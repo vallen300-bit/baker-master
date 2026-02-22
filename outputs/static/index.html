@@ -85,6 +85,24 @@
                         <button type="submit" class="contact-btn">Search</button>
                     </form>
                     <div id="contactSearchResult"></div>
+
+                    <!-- Feed Baker -->
+                    <div class="home-section-label">Feed Baker</div>
+                    <div id="feedBakerZone" class="feed-zone">
+                        <div class="feed-drop" id="feedDrop">
+                            <span class="feed-drop-icon">📂</span>
+                            <span class="feed-drop-text">Drop files here or click to upload</span>
+                            <span class="feed-drop-hint">PDF, TXT, MD, CSV, XLSX, JSON — max 50 MB</span>
+                            <input type="file" id="feedFileInput" accept=".pdf,.txt,.md,.csv,.xlsx,.json" hidden />
+                        </div>
+                        <div id="feedCollectionRow" class="feed-collection-row">
+                            <label for="feedCollection" class="feed-label">Collection:</label>
+                            <select id="feedCollection" class="feed-select">
+                                <option value="">Auto-classify</option>
+                            </select>
+                        </div>
+                        <div id="feedStatus" class="feed-status" hidden></div>
+                    </div>
                 </div>
 
                 <!-- VIEW 2: Category (Layer 2) -->

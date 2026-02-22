@@ -5,16 +5,18 @@ Reads from PostgreSQL via existing store_back + retriever.
 Serves static frontend from outputs/static/.
 Includes /api/scan SSE endpoint for interactive Baker chat.
 """
+import asyncio
 import json
 import logging
 import os
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 import anthropic
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +24,9 @@ from pydantic import BaseModel, Field
 
 from config.settings import config
 from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT
+from tools.ingest.pipeline import ingest_file
+from tools.ingest.extractors import SUPPORTED_EXTENSIONS
+from tools.ingest.classifier import VALID_COLLECTIONS
 
 logger = logging.getLogger("sentinel.dashboard")
 
@@ -673,6 +678,79 @@ async def scan_chat(req: ScanRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ============================================================
+# Ingest endpoints (INGEST-2)
+# ============================================================
+
+@app.post("/api/ingest", tags=["ingest"], dependencies=[Depends(verify_api_key)])
+async def ingest_document(
+    file: UploadFile = File(...),
+    collection: str = Query(None, description="Target collection override"),
+):
+    """Ingest a single document via dashboard upload."""
+
+    # 1. Validate file extension
+    ext = Path(file.filename).suffix.lower()
+    if ext not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {ext}. Accepted: {', '.join(sorted(SUPPORTED_EXTENSIONS))}"
+        )
+
+    # 2. Validate collection if provided
+    if collection and collection not in VALID_COLLECTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown collection: {collection}. Valid: {', '.join(sorted(VALID_COLLECTIONS))}"
+        )
+
+    # 3. Validate file size (50MB max)
+    contents = await file.read()
+    if len(contents) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large. Maximum size: 50MB.")
+
+    # 4. Write to temp file (preserve original filename for classifier heuristics)
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=ext,
+            prefix=Path(file.filename).stem + "_",
+        ) as tmp:
+            tmp.write(contents)
+            tmp_path = Path(tmp.name)
+
+        # 5. Run pipeline in thread to avoid blocking event loop
+        result = await asyncio.to_thread(
+            ingest_file,
+            filepath=tmp_path,
+            collection=collection,
+        )
+
+        # 6. Return result
+        if result.error:
+            raise HTTPException(status_code=500, detail=f"Ingestion failed: {result.error}")
+
+        return {
+            "status": "skipped" if result.skipped else "success",
+            "filename": file.filename,
+            "collection": result.collection,
+            "chunks": result.chunk_count,
+            "dedup": result.skipped and "duplicate" in (result.skip_reason or "").lower(),
+            "skip_reason": result.skip_reason,
+        }
+    finally:
+        # 7. Clean up temp file
+        if tmp_path and tmp_path.exists():
+            tmp_path.unlink()
+
+
+@app.get("/api/ingest/collections", tags=["ingest"], dependencies=[Depends(verify_api_key)])
+async def list_collections():
+    """Return available collections for the upload dropdown."""
+    return {"collections": sorted(VALID_COLLECTIONS)}
 
 
 # ============================================================

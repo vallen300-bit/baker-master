@@ -838,6 +838,26 @@ async function sendScanMessage(question) {
     if (input) { input.disabled = false; input.focus(); }
 }
 
+// ═══ CLEAR RESULTS HELPER ═══
+function _addClearBtn(container, inputEl) {
+    const btn = document.createElement('button');
+    btn.textContent = '\u2715 Clear results';
+    btn.className = 'clear-results-btn';
+    btn.onclick = () => {
+        container.innerHTML = '';
+        inputEl.value = '';
+        inputEl.focus();
+    };
+    container.prepend(btn);
+}
+
+function _toggleResultCard(toggleBtn) {
+    const card = toggleBtn.closest('.result-card');
+    if (!card) return;
+    const expanded = card.classList.toggle('expanded');
+    toggleBtn.innerHTML = expanded ? '&#9662; Show less' : '&#9656; Show more';
+}
+
 // ═══ CONTACT SEARCH (live API) ═══
 async function searchContact(e) {
     if (e) e.preventDefault();
@@ -892,6 +912,7 @@ async function searchContact(e) {
 
         html += '</div>';
         resultEl.innerHTML = html;
+        _addClearBtn(resultEl, input);
     } catch (err) {
         resultEl.innerHTML = '<div class="contact-error">Error: ' + esc(err.message) + '</div>';
     }
@@ -928,22 +949,29 @@ async function searchMemory(e) {
         for (const r of data.results) {
             const sourceBadge = esc(r.source || 'unknown');
             const score = (r.score * 100).toFixed(0);
-            const preview = esc((r.content || '').substring(0, 200));
+            const fullText = esc(r.content || '');
+            const isLong = fullText.length > 200;
+            const preview = isLong ? fullText.substring(0, 200) + '...' : fullText;
             const label = esc(r.metadata && r.metadata.label ? r.metadata.label : '');
             const collection = esc(r.metadata && r.metadata.collection ? r.metadata.collection : '');
 
-            html += '<div class="contact-result" style="margin-bottom:10px;padding:10px 14px;">';
+            html += '<div class="contact-result result-card" style="margin-bottom:10px;padding:10px 14px;">';
             html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">';
             html += '<span class="badge-stage" style="font-size:0.65rem;text-transform:uppercase;">' + sourceBadge + '</span>';
             html += '<span style="font-size:0.65rem;color:var(--text-secondary);">' + score + '% match</span>';
             if (label) html += '<span style="font-size:0.65rem;color:var(--text-secondary);">' + label + '</span>';
             html += '</div>';
-            html += '<div style="font-size:0.8rem;color:var(--text-primary);line-height:1.4;">' + preview + (r.content && r.content.length > 200 ? '...' : '') + '</div>';
+            html += '<div class="result-text-preview" style="font-size:0.8rem;color:var(--text-primary);line-height:1.4;">' + preview + '</div>';
+            if (isLong) {
+                html += '<div class="result-text-full" style="font-size:0.8rem;color:var(--text-primary);line-height:1.4;">' + fullText + '</div>';
+                html += '<button class="result-toggle" onclick="_toggleResultCard(this)">&#9656; Show more</button>';
+            }
             if (collection) html += '<div style="font-size:0.6rem;color:var(--text-secondary);margin-top:4px;">' + collection + '</div>';
             html += '</div>';
         }
         html += '</div>';
         resultEl.innerHTML = html;
+        _addClearBtn(resultEl, input);
     } catch (err) {
         resultEl.innerHTML = '<div class="contact-error">Error: ' + esc(err.message) + '</div>';
     }
@@ -1002,6 +1030,96 @@ document.addEventListener('keydown', (e) => {
         if (currentView === 'catView') { goHome(); return; }
     }
 });
+
+// ═══ FEED BAKER ═══
+(function initFeedBaker() {
+    const drop      = document.getElementById('feedDrop');
+    const fileInput = document.getElementById('feedFileInput');
+    const colSelect = document.getElementById('feedCollection');
+    const statusEl  = document.getElementById('feedStatus');
+    if (!drop) return;
+
+    const MAX_SIZE = 50 * 1024 * 1024;
+    const ALLOWED  = new Set(['pdf','txt','md','csv','xlsx','json']);
+
+    // populate collection dropdown
+    bakerFetch('/api/ingest/collections')
+        .then(r => r.json())
+        .then(d => {
+            (d.collections || []).forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c; opt.textContent = c;
+                colSelect.appendChild(opt);
+            });
+        })
+        .catch(() => {});
+
+    // drag & drop
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('feed-dragover'); });
+    drop.addEventListener('dragleave', e => { e.preventDefault(); drop.classList.remove('feed-dragover'); });
+    drop.addEventListener('drop', e => {
+        e.preventDefault(); drop.classList.remove('feed-dragover');
+        const file = e.dataTransfer.files[0];
+        if (file) _uploadFile(file);
+    });
+
+    // click to upload
+    drop.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+        if (fileInput.files[0]) _uploadFile(fileInput.files[0]);
+        fileInput.value = '';
+    });
+
+    // upload handler
+    async function _uploadFile(file) {
+        const ext = file.name.split('.').pop().toLowerCase();
+        if (!ALLOWED.has(ext)) {
+            _showStatus('error', `Unsupported file type: .${ext}`);
+            return;
+        }
+        if (file.size > MAX_SIZE) {
+            _showStatus('error', 'File too large. Maximum size: 50 MB.');
+            return;
+        }
+
+        _showStatus('uploading', `Uploading ${file.name}\u2026`);
+
+        const formData = new FormData();
+        formData.append('file', file);
+        const col = colSelect.value;
+        const url = col ? `/api/ingest?collection=${encodeURIComponent(col)}` : '/api/ingest';
+
+        try {
+            _showStatus('processing', `Processing ${file.name}\u2026`);
+            const resp = await bakerFetch(url, { method: 'POST', body: formData });
+            const data = await resp.json();
+
+            if (!resp.ok) {
+                _showStatus('error', data.detail || 'Upload failed.');
+                return;
+            }
+            if (data.status === 'skipped') {
+                _showStatus('warn', `Skipped: ${data.skip_reason || 'already ingested'}`);
+                return;
+            }
+            _showStatus('success',
+                `Ingested ${data.filename} \u2014 ${data.chunks} chunk${data.chunks !== 1 ? 's' : ''} \u2192 ${data.collection}`
+            );
+        } catch (err) {
+            _showStatus('error', 'Network error: ' + err.message);
+        }
+    }
+
+    // status display
+    function _showStatus(type, msg) {
+        statusEl.hidden = false;
+        statusEl.className = 'feed-status feed-status--' + type;
+        statusEl.textContent = msg;
+        if (type === 'success' || type === 'warn') {
+            setTimeout(() => { statusEl.hidden = true; }, 8000);
+        }
+    }
+})();
 
 // ═══ START ═══
 document.addEventListener('DOMContentLoaded', init);

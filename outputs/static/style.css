@@ -446,6 +446,48 @@ body {
     font-size: 0.75rem;
 }
 
+.clear-results-btn {
+    display: block;
+    margin: 0 0 8px auto;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    cursor: pointer;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    transition: color 0.15s, background 0.15s;
+}
+.clear-results-btn:hover {
+    color: var(--text-primary);
+    background: rgba(0,0,0,0.04);
+}
+
+.result-text-full {
+    display: none;
+}
+.result-card.expanded .result-text-preview {
+    display: none;
+}
+.result-card.expanded .result-text-full {
+    display: block;
+}
+.result-toggle {
+    background: none;
+    border: none;
+    padding: 0;
+    margin-top: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.15s;
+}
+.result-toggle:hover {
+    color: var(--text-primary);
+}
+
 .badge-stage {
     background: #eff6ff;
     color: var(--accent-pm);
@@ -982,4 +1024,103 @@ body {
     .tb-sub {
         display: none;
     }
+}
+
+/* ── Feed Baker ────────────────────────────────────────── */
+
+.feed-zone {
+    margin-top: 8px;
+}
+
+.feed-drop {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 32px 24px;
+    border: 2px dashed var(--border);
+    border-radius: var(--r-card);
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    text-align: center;
+}
+
+.feed-drop:hover,
+.feed-dragover {
+    border-color: var(--accent-chairman);
+    background: rgba(255, 193, 7, 0.04);
+}
+
+.feed-drop-icon {
+    font-size: 28px;
+}
+
+.feed-drop-text {
+    font-size: 14px;
+    color: var(--fg);
+    font-weight: 500;
+}
+
+.feed-drop-hint {
+    font-size: 11px;
+    color: var(--fg-muted);
+    font-family: var(--f-mono);
+}
+
+.feed-collection-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.feed-label {
+    font-size: 12px;
+    color: var(--fg-muted);
+    font-family: var(--f-mono);
+    text-transform: uppercase;
+}
+
+.feed-select {
+    font-size: 13px;
+    padding: 4px 10px;
+    border-radius: var(--r-btn);
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--f-mono);
+}
+
+.feed-status {
+    margin-top: 10px;
+    padding: 10px 14px;
+    border-radius: var(--r-btn);
+    font-size: 13px;
+    font-family: var(--f-mono);
+}
+
+.feed-status--uploading,
+.feed-status--processing {
+    background: rgba(33, 150, 243, 0.08);
+    color: var(--accent-pm);
+    border: 1px solid rgba(33, 150, 243, 0.2);
+}
+
+.feed-status--success {
+    background: rgba(76, 175, 80, 0.08);
+    color: var(--accent-network);
+    border: 1px solid rgba(76, 175, 80, 0.2);
+}
+
+.feed-status--warn {
+    background: rgba(255, 193, 7, 0.08);
+    color: var(--accent-chairman);
+    border: 1px solid rgba(255, 193, 7, 0.2);
+}
+
+.feed-status--error {
+    background: rgba(244, 67, 54, 0.08);
+    color: #f44336;
+    border: 1px solid rgba(244, 67, 54, 0.2);
 }
