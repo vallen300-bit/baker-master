@@ -5,8 +5,20 @@
 
 // ═══ API CONFIG ═══
 const BAKER_CONFIG = {
-    apiKey: '__BAKER_API_KEY__',  // Set via build or manually
+    apiKey: '',
 };
+
+async function loadConfig() {
+    try {
+        const resp = await fetch('/api/client-config');
+        if (resp.ok) {
+            const data = await resp.json();
+            BAKER_CONFIG.apiKey = data.apiKey;
+        }
+    } catch (e) {
+        console.error('Failed to load client config:', e);
+    }
+}
 
 async function bakerFetch(url, options = {}) {
     const headers = {
@@ -463,7 +475,8 @@ function fmtDate(iso) {
 }
 
 // ═══ INIT ═══
-function init() {
+async function init() {
+    await loadConfig();
     const now = new Date();
 
     // Greeting

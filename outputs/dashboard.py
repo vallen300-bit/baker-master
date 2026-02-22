@@ -170,6 +170,11 @@ async def startup():
         app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
         logger.info(f"Static files mounted from {_static_dir}")
 
+
+@app.get("/api/client-config", include_in_schema=False)
+async def client_config():
+    return {"apiKey": _BAKER_API_KEY}
+
     logger.info("Baker Dashboard ready on port 8080")
 
 
