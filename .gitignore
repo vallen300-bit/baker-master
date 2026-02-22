@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.env
+config/gmail_token.json
+config/gmail_credentials.json
+config/gmail_poll_state.json
+.venv/
+*.egg-info/

@@ -1,0 +1,28 @@
+# Sentinel AI — Python Dependencies
+# Install: pip install -r requirements.txt
+
+# Core
+anthropic>=0.40.0          # Claude API client
+voyageai>=0.3.0            # Voyage AI embeddings
+qdrant-client>=1.12.0      # Qdrant vector DB
+
+# Database
+asyncpg>=0.30.0            # PostgreSQL async client
+psycopg2-binary>=2.9.0     # PostgreSQL sync client (for scripts)
+
+# Web framework (for dashboard + API)
+fastapi>=0.115.0
+uvicorn>=0.32.0
+pydantic>=2.0.0
+
+# Scheduling
+apscheduler>=3.10.0        # Trigger scheduling
+
+# Utilities
+python-dotenv>=1.0.0       # .env file loading
+httpx>=0.27.0              # HTTP client for API calls
+tenacity>=9.0.0            # Retry logic
+
+# Future: Trigger integrations
+# msgraph-sdk>=1.0.0       # Microsoft 365 / Outlook
+# slack-sdk>=3.0.0         # Slack

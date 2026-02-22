@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baker · CEO Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Jura:wght@300;400;500;600;700&family=Work+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Top Bar -->
+        <div class="top-bar">
+            <div class="tb-left">
+                <span class="tb-title">baker</span>
+                <span class="tb-sub">chief of staff</span>
+            </div>
+            <div class="tb-right">
+                <span class="scan-dot" id="scanDot"></span>
+                <span class="scan-info" id="scanTime">last scan --:--</span>
+                <div class="lens-container" id="lensContainer" title="Baker state: clear" onclick="cycleLens()">
+                    <img class="lens-img" id="lensImg" alt="lens" />
+                </div>
+                <button class="refresh-btn" onclick="runScan()" title="Refresh scan">&#8635;</button>
+            </div>
+        </div>
+
+        <!-- Main layout: sidebar + content -->
+        <div class="main">
+            <!-- Sidebar rail -->
+            <div class="rail">
+                <button class="rail-btn active" data-role="home" onclick="goHome()">
+                    <span class="r-label">Home</span>
+                </button>
+                <button class="rail-btn" data-role="chairman" onclick="openRole('chairman')">
+                    <span class="r-label">Chairman</span>
+                </button>
+                <button class="rail-btn" data-role="pm" onclick="openRole('pm')">
+                    <span class="r-label">Projects</span>
+                </button>
+                <button class="rail-btn" data-role="network" onclick="openRole('network')">
+                    <span class="r-label">Network</span>
+                </button>
+                <button class="rail-btn" data-role="private" onclick="openRole('private')">
+                    <span class="r-label">Private</span>
+                </button>
+                <button class="rail-btn" data-role="travel" onclick="openRole('travel')">
+                    <span class="r-label">Travel</span>
+                </button>
+            </div>
+
+            <!-- Content area with 3 views -->
+            <div class="content">
+
+                <!-- VIEW 1: Home -->
+                <div class="view active" id="homeView">
+                    <div class="home-greeting" id="homeGreeting">Good morning, Dimitry</div>
+
+                    <!-- Today's agenda -->
+                    <div class="home-section-label">Today</div>
+                    <div class="agenda-list" id="agendaList">
+                        <!-- Populated by JS -->
+                    </div>
+
+                    <!-- Pending items -->
+                    <div class="home-section-label">Pending</div>
+                    <div class="agenda-list" id="pendingList">
+                        <!-- Populated by JS -->
+                    </div>
+
+                    <!-- Contact search -->
+                    <div class="home-section-label">Contact Search</div>
+                    <form class="contact-search-form" onsubmit="searchContact(event)">
+                        <input id="contactSearchInput" type="text" class="contact-input" placeholder="Search by name..." maxlength="200" />
+                        <button type="submit" class="contact-btn">Search</button>
+                    </form>
+                    <div id="contactSearchResult"></div>
+                </div>
+
+                <!-- VIEW 2: Category (Layer 2) -->
+                <div class="view" id="catView">
+                    <div class="cat-hero">
+                        <span class="cat-hero-icon" id="catHeroIcon"></span>
+                        <div>
+                            <div class="cat-hero-title" id="catHeroTitle"></div>
+                            <div class="cat-hero-desc" id="catHeroDesc"></div>
+                        </div>
+                    </div>
+                    <div class="cat-grid" id="catGrid">
+                        <!-- Category cards populated by JS -->
+                    </div>
+                </div>
+
+                <!-- VIEW 3: Detail (Layer 3) -->
+                <div class="view" id="detailView">
+                    <button class="back-btn" id="detailBack">&larr; Back</button>
+                    <div class="detail-breadcrumb" id="detailBreadcrumb"></div>
+                    <div class="detail-title" id="detailTitle"></div>
+                    <div class="sub-tabs" id="subTabs">
+                        <!-- Sub-issue tabs populated by JS -->
+                    </div>
+                    <div class="detail-cards" id="detailCards">
+                        <!-- Detail items populated by JS -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Baker's Scan bar (bottom action) -->
+        <div class="take-bar" id="takeBar">
+            <div class="take-bar-inner">
+                <span class="take-label" id="takeLabel">Baker's Scan</span>
+                <button class="take-btn" onclick="showTake()">Baker's Scan</button>
+            </div>
+        </div>
+
+        <!-- Baker's Scan overlay -->
+        <div class="take-overlay" id="takeOverlay">
+            <div class="take-header">
+                <span class="take-header-title">Baker's Scan</span>
+                <button class="take-close" onclick="closeTake()">&times;</button>
+            </div>
+            <div class="take-body">
+                <div id="scanMessages" class="scan-messages"></div>
+                <form id="scanForm" class="scan-form" autocomplete="off">
+                    <input id="scanInput" type="text" class="scan-input" placeholder="Ask Baker..." maxlength="4000" required />
+                    <button type="submit" class="scan-send" id="scanSendBtn">Send</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <span>auto-scan active</span>
+            <span>baker v2.2 &middot; feb 2026</span>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
