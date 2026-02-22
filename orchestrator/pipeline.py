@@ -276,6 +276,81 @@ class SentinelPipeline:
         logger.info("Store-back complete")
 
     # -------------------------------------------------------
+    # Step 6: ClickUp Write Actions (M3)
+    # -------------------------------------------------------
+
+    def _execute_clickup_actions(self, trigger: TriggerEvent, response: SentinelResponse):
+        """
+        Execute autonomous ClickUp write actions for ClickUp-sourced triggers.
+        Only writes to BAKER space (901510186446). Kill switch: BAKER_CLICKUP_READONLY=true.
+        """
+        import os
+
+        # Only act on ClickUp triggers
+        if not trigger.type.startswith("clickup_"):
+            return
+
+        # Kill switch
+        if os.getenv("BAKER_CLICKUP_READONLY", "").lower() == "true":
+            logger.info("ClickUp write actions skipped (BAKER_CLICKUP_READONLY=true)")
+            return
+
+        # Extract source task_id from trigger source_id (format: "clickup:<task_id>")
+        source_task_id = None
+        if trigger.source_id and trigger.source_id.startswith("clickup:"):
+            source_task_id = trigger.source_id.split(":", 1)[1]
+
+        if not source_task_id:
+            logger.debug("No ClickUp task ID in trigger — skipping write actions")
+            return
+
+        try:
+            from clickup_client import ClickUpClient
+            client = ClickUpClient._get_global_instance()
+        except Exception as e:
+            logger.warning(f"ClickUp client init failed — skipping write actions: {e}")
+            return
+
+        # Determine highest alert tier from response
+        max_tier = 3
+        if response.alerts:
+            tiers = [_normalize_tier(a.get("tier")) for a in response.alerts]
+            max_tier = min(tiers) if tiers else 3
+
+        try:
+            if trigger.type == "clickup_handoff_note":
+                # Handoff notes: post acknowledgment comment
+                client.post_comment(
+                    source_task_id,
+                    "[Baker] Handoff note received and processed. Alert created.",
+                )
+                logger.info(f"M3: Posted acknowledgment comment on handoff note {source_task_id}")
+
+            elif max_tier == 1:
+                # T1: Add "urgent" tag
+                client.add_tag(source_task_id, "urgent")
+                logger.info(f"M3: Added 'urgent' tag to task {source_task_id}")
+
+            elif max_tier == 2:
+                # T2: Post status comment with analysis summary
+                summary = (response.analysis or "")[:300]
+                if summary:
+                    client.post_comment(
+                        source_task_id,
+                        f"[Baker] Status update processed. Summary: {summary}",
+                    )
+                    logger.info(f"M3: Posted status comment on task {source_task_id}")
+
+        except RuntimeError as e:
+            # Kill switch or max writes exceeded — expected, just log
+            logger.info(f"M3: ClickUp write skipped — {e}")
+        except ValueError as e:
+            # Non-BAKER space write attempt — expected safety guard
+            logger.info(f"M3: ClickUp write blocked — {e}")
+        except Exception as e:
+            logger.warning(f"M3: ClickUp write action failed (non-fatal): {e}")
+
+    # -------------------------------------------------------
     # Parse Claude's response into structured format
     # -------------------------------------------------------
 
@@ -354,6 +429,10 @@ class SentinelPipeline:
         # Step 5: Store back
         self.store_back(trigger, response)
         logger.info(f"Step 5 complete: stored back")
+
+        # Step 6: ClickUp write actions (M3)
+        self._execute_clickup_actions(trigger, response)
+        logger.info(f"Step 6 complete: ClickUp actions processed")
 
         total_ms = int((time.time() - start) * 1000)
         logger.info(f"SENTINEL PIPELINE COMPLETE: {total_ms}ms total")

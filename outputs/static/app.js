@@ -5,7 +5,7 @@
 
 // ═══ API CONFIG ═══
 const BAKER_CONFIG = {
-    apiKey: '076f4eccf86fe5e30f0a82ff17969afa08f3b151d1e1931154dc0936d49a9d82',
+    apiKey: '__BAKER_API_KEY__',  // Set via build or manually
 };
 
 async function bakerFetch(url, options = {}) {
@@ -877,6 +877,58 @@ async function searchContact(e) {
             html += '<div style="margin-top:12px;font-size:0.8rem;color:var(--text-secondary);"><strong>Notes:</strong> ' + esc(contact.notes) + '</div>';
         }
 
+        html += '</div>';
+        resultEl.innerHTML = html;
+    } catch (err) {
+        resultEl.innerHTML = '<div class="contact-error">Error: ' + esc(err.message) + '</div>';
+    }
+}
+
+// ═══ MEMORY SEARCH (semantic search API) ═══
+async function searchMemory(e) {
+    if (e) e.preventDefault();
+    const input = document.getElementById('memorySearchInput');
+    const resultEl = document.getElementById('memorySearchResult');
+    if (!input || !resultEl) return;
+
+    const query = input.value.trim();
+    if (!query || query.length < 2) return;
+
+    resultEl.innerHTML = '<div class="contact-error">Searching...</div>';
+
+    try {
+        const resp = await bakerFetch('/api/search?q=' + encodeURIComponent(query));
+        if (resp.status === 400) {
+            resultEl.innerHTML = '<div class="contact-error">Query too short (min 2 characters)</div>';
+            return;
+        }
+        if (!resp.ok) throw new Error('API error ' + resp.status);
+        const data = await resp.json();
+
+        if (!data.results || data.results.length === 0) {
+            resultEl.innerHTML = '<div class="contact-error">No results found for "' + esc(query) + '"</div>';
+            return;
+        }
+
+        let html = '<div class="memory-results" style="margin-top:12px;">';
+        html += '<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:8px;">' + data.result_count + ' results</div>';
+        for (const r of data.results) {
+            const sourceBadge = esc(r.source || 'unknown');
+            const score = (r.score * 100).toFixed(0);
+            const preview = esc((r.content || '').substring(0, 200));
+            const label = esc(r.metadata && r.metadata.label ? r.metadata.label : '');
+            const collection = esc(r.metadata && r.metadata.collection ? r.metadata.collection : '');
+
+            html += '<div class="contact-result" style="margin-bottom:10px;padding:10px 14px;">';
+            html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">';
+            html += '<span class="badge-stage" style="font-size:0.65rem;text-transform:uppercase;">' + sourceBadge + '</span>';
+            html += '<span style="font-size:0.65rem;color:var(--text-secondary);">' + score + '% match</span>';
+            if (label) html += '<span style="font-size:0.65rem;color:var(--text-secondary);">' + label + '</span>';
+            html += '</div>';
+            html += '<div style="font-size:0.8rem;color:var(--text-primary);line-height:1.4;">' + preview + (r.content && r.content.length > 200 ? '...' : '') + '</div>';
+            if (collection) html += '<div style="font-size:0.6rem;color:var(--text-secondary);margin-top:4px;">' + collection + '</div>';
+            html += '</div>';
+        }
         html += '</div>';
         resultEl.innerHTML = html;
     } catch (err) {

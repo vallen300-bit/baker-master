@@ -70,6 +70,14 @@
                         <!-- Populated by JS -->
                     </div>
 
+                    <!-- Memory search -->
+                    <div class="home-section-label">Search Baker's Memory</div>
+                    <form class="contact-search-form" onsubmit="searchMemory(event)">
+                        <input id="memorySearchInput" type="text" class="contact-input" placeholder="Search Baker's memory..." maxlength="500" />
+                        <button type="submit" class="contact-btn">Search</button>
+                    </form>
+                    <div id="memorySearchResult"></div>
+
                     <!-- Contact search -->
                     <div class="home-section-label">Contact Search</div>
                     <form class="contact-search-form" onsubmit="searchContact(event)">

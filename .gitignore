@@ -1,8 +1,12 @@
-__pycache__/
-*.pyc
-.env
-config/gmail_token.json
+# Secrets
+config/.env
 config/gmail_credentials.json
+config/gmail_token.json
 config/gmail_poll_state.json
-.venv/
-*.egg-info/
+
+# Python
+*.pyc
+__pycache__/
+
+# Outputs
+analysis_outputs/

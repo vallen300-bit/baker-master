@@ -22,7 +22,7 @@ class QdrantConfig:
     collections: List[str] = field(default_factory=lambda: [
         c.strip() for c in os.getenv(
             "BAKER_COLLECTIONS",
-            "baker-people,baker-deals,baker-projects,baker-conversations,baker-whatsapp"
+            "baker-people,baker-deals,baker-projects,baker-conversations,baker-whatsapp,baker-clickup"
         ).split(",")
     ])
     collection_whatsapp: str = "baker-whatsapp"

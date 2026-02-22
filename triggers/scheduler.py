@@ -100,6 +100,21 @@ class SentinelScheduler:
         )
 
         # -------------------------------------------------------
+        # ClickUp polling — every 5 minutes
+        # -------------------------------------------------------
+        from triggers.clickup_trigger import run_clickup_poll
+        self.scheduler.add_job(
+            run_clickup_poll,
+            IntervalTrigger(minutes=5),
+            id="clickup_poll",
+            name="ClickUp multi-workspace poll",
+            coalesce=True,
+            max_instances=1,
+            replace_existing=True,
+        )
+        logger.info("Registered: clickup_poll (every 5 minutes)")
+
+        # -------------------------------------------------------
         # Daily briefing — 08:00 CET (06:00 UTC)
         # -------------------------------------------------------
         from triggers.briefing_trigger import generate_morning_briefing
@@ -164,7 +179,7 @@ def main():
     )
     parser.add_argument(
         "--run-once", type=str, default=None,
-        choices=["email", "whatsapp", "fireflies", "briefing"],
+        choices=["email", "whatsapp", "fireflies", "briefing", "clickup"],
         help="Run a single trigger immediately and exit",
     )
     args = parser.parse_args()
@@ -183,6 +198,9 @@ def main():
         elif args.run_once == "briefing":
             from triggers.briefing_trigger import generate_morning_briefing
             generate_morning_briefing()
+        elif args.run_once == "clickup":
+            from triggers.clickup_trigger import run_clickup_poll
+            run_clickup_poll()
         return
 
     scheduler = SentinelScheduler()

@@ -8,6 +8,7 @@ All writes use parameterized queries — no SQL injection risk.
 """
 import json
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -48,6 +49,18 @@ class SentinelStoreBack:
         self._pool = None
         self._init_pool()
 
+        # Ensure ClickUp tables exist
+        self._ensure_clickup_tables()
+
+        # Ensure deep_analyses table exists
+        self._ensure_deep_analyses_table()
+
+        # Ensure baker-documents Qdrant collection exists
+        self._ensure_collection("baker-documents", size=1024)  # Voyage AI voyage-3 dimension
+
+        # Ensure baker-clickup Qdrant collection exists
+        self._ensure_collection("baker-clickup", size=1024)
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -84,6 +97,323 @@ class SentinelStoreBack:
                 self._pool.putconn(conn)
             except Exception:
                 pass
+
+    # -------------------------------------------------------
+    # ClickUp table initialization
+    # -------------------------------------------------------
+
+    def _ensure_clickup_tables(self):
+        """Create clickup_tasks and baker_actions tables if they don't exist."""
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — cannot ensure ClickUp tables")
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS clickup_tasks (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    status TEXT,
+                    priority TEXT,
+                    due_date TIMESTAMPTZ,
+                    date_created TIMESTAMPTZ,
+                    date_updated TIMESTAMPTZ,
+                    list_id TEXT,
+                    list_name TEXT,
+                    space_id TEXT,
+                    workspace_id TEXT,
+                    assignees JSONB DEFAULT '[]',
+                    tags JSONB DEFAULT '[]',
+                    comment_count INTEGER DEFAULT 0,
+                    last_synced TIMESTAMPTZ DEFAULT NOW(),
+                    baker_tier TEXT,
+                    baker_writable BOOLEAN DEFAULT FALSE
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS baker_actions (
+                    id SERIAL PRIMARY KEY,
+                    action_type TEXT NOT NULL,
+                    target_task_id TEXT,
+                    target_space_id TEXT,
+                    payload JSONB,
+                    trigger_source TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    success BOOLEAN DEFAULT TRUE,
+                    error_message TEXT
+                )
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("ClickUp tables verified (clickup_tasks, baker_actions)")
+        except Exception as e:
+            logger.warning(f"Could not ensure ClickUp tables: {e}")
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # Qdrant collection helper
+    # -------------------------------------------------------
+
+    def _ensure_collection(self, name: str, size: int = 1024):
+        """Create a Qdrant collection if it doesn't already exist."""
+        try:
+            self.qdrant.get_collection(name)
+        except Exception:
+            try:
+                self.qdrant.create_collection(
+                    collection_name=name,
+                    vectors_config=VectorParams(
+                        size=size,
+                        distance=Distance.COSINE,
+                    ),
+                )
+                logger.info(f"Created Qdrant collection: {name}")
+            except Exception as e:
+                logger.warning(f"Could not create Qdrant collection '{name}': {e}")
+
+    # -------------------------------------------------------
+    # Deep Analyses table initialization
+    # -------------------------------------------------------
+
+    def _ensure_deep_analyses_table(self):
+        """Create deep_analyses table if it doesn't exist."""
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — cannot ensure deep_analyses table")
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS deep_analyses (
+                    analysis_id TEXT PRIMARY KEY,
+                    topic TEXT NOT NULL,
+                    source_documents JSONB DEFAULT '[]',
+                    prompt TEXT,
+                    token_count INTEGER DEFAULT 0,
+                    chunk_count INTEGER DEFAULT 0,
+                    cost_usd NUMERIC(10,4) DEFAULT 0,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("deep_analyses table verified")
+        except Exception as e:
+            logger.warning(f"Could not ensure deep_analyses table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # ClickUp helpers
+    # -------------------------------------------------------
+
+    def upsert_clickup_task(self, task_data: dict) -> Optional[str]:
+        """INSERT ... ON CONFLICT (id) DO UPDATE for clickup_tasks. Returns task ID."""
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — skipping upsert_clickup_task")
+            return None
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO clickup_tasks
+                    (id, name, description, status, priority, due_date,
+                     date_created, date_updated, list_id, list_name,
+                     space_id, workspace_id, assignees, tags,
+                     comment_count, last_synced, baker_tier, baker_writable)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s::jsonb, %s::jsonb, %s, NOW(), %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    description = EXCLUDED.description,
+                    status = EXCLUDED.status,
+                    priority = EXCLUDED.priority,
+                    due_date = EXCLUDED.due_date,
+                    date_updated = EXCLUDED.date_updated,
+                    list_id = EXCLUDED.list_id,
+                    list_name = EXCLUDED.list_name,
+                    space_id = EXCLUDED.space_id,
+                    workspace_id = EXCLUDED.workspace_id,
+                    assignees = EXCLUDED.assignees,
+                    tags = EXCLUDED.tags,
+                    comment_count = EXCLUDED.comment_count,
+                    last_synced = NOW(),
+                    baker_tier = EXCLUDED.baker_tier,
+                    baker_writable = EXCLUDED.baker_writable
+                RETURNING id
+                """,
+                (
+                    task_data.get("id"),
+                    task_data.get("name"),
+                    task_data.get("description"),
+                    task_data.get("status"),
+                    task_data.get("priority"),
+                    task_data.get("due_date"),
+                    task_data.get("date_created"),
+                    task_data.get("date_updated"),
+                    task_data.get("list_id"),
+                    task_data.get("list_name"),
+                    task_data.get("space_id"),
+                    task_data.get("workspace_id"),
+                    json.dumps(task_data.get("assignees", [])),
+                    json.dumps(task_data.get("tags", [])),
+                    task_data.get("comment_count", 0),
+                    task_data.get("baker_tier"),
+                    task_data.get("baker_writable", False),
+                ),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            cur.close()
+            task_id = row[0] if row else None
+            logger.info(f"Upserted ClickUp task: {task_data.get('name', '?')[:60]} → {task_id}")
+            return task_id
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"upsert_clickup_task failed: {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
+    def log_baker_action(self, action_type: str, target_task_id: str = None,
+                         target_space_id: str = None, payload: dict = None,
+                         trigger_source: str = None, success: bool = True,
+                         error_message: str = None) -> Optional[int]:
+        """INSERT into baker_actions audit log. Returns action ID."""
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — skipping log_baker_action")
+            return None
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO baker_actions
+                    (action_type, target_task_id, target_space_id, payload,
+                     trigger_source, success, error_message)
+                VALUES (%s, %s, %s, %s::jsonb, %s, %s, %s)
+                RETURNING id
+                """,
+                (
+                    action_type,
+                    target_task_id,
+                    target_space_id,
+                    json.dumps(payload) if payload else None,
+                    trigger_source,
+                    success,
+                    error_message,
+                ),
+            )
+            action_id = cur.fetchone()[0]
+            conn.commit()
+            cur.close()
+            logger.info(f"Logged baker action #{action_id}: {action_type}")
+            return action_id
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"log_baker_action failed: {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
+    def get_clickup_tasks(self, workspace_id: str = None, space_id: str = None,
+                          list_id: str = None, status: str = None,
+                          priority: str = None, limit: int = 50,
+                          offset: int = 0) -> list:
+        """Query clickup_tasks with optional filters. Returns list of dicts."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            where_parts = []
+            params = []
+            if workspace_id:
+                where_parts.append("workspace_id = %s")
+                params.append(workspace_id)
+            if space_id:
+                where_parts.append("space_id = %s")
+                params.append(space_id)
+            if list_id:
+                where_parts.append("list_id = %s")
+                params.append(list_id)
+            if status:
+                where_parts.append("status = %s")
+                params.append(status)
+            if priority:
+                where_parts.append("priority = %s")
+                params.append(priority)
+            where_clause = " AND ".join(where_parts) if where_parts else "TRUE"
+            params.extend([limit, offset])
+            cur.execute(
+                f"""
+                SELECT * FROM clickup_tasks
+                WHERE {where_clause}
+                ORDER BY date_updated DESC NULLS LAST
+                LIMIT %s OFFSET %s
+                """,
+                params,
+            )
+            rows = cur.fetchall()
+            cur.close()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"get_clickup_tasks failed: {e}")
+            return []
+        finally:
+            self._put_conn(conn)
+
+    def get_clickup_task(self, task_id: str) -> Optional[dict]:
+        """Get a single ClickUp task by ID. Returns dict or None."""
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT * FROM clickup_tasks WHERE id = %s", (task_id,))
+            row = cur.fetchone()
+            cur.close()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"get_clickup_task failed for '{task_id}': {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
+    def get_clickup_sync_status(self) -> dict:
+        """Get sync health: last poll per workspace, total count."""
+        conn = self._get_conn()
+        if not conn:
+            return {"workspaces": [], "total_tasks": 0, "health": "no_connection"}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """
+                SELECT workspace_id, COUNT(*) AS task_count,
+                       MAX(last_synced) AS last_synced
+                FROM clickup_tasks
+                GROUP BY workspace_id
+                ORDER BY workspace_id
+                """
+            )
+            rows = cur.fetchall()
+            cur.close()
+            workspaces = [dict(r) for r in rows]
+            total = sum(r["task_count"] for r in workspaces)
+            return {
+                "workspaces": workspaces,
+                "total_tasks": total,
+                "health": "ok" if workspaces else "no_data",
+            }
+        except Exception as e:
+            logger.error(f"get_clickup_sync_status failed: {e}")
+            return {"workspaces": [], "total_tasks": 0, "health": "error"}
+        finally:
+            self._put_conn(conn)
 
     # -------------------------------------------------------
     # Contact Intelligence
@@ -594,6 +924,54 @@ class SentinelStoreBack:
             logger.info(f"Stored interaction {point_id} in {collection}")
         except Exception as e:
             logger.warning(f"store_interaction failed (non-fatal): {e}")
+
+    # -------------------------------------------------------
+    # Deep Analysis: store document chunks + catalogue record
+    # -------------------------------------------------------
+
+    def store_document(self, content, metadata, collection="baker-documents"):
+        """Embed and store a document chunk in Qdrant."""
+        try:
+            embedding = self._embed(content[:8000])
+            point_id = str(uuid.uuid4())
+            self.qdrant.upsert(
+                collection_name=collection,
+                points=[PointStruct(
+                    id=point_id,
+                    vector=embedding,
+                    payload={"content": content, **metadata},
+                )],
+            )
+        except Exception as e:
+            logger.error(f"Failed to store document in {collection}: {e}")
+
+    def log_deep_analysis(self, analysis_id, topic, source_documents, prompt,
+                          token_count=0, chunk_count=0, cost_usd=0):
+        """Catalogue a completed deep analysis in PostgreSQL."""
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — skipping log_deep_analysis")
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO deep_analyses
+                    (analysis_id, topic, source_documents, prompt,
+                     token_count, chunk_count, cost_usd)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (analysis_id) DO UPDATE SET
+                    topic = EXCLUDED.topic,
+                    token_count = EXCLUDED.token_count,
+                    chunk_count = EXCLUDED.chunk_count,
+                    cost_usd = EXCLUDED.cost_usd
+            """, (analysis_id, topic, json.dumps(source_documents),
+                  prompt[:500], token_count, chunk_count, cost_usd))
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            logger.error(f"Failed to log deep analysis: {e}")
+        finally:
+            self._put_conn(conn)
 
     # -------------------------------------------------------
     # Cleanup

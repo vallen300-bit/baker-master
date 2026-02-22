@@ -67,7 +67,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT"],
     allow_headers=["Content-Type", "X-Baker-Key"],
 )
 
@@ -77,6 +77,7 @@ app.add_middleware(
 
 _store = None
 _retriever = None
+_clickup_client = None
 _static_dir = Path(__file__).parent / "static"
 _briefing_dir = Path(__file__).resolve().parent.parent.parent / "04_outputs" / "briefings"
 
@@ -99,13 +100,41 @@ def _get_retriever():
     return _retriever
 
 
+def _get_clickup_client():
+    """Lazy-initialize the ClickUp client singleton."""
+    global _clickup_client
+    if _clickup_client is None:
+        from clickup_client import ClickUpClient
+        _clickup_client = ClickUpClient._get_global_instance()
+    return _clickup_client
+
+
 # ============================================================
-# Scan request model
+# Request models
 # ============================================================
 
 class ScanRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=4000)
     history: list = Field(default_factory=list)  # [{role, content}, ...]
+
+
+class CreateTaskRequest(BaseModel):
+    list_id: str
+    name: str = Field(..., min_length=1, max_length=500)
+    description: Optional[str] = None
+    priority: Optional[int] = Field(None, ge=1, le=4)
+    status: Optional[str] = None
+
+
+class UpdateTaskRequest(BaseModel):
+    status: Optional[str] = None
+    priority: Optional[int] = Field(None, ge=1, le=4)
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+class CommentRequest(BaseModel):
+    comment_text: str = Field(..., min_length=1, max_length=5000)
 
 
 def _serialize(obj: dict) -> dict:
@@ -235,6 +264,47 @@ async def get_contact(name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# --- Semantic Search ---
+
+@app.get("/api/search", tags=["search"], dependencies=[Depends(verify_api_key)])
+async def search_memory(
+    q: str = Query(None, min_length=2, max_length=500),
+    limit: int = Query(20, ge=1, le=50),
+    threshold: float = Query(0.3, ge=0.0, le=1.0),
+):
+    """
+    Semantic search across all of Baker's memory (Qdrant vector collections).
+    Searches documents, emails, meetings, WhatsApp, contacts, ClickUp tasks.
+    """
+    if not q or len(q.strip()) < 2:
+        raise HTTPException(status_code=400, detail="Query parameter 'q' is required (min 2 characters)")
+
+    try:
+        retriever = _get_retriever()
+        contexts = retriever.search_all_collections(
+            query=q.strip(),
+            limit_per_collection=limit,
+            score_threshold=threshold,
+        )
+        results = [
+            {
+                "content": ctx.content,
+                "source": ctx.source,
+                "score": round(ctx.score, 4),
+                "metadata": ctx.metadata,
+            }
+            for ctx in contexts
+        ][:limit]
+        return {
+            "query": q.strip(),
+            "result_count": len(results),
+            "results": results,
+        }
+    except Exception as e:
+        logger.error(f"/api/search failed: {e}")
+        raise HTTPException(status_code=500, detail="Search service unavailable")
+
+
 # --- Decisions ---
 
 @app.get("/api/decisions", tags=["decisions"], dependencies=[Depends(verify_api_key)])
@@ -310,6 +380,176 @@ async def get_status():
             "error": str(e),
             "last_checked": datetime.now(timezone.utc).isoformat(),
         }
+
+
+# ============================================================
+# ClickUp Endpoints (Read + Write)
+# ============================================================
+
+_BAKER_SPACE_ID = "901510186446"
+
+
+@app.get("/api/clickup/tasks", tags=["clickup"], dependencies=[Depends(verify_api_key)])
+async def get_clickup_tasks(
+    workspace_id: Optional[str] = Query(None),
+    space_id: Optional[str] = Query(None),
+    list_id: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    priority: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """Query ClickUp tasks from PostgreSQL with optional filters."""
+    try:
+        store = _get_store()
+        tasks = store.get_clickup_tasks(
+            workspace_id=workspace_id,
+            space_id=space_id,
+            list_id=list_id,
+            status=status,
+            priority=priority,
+            limit=limit,
+            offset=offset,
+        )
+        tasks = [_serialize(t) for t in tasks]
+        return {"tasks": tasks, "count": len(tasks)}
+    except Exception as e:
+        logger.error(f"/api/clickup/tasks failed: {e}")
+        return {"tasks": [], "count": 0, "error": str(e)}
+
+
+@app.get("/api/clickup/tasks/{task_id}", tags=["clickup"], dependencies=[Depends(verify_api_key)])
+async def get_clickup_task(task_id: str):
+    """Get a single ClickUp task detail + comments."""
+    try:
+        store = _get_store()
+        task = store.get_clickup_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
+
+        result = _serialize(task)
+
+        # Fetch live comments from ClickUp API
+        try:
+            client = _get_clickup_client()
+            comments = client.get_task_comments(task_id)
+            result["comments"] = comments or []
+        except Exception as e:
+            logger.warning(f"Failed to fetch comments for task {task_id}: {e}")
+            result["comments"] = []
+
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"/api/clickup/tasks/{task_id} failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/clickup/sync-status", tags=["clickup"], dependencies=[Depends(verify_api_key)])
+async def get_clickup_sync_status():
+    """Get ClickUp sync health: last poll per workspace, total count."""
+    try:
+        store = _get_store()
+        status = store.get_clickup_sync_status()
+        # Serialize datetime fields in workspace rows
+        if status.get("workspaces"):
+            status["workspaces"] = [_serialize(w) for w in status["workspaces"]]
+        return status
+    except Exception as e:
+        logger.error(f"/api/clickup/sync-status failed: {e}")
+        return {"workspaces": [], "total_tasks": 0, "health": "error", "error": str(e)}
+
+
+@app.post("/api/clickup/tasks", tags=["clickup"], dependencies=[Depends(verify_api_key)])
+async def create_clickup_task(req: CreateTaskRequest):
+    """Create a task in ClickUp — BAKER space only."""
+    try:
+        client = _get_clickup_client()
+
+        # Validate list belongs to BAKER space
+        space_id = client._resolve_space_id_for_list(req.list_id)
+        if str(space_id) != _BAKER_SPACE_ID:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Write rejected: list {req.list_id} is not in BAKER space",
+            )
+
+        result = client.create_task(
+            list_id=req.list_id,
+            name=req.name,
+            description=req.description,
+            priority=req.priority,
+            status=req.status,
+        )
+        if result is None:
+            raise HTTPException(status_code=502, detail="ClickUp API returned no result")
+        return {"task": result, "status": "created"}
+    except HTTPException:
+        raise
+    except RuntimeError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        logger.error(f"POST /api/clickup/tasks failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/clickup/tasks/{task_id}", tags=["clickup"], dependencies=[Depends(verify_api_key)])
+async def update_clickup_task(task_id: str, req: UpdateTaskRequest):
+    """Update a task in ClickUp — BAKER space only."""
+    try:
+        client = _get_clickup_client()
+
+        # Build update kwargs from non-None fields
+        update_fields = {}
+        if req.status is not None:
+            update_fields["status"] = req.status
+        if req.priority is not None:
+            update_fields["priority"] = req.priority
+        if req.name is not None:
+            update_fields["name"] = req.name
+        if req.description is not None:
+            update_fields["description"] = req.description
+
+        if not update_fields:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        result = client.update_task(task_id, **update_fields)
+        if result is None:
+            raise HTTPException(status_code=502, detail="ClickUp API returned no result")
+        return {"task": result, "status": "updated"}
+    except HTTPException:
+        raise
+    except RuntimeError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        logger.error(f"PUT /api/clickup/tasks/{task_id} failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/clickup/tasks/{task_id}/comments", tags=["clickup"], dependencies=[Depends(verify_api_key)])
+async def create_clickup_comment(task_id: str, req: CommentRequest):
+    """Post a comment on a ClickUp task — BAKER space only."""
+    try:
+        client = _get_clickup_client()
+
+        result = client.post_comment(task_id, req.comment_text)
+        if result is None:
+            raise HTTPException(status_code=502, detail="ClickUp API returned no result")
+        return {"comment": result, "status": "created"}
+    except HTTPException:
+        raise
+    except RuntimeError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        logger.error(f"POST /api/clickup/tasks/{task_id}/comments failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================

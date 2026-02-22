@@ -100,10 +100,29 @@ class SentinelPromptBuilder:
             "calendar": "A calendar event is approaching. Prepare pre-meeting briefing.",
             "scheduled": "This is a scheduled check-in. Review all pending items and generate daily briefing.",
             "manual": "Dimitry is asking you directly. Answer the question using all available context.",
+            # ClickUp classification types
+            "clickup_task_created": "A new ClickUp task was detected. Assess relevance to active projects, flag if it needs attention.",
+            "clickup_task_updated": "An existing ClickUp task was modified. Analyze what changed (status, priority, assignee) and flag impact.",
+            "clickup_status_change": "A ClickUp task status changed. Check if this affects deadlines or dependencies across workspaces.",
+            "clickup_comment_added": "A new comment was posted on a ClickUp task. Summarize context and flag if action is needed.",
+            "clickup_task_overdue": "A ClickUp task is past its due date. Flag severity and recommend next steps.",
+            "clickup_handoff_note": "A new task or comment appeared in the Handoff Notes list. This is a direct communication — treat as high priority.",
+            "clickup_assignment_change": "A ClickUp task assignee changed. Note the handoff and check for continuity risks.",
+            "clickup_cross_workspace_flag": "A ClickUp task references content from another workspace. Flag the cross-workspace dependency.",
         }
 
-        system = f"""{BAKER_SYSTEM_PROMPT}
+        # ClickUp tier assignment guidance (injected into system prompt for ClickUp triggers)
+        clickup_tier_guidance = ""
+        if trigger_type.startswith("clickup_"):
+            clickup_tier_guidance = """
+## CLICKUP TIER ASSIGNMENT
+- **T1 (urgent):** Overdue task, blocked status, PM escalation, cross-workspace dependency, handoff note with "URGENT" or "BLOCKED"
+- **T2 (important):** New handoff note, status change on active brief, new assignment to Director
+- **T3 (routine):** Routine comment, minor update, completed task, tag change
+"""
 
+        system = f"""{BAKER_SYSTEM_PROMPT}
+{clickup_tier_guidance}
 ## CURRENT CONTEXT
 - Timestamp: {now}
 - Trigger type: {trigger_type}
