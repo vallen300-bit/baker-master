@@ -160,6 +160,26 @@ CREATE INDEX idx_alerts_status ON alerts(status) WHERE status = 'pending';
 CREATE INDEX idx_alerts_tier ON alerts(tier);
 
 -- ============================================
+-- Ingestion log (INGEST-1 — CLI batch ingestion dedup tracking)
+-- ============================================
+CREATE TABLE IF NOT EXISTS ingestion_log (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    filename TEXT NOT NULL,
+    file_hash TEXT NOT NULL,
+    file_size_bytes BIGINT,
+    collection TEXT NOT NULL,
+    chunk_count INTEGER NOT NULL,
+    point_ids TEXT[],
+    source_path TEXT,
+    ingested_at TIMESTAMPTZ DEFAULT NOW(),
+    ingested_by TEXT DEFAULT 'cli',
+    UNIQUE(filename, file_hash)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ingestion_log_filename ON ingestion_log(filename);
+CREATE INDEX IF NOT EXISTS idx_ingestion_log_hash ON ingestion_log(file_hash);
+
+-- ============================================
 -- Seed data: Known contacts from Baker WhatsApp phase
 -- ============================================
 INSERT INTO contacts (name, aliases, preferred_channel, metadata) VALUES
