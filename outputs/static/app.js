@@ -5,7 +5,7 @@
 
 // ═══ API CONFIG ═══
 const BAKER_CONFIG = {
-    apiKey: '__BAKER_API_KEY__',  // Set via build or manually
+    apiKey: '076f4eccf86fe5e30f0a82ff17969afa08f3b151d1e1931154dc0936d49a9d82',
 };
 
 async function bakerFetch(url, options = {}) {
