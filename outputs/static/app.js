@@ -1090,8 +1090,8 @@ document.addEventListener('keydown', (e) => {
         const url = col ? `/api/ingest?collection=${encodeURIComponent(col)}` : '/api/ingest';
 
         try {
-            _showStatus('processing', `Processing ${file.name}\u2026`);
             const resp = await bakerFetch(url, { method: 'POST', body: formData });
+            _showStatus('processing', `Processing ${file.name}\u2026`);
             const data = await resp.json();
 
             if (!resp.ok) {
