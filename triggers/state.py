@@ -6,6 +6,7 @@ All state stored in PostgreSQL (Neon) — no filesystem state.
 import json
 import logging
 from datetime import datetime, timezone, timedelta
+from typing import Optional
 
 logger = logging.getLogger("sentinel.trigger_state")
 
@@ -46,6 +47,11 @@ class TriggerState:
                         item        JSONB NOT NULL,
                         created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
+                """)
+                # Add cursor_data column for opaque cursor storage (Dropbox, etc.)
+                cur.execute("""
+                    ALTER TABLE trigger_watermarks
+                    ADD COLUMN IF NOT EXISTS cursor_data TEXT
                 """)
                 conn.commit()
                 cur.close()
@@ -115,6 +121,59 @@ class TriggerState:
                 store._put_conn(conn)
         except Exception as e:
             logger.error(f"Failed to set watermark for {source}: {e}")
+
+    # -------------------------------------------------------
+    # Cursor Storage (opaque strings — Dropbox, etc.)
+    # -------------------------------------------------------
+
+    def get_cursor(self, source: str) -> Optional[str]:
+        """Get stored cursor string for a trigger source. Returns None if not set."""
+        try:
+            store = self._get_store()
+            conn = store._get_conn()
+            if not conn:
+                return None
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT cursor_data FROM trigger_watermarks WHERE source = %s",
+                    (source,),
+                )
+                row = cur.fetchone()
+                cur.close()
+                return row[0] if row and row[0] else None
+            finally:
+                store._put_conn(conn)
+        except Exception as e:
+            logger.warning(f"Could not read {source} cursor from DB: {e}")
+            return None
+
+    def set_cursor(self, source: str, cursor: str):
+        """Store an opaque cursor string for a trigger source."""
+        try:
+            store = self._get_store()
+            conn = store._get_conn()
+            if not conn:
+                logger.warning(f"No DB connection — could not update {source} cursor")
+                return
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO trigger_watermarks (source, cursor_data, last_seen)
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (source) DO UPDATE
+                        SET cursor_data = EXCLUDED.cursor_data, last_seen = NOW(), updated_at = NOW()
+                    """,
+                    (source, cursor),
+                )
+                conn.commit()
+                cur.close()
+                logger.info(f"Cursor updated for {source} ({len(cursor)} chars)")
+            finally:
+                store._put_conn(conn)
+        except Exception as e:
+            logger.error(f"Failed to set cursor for {source}: {e}")
 
     # -------------------------------------------------------
     # Briefing Queue

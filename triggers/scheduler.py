@@ -115,6 +115,23 @@ class SentinelScheduler:
         logger.info("Registered: clickup_poll (every 5 minutes)")
 
         # -------------------------------------------------------
+        # Dropbox polling — every 30 minutes
+        # -------------------------------------------------------
+        from triggers.dropbox_trigger import run_dropbox_poll
+        self.scheduler.add_job(
+            run_dropbox_poll,
+            IntervalTrigger(seconds=config.triggers.dropbox_check_interval),
+            id="dropbox_poll",
+            name="Dropbox folder polling",
+            coalesce=True,
+            max_instances=1,
+            replace_existing=True,
+        )
+        logger.info(
+            f"Registered: dropbox_poll (every {config.triggers.dropbox_check_interval}s)"
+        )
+
+        # -------------------------------------------------------
         # Todoist polling — every 30 minutes
         # -------------------------------------------------------
         from triggers.todoist_trigger import run_todoist_poll
@@ -196,7 +213,7 @@ def main():
     )
     parser.add_argument(
         "--run-once", type=str, default=None,
-        choices=["email", "whatsapp", "fireflies", "briefing", "clickup", "todoist"],
+        choices=["email", "whatsapp", "fireflies", "briefing", "clickup", "todoist", "dropbox"],
         help="Run a single trigger immediately and exit",
     )
     args = parser.parse_args()
@@ -221,6 +238,9 @@ def main():
         elif args.run_once == "todoist":
             from triggers.todoist_trigger import run_todoist_poll
             run_todoist_poll()
+        elif args.run_once == "dropbox":
+            from triggers.dropbox_trigger import run_dropbox_poll
+            run_dropbox_poll()
         return
 
     scheduler = SentinelScheduler()

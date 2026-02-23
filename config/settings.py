@@ -22,7 +22,7 @@ class QdrantConfig:
     collections: List[str] = field(default_factory=lambda: [
         c.strip() for c in os.getenv(
             "BAKER_COLLECTIONS",
-            "baker-people,baker-deals,baker-projects,baker-conversations,baker-whatsapp,baker-clickup,baker-todoist"
+            "baker-people,baker-deals,baker-projects,baker-conversations,baker-whatsapp,baker-clickup,baker-todoist,baker-documents"
         ).split(",")
     ])
     collection_whatsapp: str = "baker-whatsapp"
@@ -146,6 +146,15 @@ class TodoistConfig:
 
 
 @dataclass
+class DropboxConfig:
+    app_key: str = os.getenv("DROPBOX_APP_KEY", "")
+    app_secret: str = os.getenv("DROPBOX_APP_SECRET", "")
+    refresh_token: str = os.getenv("DROPBOX_REFRESH_TOKEN", "")
+    watch_path: str = os.getenv("DROPBOX_WATCH_PATH", "/Baker-Feed")
+    max_file_size: int = 104_857_600  # 100 MB
+
+
+@dataclass
 class TriggerConfig:
     # Fireflies scanning interval (seconds)
     fireflies_scan_interval: int = 7200  # 2 hours
@@ -155,6 +164,8 @@ class TriggerConfig:
     whatsapp_check_interval: int = 600  # 10 minutes
     # Todoist polling interval
     todoist_check_interval: int = 1800  # 30 minutes
+    # Dropbox polling interval
+    dropbox_check_interval: int = int(os.getenv("DROPBOX_CHECK_INTERVAL", "1800"))  # 30 minutes
     # Daily briefing time (UTC)
     daily_briefing_hour: int = 6  # 06:00 UTC = 08:00 CET
     # Pending approval reminder interval
@@ -180,6 +191,7 @@ class SentinelConfig:
     gmail: GmailConfig = field(default_factory=GmailConfig)
     fireflies: FirefliesConfig = field(default_factory=FirefliesConfig)
     todoist: TodoistConfig = field(default_factory=TodoistConfig)
+    dropbox: DropboxConfig = field(default_factory=DropboxConfig)
     postgres: PostgresConfig = field(default_factory=PostgresConfig)
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
     outputs: OutputConfig = field(default_factory=OutputConfig)
