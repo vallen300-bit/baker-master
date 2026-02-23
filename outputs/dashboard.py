@@ -694,6 +694,11 @@ async def ingest_document(
 
     # 1. Validate file extension
     ext = Path(file.filename).suffix.lower()
+    if ext == ".doc":
+        raise HTTPException(
+            status_code=400,
+            detail=".doc files are not supported. Please save as .docx in Word and re-upload."
+        )
     if ext not in SUPPORTED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
@@ -714,10 +719,10 @@ async def ingest_document(
             detail=f"Invalid image_type: {image_type}. Valid: card, whiteboard, auto"
         )
 
-    # 4. Validate file size (50MB max)
+    # 4. Validate file size (100MB max)
     contents = await file.read()
-    if len(contents) > 50 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="File too large. Maximum size: 50MB.")
+    if len(contents) > 100 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large. Maximum size: 100MB.")
 
     # 5. Write to temp file (preserve original filename for classifier heuristics)
     tmp_path = None

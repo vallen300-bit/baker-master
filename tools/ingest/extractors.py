@@ -1,7 +1,7 @@
 """Baker AI — File-type text extractors.
 
 Each extractor takes a file path and returns extracted text as a string.
-Supported: .txt, .md, .pdf, .csv, .xlsx, .json, .jpg, .jpeg, .png, .heic, .webp
+Supported: .txt, .md, .pdf, .csv, .xlsx, .json, .docx, .jpg, .jpeg, .png, .heic, .webp
 """
 import base64
 import csv
@@ -18,7 +18,7 @@ logger = logging.getLogger("baker.ingest.extractors")
 
 # Supported extensions mapped to their extractor functions
 SUPPORTED_EXTENSIONS = {
-    ".txt", ".md", ".pdf", ".csv", ".xlsx", ".json",
+    ".txt", ".md", ".pdf", ".csv", ".xlsx", ".json", ".docx",
     ".jpg", ".jpeg", ".png", ".heic", ".webp",
 }
 
@@ -43,6 +43,10 @@ def extract(filepath: Path) -> str:
         raise FileNotFoundError(f"File not found: {filepath}")
 
     ext = filepath.suffix.lower()
+    if ext == ".doc":
+        raise ValueError(
+            ".doc files are not supported. Please save as .docx in Word and re-upload."
+        )
     if ext not in SUPPORTED_EXTENSIONS:
         raise ValueError(
             f"Unsupported file type '{ext}'. "
@@ -139,6 +143,34 @@ def _extract_xlsx(filepath: Path) -> str:
 
     wb.close()
     return "\n\n".join(parts)
+
+
+def _extract_docx(filepath: Path) -> str:
+    """Extract text from Word .docx files (paragraphs + tables)."""
+    try:
+        from docx import Document
+    except ImportError:
+        raise ImportError(
+            "python-docx is required for DOCX extraction. "
+            "Install it: pip install python-docx"
+        )
+
+    doc = Document(filepath)
+    parts = []
+
+    # Extract paragraph text
+    for para in doc.paragraphs:
+        if para.text.strip():
+            parts.append(para.text)
+
+    # Extract table text
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+            if cells:
+                parts.append(" | ".join(cells))
+
+    return "\n".join(parts)
 
 
 def _extract_json(filepath: Path) -> str:
@@ -357,6 +389,7 @@ _EXTRACTORS = {
     ".csv": _extract_csv,
     ".xlsx": _extract_xlsx,
     ".json": _extract_json,
+    ".docx": _extract_docx,
     ".jpg": _extract_image_default,
     ".jpeg": _extract_image_default,
     ".png": _extract_image_default,

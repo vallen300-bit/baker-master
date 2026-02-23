@@ -1041,8 +1041,8 @@ document.addEventListener('keydown', (e) => {
     const statusEl    = document.getElementById('feedStatus');
     if (!drop) return;
 
-    const MAX_SIZE   = 50 * 1024 * 1024;
-    const ALLOWED    = new Set(['pdf','txt','md','csv','xlsx','json','jpg','jpeg','png','heic','webp']);
+    const MAX_SIZE   = 100 * 1024 * 1024;
+    const ALLOWED    = new Set(['pdf','txt','md','csv','xlsx','json','docx','jpg','jpeg','png','heic','webp']);
     const IMAGE_EXTS = new Set(['jpg','jpeg','png','heic','webp']);
 
     // populate collection dropdown
@@ -1085,12 +1085,16 @@ document.addEventListener('keydown', (e) => {
     // upload handler
     async function _uploadFile(file) {
         const ext = file.name.split('.').pop().toLowerCase();
+        if (ext === 'doc') {
+            _showStatus('error', '.doc files are not supported. Please save as .docx in Word and re-upload.');
+            return;
+        }
         if (!ALLOWED.has(ext)) {
             _showStatus('error', `Unsupported file type: .${ext}`);
             return;
         }
         if (file.size > MAX_SIZE) {
-            _showStatus('error', 'File too large. Maximum size: 50 MB.');
+            _showStatus('error', 'File too large. Maximum size: 100 MB.');
             return;
         }
 
