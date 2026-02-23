@@ -61,6 +61,12 @@ class SentinelStoreBack:
         # Ensure baker-clickup Qdrant collection exists
         self._ensure_collection("baker-clickup", size=1024)
 
+        # Ensure Todoist tables exist
+        self._ensure_todoist_tables()
+
+        # Ensure baker-todoist Qdrant collection exists
+        self._ensure_collection("baker-todoist", size=1024)
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -150,6 +156,46 @@ class SentinelStoreBack:
             logger.info("ClickUp tables verified (clickup_tasks, baker_actions)")
         except Exception as e:
             logger.warning(f"Could not ensure ClickUp tables: {e}")
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # Todoist table initialization
+    # -------------------------------------------------------
+
+    def _ensure_todoist_tables(self):
+        """Create todoist_tasks table if it doesn't exist."""
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — cannot ensure Todoist tables")
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS todoist_tasks (
+                    todoist_id TEXT PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    description TEXT,
+                    project_id TEXT,
+                    project_name TEXT,
+                    section_id TEXT,
+                    section_name TEXT,
+                    priority INTEGER DEFAULT 1,
+                    priority_label TEXT DEFAULT 'normal',
+                    due_date TEXT,
+                    labels JSONB DEFAULT '[]',
+                    status TEXT DEFAULT 'active',
+                    created_at TIMESTAMPTZ,
+                    completed_at TIMESTAMPTZ,
+                    last_synced TIMESTAMPTZ DEFAULT NOW(),
+                    content_hash TEXT
+                )
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("Todoist tables verified (todoist_tasks)")
+        except Exception as e:
+            logger.warning(f"Could not ensure Todoist tables: {e}")
         finally:
             self._put_conn(conn)
 
@@ -275,6 +321,96 @@ class SentinelStoreBack:
         except Exception as e:
             conn.rollback()
             logger.error(f"upsert_clickup_task failed: {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # Todoist helpers
+    # -------------------------------------------------------
+
+    def upsert_todoist_task(self, task_data: dict) -> Optional[tuple]:
+        """INSERT ... ON CONFLICT (todoist_id) DO UPDATE for todoist_tasks.
+
+        Returns (todoist_id, content_changed) tuple where content_changed is True
+        if the content_hash differs from the stored value (meaning Qdrant re-embed needed).
+        Returns None if no DB connection or on error.
+        """
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — skipping upsert_todoist_task")
+            return None
+        try:
+            cur = conn.cursor()
+            # First check if task exists and get current content_hash
+            cur.execute(
+                "SELECT content_hash FROM todoist_tasks WHERE todoist_id = %s",
+                (task_data.get("todoist_id"),),
+            )
+            existing = cur.fetchone()
+            old_hash = existing[0] if existing else None
+            new_hash = task_data.get("content_hash")
+            content_changed = (old_hash != new_hash)
+
+            cur.execute(
+                """
+                INSERT INTO todoist_tasks
+                    (todoist_id, content, description, project_id, project_name,
+                     section_id, section_name, priority, priority_label,
+                     due_date, labels, status, created_at, completed_at,
+                     last_synced, content_hash)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s::jsonb, %s, %s, %s, NOW(), %s)
+                ON CONFLICT (todoist_id) DO UPDATE SET
+                    content = EXCLUDED.content,
+                    description = EXCLUDED.description,
+                    project_id = EXCLUDED.project_id,
+                    project_name = EXCLUDED.project_name,
+                    section_id = EXCLUDED.section_id,
+                    section_name = EXCLUDED.section_name,
+                    priority = EXCLUDED.priority,
+                    priority_label = EXCLUDED.priority_label,
+                    due_date = EXCLUDED.due_date,
+                    labels = EXCLUDED.labels,
+                    status = EXCLUDED.status,
+                    created_at = EXCLUDED.created_at,
+                    completed_at = EXCLUDED.completed_at,
+                    last_synced = NOW(),
+                    content_hash = EXCLUDED.content_hash
+                RETURNING todoist_id
+                """,
+                (
+                    task_data.get("todoist_id"),
+                    task_data.get("content"),
+                    task_data.get("description"),
+                    task_data.get("project_id"),
+                    task_data.get("project_name"),
+                    task_data.get("section_id"),
+                    task_data.get("section_name"),
+                    task_data.get("priority", 1),
+                    task_data.get("priority_label", "normal"),
+                    task_data.get("due_date"),
+                    json.dumps(task_data.get("labels", [])),
+                    task_data.get("status", "active"),
+                    task_data.get("created_at"),
+                    task_data.get("completed_at"),
+                    new_hash,
+                ),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            cur.close()
+            todoist_id = row[0] if row else None
+            if todoist_id:
+                logger.info(
+                    f"Upserted Todoist task: {task_data.get('content', '?')[:60]} "
+                    f"(changed={content_changed})"
+                )
+                return (todoist_id, content_changed)
+            return None
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"upsert_todoist_task failed: {e}")
             return None
         finally:
             self._put_conn(conn)

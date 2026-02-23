@@ -115,6 +115,23 @@ class SentinelScheduler:
         logger.info("Registered: clickup_poll (every 5 minutes)")
 
         # -------------------------------------------------------
+        # Todoist polling — every 30 minutes
+        # -------------------------------------------------------
+        from triggers.todoist_trigger import run_todoist_poll
+        self.scheduler.add_job(
+            run_todoist_poll,
+            IntervalTrigger(seconds=config.triggers.todoist_check_interval),
+            id="todoist_poll",
+            name="Todoist task polling",
+            coalesce=True,
+            max_instances=1,
+            replace_existing=True,
+        )
+        logger.info(
+            f"Registered: todoist_poll (every {config.triggers.todoist_check_interval}s)"
+        )
+
+        # -------------------------------------------------------
         # Daily briefing — 08:00 CET (06:00 UTC)
         # -------------------------------------------------------
         from triggers.briefing_trigger import generate_morning_briefing
@@ -179,7 +196,7 @@ def main():
     )
     parser.add_argument(
         "--run-once", type=str, default=None,
-        choices=["email", "whatsapp", "fireflies", "briefing", "clickup"],
+        choices=["email", "whatsapp", "fireflies", "briefing", "clickup", "todoist"],
         help="Run a single trigger immediately and exit",
     )
     args = parser.parse_args()
@@ -201,6 +218,9 @@ def main():
         elif args.run_once == "clickup":
             from triggers.clickup_trigger import run_clickup_poll
             run_clickup_poll()
+        elif args.run_once == "todoist":
+            from triggers.todoist_trigger import run_todoist_poll
+            run_todoist_poll()
         return
 
     scheduler = SentinelScheduler()

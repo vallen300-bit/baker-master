@@ -22,7 +22,7 @@ class QdrantConfig:
     collections: List[str] = field(default_factory=lambda: [
         c.strip() for c in os.getenv(
             "BAKER_COLLECTIONS",
-            "baker-people,baker-deals,baker-projects,baker-conversations,baker-whatsapp,baker-clickup"
+            "baker-people,baker-deals,baker-projects,baker-conversations,baker-whatsapp,baker-clickup,baker-todoist"
         ).split(",")
     ])
     collection_whatsapp: str = "baker-whatsapp"
@@ -138,6 +138,15 @@ class PostgresConfig:
 
 
 @dataclass
+class TodoistConfig:
+    api_token: str = os.getenv("TODOIST_API_TOKEN", "")
+    base_url: str = "https://api.todoist.com/rest/v2"
+    sync_url: str = "https://api.todoist.com/sync/v9"
+    # Rate limit: 450 requests/15 min = 30/min (conservative)
+    rate_limit_per_min: int = 30
+
+
+@dataclass
 class TriggerConfig:
     # Fireflies scanning interval (seconds)
     fireflies_scan_interval: int = 7200  # 2 hours
@@ -145,6 +154,8 @@ class TriggerConfig:
     email_check_interval: int = 300  # 5 minutes
     # WhatsApp check interval
     whatsapp_check_interval: int = 600  # 10 minutes
+    # Todoist polling interval
+    todoist_check_interval: int = 1800  # 30 minutes
     # Daily briefing time (UTC)
     daily_briefing_hour: int = 6  # 06:00 UTC = 08:00 CET
     # Pending approval reminder interval
@@ -169,6 +180,7 @@ class SentinelConfig:
     claude: ClaudeConfig = field(default_factory=ClaudeConfig)
     gmail: GmailConfig = field(default_factory=GmailConfig)
     fireflies: FirefliesConfig = field(default_factory=FirefliesConfig)
+    todoist: TodoistConfig = field(default_factory=TodoistConfig)
     postgres: PostgresConfig = field(default_factory=PostgresConfig)
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
     outputs: OutputConfig = field(default_factory=OutputConfig)
