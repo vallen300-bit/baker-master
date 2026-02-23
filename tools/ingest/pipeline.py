@@ -16,8 +16,9 @@ from qdrant_client.models import PointStruct
 from config.settings import config
 from scripts.bulk_ingest import chunk_text, ensure_collection, estimate_tokens, make_point_id
 from tools.ingest.classifier import classify, VALID_COLLECTIONS
+from tools.ingest.contact_writer import write_contact
 from tools.ingest.dedup import compute_file_hash, is_duplicate, log_ingestion
-from tools.ingest.extractors import extract
+from tools.ingest.extractors import extract, extract_image, parse_card_json, IMAGE_EXTENSIONS
 from tools.ingest.models import IngestResult
 
 logger = logging.getLogger("baker.ingest.pipeline")
@@ -30,17 +31,19 @@ def ingest_file(
     skip_dedup: bool = False,
     skip_llm: bool = False,
     verbose: bool = False,
+    image_type: Optional[str] = None,
 ) -> IngestResult:
     """Ingest a single file through the full pipeline.
 
     Steps:
-        1. Extract text from file
+        1. Extract text from file (or image via Claude Vision)
         2. Classify into collection (if not specified)
         3. Check for duplicates (SHA-256 + filename)
         4. Chunk text (~500 tokens, 50 overlap)
         5. Embed via Voyage AI (rate-limited batches)
         6. Upsert into Qdrant
-        7. Log to PostgreSQL ingestion_log
+        7. For business cards: also write to PostgreSQL contacts table
+        8. Log to PostgreSQL ingestion_log
 
     Args:
         filepath: Path to the file to ingest.
@@ -49,6 +52,7 @@ def ingest_file(
         skip_dedup: Skip duplicate detection.
         skip_llm: Skip LLM classification (heuristic only).
         verbose: Extra logging output.
+        image_type: For images: 'card', 'whiteboard', or 'auto'. None for non-images.
 
     Returns:
         IngestResult with details of the ingestion.
@@ -56,13 +60,19 @@ def ingest_file(
     filepath = Path(filepath).resolve()
     filename = filepath.name
     file_size = filepath.stat().st_size
+    ext = filepath.suffix.lower()
+    is_image = ext in IMAGE_EXTENSIONS
 
     if verbose:
-        logger.info("Processing: %s (%d bytes)", filename, file_size)
+        logger.info("Processing: %s (%d bytes)%s", filename, file_size,
+                     f" [image_type={image_type}]" if is_image else "")
 
     # --- Step 1: Extract ---
     try:
-        text = extract(filepath)
+        if is_image:
+            text = extract_image(filepath, image_type=image_type)
+        else:
+            text = extract(filepath)
     except (ValueError, ImportError) as e:
         return IngestResult(
             filename=filename, file_hash="", file_size_bytes=file_size,
@@ -80,6 +90,24 @@ def ingest_file(
     token_est = estimate_tokens(text)
     if verbose:
         logger.info("  Extracted %d chars (~%d tokens)", len(text), token_est)
+
+    # --- Detect card vs whiteboard for image routing ---
+    card_data = None
+    if is_image:
+        card_data = parse_card_json(text)
+        if card_data and card_data.get("name"):
+            # It's a business card — route to baker-people
+            if not collection:
+                collection = "baker-people"
+            if verbose:
+                logger.info("  Business card detected: %s", card_data.get("name"))
+        else:
+            # Whiteboard or failed card parse — route to baker-documents
+            card_data = None
+            if not collection:
+                collection = "baker-documents"
+            if verbose:
+                logger.info("  Whiteboard/document image — routing to baker-documents")
 
     # --- Step 2: Classify ---
     if collection:
@@ -116,6 +144,17 @@ def ingest_file(
     # --- Step 5+6: Embed + Upsert ---
     point_ids = _embed_and_upsert(chunks, target, filepath, verbose)
 
+    # --- Step 6b: Business card → dual-write to PostgreSQL contacts ---
+    contact_result = None
+    if card_data:
+        try:
+            contact_result = write_contact(card_data, source_file=filename)
+            if verbose:
+                logger.info("  Contact write: %s (%s)",
+                             contact_result.get("name"), contact_result.get("action"))
+        except Exception as e:
+            logger.error("  Contact write failed (non-fatal): %s", e)
+
     # --- Step 7: Log ---
     log_ingestion(
         filename=filename,
@@ -127,10 +166,18 @@ def ingest_file(
         source_path=str(filepath),
     )
 
-    return IngestResult(
+    result = IngestResult(
         filename=filename, file_hash=file_hash, file_size_bytes=file_size,
         collection=target, chunk_count=len(chunks), point_ids=point_ids,
     )
+
+    # Attach card extraction data for API response
+    if card_data:
+        result.card_data = card_data
+    if contact_result:
+        result.contact_result = contact_result
+
+    return result
 
 
 def _embed_and_upsert(

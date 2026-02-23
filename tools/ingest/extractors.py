@@ -1,18 +1,29 @@
 """Baker AI — File-type text extractors.
 
 Each extractor takes a file path and returns extracted text as a string.
-Supported: .txt, .md, .pdf, .csv, .xlsx, .json
+Supported: .txt, .md, .pdf, .csv, .xlsx, .json, .jpg, .jpeg, .png, .heic, .webp
 """
+import base64
 import csv
 import io
 import json
 import logging
+import os
 from pathlib import Path
+from typing import Optional
+
+import anthropic
 
 logger = logging.getLogger("baker.ingest.extractors")
 
 # Supported extensions mapped to their extractor functions
-SUPPORTED_EXTENSIONS = {".txt", ".md", ".pdf", ".csv", ".xlsx", ".json"}
+SUPPORTED_EXTENSIONS = {
+    ".txt", ".md", ".pdf", ".csv", ".xlsx", ".json",
+    ".jpg", ".jpeg", ".png", ".heic", ".webp",
+}
+
+# Image extensions handled by the image extractor
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".webp"}
 
 
 def extract(filepath: Path) -> str:
@@ -149,6 +160,195 @@ def _extract_json(filepath: Path) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False, default=str)
 
 
+# -------------------------------------------------------
+# Image extraction via Claude Vision
+# -------------------------------------------------------
+
+_CARD_PROMPT = """You are a precise data extractor. This image is a business card.
+
+Extract ALL visible information and return ONLY valid JSON (no markdown, no commentary):
+
+{
+  "name": "Full Name",
+  "company": "Company / Organization",
+  "role": "Title / Position",
+  "email": "email@example.com",
+  "phone": "+1234567890",
+  "address": "Full address if visible",
+  "website": "URL if visible",
+  "notes": "Any other details (LinkedIn, social handles, etc.)"
+}
+
+Rules:
+- Use null for fields not visible on the card.
+- For phone numbers, include country code if shown.
+- If multiple emails/phones, pick the primary one.
+- Return raw JSON only — no ```json``` fences, no explanation."""
+
+_WHITEBOARD_PROMPT = """You are a meticulous note-taker. This image shows a whiteboard, notepad, or handwritten document.
+
+1. First, transcribe ALL visible text exactly as written (preserve structure, headings, bullets, arrows).
+2. Then, synthesize a clean summary of the key points, decisions, and action items.
+
+Format your response as:
+
+## Transcription
+[Exact text as written on the board/page]
+
+## Summary
+[Clean synthesis of key points]
+
+## Action Items
+- [Any action items or tasks identified]
+
+Rules:
+- Preserve the original structure (columns, boxes, arrows → describe spatial layout).
+- If text is partially illegible, use [illegible] markers.
+- Include all diagrams/drawings as text descriptions."""
+
+_AUTO_CLASSIFY_PROMPT = """Look at this image and classify it as exactly one of:
+- "card" — a business card with contact information
+- "whiteboard" — a whiteboard, notepad, handwritten note, or document photo
+
+Reply with ONLY the single word: card OR whiteboard"""
+
+# MIME type mapping for Claude Vision API
+_IMAGE_MIME = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".heic": "image/jpeg",  # Converted to JPEG before sending
+}
+
+
+def _convert_heic_to_jpeg(filepath: Path) -> bytes:
+    """Convert HEIC image to JPEG bytes using pillow-heif."""
+    try:
+        from pillow_heif import register_heif_opener
+        from PIL import Image
+    except ImportError:
+        raise ImportError(
+            "pillow-heif and Pillow are required for HEIC conversion. "
+            "Install: pip install pillow-heif Pillow"
+        )
+
+    register_heif_opener()
+    img = Image.open(filepath)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=90)
+    return buf.getvalue()
+
+
+def _load_image_bytes(filepath: Path) -> tuple[bytes, str]:
+    """Load image bytes, converting HEIC if needed. Returns (bytes, mime_type)."""
+    ext = filepath.suffix.lower()
+
+    if ext == ".heic":
+        img_bytes = _convert_heic_to_jpeg(filepath)
+        mime = "image/jpeg"
+    else:
+        img_bytes = filepath.read_bytes()
+        mime = _IMAGE_MIME.get(ext, "image/jpeg")
+
+    return img_bytes, mime
+
+
+def _call_claude_vision(img_bytes: bytes, mime: str, prompt: str, max_tokens: int = 2000) -> str:
+    """Send image to Claude Sonnet via vision API and return text response."""
+    client = anthropic.Anthropic()  # Uses ANTHROPIC_API_KEY env var
+    b64 = base64.standard_b64encode(img_bytes).decode("utf-8")
+
+    response = client.messages.create(
+        model="claude-sonnet-4-5-20250929",
+        max_tokens=max_tokens,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": mime,
+                            "data": b64,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": prompt,
+                    },
+                ],
+            }
+        ],
+    )
+    return response.content[0].text
+
+
+def _classify_image(img_bytes: bytes, mime: str) -> str:
+    """Auto-classify image as 'card' or 'whiteboard'."""
+    result = _call_claude_vision(img_bytes, mime, _AUTO_CLASSIFY_PROMPT, max_tokens=10)
+    classification = result.strip().lower()
+    if classification in ("card", "whiteboard"):
+        return classification
+    # Default to whiteboard if unclear
+    logger.warning("Image classification unclear ('%s'), defaulting to whiteboard", classification)
+    return "whiteboard"
+
+
+def extract_image(filepath: Path, image_type: Optional[str] = None) -> str:
+    """Extract text/data from an image using Claude Vision.
+
+    Args:
+        filepath: Path to image file.
+        image_type: 'card', 'whiteboard', or None for auto-detect.
+
+    Returns:
+        Extracted text. For cards, returns JSON string with contact fields.
+        For whiteboards, returns structured transcription + summary.
+    """
+    img_bytes, mime = _load_image_bytes(filepath)
+
+    # Auto-classify if type not specified
+    if not image_type or image_type == "auto":
+        image_type = _classify_image(img_bytes, mime)
+        logger.info("Auto-classified %s as: %s", filepath.name, image_type)
+
+    if image_type == "card":
+        prompt = _CARD_PROMPT
+    else:
+        prompt = _WHITEBOARD_PROMPT
+
+    text = _call_claude_vision(img_bytes, mime, prompt)
+    return text
+
+
+def _extract_image_default(filepath: Path) -> str:
+    """Default image extractor (auto-detect mode) for the _EXTRACTORS dispatch."""
+    return extract_image(filepath, image_type=None)
+
+
+def parse_card_json(text: str) -> Optional[dict]:
+    """Parse the JSON output from a business card extraction.
+
+    Returns dict with contact fields, or None if parsing fails.
+    """
+    try:
+        # Strip any accidental markdown fences
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            cleaned = cleaned.split("\n", 1)[1]
+        if cleaned.endswith("```"):
+            cleaned = cleaned.rsplit("```", 1)[0]
+        cleaned = cleaned.strip()
+
+        data = json.loads(cleaned)
+        return data
+    except (json.JSONDecodeError, IndexError) as e:
+        logger.warning("Failed to parse card JSON: %s", e)
+        return None
+
+
 # Extension → extractor mapping
 _EXTRACTORS = {
     ".txt": _extract_text,
@@ -157,4 +357,9 @@ _EXTRACTORS = {
     ".csv": _extract_csv,
     ".xlsx": _extract_xlsx,
     ".json": _extract_json,
+    ".jpg": _extract_image_default,
+    ".jpeg": _extract_image_default,
+    ".png": _extract_image_default,
+    ".heic": _extract_image_default,
+    ".webp": _extract_image_default,
 }

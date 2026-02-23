@@ -91,6 +91,14 @@ Examples:
         help="Skip LLM classification (use heuristic rules only)",
     )
     parser.add_argument(
+        "--type", "-t",
+        type=str,
+        choices=["card", "whiteboard", "auto"],
+        default=None,
+        dest="image_type",
+        help="Image extraction mode: card (business card), whiteboard, or auto-detect",
+    )
+    parser.add_argument(
         "--verbose", "-v",
         action="store_true",
         help="Verbose output with per-file details",
@@ -138,6 +146,7 @@ Examples:
             skip_dedup=args.no_dedup,
             skip_llm=args.no_llm,
             verbose=args.verbose,
+            image_type=args.image_type,
         )
         results.append(result)
 

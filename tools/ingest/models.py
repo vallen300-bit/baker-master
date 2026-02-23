@@ -15,3 +15,5 @@ class IngestResult:
     skipped: bool = False
     skip_reason: Optional[str] = None
     error: Optional[str] = None
+    card_data: Optional[dict] = None          # Business card extracted fields
+    contact_result: Optional[dict] = None     # Contact write result (action, contact_id)

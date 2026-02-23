@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 import anthropic
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -688,8 +688,9 @@ async def scan_chat(req: ScanRequest):
 async def ingest_document(
     file: UploadFile = File(...),
     collection: str = Query(None, description="Target collection override"),
+    image_type: str = Form(None, description="Image mode: card, whiteboard, or auto"),
 ):
-    """Ingest a single document via dashboard upload."""
+    """Ingest a single document or image via dashboard upload."""
 
     # 1. Validate file extension
     ext = Path(file.filename).suffix.lower()
@@ -706,12 +707,19 @@ async def ingest_document(
             detail=f"Unknown collection: {collection}. Valid: {', '.join(sorted(VALID_COLLECTIONS))}"
         )
 
-    # 3. Validate file size (50MB max)
+    # 3. Validate image_type if provided
+    if image_type and image_type not in ("card", "whiteboard", "auto"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid image_type: {image_type}. Valid: card, whiteboard, auto"
+        )
+
+    # 4. Validate file size (50MB max)
     contents = await file.read()
     if len(contents) > 50 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="File too large. Maximum size: 50MB.")
 
-    # 4. Write to temp file (preserve original filename for classifier heuristics)
+    # 5. Write to temp file (preserve original filename for classifier heuristics)
     tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -722,18 +730,19 @@ async def ingest_document(
             tmp.write(contents)
             tmp_path = Path(tmp.name)
 
-        # 5. Run pipeline in thread to avoid blocking event loop
+        # 6. Run pipeline in thread to avoid blocking event loop
         result = await asyncio.to_thread(
             ingest_file,
             filepath=tmp_path,
             collection=collection,
+            image_type=image_type,
         )
 
-        # 6. Return result
+        # 7. Return result
         if result.error:
             raise HTTPException(status_code=500, detail=f"Ingestion failed: {result.error}")
 
-        return {
+        response = {
             "status": "skipped" if result.skipped else "success",
             "filename": file.filename,
             "collection": result.collection,
@@ -741,8 +750,16 @@ async def ingest_document(
             "dedup": result.skipped and "duplicate" in (result.skip_reason or "").lower(),
             "skip_reason": result.skip_reason,
         }
+
+        # Include card extraction data if present
+        if result.card_data:
+            response["card_data"] = result.card_data
+        if result.contact_result:
+            response["contact_result"] = result.contact_result
+
+        return response
     finally:
-        # 7. Clean up temp file
+        # 8. Clean up temp file
         if tmp_path and tmp_path.exists():
             tmp_path.unlink()
 

@@ -1033,14 +1033,17 @@ document.addEventListener('keydown', (e) => {
 
 // ═══ FEED BAKER ═══
 (function initFeedBaker() {
-    const drop      = document.getElementById('feedDrop');
-    const fileInput = document.getElementById('feedFileInput');
-    const colSelect = document.getElementById('feedCollection');
-    const statusEl  = document.getElementById('feedStatus');
+    const drop        = document.getElementById('feedDrop');
+    const fileInput   = document.getElementById('feedFileInput');
+    const colSelect   = document.getElementById('feedCollection');
+    const imgTypeRow  = document.getElementById('feedImageTypeRow');
+    const imgTypeSel  = document.getElementById('feedImageType');
+    const statusEl    = document.getElementById('feedStatus');
     if (!drop) return;
 
-    const MAX_SIZE = 50 * 1024 * 1024;
-    const ALLOWED  = new Set(['pdf','txt','md','csv','xlsx','json']);
+    const MAX_SIZE   = 50 * 1024 * 1024;
+    const ALLOWED    = new Set(['pdf','txt','md','csv','xlsx','json','jpg','jpeg','png','heic','webp']);
+    const IMAGE_EXTS = new Set(['jpg','jpeg','png','heic','webp']);
 
     // populate collection dropdown
     bakerFetch('/api/ingest/collections')
@@ -1054,19 +1057,28 @@ document.addEventListener('keydown', (e) => {
         })
         .catch(() => {});
 
+    // Show/hide image type selector based on selected file
+    function _toggleImageType(filename) {
+        const ext = (filename || '').split('.').pop().toLowerCase();
+        if (imgTypeRow) imgTypeRow.hidden = !IMAGE_EXTS.has(ext);
+    }
+
     // drag & drop
     drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('feed-dragover'); });
     drop.addEventListener('dragleave', e => { e.preventDefault(); drop.classList.remove('feed-dragover'); });
     drop.addEventListener('drop', e => {
         e.preventDefault(); drop.classList.remove('feed-dragover');
         const file = e.dataTransfer.files[0];
-        if (file) _uploadFile(file);
+        if (file) { _toggleImageType(file.name); _uploadFile(file); }
     });
 
     // click to upload
     drop.addEventListener('click', () => fileInput.click());
     fileInput.addEventListener('change', () => {
-        if (fileInput.files[0]) _uploadFile(fileInput.files[0]);
+        if (fileInput.files[0]) {
+            _toggleImageType(fileInput.files[0].name);
+            _uploadFile(fileInput.files[0]);
+        }
         fileInput.value = '';
     });
 
@@ -1082,10 +1094,14 @@ document.addEventListener('keydown', (e) => {
             return;
         }
 
-        _showStatus('uploading', `Uploading ${file.name}\u2026`);
+        const isImage = IMAGE_EXTS.has(ext);
+        _showStatus('uploading', `Uploading ${file.name}${isImage ? ' (image — processing may take a moment)' : ''}\u2026`);
 
         const formData = new FormData();
         formData.append('file', file);
+        if (isImage && imgTypeSel) {
+            formData.append('image_type', imgTypeSel.value);
+        }
         const col = colSelect.value;
         const url = col ? `/api/ingest?collection=${encodeURIComponent(col)}` : '/api/ingest';
 
@@ -1102,9 +1118,23 @@ document.addEventListener('keydown', (e) => {
                 _showStatus('warn', `Skipped: ${data.skip_reason || 'already ingested'}`);
                 return;
             }
-            _showStatus('success',
-                `Ingested ${data.filename} \u2014 ${data.chunks} chunk${data.chunks !== 1 ? 's' : ''} \u2192 ${data.collection}`
-            );
+
+            // Build success message
+            let msg = `Ingested ${data.filename} \u2014 ${data.chunks} chunk${data.chunks !== 1 ? 's' : ''} \u2192 ${data.collection}`;
+
+            // Append card data summary if present
+            if (data.card_data) {
+                const cd = data.card_data;
+                const parts = [cd.name, cd.company, cd.role].filter(Boolean);
+                if (parts.length) msg += `\nContact: ${parts.join(' \u2014 ')}`;
+                if (cd.email) msg += ` | ${cd.email}`;
+            }
+            if (data.contact_result && data.contact_result.action) {
+                msg += ` (${data.contact_result.action})`;
+            }
+
+            _showStatus('success', msg);
+            if (imgTypeRow) imgTypeRow.hidden = true;
         } catch (err) {
             _showStatus('error', 'Network error: ' + err.message);
         }
@@ -1116,7 +1146,7 @@ document.addEventListener('keydown', (e) => {
         statusEl.className = 'feed-status feed-status--' + type;
         statusEl.textContent = msg;
         if (type === 'success' || type === 'warn') {
-            setTimeout(() => { statusEl.hidden = true; }, 8000);
+            setTimeout(() => { statusEl.hidden = true; }, 12000);
         }
     }
 })();

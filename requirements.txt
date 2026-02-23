@@ -30,6 +30,10 @@ python-multipart>=0.0.9    # FastAPI file upload parsing
 pdfplumber>=0.10.0         # PDF text extraction
 openpyxl>=3.1.0            # Excel .xlsx extraction
 
+# Image extraction (INGEST-3)
+pillow-heif>=0.16.0        # HEIC → JPEG conversion
+Pillow>=10.0.0             # Image processing (required by pillow-heif)
+
 # Future: Trigger integrations
 # msgraph-sdk>=1.0.0       # Microsoft 365 / Outlook
 # slack-sdk>=3.0.0         # Slack
