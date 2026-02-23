@@ -100,14 +100,17 @@ def _register_jobs(scheduler: BackgroundScheduler):
     logger.info(f"Registered: todoist_poll (every {config.triggers.todoist_check_interval}s)")
 
     # Whoop polling — every 24 hours (daily health data)
+    # next_run_time=now ensures first poll fires on startup, not after 24h.
+    # Without this, every redeploy resets the 24h timer and poll never fires.
     from triggers.whoop_trigger import run_whoop_poll
     scheduler.add_job(
         run_whoop_poll,
         IntervalTrigger(seconds=config.triggers.whoop_check_interval),
         id="whoop_poll", name="Whoop health polling",
         coalesce=True, max_instances=1, replace_existing=True,
+        next_run_time=datetime.now(timezone.utc),
     )
-    logger.info(f"Registered: whoop_poll (every {config.triggers.whoop_check_interval}s)")
+    logger.info(f"Registered: whoop_poll (every {config.triggers.whoop_check_interval}s, first run: NOW)")
 
     # RSS polling — every 60 minutes (RSS-1)
     from triggers.rss_trigger import run_rss_poll
