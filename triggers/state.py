@@ -53,6 +53,32 @@ class TriggerState:
                     ALTER TABLE trigger_watermarks
                     ADD COLUMN IF NOT EXISTS cursor_data TEXT
                 """)
+                # RSS Sentinel tables (RSS-1)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS rss_feeds (
+                        id                    SERIAL PRIMARY KEY,
+                        feed_url              TEXT UNIQUE NOT NULL,
+                        title                 TEXT,
+                        category              TEXT,
+                        html_url              TEXT,
+                        is_active             BOOLEAN DEFAULT TRUE,
+                        consecutive_failures  INTEGER DEFAULT 0,
+                        last_polled           TIMESTAMPTZ,
+                        created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS rss_articles (
+                        id           SERIAL PRIMARY KEY,
+                        feed_id      INTEGER REFERENCES rss_feeds(id),
+                        url_hash     TEXT UNIQUE NOT NULL,
+                        title        TEXT,
+                        url          TEXT,
+                        author       TEXT,
+                        published_at TIMESTAMPTZ,
+                        ingested_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """)
                 conn.commit()
                 cur.close()
                 logger.info("Trigger state tables verified")

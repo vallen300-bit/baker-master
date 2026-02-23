@@ -808,6 +808,22 @@ async def list_collections():
 
 
 # ============================================================
+# RSS Feed Management (RSS-1)
+# ============================================================
+
+@app.post("/api/rss/import-opml", tags=["rss"], dependencies=[Depends(verify_api_key)])
+async def rss_import_opml(request: Request):
+    """Accept raw OPML XML body, parse, populate rss_feeds table."""
+    body = await request.body()
+    opml_text = body.decode("utf-8")
+    if not opml_text.strip():
+        raise HTTPException(status_code=400, detail="Empty OPML body")
+    from triggers.rss_trigger import import_opml
+    result = import_opml(opml_text)
+    return {"status": "ok", **result}
+
+
+# ============================================================
 # CLI runner
 # ============================================================
 

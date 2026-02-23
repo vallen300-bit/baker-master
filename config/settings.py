@@ -166,6 +166,15 @@ class WhoopConfig:
 
 
 @dataclass
+class RssConfig:
+    check_interval: int = int(os.getenv("RSS_CHECK_INTERVAL", "3600"))  # 60 min default
+    max_article_age_days: int = 7  # skip articles older than 7 days on first poll
+    max_articles_per_feed: int = 50  # safety cap per feed per poll
+    request_timeout: int = 30  # seconds per feed fetch
+    collection: str = "baker-documents"  # reuse existing collection
+
+
+@dataclass
 class TriggerConfig:
     # Fireflies scanning interval (seconds)
     fireflies_scan_interval: int = 7200  # 2 hours
@@ -179,6 +188,8 @@ class TriggerConfig:
     dropbox_check_interval: int = int(os.getenv("DROPBOX_CHECK_INTERVAL", "1800"))  # 30 minutes
     # Whoop polling interval
     whoop_check_interval: int = int(os.getenv("WHOOP_CHECK_INTERVAL", "86400"))  # 24 hours
+    # RSS polling interval
+    rss_check_interval: int = int(os.getenv("RSS_CHECK_INTERVAL", "3600"))  # 60 minutes
     # Daily briefing time (UTC)
     daily_briefing_hour: int = 6  # 06:00 UTC = 08:00 CET
     # Pending approval reminder interval
@@ -206,6 +217,7 @@ class SentinelConfig:
     todoist: TodoistConfig = field(default_factory=TodoistConfig)
     dropbox: DropboxConfig = field(default_factory=DropboxConfig)
     whoop: WhoopConfig = field(default_factory=WhoopConfig)
+    rss: RssConfig = field(default_factory=RssConfig)
     postgres: PostgresConfig = field(default_factory=PostgresConfig)
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
     outputs: OutputConfig = field(default_factory=OutputConfig)

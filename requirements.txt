@@ -37,6 +37,9 @@ Pillow>=10.0.0             # Image processing (required by pillow-heif)
 # DOCX extraction (INGEST-4)
 python-docx>=1.0.0         # Word .docx text extraction
 
+# RSS feed parsing (RSS-1)
+feedparser>=6.0.0            # RSS/Atom feed parser
+
 # Future: Trigger integrations
 # msgraph-sdk>=1.0.0       # Microsoft 365 / Outlook
 # slack-sdk>=3.0.0         # Slack
