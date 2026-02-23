@@ -1,6 +1,6 @@
 """
 Sentinel AI — Todoist API Client
-Read-only access to Todoist REST API v2 + Sync API v9.
+Read-only access to Todoist API v1 (unified endpoint).
 Polls projects, tasks (active + completed), sections, labels, comments.
 """
 import logging
@@ -36,7 +36,6 @@ class TodoistClient:
             logger.warning("TODOIST_API_TOKEN not set — Todoist client will not work")
 
         self._base_url = config.todoist.base_url
-        self._sync_url = config.todoist.sync_url
 
         self._client = httpx.Client(
             headers={"Authorization": f"Bearer {self._api_token}"},
@@ -69,11 +68,11 @@ class TodoistClient:
             time.sleep(2)
 
     # -------------------------------------------------------
-    # REST API v2 methods
+    # API v1 methods
     # -------------------------------------------------------
 
     def _get(self, path: str, params: dict = None) -> list | dict:
-        """GET request to Todoist REST API v2."""
+        """GET request to Todoist API v1."""
         self._check_rate_limit()
         url = f"{self._base_url}{path}"
         resp = self._client.get(url, params=params)
@@ -81,34 +80,37 @@ class TodoistClient:
         return resp.json()
 
     def get_projects(self) -> list[dict]:
-        """GET /rest/v2/projects — returns all projects."""
+        """GET /api/v1/projects — returns all projects."""
         return self._get("/projects")
 
     def get_tasks(self, project_id: str = None) -> list[dict]:
-        """GET /rest/v2/tasks — returns all active tasks. Optional project_id filter."""
+        """GET /api/v1/tasks — returns all active tasks. Optional project_id filter."""
         params = {}
         if project_id:
             params["project_id"] = project_id
         return self._get("/tasks", params=params if params else None)
 
-    def get_sections(self) -> list[dict]:
-        """GET /rest/v2/sections — returns all sections."""
-        return self._get("/sections")
+    def get_sections(self, project_id: str = None) -> list[dict]:
+        """GET /api/v1/sections — returns all sections. Optional project_id filter."""
+        params = {}
+        if project_id:
+            params["project_id"] = project_id
+        return self._get("/sections", params=params if params else None)
 
     def get_labels(self) -> list[dict]:
-        """GET /rest/v2/labels — returns all labels."""
+        """GET /api/v1/labels — returns all labels."""
         return self._get("/labels")
 
     def get_comments(self, task_id: str) -> list[dict]:
-        """GET /rest/v2/comments?task_id={task_id} — returns comments for a task."""
+        """GET /api/v1/comments?task_id={task_id} — returns comments for a task."""
         return self._get("/comments", params={"task_id": task_id})
 
     # -------------------------------------------------------
-    # Sync API v9 (completed tasks)
+    # Completed tasks (API v1)
     # -------------------------------------------------------
 
     def get_completed_tasks(self, since: str = None, limit: int = 200, offset: int = 0) -> list[dict]:
-        """POST /sync/v9/completed/get_all — returns completed tasks.
+        """GET /api/v1/tasks/completed — returns completed tasks.
 
         Args:
             since: ISO 8601 datetime string (e.g. '2026-02-22T00:00:00Z')
@@ -116,17 +118,15 @@ class TodoistClient:
             offset: Pagination offset
 
         Returns:
-            List of completed task dicts from the 'items' key.
+            List of completed task dicts.
         """
-        self._check_rate_limit()
-        url = f"{self._sync_url}/completed/get_all"
-
-        data = {"limit": limit, "offset": offset}
+        params = {"limit": limit, "offset": offset}
         if since:
-            data["since"] = since
+            params["since"] = since
 
-        resp = self._client.post(url, data=data)
-        resp.raise_for_status()
-        result = resp.json()
-        # Sync API returns {"items": [...], "projects": {...}}
+        result = self._get("/tasks/completed", params=params)
+
+        # v1 may return a list directly or {"items": [...]}
+        if isinstance(result, list):
+            return result
         return result.get("items", [])

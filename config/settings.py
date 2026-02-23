@@ -140,8 +140,7 @@ class PostgresConfig:
 @dataclass
 class TodoistConfig:
     api_token: str = os.getenv("TODOIST_API_TOKEN", "")
-    base_url: str = "https://api.todoist.com/rest/v2"
-    sync_url: str = "https://api.todoist.com/sync/v9"
+    base_url: str = "https://api.todoist.com/api/v1"
     # Rate limit: 450 requests/15 min = 30/min (conservative)
     rate_limit_per_min: int = 30
 

@@ -1,6 +1,6 @@
 """
 Sentinel Trigger — Todoist (Read-Only)
-Polls Todoist REST API v2 every 30 minutes for projects, tasks, sections, labels, comments.
+Polls Todoist API v1 every 30 minutes for projects, tasks, sections, labels, comments.
 Upserts results to todoist_tasks table via store_back.
 Embeds task content + comments to baker-todoist Qdrant collection.
 Feeds updated tasks into the pipeline for classification + alert drafting.
@@ -79,7 +79,7 @@ def _build_task_data(task: dict, project_map: dict, section_map: dict,
     project_name = project_map.get(str(project_id), "")
     section_name = section_map.get(str(section_id), "")
 
-    # Labels (already a list of strings in REST v2)
+    # Labels (list of strings in API v1)
     labels = task.get("labels", [])
 
     # Completed timestamp (only for completed tasks from Sync API)
@@ -251,7 +251,7 @@ def run_todoist_poll():
        c. Embed to Qdrant baker-todoist (if content changed)
        d. Fetch + embed comments (if comment_count > 0)
        e. Classify + feed to pipeline
-    6. Fetch completed tasks since last watermark (Sync API)
+    6. Fetch completed tasks since last watermark (API v1)
     7. For each completed task: same as steps 5a-5e
     8. Update watermark
     """
