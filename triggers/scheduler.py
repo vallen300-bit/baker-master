@@ -149,6 +149,23 @@ class SentinelScheduler:
         )
 
         # -------------------------------------------------------
+        # Whoop polling — every 24 hours (daily health data)
+        # -------------------------------------------------------
+        from triggers.whoop_trigger import run_whoop_poll
+        self.scheduler.add_job(
+            run_whoop_poll,
+            IntervalTrigger(seconds=config.triggers.whoop_check_interval),
+            id="whoop_poll",
+            name="Whoop health polling",
+            coalesce=True,
+            max_instances=1,
+            replace_existing=True,
+        )
+        logger.info(
+            f"Registered: whoop_poll (every {config.triggers.whoop_check_interval}s)"
+        )
+
+        # -------------------------------------------------------
         # Daily briefing — 08:00 CET (06:00 UTC)
         # -------------------------------------------------------
         from triggers.briefing_trigger import generate_morning_briefing
@@ -213,7 +230,7 @@ def main():
     )
     parser.add_argument(
         "--run-once", type=str, default=None,
-        choices=["email", "whatsapp", "fireflies", "briefing", "clickup", "todoist", "dropbox"],
+        choices=["email", "whatsapp", "fireflies", "briefing", "clickup", "todoist", "dropbox", "whoop"],
         help="Run a single trigger immediately and exit",
     )
     args = parser.parse_args()
@@ -241,6 +258,9 @@ def main():
         elif args.run_once == "dropbox":
             from triggers.dropbox_trigger import run_dropbox_poll
             run_dropbox_poll()
+        elif args.run_once == "whoop":
+            from triggers.whoop_trigger import run_whoop_poll
+            run_whoop_poll()
         return
 
     scheduler = SentinelScheduler()

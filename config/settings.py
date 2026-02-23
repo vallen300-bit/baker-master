@@ -22,7 +22,7 @@ class QdrantConfig:
     collections: List[str] = field(default_factory=lambda: [
         c.strip() for c in os.getenv(
             "BAKER_COLLECTIONS",
-            "baker-people,baker-deals,baker-projects,baker-conversations,baker-whatsapp,baker-clickup,baker-todoist,baker-documents"
+            "baker-people,baker-deals,baker-projects,baker-conversations,baker-whatsapp,baker-clickup,baker-todoist,baker-documents,baker-health"
         ).split(",")
     ])
     collection_whatsapp: str = "baker-whatsapp"
@@ -155,6 +155,17 @@ class DropboxConfig:
 
 
 @dataclass
+class WhoopConfig:
+    client_id: str = os.getenv("WHOOP_CLIENT_ID", "")
+    client_secret: str = os.getenv("WHOOP_CLIENT_SECRET", "")
+    refresh_token: str = os.getenv("WHOOP_REFRESH_TOKEN", "")
+    base_url: str = "https://api.prod.whoop.com/developer/v2"
+    token_url: str = "https://api.prod.whoop.com/oauth/oauth2/token"
+    rate_limit_per_min: int = 100
+    rate_limit_per_day: int = 10000
+
+
+@dataclass
 class TriggerConfig:
     # Fireflies scanning interval (seconds)
     fireflies_scan_interval: int = 7200  # 2 hours
@@ -166,6 +177,8 @@ class TriggerConfig:
     todoist_check_interval: int = 1800  # 30 minutes
     # Dropbox polling interval
     dropbox_check_interval: int = int(os.getenv("DROPBOX_CHECK_INTERVAL", "1800"))  # 30 minutes
+    # Whoop polling interval
+    whoop_check_interval: int = int(os.getenv("WHOOP_CHECK_INTERVAL", "86400"))  # 24 hours
     # Daily briefing time (UTC)
     daily_briefing_hour: int = 6  # 06:00 UTC = 08:00 CET
     # Pending approval reminder interval
@@ -192,6 +205,7 @@ class SentinelConfig:
     fireflies: FirefliesConfig = field(default_factory=FirefliesConfig)
     todoist: TodoistConfig = field(default_factory=TodoistConfig)
     dropbox: DropboxConfig = field(default_factory=DropboxConfig)
+    whoop: WhoopConfig = field(default_factory=WhoopConfig)
     postgres: PostgresConfig = field(default_factory=PostgresConfig)
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
     outputs: OutputConfig = field(default_factory=OutputConfig)

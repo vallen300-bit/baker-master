@@ -67,6 +67,12 @@ class SentinelStoreBack:
         # Ensure baker-todoist Qdrant collection exists
         self._ensure_collection("baker-todoist", size=1024)
 
+        # Ensure Whoop tables exist
+        self._ensure_whoop_tables()
+
+        # Ensure baker-health Qdrant collection exists
+        self._ensure_collection("baker-health", size=1024)
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -412,6 +418,140 @@ class SentinelStoreBack:
             conn.rollback()
             logger.error(f"upsert_todoist_task failed: {e}")
             return None
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # Whoop table initialization
+    # -------------------------------------------------------
+
+    def _ensure_whoop_tables(self):
+        """Create whoop_records table if it doesn't exist."""
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — cannot ensure Whoop tables")
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS whoop_records (
+                    whoop_id TEXT PRIMARY KEY,
+                    record_type TEXT NOT NULL,
+                    recorded_at TIMESTAMPTZ NOT NULL,
+                    recovery_score REAL,
+                    hrv_rmssd REAL,
+                    resting_hr REAL,
+                    spo2 REAL,
+                    skin_temp REAL,
+                    strain REAL,
+                    sleep_total_ms BIGINT,
+                    sleep_efficiency REAL,
+                    kilojoule REAL,
+                    avg_hr REAL,
+                    max_hr REAL,
+                    score_state TEXT,
+                    raw_json JSONB,
+                    content_hash TEXT,
+                    last_synced TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("Whoop tables verified (whoop_records)")
+        except Exception as e:
+            logger.warning(f"Could not ensure Whoop tables: {e}")
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # Whoop helpers
+    # -------------------------------------------------------
+
+    def upsert_whoop_record(self, record_data: dict) -> str:
+        """INSERT ... ON CONFLICT (whoop_id) DO UPDATE for whoop_records.
+
+        Checks content_hash first — returns 'skipped' if unchanged, 'upserted' otherwise.
+        Returns 'error' on failure.
+        """
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — skipping upsert_whoop_record")
+            return "error"
+        try:
+            cur = conn.cursor()
+            # Check existing content_hash for dedup
+            cur.execute(
+                "SELECT content_hash FROM whoop_records WHERE whoop_id = %s",
+                (record_data.get("whoop_id"),),
+            )
+            existing = cur.fetchone()
+            old_hash = existing[0] if existing else None
+            new_hash = record_data.get("content_hash")
+
+            if old_hash == new_hash and old_hash is not None:
+                cur.close()
+                return "skipped"
+
+            cur.execute(
+                """
+                INSERT INTO whoop_records
+                    (whoop_id, record_type, recorded_at,
+                     recovery_score, hrv_rmssd, resting_hr, spo2, skin_temp,
+                     strain, sleep_total_ms, sleep_efficiency,
+                     kilojoule, avg_hr, max_hr, score_state,
+                     raw_json, content_hash, last_synced)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, %s, %s, %s, %s, %s::jsonb, %s, NOW())
+                ON CONFLICT (whoop_id) DO UPDATE SET
+                    record_type = EXCLUDED.record_type,
+                    recorded_at = EXCLUDED.recorded_at,
+                    recovery_score = EXCLUDED.recovery_score,
+                    hrv_rmssd = EXCLUDED.hrv_rmssd,
+                    resting_hr = EXCLUDED.resting_hr,
+                    spo2 = EXCLUDED.spo2,
+                    skin_temp = EXCLUDED.skin_temp,
+                    strain = EXCLUDED.strain,
+                    sleep_total_ms = EXCLUDED.sleep_total_ms,
+                    sleep_efficiency = EXCLUDED.sleep_efficiency,
+                    kilojoule = EXCLUDED.kilojoule,
+                    avg_hr = EXCLUDED.avg_hr,
+                    max_hr = EXCLUDED.max_hr,
+                    score_state = EXCLUDED.score_state,
+                    raw_json = EXCLUDED.raw_json,
+                    content_hash = EXCLUDED.content_hash,
+                    last_synced = NOW()
+                """,
+                (
+                    record_data.get("whoop_id"),
+                    record_data.get("record_type"),
+                    record_data.get("recorded_at"),
+                    record_data.get("recovery_score"),
+                    record_data.get("hrv_rmssd"),
+                    record_data.get("resting_hr"),
+                    record_data.get("spo2"),
+                    record_data.get("skin_temp"),
+                    record_data.get("strain"),
+                    record_data.get("sleep_total_ms"),
+                    record_data.get("sleep_efficiency"),
+                    record_data.get("kilojoule"),
+                    record_data.get("avg_hr"),
+                    record_data.get("max_hr"),
+                    record_data.get("score_state"),
+                    json.dumps(record_data.get("raw_json", {})),
+                    new_hash,
+                ),
+            )
+            conn.commit()
+            cur.close()
+            logger.info(
+                f"Upserted Whoop record: {record_data.get('record_type')} "
+                f"{record_data.get('whoop_id', '?')[:20]}"
+            )
+            return "upserted"
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"upsert_whoop_record failed: {e}")
+            return "error"
         finally:
             self._put_conn(conn)
 

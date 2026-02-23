@@ -53,6 +53,14 @@ async def verify_api_key(x_baker_key: str = Header(None, alias="X-Baker-Key")):
 
 
 # ============================================================
+# Logging — must be module-level so uvicorn outputs.dashboard:app picks it up
+# ============================================================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+)
+
+# ============================================================
 # App setup
 # ============================================================
 
