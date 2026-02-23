@@ -4,7 +4,10 @@ Writes extracted contact data to BOTH:
 1. PostgreSQL contacts table (structured, dedup by email/phone)
 2. Qdrant baker-people collection (vector search)
 
-Atomic: if Qdrant upsert fails after PG write, rolls back PG.
+Atomic dual-write guarantees:
+- PG INSERT/UPDATE is staged but NOT committed until Qdrant succeeds.
+- If Qdrant write fails → PG transaction is rolled back (no partial data).
+- If PG commit fails after Qdrant write → Qdrant point is deleted (no partial data).
 """
 import json
 import logging
@@ -12,14 +15,17 @@ from typing import Optional
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 import voyageai
 from qdrant_client import QdrantClient
-from qdrant_client.models import PointStruct
+from qdrant_client.models import PointIdsList, PointStruct
 
 from config.settings import config
 from scripts.bulk_ingest import ensure_collection, make_point_id
 
 logger = logging.getLogger("baker.ingest.contact_writer")
+
+_STORAGE_ERROR = "Card extraction succeeded but storage failed — please retry"
 
 
 def _find_existing_contact(cur, name: str, email: Optional[str], phone: Optional[str]) -> Optional[dict]:
@@ -53,8 +59,24 @@ def _find_existing_contact(cur, name: str, email: Optional[str], phone: Optional
     return None
 
 
+def _delete_qdrant_point(point_id: str):
+    """Delete a single point from baker-people (rollback helper)."""
+    qdrant = QdrantClient(url=config.qdrant.url, api_key=config.qdrant.api_key)
+    qdrant.delete(
+        collection_name="baker-people",
+        points_selector=PointIdsList(points=[point_id]),
+    )
+    logger.info("Rolled back Qdrant point: %s", point_id)
+
+
 def write_contact(card_data: dict, source_file: str) -> dict:
-    """Write a business card contact to PostgreSQL + Qdrant.
+    """Write a business card contact to PostgreSQL + Qdrant (atomic).
+
+    Dual-write guarantees:
+    - PG INSERT/UPDATE is staged but NOT committed until Qdrant succeeds.
+    - If Qdrant write fails → PG transaction is rolled back.
+    - If PG commit fails after Qdrant write → Qdrant point is deleted.
+    - Neither store retains partial data after a failure.
 
     Args:
         card_data: Dict with keys: name, company, role, email, phone, address, website, notes.
@@ -62,6 +84,9 @@ def write_contact(card_data: dict, source_file: str) -> dict:
 
     Returns:
         Dict with: contact_id, name, action ('created'|'updated'|'skipped'), collection.
+
+    Raises:
+        RuntimeError: If dual-write fails (with user-facing message).
     """
     name = card_data.get("name")
     if not name:
@@ -81,9 +106,11 @@ def write_contact(card_data: dict, source_file: str) -> dict:
             metadata[field] = val
     metadata["source_file"] = source_file
 
-    # --- PostgreSQL write with dedup ---
     pool = None
     conn = None
+    qdrant_point_id = None
+    contact_id = None
+
     try:
         pool = psycopg2.pool.SimpleConnectionPool(
             minconn=1, maxconn=2, **config.postgres.dsn_params
@@ -91,12 +118,11 @@ def write_contact(card_data: dict, source_file: str) -> dict:
         conn = pool.getconn()
         cur = conn.cursor()
 
-        # Check for existing contact (dedup by email/phone)
+        # --- Step 1: PostgreSQL write (staged, NOT committed) ---
         existing = _find_existing_contact(cur, name, email, phone)
         action = "updated" if existing else "created"
 
         if existing:
-            # Update existing contact — merge fields
             contact_id = existing["id"]
             set_parts = ["updated_at = NOW()"]
             values = []
@@ -122,10 +148,9 @@ def write_contact(card_data: dict, source_file: str) -> dict:
                 f"UPDATE contacts SET {', '.join(set_parts)} WHERE id = %s",
                 values,
             )
-            logger.info("Updated existing contact: %s (matched by %s)",
+            logger.info("Staged UPDATE for contact: %s (matched by %s)",
                          existing["name"], "email" if email else "phone")
         else:
-            # Insert new contact
             cur.execute(
                 """
                 INSERT INTO contacts (name, email, phone, company, role, metadata, updated_at)
@@ -135,23 +160,31 @@ def write_contact(card_data: dict, source_file: str) -> dict:
                 (name, email, phone, company, role, json.dumps(metadata) if metadata else "{}"),
             )
             contact_id = str(cur.fetchone()[0])
-            logger.info("Created new contact: %s → %s", name, contact_id)
+            logger.info("Staged INSERT for contact: %s → %s", name, contact_id)
 
-        conn.commit()
+        # PG write is staged but NOT committed — rollback is clean from here
 
-        # --- Qdrant write ---
+        # --- Step 2: Qdrant write ---
         try:
-            _upsert_contact_vector(card_data, source_file)
+            qdrant_point_id = _upsert_contact_vector(card_data, source_file)
         except Exception as e:
-            # Rollback PG if Qdrant fails (atomic guarantee)
-            logger.error("Qdrant upsert failed, rolling back PG: %s", e)
+            # Qdrant failed → rollback PG (uncommitted, clean rollback)
+            logger.error("Qdrant upsert failed, rolling back staged PG write: %s", e)
             conn.rollback()
-            if not existing:
-                cur2 = conn.cursor()
-                cur2.execute("DELETE FROM contacts WHERE id = %s", (contact_id,))
-                conn.commit()
-                cur2.close()
-            raise
+            raise RuntimeError(_STORAGE_ERROR) from e
+
+        # --- Step 3: Commit PG (both writes succeeded) ---
+        try:
+            conn.commit()
+        except Exception as e:
+            # PG commit failed → delete the Qdrant point we just wrote
+            logger.error("PG commit failed after Qdrant write, deleting Qdrant point: %s", e)
+            try:
+                _delete_qdrant_point(qdrant_point_id)
+            except Exception as cleanup_err:
+                logger.error("Failed to clean up Qdrant point %s: %s",
+                             qdrant_point_id, cleanup_err)
+            raise RuntimeError(_STORAGE_ERROR) from e
 
         cur.close()
         return {
@@ -161,11 +194,23 @@ def write_contact(card_data: dict, source_file: str) -> dict:
             "collection": "baker-people",
         }
 
+    except RuntimeError:
+        # Our specific errors — cleanup already handled, re-raise for caller
+        raise
     except Exception as e:
+        # Unexpected error — ensure no partial data persists
         if conn:
-            conn.rollback()
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        if qdrant_point_id:
+            try:
+                _delete_qdrant_point(qdrant_point_id)
+            except Exception:
+                pass
         logger.error("write_contact failed for '%s': %s", name, e)
-        return {"contact_id": None, "name": name, "action": "error", "collection": "baker-people"}
+        raise RuntimeError(_STORAGE_ERROR) from e
     finally:
         if pool and conn:
             pool.putconn(conn)
@@ -173,8 +218,12 @@ def write_contact(card_data: dict, source_file: str) -> dict:
             pool.closeall()
 
 
-def _upsert_contact_vector(card_data: dict, source_file: str):
-    """Embed and upsert contact into baker-people Qdrant collection."""
+def _upsert_contact_vector(card_data: dict, source_file: str) -> str:
+    """Embed and upsert contact into baker-people Qdrant collection.
+
+    Returns:
+        The Qdrant point ID (needed for rollback if PG commit fails).
+    """
     voyage = voyageai.Client(api_key=config.voyage.api_key)
     qdrant = QdrantClient(url=config.qdrant.url, api_key=config.qdrant.api_key)
     ensure_collection(qdrant, "baker-people")
@@ -222,3 +271,4 @@ def _upsert_contact_vector(card_data: dict, source_file: str):
         )],
     )
     logger.info("Upserted contact vector for: %s → baker-people", card_data.get("name"))
+    return point_id

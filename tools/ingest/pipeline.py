@@ -153,7 +153,14 @@ def ingest_file(
                 logger.info("  Contact write: %s (%s)",
                              contact_result.get("name"), contact_result.get("action"))
         except Exception as e:
-            logger.error("  Contact write failed (non-fatal): %s", e)
+            logger.error("  Contact dual-write failed: %s", e)
+            contact_result = {
+                "contact_id": None,
+                "name": card_data.get("name"),
+                "action": "error",
+                "collection": "baker-people",
+                "error": str(e),
+            }
 
     # --- Step 7: Log ---
     log_ingestion(
