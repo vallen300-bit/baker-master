@@ -27,6 +27,7 @@ from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT
 from tools.ingest.pipeline import ingest_file
 from tools.ingest.extractors import SUPPORTED_EXTENSIONS
 from tools.ingest.classifier import VALID_COLLECTIONS
+from triggers.embedded_scheduler import start_scheduler, stop_scheduler, get_scheduler_status
 
 logger = logging.getLogger("sentinel.dashboard")
 
@@ -170,10 +171,27 @@ async def startup():
     except Exception as e:
         logger.warning(f"PostgreSQL connection failed on startup (will retry): {e}")
 
+    # Start Sentinel trigger scheduler (BackgroundScheduler)
+    try:
+        start_scheduler()
+        logger.info("Sentinel scheduler started (BackgroundScheduler)")
+    except Exception as e:
+        logger.error(f"Scheduler failed to start: {e}")
+
     # Mount static files if directory exists
     if _static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
         logger.info(f"Static files mounted from {_static_dir}")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    """Graceful shutdown of scheduler."""
+    try:
+        stop_scheduler()
+        logger.info("Sentinel scheduler stopped")
+    except Exception as e:
+        logger.warning(f"Scheduler shutdown error: {e}")
 
 
 @app.get("/api/client-config", include_in_schema=False)
@@ -181,6 +199,12 @@ async def client_config():
     return {"apiKey": _BAKER_API_KEY}
 
     logger.info("Baker Dashboard ready on port 8080")
+
+
+@app.get("/api/scheduler-status", tags=["health"], dependencies=[Depends(verify_api_key)])
+async def scheduler_status():
+    """Return scheduler health and registered jobs."""
+    return get_scheduler_status()
 
 
 # ============================================================
