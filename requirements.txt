@@ -44,6 +44,11 @@ feedparser>=6.0.0            # RSS/Atom feed parser
 reportlab>=4.0               # PDF generation (pure Python, no system deps)
 python-pptx>=0.6.21          # PowerPoint generation
 
+# Gmail integration (EMAIL-DEDUP-1)
+google-api-python-client>=2.100.0   # Gmail API client (googleapiclient)
+google-auth>=2.25.0                 # Google OAuth2 credentials
+google-auth-oauthlib>=1.2.0         # OAuth2 flow for Gmail
+
 # Future: Trigger integrations
 # msgraph-sdk>=1.0.0       # Microsoft 365 / Outlook
 # slack-sdk>=3.0.0         # Slack
