@@ -68,16 +68,18 @@ def check_new_emails():
     for thread in new_threads:
         metadata = thread.get("metadata", {})
         thread_id = metadata.get("thread_id", "unknown")
+        # Dedup on message_id (unique per reply), not thread_id (reused across replies)
+        message_id = metadata.get("message_id", thread_id)
 
         # Skip if already processed
-        if trigger_state.is_processed("email", thread_id):
+        if trigger_state.is_processed("email", message_id):
             skipped += 1
             continue
 
         trigger = TriggerEvent(
             type="email",
             content=thread["text"],
-            source_id=thread_id,
+            source_id=message_id,
             contact_name=metadata.get("primary_sender"),
         )
         trigger = pipeline.classify_trigger(trigger)
@@ -87,12 +89,12 @@ def check_new_emails():
                 pipeline.run(trigger)
                 processed += 1
             except Exception as e:
-                logger.error(f"Email trigger: pipeline failed for thread {thread_id}: {e}")
+                logger.error(f"Email trigger: pipeline failed for message {message_id} (thread {thread_id}): {e}")
         else:
             # Queue low-priority for daily briefing
             batch_for_briefing.append({
                 "type": "email",
-                "source_id": thread_id,
+                "source_id": message_id,
                 "content": thread["text"][:500],
                 "contact_name": metadata.get("primary_sender"),
                 "subject": metadata.get("subject", ""),

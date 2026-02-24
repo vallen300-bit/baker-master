@@ -366,6 +366,9 @@ def format_thread(thread_data: Dict, messages: List[Dict]) -> Optional[Dict]:
     text_block = "\n".join(parts)
 
     thread_id = thread_data.get("id", "")
+    # Use the latest message ID for dedup (thread_id is reused across replies)
+    all_messages = thread_data.get("messages", [])
+    latest_message_id = all_messages[-1].get("id", thread_id) if all_messages else thread_id
     metadata = {
         "subject": subject,
         "date": first_date,
@@ -373,6 +376,7 @@ def format_thread(thread_data: Dict, messages: List[Dict]) -> Optional[Dict]:
         "participants": participants_str,
         "message_count": len(msg_blocks),
         "thread_id": thread_id,
+        "message_id": latest_message_id,
         "source": "gmail",
     }
 
