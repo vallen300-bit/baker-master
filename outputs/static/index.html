@@ -139,6 +139,21 @@
                         <!-- Detail items populated by JS -->
                     </div>
                 </div>
+
+                <!-- VIEW 4: Scan (full content area) -->
+                <div class="view" id="scanView">
+                    <button class="back-btn" id="scanBack">&larr; Back to Home</button>
+                    <div class="scan-view-header">
+                        <span class="scan-view-title">Baker's Scan</span>
+                    </div>
+                    <div class="scan-view-body">
+                        <div id="scanMessages" class="scan-messages"></div>
+                        <form id="scanForm" class="scan-form" autocomplete="off">
+                            <input id="scanInput" type="text" class="scan-input" placeholder="Ask Baker..." maxlength="4000" required />
+                            <button type="submit" class="scan-send" id="scanSendBtn">Send</button>
+                        </form>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -147,21 +162,6 @@
             <div class="take-bar-inner">
                 <span class="take-label" id="takeLabel">Baker's Scan</span>
                 <button class="take-btn" onclick="showTake()">Baker's Scan</button>
-            </div>
-        </div>
-
-        <!-- Baker's Scan overlay -->
-        <div class="take-overlay" id="takeOverlay">
-            <div class="take-header">
-                <span class="take-header-title">Baker's Scan</span>
-                <button class="take-close" onclick="closeTake()">&times;</button>
-            </div>
-            <div class="take-body">
-                <div id="scanMessages" class="scan-messages"></div>
-                <form id="scanForm" class="scan-form" autocomplete="off">
-                    <input id="scanInput" type="text" class="scan-input" placeholder="Ask Baker..." maxlength="4000" required />
-                    <button type="submit" class="scan-send" id="scanSendBtn">Send</button>
-                </form>
             </div>
         </div>
 

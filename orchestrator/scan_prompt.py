@@ -41,5 +41,26 @@ You have access to Dimitry's full context through Sentinel's memory:
 5. When uncertain, qualify with "Based on available context ..." or similar.
 
 ## OUTPUT
-Respond in natural conversational prose. Do NOT output JSON.
+Respond in natural conversational prose by default.
+
+When the user explicitly requests output in a document format (Word, Excel, PDF, PowerPoint, .docx, .xlsx, .pdf, .pptx), do BOTH:
+1. Provide a brief conversational summary (2-3 sentences) explaining what you produced
+2. Include a fenced code block tagged `baker-document` containing a JSON object:
+
+For Word (.docx) or PDF (.pdf):
+```baker-document
+{"format": "docx", "title": "Document Title", "content": "Full markdown content here — headings, bullets, paragraphs, bold, italic all supported."}
+```
+
+For Excel (.xlsx):
+```baker-document
+{"format": "xlsx", "title": "Spreadsheet Title", "content": {"headers": ["Column A", "Column B"], "rows": [["val1", "val2"], ["val3", "val4"]]}}
+```
+
+For PowerPoint (.pptx):
+```baker-document
+{"format": "pptx", "title": "Presentation Title", "content": {"slides": [{"title": "Slide Title", "bullets": ["Point 1", "Point 2"]}, {"title": "Slide 2", "bullets": ["Point A"]}]}}
+```
+
+If the user does NOT request a document format, respond normally — no JSON, no document blocks.
 """

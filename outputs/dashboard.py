@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from config.settings import config
+from document_generator import generate_document, get_file, cleanup_old_files
 from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT
 from tools.ingest.pipeline import ingest_file
 from tools.ingest.extractors import SUPPORTED_EXTENSIONS
@@ -149,6 +150,12 @@ class UpdateTaskRequest(BaseModel):
 
 class CommentRequest(BaseModel):
     comment_text: str = Field(..., min_length=1, max_length=5000)
+
+
+class DocumentRequest(BaseModel):
+    content: str = Field(..., description="Markdown or JSON content for document body")
+    format: str = Field(..., pattern=r"^(docx|xlsx|pdf|pptx)$")
+    title: str = Field("Baker Document", max_length=200)
 
 
 def _serialize(obj: dict) -> dict:
@@ -709,6 +716,59 @@ async def scan_chat(req: ScanRequest):
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+# ============================================================
+# Document generation endpoints (SCAN-OUTPUT-1)
+# ============================================================
+
+@app.post("/api/scan/generate-document", tags=["scan"], dependencies=[Depends(verify_api_key)])
+async def generate_doc_endpoint(req: DocumentRequest):
+    """Generate a downloadable document from Baker Scan output."""
+    try:
+        metadata = {
+            "generated_by": "Baker Scan",
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        }
+        file_id, filename, size_bytes = generate_document(
+            content=req.content,
+            fmt=req.format,
+            title=req.title,
+            metadata=metadata,
+        )
+        return {
+            "file_id": file_id,
+            "filename": filename,
+            "size_bytes": size_bytes,
+            "download_url": f"/api/scan/download/{file_id}",
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Document generation failed: {e}")
+        raise HTTPException(status_code=500, detail="Document generation failed")
+
+
+@app.get("/api/scan/download/{file_id}", tags=["scan"])
+async def download_document(file_id: str):
+    """Download a generated document. No auth — UUID acts as token."""
+    info = get_file(file_id)
+    if not info:
+        raise HTTPException(status_code=404, detail="File not found or expired")
+    if not os.path.exists(info["filepath"]):
+        raise HTTPException(status_code=410, detail="File no longer available")
+
+    media_types = {
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "pdf": "application/pdf",
+        "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    }
+    return FileResponse(
+        path=info["filepath"],
+        filename=info["filename"],
+        media_type=media_types.get(info["format"], "application/octet-stream"),
     )
 
 

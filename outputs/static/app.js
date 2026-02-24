@@ -442,6 +442,8 @@ let takeVisible = false;
 // Scan chat state
 let scanHistory = [];
 let scanStreaming = false;
+let previousView = 'home';
+let previousRole = null;
 
 // ═══ HELPERS ═══
 
@@ -608,7 +610,7 @@ function goHome() {
     setRail(null);
     showView('homeView');
     document.getElementById('takeBar').classList.remove('visible');
-    closeTake();
+    takeVisible = false;
 }
 
 // ═══ OPEN ROLE (Layer 2) ═══
@@ -727,11 +729,29 @@ function renderItems(items, role) {
 
 // ═══ BAKER'S SCAN (live SSE) ═══
 function showTake() {
-    const overlay = document.getElementById('takeOverlay');
-    overlay.classList.add('visible');
+    // Remember which view we came from for the back button
+    if (currentView !== 'scanView') {
+        previousView = currentView;
+        previousRole = currentRole;
+    }
+
+    // Set back button text
+    const backBtn = document.getElementById('scanBack');
+    if (backBtn) {
+        const tabName = previousRole ? (roleNames[previousRole] || 'Home') : 'Home';
+        backBtn.textContent = '\u2190 Back to ' + tabName;
+        backBtn.onclick = closeTake;
+    }
+
+    // Show scan view using existing showView mechanism
+    showView('scanView');
+    currentView = 'scanView';
     takeVisible = true;
 
-    // Render existing messages
+    // Hide the take bar while scan is active
+    document.getElementById('takeBar').classList.remove('visible');
+
+    // Render existing messages if container is empty
     const container = document.getElementById('scanMessages');
     if (container && container.children.length === 0 && scanHistory.length > 0) {
         for (const msg of scanHistory) {
@@ -745,8 +765,14 @@ function showTake() {
 }
 
 function closeTake() {
-    document.getElementById('takeOverlay').classList.remove('visible');
     takeVisible = false;
+
+    // Return to previous view
+    if (previousRole) {
+        openRole(previousRole);
+    } else {
+        goHome();
+    }
 }
 
 function appendScanBubble(role, content, id) {
@@ -756,9 +782,55 @@ function appendScanBubble(role, content, id) {
     div.className = 'scan-bubble scan-bubble-' + role;
     if (id) div.id = id;
     div.innerHTML = role === 'assistant' ? md(content) : esc(content);
+
+    // Copy button for assistant messages (only when content is present)
+    if (role === 'assistant' && content) {
+        _addCopyBtn(div, content);
+    }
+
     container.appendChild(div);
-    container.scrollTop = container.scrollHeight;
     return div;
+}
+
+function _addCopyBtn(bubbleEl, textContent) {
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'scan-copy-btn';
+    copyBtn.innerHTML = '&#128203;';
+    copyBtn.title = 'Copy to clipboard';
+    copyBtn.onclick = (e) => {
+        e.stopPropagation();
+        const text = textContent || bubbleEl.innerText || '';
+        navigator.clipboard.writeText(text).then(() => {
+            copyBtn.innerHTML = '&#10003;';
+            copyBtn.title = 'Copied!';
+            setTimeout(() => {
+                copyBtn.innerHTML = '&#128203;';
+                copyBtn.title = 'Copy to clipboard';
+            }, 2000);
+        });
+    };
+    bubbleEl.style.position = 'relative';
+    bubbleEl.appendChild(copyBtn);
+}
+
+function _createDownloadCard(genData) {
+    const fmtLabels = { docx: 'Word', xlsx: 'Excel', pdf: 'PDF', pptx: 'PowerPoint' };
+    const fmtIcons = { docx: '\uD83D\uDCC4', xlsx: '\uD83D\uDCCA', pdf: '\uD83D\uDCD5', pptx: '\uD83D\uDCBD' };
+    const ext = genData.filename.split('.').pop();
+    const sizeKB = (genData.size_bytes / 1024).toFixed(1);
+
+    const card = document.createElement('div');
+    card.className = 'scan-download-card';
+    card.innerHTML =
+        '<a class="scan-download-link" href="' + esc(genData.download_url) + '" download="' + esc(genData.filename) + '">' +
+            '<span class="scan-download-icon">' + (fmtIcons[ext] || '\uD83D\uDCC1') + '</span>' +
+            '<span class="scan-download-info">' +
+                '<span class="scan-download-filename">' + esc(genData.filename) + '</span>' +
+                '<span class="scan-download-meta">' + (fmtLabels[ext] || ext.toUpperCase()) + ' \u00B7 ' + sizeKB + ' KB</span>' +
+            '</span>' +
+            '<span class="scan-download-action">\u2B07 Download</span>' +
+        '</a>';
+    return card;
 }
 
 async function sendScanMessage(question) {
@@ -773,6 +845,14 @@ async function sendScanMessage(question) {
     // Add user bubble
     scanHistory.push({ role: 'user', content: question });
     appendScanBubble('user', question);
+
+    // Scroll to show the user's new message
+    const msgContainer = document.getElementById('scanMessages');
+    const userBubbles = msgContainer.querySelectorAll('.scan-bubble-user');
+    const lastUserBubble = userBubbles[userBubbles.length - 1];
+    if (lastUserBubble) {
+        lastUserBubble.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
 
     // Add assistant placeholder
     const assistantId = 'scan-reply-' + Date.now();
@@ -813,8 +893,6 @@ async function sendScanMessage(question) {
                     if (data.token) {
                         fullResponse += data.token;
                         if (replyEl) replyEl.innerHTML = md(fullResponse);
-                        const container = document.getElementById('scanMessages');
-                        if (container) container.scrollTop = container.scrollHeight;
                     }
                     if (data.error) {
                         fullResponse += '\n[Error: ' + data.error + ']';
@@ -828,6 +906,39 @@ async function sendScanMessage(question) {
     } catch (err) {
         fullResponse = 'Connection error: ' + err.message;
         if (replyEl) replyEl.innerHTML = esc(fullResponse);
+    }
+
+    // Add copy button after streaming completes
+    if (replyEl && fullResponse) {
+        _addCopyBtn(replyEl, fullResponse);
+    }
+
+    // Detect baker-document block and trigger document generation
+    const docMatch = fullResponse.match(/```baker-document\s*\n([\s\S]*?)\n```/);
+    if (docMatch && replyEl) {
+        try {
+            const docSpec = JSON.parse(docMatch[1]);
+            // Strip the raw JSON block from the visible reply
+            const cleanResponse = fullResponse.replace(/```baker-document\s*\n[\s\S]*?\n```/, '').trim();
+            if (cleanResponse) replyEl.innerHTML = md(cleanResponse);
+
+            // Call generate endpoint
+            const genRes = await bakerFetch('/api/scan/generate-document', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    content: typeof docSpec.content === 'string' ? docSpec.content : JSON.stringify(docSpec.content),
+                    format: docSpec.format,
+                    title: docSpec.title || 'Baker Document',
+                }),
+            });
+            if (genRes.ok) {
+                const genData = await genRes.json();
+                replyEl.appendChild(_createDownloadCard(genData));
+            }
+        } catch (e) {
+            console.warn('Document generation failed:', e);
+        }
     }
 
     scanHistory.push({ role: 'assistant', content: fullResponse });
