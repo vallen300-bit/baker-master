@@ -636,6 +636,23 @@ def _format_scan_context(contexts) -> str:
     return "\n".join(blocks)
 
 
+def _chunk_conversation(text, max_chars=8000):
+    """Split long conversation text by paragraphs, respecting max_chars. (CONV-MEM-1)"""
+    paragraphs = text.split('\n\n')
+    chunks = []
+    current = ""
+    for para in paragraphs:
+        if len(current) + len(para) + 2 > max_chars:
+            if current:
+                chunks.append(current.strip())
+            current = para
+        else:
+            current = current + "\n\n" + para if current else para
+    if current:
+        chunks.append(current.strip())
+    return chunks if chunks else [text[:max_chars]]
+
+
 @app.post("/api/scan", tags=["scan"], dependencies=[Depends(verify_api_key)])
 async def scan_chat(req: ScanRequest):
     """
@@ -716,6 +733,57 @@ async def scan_chat(req: ScanRequest):
             logger.info(f"Scan complete: {elapsed_ms}ms, {len(full_response)} chars")
         except Exception as e:
             logger.warning(f"Scan store-back failed (non-fatal): {e}")
+
+        # 5b. Store full Q+A in Qdrant for conversation memory (CONV-MEM-1)
+        try:
+            store = _get_store()
+            conversation_content = (
+                f"[CONVERSATION]\n"
+                f"Question: {req.question}\n\n"
+                f"Answer: {full_response}"
+            )
+            conv_metadata = {
+                "type": "conversation",
+                "source": "scan",
+                "question": req.question[:500],
+                "project": req.project or "general",
+                "role": req.role or "ceo",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "answer_length": len(full_response),
+                "token_estimate": len(full_response) // 4,
+            }
+
+            if len(conversation_content) <= 8000:
+                store.store_document(
+                    content=conversation_content,
+                    metadata=conv_metadata,
+                    collection="baker-conversations",
+                )
+                chunk_count = 1
+            else:
+                chunks = _chunk_conversation(conversation_content, max_chars=8000)
+                for i, chunk in enumerate(chunks):
+                    chunk_meta = {
+                        **conv_metadata,
+                        "chunk_index": i,
+                        "chunk_count": len(chunks),
+                    }
+                    store.store_document(
+                        content=chunk,
+                        metadata=chunk_meta,
+                        collection="baker-conversations",
+                    )
+                chunk_count = len(chunks)
+
+            store.log_conversation(
+                question=req.question,
+                answer_length=len(full_response),
+                project=req.project or "general",
+                chunk_count=chunk_count,
+            )
+            logger.info("Conversation stored in Baker's memory (CONV-MEM-1)")
+        except Exception as e:
+            logger.warning(f"Conversation store-back failed (non-fatal): {e}")
 
     return StreamingResponse(
         event_stream(),

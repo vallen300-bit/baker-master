@@ -67,6 +67,12 @@ class SentinelStoreBack:
         # Ensure baker-todoist Qdrant collection exists
         self._ensure_collection("baker-todoist", size=1024)
 
+        # Ensure baker-conversations Qdrant collection exists (CONV-MEM-1)
+        self._ensure_collection("baker-conversations", size=1024)
+
+        # Ensure conversation_memory PostgreSQL table exists (CONV-MEM-1)
+        self._ensure_conversation_memory_table()
+
         # Ensure Whoop tables exist
         self._ensure_whoop_tables()
 
@@ -1246,6 +1252,56 @@ class SentinelStoreBack:
             cur.close()
         except Exception as e:
             logger.error(f"Failed to log deep analysis: {e}")
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # Conversation Memory (CONV-MEM-1)
+    # -------------------------------------------------------
+
+    def _ensure_conversation_memory_table(self):
+        """Create conversation_memory table if it doesn't exist."""
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — cannot ensure conversation_memory table")
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS conversation_memory (
+                    id SERIAL PRIMARY KEY,
+                    question TEXT NOT NULL,
+                    answer_length INTEGER DEFAULT 0,
+                    project TEXT DEFAULT 'general',
+                    chunk_count INTEGER DEFAULT 1,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("conversation_memory table verified")
+        except Exception as e:
+            logger.warning(f"Could not ensure conversation_memory table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def log_conversation(self, question, answer_length=0, project="general", chunk_count=1):
+        """Catalogue a scan conversation in PostgreSQL."""
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — skipping log_conversation")
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO conversation_memory
+                    (question, answer_length, project, chunk_count)
+                VALUES (%s, %s, %s, %s)
+            """, (question[:500], answer_length, project, chunk_count))
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            logger.error(f"Failed to log conversation: {e}")
         finally:
             self._put_conn(conn)
 
