@@ -69,11 +69,8 @@ body {
     font-weight: 500;
     line-height: 1.6;
     color: var(--text-primary);
-    background: var(--bg-page);
+    background: var(--bg-app);
     min-height: 100vh;
-    display: flex;
-    justify-content: center;
-    align-items: center;
     font-synthesis: none;
     -webkit-font-smoothing: auto;
     -moz-osx-font-smoothing: auto;
@@ -81,13 +78,13 @@ body {
 
 /* === App Shell === */
 .app {
-    width: 72vw;
-    max-width: 1200px;
-    min-width: 800px;
-    height: 88vh;
+    width: 100vw;
+    max-width: none;
+    min-width: 0;
+    height: 100vh;
     background: var(--bg-app);
-    border-radius: var(--radius-app);
-    box-shadow: var(--shadow-app);
+    border-radius: 0;
+    box-shadow: none;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -1051,9 +1048,9 @@ body {
 /* === Responsive === */
 @media (max-width: 1000px) {
     .app {
-        width: 95vw;
-        min-width: 600px;
-        height: 94vh;
+        width: 100vw;
+        min-width: 0;
+        height: 100vh;
     }
 
     .rail {
@@ -1072,9 +1069,10 @@ body {
 @media (max-width: 700px) {
     .app {
         width: 100vw;
-        min-width: auto;
+        min-width: 0;
         height: 100vh;
         border-radius: 0;
+        box-shadow: none;
     }
 
     .rail {
