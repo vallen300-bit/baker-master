@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import voyageai
 from qdrant_client import QdrantClient
-from qdrant_client.models import ScoredPoint
+from qdrant_client.models import ScoredPoint, Filter, FieldCondition, MatchValue
 
 from config.settings import config
 
@@ -71,13 +71,23 @@ class SentinelRetriever:
         collection: str,
         limit: int = 20,
         score_threshold: float = 0.3,
+        project: Optional[str] = None,
+        role: Optional[str] = None,
     ) -> list[RetrievedContext]:
         """Search a single Qdrant collection with a pre-computed embedding vector."""
+        conditions = []
+        if project:
+            conditions.append(FieldCondition(key="project", match=MatchValue(value=project)))
+        if role:
+            conditions.append(FieldCondition(key="role", match=MatchValue(value=role)))
+        query_filter = Filter(must=conditions) if conditions else None
+
         results = self.qdrant.query_points(
             collection_name=collection,
             query=query_vector,
             limit=limit,
             score_threshold=score_threshold,
+            query_filter=query_filter,
         )
 
         contexts = []
@@ -119,6 +129,8 @@ class SentinelRetriever:
         query: str,
         limit_per_collection: int = 10,
         score_threshold: float = 0.3,
+        project: Optional[str] = None,
+        role: Optional[str] = None,
     ) -> list[RetrievedContext]:
         """Search ALL Qdrant collections and merge results by relevance."""
         # Embed once — avoids N Voyage API calls (one per collection)
@@ -135,6 +147,8 @@ class SentinelRetriever:
                     collection=coll,
                     limit=limit_per_collection,
                     score_threshold=score_threshold,
+                    project=project,
+                    role=role,
                 )
                 all_contexts.extend(results)
                 logger.info(f"Retrieved {len(results)} results from {coll}")
@@ -335,6 +349,8 @@ class SentinelRetriever:
         trigger_text: str,
         trigger_type: str,
         contact_name: Optional[str] = None,
+        project: Optional[str] = None,
+        role: Optional[str] = None,
     ) -> list[RetrievedContext]:
         """
         Full retrieval pipeline for a trigger event.
@@ -347,6 +363,8 @@ class SentinelRetriever:
             query=trigger_text,
             limit_per_collection=10,
             score_threshold=0.3,
+            project=project,
+            role=role,
         )
         contexts.extend(semantic_results)
 

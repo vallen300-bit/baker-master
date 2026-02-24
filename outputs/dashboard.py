@@ -131,6 +131,8 @@ def _get_clickup_client():
 class ScanRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=4000)
     history: list = Field(default_factory=list)  # [{role, content}, ...]
+    project: Optional[str] = None   # scope search to project (e.g. "rg7")
+    role: Optional[str] = None      # scope search to role (e.g. "chairman")
 
 
 class CreateTaskRequest(BaseModel):
@@ -320,10 +322,13 @@ async def search_memory(
     q: str = Query(None, min_length=2, max_length=500),
     limit: int = Query(20, ge=1, le=50),
     threshold: float = Query(0.3, ge=0.0, le=1.0),
+    project: Optional[str] = Query(None),
+    role: Optional[str] = Query(None),
 ):
     """
     Semantic search across all of Baker's memory (Qdrant vector collections).
     Searches documents, emails, meetings, WhatsApp, contacts, ClickUp tasks.
+    Optional project/role filters scope results to tagged documents only.
     """
     if not q or len(q.strip()) < 2:
         raise HTTPException(status_code=400, detail="Query parameter 'q' is required (min 2 characters)")
@@ -334,6 +339,8 @@ async def search_memory(
             query=q.strip(),
             limit_per_collection=limit,
             score_threshold=threshold,
+            project=project,
+            role=role,
         )
         results = [
             {
@@ -645,6 +652,8 @@ async def scan_chat(req: ScanRequest):
             query=req.question,
             limit_per_collection=8,
             score_threshold=0.3,
+            project=req.project,
+            role=req.role,
         )
         logger.info(f"Scan: retrieved {len(contexts)} contexts for: {req.question[:80]}")
     except Exception as e:
