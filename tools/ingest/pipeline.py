@@ -32,6 +32,8 @@ def ingest_file(
     skip_llm: bool = False,
     verbose: bool = False,
     image_type: Optional[str] = None,
+    project: Optional[str] = None,
+    role: Optional[str] = None,
 ) -> IngestResult:
     """Ingest a single file through the full pipeline.
 
@@ -142,7 +144,7 @@ def ingest_file(
         )
 
     # --- Step 5+6: Embed + Upsert ---
-    point_ids = _embed_and_upsert(chunks, target, filepath, verbose)
+    point_ids = _embed_and_upsert(chunks, target, filepath, verbose, project=project, role=role)
 
     # --- Step 6b: Business card → dual-write to PostgreSQL contacts ---
     contact_result = None
@@ -192,6 +194,8 @@ def _embed_and_upsert(
     collection: str,
     filepath: Path,
     verbose: bool = False,
+    project: Optional[str] = None,
+    role: Optional[str] = None,
 ) -> list[str]:
     """Embed chunks via Voyage AI and upsert into Qdrant.
 
@@ -216,6 +220,10 @@ def _embed_and_upsert(
     batches = [chunks[i:i + embed_batch] for i in range(0, len(chunks), embed_batch)]
 
     metadata = {"source_file": filepath.name, "source_path": str(filepath)}
+    if project:
+        metadata["project"] = project
+    if role:
+        metadata["role"] = role
 
     for batch_num, batch in enumerate(batches, 1):
         if batch_num > 1:

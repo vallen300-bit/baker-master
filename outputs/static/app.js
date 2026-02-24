@@ -1156,17 +1156,44 @@ document.addEventListener('keydown', (e) => {
     const ALLOWED    = new Set(['pdf','txt','md','csv','xlsx','json','docx','jpg','jpeg','png','heic','webp']);
     const IMAGE_EXTS = new Set(['jpg','jpeg','png','heic','webp']);
 
-    // populate collection dropdown
-    bakerFetch('/api/ingest/collections')
-        .then(r => r.json())
-        .then(d => {
-            (d.collections || []).forEach(c => {
-                const opt = document.createElement('option');
-                opt.value = c; opt.textContent = c;
-                colSelect.appendChild(opt);
-            });
-        })
-        .catch(() => {});
+    // -- Grouped dropdown (hardcoded v1) --
+    const groups = [
+      { label: 'By Collection', options: [
+        { value: 'col:baker-documents',  text: 'Documents' },
+        { value: 'col:baker-contacts',   text: 'Contacts' },
+        { value: 'col:baker-emails',     text: 'Emails' },
+        { value: 'col:baker-meetings',   text: 'Fireflies' },
+        { value: 'col:baker-whatsapp',   text: 'WhatsApps' },
+        { value: 'col:baker-rss',        text: 'Articles / RSS' },
+      ]},
+      { label: 'By Project', options: [
+        { value: 'proj:rg7',                          text: 'RG7' },
+        { value: 'proj:hagenauer',                     text: 'Hagenauer' },
+        { value: 'proj:movie-hotel-asset-management',  text: 'MOVIE Hotel Asset Management' },
+      ]},
+      { label: 'By Role', options: [
+        { value: 'role:chairman', text: 'Chairman' },
+        { value: 'role:network',  text: 'Network' },
+        { value: 'role:private',  text: 'Private' },
+        { value: 'role:travel',   text: 'Travel' },
+      ]},
+    ];
+
+    // Default option
+    const defaultOpt = document.createElement('option');
+    defaultOpt.value = ''; defaultOpt.textContent = 'Auto-classify';
+    colSelect.appendChild(defaultOpt);
+
+    groups.forEach(g => {
+      const og = document.createElement('optgroup');
+      og.label = g.label;
+      g.options.forEach(o => {
+        const opt = document.createElement('option');
+        opt.value = o.value; opt.textContent = o.text;
+        og.appendChild(opt);
+      });
+      colSelect.appendChild(og);
+    });
 
     // Show/hide image type selector based on selected file
     function _toggleImageType(filename) {
@@ -1217,8 +1244,25 @@ document.addEventListener('keydown', (e) => {
         if (isImage && imgTypeSel) {
             formData.append('image_type', imgTypeSel.value);
         }
-        const col = colSelect.value;
-        const url = col ? `/api/ingest?collection=${encodeURIComponent(col)}` : '/api/ingest';
+
+        const sel = colSelect.value;  // e.g. "col:baker-documents", "proj:rg7", "role:chairman", or ""
+        let collection = null, project = null, role = null;
+
+        if (sel.startsWith('col:')) {
+          collection = sel.substring(4);   // "baker-documents"
+        } else if (sel.startsWith('proj:')) {
+          project = sel.substring(5);      // "rg7"
+        } else if (sel.startsWith('role:')) {
+          role = sel.substring(5);         // "chairman"
+        }
+        // else: sel === "" → auto-classify, all null
+
+        if (project) formData.append('project', project);
+        if (role) formData.append('role', role);
+
+        const url = collection
+          ? `/api/ingest?collection=${encodeURIComponent(collection)}`
+          : '/api/ingest';
 
         try {
             const resp = await bakerFetch(url, { method: 'POST', body: formData });

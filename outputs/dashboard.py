@@ -781,6 +781,8 @@ async def ingest_document(
     file: UploadFile = File(...),
     collection: str = Query(None, description="Target collection override"),
     image_type: str = Form(None, description="Image mode: card, whiteboard, or auto"),
+    project: str = Form(None, description="Project tag: rg7, hagenauer, movie-hotel-asset-management"),
+    role: str = Form(None, description="Role tag: chairman, network, private, travel"),
 ):
     """Ingest a single document or image via dashboard upload."""
 
@@ -833,6 +835,8 @@ async def ingest_document(
             filepath=tmp_path,
             collection=collection,
             image_type=image_type,
+            project=project,
+            role=role,
         )
 
         # 7. Return result
@@ -846,6 +850,8 @@ async def ingest_document(
             "chunks": result.chunk_count,
             "dedup": result.skipped and "duplicate" in (result.skip_reason or "").lower(),
             "skip_reason": result.skip_reason,
+            "project": project,
+            "role": role,
         }
 
         # Include card extraction data if present
