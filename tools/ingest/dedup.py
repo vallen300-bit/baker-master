@@ -64,6 +64,8 @@ def log_ingestion(
     chunk_count: int,
     point_ids: list[str],
     source_path: Optional[str] = None,
+    project: Optional[str] = None,
+    role: Optional[str] = None,
 ) -> None:
     """Record a completed ingestion in PostgreSQL.
 
@@ -75,6 +77,8 @@ def log_ingestion(
         chunk_count: Number of chunks created.
         point_ids: List of Qdrant point UUIDs.
         source_path: Full source path (optional).
+        project: Project tag (optional).
+        role: Role tag (optional).
     """
     conn = None
     try:
@@ -83,15 +87,17 @@ def log_ingestion(
             cur.execute(
                 """INSERT INTO ingestion_log
                    (filename, file_hash, file_size_bytes, collection,
-                    chunk_count, point_ids, source_path)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    project, role, chunk_count, point_ids, source_path)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                    ON CONFLICT (filename, file_hash) DO UPDATE SET
                        chunk_count = EXCLUDED.chunk_count,
                        point_ids = EXCLUDED.point_ids,
+                       project = EXCLUDED.project,
+                       role = EXCLUDED.role,
                        ingested_at = NOW()
                 """,
                 (filename, file_hash, file_size_bytes, collection,
-                 chunk_count, point_ids, source_path),
+                 project, role, chunk_count, point_ids, source_path),
             )
         conn.commit()
         logger.info("Logged ingestion: %s → %s (%d chunks)", filename, collection, chunk_count)

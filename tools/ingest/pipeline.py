@@ -173,11 +173,14 @@ def ingest_file(
         chunk_count=len(chunks),
         point_ids=point_ids,
         source_path=str(filepath),
+        project=project,
+        role=role,
     )
 
     result = IngestResult(
         filename=filename, file_hash=file_hash, file_size_bytes=file_size,
-        collection=target, chunk_count=len(chunks), point_ids=point_ids,
+        collection=target, chunk_count=len(chunks),
+        project=project, role=role, point_ids=point_ids,
     )
 
     # Attach card extraction data for API response

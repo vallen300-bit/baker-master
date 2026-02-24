@@ -11,6 +11,8 @@ class IngestResult:
     file_size_bytes: int
     collection: str
     chunk_count: int
+    project: Optional[str] = None
+    role: Optional[str] = None
     point_ids: List[str] = field(default_factory=list)
     skipped: bool = False
     skip_reason: Optional[str] = None

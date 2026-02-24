@@ -786,6 +786,15 @@ async def ingest_document(
 ):
     """Ingest a single document or image via dashboard upload."""
 
+    # 0. Validate project/role tags
+    ALLOWED_PROJECTS = {"rg7", "hagenauer", "movie-hotel-asset-management"}
+    ALLOWED_ROLES = {"chairman", "network", "private", "travel"}
+
+    if project and project not in ALLOWED_PROJECTS:
+        raise HTTPException(400, f"Invalid project: {project}. Valid: {', '.join(sorted(ALLOWED_PROJECTS))}")
+    if role and role not in ALLOWED_ROLES:
+        raise HTTPException(400, f"Invalid role: {role}. Valid: {', '.join(sorted(ALLOWED_ROLES))}")
+
     # 1. Validate file extension
     ext = Path(file.filename).suffix.lower()
     if ext == ".doc":

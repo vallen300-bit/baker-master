@@ -168,6 +168,8 @@ CREATE TABLE IF NOT EXISTS ingestion_log (
     file_hash TEXT NOT NULL,
     file_size_bytes BIGINT,
     collection TEXT NOT NULL,
+    project TEXT,
+    role TEXT,
     chunk_count INTEGER NOT NULL,
     point_ids TEXT[],
     source_path TEXT,
