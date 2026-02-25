@@ -60,9 +60,18 @@ class ClaudeConfig:
 @dataclass
 class GmailConfig:
     # OAuth2 credentials file (downloaded from Google Cloud Console)
-    credentials_path: str = str(Path(__file__).parent / "gmail_credentials.json")
+    # Render Secret Files live at /etc/secrets/; fall back to config/ for local dev
+    credentials_path: str = (
+        "/etc/secrets/gmail_credentials.json"
+        if os.path.exists("/etc/secrets/gmail_credentials.json")
+        else str(Path(__file__).parent / "gmail_credentials.json")
+    )
     # Token file (auto-generated after first OAuth2 flow)
-    token_path: str = str(Path(__file__).parent / "gmail_token.json")
+    token_path: str = (
+        "/etc/secrets/gmail_token.json"
+        if os.path.exists("/etc/secrets/gmail_token.json")
+        else str(Path(__file__).parent / "gmail_token.json")
+    )
     # Scopes needed for read-only Gmail access
     scopes: List[str] = field(default_factory=lambda: [
         "https://www.googleapis.com/auth/gmail.readonly",
