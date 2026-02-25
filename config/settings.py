@@ -6,6 +6,9 @@ Copy .env.example → .env and fill in your credentials.
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+
+# Detect Render environment (Render sets IS_RENDER=true or RENDER=true)
+_ON_RENDER = os.path.exists("/etc/secrets")
 from typing import List, Optional
 
 from dotenv import load_dotenv
@@ -72,6 +75,8 @@ class GmailConfig:
         if os.path.exists("/etc/secrets/gmail_token.json")
         else str(Path(__file__).parent / "gmail_token.json")
     )
+    # Writable dir for refreshed tokens & poll state (Render /etc/secrets is read-only)
+    writable_state_dir: str = "/tmp" if _ON_RENDER else str(Path(__file__).parent)
     # Scopes needed for read-only Gmail access
     scopes: List[str] = field(default_factory=lambda: [
         "https://www.googleapis.com/auth/gmail.readonly",

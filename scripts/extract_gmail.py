@@ -26,6 +26,7 @@ Output:
 import argparse
 import base64
 import json
+import os
 import re
 import sys
 import time
@@ -51,8 +52,17 @@ from googleapiclient.discovery import build
 _BAKER_MASTER_ROOT = _PROJECT_ROOT.parent
 _OUTPUT_DIR = _BAKER_MASTER_ROOT / "03_data" / "gmail"
 
+# Writable state dir: /tmp on Render (read-only /etc/secrets), config/ locally
+_WRITABLE_DIR = Path(config.gmail.writable_state_dir)
+
 # Poll state file: tracks last-seen timestamp for incremental polling
-_POLL_STATE_PATH = Path(config.gmail.token_path).parent / "gmail_poll_state.json"
+_POLL_STATE_PATH = _WRITABLE_DIR / "gmail_poll_state.json"
+
+# Writable token path — where refreshed tokens are saved
+_WRITABLE_TOKEN_PATH = _WRITABLE_DIR / "gmail_token.json"
+
+# Are we on a headless server (Render, Docker, etc.)?
+_HEADLESS = os.path.exists("/etc/secrets") or os.environ.get("RENDER")
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +74,8 @@ def authenticate() -> Credentials:
     Authenticate with Gmail API using OAuth2.
     - If token exists and is valid, use it.
     - If token is expired, refresh it.
-    - If no token, run the OAuth2 consent flow (opens browser).
+    - On headless servers (Render): never attempt browser flow; fail loudly.
+    - Refreshed tokens are saved to writable dir (/tmp on Render).
     """
     creds_path = Path(config.gmail.credentials_path)
     token_path = Path(config.gmail.token_path)
@@ -79,16 +90,21 @@ def authenticate() -> Credentials:
         print("  3. Enable the Gmail API")
         print("  4. Credentials → Create OAuth 2.0 Client ID (Desktop app)")
         print("  5. Download JSON → save as config/gmail_credentials.json")
+        if _HEADLESS:
+            print("  6. On Render: upload as Secret File at /etc/secrets/gmail_credentials.json")
         sys.exit(1)
 
     creds = None
 
-    # Load existing token
-    if token_path.exists():
-        try:
-            creds = Credentials.from_authorized_user_file(str(token_path), scopes)
-        except Exception as e:
-            print(f"  Warning: Could not load token ({e}), will re-authenticate.")
+    # Try writable copy first (refreshed token), then original (from secrets)
+    for tp in [_WRITABLE_TOKEN_PATH, token_path]:
+        if tp.exists():
+            try:
+                creds = Credentials.from_authorized_user_file(str(tp), scopes)
+                print(f"Gmail: Loaded token from {tp}")
+                break
+            except Exception as e:
+                print(f"  Warning: Could not load token from {tp} ({e})")
 
     # Refresh or run new flow
     if creds and creds.valid:
@@ -97,22 +113,33 @@ def authenticate() -> Credentials:
         print("Gmail: Refreshing expired OAuth token...")
         try:
             creds.refresh(Request())
-            # Save refreshed token
-            with open(token_path, "w") as f:
+            # Save refreshed token to writable dir
+            _WRITABLE_DIR.mkdir(parents=True, exist_ok=True)
+            with open(_WRITABLE_TOKEN_PATH, "w") as f:
                 f.write(creds.to_json())
-            print("Gmail: Token refreshed successfully.")
+            print(f"Gmail: Token refreshed → saved to {_WRITABLE_TOKEN_PATH}")
         except Exception as e:
-            print(f"  Token refresh failed ({e}), running new OAuth flow...")
+            print(f"  Token refresh failed: {e}")
             creds = None
 
     if not creds or not creds.valid:
-        print("Gmail: Starting OAuth2 consent flow (will open browser)...")
-        flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), scopes)
-        creds = flow.run_local_server(port=0)
-        # Save token for future runs
-        with open(token_path, "w") as f:
-            f.write(creds.to_json())
-        print(f"Gmail: Token saved to {token_path}")
+        if _HEADLESS:
+            # On Render / headless: cannot open browser — fail with instructions
+            print("ERROR: Gmail token invalid and cannot run OAuth browser flow on headless server.")
+            print()
+            print("  To fix:")
+            print("  1. Run locally: python scripts/extract_gmail.py --mode poll")
+            print("  2. This generates config/gmail_token.json")
+            print("  3. Upload it to Render as Secret File: /etc/secrets/gmail_token.json")
+            sys.exit(1)
+        else:
+            # Local dev: open browser for consent
+            print("Gmail: Starting OAuth2 consent flow (will open browser)...")
+            flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), scopes)
+            creds = flow.run_local_server(port=0)
+            with open(token_path, "w") as f:
+                f.write(creds.to_json())
+            print(f"Gmail: Token saved to {token_path}")
 
     return creds
 
