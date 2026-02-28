@@ -179,6 +179,20 @@ def has_unsubscribe_signals(headers: List[Dict]) -> bool:
     return False
 
 
+# Gmail labels that indicate spam/junk — skip these entirely (F2)
+_SKIP_LABELS = frozenset({
+    "SPAM", "TRASH", "CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL",
+})
+
+
+def has_skip_label(messages: List[Dict]) -> bool:
+    """Return True if any message in the thread carries a skip label (F2)."""
+    for msg in messages:
+        if _SKIP_LABELS.intersection(msg.get("labelIds", [])):
+            return True
+    return False
+
+
 def is_noise_thread(messages: List[Dict]) -> Tuple[bool, str]:
     """
     Determine if a thread is noise (newsletter, marketing, automated).
@@ -406,9 +420,10 @@ def format_thread(thread_data: Dict, messages: List[Dict]) -> Optional[Dict]:
     text_block = "\n".join(parts)
 
     thread_id = thread_data.get("id", "")
-    # Use the latest message ID for dedup (thread_id is reused across replies)
+    # All message IDs in thread — used for per-message dedup (F1)
     all_messages = thread_data.get("messages", [])
-    latest_message_id = all_messages[-1].get("id", thread_id) if all_messages else thread_id
+    all_message_ids = [m.get("id") for m in all_messages if m.get("id")]
+    latest_message_id = all_message_ids[-1] if all_message_ids else thread_id
     metadata = {
         "subject": subject,
         "date": first_date,
@@ -419,6 +434,7 @@ def format_thread(thread_data: Dict, messages: List[Dict]) -> Optional[Dict]:
         "message_count": len(msg_blocks),
         "thread_id": thread_id,
         "message_id": latest_message_id,
+        "all_message_ids": all_message_ids,  # F1: per-message dedup
         "source": "gmail",
     }
 
@@ -737,7 +753,12 @@ def extract_poll(service) -> List[Dict]:
 
         messages = thread.get("messages", [])
 
-        # Noise filter
+        # Gmail label filter — skip SPAM, TRASH, CATEGORY_PROMOTIONS, CATEGORY_SOCIAL (F2)
+        if has_skip_label(messages):
+            noise_count += 1
+            continue
+
+        # Noise filter (sender patterns + unsubscribe headers)
         is_noise, reason = is_noise_thread(messages)
         if is_noise:
             noise_count += 1
@@ -752,14 +773,18 @@ def extract_poll(service) -> List[Dict]:
         if formatted:
             texts.append(formatted)
 
-            # Track latest date for high-water mark
-            thread_date_str = formatted["metadata"].get("date", "")
-            if thread_date_str and thread_date_str != "unknown":
+            # Track latest received_date for high-water mark (F4)
+            received_date_str = formatted["metadata"].get("received_date", "")
+            if received_date_str and received_date_str != "unknown":
                 try:
-                    thread_dt = datetime.strptime(thread_date_str, "%Y-%m-%d")
+                    from datetime import timezone as _tz
+                    rd = datetime.fromisoformat(received_date_str)
+                    if rd.tzinfo is None:
+                        rd = rd.replace(tzinfo=_tz.utc)
+                    thread_dt = rd.date()
                     if latest_date is None or thread_dt > latest_date:
                         latest_date = thread_dt
-                except ValueError:
+                except (ValueError, TypeError):
                     pass
         else:
             empty_count += 1
@@ -775,15 +800,9 @@ def extract_poll(service) -> List[Dict]:
     print(f"  Fetch errors: {error_count}")
     print(f"  New substantive threads: {len(texts)}")
 
-    # Update high-water mark
-    # Use today's date as the new baseline (Gmail after: is date-level, not second-level)
-    new_high_water = datetime.now().strftime("%Y-%m-%d")
-    if latest_date:
-        # Use the latest thread date if it's more recent than today
-        # (shouldn't happen, but be safe)
-        latest_str = latest_date.strftime("%Y-%m-%d")
-        if latest_str > new_high_water:
-            new_high_water = latest_str
+    # F4: Advance watermark only to the newest thread's received_date, not arbitrarily to today.
+    # email_trigger.py will further advance to max(received_date of ALL seen threads).
+    new_high_water = latest_date.strftime("%Y-%m-%d") if latest_date else datetime.now().strftime("%Y-%m-%d")
 
     new_state = {
         "last_seen": new_high_water,

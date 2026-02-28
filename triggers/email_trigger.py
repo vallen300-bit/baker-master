@@ -5,6 +5,7 @@ Called by scheduler every 5 minutes.
 """
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Ensure project root is on sys.path
@@ -64,17 +65,33 @@ def check_new_emails():
     batch_for_briefing = []
     processed = 0
     skipped = 0
+    latest_seen_dt = None  # F4: track max received_date across ALL seen threads
 
     for thread in new_threads:
         metadata = thread.get("metadata", {})
         thread_id = metadata.get("thread_id", "unknown")
-        # Dedup on message_id (unique per reply), not thread_id (reused across replies)
-        message_id = metadata.get("message_id", thread_id)
 
-        # Skip if already processed
-        if trigger_state.is_processed("email", message_id):
+        # F4: Track received_date of every seen thread (processed + skipped)
+        received_date_str = metadata.get("received_date", "")
+        if received_date_str and received_date_str != "unknown":
+            try:
+                rd = datetime.fromisoformat(received_date_str)
+                if rd.tzinfo is None:
+                    rd = rd.replace(tzinfo=timezone.utc)
+                if latest_seen_dt is None or rd > latest_seen_dt:
+                    latest_seen_dt = rd
+            except (ValueError, TypeError):
+                pass
+
+        # F1: Dedup on ALL message IDs in thread — skip only if every message was seen before
+        all_message_ids = metadata.get("all_message_ids") or [metadata.get("message_id", thread_id)]
+        new_ids = [mid for mid in all_message_ids if not trigger_state.is_processed("email", mid)]
+        if not new_ids:
             skipped += 1
             continue
+
+        # Use latest message ID as pipeline source_id (logged in trigger_log for future dedup)
+        message_id = all_message_ids[-1]
 
         trigger = TriggerEvent(
             type="email",
@@ -104,6 +121,12 @@ def check_new_emails():
     # Store low-priority batch for briefing
     if batch_for_briefing:
         trigger_state.add_to_briefing_queue(batch_for_briefing)
+
+    # F4: Advance watermark to the newest received_date seen this cycle
+    # (covers both processed and deduped threads — prevents re-fetching old batches)
+    if latest_seen_dt:
+        trigger_state.set_watermark("email_poll", latest_seen_dt)
+        logger.info(f"Email watermark advanced to {latest_seen_dt.isoformat()}")
 
     logger.info(
         f"Email trigger complete: {processed} processed, "
