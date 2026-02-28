@@ -421,7 +421,7 @@ async def get_status():
         tier2_count = sum(1 for a in alerts if a.get("tier") == 2)
         deals = store.get_active_deals()
 
-        return {
+        status_data = {
             "system": "operational",
             "alerts_pending": len(alerts),
             "alerts_tier1": tier1_count,
@@ -429,6 +429,28 @@ async def get_status():
             "deals_active": len(deals),
             "last_checked": datetime.now(timezone.utc).isoformat(),
         }
+
+        # Email watermark health
+        email_wm = None
+        email_wm_age_hours = None
+        email_wm_healthy = True
+        try:
+            from triggers.state import trigger_state
+            wm = trigger_state.get_watermark("email_poll")
+            if wm:
+                email_wm = wm.isoformat()
+                email_wm_age_hours = round(
+                    (datetime.now(timezone.utc) - wm).total_seconds() / 3600, 1
+                )
+                email_wm_healthy = email_wm_age_hours < 24
+        except Exception:
+            pass
+
+        status_data["email_watermark"] = email_wm
+        status_data["email_watermark_age_hours"] = email_wm_age_hours
+        status_data["email_watermark_healthy"] = email_wm_healthy
+
+        return status_data
     except Exception as e:
         logger.error(f"/api/status failed: {e}")
         return {
