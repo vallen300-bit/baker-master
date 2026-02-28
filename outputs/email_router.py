@@ -3,8 +3,9 @@ Baker Email API — send and draft emails via Baker's Gmail account (bakerai200@
 Service-level OAuth2 auth (refresh token, no per-user flow).
 
 Routes:
-  POST /api/email/send   — send immediately
-  POST /api/email/draft  — save as draft for review
+  POST /api/email/send    — send immediately
+  POST /api/email/draft   — save as draft for review
+  GET  /api/email/inbox   — read recent inbox (metadata only)
 
 Deprecation check: 2026-09-01 (Gmail API v1 + OAuth2 token policy).
 """
@@ -27,8 +28,11 @@ _BAKER_API_KEY = os.getenv("BAKER_API_KEY", "")
 
 async def _verify_key(x_baker_key: str = Header(None, alias="X-Baker-Key")):
     if not _BAKER_API_KEY:
-        logger.warning("BAKER_API_KEY not set — email API is unauthenticated!")
-        return
+        logger.error("BAKER_API_KEY not configured — email service disabled")
+        raise HTTPException(
+            status_code=503,
+            detail="API key not configured — email service disabled",
+        )
     if x_baker_key != _BAKER_API_KEY:
         raise HTTPException(
             status_code=401,
@@ -128,6 +132,59 @@ async def send_email(req: EmailRequest):
         }
     except Exception as e:
         logger.error(f"Gmail send failed: {e}")
+        raise HTTPException(status_code=503, detail="Email service temporarily unavailable")
+
+
+@router.get("/api/email/inbox", dependencies=[Depends(_verify_key)])
+async def get_inbox(
+    limit: int = 10,
+    sender: str = None,
+    label: str = None,
+):
+    """Return recent emails from Baker's Gmail inbox (metadata only)."""
+    try:
+        service = _get_gmail_service()
+
+        # Build Gmail search query
+        query_parts = []
+        if sender:
+            query_parts.append(f"from:{sender}")
+        if label:
+            query_parts.append(f"label:{label}")
+        query_string = " ".join(query_parts) if query_parts else None
+
+        list_kwargs = {"userId": "me", "maxResults": limit}
+        if query_string:
+            list_kwargs["q"] = query_string
+
+        list_result = service.users().messages().list(**list_kwargs).execute()
+        messages = list_result.get("messages", [])
+
+        results = []
+        for msg in messages:
+            msg_data = service.users().messages().get(
+                userId="me",
+                id=msg["id"],
+                format="metadata",
+                metadataHeaders=["From", "To", "Subject", "Date"],
+            ).execute()
+
+            headers = {h["name"]: h["value"] for h in msg_data.get("payload", {}).get("headers", [])}
+            results.append({
+                "id": msg_data.get("id"),
+                "threadId": msg_data.get("threadId"),
+                "from": headers.get("From", ""),
+                "to": headers.get("To", ""),
+                "subject": headers.get("Subject", ""),
+                "date": headers.get("Date", ""),
+                "snippet": msg_data.get("snippet", ""),
+            })
+
+        logger.info(f"Inbox fetched: {len(results)} messages (limit={limit}, sender={sender}, label={label})")
+        return {"messages": results, "count": len(results)}
+
+    except Exception as e:
+        logger.error(f"Gmail inbox fetch failed: {e}")
         raise HTTPException(status_code=503, detail="Email service temporarily unavailable")
 
 

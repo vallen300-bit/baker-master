@@ -42,9 +42,11 @@ _BAKER_API_KEY = os.getenv("BAKER_API_KEY", "")
 async def verify_api_key(x_baker_key: str = Header(None, alias="X-Baker-Key")):
     """Validate API key from X-Baker-Key header."""
     if not _BAKER_API_KEY:
-        # If no key configured, log warning but allow (dev mode)
-        logger.warning("BAKER_API_KEY not set — API is unauthenticated!")
-        return
+        logger.error("BAKER_API_KEY not configured — API disabled")
+        raise HTTPException(
+            status_code=503,
+            detail="API key not configured — service disabled",
+        )
     if x_baker_key != _BAKER_API_KEY:
         raise HTTPException(
             status_code=401,

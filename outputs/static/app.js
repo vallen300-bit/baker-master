@@ -1317,5 +1317,53 @@ document.addEventListener('keydown', (e) => {
     }
 })();
 
+// ═══ EMAIL SEND ═══
+async function sendEmailSummary() {
+    const btn = document.getElementById('emailSendBtn');
+    const statusEl = document.getElementById('emailStatus');
+
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    statusEl.hidden = false;
+    statusEl.className = 'email-status email-status--sending';
+    statusEl.textContent = 'Sending summary email…';
+
+    try {
+        const resp = await bakerFetch('/api/email/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                to: 'dvallen@brisengroup.com',
+                subject: 'Baker Dashboard Summary',
+                body: 'Baker Dashboard Summary — sent from the CEO Cockpit. Check the dashboard for the latest briefing, alerts, and decisions.',
+            }),
+        });
+
+        const data = await resp.json();
+
+        if (resp.ok) {
+            statusEl.className = 'email-status email-status--success';
+            statusEl.textContent = `Sent. Message ID: ${data.message_id || 'ok'}`;
+            btn.textContent = 'Send Summary to Director';
+            setTimeout(() => { statusEl.hidden = true; }, 10000);
+        } else if (resp.status === 401) {
+            statusEl.className = 'email-status email-status--error';
+            statusEl.textContent = 'Auth failed (401) — check API key.';
+        } else if (resp.status === 503) {
+            statusEl.className = 'email-status email-status--error';
+            statusEl.textContent = 'Email service unavailable (503) — check server config.';
+        } else {
+            statusEl.className = 'email-status email-status--error';
+            statusEl.textContent = `Error: ${data.detail || resp.statusText}`;
+        }
+    } catch (err) {
+        statusEl.className = 'email-status email-status--error';
+        statusEl.textContent = 'Network error: ' + err.message;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Send Summary to Director';
+    }
+}
+
 // ═══ START ═══
 document.addEventListener('DOMContentLoaded', init);

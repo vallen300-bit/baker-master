@@ -1237,3 +1237,58 @@ body {
     color: #f44336;
     border: 1px solid rgba(244, 67, 54, 0.2);
 }
+
+/* ═══ EMAIL PANEL ═══ */
+.email-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.email-send-btn {
+    align-self: flex-start;
+    background: rgba(33, 150, 243, 0.08);
+    border: 1px solid rgba(33, 150, 243, 0.3);
+    color: var(--accent-pm);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    padding: 8px 16px;
+    border-radius: var(--radius-btn);
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.email-send-btn:hover:not(:disabled) {
+    background: rgba(33, 150, 243, 0.18);
+}
+
+.email-send-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.email-status {
+    padding: 8px 12px;
+    border-radius: var(--radius-btn);
+    font-size: 12px;
+    font-family: var(--font-mono);
+}
+
+.email-status--sending {
+    background: rgba(33, 150, 243, 0.08);
+    color: var(--accent-pm);
+    border: 1px solid rgba(33, 150, 243, 0.2);
+}
+
+.email-status--success {
+    background: rgba(76, 175, 80, 0.08);
+    color: var(--accent-network);
+    border: 1px solid rgba(76, 175, 80, 0.2);
+}
+
+.email-status--error {
+    background: rgba(244, 67, 54, 0.08);
+    color: #f44336;
+    border: 1px solid rgba(244, 67, 54, 0.2);
+}
