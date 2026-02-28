@@ -94,8 +94,6 @@ def run_rss_poll():
         if articles is None:
             articles = []
 
-        # On success: reset failure counter
-        _reset_failures(store, feed_id)
         feeds_polled += 1
 
         # If fetch returned empty (client logs its own warnings)
@@ -122,6 +120,12 @@ def run_rss_poll():
 
         # Safety cap
         new_articles = new_articles[:rss_config.max_articles_per_feed]
+
+        if new_articles:
+            _reset_failures(store, feed_id)
+        else:
+            _increment_failures(store, feed_id)
+            logger.warning(f"RSS feed {feed_title}: no new articles after filtering, incrementing failures")
 
         # 2d. Process each new article
         latest_pub = watermark

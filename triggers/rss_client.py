@@ -113,6 +113,11 @@ class RssClient:
 
         self._request_count += 1
 
+        content_type = resp.headers.get("content-type", "").lower()
+        if "html" in content_type and "xml" not in content_type:
+            logger.warning(f"Skipping feed {url}: content-type is HTML not XML ({content_type})")
+            return []
+
         try:
             feed = feedparser.parse(resp.text)
         except Exception as e:
