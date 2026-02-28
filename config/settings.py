@@ -213,7 +213,7 @@ class RssConfig:
 @dataclass
 class TriggerConfig:
     # Fireflies scanning interval (seconds)
-    fireflies_scan_interval: int = 7200  # 2 hours
+    fireflies_scan_interval: int = 900  # 15 minutes (was 7200; FIREFLIES-FIX-1)
     # Email check interval
     email_check_interval: int = 300  # 5 minutes
     # WhatsApp: migrated to WAHA webhook (Session 26) — polling removed
