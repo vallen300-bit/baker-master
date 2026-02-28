@@ -125,6 +125,13 @@ def check_new_emails():
     # F4: Advance watermark to the newest received_date seen this cycle
     # (covers both processed and deduped threads — prevents re-fetching old batches)
     if latest_seen_dt:
+        now_utc = datetime.now(timezone.utc)
+        if latest_seen_dt > now_utc:
+            logger.warning(
+                f"Email watermark ceiling hit: {latest_seen_dt.isoformat()} > now "
+                f"({now_utc.isoformat()}). Capping at now."
+            )
+            latest_seen_dt = now_utc
         trigger_state.set_watermark("email_poll", latest_seen_dt)
         logger.info(f"Email watermark advanced to {latest_seen_dt.isoformat()}")
 
