@@ -1,8 +1,5 @@
 # Secrets
 config/.env
-config/gmail_credentials.json
-config/gmail_token.json
-config/gmail_poll_state.json
 
 # Python
 *.pyc
@@ -10,3 +7,8 @@ __pycache__/
 
 # Outputs
 analysis_outputs/
+
+# Gmail OAuth credentials (stored in Render Secret Files)
+config/gmail_credentials.json
+config/gmail_token.json
+config/gmail_poll_state.json

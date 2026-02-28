@@ -287,12 +287,12 @@ def _load_image_bytes(filepath: Path) -> tuple[bytes, str]:
 
 
 def _call_claude_vision(img_bytes: bytes, mime: str, prompt: str, max_tokens: int = 2000) -> str:
-    """Send image to Claude Sonnet via vision API and return text response."""
+    """Send image to Claude Opus via vision API and return text response."""
     client = anthropic.Anthropic()  # Uses ANTHROPIC_API_KEY env var
     b64 = base64.standard_b64encode(img_bytes).decode("utf-8")
 
     response = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
+        model="claude-opus-4-6",
         max_tokens=max_tokens,
         messages=[
             {
