@@ -3,15 +3,17 @@ Baker Email API — send and draft emails via Baker's Gmail account (bakerai200@
 Service-level OAuth2 auth (refresh token, no per-user flow).
 
 Routes:
-  POST /api/email/send    — send immediately
-  POST /api/email/draft   — save as draft for review
-  GET  /api/email/inbox   — read recent inbox (metadata only)
+  POST /api/email/send          — send immediately (compose or summary mode)
+  POST /api/email/draft         — save as draft for review
+  GET  /api/email/inbox         — recent inbox list (metadata + unread_count)
+  GET  /api/email/read/{id}     — full message body (MIME parsed, plain text)
 
 Deprecation check: 2026-09-01 (Gmail API v1 + OAuth2 token policy).
 """
 import base64
 import logging
 import os
+import re
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -112,6 +114,94 @@ def _build_raw_message(to: str, subject: str, body: str, html: bool) -> str:
 
 
 # ---------------------------------------------------------------------------
+# MIME body extraction helpers (used by /api/email/read)
+# ---------------------------------------------------------------------------
+
+def _decode_b64(data: str) -> str:
+    """Decode base64url-encoded Gmail body data."""
+    try:
+        return base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _strip_html(html: str) -> str:
+    """Strip HTML tags and decode common entities to plain text."""
+    text = re.sub(r"<style[^>]*>.*?</style>", " ", html, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<script[^>]*>.*?</script>", " ", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<p\s*/?>|</p>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = (text
+            .replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+            .replace("&nbsp;", " ").replace("&#39;", "'").replace("&quot;", '"'))
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
+
+
+def _extract_body(payload: dict) -> tuple:
+    """
+    Recursively walk a Gmail MIME payload tree.
+    Returns (body_text: str, has_attachments: bool).
+    Prefers text/plain; falls back to text/html stripped of tags.
+    Handles multipart/mixed, multipart/alternative, multipart/related,
+    and nested forwarded messages.
+    """
+    mime_type = (payload.get("mimeType") or "").lower()
+    body_obj = payload.get("body") or {}
+    parts = payload.get("parts") or []
+    has_attachments = False
+
+    # Leaf nodes with direct body data
+    if mime_type == "text/plain":
+        data = body_obj.get("data", "")
+        return (_decode_b64(data) if data else ""), False
+
+    if mime_type == "text/html":
+        data = body_obj.get("data", "")
+        return (_strip_html(_decode_b64(data)) if data else ""), False
+
+    # Attachment leaf (has filename, not text)
+    if payload.get("filename") and mime_type not in ("text/plain", "text/html"):
+        return "", True
+
+    # Multipart — recurse into parts
+    if parts:
+        plain_text = None
+        html_text = None
+
+        for part in parts:
+            part_mime = (part.get("mimeType") or "").lower()
+            part_body = part.get("body") or {}
+            part_filename = part.get("filename") or ""
+
+            if part_mime == "text/plain":
+                data = part_body.get("data", "")
+                if data and not plain_text:
+                    plain_text = _decode_b64(data)
+
+            elif part_mime == "text/html":
+                data = part_body.get("data", "")
+                if data and not html_text:
+                    html_text = _strip_html(_decode_b64(data))
+
+            elif part_mime.startswith("multipart/"):
+                nested_text, nested_att = _extract_body(part)
+                has_attachments = has_attachments or nested_att
+                if nested_text and not plain_text:
+                    plain_text = nested_text
+
+            elif part_filename:
+                # Named part without text MIME type = attachment
+                has_attachments = True
+
+        result = plain_text or html_text or ""
+        return result, has_attachments
+
+    return "", has_attachments
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 @router.post("/api/email/send", dependencies=[Depends(_verify_key)])
@@ -192,6 +282,7 @@ async def get_inbox(
         messages = list_result.get("messages", [])
 
         results = []
+        unread_count = 0
         for msg in messages:
             msg_data = service.users().messages().get(
                 userId="me",
@@ -201,6 +292,11 @@ async def get_inbox(
             ).execute()
 
             headers = {h["name"]: h["value"] for h in msg_data.get("payload", {}).get("headers", [])}
+            label_ids = msg_data.get("labelIds", [])
+            is_unread = "UNREAD" in label_ids
+            if is_unread:
+                unread_count += 1
+
             results.append({
                 "id": msg_data.get("id"),
                 "threadId": msg_data.get("threadId"),
@@ -209,13 +305,72 @@ async def get_inbox(
                 "subject": headers.get("Subject", ""),
                 "date": headers.get("Date", ""),
                 "snippet": msg_data.get("snippet", ""),
+                "unread": is_unread,
             })
 
-        logger.info(f"Inbox fetched: {len(results)} messages (limit={limit}, sender={sender}, label={label})")
-        return {"messages": results, "count": len(results)}
+        logger.info(f"Inbox fetched: {len(results)} messages, {unread_count} unread (limit={limit})")
+        return {"messages": results, "count": len(results), "unread_count": unread_count}
 
     except Exception as e:
         logger.error(f"Gmail inbox fetch failed: {e}")
+        raise HTTPException(status_code=503, detail="Email service temporarily unavailable")
+
+
+@router.get("/api/email/read/{message_id}", dependencies=[Depends(_verify_key)])
+async def read_email(message_id: str):
+    """
+    Fetch the full body of a single Gmail message.
+    Uses format='full' to retrieve the complete MIME tree.
+    Prefers text/plain; falls back to text/html stripped of tags.
+    Handles multipart/mixed, multipart/alternative, and forwarded messages.
+    Falls back to snippet with body_parse_error=true if MIME parsing yields nothing.
+    """
+    try:
+        service = _get_gmail_service()
+        msg_data = service.users().messages().get(
+            userId="me",
+            id=message_id,
+            format="full",
+        ).execute()
+
+        payload = msg_data.get("payload") or {}
+        headers = {h["name"]: h["value"] for h in payload.get("headers", [])}
+        label_ids = msg_data.get("labelIds", [])
+        snippet = msg_data.get("snippet", "")
+
+        # Parse MIME tree
+        body_parse_error = False
+        try:
+            body_text, has_attachments = _extract_body(payload)
+        except Exception as parse_err:
+            logger.warning(f"MIME parse error for {message_id}: {parse_err}")
+            body_text = ""
+            has_attachments = False
+            body_parse_error = True
+
+        # Fallback to snippet if body is empty
+        if not body_text:
+            body_text = snippet
+            body_parse_error = True
+
+        logger.info(f"Email read: {message_id} ({len(body_text)} chars, attachments={has_attachments})")
+        result = {
+            "id": msg_data.get("id"),
+            "threadId": msg_data.get("threadId"),
+            "from": headers.get("From", ""),
+            "to": headers.get("To", ""),
+            "subject": headers.get("Subject", ""),
+            "date": headers.get("Date", ""),
+            "body": body_text,
+            "has_attachments": has_attachments,
+            "labels": label_ids,
+        }
+        if body_parse_error:
+            result["body_parse_error"] = True
+        return result
+
+    except Exception as e:
+        logger.error(f"Gmail read failed for {message_id}: {e}")
         raise HTTPException(status_code=503, detail="Email service temporarily unavailable")
 
 

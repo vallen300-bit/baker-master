@@ -34,6 +34,10 @@
                 <button class="rail-btn active" data-role="home" onclick="goHome()">
                     <span class="r-label">Home</span>
                 </button>
+                <button class="rail-btn" data-role="inbox" onclick="openInboxTab()">
+                    <span class="r-label">Inbox</span>
+                    <span class="r-badge" id="inboxBadge" hidden></span>
+                </button>
                 <button class="rail-btn" data-role="chairman" onclick="openRole('chairman')">
                     <span class="r-label">Chairman</span>
                 </button>
@@ -174,6 +178,18 @@
                         </form>
                     </div>
                 </div>
+                <!-- VIEW 5: Inbox -->
+                <div class="view" id="inboxView">
+                    <div class="inbox-header">
+                        <span class="inbox-title">Inbox</span>
+                        <span class="inbox-unread-label" id="inboxUnreadLabel"></span>
+                        <button class="inbox-refresh" onclick="loadInbox()" title="Refresh">&#8635;</button>
+                    </div>
+                    <div id="inboxList" class="inbox-list">
+                        <div class="inbox-empty">Loading…</div>
+                    </div>
+                </div>
+
             </div>
         </div>
 

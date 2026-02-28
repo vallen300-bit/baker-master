@@ -1317,6 +1317,131 @@ document.addEventListener('keydown', (e) => {
     }
 })();
 
+// ═══ INBOX ═══
+
+function openInboxTab() {
+    setRail('inbox');
+    showView('inboxView');
+    document.getElementById('takeBar').classList.remove('visible');
+    takeVisible = false;
+    loadInbox();
+}
+
+async function loadInbox() {
+    const listEl = document.getElementById('inboxList');
+    if (!listEl) return;
+    listEl.innerHTML = '<div class="inbox-empty">Loading…</div>';
+
+    try {
+        const resp = await bakerFetch('/api/email/inbox?limit=20');
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+
+        // Unread badge on rail + header label
+        const unread = data.unread_count || 0;
+        const badge = document.getElementById('inboxBadge');
+        const label = document.getElementById('inboxUnreadLabel');
+        if (badge) { badge.textContent = unread || ''; badge.hidden = unread === 0; }
+        if (label) label.textContent = unread > 0 ? unread + ' unread' : '';
+
+        if (!data.messages || data.messages.length === 0) {
+            listEl.innerHTML = '<div class="inbox-empty">No messages.</div>';
+            return;
+        }
+
+        listEl.innerHTML = '';
+        for (const msg of data.messages) {
+            listEl.appendChild(_buildInboxRow(msg));
+        }
+    } catch (e) {
+        listEl.innerHTML = '<div class="inbox-empty">Could not load inbox: ' + esc(e.message) + '</div>';
+    }
+}
+
+function _buildInboxRow(msg) {
+    const row = document.createElement('div');
+    row.className = 'inbox-row' + (msg.unread ? ' inbox-row--unread' : '');
+    row.dataset.msgId = msg.id;
+
+    const fromShort = _inboxShortName(msg.from);
+    const dateShort = _inboxFmtDate(msg.date);
+
+    row.innerHTML =
+        '<div class="inbox-row-top" onclick="toggleInboxEmail(\'' + esc(msg.id) + '\')">' +
+            '<span class="inbox-from">' + esc(fromShort) + '</span>' +
+            '<span class="inbox-date">' + esc(dateShort) + '</span>' +
+        '</div>' +
+        '<div class="inbox-subject" onclick="toggleInboxEmail(\'' + esc(msg.id) + '\')">' +
+            esc(msg.subject || '(no subject)') +
+        '</div>' +
+        '<div class="inbox-snippet">' + esc(msg.snippet) + '</div>' +
+        '<div class="inbox-body-wrap" id="ibody-' + esc(msg.id) + '" hidden>' +
+            '<div class="inbox-body-inner"><span class="inbox-body-loading">Loading…</span></div>' +
+        '</div>';
+
+    return row;
+}
+
+async function toggleInboxEmail(msgId) {
+    const wrap = document.getElementById('ibody-' + msgId);
+    if (!wrap) return;
+
+    if (!wrap.hidden) {
+        wrap.hidden = true;
+        return;
+    }
+    wrap.hidden = false;
+
+    // Already loaded — just show
+    if (wrap.dataset.loaded) return;
+
+    try {
+        const resp = await bakerFetch('/api/email/read/' + msgId);
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const d = await resp.json();
+
+        const attachHtml = d.has_attachments
+            ? '<div class="inbox-attach">&#128206; Has attachments</div>'
+            : '';
+        const warnHtml = d.body_parse_error
+            ? '<div class="inbox-parse-warn">Preview only — full parse unavailable</div>'
+            : '';
+        const bodyHtml = '<pre class="inbox-body-text">' + esc(d.body || '(empty)') + '</pre>';
+
+        wrap.querySelector('.inbox-body-inner').innerHTML =
+            '<div class="inbox-meta">' +
+                '<span>' + esc(d.from) + '</span>' +
+                '<span>' + esc(d.date) + '</span>' +
+            '</div>' +
+            attachHtml + warnHtml + bodyHtml;
+
+        wrap.dataset.loaded = '1';
+    } catch (e) {
+        wrap.querySelector('.inbox-body-inner').innerHTML =
+            '<div class="inbox-error">Could not load message: ' + esc(e.message) + '</div>';
+    }
+}
+
+function _inboxShortName(from) {
+    if (!from) return '';
+    const m = from.match(/^"?([^"<]+)"?\s*</);
+    return m ? m[1].trim() : from.split('@')[0];
+}
+
+function _inboxFmtDate(dateStr) {
+    if (!dateStr) return '';
+    try {
+        const d = new Date(dateStr);
+        const now = new Date();
+        if (d.toDateString() === now.toDateString()) {
+            return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+        }
+        return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+    } catch (_) {
+        return dateStr.substring(0, 10);
+    }
+}
+
 // ═══ EMAIL — Type 4: Manual Summary ═══
 async function sendEmailSummary() {
     const btn = document.getElementById('emailSendBtn');
