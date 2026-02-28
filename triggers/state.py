@@ -119,6 +119,28 @@ class TriggerState:
 
         return datetime.now(timezone.utc) - timedelta(hours=24)
 
+    def watermark_exists(self, source: str) -> bool:
+        """Return True if a watermark row exists in DB for this source."""
+        try:
+            store = self._get_store()
+            conn = store._get_conn()
+            if not conn:
+                return False
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT 1 FROM trigger_watermarks WHERE source = %s",
+                    (source,),
+                )
+                exists = cur.fetchone() is not None
+                cur.close()
+                return exists
+            finally:
+                store._put_conn(conn)
+        except Exception as e:
+            logger.warning(f"Could not check watermark existence for {source}: {e}")
+            return False
+
     def set_watermark(self, source: str, timestamp: datetime = None):
         """Update watermark after successful processing (PostgreSQL upsert)."""
         if timestamp is None:

@@ -79,8 +79,11 @@ def run_rss_poll():
         url_h = _url_hash(feed_url)
         watermark_key = f"rss:{url_h}"
 
-        # 2a. Get watermark
+        # 2a. Get watermark — detect first-ever connect for this feed
+        is_first_connect = not trigger_state.watermark_exists(watermark_key)
         watermark = trigger_state.get_watermark(watermark_key)
+        if is_first_connect:
+            logger.info(f"RSS feed '{feed_title}': first connect — backfilling all available articles")
 
         # 2b. Fetch feed
         try:
@@ -102,6 +105,8 @@ def run_rss_poll():
             continue
 
         # 2c. Filter by watermark + age
+        # On first connect: skip watermark filter to backfill all available articles.
+        # Dedup via _article_exists() still prevents double-ingestion.
         cutoff = datetime.now(timezone.utc) - timedelta(days=rss_config.max_article_age_days)
         new_articles = []
         for article in articles:
@@ -110,7 +115,7 @@ def run_rss_poll():
                 # No publish date — include it but it won't advance watermark
                 new_articles.append(article)
                 continue
-            if pub <= watermark:
+            if not is_first_connect and pub <= watermark:
                 articles_skipped += 1
                 continue
             if pub < cutoff:
