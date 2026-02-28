@@ -1,7 +1,12 @@
 """
-Sentinel Trigger — WhatsApp (via Wassenger REST API)
-Checks for new WhatsApp messages every 10 minutes.
+DEPRECATED — Session 26 (2026-02-28)
+Replaced by WAHA webhook receiver (triggers/waha_webhook.py).
+Inbound messages now arrive via POST /api/webhook/whatsapp.
+Outbound via outputs/whatsapp_sender.py.
+Do NOT delete — kept as archive reference.
 
+Original: Sentinel Trigger — WhatsApp (via Wassenger REST API)
+Checks for new WhatsApp messages every 10 minutes.
 Uses Wassenger REST API directly (not MCP) for headless operation.
 Requires WASSENGER_API_KEY and WASSENGER_DEVICE_ID in .env.
 """

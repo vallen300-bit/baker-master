@@ -195,6 +195,13 @@ class SlackConfig:
 
 
 @dataclass
+class WahaConfig:
+    base_url: str = os.getenv("WAHA_BASE_URL", "https://baker-waha.onrender.com")
+    session: str = os.getenv("WAHA_SESSION", "default")
+    webhook_secret: str = os.getenv("WAHA_WEBHOOK_SECRET", "")
+
+
+@dataclass
 class RssConfig:
     check_interval: int = int(os.getenv("RSS_CHECK_INTERVAL", "3600"))  # 60 min default
     max_article_age_days: int = 7  # skip articles older than 7 days on first poll
@@ -209,8 +216,7 @@ class TriggerConfig:
     fireflies_scan_interval: int = 7200  # 2 hours
     # Email check interval
     email_check_interval: int = 300  # 5 minutes
-    # WhatsApp check interval
-    whatsapp_check_interval: int = 600  # 10 minutes
+    # WhatsApp: migrated to WAHA webhook (Session 26) — polling removed
     # Todoist polling interval
     todoist_check_interval: int = 1800  # 30 minutes
     # Dropbox polling interval
@@ -250,6 +256,7 @@ class SentinelConfig:
     whoop: WhoopConfig = field(default_factory=WhoopConfig)
     rss: RssConfig = field(default_factory=RssConfig)
     slack: SlackConfig = field(default_factory=SlackConfig)
+    waha: WahaConfig = field(default_factory=WahaConfig)
     postgres: PostgresConfig = field(default_factory=PostgresConfig)
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
     outputs: OutputConfig = field(default_factory=OutputConfig)

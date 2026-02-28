@@ -78,6 +78,9 @@ _allowed_origins = [
     if o.strip()
 ]
 
+from triggers.waha_webhook import router as waha_router
+app.include_router(waha_router)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins,

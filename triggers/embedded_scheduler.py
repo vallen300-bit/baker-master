@@ -49,15 +49,8 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info(f"Registered: email_poll (every {config.triggers.email_check_interval}s)")
 
-    # WhatsApp polling — every 10 minutes
-    from triggers.whatsapp_trigger import check_new_whatsapp
-    scheduler.add_job(
-        check_new_whatsapp,
-        IntervalTrigger(seconds=config.triggers.whatsapp_check_interval),
-        id="whatsapp_poll", name="WhatsApp polling",
-        coalesce=True, max_instances=1, replace_existing=True,
-    )
-    logger.info(f"Registered: whatsapp_poll (every {config.triggers.whatsapp_check_interval}s)")
+    # WhatsApp: migrated from Wassenger polling to WAHA webhook (Session 26)
+    # whatsapp_poll job removed — inbound messages now arrive via POST /api/webhook/whatsapp
 
     # Fireflies scanning — every 2 hours
     from triggers.fireflies_trigger import check_new_transcripts
