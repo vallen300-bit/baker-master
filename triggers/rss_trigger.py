@@ -105,7 +105,8 @@ def run_rss_poll():
             continue
 
         # 2c. Filter by watermark + age
-        # On first connect: skip watermark filter to backfill all available articles.
+        # On first connect: skip BOTH the watermark filter and the age cutoff to
+        # backfill ALL available articles in the feed.
         # Dedup via _article_exists() still prevents double-ingestion.
         cutoff = datetime.now(timezone.utc) - timedelta(days=rss_config.max_article_age_days)
         new_articles = []
@@ -118,7 +119,7 @@ def run_rss_poll():
             if not is_first_connect and pub <= watermark:
                 articles_skipped += 1
                 continue
-            if pub < cutoff:
+            if not is_first_connect and pub < cutoff:
                 articles_skipped += 1
                 continue
             new_articles.append(article)
@@ -128,6 +129,10 @@ def run_rss_poll():
 
         if new_articles:
             _reset_failures(store, feed_id)
+        elif is_first_connect:
+            # No articles on first connect — feed is live but may be sparse.
+            # Don't count as failure; we'll still set the watermark below.
+            logger.info(f"RSS feed '{feed_title}': first connect, no articles to backfill")
         else:
             _increment_failures(store, feed_id)
             logger.warning(f"RSS feed {feed_title}: no new articles after filtering, incrementing failures")
@@ -164,8 +169,11 @@ def run_rss_poll():
                 latest_pub = pub
 
         # 2e. Update watermark
-        if latest_pub > watermark:
-            trigger_state.set_watermark(watermark_key, latest_pub)
+        # On first connect: always set watermark (even if no articles were ingested)
+        # so subsequent polls don't re-trigger backfill mode.
+        if is_first_connect or latest_pub > watermark:
+            wm_ts = latest_pub if latest_pub > watermark else datetime.now(timezone.utc)
+            trigger_state.set_watermark(watermark_key, wm_ts)
 
         _update_last_polled(store, feed_id)
 
