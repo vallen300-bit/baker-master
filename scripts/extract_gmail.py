@@ -607,15 +607,31 @@ def extract_historical(
 # ---------------------------------------------------------------------------
 
 def load_poll_state() -> Dict:
-    """Load the poll state (last-seen timestamp). Defaults to 24h ago."""
+    """Load the poll state (last-seen timestamp).
+    Priority: PostgreSQL (persistent) → file (local fallback) → default (24h ago).
+    """
+    # --- Primary: PostgreSQL via trigger_state ---
+    try:
+        from triggers.state import trigger_state
+        watermark = trigger_state.get_watermark("email_poll")
+        if watermark:
+            # Watermark is a timezone-aware datetime — convert to YYYY-MM-DD for Gmail API
+            last_seen_str = watermark.strftime("%Y-%m-%d")
+            last_seen_epoch = int(watermark.timestamp())
+            print(f"Poll state loaded from DB: last_seen = {last_seen_str}")
+            return {"last_seen": last_seen_str, "last_seen_epoch": last_seen_epoch}
+    except Exception as e:
+        print(f"  DB poll state unavailable ({e}), falling back to file.")
+
+    # --- Fallback: file-based (local dev or DB down) ---
     if _POLL_STATE_PATH.exists():
         try:
             with open(_POLL_STATE_PATH, "r") as f:
                 state = json.load(f)
-            print(f"Poll state loaded: last_seen = {state.get('last_seen', 'unknown')}")
+            print(f"Poll state loaded from file: last_seen = {state.get('last_seen', 'unknown')}")
             return state
         except (json.JSONDecodeError, IOError) as e:
-            print(f"  Warning: Could not read poll state ({e}), defaulting to 24h ago.")
+            print(f"  Warning: Could not read poll state file ({e}), defaulting to 24h ago.")
 
     # Default: 24 hours ago
     default_since = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d")
@@ -623,11 +639,31 @@ def load_poll_state() -> Dict:
 
 
 def save_poll_state(state: Dict):
-    """Save the poll state with updated high-water mark."""
-    _POLL_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(_POLL_STATE_PATH, "w") as f:
-        json.dump(state, f, indent=2)
-    print(f"Poll state saved: last_seen = {state.get('last_seen')}")
+    """Save the poll state with updated high-water mark.
+    Primary: PostgreSQL (persistent). Fallback: file (local dev).
+    """
+    last_seen_str = state.get("last_seen", "")
+
+    # --- Primary: PostgreSQL via trigger_state ---
+    try:
+        from triggers.state import trigger_state
+        if last_seen_str:
+            # Convert YYYY-MM-DD string to timezone-aware datetime for watermark
+            from datetime import timezone as tz
+            wm_dt = datetime.strptime(last_seen_str, "%Y-%m-%d").replace(tzinfo=tz.utc)
+            trigger_state.set_watermark("email_poll", wm_dt)
+            print(f"Poll state saved to DB: last_seen = {last_seen_str}")
+    except Exception as e:
+        print(f"  DB poll state save failed ({e}), using file fallback only.")
+
+    # --- Always write file as backup ---
+    try:
+        _POLL_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(_POLL_STATE_PATH, "w") as f:
+            json.dump(state, f, indent=2)
+        print(f"Poll state saved to file: last_seen = {last_seen_str}")
+    except Exception as e:
+        print(f"  Warning: Could not write poll state file ({e})")
 
 
 def extract_poll(service) -> List[Dict]:
