@@ -51,4 +51,4 @@ google-auth-oauthlib>=1.2.0         # OAuth2 flow for Gmail
 
 # Future: Trigger integrations
 # msgraph-sdk>=1.0.0       # Microsoft 365 / Outlook
-# slack-sdk>=3.0.0         # Slack
+slack-sdk>=3.0.0           # Slack

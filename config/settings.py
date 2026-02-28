@@ -25,7 +25,7 @@ class QdrantConfig:
     collections: List[str] = field(default_factory=lambda: [
         c.strip() for c in os.getenv(
             "BAKER_COLLECTIONS",
-            "baker-people,baker-deals,baker-projects,baker-conversations,baker-whatsapp,baker-clickup,baker-todoist,baker-documents,baker-health,sentinel-interactions"
+            "baker-people,baker-deals,baker-projects,baker-conversations,baker-whatsapp,baker-clickup,baker-todoist,baker-documents,baker-health,sentinel-interactions,baker-slack"
         ).split(",")
     ])
     collection_whatsapp: str = "baker-whatsapp"
@@ -180,6 +180,21 @@ class WhoopConfig:
 
 
 @dataclass
+class SlackConfig:
+    bot_token: str = os.getenv("SLACK_BOT_TOKEN", "")
+    # Comma-separated channel IDs to poll for ingest (default: #cockpit)
+    channel_ids: List[str] = field(default_factory=lambda: [
+        c.strip() for c in os.getenv("SLACK_CHANNEL_IDS", "C0AF4FVN3FB").split(",") if c.strip()
+    ])
+    # Channel where Baker posts alerts/briefings (CEO Cockpit = #cockpit)
+    cockpit_channel_id: str = os.getenv("SLACK_COCKPIT_CHANNEL", "C0AF4FVN3FB")
+    # Baker's Slack bot user ID — used to detect @Baker mentions (e.g. U01ABCDEF)
+    baker_bot_user_id: str = os.getenv("SLACK_BAKER_USER_ID", "")
+    # Qdrant collection for Slack messages
+    collection: str = "baker-slack"
+
+
+@dataclass
 class RssConfig:
     check_interval: int = int(os.getenv("RSS_CHECK_INTERVAL", "3600"))  # 60 min default
     max_article_age_days: int = 7  # skip articles older than 7 days on first poll
@@ -204,6 +219,8 @@ class TriggerConfig:
     whoop_check_interval: int = int(os.getenv("WHOOP_CHECK_INTERVAL", "86400"))  # 24 hours
     # RSS polling interval
     rss_check_interval: int = int(os.getenv("RSS_CHECK_INTERVAL", "3600"))  # 60 minutes
+    # Slack polling interval
+    slack_check_interval: int = int(os.getenv("SLACK_CHECK_INTERVAL", "300"))  # 5 minutes
     # Daily briefing time (UTC)
     daily_briefing_hour: int = 6  # 06:00 UTC = 08:00 CET
     # Pending approval reminder interval
@@ -232,6 +249,7 @@ class SentinelConfig:
     dropbox: DropboxConfig = field(default_factory=DropboxConfig)
     whoop: WhoopConfig = field(default_factory=WhoopConfig)
     rss: RssConfig = field(default_factory=RssConfig)
+    slack: SlackConfig = field(default_factory=SlackConfig)
     postgres: PostgresConfig = field(default_factory=PostgresConfig)
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
     outputs: OutputConfig = field(default_factory=OutputConfig)

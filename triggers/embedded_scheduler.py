@@ -122,6 +122,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info(f"Registered: rss_poll (every {config.triggers.rss_check_interval}s)")
 
+    # Slack polling — every 5 minutes (SLACK-1 S2)
+    from triggers.slack_trigger import run_slack_poll
+    scheduler.add_job(
+        run_slack_poll,
+        IntervalTrigger(seconds=config.triggers.slack_check_interval),
+        id="slack_poll", name="Slack channel polling",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info(f"Registered: slack_poll (every {config.triggers.slack_check_interval}s)")
+
     # Daily briefing — 06:00 UTC (08:00 CET)
     from triggers.briefing_trigger import generate_morning_briefing
     scheduler.add_job(

@@ -7,7 +7,7 @@ import json
 import logging
 from typing import Optional
 from datetime import datetime, timezone
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 
 import anthropic
 
@@ -52,6 +52,7 @@ class TriggerEvent:
     contact_id: Optional[str] = None
     priority: Optional[str] = None  # will be classified by orchestrator
     timestamp: str = ""
+    metadata: dict = field(default_factory=dict)  # carrier for trigger-specific context
 
     def __post_init__(self):
         if not self.timestamp:
@@ -386,6 +387,27 @@ class SentinelPipeline:
         )
 
     # -------------------------------------------------------
+    # Step S3: Slack thread reply for @Baker mentions
+    # -------------------------------------------------------
+
+    def _post_slack_thread_reply(self, trigger: TriggerEvent, response: SentinelResponse):
+        """Post Baker's analysis as a Slack thread reply for @Baker mentions (S3)."""
+        try:
+            from outputs.slack_notifier import SlackNotifier
+            channel_id = trigger.metadata.get("channel_id", "")
+            thread_ts = trigger.metadata.get("thread_ts", "")
+            if not channel_id or not thread_ts:
+                logger.warning("S3: missing channel_id or thread_ts in trigger metadata")
+                return
+            reply_text = (response.analysis or "I've processed this — check the Cockpit for details.")[:3000]
+            notifier = SlackNotifier()
+            ok = notifier.post_thread_reply(channel_id, thread_ts, reply_text)
+            if ok:
+                logger.info(f"S3: thread reply posted to {channel_id} ts={thread_ts}")
+        except Exception as e:
+            logger.warning(f"S3: Slack thread reply failed (non-fatal): {e}")
+
+    # -------------------------------------------------------
     # Full Pipeline Execution
     # -------------------------------------------------------
 
@@ -434,6 +456,11 @@ class SentinelPipeline:
         # Step 6: ClickUp write actions (M3)
         self._execute_clickup_actions(trigger, response)
         logger.info(f"Step 6 complete: ClickUp actions processed")
+
+        # Step 7: Slack thread reply for @Baker mentions (S3)
+        if trigger.type == "slack" and trigger.metadata.get("is_mention"):
+            self._post_slack_thread_reply(trigger, response)
+            logger.info("Step 7 complete: Slack thread reply posted")
 
         total_ms = int((time.time() - start) * 1000)
         logger.info(f"SENTINEL PIPELINE COMPLETE: {total_ms}ms total")

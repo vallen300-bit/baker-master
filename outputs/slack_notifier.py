@@ -1,13 +1,15 @@
 """
 Baker AI — Slack Output Layer
-Posts formatted messages to #cockpit via incoming webhook.
+Posts formatted messages to #cockpit via Slack Bot Token (slack_sdk WebClient).
 Uses Slack Block Kit for rich formatting.
+
+Migration note (SLACK-1 S4): replaced httpx + incoming webhook with
+slack_sdk WebClient.chat_postMessage(). Bot token read from SLACK_BOT_TOKEN.
+Target channel: config.slack.cockpit_channel_id (default: C0AF4FVN3FB = #cockpit).
 """
 import logging
 import time
 from typing import Optional
-
-import httpx
 
 from config.settings import config
 from outputs.formatters import (
@@ -24,17 +26,23 @@ _MAX_BLOCKS_PER_MESSAGE = 50
 _RATE_LIMIT_DELAY = 1.1  # seconds between multi-message posts
 
 
+def _get_webclient():
+    """Get a Slack WebClient (lazy import, new instance each call — thread-safe)."""
+    from slack_sdk import WebClient
+    return WebClient(token=config.outputs.slack_bot_token)
+
+
 class SlackNotifier:
     """
     Slack delivery engine.
-    Posts alerts, briefings, and pipeline results to #cockpit via webhook.
+    Posts alerts, briefings, and pipeline results to #cockpit via Bot Token.
     All operations are non-fatal — failures are logged but never raise.
     """
 
-    def __init__(self, webhook_url: str = None):
-        self.webhook_url = webhook_url or config.outputs.slack_webhook_url
-        if not self.webhook_url or not self.webhook_url.startswith("http"):
-            logger.warning("SlackNotifier: no valid webhook URL configured")
+    def __init__(self):
+        self._channel = config.slack.cockpit_channel_id
+        if not config.outputs.slack_bot_token:
+            logger.warning("SlackNotifier: SLACK_BOT_TOKEN not configured")
 
     # -------------------------------------------------------
     # Public API
@@ -44,16 +52,9 @@ class SlackNotifier:
         """
         Format and post a single alert.
         Tier 3 (INFO) alerts are skipped — they appear in the daily briefing only.
-
-        Args:
-            alert: dict with keys: tier (int), title (str), body (str),
-                   action_required (bool), contact_name (str), deal_name (str)
-        Returns:
-            True if posted successfully, False otherwise.
         """
         tier = alert.get("tier", 3)
 
-        # Tier 3 = INFO — don't post, stays in PostgreSQL for morning briefing
         if tier >= 3:
             logger.debug(f"Skipping Tier {tier} alert (INFO only): {alert.get('title')}")
             return True
@@ -68,12 +69,6 @@ class SlackNotifier:
         """
         Format and post the morning briefing as Block Kit message.
         Splits into multiple POSTs if blocks exceed 50.
-
-        Args:
-            briefing_text: The briefing markdown content.
-            date_str: Date string (e.g., "2026-02-19").
-        Returns:
-            True if all parts posted successfully.
         """
         logger.info(f"Posting morning briefing to Slack ({len(briefing_text)} chars)")
 
@@ -83,18 +78,15 @@ class SlackNotifier:
         if len(blocks) <= _MAX_BLOCKS_PER_MESSAGE:
             return self._post(payload)
 
-        # Split into chunks of max blocks
         all_ok = True
         for i, chunk_start in enumerate(range(0, len(blocks), _MAX_BLOCKS_PER_MESSAGE)):
             chunk = blocks[chunk_start : chunk_start + _MAX_BLOCKS_PER_MESSAGE]
 
-            # Add continuation header for subsequent chunks
             if i > 0:
                 chunk.insert(0, {
                     "type": "context",
                     "elements": [{"type": "mrkdwn", "text": f"_...continued ({i + 1})_"}],
                 })
-                # May need to drop last block to stay under limit
                 if len(chunk) > _MAX_BLOCKS_PER_MESSAGE:
                     chunk = chunk[:_MAX_BLOCKS_PER_MESSAGE]
 
@@ -102,7 +94,6 @@ class SlackNotifier:
             if not ok:
                 all_ok = False
 
-            # Rate limiting between multi-message posts
             if chunk_start + _MAX_BLOCKS_PER_MESSAGE < len(blocks):
                 time.sleep(_RATE_LIMIT_DELAY)
 
@@ -112,22 +103,43 @@ class SlackNotifier:
                              contact_name: str = None) -> bool:
         """
         Post a compact summary when the pipeline processes a trigger.
-        Only posts for email/whatsapp/meeting triggers (not scheduled/manual).
-
-        Args:
-            analysis: The pipeline analysis text.
-            trigger_type: Type of trigger (email, whatsapp, etc.).
-            contact_name: Optional contact name.
-        Returns:
-            True if posted successfully.
+        Only posts for email/whatsapp/meeting triggers (not scheduled/manual/slack).
         """
-        # Don't spam Slack with manual queries or scheduled runs
-        if trigger_type in ("manual", "scheduled"):
+        if trigger_type in ("manual", "scheduled", "slack"):
             return True
 
         logger.info(f"Posting pipeline result to Slack: {trigger_type}")
         payload = format_pipeline_result_slack(analysis, trigger_type, contact_name)
         return self._post(payload)
+
+    def post_thread_reply(self, channel_id: str, thread_ts: str, text: str) -> bool:
+        """
+        Post a reply in a Slack thread (S3 — @Baker mention response).
+
+        Args:
+            channel_id: Slack channel ID (e.g. C0AF4FVN3FB).
+            thread_ts:  Timestamp of the parent message (Slack thread identifier).
+            text:       Reply text (plain text, max 3000 chars recommended).
+        Returns:
+            True if posted successfully, False otherwise.
+        """
+        if not config.outputs.slack_bot_token:
+            logger.warning("Slack thread reply skipped: SLACK_BOT_TOKEN not configured")
+            return False
+        try:
+            client = _get_webclient()
+            resp = client.chat_postMessage(
+                channel=channel_id,
+                thread_ts=thread_ts,
+                text=text[:3000],
+            )
+            if resp.get("ok"):
+                return True
+            logger.warning(f"Slack thread reply failed: {resp.get('error')}")
+            return False
+        except Exception as e:
+            logger.warning(f"Slack thread reply failed: {e}")
+            return False
 
     # -------------------------------------------------------
     # Internal
@@ -135,29 +147,32 @@ class SlackNotifier:
 
     def _post(self, payload: dict) -> bool:
         """
-        POST payload to Slack webhook.
+        Post Block Kit payload to #cockpit via WebClient.chat_postMessage().
         Returns True on success. All errors are non-fatal.
         """
-        if not self.webhook_url or not self.webhook_url.startswith("http"):
-            logger.warning("Slack POST skipped: no webhook URL configured")
+        if not config.outputs.slack_bot_token:
+            logger.warning("Slack POST skipped: SLACK_BOT_TOKEN not configured")
             return False
 
         try:
-            with httpx.Client(timeout=10) as client:
-                resp = client.post(self.webhook_url, json=payload)
+            client = _get_webclient()
 
-                if resp.status_code == 200:
-                    return True
+            # Ensure `text` fallback exists — required for push notifications / accessibility
+            text = payload.get("text") or " "
 
-                # Slack returns "ok" for success, error text otherwise
-                logger.warning(
-                    f"Slack POST returned {resp.status_code}: {resp.text[:200]}"
-                )
-                return False
+            resp = client.chat_postMessage(
+                channel=self._channel,
+                text=text,
+                blocks=payload.get("blocks"),
+                attachments=payload.get("attachments"),
+            )
 
-        except httpx.TimeoutException:
-            logger.warning("Slack POST timed out (10s)")
+            if resp.get("ok"):
+                return True
+
+            logger.warning(f"Slack chat_postMessage failed: {resp.get('error')}")
             return False
+
         except Exception as e:
             logger.warning(f"Slack POST failed: {e}")
             return False
