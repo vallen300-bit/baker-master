@@ -12,3 +12,7 @@ analysis_outputs/
 config/gmail_credentials.json
 config/gmail_token.json
 config/gmail_poll_state.json
+
+# PL working files
+EMAIL-FIX-1_items1-2.patch
+PL-2_HANDOVER.md
