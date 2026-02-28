@@ -269,6 +269,7 @@ class SentinelPipeline:
                 trigger_content=trigger.content[:500],
                 response_analysis=response.analysis[:500],
                 contact_name=trigger.contact_name,
+                full_content=trigger.content,
             )
         except Exception as e:
             logger.warning(f"Store-back: Qdrant interaction store failed (non-fatal): {e}")

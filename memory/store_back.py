@@ -1166,6 +1166,7 @@ class SentinelStoreBack:
         trigger_content: str,
         response_analysis: str,
         contact_name: Optional[str] = None,
+        full_content: Optional[str] = None,
     ):
         """Store a Sentinel interaction as a new vector in Qdrant."""
         collection = "sentinel-interactions"
@@ -1182,25 +1183,31 @@ class SentinelStoreBack:
                 )
                 logger.info(f"Created collection: {collection}")
 
-            text = (
+            snippet_text = (
                 f"[{trigger_type}] {trigger_content}\n"
                 f"[Analysis] {response_analysis}"
             )
-            vector = self._embed(text[:8000])
+            # Embed full content when available for richer retrieval
+            embed_text = (full_content or snippet_text)[:8000]
+            vector = self._embed(embed_text)
             point_id = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+            payload = {
+                "text": snippet_text,
+                "trigger_type": trigger_type,
+                "contact": contact_name or "unknown",
+                "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+            if full_content:
+                payload["full_content"] = full_content[:8000]
 
             self.qdrant.upsert(
                 collection_name=collection,
                 points=[PointStruct(
                     id=point_id,
                     vector=vector,
-                    payload={
-                        "text": text,
-                        "trigger_type": trigger_type,
-                        "contact": contact_name or "unknown",
-                        "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    },
+                    payload=payload,
                 )],
             )
             logger.info(f"Stored interaction {point_id} in {collection}")
