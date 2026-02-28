@@ -675,17 +675,8 @@ def save_poll_state(state: Dict):
     """
     last_seen_str = state.get("last_seen", "")
 
-    # --- Primary: PostgreSQL via trigger_state ---
-    try:
-        from triggers.state import trigger_state
-        if last_seen_str:
-            # Convert YYYY-MM-DD string to timezone-aware datetime for watermark
-            from datetime import timezone as tz
-            wm_dt = datetime.strptime(last_seen_str, "%Y-%m-%d").replace(tzinfo=tz.utc)
-            trigger_state.set_watermark("email_poll", wm_dt)
-            print(f"Poll state saved to DB: last_seen = {last_seen_str}")
-    except Exception as e:
-        print(f"  DB poll state save failed ({e}), using file fallback only.")
+    # DB watermark is managed exclusively by email_trigger.py (F4 logic).
+    # save_poll_state() writes file only — dev/local fallback.
 
     # --- Always write file as backup ---
     try:
