@@ -56,6 +56,21 @@ def check_new_emails():
 
     if not new_threads:
         logger.info("Email trigger: no new threads")
+        # Gap detection: alert if no email activity for 48+ hours
+        wm = trigger_state.get_watermark("email_poll")
+        if wm:
+            gap_hours = (datetime.now(timezone.utc) - wm).total_seconds() / 3600
+            if gap_hours > 48:
+                gap_title = f"Email gap alert: {gap_hours:.0f}h since last email"
+                gap_body = f"Watermark stuck at {wm.isoformat()}. Check Gmail auth and poll health."
+                logger.warning(gap_title)
+                try:
+                    from memory.store_back import store
+                    store.create_alert(tier=1, title=gap_title, body=gap_body)
+                    from outputs.slack_notifier import SlackNotifier
+                    SlackNotifier().post_alert(gap_title, gap_body)
+                except Exception as e:
+                    logger.error(f"Gap alert dispatch failed: {e}")
         return
 
     logger.info(f"Email trigger: {len(new_threads)} new threads found")
