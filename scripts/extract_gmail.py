@@ -311,8 +311,10 @@ def format_thread(thread_data: Dict, messages: List[Dict]) -> Optional[Dict]:
     # Extract info from all messages
     msg_blocks = []
     all_participants = set()
+    all_sender_domains = []
     dates = []
     subject = ""
+    first_sender_domain = ""
 
     for msg in messages:
         headers = msg.get("payload", {}).get("headers", [])
@@ -324,6 +326,14 @@ def format_thread(thread_data: Dict, messages: List[Dict]) -> Optional[Dict]:
         msg_subject = header_map.get("subject", "")
         if msg_subject and not subject:
             subject = msg_subject
+
+        # Track sender domain (first message = thread initiator)
+        _, sender_email_addr = parseaddr(from_addr)
+        if sender_email_addr and "@" in sender_email_addr:
+            domain = sender_email_addr.split("@", 1)[1].lower()
+            all_sender_domains.append(domain)
+            if not first_sender_domain:
+                first_sender_domain = domain
 
         # Parse date
         msg_date = parse_message_date(headers)
@@ -375,9 +385,12 @@ def format_thread(thread_data: Dict, messages: List[Dict]) -> Optional[Dict]:
             else dates[0].strftime("%Y-%m-%d")
         )
         first_date = dates[0].strftime("%Y-%m-%d")
+        # received_date = ISO timestamp of most recent message in thread
+        received_date = dates[-1].isoformat()
     else:
         date_range = "unknown"
         first_date = "unknown"
+        received_date = "unknown"
 
     # Assemble text block
     participants_str = ", ".join(sorted(all_participants))
@@ -400,6 +413,8 @@ def format_thread(thread_data: Dict, messages: List[Dict]) -> Optional[Dict]:
         "subject": subject,
         "date": first_date,
         "date_range": date_range,
+        "received_date": received_date,
+        "sender_domain": first_sender_domain,
         "participants": participants_str,
         "message_count": len(msg_blocks),
         "thread_id": thread_id,
@@ -524,7 +539,7 @@ def extract_historical(
 
             # Limit messages
             if len(messages) > config.gmail.max_messages_per_thread:
-                messages = messages[:config.gmail.max_messages_per_thread]
+                messages = messages[-config.gmail.max_messages_per_thread:]
 
             formatted = format_thread(thread, messages)
             if formatted:
@@ -577,7 +592,7 @@ def extract_historical(
 
         # Limit messages per thread
         if len(messages) > config.gmail.max_messages_per_thread:
-            messages = messages[:config.gmail.max_messages_per_thread]
+            messages = messages[-config.gmail.max_messages_per_thread:]
 
         # Format
         formatted = format_thread(thread, messages)
@@ -730,7 +745,7 @@ def extract_poll(service) -> List[Dict]:
 
         # Limit messages per thread
         if len(messages) > config.gmail.max_messages_per_thread:
-            messages = messages[:config.gmail.max_messages_per_thread]
+            messages = messages[-config.gmail.max_messages_per_thread:]
 
         # Format
         formatted = format_thread(thread, messages)
