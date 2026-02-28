@@ -426,6 +426,14 @@ class SentinelPipeline:
         # Step 1: Classify
         trigger = self.classify_trigger(trigger)
 
+        # Email alert for high-priority triggers (EMAIL-SMART-1 Type 1)
+        if trigger.priority == "high":
+            try:
+                from outputs.email_alerts import send_alert_email
+                send_alert_email(trigger)
+            except Exception as _e:
+                logger.warning(f"Alert email failed (non-fatal): {_e}")
+
         # Step 2: Retrieve
         contexts = self.retrieve_context(trigger)
         from collections import Counter

@@ -815,6 +815,14 @@ async def scan_chat(req: ScanRequest):
         except Exception as e:
             logger.warning(f"Conversation store-back failed (non-fatal): {e}")
 
+        # 5c. Email scan result to Director (EMAIL-SMART-1 Type 2)
+        if full_response:
+            try:
+                from outputs.email_alerts import send_scan_result_email
+                send_scan_result_email(req.question, full_response)
+            except Exception as e:
+                logger.warning(f"Scan email failed (non-fatal): {e}")
+
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",

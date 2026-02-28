@@ -89,8 +89,21 @@
                     <!-- Email -->
                     <div class="home-section-label">Email</div>
                     <div class="email-panel" id="emailPanel">
+
+                        <!-- Type 4: Manual Summary -->
+                        <textarea id="emailNoteInput" class="email-note-input" placeholder="Add a note (optional)" rows="2" maxlength="1000"></textarea>
                         <button class="email-send-btn" id="emailSendBtn" onclick="sendEmailSummary()">Send Summary to Director</button>
                         <div class="email-status" id="emailStatus" hidden></div>
+
+                        <!-- Type 5: Compose -->
+                        <div class="email-compose-toggle" onclick="toggleCompose()">&#9662; Compose email</div>
+                        <div class="email-compose" id="emailCompose" hidden>
+                            <input id="emailComposeTo" type="email" class="email-compose-input" placeholder="To: email address" />
+                            <input id="emailComposeSubject" type="text" class="email-compose-input" placeholder="Subject" maxlength="200" />
+                            <textarea id="emailComposeBody" class="email-compose-body" placeholder="Message" rows="4" maxlength="5000"></textarea>
+                            <button class="email-send-btn" id="emailComposeBtn" onclick="composeEmail()">Send</button>
+                            <div class="email-status" id="emailComposeStatus" hidden></div>
+                        </div>
                     </div>
 
                     <!-- Feed Baker -->

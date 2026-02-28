@@ -192,6 +192,13 @@ def generate_morning_briefing():
     # Deliver
     deliver_briefing(briefing_text, date_str)
 
+    # Email daily summary to Director (EMAIL-SMART-1 Type 3)
+    try:
+        from outputs.email_alerts import send_daily_summary_email
+        send_daily_summary_email(briefing_text)
+    except Exception as e:
+        logger.warning(f"Daily summary email failed (non-fatal): {e}")
+
     # Clear the queue
     trigger_state.clear_briefing_queue()
 

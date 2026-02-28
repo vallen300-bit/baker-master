@@ -1292,3 +1292,74 @@ body {
     color: #f44336;
     border: 1px solid rgba(244, 67, 54, 0.2);
 }
+
+/* ═══ EMAIL PANEL EXTENSIONS (EMAIL-SMART-1) ═══ */
+.email-note-input {
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: var(--radius-btn);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 8px 10px;
+    resize: vertical;
+}
+
+.email-note-input::placeholder {
+    color: var(--text-muted);
+}
+
+.email-compose-toggle {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 4px 0;
+    user-select: none;
+}
+
+.email-compose-toggle:hover {
+    color: var(--text-secondary);
+}
+
+.email-compose {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 4px;
+    padding: 10px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: var(--radius-btn);
+}
+
+.email-compose-input {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: var(--radius-btn);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 7px 10px;
+}
+
+.email-compose-input::placeholder {
+    color: var(--text-muted);
+}
+
+.email-compose-body {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: var(--radius-btn);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 7px 10px;
+    resize: vertical;
+}
+
+.email-compose-body::placeholder {
+    color: var(--text-muted);
+}

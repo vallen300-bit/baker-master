@@ -1317,26 +1317,24 @@ document.addEventListener('keydown', (e) => {
     }
 })();
 
-// ═══ EMAIL SEND ═══
+// ═══ EMAIL — Type 4: Manual Summary ═══
 async function sendEmailSummary() {
     const btn = document.getElementById('emailSendBtn');
     const statusEl = document.getElementById('emailStatus');
+    const noteInput = document.getElementById('emailNoteInput');
+    const note = noteInput ? noteInput.value.trim() : '';
 
     btn.disabled = true;
     btn.textContent = 'Sending…';
     statusEl.hidden = false;
     statusEl.className = 'email-status email-status--sending';
-    statusEl.textContent = 'Sending summary email…';
+    statusEl.textContent = 'Generating and sending summary…';
 
     try {
         const resp = await bakerFetch('/api/email/send', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                to: 'dvallen@brisengroup.com',
-                subject: 'Baker Dashboard Summary',
-                body: 'Baker Dashboard Summary — sent from the CEO Cockpit. Check the dashboard for the latest briefing, alerts, and decisions.',
-            }),
+            body: JSON.stringify({ custom_note: note }),
         });
 
         const data = await resp.json();
@@ -1344,7 +1342,7 @@ async function sendEmailSummary() {
         if (resp.ok) {
             statusEl.className = 'email-status email-status--success';
             statusEl.textContent = `Sent. Message ID: ${data.message_id || 'ok'}`;
-            btn.textContent = 'Send Summary to Director';
+            if (noteInput) noteInput.value = '';
             setTimeout(() => { statusEl.hidden = true; }, 10000);
         } else if (resp.status === 401) {
             statusEl.className = 'email-status email-status--error';
@@ -1362,6 +1360,67 @@ async function sendEmailSummary() {
     } finally {
         btn.disabled = false;
         btn.textContent = 'Send Summary to Director';
+    }
+}
+
+// ═══ EMAIL — Type 5: Compose ═══
+function toggleCompose() {
+    const panel = document.getElementById('emailCompose');
+    if (panel) panel.hidden = !panel.hidden;
+}
+
+async function composeEmail() {
+    const btn = document.getElementById('emailComposeBtn');
+    const statusEl = document.getElementById('emailComposeStatus');
+    const to = document.getElementById('emailComposeTo').value.trim();
+    const subject = document.getElementById('emailComposeSubject').value.trim();
+    const body = document.getElementById('emailComposeBody').value.trim();
+
+    if (!to || !subject || !body) {
+        statusEl.hidden = false;
+        statusEl.className = 'email-status email-status--error';
+        statusEl.textContent = 'To, Subject, and Message are all required.';
+        return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    statusEl.hidden = false;
+    statusEl.className = 'email-status email-status--sending';
+    statusEl.textContent = 'Sending…';
+
+    try {
+        const resp = await bakerFetch('/api/email/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ to, subject, body }),
+        });
+
+        const data = await resp.json();
+
+        if (resp.ok) {
+            statusEl.className = 'email-status email-status--success';
+            statusEl.textContent = `Sent. Message ID: ${data.message_id || 'ok'}`;
+            document.getElementById('emailComposeTo').value = '';
+            document.getElementById('emailComposeSubject').value = '';
+            document.getElementById('emailComposeBody').value = '';
+            setTimeout(() => { statusEl.hidden = true; }, 10000);
+        } else if (resp.status === 401) {
+            statusEl.className = 'email-status email-status--error';
+            statusEl.textContent = 'Auth failed (401) — check API key.';
+        } else if (resp.status === 503) {
+            statusEl.className = 'email-status email-status--error';
+            statusEl.textContent = 'Email service unavailable (503).';
+        } else {
+            statusEl.className = 'email-status email-status--error';
+            statusEl.textContent = `Error: ${data.detail || resp.statusText}`;
+        }
+    } catch (err) {
+        statusEl.className = 'email-status email-status--error';
+        statusEl.textContent = 'Network error: ' + err.message;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Send';
     }
 }
 
