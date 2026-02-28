@@ -781,7 +781,11 @@ function appendScanBubble(role, content, id) {
     const div = document.createElement('div');
     div.className = 'scan-bubble scan-bubble-' + role;
     if (id) div.id = id;
-    div.innerHTML = role === 'assistant' ? md(content) : esc(content);
+    if (role === 'assistant' && !content) {
+        div.innerHTML = '<div class="scan-typing"><span></span><span></span><span></span></div>';
+    } else {
+        div.innerHTML = role === 'assistant' ? md(content) : esc(content);
+    }
 
     // Copy button for assistant messages (only when content is present)
     if (role === 'assistant' && content) {
@@ -891,6 +895,9 @@ async function sendScanMessage(question) {
                 try {
                     const data = JSON.parse(payload);
                     if (data.token) {
+                        if (!fullResponse && replyEl) {
+                            replyEl.innerHTML = '';  // removes typing indicator
+                        }
                         fullResponse += data.token;
                         if (replyEl) replyEl.innerHTML = md(fullResponse);
                     }
