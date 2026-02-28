@@ -29,7 +29,7 @@ class QdrantConfig:
         ).split(",")
     ])
     collection_whatsapp: str = "baker-whatsapp"
-    collection_email: str = "sentinel-email"
+    collection_email: str = "baker-conversations"
     collection_meetings: str = "sentinel-meetings"
     collection_documents: str = "sentinel-documents"
 
