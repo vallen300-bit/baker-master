@@ -314,6 +314,42 @@ def _quick_email_detect(question: str) -> dict:
     return None
 
 
+def _quick_fireflies_detect(question: str) -> dict:
+    """
+    Fast regex pre-check for Fireflies fetch requests.
+    Catches natural language like 'check my Fireflies', 'pull the recording',
+    'find the meeting with X', etc. Bypasses Haiku entirely.
+    """
+    q = question.lower()
+
+    # Must mention Fireflies OR meeting recordings
+    fireflies_refs = [
+        "fireflies", "fire flies", "firefly",
+        "recording", "transcript", "meeting recording",
+    ]
+    has_fireflies_ref = any(ref in q for ref in fireflies_refs)
+
+    if not has_fireflies_ref:
+        return None
+
+    # Must contain a fetch/search verb
+    fetch_verbs = [
+        "check", "pull", "fetch", "find", "get", "search",
+        "look up", "look for", "go to", "open", "show",
+        "retrieve", "grab", "bring up", "dig up",
+    ]
+    has_verb = any(v in q for v in fetch_verbs)
+
+    if has_verb:
+        logger.info(f"Quick fireflies detect: matched via regex (bypassing Haiku)")
+        return {
+            "type": "fireflies_fetch",
+            "content_request": question,
+        }
+
+    return None
+
+
 def classify_intent(question: str) -> dict:
     """
     Classify the Director's input into action types.
@@ -327,6 +363,12 @@ def classify_intent(question: str) -> dict:
     if quick:
         _log_action("classify_intent:regex_match", f"type={quick.get('type')}, recipient={quick.get('recipient')}")
         return quick
+
+    # Fast path — regex catches Fireflies fetch requests
+    quick_ff = _quick_fireflies_detect(question)
+    if quick_ff:
+        _log_action("classify_intent:regex_match", f"type=fireflies_fetch")
+        return quick_ff
 
     try:
         claude = anthropic.Anthropic(api_key=config.claude.api_key)
