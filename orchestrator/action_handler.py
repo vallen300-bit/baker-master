@@ -215,7 +215,7 @@ _INTENT_SYSTEM = """You are Baker's intent classifier. Given a Director's messag
 Return exactly this JSON structure (no other text, no markdown):
 {
   "type": "email_action" | "deadline_action" | "vip_action" | "fireflies_fetch" | "question",
-  "recipient": "<email address or null>",
+  "recipient": "<email address or comma-separated list of email addresses, or null>",
   "subject": "<inferred subject line or null>",
   "content_request": "<what Baker should include in the email body, or null>",
   "deadline_action": "<dismiss | complete | confirm | null>",
@@ -341,12 +341,15 @@ def generate_email_body(content_request: str, retriever, project=None, role=None
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     system = (
-        "You are Baker, CEO Chief of Staff AI. Write a professional email body based on the "
-        "Director's request and the retrieved context below.\n"
-        "Rules:\n"
+        "You are Baker, CEO Chief of Staff AI. You MUST compose an email body NOW.\n\n"
+        "CRITICAL RULES:\n"
+        "- You MUST write the email body immediately. NEVER ask for clarification.\n"
+        "- NEVER respond with questions like 'could you provide more detail' or 'who is the recipient'.\n"
+        "- If details are sparse, write a brief, professional email with what you have.\n"
         "- Write only the email body. No salutation ('Dear X'), no subject line, no signature.\n"
         "- Plain text. Professional, concise tone.\n"
-        "- Use facts from the retrieved context — do not invent information.\n"
+        "- Use facts from the retrieved context if relevant — do not invent information.\n"
+        "- If no context is relevant, compose a general professional email based on the topic.\n"
         f"Today's date: {now}\n\n"
         f"RETRIEVED CONTEXT:\n{context_block}"
     )
@@ -357,7 +360,7 @@ def generate_email_body(content_request: str, retriever, project=None, role=None
             model=config.claude.model,
             max_tokens=1500,
             system=system,
-            messages=[{"role": "user", "content": f"Write an email body for this request: {content_request}"}],
+            messages=[{"role": "user", "content": f"Compose this email now: {content_request}"}],
         )
         return resp.content[0].text.strip()
     except Exception as e:
@@ -393,17 +396,21 @@ def _log_sent_email(to: str, subject: str, body: str, message_id: str,
 def handle_email_action(intent: dict, retriever, project=None, role=None,
                         channel: str = "scan") -> str:
     """
-    Process a detected email action intent.
+    Process a detected email action intent. Supports single or multiple recipients.
     - Internal (@brisengroup.com): auto-send, return confirmation.
     - External: save pending draft to PostgreSQL, return draft for confirmation.
+    - Mixed: send internal immediately, draft external for confirmation.
     Returns the response text to stream back to the Director.
     channel: "scan" or "whatsapp" — determines where confirmations/replies go.
     """
-    recipient = (intent.get("recipient") or "").strip()
+    raw_recipient = (intent.get("recipient") or "").strip()
     subject = (intent.get("subject") or "Email from Dimitry Vallen").strip()
     content_request = (intent.get("content_request") or intent.get("subject") or "general email").strip()
 
-    if not recipient or "@" not in recipient:
+    # Parse multiple recipients (comma, semicolon, or "and" separated)
+    recipients = _parse_recipients(raw_recipient)
+
+    if not recipients:
         return (
             "I couldn't identify a recipient email address in your request. "
             "Please specify who to send the email to (e.g. \"Send the meeting summary to john@example.com\")."
@@ -412,39 +419,78 @@ def handle_email_action(intent: dict, retriever, project=None, role=None,
     body = generate_email_body(content_request, retriever, project, role)
     full_body = body + BAKER_FOOTER
 
-    domain = recipient.split("@")[-1].lower()
-    is_internal = domain == INTERNAL_DOMAIN
+    # Separate internal vs external recipients
+    internal = [r for r in recipients if r.split("@")[-1].lower() == INTERNAL_DOMAIN]
+    external = [r for r in recipients if r.split("@")[-1].lower() != INTERNAL_DOMAIN]
 
-    if is_internal:
+    results = []
+
+    # Auto-send to all internal recipients
+    for recipient in internal:
         try:
             from outputs.email_alerts import send_composed_email
             result = send_composed_email(recipient, subject, full_body)
-            if not result:
-                return f"\u274c Failed to send email to {recipient}: no response from Gmail"
-            message_id = result.get("message_id")
-            thread_id = result.get("thread_id")
-            _delete_draft()
-            # REPLY-TRACK-1: Log sent email for reply tracking
-            _log_sent_email(recipient, subject, full_body, message_id, thread_id, channel)
-            preview = full_body[:200].replace("\n", " ")
-            logger.info(f"Action: internal email sent to {recipient} via {channel} (id={message_id})")
-            return (
-                f"\u2705 Email sent to {recipient}\n"
-                f"Subject: {subject}\n\n"
-                f"{preview}\u2026"
-            )
+            if result:
+                message_id = result.get("message_id")
+                thread_id = result.get("thread_id")
+                _log_sent_email(recipient, subject, full_body, message_id, thread_id, channel)
+                results.append(f"\u2705 Sent to {recipient}")
+                logger.info(f"Action: internal email sent to {recipient} via {channel} (id={message_id})")
+            else:
+                results.append(f"\u274c Failed: {recipient}")
         except Exception as e:
-            logger.error(f"Internal email send failed: {e}")
-            return f"\u274c Failed to send email to {recipient}: {e}"
-    else:
-        _save_draft(recipient, subject, full_body, content_request, channel=channel)
-        logger.info(f"Action: external draft saved for {recipient} via {channel}")
-        return (
-            f'\U0001f4e7 Draft ready \u2014 reply "send" to confirm, or "edit: [changes]" to modify.\n\n'
-            f"To: {recipient}\n"
-            f"Subject: {subject}\n\n"
-            f"---\n\n{full_body}"
+            logger.error(f"Internal email send failed for {recipient}: {e}")
+            results.append(f"\u274c Failed: {recipient}: {e}")
+
+    # Draft for external recipients (first one gets the draft, rest queued)
+    if external:
+        first_external = external[0]
+        all_external = ", ".join(external)
+        _save_draft(first_external, subject, full_body, content_request, channel=channel)
+        logger.info(f"Action: external draft saved for {first_external} via {channel}")
+
+        if len(external) > 1:
+            # Store additional recipients in content_req for confirmation handler
+            _save_draft(all_external, subject, full_body, content_request, channel=channel)
+
+        results.append(
+            f'\U0001f4e7 Draft ready for {all_external} \u2014 reply "send" to confirm, '
+            f'or "edit: [changes]" to modify.'
         )
+
+    # Build final response
+    if not external:
+        # All internal — already sent
+        _delete_draft()
+        preview = full_body[:200].replace("\n", " ")
+        return "\n".join(results) + f"\nSubject: {subject}\n\n{preview}\u2026"
+    elif not internal:
+        # All external — show draft
+        return "\n".join(results) + f"\n\nTo: {', '.join(external)}\nSubject: {subject}\n\n---\n\n{full_body}"
+    else:
+        # Mixed — internal sent, external drafted
+        preview = full_body[:200].replace("\n", " ")
+        return "\n".join(results) + f"\n\nSubject: {subject}\n\n---\n\n{full_body}"
+
+
+def _parse_recipients(raw: str) -> list:
+    """
+    Parse a recipient string that may contain multiple addresses.
+    Handles: "a@x.com, b@y.com", "a@x.com; b@y.com", "a@x.com and b@y.com"
+    Returns list of valid email addresses.
+    """
+    if not raw:
+        return []
+
+    import re
+    # Split on comma, semicolon, or " and "
+    parts = re.split(r'[,;]\s*|\s+and\s+', raw)
+    recipients = []
+    for part in parts:
+        addr = part.strip().strip("<>")
+        if "@" in addr:
+            recipients.append(addr)
+    return recipients
 
 
 def handle_confirmation(retriever=None, project=None, role=None) -> str:
@@ -455,22 +501,26 @@ def handle_confirmation(retriever=None, project=None, role=None) -> str:
 
     try:
         from outputs.email_alerts import send_composed_email
-        result = send_composed_email(draft["to"], draft["subject"], draft["body"])
-        if not result:
-            return "\u274c Failed to send email: no response from Gmail"
-        message_id = result.get("message_id")
-        thread_id = result.get("thread_id")
         draft_channel = draft.get("channel", "scan")
+        recipients = _parse_recipients(draft["to"])
+        if not recipients:
+            recipients = [draft["to"]]
+
+        results = []
+        for recipient in recipients:
+            result = send_composed_email(recipient, draft["subject"], draft["body"])
+            if result:
+                message_id = result.get("message_id")
+                thread_id = result.get("thread_id")
+                _log_sent_email(recipient, draft["subject"], draft["body"], message_id, thread_id, draft_channel)
+                results.append(f"\u2705 Sent to {recipient}")
+                logger.info(f"Action: confirmed send to {recipient} via {draft_channel} (id={message_id})")
+            else:
+                results.append(f"\u274c Failed: {recipient}")
+
         _delete_draft()
-        # REPLY-TRACK-1: Log sent email for reply tracking (use original channel)
-        _log_sent_email(draft["to"], draft["subject"], draft["body"], message_id, thread_id, draft_channel)
         preview = draft["body"][:200].replace("\n", " ")
-        logger.info(f"Action: confirmed send to {draft['to']} via {draft_channel} (id={message_id})")
-        return (
-            f"\u2705 Email sent to {draft['to']}\n"
-            f"Subject: {draft['subject']}\n\n"
-            f"{preview}\u2026"
-        )
+        return "\n".join(results) + f"\nSubject: {draft['subject']}\n\n{preview}\u2026"
     except Exception as e:
         logger.error(f"Confirmation send failed: {e}")
         return f"\u274c Failed to send email: {e}"
