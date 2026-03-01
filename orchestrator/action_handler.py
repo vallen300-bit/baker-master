@@ -91,12 +91,20 @@ def _ensure_draft_table():
                 body        TEXT NOT NULL,
                 content_req TEXT NOT NULL,
                 created_at  TIMESTAMPTZ NOT NULL,
-                expires_at  TIMESTAMPTZ NOT NULL
+                expires_at  TIMESTAMPTZ NOT NULL,
+                channel     TEXT NOT NULL DEFAULT 'scan'
             )
+        """)
+        # WHATSAPP-ACTION-1: Add channel column if missing (existing deployments)
+        cur.execute("""
+            DO $$ BEGIN
+                ALTER TABLE pending_drafts ADD COLUMN channel TEXT NOT NULL DEFAULT 'scan';
+            EXCEPTION WHEN duplicate_column THEN NULL;
+            END $$
         """)
         conn.commit()
         cur.close()
-        logger.info("action_handler: pending_drafts table verified")
+        logger.info("action_handler: pending_drafts table verified (with channel)")
     except Exception as e:
         logger.warning(f"action_handler: could not ensure pending_drafts table: {e}")
     finally:
@@ -110,7 +118,8 @@ _ensure_draft_table()
 # Draft persistence helpers
 # ---------------------------------------------------------------------------
 
-def _save_draft(to: str, subject: str, body: str, content_req: str):
+def _save_draft(to: str, subject: str, body: str, content_req: str,
+                channel: str = "scan"):
     """Upsert a single pending draft for the Director."""
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(seconds=DRAFT_TTL_SECONDS)
@@ -121,19 +130,20 @@ def _save_draft(to: str, subject: str, body: str, content_req: str):
     try:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO pending_drafts (id, to_address, subject, body, content_req, created_at, expires_at)
-            VALUES ('director', %s, %s, %s, %s, %s, %s)
+            INSERT INTO pending_drafts (id, to_address, subject, body, content_req, created_at, expires_at, channel)
+            VALUES ('director', %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (id) DO UPDATE SET
                 to_address  = EXCLUDED.to_address,
                 subject     = EXCLUDED.subject,
                 body        = EXCLUDED.body,
                 content_req = EXCLUDED.content_req,
                 created_at  = EXCLUDED.created_at,
-                expires_at  = EXCLUDED.expires_at
-        """, (to, subject, body, content_req, now, expires_at))
+                expires_at  = EXCLUDED.expires_at,
+                channel     = EXCLUDED.channel
+        """, (to, subject, body, content_req, now, expires_at, channel))
         conn.commit()
         cur.close()
-        logger.info(f"action_handler: draft saved for {to} (expires {expires_at.strftime('%H:%M:%S')} UTC)")
+        logger.info(f"action_handler: draft saved for {to} via {channel} (expires {expires_at.strftime('%H:%M:%S')} UTC)")
     except Exception as e:
         logger.error(f"action_handler: draft save failed: {e}")
     finally:
@@ -151,7 +161,7 @@ def _load_draft() -> Optional[dict]:
     try:
         cur = conn.cursor()
         cur.execute("""
-            SELECT to_address, subject, body, content_req, created_at, expires_at
+            SELECT to_address, subject, body, content_req, created_at, expires_at, channel
             FROM pending_drafts
             WHERE id = 'director'
         """)
@@ -159,7 +169,7 @@ def _load_draft() -> Optional[dict]:
         cur.close()
         if not row:
             return None
-        to_address, subject, body, content_req, created_at, expires_at = row
+        to_address, subject, body, content_req, created_at, expires_at, channel = row
         if datetime.now(timezone.utc) > expires_at:
             logger.info("action_handler: draft expired — auto-deleting")
             _delete_draft()
@@ -171,6 +181,7 @@ def _load_draft() -> Optional[dict]:
             "content_request": content_req,
             "created_at": created_at,
             "expires_at": expires_at,
+            "channel": channel or "scan",
         }
     except Exception as e:
         logger.warning(f"action_handler: draft load failed: {e}")
@@ -371,12 +382,14 @@ def _log_sent_email(to: str, subject: str, body: str, message_id: str,
 # Action handlers
 # ---------------------------------------------------------------------------
 
-def handle_email_action(intent: dict, retriever, project=None, role=None) -> str:
+def handle_email_action(intent: dict, retriever, project=None, role=None,
+                        channel: str = "scan") -> str:
     """
     Process a detected email action intent.
     - Internal (@brisengroup.com): auto-send, return confirmation.
     - External: save pending draft to PostgreSQL, return draft for confirmation.
     Returns the response text to stream back to the Director.
+    channel: "scan" or "whatsapp" — determines where confirmations/replies go.
     """
     recipient = (intent.get("recipient") or "").strip()
     subject = (intent.get("subject") or "Email from Dimitry Vallen").strip()
@@ -404,24 +417,24 @@ def handle_email_action(intent: dict, retriever, project=None, role=None) -> str
             thread_id = result.get("thread_id")
             _delete_draft()
             # REPLY-TRACK-1: Log sent email for reply tracking
-            _log_sent_email(recipient, subject, full_body, message_id, thread_id, "scan")
+            _log_sent_email(recipient, subject, full_body, message_id, thread_id, channel)
             preview = full_body[:200].replace("\n", " ")
-            logger.info(f"Action: internal email sent to {recipient} (id={message_id})")
+            logger.info(f"Action: internal email sent to {recipient} via {channel} (id={message_id})")
             return (
                 f"\u2705 Email sent to {recipient}\n"
-                f"**Subject:** {subject}\n\n"
+                f"Subject: {subject}\n\n"
                 f"{preview}\u2026"
             )
         except Exception as e:
             logger.error(f"Internal email send failed: {e}")
             return f"\u274c Failed to send email to {recipient}: {e}"
     else:
-        _save_draft(recipient, subject, full_body, content_request)
-        logger.info(f"Action: external draft saved for {recipient}")
+        _save_draft(recipient, subject, full_body, content_request, channel=channel)
+        logger.info(f"Action: external draft saved for {recipient} via {channel}")
         return (
-            f'📧 Draft ready — reply **"send it"** to confirm, or **"edit: [instruction]"** to modify.\n\n'
-            f"**To:** {recipient}\n"
-            f"**Subject:** {subject}\n\n"
+            f'\U0001f4e7 Draft ready \u2014 reply "send" to confirm, or "edit: [changes]" to modify.\n\n'
+            f"To: {recipient}\n"
+            f"Subject: {subject}\n\n"
             f"---\n\n{full_body}"
         )
 
@@ -439,14 +452,15 @@ def handle_confirmation(retriever=None, project=None, role=None) -> str:
             return "\u274c Failed to send email: no response from Gmail"
         message_id = result.get("message_id")
         thread_id = result.get("thread_id")
+        draft_channel = draft.get("channel", "scan")
         _delete_draft()
-        # REPLY-TRACK-1: Log sent email for reply tracking
-        _log_sent_email(draft["to"], draft["subject"], draft["body"], message_id, thread_id, "scan")
+        # REPLY-TRACK-1: Log sent email for reply tracking (use original channel)
+        _log_sent_email(draft["to"], draft["subject"], draft["body"], message_id, thread_id, draft_channel)
         preview = draft["body"][:200].replace("\n", " ")
-        logger.info(f"Action: confirmed send to {draft['to']} (id={message_id})")
+        logger.info(f"Action: confirmed send to {draft['to']} via {draft_channel} (id={message_id})")
         return (
             f"\u2705 Email sent to {draft['to']}\n"
-            f"**Subject:** {draft['subject']}\n\n"
+            f"Subject: {draft['subject']}\n\n"
             f"{preview}\u2026"
         )
     except Exception as e:
