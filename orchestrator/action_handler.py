@@ -233,7 +233,7 @@ _INTENT_SYSTEM = """You are Baker's intent classifier. Given a Director's messag
 Return exactly this JSON structure (no other text, no markdown):
 {
   "type": "email_action" | "deadline_action" | "vip_action" | "fireflies_fetch" | "question",
-  "recipient": "<email address or comma-separated list of email addresses, or null>",
+  "recipient": "<email address OR name of recipient(s). For multiple recipients, return comma-separated (e.g. 'Edita Vallen, Philip Vallen, dvallen@brisengroup.com'). 'myself' or 'me' means dvallen@brisengroup.com. Return null only if no recipient at all.>",
   "subject": "<inferred subject line or null>",
   "content_request": "<what Baker should include in the email body, or null>",
   "deadline_action": "<dismiss | complete | confirm | null>",
@@ -244,12 +244,16 @@ Return exactly this JSON structure (no other text, no markdown):
   "vip_email": "<email of VIP contact, or null>"
 }
 
-Email action patterns:
+Email action patterns (classify as email_action even if recipient is a NAME, not an email address):
 - "Send [something] to [name/email]"
 - "Email [name/email] about [topic]"
 - "Forward [something] to [name/email]"
 - "Share [something] with [name/email]"
 - "Write an email to [name/email] about [topic]"
+- "Send the same email to [name] and [name]"
+- "Send this to [name]"
+- "Email [name], [name], and myself about [topic]"
+- "Please send this email to [name]"
 
 Deadline action patterns:
 - "Dismiss the [X] deadline" → type: "deadline_action", deadline_action: "dismiss"
@@ -414,6 +418,8 @@ def generate_email_body(content_request: str, retriever, project=None, role=None
         "- Plain text. Professional, concise tone.\n"
         "- Use facts from the retrieved context if relevant — do not invent information.\n"
         "- If no context is relevant, compose a general professional email based on the topic.\n"
+        "- Write in plain text ONLY. Do NOT use markdown formatting — no bold (**), no headers (#),\n"
+        "  no bullet points (-), no italic (*). Write naturally as in a professional email.\n"
         f"Today's date: {now}\n\n"
         f"RETRIEVED CONTEXT:\n{context_block}"
     )
@@ -539,6 +545,48 @@ def _clean_email_body(raw_body: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Fix 3: Strip markdown formatting from email body
+# ---------------------------------------------------------------------------
+
+def _strip_markdown(text: str) -> str:
+    """Convert markdown-formatted text to clean plain text for email."""
+    import re
+    if not text:
+        return text
+
+    # Remove bold: **text** or __text__ -> text
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
+    text = re.sub(r'__(.+?)__', r'\1', text)
+
+    # Remove italic: *text* or _text_ -> text
+    text = re.sub(r'\*(.+?)\*', r'\1', text)
+    text = re.sub(r'(?<!\w)_(.+?)_(?!\w)', r'\1', text)
+
+    # Remove headers: ## Header -> Header
+    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+
+    # Remove bullet markers: - item or * item -> item
+    text = re.sub(r'^\s*[-*+]\s+', '', text, flags=re.MULTILINE)
+
+    # Remove numbered list markers: 1. item -> item
+    text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
+
+    # Remove inline code: `code` -> code
+    text = re.sub(r'`(.+?)`', r'\1', text)
+
+    # Remove links: [text](url) -> text
+    text = re.sub(r'\[(.+?)\]\(.+?\)', r'\1', text)
+
+    # Remove horizontal rules: --- or *** -> blank line
+    text = re.sub(r'^[-*_]{3,}\s*$', '', text, flags=re.MULTILINE)
+
+    # Clean up excessive blank lines
+    text = re.sub(r'\n{3,}', '\n\n', text)
+
+    return text.strip()
+
+
+# ---------------------------------------------------------------------------
 # Action handlers
 # ---------------------------------------------------------------------------
 
@@ -559,13 +607,14 @@ def handle_email_action(intent: dict, retriever, project=None, role=None,
     content_request = (intent.get("content_request") or intent.get("subject") or "general email").strip()
 
     # Parse multiple recipients (comma, semicolon, or "and" separated)
+    # First extract any explicit email addresses
     recipients = _parse_recipients(raw_recipient)
 
-    # Patch B: If no email addresses found, try name-to-email resolution
-    if not recipients and raw_recipient:
+    # Always also try name-to-email resolution (handles mixed: "Edita and pvallen@protonmail.com")
+    if raw_recipient:
         resolved = _resolve_names_to_emails(raw_recipient)
         if resolved:
-            recipients = resolved
+            recipients = list(set(recipients + resolved))
             _log_action("handle_email_action:name_resolved", f"raw={raw_recipient}, resolved={resolved}")
 
     _log_action("handle_email_action:recipients", f"raw={raw_recipient}, parsed={recipients}")
@@ -579,6 +628,8 @@ def handle_email_action(intent: dict, retriever, project=None, role=None,
     body = generate_email_body(content_request, retriever, project, role)
     # Patch C: Strip any meta-commentary Claude added to the email body
     body = _clean_email_body(body)
+    # Fix 3: Strip markdown formatting — emails should be clean plain text
+    body = _strip_markdown(body)
     # Note: send_composed_email() adds its own footer — don't double-add here
     full_body = body
 
