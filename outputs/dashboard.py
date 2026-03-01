@@ -204,12 +204,18 @@ async def startup():
     except Exception as e:
         logger.error(f"Scheduler failed to start: {e}")
 
-    # FIREFLIES-FETCH-1: Backfill last 30 days of Fireflies history on deploy
+    # FIREFLIES-FETCH-1 + DEPLOY-FIX-1: Backfill in background thread — don't block startup
+    import threading
     try:
         from triggers.fireflies_trigger import backfill_fireflies
-        backfill_fireflies()
+        threading.Thread(
+            target=backfill_fireflies,
+            name="fireflies-backfill",
+            daemon=True,
+        ).start()
+        logger.info("Fireflies backfill launched in background thread")
     except Exception as e:
-        logger.warning(f"Fireflies backfill failed on startup (non-fatal): {e}")
+        logger.warning(f"Fireflies backfill failed to launch (non-fatal): {e}")
 
     # Mount static files if directory exists
     if _static_dir.exists():

@@ -53,18 +53,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     # whatsapp_poll job removed — inbound messages now arrive via POST /api/webhook/whatsapp
 
     # Fireflies scanning — every 15 minutes, fires immediately on startup
-    # FIREFLIES-FIX-1: Render recycles instances faster than the old 2h interval,
-    # so the scan never fired. next_run_time=now ensures at least one scan per
-    # instance lifecycle. Interval reduced from 7200s to 900s for same reason.
+    # Fireflies scanning — regular interval (DEPLOY-FIX-1: removed next_run_time=now;
+    # backfill thread handles startup catch-up, no need for immediate duplicate run)
     from triggers.fireflies_trigger import check_new_transcripts
     scheduler.add_job(
         check_new_transcripts,
         IntervalTrigger(seconds=config.triggers.fireflies_scan_interval),
         id="fireflies_scan", name="Fireflies scanning",
         coalesce=True, max_instances=1, replace_existing=True,
-        next_run_time=datetime.now(timezone.utc),
     )
-    logger.info(f"Registered: fireflies_scan (every {config.triggers.fireflies_scan_interval}s, first run: NOW)")
+    logger.info(f"Registered: fireflies_scan (every {config.triggers.fireflies_scan_interval}s)")
 
     # ClickUp polling — every 5 minutes
     from triggers.clickup_trigger import run_clickup_poll

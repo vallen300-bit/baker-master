@@ -28,7 +28,7 @@ CLICKUP_WORKSPACE_IDS = [
     "24382372",
     "24382764",
     "24385290",
-    "9004065517",
+    # "9004065517",  # DEPLOY-FIX-1: Removed — returns OAUTH_017 (no API key access)
 ]
 
 # BAKER space — the only space Baker can write to
