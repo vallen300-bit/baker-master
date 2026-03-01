@@ -862,10 +862,30 @@ async def scan_chat(req: ScanRequest):
     # 2. Build system prompt with context
     context_block = _format_scan_context(contexts)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    # Inject live deadline data so Baker can answer "check my schedule" etc.
+    deadline_block = ""
+    try:
+        from models.deadlines import get_active_deadlines
+        deadlines = get_active_deadlines(limit=15)
+        if deadlines:
+            dl_lines = []
+            for dl in deadlines:
+                due = dl.get("due_date")
+                due_str = due.strftime("%Y-%m-%d") if due else "TBD"
+                priority = dl.get("priority", "normal")
+                status = dl.get("status", "active")
+                desc = dl.get("description", "")
+                dl_lines.append(f"- [{priority.upper()}] {due_str}: {desc} ({status})")
+            deadline_block = "\n\n## ACTIVE DEADLINES\n" + "\n".join(dl_lines)
+    except Exception:
+        pass
+
     system_prompt = (
         f"{SCAN_SYSTEM_PROMPT}\n"
         f"## CURRENT TIME\n{now}\n\n"
         f"## RETRIEVED CONTEXT\n{context_block}"
+        f"{deadline_block}"
     )
 
     # 3. Build messages (include history for follow-ups)

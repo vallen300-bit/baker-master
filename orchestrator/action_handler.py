@@ -350,6 +350,66 @@ def _quick_fireflies_detect(question: str) -> dict:
     return None
 
 
+def _quick_deadline_detect(question: str) -> dict:
+    """
+    Fast regex pre-check for deadline/schedule/commitment queries.
+    Catches natural language like 'check my schedule', 'any deadlines',
+    'what are my commitments', 'upcoming deadlines', etc.
+    """
+    q = question.lower()
+
+    deadline_refs = [
+        "deadline", "deadlines",
+        "schedule", "calendar",
+        "commitment", "commitments",
+        "due date", "due dates",
+        "upcoming", "overdue",
+        "what do i have", "what's coming up", "what is coming up",
+        "what do i owe", "what am i supposed to",
+        "remind me", "reminders",
+    ]
+    has_ref = any(ref in q for ref in deadline_refs)
+
+    if not has_ref:
+        return None
+
+    # Check for action verbs OR question patterns
+    action_patterns = [
+        "check", "look", "see", "show", "list", "what", "any",
+        "find", "get", "pull up", "review", "tell me",
+        "do i have", "are there", "is there",
+        "dismiss", "cancel", "complete", "done", "confirm",
+    ]
+    has_action = any(p in q for p in action_patterns)
+
+    if has_action:
+        # Determine if this is a query (list/check) or a management action (dismiss/complete)
+        mgmt_words = ["dismiss", "cancel", "complete", "done", "confirm", "disregard"]
+        is_mgmt = any(w in q for w in mgmt_words)
+
+        if is_mgmt:
+            logger.info("Quick deadline detect: management action (bypassing Haiku)")
+            action = "dismiss"
+            if any(w in q for w in ("complete", "done")):
+                action = "complete"
+            elif any(w in q for w in ("confirm",)):
+                action = "confirm"
+            return {
+                "type": "deadline_action",
+                "deadline_action": action,
+                "deadline_search": question,
+                "content_request": question,
+            }
+        else:
+            # Query — return as question but with deadline context
+            # The scan RAG pipeline will answer from the deadlines table
+            # since deadlines are surfaced in daily briefings and dashboard
+            logger.info("Quick deadline detect: query (letting RAG handle with context)")
+            return None  # Let RAG answer — it has deadline data in context
+
+    return None
+
+
 def classify_intent(question: str) -> dict:
     """
     Classify the Director's input into action types.
@@ -369,6 +429,12 @@ def classify_intent(question: str) -> dict:
     if quick_ff:
         _log_action("classify_intent:regex_match", f"type=fireflies_fetch")
         return quick_ff
+
+    # Fast path — regex catches deadline management actions (dismiss/complete/confirm)
+    quick_dl = _quick_deadline_detect(question)
+    if quick_dl:
+        _log_action("classify_intent:regex_match", f"type={quick_dl.get('type')}")
+        return quick_dl
 
     try:
         claude = anthropic.Anthropic(api_key=config.claude.api_key)
