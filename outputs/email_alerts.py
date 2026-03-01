@@ -60,9 +60,9 @@ def _get_gmail_service():
     return build("gmail", "v1", credentials=creds)
 
 
-def _send_raw(to: str, subject: str, body: str) -> Optional[str]:
+def _send_raw_full(to: str, subject: str, body: str) -> Optional[dict]:
     """
-    Low-level Gmail send. Returns message_id on success, None on failure.
+    Low-level Gmail send. Returns dict with message_id and thread_id.
     Caller is responsible for all error handling.
     """
     service = _get_gmail_service()
@@ -75,8 +75,18 @@ def _send_raw(to: str, subject: str, body: str) -> Optional[str]:
         userId="me", body={"raw": raw}
     ).execute()
     message_id = result.get("id")
-    logger.info(f"Email sent to {to}: {subject!r} (id={message_id})")
-    return message_id
+    thread_id = result.get("threadId")
+    logger.info(f"Email sent to {to}: {subject!r} (id={message_id}, thread={thread_id})")
+    return {"message_id": message_id, "thread_id": thread_id}
+
+
+def _send_raw(to: str, subject: str, body: str) -> Optional[str]:
+    """
+    Low-level Gmail send. Returns message_id on success, None on failure.
+    Wrapper around _send_raw_full() for backward compatibility.
+    """
+    result = _send_raw_full(to, subject, body)
+    return result.get("message_id") if result else None
 
 
 # ---------------------------------------------------------------------------
@@ -506,10 +516,11 @@ def send_manual_summary_email(custom_note: str = "", to: str = None) -> Optional
 # Phase 2 — Type 5: Composed Email (Director-triggered, any recipient)
 # ---------------------------------------------------------------------------
 
-def send_composed_email(to: str, subject: str, body: str) -> Optional[str]:
+def send_composed_email(to: str, subject: str, body: str) -> Optional[dict]:
     """
     Send a Director-composed email via Baker's Gmail to any recipient.
-    Appends standard footer. Returns message_id on success, None on failure.
+    Appends standard footer.
+    Returns dict {"message_id": str, "thread_id": str} on success, None on failure.
     Called by /api/email/send when body is provided.
     """
     try:
@@ -518,7 +529,7 @@ def send_composed_email(to: str, subject: str, body: str) -> Optional[str]:
             f"---\n"
             f"Sent via Baker CEO Cockpit on behalf of Dimitry Vallen"
         )
-        return _send_raw(to, subject, full_body)
+        return _send_raw_full(to, subject, full_body)
     except Exception as e:
         logger.error(f"send_composed_email failed (non-fatal): {e}")
         return None

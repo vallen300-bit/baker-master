@@ -347,6 +347,27 @@ def generate_email_body(content_request: str, retriever, project=None, role=None
 
 
 # ---------------------------------------------------------------------------
+# REPLY-TRACK-1: Sent email logging helper
+# ---------------------------------------------------------------------------
+
+def _log_sent_email(to: str, subject: str, body: str, message_id: str,
+                    thread_id: str, channel: str = "scan"):
+    """Log a sent email for reply tracking. Non-fatal on error."""
+    try:
+        from models.sent_emails import log_sent_email
+        log_sent_email(
+            to_address=to,
+            subject=subject,
+            body_preview=body[:200] if body else "",
+            gmail_message_id=message_id,
+            gmail_thread_id=thread_id,
+            channel=channel,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to log sent email for reply tracking: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Action handlers
 # ---------------------------------------------------------------------------
 
@@ -376,18 +397,24 @@ def handle_email_action(intent: dict, retriever, project=None, role=None) -> str
     if is_internal:
         try:
             from outputs.email_alerts import send_composed_email
-            message_id = send_composed_email(recipient, subject, full_body)
+            result = send_composed_email(recipient, subject, full_body)
+            if not result:
+                return f"\u274c Failed to send email to {recipient}: no response from Gmail"
+            message_id = result.get("message_id")
+            thread_id = result.get("thread_id")
             _delete_draft()
+            # REPLY-TRACK-1: Log sent email for reply tracking
+            _log_sent_email(recipient, subject, full_body, message_id, thread_id, "scan")
             preview = full_body[:200].replace("\n", " ")
             logger.info(f"Action: internal email sent to {recipient} (id={message_id})")
             return (
-                f"✅ Email sent to {recipient}\n"
+                f"\u2705 Email sent to {recipient}\n"
                 f"**Subject:** {subject}\n\n"
-                f"{preview}…"
+                f"{preview}\u2026"
             )
         except Exception as e:
             logger.error(f"Internal email send failed: {e}")
-            return f"❌ Failed to send email to {recipient}: {e}"
+            return f"\u274c Failed to send email to {recipient}: {e}"
     else:
         _save_draft(recipient, subject, full_body, content_request)
         logger.info(f"Action: external draft saved for {recipient}")
@@ -407,18 +434,24 @@ def handle_confirmation(retriever=None, project=None, role=None) -> str:
 
     try:
         from outputs.email_alerts import send_composed_email
-        message_id = send_composed_email(draft["to"], draft["subject"], draft["body"])
+        result = send_composed_email(draft["to"], draft["subject"], draft["body"])
+        if not result:
+            return "\u274c Failed to send email: no response from Gmail"
+        message_id = result.get("message_id")
+        thread_id = result.get("thread_id")
         _delete_draft()
+        # REPLY-TRACK-1: Log sent email for reply tracking
+        _log_sent_email(draft["to"], draft["subject"], draft["body"], message_id, thread_id, "scan")
         preview = draft["body"][:200].replace("\n", " ")
         logger.info(f"Action: confirmed send to {draft['to']} (id={message_id})")
         return (
-            f"✅ Email sent to {draft['to']}\n"
+            f"\u2705 Email sent to {draft['to']}\n"
             f"**Subject:** {draft['subject']}\n\n"
-            f"{preview}…"
+            f"{preview}\u2026"
         )
     except Exception as e:
         logger.error(f"Confirmation send failed: {e}")
-        return f"❌ Failed to send email: {e}"
+        return f"\u274c Failed to send email: {e}"
 
 
 def handle_edit(edit_instruction: str, retriever, project=None, role=None) -> str:

@@ -226,9 +226,10 @@ async def send_email(req: EmailRequest):
             )
         try:
             from outputs.email_alerts import send_composed_email
-            message_id = send_composed_email(req.to, req.subject, req.body)
-            if not message_id:
+            result = send_composed_email(req.to, req.subject, req.body)
+            if not result:
                 raise HTTPException(status_code=503, detail="Email service temporarily unavailable")
+            message_id = result.get("message_id")
             logger.info(f"Composed email sent to {req.to}: {req.subject} (id={message_id})")
             return {"status": "sent", "message_id": message_id, "mode": "compose"}
         except HTTPException:

@@ -86,6 +86,18 @@ def check_new_emails():
         metadata = thread.get("metadata", {})
         thread_id = metadata.get("thread_id", "unknown")
 
+        # REPLY-TRACK-1: Check if this incoming email is a reply to a Baker-sent email
+        try:
+            _check_reply_match(
+                thread_id=thread_id,
+                sender=metadata.get("primary_sender", ""),
+                sender_email=metadata.get("primary_sender_email", ""),
+                subject=metadata.get("subject", ""),
+                body_preview=thread.get("text", "")[:300],
+            )
+        except Exception as _e:
+            logger.debug(f"Reply check failed for thread {thread_id}: {_e}")
+
         # F4: Track received_date of every seen thread (processed + skipped)
         received_date_str = metadata.get("received_date", "")
         if received_date_str and received_date_str != "unknown":
@@ -167,6 +179,94 @@ def check_new_emails():
         f"Email trigger complete: {processed} processed, "
         f"{len(batch_for_briefing)} queued for briefing, {skipped} skipped (dedup)"
     )
+
+
+def _check_reply_match(
+    thread_id: str,
+    sender: str = "",
+    sender_email: str = "",
+    subject: str = "",
+    body_preview: str = "",
+):
+    """
+    REPLY-TRACK-1: Check if an incoming email is a reply to a Baker-sent email.
+    If so, mark it as replied and push an alert to the digest buffer.
+    """
+    from models.sent_emails import find_awaiting_reply, mark_reply_received
+
+    sent = find_awaiting_reply(thread_id)
+    if not sent:
+        return  # Not a reply to anything Baker sent
+
+    # Mark reply received
+    mark_reply_received(
+        sent_email_id=sent["id"],
+        reply_snippet=body_preview[:300],
+        reply_from=sender_email or sender,
+    )
+    logger.info(
+        f"Reply detected from {sender} to Baker-sent email "
+        f"(thread={thread_id}, original subject: {sent.get('subject', '?')[:60]})"
+    )
+
+    # Determine urgency: VIP replies = urgent
+    is_vip = False
+    try:
+        from models.deadlines import get_vip_contacts
+        vips = get_vip_contacts()
+        sender_lower = (sender or "").lower()
+        email_lower = (sender_email or "").lower()
+        for vip in vips:
+            vip_name = (vip.get("name") or "").lower()
+            vip_email = (vip.get("email") or "").lower()
+            if (sender_lower and sender_lower in vip_name) or \
+               (email_lower and email_lower == vip_email):
+                is_vip = True
+                break
+    except Exception:
+        pass
+
+    tier = 1 if is_vip else 2
+
+    # Push alert to digest buffer
+    try:
+        from orchestrator.digest_manager import add_alert
+
+        reply_preview = body_preview[:200].replace("\n", " ")
+        title = (
+            f"\U0001f4e9 Reply received to Baker-sent email\n"
+            f"From: {sender or sender_email}\n"
+            f"Original subject: {sent.get('subject', '?')}\n"
+            f'Preview: "{reply_preview}..."'
+        )
+
+        add_alert(
+            title=title,
+            source_type="Reply Detection",
+            timestamp=datetime.now(timezone.utc).strftime("%H:%M UTC"),
+            tier=tier,
+            source_id=f"reply:{thread_id}",
+            content=f"Reply from {sender} to: {sent.get('subject', '?')}",
+            is_critical=is_vip,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to push reply alert to digest: {e}")
+
+    # If original was sent via WhatsApp, also notify on WhatsApp
+    if sent.get("channel") == "whatsapp":
+        try:
+            from outputs.whatsapp_sender import send_whatsapp
+
+            wa_text = (
+                f"\U0001f4e9 Reply to your email:\n"
+                f"From: {sender or sender_email}\n"
+                f"Re: {sent.get('subject', '?')}\n"
+                f'"{body_preview[:200]}"\n\n'
+                f"Reply here to follow up, or ask me to draft a response."
+            )
+            send_whatsapp(wa_text)
+        except Exception as e:
+            logger.warning(f"WhatsApp reply notification failed: {e}")
 
 
 if __name__ == "__main__":
