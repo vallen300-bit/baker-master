@@ -114,8 +114,8 @@ def ensure_tables():
 
 def seed_vip_contacts():
     """
-    Seed the VIP contacts table with initial contacts if empty.
-    Emails/WhatsApp IDs resolved from known data; NULL where unknown.
+    VIP-SEED-1: Seed the VIP contacts table with the full Director-confirmed list.
+    Replaces old placeholder data. Runs on every startup — idempotent via row-count check.
     """
     conn = get_conn()
     if not conn:
@@ -123,68 +123,40 @@ def seed_vip_contacts():
     try:
         cur = conn.cursor()
 
-        # Only seed if table is empty
+        # VIP-SEED-1: Full list with confirmed emails and WhatsApp IDs
+        vips = [
+            ("Balazs Csepregi", "Brisen Internal", "balazs.csepregi@brisengroup.com", "36303005919@c.us"),
+            ("Caroline Schreiner", "Brisen Internal", "caroline.schreiner@brisengroup.com", "491735460427@c.us"),
+            ("Conrad Weiss", "Brisen Internal", "conrad.weiss@brisengroup.com", "41794033419@c.us"),
+            ("Constantinos Pohanis", "Brisen Internal", "cpohanis@brisengroup.com", "35799492642@c.us"),
+            ("Edita Vallen", "COO / Brisen Internal", "edita.vallen@brisengroup.com", "41799439246@c.us"),
+            ("Rolf Hübner", "Brisen Internal", "rolf.huebner@brisengroup.com", "35799484778@c.us"),
+            ("Siegfried Brandner", "Brisen Internal", "siegfried.brandner@brisengroup.com", "436605206014@c.us"),
+            ("Thomas Leitner", "Brisen Internal", "thomas.leitner@brisengroup.com", "436645244702@c.us"),
+            ("Vladimir Moravcik", "Brisen Internal", "vladimir.moravcik@brisengroup.com", "436649676154@c.us"),
+            ("Alric Ofenheimer", "External / Attorney-at-law", "A.Ofenheimer@eh.at", "4367683647246@c.us"),
+            ("Christophe Buchwalder", "External / Attorney-at-law", "buchwalder@gantey.ch", "41794055384@c.us"),
+        ]
+
+        # Check if already migrated (11 rows = current version)
         cur.execute("SELECT COUNT(*) FROM vip_contacts")
         count = cur.fetchone()[0]
-        if count > 0:
+        if count == len(vips):
             logger.info(f"deadlines: vip_contacts already has {count} rows, skipping seed")
             cur.close()
             return
 
-        vips = [
-            {
-                "name": "Edita Vallen",
-                "role": "COO, Brisen Group",
-                "email": None,  # not in known data
-                "whatsapp_id": None,
-                "fireflies_speaker_label": "Edita",
-            },
-            {
-                "name": "Thomas Leitner",
-                "role": "CFO, Brisen Development",
-                "email": None,  # not in known data
-                "whatsapp_id": None,
-                "fireflies_speaker_label": "Thomas",
-            },
-            {
-                "name": "Christophe Buchwalder",
-                "role": "Legal advisor",
-                "email": None,
-                "whatsapp_id": None,
-                "fireflies_speaker_label": "Christophe",
-            },
-            {
-                "name": "Alric Ofenheimer",
-                "role": "E+H lawyer",
-                "email": None,
-                "whatsapp_id": None,
-                "fireflies_speaker_label": "Alric",
-            },
-            {
-                "name": "Balazs Csepregi",
-                "role": "Financial modeling, Brisengroup",
-                "email": None,
-                "whatsapp_id": None,
-                "fireflies_speaker_label": "Balazs",
-            },
-            {
-                "name": "Constantinos Pohanis",
-                "role": "Finance/Legal",
-                "email": None,
-                "whatsapp_id": None,
-                "fireflies_speaker_label": "Constantinos",
-            },
-        ]
-
-        for v in vips:
+        # Clear old data and insert fresh
+        cur.execute("DELETE FROM vip_contacts")
+        for name, role, email, whatsapp_id in vips:
             cur.execute("""
-                INSERT INTO vip_contacts (name, role, email, whatsapp_id, fireflies_speaker_label)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (v["name"], v["role"], v["email"], v["whatsapp_id"], v["fireflies_speaker_label"]))
+                INSERT INTO vip_contacts (name, role, email, whatsapp_id)
+                VALUES (%s, %s, %s, %s)
+            """, (name, role, email, whatsapp_id))
 
         conn.commit()
         cur.close()
-        logger.info(f"deadlines: seeded {len(vips)} VIP contacts")
+        logger.info(f"deadlines: seeded {len(vips)} VIP contacts (VIP-SEED-1)")
     except Exception as e:
         logger.error(f"deadlines: VIP seed failed: {e}")
     finally:
