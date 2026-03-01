@@ -141,6 +141,56 @@ def _build_daily_briefing_body(briefing_text: str = "") -> str:
         parts.append("\u2022 No developments to report.")
         parts.append("")
 
+    # UPCOMING DEADLINES section (DEADLINE-SYSTEM-1)
+    parts.append("\U0001f4c5 UPCOMING DEADLINES")
+    try:
+        from models.deadlines import get_active_deadlines
+        deadlines = get_active_deadlines(limit=10)
+        if deadlines:
+            for dl in deadlines:
+                due = dl.get("due_date")
+                if due and due.tzinfo is None:
+                    due = due.replace(tzinfo=timezone.utc)
+                desc = dl.get("description", "Untitled")
+                priority = dl.get("priority", "normal")
+                status = dl.get("status", "active")
+                confidence = dl.get("confidence", "hard")
+
+                # Color coding by urgency
+                if due:
+                    hours_left = (due - now).total_seconds() / 3600
+                    if hours_left < 0:
+                        icon = "\U0001f534"  # red - overdue
+                    elif hours_left <= 48:
+                        icon = "\U0001f534"  # red - due within 48h
+                    elif hours_left <= 168:
+                        icon = "\U0001f7e1"  # yellow - due within 7 days
+                    else:
+                        icon = "\U0001f7e2"  # green - 7+ days
+                else:
+                    icon = "\u23f8\ufe0f"
+
+                if status == "pending_confirm":
+                    icon = "\u23f8\ufe0f"  # pause - pending confirmation
+
+                due_str = due.strftime("%B %-d") if due else "TBD"
+                priority_note = ""
+                if priority == "critical":
+                    priority_note = " (CRITICAL \u2014 your commitment)"
+                elif priority == "high":
+                    priority_note = " (HIGH \u2014 VIP request)"
+
+                if confidence == "soft" and status == "pending_confirm":
+                    parts.append(f"{icon} Pending confirmation: \"{desc}\" \u2014 est. {due_str}")
+                else:
+                    parts.append(f"{icon} {due_str} \u2014 {desc}{priority_note}")
+        else:
+            parts.append("\u2022 No upcoming deadlines.")
+    except Exception as e:
+        logger.warning(f"Could not load deadlines for briefing: {e}")
+        parts.append("\u2022 Deadline data unavailable.")
+    parts.append("")
+
     # NUMBERS section — simple counts from the database
     parts.append("\U0001f4c8 NUMBERS")
     try:

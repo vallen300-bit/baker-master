@@ -116,6 +116,19 @@ def check_new_emails():
         )
         trigger = pipeline.classify_trigger(trigger)
 
+        # DEADLINE-SYSTEM-1: Extract deadlines from email content
+        try:
+            from orchestrator.deadline_manager import extract_deadlines
+            extract_deadlines(
+                content=thread["text"],
+                source_type="email",
+                source_id=message_id,
+                sender_name=metadata.get("primary_sender", ""),
+                sender_email=metadata.get("primary_sender_email", ""),
+            )
+        except Exception as _e:
+            logger.debug(f"Deadline extraction failed for email {message_id}: {_e}")
+
         if trigger.priority in ("high", "medium"):
             try:
                 pipeline.run(trigger)

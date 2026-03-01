@@ -149,6 +149,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: digest_flush (every 30 minutes)")
 
+    # Deadline cadence check — every hour (DEADLINE-SYSTEM-1)
+    from orchestrator.deadline_manager import run_cadence_check
+    scheduler.add_job(
+        run_cadence_check,
+        IntervalTrigger(seconds=3600),
+        id="deadline_cadence", name="Deadline escalation cadence",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: deadline_cadence (every 60 minutes)")
+
 
 def start_scheduler():
     """Create and start the BackgroundScheduler. Idempotent — safe to call twice."""

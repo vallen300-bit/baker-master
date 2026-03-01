@@ -203,10 +203,16 @@ _INTENT_SYSTEM = """You are Baker's intent classifier. Given a Director's messag
 
 Return exactly this JSON structure (no other text, no markdown):
 {
-  "type": "email_action" | "question",
+  "type": "email_action" | "deadline_action" | "vip_action" | "question",
   "recipient": "<email address or null>",
   "subject": "<inferred subject line or null>",
-  "content_request": "<what Baker should include in the email body, or null>"
+  "content_request": "<what Baker should include in the email body, or null>",
+  "deadline_action": "<dismiss | complete | confirm | null>",
+  "deadline_search": "<text identifying which deadline, or null>",
+  "deadline_date": "<YYYY-MM-DD date for confirm action, or null>",
+  "vip_action_type": "<add | remove | null>",
+  "vip_name": "<name of VIP contact, or null>",
+  "vip_email": "<email of VIP contact, or null>"
 }
 
 Email action patterns:
@@ -215,6 +221,18 @@ Email action patterns:
 - "Forward [something] to [name/email]"
 - "Share [something] with [name/email]"
 - "Write an email to [name/email] about [topic]"
+
+Deadline action patterns:
+- "Dismiss the [X] deadline" → type: "deadline_action", deadline_action: "dismiss"
+- "Cancel the [date] deadline" → type: "deadline_action", deadline_action: "dismiss"
+- "This deadline is done" / "I completed [X]" → type: "deadline_action", deadline_action: "complete"
+- "Confirm the [X] deadline for [date]" → type: "deadline_action", deadline_action: "confirm"
+- "Confirm [X] for March 15" → type: "deadline_action", deadline_action: "confirm", deadline_date: "2026-03-15"
+- "Disregard the [X] deadline" → type: "deadline_action", deadline_action: "dismiss"
+
+VIP action patterns:
+- "Add [name] to the VIP list" → type: "vip_action", vip_action_type: "add"
+- "Remove [name] from the VIP list" → type: "vip_action", vip_action_type: "remove"
 
 If the message is a question, information request, or anything else → type: "question".
 Only return the JSON object."""
@@ -426,3 +444,63 @@ def handle_edit(edit_instruction: str, retriever, project=None, role=None) -> st
         f"**Subject:** {draft['subject']}\n\n"
         f"---\n\n{full_body}"
     )
+
+
+# ---------------------------------------------------------------------------
+# DEADLINE-SYSTEM-1: Deadline and VIP action handlers
+# ---------------------------------------------------------------------------
+
+def handle_deadline_action(intent: dict) -> str:
+    """
+    Process a detected deadline action intent.
+    Returns the response text to stream back to the Director.
+    """
+    action = (intent.get("deadline_action") or "").lower()
+    search = intent.get("deadline_search") or intent.get("content_request") or ""
+
+    if not search:
+        return "I couldn't identify which deadline you're referring to. Please be more specific."
+
+    try:
+        from orchestrator.deadline_manager import (
+            dismiss_deadline, complete_deadline, confirm_deadline,
+        )
+
+        if action == "dismiss":
+            return dismiss_deadline(search)
+        elif action == "complete":
+            return complete_deadline(search)
+        elif action == "confirm":
+            date_str = intent.get("deadline_date") or ""
+            return confirm_deadline(search, date_str)
+        else:
+            return f"I didn't understand the deadline action \"{action}\". Try: dismiss, complete, or confirm."
+    except Exception as e:
+        logger.error(f"Deadline action failed: {e}")
+        return f"Failed to process deadline action: {e}"
+
+
+def handle_vip_action(intent: dict) -> str:
+    """
+    Process a detected VIP contact management action.
+    Returns the response text to stream back to the Director.
+    """
+    action = (intent.get("vip_action_type") or "").lower()
+    name = intent.get("vip_name") or ""
+
+    if not name:
+        return "I couldn't identify the contact name. Please specify who to add or remove."
+
+    try:
+        from orchestrator.deadline_manager import add_vip, remove_vip
+
+        if action == "add":
+            email = intent.get("vip_email")
+            return add_vip(name=name, email=email)
+        elif action == "remove":
+            return remove_vip(name=name)
+        else:
+            return f"I didn't understand the VIP action \"{action}\". Try: add or remove."
+    except Exception as e:
+        logger.error(f"VIP action failed: {e}")
+        return f"Failed to process VIP action: {e}"

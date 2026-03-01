@@ -331,6 +331,23 @@ def _poll_workspace(client, store, workspace_id: str) -> int:
                     except Exception as e:
                         logger.error(f"Failed to fetch/embed comments for task {task.get('id')}: {e}")
 
+                # DEADLINE-SYSTEM-1: Extract deadlines from ClickUp task
+                try:
+                    from orchestrator.deadline_manager import extract_deadlines
+                    task_content = (
+                        f"Task: {task_data.get('name', '')}\n"
+                        f"Description: {task_data.get('description', '')}\n"
+                        f"Due date: {task_data.get('due_date', 'none')}\n"
+                        f"Status: {task_data.get('status', 'unknown')}"
+                    )
+                    extract_deadlines(
+                        content=task_content,
+                        source_type="clickup",
+                        source_id=f"clickup:{task_data.get('id', '')}",
+                    )
+                except Exception as _e:
+                    logger.debug(f"Deadline extraction failed for task {task.get('id')}: {_e}")
+
                 # Classify and feed to pipeline
                 classification = _classify_task_change(task_data, is_new)
                 _feed_to_pipeline(task_data, classification)

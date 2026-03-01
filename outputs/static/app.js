@@ -551,6 +551,7 @@ async function fetchSystemStatus() {
 function populateHome() {
     const agendaList = document.getElementById('agendaList');
     const pendingList = document.getElementById('pendingList');
+    const deadlineList = document.getElementById('deadlineList');
 
     // Agenda items (will be populated from API later; static for now)
     if (agendaList) {
@@ -560,6 +561,11 @@ function populateHome() {
     // Pending items from API
     if (pendingList) {
         fetchPendingItems(pendingList);
+    }
+
+    // Deadlines from API (DEADLINE-SYSTEM-1)
+    if (deadlineList) {
+        fetchDeadlines(deadlineList);
     }
 }
 
@@ -586,6 +592,64 @@ async function fetchPendingItems(container) {
         container.innerHTML = html;
     } catch (e) {
         container.innerHTML = '<div class="agenda-empty">No pending items. All clear.</div>';
+    }
+}
+
+// ═══ DEADLINES (DEADLINE-SYSTEM-1) ═══
+async function fetchDeadlines(container) {
+    try {
+        const resp = await bakerFetch('/api/deadlines?limit=8');
+        if (!resp.ok) throw new Error('API ' + resp.status);
+        const data = await resp.json();
+        const deadlines = (data && data.deadlines) ? data.deadlines : [];
+
+        if (deadlines.length === 0) {
+            container.innerHTML = '<div class="agenda-empty">No upcoming deadlines.</div>';
+            return;
+        }
+
+        let html = '';
+        const now = new Date();
+        for (const d of deadlines) {
+            const due = d.due_date ? new Date(d.due_date) : null;
+            const hoursLeft = due ? (due - now) / 3600000 : Infinity;
+            const priority = d.priority || 'normal';
+            const status = d.status || 'active';
+            const confidence = d.confidence || 'hard';
+
+            // Color coding
+            let icon, color;
+            if (status === 'pending_confirm') {
+                icon = '\u23f8\ufe0f'; color = '#9ca3af';
+            } else if (hoursLeft < 0) {
+                icon = '\ud83d\udd34'; color = '#ef4444';
+            } else if (hoursLeft <= 48) {
+                icon = '\ud83d\udd34'; color = '#ef4444';
+            } else if (hoursLeft <= 168) {
+                icon = '\ud83d\udfe1'; color = '#f59e0b';
+            } else {
+                icon = '\ud83d\udfe2'; color = '#22c55e';
+            }
+
+            const dueStr = due ? due.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }) : 'TBD';
+            let label = '';
+            if (priority === 'critical') label = ' (CRITICAL)';
+            else if (priority === 'high') label = ' (HIGH)';
+
+            let desc = esc(d.description || 'Untitled');
+            if (status === 'pending_confirm') {
+                desc = 'Pending: ' + desc;
+            }
+
+            html += `<div class="agenda-item">
+                <span class="agenda-time" style="color:${color};">${icon} ${dueStr}</span>
+                <span class="agenda-type task">${esc(priority)}</span>
+                <span class="agenda-desc">${desc}${label}</span>
+            </div>`;
+        }
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = '<div class="agenda-empty">No upcoming deadlines.</div>';
     }
 }
 

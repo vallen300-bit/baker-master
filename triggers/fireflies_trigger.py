@@ -95,6 +95,18 @@ def check_new_transcripts():
             priority="medium",
         )
 
+        # DEADLINE-SYSTEM-1: Extract deadlines from transcript
+        try:
+            from orchestrator.deadline_manager import extract_deadlines
+            extract_deadlines(
+                content=transcript["text"],
+                source_type="fireflies",
+                source_id=source_id,
+                sender_name=metadata.get("organizer", ""),
+            )
+        except Exception as _e:
+            logger.debug(f"Deadline extraction failed for transcript {source_id}: {_e}")
+
         try:
             pipeline.run(trigger)
             processed += 1

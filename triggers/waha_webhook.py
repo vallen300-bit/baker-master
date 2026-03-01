@@ -43,6 +43,20 @@ async def waha_webhook(
     # Format and run pipeline (same pattern as old trigger)
     text = f"WhatsApp message from {sender_name}:\n[{datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()[:19]}] {sender_name}: {message_body}"
 
+    # DEADLINE-SYSTEM-1: Extract deadlines from WhatsApp messages (Director's only)
+    if sender == "41799605092@c.us":
+        try:
+            from orchestrator.deadline_manager import extract_deadlines
+            extract_deadlines(
+                content=message_body,
+                source_type="whatsapp",
+                source_id=f"wa-{msg_id}",
+                sender_name=sender_name,
+                sender_whatsapp=sender,
+            )
+        except Exception as _e:
+            logger.debug(f"Deadline extraction failed for WA {msg_id}: {_e}")
+
     from orchestrator.pipeline import SentinelPipeline, TriggerEvent
     pipeline = SentinelPipeline()
 

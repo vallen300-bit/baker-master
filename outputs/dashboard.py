@@ -291,6 +291,58 @@ async def resolve_alert(alert_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# --- Deadlines (DEADLINE-SYSTEM-1) ---
+
+@app.get("/api/deadlines", tags=["deadlines"], dependencies=[Depends(verify_api_key)])
+async def get_deadlines(
+    status: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Get active deadlines for the dashboard."""
+    try:
+        from models.deadlines import get_active_deadlines
+        deadlines = get_active_deadlines(limit=limit)
+        deadlines = [_serialize(d) for d in deadlines]
+        return {"deadlines": deadlines, "count": len(deadlines)}
+    except Exception as e:
+        logger.error(f"/api/deadlines failed: {e}")
+        return {"deadlines": [], "count": 0, "error": str(e)}
+
+
+@app.post("/api/deadlines/{deadline_id}/dismiss", tags=["deadlines"], dependencies=[Depends(verify_api_key)])
+async def dismiss_deadline_api(deadline_id: int):
+    """Dismiss a deadline."""
+    try:
+        from models.deadlines import update_deadline, get_deadline_by_id
+        dl = get_deadline_by_id(deadline_id)
+        if not dl:
+            raise HTTPException(status_code=404, detail=f"Deadline {deadline_id} not found")
+        update_deadline(deadline_id, status="dismissed", dismissed_reason="Dismissed via dashboard")
+        return {"status": "dismissed", "id": deadline_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"/api/deadlines/{deadline_id}/dismiss failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/deadlines/{deadline_id}/complete", tags=["deadlines"], dependencies=[Depends(verify_api_key)])
+async def complete_deadline_api(deadline_id: int):
+    """Mark a deadline as completed."""
+    try:
+        from models.deadlines import update_deadline, get_deadline_by_id
+        dl = get_deadline_by_id(deadline_id)
+        if not dl:
+            raise HTTPException(status_code=404, detail=f"Deadline {deadline_id} not found")
+        update_deadline(deadline_id, status="completed", dismissed_reason="Completed via dashboard")
+        return {"status": "completed", "id": deadline_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"/api/deadlines/{deadline_id}/complete failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # --- Deals ---
 
 @app.get("/api/deals", tags=["deals"], dependencies=[Depends(verify_api_key)])
@@ -732,11 +784,21 @@ async def scan_chat(req: ScanRequest):
             req.question,
         )
     elif draft_action is None:
-        # No pending draft — classify intent for new email actions
+        # No pending draft — classify intent for new actions
         intent = _ah.classify_intent(req.question)
         if intent.get("type") == "email_action":
             return _action_stream_response(
                 _ah.handle_email_action(intent, _get_retriever(), req.project, req.role),
+                req.question,
+            )
+        elif intent.get("type") == "deadline_action":
+            return _action_stream_response(
+                _ah.handle_deadline_action(intent),
+                req.question,
+            )
+        elif intent.get("type") == "vip_action":
+            return _action_stream_response(
+                _ah.handle_vip_action(intent),
                 req.question,
             )
     # draft_action == "dismiss" or regular question → fall through to RAG pipeline
