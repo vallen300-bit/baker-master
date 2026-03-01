@@ -417,7 +417,8 @@ def handle_email_action(intent: dict, retriever, project=None, role=None,
         )
 
     body = generate_email_body(content_request, retriever, project, role)
-    full_body = body + BAKER_FOOTER
+    # Note: send_composed_email() adds its own footer — don't double-add here
+    full_body = body
 
     # Separate internal vs external recipients
     internal = [r for r in recipients if r.split("@")[-1].lower() == INTERNAL_DOMAIN]
@@ -537,7 +538,7 @@ def handle_edit(edit_instruction: str, retriever, project=None, role=None) -> st
         f"Edit instruction: {edit_instruction}"
     )
     body = generate_email_body(enhanced_request, retriever, project, role)
-    full_body = body + BAKER_FOOTER
+    full_body = body  # send_composed_email adds footer
 
     # Re-save with updated body and reset TTL
     _save_draft(draft["to"], draft["subject"], full_body, draft["content_request"])
