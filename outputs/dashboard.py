@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 from config.settings import config
 from document_generator import generate_document, get_file, cleanup_old_files
 from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT
+from orchestrator import action_handler as _ah
 from tools.ingest.pipeline import ingest_file
 from tools.ingest.extractors import SUPPORTED_EXTENSIONS
 from tools.ingest.classifier import VALID_COLLECTIONS
@@ -683,6 +684,32 @@ def _chunk_conversation(text, max_chars=8000):
     return chunks if chunks else [text[:max_chars]]
 
 
+def _action_stream_response(text: str, question: str) -> StreamingResponse:
+    """
+    Wrap an action result as a single-token SSE response (bypasses RAG pipeline).
+    Also fires the Type 2 scan result email so the Director gets a copy.
+    """
+    async def _stream():
+        payload = json.dumps({"token": text})
+        yield f"data: {payload}\n\n"
+        yield "data: [DONE]\n\n"
+        try:
+            from outputs.email_alerts import send_scan_result_email
+            send_scan_result_email(question, text)
+        except Exception as _e:
+            logger.warning(f"Action email notification failed (non-fatal): {_e}")
+
+    return StreamingResponse(
+        _stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @app.post("/api/scan", tags=["scan"], dependencies=[Depends(verify_api_key)])
 async def scan_chat(req: ScanRequest):
     """
@@ -691,6 +718,25 @@ async def scan_chat(req: ScanRequest):
     and logs the interaction to store-back.
     """
     start = time.time()
+
+    # SCAN-ACTION-1: Email action routing — check before RAG pipeline
+    draft_action = _ah.check_pending_draft(req.question)
+    if draft_action == "confirm":
+        return _action_stream_response(_ah.handle_confirmation(), req.question)
+    elif draft_action and draft_action.startswith("edit:"):
+        return _action_stream_response(
+            _ah.handle_edit(draft_action[5:], _get_retriever(), req.project, req.role),
+            req.question,
+        )
+    elif draft_action is None:
+        # No pending draft — classify intent for new email actions
+        intent = _ah.classify_intent(req.question)
+        if intent.get("type") == "email_action":
+            return _action_stream_response(
+                _ah.handle_email_action(intent, _get_retriever(), req.project, req.role),
+                req.question,
+            )
+    # draft_action == "dismiss" or regular question → fall through to RAG pipeline
 
     # 1. Retrieve context
     try:
