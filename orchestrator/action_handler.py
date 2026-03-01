@@ -29,7 +29,7 @@ logger = logging.getLogger("baker.action_handler")
 INTERNAL_DOMAIN = "brisengroup.com"
 DIRECTOR_EMAIL = "dvallen@brisengroup.com"
 BAKER_FOOTER = "\n\n---\nSent via Baker CEO Cockpit on behalf of Dimitry Vallen"
-DRAFT_TTL_SECONDS = 300
+DRAFT_TTL_SECONDS = 1800  # 30 minutes — multi-turn revision conversations need time
 
 # EMAIL-DELIVERY-1 DEBUG: In-memory action log for remote diagnosis
 _action_log: list = []
@@ -357,30 +357,44 @@ def check_pending_draft(question: str) -> Optional[str]:
     Returns:
       "confirm"              — Director confirmed (simple: "send it", "yes")
       "confirm_to:<addrs>"   — Director confirmed with new recipients
-      "edit:<instruction>"   — Director wants edits ("edit: make it shorter")
-      "dismiss"              — Unrelated input; draft cleared, fall through
+      "edit:<instruction>"   — Director wants edits or revision
+      "dismiss"              — Explicitly cancelled or clearly unrelated
       None                   — No pending draft active
     """
+    import re
+
     draft = _load_draft()
     if draft is None:
         return None
 
     q = question.strip().lower()
+    raw = question.strip()
 
-    # Exact short confirmations
+    # 1. Exact short confirmations
     if q in ("send it", "yes", "confirm", "go ahead", "do it", "send",
              "send now", "please send", "send please", "ok send",
-             "ok send it", "yes send it", "go"):
+             "ok send it", "yes send it", "go", "looks good send it",
+             "perfect send it", "good send it"):
         _log_action("check_pending_draft:confirm_exact", q)
         return "confirm"
 
-    # Edit requests
+    # 2. Explicit edit: prefix
     if q.startswith("edit:"):
-        instruction = question.strip()[5:].strip()
+        instruction = raw[5:].strip()
+        _log_action("check_pending_draft:edit_prefix", instruction[:100])
         return f"edit:{instruction}"
 
-    # Broader send-intent detection: "send this to X", "now send it to X", etc.
-    import re
+    # 3. Explicit cancel / dismiss
+    cancel_phrases = [
+        "cancel", "never mind", "nevermind", "forget it", "forget the email",
+        "start over", "discard", "drop it", "scratch that", "abort",
+    ]
+    if q in cancel_phrases or any(q.startswith(p) for p in cancel_phrases):
+        _log_action("check_pending_draft:explicit_cancel", q)
+        _delete_draft()
+        return "dismiss"
+
+    # 4. Send-intent with possible new recipients
     send_patterns = [
         r"\bsend\s+(?:this|it|the\s+email|that|the\s+draft)",
         r"\bplease\s+send",
@@ -392,10 +406,7 @@ def check_pending_draft(question: str) -> Optional[str]:
     has_send_intent = any(re.search(p, q) for p in send_patterns)
 
     if has_send_intent:
-        # Extract any email addresses from the message
         email_addrs = re.findall(r'[\w.+-]+@[\w.-]+\.\w+', question)
-
-        # Extract names and resolve to emails
         resolved = _resolve_recipients_from_text(question)
         all_recipients = list(set(email_addrs + resolved))
 
@@ -407,7 +418,32 @@ def check_pending_draft(question: str) -> Optional[str]:
             _log_action("check_pending_draft:confirm_send_intent", q)
             return "confirm"
 
-    # Any other input clears the draft and falls through to normal scan
+    # 5. Revision-intent detection — natural edit requests without "edit:" prefix
+    revision_keywords = [
+        "shorter", "longer", "brief", "concise", "expand",
+        "change", "add", "remove", "update", "rewrite", "fix",
+        "adjust", "tone", "formal", "casual", "friendly", "professional",
+        "more", "less", "include", "mention", "rephrase", "reword",
+        "tweak", "modify", "soften", "strengthen", "simplify",
+        "bullet", "paragraph", "date", "name", "reference",
+    ]
+    has_revision_keyword = any(kw in q for kw in revision_keywords)
+
+    # Short instructions (under ~50 words, no question mark) are likely revisions
+    word_count = len(q.split())
+    is_short_instruction = word_count <= 50 and "?" not in q
+
+    if has_revision_keyword and is_short_instruction:
+        _log_action("check_pending_draft:implicit_edit", q[:100])
+        return f"edit:{raw}"
+
+    # 6. If it's a short instruction without question marks, likely still about the draft
+    if is_short_instruction and word_count <= 15 and "?" not in q:
+        # Very short non-question inputs while a draft is pending → treat as edit
+        _log_action("check_pending_draft:short_instruction_as_edit", q[:100])
+        return f"edit:{raw}"
+
+    # 7. Clearly unrelated — longer text or contains question marks → dismiss
     logger.info("action_handler: pending draft dismissed by unrelated input")
     _log_action("check_pending_draft:dismissed", q[:100])
     _delete_draft()
