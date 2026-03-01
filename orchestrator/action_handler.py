@@ -355,27 +355,97 @@ def check_pending_draft(question: str) -> Optional[str]:
     Check whether the question interacts with a pending email draft.
 
     Returns:
-      "confirm"           — Director confirmed ("send it", "yes", "confirm", …)
-      "edit:<instruction>"— Director wants edits ("edit: make it shorter")
-      "dismiss"           — Any other input; draft cleared, fall through to normal scan
-      None                — No pending draft active
+      "confirm"              — Director confirmed (simple: "send it", "yes")
+      "confirm_to:<addrs>"   — Director confirmed with new recipients
+      "edit:<instruction>"   — Director wants edits ("edit: make it shorter")
+      "dismiss"              — Unrelated input; draft cleared, fall through
+      None                   — No pending draft active
     """
     draft = _load_draft()
     if draft is None:
         return None
 
     q = question.strip().lower()
-    if q in ("send it", "yes", "confirm", "go ahead", "do it", "send"):
+
+    # Exact short confirmations
+    if q in ("send it", "yes", "confirm", "go ahead", "do it", "send",
+             "send now", "please send", "send please", "ok send",
+             "ok send it", "yes send it", "go"):
+        _log_action("check_pending_draft:confirm_exact", q)
         return "confirm"
 
-    if question.strip().lower().startswith("edit:"):
+    # Edit requests
+    if q.startswith("edit:"):
         instruction = question.strip()[5:].strip()
         return f"edit:{instruction}"
 
+    # Broader send-intent detection: "send this to X", "now send it to X", etc.
+    import re
+    send_patterns = [
+        r"\bsend\s+(?:this|it|the\s+email|that|the\s+draft)",
+        r"\bplease\s+send",
+        r"\bnow\s+send",
+        r"\bgo\s+ahead\s+and\s+send",
+        r"\bforward\s+(?:this|it|the\s+email)",
+        r"\bsend\s+(?:this\s+)?(?:to|email)",
+    ]
+    has_send_intent = any(re.search(p, q) for p in send_patterns)
+
+    if has_send_intent:
+        # Extract any email addresses from the message
+        email_addrs = re.findall(r'[\w.+-]+@[\w.-]+\.\w+', question)
+
+        # Extract names and resolve to emails
+        resolved = _resolve_recipients_from_text(question)
+        all_recipients = list(set(email_addrs + resolved))
+
+        if all_recipients:
+            addrs = ", ".join(all_recipients)
+            _log_action("check_pending_draft:confirm_with_recipients", f"addrs={addrs}")
+            return f"confirm_to:{addrs}"
+        else:
+            _log_action("check_pending_draft:confirm_send_intent", q)
+            return "confirm"
+
     # Any other input clears the draft and falls through to normal scan
     logger.info("action_handler: pending draft dismissed by unrelated input")
+    _log_action("check_pending_draft:dismissed", q[:100])
     _delete_draft()
     return "dismiss"
+
+
+def _resolve_recipients_from_text(text: str) -> list:
+    """
+    Resolve person names in text to email addresses using vip_contacts table.
+    Handles "myself"/"me"/"Dimitry" → dvallen@brisengroup.com.
+    Returns list of resolved email addresses.
+    """
+    resolved = []
+    text_lower = text.lower()
+
+    # Self-references
+    if any(w in text_lower for w in ("myself", " me ", " me,", " me.", "to me")):
+        resolved.append(DIRECTOR_EMAIL)
+    if "dimitry" in text_lower:
+        resolved.append(DIRECTOR_EMAIL)
+
+    # Look up names from VIP contacts
+    try:
+        from models.deadlines import get_vip_contacts
+        vips = get_vip_contacts()
+        for vip in vips:
+            vip_name = (vip.get("name") or "").strip()
+            vip_email = vip.get("email")
+            if not vip_name or not vip_email:
+                continue
+            # Match first name or full name (case-insensitive)
+            first_name = vip_name.split()[0].lower()
+            if first_name in text_lower or vip_name.lower() in text_lower:
+                resolved.append(vip_email)
+    except Exception as e:
+        logger.warning(f"VIP name resolution failed: {e}")
+
+    return list(set(resolved))
 
 
 # ---------------------------------------------------------------------------
@@ -568,9 +638,13 @@ def _parse_recipients(raw: str) -> list:
     return recipients
 
 
-def handle_confirmation(retriever=None, project=None, role=None) -> str:
-    """Send the pending external draft. Clears state on success."""
-    _log_action("handle_confirmation:ENTERED", "checking for pending draft")
+def handle_confirmation(retriever=None, project=None, role=None,
+                        recipient_override: str = None) -> str:
+    """
+    Send the pending external draft. Clears state on success.
+    If recipient_override is provided, send to those addresses instead of the draft's original.
+    """
+    _log_action("handle_confirmation:ENTERED", f"recipient_override={recipient_override}")
     draft = _load_draft()
     if draft is None:
         _log_action("handle_confirmation:no_draft", "draft is None")
@@ -580,7 +654,13 @@ def handle_confirmation(retriever=None, project=None, role=None) -> str:
     try:
         from outputs.email_alerts import send_composed_email
         draft_channel = draft.get("channel", "scan")
-        recipients = _parse_recipients(draft["to"])
+
+        # Use override recipients if provided, otherwise use draft's original
+        if recipient_override:
+            recipients = _parse_recipients(recipient_override)
+            _log_action("handle_confirmation:using_override", f"recipients={recipients}")
+        else:
+            recipients = _parse_recipients(draft["to"])
         if not recipients:
             recipients = [draft["to"]]
 

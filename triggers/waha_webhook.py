@@ -47,6 +47,12 @@ def _handle_director_message(message_body: str, msg_id: str, sender_name: str) -
         _wa_reply(result)
         logger.info(f"WhatsApp action: draft confirmed by Director")
         return True
+    elif draft_action and draft_action.startswith("confirm_to:"):
+        new_recipients = draft_action[11:]
+        result = ah.handle_confirmation(recipient_override=new_recipients)
+        _wa_reply(result)
+        logger.info(f"WhatsApp action: draft confirmed with new recipients: {new_recipients}")
+        return True
     elif draft_action and draft_action.startswith("edit:"):
         instruction = draft_action[5:]
         result = ah.handle_edit(instruction, _get_retriever())

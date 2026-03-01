@@ -803,6 +803,12 @@ async def scan_chat(req: ScanRequest):
     if draft_action == "confirm":
         logger.info("SCAN_DEBUG: routing to handle_confirmation")
         return _action_stream_response(_ah.handle_confirmation(), req.question)
+    elif draft_action and draft_action.startswith("confirm_to:"):
+        new_recipients = draft_action[11:]  # everything after "confirm_to:"
+        logger.info(f"SCAN_DEBUG: routing to handle_confirmation with recipients={new_recipients}")
+        return _action_stream_response(
+            _ah.handle_confirmation(recipient_override=new_recipients), req.question,
+        )
     elif draft_action and draft_action.startswith("edit:"):
         return _action_stream_response(
             _ah.handle_edit(draft_action[5:], _get_retriever(), req.project, req.role),
