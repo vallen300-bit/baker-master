@@ -304,6 +304,15 @@ async def resolve_alert(alert_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# --- Debug: Action Handler Log (EMAIL-DELIVERY-1 diagnosis) ---
+
+@app.get("/api/debug/action-log", tags=["debug"], dependencies=[Depends(verify_api_key)])
+async def get_action_log():
+    """Return the in-memory action handler event log for diagnosis."""
+    from orchestrator.action_handler import _action_log
+    return {"events": list(_action_log), "count": len(_action_log)}
+
+
 # --- Deadlines (DEADLINE-SYSTEM-1) ---
 
 @app.get("/api/deadlines", tags=["deadlines"], dependencies=[Depends(verify_api_key)])
@@ -788,8 +797,11 @@ async def scan_chat(req: ScanRequest):
     start = time.time()
 
     # SCAN-ACTION-1: Email action routing — check before RAG pipeline
+    logger.info(f"SCAN_DEBUG: question={req.question[:200]}")
     draft_action = _ah.check_pending_draft(req.question)
+    logger.info(f"SCAN_DEBUG: draft_action={draft_action}")
     if draft_action == "confirm":
+        logger.info("SCAN_DEBUG: routing to handle_confirmation")
         return _action_stream_response(_ah.handle_confirmation(), req.question)
     elif draft_action and draft_action.startswith("edit:"):
         return _action_stream_response(
@@ -799,7 +811,9 @@ async def scan_chat(req: ScanRequest):
     elif draft_action is None:
         # No pending draft — classify intent for new actions
         intent = _ah.classify_intent(req.question)
+        logger.info(f"SCAN_DEBUG: intent_type={intent.get('type')}, recipient={intent.get('recipient')}")
         if intent.get("type") == "email_action":
+            logger.info("SCAN_DEBUG: routing to handle_email_action")
             return _action_stream_response(
                 _ah.handle_email_action(intent, _get_retriever(), req.project, req.role),
                 req.question,

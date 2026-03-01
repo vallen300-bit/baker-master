@@ -31,6 +31,24 @@ DIRECTOR_EMAIL = "dvallen@brisengroup.com"
 BAKER_FOOTER = "\n\n---\nSent via Baker CEO Cockpit on behalf of Dimitry Vallen"
 DRAFT_TTL_SECONDS = 300
 
+# EMAIL-DELIVERY-1 DEBUG: In-memory action log for remote diagnosis
+_action_log: list = []
+_ACTION_LOG_MAX = 50
+
+
+def _log_action(event: str, detail: str = ""):
+    """Append to in-memory action log for /api/debug/action-log endpoint."""
+    from datetime import datetime, timezone
+    entry = {
+        "time": datetime.now(timezone.utc).isoformat(),
+        "event": event,
+        "detail": detail[:500],
+    }
+    _action_log.append(entry)
+    if len(_action_log) > _ACTION_LOG_MAX:
+        _action_log.pop(0)
+    logger.info(f"ACTION_LOG: {event} | {detail[:200]}")
+
 # ---------------------------------------------------------------------------
 # Lightweight PostgreSQL pool — draft table only (min=1, max=2)
 # ---------------------------------------------------------------------------
@@ -298,9 +316,12 @@ def classify_intent(question: str) -> dict:
     Uses fast regex pre-check first, then falls back to Claude Haiku.
     Falls back to {"type": "question"} on any error.
     """
+    _log_action("classify_intent:start", f"question={question[:200]}")
+
     # EMAIL-DELIVERY-1: Fast path — regex catches obvious email commands
     quick = _quick_email_detect(question)
     if quick:
+        _log_action("classify_intent:regex_match", f"type={quick.get('type')}, recipient={quick.get('recipient')}")
         return quick
 
     try:
@@ -316,8 +337,11 @@ def classify_intent(question: str) -> dict:
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
-        return json.loads(raw)
+        result = json.loads(raw)
+        _log_action("classify_intent:haiku_result", f"type={result.get('type')}, raw={raw[:200]}")
+        return result
     except Exception as e:
+        _log_action("classify_intent:haiku_failed", str(e))
         logger.warning(f"Intent classification failed ({e}) — defaulting to question")
         return {"type": "question"}
 
@@ -443,12 +467,15 @@ def handle_email_action(intent: dict, retriever, project=None, role=None,
     Returns the response text to stream back to the Director.
     channel: "scan" or "whatsapp" — determines where confirmations/replies go.
     """
+    _log_action("handle_email_action:ENTERED", f"intent={json.dumps(intent)[:300]}, channel={channel}")
+
     raw_recipient = (intent.get("recipient") or "").strip()
     subject = (intent.get("subject") or "Email from Dimitry Vallen").strip()
     content_request = (intent.get("content_request") or intent.get("subject") or "general email").strip()
 
     # Parse multiple recipients (comma, semicolon, or "and" separated)
     recipients = _parse_recipients(raw_recipient)
+    _log_action("handle_email_action:recipients", f"raw={raw_recipient}, parsed={recipients}")
 
     if not recipients:
         return (
@@ -466,11 +493,15 @@ def handle_email_action(intent: dict, retriever, project=None, role=None,
 
     results = []
 
+    _log_action("handle_email_action:routing", f"internal={internal}, external={external}")
+
     # Auto-send to all internal recipients
     for recipient in internal:
+        _log_action("handle_email_action:SENDING_INTERNAL", f"to={recipient}")
         try:
             from outputs.email_alerts import send_composed_email
             result = send_composed_email(recipient, subject, full_body)
+            _log_action("handle_email_action:send_result", f"to={recipient}, result={result}")
             if result:
                 message_id = result.get("message_id")
                 thread_id = result.get("thread_id")
@@ -478,13 +509,16 @@ def handle_email_action(intent: dict, retriever, project=None, role=None,
                 results.append(f"\u2705 Sent to {recipient}")
                 logger.info(f"Action: internal email sent to {recipient} via {channel} (id={message_id})")
             else:
-                results.append(f"\u274c Failed: {recipient}")
+                results.append(f"\u274c Failed: {recipient} (send returned None)")
+                _log_action("handle_email_action:send_returned_none", f"to={recipient}")
         except Exception as e:
             logger.error(f"Internal email send failed for {recipient}: {e}")
+            _log_action("handle_email_action:send_exception", f"to={recipient}, error={e}")
             results.append(f"\u274c Failed: {recipient}: {e}")
 
     # Draft for external recipients (first one gets the draft, rest queued)
     if external:
+        _log_action("handle_email_action:DRAFTING_EXTERNAL", f"recipients={external}")
         first_external = external[0]
         all_external = ", ".join(external)
         _save_draft(first_external, subject, full_body, content_request, channel=channel)
@@ -536,9 +570,12 @@ def _parse_recipients(raw: str) -> list:
 
 def handle_confirmation(retriever=None, project=None, role=None) -> str:
     """Send the pending external draft. Clears state on success."""
+    _log_action("handle_confirmation:ENTERED", "checking for pending draft")
     draft = _load_draft()
     if draft is None:
+        _log_action("handle_confirmation:no_draft", "draft is None")
         return "No pending draft to send (it may have expired). Please start again with a new email command."
+    _log_action("handle_confirmation:draft_found", f"to={draft.get('to')}, channel={draft.get('channel')}")
 
     try:
         from outputs.email_alerts import send_composed_email
