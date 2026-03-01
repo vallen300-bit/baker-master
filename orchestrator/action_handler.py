@@ -5,17 +5,22 @@ Handles intent classification, pending draft state, and email action execution
 for the Baker Scan endpoint. Bypasses the normal RAG streaming pipeline for
 recognised email commands.
 
+Draft state is persisted to PostgreSQL (pending_drafts table, single row keyed
+'director') so it survives process restarts and multi-worker deployments.
+TTL is enforced passively on every read — no background sweep required.
+
 Internal flow:
   scan_chat() → classify_intent() → handle_email_action() → send / draft
   scan_chat() → check_pending_draft() → handle_confirmation() / handle_edit()
 """
 import json
 import logging
-import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import anthropic
-from typing import Optional
+import psycopg2
+import psycopg2.pool
 
 from config.settings import config
 
@@ -24,24 +29,170 @@ logger = logging.getLogger("baker.action_handler")
 INTERNAL_DOMAIN = "brisengroup.com"
 DIRECTOR_EMAIL = "dvallen@brisengroup.com"
 BAKER_FOOTER = "\n\n---\nSent via Baker CEO Cockpit on behalf of Dimitry Vallen"
+DRAFT_TTL_SECONDS = 300
 
 # ---------------------------------------------------------------------------
-# In-memory pending draft (single Director use case — no DB needed)
-# Draft expires after 5 minutes of inactivity.
+# Lightweight PostgreSQL pool — draft table only (min=1, max=2)
 # ---------------------------------------------------------------------------
-_pending_draft: Optional[dict] = None
+
+_pool: Optional[psycopg2.pool.SimpleConnectionPool] = None
 
 
-def _draft_expired() -> bool:
-    if not _pending_draft:
-        return False
-    age = (datetime.now(timezone.utc) - _pending_draft["created_at"]).total_seconds()
-    return age > _pending_draft["expires_after"]
+def _get_pool() -> Optional[psycopg2.pool.SimpleConnectionPool]:
+    global _pool
+    if _pool is None:
+        try:
+            _pool = psycopg2.pool.SimpleConnectionPool(
+                minconn=1,
+                maxconn=2,
+                **config.postgres.dsn_params,
+            )
+            logger.info("action_handler: PostgreSQL pool initialised")
+        except Exception as e:
+            logger.warning(f"action_handler: PostgreSQL pool init failed: {e}")
+    return _pool
 
 
-def _clear_draft():
-    global _pending_draft
-    _pending_draft = None
+def _get_conn():
+    pool = _get_pool()
+    if pool is None:
+        return None
+    try:
+        return pool.getconn()
+    except Exception as e:
+        logger.warning(f"action_handler: could not get connection: {e}")
+        return None
+
+
+def _put_conn(conn):
+    pool = _get_pool()
+    if pool and conn:
+        try:
+            pool.putconn(conn)
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Table bootstrap — called once at import time
+# ---------------------------------------------------------------------------
+
+def _ensure_draft_table():
+    conn = _get_conn()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS pending_drafts (
+                id          TEXT PRIMARY KEY,
+                to_address  TEXT NOT NULL,
+                subject     TEXT NOT NULL,
+                body        TEXT NOT NULL,
+                content_req TEXT NOT NULL,
+                created_at  TIMESTAMPTZ NOT NULL,
+                expires_at  TIMESTAMPTZ NOT NULL
+            )
+        """)
+        conn.commit()
+        cur.close()
+        logger.info("action_handler: pending_drafts table verified")
+    except Exception as e:
+        logger.warning(f"action_handler: could not ensure pending_drafts table: {e}")
+    finally:
+        _put_conn(conn)
+
+
+_ensure_draft_table()
+
+
+# ---------------------------------------------------------------------------
+# Draft persistence helpers
+# ---------------------------------------------------------------------------
+
+def _save_draft(to: str, subject: str, body: str, content_req: str):
+    """Upsert a single pending draft for the Director."""
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(seconds=DRAFT_TTL_SECONDS)
+    conn = _get_conn()
+    if not conn:
+        logger.error("action_handler: no DB connection — draft not saved")
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO pending_drafts (id, to_address, subject, body, content_req, created_at, expires_at)
+            VALUES ('director', %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                to_address  = EXCLUDED.to_address,
+                subject     = EXCLUDED.subject,
+                body        = EXCLUDED.body,
+                content_req = EXCLUDED.content_req,
+                created_at  = EXCLUDED.created_at,
+                expires_at  = EXCLUDED.expires_at
+        """, (to, subject, body, content_req, now, expires_at))
+        conn.commit()
+        cur.close()
+        logger.info(f"action_handler: draft saved for {to} (expires {expires_at.strftime('%H:%M:%S')} UTC)")
+    except Exception as e:
+        logger.error(f"action_handler: draft save failed: {e}")
+    finally:
+        _put_conn(conn)
+
+
+def _load_draft() -> Optional[dict]:
+    """
+    Load the pending draft. Returns None if no draft exists or TTL has expired.
+    Expired drafts are auto-deleted on load.
+    """
+    conn = _get_conn()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT to_address, subject, body, content_req, created_at, expires_at
+            FROM pending_drafts
+            WHERE id = 'director'
+        """)
+        row = cur.fetchone()
+        cur.close()
+        if not row:
+            return None
+        to_address, subject, body, content_req, created_at, expires_at = row
+        if datetime.now(timezone.utc) > expires_at:
+            logger.info("action_handler: draft expired — auto-deleting")
+            _delete_draft()
+            return None
+        return {
+            "to": to_address,
+            "subject": subject,
+            "body": body,
+            "content_request": content_req,
+            "created_at": created_at,
+            "expires_at": expires_at,
+        }
+    except Exception as e:
+        logger.warning(f"action_handler: draft load failed: {e}")
+        return None
+    finally:
+        _put_conn(conn)
+
+
+def _delete_draft():
+    """Remove the pending draft."""
+    conn = _get_conn()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM pending_drafts WHERE id = 'director'")
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        logger.warning(f"action_handler: draft delete failed: {e}")
+    finally:
+        _put_conn(conn)
 
 
 # ---------------------------------------------------------------------------
@@ -108,14 +259,8 @@ def check_pending_draft(question: str) -> Optional[str]:
       "dismiss"           — Any other input; draft cleared, fall through to normal scan
       None                — No pending draft active
     """
-    global _pending_draft
-
-    if not _pending_draft:
-        return None
-
-    if _draft_expired():
-        logger.info("Pending draft expired — cleared")
-        _clear_draft()
+    draft = _load_draft()
+    if draft is None:
         return None
 
     q = question.strip().lower()
@@ -126,9 +271,9 @@ def check_pending_draft(question: str) -> Optional[str]:
         instruction = question.strip()[5:].strip()
         return f"edit:{instruction}"
 
-    # Any other input clears the draft
-    logger.info("Pending draft dismissed by unrelated input")
-    _clear_draft()
+    # Any other input clears the draft and falls through to normal scan
+    logger.info("action_handler: pending draft dismissed by unrelated input")
+    _delete_draft()
     return "dismiss"
 
 
@@ -191,11 +336,9 @@ def handle_email_action(intent: dict, retriever, project=None, role=None) -> str
     """
     Process a detected email action intent.
     - Internal (@brisengroup.com): auto-send, return confirmation.
-    - External: save pending draft, return draft for confirmation.
+    - External: save pending draft to PostgreSQL, return draft for confirmation.
     Returns the response text to stream back to the Director.
     """
-    global _pending_draft
-
     recipient = (intent.get("recipient") or "").strip()
     subject = (intent.get("subject") or "Email from Dimitry Vallen").strip()
     content_request = (intent.get("content_request") or intent.get("subject") or "general email").strip()
@@ -216,7 +359,7 @@ def handle_email_action(intent: dict, retriever, project=None, role=None) -> str
         try:
             from outputs.email_alerts import send_composed_email
             message_id = send_composed_email(recipient, subject, full_body)
-            _clear_draft()
+            _delete_draft()
             preview = full_body[:200].replace("\n", " ")
             logger.info(f"Action: internal email sent to {recipient} (id={message_id})")
             return (
@@ -228,15 +371,8 @@ def handle_email_action(intent: dict, retriever, project=None, role=None) -> str
             logger.error(f"Internal email send failed: {e}")
             return f"❌ Failed to send email to {recipient}: {e}"
     else:
-        _pending_draft = {
-            "to": recipient,
-            "subject": subject,
-            "body": full_body,
-            "content_request": content_request,
-            "created_at": datetime.now(timezone.utc),
-            "expires_after": 300,
-        }
-        logger.info(f"Action: external draft ready for {recipient}")
+        _save_draft(recipient, subject, full_body, content_request)
+        logger.info(f"Action: external draft saved for {recipient}")
         return (
             f'📧 Draft ready — reply **"send it"** to confirm, or **"edit: [instruction]"** to modify.\n\n'
             f"**To:** {recipient}\n"
@@ -247,17 +383,14 @@ def handle_email_action(intent: dict, retriever, project=None, role=None) -> str
 
 def handle_confirmation(retriever=None, project=None, role=None) -> str:
     """Send the pending external draft. Clears state on success."""
-    global _pending_draft
-
-    if not _pending_draft or _draft_expired():
-        _clear_draft()
+    draft = _load_draft()
+    if draft is None:
         return "No pending draft to send (it may have expired). Please start again with a new email command."
 
-    draft = _pending_draft.copy()
     try:
         from outputs.email_alerts import send_composed_email
         message_id = send_composed_email(draft["to"], draft["subject"], draft["body"])
-        _clear_draft()
+        _delete_draft()
         preview = draft["body"][:200].replace("\n", " ")
         logger.info(f"Action: confirmed send to {draft['to']} (id={message_id})")
         return (
@@ -272,26 +405,24 @@ def handle_confirmation(retriever=None, project=None, role=None) -> str:
 
 def handle_edit(edit_instruction: str, retriever, project=None, role=None) -> str:
     """Regenerate the pending draft body with the edit instruction applied."""
-    global _pending_draft
-
-    if not _pending_draft or _draft_expired():
-        _clear_draft()
+    draft = _load_draft()
+    if draft is None:
         return "No pending draft to edit (it may have expired). Please start again with a new email command."
 
     enhanced_request = (
-        f"{_pending_draft['content_request']}\n\n"
+        f"{draft['content_request']}\n\n"
         f"Edit instruction: {edit_instruction}"
     )
     body = generate_email_body(enhanced_request, retriever, project, role)
     full_body = body + BAKER_FOOTER
 
-    _pending_draft["body"] = full_body
-    _pending_draft["created_at"] = datetime.now(timezone.utc)  # reset TTL on edit
+    # Re-save with updated body and reset TTL
+    _save_draft(draft["to"], draft["subject"], full_body, draft["content_request"])
 
-    logger.info(f"Action: draft updated for {_pending_draft['to']} (edit: {edit_instruction[:60]})")
+    logger.info(f"Action: draft updated for {draft['to']} (edit: {edit_instruction[:60]})")
     return (
         f'📧 Draft updated — reply **"send it"** to confirm, or **"edit: [instruction]"** to modify again.\n\n'
-        f"**To:** {_pending_draft['to']}\n"
-        f"**Subject:** {_pending_draft['subject']}\n\n"
+        f"**To:** {draft['to']}\n"
+        f"**Subject:** {draft['subject']}\n\n"
         f"---\n\n{full_body}"
     )
