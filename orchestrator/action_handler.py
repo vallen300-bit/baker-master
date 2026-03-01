@@ -257,12 +257,52 @@ If the message is a question, information request, or anything else → type: "q
 Only return the JSON object."""
 
 
+def _quick_email_detect(question: str) -> dict:
+    """
+    EMAIL-DELIVERY-1: Fast regex pre-check for obvious email action patterns.
+    Bypasses Haiku classifier entirely for clear email commands.
+    Returns intent dict if detected, None otherwise.
+    """
+    import re
+    q = question.lower()
+
+    # Must contain an email-related verb
+    email_verbs = [
+        "send email", "send an email", "send a email",
+        "email to ", "email about", "email regarding",
+        "write email", "write an email", "write a email",
+        "send to ", "forward to ", "share with ",
+        "draft email", "draft an email", "compose email",
+        "send a message to", "send message to",
+    ]
+    has_verb = any(v in q for v in email_verbs)
+
+    # Must contain at least one email address
+    emails = re.findall(r'[\w.+-]+@[\w.-]+\.\w+', question)
+
+    if has_verb and emails:
+        logger.info(f"Quick email detect: matched {len(emails)} recipients via regex (bypassing Haiku)")
+        return {
+            "type": "email_action",
+            "recipient": ", ".join(emails),
+            "subject": None,
+            "content_request": question,
+        }
+
+    return None
+
+
 def classify_intent(question: str) -> dict:
     """
-    Use Claude Haiku to classify the Director's input as email_action or question.
-    Returns a dict with type, recipient, subject, content_request.
+    Classify the Director's input into action types.
+    Uses fast regex pre-check first, then falls back to Claude Haiku.
     Falls back to {"type": "question"} on any error.
     """
+    # EMAIL-DELIVERY-1: Fast path — regex catches obvious email commands
+    quick = _quick_email_detect(question)
+    if quick:
+        return quick
+
     try:
         claude = anthropic.Anthropic(api_key=config.claude.api_key)
         resp = claude.messages.create(
