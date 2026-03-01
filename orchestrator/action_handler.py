@@ -214,7 +214,7 @@ _INTENT_SYSTEM = """You are Baker's intent classifier. Given a Director's messag
 
 Return exactly this JSON structure (no other text, no markdown):
 {
-  "type": "email_action" | "deadline_action" | "vip_action" | "question",
+  "type": "email_action" | "deadline_action" | "vip_action" | "fireflies_fetch" | "question",
   "recipient": "<email address or null>",
   "subject": "<inferred subject line or null>",
   "content_request": "<what Baker should include in the email body, or null>",
@@ -244,6 +244,14 @@ Deadline action patterns:
 VIP action patterns:
 - "Add [name] to the VIP list" → type: "vip_action", vip_action_type: "add"
 - "Remove [name] from the VIP list" → type: "vip_action", vip_action_type: "remove"
+
+Fireflies fetch patterns:
+- "Pull the Fireflies recording with [name]" → type: "fireflies_fetch"
+- "Get the Fireflies transcript from [date]" → type: "fireflies_fetch"
+- "Fetch the meeting with [name] from Tuesday" → type: "fireflies_fetch"
+- "Check Fireflies for the [name] call" → type: "fireflies_fetch"
+- "Find the recording of the [topic] meeting" → type: "fireflies_fetch"
+- "Pull the Fireflies recording with John and draft a follow-up email" → type: "fireflies_fetch" (the email action will be chained after fetch)
 
 If the message is a question, information request, or anything else → type: "question".
 Only return the JSON object."""
@@ -551,3 +559,215 @@ def handle_vip_action(intent: dict) -> str:
     except Exception as e:
         logger.error(f"VIP action failed: {e}")
         return f"Failed to process VIP action: {e}"
+
+
+# ---------------------------------------------------------------------------
+# FIREFLIES-FETCH-1: On-demand Fireflies fetch
+# ---------------------------------------------------------------------------
+
+_FIREFLIES_PARAM_SYSTEM = """Extract Fireflies search parameters from this message.
+Return JSON (no other text):
+{
+    "keyword": "person name or topic keyword, or null",
+    "date_hint": "relative or absolute date like 'Tuesday', 'last week', 'March 2', or null",
+    "action_after": "the follow-up action requested (e.g. 'draft a follow-up email to John'), or null"
+}
+"""
+
+
+def _extract_fireflies_params(message: str) -> dict:
+    """Use Claude Haiku to extract search parameters from the Director's message."""
+    try:
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d (%A)")
+        claude = anthropic.Anthropic(api_key=config.claude.api_key)
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            system=_FIREFLIES_PARAM_SYSTEM,
+            messages=[{
+                "role": "user",
+                "content": f"Today is {today}.\n\nMessage: {message}",
+            }],
+        )
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
+        return json.loads(raw)
+    except Exception as e:
+        logger.warning(f"Fireflies param extraction failed: {e}")
+        return {}
+
+
+def _resolve_date_hint(date_hint: str) -> tuple:
+    """
+    Resolve a natural language date hint to (from_date, to_date) ISO strings.
+    Returns (None, None) if unresolvable.
+    """
+    if not date_hint:
+        return None, None
+
+    now = datetime.now(timezone.utc)
+    hint = date_hint.lower().strip()
+
+    # Relative hints
+    if hint in ("today",):
+        d = now.strftime("%Y-%m-%d")
+        return d, d
+    if hint in ("yesterday",):
+        d = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+        return d, d
+    if "last week" in hint:
+        start = (now - timedelta(days=7)).strftime("%Y-%m-%d")
+        return start, now.strftime("%Y-%m-%d")
+    if "this week" in hint:
+        # Monday of this week
+        monday = now - timedelta(days=now.weekday())
+        return monday.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d")
+
+    # Day names (most recent occurrence)
+    day_names = {
+        "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+        "friday": 4, "saturday": 5, "sunday": 6,
+    }
+    for day_name, day_num in day_names.items():
+        if day_name in hint:
+            days_ago = (now.weekday() - day_num) % 7
+            if days_ago == 0:
+                days_ago = 7  # "Tuesday" means last Tuesday if today is Tuesday
+            target = now - timedelta(days=days_ago)
+            d = target.strftime("%Y-%m-%d")
+            return d, d
+
+    # Try direct date parse
+    for fmt in ("%Y-%m-%d", "%B %d", "%b %d", "%d %B", "%d %b"):
+        try:
+            parsed = datetime.strptime(hint, fmt)
+            if parsed.year == 1900:
+                parsed = parsed.replace(year=now.year)
+            d = parsed.strftime("%Y-%m-%d")
+            return d, d
+        except ValueError:
+            continue
+
+    return None, None
+
+
+def handle_fireflies_fetch(message: str, retriever=None, project=None,
+                           role=None, channel: str = "scan") -> str:
+    """
+    FIREFLIES-FETCH-1: On-demand Fireflies transcript fetch.
+    1. Extract search params via Haiku
+    2. Search Fireflies API
+    3. Ingest new transcripts through pipeline
+    4. Chain follow-up action if requested
+    5. Return summary
+    """
+    # 1. Extract params
+    params = _extract_fireflies_params(message)
+    keyword = params.get("keyword")
+    date_hint = params.get("date_hint")
+    action_after = params.get("action_after")
+
+    from_date, to_date = _resolve_date_hint(date_hint)
+
+    logger.info(
+        f"Fireflies fetch: keyword={keyword}, date_hint={date_hint}, "
+        f"resolved=({from_date}, {to_date}), action_after={action_after}"
+    )
+
+    # 2. Search Fireflies API
+    api_key = config.fireflies.api_key
+    if not api_key:
+        return "Fireflies API key is not configured. Cannot fetch recordings."
+
+    try:
+        from scripts.extract_fireflies import search_transcripts, format_transcript
+        results = search_transcripts(
+            api_key=api_key,
+            keyword=keyword,
+            from_date=from_date,
+            to_date=to_date,
+            limit=10,
+        )
+    except Exception as e:
+        logger.error(f"Fireflies search failed: {e}")
+        return f"Failed to search Fireflies: {e}"
+
+    if not results:
+        parts = ["No Fireflies recordings found"]
+        if keyword:
+            parts.append(f'matching "{keyword}"')
+        if date_hint:
+            parts.append(f"from {date_hint}")
+        return " ".join(parts) + "."
+
+    # 3. Filter out already-processed (dedup)
+    from triggers.state import trigger_state
+    new_results = []
+    for t in results:
+        source_id = t.get("id", "")
+        if source_id and not trigger_state.is_processed("meeting", source_id):
+            new_results.append(t)
+
+    # 4. Ingest each through pipeline
+    from orchestrator.pipeline import SentinelPipeline, TriggerEvent
+    pipeline = SentinelPipeline()
+    ingested = 0
+    titles = []
+
+    for t in new_results:
+        formatted = format_transcript(t)
+        source_id = t.get("id", "")
+        metadata = formatted.get("metadata", {})
+        titles.append(f"{metadata.get('meeting_title', '?')} ({metadata.get('date', '?')})")
+
+        trigger = TriggerEvent(
+            type="meeting",
+            content=formatted["text"],
+            source_id=source_id,
+            contact_name=metadata.get("organizer"),
+            priority="medium",
+        )
+
+        try:
+            pipeline.run(trigger)
+            ingested += 1
+        except Exception as e:
+            logger.error(f"Fireflies fetch: pipeline failed for {source_id}: {e}")
+
+        # Deadline extraction
+        try:
+            from orchestrator.deadline_manager import extract_deadlines
+            extract_deadlines(
+                content=formatted["text"],
+                source_type="fireflies",
+                source_id=source_id,
+                sender_name=metadata.get("organizer", ""),
+            )
+        except Exception:
+            pass
+
+    # 5. Build reply
+    already_had = len(results) - len(new_results)
+    reply_parts = [f"\U0001f4cb Fetched {ingested} recording(s) from Fireflies"]
+    if titles:
+        for t in titles:
+            reply_parts.append(f"\u2022 {t}")
+    if already_had > 0:
+        reply_parts.append(f"({already_had} already in Baker's memory)")
+    if ingested > 0:
+        reply_parts.append("\nNow in Baker's memory \u2014 you can ask questions about it.")
+
+    # 6. Chain follow-up action if requested
+    if action_after and ingested > 0 and retriever:
+        reply_parts.append("\nProcessing your follow-up request...")
+        # Re-classify the action part
+        action_intent = classify_intent(action_after)
+        if action_intent.get("type") == "email_action":
+            email_result = handle_email_action(
+                action_intent, retriever, project, role, channel=channel,
+            )
+            reply_parts.append(email_result)
+
+    return "\n".join(reply_parts)

@@ -188,6 +188,70 @@ def format_transcript(t: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Search / filter (FIREFLIES-FETCH-1)
+# ---------------------------------------------------------------------------
+
+def search_transcripts(
+    api_key: str,
+    keyword: str = None,
+    from_date: str = None,
+    to_date: str = None,
+    limit: int = 50,
+) -> list[dict]:
+    """
+    Search Fireflies transcripts by keyword and/or date range.
+    Fetches from API then filters client-side.
+
+    - keyword: matched against title and participant names (case-insensitive)
+    - from_date / to_date: ISO date strings (YYYY-MM-DD) for range filtering
+    - Returns: list of raw transcript dicts (same format as fetch_transcripts)
+    """
+    raw = fetch_transcripts(api_key, limit=limit)
+    if not raw:
+        return []
+
+    results = []
+    from_dt = None
+    to_dt = None
+
+    if from_date:
+        try:
+            from_dt = datetime.strptime(from_date, "%Y-%m-%d")
+        except ValueError:
+            pass
+    if to_date:
+        try:
+            to_dt = datetime.strptime(to_date, "%Y-%m-%d")
+        except ValueError:
+            pass
+
+    for t in raw:
+        # Date filter
+        t_date = transcript_date(t)
+        if from_dt and t_date and t_date < from_dt:
+            continue
+        if to_dt and t_date and t_date > to_dt:
+            continue
+
+        # Keyword filter (title + participants)
+        if keyword:
+            kw_lower = keyword.lower()
+            title = (t.get("title") or "").lower()
+            participants = t.get("participants") or []
+            if isinstance(participants, list):
+                participants_str = " ".join(str(p).lower() for p in participants)
+            else:
+                participants_str = str(participants).lower()
+
+            if kw_lower not in title and kw_lower not in participants_str:
+                continue
+
+        results.append(t)
+
+    return results
+
+
+# ---------------------------------------------------------------------------
 # Date filtering
 # ---------------------------------------------------------------------------
 

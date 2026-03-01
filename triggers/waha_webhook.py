@@ -81,6 +81,14 @@ def _handle_director_message(message_body: str, msg_id: str, sender_name: str) -
         logger.info(f"WhatsApp action: VIP action processed")
         return True
 
+    elif intent_type == "fireflies_fetch":
+        result = ah.handle_fireflies_fetch(
+            message_body, _get_retriever(), channel="whatsapp",
+        )
+        _wa_reply(result)
+        logger.info(f"WhatsApp action: Fireflies fetch processed")
+        return True
+
     # 3. Not an action — fall through to normal pipeline
     return False
 

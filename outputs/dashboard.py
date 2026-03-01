@@ -204,6 +204,13 @@ async def startup():
     except Exception as e:
         logger.error(f"Scheduler failed to start: {e}")
 
+    # FIREFLIES-FETCH-1: Backfill last 30 days of Fireflies history on deploy
+    try:
+        from triggers.fireflies_trigger import backfill_fireflies
+        backfill_fireflies()
+    except Exception as e:
+        logger.warning(f"Fireflies backfill failed on startup (non-fatal): {e}")
+
     # Mount static files if directory exists
     if _static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")
@@ -799,6 +806,14 @@ async def scan_chat(req: ScanRequest):
         elif intent.get("type") == "vip_action":
             return _action_stream_response(
                 _ah.handle_vip_action(intent),
+                req.question,
+            )
+        elif intent.get("type") == "fireflies_fetch":
+            return _action_stream_response(
+                _ah.handle_fireflies_fetch(
+                    req.question, _get_retriever(), req.project, req.role,
+                    channel="scan",
+                ),
                 req.question,
             )
     # draft_action == "dismiss" or regular question → fall through to RAG pipeline
