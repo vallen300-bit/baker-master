@@ -355,133 +355,27 @@ def check_pending_draft(question: str) -> Optional[str]:
     Check whether the question interacts with a pending email draft.
 
     Returns:
-      "confirm"              — Director confirmed (simple: "send it", "yes")
-      "confirm_to:<addrs>"   — Director confirmed with new recipients
-      "edit:<instruction>"   — Director wants edits or revision
-      "dismiss"              — Explicitly cancelled or clearly unrelated
-      None                   — No pending draft active
+      "confirm"           — Director confirmed ("send it", "yes", "confirm", …)
+      "edit:<instruction>"— Director wants edits ("edit: make it shorter")
+      "dismiss"           — Any other input; draft cleared, fall through to normal scan
+      None                — No pending draft active
     """
-    import re
-
     draft = _load_draft()
     if draft is None:
         return None
 
     q = question.strip().lower()
-    raw = question.strip()
-
-    # 1. Exact short confirmations
-    if q in ("send it", "yes", "confirm", "go ahead", "do it", "send",
-             "send now", "please send", "send please", "ok send",
-             "ok send it", "yes send it", "go", "looks good send it",
-             "perfect send it", "good send it"):
-        _log_action("check_pending_draft:confirm_exact", q)
+    if q in ("send it", "yes", "confirm", "go ahead", "do it", "send"):
         return "confirm"
 
-    # 2. Explicit edit: prefix
-    if q.startswith("edit:"):
-        instruction = raw[5:].strip()
-        _log_action("check_pending_draft:edit_prefix", instruction[:100])
+    if question.strip().lower().startswith("edit:"):
+        instruction = question.strip()[5:].strip()
         return f"edit:{instruction}"
 
-    # 3. Explicit cancel / dismiss
-    cancel_phrases = [
-        "cancel", "never mind", "nevermind", "forget it", "forget the email",
-        "start over", "discard", "drop it", "scratch that", "abort",
-    ]
-    if q in cancel_phrases or any(q.startswith(p) for p in cancel_phrases):
-        _log_action("check_pending_draft:explicit_cancel", q)
-        _delete_draft()
-        return "dismiss"
-
-    # 4. Send-intent with possible new recipients
-    send_patterns = [
-        r"\bsend\s+(?:this|it|the\s+email|that|the\s+draft)",
-        r"\bplease\s+send",
-        r"\bnow\s+send",
-        r"\bgo\s+ahead\s+and\s+send",
-        r"\bforward\s+(?:this|it|the\s+email)",
-        r"\bsend\s+(?:this\s+)?(?:to|email)",
-    ]
-    has_send_intent = any(re.search(p, q) for p in send_patterns)
-
-    if has_send_intent:
-        email_addrs = re.findall(r'[\w.+-]+@[\w.-]+\.\w+', question)
-        resolved = _resolve_recipients_from_text(question)
-        all_recipients = list(set(email_addrs + resolved))
-
-        if all_recipients:
-            addrs = ", ".join(all_recipients)
-            _log_action("check_pending_draft:confirm_with_recipients", f"addrs={addrs}")
-            return f"confirm_to:{addrs}"
-        else:
-            _log_action("check_pending_draft:confirm_send_intent", q)
-            return "confirm"
-
-    # 5. Revision-intent detection — natural edit requests without "edit:" prefix
-    revision_keywords = [
-        "shorter", "longer", "brief", "concise", "expand",
-        "change", "add", "remove", "update", "rewrite", "fix",
-        "adjust", "tone", "formal", "casual", "friendly", "professional",
-        "more", "less", "include", "mention", "rephrase", "reword",
-        "tweak", "modify", "soften", "strengthen", "simplify",
-        "bullet", "paragraph", "date", "name", "reference",
-    ]
-    has_revision_keyword = any(kw in q for kw in revision_keywords)
-
-    # Short instructions (under ~50 words, no question mark) are likely revisions
-    word_count = len(q.split())
-    is_short_instruction = word_count <= 50 and "?" not in q
-
-    if has_revision_keyword and is_short_instruction:
-        _log_action("check_pending_draft:implicit_edit", q[:100])
-        return f"edit:{raw}"
-
-    # 6. If it's a short instruction without question marks, likely still about the draft
-    if is_short_instruction and word_count <= 15 and "?" not in q:
-        # Very short non-question inputs while a draft is pending → treat as edit
-        _log_action("check_pending_draft:short_instruction_as_edit", q[:100])
-        return f"edit:{raw}"
-
-    # 7. Clearly unrelated — longer text or contains question marks → dismiss
+    # Any other input clears the draft and falls through to normal scan
     logger.info("action_handler: pending draft dismissed by unrelated input")
-    _log_action("check_pending_draft:dismissed", q[:100])
     _delete_draft()
     return "dismiss"
-
-
-def _resolve_recipients_from_text(text: str) -> list:
-    """
-    Resolve person names in text to email addresses using vip_contacts table.
-    Handles "myself"/"me"/"Dimitry" → dvallen@brisengroup.com.
-    Returns list of resolved email addresses.
-    """
-    resolved = []
-    text_lower = text.lower()
-
-    # Self-references
-    if any(w in text_lower for w in ("myself", " me ", " me,", " me.", "to me")):
-        resolved.append(DIRECTOR_EMAIL)
-    if "dimitry" in text_lower:
-        resolved.append(DIRECTOR_EMAIL)
-
-    # Look up names from VIP contacts
-    try:
-        from models.deadlines import get_vip_contacts
-        vips = get_vip_contacts()
-        for vip in vips:
-            vip_name = (vip.get("name") or "").strip()
-            vip_email = vip.get("email")
-            if not vip_name or not vip_email:
-                continue
-            # Match first name or full name (case-insensitive)
-            first_name = vip_name.split()[0].lower()
-            if first_name in text_lower or vip_name.lower() in text_lower:
-                resolved.append(vip_email)
-    except Exception as e:
-        logger.warning(f"VIP name resolution failed: {e}")
-
-    return list(set(resolved))
 
 
 # ---------------------------------------------------------------------------
@@ -560,6 +454,91 @@ def _log_sent_email(to: str, subject: str, body: str, message_id: str,
 
 
 # ---------------------------------------------------------------------------
+# Patch B: Name-to-email resolution via VIP contacts
+# ---------------------------------------------------------------------------
+
+def _resolve_names_to_emails(raw: str) -> list:
+    """
+    Resolve person names to email addresses using vip_contacts table.
+    Handles "myself"/"me"/"Dimitry" -> dvallen@brisengroup.com.
+    Returns list of resolved email addresses.
+    """
+    resolved = []
+    raw_lower = raw.lower()
+
+    # Self-references
+    if any(w in raw_lower for w in ("myself", "me", "dimitry")):
+        resolved.append(DIRECTOR_EMAIL)
+
+    # VIP contact lookup
+    try:
+        from models.deadlines import get_vip_contacts
+        vips = get_vip_contacts()
+        import re
+        # Split on comma, semicolon, "and" to get individual names
+        name_parts = re.split(r'[,;]\s*|\s+and\s+', raw)
+        for part in name_parts:
+            part_clean = part.strip().lower()
+            if not part_clean or part_clean in ("myself", "me", "dimitry"):
+                continue
+            for vip in vips:
+                vip_name = (vip.get("name") or "").strip()
+                vip_email = vip.get("email")
+                if not vip_name or not vip_email:
+                    continue
+                first_name = vip_name.split()[0].lower()
+                if part_clean == first_name or part_clean == vip_name.lower():
+                    resolved.append(vip_email)
+                    break
+    except Exception as e:
+        logger.warning(f"VIP name resolution failed: {e}")
+
+    return list(set(resolved))
+
+
+# ---------------------------------------------------------------------------
+# Patch C: Strip meta-commentary from generated email body
+# ---------------------------------------------------------------------------
+
+def _clean_email_body(raw_body: str) -> str:
+    """Remove Baker's meta-commentary from generated email text."""
+    lines = raw_body.strip().split('\n')
+    skip_patterns = [
+        'based on the context',
+        'based on available context',
+        'here is the email',
+        "here's the email",
+        'i\'ll draft',
+        'i will draft',
+        'here is a draft',
+        "here's a draft",
+        'the email body',
+        'email body for',
+        'draft email:',
+        'subject:',
+        'here is the composed',
+        "here's the composed",
+        'based on the retrieved',
+        'for all three recipients',
+        'for all recipients',
+    ]
+
+    # Skip leading lines that match meta-patterns
+    start_idx = 0
+    for i, line in enumerate(lines):
+        line_lower = line.strip().lower()
+        if any(p in line_lower for p in skip_patterns):
+            start_idx = i + 1
+        elif line.strip() == '---':
+            start_idx = i + 1
+        elif line.strip():
+            break
+
+    cleaned = '\n'.join(lines[start_idx:]).strip()
+    return cleaned if cleaned else raw_body.strip()
+
+
+# ---------------------------------------------------------------------------
 # Action handlers
 # ---------------------------------------------------------------------------
 
@@ -581,6 +560,14 @@ def handle_email_action(intent: dict, retriever, project=None, role=None,
 
     # Parse multiple recipients (comma, semicolon, or "and" separated)
     recipients = _parse_recipients(raw_recipient)
+
+    # Patch B: If no email addresses found, try name-to-email resolution
+    if not recipients and raw_recipient:
+        resolved = _resolve_names_to_emails(raw_recipient)
+        if resolved:
+            recipients = resolved
+            _log_action("handle_email_action:name_resolved", f"raw={raw_recipient}, resolved={resolved}")
+
     _log_action("handle_email_action:recipients", f"raw={raw_recipient}, parsed={recipients}")
 
     if not recipients:
@@ -590,6 +577,8 @@ def handle_email_action(intent: dict, retriever, project=None, role=None,
         )
 
     body = generate_email_body(content_request, retriever, project, role)
+    # Patch C: Strip any meta-commentary Claude added to the email body
+    body = _clean_email_body(body)
     # Note: send_composed_email() adds its own footer — don't double-add here
     full_body = body
 
@@ -674,13 +663,9 @@ def _parse_recipients(raw: str) -> list:
     return recipients
 
 
-def handle_confirmation(retriever=None, project=None, role=None,
-                        recipient_override: str = None) -> str:
-    """
-    Send the pending external draft. Clears state on success.
-    If recipient_override is provided, send to those addresses instead of the draft's original.
-    """
-    _log_action("handle_confirmation:ENTERED", f"recipient_override={recipient_override}")
+def handle_confirmation(retriever=None, project=None, role=None) -> str:
+    """Send the pending external draft. Clears state on success."""
+    _log_action("handle_confirmation:ENTERED", "checking for pending draft")
     draft = _load_draft()
     if draft is None:
         _log_action("handle_confirmation:no_draft", "draft is None")
@@ -690,13 +675,7 @@ def handle_confirmation(retriever=None, project=None, role=None,
     try:
         from outputs.email_alerts import send_composed_email
         draft_channel = draft.get("channel", "scan")
-
-        # Use override recipients if provided, otherwise use draft's original
-        if recipient_override:
-            recipients = _parse_recipients(recipient_override)
-            _log_action("handle_confirmation:using_override", f"recipients={recipients}")
-        else:
-            recipients = _parse_recipients(draft["to"])
+        recipients = _parse_recipients(draft["to"])
         if not recipients:
             recipients = [draft["to"]]
 
