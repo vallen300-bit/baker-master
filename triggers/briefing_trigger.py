@@ -147,21 +147,28 @@ def generate_morning_briefing():
     briefing_context = gather_briefing_context()
     logger.info(f"Briefing context gathered ({len(briefing_context)} chars)")
 
-    # Build briefing trigger
+    # Build briefing trigger — EMAIL-REFORM-1 structured format
+    # The output of this prompt gets embedded directly into the Type 3 daily briefing email.
+    # It must produce exactly these two sections (Claude-synthesized, not raw data):
     briefing_content = (
-        f"Generate the Baker Morning Briefing for {date_str}.\n\n"
-        f"Use this format:\n"
-        f"BAKER MORNING BRIEFING — {date_str}\n\n"
-        f"IMMEDIATE (Tier 1)\n"
-        f"- [urgent alert summaries]\n\n"
-        f"TODAY (Tier 2)\n"
-        f"- [items needing attention within 24h]\n\n"
-        f"RADAR\n"
-        f"- [deal updates, project status, people waiting]\n\n"
-        f"OVERNIGHT\n"
-        f"- [summary of emails/messages received since last briefing]\n\n"
-        f"DECISIONS PENDING\n"
-        f"- [any draft messages awaiting CEO approval]\n\n"
+        f"Generate Baker's executive daily briefing for {date_str}.\n\n"
+        f"You are Baker, the CEO's AI chief of staff. Write a 2-minute-read executive summary.\n"
+        f"Be concise, direct, and prioritize by relevance to the Director.\n\n"
+        f"Use EXACTLY this format (these sections are embedded into the daily email):\n\n"
+        f"\U0001f4cc DECISIONS NEEDED\n"
+        f"\u2022 [Item requiring Director action — be specific about what decision is needed]\n"
+        f"\u2022 [Item 2]\n"
+        f"(If none: \"No pending decisions today.\")\n\n"
+        f"\U0001f4ca KEY DEVELOPMENTS (last 24h)\n"
+        f"\u2022 [Top development — synthesize, don't just list raw data]\n"
+        f"\u2022 [Development 2]\n"
+        f"\u2022 [Development 3]\n"
+        f"(Max 5 items. Prioritize by relevance to Director.)\n\n"
+        f"Rules:\n"
+        f"- Synthesize the information — do NOT just dump raw items.\n"
+        f"- Write like a chief of staff briefing a CEO: what matters, what needs action.\n"
+        f"- If something needs a decision, put it in DECISIONS NEEDED, not KEY DEVELOPMENTS.\n"
+        f"- Keep each bullet to 1-2 lines max.\n\n"
         f"---\n"
         f"Here is the overnight context to summarize:\n\n"
         f"{briefing_context}"

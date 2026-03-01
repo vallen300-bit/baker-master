@@ -693,9 +693,12 @@ def _action_stream_response(text: str, question: str) -> StreamingResponse:
         payload = json.dumps({"token": text})
         yield f"data: {payload}\n\n"
         yield "data: [DONE]\n\n"
+        # EMAIL-REFORM-1: Type 2 email only when Director explicitly requests it
         try:
-            from outputs.email_alerts import send_scan_result_email
-            send_scan_result_email(question, text)
+            from outputs.email_alerts import has_email_intent, send_scan_result_email
+            if has_email_intent(question):
+                send_scan_result_email(question, text)
+                logger.info("Scan result emailed (explicit request detected)")
         except Exception as _e:
             logger.warning(f"Action email notification failed (non-fatal): {_e}")
 
@@ -861,11 +864,13 @@ async def scan_chat(req: ScanRequest):
         except Exception as e:
             logger.warning(f"Conversation store-back failed (non-fatal): {e}")
 
-        # 5c. Email scan result to Director (EMAIL-SMART-1 Type 2)
+        # 5c. Email scan result to Director (EMAIL-REFORM-1 Type 2 — opt-in only)
         if full_response:
             try:
-                from outputs.email_alerts import send_scan_result_email
-                send_scan_result_email(req.question, full_response)
+                from outputs.email_alerts import has_email_intent, send_scan_result_email
+                if has_email_intent(req.question):
+                    send_scan_result_email(req.question, full_response)
+                    logger.info("Scan result emailed (explicit request detected)")
             except Exception as e:
                 logger.warning(f"Scan email failed (non-fatal): {e}")
 
