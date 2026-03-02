@@ -978,6 +978,33 @@ async def scan_chat(req: ScanRequest):
     except Exception as e:
         logger.warning(f"Meeting transcript retrieval failed (non-fatal): {e}")
 
+    # 1c. ARCH-6/7: Also search full emails + WhatsApp from PostgreSQL
+    try:
+        retriever = _get_retriever()
+        # Emails
+        emails = retriever.get_email_messages(req.question, limit=3)
+        if emails:
+            contexts.extend(emails)
+            logger.info(f"Scan: added {len(emails)} email messages from PostgreSQL")
+        recent_emails = retriever.get_recent_emails(limit=3)
+        existing_eids = {c.metadata.get("message_id") for c in emails}
+        for r in recent_emails:
+            if r.metadata.get("message_id") not in existing_eids:
+                contexts.append(r)
+
+        # WhatsApp
+        wa_msgs = retriever.get_whatsapp_messages(req.question, limit=3)
+        if wa_msgs:
+            contexts.extend(wa_msgs)
+            logger.info(f"Scan: added {len(wa_msgs)} WhatsApp messages from PostgreSQL")
+        recent_wa = retriever.get_recent_whatsapp(limit=3)
+        existing_wids = {c.metadata.get("msg_id") for c in wa_msgs}
+        for r in recent_wa:
+            if r.metadata.get("msg_id") not in existing_wids:
+                contexts.append(r)
+    except Exception as e:
+        logger.warning(f"Email/WhatsApp retrieval failed (non-fatal): {e}")
+
     # 2. Build system prompt with context
     context_block = _format_scan_context(contexts)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")

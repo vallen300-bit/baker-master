@@ -162,6 +162,22 @@ async def waha_webhook(
 
     logger.info(f"WhatsApp webhook: message from {sender_name} ({sender})")
 
+    # ARCH-7: Store full WhatsApp message to PostgreSQL
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        store.store_whatsapp_message(
+            msg_id=msg_id,
+            sender=sender,
+            sender_name=sender_name,
+            chat_id=sender,
+            full_text=message_body,
+            timestamp=datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat() if timestamp else None,
+            is_director=(sender == DIRECTOR_WHATSAPP),
+        )
+    except Exception as _e:
+        logger.warning(f"Failed to store WhatsApp msg {msg_id} to PostgreSQL (non-fatal): {_e}")
+
     # WHATSAPP-ACTION-1: Director messages → action detection first
     if sender == DIRECTOR_WHATSAPP and message_body:
         try:

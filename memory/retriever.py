@@ -492,6 +492,210 @@ class SentinelRetriever:
             self._pg_pool = None
             return []
 
+    # ----------------------------------------------------------------
+    # Email Messages (ARCH-6 — full text from PostgreSQL)
+    # ----------------------------------------------------------------
+
+    def get_email_messages(self, query: str, limit: int = 5) -> list[RetrievedContext]:
+        """Search email_messages table by keyword match on subject, sender, or body."""
+        try:
+            conn = self._get_pg_conn()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT message_id, thread_id, sender_name, sender_email,
+                       subject, full_body, received_date
+                FROM email_messages
+                WHERE subject ILIKE %s
+                   OR sender_name ILIKE %s
+                   OR sender_email ILIKE %s
+                   OR full_body ILIKE %s
+                ORDER BY received_date DESC NULLS LAST
+                LIMIT %s
+                """,
+                (f"%{query}%", f"%{query}%", f"%{query}%", f"%{query}%", limit),
+            )
+            rows = cur.fetchall()
+            cols = ["message_id", "thread_id", "sender_name", "sender_email",
+                    "subject", "full_body", "received_date"]
+            cur.close()
+
+            contexts = []
+            for row in rows:
+                data = {c: v for c, v in zip(cols, row) if v is not None}
+                body = data.get("full_body", "")
+                subject = data.get("subject", "No subject")
+                sender = data.get("sender_name") or data.get("sender_email") or "Unknown"
+                date = data.get("received_date", "")
+                date_str = str(date)[:10] if date else ""
+
+                content = (
+                    f"[EMAIL] From: {sender} | Subject: {subject} ({date_str})\n\n"
+                    f"{body}"
+                )
+                contexts.append(RetrievedContext(
+                    content=content,
+                    source="email",
+                    score=0.95,
+                    metadata={
+                        "type": "email_message",
+                        "label": subject,
+                        "date": date_str,
+                        "message_id": data.get("message_id"),
+                        "sender": sender,
+                    },
+                    token_estimate=self._estimate_tokens(content),
+                ))
+            return contexts
+        except Exception as e:
+            logger.warning(f"Email message search failed (non-fatal): {e}")
+            self._pg_pool = None
+            return []
+
+    def get_recent_emails(self, limit: int = 5) -> list[RetrievedContext]:
+        """Get the N most recent emails by date."""
+        try:
+            conn = self._get_pg_conn()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT message_id, sender_name, sender_email, subject, full_body, received_date
+                FROM email_messages
+                ORDER BY received_date DESC NULLS LAST
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = cur.fetchall()
+            cols = ["message_id", "sender_name", "sender_email", "subject", "full_body", "received_date"]
+            cur.close()
+
+            contexts = []
+            for row in rows:
+                data = {c: v for c, v in zip(cols, row) if v is not None}
+                body = data.get("full_body", "")
+                subject = data.get("subject", "No subject")
+                sender = data.get("sender_name") or data.get("sender_email") or "Unknown"
+                date = data.get("received_date", "")
+                date_str = str(date)[:10] if date else ""
+
+                content = (
+                    f"[EMAIL] From: {sender} | Subject: {subject} ({date_str})\n\n"
+                    f"{body}"
+                )
+                contexts.append(RetrievedContext(
+                    content=content,
+                    source="email",
+                    score=0.85,
+                    metadata={
+                        "type": "email_message",
+                        "label": subject,
+                        "date": date_str,
+                        "message_id": data.get("message_id"),
+                    },
+                    token_estimate=self._estimate_tokens(content),
+                ))
+            return contexts
+        except Exception as e:
+            logger.warning(f"Recent email fetch failed (non-fatal): {e}")
+            self._pg_pool = None
+            return []
+
+    # ----------------------------------------------------------------
+    # WhatsApp Messages (ARCH-7 — full text from PostgreSQL)
+    # ----------------------------------------------------------------
+
+    def get_whatsapp_messages(self, query: str, limit: int = 5) -> list[RetrievedContext]:
+        """Search whatsapp_messages table by keyword match on sender, text."""
+        try:
+            conn = self._get_pg_conn()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id, sender, sender_name, full_text, timestamp
+                FROM whatsapp_messages
+                WHERE sender_name ILIKE %s
+                   OR full_text ILIKE %s
+                ORDER BY timestamp DESC NULLS LAST
+                LIMIT %s
+                """,
+                (f"%{query}%", f"%{query}%", limit),
+            )
+            rows = cur.fetchall()
+            cols = ["id", "sender", "sender_name", "full_text", "timestamp"]
+            cur.close()
+
+            contexts = []
+            for row in rows:
+                data = {c: v for c, v in zip(cols, row) if v is not None}
+                text = data.get("full_text", "")
+                sender = data.get("sender_name") or data.get("sender") or "Unknown"
+                date = data.get("timestamp", "")
+                date_str = str(date)[:10] if date else ""
+
+                content = f"[WHATSAPP] {sender} ({date_str}): {text}"
+                contexts.append(RetrievedContext(
+                    content=content,
+                    source="whatsapp",
+                    score=0.95,
+                    metadata={
+                        "type": "whatsapp_message",
+                        "label": f"WhatsApp: {sender}",
+                        "date": date_str,
+                        "msg_id": data.get("id"),
+                    },
+                    token_estimate=self._estimate_tokens(content),
+                ))
+            return contexts
+        except Exception as e:
+            logger.warning(f"WhatsApp message search failed (non-fatal): {e}")
+            self._pg_pool = None
+            return []
+
+    def get_recent_whatsapp(self, limit: int = 5) -> list[RetrievedContext]:
+        """Get the N most recent WhatsApp messages by date."""
+        try:
+            conn = self._get_pg_conn()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id, sender, sender_name, full_text, timestamp
+                FROM whatsapp_messages
+                ORDER BY timestamp DESC NULLS LAST
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = cur.fetchall()
+            cols = ["id", "sender", "sender_name", "full_text", "timestamp"]
+            cur.close()
+
+            contexts = []
+            for row in rows:
+                data = {c: v for c, v in zip(cols, row) if v is not None}
+                text = data.get("full_text", "")
+                sender = data.get("sender_name") or data.get("sender") or "Unknown"
+                date = data.get("timestamp", "")
+                date_str = str(date)[:10] if date else ""
+
+                content = f"[WHATSAPP] {sender} ({date_str}): {text}"
+                contexts.append(RetrievedContext(
+                    content=content,
+                    source="whatsapp",
+                    score=0.85,
+                    metadata={
+                        "type": "whatsapp_message",
+                        "label": f"WhatsApp: {sender}",
+                        "date": date_str,
+                    },
+                    token_estimate=self._estimate_tokens(content),
+                ))
+            return contexts
+        except Exception as e:
+            logger.warning(f"Recent WhatsApp fetch failed (non-fatal): {e}")
+            self._pg_pool = None
+            return []
+
     def get_recent_meeting_transcripts(self, limit: int = 5) -> list[RetrievedContext]:
         """Get the N most recent meeting transcripts by date — no keyword needed."""
         try:
@@ -590,7 +794,25 @@ class SentinelRetriever:
             if r.metadata.get("meeting_id") not in existing_ids:
                 contexts.append(r)
 
-        # 4. Active deals (always included for CEO context)
+        # 4. Email messages (ARCH-6 — keyword match + recent)
+        emails = self.get_email_messages(trigger_text, limit=3)
+        contexts.extend(emails)
+        recent_emails = self.get_recent_emails(limit=3)
+        existing_email_ids = {c.metadata.get("message_id") for c in emails}
+        for r in recent_emails:
+            if r.metadata.get("message_id") not in existing_email_ids:
+                contexts.append(r)
+
+        # 5. WhatsApp messages (ARCH-7 — keyword match + recent)
+        wa_msgs = self.get_whatsapp_messages(trigger_text, limit=3)
+        contexts.extend(wa_msgs)
+        recent_wa = self.get_recent_whatsapp(limit=3)
+        existing_wa_ids = {c.metadata.get("msg_id") for c in wa_msgs}
+        for r in recent_wa:
+            if r.metadata.get("msg_id") not in existing_wa_ids:
+                contexts.append(r)
+
+        # 6. Active deals (always included for CEO context)
         deals = self.get_active_deals()
         contexts.extend(deals)
 

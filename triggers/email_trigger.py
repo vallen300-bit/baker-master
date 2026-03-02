@@ -120,6 +120,23 @@ def check_new_emails():
         # Use latest message ID as pipeline source_id (logged in trigger_log for future dedup)
         message_id = all_message_ids[-1]
 
+        # ARCH-6: Store full email to PostgreSQL
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            store.store_email_message(
+                message_id=message_id,
+                thread_id=thread_id,
+                sender_name=metadata.get("primary_sender"),
+                sender_email=metadata.get("primary_sender_email"),
+                subject=metadata.get("subject"),
+                full_body=thread["text"],
+                received_date=metadata.get("received_date"),
+                priority=None,  # set after classification
+            )
+        except Exception as _e:
+            logger.warning(f"Failed to store email {message_id} to PostgreSQL (non-fatal): {_e}")
+
         trigger = TriggerEvent(
             type="email",
             content=thread["text"],

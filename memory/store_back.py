@@ -76,6 +76,12 @@ class SentinelStoreBack:
         # Ensure meeting_transcripts table exists (ARCH-3)
         self._ensure_meeting_transcripts_table()
 
+        # Ensure email_messages table exists (ARCH-6)
+        self._ensure_email_messages_table()
+
+        # Ensure whatsapp_messages table exists (ARCH-7)
+        self._ensure_whatsapp_messages_table()
+
         # Ensure Whoop tables exist
         self._ensure_whoop_tables()
 
@@ -337,6 +343,125 @@ class SentinelStoreBack:
             return True
         except Exception as e:
             logger.error(f"store_meeting_transcript failed: {e}")
+            return False
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # Email Messages (ARCH-6)
+    # -------------------------------------------------------
+
+    def _ensure_email_messages_table(self):
+        """Create email_messages table if it doesn't exist."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS email_messages (
+                    message_id TEXT PRIMARY KEY,
+                    thread_id TEXT,
+                    sender_name TEXT,
+                    sender_email TEXT,
+                    subject TEXT,
+                    full_body TEXT,
+                    received_date TIMESTAMPTZ,
+                    priority TEXT,
+                    ingested_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("email_messages table verified")
+        except Exception as e:
+            logger.warning(f"Could not ensure email_messages table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def store_email_message(self, message_id: str, thread_id: str = None,
+                            sender_name: str = None, sender_email: str = None,
+                            subject: str = None, full_body: str = None,
+                            received_date: str = None, priority: str = None) -> bool:
+        """Upsert a full email message. Returns True on success."""
+        conn = self._get_conn()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO email_messages
+                    (message_id, thread_id, sender_name, sender_email,
+                     subject, full_body, received_date, priority)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (message_id) DO UPDATE SET
+                    full_body = EXCLUDED.full_body,
+                    ingested_at = NOW()
+            """, (message_id, thread_id, sender_name, sender_email,
+                  subject, full_body, received_date, priority))
+            conn.commit()
+            cur.close()
+            return True
+        except Exception as e:
+            logger.error(f"store_email_message failed: {e}")
+            return False
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # WhatsApp Messages (ARCH-7)
+    # -------------------------------------------------------
+
+    def _ensure_whatsapp_messages_table(self):
+        """Create whatsapp_messages table if it doesn't exist."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS whatsapp_messages (
+                    id TEXT PRIMARY KEY,
+                    sender TEXT,
+                    sender_name TEXT,
+                    chat_id TEXT,
+                    full_text TEXT,
+                    timestamp TIMESTAMPTZ,
+                    is_director BOOLEAN DEFAULT FALSE,
+                    ingested_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("whatsapp_messages table verified")
+        except Exception as e:
+            logger.warning(f"Could not ensure whatsapp_messages table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def store_whatsapp_message(self, msg_id: str, sender: str = None,
+                               sender_name: str = None, chat_id: str = None,
+                               full_text: str = None, timestamp: str = None,
+                               is_director: bool = False) -> bool:
+        """Upsert a full WhatsApp message. Returns True on success."""
+        conn = self._get_conn()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO whatsapp_messages
+                    (id, sender, sender_name, chat_id, full_text, timestamp, is_director)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    full_text = EXCLUDED.full_text,
+                    ingested_at = NOW()
+            """, (msg_id, sender, sender_name, chat_id, full_text, timestamp, is_director))
+            conn.commit()
+            cur.close()
+            return True
+        except Exception as e:
+            logger.error(f"store_whatsapp_message failed: {e}")
             return False
         finally:
             self._put_conn(conn)
