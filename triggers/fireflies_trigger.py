@@ -104,6 +104,23 @@ def check_new_transcripts():
             priority="medium",
         )
 
+        # ARCH-3: Store full transcript in PostgreSQL
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            store.store_meeting_transcript(
+                transcript_id=source_id,
+                title=metadata.get("meeting_title", "Untitled"),
+                meeting_date=metadata.get("date"),
+                duration=metadata.get("duration"),
+                organizer=metadata.get("organizer"),
+                participants=metadata.get("participants"),
+                summary=transcript["text"][:2000] if "Summary:" in transcript["text"] else None,
+                full_transcript=transcript["text"],
+            )
+        except Exception as _e:
+            logger.warning(f"Failed to store transcript {source_id} in PostgreSQL (non-fatal): {_e}")
+
         # DEADLINE-SYSTEM-1: Extract deadlines from transcript
         try:
             from orchestrator.deadline_manager import extract_deadlines
@@ -180,13 +197,31 @@ def backfill_fireflies():
 
             # Format and ingest
             formatted = format_transcript(t)
+            metadata = formatted.get("metadata", {})
             trigger = TriggerEvent(
                 type="meeting",
                 content=formatted["text"],
                 source_id=source_id,
-                contact_name=formatted.get("metadata", {}).get("organizer"),
+                contact_name=metadata.get("organizer"),
                 priority="medium",
             )
+
+            # ARCH-3: Store full transcript in PostgreSQL
+            try:
+                from memory.store_back import SentinelStoreBack
+                store = SentinelStoreBack._get_global_instance()
+                store.store_meeting_transcript(
+                    transcript_id=source_id,
+                    title=metadata.get("meeting_title", "Untitled"),
+                    meeting_date=metadata.get("date"),
+                    duration=metadata.get("duration"),
+                    organizer=metadata.get("organizer"),
+                    participants=metadata.get("participants"),
+                    summary=formatted["text"][:2000] if "Summary:" in formatted["text"] else None,
+                    full_transcript=formatted["text"],
+                )
+            except Exception as _e:
+                logger.warning(f"Backfill: failed to store transcript {source_id} in PostgreSQL (non-fatal): {_e}")
 
             try:
                 pipeline.run(trigger)

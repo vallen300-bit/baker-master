@@ -1197,6 +1197,23 @@ def handle_fireflies_fetch(message: str, retriever=None, project=None,
             priority="medium",
         )
 
+        # ARCH-3: Store full transcript in PostgreSQL
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            store.store_meeting_transcript(
+                transcript_id=source_id,
+                title=metadata.get("meeting_title", "Untitled"),
+                meeting_date=metadata.get("date"),
+                duration=metadata.get("duration"),
+                organizer=metadata.get("organizer"),
+                participants=metadata.get("participants"),
+                summary=formatted["text"][:2000] if "Summary:" in formatted["text"] else None,
+                full_transcript=formatted["text"],
+            )
+        except Exception as _e:
+            logger.warning(f"Failed to store transcript {source_id} in PostgreSQL (non-fatal): {_e}")
+
         try:
             pipeline.run(trigger)
             ingested += 1

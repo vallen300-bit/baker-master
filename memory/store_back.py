@@ -73,6 +73,9 @@ class SentinelStoreBack:
         # Ensure conversation_memory PostgreSQL table exists (CONV-MEM-1)
         self._ensure_conversation_memory_table()
 
+        # Ensure meeting_transcripts table exists (ARCH-3)
+        self._ensure_meeting_transcripts_table()
+
         # Ensure Whoop tables exist
         self._ensure_whoop_tables()
 
@@ -267,6 +270,74 @@ class SentinelStoreBack:
             logger.info("deep_analyses table verified")
         except Exception as e:
             logger.warning(f"Could not ensure deep_analyses table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # Meeting Transcripts (ARCH-3)
+    # -------------------------------------------------------
+
+    def _ensure_meeting_transcripts_table(self):
+        """Create meeting_transcripts table if it doesn't exist."""
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — cannot ensure meeting_transcripts table")
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS meeting_transcripts (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    meeting_date TIMESTAMPTZ,
+                    duration TEXT,
+                    organizer TEXT,
+                    participants TEXT,
+                    summary TEXT,
+                    full_transcript TEXT,
+                    source TEXT NOT NULL DEFAULT 'fireflies',
+                    ingested_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("meeting_transcripts table verified")
+        except Exception as e:
+            logger.warning(f"Could not ensure meeting_transcripts table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def store_meeting_transcript(self, transcript_id: str, title: str,
+                                  meeting_date: str = None, duration: str = None,
+                                  organizer: str = None, participants: str = None,
+                                  summary: str = None, full_transcript: str = None,
+                                  source: str = "fireflies") -> bool:
+        """Upsert a full meeting transcript. Returns True on success."""
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — skipping store_meeting_transcript")
+            return False
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO meeting_transcripts
+                    (id, title, meeting_date, duration, organizer,
+                     participants, summary, full_transcript, source)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO UPDATE SET
+                    title = EXCLUDED.title,
+                    summary = EXCLUDED.summary,
+                    full_transcript = EXCLUDED.full_transcript,
+                    ingested_at = NOW()
+            """, (transcript_id, title, meeting_date, duration, organizer,
+                  participants, summary, full_transcript, source))
+            conn.commit()
+            cur.close()
+            logger.info(f"Stored meeting transcript: {title} ({transcript_id})")
+            return True
+        except Exception as e:
+            logger.error(f"store_meeting_transcript failed: {e}")
+            return False
         finally:
             self._put_conn(conn)
 
