@@ -157,7 +157,8 @@ baker-projects, sentinel-interactions, sentinel-email, sentinel-meetings, sentin
 
 `triggers_log`, `decisions`, `alerts`, `contacts`, `deals`, `preferences`,
 `clickup_tasks`, `baker_actions`, `pending_drafts`, `trigger_watermarks`,
-`todoist_tasks`, `conversation_memory`, `sent_emails`, `deadlines`, `vip_contacts`
+`todoist_tasks`, `conversation_memory`, `sent_emails`, `deadlines`, `vip_contacts`,
+`meeting_transcripts` (ARCH-3), `email_messages` (ARCH-6), `whatsapp_messages` (ARCH-7)
 
 ## Architecture: Role Division (Baker vs Cowork)
 
@@ -240,6 +241,14 @@ The goal: the next session reads this file and knows exactly what's current — 
   - **Cowork Session Playbook:** Created `Baker-Project/COWORK_SESSION_PLAYBOOK.md` — template for working on any Mac without Claude Code (two-file memory system: PROJECT_MEMORY + SESSION_HANDOVER).
   - **MCP write tools (4 new):** Added `baker_store_decision`, `baker_add_deadline`, `baker_upsert_vip`, `baker_store_analysis` to `baker_mcp_server.py`. Server now has 18 tools (14 read + 4 write). Closes the feedback loop: Cowork/Claude Code → Baker memory.
   - **MCP connected to Claude Code:** Added baker MCP config to `~/.claude/settings.json` on dimitry300 machine. Claude Code now has 1M context + Baker's full memory = analytical workbench.
+- **2026-03-02/03 (primary machine, long session):** CLICKUP-V2 PM Overlay + ARCH full-content overhaul:
+  - **CLICKUP-V2:** 3 new intents (clickup_action, clickup_fetch, clickup_plan) in action_handler.py, wired into Scan + WhatsApp. Natural-language ClickUp task management.
+  - **ARCH-3:** `meeting_transcripts` PostgreSQL table + backfill (50 Fireflies transcripts). Memory-first search + recent-3 injection into Scan context. Diagnostic endpoints: GET /api/fireflies/status, POST /api/fireflies/backfill.
+  - **ARCH-6:** `email_messages` PostgreSQL table + Gmail API backfill (123 emails, 14 days). email_trigger.py stores every email. Retriever keyword search + recent-3 injection. Endpoint: POST /api/emails/backfill?days=14.
+  - **ARCH-7:** `whatsapp_messages` PostgreSQL table. waha_webhook.py stores every message. Retriever keyword search + recent-3 injection. No historical backfill (API limitation).
+  - **Full-text enrichment:** When Qdrant returns a meeting/email chunk, retriever swaps it with complete source from PostgreSQL.
+  - **Remaining truncation cleanup:** deadline_manager.py, slack_trigger.py, pipeline.py — all [:500] and [:1000] caps removed.
+  - **Chunk-before-embed (Terminal 2):** store_back.py now chunks long content into ~500-token overlapping pieces before embedding. No silent truncation on Voyage AI token limit.
   - **MCP connected to Claude Desktop:** Added baker MCP config to Claude Desktop `claude_desktop_config.json` on dimitry300 machine. Installed Python 3.11 via Homebrew + dependencies (psycopg2-binary, mcp).
   - **Architecture documented:** Added "Role Division (Baker vs Cowork)" section to CLAUDE.md — Baker remembers, Cowork/Claude Code thinks. MCP bridges them.
   - **ARCH-3** still open in ClickUp (Fireflies full transcript storage).
