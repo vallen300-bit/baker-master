@@ -341,6 +341,69 @@ class SentinelRetriever:
         return []
 
     # ----------------------------------------------------------------
+    # Meeting Transcripts (ARCH-3 — full text from PostgreSQL)
+    # ----------------------------------------------------------------
+
+    def get_meeting_transcripts(self, query: str, limit: int = 5) -> list[RetrievedContext]:
+        """Search meeting_transcripts table by keyword match on title, participants, or full text."""
+        try:
+            conn = self._get_pg_conn()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id, title, meeting_date, duration, organizer, participants,
+                       summary, full_transcript
+                FROM meeting_transcripts
+                WHERE title ILIKE %s
+                   OR participants ILIKE %s
+                   OR organizer ILIKE %s
+                   OR full_transcript ILIKE %s
+                ORDER BY ingested_at DESC
+                LIMIT %s
+                """,
+                (f"%{query}%", f"%{query}%", f"%{query}%", f"%{query}%", limit),
+            )
+            rows = cur.fetchall()
+            cols = ["id", "title", "meeting_date", "duration", "organizer",
+                    "participants", "summary", "full_transcript"]
+            cur.close()
+
+            contexts = []
+            for row in rows:
+                data = {c: v for c, v in zip(cols, row) if v is not None}
+                # Use full transcript as content, capped at token budget
+                transcript_text = data.get("full_transcript", "")
+                title = data.get("title", "Unknown Meeting")
+                date = data.get("meeting_date", "")
+                date_str = str(date)[:10] if date else ""
+
+                content = (
+                    f"[MEETING TRANSCRIPT] {title} ({date_str})\n"
+                    f"Organizer: {data.get('organizer', '?')}\n"
+                    f"Participants: {data.get('participants', '?')}\n"
+                    f"Duration: {data.get('duration', '?')}\n\n"
+                    f"{transcript_text}"
+                )
+
+                contexts.append(RetrievedContext(
+                    content=content,
+                    source="meeting",
+                    score=0.95,  # High score — direct keyword match
+                    metadata={
+                        "type": "meeting_transcript",
+                        "label": title,
+                        "date": date_str,
+                        "meeting_id": data.get("id"),
+                    },
+                    token_estimate=self._estimate_tokens(content),
+                ))
+            return contexts
+        except Exception as e:
+            logger.warning(f"Meeting transcript search failed (non-fatal): {e}")
+            self._pg_pool = None
+            return []
+
+    # ----------------------------------------------------------------
     # Combined Retrieval
     # ----------------------------------------------------------------
 
@@ -374,7 +437,11 @@ class SentinelRetriever:
             if profile:
                 contexts.insert(0, profile)
 
-        # 3. Active deals (always included for CEO context)
+        # 3. Meeting transcripts (ARCH-3 — full text from PostgreSQL)
+        transcripts = self.get_meeting_transcripts(trigger_text, limit=3)
+        contexts.extend(transcripts)
+
+        # 4. Active deals (always included for CEO context)
         deals = self.get_active_deals()
         contexts.extend(deals)
 

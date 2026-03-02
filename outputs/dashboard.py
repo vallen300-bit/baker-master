@@ -893,6 +893,16 @@ async def scan_chat(req: ScanRequest):
         logger.error(f"Scan retrieval failed: {e}")
         contexts = []
 
+    # 1b. ARCH-3: Also search full meeting transcripts from PostgreSQL
+    try:
+        retriever = _get_retriever()
+        transcripts = retriever.get_meeting_transcripts(req.question, limit=3)
+        if transcripts:
+            contexts.extend(transcripts)
+            logger.info(f"Scan: added {len(transcripts)} meeting transcripts from PostgreSQL")
+    except Exception as e:
+        logger.warning(f"Meeting transcript retrieval failed (non-fatal): {e}")
+
     # 2. Build system prompt with context
     context_block = _format_scan_context(contexts)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
