@@ -211,7 +211,7 @@ def _embed_message(store, channel_id: str, user_name: str, text: str, ts: str, c
             "text": text,
         }
 
-        store.store_document(embed_text[:4000], metadata, collection=collection)
+        store.store_document(embed_text, metadata, collection=collection)
     except Exception as e:
         logger.warning(f"Slack: failed to embed message ts={ts}: {e}")
 

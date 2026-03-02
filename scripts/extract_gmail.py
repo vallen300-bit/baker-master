@@ -370,10 +370,6 @@ def format_thread(thread_data: Dict, messages: List[Dict]) -> Optional[Dict]:
         if not body:
             continue
 
-        # Truncate very long bodies (e.g. forwarded chains)
-        if len(body) > 8000:
-            body = body[:8000] + "\n[...truncated]"
-
         # Build message block
         sender_name, sender_email = parseaddr(from_addr)
         sender_display = sender_name if sender_name else sender_email

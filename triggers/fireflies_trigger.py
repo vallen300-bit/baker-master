@@ -115,7 +115,7 @@ def check_new_transcripts():
                 duration=metadata.get("duration"),
                 organizer=metadata.get("organizer"),
                 participants=metadata.get("participants"),
-                summary=transcript["text"][:2000] if "Summary:" in transcript["text"] else None,
+                summary=transcript["text"] if "Summary:" in transcript["text"] else None,
                 full_transcript=transcript["text"],
             )
         except Exception as _e:
@@ -223,7 +223,7 @@ def backfill_fireflies():
                     duration=metadata.get("duration"),
                     organizer=metadata.get("organizer"),
                     participants=metadata.get("participants"),
-                    summary=formatted["text"][:2000] if "Summary:" in formatted["text"] else None,
+                    summary=formatted["text"] if "Summary:" in formatted["text"] else None,
                     full_transcript=formatted["text"],
                 )
             except Exception as _e:
@@ -298,7 +298,7 @@ def backfill_transcripts_only():
                 duration=metadata.get("duration"),
                 organizer=metadata.get("organizer"),
                 participants=metadata.get("participants"),
-                summary=formatted["text"][:2000] if "Summary:" in formatted["text"] else None,
+                summary=formatted["text"] if "Summary:" in formatted["text"] else None,
                 full_transcript=formatted["text"],
             )
             if success:
@@ -309,7 +309,7 @@ def backfill_transcripts_only():
                 try:
                     import time as _time
                     _time.sleep(2)  # Voyage AI rate limit: avoid burst
-                    embed_text = formatted["text"][:8000]
+                    embed_text = formatted["text"]
                     embed_metadata = {
                         "source": "fireflies",
                         "meeting_title": metadata.get("meeting_title", ""),

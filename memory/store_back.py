@@ -1230,6 +1230,9 @@ class SentinelStoreBack:
     # -------------------------------------------------------
 
     def _embed(self, text: str) -> list[float]:
+        # Voyage-3 supports 32K tokens (~128K chars). Cap at 120K chars as safety margin.
+        if len(text) > 120_000:
+            text = text[:120_000]
         result = self.voyage.embed(
             texts=[text],
             model=config.voyage.model,
@@ -1265,7 +1268,7 @@ class SentinelStoreBack:
                 f"[Analysis] {response_analysis}"
             )
             # Embed full content when available for richer retrieval
-            embed_text = (full_content or snippet_text)[:8000]
+            embed_text = full_content or snippet_text
             vector = self._embed(embed_text)
             point_id = int(datetime.now(timezone.utc).timestamp() * 1000)
 
@@ -1277,7 +1280,7 @@ class SentinelStoreBack:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
             if full_content:
-                payload["full_content"] = full_content[:8000]
+                payload["full_content"] = full_content
 
             self.qdrant.upsert(
                 collection_name=collection,
@@ -1298,7 +1301,7 @@ class SentinelStoreBack:
     def store_document(self, content, metadata, collection="baker-documents"):
         """Embed and store a document chunk in Qdrant."""
         try:
-            embedding = self._embed(content[:8000])
+            embedding = self._embed(content)
             point_id = str(uuid.uuid4())
             self.qdrant.upsert(
                 collection_name=collection,

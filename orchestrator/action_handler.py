@@ -1239,7 +1239,7 @@ def handle_fireflies_fetch(message: str, retriever=None, project=None,
                 duration=metadata.get("duration"),
                 organizer=metadata.get("organizer"),
                 participants=metadata.get("participants"),
-                summary=formatted["text"][:2000] if "Summary:" in formatted["text"] else None,
+                summary=formatted["text"] if "Summary:" in formatted["text"] else None,
                 full_transcript=formatted["text"],
             )
         except Exception as _e:
