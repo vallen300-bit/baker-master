@@ -161,6 +161,12 @@ def backfill_fireflies():
     _backfill_running = True
     logger.info("Fireflies backfill: starting 30-day catch-up...")
 
+    # ARCH-3: Also backfill full transcripts to PostgreSQL (upsert, safe to repeat)
+    try:
+        backfill_transcripts_only()
+    except Exception as _e:
+        logger.warning(f"Transcript PostgreSQL backfill failed (non-fatal): {_e}")
+
     try:
         from scripts.extract_fireflies import fetch_transcripts, format_transcript, transcript_date
 
@@ -252,6 +258,68 @@ def backfill_fireflies():
         _backfill_running = False
 
 
+def backfill_transcripts_only():
+    """
+    ARCH-3: One-time backfill — stores full transcripts to PostgreSQL only.
+    No dedup check, no pipeline re-run. Safe to run repeatedly (upsert on conflict).
+    Call this once to populate meeting_transcripts for all existing Fireflies data.
+    """
+    api_key = config.fireflies.api_key
+    if not api_key:
+        logger.info("Transcript backfill: FIREFLIES_API_KEY not set, skipping")
+        return
+
+    logger.info("Transcript backfill: fetching all transcripts from Fireflies API...")
+
+    try:
+        from scripts.extract_fireflies import fetch_transcripts, format_transcript
+        from memory.store_back import SentinelStoreBack
+
+        raw = fetch_transcripts(api_key, limit=50)
+        if not raw:
+            logger.info("Transcript backfill: no transcripts returned")
+            return
+
+        store = SentinelStoreBack._get_global_instance()
+        stored = 0
+
+        for t in raw:
+            source_id = t.get("id", "")
+            if not source_id:
+                continue
+
+            formatted = format_transcript(t)
+            metadata = formatted.get("metadata", {})
+
+            success = store.store_meeting_transcript(
+                transcript_id=source_id,
+                title=metadata.get("meeting_title", "Untitled"),
+                meeting_date=metadata.get("date"),
+                duration=metadata.get("duration"),
+                organizer=metadata.get("organizer"),
+                participants=metadata.get("participants"),
+                summary=formatted["text"][:2000] if "Summary:" in formatted["text"] else None,
+                full_transcript=formatted["text"],
+            )
+            if success:
+                stored += 1
+
+        logger.info(f"Transcript backfill complete: {stored} of {len(raw)} transcripts stored to PostgreSQL")
+
+    except Exception as e:
+        logger.error(f"Transcript backfill failed: {e}")
+
+
 if __name__ == "__main__":
+    import argparse
     logging.basicConfig(level=logging.INFO, format="%(name)s | %(message)s")
-    check_new_transcripts()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--backfill-transcripts", action="store_true",
+                        help="One-time: store all Fireflies transcripts to PostgreSQL")
+    args = parser.parse_args()
+
+    if args.backfill_transcripts:
+        backfill_transcripts_only()
+    else:
+        check_new_transcripts()
