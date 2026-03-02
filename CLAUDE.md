@@ -200,6 +200,10 @@ Before closing a session, do these steps:
 
 The goal: the next session reads this file and knows exactly what's current — no archaeology needed.
 
+## Session Log
+
+- **2026-03-02 (dimitry300 machine):** Orientation session. Cloned repo to second workstation (/Users/dimitry300/Desktop/baker-code). Set up ClickUp API token in ~/.zshrc. Verified ClickUp Handoff Notes list access. No code changes — context transfer only. Opening prompt for future sessions established.
+
 ## Director Preferences
 
 - Bottom-line first, then supporting detail
