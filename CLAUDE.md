@@ -159,6 +159,28 @@ baker-projects, sentinel-interactions, sentinel-email, sentinel-meetings, sentin
 `clickup_tasks`, `baker_actions`, `pending_drafts`, `trigger_watermarks`,
 `todoist_tasks`, `conversation_memory`, `sent_emails`, `deadlines`, `vip_contacts`
 
+## Architecture: Role Division (Baker vs Cowork)
+
+Baker is the **Chief of Staff** — always on guard, monitors, remembers, acts on routine.
+Cowork (+ Claude Code) is the **Thinker & Creator** — deep analysis, brainstorming, decisions.
+
+| Actor | Role | Context | Connected via |
+|-------|------|---------|---------------|
+| **Baker (Sentinel)** | Chief of Staff — monitors, remembers, acts | Always-on (Render) | Triggers, pipeline |
+| **Cowork (Claude Desktop)** | Thinker — quick PM/PL coordination | 200K tokens | Baker MCP (18 tools) |
+| **Claude Code CLI** | Thinker — deep analysis, heavy thinking, coding | **1M tokens** | Baker MCP (18 tools) |
+| **Director (Dimitry)** | Final authority | Human | All of the above |
+
+**MCP bridge:** Baker MCP server exposes 14 read tools + 4 write tools. Both Cowork and Claude Code connect to the same Baker memory. Decisions stored from either environment are visible to the other.
+
+**Write tools (Cowork/Claude Code → Baker memory):**
+- `baker_store_decision` → decisions table
+- `baker_add_deadline` → deadlines table
+- `baker_upsert_vip` → vip_contacts table
+- `baker_store_analysis` → deep_analyses table
+
+**MCP server location:** `Baker-Project/baker-mcp/baker_mcp_server.py` (Dropbox, syncs to all machines)
+
 ## Multi-Role Workshop Model
 
 | Role | Authority | Where |
@@ -213,6 +235,14 @@ The goal: the next session reads this file and knows exactly what's current — 
   - All include ALTER TABLE IF NOT EXISTS for live Neon migration.
   - ARCH-3 (Fireflies full transcript storage) left as "to do" — requires new table + MCP tool.
   - ARCH-4 merged into ARCH-1 (WhatsApp truncation was one of the 3 [:500] removals).
+- **2026-03-02 (dimitry300 machine, session 2 continued):** Architecture & MCP bridge work:
+  - **CLAUDE.md symlink:** Created symlink from Dropbox Baker-Project/CLAUDE.md → git repo. Cowork sessions can now read live technical state. Updated Cowork instructions.md to include CLAUDE.md as document #1.
+  - **Cowork Session Playbook:** Created `Baker-Project/COWORK_SESSION_PLAYBOOK.md` — template for working on any Mac without Claude Code (two-file memory system: PROJECT_MEMORY + SESSION_HANDOVER).
+  - **MCP write tools (4 new):** Added `baker_store_decision`, `baker_add_deadline`, `baker_upsert_vip`, `baker_store_analysis` to `baker_mcp_server.py`. Server now has 18 tools (14 read + 4 write). Closes the feedback loop: Cowork/Claude Code → Baker memory.
+  - **MCP connected to Claude Code:** Added baker MCP config to `~/.claude/settings.json` on dimitry300 machine. Claude Code now has 1M context + Baker's full memory = analytical workbench.
+  - **MCP connected to Claude Desktop:** Added baker MCP config to Claude Desktop `claude_desktop_config.json` on dimitry300 machine. Installed Python 3.11 via Homebrew + dependencies (psycopg2-binary, mcp).
+  - **Architecture documented:** Added "Role Division (Baker vs Cowork)" section to CLAUDE.md — Baker remembers, Cowork/Claude Code thinks. MCP bridges them.
+  - **ARCH-3** still open in ClickUp (Fireflies full transcript storage).
 
 ## Director Preferences
 
