@@ -33,9 +33,11 @@ def poll_gmail() -> list:
     Returns list of {text, metadata} dicts.
     Reuses extract_gmail.py's poll logic.
     """
-    from scripts.extract_gmail import extract_poll
+    from scripts import extract_gmail
     service = _get_gmail_service()
-    return extract_poll(service)
+    # ARCH-6: Set Gmail service so format_thread() can extract attachments
+    extract_gmail._gmail_service = service
+    return extract_gmail.extract_poll(service)
 
 
 def check_new_emails():
@@ -297,6 +299,7 @@ def backfill_emails(days: int = 14):
     logger.info(f"Email backfill: fetching last {days} days from Gmail API...")
 
     try:
+        from scripts import extract_gmail
         from scripts.extract_gmail import (
             authenticate, fetch_thread_ids, fetch_thread_detail,
             format_thread, has_skip_label, is_noise_thread,
@@ -306,6 +309,8 @@ def backfill_emails(days: int = 14):
 
         creds = authenticate()
         service = build("gmail", "v1", credentials=creds)
+        # ARCH-6: Set Gmail service so format_thread() can extract attachments
+        extract_gmail._gmail_service = service
         store = SentinelStoreBack._get_global_instance()
 
         since_date = (datetime.now(timezone.utc) - __import__("datetime").timedelta(days=days)).strftime("%Y-%m-%d")

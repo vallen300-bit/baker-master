@@ -377,8 +377,21 @@ def format_thread(thread_data: Dict, messages: List[Dict]) -> Optional[Dict]:
             f"--- {sender_display} ({date_str}) ---\n{body}"
         )
 
+    # Extract attachments if Gmail service is available
+    attachment_blocks = []
+    if _gmail_service:
+        for msg in messages:
+            try:
+                attachments = extract_attachments_text(_gmail_service, msg)
+                for att in attachments:
+                    attachment_blocks.append(
+                        f"--- Attachment: {att['filename']} ---\n{att['text']}"
+                    )
+            except Exception:
+                pass
+
     # Skip threads with no content
-    if not msg_blocks:
+    if not msg_blocks and not attachment_blocks:
         return None
 
     # Skip very short threads (likely auto-replies, OOO, etc.)
@@ -412,6 +425,11 @@ def format_thread(thread_data: Dict, messages: List[Dict]) -> Optional[Dict]:
         "",
     ]
     parts.extend(msg_blocks)
+
+    if attachment_blocks:
+        parts.append("")
+        parts.append("=== ATTACHMENTS ===")
+        parts.extend(attachment_blocks)
 
     text_block = "\n".join(parts)
 
@@ -482,6 +500,105 @@ def fetch_thread_ids(service, query: str, limit: Optional[int] = None) -> List[s
         time.sleep(0.2)
 
     return thread_ids
+
+
+# ---------------------------------------------------------------------------
+# Attachment extraction (ARCH-6 attachments)
+# ---------------------------------------------------------------------------
+
+# File types we can extract text from (match ingest pipeline)
+_ATTACHMENT_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".csv", ".txt", ".md", ".json"}
+
+# Max attachment size to process (10 MB)
+_MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024
+
+# Module-level Gmail service reference (set by callers that need attachments)
+_gmail_service = None
+
+
+def extract_attachments_text(service, message: Dict) -> List[Dict]:
+    """
+    Extract text content from email attachments.
+    Returns list of {"filename": ..., "text": ...} dicts.
+    Only processes supported file types under 10MB.
+    """
+    results = []
+    payload = message.get("payload", {})
+    message_id = message.get("id", "")
+
+    parts = payload.get("parts", [])
+    if not parts:
+        return results
+
+    for part in parts:
+        filename = part.get("filename", "")
+        if not filename:
+            continue
+
+        # Check file extension
+        ext = Path(filename).suffix.lower()
+        if ext not in _ATTACHMENT_EXTENSIONS:
+            continue
+
+        # Check size
+        body = part.get("body", {})
+        size = body.get("size", 0)
+        if size > _MAX_ATTACHMENT_SIZE:
+            continue
+
+        attachment_id = body.get("attachmentId")
+        if not attachment_id:
+            # Inline small attachment — data might be in body directly
+            data = body.get("data")
+            if data:
+                try:
+                    file_bytes = base64.urlsafe_b64decode(data)
+                    text = _extract_text_from_bytes(file_bytes, filename, ext)
+                    if text:
+                        results.append({"filename": filename, "text": text})
+                except Exception as e:
+                    logging.getLogger("sentinel.gmail").debug(
+                        f"Failed to extract inline attachment {filename}: {e}"
+                    )
+            continue
+
+        # Download attachment via Gmail API
+        try:
+            att = service.users().messages().attachments().get(
+                userId="me", messageId=message_id, id=attachment_id
+            ).execute()
+            data = att.get("data", "")
+            if data:
+                file_bytes = base64.urlsafe_b64decode(data)
+                text = _extract_text_from_bytes(file_bytes, filename, ext)
+                if text:
+                    results.append({"filename": filename, "text": text})
+        except Exception as e:
+            logging.getLogger("sentinel.gmail").debug(
+                f"Failed to download attachment {filename}: {e}"
+            )
+
+    return results
+
+
+def _extract_text_from_bytes(file_bytes: bytes, filename: str, ext: str) -> Optional[str]:
+    """Write bytes to temp file and extract text using the ingest pipeline extractors."""
+    import tempfile
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=ext, prefix=f"{Path(filename).stem}_") as tmp:
+            tmp.write(file_bytes)
+            tmp_path = Path(tmp.name)
+
+        from tools.ingest.extractors import extract
+        text = extract(tmp_path)
+        return text.strip() if text else None
+    except Exception as e:
+        logging.getLogger("sentinel.gmail").debug(f"Text extraction failed for {filename}: {e}")
+        return None
+    finally:
+        if tmp_path and tmp_path.exists():
+            tmp_path.unlink()
 
 
 def fetch_thread_detail(service, thread_id: str) -> Optional[Dict]:
