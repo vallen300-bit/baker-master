@@ -184,7 +184,7 @@ class SentinelPipeline:
             trigger_log_id = self.store.log_trigger(
                 trigger_type=trigger.type,
                 source_id=trigger.source_id,
-                content=trigger.content[:1000],
+                content=trigger.content,
                 contact_id=trigger.contact_id,
                 priority=trigger.priority,
             )
@@ -267,8 +267,8 @@ class SentinelPipeline:
             # 6. Embed interaction in Qdrant
             self.store.store_interaction(
                 trigger_type=trigger.type,
-                trigger_content=trigger.content[:500],
-                response_analysis=response.analysis[:500],
+                trigger_content=trigger.content,
+                response_analysis=response.analysis,
                 contact_name=trigger.contact_name,
                 full_content=trigger.content,
             )

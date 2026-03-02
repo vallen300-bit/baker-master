@@ -158,7 +158,96 @@ class SentinelRetriever:
 
         # Sort by relevance score (highest first)
         all_contexts.sort(key=lambda c: c.score, reverse=True)
+
+        # ARCH-3: Enrich top results with full source text from PostgreSQL
+        all_contexts = self._enrich_with_full_text(all_contexts)
+
         return all_contexts
+
+    def _enrich_with_full_text(self, contexts: list["RetrievedContext"]) -> list["RetrievedContext"]:
+        """
+        For top-scoring meeting/email chunks from Qdrant, replace truncated
+        content with full source text from PostgreSQL.
+        Only enriches the top 5 results to stay within token budget.
+        """
+        enriched_ids = set()  # avoid duplicating the same source
+
+        for i, ctx in enumerate(contexts[:10]):  # scan top 10 candidates
+            if len(enriched_ids) >= 3:  # max 3 full-text enrichments
+                break
+
+            try:
+                # Meeting transcripts — match by fireflies_id in metadata
+                fireflies_id = ctx.metadata.get("fireflies_id") or ctx.metadata.get("transcript_id")
+                if fireflies_id and fireflies_id not in enriched_ids:
+                    full = self._get_full_meeting_transcript(fireflies_id)
+                    if full:
+                        contexts[i] = RetrievedContext(
+                            content=full,
+                            source=ctx.source,
+                            score=ctx.score,
+                            metadata={**ctx.metadata, "enriched": True},
+                            token_estimate=self._estimate_tokens(full),
+                        )
+                        enriched_ids.add(fireflies_id)
+                        logger.info(f"Enriched meeting {fireflies_id} with full transcript")
+                        continue
+
+                # Emails — match by source_id (message_id) in trigger_log
+                source_id = ctx.metadata.get("message_id") or ctx.metadata.get("source_id")
+                collection = ctx.metadata.get("collection", "")
+                is_email = "email" in collection or ctx.source in ("email", "emails", "conversations")
+                if is_email and source_id and source_id not in enriched_ids:
+                    full = self._get_full_trigger_content(source_id)
+                    if full:
+                        contexts[i] = RetrievedContext(
+                            content=full,
+                            source=ctx.source,
+                            score=ctx.score,
+                            metadata={**ctx.metadata, "enriched": True},
+                            token_estimate=self._estimate_tokens(full),
+                        )
+                        enriched_ids.add(source_id)
+                        logger.info(f"Enriched email {source_id} with full content")
+
+            except Exception as e:
+                logger.debug(f"Enrichment failed for context {i} (non-fatal): {e}")
+
+        return contexts
+
+    def _get_full_meeting_transcript(self, transcript_id: str) -> Optional[str]:
+        """Fetch full transcript text from meeting_transcripts table."""
+        try:
+            conn = self._get_pg_conn()
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT full_transcript FROM meeting_transcripts WHERE id = %s",
+                (transcript_id,),
+            )
+            row = cur.fetchone()
+            cur.close()
+            return row[0] if row and row[0] else None
+        except Exception as e:
+            logger.debug(f"Full transcript lookup failed for {transcript_id}: {e}")
+            self._pg_pool = None
+            return None
+
+    def _get_full_trigger_content(self, source_id: str) -> Optional[str]:
+        """Fetch full content from trigger_log by source_id."""
+        try:
+            conn = self._get_pg_conn()
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT content FROM trigger_log WHERE source_id = %s ORDER BY received_at DESC LIMIT 1",
+                (source_id,),
+            )
+            row = cur.fetchone()
+            cur.close()
+            return row[0] if row and row[0] else None
+        except Exception as e:
+            logger.debug(f"Full trigger content lookup failed for {source_id}: {e}")
+            self._pg_pool = None
+            return None
 
     # ----------------------------------------------------------------
     # PostgreSQL Structured Queries
