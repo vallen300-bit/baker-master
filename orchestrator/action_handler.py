@@ -1143,9 +1143,36 @@ def handle_fireflies_fetch(message: str, retriever=None, project=None,
         f"resolved=({from_date}, {to_date}), action_after={action_after}"
     )
 
-    # 2. Search Fireflies API
+    # 1b. Check Baker's own memory first (PostgreSQL meeting_transcripts)
+    try:
+        from memory.retriever import SentinelRetriever
+        _retriever = retriever or SentinelRetriever()
+        search_term = keyword or date_hint or message[:100]
+        memory_results = _retriever.get_meeting_transcripts(search_term, limit=5)
+        if memory_results:
+            reply_parts = [f"\U0001f4cb Found {len(memory_results)} recording(s) in Baker's memory:"]
+            for ctx in memory_results:
+                label = ctx.metadata.get("label", "?")
+                date = ctx.metadata.get("date", "?")
+                reply_parts.append(f"\u2022 {label} ({date})")
+                # Include summary (first 500 chars of content)
+                summary = ctx.content[:500].split("\n\n", 1)[-1][:300]
+                if summary:
+                    reply_parts.append(f"  {summary}")
+            reply_parts.append("\nFull transcripts are available — ask me about any specific meeting.")
+            # Still try to fetch new ones from API below, but return memory results if API has nothing new
+            _memory_reply = "\n".join(reply_parts)
+        else:
+            _memory_reply = None
+    except Exception as e:
+        logger.warning(f"Memory search for Fireflies failed: {e}")
+        _memory_reply = None
+
+    # 2. Search Fireflies API for NEW recordings not yet in memory
     api_key = config.fireflies.api_key
     if not api_key:
+        if _memory_reply:
+            return _memory_reply
         return "Fireflies API key is not configured. Cannot fetch recordings."
 
     try:
@@ -1159,9 +1186,13 @@ def handle_fireflies_fetch(message: str, retriever=None, project=None,
         )
     except Exception as e:
         logger.error(f"Fireflies search failed: {e}")
+        if _memory_reply:
+            return _memory_reply
         return f"Failed to search Fireflies: {e}"
 
     if not results:
+        if _memory_reply:
+            return _memory_reply
         parts = ["No Fireflies recordings found"]
         if keyword:
             parts.append(f'matching "{keyword}"')
