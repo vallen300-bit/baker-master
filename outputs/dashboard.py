@@ -240,6 +240,70 @@ async def client_config():
     logger.info("Baker Dashboard ready on port 8080")
 
 
+@app.get("/api/fireflies/status", tags=["fireflies"], dependencies=[Depends(verify_api_key)])
+async def fireflies_status():
+    """Diagnostic: check Fireflies API connectivity, watermark, and meeting_transcripts count."""
+    import asyncio
+    result = {}
+
+    # 1. Check API key
+    from config.settings import config as _cfg
+    result["api_key_set"] = bool(_cfg.fireflies.api_key)
+    result["api_key_preview"] = _cfg.fireflies.api_key[:8] + "..." if _cfg.fireflies.api_key else "NOT SET"
+
+    # 2. Check watermark
+    try:
+        from triggers.state import trigger_state
+        wm = trigger_state.get_watermark("fireflies")
+        result["watermark"] = wm.isoformat()
+    except Exception as e:
+        result["watermark"] = f"error: {e}"
+
+    # 3. Check meeting_transcripts row count
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if conn:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM meeting_transcripts")
+            result["meeting_transcripts_count"] = cur.fetchone()[0]
+            cur.execute("SELECT id, title, meeting_date FROM meeting_transcripts ORDER BY ingested_at DESC LIMIT 5")
+            rows = cur.fetchall()
+            result["latest_transcripts"] = [{"id": r[0], "title": r[1], "date": str(r[2])} for r in rows]
+            cur.close()
+            store._put_conn(conn)
+    except Exception as e:
+        result["meeting_transcripts_count"] = f"error: {e}"
+
+    # 4. Try fetching from Fireflies API directly
+    try:
+        from scripts.extract_fireflies import fetch_transcripts, transcript_date
+        raw = await asyncio.to_thread(fetch_transcripts, _cfg.fireflies.api_key, 5)
+        result["api_fetch_count"] = len(raw) if raw else 0
+        if raw:
+            result["api_latest"] = [
+                {"id": t.get("id","?"), "title": t.get("title","?"), "date": str(transcript_date(t))}
+                for t in raw[:3]
+            ]
+    except Exception as e:
+        result["api_fetch_error"] = str(e)
+
+    return result
+
+
+@app.post("/api/fireflies/backfill", tags=["fireflies"], dependencies=[Depends(verify_api_key)])
+async def fireflies_backfill_endpoint():
+    """Trigger a one-time Fireflies transcript backfill to PostgreSQL."""
+    import asyncio
+    try:
+        from triggers.fireflies_trigger import backfill_transcripts_only
+        await asyncio.to_thread(backfill_transcripts_only)
+        return {"status": "ok", "message": "Backfill completed — check /api/fireflies/status for results"}
+    except Exception as e:
+        logger.error(f"Fireflies backfill endpoint failed: {e}")
+        return {"status": "error", "message": str(e)}
+
+
 @app.get("/api/scheduler-status", tags=["health"], dependencies=[Depends(verify_api_key)])
 async def scheduler_status():
     """Return scheduler health and registered jobs."""
