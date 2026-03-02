@@ -203,6 +203,16 @@ The goal: the next session reads this file and knows exactly what's current — 
 ## Session Log
 
 - **2026-03-02 (dimitry300 machine):** Orientation session. Cloned repo to second workstation (/Users/dimitry300/Desktop/baker-code). Set up ClickUp API token in ~/.zshrc. Verified ClickUp Handoff Notes list access. No code changes — context transfer only. Opening prompt for future sessions established.
+- **2026-03-02 (dimitry300 machine, session 2):** ARCH-1/2/5 — removed all content truncation and added missing DB columns. 8 files changed:
+  - Removed [:500] truncation: deadlines.py, email_trigger.py, waha_webhook.py
+  - Removed [:200] body_preview and [:300] reply_snippet truncation: sent_emails.py
+  - Removed [:500] prompt and question truncation: store_back.py
+  - Added `analysis_text TEXT` column to deep_analyses table (store_back.py)
+  - Added `answer TEXT` column to conversation_memory table (store_back.py) + wired full_response through dashboard.py
+  - Added `summary TEXT` column to rss_articles table (state.py) + store article content in rss_trigger.py
+  - All include ALTER TABLE IF NOT EXISTS for live Neon migration.
+  - ARCH-3 (Fireflies full transcript storage) left as "to do" — requires new table + MCP tool.
+  - ARCH-4 merged into ARCH-1 (WhatsApp truncation was one of the 3 [:500] removals).
 
 ## Director Preferences
 
