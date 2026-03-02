@@ -304,6 +304,33 @@ async def fireflies_backfill_endpoint():
         return {"status": "error", "message": str(e)}
 
 
+@app.post("/api/emails/backfill", tags=["emails"], dependencies=[Depends(verify_api_key)])
+async def email_backfill_endpoint(days: int = Query(14, ge=1, le=90)):
+    """Backfill last N days of emails from Gmail API to PostgreSQL + Qdrant."""
+    import asyncio
+    try:
+        from triggers.email_trigger import backfill_emails
+        await asyncio.to_thread(backfill_emails, days)
+
+        # Check count
+        try:
+            store = _get_store()
+            conn = store._get_conn()
+            if conn:
+                cur = conn.cursor()
+                cur.execute("SELECT COUNT(*) FROM email_messages")
+                count = cur.fetchone()[0]
+                cur.close()
+                store._put_conn(conn)
+                return {"status": "ok", "message": f"Backfill completed — {count} emails in PostgreSQL", "days": days}
+        except Exception:
+            pass
+        return {"status": "ok", "message": "Backfill completed", "days": days}
+    except Exception as e:
+        logger.error(f"Email backfill endpoint failed: {e}")
+        return {"status": "error", "message": str(e)}
+
+
 @app.get("/api/scheduler-status", tags=["health"], dependencies=[Depends(verify_api_key)])
 async def scheduler_status():
     """Return scheduler health and registered jobs."""

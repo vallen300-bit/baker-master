@@ -286,6 +286,119 @@ def _check_reply_match(
             logger.warning(f"WhatsApp reply notification failed: {e}")
 
 
+def backfill_emails(days: int = 14):
+    """
+    ARCH-6: One-time backfill — fetch last N days of emails from Gmail API,
+    store full bodies to email_messages table + embed to Qdrant.
+    No pipeline re-run. Safe to run repeatedly (upsert on conflict).
+    """
+    import time as _time
+
+    logger.info(f"Email backfill: fetching last {days} days from Gmail API...")
+
+    try:
+        from scripts.extract_gmail import (
+            authenticate, fetch_thread_ids, fetch_thread_detail,
+            format_thread, has_skip_label, is_noise_thread,
+        )
+        from googleapiclient.discovery import build
+        from memory.store_back import SentinelStoreBack
+
+        creds = authenticate()
+        service = build("gmail", "v1", credentials=creds)
+        store = SentinelStoreBack._get_global_instance()
+
+        since_date = (datetime.now(timezone.utc) - __import__("datetime").timedelta(days=days)).strftime("%Y-%m-%d")
+        query = f"after:{since_date} {config.gmail.default_query}"
+
+        logger.info(f"Email backfill query: {query}")
+        thread_ids = fetch_thread_ids(service, query, limit=None)
+
+        if not thread_ids:
+            logger.info("Email backfill: no threads found")
+            return
+
+        logger.info(f"Email backfill: {len(thread_ids)} threads to process")
+
+        stored = 0
+        embedded = 0
+
+        for i, tid in enumerate(thread_ids):
+            thread = fetch_thread_detail(service, tid)
+            if not thread:
+                continue
+
+            messages = thread.get("messages", [])
+
+            # Skip noise
+            if has_skip_label(messages):
+                continue
+            is_noise, _ = is_noise_thread(messages)
+            if is_noise:
+                continue
+
+            # Limit messages per thread
+            if len(messages) > config.gmail.max_messages_per_thread:
+                messages = messages[-config.gmail.max_messages_per_thread:]
+
+            formatted = format_thread(thread, messages)
+            if not formatted:
+                continue
+
+            metadata = formatted.get("metadata", {})
+            message_id = metadata.get("message_id", tid)
+
+            # Store to PostgreSQL
+            success = store.store_email_message(
+                message_id=message_id,
+                thread_id=metadata.get("thread_id"),
+                sender_name=metadata.get("primary_sender"),
+                sender_email=metadata.get("primary_sender_email"),
+                subject=metadata.get("subject"),
+                full_body=formatted["text"],
+                received_date=metadata.get("received_date"),
+            )
+            if success:
+                stored += 1
+
+            # Embed to Qdrant with rate limiting
+            try:
+                _time.sleep(2)  # Voyage AI rate limit
+                embed_metadata = {
+                    "source": "email",
+                    "subject": metadata.get("subject", ""),
+                    "sender": metadata.get("primary_sender", ""),
+                    "sender_email": metadata.get("primary_sender_email", ""),
+                    "date": metadata.get("received_date", ""),
+                    "message_id": message_id,
+                    "thread_id": metadata.get("thread_id", ""),
+                    "content_type": "email_thread",
+                    "label": metadata.get("subject", "email"),
+                }
+                store.store_document(formatted["text"], embed_metadata, collection="baker-conversations")
+                embedded += 1
+            except Exception as _e:
+                logger.warning(f"Email Qdrant embed failed for {message_id}: {_e}")
+
+            if (i + 1) % 50 == 0:
+                logger.info(f"Email backfill: processed {i + 1}/{len(thread_ids)}...")
+
+        logger.info(f"Email backfill complete: {stored} stored to PostgreSQL, {embedded} embedded to Qdrant (of {len(thread_ids)} threads)")
+
+    except Exception as e:
+        logger.error(f"Email backfill failed: {e}")
+
+
 if __name__ == "__main__":
+    import argparse
     logging.basicConfig(level=logging.INFO, format="%(name)s | %(message)s")
-    check_new_emails()
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--backfill", type=int, default=0,
+                        help="Backfill last N days of emails to PostgreSQL + Qdrant")
+    args = parser.parse_args()
+
+    if args.backfill:
+        backfill_emails(days=args.backfill)
+    else:
+        check_new_emails()
