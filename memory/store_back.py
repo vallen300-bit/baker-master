@@ -1229,16 +1229,65 @@ class SentinelStoreBack:
     # Qdrant: Store interaction as embedding
     # -------------------------------------------------------
 
+    # Voyage-3 max: 32K tokens per text (~120K chars).
+    _EMBED_CHAR_LIMIT = 120_000
+
     def _embed(self, text: str) -> list[float]:
-        # Voyage-3 supports 32K tokens (~128K chars). Cap at 120K chars as safety margin.
-        if len(text) > 120_000:
-            text = text[:120_000]
+        """Embed a single text that fits within Voyage-3's 32K token limit."""
+        if len(text) > self._EMBED_CHAR_LIMIT:
+            text = text[:self._EMBED_CHAR_LIMIT]
         result = self.voyage.embed(
             texts=[text],
             model=config.voyage.model,
             input_type="document",
         )
         return result.embeddings[0]
+
+    @staticmethod
+    def _chunk_text(text: str, max_tokens: int = 500, overlap_tokens: int = 50) -> list[str]:
+        """Split text into overlapping chunks (~500 tokens each).
+        Same algorithm as bulk_ingest.chunk_text, inlined to avoid import side-effects."""
+        est_tokens = len(text) // 4
+        if est_tokens <= max_tokens:
+            return [text]
+
+        max_chars = max_tokens * 4
+        overlap_chars = overlap_tokens * 4
+        chunks = []
+        start = 0
+
+        while start < len(text):
+            end = start + max_chars
+            if end < len(text):
+                search_region = text[start + (max_chars // 2):end]
+                for delim in [". ", ".\n", "?\n", "!\n", "\n\n", "? ", "! "]:
+                    last_break = search_region.rfind(delim)
+                    if last_break != -1:
+                        end = start + (max_chars // 2) + last_break + len(delim)
+                        break
+            chunk = text[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+            start = end - overlap_chars
+            if start <= (end - max_chars):
+                start = end - (max_chars // 2)
+
+        return chunks
+
+    def _embed_chunked(self, text: str) -> list[tuple[str, list[float]]]:
+        """
+        Embed text of any length by chunking first.
+        Short texts (<= 32K tokens) get a single embedding (fast path).
+        Long texts are split into ~500-token overlapping chunks, each embedded separately.
+        Returns list of (chunk_text, vector) tuples.
+        """
+        chunks = self._chunk_text(text)
+
+        results = []
+        for chunk in chunks:
+            vector = self._embed(chunk)
+            results.append((chunk, vector))
+        return results
 
     def store_interaction(
         self,
@@ -1248,7 +1297,8 @@ class SentinelStoreBack:
         contact_name: Optional[str] = None,
         full_content: Optional[str] = None,
     ):
-        """Store a Sentinel interaction as a new vector in Qdrant."""
+        """Store a Sentinel interaction as vectors in Qdrant.
+        Short content → single vector. Long content → chunked into multiple vectors."""
         collection = "sentinel-interactions"
         try:
             try:
@@ -1267,30 +1317,41 @@ class SentinelStoreBack:
                 f"[{trigger_type}] {trigger_content}\n"
                 f"[Analysis] {response_analysis}"
             )
-            # Embed full content when available for richer retrieval
             embed_text = full_content or snippet_text
-            vector = self._embed(embed_text)
-            point_id = int(datetime.now(timezone.utc).timestamp() * 1000)
-
-            payload = {
-                "text": snippet_text,
+            base_payload = {
                 "trigger_type": trigger_type,
                 "contact": contact_name or "unknown",
                 "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
-            if full_content:
-                payload["full_content"] = full_content
+
+            chunk_pairs = self._embed_chunked(embed_text)
+            base_id = int(datetime.now(timezone.utc).timestamp() * 1000)
+            points = []
+
+            for i, (chunk, vector) in enumerate(chunk_pairs):
+                payload = {
+                    **base_payload,
+                    "text": chunk,
+                    "chunk_index": i,
+                    "total_chunks": len(chunk_pairs),
+                }
+                if i == 0 and full_content:
+                    payload["full_content"] = full_content
+                points.append(PointStruct(
+                    id=base_id + i,
+                    vector=vector,
+                    payload=payload,
+                ))
 
             self.qdrant.upsert(
                 collection_name=collection,
-                points=[PointStruct(
-                    id=point_id,
-                    vector=vector,
-                    payload=payload,
-                )],
+                points=points,
             )
-            logger.info(f"Stored interaction {point_id} in {collection}")
+            logger.info(
+                f"Stored interaction in {collection}: "
+                f"{len(points)} chunk(s), base_id={base_id}"
+            )
         except Exception as e:
             logger.warning(f"store_interaction failed (non-fatal): {e}")
 
@@ -1299,18 +1360,35 @@ class SentinelStoreBack:
     # -------------------------------------------------------
 
     def store_document(self, content, metadata, collection="baker-documents"):
-        """Embed and store a document chunk in Qdrant."""
+        """Embed and store a document in Qdrant.
+        Short content → single vector. Long content → chunked into multiple vectors."""
         try:
-            embedding = self._embed(content)
-            point_id = str(uuid.uuid4())
+            chunk_pairs = self._embed_chunked(content)
+            points = []
+
+            for i, (chunk, vector) in enumerate(chunk_pairs):
+                point_id = str(uuid.uuid4())
+                chunk_payload = {
+                    "content": chunk,
+                    **metadata,
+                    "chunk_index": i,
+                    "total_chunks": len(chunk_pairs),
+                }
+                points.append(PointStruct(
+                    id=point_id,
+                    vector=vector,
+                    payload=chunk_payload,
+                ))
+
             self.qdrant.upsert(
                 collection_name=collection,
-                points=[PointStruct(
-                    id=point_id,
-                    vector=embedding,
-                    payload={"content": content, **metadata},
-                )],
+                points=points,
             )
+            if len(points) > 1:
+                logger.info(
+                    f"Stored {len(points)} chunks in {collection} "
+                    f"(content: {len(content):,} chars)"
+                )
         except Exception as e:
             logger.error(f"Failed to store document in {collection}: {e}")
 
