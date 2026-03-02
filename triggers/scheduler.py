@@ -71,19 +71,7 @@ class SentinelScheduler:
             f"Registered: email_poll (every {config.triggers.email_check_interval}s)"
         )
 
-        # -------------------------------------------------------
-        # WhatsApp polling — every 10 minutes
-        # -------------------------------------------------------
-        from triggers.whatsapp_trigger import check_new_whatsapp
-        self.scheduler.add_job(
-            check_new_whatsapp,
-            IntervalTrigger(seconds=config.triggers.whatsapp_check_interval),
-            id="whatsapp_poll",
-            name="WhatsApp polling",
-        )
-        logger.info(
-            f"Registered: whatsapp_poll (every {config.triggers.whatsapp_check_interval}s)"
-        )
+        # WhatsApp: migrated to WAHA webhook (S26) — polling removed (WASSENGER-CLEANUP)
 
         # -------------------------------------------------------
         # Fireflies scanning — every 2 hours
@@ -230,7 +218,7 @@ def main():
     )
     parser.add_argument(
         "--run-once", type=str, default=None,
-        choices=["email", "whatsapp", "fireflies", "briefing", "clickup", "todoist", "dropbox", "whoop"],
+        choices=["email", "fireflies", "briefing", "clickup", "todoist", "dropbox", "whoop"],
         help="Run a single trigger immediately and exit",
     )
     args = parser.parse_args()
@@ -240,9 +228,6 @@ def main():
         if args.run_once == "email":
             from triggers.email_trigger import check_new_emails
             check_new_emails()
-        elif args.run_once == "whatsapp":
-            from triggers.whatsapp_trigger import check_new_whatsapp
-            check_new_whatsapp()
         elif args.run_once == "fireflies":
             from triggers.fireflies_trigger import check_new_transcripts
             check_new_transcripts()
