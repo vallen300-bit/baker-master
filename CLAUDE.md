@@ -186,6 +186,20 @@ Communication between roles: ClickUp **Handoff Notes** list (901521426367).
 12. Feedly — queued
 13. Onboarding Briefing — waiting on template
 
+## End-of-Session Checklist
+
+Before closing a session, do these steps:
+
+1. **Update this file.** Edit CLAUDE.md to reflect what shipped:
+   - Move completed items from backlog to "done" (strikethrough)
+   - Add new key files if any were created
+   - Update architecture sections if flow changed
+   - Add any new critical IDs, tables, or collections
+2. **Commit and push.** The next session on any machine will `git pull` and get the updated state.
+3. **Note blockers.** If something is blocked or half-done, add a line under the relevant backlog item so the next session knows where to pick up.
+
+The goal: the next session reads this file and knows exactly what's current — no archaeology needed.
+
 ## Director Preferences
 
 - Bottom-line first, then supporting detail
