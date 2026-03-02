@@ -960,10 +960,21 @@ async def scan_chat(req: ScanRequest):
     # 1b. ARCH-3: Also search full meeting transcripts from PostgreSQL
     try:
         retriever = _get_retriever()
+        # Keyword match
         transcripts = retriever.get_meeting_transcripts(req.question, limit=3)
         if transcripts:
             contexts.extend(transcripts)
-            logger.info(f"Scan: added {len(transcripts)} meeting transcripts from PostgreSQL")
+            logger.info(f"Scan: added {len(transcripts)} keyword-matched transcripts")
+        # Always include recent transcripts (so Baker knows about latest meetings)
+        recent = retriever.get_recent_meeting_transcripts(limit=3)
+        existing_ids = {c.metadata.get("meeting_id") for c in transcripts}
+        added = 0
+        for r in recent:
+            if r.metadata.get("meeting_id") not in existing_ids:
+                contexts.append(r)
+                added += 1
+        if added:
+            logger.info(f"Scan: added {added} recent meeting transcripts")
     except Exception as e:
         logger.warning(f"Meeting transcript retrieval failed (non-fatal): {e}")
 

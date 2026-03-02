@@ -304,7 +304,24 @@ def backfill_transcripts_only():
             if success:
                 stored += 1
 
-        logger.info(f"Transcript backfill complete: {stored} of {len(raw)} transcripts stored to PostgreSQL")
+            # Also embed in Qdrant for semantic search
+            try:
+                embed_text = formatted["text"][:8000]  # Qdrant chunk budget
+                embed_metadata = {
+                    "source": "fireflies",
+                    "meeting_title": metadata.get("meeting_title", ""),
+                    "date": metadata.get("date", ""),
+                    "organizer": metadata.get("organizer", ""),
+                    "participants": metadata.get("participants", ""),
+                    "fireflies_id": source_id,
+                    "content_type": "meeting_transcript",
+                    "label": metadata.get("meeting_title", "meeting"),
+                }
+                store.store_document(embed_text, embed_metadata, collection="baker-conversations")
+            except Exception as _e:
+                logger.debug(f"Qdrant embed failed for {source_id} (non-fatal): {_e}")
+
+        logger.info(f"Transcript backfill complete: {stored} of {len(raw)} transcripts stored to PostgreSQL + Qdrant")
 
     except Exception as e:
         logger.error(f"Transcript backfill failed: {e}")

@@ -492,6 +492,60 @@ class SentinelRetriever:
             self._pg_pool = None
             return []
 
+    def get_recent_meeting_transcripts(self, limit: int = 5) -> list[RetrievedContext]:
+        """Get the N most recent meeting transcripts by date — no keyword needed."""
+        try:
+            conn = self._get_pg_conn()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id, title, meeting_date, duration, organizer, participants,
+                       summary, full_transcript
+                FROM meeting_transcripts
+                ORDER BY ingested_at DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+            rows = cur.fetchall()
+            cols = ["id", "title", "meeting_date", "duration", "organizer",
+                    "participants", "summary", "full_transcript"]
+            cur.close()
+
+            contexts = []
+            for row in rows:
+                data = {c: v for c, v in zip(cols, row) if v is not None}
+                transcript_text = data.get("full_transcript", "")
+                title = data.get("title", "Unknown Meeting")
+                date = data.get("meeting_date", "")
+                date_str = str(date)[:10] if date else ""
+
+                content = (
+                    f"[MEETING TRANSCRIPT] {title} ({date_str})\n"
+                    f"Organizer: {data.get('organizer', '?')}\n"
+                    f"Participants: {data.get('participants', '?')}\n"
+                    f"Duration: {data.get('duration', '?')}\n\n"
+                    f"{transcript_text}"
+                )
+
+                contexts.append(RetrievedContext(
+                    content=content,
+                    source="meeting",
+                    score=0.9,
+                    metadata={
+                        "type": "meeting_transcript",
+                        "label": title,
+                        "date": date_str,
+                        "meeting_id": data.get("id"),
+                    },
+                    token_estimate=self._estimate_tokens(content),
+                ))
+            return contexts
+        except Exception as e:
+            logger.warning(f"Recent meeting transcript fetch failed (non-fatal): {e}")
+            self._pg_pool = None
+            return []
+
     # ----------------------------------------------------------------
     # Combined Retrieval
     # ----------------------------------------------------------------
@@ -526,9 +580,15 @@ class SentinelRetriever:
             if profile:
                 contexts.insert(0, profile)
 
-        # 3. Meeting transcripts (ARCH-3 — full text from PostgreSQL)
+        # 3. Meeting transcripts (ARCH-3 — keyword match + recent)
         transcripts = self.get_meeting_transcripts(trigger_text, limit=3)
         contexts.extend(transcripts)
+        recent = self.get_recent_meeting_transcripts(limit=3)
+        # Avoid duplicates
+        existing_ids = {c.metadata.get("meeting_id") for c in transcripts}
+        for r in recent:
+            if r.metadata.get("meeting_id") not in existing_ids:
+                contexts.append(r)
 
         # 4. Active deals (always included for CEO context)
         deals = self.get_active_deals()
