@@ -128,7 +128,7 @@ def extract_deadlines(
             # Append source to existing snippet
             from models.deadlines import update_deadline
             old_snippet = existing.get("source_snippet") or ""
-            new_snippet = f"{old_snippet}\n[{source_type}] {content[:200]}".strip()[:500]
+            new_snippet = f"{old_snippet}\n[{source_type}] {content}".strip()
             update_deadline(existing["id"], source_snippet=new_snippet)
             logger.info(f"Deadline dedup: merged into existing #{existing['id']}")
             continue
@@ -141,7 +141,7 @@ def extract_deadlines(
             source_type=source_type,
         )
 
-        snippet = content[:500]
+        snippet = content
 
         dl_id = insert_deadline(
             description=description,

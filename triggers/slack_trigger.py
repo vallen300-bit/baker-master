@@ -208,7 +208,7 @@ def _embed_message(store, channel_id: str, user_name: str, text: str, ts: str, c
             "date": date_str,
             "content_type": "slack_message",
             "label": f"slack:{user_name[:60]}",
-            "text": text[:500],
+            "text": text,
         }
 
         store.store_document(embed_text[:4000], metadata, collection=collection)
