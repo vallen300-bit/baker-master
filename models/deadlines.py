@@ -233,7 +233,7 @@ def insert_deadline(
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (description, due_date, source_type, source_id,
-              (source_snippet or "")[:500], confidence, priority, status))
+              source_snippet or "", confidence, priority, status))
         row = cur.fetchone()
         conn.commit()
         cur.close()

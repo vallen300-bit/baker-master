@@ -209,7 +209,7 @@ async def waha_webhook(
         trigger_state.add_to_briefing_queue([{
             "type": "whatsapp",
             "source_id": sender,
-            "content": text[:500],
+            "content": text,
             "contact_name": sender_name,
             "message_count": 1,
             "priority": trigger.priority,

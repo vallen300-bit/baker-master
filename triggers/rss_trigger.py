@@ -296,16 +296,17 @@ def _store_article(store, feed_id: int, article: dict, url_hash: str):
         cur = conn.cursor()
         cur.execute(
             """
-            INSERT INTO rss_articles (feed_id, url_hash, title, url, author, published_at)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO rss_articles (feed_id, url_hash, title, url, author, summary, published_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (url_hash) DO NOTHING
             """,
             (
                 feed_id,
                 url_hash,
-                (article.get("title") or "")[:500],
-                (article.get("link") or "")[:2000],
-                (article.get("author") or "")[:200],
+                article.get("title") or "",
+                article.get("link") or "",
+                article.get("author") or "",
+                article.get("content") or article.get("summary") or "",
                 article.get("published"),
             ),
         )

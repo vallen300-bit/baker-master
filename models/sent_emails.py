@@ -86,7 +86,7 @@ def log_sent_email(
                 (to_address, subject, body_preview, gmail_message_id, gmail_thread_id, channel)
             VALUES (%s, %s, %s, %s, %s, %s)
             RETURNING id
-        """, (to_address, subject, (body_preview or "")[:200],
+        """, (to_address, subject, body_preview or "",
               gmail_message_id, gmail_thread_id, channel))
         row = cur.fetchone()
         conn.commit()
@@ -155,7 +155,7 @@ def mark_reply_received(
                 reply_snippet = %s,
                 reply_from = %s
             WHERE id = %s
-        """, (datetime.now(timezone.utc), (reply_snippet or "")[:300],
+        """, (datetime.now(timezone.utc), reply_snippet or "",
               reply_from, sent_email_id))
         conn.commit()
         cur.close()

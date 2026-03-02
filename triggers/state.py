@@ -75,9 +75,15 @@ class TriggerState:
                         title        TEXT,
                         url          TEXT,
                         author       TEXT,
+                        summary      TEXT,
                         published_at TIMESTAMPTZ,
                         ingested_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
+                """)
+                # ARCH-5: Add summary column to existing tables
+                cur.execute("""
+                    ALTER TABLE rss_articles
+                    ADD COLUMN IF NOT EXISTS summary TEXT
                 """)
                 conn.commit()
                 cur.close()

@@ -1013,6 +1013,7 @@ async def scan_chat(req: ScanRequest):
 
             store.log_conversation(
                 question=req.question,
+                answer=full_response,
                 answer_length=len(full_response),
                 project=req.project or "general",
                 chunk_count=chunk_count,

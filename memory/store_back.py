@@ -250,11 +250,17 @@ class SentinelStoreBack:
                     topic TEXT NOT NULL,
                     source_documents JSONB DEFAULT '[]',
                     prompt TEXT,
+                    analysis_text TEXT,
                     token_count INTEGER DEFAULT 0,
                     chunk_count INTEGER DEFAULT 0,
                     cost_usd NUMERIC(10,4) DEFAULT 0,
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 )
+            """)
+            # ARCH-5: Add analysis_text column to existing tables
+            cur.execute("""
+                ALTER TABLE deep_analyses
+                ADD COLUMN IF NOT EXISTS analysis_text TEXT
             """)
             conn.commit()
             cur.close()
@@ -1235,7 +1241,8 @@ class SentinelStoreBack:
             logger.error(f"Failed to store document in {collection}: {e}")
 
     def log_deep_analysis(self, analysis_id, topic, source_documents, prompt,
-                          token_count=0, chunk_count=0, cost_usd=0):
+                          token_count=0, chunk_count=0, cost_usd=0,
+                          analysis_text=""):
         """Catalogue a completed deep analysis in PostgreSQL."""
         conn = self._get_conn()
         if not conn:
@@ -1246,15 +1253,16 @@ class SentinelStoreBack:
             cur.execute("""
                 INSERT INTO deep_analyses
                     (analysis_id, topic, source_documents, prompt,
-                     token_count, chunk_count, cost_usd)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                     analysis_text, token_count, chunk_count, cost_usd)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (analysis_id) DO UPDATE SET
                     topic = EXCLUDED.topic,
+                    analysis_text = EXCLUDED.analysis_text,
                     token_count = EXCLUDED.token_count,
                     chunk_count = EXCLUDED.chunk_count,
                     cost_usd = EXCLUDED.cost_usd
             """, (analysis_id, topic, json.dumps(source_documents),
-                  prompt[:500], token_count, chunk_count, cost_usd))
+                  prompt, analysis_text, token_count, chunk_count, cost_usd))
             conn.commit()
             cur.close()
         except Exception as e:
@@ -1278,11 +1286,17 @@ class SentinelStoreBack:
                 CREATE TABLE IF NOT EXISTS conversation_memory (
                     id SERIAL PRIMARY KEY,
                     question TEXT NOT NULL,
+                    answer TEXT,
                     answer_length INTEGER DEFAULT 0,
                     project TEXT DEFAULT 'general',
                     chunk_count INTEGER DEFAULT 1,
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 )
+            """)
+            # ARCH-5: Add answer column to existing tables
+            cur.execute("""
+                ALTER TABLE conversation_memory
+                ADD COLUMN IF NOT EXISTS answer TEXT
             """)
             conn.commit()
             cur.close()
@@ -1292,7 +1306,7 @@ class SentinelStoreBack:
         finally:
             self._put_conn(conn)
 
-    def log_conversation(self, question, answer_length=0, project="general", chunk_count=1):
+    def log_conversation(self, question, answer="", answer_length=0, project="general", chunk_count=1):
         """Catalogue a scan conversation in PostgreSQL."""
         conn = self._get_conn()
         if not conn:
@@ -1302,9 +1316,9 @@ class SentinelStoreBack:
             cur = conn.cursor()
             cur.execute("""
                 INSERT INTO conversation_memory
-                    (question, answer_length, project, chunk_count)
-                VALUES (%s, %s, %s, %s)
-            """, (question[:500], answer_length, project, chunk_count))
+                    (question, answer, answer_length, project, chunk_count)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (question, answer, answer_length, project, chunk_count))
             conn.commit()
             cur.close()
         except Exception as e:

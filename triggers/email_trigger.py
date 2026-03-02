@@ -152,7 +152,7 @@ def check_new_emails():
             batch_for_briefing.append({
                 "type": "email",
                 "source_id": message_id,
-                "content": thread["text"][:500],
+                "content": thread["text"],
                 "contact_name": metadata.get("primary_sender"),
                 "subject": metadata.get("subject", ""),
                 "priority": trigger.priority,
