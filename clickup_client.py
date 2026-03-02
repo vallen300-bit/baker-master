@@ -223,9 +223,34 @@ class ClickUpClient:
         """GET /task/{task_id} — returns full task detail."""
         return self._request("GET", f"/task/{task_id}")
 
+    def search_tasks(self, workspace_id: str, query: str) -> list:
+        """GET /team/{workspace_id}/task — search tasks by name."""
+        params = {"name": query, "include_closed": "true"}
+        data = self._request("GET", f"/team/{workspace_id}/task", params=params)
+        if data and "tasks" in data:
+            return data["tasks"]
+        return []
+
     # -------------------------------------------------------
     # Write methods (BAKER space ONLY — 901510186446)
     # -------------------------------------------------------
+
+    def create_list(self, space_id: str, name: str) -> Optional[dict]:
+        """POST /space/{space_id}/list — BAKER space only."""
+        self._check_write_allowed(space_id, "create_list")
+        payload = {"name": name}
+        result = self._request("POST", f"/space/{space_id}/list", json=payload)
+        success = result is not None
+        self._cycle_write_count += 1
+        self._log_action(
+            action_type="create_list",
+            target_task_id=result.get("id") if result else None,
+            target_space_id=space_id,
+            payload=payload,
+            trigger_source="clickup_client",
+            success=success,
+        )
+        return result
 
     def _resolve_space_id_for_task(self, task_id: str) -> Optional[str]:
         """Look up the space_id for a task by fetching its detail."""

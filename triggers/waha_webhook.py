@@ -40,6 +40,22 @@ def _handle_director_message(message_body: str, msg_id: str, sender_name: str) -
     """
     import orchestrator.action_handler as ah
 
+    # 0. Check for pending ClickUp plan interaction
+    try:
+        plan_action = ah.check_pending_plan(message_body, channel="whatsapp")
+        if plan_action == "confirm":
+            result = ah.execute_pending_plan(channel="whatsapp")
+            _wa_reply(result)
+            logger.info("WhatsApp action: ClickUp plan confirmed")
+            return True
+        elif plan_action and plan_action.startswith("revise:"):
+            result = ah.revise_pending_plan(plan_action[7:], _get_retriever(), channel="whatsapp")
+            _wa_reply(result)
+            logger.info("WhatsApp action: ClickUp plan revised")
+            return True
+    except Exception as e:
+        logger.warning(f"Pending plan check failed: {e}")
+
     # 1. Check for pending draft interaction (send/edit/dismiss)
     draft_action = ah.check_pending_draft(message_body)
     if draft_action == "confirm":
@@ -93,6 +109,24 @@ def _handle_director_message(message_body: str, msg_id: str, sender_name: str) -
         )
         _wa_reply(result)
         logger.info(f"WhatsApp action: Fireflies fetch processed")
+        return True
+
+    elif intent_type == "clickup_action":
+        result = ah.handle_clickup_action(intent, _get_retriever(), channel="whatsapp")
+        _wa_reply(result)
+        logger.info(f"WhatsApp action: ClickUp action processed")
+        return True
+
+    elif intent_type == "clickup_fetch":
+        result = ah.handle_clickup_fetch(message_body, _get_retriever(), channel="whatsapp")
+        _wa_reply(result)
+        logger.info(f"WhatsApp action: ClickUp fetch processed")
+        return True
+
+    elif intent_type == "clickup_plan":
+        result = ah.handle_clickup_plan(message_body, _get_retriever(), channel="whatsapp")
+        _wa_reply(result)
+        logger.info(f"WhatsApp action: ClickUp plan processed")
         return True
 
     # 3. Not an action — fall through to normal pipeline

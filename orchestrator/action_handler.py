@@ -232,7 +232,7 @@ _INTENT_SYSTEM = """You are Baker's intent classifier. Given a Director's messag
 
 Return exactly this JSON structure (no other text, no markdown):
 {
-  "type": "email_action" | "deadline_action" | "vip_action" | "fireflies_fetch" | "question",
+  "type": "email_action" | "deadline_action" | "vip_action" | "fireflies_fetch" | "clickup_action" | "clickup_fetch" | "clickup_plan" | "question",
   "recipient": "<email address OR name of recipient(s). For multiple recipients, return comma-separated (e.g. 'Edita Vallen, Philip Vallen, dvallen@brisengroup.com'). 'myself' or 'me' means dvallen@brisengroup.com. Return null only if no recipient at all.>",
   "subject": "<inferred subject line or null>",
   "content_request": "<what Baker should include in the email body, or null>",
@@ -241,7 +241,16 @@ Return exactly this JSON structure (no other text, no markdown):
   "deadline_date": "<YYYY-MM-DD date for confirm action, or null>",
   "vip_action_type": "<add | remove | null>",
   "vip_name": "<name of VIP contact, or null>",
-  "vip_email": "<email of VIP contact, or null>"
+  "vip_email": "<email of VIP contact, or null>",
+  "clickup_sub_type": "<create_task | update_task | post_comment | null>",
+  "clickup_task_keyword": "<keyword to find existing task, or null>",
+  "clickup_task_name": "<name for new task, or null>",
+  "clickup_priority": "<1-4 integer (1=urgent, 4=low), or null>",
+  "clickup_due_date": "<ISO date string, or null>",
+  "clickup_status": "<target status like 'complete', 'in progress', or null>",
+  "clickup_comment_text": "<comment body, or null>",
+  "clickup_project_name": "<project name for planning, or null>",
+  "clickup_status_filter": "<'overdue', 'open', etc., or null>"
 }
 
 Email action patterns (classify as email_action even if recipient is a NAME, not an email address):
@@ -274,6 +283,23 @@ Fireflies fetch patterns:
 - "Check Fireflies for the [name] call" → type: "fireflies_fetch"
 - "Find the recording of the [topic] meeting" → type: "fireflies_fetch"
 - "Pull the Fireflies recording with John and draft a follow-up email" → type: "fireflies_fetch" (the email action will be chained after fetch)
+
+ClickUp action patterns (classify as clickup_action):
+- "Create a task in ClickUp called [name]" → clickup_sub_type: "create_task"
+- "Mark the [task] as complete" → clickup_sub_type: "update_task", clickup_status: "complete"
+- "Add a comment on the [task]: [text]" → clickup_sub_type: "post_comment"
+- "Close the [task] task" → clickup_sub_type: "update_task", clickup_status: "complete"
+
+ClickUp fetch patterns (classify as clickup_fetch):
+- "What's overdue in ClickUp?" → clickup_status_filter: "overdue"
+- "Check ClickUp for [keyword]" → clickup_task_keyword: "[keyword]"
+- "What tasks are open?" → clickup_status_filter: "open"
+- "Status of the [task]?" → clickup_task_keyword: "[task]"
+
+ClickUp plan patterns (classify as clickup_plan):
+- "Plan a project for [description]" → clickup_project_name: "[description]"
+- "Break [project] into stages" → clickup_project_name: "[project]"
+- "Create a project plan for migrating email" → clickup_project_name: "email migration"
 
 If the message is a question, information request, or anything else → type: "question".
 Only return the JSON object."""
@@ -410,6 +436,47 @@ def _quick_deadline_detect(question: str) -> dict:
     return None
 
 
+def _quick_clickup_action_detect(question: str) -> Optional[dict]:
+    """Fast regex for ClickUp task CRUD commands."""
+    import re
+    q = question.lower()
+    pattern = re.compile(
+        r"\b(create|add|make|new|mark|set|update|change|move|assign|close|complete|"
+        r"comment|note|post)\b.*\b(task|clickup|ticket)\b",
+        re.IGNORECASE,
+    )
+    if pattern.search(q):
+        return {"type": "clickup_action"}
+    return None
+
+
+def _quick_clickup_fetch_detect(question: str) -> Optional[dict]:
+    """Fast regex for ClickUp read queries."""
+    import re
+    q = question.lower()
+    pattern = re.compile(
+        r"\b(check|what|show|list|status|overdue|pending|open|search|find|"
+        r"how many|get)\b.*\b(task|clickup|ticket|overdue)\b",
+        re.IGNORECASE,
+    )
+    if pattern.search(q):
+        return {"type": "clickup_fetch"}
+    return None
+
+
+def _quick_clickup_plan_detect(question: str) -> Optional[dict]:
+    """Fast regex for project planning commands."""
+    import re
+    q = question.lower()
+    pattern = re.compile(
+        r"\b(plan|project plan|break.*into|stage|phase|roadmap)\b.*\b(project|migration|rollout|launch|implementation)\b",
+        re.IGNORECASE,
+    )
+    if pattern.search(q):
+        return {"type": "clickup_plan"}
+    return None
+
+
 def classify_intent(question: str) -> dict:
     """
     Classify the Director's input into action types.
@@ -435,6 +502,24 @@ def classify_intent(question: str) -> dict:
     if quick_dl:
         _log_action("classify_intent:regex_match", f"type={quick_dl.get('type')}")
         return quick_dl
+
+    # Fast path — regex catches ClickUp action commands
+    quick_cu_action = _quick_clickup_action_detect(question)
+    if quick_cu_action:
+        _log_action("classify_intent:regex_match", "type=clickup_action")
+        return quick_cu_action
+
+    # Fast path — regex catches ClickUp plan commands (before fetch, since plan is more specific)
+    quick_cu_plan = _quick_clickup_plan_detect(question)
+    if quick_cu_plan:
+        _log_action("classify_intent:regex_match", "type=clickup_plan")
+        return quick_cu_plan
+
+    # Fast path — regex catches ClickUp fetch queries
+    quick_cu_fetch = _quick_clickup_fetch_detect(question)
+    if quick_cu_fetch:
+        _log_action("classify_intent:regex_match", "type=clickup_fetch")
+        return quick_cu_fetch
 
     try:
         claude = anthropic.Anthropic(api_key=config.claude.api_key)
@@ -1153,3 +1238,577 @@ def handle_fireflies_fetch(message: str, retriever=None, project=None,
             reply_parts.append(email_result)
 
     return "\n".join(reply_parts)
+
+
+# ---------------------------------------------------------------------------
+# CLICKUP-V2: ClickUp PM Overlay — Natural Language Task Management
+# ---------------------------------------------------------------------------
+
+import re
+import time
+from datetime import timedelta
+
+# BAKER space — the only space Baker is allowed to write to
+_BAKER_SPACE_ID = "901510186446"
+_DEFAULT_LIST_ID = "901521426367"  # Handoff Notes list
+_ALL_WORKSPACES = ["2652545", "24368967", "24382372", "24382764", "24385290", "9004065517"]
+_PLAN_TTL_SECONDS = 1800  # 30 minutes
+
+# Approval / revision regex patterns
+_RE_APPROVAL = re.compile(
+    r"^\s*(approved?|yes|go ahead|do it|create it|execute|confirm|proceed|lgtm|looks good)\s*\.?\s*$",
+    re.IGNORECASE,
+)
+_RE_REVISION = re.compile(
+    r"\b(change|move|adjust|revise|update|modify|make it|add|remove|split|merge|extend|shorten)\b",
+    re.IGNORECASE,
+)
+
+# In-memory pending plan state (per channel)
+_pending_plans = {}
+
+
+def _save_pending_plan(channel: str, plan: dict, original_request: str):
+    _pending_plans[channel] = {
+        "plan": plan,
+        "request": original_request,
+        "expires": time.time() + _PLAN_TTL_SECONDS,
+    }
+
+
+def _get_pending_plan(channel: str) -> Optional[dict]:
+    entry = _pending_plans.get(channel)
+    if not entry:
+        return None
+    if time.time() > entry["expires"]:
+        del _pending_plans[channel]
+        return None
+    return entry
+
+
+def _clear_pending_plan(channel: str):
+    _pending_plans.pop(channel, None)
+
+
+def check_pending_plan(question: str, channel: str = "scan") -> Optional[str]:
+    """Check if a pending ClickUp plan exists and whether the message is approval/revision."""
+    entry = _get_pending_plan(channel)
+    if not entry:
+        return None
+    if _RE_APPROVAL.search(question):
+        return "confirm"
+    if _RE_REVISION.search(question):
+        return f"revise:{question}"
+    return None
+
+
+def _find_clickup_task(keyword: str) -> dict:
+    """Search clickup_tasks table by keyword (ILIKE). Returns status + task(s)."""
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    conn = store._get_conn()
+    if not conn:
+        return {"status": "error", "message": "Database unavailable"}
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """SELECT id, name, status, priority, due_date, list_name, space_id
+               FROM clickup_tasks WHERE name ILIKE %s
+               ORDER BY date_updated DESC NULLS LAST LIMIT 10""",
+            (f"%{keyword}%",),
+        )
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        if len(rows) == 1:
+            return {"status": "found", "task": rows[0]}
+        elif len(rows) > 1:
+            return {"status": "multiple", "tasks": rows}
+        else:
+            try:
+                from clickup_client import ClickUpClient
+                client = ClickUpClient._get_global_instance()
+                for ws_id in _ALL_WORKSPACES:
+                    api_results = client.search_tasks(ws_id, keyword)
+                    if api_results:
+                        return {"status": "found", "task": api_results[0]}
+            except Exception as e:
+                logger.warning(f"ClickUp API search fallback failed: {e}")
+            return {"status": "not_found"}
+    except Exception as e:
+        logger.error(f"Task lookup failed: {e}")
+        return {"status": "error", "message": str(e)}
+    finally:
+        store._put_conn(conn)
+
+
+def _extract_clickup_params(message: str, intent_type: str) -> dict:
+    """Use Haiku to extract structured params from a ClickUp command."""
+    extraction_prompt = f"""Extract parameters from this ClickUp command.
+Intent type: {intent_type}
+
+Return JSON with these fields (omit if not mentioned):
+- clickup_sub_type: "create_task", "update_task", or "post_comment"
+- clickup_task_name: name for new task
+- clickup_task_keyword: keyword to find existing task
+- clickup_priority: 1-4 integer (1=urgent, 2=high, 3=normal, 4=low)
+- clickup_due_date: ISO date if mentioned
+- clickup_status: target status
+- clickup_comment_text: comment body
+- clickup_project_name: project name (for plan intent)
+- clickup_status_filter: "overdue", "open", etc (for fetch intent)
+
+Return ONLY valid JSON, no markdown."""
+
+    claude = anthropic.Anthropic(api_key=config.claude.api_key)
+    resp = claude.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=400,
+        system=extraction_prompt,
+        messages=[{"role": "user", "content": message}],
+    )
+    raw = resp.content[0].text.strip()
+    if raw.startswith("```"):
+        lines = raw.split("\n")
+        raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
+    return json.loads(raw)
+
+
+# ---------------------------------------------------------------------------
+# ClickUp Action Handler (single task CRUD)
+# ---------------------------------------------------------------------------
+
+def handle_clickup_action(intent: dict, retriever=None, channel: str = "scan") -> str:
+    """Handle single-task ClickUp operations: create, update, comment."""
+    from clickup_client import ClickUpClient
+    client = ClickUpClient._get_global_instance()
+
+    # If fast-path matched, extract params via Haiku
+    if "clickup_sub_type" not in intent:
+        try:
+            params = _extract_clickup_params(
+                intent.get("content_request", ""), "clickup_action"
+            )
+            intent.update(params)
+        except Exception as e:
+            logger.warning(f"ClickUp param extraction failed: {e}")
+
+    sub_type = intent.get("clickup_sub_type", "create_task")
+
+    try:
+        if sub_type == "create_task":
+            return _handle_create_task(client, intent)
+        elif sub_type == "update_task":
+            return _handle_update_task(client, intent)
+        elif sub_type == "post_comment":
+            return _handle_post_comment(client, intent)
+        else:
+            return f"Unknown ClickUp action sub-type: {sub_type}"
+    except RuntimeError as e:
+        return f"ClickUp write blocked: {e}"
+    except ValueError as e:
+        return f"ClickUp safety guard: {e}"
+    except Exception as e:
+        logger.error(f"ClickUp action failed: {e}")
+        return f"ClickUp action failed: {e}"
+
+
+def _handle_create_task(client, intent: dict) -> str:
+    name = intent.get("clickup_task_name", "Untitled Task")
+    priority = intent.get("clickup_priority")
+    due_date = intent.get("clickup_due_date")
+    status = intent.get("clickup_status")
+
+    due_ms = None
+    if due_date:
+        try:
+            dt = datetime.fromisoformat(due_date.replace("Z", "+00:00"))
+            due_ms = int(dt.timestamp() * 1000)
+        except (ValueError, TypeError):
+            pass
+
+    result = client.create_task(
+        list_id=_DEFAULT_LIST_ID, name=name,
+        priority=priority, due_date=due_ms, status=status,
+    )
+    if result:
+        task_id = result.get("id", "unknown")
+        task_url = result.get("url", f"https://app.clickup.com/t/{task_id}")
+        prio_labels = {1: "Urgent", 2: "High", 3: "Normal", 4: "Low"}
+        parts = [f"Task created: **{name}**", f"- ID: {task_id}"]
+        if priority:
+            parts.append(f"- Priority: {prio_labels.get(priority, priority)}")
+        if due_date:
+            parts.append(f"- Due: {due_date}")
+        parts.append(f"- [Open in ClickUp]({task_url})")
+        return "\n".join(parts)
+    return "Failed to create task in ClickUp. Check logs for details."
+
+
+def _handle_update_task(client, intent: dict) -> str:
+    keyword = intent.get("clickup_task_keyword", "")
+    if not keyword:
+        return "I need a task name or keyword to find the task to update."
+
+    lookup = _find_clickup_task(keyword)
+    if lookup["status"] == "not_found":
+        return f"No task found matching '{keyword}'. Try a different keyword."
+    if lookup["status"] == "multiple":
+        lines = [f"Multiple tasks match '{keyword}'. Which one?"]
+        for t in lookup["tasks"][:5]:
+            lines.append(f"- **{t['name']}** ({t['status']}) -- ID: {t['id']}")
+        return "\n".join(lines)
+    if lookup["status"] == "error":
+        return f"Task lookup error: {lookup.get('message', 'unknown')}"
+
+    task = lookup["task"]
+    if task.get("space_id") and str(task["space_id"]) != _BAKER_SPACE_ID:
+        return f"Task '{task['name']}' is not in BAKER space -- writes not allowed."
+
+    updates = {}
+    new_status = intent.get("clickup_status")
+    new_priority = intent.get("clickup_priority")
+    if new_status:
+        status_map = {
+            "complete": "complete", "completed": "complete", "done": "complete",
+            "closed": "complete", "in progress": "in progress",
+            "open": "Open", "to do": "to do", "todo": "to do",
+        }
+        updates["status"] = status_map.get(new_status.lower(), new_status)
+    if new_priority:
+        updates["priority"] = new_priority
+    if not updates:
+        return f"Found task '{task['name']}' but no update fields specified."
+
+    result = client.update_task(task["id"], **updates)
+    if result:
+        parts = [f"Task updated: **{task['name']}**"]
+        for k, v in updates.items():
+            parts.append(f"- {k}: {v}")
+        return "\n".join(parts)
+    return f"Failed to update task '{task['name']}'. Check logs."
+
+
+def _handle_post_comment(client, intent: dict) -> str:
+    keyword = intent.get("clickup_task_keyword", "")
+    comment_text = intent.get("clickup_comment_text", "")
+    if not keyword:
+        return "I need a task name or keyword to find the task."
+    if not comment_text:
+        return "No comment text provided. What should the comment say?"
+
+    lookup = _find_clickup_task(keyword)
+    if lookup["status"] == "not_found":
+        return f"No task found matching '{keyword}'."
+    if lookup["status"] == "multiple":
+        lines = [f"Multiple tasks match '{keyword}'. Which one?"]
+        for t in lookup["tasks"][:5]:
+            lines.append(f"- **{t['name']}** -- ID: {t['id']}")
+        return "\n".join(lines)
+    if lookup["status"] == "error":
+        return f"Task lookup error: {lookup.get('message', 'unknown')}"
+
+    task = lookup["task"]
+    if task.get("space_id") and str(task["space_id"]) != _BAKER_SPACE_ID:
+        return f"Task '{task['name']}' is not in BAKER space -- writes not allowed."
+
+    result = client.post_comment(task["id"], comment_text)
+    if result:
+        preview = comment_text[:100] + ("..." if len(comment_text) > 100 else "")
+        return f'Comment posted on **{task["name"]}**: "{preview}"'
+    return f"Failed to post comment on '{task['name']}'. Check logs."
+
+
+# ---------------------------------------------------------------------------
+# ClickUp Fetch Handler (read-only queries)
+# ---------------------------------------------------------------------------
+
+def handle_clickup_fetch(message: str, retriever=None, channel: str = "scan",
+                         project=None, role=None) -> str:
+    """Handle read-only ClickUp queries: status, overdue, search."""
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+
+    try:
+        params = _extract_clickup_params(message, "clickup_fetch")
+    except Exception:
+        params = {}
+
+    keyword = params.get("clickup_task_keyword", "")
+    status_filter = params.get("clickup_status_filter", "")
+
+    conn = store._get_conn()
+    if not conn:
+        return "Database unavailable -- cannot query ClickUp tasks."
+
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        if status_filter == "overdue":
+            cur.execute(
+                """SELECT id, name, status, priority, due_date, list_name
+                   FROM clickup_tasks
+                   WHERE due_date < NOW() AND status NOT IN ('complete', 'closed', 'Closed')
+                   ORDER BY due_date ASC LIMIT 20""",
+            )
+        elif keyword:
+            cur.execute(
+                """SELECT id, name, status, priority, due_date, list_name
+                   FROM clickup_tasks WHERE name ILIKE %s
+                   ORDER BY date_updated DESC NULLS LAST LIMIT 20""",
+                (f"%{keyword}%",),
+            )
+        else:
+            cur.execute(
+                """SELECT id, name, status, priority, due_date, list_name
+                   FROM clickup_tasks
+                   WHERE status NOT IN ('complete', 'closed', 'Closed')
+                   ORDER BY date_updated DESC NULLS LAST LIMIT 20""",
+            )
+
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+
+        if not rows:
+            if status_filter == "overdue":
+                return "No overdue tasks found in ClickUp."
+            if keyword:
+                return f"No tasks found matching '{keyword}'."
+            return "No open tasks found in ClickUp."
+
+        return _format_task_list(rows, status_filter or keyword or "open tasks")
+    except Exception as e:
+        logger.error(f"ClickUp fetch failed: {e}")
+        return f"Failed to query ClickUp tasks: {e}"
+    finally:
+        store._put_conn(conn)
+
+
+def _format_task_list(tasks: list, context: str) -> str:
+    status_emoji = {
+        "open": "[ ]", "to do": "[ ]", "in progress": "[~]",
+        "complete": "[x]", "closed": "[x]", "review": "[?]",
+    }
+    lines = [f"**ClickUp: {context}** ({len(tasks)} tasks)", ""]
+    for t in tasks:
+        status = (t.get("status") or "unknown").lower()
+        marker = status_emoji.get(status, "[-]")
+        name = t.get("name", "Untitled")
+        prio = t.get("priority", "")
+        due = ""
+        if t.get("due_date"):
+            try:
+                dt = t["due_date"]
+                if isinstance(dt, str):
+                    due = f" | due {dt[:10]}"
+                else:
+                    due = f" | due {dt.strftime('%Y-%m-%d')}"
+            except Exception:
+                pass
+        prio_str = f" P{prio}" if prio else ""
+        list_name = f" ({t.get('list_name', '')})" if t.get("list_name") else ""
+        lines.append(f"{marker} **{name}**{prio_str}{due}{list_name}")
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# ClickUp Plan Handler (project planning with approval loop)
+# ---------------------------------------------------------------------------
+
+def handle_clickup_plan(message: str, retriever=None, channel: str = "scan",
+                        project=None, role=None) -> str:
+    """Generate a project plan, store for approval, then execute."""
+    pending = _get_pending_plan(channel)
+    if pending:
+        if _RE_APPROVAL.search(message):
+            return execute_pending_plan(channel)
+        elif _RE_REVISION.search(message):
+            return revise_pending_plan(message, retriever, channel)
+        _clear_pending_plan(channel)
+
+    try:
+        params = _extract_clickup_params(message, "clickup_plan")
+        project_name = params.get("clickup_project_name", message[:100])
+    except Exception:
+        project_name = message[:100]
+
+    context_block = ""
+    if retriever:
+        try:
+            contexts = retriever.search_all_collections(
+                query=message, limit_per_collection=5, score_threshold=0.3,
+            )
+            if contexts:
+                snippets = [f"- {c.content[:200]}" for c in contexts[:5]]
+                context_block = "\nRelevant context:\n" + "\n".join(snippets)
+        except Exception:
+            pass
+
+    plan_prompt = f"""Create a project plan for ClickUp.
+
+Project request: {message}
+{context_block}
+
+Return a JSON object with:
+{{
+  "project_name": "Short project name",
+  "stages": [
+    {{
+      "name": "Stage 1: ...",
+      "description": "What this stage covers",
+      "days": 5,
+      "tasks": [
+        {{"name": "Task name", "description": "Details", "priority": 3}}
+      ]
+    }}
+  ],
+  "total_days": 20,
+  "notes": "Any important considerations"
+}}
+
+Rules: 3-6 stages, 5-10 working days per stage unless specified,
+2-5 tasks per stage. Priorities: 1=Urgent, 2=High, 3=Normal, 4=Low.
+Return ONLY valid JSON, no markdown fences."""
+
+    try:
+        claude = anthropic.Anthropic(api_key=config.claude.api_key)
+        resp = claude.messages.create(
+            model=config.claude.model, max_tokens=4096,
+            system="You are a project planning assistant. Return only JSON.",
+            messages=[{"role": "user", "content": plan_prompt}],
+        )
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+        plan = json.loads(raw)
+    except json.JSONDecodeError:
+        return "Failed to generate a valid project plan. Please try rephrasing."
+    except Exception as e:
+        return f"Plan generation failed: {e}"
+
+    _save_pending_plan(channel, plan, message)
+    display = _format_plan_for_display(plan)
+    display += "\n\n**Reply 'Approved' to create this in ClickUp, or describe changes.**"
+    return display
+
+
+def _format_plan_for_display(plan: dict) -> str:
+    lines = [f"**Project Plan: {plan.get('project_name', 'Untitled')}**"]
+    lines.append(f"Total duration: ~{plan.get('total_days', '?')} working days")
+    lines.append("")
+    prio_labels = {1: "URGENT", 2: "HIGH", 3: "NORMAL", 4: "LOW"}
+    for i, stage in enumerate(plan.get("stages", []), 1):
+        days = stage.get("days", "?")
+        lines.append(f"**Stage {i}: {stage.get('name', 'Unnamed')}** ({days} days)")
+        if stage.get("description"):
+            lines.append(f"  {stage['description']}")
+        for task in stage.get("tasks", []):
+            prio = task.get("priority", 3)
+            lines.append(f"  - {task.get('name', 'Task')} [{prio_labels.get(prio, str(prio))}]")
+        lines.append("")
+    if plan.get("notes"):
+        lines.append(f"**Notes:** {plan['notes']}")
+    return "\n".join(lines)
+
+
+def execute_pending_plan(channel: str = "scan") -> str:
+    """Execute the pending plan: create list + tasks in ClickUp."""
+    entry = _get_pending_plan(channel)
+    if not entry:
+        return "No pending plan to execute. Plan may have expired (30 min TTL)."
+    plan = entry["plan"]
+    _clear_pending_plan(channel)
+    try:
+        return _execute_plan_in_clickup(plan)
+    except RuntimeError as e:
+        return f"Plan execution blocked: {e}"
+    except Exception as e:
+        logger.error(f"Plan execution failed: {e}")
+        return f"Plan execution failed: {e}"
+
+
+def _execute_plan_in_clickup(plan: dict) -> str:
+    from clickup_client import ClickUpClient
+    client = ClickUpClient._get_global_instance()
+    client.reset_cycle_counter()
+
+    project_name = plan.get("project_name", "New Project")
+    new_list = client.create_list(_BAKER_SPACE_ID, project_name)
+    if not new_list:
+        return "Failed to create project list in ClickUp."
+
+    list_id = new_list["id"]
+    created_tasks = []
+    base_date = datetime.now(timezone.utc)
+    cumulative_days = 0
+
+    for stage in plan.get("stages", []):
+        stage_days = stage.get("days", 5)
+        for task_def in stage.get("tasks", []):
+            task_name = f"[{stage.get('name', 'Stage')}] {task_def.get('name', 'Task')}"
+            due_offset = cumulative_days + stage_days
+            due_dt = base_date + timedelta(days=due_offset)
+            due_ms = int(due_dt.timestamp() * 1000)
+            try:
+                result = client.create_task(
+                    list_id=list_id, name=task_name,
+                    description=task_def.get("description", ""),
+                    priority=task_def.get("priority"), due_date=due_ms,
+                )
+                if result:
+                    created_tasks.append(result)
+            except RuntimeError as e:
+                logger.warning(f"Task creation stopped (write limit): {e}")
+                break
+        cumulative_days += stage_days
+
+    list_url = new_list.get("url", f"https://app.clickup.com/24385290/v/li/{list_id}")
+    return "\n".join([
+        f"**Project created in ClickUp: {project_name}**",
+        f"- List: {list_id}",
+        f"- Tasks created: {len(created_tasks)}",
+        f"- Timeline: ~{cumulative_days} working days",
+        f"- [Open in ClickUp]({list_url})",
+    ])
+
+
+def revise_pending_plan(revision_text: str, retriever=None, channel: str = "scan") -> str:
+    """Revise the pending plan based on Director feedback."""
+    entry = _get_pending_plan(channel)
+    if not entry:
+        return "No pending plan to revise."
+    plan = entry["plan"]
+    original_request = entry["request"]
+
+    revision_prompt = f"""Revise this project plan based on feedback.
+
+Original request: {original_request}
+
+Current plan:
+{json.dumps(plan, indent=2)}
+
+Revision requested: {revision_text}
+
+Return the REVISED plan as JSON in the same format. Return ONLY valid JSON."""
+
+    try:
+        claude = anthropic.Anthropic(api_key=config.claude.api_key)
+        resp = claude.messages.create(
+            model=config.claude.model, max_tokens=4096,
+            system="You are a project planning assistant. Return only JSON.",
+            messages=[{"role": "user", "content": revision_prompt}],
+        )
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```(?:json)?\s*", "", raw)
+            raw = re.sub(r"\s*```$", "", raw)
+        revised_plan = json.loads(raw)
+    except Exception as e:
+        return f"Plan revision failed: {e}"
+
+    _save_pending_plan(channel, revised_plan, original_request)
+    display = _format_plan_for_display(revised_plan)
+    display += "\n\n**Reply 'Approved' to create this in ClickUp, or describe further changes.**"
+    return display

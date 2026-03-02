@@ -796,6 +796,21 @@ async def scan_chat(req: ScanRequest):
     """
     start = time.time()
 
+    # CLICKUP-V2: Check for pending ClickUp plan interaction first
+    try:
+        plan_action = _ah.check_pending_plan(req.question, channel="scan")
+        if plan_action == "confirm":
+            return _action_stream_response(
+                _ah.execute_pending_plan(channel="scan"), req.question,
+            )
+        elif plan_action and plan_action.startswith("revise:"):
+            return _action_stream_response(
+                _ah.revise_pending_plan(plan_action[7:], _get_retriever(), channel="scan"),
+                req.question,
+            )
+    except Exception as e:
+        logger.warning(f"Pending plan check failed (continuing): {e}")
+
     # SCAN-ACTION-1: Email action routing — check before RAG pipeline
     logger.info(f"SCAN_DEBUG: question={req.question[:200]}")
     draft_action = _ah.check_pending_draft(req.question)
@@ -839,6 +854,25 @@ async def scan_chat(req: ScanRequest):
                 _ah.handle_fireflies_fetch(
                     req.question, _get_retriever(), req.project, req.role,
                     channel="scan",
+                ),
+                req.question,
+            )
+        elif intent.get("type") == "clickup_action":
+            return _action_stream_response(
+                _ah.handle_clickup_action(intent, _get_retriever(), channel="scan"),
+                req.question,
+            )
+        elif intent.get("type") == "clickup_fetch":
+            return _action_stream_response(
+                _ah.handle_clickup_fetch(
+                    req.question, _get_retriever(), channel="scan",
+                ),
+                req.question,
+            )
+        elif intent.get("type") == "clickup_plan":
+            return _action_stream_response(
+                _ah.handle_clickup_plan(
+                    req.question, _get_retriever(), channel="scan",
                 ),
                 req.question,
             )
