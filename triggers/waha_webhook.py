@@ -6,8 +6,13 @@ WHATSAPP-ACTION-1: Director messages (41799605092@c.us) are checked for
 action intent before pipeline routing. Email, deadline, and VIP actions
 are executed and confirmed on WhatsApp. Non-action messages fall through
 to the normal pipeline.
+
+WA-QUESTION-1: Director questions (intent == "question") get a
+conversational reply using the same Scan-style RAG flow (retrieval →
+SCAN_SYSTEM_PROMPT → Claude → WhatsApp reply + store-back).
 """
 import logging
+import time
 from datetime import datetime, timezone
 from fastapi import APIRouter, Header, Request
 
@@ -30,6 +35,192 @@ def _get_retriever():
     """Lazy-initialize the retriever for RAG-based email body generation."""
     from memory.retriever import SentinelRetriever
     return SentinelRetriever()
+
+
+def _format_wa_context(contexts) -> str:
+    """Format retrieved contexts into a compact block for the WhatsApp prompt.
+    Mirrors _format_scan_context() from dashboard.py."""
+    if not contexts:
+        return "[No relevant context found in memory]"
+
+    sections = {}
+    for ctx in contexts:
+        source = ctx.source.upper()
+        if source not in sections:
+            sections[source] = []
+        sections[source].append(ctx)
+
+    blocks = []
+    for source, items in sections.items():
+        blocks.append(f"\n--- {source} ({len(items)} items) ---")
+        for item in items:
+            label = item.metadata.get("label", "unknown")
+            date_str = item.metadata.get("date", "")
+            meta = f" [{date_str}]" if date_str else ""
+            blocks.append(f"[{source}] {label}{meta}: {item.content[:600]}")
+
+    return "\n".join(blocks)
+
+
+def _handle_director_question(question: str, msg_id: str):
+    """
+    WA-QUESTION-1: Answer a Director question using the Scan-style RAG flow.
+    Retrieves context from Qdrant + PostgreSQL, calls Claude, replies on
+    WhatsApp, and stores the interaction back to memory.
+    """
+    start = time.time()
+
+    # --- 1. Retrieve context (Qdrant vectors) ---
+    try:
+        retriever = _get_retriever()
+        contexts = retriever.search_all_collections(
+            query=question,
+            limit_per_collection=8,
+            score_threshold=0.3,
+        )
+        logger.info(f"WA question: retrieved {len(contexts)} Qdrant contexts")
+    except Exception as e:
+        logger.error(f"WA question retrieval failed: {e}")
+        contexts = []
+
+    # --- 1b. Meeting transcripts from PostgreSQL ---
+    try:
+        retriever = _get_retriever()
+        transcripts = retriever.get_meeting_transcripts(question, limit=3)
+        if transcripts:
+            contexts.extend(transcripts)
+        recent = retriever.get_recent_meeting_transcripts(limit=3)
+        existing_ids = {c.metadata.get("meeting_id") for c in transcripts}
+        for r in recent:
+            if r.metadata.get("meeting_id") not in existing_ids:
+                contexts.append(r)
+    except Exception as e:
+        logger.warning(f"WA question: transcript retrieval failed (non-fatal): {e}")
+
+    # --- 1c. Emails + WhatsApp from PostgreSQL ---
+    try:
+        retriever = _get_retriever()
+        emails = retriever.get_email_messages(question, limit=3)
+        if emails:
+            contexts.extend(emails)
+        recent_emails = retriever.get_recent_emails(limit=3)
+        existing_eids = {c.metadata.get("message_id") for c in emails}
+        for r in recent_emails:
+            if r.metadata.get("message_id") not in existing_eids:
+                contexts.append(r)
+
+        wa_msgs = retriever.get_whatsapp_messages(question, limit=3)
+        if wa_msgs:
+            contexts.extend(wa_msgs)
+        recent_wa = retriever.get_recent_whatsapp(limit=3)
+        existing_wids = {c.metadata.get("msg_id") for c in wa_msgs}
+        for r in recent_wa:
+            if r.metadata.get("msg_id") not in existing_wids:
+                contexts.append(r)
+    except Exception as e:
+        logger.warning(f"WA question: email/WA retrieval failed (non-fatal): {e}")
+
+    # --- 2. Build system prompt ---
+    from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT
+    from config.settings import config
+
+    context_block = _format_wa_context(contexts)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    # Deadlines
+    deadline_block = ""
+    try:
+        from models.deadlines import get_active_deadlines
+        deadlines = get_active_deadlines(limit=15)
+        if deadlines:
+            dl_lines = []
+            for dl in deadlines:
+                due = dl.get("due_date")
+                due_str = due.strftime("%Y-%m-%d") if due else "TBD"
+                priority = dl.get("priority", "normal")
+                status = dl.get("status", "active")
+                desc = dl.get("description", "")
+                dl_lines.append(f"- [{priority.upper()}] {due_str}: {desc} ({status})")
+            deadline_block = "\n\n## ACTIVE DEADLINES\n" + "\n".join(dl_lines)
+    except Exception:
+        pass
+
+    system_prompt = (
+        f"{SCAN_SYSTEM_PROMPT}\n"
+        f"## CURRENT TIME\n{now}\n\n"
+        f"## RETRIEVED CONTEXT\n{context_block}"
+        f"{deadline_block}\n\n"
+        f"## CHANNEL\n"
+        f"You are replying on WhatsApp. Keep your answer concise — 2-3 short paragraphs max.\n"
+        f"No markdown headers or bullet formatting. Use *bold* sparingly (WhatsApp supports it).\n"
+        f"No document blocks. No numbered lists longer than 5 items.\n"
+    )
+
+    # --- 3. Call Claude (non-streaming, WhatsApp doesn't support SSE) ---
+    try:
+        import anthropic
+        claude = anthropic.Anthropic(api_key=config.claude.api_key)
+        response = claude.messages.create(
+            model=config.claude.model,
+            max_tokens=2048,
+            system=system_prompt,
+            messages=[{"role": "user", "content": question}],
+        )
+        answer = response.content[0].text
+    except Exception as e:
+        logger.error(f"WA question: Claude call failed: {e}")
+        _wa_reply("Sorry, I couldn't process that right now. Try again in a moment.")
+        return
+
+    # --- 4. Send reply ---
+    _wa_reply(answer)
+    elapsed_ms = int((time.time() - start) * 1000)
+    logger.info(f"WA question answered: {elapsed_ms}ms, {len(answer)} chars")
+
+    # --- 5. Store-back (fire-and-forget) ---
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+
+        # 5a. Log decision
+        store.log_decision(
+            decision=f"WA question: {question[:100]}",
+            reasoning=answer[:500],
+            confidence="medium",
+            trigger_type="whatsapp_question",
+        )
+
+        # 5b. Store Q+A to Qdrant for conversation memory (CONV-MEM-1)
+        conversation_content = (
+            f"[CONVERSATION]\n"
+            f"Question (WhatsApp): {question}\n\n"
+            f"Answer: {answer}"
+        )
+        conv_metadata = {
+            "type": "conversation",
+            "source": "whatsapp_question",
+            "question": question[:500],
+            "project": "general",
+            "role": "ceo",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "answer_length": len(answer),
+        }
+        store.store_document(
+            content=conversation_content,
+            metadata=conv_metadata,
+            collection="baker-conversations",
+        )
+
+        # 5c. Log to conversation_memory table
+        store.log_conversation(
+            question=question,
+            answer=answer,
+            answer_length=len(answer),
+            project="general",
+            chunk_count=1,
+        )
+    except Exception as e:
+        logger.warning(f"WA question store-back failed (non-fatal): {e}")
 
 
 def _handle_director_message(message_body: str, msg_id: str, sender_name: str) -> bool:
@@ -213,13 +404,9 @@ async def waha_webhook(
             if handled:
                 return {"status": "action_processed", "sender": sender_name}
         except Exception as e:
-            logger.error(f"WhatsApp action routing failed (falling through to pipeline): {e}")
+            logger.error(f"WhatsApp action routing failed (falling through to question handler): {e}")
 
-    # Format and run pipeline (normal flow for non-Director or non-action messages)
-    text = f"WhatsApp message from {sender_name}:\n[{datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()[:19]}] {sender_name}: {combined_body}"
-
-    # DEADLINE-SYSTEM-1: Extract deadlines from WhatsApp messages (Director's only)
-    if sender == DIRECTOR_WHATSAPP:
+        # DEADLINE-SYSTEM-1: Extract deadlines from Director messages
         try:
             from orchestrator.deadline_manager import extract_deadlines
             extract_deadlines(
@@ -231,6 +418,17 @@ async def waha_webhook(
             )
         except Exception as _e:
             logger.debug(f"Deadline extraction failed for WA {msg_id}: {_e}")
+
+        # WA-QUESTION-1: Director question — conversational reply via Scan-style RAG
+        try:
+            _handle_director_question(combined_body, msg_id)
+            return {"status": "question_answered", "sender": sender_name}
+        except Exception as e:
+            logger.error(f"WA question handler failed: {e}")
+            return {"status": "error", "sender": sender_name}
+
+    # Non-Director messages: background intelligence via pipeline (no reply)
+    text = f"WhatsApp message from {sender_name}:\n[{datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()[:19]}] {sender_name}: {combined_body}"
 
     from orchestrator.pipeline import SentinelPipeline, TriggerEvent
     pipeline = SentinelPipeline()

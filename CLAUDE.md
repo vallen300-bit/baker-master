@@ -105,6 +105,11 @@ WAHA webhook → waha_webhook.py
     → check_pending_plan() → ClickUp plan loop
     → check_pending_draft() → email draft loop
     → classify_intent() → route to handler → _wa_reply()
+    → question? → _handle_director_question() (WA-QUESTION-1)
+      → Qdrant vectors + PostgreSQL (meetings, emails, WhatsApp)
+      → SCAN_SYSTEM_PROMPT + context + deadlines + WhatsApp channel hint
+      → Claude (non-streaming, max_tokens=2048)
+      → _wa_reply(answer) + store-back (Qdrant + conversation_memory)
   → Non-Director → pipeline.run() or briefing queue
 
 Backfill: scripts/extract_whatsapp.py
@@ -213,7 +218,7 @@ Communication between roles: ClickUp **Handoff Notes** list (901521426367).
 3. ~~CLICKUP-V2 PM Overlay~~ — DONE (3 intents: action, fetch, plan)
 4. Slack integration — queued
 5. ~~WhatsApp input (backfill + media)~~ — DONE (backfill script, media OCR, 6h re-sync, API endpoint). **BLOCKED:** needs `WHATSAPP_API_KEY` added to Render env vars to activate.
-6. WhatsApp output — queued (Baker → WhatsApp rich responses)
+6. ~~WhatsApp output~~ — DONE (WA-QUESTION-1: Director questions get Scan-style conversational replies via WhatsApp)
 7. Dashboard data layer — queued
 8. Todoist — queued
 9. Calendar — queued
