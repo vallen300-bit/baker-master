@@ -1010,7 +1010,7 @@ async def scan_chat(req: ScanRequest):
         _conv_history = ""
         try:
             store = _get_store()
-            recent_turns = store.get_recent_conversations(limit=5)
+            recent_turns = store.get_recent_conversations(limit=15)
             if recent_turns:
                 # Build a compact history string (newest-first → reverse for chronological)
                 lines = []

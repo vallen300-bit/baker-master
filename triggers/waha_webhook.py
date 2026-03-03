@@ -275,7 +275,7 @@ def _handle_director_message(message_body: str, msg_id: str, sender_name: str) -
     try:
         from memory.store_back import SentinelStoreBack
         store = SentinelStoreBack._get_global_instance()
-        recent_turns = store.get_recent_conversations(limit=5)
+        recent_turns = store.get_recent_conversations(limit=15)
         if recent_turns:
             lines = []
             for turn in reversed(recent_turns):
