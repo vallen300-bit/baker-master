@@ -158,7 +158,8 @@ baker-projects, sentinel-interactions, sentinel-email, sentinel-meetings, sentin
 `triggers_log`, `decisions`, `alerts`, `contacts`, `deals`, `preferences`,
 `clickup_tasks`, `baker_actions`, `pending_drafts`, `trigger_watermarks`,
 `todoist_tasks`, `conversation_memory`, `sent_emails`, `deadlines`, `vip_contacts`,
-`meeting_transcripts` (ARCH-3), `email_messages` (ARCH-6), `whatsapp_messages` (ARCH-7)
+`meeting_transcripts` (ARCH-3), `email_messages` (ARCH-6), `whatsapp_messages` (ARCH-7),
+`insights` (INSIGHT-1)
 
 ## Architecture: Role Division (Baker vs Cowork)
 
@@ -251,7 +252,21 @@ The goal: the next session reads this file and knows exactly what's current — 
   - **Chunk-before-embed (Terminal 2):** store_back.py now chunks long content into ~500-token overlapping pieces before embedding. No silent truncation on Voyage AI token limit.
   - **MCP connected to Claude Desktop:** Added baker MCP config to Claude Desktop `claude_desktop_config.json` on dimitry300 machine. Installed Python 3.11 via Homebrew + dependencies (psycopg2-binary, mcp).
   - **Architecture documented:** Added "Role Division (Baker vs Cowork)" section to CLAUDE.md — Baker remembers, Cowork/Claude Code thinks. MCP bridges them.
-  - **ARCH-3** still open in ClickUp (Fireflies full transcript storage).
+  - **ARCH-3** ~~still open~~ CLOSED — Fireflies full transcript storage shipped.
+- **2026-03-03 (primary machine, continued):** Fireflies gap diagnosis + email attachments + insights pipeline:
+  - **Fireflies backfill fixed:** Rate-limited Voyage AI embedding (2s delay), 50 transcripts now in both PostgreSQL + Qdrant. Diagnostic endpoint: GET /api/fireflies/status. Manual backfill: POST /api/fireflies/backfill.
+  - **Memory-first search:** handle_fireflies_fetch now checks PostgreSQL before hitting Fireflies API. Baker returns stored transcripts immediately.
+  - **Recent injection:** Scan always includes 3 most recent meetings + 3 most recent emails + 3 most recent WhatsApp messages in context — regardless of keyword match.
+  - **Email attachments (ARCH-6 ext):** extract_gmail.py now downloads and parses PDF, DOCX, XLSX, CSV, TXT attachments via Gmail API. Text appended to email body. Supported up to 10MB per file.
+  - **Email backfill with attachments:** POST /api/emails/backfill?days=14 re-fetches from Gmail API including attachments. 123 emails backfilled (re-run needed for attachment extraction).
+  - **INSIGHT-1:** New `insights` table + API (POST/GET /api/insights). Claude Code sessions can push strategic analysis into Baker's permanent memory. Auto-embedded to Qdrant. Retriever surfaces insights in Scan context.
+  - **Wertheimer SFO analysis stored:** Full proposal framework for Chanel family office LP opportunity stored as insight (project: brisen-lp).
+  - **WhatsApp backfill (Terminal 2):** POST /api/whatsapp/backfill endpoint added + WAHA media extraction (waha_client.py). Historical WhatsApp messages + media attachments now backfillable.
+
+### Still To Do
+- **Email backfill re-run needed:** Run POST /api/emails/backfill?days=14 again AFTER attachment code deployed — first 123 emails don't have attachment text.
+- **WhatsApp historical backfill:** Run POST /api/whatsapp/backfill?days=90 to populate whatsapp_messages table with historical data. Endpoint exists, needs to be triggered.
+- **Wertheimer term sheet:** Financial decisions needed (target IRR, MO Vienna valuation, GP carry structure, management fee) before Cowork can draft.
 
 ## Director Preferences
 
