@@ -62,7 +62,8 @@ Switch hats as needed. When coding, code. When scoping, think.
 | `triggers/embedded_scheduler.py` | APScheduler — runs all polling triggers |
 | `triggers/email_trigger.py` | Gmail polling (every 5 min) |
 | `triggers/clickup_trigger.py` | ClickUp polling (every 5 min, all 6 workspaces) |
-| `triggers/waha_webhook.py` | WhatsApp webhook receiver (WAHA push, not polling) |
+| `triggers/waha_webhook.py` | WhatsApp webhook receiver (WAHA push) + media download/OCR |
+| `triggers/waha_client.py` | WAHA API client — list chats, fetch messages, download media, extract text |
 | `triggers/fireflies_trigger.py` | Fireflies meeting transcript sync |
 | `triggers/todoist_trigger.py` | Todoist task sync |
 | `triggers/rss_trigger.py` | RSS feed ingestion |
@@ -97,11 +98,21 @@ User question → scan_chat()
 
 ```
 WAHA webhook → waha_webhook.py
+  → hasMedia? → waha_client.download_media_file() → extract_media_text() (Claude Vision / doc extractors)
+  → Build combined_body (text + [Attachment: extracted text])
+  → Store to whatsapp_messages table (ARCH-7)
   → Director message? → _handle_director_message()
     → check_pending_plan() → ClickUp plan loop
     → check_pending_draft() → email draft loop
     → classify_intent() → route to handler → _wa_reply()
   → Non-Director → pipeline.run() or briefing queue
+
+Backfill: scripts/extract_whatsapp.py
+  → waha_client.list_chats() → fetch_messages() per chat
+  → download media → extract text → format_chat() → store_document() to baker-whatsapp
+  → Startup: 7-day catch-up (dashboard.py background thread)
+  → Scheduled: 6-hour re-sync (embedded_scheduler.py)
+  → On-demand: POST /api/whatsapp/backfill?days=365
 ```
 
 ## Critical IDs
@@ -143,7 +154,8 @@ WAHA webhook → waha_webhook.py
 | VOYAGE_API_KEY | Voyage AI embeddings |
 | QDRANT_URL / QDRANT_API_KEY | Qdrant Cloud |
 | POSTGRES_* | Neon PostgreSQL connection |
-| WASSENGER_API_KEY | WhatsApp (legacy, being replaced by WAHA) |
+| WHATSAPP_API_KEY | WAHA API auth (chats, messages, media download) |
+| WASSENGER_API_KEY | WhatsApp (legacy, replaced by WAHA) |
 | FIREFLIES_API_KEY | Meeting transcripts |
 | TODOIST_API_TOKEN | Todoist sync |
 
@@ -200,15 +212,16 @@ Communication between roles: ClickUp **Handoff Notes** list (901521426367).
 2. ~~ClickUp foundation (B1-B4)~~ — DONE
 3. ~~CLICKUP-V2 PM Overlay~~ — DONE (3 intents: action, fetch, plan)
 4. Slack integration — queued
-5. WhatsApp output — queued
-6. Dashboard data layer — queued
-7. Todoist — queued
-8. Calendar — queued
-9. M365/Outlook — blocked (tenant not live)
-10. Dropbox — queued
-11. Whoop — queued
-12. Feedly — queued
-13. Onboarding Briefing — waiting on template
+5. ~~WhatsApp input (backfill + media)~~ — DONE (backfill script, media OCR, 6h re-sync, API endpoint). **BLOCKED:** needs `WHATSAPP_API_KEY` added to Render env vars to activate.
+6. WhatsApp output — queued (Baker → WhatsApp rich responses)
+7. Dashboard data layer — queued
+8. Todoist — queued
+9. Calendar — queued
+10. M365/Outlook — blocked (tenant not live)
+11. Dropbox — queued
+12. Whoop — queued
+13. Feedly — queued
+14. Onboarding Briefing — waiting on template
 
 ## End-of-Session Checklist
 
@@ -267,6 +280,20 @@ The goal: the next session reads this file and knows exactly what's current — 
 - **Email backfill re-run needed:** Run POST /api/emails/backfill?days=14 again AFTER attachment code deployed — first 123 emails don't have attachment text.
 - **WhatsApp historical backfill:** Run POST /api/whatsapp/backfill?days=90 to populate whatsapp_messages table with historical data. Endpoint exists, needs to be triggered.
 - **Wertheimer term sheet:** Financial decisions needed (target IRR, MO Vienna valuation, GP carry structure, management fee) before Cowork can draft.
+
+- **2026-03-03 (dimitry300 machine, session 3):** Full-text storage overhaul + WhatsApp backfill build:
+  - **Content truncation removal:** Removed all remaining [:8000], [:2000], [:4000] caps from extract_gmail.py, store_back.py, fireflies_trigger.py, action_handler.py, slack_trigger.py. Everything that passes noise filter is now stored in full.
+  - **Chunk-before-embed:** store_back.py `store_document()` and `store_interaction()` now auto-chunk long content into ~500-token overlapping pieces before embedding. No more Voyage-3 32K token limit — 170K-char transcripts get ~95 searchable vectors instead of being truncated. Safety ceiling at 120K chars in `_embed()`.
+  - **WhatsApp historical backfill (new feature):**
+    - `triggers/waha_client.py` (new): WAHA API client — list_chats, fetch_messages, download_media_file, extract_media_text
+    - `scripts/extract_whatsapp.py` (new): CLI backfill tool (--since, --limit, --chat-id, --dry-run, --no-media) + backfill_whatsapp() startup function
+    - `triggers/waha_webhook.py`: upgraded to download media attachments, extract text via Claude Vision (images) / doc extractors (PDFs), include in pipeline content. Also stores to whatsapp_messages table (ARCH-7, merged with other terminal's work).
+    - `triggers/embedded_scheduler.py`: added whatsapp_resync job (every 6 hours)
+    - `outputs/dashboard.py`: added startup backfill thread (7-day catch-up) + POST /api/whatsapp/backfill?days=365 endpoint
+    - `config/settings.py`: added api_key to WahaConfig
+  - **Tested:** 476 chats found via WAHA API, history back to Dec 2025, media download confirmed (97KB JPEG). Dry-run and extraction verified locally.
+  - **BLOCKED:** `WHATSAPP_API_KEY` env var needs to be added to Render baker-master service. Handoff note sent to PM. Once set, run: `curl -X POST -H "X-Baker-Key: bakerbhavanga" "https://baker-master.onrender.com/api/whatsapp/backfill?days=365"`
+  - **Baker API key** (`bakerbhavanga`) and **WHATSAPP_API_KEY** (`8cbfd17c6ac9f44fa3c43fefaa078414`) added to `~/.zshrc` on dimitry300 machine.
 
 ## Director Preferences
 
