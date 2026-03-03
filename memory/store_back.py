@@ -82,6 +82,9 @@ class SentinelStoreBack:
         # Ensure whatsapp_messages table exists (ARCH-7)
         self._ensure_whatsapp_messages_table()
 
+        # Ensure insights table exists (INSIGHT-1)
+        self._ensure_insights_table()
+
         # Ensure Whoop tables exist
         self._ensure_whoop_tables()
 
@@ -463,6 +466,119 @@ class SentinelStoreBack:
         except Exception as e:
             logger.error(f"store_whatsapp_message failed: {e}")
             return False
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # Insights (INSIGHT-1 — Claude Code → Baker memory)
+    # -------------------------------------------------------
+
+    def _ensure_insights_table(self):
+        """Create insights table if it doesn't exist."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS insights (
+                    id SERIAL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    tags TEXT[] DEFAULT '{}',
+                    source TEXT NOT NULL DEFAULT 'claude-code',
+                    project TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("insights table verified")
+        except Exception as e:
+            logger.warning(f"Could not ensure insights table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def store_insight(self, title: str, content: str, tags: list = None,
+                      source: str = "claude-code", project: str = None) -> Optional[int]:
+        """
+        Store a strategic insight/analysis to PostgreSQL + Qdrant.
+        Returns insight ID on success.
+        """
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO insights (title, content, tags, source, project)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id
+            """, (title, content, tags or [], source, project))
+            insight_id = cur.fetchone()[0]
+            conn.commit()
+            cur.close()
+
+            # Also embed to Qdrant for semantic search
+            try:
+                embed_metadata = {
+                    "source": "insight",
+                    "title": title,
+                    "tags": ",".join(tags) if tags else "",
+                    "project": project or "",
+                    "insight_id": str(insight_id),
+                    "content_type": "strategic_insight",
+                    "label": title,
+                    "origin": source,
+                }
+                self.store_document(content, embed_metadata, collection="baker-conversations")
+            except Exception as _e:
+                logger.warning(f"Insight Qdrant embed failed (PostgreSQL saved): {_e}")
+
+            logger.info(f"Stored insight #{insight_id}: {title}")
+            return insight_id
+        except Exception as e:
+            logger.error(f"store_insight failed: {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
+    def get_insights(self, query: str = None, project: str = None,
+                     limit: int = 10) -> list:
+        """Search insights by keyword or project. Returns list of dicts."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            import psycopg2.extras
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            if query:
+                cur.execute(
+                    """SELECT id, title, content, tags, source, project, created_at
+                       FROM insights
+                       WHERE title ILIKE %s OR content ILIKE %s
+                       ORDER BY created_at DESC LIMIT %s""",
+                    (f"%{query}%", f"%{query}%", limit),
+                )
+            elif project:
+                cur.execute(
+                    """SELECT id, title, content, tags, source, project, created_at
+                       FROM insights WHERE project = %s
+                       ORDER BY created_at DESC LIMIT %s""",
+                    (project, limit),
+                )
+            else:
+                cur.execute(
+                    """SELECT id, title, content, tags, source, project, created_at
+                       FROM insights ORDER BY created_at DESC LIMIT %s""",
+                    (limit,),
+                )
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            return rows
+        except Exception as e:
+            logger.error(f"get_insights failed: {e}")
+            return []
         finally:
             self._put_conn(conn)
 

@@ -696,6 +696,57 @@ class SentinelRetriever:
             self._pg_pool = None
             return []
 
+    # ----------------------------------------------------------------
+    # Strategic Insights (INSIGHT-1)
+    # ----------------------------------------------------------------
+
+    def get_insights(self, query: str, limit: int = 5) -> list[RetrievedContext]:
+        """Search insights table by keyword match on title or content."""
+        try:
+            conn = self._get_pg_conn()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT id, title, content, tags, source, project, created_at
+                FROM insights
+                WHERE title ILIKE %s OR content ILIKE %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (f"%{query}%", f"%{query}%", limit),
+            )
+            rows = cur.fetchall()
+            cols = ["id", "title", "content", "tags", "source", "project", "created_at"]
+            cur.close()
+
+            contexts = []
+            for row in rows:
+                data = {c: v for c, v in zip(cols, row) if v is not None}
+                title = data.get("title", "Untitled")
+                content = data.get("content", "")
+                date = data.get("created_at", "")
+                date_str = str(date)[:10] if date else ""
+
+                full = f"[STRATEGIC INSIGHT] {title} ({date_str})\n\n{content}"
+                contexts.append(RetrievedContext(
+                    content=full,
+                    source="insight",
+                    score=0.95,
+                    metadata={
+                        "type": "insight",
+                        "label": title,
+                        "date": date_str,
+                        "insight_id": data.get("id"),
+                        "project": data.get("project"),
+                    },
+                    token_estimate=self._estimate_tokens(full),
+                ))
+            return contexts
+        except Exception as e:
+            logger.warning(f"Insight search failed (non-fatal): {e}")
+            self._pg_pool = None
+            return []
+
     def get_recent_meeting_transcripts(self, limit: int = 5) -> list[RetrievedContext]:
         """Get the N most recent meeting transcripts by date — no keyword needed."""
         try:
@@ -812,7 +863,11 @@ class SentinelRetriever:
             if r.metadata.get("msg_id") not in existing_wa_ids:
                 contexts.append(r)
 
-        # 6. Active deals (always included for CEO context)
+        # 6. Strategic insights (INSIGHT-1 — keyword match)
+        insights = self.get_insights(trigger_text, limit=3)
+        contexts.extend(insights)
+
+        # 7. Active deals (always included for CEO context)
         deals = self.get_active_deals()
         contexts.extend(deals)
 

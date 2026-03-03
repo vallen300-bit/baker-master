@@ -366,6 +366,55 @@ async def whatsapp_backfill_endpoint(days: int = Query(90, ge=1, le=365)):
         return {"status": "error", "message": str(e)}
 
 
+# ============================================================
+# Insights (INSIGHT-1 — Claude Code → Baker memory)
+# ============================================================
+
+class InsightRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=500)
+    content: str = Field(..., min_length=1)
+    tags: list = Field(default_factory=list)
+    source: str = Field(default="claude-code")
+    project: Optional[str] = None
+
+
+@app.post("/api/insights", tags=["insights"], dependencies=[Depends(verify_api_key)])
+async def store_insight_endpoint(req: InsightRequest):
+    """Store a strategic insight/analysis into Baker's permanent memory (PostgreSQL + Qdrant)."""
+    try:
+        store = _get_store()
+        insight_id = store.store_insight(
+            title=req.title,
+            content=req.content,
+            tags=req.tags,
+            source=req.source,
+            project=req.project,
+        )
+        if insight_id:
+            return {"status": "stored", "id": insight_id, "title": req.title}
+        return {"status": "error", "message": "Failed to store insight"}
+    except Exception as e:
+        logger.error(f"POST /api/insights failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/insights", tags=["insights"], dependencies=[Depends(verify_api_key)])
+async def get_insights_endpoint(
+    q: Optional[str] = Query(None),
+    project: Optional[str] = Query(None),
+    limit: int = Query(10, ge=1, le=50),
+):
+    """Search insights by keyword or project."""
+    try:
+        store = _get_store()
+        results = store.get_insights(query=q, project=project, limit=limit)
+        results = [_serialize(r) for r in results]
+        return {"insights": results, "count": len(results)}
+    except Exception as e:
+        logger.error(f"GET /api/insights failed: {e}")
+        return {"insights": [], "count": 0, "error": str(e)}
+
+
 @app.get("/api/scheduler-status", tags=["health"], dependencies=[Depends(verify_api_key)])
 async def scheduler_status():
     """Return scheduler health and registered jobs."""
