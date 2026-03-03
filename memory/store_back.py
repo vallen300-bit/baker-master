@@ -1719,6 +1719,32 @@ class SentinelStoreBack:
         finally:
             self._put_conn(conn)
 
+    def get_recent_conversations(self, limit: int = 5) -> list:
+        """
+        WA-SEND-1: Fetch most recent conversation turns for short-term memory.
+        Returns list of dicts: [{question, answer, created_at}, ...] newest-first.
+        """
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            import psycopg2.extras
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT question, answer, created_at
+                FROM conversation_memory
+                ORDER BY created_at DESC
+                LIMIT %s
+            """, (limit,))
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            return rows
+        except Exception as e:
+            logger.warning(f"get_recent_conversations failed: {e}")
+            return []
+        finally:
+            self._put_conn(conn)
+
     # -------------------------------------------------------
     # Cleanup
     # -------------------------------------------------------

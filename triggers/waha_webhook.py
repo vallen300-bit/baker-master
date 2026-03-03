@@ -270,8 +270,25 @@ def _handle_director_message(message_body: str, msg_id: str, sender_name: str) -
         # Draft was dismissed by unrelated input — fall through to intent check
         pass
 
-    # 2. Classify intent
-    intent = ah.classify_intent(message_body)
+    # 2. Classify intent (with short-term memory for reference resolution)
+    _conv_history = ""
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        recent_turns = store.get_recent_conversations(limit=5)
+        if recent_turns:
+            lines = []
+            for turn in reversed(recent_turns):
+                q = (turn.get("question") or "")[:200]
+                a = (turn.get("answer") or "")[:300]
+                lines.append(f"Director: {q}")
+                if a:
+                    lines.append(f"Baker: {a}")
+            _conv_history = "\n".join(lines)
+    except Exception:
+        pass
+
+    intent = ah.classify_intent(message_body, conversation_history=_conv_history)
     intent_type = intent.get("type", "question")
 
     if intent_type == "email_action":
@@ -283,7 +300,10 @@ def _handle_director_message(message_body: str, msg_id: str, sender_name: str) -
         return True
 
     elif intent_type == "whatsapp_action":
-        result = ah.handle_whatsapp_action(intent, _get_retriever(), channel="whatsapp")
+        result = ah.handle_whatsapp_action(
+            intent, _get_retriever(), channel="whatsapp",
+            conversation_history=_conv_history,
+        )
         _wa_reply(result)
         logger.info(f"WhatsApp action: whatsapp send processed")
         return True

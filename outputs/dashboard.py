@@ -1006,7 +1006,25 @@ async def scan_chat(req: ScanRequest):
         )
     elif draft_action is None:
         # No pending draft — classify intent for new actions
-        intent = _ah.classify_intent(req.question)
+        # WA-SEND-1: Fetch recent conversation turns for short-term memory
+        _conv_history = ""
+        try:
+            store = _get_store()
+            recent_turns = store.get_recent_conversations(limit=5)
+            if recent_turns:
+                # Build a compact history string (newest-first → reverse for chronological)
+                lines = []
+                for turn in reversed(recent_turns):
+                    q = (turn.get("question") or "")[:200]
+                    a = (turn.get("answer") or "")[:300]
+                    lines.append(f"Director: {q}")
+                    if a:
+                        lines.append(f"Baker: {a}")
+                _conv_history = "\n".join(lines)
+        except Exception as e:
+            logger.debug(f"Conversation history fetch failed (non-fatal): {e}")
+
+        intent = _ah.classify_intent(req.question, conversation_history=_conv_history)
         logger.info(f"SCAN_DEBUG: intent_type={intent.get('type')}, recipient={intent.get('recipient')}")
         if intent.get("type") == "email_action":
             logger.info("SCAN_DEBUG: routing to handle_email_action")
@@ -1017,7 +1035,10 @@ async def scan_chat(req: ScanRequest):
         elif intent.get("type") == "whatsapp_action":
             logger.info("SCAN_DEBUG: routing to handle_whatsapp_action")
             return _action_stream_response(
-                _ah.handle_whatsapp_action(intent, _get_retriever(), channel="scan"),
+                _ah.handle_whatsapp_action(
+                    intent, _get_retriever(), channel="scan",
+                    conversation_history=_conv_history,
+                ),
                 req.question,
             )
         elif intent.get("type") == "deadline_action":

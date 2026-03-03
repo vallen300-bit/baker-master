@@ -274,6 +274,8 @@ WhatsApp action patterns (classify as whatsapp_action):
 - "Tell [name] on WhatsApp that [message]"
 - "Ask [name] on WhatsApp if [question]"
 - "Send [name] a WA message about [topic]"
+- "Send [name] the whats up with [message]" (misspelling of WhatsApp)
+- Common misspellings: "whats up", "whats app", "watsapp", "whatsup" all mean WhatsApp
 
 Deadline action patterns:
 - "Dismiss the [X] deadline" → type: "deadline_action", deadline_action: "dismiss"
@@ -360,11 +362,15 @@ def _quick_whatsapp_detect(question: str) -> dict:
     import re
     q = question.lower()
 
-    # Must mention WhatsApp / WA
-    wa_refs = ["whatsapp", "wa message", "wa to ", "on wa "]
-    has_wa = any(ref in q for ref in wa_refs)
+    # Must mention WhatsApp / WA (including common misspellings)
+    # Normalize common misspellings before checking
+    q_normalized = q.replace("whats up", "whatsapp").replace("whats app", "whatsapp").replace("watsapp", "whatsapp").replace("whatsup", "whatsapp").replace("whatssapp", "whatsapp").replace("watsap", "whatsapp").replace("whats-app", "whatsapp")
+    wa_refs = ["whatsapp", "wa message", "wa to ", "on wa ", "the wa "]
+    has_wa = any(ref in q_normalized for ref in wa_refs)
     if not has_wa:
         return None
+    # Use normalized form for subsequent matching
+    q = q_normalized
 
     # Must contain a send-like verb
     send_verbs = [
@@ -376,20 +382,20 @@ def _quick_whatsapp_detect(question: str) -> dict:
         return None
 
     # Try to extract recipient name
-    # Patterns: "whatsapp to Edita", "send a whatsapp to Edita", "whatsapp Edita about"
+    # Patterns: "whatsapp to Edita", "send a whatsapp to Edita", "send Edita the whatsapp"
     recipient = None
     patterns = [
-        r'(?:whatsapp|wa)\s+(?:message\s+)?(?:to\s+)?(\w[\w\s]*?)\s+(?:about|regarding|that|if|whether|asking|saying)',
-        r'(?:send|write|message|tell|ask)\s+(\w[\w\s]*?)\s+(?:a\s+)?(?:whatsapp|wa)',
-        r'(?:send|write)\s+(?:a\s+)?(?:whatsapp|wa)\s+(?:message\s+)?(?:to\s+)?(\w[\w\s]*?)(?:\s+about|\s+regarding|\s+that|\s+saying|:|$)',
-        r'(?:whatsapp|wa)\s+(\w+)',
+        r'(?:whatsapp|wa)\s+(?:message\s+)?(?:to\s+)?(\w[\w\s]*?)\s+(?:about|regarding|that|if|whether|asking|saying|with)',
+        r'(?:send|write|message|tell|ask)\s+(\w[\w\s]*?)\s+(?:a\s+|the\s+)?(?:whatsapp|wa)',
+        r'(?:send|write)\s+(?:a\s+)?(?:whatsapp|wa)\s+(?:message\s+)?(?:to\s+)?(\w[\w\s]*?)(?:\s+about|\s+regarding|\s+that|\s+saying|\s+with|:|$)',
+        r'(?:whatsapp|wa)\s+(?:to\s+)?(\w+)',
     ]
     for pat in patterns:
         m = re.search(pat, q)
         if m:
             candidate = m.group(1).strip()
             # Skip noise words
-            if candidate.lower() not in ("a", "an", "the", "me", "my", "to"):
+            if candidate.lower() not in ("a", "an", "the", "me", "my", "to", "with", "same", "message"):
                 recipient = candidate.title()
                 break
 
@@ -542,11 +548,12 @@ def _quick_clickup_plan_detect(question: str) -> Optional[dict]:
     return None
 
 
-def classify_intent(question: str) -> dict:
+def classify_intent(question: str, conversation_history: str = "") -> dict:
     """
     Classify the Director's input into action types.
     Uses fast regex pre-check first, then falls back to Claude Haiku.
     Falls back to {"type": "question"} on any error.
+    conversation_history: optional recent turns for resolving references.
     """
     _log_action("classify_intent:start", f"question={question[:200]}")
 
@@ -594,11 +601,15 @@ def classify_intent(question: str) -> dict:
 
     try:
         claude = anthropic.Anthropic(api_key=config.claude.api_key)
+        # Include conversation history for resolving references like "the same message"
+        user_content = question
+        if conversation_history:
+            user_content = f"Recent conversation:\n{conversation_history}\n\nCurrent message to classify:\n{question}"
         resp = claude.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=300,
             system=_INTENT_SYSTEM,
-            messages=[{"role": "user", "content": question}],
+            messages=[{"role": "user", "content": user_content}],
         )
         raw = resp.content[0].text.strip()
         # Strip markdown code fences if model adds them
@@ -1145,11 +1156,13 @@ def handle_vip_action(intent: dict) -> str:
 # WA-SEND-1: WhatsApp send action handler
 # ---------------------------------------------------------------------------
 
-def handle_whatsapp_action(intent: dict, retriever, channel: str = "scan") -> str:
+def handle_whatsapp_action(intent: dict, retriever, channel: str = "scan",
+                           conversation_history: str = "") -> str:
     """
     WA-SEND-1: Process a detected WhatsApp send action.
     Resolves recipient name → WhatsApp ID, generates message body,
     sends via WAHA, and returns confirmation.
+    conversation_history: recent turns so "the same message" resolves.
     """
     _log_action("handle_whatsapp_action:ENTERED", f"intent={json.dumps(intent)[:300]}, channel={channel}")
 
@@ -1181,8 +1194,15 @@ def handle_whatsapp_action(intent: dict, retriever, channel: str = "scan") -> st
             f"You can add it with: \"Add {raw_recipient} to the VIP list with WhatsApp [number]\""
         )
 
-    # Generate message body using existing RAG-based text generation
-    body = generate_email_body(content_request, retriever)
+    # Generate message body — include conversation history for "same message" references
+    enhanced_request = content_request
+    if conversation_history:
+        enhanced_request = (
+            f"{content_request}\n\n"
+            f"RECENT CONVERSATION (use this to resolve references like 'the same message'):\n"
+            f"{conversation_history}"
+        )
+    body = generate_email_body(enhanced_request, retriever)
     # Clean up — strip meta-commentary and markdown
     body = _clean_email_body(body)
     body = _strip_markdown(body)
