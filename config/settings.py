@@ -198,6 +198,7 @@ class SlackConfig:
 class WahaConfig:
     base_url: str = os.getenv("WAHA_BASE_URL", "https://baker-waha.onrender.com")
     session: str = os.getenv("WAHA_SESSION", "default")
+    api_key: str = os.getenv("WHATSAPP_API_KEY", "")
     webhook_secret: str = os.getenv("WAHA_WEBHOOK_SECRET", "")
 
 

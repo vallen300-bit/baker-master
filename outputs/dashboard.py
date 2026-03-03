@@ -217,6 +217,18 @@ async def startup():
     except Exception as e:
         logger.warning(f"Fireflies backfill failed to launch (non-fatal): {e}")
 
+    # WhatsApp backfill — 7-day catch-up on startup (like Fireflies above)
+    try:
+        from scripts.extract_whatsapp import backfill_whatsapp
+        threading.Thread(
+            target=backfill_whatsapp,
+            name="whatsapp-backfill",
+            daemon=True,
+        ).start()
+        logger.info("WhatsApp backfill launched in background thread")
+    except Exception as e:
+        logger.warning(f"WhatsApp backfill failed to launch (non-fatal): {e}")
+
     # Mount static files if directory exists
     if _static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(_static_dir)), name="static")

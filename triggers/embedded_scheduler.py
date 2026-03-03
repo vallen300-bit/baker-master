@@ -127,6 +127,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info(f"Registered: slack_poll (every {config.triggers.slack_check_interval}s)")
 
+    # WhatsApp re-sync — every 6 hours (catch missed webhook messages)
+    from scripts.extract_whatsapp import backfill_whatsapp
+    scheduler.add_job(
+        backfill_whatsapp,
+        IntervalTrigger(seconds=21600),
+        id="whatsapp_resync", name="WhatsApp periodic re-sync",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: whatsapp_resync (every 6 hours)")
+
     # Daily briefing — 06:00 UTC (08:00 CET)
     from triggers.briefing_trigger import generate_morning_briefing
     scheduler.add_job(

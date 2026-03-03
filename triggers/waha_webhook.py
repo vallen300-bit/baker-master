@@ -162,6 +162,34 @@ async def waha_webhook(
 
     logger.info(f"WhatsApp webhook: message from {sender_name} ({sender})")
 
+    # --- Media handling: download and extract text from attachments ---
+    media_text = ""
+    if has_media:
+        try:
+            from triggers.waha_client import download_media_file, extract_media_text, is_extractable
+
+            media = payload.get("media") or {}
+            media_url = media.get("url", "")
+            mimetype = media.get("mimetype", "")
+
+            if media_url and is_extractable(mimetype):
+                filepath = download_media_file(media_url)
+                if filepath:
+                    media_text = extract_media_text(filepath, mimetype)
+                    if media_text:
+                        logger.info(f"Extracted {len(media_text)} chars from WA media ({mimetype})")
+        except Exception as e:
+            logger.warning(f"WhatsApp media processing failed (continuing with text only): {e}")
+
+    # Build combined body (text + media)
+    body_parts = []
+    if message_body:
+        body_parts.append(message_body)
+    if media_text:
+        mimetype = (payload.get("media") or {}).get("mimetype", "attachment")
+        body_parts.append(f"[Attachment ({mimetype}): {media_text}]")
+    combined_body = "\n".join(body_parts)
+
     # ARCH-7: Store full WhatsApp message to PostgreSQL
     try:
         from memory.store_back import SentinelStoreBack
@@ -171,7 +199,7 @@ async def waha_webhook(
             sender=sender,
             sender_name=sender_name,
             chat_id=sender,
-            full_text=message_body,
+            full_text=combined_body,
             timestamp=datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat() if timestamp else None,
             is_director=(sender == DIRECTOR_WHATSAPP),
         )
@@ -179,23 +207,23 @@ async def waha_webhook(
         logger.warning(f"Failed to store WhatsApp msg {msg_id} to PostgreSQL (non-fatal): {_e}")
 
     # WHATSAPP-ACTION-1: Director messages → action detection first
-    if sender == DIRECTOR_WHATSAPP and message_body:
+    if sender == DIRECTOR_WHATSAPP and combined_body:
         try:
-            handled = _handle_director_message(message_body, msg_id, sender_name)
+            handled = _handle_director_message(combined_body, msg_id, sender_name)
             if handled:
                 return {"status": "action_processed", "sender": sender_name}
         except Exception as e:
             logger.error(f"WhatsApp action routing failed (falling through to pipeline): {e}")
 
     # Format and run pipeline (normal flow for non-Director or non-action messages)
-    text = f"WhatsApp message from {sender_name}:\n[{datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()[:19]}] {sender_name}: {message_body}"
+    text = f"WhatsApp message from {sender_name}:\n[{datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat()[:19]}] {sender_name}: {combined_body}"
 
     # DEADLINE-SYSTEM-1: Extract deadlines from WhatsApp messages (Director's only)
     if sender == DIRECTOR_WHATSAPP:
         try:
             from orchestrator.deadline_manager import extract_deadlines
             extract_deadlines(
-                content=message_body,
+                content=combined_body,
                 source_type="whatsapp",
                 source_id=f"wa-{msg_id}",
                 sender_name=sender_name,
