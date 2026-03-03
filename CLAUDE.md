@@ -43,7 +43,7 @@ Switch hats as needed. When coding, code. When scoping, think.
 | `orchestrator/pipeline.py` | 5-step RAG pipeline: Classify → Retrieve → Augment → Generate → Store |
 | `orchestrator/prompt_builder.py` | Pipeline prompt (structured JSON output) |
 | `orchestrator/scan_prompt.py` | Scan prompt (conversational output for chat) |
-| `orchestrator/action_handler.py` | Intent router — email, deadline, VIP, fireflies, ClickUp actions |
+| `orchestrator/action_handler.py` | Intent router — email, WhatsApp, deadline, VIP, fireflies, ClickUp actions |
 | `memory/retriever.py` | Read-side: Qdrant vector search + PostgreSQL structured queries |
 | `memory/store_back.py` | Write-side: PostgreSQL writes + Qdrant interaction embeddings |
 
@@ -87,9 +87,10 @@ Switch hats as needed. When coding, code. When scoping, think.
 User question → scan_chat()
   → check_pending_plan() (ClickUp plan approval loop)
   → check_pending_draft() (email draft approval loop)
-  → classify_intent() (regex fast-path → Haiku fallback)
+  → classify_intent() (regex fast-path → Haiku fallback, with 15-turn conversation history)
     → clickup_action / clickup_fetch / clickup_plan → action handler → SSE response
     → email_action → draft/send → SSE response
+    → whatsapp_action → resolve VIP name → send via WAHA → SSE response
     → deadline_action / vip_action / fireflies_fetch → handler → SSE response
     → question → RAG pipeline (retrieve context → Claude Opus → stream SSE)
 ```
@@ -104,7 +105,8 @@ WAHA webhook → waha_webhook.py
   → Director message? → _handle_director_message()
     → check_pending_plan() → ClickUp plan loop
     → check_pending_draft() → email draft loop
-    → classify_intent() → route to handler → _wa_reply()
+    → classify_intent() (with 15-turn history) → route to handler → _wa_reply()
+    → whatsapp_action? → resolve VIP name → send via WAHA → _wa_reply()
     → question? → _handle_director_question() (WA-QUESTION-1)
       → Qdrant vectors + PostgreSQL (meetings, emails, WhatsApp)
       → SCAN_SYSTEM_PROMPT + context + deadlines + WhatsApp channel hint
@@ -219,6 +221,7 @@ Communication between roles: ClickUp **Handoff Notes** list (901521426367).
 4. Slack integration — queued
 5. ~~WhatsApp input (backfill + media)~~ — DONE (backfill script, media OCR, 6h re-sync, API endpoint). **BLOCKED:** needs `WHATSAPP_API_KEY` added to Render env vars to activate.
 6. ~~WhatsApp output~~ — DONE (WA-QUESTION-1: Director questions get Scan-style conversational replies via WhatsApp)
+6b. ~~WhatsApp send to contacts~~ — DONE (WA-SEND-1: Baker sends WhatsApp to any VIP contact on command + 15-turn short-term memory)
 7. Dashboard data layer — queued
 8. Todoist — queued
 9. Calendar — queued
@@ -285,6 +288,7 @@ The goal: the next session reads this file and knows exactly what's current — 
 - **Email backfill re-run needed:** Run POST /api/emails/backfill?days=14 again AFTER attachment code deployed — first 123 emails don't have attachment text.
 - **WhatsApp historical backfill:** Run POST /api/whatsapp/backfill?days=90 to populate whatsapp_messages table with historical data. Endpoint exists, needs to be triggered.
 - **Wertheimer term sheet:** Financial decisions needed (target IRR, MO Vienna valuation, GP carry structure, management fee) before Cowork can draft.
+- **Agentic RAG transition:** PM brief reviewed by Code. Architecture approved. Waiting for PM to provide implementation brief. See `pm/briefs/Baker_Agentic_RAG_Transition_Summary.docx` for full spec. Code review notes: (1) keep deadlines in system prompt always, (2) add routing hints for tool selection, (3) max_iterations=2 for WhatsApp, (4) include 15-turn conversation memory in agent loop, (5) update app.js for tool_call SSE events.
 
 - **2026-03-03 (dimitry300 machine, session 3):** Full-text storage overhaul + WhatsApp backfill build:
   - **Content truncation removal:** Removed all remaining [:8000], [:2000], [:4000] caps from extract_gmail.py, store_back.py, fireflies_trigger.py, action_handler.py, slack_trigger.py. Everything that passes noise filter is now stored in full.

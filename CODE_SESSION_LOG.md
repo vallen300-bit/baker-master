@@ -1,0 +1,60 @@
+# Code Session Log
+
+Append-only history. Write at session end, read only when tracing past work.
+
+---
+
+- **2026-03-02 (dimitry300 machine):** Orientation session. Cloned repo to second workstation (/Users/dimitry300/Desktop/baker-code). Set up ClickUp API token in ~/.zshrc. Verified ClickUp Handoff Notes list access. No code changes — context transfer only. Opening prompt for future sessions established.
+- **2026-03-02 (dimitry300 machine, session 2):** ARCH-1/2/5 — removed all content truncation and added missing DB columns. 8 files changed:
+  - Removed [:500] truncation: deadlines.py, email_trigger.py, waha_webhook.py
+  - Removed [:200] body_preview and [:300] reply_snippet truncation: sent_emails.py
+  - Removed [:500] prompt and question truncation: store_back.py
+  - Added `analysis_text TEXT` column to deep_analyses table (store_back.py)
+  - Added `answer TEXT` column to conversation_memory table (store_back.py) + wired full_response through dashboard.py
+  - Added `summary TEXT` column to rss_articles table (state.py) + store article content in rss_trigger.py
+  - All include ALTER TABLE IF NOT EXISTS for live Neon migration.
+  - ARCH-3 (Fireflies full transcript storage) left as "to do" — requires new table + MCP tool.
+  - ARCH-4 merged into ARCH-1 (WhatsApp truncation was one of the 3 [:500] removals).
+- **2026-03-02 (dimitry300 machine, session 2 continued):** Architecture & MCP bridge work:
+  - **CLAUDE.md symlink:** Created symlink from Dropbox Baker-Project/CLAUDE.md → git repo. Cowork sessions can now read live technical state. Updated Cowork instructions.md to include CLAUDE.md as document #1.
+  - **Cowork Session Playbook:** Created `Baker-Project/COWORK_SESSION_PLAYBOOK.md` — template for working on any Mac without Claude Code (two-file memory system: PROJECT_MEMORY + SESSION_HANDOVER).
+  - **MCP write tools (4 new):** Added `baker_store_decision`, `baker_add_deadline`, `baker_upsert_vip`, `baker_store_analysis` to `baker_mcp_server.py`. Server now has 18 tools (14 read + 4 write). Closes the feedback loop: Cowork/Claude Code → Baker memory.
+  - **MCP connected to Claude Code:** Added baker MCP config to `~/.claude/settings.json` on dimitry300 machine. Claude Code now has 1M context + Baker's full memory = analytical workbench.
+- **2026-03-02/03 (primary machine, long session):** CLICKUP-V2 PM Overlay + ARCH full-content overhaul:
+  - **CLICKUP-V2:** 3 new intents (clickup_action, clickup_fetch, clickup_plan) in action_handler.py, wired into Scan + WhatsApp. Natural-language ClickUp task management.
+  - **ARCH-3:** `meeting_transcripts` PostgreSQL table + backfill (50 Fireflies transcripts). Memory-first search + recent-3 injection into Scan context. Diagnostic endpoints: GET /api/fireflies/status, POST /api/fireflies/backfill.
+  - **ARCH-6:** `email_messages` PostgreSQL table + Gmail API backfill (123 emails, 14 days). email_trigger.py stores every email. Retriever keyword search + recent-3 injection. Endpoint: POST /api/emails/backfill?days=14.
+  - **ARCH-7:** `whatsapp_messages` PostgreSQL table. waha_webhook.py stores every message. Retriever keyword search + recent-3 injection. No historical backfill (API limitation).
+  - **Full-text enrichment:** When Qdrant returns a meeting/email chunk, retriever swaps it with complete source from PostgreSQL.
+  - **Remaining truncation cleanup:** deadline_manager.py, slack_trigger.py, pipeline.py — all [:500] and [:1000] caps removed.
+  - **Chunk-before-embed (Terminal 2):** store_back.py now chunks long content into ~500-token overlapping pieces before embedding. No silent truncation on Voyage AI token limit.
+  - **MCP connected to Claude Desktop:** Added baker MCP config to Claude Desktop `claude_desktop_config.json` on dimitry300 machine. Installed Python 3.11 via Homebrew + dependencies (psycopg2-binary, mcp).
+  - **Architecture documented:** Added "Role Division (Baker vs Cowork)" section to CLAUDE.md — Baker remembers, Cowork/Claude Code thinks. MCP bridges them.
+  - **ARCH-3** ~~still open~~ CLOSED — Fireflies full transcript storage shipped.
+- **2026-03-03 (primary machine, continued):** Fireflies gap diagnosis + email attachments + insights pipeline:
+  - **Fireflies backfill fixed:** Rate-limited Voyage AI embedding (2s delay), 50 transcripts now in both PostgreSQL + Qdrant. Diagnostic endpoint: GET /api/fireflies/status. Manual backfill: POST /api/fireflies/backfill.
+  - **Memory-first search:** handle_fireflies_fetch now checks PostgreSQL before hitting Fireflies API. Baker returns stored transcripts immediately.
+  - **Recent injection:** Scan always includes 3 most recent meetings + 3 most recent emails + 3 most recent WhatsApp messages in context — regardless of keyword match.
+  - **Email attachments (ARCH-6 ext):** extract_gmail.py now downloads and parses PDF, DOCX, XLSX, CSV, TXT attachments via Gmail API. Text appended to email body. Supported up to 10MB per file.
+  - **Email backfill with attachments:** POST /api/emails/backfill?days=14 re-fetches from Gmail API including attachments. 123 emails backfilled (re-run needed for attachment extraction).
+  - **INSIGHT-1:** New `insights` table + API (POST/GET /api/insights). Claude Code sessions can push strategic analysis into Baker's permanent memory. Auto-embedded to Qdrant. Retriever surfaces insights in Scan context.
+  - **Wertheimer SFO analysis stored:** Full proposal framework for Chanel family office LP opportunity stored as insight (project: brisen-lp).
+  - **WhatsApp backfill (Terminal 2):** POST /api/whatsapp/backfill endpoint added + WAHA media extraction (waha_client.py). Historical WhatsApp messages + media attachments now backfillable.
+- **2026-03-03 (dimitry300 machine, session 3):** Full-text storage overhaul + WhatsApp backfill build:
+  - **Content truncation removal:** Removed all remaining [:8000], [:2000], [:4000] caps from extract_gmail.py, store_back.py, fireflies_trigger.py, action_handler.py, slack_trigger.py. Everything that passes noise filter is now stored in full.
+  - **Chunk-before-embed:** store_back.py `store_document()` and `store_interaction()` now auto-chunk long content into ~500-token overlapping pieces before embedding. No more Voyage-3 32K token limit — 170K-char transcripts get ~95 searchable vectors instead of being truncated. Safety ceiling at 120K chars in `_embed()`.
+  - **WhatsApp historical backfill (new feature):**
+    - `triggers/waha_client.py` (new): WAHA API client — list_chats, fetch_messages, download_media_file, extract_media_text
+    - `scripts/extract_whatsapp.py` (new): CLI backfill tool (--since, --limit, --chat-id, --dry-run, --no-media) + backfill_whatsapp() startup function
+    - `triggers/waha_webhook.py`: upgraded to download media attachments, extract text via Claude Vision (images) / doc extractors (PDFs), include in pipeline content. Also stores to whatsapp_messages table (ARCH-7, merged with other terminal's work).
+    - `triggers/embedded_scheduler.py`: added whatsapp_resync job (every 6 hours)
+    - `outputs/dashboard.py`: added startup backfill thread (7-day catch-up) + POST /api/whatsapp/backfill?days=365 endpoint
+    - `config/settings.py`: added api_key to WahaConfig
+  - **Tested:** 476 chats found via WAHA API, history back to Dec 2025, media download confirmed (97KB JPEG). Dry-run and extraction verified locally.
+  - **BLOCKED:** `WHATSAPP_API_KEY` env var needs to be added to Render baker-master service.
+- **2026-03-03 (primary machine, session 4):** WA-SEND-1 — WhatsApp send to any VIP contact:
+  - **WA-SEND-1 (3 commits):** Baker can now send WhatsApp messages to any contact in the VIP list (11 contacts with WhatsApp IDs). New `whatsapp_action` intent type in classifier (regex fast-path + Haiku). `_quick_whatsapp_detect()` regex, `_resolve_names_to_whatsapp_ids()` resolver, `handle_whatsapp_action()` handler. Wired into both Scan (dashboard.py) and WhatsApp (waha_webhook.py). Edita confirmed receipt — end-to-end verified.
+  - **Spelling fix:** "whats up", "whatsup", "watsapp", "whats app" now normalize to "whatsapp" before regex matching. Prevents misclassification as email_action.
+  - **Short-term memory (15 turns):** `get_recent_conversations(limit=15)` added to store_back.py. Both scan_chat() and waha_webhook fetch last 15 conversation turns from conversation_memory table and pass to classify_intent() and handle_whatsapp_action(). Baker can now resolve "the same message" / "do it again" references.
+  - **Files changed:** orchestrator/action_handler.py, outputs/dashboard.py, triggers/waha_webhook.py, memory/store_back.py
+  - **Agentic RAG review:** Independent review of PM's Baker Agentic RAG Transition Summary. Architecture approved with 5 implementation notes: (1) keep deadlines in system prompt, (2) add routing hints for tool selection, (3) max_iterations=2 for WhatsApp, (4) include 15-turn conversation memory in agent loop, (5) update app.js for tool_call SSE events. Waiting for PM implementation brief.
