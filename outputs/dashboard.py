@@ -1014,6 +1014,12 @@ async def scan_chat(req: ScanRequest):
                 _ah.handle_email_action(intent, _get_retriever(), req.project, req.role),
                 req.question,
             )
+        elif intent.get("type") == "whatsapp_action":
+            logger.info("SCAN_DEBUG: routing to handle_whatsapp_action")
+            return _action_stream_response(
+                _ah.handle_whatsapp_action(intent, _get_retriever(), channel="scan"),
+                req.question,
+            )
         elif intent.get("type") == "deadline_action":
             return _action_stream_response(
                 _ah.handle_deadline_action(intent),

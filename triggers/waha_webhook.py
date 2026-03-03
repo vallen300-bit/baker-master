@@ -282,6 +282,12 @@ def _handle_director_message(message_body: str, msg_id: str, sender_name: str) -
         logger.info(f"WhatsApp action: email action processed")
         return True
 
+    elif intent_type == "whatsapp_action":
+        result = ah.handle_whatsapp_action(intent, _get_retriever(), channel="whatsapp")
+        _wa_reply(result)
+        logger.info(f"WhatsApp action: whatsapp send processed")
+        return True
+
     elif intent_type == "deadline_action":
         result = ah.handle_deadline_action(intent)
         _wa_reply(result)

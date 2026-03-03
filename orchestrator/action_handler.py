@@ -232,10 +232,12 @@ _INTENT_SYSTEM = """You are Baker's intent classifier. Given a Director's messag
 
 Return exactly this JSON structure (no other text, no markdown):
 {
-  "type": "email_action" | "deadline_action" | "vip_action" | "fireflies_fetch" | "clickup_action" | "clickup_fetch" | "clickup_plan" | "question",
+  "type": "email_action" | "whatsapp_action" | "deadline_action" | "vip_action" | "fireflies_fetch" | "clickup_action" | "clickup_fetch" | "clickup_plan" | "question",
   "recipient": "<email address OR name of recipient(s). For multiple recipients, return comma-separated (e.g. 'Edita Vallen, Philip Vallen, dvallen@brisengroup.com'). 'myself' or 'me' means dvallen@brisengroup.com. Return null only if no recipient at all.>",
   "subject": "<inferred subject line or null>",
   "content_request": "<what Baker should include in the email body, or null>",
+  "whatsapp_recipient": "<name of WhatsApp recipient, or null>",
+  "whatsapp_message": "<message content to send via WhatsApp, or null>",
   "deadline_action": "<dismiss | complete | confirm | null>",
   "deadline_search": "<text identifying which deadline, or null>",
   "deadline_date": "<YYYY-MM-DD date for confirm action, or null>",
@@ -263,6 +265,15 @@ Email action patterns (classify as email_action even if recipient is a NAME, not
 - "Send this to [name]"
 - "Email [name], [name], and myself about [topic]"
 - "Please send this email to [name]"
+
+WhatsApp action patterns (classify as whatsapp_action):
+- "Send a WhatsApp to [name] about [topic]"
+- "WhatsApp [name] about [topic]"
+- "Message [name] on WhatsApp about [topic]"
+- "Send [name] a WhatsApp message: [text]"
+- "Tell [name] on WhatsApp that [message]"
+- "Ask [name] on WhatsApp if [question]"
+- "Send [name] a WA message about [topic]"
 
 Deadline action patterns:
 - "Dismiss the [X] deadline" → type: "deadline_action", deadline_action: "dismiss"
@@ -334,6 +345,60 @@ def _quick_email_detect(question: str) -> dict:
             "type": "email_action",
             "recipient": ", ".join(emails),
             "subject": None,
+            "content_request": question,
+        }
+
+    return None
+
+
+def _quick_whatsapp_detect(question: str) -> dict:
+    """
+    WA-SEND-1: Fast regex pre-check for WhatsApp send patterns.
+    Bypasses Haiku classifier for clear WhatsApp commands.
+    Returns intent dict if detected, None otherwise.
+    """
+    import re
+    q = question.lower()
+
+    # Must mention WhatsApp / WA
+    wa_refs = ["whatsapp", "wa message", "wa to ", "on wa "]
+    has_wa = any(ref in q for ref in wa_refs)
+    if not has_wa:
+        return None
+
+    # Must contain a send-like verb
+    send_verbs = [
+        "send", "write", "message", "tell", "ask",
+        "whatsapp",  # "WhatsApp Edita about..." acts as verb
+    ]
+    has_verb = any(v in q for v in send_verbs)
+    if not has_verb:
+        return None
+
+    # Try to extract recipient name
+    # Patterns: "whatsapp to Edita", "send a whatsapp to Edita", "whatsapp Edita about"
+    recipient = None
+    patterns = [
+        r'(?:whatsapp|wa)\s+(?:message\s+)?(?:to\s+)?(\w[\w\s]*?)\s+(?:about|regarding|that|if|whether|asking|saying)',
+        r'(?:send|write|message|tell|ask)\s+(\w[\w\s]*?)\s+(?:a\s+)?(?:whatsapp|wa)',
+        r'(?:send|write)\s+(?:a\s+)?(?:whatsapp|wa)\s+(?:message\s+)?(?:to\s+)?(\w[\w\s]*?)(?:\s+about|\s+regarding|\s+that|\s+saying|:|$)',
+        r'(?:whatsapp|wa)\s+(\w+)',
+    ]
+    for pat in patterns:
+        m = re.search(pat, q)
+        if m:
+            candidate = m.group(1).strip()
+            # Skip noise words
+            if candidate.lower() not in ("a", "an", "the", "me", "my", "to"):
+                recipient = candidate.title()
+                break
+
+    if recipient:
+        logger.info(f"Quick WhatsApp detect: matched recipient={recipient} (bypassing Haiku)")
+        return {
+            "type": "whatsapp_action",
+            "whatsapp_recipient": recipient,
+            "whatsapp_message": question,
             "content_request": question,
         }
 
@@ -490,6 +555,12 @@ def classify_intent(question: str) -> dict:
     if quick:
         _log_action("classify_intent:regex_match", f"type={quick.get('type')}, recipient={quick.get('recipient')}")
         return quick
+
+    # WA-SEND-1: Fast path — regex catches WhatsApp send commands
+    quick_wa = _quick_whatsapp_detect(question)
+    if quick_wa:
+        _log_action("classify_intent:regex_match", f"type=whatsapp_action, recipient={quick_wa.get('whatsapp_recipient')}")
+        return quick_wa
 
     # Fast path — regex catches Fireflies fetch requests
     quick_ff = _quick_fireflies_detect(question)
@@ -693,6 +764,48 @@ def _resolve_names_to_emails(raw: str) -> list:
         logger.warning(f"VIP name resolution failed: {e}")
 
     return list(set(resolved))
+
+
+DIRECTOR_WHATSAPP = "41799605092@c.us"
+
+
+def _resolve_names_to_whatsapp_ids(raw: str) -> list:
+    """
+    WA-SEND-1: Resolve person names to WhatsApp IDs using vip_contacts table.
+    Handles "myself"/"me"/"dimitry" -> Director's WhatsApp ID.
+    Returns list of (name, whatsapp_id) tuples.
+    """
+    resolved = []
+    raw_lower = raw.lower()
+
+    # Self-references
+    if any(w in raw_lower for w in ("myself", "me", "dimitry")):
+        resolved.append(("Dimitry", DIRECTOR_WHATSAPP))
+
+    # VIP contact lookup
+    try:
+        from models.deadlines import get_vip_contacts
+        vips = get_vip_contacts()
+        import re
+        # Split on comma, semicolon, "and" to get individual names
+        name_parts = re.split(r'[,;]\s*|\s+and\s+', raw)
+        for part in name_parts:
+            part_clean = part.strip().lower()
+            if not part_clean or part_clean in ("myself", "me", "dimitry"):
+                continue
+            for vip in vips:
+                vip_name = (vip.get("name") or "").strip()
+                vip_wa = vip.get("whatsapp_id")
+                if not vip_name or not vip_wa:
+                    continue
+                first_name = vip_name.split()[0].lower()
+                if part_clean == first_name or part_clean == vip_name.lower():
+                    resolved.append((vip_name, vip_wa))
+                    break
+    except Exception as e:
+        logger.warning(f"VIP WhatsApp resolution failed: {e}")
+
+    return resolved
 
 
 # ---------------------------------------------------------------------------
@@ -1026,6 +1139,77 @@ def handle_vip_action(intent: dict) -> str:
     except Exception as e:
         logger.error(f"VIP action failed: {e}")
         return f"Failed to process VIP action: {e}"
+
+
+# ---------------------------------------------------------------------------
+# WA-SEND-1: WhatsApp send action handler
+# ---------------------------------------------------------------------------
+
+def handle_whatsapp_action(intent: dict, retriever, channel: str = "scan") -> str:
+    """
+    WA-SEND-1: Process a detected WhatsApp send action.
+    Resolves recipient name → WhatsApp ID, generates message body,
+    sends via WAHA, and returns confirmation.
+    """
+    _log_action("handle_whatsapp_action:ENTERED", f"intent={json.dumps(intent)[:300]}, channel={channel}")
+
+    raw_recipient = (
+        intent.get("whatsapp_recipient")
+        or intent.get("recipient")
+        or ""
+    ).strip()
+    content_request = (
+        intent.get("whatsapp_message")
+        or intent.get("content_request")
+        or intent.get("subject")
+        or "general message"
+    ).strip()
+
+    if not raw_recipient:
+        return (
+            "I couldn't identify who to send the WhatsApp message to. "
+            "Please specify a name (e.g. \"Send a WhatsApp to Edita about dinner tonight\")."
+        )
+
+    # Resolve name → WhatsApp ID
+    resolved = _resolve_names_to_whatsapp_ids(raw_recipient)
+    _log_action("handle_whatsapp_action:resolved", f"raw={raw_recipient}, resolved={resolved}")
+
+    if not resolved:
+        return (
+            f"I don't have {raw_recipient}'s WhatsApp number in the VIP contacts list. "
+            f"You can add it with: \"Add {raw_recipient} to the VIP list with WhatsApp [number]\""
+        )
+
+    # Generate message body using existing RAG-based text generation
+    body = generate_email_body(content_request, retriever)
+    # Clean up — strip meta-commentary and markdown
+    body = _clean_email_body(body)
+    body = _strip_markdown(body)
+
+    results = []
+    from outputs.whatsapp_sender import send_whatsapp
+
+    for name, wa_id in resolved:
+        _log_action("handle_whatsapp_action:SENDING", f"to={name} ({wa_id})")
+        try:
+            success = send_whatsapp(text=body, chat_id=wa_id)
+            if success:
+                results.append(f"\u2705 WhatsApp sent to {name}")
+                logger.info(f"Action: WhatsApp sent to {name} ({wa_id}) via {channel}")
+            else:
+                results.append(f"\u274c Message to {name} could not be delivered. Please check the WhatsApp connection.")
+                _log_action("handle_whatsapp_action:send_failed", f"to={name}, returned False")
+        except Exception as e:
+            logger.error(f"WhatsApp send failed for {name}: {e}")
+            _log_action("handle_whatsapp_action:send_exception", f"to={name}, error={e}")
+            results.append(f"\u274c Failed to send to {name}: {e}")
+
+    # Log the action
+    _log_action("handle_whatsapp_action:DONE", f"recipients={[n for n, _ in resolved]}, results={results}")
+
+    preview = body[:200].replace("\n", " ")
+    return "\n".join(results) + f"\n\n{preview}\u2026"
 
 
 # ---------------------------------------------------------------------------
