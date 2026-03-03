@@ -343,6 +343,29 @@ async def email_backfill_endpoint(days: int = Query(14, ge=1, le=90)):
         return {"status": "error", "message": str(e)}
 
 
+@app.post("/api/whatsapp/backfill", tags=["whatsapp"], dependencies=[Depends(verify_api_key)])
+async def whatsapp_backfill_endpoint(days: int = Query(90, ge=1, le=365)):
+    """Backfill last N days of WhatsApp messages from WAHA API to Qdrant + PostgreSQL."""
+    import asyncio
+    try:
+        from scripts.extract_whatsapp import extract_historical, ingest_to_qdrant
+        from datetime import datetime, timedelta, timezone
+
+        since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+
+        def _run():
+            items = extract_historical(since=since, limit=None, chat_id=None, dry_run=False, download_media=True)
+            if items:
+                ingest_to_qdrant(items)
+            return len(items)
+
+        count = await asyncio.to_thread(_run)
+        return {"status": "ok", "message": f"Backfill completed — {count} chats ingested", "days": days}
+    except Exception as e:
+        logger.error(f"WhatsApp backfill endpoint failed: {e}")
+        return {"status": "error", "message": str(e)}
+
+
 @app.get("/api/scheduler-status", tags=["health"], dependencies=[Depends(verify_api_key)])
 async def scheduler_status():
     """Return scheduler health and registered jobs."""
