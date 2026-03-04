@@ -426,14 +426,16 @@ class SentinelPipeline:
         # Step 1: Classify
         trigger = self.classify_trigger(trigger)
 
-        # Alert digest for high-priority triggers (EMAIL-REFORM-1 Type 1)
-        # Routes through 30-min digest buffer instead of per-event email
-        if trigger.priority == "high":
-            try:
-                from outputs.email_alerts import send_alert_email
-                send_alert_email(trigger)
-            except Exception as _e:
-                logger.warning(f"Alert digest routing failed (non-fatal): {_e}")
+        # ALERT-DEDUP-1: Alert digest email DISABLED.
+        # Was sending ~48 digest emails/day (every 30 min) — Director stopped reading them.
+        # Real-time alerts go to Slack (with dedup). Daily briefing email at 08:00 CET
+        # covers everything. Re-enable by uncommenting and restoring digest_flush in scheduler.
+        # if trigger.priority == "high":
+        #     try:
+        #         from outputs.email_alerts import send_alert_email
+        #         send_alert_email(trigger)
+        #     except Exception as _e:
+        #         logger.warning(f"Alert digest routing failed (non-fatal): {_e}")
 
         # Step 2: Retrieve
         contexts = self.retrieve_context(trigger)

@@ -147,15 +147,17 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info(f"Registered: daily_briefing (at {config.triggers.daily_briefing_hour:02d}:00 UTC)")
 
-    # Alert digest flush — every 30 minutes (EMAIL-REFORM-1)
-    from orchestrator.digest_manager import flush_digest
-    scheduler.add_job(
-        flush_digest,
-        IntervalTrigger(seconds=1800),
-        id="digest_flush", name="Alert digest flush",
-        coalesce=True, max_instances=1, replace_existing=True,
-    )
-    logger.info("Registered: digest_flush (every 30 minutes)")
+    # ALERT-DEDUP-1: Alert digest flush DISABLED.
+    # Was sending ~48 digest emails/day. Slack (with dedup) + daily briefing email
+    # now cover all alerting. Re-enable by uncommenting.
+    # from orchestrator.digest_manager import flush_digest
+    # scheduler.add_job(
+    #     flush_digest,
+    #     IntervalTrigger(seconds=1800),
+    #     id="digest_flush", name="Alert digest flush",
+    #     coalesce=True, max_instances=1, replace_existing=True,
+    # )
+    logger.info("digest_flush DISABLED (ALERT-DEDUP-1 — Slack + daily briefing replaces digest)")
 
     # Deadline cadence check — every hour (DEADLINE-SYSTEM-1)
     from orchestrator.deadline_manager import run_cadence_check
