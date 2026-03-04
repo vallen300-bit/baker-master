@@ -76,9 +76,35 @@ Return structured JSON:
   "decisions_log": [{"decision": "...", "reasoning": "...", "confidence": "high|medium|low"}]
 }
 
-Tier 1 = Immediate action required (deal at risk, deadline today, critical response needed)
-Tier 2 = Important, act within 24 hours
-Tier 3 = Informational, review when convenient
+## ALERT TIER RULES (STRICT — READ CAREFULLY)
+
+DEFAULT TO TIER 3. Most triggers are routine and do not need alerts at all.
+It is better to under-alert than to over-alert. False urgency erodes trust.
+
+Tier 1 (URGENT) — USE VERY SPARINGLY (max 1-2 per day across ALL triggers):
+ONLY for situations requiring action in the next 2 hours or irreversible damage:
+- Money at risk RIGHT NOW (payment deadline today, contract expiring today)
+- Explicit escalation from a VIP contact using urgent language ("urgent", "ASAP", "call me now")
+- System failure (auth broken, data loss detected)
+DO NOT use Tier 1 for: scheduling conflicts, pending responses, monitoring updates,
+approaching deadlines (>24h away), follow-ups, or anything the Director already knows.
+
+Tier 2 (IMPORTANT) — max 5 per day:
+- Genuinely NEW information the Director has NOT yet seen that requires a decision within 48h
+- A contact responded to something the Director is actively waiting for
+- A hard deadline is <24 hours away AND the Director has not acknowledged it
+DO NOT use Tier 2 for: routine status updates, repeat information on known issues,
+informational summaries, monitoring updates, or anything previously flagged.
+
+Tier 3 (INFO) — the DEFAULT for everything else:
+- Status updates, progress reports, routine communications
+- Monitoring updates on known situations (e.g. "still waiting for response")
+- Scheduling changes, calendar updates, task updates
+- Any information that is not time-critical
+
+CRITICAL: One alert per distinct topic. Do NOT generate multiple alerts about
+the same subject. If a trigger is about a topic already covered in a recent alert,
+either skip the alert entirely or use Tier 3.
 """
 
 
@@ -127,10 +153,11 @@ class SentinelPromptBuilder:
         clickup_tier_guidance = ""
         if trigger_type.startswith("clickup_"):
             clickup_tier_guidance = """
-## CLICKUP TIER ASSIGNMENT
-- **T1 (urgent):** Overdue task, blocked status, PM escalation, cross-workspace dependency, handoff note with "URGENT" or "BLOCKED"
-- **T2 (important):** New handoff note, status change on active brief, new assignment to Director
-- **T3 (routine):** Routine comment, minor update, completed task, tag change
+## CLICKUP TIER ASSIGNMENT (STRICT)
+- **T1 (urgent):** ONLY overdue task that is actively blocking other people's work, or handoff note containing the word "URGENT" or "BLOCKED"
+- **T2 (important):** ONLY new handoff notes from PM with an explicit action request for the Director
+- **T3 (routine — DEFAULT):** Everything else — status changes, comments, completed tasks, tag changes, new assignments, progress updates
+Most ClickUp activity is Tier 3. Do not escalate routine project management noise.
 """
 
         system = f"""{BAKER_SYSTEM_PROMPT}

@@ -18,6 +18,10 @@ from triggers.state import trigger_state
 
 logger = logging.getLogger("sentinel.trigger.email")
 
+# ALERT-DEDUP-1: Track last gap alert to avoid firing every 5 min
+_last_gap_alert_time: float = 0.0
+_GAP_ALERT_COOLDOWN = 24 * 3600  # 24 hours between gap alerts
+
 
 def _get_gmail_service():
     """Authenticate and return Gmail API service object."""
@@ -59,18 +63,29 @@ def check_new_emails():
     if not new_threads:
         logger.info("Email trigger: no new threads")
         # Gap detection: alert if no email activity for 48+ hours
+        # ALERT-DEDUP-1: only fire once per 24h to avoid spamming Slack every 5 min
+        global _last_gap_alert_time
+        import time as _time
+        now_ts = _time.time()
         wm = trigger_state.get_watermark("email_poll")
         if wm:
             gap_hours = (datetime.now(timezone.utc) - wm).total_seconds() / 3600
-            if gap_hours > 48:
+            if gap_hours > 48 and (now_ts - _last_gap_alert_time) > _GAP_ALERT_COOLDOWN:
                 gap_title = f"Email gap alert: {gap_hours:.0f}h since last email"
                 gap_body = f"Watermark stuck at {wm.isoformat()}. Check Gmail auth and poll health."
                 logger.warning(gap_title)
                 try:
-                    from memory.store_back import store
+                    from memory.store_back import SentinelStoreBack
+                    store = SentinelStoreBack._get_global_instance()
                     store.create_alert(tier=1, title=gap_title, body=gap_body)
                     from outputs.slack_notifier import SlackNotifier
-                    SlackNotifier().post_alert(gap_title, gap_body)
+                    SlackNotifier().post_alert({
+                        "tier": 1,
+                        "title": gap_title,
+                        "body": gap_body,
+                        "action_required": True,
+                    })
+                    _last_gap_alert_time = now_ts
                 except Exception as e:
                     logger.error(f"Gap alert dispatch failed: {e}")
         return

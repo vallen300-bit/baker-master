@@ -6,8 +6,13 @@ Uses Slack Block Kit for rich formatting.
 Migration note (SLACK-1 S4): replaced httpx + incoming webhook with
 slack_sdk WebClient.chat_postMessage(). Bot token read from SLACK_BOT_TOKEN.
 Target channel: config.slack.cockpit_channel_id (default: C0AF4FVN3FB = #cockpit).
+
+ALERT-DEDUP-1: Two-level dedup prevents the same alert from flooding Slack.
+Level 1: exact title+tier match → 1h window.
+Level 2: topic entity+tier match → 4h window.
 """
 import logging
+import re
 import time
 from typing import Optional
 
@@ -24,6 +29,77 @@ logger = logging.getLogger("sentinel.slack")
 # Slack limits
 _MAX_BLOCKS_PER_MESSAGE = 50
 _RATE_LIMIT_DELAY = 1.1  # seconds between multi-message posts
+
+# -------------------------------------------------------
+# ALERT-DEDUP-1: In-memory dedup cache
+# -------------------------------------------------------
+_EXACT_DEDUP_WINDOW = 3600        # 1 hour — blocks identical title+tier repeats
+_TOPIC_DEDUP_WINDOW = 4 * 3600    # 4 hours — blocks same-entity+tier variants
+
+# {key: timestamp} — separate caches for exact vs topic dedup
+_exact_cache: dict[str, float] = {}
+_topic_cache: dict[str, float] = {}
+_suppressed_count = 0
+
+
+def _cleanup_cache(cache: dict, max_age: float):
+    """Remove expired entries from a dedup cache."""
+    now = time.time()
+    expired = [k for k, ts in cache.items() if now - ts > max_age]
+    for k in expired:
+        del cache[k]
+
+
+def _exact_key(title: str, tier: int) -> str:
+    """Dedup key for exact title match."""
+    return f"t{tier}:{title.strip().lower()}"
+
+
+def _topic_key(title: str, tier: int) -> str:
+    """Dedup key based on the primary entity/topic in the alert title.
+    Extracts the first proper-noun-like word (>3 chars, capitalized) as the topic."""
+    for word in title.split():
+        clean = re.sub(r'[^\w]', '', word)
+        if len(clean) > 3 and clean[0].isupper():
+            return f"t{tier}:{clean.lower()}"
+    # Fallback: first significant word
+    for word in title.split():
+        clean = re.sub(r'[^\w]', '', word).lower()
+        if len(clean) > 3:
+            return f"t{tier}:{clean}"
+    return f"t{tier}:{title[:20].lower()}"
+
+
+def _is_duplicate_alert(title: str, tier: int) -> bool:
+    """Check if a similar alert was posted recently. Returns True to suppress."""
+    global _suppressed_count
+    now = time.time()
+
+    # Prune expired entries
+    _cleanup_cache(_exact_cache, _EXACT_DEDUP_WINDOW)
+    _cleanup_cache(_topic_cache, _TOPIC_DEDUP_WINDOW)
+
+    ek = _exact_key(title, tier)
+    tk = _topic_key(title, tier)
+
+    # Level 1: exact match within 1h
+    if ek in _exact_cache:
+        _suppressed_count += 1
+        if _suppressed_count % 50 == 0:
+            logger.info(f"ALERT-DEDUP-1: {_suppressed_count} total alerts suppressed since startup")
+        return True
+
+    # Level 2: topic match within 4h
+    if tk in _topic_cache:
+        _suppressed_count += 1
+        if _suppressed_count % 50 == 0:
+            logger.info(f"ALERT-DEDUP-1: {_suppressed_count} total alerts suppressed since startup")
+        return True
+
+    # Not a duplicate — record in both caches
+    _exact_cache[ek] = now
+    _topic_cache[tk] = now
+    return False
 
 
 def _get_webclient():
@@ -52,15 +128,22 @@ class SlackNotifier:
         """
         Format and post a single alert.
         Tier 3 (INFO) alerts are skipped — they appear in the daily briefing only.
+        ALERT-DEDUP-1: Duplicate alerts (same title or same topic entity) are suppressed.
         """
         tier = alert.get("tier", 3)
+        title = alert.get("title", "")
 
         if tier >= 3:
-            logger.debug(f"Skipping Tier {tier} alert (INFO only): {alert.get('title')}")
+            logger.debug(f"Skipping Tier {tier} alert (INFO only): {title}")
+            return True
+
+        # ALERT-DEDUP-1: suppress duplicate alerts
+        if _is_duplicate_alert(title, tier):
+            logger.debug(f"Slack alert suppressed (duplicate): [{tier}] {title}")
             return True
 
         label = tier_label(tier)
-        logger.info(f"Posting {label} alert to Slack: {alert.get('title', '?')}")
+        logger.info(f"Posting {label} alert to Slack: {title}")
 
         payload = format_alert_slack(alert)
         return self._post(payload)
