@@ -98,10 +98,18 @@ def check_new_emails():
     processed = 0
     skipped = 0
     latest_seen_dt = None  # F4: track max received_date across ALL seen threads
+    _seen_threads_this_cycle: set = set()  # ALERT-DEDUP-1: prevent within-cycle duplicates
 
     for thread in new_threads:
         metadata = thread.get("metadata", {})
         thread_id = metadata.get("thread_id", "unknown")
+
+        # ALERT-DEDUP-1: Skip if we already processed this thread in this poll cycle
+        # (extract_poll can return the same thread twice via Gmail pagination)
+        if thread_id in _seen_threads_this_cycle:
+            skipped += 1
+            continue
+        _seen_threads_this_cycle.add(thread_id)
 
         # REPLY-TRACK-1: Check if this incoming email is a reply to a Baker-sent email
         try:
@@ -127,15 +135,15 @@ def check_new_emails():
             except (ValueError, TypeError):
                 pass
 
-        # F1: Dedup on ALL message IDs in thread — skip only if every message was seen before
-        all_message_ids = metadata.get("all_message_ids") or [metadata.get("message_id", thread_id)]
-        new_ids = [mid for mid in all_message_ids if not trigger_state.is_processed("email", mid)]
-        if not new_ids:
+        # F1: Dedup on thread_id against trigger_log — skip if this thread was already processed
+        # ALERT-DEDUP-1 fix: use thread_id for dedup (not individual message_ids which only
+        # partially match trigger_log entries, causing repeat processing every cycle)
+        if trigger_state.is_processed("email", thread_id):
             skipped += 1
             continue
 
-        # Use latest message ID as pipeline source_id (logged in trigger_log for future dedup)
-        message_id = all_message_ids[-1]
+        # Use thread_id as pipeline source_id (stable across poll cycles)
+        message_id = thread_id
 
         # ARCH-6: Store full email to PostgreSQL
         try:
