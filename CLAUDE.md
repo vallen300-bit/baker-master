@@ -288,7 +288,21 @@ The goal: the next session reads this file and knows exactly what's current — 
 - **Email backfill re-run needed:** Run POST /api/emails/backfill?days=14 again AFTER attachment code deployed — first 123 emails don't have attachment text.
 - **WhatsApp historical backfill:** Run POST /api/whatsapp/backfill?days=90 to populate whatsapp_messages table with historical data. Endpoint exists, needs to be triggered.
 - **Wertheimer term sheet:** Financial decisions needed (target IRR, MO Vienna valuation, GP carry structure, management fee) before Cowork can draft.
-- **Agentic RAG transition:** PM brief reviewed by Code. Architecture approved. Waiting for PM to provide implementation brief. See `pm/briefs/Baker_Agentic_RAG_Transition_Summary.docx` for full spec. Code review notes: (1) keep deadlines in system prompt always, (2) add routing hints for tool selection, (3) max_iterations=2 for WhatsApp, (4) include 15-turn conversation memory in agent loop, (5) update app.js for tool_call SSE events.
+- **Agentic RAG transition:** Brief reviewed against current code (session 5). 9 gaps identified — 2 critical (WA history not passed to question handler, conv_metadata JSONB column missing), 4 medium (collection count, tool result size cap, deals/insights lost without ambient inclusion, streaming architecture), 3 minor. Brief is at `Baker-Project/pm/briefs/BRIEF_AGENTIC_RAG_v1.md`. Ready to implement once gaps are addressed.
+- **ClaimsMax / Philip emails:** Draft emails to Philip and Balazs ready (session 5). Need Philip's email address to send. Balazs = balazs.csepregi@brisengroup.com.
+- **Cupial/Hagenauer claims:** Claims-analysis agent completed first pass. ClaimsMax database queries prepared. Resume agent ID: `aa9055f9f8bbe76fb`. Next: connect ClaimsMax database for evidence retrieval.
+
+- **2026-03-04 (primary machine, session 5):** Slack/email flood fix + ClaimsMax + Cupial analysis:
+  - **ALERT-DEDUP-1 (4 commits):**
+    - `outputs/slack_notifier.py`: Two-level dedup cache (exact title 1h + topic entity 4h). Slack alerts reduced from ~1,100/day to ~20/day.
+    - `orchestrator/prompt_builder.py`: Strict tier criteria — T1 max 1-2/day, T2 max 5/day, T3 default. Also tightened ClickUp tier guidance.
+    - `triggers/email_trigger.py`: Fixed email gap alert spam (24h cooldown), fixed `post_alert()` wrong argument types, fixed double-processing bug (within-cycle dedup via `_seen_threads_this_cycle` set + cross-cycle dedup using thread_id instead of broken message_id matching).
+    - `orchestrator/pipeline.py` + `triggers/embedded_scheduler.py`: Disabled 30-min alert digest email (was ~48 emails/day). Baker now sends 1 email/day (morning briefing at 08:00 CET).
+  - **Agentic RAG brief review:** Full code-vs-brief validation. 6 validated, 9 gaps identified. Documented above.
+  - **ClaimsMax analysis:** Read Philip's presentation (10 slides), Feb 25 meeting transcript (79 min, Philip/UBM strategy), Mar 4 meeting transcript (18 min, Dr. Jurkovic/UBM pitch). Drafted emails to Philip and Balazs. Produced commercialization roadmap (4 phases). Brainstorm dashboard deployed to GitHub Pages: https://vallen300-bit.github.io/claimsmax-brainstorm/
+  - **Cupial/Hagenauer claims analysis:** Launched claims-analysis agent on Excel spreadsheet + Dropbox strategic docs. Financial exposure mapped, 5 immediate actions identified, ClaimsMax database queries prepared.
+  - **Infra:** Installed `gh` CLI on primary machine, authenticated as vallen300-bit. Created movie-residences-sales repo with GitHub Pages: https://vallen300-bit.github.io/movie-residences-sales/
+  - **New folder:** `projects/claim-management-ai/` created for ClaimsMax working files (gitignored).
 
 - **2026-03-03 (dimitry300 machine, session 3):** Full-text storage overhaul + WhatsApp backfill build:
   - **Content truncation removal:** Removed all remaining [:8000], [:2000], [:4000] caps from extract_gmail.py, store_back.py, fireflies_trigger.py, action_handler.py, slack_trigger.py. Everything that passes noise filter is now stored in full.

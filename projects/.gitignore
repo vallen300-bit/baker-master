@@ -1,0 +1,4 @@
+# Project working files — never commit to repo
+# These are client documents, slides, analysis inputs used by Claude Code sessions
+*
+!.gitignore
