@@ -1301,22 +1301,52 @@ def _scan_chat_agentic(req, start: float, domain_context: str = "",
         full_response = ""
         agent_result = None
 
+        # Run sync agent generator in a thread, bridge via asyncio.Queue.
+        # This lets us send SSE keepalive pings while Claude API calls block.
+        import queue as _queue
+        item_queue = _queue.Queue()
+
+        def _run_agent():
+            try:
+                gen = run_agent_loop_streaming(
+                    question=req.question,
+                    system_prompt=system_prompt,
+                    history=history,
+                    max_iterations=_max_iter,
+                    timeout_override=_timeout,
+                )
+                for item in gen:
+                    item_queue.put(item)
+            except Exception as e:
+                item_queue.put({"error": str(e)})
+            finally:
+                item_queue.put(None)  # sentinel: generator done
+
+        # Start agent in background thread
+        agent_thread = asyncio.get_event_loop().run_in_executor(None, _run_agent)
+
         try:
-            gen = run_agent_loop_streaming(
-                question=req.question,
-                system_prompt=system_prompt,
-                history=history,
-                max_iterations=_max_iter,
-                timeout_override=_timeout,
-            )
-            for item in gen:
+            while True:
+                # Poll queue with short timeout; send keepalive if idle
+                try:
+                    item = await asyncio.wait_for(
+                        asyncio.get_event_loop().run_in_executor(
+                            None, lambda: item_queue.get(timeout=8)
+                        ),
+                        timeout=10,
+                    )
+                except (asyncio.TimeoutError, Exception):
+                    # No data for 8-10s — send SSE comment to keep connection alive
+                    yield ": keepalive\n\n"
+                    continue
+
+                if item is None:
+                    break  # generator done
+
                 if "_agent_result" in item:
                     agent_result = item["_agent_result"]
-                    # If timed out, fall back to single-pass (always — thinking
-                    # text before tool calls doesn't count as a real answer)
                     if agent_result.timed_out:
                         logger.warning("Agent timed out — falling back to single-pass")
-                        # PM note: delimiter so frontend knows a fresh answer follows
                         yield f"data: {json.dumps({'token': '[Searching further...] '})}\n\n"
                         async for sse in _scan_chat_legacy_stream(
                             req, start, domain_context,
@@ -1329,12 +1359,18 @@ def _scan_chat_agentic(req, start: float, domain_context: str = "",
                     payload = json.dumps({"token": item["token"]})
                     yield f"data: {payload}\n\n"
                 elif "tool_call" in item:
-                    # Optional: notify frontend of tool execution
-                    pass
+                    # Send tool name as SSE data (acts as keepalive + UI hint)
+                    yield f"data: {json.dumps({'tool_call': item['tool_call']})}\n\n"
+                elif "error" in item:
+                    logger.error(f"Agentic scan error: {item['error']}")
+                    yield f"data: {json.dumps({'error': item['error']})}\n\n"
         except Exception as e:
             logger.error(f"Agentic scan error: {e}")
             err_payload = json.dumps({"error": str(e)})
             yield f"data: {err_payload}\n\n"
+
+        # Wait for thread to finish
+        await agent_thread
 
         yield "data: [DONE]\n\n"
 
