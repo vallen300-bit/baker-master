@@ -42,7 +42,7 @@ Switch hats as needed. When coding, code. When scoping, think.
 |------|---------|
 | `orchestrator/pipeline.py` | 5-step RAG pipeline: Classify → Retrieve → Augment → Generate → Store |
 | `orchestrator/prompt_builder.py` | Pipeline prompt (structured JSON output) |
-| `orchestrator/scan_prompt.py` | Scan prompt (conversational output for chat) |
+| `orchestrator/scan_prompt.py` | Scan prompt + STEP1C domain/mode prompt extensions + build_mode_aware_prompt() |
 | `orchestrator/action_handler.py` | Intent router — email, WhatsApp, deadline, VIP, fireflies, ClickUp actions |
 | `orchestrator/decision_engine.py` | **DECISION-ENGINE-1A:** score_trigger() — domain, urgency, tier, mode, overrides, VIP SLA |
 | `orchestrator/agent.py` | **AGENTIC-RAG-1 + STEP1B:** Agent loop with 8 tools, ToolExecutor, tier-based routing |
@@ -94,9 +94,11 @@ User question → scan_chat()
     → email_action → draft/send → SSE response
     → whatsapp_action → resolve VIP name → send via WAHA → SSE response
     → deadline_action / vip_action / fireflies_fetch → handler → SSE response
-    → question → BAKER_AGENTIC_RAG flag?
-        → true:  _scan_chat_agentic() → agent loop (Claude picks tools) → stream SSE
-        → false: _scan_chat_legacy()  → single-pass RAG → stream SSE
+    → question → score_trigger() → baker_task created → mode+tier routing:
+        → tier 1 + mode!=delegate: _scan_chat_legacy() → fast path (~3s) → stream SSE
+        → mode==delegate OR agentic flag: _scan_chat_agentic() → agent loop (8 tools, mode-aware prompt) → stream SSE
+        → else: _scan_chat_legacy() → single-pass RAG → stream SSE
+        → baker_task closed with deliverable + agent metadata
 ```
 
 ## Architecture: How WhatsApp Works
@@ -111,11 +113,12 @@ WAHA webhook → waha_webhook.py
     → check_pending_draft() → email draft loop
     → classify_intent() (with 15-turn history) → route to handler → _wa_reply()
     → whatsapp_action? → resolve VIP name → send via WAHA → _wa_reply()
-    → question? → _handle_director_question() (WA-QUESTION-1)
-      → BAKER_AGENTIC_RAG flag?
-        → true:  _handle_director_question_agentic() → agent loop (max 3 iterations)
-        → false: _handle_director_question_legacy() → single-pass RAG
-      → _wa_reply(answer) + _wa_store_back() (Qdrant + conversation_memory)
+    → question? → _handle_director_question() (WA-QUESTION-1 + STEP1C)
+      → baker_task created → mode+tier routing:
+        → tier 1 + mode!=delegate: legacy fast path
+        → mode==delegate OR agentic flag: agent loop (mode-aware prompt, delegate: max 5 iter, 15s timeout)
+        → else: legacy single-pass RAG
+      → _wa_reply(answer) + baker_task closed + _wa_store_back()
   → Non-Director → pipeline.run() or briefing queue
 
 Backfill: scripts/extract_whatsapp.py
@@ -184,7 +187,7 @@ baker-projects, sentinel-interactions, sentinel-email, sentinel-meetings, sentin
 `clickup_tasks`, `baker_actions`, `pending_drafts`, `trigger_watermarks`,
 `todoist_tasks`, `conversation_memory`, `sent_emails`, `deadlines`, `vip_contacts`,
 `meeting_transcripts` (ARCH-3), `email_messages` (ARCH-6), `whatsapp_messages` (ARCH-7),
-`insights` (INSIGHT-1)
+`insights` (INSIGHT-1), `baker_tasks` (STEP1C)
 
 ## Architecture: Role Division (Baker vs Cowork)
 
@@ -337,7 +340,7 @@ The goal: the next session reads this file and knows exactly what's current — 
 - ~~**Phase 1 (5 tools):**~~ DONE — pushed session 4, deployed.
 - ~~**DECISION-ENGINE-1A:**~~ DONE — pushed session 6, deployed with all architect fixes.
 - ~~**STEP1B (8 tools + tier routing):**~~ DONE — pushed session 6, deployed with all architect fixes.
-- **STEP1C (task ledger + delegation):** NEXT — read brief, implement.
+- ~~**STEP1C (task ledger + delegation):**~~ DONE — pushed session 7. baker_tasks table, mode-aware routing, domain/mode prompts, API endpoints.
 - **Phase 2 (future):** PostgreSQL `agent_tool_calls` observability table. Channel-aware tool selection.
 - **Phase 3 (future):** Parallel tool execution (asyncio.gather), result caching (5-min TTL), token budget management.
 
@@ -378,11 +381,20 @@ The goal: the next session reads this file and knows exactly what's current — 
   - **Andrey Oskolkov + Christian Merz** added as VIP contacts (Tier 2 default, will promote to Tier 1 on next restart).
   - **Production verified:** 12 scheduler jobs (including vip_sla_check), all 5 scored columns live in trigger_log, Scan streaming works, tier routing active.
 
+- **2026-03-05 (dimitry300 machine, session 7):** STEP1C — Task Ledger + Delegation Framework:
+  - **Commit 1:** Fixed MEMORY ACCESS in scan_prompt.py — now lists all 8 agent tools (was 5).
+  - **Commit 2:** `baker_tasks` PostgreSQL table + 4 CRUD methods in store_back.py. Full lifecycle tracking (pending→in_progress→completed/failed), agent metadata (iterations, tokens, elapsed), Director feedback (accepted/rejected/revised). Explicit column whitelist on UPDATE (no SQL injection).
+  - **Commit 3:** Domain expertise prompts (5 domains: chairman/projects/network/private/travel) + mode prompt extensions (handle/delegate/escalate) in scan_prompt.py. `build_mode_aware_prompt()` helper. `timeout_override` param added to both agent loop entry points in agent.py.
+  - **Commit 4:** Mode-aware routing wired into dashboard.py (Scan) and waha_webhook.py (WhatsApp). `mode` field from Decision Engine now consumed for routing: delegate forces agentic path with more iterations (7 Scan, 5 WA) + longer timeouts (20s Scan, 15s WA). baker_task created on every Director question, closed with deliverable after response. API endpoints: `GET /api/tasks` + `POST /api/tasks/{id}/feedback` with Pydantic validation. All architect review fixes applied (7 issues: fallback task orphan, WA call-site signatures, SQL injection whitelist, timeout override, Pydantic validation, prompt helper location, tool list fix).
+  - **Commit 5:** CLAUDE.md update — marked STEP1C done, added baker_tasks to tables, updated architecture diagrams.
+
 ### Next Session Action Items (March 5+)
-- **Step 1C:** Task ledger + delegation framework. Baker's Agentic RAG Transition Plan Step 1C. Read brief at `Baker-Project/pm/briefs/` (Dropbox on dimitry300 machine).
+- ~~**Step 1C:**~~ DONE — shipped session 7.
 - ~~**Set BAKER_AGENTIC_RAG=true on Render**~~ DONE — PM set it during session 6. 8-tool agentic loop active for Tier 2-3 queries.
 - **Andrey Oskolkov + Christian Merz** need tier promotion to 1 — will happen automatically on next Render restart (startup migration).
 - **Monitor:** Check trigger_log for scored fields after a few email/ClickUp poll cycles: `SELECT domain, tier, mode, COUNT(*) FROM trigger_log WHERE domain IS NOT NULL GROUP BY domain, tier, mode`
+- **Monitor STEP1C:** Check baker_tasks after Scan/WA questions: `SELECT id, mode, domain, tier, status, title[:40], agent_iterations, agent_elapsed_ms FROM baker_tasks ORDER BY created_at DESC LIMIT 10`
+- **Step 2 (next):** Agentic RAG Transition Plan Step 2 — review brief at `Baker-Project/pm/briefs/`
 
 ## Key Documents (Dropbox)
 
