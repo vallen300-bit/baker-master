@@ -1083,6 +1083,7 @@ async def scan_chat(req: ScanRequest):
     # DECISION-ENGINE-1A: Score the question for domain context
     # M4 fix: allow_llm=False to avoid blocking Haiku call in async event loop
     _domain_context = ""
+    _scored = None
     try:
         from orchestrator.decision_engine import score_trigger as _score_trigger
         _scored = _score_trigger(req.question, "director", "scan", {}, allow_llm=False)
@@ -1094,10 +1095,17 @@ async def scan_chat(req: ScanRequest):
     except Exception as _e:
         logger.warning(f"Decision Engine scoring failed (non-fatal): {_e}")
 
-    # AGENTIC-RAG-1: Feature-flagged agent loop vs. legacy single-pass
+    # STEP1B: Tier-based routing.
+    # Tier 1 (most urgent) → legacy fast path (~3s) regardless of feature flag.
+    # Tier 2-3 → agentic (8 tools) when BAKER_AGENTIC_RAG=true, legacy otherwise.
     from orchestrator.agent import is_agentic_rag_enabled
 
-    if is_agentic_rag_enabled():
+    _tier = _scored.get("tier", 3) if _scored else 3
+
+    if _tier == 1:
+        logger.info("Scan: Tier 1 detected — forcing legacy path for speed")
+        return _scan_chat_legacy(req, start, _domain_context)
+    elif is_agentic_rag_enabled():
         return _scan_chat_agentic(req, start, _domain_context)
     else:
         return _scan_chat_legacy(req, start, _domain_context)
@@ -1263,7 +1271,7 @@ def _scan_chat_agentic(req, start: float, domain_context: str = ""):
                         logger.warning("Agent timed out — falling back to single-pass")
                         # PM note: delimiter so frontend knows a fresh answer follows
                         yield f"data: {json.dumps({'token': '[Searching further...] '})}\n\n"
-                        async for sse in _scan_chat_legacy_stream(req, start):
+                        async for sse in _scan_chat_legacy_stream(req, start, domain_context):
                             yield sse
                         return
                 elif "token" in item:
@@ -1310,7 +1318,7 @@ def _scan_chat_agentic(req, start: float, domain_context: str = ""):
     )
 
 
-async def _scan_chat_legacy_stream(req, start: float):
+async def _scan_chat_legacy_stream(req, start: float, domain_context: str = ""):
     """Legacy single-pass RAG as an async generator (used as fallback from agentic)."""
     full_response = ""
     try:
@@ -1357,7 +1365,9 @@ async def _scan_chat_legacy_stream(req, start: float):
     except Exception:
         pass
 
-    system_prompt = _build_scan_system_prompt(deadline_only=False, contexts=contexts)
+    system_prompt = _build_scan_system_prompt(
+        deadline_only=False, contexts=contexts, domain_context=domain_context,
+    )
 
     messages = []
     for msg in (req.history or [])[-10:]:

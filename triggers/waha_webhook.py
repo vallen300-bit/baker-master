@@ -62,19 +62,24 @@ def _format_wa_context(contexts) -> str:
     return "\n".join(blocks)
 
 
-def _handle_director_question(question: str, msg_id: str):
+def _handle_director_question(question: str, msg_id: str, scored: dict = None):
     """
     WA-QUESTION-1: Answer a Director question using the Scan-style RAG flow.
 
-    AGENTIC-RAG-1: When BAKER_AGENTIC_RAG=true, uses agent loop with tool use
-    instead of pre-fetching all context.  Falls back to legacy single-pass if
-    the agent times out or if the flag is off.
+    AGENTIC-RAG-1 + STEP1B: Tier-based routing.
+    Tier 1 (most urgent) → legacy fast path for speed.
+    Tier 2-3 → agentic when BAKER_AGENTIC_RAG=true, legacy otherwise.
     """
     start = time.time()
 
     from orchestrator.agent import is_agentic_rag_enabled
 
-    if is_agentic_rag_enabled():
+    _tier = scored.get("tier", 3) if scored else 3
+
+    if _tier == 1:
+        logger.info("WA question: Tier 1 — forcing legacy path for speed")
+        answer = _handle_director_question_legacy(question, start)
+    elif is_agentic_rag_enabled():
         answer = _handle_director_question_agentic(question, start)
     else:
         answer = _handle_director_question_legacy(question, start)
@@ -142,12 +147,12 @@ def _handle_director_question_agentic(question: str, start: float) -> str:
 
         if result.timed_out or not result.answer:
             logger.warning("Agent timed out on WhatsApp — falling back to legacy")
-            return _handle_director_question_legacy(question, time.time())
+            return _handle_director_question_legacy(question, start)
 
         return result.answer
     except Exception as e:
         logger.error(f"Agentic WA question failed, falling back to legacy: {e}")
-        return _handle_director_question_legacy(question, time.time())
+        return _handle_director_question_legacy(question, start)
 
 
 def _handle_director_question_legacy(question: str, start: float) -> str:
@@ -535,7 +540,7 @@ async def waha_webhook(
 
         # WA-QUESTION-1: Director question — conversational reply via Scan-style RAG
         try:
-            _handle_director_question(combined_body, msg_id)
+            _handle_director_question(combined_body, msg_id, scored=_scored)
             return {"status": "question_answered", "sender": sender_name}
         except Exception as e:
             logger.error(f"WA question handler failed: {e}")

@@ -160,6 +160,84 @@ TOOL_DEFINITIONS = [
             "required": ["name"],
         },
     },
+    # STEP1B: 3 new retrieval tools (tools 6-8)
+    {
+        "name": "get_deadlines",
+        "description": (
+            "Get all active deadlines and upcoming dates from Baker's deadline "
+            "tracker.  Returns every active and pending deadline ordered by due "
+            "date — no keyword needed.\n\n"
+            "Use for:\n"
+            "- 'What deadlines do I have coming up?'\n"
+            "- 'What's due this week?'\n"
+            "- 'Any upcoming submission deadlines?'"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "get_clickup_tasks",
+        "description": (
+            "Search ClickUp tasks by keyword, status, or list name.  Searches "
+            "task name and description across all synced workspaces.\n\n"
+            "Use for:\n"
+            "- 'What ClickUp tasks are open for Hagenauer?'\n"
+            "- 'Show me high priority tasks'\n"
+            "- 'Any tasks about the MO Vienna permit?'"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Keyword to search in task name and description.",
+                },
+                "status": {
+                    "type": "string",
+                    "description": "Filter by status (e.g. 'open', 'in progress'). Optional.",
+                },
+                "priority": {
+                    "type": "string",
+                    "description": "Filter by priority (e.g. 'urgent', 'high'). Optional.",
+                },
+                "list_name": {
+                    "type": "string",
+                    "description": "Filter by ClickUp list name (partial match). Optional.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results (default 10).",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "search_deals_insights",
+        "description": (
+            "Search active deals and strategic insights.  Returns results from "
+            "both the deals pipeline and the insights table (strategic analysis "
+            "stored by Claude Code / Cowork sessions).\n\n"
+            "Use for:\n"
+            "- 'What is the status of the Wertheimer deal?'\n"
+            "- 'Any strategic analysis on LP fundraise?'\n"
+            "- 'Show me active deals'\n"
+            "- 'What insights do we have on ClaimsMax?'"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Keyword to search insights. Deals are always returned in full.",
+                },
+            },
+            "required": ["query"],
+        },
+    },
 ]
 
 
@@ -191,6 +269,12 @@ class ToolExecutor:
                 return self._search_whatsapp(tool_input)
             elif tool_name == "get_contact":
                 return self._get_contact(tool_input)
+            elif tool_name == "get_deadlines":
+                return self._get_deadlines(tool_input)
+            elif tool_name == "get_clickup_tasks":
+                return self._get_clickup_tasks(tool_input)
+            elif tool_name == "search_deals_insights":
+                return self._search_deals_insights(tool_input)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -242,6 +326,48 @@ class ToolExecutor:
         if result:
             return result.content
         return json.dumps({"result": f"No contact found matching '{name}'"})
+
+    # -- STEP1B: 3 new tool implementations --
+
+    def _get_deadlines(self, inp: dict) -> str:
+        try:
+            from models.deadlines import get_active_deadlines
+            deadlines = get_active_deadlines(limit=50)
+        except Exception as e:
+            return json.dumps({"error": f"Deadlines unavailable: {str(e)}"})
+
+        if not deadlines:
+            return "[No active deadlines found]"
+
+        lines = [f"--- DEADLINES ({len(deadlines)} active) ---"]
+        for dl in deadlines:
+            due = dl.get("due_date")
+            due_str = due.strftime("%Y-%m-%d") if due else "TBD"
+            priority = (dl.get("priority") or "normal").upper()
+            status = dl.get("status", "active")
+            desc = dl.get("description", "")
+            lines.append(f"[{priority}] {due_str}: {desc} ({status})")
+        return "\n".join(lines)
+
+    def _get_clickup_tasks(self, inp: dict) -> str:
+        query = inp.get("query", "")
+        results = self._retriever.get_clickup_tasks_search(
+            query=query,
+            status=inp.get("status"),
+            priority=inp.get("priority"),
+            list_name=inp.get("list_name"),
+            limit=inp.get("limit", 10),
+        )
+        return self._format_contexts(results, "CLICKUP TASKS")
+
+    def _search_deals_insights(self, inp: dict) -> str:
+        query = inp.get("query", "")
+        deals = self._retriever.get_active_deals()
+        insights = self._retriever.get_insights(query, limit=5) if query else []
+        combined = deals + insights
+        if not combined:
+            return "[No deals or insights found]"
+        return self._format_contexts(combined, "DEALS & INSIGHTS")
 
     @staticmethod
     def _format_contexts(contexts, label: str) -> str:

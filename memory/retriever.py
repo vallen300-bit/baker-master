@@ -331,7 +331,7 @@ class SentinelRetriever:
                     content=f"[ACTIVE DEAL] {content}",
                     source="postgres",
                     score=1.0,
-                    metadata={"type": "deal", "name": deal.get("name")},
+                    metadata={"type": "deal", "label": deal.get("name"), "name": deal.get("name")},
                     token_estimate=self._estimate_tokens(content),
                 ))
             return contexts
@@ -798,6 +798,103 @@ class SentinelRetriever:
             return contexts
         except Exception as e:
             logger.warning(f"Recent meeting transcript fetch failed (non-fatal): {e}")
+            self._pg_pool = None
+            return []
+
+    # ----------------------------------------------------------------
+    # ClickUp Tasks (STEP1B — keyword search on PostgreSQL)
+    # ----------------------------------------------------------------
+
+    def get_clickup_tasks_search(
+        self,
+        query: str,
+        status: str = None,
+        priority: str = None,
+        list_name: str = None,
+        limit: int = 10,
+    ) -> list[RetrievedContext]:
+        """Search clickup_tasks table by keyword (ILIKE on name + description).
+        Optional filters: status, priority, list_name (partial match)."""
+        try:
+            conn = self._get_pg_conn()
+            cur = conn.cursor()
+
+            if query:
+                where_parts = ["(name ILIKE %s OR description ILIKE %s)"]
+                params: list = [f"%{query}%", f"%{query}%"]
+            else:
+                where_parts = ["1=1"]
+                params: list = []
+
+            if status:
+                where_parts.append("status ILIKE %s")
+                params.append(f"%{status}%")
+            if priority:
+                where_parts.append("priority ILIKE %s")
+                params.append(f"%{priority}%")
+            if list_name:
+                where_parts.append("list_name ILIKE %s")
+                params.append(f"%{list_name}%")
+
+            where_clause = " AND ".join(where_parts)
+            params.append(limit)
+
+            cur.execute(
+                f"""
+                SELECT id, name, description, status, priority,
+                       due_date, list_name, assignees, tags, date_updated
+                FROM clickup_tasks
+                WHERE {where_clause}
+                ORDER BY date_updated DESC NULLS LAST
+                LIMIT %s
+                """,
+                params,
+            )
+            rows = cur.fetchall()
+            cols = [
+                "id", "name", "description", "status", "priority",
+                "due_date", "list_name", "assignees", "tags", "date_updated",
+            ]
+            cur.close()
+
+            contexts = []
+            for row in rows:
+                data = {c: v for c, v in zip(cols, row) if v is not None}
+                name = data.get("name", "Untitled Task")
+                status_val = data.get("status", "unknown")
+                priority_val = data.get("priority", "normal")
+                due = data.get("due_date")
+                due_str = str(due)[:10] if due else "no due date"
+                list_val = data.get("list_name", "")
+                description = data.get("description", "")
+                date_updated = data.get("date_updated")
+                date_str = str(date_updated)[:10] if date_updated else ""
+
+                content = (
+                    f"[CLICKUP TASK] {name}\n"
+                    f"Status: {status_val} | Priority: {priority_val} | "
+                    f"Due: {due_str} | List: {list_val}\n"
+                )
+                if description:
+                    content += f"Description: {description}\n"
+
+                contexts.append(RetrievedContext(
+                    content=content,
+                    source="clickup",
+                    score=0.95,
+                    metadata={
+                        "type": "clickup_task",
+                        "label": name,
+                        "date": date_str,
+                        "task_id": data.get("id"),
+                        "status": status_val,
+                        "list_name": list_val,
+                    },
+                    token_estimate=self._estimate_tokens(content),
+                ))
+            return contexts
+        except Exception as e:
+            logger.warning(f"ClickUp task search failed (non-fatal): {e}")
             self._pg_pool = None
             return []
 
