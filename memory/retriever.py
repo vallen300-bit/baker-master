@@ -910,13 +910,24 @@ class SentinelRetriever:
             conn = self._get_pg_conn()
             cur = conn.cursor()
             q_lower = query.lower().strip()
+            if not q_lower:
+                return []
+            # Match if: query equals matter name, OR query contains a matter name,
+            # OR a matter name contains the query, OR query matches a keyword/person.
+            # This handles multi-word agent queries like "Cupial dispute".
+            q_like = f"%{q_lower}%"
             cur.execute(
                 """SELECT people, keywords FROM matter_registry
                    WHERE status = 'active'
-                     AND (LOWER(matter_name) = %s
+                     AND (LOWER(matter_name) ILIKE %s
+                          OR %s ILIKE '%%' || LOWER(matter_name) || '%%'
                           OR %s = ANY(SELECT LOWER(unnest(keywords)))
-                          OR %s = ANY(SELECT LOWER(unnest(people))))""",
-                (q_lower, q_lower, q_lower),
+                          OR %s = ANY(SELECT LOWER(unnest(people)))
+                          OR EXISTS (
+                              SELECT 1 FROM unnest(keywords) k
+                              WHERE %s ILIKE '%%' || LOWER(k) || '%%'
+                          ))""",
+                (q_like, q_lower, q_lower, q_lower, q_lower),
             )
             rows = cur.fetchall()
             cur.close()
@@ -961,16 +972,24 @@ class SentinelRetriever:
             import psycopg2.extras
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             q_lower = query.lower().strip()
+            if not q_lower:
+                return None
+            q_like = f"%{q_lower}%"
             cur.execute(
                 """SELECT id, matter_name, description, people, keywords,
                           projects, status
                    FROM matter_registry
                    WHERE status = 'active'
-                     AND (LOWER(matter_name) = %s
+                     AND (LOWER(matter_name) ILIKE %s
+                          OR %s ILIKE '%%' || LOWER(matter_name) || '%%'
                           OR %s = ANY(SELECT LOWER(unnest(keywords)))
-                          OR %s = ANY(SELECT LOWER(unnest(people))))
+                          OR %s = ANY(SELECT LOWER(unnest(people)))
+                          OR EXISTS (
+                              SELECT 1 FROM unnest(keywords) k
+                              WHERE %s ILIKE '%%' || LOWER(k) || '%%'
+                          ))
                    LIMIT 1""",
-                (q_lower, q_lower, q_lower),
+                (q_like, q_lower, q_lower, q_lower, q_lower),
             )
             row = cur.fetchone()
             cur.close()
