@@ -45,7 +45,7 @@ Switch hats as needed. When coding, code. When scoping, think.
 | `orchestrator/scan_prompt.py` | Scan prompt + STEP1C domain/mode prompt extensions + build_mode_aware_prompt() |
 | `orchestrator/action_handler.py` | Intent router — email, WhatsApp, deadline, VIP, fireflies, ClickUp actions |
 | `orchestrator/decision_engine.py` | **DECISION-ENGINE-1A:** score_trigger() — domain, urgency, tier, mode, overrides, VIP SLA |
-| `orchestrator/agent.py` | **AGENTIC-RAG-1 + STEP1B:** Agent loop with 8 tools, ToolExecutor, tier-based routing |
+| `orchestrator/agent.py` | **AGENTIC-RAG-1 + STEP1B + RETRIEVAL-FIX-1:** Agent loop with 9 tools, ToolExecutor, tier-based routing, matter-aware search |
 | `memory/retriever.py` | Read-side: Qdrant vector search + PostgreSQL structured queries |
 | `memory/store_back.py` | Write-side: PostgreSQL writes + Qdrant interaction embeddings |
 
@@ -187,7 +187,7 @@ baker-projects, sentinel-interactions, sentinel-email, sentinel-meetings, sentin
 `clickup_tasks`, `baker_actions`, `pending_drafts`, `trigger_watermarks`,
 `todoist_tasks`, `conversation_memory`, `sent_emails`, `deadlines`, `vip_contacts`,
 `meeting_transcripts` (ARCH-3), `email_messages` (ARCH-6), `whatsapp_messages` (ARCH-7),
-`insights` (INSIGHT-1), `baker_tasks` (STEP1C)
+`insights` (INSIGHT-1), `baker_tasks` (STEP1C), `matter_registry` (RETRIEVAL-FIX-1)
 
 ## Architecture: Role Division (Baker vs Cowork)
 
@@ -341,6 +341,7 @@ The goal: the next session reads this file and knows exactly what's current — 
 - ~~**DECISION-ENGINE-1A:**~~ DONE — pushed session 6, deployed with all architect fixes.
 - ~~**STEP1B (8 tools + tier routing):**~~ DONE — pushed session 6, deployed with all architect fixes.
 - ~~**STEP1C (task ledger + delegation):**~~ DONE — pushed session 7. baker_tasks table, mode-aware routing, domain/mode prompts, API endpoints.
+- ~~**RETRIEVAL-FIX-1 (matter registry):**~~ DONE — pushed session 7. 9 tools, matter-aware search, auto-fetch from connected people.
 - **Phase 2 (future):** PostgreSQL `agent_tool_calls` observability table. Channel-aware tool selection.
 - **Phase 3 (future):** Parallel tool execution (asyncio.gather), result caching (5-min TTL), token budget management.
 
@@ -388,13 +389,22 @@ The goal: the next session reads this file and knows exactly what's current — 
   - **Commit 4:** Mode-aware routing wired into dashboard.py (Scan) and waha_webhook.py (WhatsApp). `mode` field from Decision Engine now consumed for routing: delegate forces agentic path with more iterations (7 Scan, 5 WA) + longer timeouts (20s Scan, 15s WA). baker_task created on every Director question, closed with deliverable after response. API endpoints: `GET /api/tasks` + `POST /api/tasks/{id}/feedback` with Pydantic validation. All architect review fixes applied (7 issues: fallback task orphan, WA call-site signatures, SQL injection whitelist, timeout override, Pydantic validation, prompt helper location, tool list fix).
   - **Commit 5:** CLAUDE.md update — marked STEP1C done, added baker_tasks to tables, updated architecture diagrams.
 
-### Next Session Action Items (March 5+)
-- ~~**Step 1C:**~~ DONE — shipped session 7.
-- ~~**Set BAKER_AGENTIC_RAG=true on Render**~~ DONE — PM set it during session 6. 8-tool agentic loop active for Tier 2-3 queries.
-- **Andrey Oskolkov + Christian Merz** need tier promotion to 1 — will happen automatically on next Render restart (startup migration).
-- **Monitor:** Check trigger_log for scored fields after a few email/ClickUp poll cycles: `SELECT domain, tier, mode, COUNT(*) FROM trigger_log WHERE domain IS NOT NULL GROUP BY domain, tier, mode`
-- **Monitor STEP1C:** Check baker_tasks after Scan/WA questions: `SELECT id, mode, domain, tier, status, title[:40], agent_iterations, agent_elapsed_ms FROM baker_tasks ORDER BY created_at DESC LIMIT 10`
-- **Step 2 (next):** Agentic RAG Transition Plan Step 2 — review brief at `Baker-Project/pm/briefs/`
+- **2026-03-05 (dimitry300 machine, session 7 continued):** RETRIEVAL-FIX-1 — Matter Registry + critical production fixes:
+  - **STEP1C hotfixes (3 commits):** Softened mode/domain prompts (handle mode removed, escalate rewritten). Fixed agent timeout fallback logic (`and not answer` → just `timed_out`). Increased default timeout from 10s to 30s.
+  - **SSE keepalive fix:** Root cause of "short answers" — Baker produced excellent 50s answers but SSE connection dropped during blocking Claude API calls (10-20s silence). Fix: async Queue bridge with 8s keepalive pings. This was the key breakthrough — answers were always being generated, client just wasn't receiving them.
+  - **RETRIEVAL-FIX-1 (Code Brisen, architect-reviewed):** `matter_registry` PostgreSQL table linking business matters to connected people, keywords, and projects. 5 seed matters (Cupial, Hagenauer, Wertheimer LP, FX Mayr, ClaimsMax). New `get_matter_context` agent tool (#9). API endpoints `GET/POST/PUT /api/matters`. Code Brisen implemented, Code 300 reviewed (10-point checklist, all passed).
+  - **Matter expansion fixes (2 commits):** People-first ordering (set→ordered list, people before keywords). ILIKE partial matching for multi-word agent queries ("Cupial dispute" now matches "Cupial" matter).
+  - **Auto-fetch in get_matter_context:** When agent looks up a matter, it automatically fetches recent emails and WhatsApp from connected people. This was the final fix — Baker now surfaces Hassa's March 4 email when asked about Cupial.
+  - **Result:** Baker went from "I have zero emails about Cupials" to "This matter has broken open in the last 48 hours with significant movement on two parallel tracks" — finding Hassa's handover push + E+H's legal offensive.
+  - **Workflow established:** Code 300 (this machine) = supervisor/architect. Code Brisen (primary machine) = builder. Director bridges. Code 300 writes briefs, Code Brisen implements, Code 300 reviews before push.
+
+### Next Session Action Items (March 6+)
+- **Step 3 (Agentic Onboarding):** Next on the Transition Plan. Baker interviews Director (~30 min) to populate VIP profiles, team roles, strategic priorities. Code Brisen builds. Brief needed.
+- **Step 4 (Cost Monitor):** Track API costs per query, circuit breaker at €5/day. Pure code work.
+- **Expand matter registry:** Director adds more matters during Step 3 onboarding or via `POST /api/matters`.
+- **RETRIEVAL-FIX-2 (deferred):** Background trigger auto-tagging against matter registry — Baker catches new signals in real-time without being asked.
+- **Andrey Oskolkov + Christian Merz** VIP tier promotion to 1.
+- **WhatsApp historical backfill:** Run `POST /api/whatsapp/backfill?days=365` (needs `WHATSAPP_API_KEY` on Render).
 
 ## Key Documents (Dropbox)
 
