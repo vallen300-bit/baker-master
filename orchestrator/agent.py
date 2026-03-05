@@ -421,16 +421,56 @@ class ToolExecutor:
         matter = self._retriever.get_matter_context(query)
         if not matter:
             return json.dumps({"result": f"No matter found matching '{query}'"})
-        return (
-            f"--- MATTER: {matter.get('matter_name', '?')} ---\n"
-            f"Description: {matter.get('description', 'N/A')}\n"
-            f"People: {', '.join(matter.get('people', []))}\n"
-            f"Keywords: {', '.join(matter.get('keywords', []))}\n"
-            f"Projects: {', '.join(matter.get('projects', []))}\n"
-            f"Status: {matter.get('status', 'active')}\n\n"
-            f"TIP: Search for the people listed above to find emails, "
-            f"WhatsApp messages, and meetings connected to this matter."
-        )
+
+        parts = [
+            f"--- MATTER: {matter.get('matter_name', '?')} ---",
+            f"Description: {matter.get('description', 'N/A')}",
+            f"People: {', '.join(matter.get('people', []))}",
+            f"Keywords: {', '.join(matter.get('keywords', []))}",
+            f"Projects: {', '.join(matter.get('projects', []))}",
+            f"Status: {matter.get('status', 'active')}",
+        ]
+
+        # Auto-fetch recent emails and WhatsApp from connected people
+        # so Claude gets the full picture in one tool call
+        people = matter.get("people", [])
+        if people:
+            email_results = []
+            wa_results = []
+            seen_email_ids = set()
+            seen_wa_ids = set()
+            for person in people[:3]:  # top 3 people
+                try:
+                    emails = self._retriever.get_email_messages(person, limit=2)
+                    for e in emails:
+                        eid = e.metadata.get("message_id")
+                        if eid not in seen_email_ids:
+                            email_results.append(e)
+                            seen_email_ids.add(eid)
+                except Exception:
+                    pass
+                try:
+                    wa = self._retriever.get_whatsapp_messages(person, limit=2)
+                    for w in wa:
+                        wid = w.metadata.get("msg_id")
+                        if wid not in seen_wa_ids:
+                            wa_results.append(w)
+                            seen_wa_ids.add(wid)
+                except Exception:
+                    pass
+
+            if email_results:
+                parts.append(f"\n--- RECENT EMAILS from connected people ({len(email_results)}) ---")
+                for ctx in email_results[:5]:
+                    parts.append(ctx.content[:500])
+            if wa_results:
+                parts.append(f"\n--- RECENT WHATSAPP from connected people ({len(wa_results)}) ---")
+                for ctx in wa_results[:5]:
+                    parts.append(ctx.content[:500])
+            if not email_results and not wa_results:
+                parts.append("\n[No recent emails or WhatsApp from connected people found]")
+
+        return "\n".join(parts)
 
     @staticmethod
     def _format_contexts(contexts, label: str) -> str:
