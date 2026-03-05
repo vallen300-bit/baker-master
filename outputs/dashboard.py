@@ -1312,8 +1312,9 @@ def _scan_chat_agentic(req, start: float, domain_context: str = "",
             for item in gen:
                 if "_agent_result" in item:
                     agent_result = item["_agent_result"]
-                    # If timed out with no answer, fall back to single-pass
-                    if agent_result.timed_out and not agent_result.answer:
+                    # If timed out, fall back to single-pass (always — thinking
+                    # text before tool calls doesn't count as a real answer)
+                    if agent_result.timed_out:
                         logger.warning("Agent timed out — falling back to single-pass")
                         # PM note: delimiter so frontend knows a fresh answer follows
                         yield f"data: {json.dumps({'token': '[Searching further...] '})}\n\n"

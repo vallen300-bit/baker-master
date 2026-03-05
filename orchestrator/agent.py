@@ -28,7 +28,7 @@ _AGENTIC_RAG = os.getenv("BAKER_AGENTIC_RAG", "false").lower() == "true"
 
 # Hard wall-clock timeout (PM review item #1).
 # If the agent loop exceeds this, we abandon and fall back to single-pass.
-AGENT_TIMEOUT_SECONDS = float(os.getenv("BAKER_AGENT_TIMEOUT", "10"))
+AGENT_TIMEOUT_SECONDS = float(os.getenv("BAKER_AGENT_TIMEOUT", "30"))
 
 
 # ─────────────────────────────────────────────────
