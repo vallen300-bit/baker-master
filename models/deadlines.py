@@ -100,6 +100,9 @@ def ensure_tables():
                 email VARCHAR(200),
                 whatsapp_id VARCHAR(50),
                 fireflies_speaker_label VARCHAR(200),
+                role_context TEXT,
+                communication_pref TEXT DEFAULT 'email',
+                expertise TEXT,
                 added_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
             )
         """)

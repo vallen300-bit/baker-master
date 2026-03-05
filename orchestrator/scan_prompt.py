@@ -191,13 +191,50 @@ MODE_PROMPT_EXTENSIONS = {
 }
 
 
+def _get_preferences_safe(category: str = None) -> list:
+    """Read Director preferences from DB. Returns [] on any failure (non-fatal)."""
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        return store.get_preferences(category=category)
+    except Exception:
+        return []
+
+
 def build_mode_aware_prompt(base_prompt: str, domain: str = None,
                             mode: str = None) -> str:
-    """Concatenate base prompt + domain expertise + mode framing.
+    """Concatenate base prompt + domain expertise (DB overrides hardcoded)
+    + strategic priorities + communication style + mode framing.
     Returns the enriched system prompt string."""
     parts = [base_prompt]
-    if domain and domain in DOMAIN_EXPERTISE:
-        parts.append(DOMAIN_EXPERTISE[domain])
+
+    # Domain context: DB overrides hardcoded defaults
+    if domain:
+        db_context = _get_preferences_safe(category="domain_context")
+        db_domain = next((p for p in db_context if p.get("pref_key") == domain), None)
+        if db_domain:
+            parts.append(f"## DOMAIN CONTEXT\n{db_domain['pref_value']}")
+        elif domain in DOMAIN_EXPERTISE:
+            parts.append(DOMAIN_EXPERTISE[domain])
+
+    # Strategic priorities (always injected, regardless of domain)
+    priorities = _get_preferences_safe(category="strategic_priority")
+    if priorities:
+        lines = ["## CURRENT STRATEGIC PRIORITIES"]
+        for p in sorted(priorities, key=lambda x: x.get("pref_key", "")):
+            lines.append(f"- {p['pref_value']}")
+        parts.append("\n".join(lines))
+
+    # Communication style preferences
+    comm_prefs = _get_preferences_safe(category="communication")
+    if comm_prefs:
+        lines = ["## COMMUNICATION STYLE"]
+        for p in comm_prefs:
+            lines.append(f"- {p.get('pref_key', '')}: {p['pref_value']}")
+        parts.append("\n".join(lines))
+
+    # Mode extension
     if mode and mode in MODE_PROMPT_EXTENSIONS:
         parts.append(MODE_PROMPT_EXTENSIONS[mode])
+
     return "\n\n".join(parts)

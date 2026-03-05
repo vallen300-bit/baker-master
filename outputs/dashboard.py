@@ -387,6 +387,12 @@ class MatterUpdateRequest(BaseModel):
     status: Optional[str] = None
 
 
+class PreferenceRequest(BaseModel):
+    category: str = Field(..., min_length=1, max_length=100)
+    key: str = Field(..., min_length=1, max_length=200)
+    value: str = Field(..., min_length=1)
+
+
 class InsightRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
     content: str = Field(..., min_length=1)
@@ -489,6 +495,61 @@ async def update_matter_endpoint(matter_id: int, req: MatterUpdateRequest):
         raise
     except Exception as e:
         logger.error(f"PUT /api/matters/{matter_id} failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# STEP3: Director Preferences API
+# ============================================================
+
+@app.get("/api/preferences", tags=["preferences"], dependencies=[Depends(verify_api_key)])
+async def get_preferences_endpoint(
+    category: Optional[str] = Query(None),
+):
+    """Get Director preferences, optionally filtered by category."""
+    try:
+        store = _get_store()
+        prefs = store.get_preferences(category=category)
+        prefs = [_serialize(p) for p in prefs]
+        return {"preferences": prefs, "count": len(prefs)}
+    except Exception as e:
+        logger.error(f"GET /api/preferences failed: {e}")
+        return {"preferences": [], "count": 0, "error": str(e)}
+
+
+@app.post("/api/preferences", tags=["preferences"], dependencies=[Depends(verify_api_key)])
+async def upsert_preference_endpoint(req: PreferenceRequest):
+    """Store or update a Director preference (UPSERT by category + key)."""
+    try:
+        store = _get_store()
+        ok = store.upsert_preference(
+            category=req.category,
+            key=req.key,
+            value=req.value,
+        )
+        if ok:
+            return {"status": "upserted", "category": req.category, "key": req.key}
+        raise HTTPException(status_code=500, detail="Failed to upsert preference")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"POST /api/preferences failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/preferences/{category}/{key}", tags=["preferences"], dependencies=[Depends(verify_api_key)])
+async def delete_preference_endpoint(category: str, key: str):
+    """Delete a Director preference by category and key."""
+    try:
+        store = _get_store()
+        ok = store.delete_preference(category=category, key=key)
+        if ok:
+            return {"status": "deleted", "category": category, "key": key}
+        raise HTTPException(status_code=404, detail=f"Preference {category}/{key} not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"DELETE /api/preferences/{category}/{key} failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

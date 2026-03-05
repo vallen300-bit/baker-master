@@ -100,6 +100,10 @@ class SentinelStoreBack:
         # RETRIEVAL-FIX-1: Ensure matter_registry table exists
         self._ensure_matter_registry_table()
 
+        # STEP3: Ensure director_preferences table + VIP profile columns
+        self._ensure_director_preferences_table()
+        self._ensure_vip_profile_columns()
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -1033,6 +1037,192 @@ class SentinelStoreBack:
             except Exception:
                 pass
             logger.warning(f"Could not ensure Decision Engine columns: {e}")
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # STEP3: Director Preferences + VIP Profile Columns
+    # -------------------------------------------------------
+
+    def _ensure_director_preferences_table(self):
+        """Create director_preferences table if it doesn't exist. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS director_preferences (
+                    id          SERIAL PRIMARY KEY,
+                    category    TEXT NOT NULL,
+                    pref_key    TEXT NOT NULL,
+                    pref_value  TEXT NOT NULL,
+                    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE(category, pref_key)
+                )
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("director_preferences table verified")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure director_preferences table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_vip_profile_columns(self):
+        """Add role_context, communication_pref, expertise columns to vip_contacts. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS role_context TEXT")
+            cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS communication_pref TEXT DEFAULT 'email'")
+            cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS expertise TEXT")
+            conn.commit()
+            cur.close()
+            logger.info("vip_contacts profile columns verified (role_context, communication_pref, expertise)")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure VIP profile columns: {e}")
+        finally:
+            self._put_conn(conn)
+
+    # -- Director Preferences CRUD --
+
+    def upsert_preference(self, category: str, key: str, value: str) -> bool:
+        """Insert or update a Director preference. Returns True on success."""
+        conn = self._get_conn()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO director_preferences (category, pref_key, pref_value)
+                   VALUES (%s, %s, %s)
+                   ON CONFLICT (category, pref_key)
+                   DO UPDATE SET pref_value = EXCLUDED.pref_value,
+                                 updated_at = NOW()""",
+                (category, key, value),
+            )
+            conn.commit()
+            cur.close()
+            logger.info(f"Upserted preference {category}/{key}")
+            return True
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"upsert_preference failed: {e}")
+            return False
+        finally:
+            self._put_conn(conn)
+
+    def get_preferences(self, category: str = None) -> list:
+        """Get Director preferences, optionally filtered by category. Returns list of dicts."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            if category:
+                cur.execute(
+                    """SELECT id, category, pref_key, pref_value, updated_at
+                       FROM director_preferences
+                       WHERE category = %s
+                       ORDER BY category, pref_key""",
+                    (category,),
+                )
+            else:
+                cur.execute(
+                    """SELECT id, category, pref_key, pref_value, updated_at
+                       FROM director_preferences
+                       ORDER BY category, pref_key"""
+                )
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            return rows
+        except Exception as e:
+            logger.warning(f"get_preferences failed (non-fatal): {e}")
+            return []
+        finally:
+            self._put_conn(conn)
+
+    def delete_preference(self, category: str, key: str) -> bool:
+        """Delete a Director preference by category + key. Returns True if deleted."""
+        conn = self._get_conn()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "DELETE FROM director_preferences WHERE category = %s AND pref_key = %s",
+                (category, key),
+            )
+            deleted = cur.rowcount
+            conn.commit()
+            cur.close()
+            return deleted > 0
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"delete_preference failed: {e}")
+            return False
+        finally:
+            self._put_conn(conn)
+
+    # -- VIP Profile Update --
+
+    def update_vip_profile(self, name: str, **kwargs) -> Optional[dict]:
+        """Update a VIP contact's profile fields. Only provided fields are updated.
+        Allowed: tier, domain, role_context, communication_pref, expertise.
+        Returns the updated row as dict, or None on failure/not found."""
+        allowed = {"tier", "domain", "role_context", "communication_pref", "expertise"}
+        updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
+        if not updates:
+            return None
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            set_parts = []
+            params = []
+            for col, val in updates.items():
+                set_parts.append(f"{col} = %s")
+                params.append(val)
+            params.append(name.lower())
+
+            cur.execute(
+                f"""UPDATE vip_contacts SET {', '.join(set_parts)}
+                    WHERE LOWER(name) = %s
+                    RETURNING *""",
+                params,
+            )
+            row = cur.fetchone()
+            conn.commit()
+            cur.close()
+            if row:
+                logger.info(f"Updated VIP profile for '{name}': {list(updates.keys())}")
+                return dict(row)
+            return None
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"update_vip_profile failed for '{name}': {e}")
+            return None
         finally:
             self._put_conn(conn)
 
