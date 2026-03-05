@@ -1095,20 +1095,40 @@ async def scan_chat(req: ScanRequest):
     except Exception as _e:
         logger.warning(f"Decision Engine scoring failed (non-fatal): {_e}")
 
-    # STEP1B: Tier-based routing.
-    # Tier 1 (most urgent) → legacy fast path (~3s) regardless of feature flag.
-    # Tier 2-3 → agentic (8 tools) when BAKER_AGENTIC_RAG=true, legacy otherwise.
+    # STEP1C: Mode+tier routing.
+    # mode=handle/delegate/escalate from Decision Engine.
+    # delegate forces agentic path with more iterations + timeout.
     from orchestrator.agent import is_agentic_rag_enabled
 
     _tier = _scored.get("tier", 3) if _scored else 3
+    _mode = _scored.get("mode", "escalate") if _scored else "escalate"
+    _domain = _scored.get("domain", "projects") if _scored else "projects"
 
-    if _tier == 1:
+    # Create baker_task (non-fatal tracking)
+    _task_id = None
+    try:
+        store = _get_store()
+        _task_id = store.create_baker_task(
+            domain=_domain,
+            urgency_score=_scored.get("urgency_score") if _scored else None,
+            tier=_tier, mode=_mode, task_type="question",
+            title=req.question[:200], description=req.question,
+            sender="director", source="scan", channel="scan",
+            status="in_progress",
+        )
+    except Exception as _te:
+        logger.warning(f"baker_task creation failed (non-fatal): {_te}")
+
+    if _tier == 1 and _mode != "delegate":
         logger.info("Scan: Tier 1 detected — forcing legacy path for speed")
-        return _scan_chat_legacy(req, start, _domain_context)
-    elif is_agentic_rag_enabled():
-        return _scan_chat_agentic(req, start, _domain_context)
+        return _scan_chat_legacy(req, start, _domain_context,
+                                 task_id=_task_id, mode=_mode, domain=_domain)
+    elif is_agentic_rag_enabled() or _mode == "delegate":
+        return _scan_chat_agentic(req, start, _domain_context,
+                                  task_id=_task_id, mode=_mode, domain=_domain)
     else:
-        return _scan_chat_legacy(req, start, _domain_context)
+        return _scan_chat_legacy(req, start, _domain_context,
+                                 task_id=_task_id, mode=_mode, domain=_domain)
 
 
 def _build_scan_system_prompt(deadline_only: bool = False, contexts=None,
@@ -1155,7 +1175,8 @@ def _build_scan_system_prompt(deadline_only: bool = False, contexts=None,
         )
 
 
-def _scan_store_back(req, full_response: str, start: float, extra_meta: Optional[dict] = None):
+def _scan_store_back(req, full_response: str, start: float,
+                     extra_meta: Optional[dict] = None, task_id: int = None):
     """Store-back logic shared by both agentic and legacy paths."""
     elapsed_ms = int((time.time() - start) * 1000)
     try:
@@ -1227,6 +1248,23 @@ def _scan_store_back(req, full_response: str, start: float, extra_meta: Optional
     except Exception as e:
         logger.warning(f"Conversation store-back failed (non-fatal): {e}")
 
+    # STEP1C: Close baker_task with deliverable + agent metadata
+    if task_id:
+        try:
+            store = _get_store()
+            agent_meta = extra_meta or {}
+            store.update_baker_task(
+                task_id, status="completed",
+                deliverable=full_response[:5000],
+                agent_iterations=agent_meta.get("agent_iterations"),
+                agent_tool_calls=agent_meta.get("agent_tool_calls"),
+                agent_input_tokens=agent_meta.get("agent_input_tokens"),
+                agent_output_tokens=agent_meta.get("agent_output_tokens"),
+                agent_elapsed_ms=agent_meta.get("agent_elapsed_ms"),
+            )
+        except Exception as e:
+            logger.warning(f"baker_task update failed (non-fatal): {e}")
+
     # Email scan result to Director (EMAIL-REFORM-1 Type 2 — opt-in only)
     if full_response:
         try:
@@ -1238,11 +1276,18 @@ def _scan_store_back(req, full_response: str, start: float, extra_meta: Optional
             logger.warning(f"Scan email failed (non-fatal): {e}")
 
 
-def _scan_chat_agentic(req, start: float, domain_context: str = ""):
-    """AGENTIC-RAG-1: Agent loop with tool use for Scan SSE."""
+def _scan_chat_agentic(req, start: float, domain_context: str = "",
+                       task_id: int = None, mode: str = None, domain: str = None):
+    """AGENTIC-RAG-1 + STEP1C: Agent loop with tool use for Scan SSE."""
     from orchestrator.agent import run_agent_loop_streaming
+    from orchestrator.scan_prompt import build_mode_aware_prompt
 
-    system_prompt = _build_scan_system_prompt(deadline_only=True, domain_context=domain_context)
+    base_prompt = _build_scan_system_prompt(deadline_only=True, domain_context=domain_context)
+    system_prompt = build_mode_aware_prompt(base_prompt, domain, mode)
+
+    # STEP1C: delegate mode gets more iterations + longer timeout
+    _max_iter = 7 if mode == "delegate" else 5
+    _timeout = 20.0 if mode == "delegate" else None
 
     # Build history
     history = []
@@ -1261,7 +1306,8 @@ def _scan_chat_agentic(req, start: float, domain_context: str = ""):
                 question=req.question,
                 system_prompt=system_prompt,
                 history=history,
-                max_iterations=5,
+                max_iterations=_max_iter,
+                timeout_override=_timeout,
             )
             for item in gen:
                 if "_agent_result" in item:
@@ -1271,7 +1317,10 @@ def _scan_chat_agentic(req, start: float, domain_context: str = ""):
                         logger.warning("Agent timed out — falling back to single-pass")
                         # PM note: delimiter so frontend knows a fresh answer follows
                         yield f"data: {json.dumps({'token': '[Searching further...] '})}\n\n"
-                        async for sse in _scan_chat_legacy_stream(req, start, domain_context):
+                        async for sse in _scan_chat_legacy_stream(
+                            req, start, domain_context,
+                            task_id=task_id, mode=mode, domain=domain,
+                        ):
                             yield sse
                         return
                 elif "token" in item:
@@ -1305,7 +1354,7 @@ def _scan_chat_agentic(req, start: float, domain_context: str = ""):
                 f"{agent_result.total_input_tokens}+{agent_result.total_output_tokens} tokens, "
                 f"{agent_result.elapsed_ms}ms"
             )
-        _scan_store_back(req, full_response, start, extra_meta)
+        _scan_store_back(req, full_response, start, extra_meta, task_id=task_id)
 
     return StreamingResponse(
         event_stream(),
@@ -1318,7 +1367,8 @@ def _scan_chat_agentic(req, start: float, domain_context: str = ""):
     )
 
 
-async def _scan_chat_legacy_stream(req, start: float, domain_context: str = ""):
+async def _scan_chat_legacy_stream(req, start: float, domain_context: str = "",
+                                   task_id: int = None, mode: str = None, domain: str = None):
     """Legacy single-pass RAG as an async generator (used as fallback from agentic)."""
     full_response = ""
     try:
@@ -1365,9 +1415,11 @@ async def _scan_chat_legacy_stream(req, start: float, domain_context: str = ""):
     except Exception:
         pass
 
-    system_prompt = _build_scan_system_prompt(
+    from orchestrator.scan_prompt import build_mode_aware_prompt
+    base_prompt = _build_scan_system_prompt(
         deadline_only=False, contexts=contexts, domain_context=domain_context,
     )
+    system_prompt = build_mode_aware_prompt(base_prompt, domain, mode)
 
     messages = []
     for msg in (req.history or [])[-10:]:
@@ -1393,10 +1445,11 @@ async def _scan_chat_legacy_stream(req, start: float, domain_context: str = ""):
         yield f"data: {err_payload}\n\n"
 
     yield "data: [DONE]\n\n"
-    _scan_store_back(req, full_response, start)
+    _scan_store_back(req, full_response, start, task_id=task_id)
 
 
-def _scan_chat_legacy(req, start: float, domain_context: str = ""):
+def _scan_chat_legacy(req, start: float, domain_context: str = "",
+                      task_id: int = None, mode: str = None, domain: str = None):
     """Legacy single-pass RAG — unchanged behavior, refactored into own function."""
 
     # 1. Retrieve context
@@ -1458,10 +1511,12 @@ def _scan_chat_legacy(req, start: float, domain_context: str = ""):
     except Exception as e:
         logger.warning(f"Email/WhatsApp retrieval failed (non-fatal): {e}")
 
-    # 2. Build system prompt with context (DECISION-ENGINE-1A: domain context included)
-    system_prompt = _build_scan_system_prompt(
+    # 2. Build system prompt with context (STEP1C: mode-aware prompt)
+    from orchestrator.scan_prompt import build_mode_aware_prompt
+    base_prompt = _build_scan_system_prompt(
         deadline_only=False, contexts=contexts, domain_context=domain_context,
     )
+    system_prompt = build_mode_aware_prompt(base_prompt, domain, mode)
 
     # 3. Build messages (include history for follow-ups)
     messages = []
@@ -1497,8 +1552,8 @@ def _scan_chat_legacy(req, start: float, domain_context: str = ""):
         # Send [DONE] signal
         yield "data: [DONE]\n\n"
 
-        # 5. Store-back
-        _scan_store_back(req, full_response, start)
+        # 5. Store-back (STEP1C: pass task_id for closure)
+        _scan_store_back(req, full_response, start, task_id=task_id)
 
     return StreamingResponse(
         event_stream(),
@@ -1672,6 +1727,49 @@ async def ingest_document(
 async def list_collections():
     """Return available collections for the upload dropdown."""
     return {"collections": sorted(VALID_COLLECTIONS)}
+
+
+# ============================================================
+# STEP1C: Baker Tasks API (Task Ledger)
+# ============================================================
+
+@app.get("/api/tasks", tags=["tasks"], dependencies=[Depends(verify_api_key)])
+async def get_baker_tasks_endpoint(
+    status: Optional[str] = Query(None, description="Filter by status"),
+    mode: Optional[str] = Query(None, description="Filter by mode"),
+    limit: int = Query(20, le=100, description="Max results"),
+):
+    """Query the baker_tasks ledger."""
+    store = _get_store()
+    tasks = store.get_baker_tasks(status=status, mode=mode, limit=limit)
+    # Serialize datetimes for JSON
+    for t in tasks:
+        for k, v in t.items():
+            if isinstance(v, datetime):
+                t[k] = v.isoformat()
+    return {"tasks": tasks, "count": len(tasks)}
+
+
+class TaskFeedbackRequest(BaseModel):
+    feedback: str = Field(..., pattern="^(accepted|rejected|revised)$")
+    comment: Optional[str] = None
+
+
+@app.post("/api/tasks/{task_id}/feedback", tags=["tasks"], dependencies=[Depends(verify_api_key)])
+async def task_feedback_endpoint(task_id: int, body: TaskFeedbackRequest):
+    """Director feedback on a completed baker_task."""
+    store = _get_store()
+    task = store.get_baker_task_by_id(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task {task_id} not found")
+    ok = store.update_baker_task(
+        task_id,
+        director_feedback=body.feedback,
+        feedback_comment=body.comment,
+    )
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to update task")
+    return {"status": "updated", "task_id": task_id, "feedback": body.feedback}
 
 
 # ============================================================

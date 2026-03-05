@@ -64,25 +64,43 @@ def _format_wa_context(contexts) -> str:
 
 def _handle_director_question(question: str, msg_id: str, scored: dict = None):
     """
-    WA-QUESTION-1: Answer a Director question using the Scan-style RAG flow.
+    WA-QUESTION-1 + STEP1C: Answer a Director question using Scan-style RAG.
 
-    AGENTIC-RAG-1 + STEP1B: Tier-based routing.
-    Tier 1 (most urgent) → legacy fast path for speed.
-    Tier 2-3 → agentic when BAKER_AGENTIC_RAG=true, legacy otherwise.
+    Mode+tier routing: delegate forces agentic path with more iterations.
+    All paths create a baker_task for tracking.
     """
     start = time.time()
 
     from orchestrator.agent import is_agentic_rag_enabled
 
     _tier = scored.get("tier", 3) if scored else 3
+    _mode = scored.get("mode", "escalate") if scored else "escalate"
+    _domain = scored.get("domain", "projects") if scored else "projects"
 
-    if _tier == 1:
+    # Create baker_task (non-fatal)
+    _task_id = None
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        _task_id = store.create_baker_task(
+            domain=_domain,
+            urgency_score=scored.get("urgency_score") if scored else None,
+            tier=_tier, mode=_mode, task_type="question",
+            title=question[:200], description=question,
+            sender="director", source="whatsapp", channel="whatsapp",
+            status="in_progress",
+        )
+    except Exception:
+        pass
+
+    # Mode+tier routing (all call sites pass mode + domain)
+    if _tier == 1 and _mode != "delegate":
         logger.info("WA question: Tier 1 — forcing legacy path for speed")
-        answer = _handle_director_question_legacy(question, start)
-    elif is_agentic_rag_enabled():
-        answer = _handle_director_question_agentic(question, start)
+        answer = _handle_director_question_legacy(question, start, mode=_mode, domain=_domain)
+    elif is_agentic_rag_enabled() or _mode == "delegate":
+        answer = _handle_director_question_agentic(question, start, mode=_mode, domain=_domain)
     else:
-        answer = _handle_director_question_legacy(question, start)
+        answer = _handle_director_question_legacy(question, start, mode=_mode, domain=_domain)
 
     if not answer:
         return  # error already handled inside the helper
@@ -92,14 +110,25 @@ def _handle_director_question(question: str, msg_id: str, scored: dict = None):
     elapsed_ms = int((time.time() - start) * 1000)
     logger.info(f"WA question answered: {elapsed_ms}ms, {len(answer)} chars")
 
+    # Close baker_task (non-fatal)
+    if _task_id:
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            store.update_baker_task(_task_id, status="completed",
+                                   deliverable=answer[:5000])
+        except Exception:
+            pass
+
     # --- Store-back (fire-and-forget) ---
     _wa_store_back(question, answer)
 
 
-def _handle_director_question_agentic(question: str, start: float) -> str:
-    """Agent loop path for WhatsApp questions."""
+def _handle_director_question_agentic(question: str, start: float,
+                                      mode: str = None, domain: str = None) -> str:
+    """Agent loop path for WhatsApp questions. STEP1C: mode-aware prompt."""
     from orchestrator.agent import run_agent_loop
-    from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT
+    from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT, build_mode_aware_prompt
     from config.settings import config
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -122,7 +151,7 @@ def _handle_director_question_agentic(question: str, start: float) -> str:
     except Exception:
         pass
 
-    system_prompt = (
+    base_prompt = (
         f"{SCAN_SYSTEM_PROMPT}\n"
         f"## CURRENT TIME\n{now}\n"
         f"{deadline_block}\n\n"
@@ -131,12 +160,18 @@ def _handle_director_question_agentic(question: str, start: float) -> str:
         f"No markdown headers or bullet formatting. Use *bold* sparingly (WhatsApp supports it).\n"
         f"No document blocks. No numbered lists longer than 5 items.\n"
     )
+    system_prompt = build_mode_aware_prompt(base_prompt, domain, mode)
+
+    # STEP1C: delegate mode gets more iterations + longer timeout
+    _max_iter = 5 if mode == "delegate" else 3
+    _timeout = 15.0 if mode == "delegate" else None
 
     try:
         result = run_agent_loop(
             question=question,
             system_prompt=system_prompt,
-            max_iterations=3,
+            max_iterations=_max_iter,
+            timeout_override=_timeout,
         )
         logger.info(
             f"AGENTIC-RAG WA: {result.iterations} iterations, "
@@ -147,15 +182,16 @@ def _handle_director_question_agentic(question: str, start: float) -> str:
 
         if result.timed_out or not result.answer:
             logger.warning("Agent timed out on WhatsApp — falling back to legacy")
-            return _handle_director_question_legacy(question, start)
+            return _handle_director_question_legacy(question, start, mode=mode, domain=domain)
 
         return result.answer
     except Exception as e:
         logger.error(f"Agentic WA question failed, falling back to legacy: {e}")
-        return _handle_director_question_legacy(question, start)
+        return _handle_director_question_legacy(question, start, mode=mode, domain=domain)
 
 
-def _handle_director_question_legacy(question: str, start: float) -> str:
+def _handle_director_question_legacy(question: str, start: float,
+                                     mode: str = None, domain: str = None) -> str:
     """Legacy single-pass RAG path for WhatsApp questions."""
     # --- 1. Retrieve context (Qdrant vectors) ---
     try:
@@ -207,8 +243,8 @@ def _handle_director_question_legacy(question: str, start: float) -> str:
     except Exception as e:
         logger.warning(f"WA question: email/WA retrieval failed (non-fatal): {e}")
 
-    # --- 2. Build system prompt ---
-    from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT
+    # --- 2. Build system prompt (STEP1C: mode-aware) ---
+    from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT, build_mode_aware_prompt
     from config.settings import config
 
     context_block = _format_wa_context(contexts)
@@ -232,7 +268,7 @@ def _handle_director_question_legacy(question: str, start: float) -> str:
     except Exception:
         pass
 
-    system_prompt = (
+    base_prompt = (
         f"{SCAN_SYSTEM_PROMPT}\n"
         f"## CURRENT TIME\n{now}\n\n"
         f"## RETRIEVED CONTEXT\n{context_block}"
@@ -242,6 +278,7 @@ def _handle_director_question_legacy(question: str, start: float) -> str:
         f"No markdown headers or bullet formatting. Use *bold* sparingly (WhatsApp supports it).\n"
         f"No document blocks. No numbered lists longer than 5 items.\n"
     )
+    system_prompt = build_mode_aware_prompt(base_prompt, domain, mode)
 
     # --- 3. Call Claude (non-streaming, WhatsApp doesn't support SSE) ---
     try:
