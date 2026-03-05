@@ -410,12 +410,14 @@ def run_agent_loop(
     system_prompt: str,
     history: Optional[list] = None,
     max_iterations: int = 3,
+    timeout_override: float = None,
 ) -> AgentResult:
     """
     Blocking agent loop.  Returns AgentResult with the final text answer.
     Used by WhatsApp (_handle_director_question).
     """
     t0 = time.time()
+    timeout = timeout_override or AGENT_TIMEOUT_SECONDS
     executor = ToolExecutor()
     claude = anthropic.Anthropic(api_key=config.claude.api_key)
 
@@ -434,7 +436,7 @@ def run_agent_loop(
     for iteration in range(max_iterations):
         # Timeout check (PM review item #1)
         elapsed = time.time() - t0
-        if elapsed > AGENT_TIMEOUT_SECONDS:
+        if elapsed > timeout:
             logger.warning(f"Agent loop timed out after {elapsed:.1f}s, {iteration} iterations")
             return AgentResult(
                 answer="",
@@ -551,6 +553,7 @@ def run_agent_loop_streaming(
     system_prompt: str,
     history: Optional[list] = None,
     max_iterations: int = 5,
+    timeout_override: float = None,
 ) -> Generator[dict, None, AgentResult]:
     """
     Streaming agent loop for Scan SSE.
@@ -565,6 +568,7 @@ def run_agent_loop_streaming(
     The final AgentResult is also yielded as {"_agent_result": AgentResult}.
     """
     t0 = time.time()
+    timeout = timeout_override or AGENT_TIMEOUT_SECONDS
     executor = ToolExecutor()
     claude = anthropic.Anthropic(api_key=config.claude.api_key)
 
@@ -584,7 +588,7 @@ def run_agent_loop_streaming(
     for iteration in range(max_iterations):
         # Timeout check
         elapsed = time.time() - t0
-        if elapsed > AGENT_TIMEOUT_SECONDS:
+        if elapsed > timeout:
             logger.warning(f"Agent streaming timed out after {elapsed:.1f}s")
             result = AgentResult(
                 answer=full_answer,
