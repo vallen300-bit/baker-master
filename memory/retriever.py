@@ -923,20 +923,30 @@ class SentinelRetriever:
             if not rows:
                 return []
 
-            # Merge all people + keywords from matched matters, deduplicated
-            expanded = set()
+            # Merge people first (most useful for email/WA sender matching),
+            # then keywords. Deduplicated, preserving priority order.
+            seen = set()
+            expanded_people = []
+            expanded_keywords = []
             for people, keywords in rows:
                 for p in (people or []):
-                    expanded.add(p)
+                    p_key = p.lower()
+                    if p_key not in seen and p_key != q_lower:
+                        seen.add(p_key)
+                        expanded_people.append(p)
                 for k in (keywords or []):
-                    expanded.add(k)
+                    k_key = k.lower()
+                    if k_key not in seen and k_key != q_lower:
+                        seen.add(k_key)
+                        expanded_keywords.append(k)
 
-            # Remove the original query itself to avoid duplicate search
-            expanded.discard(q_lower)
-            expanded.discard(query)
-
-            logger.info(f"Matter expansion for '{query}': {len(expanded)} terms from {len(rows)} matter(s)")
-            return list(expanded)
+            result = expanded_people + expanded_keywords
+            logger.info(
+                f"Matter expansion for '{query}': {len(result)} terms "
+                f"({len(expanded_people)} people + {len(expanded_keywords)} keywords) "
+                f"from {len(rows)} matter(s)"
+            )
+            return result
         except Exception as e:
             logger.debug(f"Matter expansion failed (non-fatal): {e}")
             self._pg_pool = None
