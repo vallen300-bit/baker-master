@@ -403,11 +403,12 @@ The goal: the next session reads this file and knows exactly what's current — 
   - **Workflow established:** Code 300 (this machine) = supervisor/architect. Code Brisen (primary machine) = builder. Director bridges. Code 300 writes briefs, Code Brisen implements, Code 300 reviews before push.
 
 ### Next Session Action Items (March 6+)
-- **Run onboarding interview:** Director opens Cowork PM, walks through 6-stage interview (VIP profiles, matters, priorities, domain context, comm style). Cowork writes to Baker DB via MCP tools.
-- **Step 4 (Cost Monitor):** Track API costs per query, circuit breaker at €5/day. Pure code work.
-- **Expand matter registry:** Director adds more matters during onboarding or via `POST /api/matters`.
-- **RETRIEVAL-FIX-2 (deferred):** Background trigger auto-tagging against matter registry — Baker catches new signals in real-time without being asked.
-- **Andrey Oskolkov + Christian Merz** VIP tier promotion to 1 (can be done during onboarding).
+- ~~**Run onboarding interview:**~~ DONE — 14 preferences + 13 matters loaded via Cowork PM.
+- **AGENT-FRAMEWORK-1 (NEXT):** Multi-agent orchestration — Baker delegates to 10 specialist agents (Sales, Finance, Legal/Claims, Asset Management, Research, Comms/Draft, IT, Investment Banking, Marketing & PR, AI Development). Option C: manual trigger + proactive routing. Director defines agent specs with Cowork PM, PM sends summary to Code 300 for architecture + brief. Code Brisen builds.
+- **Step 4 (Cost Monitor) — DEFERRED:** Track API costs per query, circuit breaker at €5/day. Do before scaling proactive agents.
+- **Morning Briefing Upgrade — DEFERRED:** Upgrade from data dump to agentic proposals.
+- **Calendar Integration — DEFERRED:** Pre-meeting briefings + conflict detection.
+- **RETRIEVAL-FIX-2 — DEFERRED:** Background trigger auto-tagging against matter registry.
 - **WhatsApp historical backfill:** Run `POST /api/whatsapp/backfill?days=365` (needs `WHATSAPP_API_KEY` on Render).
 
 - **2026-03-05 (dimitry300 machine, session 8):** Step 3 — Agentic Onboarding:
