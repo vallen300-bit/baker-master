@@ -44,7 +44,8 @@ Switch hats as needed. When coding, code. When scoping, think.
 | `orchestrator/prompt_builder.py` | Pipeline prompt (structured JSON output) |
 | `orchestrator/scan_prompt.py` | Scan prompt (conversational output for chat) |
 | `orchestrator/action_handler.py` | Intent router — email, WhatsApp, deadline, VIP, fireflies, ClickUp actions |
-| `orchestrator/agent.py` | **AGENTIC-RAG-1:** Agent loop with tool-use — 5 tools, ToolExecutor, streaming + blocking modes |
+| `orchestrator/decision_engine.py` | **DECISION-ENGINE-1A:** score_trigger() — domain, urgency, tier, mode, overrides, VIP SLA |
+| `orchestrator/agent.py` | **AGENTIC-RAG-1 + STEP1B:** Agent loop with 8 tools, ToolExecutor, tier-based routing |
 | `memory/retriever.py` | Read-side: Qdrant vector search + PostgreSQL structured queries |
 | `memory/store_back.py` | Write-side: PostgreSQL writes + Qdrant interaction embeddings |
 
@@ -293,7 +294,7 @@ The goal: the next session reads this file and knows exactly what's current — 
 - **Email backfill re-run needed:** Run POST /api/emails/backfill?days=14 again AFTER attachment code deployed — first 123 emails don't have attachment text.
 - **WhatsApp historical backfill:** Run POST /api/whatsapp/backfill?days=90 to populate whatsapp_messages table with historical data. Endpoint exists, needs to be triggered.
 - **Wertheimer term sheet:** Financial decisions needed (target IRR, MO Vienna valuation, GP carry structure, management fee) before Cowork can draft.
-- **Agentic RAG transition:** Brief reviewed against current code (session 5). 9 gaps identified — 2 critical (WA history not passed to question handler, conv_metadata JSONB column missing), 4 medium (collection count, tool result size cap, deals/insights lost without ambient inclusion, streaming architecture), 3 minor. Brief is at `Baker-Project/pm/briefs/BRIEF_AGENTIC_RAG_v1.md`. Ready to implement once gaps are addressed.
+- ~~**Agentic RAG transition:**~~ DONE — AGENTIC-RAG-1 shipped (session 4), DECISION-ENGINE-1A shipped (session 6), STEP1B shipped (session 6). 8 tools, tier-based routing, VIP SLA monitoring all live.
 - **ClaimsMax / Philip emails:** Draft emails to Philip and Balazs ready (session 5). Need Philip's email address to send. Balazs = balazs.csepregi@brisengroup.com.
 - **Cupial/Hagenauer claims:** Claims-analysis agent completed first pass. ClaimsMax database queries prepared. Resume agent ID: `aa9055f9f8bbe76fb`. Next: connect ClaimsMax database for evidence retrieval.
 
@@ -332,17 +333,13 @@ The goal: the next session reads this file and knows exactly what's current — 
   - **PM-reviewed:** All 6 hardening items addressed (hard timeout, separate sleep fix, example queries in tool descriptions, per-tool error handling, token logging from day one, stream delimiter on fallback).
   - **Status: NOT PUSHED.** All 5 files are modified locally, syntax-checked, ready to commit and push. Feature flag defaults to `false` — zero behavior change on deploy.
 
-### AGENTIC-RAG-1 — Next Session Action Items
-- **Commit and push** the 5 files (sleep fix as separate commit per PM recommendation)
-- **Deploy to Render** with `BAKER_AGENTIC_RAG=false` (confirm no regressions)
-- **Flip flag to `true`** on Render, test:
-  - Scan: "What deals are active?" — verify tool calls in Render logs
-  - Scan: "What did we discuss with Hagenauer?" — verify search_meetings tool
-  - WhatsApp: simulate Director question via curl — verify reply arrives
-  - Action routing: "Send email to Marco" — must bypass agent loop
-- **Monitor:** Render logs for `AGENTIC-RAG` entries (iteration count, tool selection, token usage, latency)
-- **Phase 2 (future):** Add 4 more tools (get_active_deals, get_pending_alerts, get_recent_decisions, search_insights). PostgreSQL `agent_tool_calls` observability table. Channel-aware tool selection.
-- **Phase 3 (future):** Parallel tool execution (asyncio.gather), result caching (5-min TTL), token budget management, fallback to single-pass if agent loop times out.
+### AGENTIC-RAG-1 — Status
+- ~~**Phase 1 (5 tools):**~~ DONE — pushed session 4, deployed.
+- ~~**DECISION-ENGINE-1A:**~~ DONE — pushed session 6, deployed with all architect fixes.
+- ~~**STEP1B (8 tools + tier routing):**~~ DONE — pushed session 6, deployed with all architect fixes.
+- **STEP1C (task ledger + delegation):** NEXT — read brief, implement.
+- **Phase 2 (future):** PostgreSQL `agent_tool_calls` observability table. Channel-aware tool selection.
+- **Phase 3 (future):** Parallel tool execution (asyncio.gather), result caching (5-min TTL), token budget management.
 
 - **2026-03-04 (dimitry300 machine, session 5):** Baker Vision Definition + Decision Engine Brief + Tooling Setup:
   - **Baker Vision defined (3 foundational questions answered by Director):**
@@ -365,11 +362,27 @@ The goal: the next session reads this file and knows exactly what's current — 
   - **Baker Agentic RAG Transition Plan** read — PM's revision of Chat's Master Implementation Plan. 15 steps, 3 horizons. Step 1 resequenced: 1A = Decision Engine (brain), 1B = retrieval tool wrappers (hands), 1C = task ledger + delegation framework.
   - **Git state:** AGENTIC-RAG-1 still uncommitted on this machine (5 modified files + 1 new). Remote has 4 commits ahead (WA-SEND-1). Merge conflict on CLAUDE.md, dashboard.py, waha_webhook.py. Must resolve before pushing.
 
-### Next Session Action Items (March 5)
-- **Resolve git merge:** Stash AGENTIC-RAG-1 changes, pull WA-SEND-1 commits, reapply and resolve conflicts
-- **Update BRIEF_DECISION_ENGINE_v1.md** with PM feedback + Director answers (ClickUp = all Projects, family contacts, VIP tier defaults)
-- **Invoke `/feature-dev`** on Code Brisen: "Build Baker's Decision Engine based on BRIEF_DECISION_ENGINE_v1.md in Baker-Project/pm/briefs/"
-- **Commit and push AGENTIC-RAG-1** (still pending from session 4)
+- **2026-03-05 (primary machine, session 6):** Decision Engine + Agentic RAG Step 1A + 1B:
+  - **DECISION-ENGINE-1A (3 commits):** Full scoring and routing layer for all triggers.
+    - `orchestrator/decision_engine.py` (NEW): score_trigger() with 4-step domain classifier (VIP cache → keyword regex → source mapping → Haiku fallback), 3-component urgency scorer (time + financial + relationship = 3-9), 2 override detectors (emotional urgency, travel urgent), tier assigner (1=urgent/WA, 2=slack, 3=dashboard), mode tagger (handle/delegate/escalate).
+    - VIP cache (5-min TTL, thread-safe) + deadline cache (5-min TTL). VIP SLA monitoring job (every 5 min) — Tier 1 VIP unanswered >15min → WhatsApp alert, Tier 2 >4h → Slack alert.
+    - Scoring inserted at 3 points: pipeline.py (background), waha_webhook.py (WhatsApp), dashboard.py (Scan). All non-fatal — scoring failure doesn't break pipeline.
+    - TriggerEvent extended with 6 Optional scored fields. trigger_log table has 5 new columns. vip_contacts has tier + domain columns. 6 Tier 1 VIPs set.
+    - Architect-reviewed: 3 critical + 5 medium + 3 low bugs found and fixed (tier numbering standardized to 1=urgent, financial parsing via finditer, startup DELETE removed, thread safety, caches, async blocking, VIP name matching, SLA query order).
+  - **STEP1B (1 commit):** 3 new agent tools + tier-based RAG routing.
+    - `orchestrator/agent.py`: Expanded from 5 to 8 tools — added get_deadlines, get_clickup_tasks, search_deals_insights.
+    - `memory/retriever.py`: New get_clickup_tasks_search() — PostgreSQL ILIKE on clickup_tasks with status/priority/list_name filters.
+    - Tier-based routing in both Scan (dashboard.py) and WhatsApp (waha_webhook.py): Tier 1 → legacy fast path (~3s), Tier 2-3 + flag → agentic tool loop (8 tools).
+    - Fixed _scan_chat_legacy_stream missing domain_context, get_active_deals missing "label" metadata key, _scored NameError on scoring failure.
+    - Architect-reviewed: 3 medium fixes applied (query optionality, fallback timing, psycopg2.extras import).
+  - **Andrey Oskolkov + Christian Merz** added as VIP contacts (Tier 2 default, will promote to Tier 1 on next restart).
+  - **Production verified:** 12 scheduler jobs (including vip_sla_check), all 5 scored columns live in trigger_log, Scan streaming works, tier routing active.
+
+### Next Session Action Items (March 5+)
+- **Step 1C:** Task ledger + delegation framework. Baker's Agentic RAG Transition Plan Step 1C. Read brief at `Baker-Project/pm/briefs/` (Dropbox on dimitry300 machine).
+- **Set BAKER_AGENTIC_RAG=true on Render** to activate the 8-tool agentic loop for Tier 2-3 queries. Currently defaults to false.
+- **Andrey Oskolkov + Christian Merz** need tier promotion to 1 — will happen automatically on next Render restart (startup migration).
+- **Monitor:** Check trigger_log for scored fields after a few email/ClickUp poll cycles: `SELECT domain, tier, mode, COUNT(*) FROM trigger_log WHERE domain IS NOT NULL GROUP BY domain, tier, mode`
 
 ## Key Documents (Dropbox)
 
