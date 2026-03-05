@@ -259,164 +259,44 @@ The goal: the next session reads this file and knows exactly what's current — 
 
 ## Session Log
 
-- **2026-03-02 (dimitry300 machine):** Orientation session. Cloned repo to second workstation (/Users/dimitry300/Desktop/baker-code). Set up ClickUp API token in ~/.zshrc. Verified ClickUp Handoff Notes list access. No code changes — context transfer only. Opening prompt for future sessions established.
-- **2026-03-02 (dimitry300 machine, session 2):** ARCH-1/2/5 — removed all content truncation and added missing DB columns. 8 files changed:
-  - Removed [:500] truncation: deadlines.py, email_trigger.py, waha_webhook.py
-  - Removed [:200] body_preview and [:300] reply_snippet truncation: sent_emails.py
-  - Removed [:500] prompt and question truncation: store_back.py
-  - Added `analysis_text TEXT` column to deep_analyses table (store_back.py)
-  - Added `answer TEXT` column to conversation_memory table (store_back.py) + wired full_response through dashboard.py
-  - Added `summary TEXT` column to rss_articles table (state.py) + store article content in rss_trigger.py
-  - All include ALTER TABLE IF NOT EXISTS for live Neon migration.
-  - ARCH-3 (Fireflies full transcript storage) left as "to do" — requires new table + MCP tool.
-  - ARCH-4 merged into ARCH-1 (WhatsApp truncation was one of the 3 [:500] removals).
-- **2026-03-02 (dimitry300 machine, session 2 continued):** Architecture & MCP bridge work:
-  - **CLAUDE.md symlink:** Created symlink from Dropbox Baker-Project/CLAUDE.md → git repo. Cowork sessions can now read live technical state. Updated Cowork instructions.md to include CLAUDE.md as document #1.
-  - **Cowork Session Playbook:** Created `Baker-Project/COWORK_SESSION_PLAYBOOK.md` — template for working on any Mac without Claude Code (two-file memory system: PROJECT_MEMORY + SESSION_HANDOVER).
-  - **MCP write tools (4 new):** Added `baker_store_decision`, `baker_add_deadline`, `baker_upsert_vip`, `baker_store_analysis` to `baker_mcp_server.py`. Server now has 18 tools (14 read + 4 write). Closes the feedback loop: Cowork/Claude Code → Baker memory.
-  - **MCP connected to Claude Code:** Added baker MCP config to `~/.claude/settings.json` on dimitry300 machine. Claude Code now has 1M context + Baker's full memory = analytical workbench.
-- **2026-03-02/03 (primary machine, long session):** CLICKUP-V2 PM Overlay + ARCH full-content overhaul:
-  - **CLICKUP-V2:** 3 new intents (clickup_action, clickup_fetch, clickup_plan) in action_handler.py, wired into Scan + WhatsApp. Natural-language ClickUp task management.
-  - **ARCH-3:** `meeting_transcripts` PostgreSQL table + backfill (50 Fireflies transcripts). Memory-first search + recent-3 injection into Scan context. Diagnostic endpoints: GET /api/fireflies/status, POST /api/fireflies/backfill.
-  - **ARCH-6:** `email_messages` PostgreSQL table + Gmail API backfill (123 emails, 14 days). email_trigger.py stores every email. Retriever keyword search + recent-3 injection. Endpoint: POST /api/emails/backfill?days=14.
-  - **ARCH-7:** `whatsapp_messages` PostgreSQL table. waha_webhook.py stores every message. Retriever keyword search + recent-3 injection. No historical backfill (API limitation).
-  - **Full-text enrichment:** When Qdrant returns a meeting/email chunk, retriever swaps it with complete source from PostgreSQL.
-  - **Remaining truncation cleanup:** deadline_manager.py, slack_trigger.py, pipeline.py — all [:500] and [:1000] caps removed.
-  - **Chunk-before-embed (Terminal 2):** store_back.py now chunks long content into ~500-token overlapping pieces before embedding. No silent truncation on Voyage AI token limit.
-  - **MCP connected to Claude Desktop:** Added baker MCP config to Claude Desktop `claude_desktop_config.json` on dimitry300 machine. Installed Python 3.11 via Homebrew + dependencies (psycopg2-binary, mcp).
-  - **Architecture documented:** Added "Role Division (Baker vs Cowork)" section to CLAUDE.md — Baker remembers, Cowork/Claude Code thinks. MCP bridges them.
-  - **ARCH-3** ~~still open~~ CLOSED — Fireflies full transcript storage shipped.
-- **2026-03-03 (primary machine, continued):** Fireflies gap diagnosis + email attachments + insights pipeline:
-  - **Fireflies backfill fixed:** Rate-limited Voyage AI embedding (2s delay), 50 transcripts now in both PostgreSQL + Qdrant. Diagnostic endpoint: GET /api/fireflies/status. Manual backfill: POST /api/fireflies/backfill.
-  - **Memory-first search:** handle_fireflies_fetch now checks PostgreSQL before hitting Fireflies API. Baker returns stored transcripts immediately.
-  - **Recent injection:** Scan always includes 3 most recent meetings + 3 most recent emails + 3 most recent WhatsApp messages in context — regardless of keyword match.
-  - **Email attachments (ARCH-6 ext):** extract_gmail.py now downloads and parses PDF, DOCX, XLSX, CSV, TXT attachments via Gmail API. Text appended to email body. Supported up to 10MB per file.
-  - **Email backfill with attachments:** POST /api/emails/backfill?days=14 re-fetches from Gmail API including attachments. 123 emails backfilled (re-run needed for attachment extraction).
-  - **INSIGHT-1:** New `insights` table + API (POST/GET /api/insights). Claude Code sessions can push strategic analysis into Baker's permanent memory. Auto-embedded to Qdrant. Retriever surfaces insights in Scan context.
-  - **Wertheimer SFO analysis stored:** Full proposal framework for Chanel family office LP opportunity stored as insight (project: brisen-lp).
-  - **WhatsApp backfill (Terminal 2):** POST /api/whatsapp/backfill endpoint added + WAHA media extraction (waha_client.py). Historical WhatsApp messages + media attachments now backfillable.
+Sessions 1-6 archived in `SESSION_LOG.md`. Recent sessions below.
 
-### Still To Do
-- **Email backfill re-run needed:** Run POST /api/emails/backfill?days=14 again AFTER attachment code deployed — first 123 emails don't have attachment text.
-- **WhatsApp historical backfill:** Run POST /api/whatsapp/backfill?days=90 to populate whatsapp_messages table with historical data. Endpoint exists, needs to be triggered.
-- **Wertheimer term sheet:** Financial decisions needed (target IRR, MO Vienna valuation, GP carry structure, management fee) before Cowork can draft.
-- ~~**Agentic RAG transition:**~~ DONE — AGENTIC-RAG-1 shipped (session 4), DECISION-ENGINE-1A shipped (session 6), STEP1B shipped (session 6). 8 tools, tier-based routing, VIP SLA monitoring all live.
-- **ClaimsMax / Philip emails:** Draft emails to Philip and Balazs ready (session 5). Need Philip's email address to send. Balazs = balazs.csepregi@brisengroup.com.
-- **Cupial/Hagenauer claims:** Claims-analysis agent completed first pass. ClaimsMax database queries prepared. Resume agent ID: `aa9055f9f8bbe76fb`. Next: connect ClaimsMax database for evidence retrieval.
+### Completed Milestones (sessions 1-8)
+- ~~ARCH-1/2/3/4/5/6/7~~ — full-text storage, no truncation, all data sources
+- ~~CLICKUP-V2~~ — 3 intents (action, fetch, plan)
+- ~~AGENTIC-RAG-1~~ — 9 tools, agent loop, tier-based routing
+- ~~DECISION-ENGINE-1A~~ — domain classifier, urgency scorer, VIP SLA monitoring
+- ~~STEP1B~~ — 8 tools + tier routing
+- ~~STEP1C~~ — baker_tasks table, mode-aware routing, domain/mode prompts
+- ~~RETRIEVAL-FIX-1~~ — matter registry (13 matters), auto-fetch from connected people
+- ~~Step 3 (Onboarding)~~ — director_preferences (14 prefs), VIP profile enrichment, DB-driven prompts
+- ~~ALERT-DEDUP-1~~ — Slack alerts reduced from ~1,100/day to ~20/day
+- ~~INSIGHT-1~~ — insights table + API
+- MCP server: 23 tools (15 read + 8 write)
 
-- **2026-03-04 (primary machine, session 5):** Slack/email flood fix + ClaimsMax + Cupial analysis:
-  - **ALERT-DEDUP-1 (4 commits):**
-    - `outputs/slack_notifier.py`: Two-level dedup cache (exact title 1h + topic entity 4h). Slack alerts reduced from ~1,100/day to ~20/day.
-    - `orchestrator/prompt_builder.py`: Strict tier criteria — T1 max 1-2/day, T2 max 5/day, T3 default. Also tightened ClickUp tier guidance.
-    - `triggers/email_trigger.py`: Fixed email gap alert spam (24h cooldown), fixed `post_alert()` wrong argument types, fixed double-processing bug (within-cycle dedup via `_seen_threads_this_cycle` set + cross-cycle dedup using thread_id instead of broken message_id matching).
-    - `orchestrator/pipeline.py` + `triggers/embedded_scheduler.py`: Disabled 30-min alert digest email (was ~48 emails/day). Baker now sends 1 email/day (morning briefing at 08:00 CET).
-  - **Agentic RAG brief review:** Full code-vs-brief validation. 6 validated, 9 gaps identified. Documented above.
-  - **ClaimsMax analysis:** Read Philip's presentation (10 slides), Feb 25 meeting transcript (79 min, Philip/UBM strategy), Mar 4 meeting transcript (18 min, Dr. Jurkovic/UBM pitch). Drafted emails to Philip and Balazs. Produced commercialization roadmap (4 phases). Brainstorm dashboard deployed to GitHub Pages: https://vallen300-bit.github.io/claimsmax-brainstorm/
-  - **Cupial/Hagenauer claims analysis:** Launched claims-analysis agent on Excel spreadsheet + Dropbox strategic docs. Financial exposure mapped, 5 immediate actions identified, ClaimsMax database queries prepared.
-  - **Infra:** Installed `gh` CLI on primary machine, authenticated as vallen300-bit. Created movie-residences-sales repo with GitHub Pages: https://vallen300-bit.github.io/movie-residences-sales/
-  - **New folder:** `projects/claim-management-ai/` created for ClaimsMax working files (gitignored).
+### Open Items
+- **WhatsApp historical backfill:** Run `POST /api/whatsapp/backfill?days=365` (needs `WHATSAPP_API_KEY` on Render)
+- **Email backfill re-run:** Run POST /api/emails/backfill?days=14 for attachment text extraction
+- **ClaimsMax / Philip emails:** Draft emails ready, need Philip's email address
+- **Wertheimer term sheet:** Financial decisions needed before Cowork can draft
 
-- **2026-03-03 (dimitry300 machine, session 3):** Full-text storage overhaul + WhatsApp backfill build:
-  - **Content truncation removal:** Removed all remaining [:8000], [:2000], [:4000] caps from extract_gmail.py, store_back.py, fireflies_trigger.py, action_handler.py, slack_trigger.py. Everything that passes noise filter is now stored in full.
-  - **Chunk-before-embed:** store_back.py `store_document()` and `store_interaction()` now auto-chunk long content into ~500-token overlapping pieces before embedding. No more Voyage-3 32K token limit — 170K-char transcripts get ~95 searchable vectors instead of being truncated. Safety ceiling at 120K chars in `_embed()`.
-  - **WhatsApp historical backfill (new feature):**
-    - `triggers/waha_client.py` (new): WAHA API client — list_chats, fetch_messages, download_media_file, extract_media_text
-    - `scripts/extract_whatsapp.py` (new): CLI backfill tool (--since, --limit, --chat-id, --dry-run, --no-media) + backfill_whatsapp() startup function
-    - `triggers/waha_webhook.py`: upgraded to download media attachments, extract text via Claude Vision (images) / doc extractors (PDFs), include in pipeline content. Also stores to whatsapp_messages table (ARCH-7, merged with other terminal's work).
-    - `triggers/embedded_scheduler.py`: added whatsapp_resync job (every 6 hours)
-    - `outputs/dashboard.py`: added startup backfill thread (7-day catch-up) + POST /api/whatsapp/backfill?days=365 endpoint
-    - `config/settings.py`: added api_key to WahaConfig
-  - **Tested:** 476 chats found via WAHA API, history back to Dec 2025, media download confirmed (97KB JPEG). Dry-run and extraction verified locally.
-  - **BLOCKED:** `WHATSAPP_API_KEY` env var needs to be added to Render baker-master service. Handoff note sent to PM. Once set, run: `curl -X POST -H "X-Baker-Key: bakerbhavanga" "https://baker-master.onrender.com/api/whatsapp/backfill?days=365"`
-  - **Baker API key** (`bakerbhavanga`) and **WHATSAPP_API_KEY** (`8cbfd17c6ac9f44fa3c43fefaa078414`) added to `~/.zshrc` on dimitry300 machine.
+### Session 7 — 2026-03-05 (dimitry300 machine)
+STEP1C + RETRIEVAL-FIX-1 + SSE keepalive fix. baker_tasks table, mode-aware routing, matter_registry (5 seed matters), get_matter_context tool (#9), auto-fetch from connected people. SSE keepalive pings fixed connection drops.
 
-- **2026-03-03 (dimitry300 machine, session 4):** AGENTIC-RAG-1 — agentic RAG transition (Phase 1 MVP):
-  - **orchestrator/agent.py (NEW):** Agent loop module (~350 lines). 5 tools: search_memory, search_meetings, search_emails, search_whatsapp, get_contact. ToolExecutor with per-tool error handling. Two entry points: run_agent_loop() (blocking, WhatsApp) and run_agent_loop_streaming() (generator, Scan SSE). Hard 10s wall-clock timeout with fallback to legacy. AgentResult dataclass tracks iterations, tool calls, token counts, timing.
-  - **memory/retriever.py:** `time.sleep(1)` → `time.sleep(0.05)` — eliminates 14s dead wait across 15 Qdrant collections. Standalone fix, benefits both old and new flows.
-  - **orchestrator/scan_prompt.py:** Added `## MEMORY ACCESS` section to SCAN_SYSTEM_PROMPT — tells Claude about the 5 tools and how to use them.
-  - **outputs/dashboard.py:** Refactored scan_chat() question flow. Extracted shared helpers: `_build_scan_system_prompt()`, `_scan_store_back()`. Feature flag at line 1057 routes to `_scan_chat_agentic()` or `_scan_chat_legacy()`. Legacy path is byte-for-byte identical behavior. Agentic path streams tokens via agent loop, logs agent metadata (tokens, iterations, tool counts) to Qdrant conv_metadata. Stream delimiter `[Searching further...]` on timeout fallback.
-  - **triggers/waha_webhook.py:** Refactored `_handle_director_question()` into dispatcher + `_handle_director_question_agentic()` (max 3 iterations) + `_handle_director_question_legacy()` + `_wa_store_back()`. Feature flag, same fallback pattern.
-  - **PM-reviewed:** All 6 hardening items addressed (hard timeout, separate sleep fix, example queries in tool descriptions, per-tool error handling, token logging from day one, stream delimiter on fallback).
-  - **Status: NOT PUSHED.** All 5 files are modified locally, syntax-checked, ready to commit and push. Feature flag defaults to `false` — zero behavior change on deploy.
+### Session 8 — 2026-03-05 (dimitry300 machine)
+Step 3 Agentic Onboarding. director_preferences table + 3 VIP columns + DB-driven prompt injection. MCP server: 23 tools (15 read + 8 write). Onboarding completed via Cowork PM: 14 preferences + 13 matters loaded. AGENT-FRAMEWORK-1 scoped (10 specialist agents).
 
-### AGENTIC-RAG-1 — Status
-- ~~**Phase 1 (5 tools):**~~ DONE — pushed session 4, deployed.
-- ~~**DECISION-ENGINE-1A:**~~ DONE — pushed session 6, deployed with all architect fixes.
-- ~~**STEP1B (8 tools + tier routing):**~~ DONE — pushed session 6, deployed with all architect fixes.
-- ~~**STEP1C (task ledger + delegation):**~~ DONE — pushed session 7. baker_tasks table, mode-aware routing, domain/mode prompts, API endpoints.
-- ~~**RETRIEVAL-FIX-1 (matter registry):**~~ DONE — pushed session 7. 9 tools, matter-aware search, auto-fetch from connected people.
-- ~~**Step 3 (Agentic Onboarding):**~~ DONE — pushed session 8. director_preferences table, VIP profile enrichment (3 new columns), DB-driven prompt injection (priorities + domain context + comm style), 3 API endpoints, 3 new MCP tools (21 total). Onboarding interview runs via Cowork PM.
-- **Phase 2 (future):** PostgreSQL `agent_tool_calls` observability table. Channel-aware tool selection.
-- **Phase 3 (future):** Parallel tool execution (asyncio.gather), result caching (5-min TTL), token budget management.
+### Next: AGENT-FRAMEWORK-1
+Multi-agent orchestration — Baker delegates to 10 specialist agents:
+Sales, Finance, Legal/Claims, Asset Management, Research, Comms/Draft, IT, Investment Banking, Marketing & PR, AI Development.
+Option C: manual trigger + proactive routing. Director defines specs with Cowork PM → PM sends summary → Code 300 architects + writes brief → Code Brisen builds.
 
-- **2026-03-04 (dimitry300 machine, session 5):** Baker Vision Definition + Decision Engine Brief + Tooling Setup:
-  - **Baker Vision defined (3 foundational questions answered by Director):**
-    - **Q1 — Standing Orders (7 orders):** No surprises in meetings (pre-meeting briefings auto-prepared), no deadline missed (status checks + mitigation proposals), every VIP response within 24h (auto-draft), morning briefing with proposals not just data, track every commitment and enforce follow-through, proactive intelligence (analysis agents on significant signals), protect calendar and prepare the day (conflict resolution proposals).
-    - **Q2 — Domain Priority:** Chairman > Projects > Network > Private > Travel. Urgency scoring: time(1-3) + money(1-3) + relationship(1-3) = 3-9. Tiers: 7-9=Tier 3 (WhatsApp immediate), 4-6=Tier 2 (Slack hourly), 1-3=Tier 1 (Dashboard morning briefing). Tiebreaker: money > external > oldest. Overrides: emotional urgency (Private flips to top), time-critical travel (Tier 3 forced), VIP 24h SLA breach.
-    - **Q3 — Ideal Tuesday:** Three touchpoints: WhatsApp morning briefing (06:00, proactive proposals), Dashboard deep work (business hours, Scan + review), WhatsApp alerts (anytime, Tier 3 only). Ratio: 90% Baker handles autonomously, 8% Baker proposes + Director approves, 2% Director initiates. Three scheduler loops: overnight batch (02:00-06:00), continuous monitor (real-time Tier 3), hourly cycle (Tier 2 + Slack).
-    - **Baker's two operational modes:** Mode A = Baker handles alone (routine: follow-ups, nudges, meeting invites, reservations, acknowledgments). Mode B = Baker delegates to specialist agent, copies Director, collects output, packages as proposal. Mode C = Baker escalates (insufficient context, needs Director input before delegating).
-    - **All ClickUp spaces = Projects domain.** Domain classification uses content keywords, not workspace mapping.
-    - **Family contacts for emotional urgency override:** Edita, Kira, Nona, Philip.
-  - **BRIEF_DECISION_ENGINE_v1.md written** — saved to `Baker-Project/pm/briefs/`. Defines Step 1A: domain classifier, urgency scorer, override detector, tier assigner, handle/delegate router. ScoredTrigger dataclass flows through pipeline. 12 acceptance criteria. PM reviewed and approved with 3 structural observations.
-  - **PM structural feedback incorporated:**
-    - Ship scoring engine (1A) first, delegation framework (1C) as separate brief
-    - Handle/delegate router ships conservative: Baker handles only proven templates, everything else defaults to Mode C (escalate) until Director promotes patterns
-    - Edita is dual-role: content keywords override sender→domain mapping
-    - VIP tiers: default all 11 to Tier 2 for now, assign properly during agentic onboarding (Step 3)
-    - Financial thresholds: €100K/€10K approved as starting point, tune after 2 weeks
-    - Haiku fallback: approved (~$0.04/day, negligible)
-  - **Code Brisen tooled up:** 9 plugins installed (feature-dev, pyright-lsp, code-review, security-guidance, hookify, claude-code-setup, agent-sdk-dev, ralph-loop, skill-creator). Baker MCP connected. Security-code-reviewer agent active.
-  - **Claims Analysis Agent created on Code Brisen** — specializes in construction dispute analysis (Cupial/Heidenauer €200K dispute). Reads spreadsheets, categorizes line items, assesses evidence strength, recommends recovery strategy.
-  - **Baker Agentic RAG Transition Plan** read — PM's revision of Chat's Master Implementation Plan. 15 steps, 3 horizons. Step 1 resequenced: 1A = Decision Engine (brain), 1B = retrieval tool wrappers (hands), 1C = task ledger + delegation framework.
-  - **Git state:** AGENTIC-RAG-1 still uncommitted on this machine (5 modified files + 1 new). Remote has 4 commits ahead (WA-SEND-1). Merge conflict on CLAUDE.md, dashboard.py, waha_webhook.py. Must resolve before pushing.
-
-- **2026-03-05 (primary machine, session 6):** Decision Engine + Agentic RAG Step 1A + 1B:
-  - **DECISION-ENGINE-1A (3 commits):** Full scoring and routing layer for all triggers.
-    - `orchestrator/decision_engine.py` (NEW): score_trigger() with 4-step domain classifier (VIP cache → keyword regex → source mapping → Haiku fallback), 3-component urgency scorer (time + financial + relationship = 3-9), 2 override detectors (emotional urgency, travel urgent), tier assigner (1=urgent/WA, 2=slack, 3=dashboard), mode tagger (handle/delegate/escalate).
-    - VIP cache (5-min TTL, thread-safe) + deadline cache (5-min TTL). VIP SLA monitoring job (every 5 min) — Tier 1 VIP unanswered >15min → WhatsApp alert, Tier 2 >4h → Slack alert.
-    - Scoring inserted at 3 points: pipeline.py (background), waha_webhook.py (WhatsApp), dashboard.py (Scan). All non-fatal — scoring failure doesn't break pipeline.
-    - TriggerEvent extended with 6 Optional scored fields. trigger_log table has 5 new columns. vip_contacts has tier + domain columns. 6 Tier 1 VIPs set.
-    - Architect-reviewed: 3 critical + 5 medium + 3 low bugs found and fixed (tier numbering standardized to 1=urgent, financial parsing via finditer, startup DELETE removed, thread safety, caches, async blocking, VIP name matching, SLA query order).
-  - **STEP1B (1 commit):** 3 new agent tools + tier-based RAG routing.
-    - `orchestrator/agent.py`: Expanded from 5 to 8 tools — added get_deadlines, get_clickup_tasks, search_deals_insights.
-    - `memory/retriever.py`: New get_clickup_tasks_search() — PostgreSQL ILIKE on clickup_tasks with status/priority/list_name filters.
-    - Tier-based routing in both Scan (dashboard.py) and WhatsApp (waha_webhook.py): Tier 1 → legacy fast path (~3s), Tier 2-3 + flag → agentic tool loop (8 tools).
-    - Fixed _scan_chat_legacy_stream missing domain_context, get_active_deals missing "label" metadata key, _scored NameError on scoring failure.
-    - Architect-reviewed: 3 medium fixes applied (query optionality, fallback timing, psycopg2.extras import).
-  - **Andrey Oskolkov + Christian Merz** added as VIP contacts (Tier 2 default, will promote to Tier 1 on next restart).
-  - **Production verified:** 12 scheduler jobs (including vip_sla_check), all 5 scored columns live in trigger_log, Scan streaming works, tier routing active.
-
-- **2026-03-05 (dimitry300 machine, session 7):** STEP1C — Task Ledger + Delegation Framework:
-  - **Commit 1:** Fixed MEMORY ACCESS in scan_prompt.py — now lists all 8 agent tools (was 5).
-  - **Commit 2:** `baker_tasks` PostgreSQL table + 4 CRUD methods in store_back.py. Full lifecycle tracking (pending→in_progress→completed/failed), agent metadata (iterations, tokens, elapsed), Director feedback (accepted/rejected/revised). Explicit column whitelist on UPDATE (no SQL injection).
-  - **Commit 3:** Domain expertise prompts (5 domains: chairman/projects/network/private/travel) + mode prompt extensions (handle/delegate/escalate) in scan_prompt.py. `build_mode_aware_prompt()` helper. `timeout_override` param added to both agent loop entry points in agent.py.
-  - **Commit 4:** Mode-aware routing wired into dashboard.py (Scan) and waha_webhook.py (WhatsApp). `mode` field from Decision Engine now consumed for routing: delegate forces agentic path with more iterations (7 Scan, 5 WA) + longer timeouts (20s Scan, 15s WA). baker_task created on every Director question, closed with deliverable after response. API endpoints: `GET /api/tasks` + `POST /api/tasks/{id}/feedback` with Pydantic validation. All architect review fixes applied (7 issues: fallback task orphan, WA call-site signatures, SQL injection whitelist, timeout override, Pydantic validation, prompt helper location, tool list fix).
-  - **Commit 5:** CLAUDE.md update — marked STEP1C done, added baker_tasks to tables, updated architecture diagrams.
-
-- **2026-03-05 (dimitry300 machine, session 7 continued):** RETRIEVAL-FIX-1 — Matter Registry + critical production fixes:
-  - **STEP1C hotfixes (3 commits):** Softened mode/domain prompts (handle mode removed, escalate rewritten). Fixed agent timeout fallback logic (`and not answer` → just `timed_out`). Increased default timeout from 10s to 30s.
-  - **SSE keepalive fix:** Root cause of "short answers" — Baker produced excellent 50s answers but SSE connection dropped during blocking Claude API calls (10-20s silence). Fix: async Queue bridge with 8s keepalive pings. This was the key breakthrough — answers were always being generated, client just wasn't receiving them.
-  - **RETRIEVAL-FIX-1 (Code Brisen, architect-reviewed):** `matter_registry` PostgreSQL table linking business matters to connected people, keywords, and projects. 5 seed matters (Cupial, Hagenauer, Wertheimer LP, FX Mayr, ClaimsMax). New `get_matter_context` agent tool (#9). API endpoints `GET/POST/PUT /api/matters`. Code Brisen implemented, Code 300 reviewed (10-point checklist, all passed).
-  - **Matter expansion fixes (2 commits):** People-first ordering (set→ordered list, people before keywords). ILIKE partial matching for multi-word agent queries ("Cupial dispute" now matches "Cupial" matter).
-  - **Auto-fetch in get_matter_context:** When agent looks up a matter, it automatically fetches recent emails and WhatsApp from connected people. This was the final fix — Baker now surfaces Hassa's March 4 email when asked about Cupial.
-  - **Result:** Baker went from "I have zero emails about Cupials" to "This matter has broken open in the last 48 hours with significant movement on two parallel tracks" — finding Hassa's handover push + E+H's legal offensive.
-  - **Workflow established:** Code 300 (this machine) = supervisor/architect. Code Brisen (primary machine) = builder. Director bridges. Code 300 writes briefs, Code Brisen implements, Code 300 reviews before push.
-
-### Next Session Action Items (March 6+)
-- ~~**Run onboarding interview:**~~ DONE — 14 preferences + 13 matters loaded via Cowork PM.
-- **AGENT-FRAMEWORK-1 (NEXT):** Multi-agent orchestration — Baker delegates to 10 specialist agents (Sales, Finance, Legal/Claims, Asset Management, Research, Comms/Draft, IT, Investment Banking, Marketing & PR, AI Development). Option C: manual trigger + proactive routing. Director defines agent specs with Cowork PM, PM sends summary to Code 300 for architecture + brief. Code Brisen builds.
-- **Step 4 (Cost Monitor) — DEFERRED:** Track API costs per query, circuit breaker at €5/day. Do before scaling proactive agents.
-- **Morning Briefing Upgrade — DEFERRED:** Upgrade from data dump to agentic proposals.
-- **Calendar Integration — DEFERRED:** Pre-meeting briefings + conflict detection.
-- **RETRIEVAL-FIX-2 — DEFERRED:** Background trigger auto-tagging against matter registry.
-- **WhatsApp historical backfill:** Run `POST /api/whatsapp/backfill?days=365` (needs `WHATSAPP_API_KEY` on Render).
-
-- **2026-03-05 (dimitry300 machine, session 8):** Step 3 — Agentic Onboarding:
-  - **Brief written + revised:** Original brief scoped a `/onboard` Scan command with 6-stage interview engine + Haiku NLP parsing. Director decided to run onboarding via Cowork PM instead — cuts scope in half (Cowork IS the interview engine). Brief revised to slim version: DB layer + MCP tools + prompt enrichment only.
-  - **Code Brisen built (3e20f11):** 4 files, +294 lines. `director_preferences` table (UPSERT, UNIQUE(category, pref_key)), 3 new VIP columns (role_context, communication_pref, expertise), `update_vip_profile()` with 5-field whitelist, `_get_preferences_safe()` wrapper for fault-tolerant prompt reads. 3 API endpoints (GET/POST/DELETE /api/preferences). `build_mode_aware_prompt()` now reads DB: domain_context overrides hardcoded dict, injects strategic priorities + communication style.
-  - **Code 300 architect review:** 14-point checklist, all passed. Zero issues.
-  - **MCP server updated (Code 300):** 3 new tools added to `baker_mcp_server.py` in Dropbox: `baker_upsert_preference` (write), `baker_update_vip_profile` (write), `baker_get_preferences` (read). Server now has 21 tools (15 read + 6 write).
-  - **Ready for onboarding:** Director opens Cowork PM, walks through 6-stage interview. Cowork has all tools needed to write VIP profiles, preferences, and matters directly to Baker's DB.
+### Deferred
+- **Step 4 (Cost Monitor):** API cost tracking, circuit breaker at €5/day
+- **Morning Briefing Upgrade:** Data dump → agentic proposals
+- **Calendar Integration:** Pre-meeting briefings + conflict detection
+- **RETRIEVAL-FIX-2:** Background trigger auto-tagging against matter registry
+- **Commitment Tracker:** Extract + track commitments from meetings/emails
 
 ## Key Documents (Dropbox)
 
