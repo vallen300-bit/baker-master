@@ -380,7 +380,7 @@ The goal: the next session reads this file and knows exactly what's current — 
 
 ### Next Session Action Items (March 5+)
 - **Step 1C:** Task ledger + delegation framework. Baker's Agentic RAG Transition Plan Step 1C. Read brief at `Baker-Project/pm/briefs/` (Dropbox on dimitry300 machine).
-- **Set BAKER_AGENTIC_RAG=true on Render** to activate the 8-tool agentic loop for Tier 2-3 queries. Currently defaults to false.
+- ~~**Set BAKER_AGENTIC_RAG=true on Render**~~ DONE — PM set it during session 6. 8-tool agentic loop active for Tier 2-3 queries.
 - **Andrey Oskolkov + Christian Merz** need tier promotion to 1 — will happen automatically on next Render restart (startup migration).
 - **Monitor:** Check trigger_log for scored fields after a few email/ClickUp poll cycles: `SELECT domain, tier, mode, COUNT(*) FROM trigger_log WHERE domain IS NOT NULL GROUP BY domain, tier, mode`
 
