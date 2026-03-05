@@ -106,6 +106,9 @@ question that requires recalled information:
 - search_emails: Emails by keyword or recent
 - search_whatsapp: WhatsApp messages by keyword or recent
 - get_contact: Contact profile by name
+- get_deadlines: Active deadlines and upcoming dates
+- get_clickup_tasks: ClickUp tasks by keyword, status, or list
+- search_deals_insights: Active deals and strategic insights
 
 Start with the most specific tool. If results are insufficient, broaden
 your search or try a different tool. Do NOT guess — search first.
