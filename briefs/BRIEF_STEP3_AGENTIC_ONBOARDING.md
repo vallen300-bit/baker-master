@@ -1,4 +1,4 @@
-# BRIEF: Step 3 — Agentic Onboarding
+# BRIEF: Step 3 — Agentic Onboarding (Slim — Cowork-Driven)
 
 **Author:** Code 300 (Supervisor/Architect)
 **Builder:** Code Brisen
@@ -10,19 +10,31 @@
 
 ## Goal
 
-Baker interviews the Director (~30 min) via Scan to populate VIP profiles, expand the matter registry, and store strategic preferences. After onboarding, the Decision Engine scores triggers using real Director data instead of hardcoded defaults.
+The Director runs a ~30 min onboarding interview with **Cowork PM** (not Scan). Cowork already has Baker MCP access — it just needs the right write tools and DB tables to store answers. After onboarding, the Decision Engine and Scan prompts use real Director data instead of hardcoded defaults.
 
-**One sentence:** Turn Baker from a generic Chief of Staff into *Dimitry's* Chief of Staff.
+**One sentence:** Build the plumbing so Cowork PM can turn Baker into *Dimitry's* Chief of Staff.
 
 ---
 
 ## What Ships
 
-1. **`/onboard` Scan command** — 6-stage conversational interview
-2. **`director_preferences` table** — key-value store for Director's strategic context
-3. **VIP profile enrichment** — 3 new columns on `vip_contacts`
-4. **6 API endpoints** — CRUD for preferences + onboarding status
-5. **Decision Engine reads real data** — VIP tiers, domains, preferences from DB instead of hardcoded defaults
+1. **`director_preferences` table** — key-value store for strategic context
+2. **3 new columns on `vip_contacts`** — role_context, communication_pref, expertise
+3. **2 new MCP write tools** — `baker_upsert_preference` + `baker_update_vip_profile`
+4. **1 MCP read tool update** — `baker_vip_contacts` returns the 3 new columns
+5. **1 new MCP read tool** — `baker_get_preferences` to read back stored preferences
+6. **Prompt enrichment** — `scan_prompt.py` reads preferences from DB, injects into prompts
+7. **3 API endpoints** — CRUD for preferences (dashboard access)
+
+---
+
+## What We DON'T Build
+
+- ~~`orchestrator/onboarding.py`~~ — Cowork IS the interview engine
+- ~~Onboarding intent in dashboard.py~~ — no `/onboard` command needed
+- ~~Haiku parsing of natural language~~ — Cowork does this natively
+- ~~Session state management~~ — Cowork holds conversation context
+- ~~Onboarding API endpoints~~ — Cowork writes directly via MCP
 
 ---
 
@@ -33,9 +45,9 @@ Baker interviews the Director (~30 min) via Scan to populate VIP profiles, expan
 ```sql
 CREATE TABLE IF NOT EXISTS director_preferences (
     id          SERIAL PRIMARY KEY,
-    category    TEXT NOT NULL,       -- 'strategic_priority' | 'communication' | 'standing_order' | 'domain_context' | 'general'
-    pref_key    TEXT NOT NULL,       -- e.g. 'top_priority_1', 'email_style', 'chairman_context'
-    pref_value  TEXT NOT NULL,       -- free text value
+    category    TEXT NOT NULL,
+    pref_key    TEXT NOT NULL,
+    pref_value  TEXT NOT NULL,
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     UNIQUE(category, pref_key)
 );
@@ -48,7 +60,7 @@ CREATE TABLE IF NOT EXISTS director_preferences (
 - `domain_context` — Director-specific context per domain (replaces generic prompts in scan_prompt.py)
 - `general` — Catch-all (timezone, working hours, delegation threshold, etc.)
 
-### VIP Table Changes: 3 new columns on `vip_contacts`
+### VIP Table Changes: 3 new columns
 
 ```sql
 ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS role_context TEXT;
@@ -56,253 +68,198 @@ ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS communication_pref TEXT DEFAUL
 ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS expertise TEXT;
 ```
 
-- `role_context` — Free text: "CFO at Brisen, handles all financial approvals, reports to Dimitry"
-- `communication_pref` — `email` | `whatsapp` | `slack` | `phone` — how Director prefers to communicate with this person
-- `expertise` — Free text: "Construction law, Austrian regulatory, Hagenauer permit disputes"
-
-### No New Tables Beyond These Two Changes
-
-Everything else uses existing infrastructure:
-- `matter_registry` — already has CRUD + API endpoints
-- `vip_contacts` — already has tier + domain columns
-- `baker_tasks` — already tracks Director feedback
+- `role_context` — "CFO at Brisen, handles all financial approvals, reports to Dimitry"
+- `communication_pref` — `email` | `whatsapp` | `slack` | `phone`
+- `expertise` — "Construction law, Austrian regulatory, Hagenauer permit disputes"
 
 ---
 
-## Onboarding Flow: 6 Stages
+## MCP Tools (Baker MCP Server)
 
-The `/onboard` command in Scan starts a stateful conversation. Each stage:
-1. Baker presents current data + asks structured questions
-2. Director answers in natural language
-3. Baker parses, confirms ("I'll set Edita to Tier 1, domain: chairman. Correct?")
-4. Director confirms or corrects
-5. Baker writes to DB and moves to next stage
+### New Tool 1: `baker_upsert_preference`
+
+```python
+@mcp.tool()
+async def baker_upsert_preference(
+    category: str,      # strategic_priority | communication | standing_order | domain_context | general
+    pref_key: str,      # e.g. 'priority_1', 'email_tone', 'chairman'
+    pref_value: str     # free text value
+) -> str:
+    """Store or update a Director preference. Categories: strategic_priority, communication,
+    standing_order, domain_context, general. Uses UPSERT — same category+key overwrites."""
+```
+
+Calls `store_back.upsert_preference()`. Returns confirmation string.
+
+### New Tool 2: `baker_update_vip_profile`
+
+```python
+@mcp.tool()
+async def baker_update_vip_profile(
+    name: str,                          # VIP name (matched case-insensitive)
+    tier: int | None = None,            # 1 or 2
+    domain: str | None = None,          # chairman | projects | network | private | travel
+    role_context: str | None = None,    # free text
+    communication_pref: str | None = None,  # email | whatsapp | slack | phone
+    expertise: str | None = None        # free text
+) -> str:
+    """Update a VIP contact's profile. Only provided fields are updated; others preserved.
+    Use this during onboarding to set tier, domain, role context, and expertise for each VIP."""
+```
+
+Calls `store_back.update_vip_profile()`. Returns confirmation with updated fields.
+
+### Updated Tool: `baker_vip_contacts` (read)
+
+Add the 3 new columns to the SELECT query so Cowork can see current profiles:
+
+```sql
+SELECT name, role, email, whatsapp_id, fireflies_speaker_label,
+       tier, domain, role_context, communication_pref, expertise
+FROM vip_contacts ORDER BY name
+```
+
+### New Tool 3: `baker_get_preferences` (read)
+
+```python
+@mcp.tool()
+async def baker_get_preferences(
+    category: str | None = None     # optional filter by category
+) -> str:
+    """Read Director preferences. Optionally filter by category:
+    strategic_priority, communication, standing_order, domain_context, general."""
+```
+
+Calls `store_back.get_preferences()`. Returns formatted list.
+
+---
+
+## Store Back Functions (memory/store_back.py)
+
+### New Functions
+
+```python
+# --- director_preferences ---
+
+def ensure_director_preferences_table() -> None:
+    """CREATE TABLE IF NOT EXISTS + UNIQUE constraint. Called at startup."""
+
+def upsert_preference(category: str, key: str, value: str) -> None:
+    """INSERT ... ON CONFLICT (category, pref_key) DO UPDATE SET pref_value = ..., updated_at = NOW()"""
+
+def get_preferences(category: str = None) -> List[dict]:
+    """SELECT * FROM director_preferences WHERE category = ... (or all if None)"""
+
+def delete_preference(category: str, key: str) -> None:
+    """DELETE FROM director_preferences WHERE category = ... AND pref_key = ..."""
+
+# --- vip profile update ---
+
+def update_vip_profile(name: str, updates: dict) -> dict:
+    """UPDATE vip_contacts SET <only provided fields> WHERE LOWER(name) = LOWER(...)
+    Whitelist: tier, domain, role_context, communication_pref, expertise.
+    Returns the updated row."""
+```
+
+### Startup Addition
+
+`ensure_director_preferences_table()` called alongside existing `ensure_*` functions in store_back.py module init.
+
+---
+
+## Prompt Enrichment (scan_prompt.py)
+
+### Change 1: Domain context from DB
+
+In `build_mode_aware_prompt()`, after selecting from `DOMAIN_EXPERTISE` dict:
+
+```python
+from memory.store_back import get_preferences
+
+def build_mode_aware_prompt(base_prompt, domain=None, mode=None):
+    prompt = base_prompt
+
+    if domain:
+        # Check DB first, fall back to hardcoded
+        db_context = get_preferences(category='domain_context')
+        db_domain = next((p for p in db_context if p['pref_key'] == domain), None)
+        if db_domain:
+            prompt += f"\n\n## DOMAIN CONTEXT\n{db_domain['pref_value']}"
+        elif domain in DOMAIN_EXPERTISE:
+            prompt += f"\n\n## DOMAIN CONTEXT\n{DOMAIN_EXPERTISE[domain]}"
+
+    # Inject strategic priorities (always, regardless of domain)
+    priorities = get_preferences(category='strategic_priority')
+    if priorities:
+        prompt += "\n\n## CURRENT STRATEGIC PRIORITIES\n"
+        for p in sorted(priorities, key=lambda x: x['pref_key']):
+            prompt += f"- {p['pref_value']}\n"
+
+    if mode and mode in MODE_EXTENSIONS:
+        prompt += f"\n\n{MODE_EXTENSIONS[mode]}"
+
+    return prompt
+```
+
+### Change 2: Communication style
+
+If `get_preferences(category='communication')` has entries, append to the base system prompt:
+
+```python
+comm_prefs = get_preferences(category='communication')
+if comm_prefs:
+    prompt += "\n\n## COMMUNICATION STYLE\n"
+    for p in comm_prefs:
+        prompt += f"- {p['pref_key']}: {p['pref_value']}\n"
+```
+
+---
+
+## API Endpoints (dashboard.py)
+
+Minimal — just enough for debugging and the CEO Cockpit if needed later:
+
+```
+GET  /api/preferences                    — all preferences (optional ?category= query param)
+POST /api/preferences                    — upsert {category, key, value}
+DELETE /api/preferences/{category}/{key} — delete a preference
+```
+
+Auth: `X-Baker-Key` header (same as all other /api/* routes).
+
+---
+
+## Onboarding Interview Guide (for Cowork PM)
+
+Cowork doesn't need code — it needs a script. This is the interview guide that Cowork PM follows when the Director says "let's do onboarding":
 
 ### Stage 1: VIP Review (~5 min)
-
-Baker shows the current 11 VIPs in a formatted table:
-
-```
-Here are your current VIP contacts:
-
-| # | Name                  | Tier | Domain  | Role |
-|---|-----------------------|------|---------|------|
-| 1 | Edita Vallen          | 1    | network | COO  |
-| 2 | Balazs Csepregi       | 2    | network | —    |
-| ...                                               |
-
-For each person, I need:
-- **Tier** (1 = WhatsApp alert within 15 min, 2 = Slack within 4h)
-- **Domain** (chairman / projects / network / private / travel)
-- **Role context** (one line: what they do, why they matter)
-
-You can answer like: "Edita: Tier 1, chairman, COO and board member — handles all governance"
-Or just say "looks good" if defaults are fine for someone.
-```
-
-Baker processes batch answers. Writes `UPDATE vip_contacts SET tier=X, domain=Y, role_context=Z WHERE name = ...`.
+- Call `baker_vip_contacts` to show current list
+- For each VIP, ask Director to confirm/update: tier (1/2), domain, role context
+- Call `baker_update_vip_profile` for each change
 
 ### Stage 2: Missing VIPs (~3 min)
-
-```
-Anyone missing from the VIP list? I should track people whose messages
-deserve priority treatment.
-
-Current Tier 1 (WhatsApp alert): Edita, Ofenheimer, Buchwalder, Oskolkov, Pohanis, Merz
-Current Tier 2 (Slack alert): everyone else
-
-Who else should I add? Give me: Name, email, WhatsApp (if known), tier, domain.
-```
-
-Baker parses and INSERTs new VIPs. Handles partial data gracefully (email only, WhatsApp only, etc.).
+- Ask "Anyone missing?"
+- Call `baker_upsert_vip` for new contacts (existing tool)
+- Then `baker_update_vip_profile` to set tier/domain/role
 
 ### Stage 3: Matter Expansion (~5 min)
-
-Baker shows current 5 matters:
-
-```
-Active matters I'm tracking:
-
-1. **Cupial** — Handover & defect dispute (People: Hassa, Ofenheimer, Caroly, ...)
-2. **Hagenauer** — Construction permit/final account (People: Hagenauer, Ofenheimer, Arndt)
-3. **Wertheimer LP** — Chanel family office LP (People: Wertheimer, Christophe)
-4. **FX Mayr** — Acquisition/Lilienmatt (People: Oskolkov, Buchwalder, Edita)
-5. **ClaimsMax** — Claims management AI (People: Philip)
-
-What other active matters should I track? For each, tell me:
-- **Name** (short label)
-- **Description** (one sentence)
-- **Key people** (names)
-- **Keywords** (terms that signal this matter in emails/messages)
-```
-
-Baker parses and calls `POST /api/matters` for each new matter.
+- Call `baker_raw_query` to show current matters: `SELECT matter_name, description, people, keywords FROM matter_registry WHERE status = 'active'`
+- Ask Director about missing matters
+- Use Baker API via `baker_raw_query` or store via direct API call
 
 ### Stage 4: Strategic Priorities (~5 min)
-
-```
-What are your top 3-5 business priorities right now?
-These help me know what to flag as urgent and what context to bring into answers.
-
-Example: "Close Wertheimer LP fundraise by Q2 2026"
-```
-
-Baker stores each as `director_preferences(category='strategic_priority', pref_key='priority_1', pref_value='...')`.
+- Ask "Top 3-5 priorities right now?"
+- Call `baker_upsert_preference(category='strategic_priority', pref_key='priority_1', pref_value='...')` for each
 
 ### Stage 5: Domain Context (~5 min)
-
-```
-I use 5 domains to classify incoming signals:
-1. **Chairman** — board governance, compliance, regulatory
-2. **Projects** — construction, development, active deals
-3. **Network** — investors, LPs, fund placements, relationships
-4. **Private** — personal, family, health, property
-5. **Travel** — logistics, reservations, itineraries
-
-For each domain, is there anything specific I should know?
-Example: "Chairman — I'm chairman of Brisen Holding AG, board meets quarterly,
-key governance issue right now is the Hagenauer supervisory board seat"
-
-Just skip any domain where the default context is fine.
-```
-
-Baker stores each as `director_preferences(category='domain_context', pref_key='chairman', pref_value='...')`.
+- Ask about each of 5 domains
+- Call `baker_upsert_preference(category='domain_context', pref_key='chairman', pref_value='...')` for each
 
 ### Stage 6: Communication & Summary (~3 min)
-
-```
-Quick preferences:
-1. When I draft emails for you, what tone? (formal / warm-professional / casual)
-2. Working hours for scheduling? (e.g., 08:00-19:00 CET)
-3. Should I include a proposal/recommendation in every morning briefing, or only when action is needed?
-
-Then I'll show you a summary of everything we set up.
-```
-
-Baker stores answers, then outputs a complete summary table of all onboarding data. Director confirms or requests edits.
-
----
-
-## Implementation Details
-
-### File: `orchestrator/onboarding.py` (NEW)
-
-**OnboardingSession class:**
-
-```python
-@dataclass
-class OnboardingSession:
-    stage: int = 1                    # 1-6
-    vip_updates: list = field(...)    # queued VIP changes
-    new_vips: list = field(...)       # queued new VIPs
-    new_matters: list = field(...)    # queued new matters
-    preferences: dict = field(...)    # queued preference writes
-    completed: bool = False
-
-# In-memory dict keyed by user session / API key
-_active_sessions: Dict[str, OnboardingSession] = {}
-```
-
-**Key functions:**
-- `start_onboarding(session_id) -> str` — Returns Stage 1 prompt
-- `process_onboarding_response(session_id, user_message) -> str` — Parses Director's response, advances stage, returns next prompt or confirmation
-- `get_onboarding_status(session_id) -> dict` — Current stage + collected data
-- `_parse_vip_updates(message) -> List[dict]` — NLP parsing of VIP edits (Claude Haiku)
-- `_parse_matters(message) -> List[dict]` — NLP parsing of matter descriptions (Claude Haiku)
-- `_parse_preferences(message) -> List[dict]` — NLP parsing of preference answers (Claude Haiku)
-- `_write_onboarding_data(session) -> dict` — Batch-writes all collected data to DB
-
-**Parsing approach:** Use Claude Haiku to extract structured data from Director's natural-language answers. Cheap (~$0.01/call), reliable. Prompt returns JSON. Example:
-
-```python
-PARSE_VIP_PROMPT = """Extract VIP updates from this message. Return JSON array:
-[{"name": "Edita Vallen", "tier": 1, "domain": "chairman", "role_context": "COO and board member"}]
-Only include fields that were explicitly mentioned. Current VIPs for reference: {vip_list}"""
-```
-
-### File: `memory/store_back.py` — additions
-
-```python
-# director_preferences CRUD
-def upsert_preference(category: str, key: str, value: str) -> None
-def get_preferences(category: str = None) -> List[dict]
-def delete_preference(category: str, key: str) -> None
-
-# vip_contacts update (extend existing)
-def update_vip_profile(name: str, updates: dict) -> None  # tier, domain, role_context, communication_pref, expertise
-```
-
-### File: `outputs/dashboard.py` — changes
-
-1. New intent `onboarding` in `classify_intent()` — triggers on `/onboard` or "start onboarding" or "let's set up"
-2. `_handle_onboarding()` function — routes to `onboarding.py`, streams responses via SSE
-3. Onboarding state persists in-memory per session (simple dict, not DB — onboarding is a one-time event)
-
-### File: `orchestrator/scan_prompt.py` — changes
-
-1. `build_mode_aware_prompt()` now checks `director_preferences` for domain_context overrides
-2. If `director_preferences` has a `domain_context` entry for the current domain, use it instead of the generic DOMAIN_EXPERTISE dict
-3. Inject strategic priorities into the system prompt when available:
-
-```python
-# After domain context, before mode extension:
-priorities = get_preferences(category='strategic_priority')
-if priorities:
-    prompt += "\n\n## CURRENT STRATEGIC PRIORITIES\n"
-    for p in priorities:
-        prompt += f"- {p['pref_value']}\n"
-```
-
-### File: `orchestrator/decision_engine.py` — changes
-
-No structural changes needed. The decision engine already:
-- Reads `tier` and `domain` from `vip_contacts` (via VIP cache with 5-min TTL)
-- Uses keyword patterns for domain classification
-
-After onboarding populates real tier/domain values, the engine automatically uses them on next cache refresh.
-
-**One small addition:** If `director_preferences` has domain_context entries, use them as additional keyword sources for the domain classifier (optional, low priority).
-
-### API Endpoints (in dashboard.py)
-
-```
-GET  /api/preferences                    — all preferences (optional ?category= filter)
-POST /api/preferences                    — upsert a preference {category, key, value}
-DELETE /api/preferences/{category}/{key}  — delete a preference
-
-GET  /api/onboarding/status              — current onboarding stage + data collected
-POST /api/onboarding/start               — begin onboarding (returns Stage 1 prompt)
-POST /api/onboarding/respond             — send Director's response, get next stage
-```
-
----
-
-## Acceptance Criteria
-
-1. **`/onboard` in Scan** starts the 6-stage interview. Each stage shows current data and asks structured questions.
-2. **Director's natural-language answers** are parsed by Haiku into structured updates. Baker confirms before writing.
-3. **VIP profiles** updated with real tier, domain, role_context, communication_pref, expertise.
-4. **New VIPs** can be added during onboarding (INSERT into vip_contacts).
-5. **New matters** can be added during onboarding (POST /api/matters).
-6. **Strategic priorities** stored in `director_preferences` and injected into Scan prompts.
-7. **Domain context** overrides generic prompts in `scan_prompt.py` when Director provides specific context.
-8. **All writes are confirmed** — Baker shows "I'll set X to Y" and waits for Director's OK before writing.
-9. **Onboarding can be resumed** — if Director leaves mid-interview, `/onboard` picks up where they left off.
-10. **`director_preferences` table** created with proper UNIQUE constraint and CRUD functions.
-11. **3 new columns** added to `vip_contacts` (role_context, communication_pref, expertise) via ALTER TABLE IF NOT EXISTS.
-12. **Summary at end** — Stage 6 shows a complete formatted summary of all onboarding data.
-
----
-
-## Out of Scope (Deferred)
-
-- **Learning loop** (feedback → tuning Decision Engine weights) — Step 4+
-- **Delegation routing** (which expert handles which query type) — needs more operational data first
-- **Team role mapping table** — VIP role_context covers this for now
-- **Refactoring hardcoded Director identity** to config — infrastructure cleanup, separate PR
-- **WhatsApp onboarding channel** — Scan only for MVP. Can add WA later.
-- **Cost monitoring** — Step 4 (separate brief)
-- **Frontend onboarding UI** — text-based in Scan is sufficient
+- Ask tone, hours, briefing preferences
+- Call `baker_upsert_preference(category='communication', ...)` for each
+- Call `baker_vip_contacts` + `baker_get_preferences` to show final summary
 
 ---
 
@@ -310,22 +267,25 @@ POST /api/onboarding/respond             — send Director's response, get next 
 
 | File | Action | What |
 |------|--------|------|
-| `orchestrator/onboarding.py` | **CREATE** | OnboardingSession, 6 stages, Haiku parsing |
-| `memory/store_back.py` | MODIFY | Add director_preferences table + CRUD, update_vip_profile(), 3 new VIP columns |
-| `outputs/dashboard.py` | MODIFY | New `onboarding` intent, `_handle_onboarding()`, 6 API endpoints |
-| `orchestrator/scan_prompt.py` | MODIFY | Read preferences for domain context + strategic priorities |
-| `models/deadlines.py` | MODIFY | 3 new columns in vip_contacts CREATE TABLE (for fresh installs) |
+| `memory/store_back.py` | MODIFY | director_preferences table + CRUD, update_vip_profile(), 3 new VIP columns |
+| `outputs/dashboard.py` | MODIFY | 3 API endpoints for preferences |
+| `orchestrator/scan_prompt.py` | MODIFY | Read preferences, inject into prompts |
+| `models/deadlines.py` | MODIFY | 3 new columns in vip_contacts CREATE TABLE (fresh installs) |
+| `baker_mcp_server.py`* | MODIFY | 2 new write tools + 1 new read tool + update vip_contacts read |
+
+*MCP server is in Dropbox (`Baker-Project/baker-mcp/baker_mcp_server.py`), not in this repo. Code 300 will update it separately after Code Brisen ships the backend.
 
 ---
 
 ## Implementation Order
 
-1. **DB layer first** — `store_back.py`: director_preferences table + CRUD, vip update function, ALTER TABLE for 3 new columns
-2. **Onboarding engine** — `onboarding.py`: session state, 6 stages, Haiku parsing functions
-3. **Wire into Scan** — `dashboard.py`: onboarding intent + handler + API endpoints
-4. **Prompt enrichment** — `scan_prompt.py`: read preferences, inject into prompts
-5. **Seed table schema** — `deadlines.py`: add 3 columns to CREATE TABLE for clean installs
-6. **Syntax check all 5 files**, commit locally, do NOT push
+1. **DB layer** — `store_back.py`: director_preferences table + CRUD, update_vip_profile(), ALTER TABLE for 3 new VIP columns
+2. **API endpoints** — `dashboard.py`: 3 preference endpoints
+3. **Prompt enrichment** — `scan_prompt.py`: read preferences, inject into prompts
+4. **Seed schema** — `deadlines.py`: add 3 columns to CREATE TABLE
+5. **Syntax check all 4 files**, commit locally, do NOT push
+
+MCP server update (step 6) is done by Code 300 on the Dropbox file after backend ships.
 
 ---
 
@@ -333,8 +293,9 @@ POST /api/onboarding/respond             — send Director's response, get next 
 
 ```
 Read CLAUDE.md. Read briefs/BRIEF_STEP3_AGENTIC_ONBOARDING.md.
-Implement in the order specified (DB layer → onboarding engine → Scan wiring → prompt enrichment → seed schema).
-Syntax-check all 5 files. Commit locally, do NOT push.
+Implement in order: DB layer → API endpoints → prompt enrichment → seed schema.
+4 files to modify (store_back.py, dashboard.py, scan_prompt.py, deadlines.py). No new files.
+Syntax-check all 4 files. Commit locally, do NOT push.
 ```
 
 ---
@@ -343,12 +304,25 @@ Syntax-check all 5 files. Commit locally, do NOT push.
 
 Before approving push:
 - [ ] director_preferences table has UNIQUE(category, pref_key) constraint
+- [ ] UPSERT uses ON CONFLICT ... DO UPDATE (not INSERT + separate UPDATE)
 - [ ] ALTER TABLE uses IF NOT EXISTS for all 3 new VIP columns
-- [ ] Haiku parsing prompts return valid JSON (test with edge cases)
-- [ ] Onboarding state doesn't leak between sessions
+- [ ] update_vip_profile() uses explicit column whitelist (no SQL injection)
+- [ ] update_vip_profile() only updates provided fields (None = skip)
 - [ ] All DB writes wrapped in try/except (fault-tolerant)
-- [ ] No SQL injection — all queries use parameterized statements
-- [ ] SSE streaming works during onboarding (no blocking calls without keepalive)
-- [ ] `/onboard` resume works (stage persisted correctly)
-- [ ] Strategic priorities actually appear in Scan prompts after onboarding
+- [ ] No SQL injection — all queries use parameterized statements (%s placeholders)
+- [ ] get_preferences() returns stable sort order (by category, pref_key)
+- [ ] Strategic priorities appear in Scan prompts after preferences are stored
+- [ ] Domain context from DB overrides hardcoded DOMAIN_EXPERTISE dict
 - [ ] VIP tier changes reflect in Decision Engine within 5 min (cache TTL)
+- [ ] API endpoints require X-Baker-Key auth
+- [ ] ensure_director_preferences_table() called at startup
+
+---
+
+## After Code Ships — Code 300 Follow-up
+
+1. Update `baker_mcp_server.py` in Dropbox with 2 new write tools + 1 new read tool + updated vip_contacts read
+2. Restart MCP server (Cowork + Claude Code will pick up new tools)
+3. Write Cowork PM onboarding session instructions (paste the Interview Guide above into Cowork opening prompt)
+4. Director runs onboarding with Cowork PM
+5. Verify data: `curl -H "X-Baker-Key: bakerbhavanga" "https://baker-master.onrender.com/api/preferences"`
