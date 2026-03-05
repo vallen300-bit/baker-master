@@ -91,6 +91,9 @@ class SentinelStoreBack:
         # Ensure baker-health Qdrant collection exists
         self._ensure_collection("baker-health", size=1024)
 
+        # STEP1C: Ensure baker_tasks table exists
+        self._ensure_baker_tasks_table()
+
         # DECISION-ENGINE-1A: Ensure decision engine columns exist
         self._ensure_decision_engine_columns()
 
@@ -787,6 +790,198 @@ class SentinelStoreBack:
             logger.info("Whoop tables verified (whoop_records)")
         except Exception as e:
             logger.warning(f"Could not ensure Whoop tables: {e}")
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # STEP1C: Baker Tasks table + CRUD
+    # -------------------------------------------------------
+
+    def _ensure_baker_tasks_table(self):
+        """Create baker_tasks table if it doesn't exist."""
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — cannot ensure baker_tasks table")
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS baker_tasks (
+                    id              SERIAL PRIMARY KEY,
+                    trigger_log_id  INTEGER,
+                    domain          TEXT,
+                    urgency_score   INTEGER,
+                    tier            INTEGER,
+                    mode            TEXT NOT NULL,
+                    task_type       TEXT NOT NULL DEFAULT 'question',
+                    title           TEXT NOT NULL,
+                    description     TEXT,
+                    sender          TEXT,
+                    source          TEXT,
+                    channel         TEXT,
+                    status          TEXT NOT NULL DEFAULT 'pending',
+                    deliverable     TEXT,
+                    error_message   TEXT,
+                    agent_iterations    INTEGER,
+                    agent_tool_calls    INTEGER,
+                    agent_input_tokens  INTEGER,
+                    agent_output_tokens INTEGER,
+                    agent_elapsed_ms    INTEGER,
+                    director_feedback   TEXT,
+                    feedback_comment    TEXT,
+                    feedback_at         TIMESTAMPTZ,
+                    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    started_at      TIMESTAMPTZ,
+                    completed_at    TIMESTAMPTZ
+                );
+                CREATE INDEX IF NOT EXISTS idx_baker_tasks_status ON baker_tasks(status);
+                CREATE INDEX IF NOT EXISTS idx_baker_tasks_created ON baker_tasks(created_at DESC);
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("Baker tasks table verified (baker_tasks)")
+        except Exception as e:
+            logger.warning(f"Could not ensure baker_tasks table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def create_baker_task(self, domain=None, urgency_score=None, tier=None,
+                          mode="escalate", task_type="question", title="",
+                          description=None, sender=None, source=None,
+                          channel=None, status="in_progress",
+                          trigger_log_id=None) -> Optional[int]:
+        """INSERT into baker_tasks. Returns task ID."""
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — skipping create_baker_task")
+            return None
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO baker_tasks
+                    (trigger_log_id, domain, urgency_score, tier, mode,
+                     task_type, title, description, sender, source, channel,
+                     status, started_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        CASE WHEN %s = 'in_progress' THEN NOW() ELSE NULL END)
+                RETURNING id
+                """,
+                (
+                    trigger_log_id, domain, urgency_score, tier, mode,
+                    task_type, title, description, sender, source, channel,
+                    status, status,
+                ),
+            )
+            task_id = cur.fetchone()[0]
+            conn.commit()
+            cur.close()
+            logger.info(f"Created baker_task #{task_id}: {mode}/{domain} — {title[:60]}")
+            return task_id
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"create_baker_task failed: {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
+    _TASK_UPDATE_FIELDS = {
+        "status", "deliverable", "error_message",
+        "agent_iterations", "agent_tool_calls",
+        "agent_input_tokens", "agent_output_tokens", "agent_elapsed_ms",
+        "director_feedback", "feedback_comment",
+    }
+
+    def update_baker_task(self, task_id: int, **kwargs) -> bool:
+        """UPDATE baker_tasks with explicit column whitelist. No arbitrary kwargs."""
+        # Filter to allowed fields only
+        updates = {k: v for k, v in kwargs.items()
+                   if k in self._TASK_UPDATE_FIELDS and v is not None}
+        if not updates:
+            return False
+
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — skipping update_baker_task")
+            return False
+        try:
+            cur = conn.cursor()
+            set_clauses = []
+            values = []
+            for col, val in updates.items():
+                set_clauses.append(f"{col} = %s")
+                values.append(val)
+
+            # Auto-set timestamps based on status transitions
+            new_status = updates.get("status")
+            if new_status == "in_progress":
+                set_clauses.append("started_at = NOW()")
+            elif new_status in ("completed", "failed"):
+                set_clauses.append("completed_at = NOW()")
+
+            # Auto-set feedback_at when director_feedback is provided
+            if "director_feedback" in updates:
+                set_clauses.append("feedback_at = NOW()")
+
+            values.append(task_id)
+            sql = f"UPDATE baker_tasks SET {', '.join(set_clauses)} WHERE id = %s"
+            cur.execute(sql, values)
+            conn.commit()
+            cur.close()
+            logger.info(f"Updated baker_task #{task_id}: {list(updates.keys())}")
+            return True
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"update_baker_task failed: {e}")
+            return False
+        finally:
+            self._put_conn(conn)
+
+    def get_baker_tasks(self, status=None, mode=None, limit=20) -> list:
+        """SELECT from baker_tasks with optional filters. Returns list of dicts."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            conditions = []
+            values = []
+            if status:
+                conditions.append("status = %s")
+                values.append(status)
+            if mode:
+                conditions.append("mode = %s")
+                values.append(mode)
+
+            where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            values.append(limit)
+            cur.execute(
+                f"SELECT * FROM baker_tasks {where} ORDER BY created_at DESC LIMIT %s",
+                values,
+            )
+            rows = cur.fetchall()
+            cur.close()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"get_baker_tasks failed: {e}")
+            return []
+        finally:
+            self._put_conn(conn)
+
+    def get_baker_task_by_id(self, task_id: int) -> Optional[dict]:
+        """Get a single baker_task by ID. Returns dict or None."""
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT * FROM baker_tasks WHERE id = %s", (task_id,))
+            row = cur.fetchone()
+            cur.close()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"get_baker_task_by_id failed: {e}")
+            return None
         finally:
             self._put_conn(conn)
 
