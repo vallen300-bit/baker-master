@@ -246,6 +246,17 @@ class OutputConfig:
 
 
 @dataclass
+class DecisionEngineConfig:
+    """DECISION-ENGINE-1A: Scoring and routing configuration."""
+    family_contacts: List[str] = field(default_factory=lambda: ["edita", "kira", "nona", "philip"])
+    vip_sla_tier1_minutes: int = 15
+    vip_sla_tier2_minutes: int = 240  # 4 hours
+    financial_threshold_high: int = 100_000
+    financial_threshold_medium: int = 10_000
+    haiku_model: str = "claude-haiku-4-5-20251001"
+
+
+@dataclass
 class SentinelConfig:
     qdrant: QdrantConfig = field(default_factory=QdrantConfig)
     voyage: VoyageConfig = field(default_factory=VoyageConfig)
@@ -261,6 +272,7 @@ class SentinelConfig:
     postgres: PostgresConfig = field(default_factory=PostgresConfig)
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
     outputs: OutputConfig = field(default_factory=OutputConfig)
+    decision_engine: DecisionEngineConfig = field(default_factory=DecisionEngineConfig)
     # Baker personality
     baker_persona: str = "chief_of_staff"
     debug: bool = os.getenv("SENTINEL_DEBUG", "false").lower() == "true"

@@ -499,6 +499,18 @@ async def waha_webhook(
     except Exception as _e:
         logger.warning(f"Failed to store WhatsApp msg {msg_id} to PostgreSQL (non-fatal): {_e}")
 
+    # DECISION-ENGINE-1A: Score trigger (no LLM fallback for webhook latency)
+    _scored = None
+    try:
+        from orchestrator.decision_engine import score_trigger
+        _scored = score_trigger(combined_body, sender_name, "whatsapp", {}, allow_llm=False)
+        logger.info(
+            f"Decision Engine (WA): domain={_scored['domain']} score={_scored['urgency_score']} "
+            f"tier={_scored['tier']} mode={_scored['mode']}"
+        )
+    except Exception as _e:
+        logger.warning(f"Decision Engine scoring failed (non-fatal): {_e}")
+
     # WHATSAPP-ACTION-1: Director messages → action detection first
     if sender == DIRECTOR_WHATSAPP and combined_body:
         try:
@@ -543,7 +555,15 @@ async def waha_webhook(
     )
     trigger = pipeline.classify_trigger(trigger)
 
-    if trigger.priority in ("high", "medium"):
+    # DECISION-ENGINE-1A: Use scored tier for routing
+    # Tier convention: 1=most urgent, 3=least urgent. Tier <= 2 → run pipeline.
+    run_pipeline = False
+    if _scored and _scored.get("tier", 3) <= 2:
+        run_pipeline = True
+    elif trigger.priority in ("high", "medium"):
+        run_pipeline = True  # fallback to old heuristic if scoring failed
+
+    if run_pipeline:
         try:
             pipeline.run(trigger)
         except Exception as e:

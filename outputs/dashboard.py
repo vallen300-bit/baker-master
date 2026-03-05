@@ -1080,17 +1080,33 @@ async def scan_chat(req: ScanRequest):
             )
     # draft_action == "dismiss" or regular question → fall through to RAG pipeline
 
+    # DECISION-ENGINE-1A: Score the question for domain context
+    # M4 fix: allow_llm=False to avoid blocking Haiku call in async event loop
+    _domain_context = ""
+    try:
+        from orchestrator.decision_engine import score_trigger as _score_trigger
+        _scored = _score_trigger(req.question, "director", "scan", {}, allow_llm=False)
+        _domain_context = f"\n\n## DOMAIN CONTEXT\nThis question relates to the {_scored['domain']} domain.\n"
+        logger.info(
+            f"Decision Engine (Scan): domain={_scored['domain']} "
+            f"score={_scored['urgency_score']} tier={_scored['tier']}"
+        )
+    except Exception as _e:
+        logger.warning(f"Decision Engine scoring failed (non-fatal): {_e}")
+
     # AGENTIC-RAG-1: Feature-flagged agent loop vs. legacy single-pass
     from orchestrator.agent import is_agentic_rag_enabled
 
     if is_agentic_rag_enabled():
-        return _scan_chat_agentic(req, start)
+        return _scan_chat_agentic(req, start, _domain_context)
     else:
-        return _scan_chat_legacy(req, start)
+        return _scan_chat_legacy(req, start, _domain_context)
 
 
-def _build_scan_system_prompt(deadline_only: bool = False, contexts=None) -> str:
-    """Build the system prompt with time + optional context + deadlines."""
+def _build_scan_system_prompt(deadline_only: bool = False, contexts=None,
+                              domain_context: str = "") -> str:
+    """Build the system prompt with time + optional context + deadlines.
+    DECISION-ENGINE-1A: domain_context injected from score_trigger."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     # Deadlines (included in both agentic and legacy paths)
@@ -1116,6 +1132,7 @@ def _build_scan_system_prompt(deadline_only: bool = False, contexts=None) -> str
         return (
             f"{SCAN_SYSTEM_PROMPT}\n"
             f"## CURRENT TIME\n{now}\n"
+            f"{domain_context}"
             f"{deadline_block}"
         )
     else:
@@ -1124,6 +1141,7 @@ def _build_scan_system_prompt(deadline_only: bool = False, contexts=None) -> str
         return (
             f"{SCAN_SYSTEM_PROMPT}\n"
             f"## CURRENT TIME\n{now}\n\n"
+            f"{domain_context}"
             f"## RETRIEVED CONTEXT\n{context_block}"
             f"{deadline_block}"
         )
@@ -1212,11 +1230,11 @@ def _scan_store_back(req, full_response: str, start: float, extra_meta: Optional
             logger.warning(f"Scan email failed (non-fatal): {e}")
 
 
-def _scan_chat_agentic(req, start: float):
+def _scan_chat_agentic(req, start: float, domain_context: str = ""):
     """AGENTIC-RAG-1: Agent loop with tool use for Scan SSE."""
     from orchestrator.agent import run_agent_loop_streaming
 
-    system_prompt = _build_scan_system_prompt(deadline_only=True)
+    system_prompt = _build_scan_system_prompt(deadline_only=True, domain_context=domain_context)
 
     # Build history
     history = []
@@ -1368,7 +1386,7 @@ async def _scan_chat_legacy_stream(req, start: float):
     _scan_store_back(req, full_response, start)
 
 
-def _scan_chat_legacy(req, start: float):
+def _scan_chat_legacy(req, start: float, domain_context: str = ""):
     """Legacy single-pass RAG — unchanged behavior, refactored into own function."""
 
     # 1. Retrieve context
@@ -1430,8 +1448,10 @@ def _scan_chat_legacy(req, start: float):
     except Exception as e:
         logger.warning(f"Email/WhatsApp retrieval failed (non-fatal): {e}")
 
-    # 2. Build system prompt with context
-    system_prompt = _build_scan_system_prompt(deadline_only=False, contexts=contexts)
+    # 2. Build system prompt with context (DECISION-ENGINE-1A: domain context included)
+    system_prompt = _build_scan_system_prompt(
+        deadline_only=False, contexts=contexts, domain_context=domain_context,
+    )
 
     # 3. Build messages (include history for follow-ups)
     messages = []

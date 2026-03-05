@@ -91,6 +91,9 @@ class SentinelStoreBack:
         # Ensure baker-health Qdrant collection exists
         self._ensure_collection("baker-health", size=1024)
 
+        # DECISION-ENGINE-1A: Ensure decision engine columns exist
+        self._ensure_decision_engine_columns()
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -788,6 +791,54 @@ class SentinelStoreBack:
             self._put_conn(conn)
 
     # -------------------------------------------------------
+    # DECISION-ENGINE-1A: Decision Engine column migrations
+    # -------------------------------------------------------
+
+    def _ensure_decision_engine_columns(self):
+        """Add scored columns to vip_contacts and trigger_log. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — cannot ensure Decision Engine columns")
+            return
+        try:
+            cur = conn.cursor()
+
+            # vip_contacts: add tier + domain columns
+            cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS tier INTEGER DEFAULT 2")
+            cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS domain VARCHAR(20) DEFAULT 'network'")
+
+            # trigger_log: add scored fields
+            cur.execute("ALTER TABLE trigger_log ADD COLUMN IF NOT EXISTS domain VARCHAR(20)")
+            cur.execute("ALTER TABLE trigger_log ADD COLUMN IF NOT EXISTS urgency_score INTEGER")
+            cur.execute("ALTER TABLE trigger_log ADD COLUMN IF NOT EXISTS tier INTEGER")
+            cur.execute("ALTER TABLE trigger_log ADD COLUMN IF NOT EXISTS mode VARCHAR(20)")
+            cur.execute("ALTER TABLE trigger_log ADD COLUMN IF NOT EXISTS scoring_reasoning TEXT")
+
+            # Set Tier 1 VIPs (6 Director-confirmed) — safe: only upgrades tier, no deletes
+            cur.execute("""
+                UPDATE vip_contacts SET tier = 1
+                WHERE LOWER(name) IN (
+                    'edita vallen', 'alric ofenheimer', 'christophe buchwalder',
+                    'andrey oskolkov', 'constantinos pohanis', 'christian merz'
+                ) AND (tier IS NULL OR tier != 1)
+            """)
+
+            # C2 fix: VIP dedup removed from startup — was destructive on every deploy.
+            # Run one-time dedup via: POST /api/admin/dedup-vips or manual SQL.
+
+            conn.commit()
+            cur.close()
+            logger.info("Decision Engine columns verified (vip_contacts + trigger_log)")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure Decision Engine columns: {e}")
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
     # Whoop helpers
     # -------------------------------------------------------
 
@@ -1184,8 +1235,12 @@ class SentinelStoreBack:
 
     def log_trigger(self, trigger_type: str, source_id: str,
                     content: str, contact_id: str = None,
-                    priority: str = None) -> Optional[int]:
-        """Log every pipeline execution. Returns trigger_log ID."""
+                    priority: str = None,
+                    domain: str = None, urgency_score: int = None,
+                    tier: int = None, mode: str = None,
+                    scoring_reasoning: str = None) -> Optional[int]:
+        """Log every pipeline execution. Returns trigger_log ID.
+        DECISION-ENGINE-1A: Now includes scored fields."""
         conn = self._get_conn()
         if not conn:
             logger.warning("No DB connection — skipping log_trigger")
@@ -1194,13 +1249,16 @@ class SentinelStoreBack:
             cur = conn.cursor()
             cur.execute(
                 """
-                INSERT INTO trigger_log (type, source_id, content, contact_id, priority, received_at)
-                VALUES (%s, %s, %s, %s, %s, NOW())
+                INSERT INTO trigger_log
+                    (type, source_id, content, contact_id, priority, received_at,
+                     domain, urgency_score, tier, mode, scoring_reasoning)
+                VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (trigger_type, source_id, content,
                  contact_id if contact_id else None,
-                 priority),
+                 priority, domain, urgency_score, tier, mode,
+                 scoring_reasoning),
             )
             trigger_id = cur.fetchone()[0]
             conn.commit()

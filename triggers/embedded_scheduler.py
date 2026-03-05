@@ -169,6 +169,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: deadline_cadence (every 60 minutes)")
 
+    # VIP SLA monitoring — every 5 minutes (DECISION-ENGINE-1A)
+    from orchestrator.decision_engine import run_vip_sla_check
+    scheduler.add_job(
+        run_vip_sla_check,
+        IntervalTrigger(minutes=5),
+        id="vip_sla_check", name="VIP SLA monitoring",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: vip_sla_check (every 5 minutes)")
+
 
 def start_scheduler():
     """Create and start the BackgroundScheduler. Idempotent — safe to call twice."""

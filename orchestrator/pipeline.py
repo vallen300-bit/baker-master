@@ -53,6 +53,13 @@ class TriggerEvent:
     priority: Optional[str] = None  # will be classified by orchestrator
     timestamp: str = ""
     metadata: dict = field(default_factory=dict)  # carrier for trigger-specific context
+    # DECISION-ENGINE-1A: Scored fields (populated by score_trigger)
+    domain: Optional[str] = None
+    urgency_score: Optional[int] = None
+    tier: Optional[int] = None
+    mode: Optional[str] = None
+    override_applied: Optional[str] = None
+    scoring_reasoning: Optional[str] = None
 
     def __post_init__(self):
         if not self.timestamp:
@@ -180,13 +187,18 @@ class SentinelPipeline:
         trigger_log_id = None
 
         try:
-            # 1. Log this trigger
+            # 1. Log this trigger (with Decision Engine scored fields)
             trigger_log_id = self.store.log_trigger(
                 trigger_type=trigger.type,
                 source_id=trigger.source_id,
                 content=trigger.content,
                 contact_id=trigger.contact_id,
                 priority=trigger.priority,
+                domain=trigger.domain,
+                urgency_score=trigger.urgency_score,
+                tier=trigger.tier,
+                mode=trigger.mode,
+                scoring_reasoning=trigger.scoring_reasoning,
             )
         except Exception as e:
             logger.warning(f"Store-back: log_trigger failed (non-fatal): {e}")
@@ -425,6 +437,26 @@ class SentinelPipeline:
 
         # Step 1: Classify
         trigger = self.classify_trigger(trigger)
+
+        # Step 1b: Score (Decision Engine — DECISION-ENGINE-1A)
+        try:
+            from orchestrator.decision_engine import score_trigger
+            scored = score_trigger(
+                trigger.content, trigger.contact_name or "",
+                trigger.type, trigger.metadata,
+            )
+            trigger.domain = scored["domain"]
+            trigger.urgency_score = scored["urgency_score"]
+            trigger.tier = scored["tier"]
+            trigger.mode = scored["mode"]
+            trigger.override_applied = scored.get("override_applied")
+            trigger.scoring_reasoning = scored.get("reasoning")
+            logger.info(
+                f"Decision Engine: domain={trigger.domain} score={trigger.urgency_score} "
+                f"tier={trigger.tier} mode={trigger.mode}"
+            )
+        except Exception as e:
+            logger.warning(f"Decision Engine failed (non-fatal, continuing): {e}")
 
         # ALERT-DEDUP-1: Alert digest email DISABLED.
         # Was sending ~48 digest emails/day (every 30 min) — Director stopped reading them.
