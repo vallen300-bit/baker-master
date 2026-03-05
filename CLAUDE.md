@@ -225,23 +225,72 @@ Cowork (+ Claude Code) is the **Thinker & Creator** — deep analysis, brainstor
 
 Communication between roles: ClickUp **Handoff Notes** list (901521426367).
 
-## Phase 1 Backlog (PM-approved order)
+## Roadmap
 
-1. ~~Brief 9C fixes~~ — DONE
-2. ~~ClickUp foundation (B1-B4)~~ — DONE
-3. ~~CLICKUP-V2 PM Overlay~~ — DONE (3 intents: action, fetch, plan)
-4. Slack integration — queued
-5. ~~WhatsApp input (backfill + media)~~ — DONE (backfill script, media OCR, 6h re-sync, API endpoint). **BLOCKED:** needs `WHATSAPP_API_KEY` added to Render env vars to activate.
-6. ~~WhatsApp output~~ — DONE (WA-QUESTION-1: Director questions get Scan-style conversational replies via WhatsApp)
-6b. ~~WhatsApp send to contacts~~ — DONE (WA-SEND-1: Baker sends WhatsApp to any VIP contact on command + 15-turn short-term memory)
-7. Dashboard data layer — queued
-8. Todoist — queued
-9. Calendar — queued
-10. M365/Outlook — blocked (tenant not live)
-11. Dropbox — queued
-12. Whoop — queued
-13. Feedly — queued
-14. Onboarding Briefing — waiting on template
+### Phase 1 — Foundation (DONE)
+All shipped in sessions 1-8. Baker is a reactive Chief of Staff with memory, scoring, and matter-aware retrieval.
+
+| What | Status |
+|------|--------|
+| Full-text storage (ARCH-1 through ARCH-7) | DONE — no truncation, all data sources |
+| ClickUp integration (B1-B4 + CLICKUP-V2) | DONE — read all 6 workspaces, write BAKER space, 3 intents |
+| WhatsApp input + output + send | DONE — backfill, media OCR, Director Q&A, send to VIPs |
+| Agentic RAG (9 tools, agent loop, tier routing) | DONE — search memory/meetings/emails/WA/contacts/deadlines/ClickUp/deals/matters |
+| Decision Engine (domain/urgency/tier/mode) | DONE — 4-step classifier, 3-component scorer, VIP SLA monitoring |
+| Task Ledger + Delegation (STEP1C) | DONE — baker_tasks table, mode-aware routing, Director feedback |
+| Matter Registry (RETRIEVAL-FIX-1) | DONE — 13 matters, auto-fetch from connected people |
+| Director Onboarding (Step 3) | DONE — 14 preferences, 13 matters, VIP profiles, DB-driven prompts |
+| Alert Dedup (ALERT-DEDUP-1) | DONE — ~1,100/day → ~20/day |
+| MCP Bridge | DONE — 23 tools (15 read + 8 write), Cowork + Claude Code connected |
+
+### Phase 2 — Multi-Agent Orchestration (NOW)
+Baker becomes an orchestrator that delegates to specialist AI agents. Each agent has its own system prompt, tools, and domain expertise.
+
+**AGENT-FRAMEWORK-1** — 10 specialist agents:
+
+| # | Agent | Domain | Purpose |
+|---|-------|--------|---------|
+| 1 | Sales Agent | projects | MO Residences pitch decks, buyer follow-ups, market comps |
+| 2 | Finance Agent | chairman | Loan analysis, LP term sheets, cash flow models |
+| 3 | Legal/Claims Agent | projects | Dispute analysis, deadline tracking, evidence review |
+| 4 | Asset Management Agent | projects | Hotel KPI reports, operational benchmarks |
+| 5 | Research Agent | network | Market intelligence, competitor analysis, due diligence |
+| 6 | Comms/Draft Agent | chairman | Email drafts, presentations, board memos |
+| 7 | IT Agent | projects | M365 migration, Azure EU, infrastructure |
+| 8 | Investment Banking Manager | chairman | Raising finance, analyzing projects, investor relations |
+| 9 | Marketing & PR Agent | network | Social media, ads, promotion, marketing collaterals |
+| 10 | AI Development Agent | projects | Baker system development |
+
+**Trigger model:** Option C — Director can trigger manually ("Baker, have the finance agent analyze X") AND Baker can trigger proactively on matching signals.
+
+**Process:** Director defines each agent's specs with Cowork PM → PM writes summary → Code 300 architects framework + writes brief → Code Brisen builds.
+
+### Phase 3 — Proactive Baker (NEXT after Phase 2)
+Baker executes the 7 standing orders autonomously. Requires Phase 2 agents + calendar integration.
+
+| Standing Order | Depends On |
+|---|---|
+| No surprises in meetings — auto-prepare briefings | Calendar integration + Research Agent |
+| No deadline missed — status checks + proposals | Commitment Tracker + Legal Agent |
+| VIP 24h response — auto-draft responses | Comms/Draft Agent |
+| Morning briefing with proposals | Morning Briefing Upgrade + all agents |
+| Track commitments + follow-through | Commitment Tracker (new) |
+| Proactive intelligence — analysis on signals | RETRIEVAL-FIX-2 + Research Agent |
+| Protect calendar + prepare the day | Calendar integration |
+
+### Phase 4 — Scale & Optimize (FUTURE)
+- **Cost Monitor (Step 4):** API cost tracking, circuit breaker at €5/day
+- **Agent Observability:** PostgreSQL agent_tool_calls table, per-agent metrics
+- **Parallel Execution:** asyncio.gather for multi-tool calls, result caching (5-min TTL)
+- **Additional Integrations:** Slack (queued), Calendar, M365/Outlook (blocked — tenant not live), Dropbox, Whoop, Feedly
+- **Dashboard Data Layer:** CEO Cockpit frontend enhancements
+- **Learning Loop:** Director feedback → tune Decision Engine weights + agent routing
+
+### Open Items (operational)
+- **WhatsApp historical backfill:** Run `POST /api/whatsapp/backfill?days=365` (needs `WHATSAPP_API_KEY` on Render)
+- **Email backfill re-run:** Run POST /api/emails/backfill?days=14 for attachment text extraction
+- **ClaimsMax / Philip emails:** Draft emails ready, need Philip's email address
+- **Wertheimer term sheet:** Financial decisions needed before Cowork can draft
 
 ## End-of-Session Checklist
 
@@ -261,42 +310,11 @@ The goal: the next session reads this file and knows exactly what's current — 
 
 Sessions 1-6 archived in `SESSION_LOG.md`. Recent sessions below.
 
-### Completed Milestones (sessions 1-8)
-- ~~ARCH-1/2/3/4/5/6/7~~ — full-text storage, no truncation, all data sources
-- ~~CLICKUP-V2~~ — 3 intents (action, fetch, plan)
-- ~~AGENTIC-RAG-1~~ — 9 tools, agent loop, tier-based routing
-- ~~DECISION-ENGINE-1A~~ — domain classifier, urgency scorer, VIP SLA monitoring
-- ~~STEP1B~~ — 8 tools + tier routing
-- ~~STEP1C~~ — baker_tasks table, mode-aware routing, domain/mode prompts
-- ~~RETRIEVAL-FIX-1~~ — matter registry (13 matters), auto-fetch from connected people
-- ~~Step 3 (Onboarding)~~ — director_preferences (14 prefs), VIP profile enrichment, DB-driven prompts
-- ~~ALERT-DEDUP-1~~ — Slack alerts reduced from ~1,100/day to ~20/day
-- ~~INSIGHT-1~~ — insights table + API
-- MCP server: 23 tools (15 read + 8 write)
-
-### Open Items
-- **WhatsApp historical backfill:** Run `POST /api/whatsapp/backfill?days=365` (needs `WHATSAPP_API_KEY` on Render)
-- **Email backfill re-run:** Run POST /api/emails/backfill?days=14 for attachment text extraction
-- **ClaimsMax / Philip emails:** Draft emails ready, need Philip's email address
-- **Wertheimer term sheet:** Financial decisions needed before Cowork can draft
-
 ### Session 7 — 2026-03-05 (dimitry300 machine)
-STEP1C + RETRIEVAL-FIX-1 + SSE keepalive fix. baker_tasks table, mode-aware routing, matter_registry (5 seed matters), get_matter_context tool (#9), auto-fetch from connected people. SSE keepalive pings fixed connection drops.
+STEP1C + RETRIEVAL-FIX-1 + SSE keepalive fix. baker_tasks table, mode-aware routing, matter_registry (5 seed matters), get_matter_context tool (#9), auto-fetch from connected people.
 
 ### Session 8 — 2026-03-05 (dimitry300 machine)
-Step 3 Agentic Onboarding. director_preferences table + 3 VIP columns + DB-driven prompt injection. MCP server: 23 tools (15 read + 8 write). Onboarding completed via Cowork PM: 14 preferences + 13 matters loaded. AGENT-FRAMEWORK-1 scoped (10 specialist agents).
-
-### Next: AGENT-FRAMEWORK-1
-Multi-agent orchestration — Baker delegates to 10 specialist agents:
-Sales, Finance, Legal/Claims, Asset Management, Research, Comms/Draft, IT, Investment Banking, Marketing & PR, AI Development.
-Option C: manual trigger + proactive routing. Director defines specs with Cowork PM → PM sends summary → Code 300 architects + writes brief → Code Brisen builds.
-
-### Deferred
-- **Step 4 (Cost Monitor):** API cost tracking, circuit breaker at €5/day
-- **Morning Briefing Upgrade:** Data dump → agentic proposals
-- **Calendar Integration:** Pre-meeting briefings + conflict detection
-- **RETRIEVAL-FIX-2:** Background trigger auto-tagging against matter registry
-- **Commitment Tracker:** Extract + track commitments from meetings/emails
+Step 3 Agentic Onboarding. director_preferences table + 3 VIP columns + DB-driven prompt injection. MCP server: 23 tools (15 read + 8 write). Onboarding completed via Cowork PM: 14 preferences + 13 matters. AGENT-FRAMEWORK-1 scoped (10 specialist agents). CLAUDE.md trimmed (sessions 1-6 archived). Roadmap consolidated.
 
 ## Key Documents (Dropbox)
 
