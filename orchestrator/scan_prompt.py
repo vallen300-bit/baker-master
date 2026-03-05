@@ -144,55 +144,30 @@ If the user does NOT request a document format, respond normally — no JSON, no
 
 DOMAIN_EXPERTISE = {
     "chairman": (
-        "## DOMAIN: CHAIRMAN\n"
-        "This relates to Dimitry's role as Chairman of Brisen Group.\n"
-        "Key entities: Board members, shareholders, corporate governance.\n"
-        "Search priorities: board minutes, shareholder communications, "
-        "corporate resolutions, regulatory filings.\n"
-        "Tone: formal, precise. Reference governance context when relevant."
+        "## DOMAIN HINT\n"
+        "This question likely relates to Dimitry's Chairman role at Brisen Group."
     ),
     "projects": (
-        "## DOMAIN: PROJECTS\n"
-        "This relates to active Brisen Group projects and ClickUp workspaces.\n"
-        "Key entities: project managers, contractors, permits, timelines.\n"
-        "Search priorities: ClickUp tasks, project emails, meeting transcripts "
-        "with project stakeholders, deadline tracking.\n"
-        "Focus on status, blockers, and next actions."
+        "## DOMAIN HINT\n"
+        "This question likely relates to active Brisen Group projects."
     ),
     "network": (
-        "## DOMAIN: NETWORK\n"
-        "This relates to Dimitry's professional network and relationship management.\n"
-        "Key entities: VIP contacts, partners, investors, advisors.\n"
-        "Search priorities: contact profiles, recent communications, meeting "
-        "history, deal pipeline, relationship context.\n"
-        "Frame answers around people and relationships."
+        "## DOMAIN HINT\n"
+        "This question likely relates to Dimitry's professional network and relationships."
     ),
     "private": (
-        "## DOMAIN: PRIVATE\n"
-        "This relates to personal or family matters.\n"
-        "Key entities: family members (Edita, Kira, Nona, Philip), "
-        "personal commitments, private appointments.\n"
-        "Search priorities: WhatsApp with family, personal calendar, "
-        "private travel, health data.\n"
-        "Handle with discretion and sensitivity."
+        "## DOMAIN HINT\n"
+        "This question likely relates to personal or family matters. Handle with discretion."
     ),
     "travel": (
-        "## DOMAIN: TRAVEL\n"
-        "This relates to travel planning and logistics.\n"
-        "Key entities: flights, hotels, restaurants, meetings at destination.\n"
-        "Search priorities: upcoming travel, booking confirmations, "
-        "meeting schedules at destinations, local contacts.\n"
-        "Be specific about dates, times, and logistics."
+        "## DOMAIN HINT\n"
+        "This question likely relates to travel planning and logistics."
     ),
 }
 
 MODE_PROMPT_EXTENSIONS = {
-    "handle": (
-        "## MODE: HANDLE\n"
-        "Produce a direct, decisive deliverable. You have full authority to "
-        "answer this question. Do NOT ask the Director for clarification — "
-        "make the best decision with available information and state it clearly."
-    ),
+    # "handle" intentionally omitted — default mode should not alter baseline behavior.
+    # Baker's existing SCAN_SYSTEM_PROMPT already produces thorough, decisive answers.
     "delegate": (
         "## MODE: DEEP ANALYSIS\n"
         "Use multiple tools for thorough analysis. Search broadly across memory, "
@@ -201,10 +176,10 @@ MODE_PROMPT_EXTENSIONS = {
         "thoroughness matters more than speed here."
     ),
     "escalate": (
-        "## MODE: ESCALATE\n"
-        "Present what you found transparently. If your context is incomplete, "
-        "explicitly state what you need from the Director to give a complete "
-        "answer. Frame gaps clearly: 'I found X, but I need Y to advise on Z.'"
+        "## MODE: TRANSPARENCY NOTE\n"
+        "Answer thoroughly as usual. At the end, if your context is incomplete "
+        "on any point, add a brief note on what additional information would "
+        "help. Do NOT shorten your answer — still be thorough and detailed."
     ),
 }
 
