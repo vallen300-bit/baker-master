@@ -42,12 +42,12 @@ Switch hats as needed. When coding, code. When scoping, think.
 |------|---------|
 | `orchestrator/pipeline.py` | 5-step RAG pipeline: Classify → Retrieve → Augment → Generate → Store |
 | `orchestrator/prompt_builder.py` | Pipeline prompt (structured JSON output) |
-| `orchestrator/scan_prompt.py` | Scan prompt + STEP1C domain/mode prompt extensions + build_mode_aware_prompt() |
+| `orchestrator/scan_prompt.py` | Scan prompt + STEP1C domain/mode prompt extensions + STEP3 DB-driven preferences + build_mode_aware_prompt() |
 | `orchestrator/action_handler.py` | Intent router — email, WhatsApp, deadline, VIP, fireflies, ClickUp actions |
 | `orchestrator/decision_engine.py` | **DECISION-ENGINE-1A:** score_trigger() — domain, urgency, tier, mode, overrides, VIP SLA |
 | `orchestrator/agent.py` | **AGENTIC-RAG-1 + STEP1B + RETRIEVAL-FIX-1:** Agent loop with 9 tools, ToolExecutor, tier-based routing, matter-aware search |
 | `memory/retriever.py` | Read-side: Qdrant vector search + PostgreSQL structured queries |
-| `memory/store_back.py` | Write-side: PostgreSQL writes + Qdrant interaction embeddings |
+| `memory/store_back.py` | Write-side: PostgreSQL writes + Qdrant interaction embeddings + STEP3 director_preferences + VIP profiles |
 
 ### API & Dashboard
 | File | Purpose |
@@ -187,7 +187,8 @@ baker-projects, sentinel-interactions, sentinel-email, sentinel-meetings, sentin
 `clickup_tasks`, `baker_actions`, `pending_drafts`, `trigger_watermarks`,
 `todoist_tasks`, `conversation_memory`, `sent_emails`, `deadlines`, `vip_contacts`,
 `meeting_transcripts` (ARCH-3), `email_messages` (ARCH-6), `whatsapp_messages` (ARCH-7),
-`insights` (INSIGHT-1), `baker_tasks` (STEP1C), `matter_registry` (RETRIEVAL-FIX-1)
+`insights` (INSIGHT-1), `baker_tasks` (STEP1C), `matter_registry` (RETRIEVAL-FIX-1),
+`director_preferences` (STEP3)
 
 ## Architecture: Role Division (Baker vs Cowork)
 
@@ -197,17 +198,19 @@ Cowork (+ Claude Code) is the **Thinker & Creator** — deep analysis, brainstor
 | Actor | Role | Context | Connected via |
 |-------|------|---------|---------------|
 | **Baker (Sentinel)** | Chief of Staff — monitors, remembers, acts | Always-on (Render) | Triggers, pipeline |
-| **Cowork (Claude Desktop)** | Thinker — quick PM/PL coordination | 200K tokens | Baker MCP (18 tools) |
-| **Claude Code CLI** | Thinker — deep analysis, heavy thinking, coding | **1M tokens** | Baker MCP (18 tools) |
+| **Cowork (Claude Desktop)** | Thinker — quick PM/PL coordination | 200K tokens | Baker MCP (21 tools) |
+| **Claude Code CLI** | Thinker — deep analysis, heavy thinking, coding | **1M tokens** | Baker MCP (21 tools) |
 | **Director (Dimitry)** | Final authority | Human | All of the above |
 
-**MCP bridge:** Baker MCP server exposes 14 read tools + 4 write tools. Both Cowork and Claude Code connect to the same Baker memory. Decisions stored from either environment are visible to the other.
+**MCP bridge:** Baker MCP server exposes 15 read tools + 6 write tools. Both Cowork and Claude Code connect to the same Baker memory. Decisions stored from either environment are visible to the other.
 
 **Write tools (Cowork/Claude Code → Baker memory):**
 - `baker_store_decision` → decisions table
 - `baker_add_deadline` → deadlines table
-- `baker_upsert_vip` → vip_contacts table
+- `baker_upsert_vip` → vip_contacts table (basic: name, role, email, whatsapp_id)
 - `baker_store_analysis` → deep_analyses table
+- `baker_upsert_preference` → director_preferences table (STEP3: strategic priorities, domain context, communication style)
+- `baker_update_vip_profile` → vip_contacts table (STEP3: tier, domain, role_context, communication_pref, expertise)
 
 **MCP server location:** `Baker-Project/baker-mcp/baker_mcp_server.py` (Dropbox, syncs to all machines)
 
@@ -342,6 +345,7 @@ The goal: the next session reads this file and knows exactly what's current — 
 - ~~**STEP1B (8 tools + tier routing):**~~ DONE — pushed session 6, deployed with all architect fixes.
 - ~~**STEP1C (task ledger + delegation):**~~ DONE — pushed session 7. baker_tasks table, mode-aware routing, domain/mode prompts, API endpoints.
 - ~~**RETRIEVAL-FIX-1 (matter registry):**~~ DONE — pushed session 7. 9 tools, matter-aware search, auto-fetch from connected people.
+- ~~**Step 3 (Agentic Onboarding):**~~ DONE — pushed session 8. director_preferences table, VIP profile enrichment (3 new columns), DB-driven prompt injection (priorities + domain context + comm style), 3 API endpoints, 3 new MCP tools (21 total). Onboarding interview runs via Cowork PM.
 - **Phase 2 (future):** PostgreSQL `agent_tool_calls` observability table. Channel-aware tool selection.
 - **Phase 3 (future):** Parallel tool execution (asyncio.gather), result caching (5-min TTL), token budget management.
 
@@ -399,12 +403,19 @@ The goal: the next session reads this file and knows exactly what's current — 
   - **Workflow established:** Code 300 (this machine) = supervisor/architect. Code Brisen (primary machine) = builder. Director bridges. Code 300 writes briefs, Code Brisen implements, Code 300 reviews before push.
 
 ### Next Session Action Items (March 6+)
-- **Step 3 (Agentic Onboarding):** Next on the Transition Plan. Baker interviews Director (~30 min) to populate VIP profiles, team roles, strategic priorities. Code Brisen builds. Brief needed.
+- **Run onboarding interview:** Director opens Cowork PM, walks through 6-stage interview (VIP profiles, matters, priorities, domain context, comm style). Cowork writes to Baker DB via MCP tools.
 - **Step 4 (Cost Monitor):** Track API costs per query, circuit breaker at €5/day. Pure code work.
-- **Expand matter registry:** Director adds more matters during Step 3 onboarding or via `POST /api/matters`.
+- **Expand matter registry:** Director adds more matters during onboarding or via `POST /api/matters`.
 - **RETRIEVAL-FIX-2 (deferred):** Background trigger auto-tagging against matter registry — Baker catches new signals in real-time without being asked.
-- **Andrey Oskolkov + Christian Merz** VIP tier promotion to 1.
+- **Andrey Oskolkov + Christian Merz** VIP tier promotion to 1 (can be done during onboarding).
 - **WhatsApp historical backfill:** Run `POST /api/whatsapp/backfill?days=365` (needs `WHATSAPP_API_KEY` on Render).
+
+- **2026-03-05 (dimitry300 machine, session 8):** Step 3 — Agentic Onboarding:
+  - **Brief written + revised:** Original brief scoped a `/onboard` Scan command with 6-stage interview engine + Haiku NLP parsing. Director decided to run onboarding via Cowork PM instead — cuts scope in half (Cowork IS the interview engine). Brief revised to slim version: DB layer + MCP tools + prompt enrichment only.
+  - **Code Brisen built (3e20f11):** 4 files, +294 lines. `director_preferences` table (UPSERT, UNIQUE(category, pref_key)), 3 new VIP columns (role_context, communication_pref, expertise), `update_vip_profile()` with 5-field whitelist, `_get_preferences_safe()` wrapper for fault-tolerant prompt reads. 3 API endpoints (GET/POST/DELETE /api/preferences). `build_mode_aware_prompt()` now reads DB: domain_context overrides hardcoded dict, injects strategic priorities + communication style.
+  - **Code 300 architect review:** 14-point checklist, all passed. Zero issues.
+  - **MCP server updated (Code 300):** 3 new tools added to `baker_mcp_server.py` in Dropbox: `baker_upsert_preference` (write), `baker_update_vip_profile` (write), `baker_get_preferences` (read). Server now has 21 tools (15 read + 6 write).
+  - **Ready for onboarding:** Director opens Cowork PM, walks through 6-stage interview. Cowork has all tools needed to write VIP profiles, preferences, and matters directly to Baker's DB.
 
 ## Key Documents (Dropbox)
 
