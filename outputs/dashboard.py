@@ -370,6 +370,23 @@ async def whatsapp_backfill_endpoint(days: int = Query(90, ge=1, le=365)):
 # Insights (INSIGHT-1 — Claude Code → Baker memory)
 # ============================================================
 
+class MatterRequest(BaseModel):
+    matter_name: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = None
+    people: list = Field(default_factory=list)
+    keywords: list = Field(default_factory=list)
+    projects: list = Field(default_factory=list)
+
+
+class MatterUpdateRequest(BaseModel):
+    matter_name: Optional[str] = None
+    description: Optional[str] = None
+    people: Optional[list] = None
+    keywords: Optional[list] = None
+    projects: Optional[list] = None
+    status: Optional[str] = None
+
+
 class InsightRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
     content: str = Field(..., min_length=1)
@@ -413,6 +430,66 @@ async def get_insights_endpoint(
     except Exception as e:
         logger.error(f"GET /api/insights failed: {e}")
         return {"insights": [], "count": 0, "error": str(e)}
+
+
+# ============================================================
+# RETRIEVAL-FIX-1: Matter Registry API
+# ============================================================
+
+@app.get("/api/matters", tags=["matters"], dependencies=[Depends(verify_api_key)])
+async def get_matters_endpoint(
+    status: str = Query("active"),
+):
+    """List all matters, filtered by status."""
+    try:
+        store = _get_store()
+        matters = store.get_matters(status=status)
+        matters = [_serialize(m) for m in matters]
+        return {"matters": matters, "count": len(matters)}
+    except Exception as e:
+        logger.error(f"GET /api/matters failed: {e}")
+        return {"matters": [], "count": 0, "error": str(e)}
+
+
+@app.post("/api/matters", tags=["matters"], dependencies=[Depends(verify_api_key)])
+async def create_matter_endpoint(req: MatterRequest):
+    """Create a new matter in the registry."""
+    try:
+        store = _get_store()
+        matter_id = store.create_matter(
+            matter_name=req.matter_name,
+            description=req.description,
+            people=req.people,
+            keywords=req.keywords,
+            projects=req.projects,
+        )
+        if matter_id:
+            return {"status": "created", "id": matter_id, "matter_name": req.matter_name}
+        raise HTTPException(status_code=409, detail=f"Matter '{req.matter_name}' already exists or creation failed")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"POST /api/matters failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/matters/{matter_id}", tags=["matters"], dependencies=[Depends(verify_api_key)])
+async def update_matter_endpoint(matter_id: int, req: MatterUpdateRequest):
+    """Update an existing matter by ID."""
+    try:
+        store = _get_store()
+        updates = req.model_dump(exclude_none=True)
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
+        ok = store.update_matter(matter_id, **updates)
+        if ok:
+            return {"status": "updated", "id": matter_id}
+        raise HTTPException(status_code=404, detail=f"Matter id={matter_id} not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"PUT /api/matters/{matter_id} failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/scheduler-status", tags=["health"], dependencies=[Depends(verify_api_key)])

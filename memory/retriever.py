@@ -899,6 +899,78 @@ class SentinelRetriever:
             return []
 
     # ----------------------------------------------------------------
+    # RETRIEVAL-FIX-1: Matter Registry Expansion
+    # ----------------------------------------------------------------
+
+    def expand_query_via_matters(self, query: str) -> list[str]:
+        """Look up the matter registry. If query matches a matter name, keyword,
+        or person, return all associated people + keywords as additional search
+        terms. Returns empty list on no match or error (non-fatal)."""
+        try:
+            conn = self._get_pg_conn()
+            cur = conn.cursor()
+            q_lower = query.lower().strip()
+            cur.execute(
+                """SELECT people, keywords FROM matter_registry
+                   WHERE status = 'active'
+                     AND (LOWER(matter_name) = %s
+                          OR %s = ANY(SELECT LOWER(unnest(keywords)))
+                          OR %s = ANY(SELECT LOWER(unnest(people))))""",
+                (q_lower, q_lower, q_lower),
+            )
+            rows = cur.fetchall()
+            cur.close()
+            if not rows:
+                return []
+
+            # Merge all people + keywords from matched matters, deduplicated
+            expanded = set()
+            for people, keywords in rows:
+                for p in (people or []):
+                    expanded.add(p)
+                for k in (keywords or []):
+                    expanded.add(k)
+
+            # Remove the original query itself to avoid duplicate search
+            expanded.discard(q_lower)
+            expanded.discard(query)
+
+            logger.info(f"Matter expansion for '{query}': {len(expanded)} terms from {len(rows)} matter(s)")
+            return list(expanded)
+        except Exception as e:
+            logger.debug(f"Matter expansion failed (non-fatal): {e}")
+            self._pg_pool = None
+            return []
+
+    def get_matter_context(self, query: str) -> Optional[dict]:
+        """Look up a matter by name or keyword. Returns full matter record
+        or None. Used by the agent's get_matter_context tool."""
+        try:
+            conn = self._get_pg_conn()
+            cur = conn.cursor()
+            import psycopg2.extras
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            q_lower = query.lower().strip()
+            cur.execute(
+                """SELECT id, matter_name, description, people, keywords,
+                          projects, status
+                   FROM matter_registry
+                   WHERE status = 'active'
+                     AND (LOWER(matter_name) = %s
+                          OR %s = ANY(SELECT LOWER(unnest(keywords)))
+                          OR %s = ANY(SELECT LOWER(unnest(people))))
+                   LIMIT 1""",
+                (q_lower, q_lower, q_lower),
+            )
+            row = cur.fetchone()
+            cur.close()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.debug(f"get_matter_context failed (non-fatal): {e}")
+            self._pg_pool = None
+            return None
+
+    # ----------------------------------------------------------------
     # Combined Retrieval
     # ----------------------------------------------------------------
 

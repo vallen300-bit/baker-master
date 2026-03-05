@@ -101,6 +101,8 @@ ClickUp:
 ## MEMORY ACCESS
 You have tools to search Baker's memory. Use them before answering any
 question that requires recalled information:
+- get_matter_context: Look up a matter/deal/dispute to get all connected people
+  and keywords FIRST — then search using those terms
 - search_memory: Broad semantic search across all stored knowledge
 - search_meetings: Meeting transcripts by keyword or recent
 - search_emails: Emails by keyword or recent
@@ -109,6 +111,11 @@ question that requires recalled information:
 - get_deadlines: Active deadlines and upcoming dates
 - get_clickup_tasks: ClickUp tasks by keyword, status, or list
 - search_deals_insights: Active deals and strategic insights
+
+**Best practice:** When asked about a deal, dispute, or project, call
+get_matter_context first to discover connected people and keywords, then
+search emails/WhatsApp/meetings using those expanded terms. This ensures
+you don't miss relevant communications that use different words.
 
 Start with the most specific tool. If results are insufficient, broaden
 your search or try a different tool. Do NOT guess — search first.

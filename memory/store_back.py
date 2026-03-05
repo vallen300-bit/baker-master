@@ -97,6 +97,9 @@ class SentinelStoreBack:
         # DECISION-ENGINE-1A: Ensure decision engine columns exist
         self._ensure_decision_engine_columns()
 
+        # RETRIEVAL-FIX-1: Ensure matter_registry table exists
+        self._ensure_matter_registry_table()
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -1030,6 +1033,227 @@ class SentinelStoreBack:
             except Exception:
                 pass
             logger.warning(f"Could not ensure Decision Engine columns: {e}")
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # RETRIEVAL-FIX-1: Matter Registry
+    # -------------------------------------------------------
+
+    def _ensure_matter_registry_table(self):
+        """Create matter_registry table + seed data if empty. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS matter_registry (
+                    id              SERIAL PRIMARY KEY,
+                    matter_name     TEXT NOT NULL UNIQUE,
+                    description     TEXT,
+                    people          TEXT[] NOT NULL DEFAULT '{}',
+                    keywords        TEXT[] NOT NULL DEFAULT '{}',
+                    projects        TEXT[] NOT NULL DEFAULT '{}',
+                    status          TEXT NOT NULL DEFAULT 'active',
+                    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_matter_registry_name "
+                "ON matter_registry(matter_name)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_matter_registry_status "
+                "ON matter_registry(status)"
+            )
+
+            # Seed data — only if table is empty (first deploy)
+            cur.execute("SELECT COUNT(*) FROM matter_registry")
+            count = cur.fetchone()[0]
+            if count == 0:
+                self._seed_matter_registry(cur)
+
+            conn.commit()
+            cur.close()
+            logger.info("matter_registry table verified")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure matter_registry table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _seed_matter_registry(self, cur):
+        """Insert initial matters. Called once on first deploy."""
+        seed = [
+            {
+                "matter_name": "Cupial",
+                "description": "Handover & defect dispute on MOVIE Residences Tops 4, 5, 6, 18. Escrow release. HEC commission.",
+                "people": ["Hassa", "Ofenheimer", "Caroly", "Cupial-Zgryzek", "Groschl", "Leitner"],
+                "keywords": ["cupial", "kupial", "snagging", "escrow", "defect", "top 4", "top 5", "top 6", "top 18", "handover", "movie residences", "hec commission"],
+                "projects": ["hagenauer"],
+            },
+            {
+                "matter_name": "Hagenauer",
+                "description": "Construction project — permit, final account, defect rectification.",
+                "people": ["Hagenauer", "Ofenheimer", "Arndt"],
+                "keywords": ["hagenauer", "permit", "baubewilligung", "final account", "schlussrechnung"],
+                "projects": ["hagenauer"],
+            },
+            {
+                "matter_name": "Wertheimer LP",
+                "description": "Chanel family office LP opportunity — fundraise, SFO structure.",
+                "people": ["Wertheimer", "Christophe"],
+                "keywords": ["wertheimer", "sfo", "chanel", "lp", "fundraise", "family office"],
+                "projects": ["brisen-lp"],
+            },
+            {
+                "matter_name": "FX Mayr",
+                "description": "FX Mayr acquisition — Lilienmatt, MRCI partnership.",
+                "people": ["Oskolkov", "Buchwalder", "Edita"],
+                "keywords": ["fx mayr", "acquisition", "lilienmatt", "mrci"],
+                "projects": ["fx-mayr"],
+            },
+            {
+                "matter_name": "ClaimsMax",
+                "description": "Claims management AI — Philip's project, UBM strategy, Jurkovic pitch.",
+                "people": ["Philip"],
+                "keywords": ["claimsmax", "claims", "ubm", "jurkovic"],
+                "projects": ["claimsmax"],
+            },
+        ]
+        for m in seed:
+            cur.execute(
+                """INSERT INTO matter_registry
+                   (matter_name, description, people, keywords, projects)
+                   VALUES (%s, %s, %s, %s, %s)
+                   ON CONFLICT (matter_name) DO NOTHING""",
+                (m["matter_name"], m["description"],
+                 m["people"], m["keywords"], m["projects"]),
+            )
+        logger.info(f"Seeded {len(seed)} matters into matter_registry")
+
+    # -- Matter Registry CRUD --
+
+    def create_matter(self, matter_name: str, description: str = None,
+                      people: list = None, keywords: list = None,
+                      projects: list = None) -> Optional[int]:
+        """Insert a new matter. Returns matter ID on success."""
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO matter_registry
+                   (matter_name, description, people, keywords, projects)
+                   VALUES (%s, %s, %s, %s, %s)
+                   RETURNING id""",
+                (matter_name, description,
+                 people or [], keywords or [], projects or []),
+            )
+            matter_id = cur.fetchone()[0]
+            conn.commit()
+            cur.close()
+            logger.info(f"Created matter '{matter_name}' (id={matter_id})")
+            return matter_id
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"Failed to create matter '{matter_name}': {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
+    def update_matter(self, matter_id: int, **kwargs) -> bool:
+        """Update a matter by ID. Allowed fields: matter_name, description,
+        people, keywords, projects, status. Returns True on success."""
+        allowed = {"matter_name", "description", "people", "keywords",
+                    "projects", "status"}
+        updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
+        if not updates:
+            return False
+        conn = self._get_conn()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            set_parts = []
+            params = []
+            for col, val in updates.items():
+                set_parts.append(f"{col} = %s")
+                params.append(val)
+            set_parts.append("updated_at = NOW()")
+            params.append(matter_id)
+
+            cur.execute(
+                f"UPDATE matter_registry SET {', '.join(set_parts)} WHERE id = %s",
+                params,
+            )
+            conn.commit()
+            affected = cur.rowcount
+            cur.close()
+            return affected > 0
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"Failed to update matter id={matter_id}: {e}")
+            return False
+        finally:
+            self._put_conn(conn)
+
+    def get_matters(self, status: str = "active") -> list:
+        """Get all matters, optionally filtered by status. Returns list of dicts."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """SELECT id, matter_name, description, people, keywords,
+                          projects, status, created_at, updated_at
+                   FROM matter_registry
+                   WHERE status = %s
+                   ORDER BY matter_name""",
+                (status,),
+            )
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            return rows
+        except Exception as e:
+            logger.warning(f"get_matters failed (non-fatal): {e}")
+            return []
+        finally:
+            self._put_conn(conn)
+
+    def get_matter_by_name(self, name: str) -> Optional[dict]:
+        """Look up a single matter by exact name (case-insensitive)."""
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                """SELECT id, matter_name, description, people, keywords,
+                          projects, status, created_at, updated_at
+                   FROM matter_registry
+                   WHERE LOWER(matter_name) = LOWER(%s)""",
+                (name,),
+            )
+            row = cur.fetchone()
+            cur.close()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.warning(f"get_matter_by_name failed (non-fatal): {e}")
+            return None
         finally:
             self._put_conn(conn)
 

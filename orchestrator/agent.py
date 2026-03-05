@@ -238,6 +238,30 @@ TOOL_DEFINITIONS = [
             "required": ["query"],
         },
     },
+    # RETRIEVAL-FIX-1: Matter context tool (tool #9)
+    {
+        "name": "get_matter_context",
+        "description": (
+            "Look up a business matter/issue by name to get all connected people, "
+            "keywords, and context. Use this FIRST when a question mentions a deal, "
+            "dispute, project, or person — it reveals who else is involved and what "
+            "keywords to search for.\n\n"
+            "Use for:\n"
+            "- 'What's the latest on Cupial?' → reveals Hassa, escrow, Top 4 etc.\n"
+            "- 'Any updates on the Hagenauer project?' → reveals Ofenheimer, permit\n"
+            "- 'Tell me about ClaimsMax' → reveals Philip, UBM, Jurkovic"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Matter name or keyword to look up.",
+                },
+            },
+            "required": ["query"],
+        },
+    },
 ]
 
 
@@ -275,6 +299,8 @@ class ToolExecutor:
                 return self._get_clickup_tasks(tool_input)
             elif tool_name == "search_deals_insights":
                 return self._search_deals_insights(tool_input)
+            elif tool_name == "get_matter_context":
+                return self._get_matter_context(tool_input)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -307,6 +333,17 @@ class ToolExecutor:
         limit = inp.get("limit", 5)
         if query:
             results = self._retriever.get_email_messages(query, limit=limit)
+            # RETRIEVAL-FIX-1: Expand via matter registry (max 3 extra queries)
+            expanded_terms = self._retriever.expand_query_via_matters(query)
+            if expanded_terms:
+                seen_ids = {c.metadata.get("message_id") for c in results}
+                # Search people names first (most likely to find connected emails)
+                for term in expanded_terms[:3]:
+                    extra = self._retriever.get_email_messages(term, limit=3)
+                    for e in extra:
+                        if e.metadata.get("message_id") not in seen_ids:
+                            results.append(e)
+                            seen_ids.add(e.metadata.get("message_id"))
         else:
             results = self._retriever.get_recent_emails(limit=limit)
         return self._format_contexts(results, "EMAILS")
@@ -316,6 +353,16 @@ class ToolExecutor:
         limit = inp.get("limit", 5)
         if query:
             results = self._retriever.get_whatsapp_messages(query, limit=limit)
+            # RETRIEVAL-FIX-1: Expand via matter registry (max 3 extra queries)
+            expanded_terms = self._retriever.expand_query_via_matters(query)
+            if expanded_terms:
+                seen_ids = {c.metadata.get("msg_id") for c in results}
+                for term in expanded_terms[:3]:
+                    extra = self._retriever.get_whatsapp_messages(term, limit=3)
+                    for e in extra:
+                        if e.metadata.get("msg_id") not in seen_ids:
+                            results.append(e)
+                            seen_ids.add(e.metadata.get("msg_id"))
         else:
             results = self._retriever.get_recent_whatsapp(limit=limit)
         return self._format_contexts(results, "WHATSAPP")
@@ -368,6 +415,22 @@ class ToolExecutor:
         if not combined:
             return "[No deals or insights found]"
         return self._format_contexts(combined, "DEALS & INSIGHTS")
+
+    def _get_matter_context(self, inp: dict) -> str:
+        query = inp.get("query", "")
+        matter = self._retriever.get_matter_context(query)
+        if not matter:
+            return json.dumps({"result": f"No matter found matching '{query}'"})
+        return (
+            f"--- MATTER: {matter.get('matter_name', '?')} ---\n"
+            f"Description: {matter.get('description', 'N/A')}\n"
+            f"People: {', '.join(matter.get('people', []))}\n"
+            f"Keywords: {', '.join(matter.get('keywords', []))}\n"
+            f"Projects: {', '.join(matter.get('projects', []))}\n"
+            f"Status: {matter.get('status', 'active')}\n\n"
+            f"TIP: Search for the people listed above to find emails, "
+            f"WhatsApp messages, and meetings connected to this matter."
+        )
 
     @staticmethod
     def _format_contexts(contexts, label: str) -> str:
