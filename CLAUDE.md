@@ -44,6 +44,7 @@ Switch hats as needed. When coding, code. When scoping, think.
 | `orchestrator/prompt_builder.py` | Pipeline prompt (structured JSON output) |
 | `orchestrator/scan_prompt.py` | Scan prompt (conversational output for chat) |
 | `orchestrator/action_handler.py` | Intent router — email, WhatsApp, deadline, VIP, fireflies, ClickUp actions |
+| `orchestrator/agent.py` | **AGENTIC-RAG-1:** Agent loop with tool-use — 5 tools, ToolExecutor, streaming + blocking modes |
 | `memory/retriever.py` | Read-side: Qdrant vector search + PostgreSQL structured queries |
 | `memory/store_back.py` | Write-side: PostgreSQL writes + Qdrant interaction embeddings |
 
@@ -92,7 +93,9 @@ User question → scan_chat()
     → email_action → draft/send → SSE response
     → whatsapp_action → resolve VIP name → send via WAHA → SSE response
     → deadline_action / vip_action / fireflies_fetch → handler → SSE response
-    → question → RAG pipeline (retrieve context → Claude Opus → stream SSE)
+    → question → BAKER_AGENTIC_RAG flag?
+        → true:  _scan_chat_agentic() → agent loop (Claude picks tools) → stream SSE
+        → false: _scan_chat_legacy()  → single-pass RAG → stream SSE
 ```
 
 ## Architecture: How WhatsApp Works
@@ -108,10 +111,10 @@ WAHA webhook → waha_webhook.py
     → classify_intent() (with 15-turn history) → route to handler → _wa_reply()
     → whatsapp_action? → resolve VIP name → send via WAHA → _wa_reply()
     → question? → _handle_director_question() (WA-QUESTION-1)
-      → Qdrant vectors + PostgreSQL (meetings, emails, WhatsApp)
-      → SCAN_SYSTEM_PROMPT + context + deadlines + WhatsApp channel hint
-      → Claude (non-streaming, max_tokens=2048)
-      → _wa_reply(answer) + store-back (Qdrant + conversation_memory)
+      → BAKER_AGENTIC_RAG flag?
+        → true:  _handle_director_question_agentic() → agent loop (max 3 iterations)
+        → false: _handle_director_question_legacy() → single-pass RAG
+      → _wa_reply(answer) + _wa_store_back() (Qdrant + conversation_memory)
   → Non-Director → pipeline.run() or briefing queue
 
 Backfill: scripts/extract_whatsapp.py
@@ -165,6 +168,8 @@ Backfill: scripts/extract_whatsapp.py
 | WASSENGER_API_KEY | WhatsApp (legacy, replaced by WAHA) |
 | FIREFLIES_API_KEY | Meeting transcripts |
 | TODOIST_API_TOKEN | Todoist sync |
+| BAKER_AGENTIC_RAG | `true`/`false` — enable agentic RAG agent loop (default: false) |
+| BAKER_AGENT_TIMEOUT | Agent loop wall-clock timeout in seconds (default: 10) |
 
 ## Qdrant Collections
 
@@ -317,6 +322,66 @@ The goal: the next session reads this file and knows exactly what's current — 
   - **Tested:** 476 chats found via WAHA API, history back to Dec 2025, media download confirmed (97KB JPEG). Dry-run and extraction verified locally.
   - **BLOCKED:** `WHATSAPP_API_KEY` env var needs to be added to Render baker-master service. Handoff note sent to PM. Once set, run: `curl -X POST -H "X-Baker-Key: bakerbhavanga" "https://baker-master.onrender.com/api/whatsapp/backfill?days=365"`
   - **Baker API key** (`bakerbhavanga`) and **WHATSAPP_API_KEY** (`8cbfd17c6ac9f44fa3c43fefaa078414`) added to `~/.zshrc` on dimitry300 machine.
+
+- **2026-03-03 (dimitry300 machine, session 4):** AGENTIC-RAG-1 — agentic RAG transition (Phase 1 MVP):
+  - **orchestrator/agent.py (NEW):** Agent loop module (~350 lines). 5 tools: search_memory, search_meetings, search_emails, search_whatsapp, get_contact. ToolExecutor with per-tool error handling. Two entry points: run_agent_loop() (blocking, WhatsApp) and run_agent_loop_streaming() (generator, Scan SSE). Hard 10s wall-clock timeout with fallback to legacy. AgentResult dataclass tracks iterations, tool calls, token counts, timing.
+  - **memory/retriever.py:** `time.sleep(1)` → `time.sleep(0.05)` — eliminates 14s dead wait across 15 Qdrant collections. Standalone fix, benefits both old and new flows.
+  - **orchestrator/scan_prompt.py:** Added `## MEMORY ACCESS` section to SCAN_SYSTEM_PROMPT — tells Claude about the 5 tools and how to use them.
+  - **outputs/dashboard.py:** Refactored scan_chat() question flow. Extracted shared helpers: `_build_scan_system_prompt()`, `_scan_store_back()`. Feature flag at line 1057 routes to `_scan_chat_agentic()` or `_scan_chat_legacy()`. Legacy path is byte-for-byte identical behavior. Agentic path streams tokens via agent loop, logs agent metadata (tokens, iterations, tool counts) to Qdrant conv_metadata. Stream delimiter `[Searching further...]` on timeout fallback.
+  - **triggers/waha_webhook.py:** Refactored `_handle_director_question()` into dispatcher + `_handle_director_question_agentic()` (max 3 iterations) + `_handle_director_question_legacy()` + `_wa_store_back()`. Feature flag, same fallback pattern.
+  - **PM-reviewed:** All 6 hardening items addressed (hard timeout, separate sleep fix, example queries in tool descriptions, per-tool error handling, token logging from day one, stream delimiter on fallback).
+  - **Status: NOT PUSHED.** All 5 files are modified locally, syntax-checked, ready to commit and push. Feature flag defaults to `false` — zero behavior change on deploy.
+
+### AGENTIC-RAG-1 — Next Session Action Items
+- **Commit and push** the 5 files (sleep fix as separate commit per PM recommendation)
+- **Deploy to Render** with `BAKER_AGENTIC_RAG=false` (confirm no regressions)
+- **Flip flag to `true`** on Render, test:
+  - Scan: "What deals are active?" — verify tool calls in Render logs
+  - Scan: "What did we discuss with Hagenauer?" — verify search_meetings tool
+  - WhatsApp: simulate Director question via curl — verify reply arrives
+  - Action routing: "Send email to Marco" — must bypass agent loop
+- **Monitor:** Render logs for `AGENTIC-RAG` entries (iteration count, tool selection, token usage, latency)
+- **Phase 2 (future):** Add 4 more tools (get_active_deals, get_pending_alerts, get_recent_decisions, search_insights). PostgreSQL `agent_tool_calls` observability table. Channel-aware tool selection.
+- **Phase 3 (future):** Parallel tool execution (asyncio.gather), result caching (5-min TTL), token budget management, fallback to single-pass if agent loop times out.
+
+- **2026-03-04 (dimitry300 machine, session 5):** Baker Vision Definition + Decision Engine Brief + Tooling Setup:
+  - **Baker Vision defined (3 foundational questions answered by Director):**
+    - **Q1 — Standing Orders (7 orders):** No surprises in meetings (pre-meeting briefings auto-prepared), no deadline missed (status checks + mitigation proposals), every VIP response within 24h (auto-draft), morning briefing with proposals not just data, track every commitment and enforce follow-through, proactive intelligence (analysis agents on significant signals), protect calendar and prepare the day (conflict resolution proposals).
+    - **Q2 — Domain Priority:** Chairman > Projects > Network > Private > Travel. Urgency scoring: time(1-3) + money(1-3) + relationship(1-3) = 3-9. Tiers: 7-9=Tier 3 (WhatsApp immediate), 4-6=Tier 2 (Slack hourly), 1-3=Tier 1 (Dashboard morning briefing). Tiebreaker: money > external > oldest. Overrides: emotional urgency (Private flips to top), time-critical travel (Tier 3 forced), VIP 24h SLA breach.
+    - **Q3 — Ideal Tuesday:** Three touchpoints: WhatsApp morning briefing (06:00, proactive proposals), Dashboard deep work (business hours, Scan + review), WhatsApp alerts (anytime, Tier 3 only). Ratio: 90% Baker handles autonomously, 8% Baker proposes + Director approves, 2% Director initiates. Three scheduler loops: overnight batch (02:00-06:00), continuous monitor (real-time Tier 3), hourly cycle (Tier 2 + Slack).
+    - **Baker's two operational modes:** Mode A = Baker handles alone (routine: follow-ups, nudges, meeting invites, reservations, acknowledgments). Mode B = Baker delegates to specialist agent, copies Director, collects output, packages as proposal. Mode C = Baker escalates (insufficient context, needs Director input before delegating).
+    - **All ClickUp spaces = Projects domain.** Domain classification uses content keywords, not workspace mapping.
+    - **Family contacts for emotional urgency override:** Edita, Kira, Nona, Philip.
+  - **BRIEF_DECISION_ENGINE_v1.md written** — saved to `Baker-Project/pm/briefs/`. Defines Step 1A: domain classifier, urgency scorer, override detector, tier assigner, handle/delegate router. ScoredTrigger dataclass flows through pipeline. 12 acceptance criteria. PM reviewed and approved with 3 structural observations.
+  - **PM structural feedback incorporated:**
+    - Ship scoring engine (1A) first, delegation framework (1C) as separate brief
+    - Handle/delegate router ships conservative: Baker handles only proven templates, everything else defaults to Mode C (escalate) until Director promotes patterns
+    - Edita is dual-role: content keywords override sender→domain mapping
+    - VIP tiers: default all 11 to Tier 2 for now, assign properly during agentic onboarding (Step 3)
+    - Financial thresholds: €100K/€10K approved as starting point, tune after 2 weeks
+    - Haiku fallback: approved (~$0.04/day, negligible)
+  - **Code Brisen tooled up:** 9 plugins installed (feature-dev, pyright-lsp, code-review, security-guidance, hookify, claude-code-setup, agent-sdk-dev, ralph-loop, skill-creator). Baker MCP connected. Security-code-reviewer agent active.
+  - **Claims Analysis Agent created on Code Brisen** — specializes in construction dispute analysis (Cupial/Heidenauer €200K dispute). Reads spreadsheets, categorizes line items, assesses evidence strength, recommends recovery strategy.
+  - **Baker Agentic RAG Transition Plan** read — PM's revision of Chat's Master Implementation Plan. 15 steps, 3 horizons. Step 1 resequenced: 1A = Decision Engine (brain), 1B = retrieval tool wrappers (hands), 1C = task ledger + delegation framework.
+  - **Git state:** AGENTIC-RAG-1 still uncommitted on this machine (5 modified files + 1 new). Remote has 4 commits ahead (WA-SEND-1). Merge conflict on CLAUDE.md, dashboard.py, waha_webhook.py. Must resolve before pushing.
+
+### Next Session Action Items (March 5)
+- **Resolve git merge:** Stash AGENTIC-RAG-1 changes, pull WA-SEND-1 commits, reapply and resolve conflicts
+- **Update BRIEF_DECISION_ENGINE_v1.md** with PM feedback + Director answers (ClickUp = all Projects, family contacts, VIP tier defaults)
+- **Invoke `/feature-dev`** on Code Brisen: "Build Baker's Decision Engine based on BRIEF_DECISION_ENGINE_v1.md in Baker-Project/pm/briefs/"
+- **Commit and push AGENTIC-RAG-1** (still pending from session 4)
+
+## Key Documents (Dropbox)
+
+| Document | Path | Purpose |
+|----------|------|---------|
+| Master Implementation Plan | `Baker-Project/Baker_Master_Implementation_Plan_1.docx` | Chat's original 16-step plan (stale snapshot) |
+| Agentic RAG Transition Plan | `Baker-Project/Baker_Agentic_RAG_Transition_Plan.docx` | PM's revised plan — 15 steps, 3 horizons (current) |
+| Decision Engine Brief | `Baker-Project/pm/briefs/BRIEF_DECISION_ENGINE_v1.md` | Step 1A specification (PM approved) |
+| Agentic RAG Brief | `Baker-Project/pm/briefs/BRIEF_AGENTIC_RAG_v1.md` | AGENTIC-RAG-1 specification (built, not pushed) |
+| Architecture v5.1 | `vallen300-bit.github.io/brisen-dashboards/Baker_Architecture_v5.html` | Three actors, three jobs, one memory |
+| Operating Model v2.0 | `Baker-Project/pm/BAKER_OPERATING_MODEL_v2.md` | PM + Code + Director workflow |
+| PM Onboard | `Baker-Project/pm/PM_ONBOARD.md` | Cowork PM session startup |
 
 ## Director Preferences
 

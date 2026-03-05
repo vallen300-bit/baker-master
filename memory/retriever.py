@@ -141,7 +141,7 @@ class SentinelRetriever:
         for i, coll in enumerate(config.qdrant.collections):
             try:
                 if i > 0:
-                    time.sleep(1)  # rate-limit safety net
+                    time.sleep(0.05)  # minimal safety net (Qdrant Cloud needs no rate limit)
                 results = self.search_collection(
                     query_vector=query_vector,
                     collection=coll,

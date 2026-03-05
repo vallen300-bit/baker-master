@@ -65,11 +65,93 @@ def _format_wa_context(contexts) -> str:
 def _handle_director_question(question: str, msg_id: str):
     """
     WA-QUESTION-1: Answer a Director question using the Scan-style RAG flow.
-    Retrieves context from Qdrant + PostgreSQL, calls Claude, replies on
-    WhatsApp, and stores the interaction back to memory.
+
+    AGENTIC-RAG-1: When BAKER_AGENTIC_RAG=true, uses agent loop with tool use
+    instead of pre-fetching all context.  Falls back to legacy single-pass if
+    the agent times out or if the flag is off.
     """
     start = time.time()
 
+    from orchestrator.agent import is_agentic_rag_enabled
+
+    if is_agentic_rag_enabled():
+        answer = _handle_director_question_agentic(question, start)
+    else:
+        answer = _handle_director_question_legacy(question, start)
+
+    if not answer:
+        return  # error already handled inside the helper
+
+    # --- Send reply ---
+    _wa_reply(answer)
+    elapsed_ms = int((time.time() - start) * 1000)
+    logger.info(f"WA question answered: {elapsed_ms}ms, {len(answer)} chars")
+
+    # --- Store-back (fire-and-forget) ---
+    _wa_store_back(question, answer)
+
+
+def _handle_director_question_agentic(question: str, start: float) -> str:
+    """Agent loop path for WhatsApp questions."""
+    from orchestrator.agent import run_agent_loop
+    from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT
+    from config.settings import config
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    # Deadlines (lightweight — always included)
+    deadline_block = ""
+    try:
+        from models.deadlines import get_active_deadlines
+        deadlines = get_active_deadlines(limit=15)
+        if deadlines:
+            dl_lines = []
+            for dl in deadlines:
+                due = dl.get("due_date")
+                due_str = due.strftime("%Y-%m-%d") if due else "TBD"
+                priority = dl.get("priority", "normal")
+                status = dl.get("status", "active")
+                desc = dl.get("description", "")
+                dl_lines.append(f"- [{priority.upper()}] {due_str}: {desc} ({status})")
+            deadline_block = "\n\n## ACTIVE DEADLINES\n" + "\n".join(dl_lines)
+    except Exception:
+        pass
+
+    system_prompt = (
+        f"{SCAN_SYSTEM_PROMPT}\n"
+        f"## CURRENT TIME\n{now}\n"
+        f"{deadline_block}\n\n"
+        f"## CHANNEL\n"
+        f"You are replying on WhatsApp. Keep your answer concise — 2-3 short paragraphs max.\n"
+        f"No markdown headers or bullet formatting. Use *bold* sparingly (WhatsApp supports it).\n"
+        f"No document blocks. No numbered lists longer than 5 items.\n"
+    )
+
+    try:
+        result = run_agent_loop(
+            question=question,
+            system_prompt=system_prompt,
+            max_iterations=3,
+        )
+        logger.info(
+            f"AGENTIC-RAG WA: {result.iterations} iterations, "
+            f"{len(result.tool_calls)} tools, "
+            f"{result.total_input_tokens}+{result.total_output_tokens} tokens, "
+            f"{result.elapsed_ms}ms"
+        )
+
+        if result.timed_out or not result.answer:
+            logger.warning("Agent timed out on WhatsApp — falling back to legacy")
+            return _handle_director_question_legacy(question, time.time())
+
+        return result.answer
+    except Exception as e:
+        logger.error(f"Agentic WA question failed, falling back to legacy: {e}")
+        return _handle_director_question_legacy(question, time.time())
+
+
+def _handle_director_question_legacy(question: str, start: float) -> str:
+    """Legacy single-pass RAG path for WhatsApp questions."""
     # --- 1. Retrieve context (Qdrant vectors) ---
     try:
         retriever = _get_retriever()
@@ -166,23 +248,19 @@ def _handle_director_question(question: str, msg_id: str):
             system=system_prompt,
             messages=[{"role": "user", "content": question}],
         )
-        answer = response.content[0].text
+        return response.content[0].text
     except Exception as e:
         logger.error(f"WA question: Claude call failed: {e}")
         _wa_reply("Sorry, I couldn't process that right now. Try again in a moment.")
-        return
+        return ""
 
-    # --- 4. Send reply ---
-    _wa_reply(answer)
-    elapsed_ms = int((time.time() - start) * 1000)
-    logger.info(f"WA question answered: {elapsed_ms}ms, {len(answer)} chars")
 
-    # --- 5. Store-back (fire-and-forget) ---
+def _wa_store_back(question: str, answer: str):
+    """Store-back logic for WhatsApp questions (shared by both paths)."""
     try:
         from memory.store_back import SentinelStoreBack
         store = SentinelStoreBack._get_global_instance()
 
-        # 5a. Log decision
         store.log_decision(
             decision=f"WA question: {question[:100]}",
             reasoning=answer[:500],
@@ -190,7 +268,6 @@ def _handle_director_question(question: str, msg_id: str):
             trigger_type="whatsapp_question",
         )
 
-        # 5b. Store Q+A to Qdrant for conversation memory (CONV-MEM-1)
         conversation_content = (
             f"[CONVERSATION]\n"
             f"Question (WhatsApp): {question}\n\n"
@@ -211,7 +288,6 @@ def _handle_director_question(question: str, msg_id: str):
             collection="baker-conversations",
         )
 
-        # 5c. Log to conversation_memory table
         store.log_conversation(
             question=question,
             answer=answer,

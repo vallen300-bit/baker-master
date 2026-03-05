@@ -1080,6 +1080,297 @@ async def scan_chat(req: ScanRequest):
             )
     # draft_action == "dismiss" or regular question → fall through to RAG pipeline
 
+    # AGENTIC-RAG-1: Feature-flagged agent loop vs. legacy single-pass
+    from orchestrator.agent import is_agentic_rag_enabled
+
+    if is_agentic_rag_enabled():
+        return _scan_chat_agentic(req, start)
+    else:
+        return _scan_chat_legacy(req, start)
+
+
+def _build_scan_system_prompt(deadline_only: bool = False, contexts=None) -> str:
+    """Build the system prompt with time + optional context + deadlines."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    # Deadlines (included in both agentic and legacy paths)
+    deadline_block = ""
+    try:
+        from models.deadlines import get_active_deadlines
+        deadlines = get_active_deadlines(limit=15)
+        if deadlines:
+            dl_lines = []
+            for dl in deadlines:
+                due = dl.get("due_date")
+                due_str = due.strftime("%Y-%m-%d") if due else "TBD"
+                priority = dl.get("priority", "normal")
+                status = dl.get("status", "active")
+                desc = dl.get("description", "")
+                dl_lines.append(f"- [{priority.upper()}] {due_str}: {desc} ({status})")
+            deadline_block = "\n\n## ACTIVE DEADLINES\n" + "\n".join(dl_lines)
+    except Exception:
+        pass
+
+    if deadline_only:
+        # Agentic mode: no pre-fetched context, tools provide context
+        return (
+            f"{SCAN_SYSTEM_PROMPT}\n"
+            f"## CURRENT TIME\n{now}\n"
+            f"{deadline_block}"
+        )
+    else:
+        # Legacy mode: context stuffed into prompt
+        context_block = _format_scan_context(contexts)
+        return (
+            f"{SCAN_SYSTEM_PROMPT}\n"
+            f"## CURRENT TIME\n{now}\n\n"
+            f"## RETRIEVED CONTEXT\n{context_block}"
+            f"{deadline_block}"
+        )
+
+
+def _scan_store_back(req, full_response: str, start: float, extra_meta: Optional[dict] = None):
+    """Store-back logic shared by both agentic and legacy paths."""
+    elapsed_ms = int((time.time() - start) * 1000)
+    try:
+        store = _get_store()
+        store.log_decision(
+            decision=f"Scan answer: {req.question[:100]}",
+            reasoning=full_response[:500],
+            confidence="medium",
+            trigger_type="scan",
+        )
+        logger.info(f"Scan complete: {elapsed_ms}ms, {len(full_response)} chars")
+    except Exception as e:
+        logger.warning(f"Scan store-back failed (non-fatal): {e}")
+
+    # Store full Q+A in Qdrant for conversation memory (CONV-MEM-1)
+    try:
+        store = _get_store()
+        conversation_content = (
+            f"[CONVERSATION]\n"
+            f"Question: {req.question}\n\n"
+            f"Answer: {full_response}"
+        )
+        conv_metadata = {
+            "type": "conversation",
+            "source": "scan",
+            "question": req.question[:500],
+            "project": req.project or "general",
+            "role": req.role or "ceo",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "answer_length": len(full_response),
+            "token_estimate": len(full_response) // 4,
+        }
+        if extra_meta:
+            conv_metadata.update(extra_meta)
+            # NOTE: Agent metadata (tokens, iterations, tool counts) lives in Qdrant
+            # payload only.  Phase 2 observability should add a dedicated PostgreSQL
+            # table (agent_tool_calls) for queryable analytics.
+
+        if len(conversation_content) <= 8000:
+            store.store_document(
+                content=conversation_content,
+                metadata=conv_metadata,
+                collection="baker-conversations",
+            )
+            chunk_count = 1
+        else:
+            chunks = _chunk_conversation(conversation_content, max_chars=8000)
+            for i, chunk in enumerate(chunks):
+                chunk_meta = {
+                    **conv_metadata,
+                    "chunk_index": i,
+                    "chunk_count": len(chunks),
+                }
+                store.store_document(
+                    content=chunk,
+                    metadata=chunk_meta,
+                    collection="baker-conversations",
+                )
+            chunk_count = len(chunks)
+
+        store.log_conversation(
+            question=req.question,
+            answer=full_response,
+            answer_length=len(full_response),
+            project=req.project or "general",
+            chunk_count=chunk_count,
+        )
+        logger.info("Conversation stored in Baker's memory (CONV-MEM-1)")
+    except Exception as e:
+        logger.warning(f"Conversation store-back failed (non-fatal): {e}")
+
+    # Email scan result to Director (EMAIL-REFORM-1 Type 2 — opt-in only)
+    if full_response:
+        try:
+            from outputs.email_alerts import has_email_intent, send_scan_result_email
+            if has_email_intent(req.question):
+                send_scan_result_email(req.question, full_response)
+                logger.info("Scan result emailed (explicit request detected)")
+        except Exception as e:
+            logger.warning(f"Scan email failed (non-fatal): {e}")
+
+
+def _scan_chat_agentic(req, start: float):
+    """AGENTIC-RAG-1: Agent loop with tool use for Scan SSE."""
+    from orchestrator.agent import run_agent_loop_streaming
+
+    system_prompt = _build_scan_system_prompt(deadline_only=True)
+
+    # Build history
+    history = []
+    for msg in (req.history or [])[-10:]:
+        role = msg.get("role", "user") if isinstance(msg, dict) else "user"
+        content = msg.get("content", "") if isinstance(msg, dict) else str(msg)
+        if role in ("user", "assistant") and content:
+            history.append({"role": role, "content": content})
+
+    async def event_stream():
+        full_response = ""
+        agent_result = None
+
+        try:
+            gen = run_agent_loop_streaming(
+                question=req.question,
+                system_prompt=system_prompt,
+                history=history,
+                max_iterations=5,
+            )
+            for item in gen:
+                if "_agent_result" in item:
+                    agent_result = item["_agent_result"]
+                    # If timed out with no answer, fall back to single-pass
+                    if agent_result.timed_out and not agent_result.answer:
+                        logger.warning("Agent timed out — falling back to single-pass")
+                        # PM note: delimiter so frontend knows a fresh answer follows
+                        yield f"data: {json.dumps({'token': '[Searching further...] '})}\n\n"
+                        async for sse in _scan_chat_legacy_stream(req, start):
+                            yield sse
+                        return
+                elif "token" in item:
+                    full_response += item["token"]
+                    payload = json.dumps({"token": item["token"]})
+                    yield f"data: {payload}\n\n"
+                elif "tool_call" in item:
+                    # Optional: notify frontend of tool execution
+                    pass
+        except Exception as e:
+            logger.error(f"Agentic scan error: {e}")
+            err_payload = json.dumps({"error": str(e)})
+            yield f"data: {err_payload}\n\n"
+
+        yield "data: [DONE]\n\n"
+
+        # Store-back with agent metadata (PM review item #5: log tokens)
+        extra_meta = {}
+        if agent_result:
+            extra_meta = {
+                "agentic": True,
+                "agent_iterations": agent_result.iterations,
+                "agent_tool_calls": len(agent_result.tool_calls),
+                "agent_input_tokens": agent_result.total_input_tokens,
+                "agent_output_tokens": agent_result.total_output_tokens,
+                "agent_elapsed_ms": agent_result.elapsed_ms,
+            }
+            logger.info(
+                f"AGENTIC-RAG scan: {agent_result.iterations} iterations, "
+                f"{len(agent_result.tool_calls)} tools, "
+                f"{agent_result.total_input_tokens}+{agent_result.total_output_tokens} tokens, "
+                f"{agent_result.elapsed_ms}ms"
+            )
+        _scan_store_back(req, full_response, start, extra_meta)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+async def _scan_chat_legacy_stream(req, start: float):
+    """Legacy single-pass RAG as an async generator (used as fallback from agentic)."""
+    full_response = ""
+    try:
+        retriever = _get_retriever()
+        contexts = retriever.search_all_collections(
+            query=req.question, limit_per_collection=8, score_threshold=0.3,
+            project=req.project, role=req.role,
+        )
+    except Exception as e:
+        logger.error(f"Scan retrieval failed: {e}")
+        contexts = []
+
+    try:
+        retriever = _get_retriever()
+        transcripts = retriever.get_meeting_transcripts(req.question, limit=3)
+        if transcripts:
+            contexts.extend(transcripts)
+        recent = retriever.get_recent_meeting_transcripts(limit=3)
+        existing_ids = {c.metadata.get("meeting_id") for c in transcripts}
+        for r in recent:
+            if r.metadata.get("meeting_id") not in existing_ids:
+                contexts.append(r)
+    except Exception:
+        pass
+
+    try:
+        retriever = _get_retriever()
+        emails = retriever.get_email_messages(req.question, limit=3)
+        if emails:
+            contexts.extend(emails)
+        recent_emails = retriever.get_recent_emails(limit=3)
+        existing_eids = {c.metadata.get("message_id") for c in emails}
+        for r in recent_emails:
+            if r.metadata.get("message_id") not in existing_eids:
+                contexts.append(r)
+        wa_msgs = retriever.get_whatsapp_messages(req.question, limit=3)
+        if wa_msgs:
+            contexts.extend(wa_msgs)
+        recent_wa = retriever.get_recent_whatsapp(limit=3)
+        existing_wids = {c.metadata.get("msg_id") for c in wa_msgs}
+        for r in recent_wa:
+            if r.metadata.get("msg_id") not in existing_wids:
+                contexts.append(r)
+    except Exception:
+        pass
+
+    system_prompt = _build_scan_system_prompt(deadline_only=False, contexts=contexts)
+
+    messages = []
+    for msg in (req.history or [])[-10:]:
+        role = msg.get("role", "user") if isinstance(msg, dict) else "user"
+        content = msg.get("content", "") if isinstance(msg, dict) else str(msg)
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": req.question})
+
+    try:
+        claude = anthropic.Anthropic(api_key=config.claude.api_key)
+        with claude.messages.stream(
+            model=config.claude.model, max_tokens=4096,
+            system=system_prompt, messages=messages,
+        ) as stream:
+            for text in stream.text_stream:
+                full_response += text
+                payload = json.dumps({"token": text})
+                yield f"data: {payload}\n\n"
+    except Exception as e:
+        logger.error(f"Scan stream error: {e}")
+        err_payload = json.dumps({"error": str(e)})
+        yield f"data: {err_payload}\n\n"
+
+    yield "data: [DONE]\n\n"
+    _scan_store_back(req, full_response, start)
+
+
+def _scan_chat_legacy(req, start: float):
+    """Legacy single-pass RAG — unchanged behavior, refactored into own function."""
+
     # 1. Retrieve context
     try:
         retriever = _get_retriever()
@@ -1098,12 +1389,10 @@ async def scan_chat(req: ScanRequest):
     # 1b. ARCH-3: Also search full meeting transcripts from PostgreSQL
     try:
         retriever = _get_retriever()
-        # Keyword match
         transcripts = retriever.get_meeting_transcripts(req.question, limit=3)
         if transcripts:
             contexts.extend(transcripts)
             logger.info(f"Scan: added {len(transcripts)} keyword-matched transcripts")
-        # Always include recent transcripts (so Baker knows about latest meetings)
         recent = retriever.get_recent_meeting_transcripts(limit=3)
         existing_ids = {c.metadata.get("meeting_id") for c in transcripts}
         added = 0
@@ -1119,7 +1408,6 @@ async def scan_chat(req: ScanRequest):
     # 1c. ARCH-6/7: Also search full emails + WhatsApp from PostgreSQL
     try:
         retriever = _get_retriever()
-        # Emails
         emails = retriever.get_email_messages(req.question, limit=3)
         if emails:
             contexts.extend(emails)
@@ -1130,7 +1418,6 @@ async def scan_chat(req: ScanRequest):
             if r.metadata.get("message_id") not in existing_eids:
                 contexts.append(r)
 
-        # WhatsApp
         wa_msgs = retriever.get_whatsapp_messages(req.question, limit=3)
         if wa_msgs:
             contexts.extend(wa_msgs)
@@ -1144,33 +1431,7 @@ async def scan_chat(req: ScanRequest):
         logger.warning(f"Email/WhatsApp retrieval failed (non-fatal): {e}")
 
     # 2. Build system prompt with context
-    context_block = _format_scan_context(contexts)
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-    # Inject live deadline data so Baker can answer "check my schedule" etc.
-    deadline_block = ""
-    try:
-        from models.deadlines import get_active_deadlines
-        deadlines = get_active_deadlines(limit=15)
-        if deadlines:
-            dl_lines = []
-            for dl in deadlines:
-                due = dl.get("due_date")
-                due_str = due.strftime("%Y-%m-%d") if due else "TBD"
-                priority = dl.get("priority", "normal")
-                status = dl.get("status", "active")
-                desc = dl.get("description", "")
-                dl_lines.append(f"- [{priority.upper()}] {due_str}: {desc} ({status})")
-            deadline_block = "\n\n## ACTIVE DEADLINES\n" + "\n".join(dl_lines)
-    except Exception:
-        pass
-
-    system_prompt = (
-        f"{SCAN_SYSTEM_PROMPT}\n"
-        f"## CURRENT TIME\n{now}\n\n"
-        f"## RETRIEVED CONTEXT\n{context_block}"
-        f"{deadline_block}"
-    )
+    system_prompt = _build_scan_system_prompt(deadline_only=False, contexts=contexts)
 
     # 3. Build messages (include history for follow-ups)
     messages = []
@@ -1206,81 +1467,8 @@ async def scan_chat(req: ScanRequest):
         # Send [DONE] signal
         yield "data: [DONE]\n\n"
 
-        # 5. Store-back (non-blocking, fire-and-forget)
-        elapsed_ms = int((time.time() - start) * 1000)
-        try:
-            store = _get_store()
-            store.log_decision(
-                decision=f"Scan answer: {req.question[:100]}",
-                reasoning=full_response[:500],
-                confidence="medium",
-                trigger_type="scan",
-            )
-            logger.info(f"Scan complete: {elapsed_ms}ms, {len(full_response)} chars")
-        except Exception as e:
-            logger.warning(f"Scan store-back failed (non-fatal): {e}")
-
-        # 5b. Store full Q+A in Qdrant for conversation memory (CONV-MEM-1)
-        try:
-            store = _get_store()
-            conversation_content = (
-                f"[CONVERSATION]\n"
-                f"Question: {req.question}\n\n"
-                f"Answer: {full_response}"
-            )
-            conv_metadata = {
-                "type": "conversation",
-                "source": "scan",
-                "question": req.question[:500],
-                "project": req.project or "general",
-                "role": req.role or "ceo",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "answer_length": len(full_response),
-                "token_estimate": len(full_response) // 4,
-            }
-
-            if len(conversation_content) <= 8000:
-                store.store_document(
-                    content=conversation_content,
-                    metadata=conv_metadata,
-                    collection="baker-conversations",
-                )
-                chunk_count = 1
-            else:
-                chunks = _chunk_conversation(conversation_content, max_chars=8000)
-                for i, chunk in enumerate(chunks):
-                    chunk_meta = {
-                        **conv_metadata,
-                        "chunk_index": i,
-                        "chunk_count": len(chunks),
-                    }
-                    store.store_document(
-                        content=chunk,
-                        metadata=chunk_meta,
-                        collection="baker-conversations",
-                    )
-                chunk_count = len(chunks)
-
-            store.log_conversation(
-                question=req.question,
-                answer=full_response,
-                answer_length=len(full_response),
-                project=req.project or "general",
-                chunk_count=chunk_count,
-            )
-            logger.info("Conversation stored in Baker's memory (CONV-MEM-1)")
-        except Exception as e:
-            logger.warning(f"Conversation store-back failed (non-fatal): {e}")
-
-        # 5c. Email scan result to Director (EMAIL-REFORM-1 Type 2 — opt-in only)
-        if full_response:
-            try:
-                from outputs.email_alerts import has_email_intent, send_scan_result_email
-                if has_email_intent(req.question):
-                    send_scan_result_email(req.question, full_response)
-                    logger.info("Scan result emailed (explicit request detected)")
-            except Exception as e:
-                logger.warning(f"Scan email failed (non-fatal): {e}")
+        # 5. Store-back
+        _scan_store_back(req, full_response, start)
 
     return StreamingResponse(
         event_stream(),
