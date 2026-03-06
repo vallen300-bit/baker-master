@@ -93,14 +93,53 @@ def _handle_director_question(question: str, msg_id: str, scored: dict = None):
     except Exception:
         pass
 
-    # Mode+tier routing (all call sites pass mode + domain)
-    if _tier == 1 and _mode != "delegate":
-        logger.info("WA question: Tier 1 — forcing legacy path for speed")
-        answer = _handle_director_question_legacy(question, start, mode=_mode, domain=_domain)
-    elif is_agentic_rag_enabled() or _mode == "delegate":
-        answer = _handle_director_question_agentic(question, start, mode=_mode, domain=_domain)
-    else:
-        answer = _handle_director_question_legacy(question, start, mode=_mode, domain=_domain)
+    # AGENT-FRAMEWORK-1: Try capability routing first
+    answer = None
+    try:
+        from orchestrator.capability_router import CapabilityRouter
+        from orchestrator.capability_runner import CapabilityRunner
+        _cap_plan = CapabilityRouter().route(question, _domain, _mode, scored)
+        if _cap_plan and _cap_plan.capabilities:
+            cap_slugs = [c.slug for c in _cap_plan.capabilities]
+            logger.info(f"WA capability routing: mode={_cap_plan.mode}, caps={cap_slugs}")
+            runner = CapabilityRunner()
+            if _cap_plan.mode == "fast":
+                result = runner.run_single(_cap_plan.capabilities[0], question,
+                                           domain=_domain, mode=_mode)
+            else:
+                result = runner.run_multi(_cap_plan, question,
+                                          domain=_domain, mode=_mode)
+            if result and result.answer:
+                answer = result.answer
+                # Log capability run
+                try:
+                    import json as _json
+                    from memory.store_back import SentinelStoreBack
+                    store = SentinelStoreBack._get_global_instance()
+                    store.insert_capability_run(
+                        baker_task_id=_task_id, capability_slug=cap_slugs[0],
+                        sub_task=question[:500], status="completed",
+                    )
+                    if _task_id:
+                        store.update_baker_task(
+                            _task_id, capability_slugs=_json.dumps(cap_slugs),
+                            agent_iterations=result.iterations,
+                            agent_elapsed_ms=result.elapsed_ms,
+                        )
+                except Exception:
+                    pass
+    except Exception as _cap_e:
+        logger.warning(f"WA capability routing failed (non-fatal): {_cap_e}")
+
+    # Fallback: existing mode+tier routing
+    if not answer:
+        if _tier == 1 and _mode != "delegate":
+            logger.info("WA question: Tier 1 — forcing legacy path for speed")
+            answer = _handle_director_question_legacy(question, start, mode=_mode, domain=_domain)
+        elif is_agentic_rag_enabled() or _mode == "delegate":
+            answer = _handle_director_question_agentic(question, start, mode=_mode, domain=_domain)
+        else:
+            answer = _handle_director_question_legacy(question, start, mode=_mode, domain=_domain)
 
     if not answer:
         return  # error already handled inside the helper

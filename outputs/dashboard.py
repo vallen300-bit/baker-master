@@ -1216,6 +1216,9 @@ async def scan_chat(req: ScanRequest):
                 ),
                 req.question,
             )
+        elif intent.get("type") == "capability_task":
+            # AGENT-FRAMEWORK-1: Explicit capability invocation
+            return _scan_chat_capability(req, start, intent)
     # draft_action == "dismiss" or regular question → fall through to RAG pipeline
 
     # DECISION-ENGINE-1A: Score the question for domain context
@@ -1257,6 +1260,19 @@ async def scan_chat(req: ScanRequest):
     except Exception as _te:
         logger.warning(f"baker_task creation failed (non-fatal): {_te}")
 
+    # AGENT-FRAMEWORK-1: Try implicit capability routing before generic RAG
+    try:
+        from orchestrator.capability_router import CapabilityRouter
+        _cap_plan = CapabilityRouter().route(req.question, _domain, _mode, _scored)
+        if _cap_plan and _cap_plan.capabilities:
+            return _scan_chat_capability(
+                req, start, {"plan": _cap_plan},
+                task_id=_task_id, domain=_domain, mode=_mode,
+            )
+    except Exception as _cap_e:
+        logger.warning(f"Capability routing failed (non-fatal, falling through): {_cap_e}")
+
+    # Existing tier/mode routing (generic RAG fallback)
     if _tier == 1 and _mode != "delegate":
         logger.info("Scan: Tier 1 detected — forcing legacy path for speed")
         return _scan_chat_legacy(req, start, _domain_context,
@@ -1412,6 +1428,171 @@ def _scan_store_back(req, full_response: str, start: float,
                 logger.info("Scan result emailed (explicit request detected)")
         except Exception as e:
             logger.warning(f"Scan email failed (non-fatal): {e}")
+
+
+def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
+                          task_id: int = None, domain: str = None, mode: str = None):
+    """AGENT-FRAMEWORK-1: Route through capability framework.
+    Handles both explicit ('have the finance agent...') and implicit (router match) paths."""
+    import json as _json
+
+    from orchestrator.capability_router import CapabilityRouter, RoutingPlan
+    from orchestrator.capability_runner import CapabilityRunner
+
+    # Build routing plan
+    plan = intent_or_plan.get("plan") if isinstance(intent_or_plan, dict) else None
+    if plan is None:
+        # Explicit intent — route via hint
+        hint = intent_or_plan.get("capability_hint", "") if isinstance(intent_or_plan, dict) else ""
+        router = CapabilityRouter()
+        plan = router.route(req.question, domain, mode)
+        if not plan or not plan.capabilities:
+            # No capability match — fall through to generic agentic
+            logger.info("Capability routing: no match, falling through to agentic")
+            return _scan_chat_agentic(req, start, "", task_id=task_id,
+                                      mode=mode, domain=domain)
+
+    cap_slugs = [c.slug for c in plan.capabilities]
+    logger.info(f"Capability routing: mode={plan.mode}, capabilities={cap_slugs}")
+
+    # Update baker_task with capability info
+    try:
+        store = _get_store()
+        if task_id:
+            store.update_baker_task(task_id,
+                                    capability_slugs=_json.dumps(cap_slugs))
+    except Exception:
+        pass
+
+    runner = CapabilityRunner()
+
+    if plan.mode == "fast" and len(plan.capabilities) == 1:
+        # Fast path — single capability, stream SSE
+        cap = plan.capabilities[0]
+
+        async def _cap_stream():
+            import asyncio
+            q = asyncio.Queue()
+            _agent_result = [None]
+
+            def _run():
+                try:
+                    for chunk in runner.run_streaming(cap, req.question,
+                                                      history=req.history,
+                                                      domain=domain, mode=mode):
+                        if "_agent_result" in chunk:
+                            _agent_result[0] = chunk["_agent_result"]
+                        elif "token" in chunk:
+                            q.put_nowait(chunk["token"])
+                        elif "tool_call" in chunk:
+                            q.put_nowait(None)  # keepalive
+                except Exception as e:
+                    logger.error(f"Capability stream error: {e}")
+                finally:
+                    q.put_nowait(StopIteration)
+
+            import threading
+            t = threading.Thread(target=_run, daemon=True)
+            t.start()
+
+            # SSE event: which capabilities are active
+            yield f"data: {_json.dumps({'capabilities': cap_slugs})}\n\n"
+
+            while True:
+                try:
+                    item = await asyncio.wait_for(
+                        asyncio.get_event_loop().run_in_executor(None, q.get),
+                        timeout=2.0,
+                    )
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+
+                if item is StopIteration:
+                    break
+                if item is None:
+                    yield ": keepalive\n\n"
+                    continue
+                yield f"data: {_json.dumps({'token': item})}\n\n"
+
+            # Log capability run
+            ar = _agent_result[0]
+            if ar:
+                try:
+                    store = _get_store()
+                    run_id = store.insert_capability_run(
+                        baker_task_id=task_id,
+                        capability_slug=cap.slug,
+                        sub_task=req.question[:500],
+                        status="completed" if not ar.timed_out else "timed_out",
+                    )
+                    if run_id:
+                        store.update_capability_run(
+                            run_id, answer=ar.answer[:2000],
+                            tools_used=_json.dumps([tc["name"] for tc in ar.tool_calls]),
+                            iterations=ar.iterations,
+                            input_tokens=ar.total_input_tokens,
+                            output_tokens=ar.total_output_tokens,
+                            elapsed_ms=ar.elapsed_ms,
+                            status="completed" if not ar.timed_out else "timed_out",
+                        )
+                    if task_id:
+                        store.update_baker_task(
+                            task_id, status="completed",
+                            deliverable=ar.answer[:2000],
+                            agent_iterations=ar.iterations,
+                            agent_tool_calls=len(ar.tool_calls),
+                            agent_input_tokens=ar.total_input_tokens,
+                            agent_output_tokens=ar.total_output_tokens,
+                            agent_elapsed_ms=ar.elapsed_ms,
+                        )
+                except Exception as _e:
+                    logger.warning(f"Capability run logging failed (non-fatal): {_e}")
+
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(_cap_stream(), media_type="text/event-stream")
+
+    elif plan.mode == "delegate":
+        # Delegate path — multi-capability, blocking then stream result
+        result = runner.run_multi(plan, req.question, history=req.history,
+                                  domain=domain, mode=mode)
+
+        async def _delegate_stream():
+            yield f"data: {_json.dumps({'capabilities': cap_slugs, 'phase': 'synthesizing'})}\n\n"
+            if result.answer:
+                yield f"data: {_json.dumps({'token': result.answer})}\n\n"
+            # Log
+            try:
+                store = _get_store()
+                for i, st in enumerate(plan.sub_tasks or []):
+                    store.insert_capability_run(
+                        baker_task_id=task_id,
+                        capability_slug=st.get("capability_slug", ""),
+                        sub_task=st.get("sub_task", "")[:500],
+                        status="completed",
+                    )
+                if task_id:
+                    store.update_baker_task(
+                        task_id, status="completed",
+                        deliverable=result.answer[:2000],
+                        decomposition=_json.dumps(plan.sub_tasks),
+                        agent_iterations=result.iterations,
+                        agent_tool_calls=len(result.tool_calls),
+                        agent_input_tokens=result.total_input_tokens,
+                        agent_output_tokens=result.total_output_tokens,
+                        agent_elapsed_ms=result.elapsed_ms,
+                    )
+            except Exception as _e:
+                logger.warning(f"Delegate logging failed (non-fatal): {_e}")
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(_delegate_stream(), media_type="text/event-stream")
+
+    else:
+        # Fallback to agentic
+        return _scan_chat_agentic(req, start, "", task_id=task_id,
+                                  mode=mode, domain=domain)
 
 
 def _scan_chat_agentic(req, start: float, domain_context: str = "",
