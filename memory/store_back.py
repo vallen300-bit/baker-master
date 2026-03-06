@@ -941,6 +941,25 @@ class SentinelStoreBack:
             sql = f"UPDATE baker_tasks SET {', '.join(set_clauses)} WHERE id = %s"
             cur.execute(sql, values)
             conn.commit()
+
+            # AGENT-FRAMEWORK-1: Propagate feedback to decomposition_log
+            if "director_feedback" in updates:
+                try:
+                    feedback = updates["director_feedback"]
+                    quality = "good" if feedback in ("accepted", "good") else "partial" if feedback == "revised" else "poor"
+                    cur2 = conn.cursor()
+                    cur2.execute(
+                        """UPDATE decomposition_log
+                           SET director_feedback = %s, feedback_at = NOW(),
+                               outcome_quality = %s
+                           WHERE baker_task_id = %s""",
+                        (feedback, quality, task_id),
+                    )
+                    conn.commit()
+                    cur2.close()
+                except Exception as _fb_e:
+                    logger.debug(f"Feedback propagation to decomposition_log failed (non-fatal): {_fb_e}")
+
             cur.close()
             logger.info(f"Updated baker_task #{task_id}: {list(updates.keys())}")
             return True
