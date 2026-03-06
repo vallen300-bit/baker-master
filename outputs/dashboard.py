@@ -194,6 +194,20 @@ async def startup():
     try:
         store = _get_store()
         logger.info("PostgreSQL store initialized")
+        # COCKPIT-ALERT-UI: ensure structured_actions column exists
+        conn = store._get_conn()
+        if conn:
+            try:
+                cur = conn.cursor()
+                cur.execute("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS structured_actions JSONB")
+                conn.commit()
+                cur.close()
+                logger.info("COCKPIT-ALERT-UI: structured_actions column ensured")
+            except Exception as me:
+                conn.rollback()
+                logger.warning(f"COCKPIT-ALERT-UI migration (non-fatal): {me}")
+            finally:
+                store._put_conn(conn)
     except Exception as e:
         logger.warning(f"PostgreSQL connection failed on startup (will retry): {e}")
 
@@ -665,6 +679,18 @@ async def resolve_alert(alert_id: int):
         return {"status": "resolved", "id": alert_id}
     except Exception as e:
         logger.error(f"/api/alerts/{alert_id}/resolve failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/alerts/{alert_id}/dismiss", tags=["alerts"], dependencies=[Depends(verify_api_key)])
+async def dismiss_alert(alert_id: int):
+    """Dismiss alert without acting."""
+    try:
+        store = _get_store()
+        store.dismiss_alert(alert_id)
+        return {"status": "dismissed", "id": alert_id}
+    except Exception as e:
+        logger.error(f"/api/alerts/{alert_id}/dismiss failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

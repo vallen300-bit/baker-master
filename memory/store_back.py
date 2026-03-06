@@ -2388,7 +2388,8 @@ class SentinelStoreBack:
 
     def create_alert(self, tier: int, title: str, body: str = None,
                      action_required: bool = False, trigger_id: int = None,
-                     contact_id: str = None, deal_id: str = None) -> Optional[int]:
+                     contact_id: str = None, deal_id: str = None,
+                     structured_actions: dict = None) -> Optional[int]:
         """Insert into alerts table. Returns alert ID."""
         conn = self._get_conn()
         if not conn:
@@ -2396,16 +2397,18 @@ class SentinelStoreBack:
             return None
         try:
             cur = conn.cursor()
+            import json as _json
+            sa_json = _json.dumps(structured_actions) if structured_actions else None
             cur.execute(
                 """
                 INSERT INTO alerts (tier, title, body, action_required,
-                    trigger_id, contact_id, deal_id, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                    trigger_id, contact_id, deal_id, structured_actions, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 RETURNING id
                 """,
                 (tier, title, body, action_required,
                  trigger_id, contact_id if contact_id else None,
-                 deal_id if deal_id else None),
+                 deal_id if deal_id else None, sa_json),
             )
             alert_id = cur.fetchone()[0]
             conn.commit()
@@ -2479,6 +2482,46 @@ class SentinelStoreBack:
         except Exception as e:
             conn.rollback()
             logger.error(f"resolve_alert failed for #{alert_id}: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def dismiss_alert(self, alert_id: int):
+        """Mark alert as dismissed without acting."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE alerts SET status = 'dismissed', resolved_at = NOW() WHERE id = %s",
+                (alert_id,),
+            )
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"dismiss_alert failed for #{alert_id}: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def update_alert_structured_actions(self, alert_id: int, structured_actions: dict):
+        """Store structured actions JSON on an existing alert."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            import json as _json
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE alerts SET structured_actions = %s WHERE id = %s",
+                (_json.dumps(structured_actions), alert_id),
+            )
+            conn.commit()
+            cur.close()
+            logger.info(f"Updated structured_actions for alert #{alert_id}")
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"update_alert_structured_actions failed for #{alert_id}: {e}")
         finally:
             self._put_conn(conn)
 
