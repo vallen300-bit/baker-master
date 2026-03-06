@@ -5,7 +5,7 @@
 **Builder:** Code Brisen
 **Status:** Ready for implementation
 **Priority:** High — Phase 2 keystone
-**Version:** 2.0 — Revised after Director architectural review (2026-03-06)
+**Version:** 2.1 — Director answers (Q2/Q9/Q12) + proactive alert format + action types (2026-03-06)
 
 ---
 
@@ -771,7 +771,142 @@ After Code Brisen commits, Code 300 reviews against:
 
 ---
 
-## 17. Reference: IT Capability — Full Specification
+## 17. Director Decisions (Q2, Q9, Q12) — Recorded 2026-03-06
+
+### Q2: Quality Bar
+
+**Default: B (85-90%) — "Client-ready with my review."** Director reviews and approves with minor tweaks.
+
+Exceptions:
+- **Internal-only outputs** (memory updates, internal tracking, IT agent logs): A (60-70%) is fine — only agents or Director consume these.
+- **C (95% send-ready)** is not granted to any capability at launch. Capabilities earn that over time based on track record.
+
+### Q9: Employee Visibility
+
+**Director-only at launch.** All capability output flows to the Director. He decides what to share and when. Rationale: capabilities will make mistakes early — employees should not react to untuned output.
+
+Evolution path: After a capability proves reliable (2-4 weeks), Director selectively opens visibility per capability. Some (Research, AI Dev) stay Director-only permanently.
+
+### Q12: Success / Failure Criteria
+
+**SUCCESS (after 2 weeks):**
+- Capabilities answer routine questions before Director thinks to ask — cash position, migration status, claim deadlines arrive proactively
+- Output usable on first pass — Director editing 10-20%, not rewriting
+- Decision speed increases — options come pre-analyzed with tradeoffs
+- No missed deadlines — capabilities catch what humans drop
+- Concrete proof-of-concept: Baker detects flight/train booking in email, sends alert with "leave by" time
+
+**FAILURE (after 2 weeks):**
+- Alert fatigue — Director dismissing more output than using
+- Quality drag — correcting capability work takes longer than doing it yourself
+- Context amnesia — capabilities keep asking for info they should already know
+- Human friction — employees feel surveilled or undermined
+
+---
+
+## 18. Proactive Alert Format — "CEO Cockpit Command Interface"
+
+All proactive alerts and multi-action outputs follow this structured format.
+The Director sees the situation and selects actions. Baker executes.
+
+### Alert Structure
+
+```json
+{
+  "alert_id": 3382,
+  "title": "Hagenauer: Contract termination — 8 days",
+  "problem": "3-4 lines summarizing the issue",
+  "cause": "2 lines — Baker's analysis of why this happened",
+  "solution": "2-3 lines — what solved looks like",
+  "parts": [
+    {
+      "label": "Legal defense",
+      "actions": [
+        {
+          "label": "Forward Neubauer letter to Aukera",
+          "description": "Draft email with letter attached and proposed call times",
+          "type": "draft",
+          "prompt": "Draft an email to Aukera forwarding the Neubauer letter..."
+        },
+        {
+          "label": "E+H termination risk assessment",
+          "description": "Instruction email to Arndt: probability + defenses",
+          "type": "draft",
+          "prompt": "Draft instruction to Arndt Blaschka..."
+        }
+      ],
+      "allow_freetext": true,
+      "allow_skip": true
+    },
+    {
+      "label": "Financial response",
+      "actions": [
+        {
+          "label": "Security options comparison",
+          "description": "Table: guarantee vs escrow vs cash — cost, speed, strength",
+          "type": "analyze",
+          "prompt": "Produce a security options comparison table..."
+        }
+      ],
+      "allow_freetext": true,
+      "allow_skip": true
+    }
+  ],
+  "global_freetext": true
+}
+```
+
+### Four Action Types
+
+Each action is tagged with a type that tells the Director what Baker will produce
+and determines how Baker routes the execution:
+
+| Tag | Type Slug | What Baker Does | Output | Route |
+|-----|-----------|-----------------|--------|-------|
+| 📋 | `plan` | Creates ClickUp task structure, timeline, milestones | ClickUp folder/list with staged tasks | `action_handler.handle_clickup_plan()` |
+| 🔍 | `analyze` | Runs capability search + analysis | Report, comparison table, study, review | `CapabilityRunner.run_single()` |
+| ✉️ | `draft` | Produces text for Director approval | Email, letter, memo, presentation outline | `action_handler.handle_email_action()` or `CapabilityRunner` |
+| 🎯 | `specialist` | Invokes a named capability for deep domain analysis | Expert assessment with recommendations | `CapabilityRunner.run_single(named_capability)` |
+
+### Three Controls Per Part
+
+For each part of the alert, the Director has:
+
+1. **Select** — click any combination of proposed actions (multi-select)
+2. **Something else** — free text input for that specific part ("I have a different idea for this part")
+3. **Skip** — dismiss the entire part, Baker does nothing for it
+
+Plus a **global "Something else"** at the bottom for anything that doesn't fit any part.
+
+### Director Interaction Flow
+
+```
+Alert arrives in CEO Cockpit
+  → Director reads: problem, cause, solution vision
+  → For each part:
+     → Selects actions he wants executed, OR
+     → Types "something else" with his own instruction, OR
+     → Skips the part entirely
+  → Clicks "Execute Selected"
+  → Baker routes each selected action by type:
+     → plan  → ClickUp plan creation flow
+     → analyze → capability run → streams result
+     → draft → email draft → approve/edit flow
+     → specialist → named capability → streams assessment
+  → Results stream back to Cockpit sequentially
+  → Director reviews each deliverable
+```
+
+### Implementation Note
+
+This alert format requires a frontend update (BRIEF_COCKPIT_ALERT_UI.md — separate brief).
+The backend structure (JSON format above) should be produced by the pipeline's alert generation.
+The existing `create_alert()` in store_back.py needs a new `structured_actions` JSONB column
+to store the parts/actions alongside the existing title/body fields.
+
+---
+
+## 19. Reference: IT Capability — Full Specification
 
 The IT capability is the first to be fully specified (PM + Director session, 2026-03-06).
 Full spec available in: PM deliverable `it-agent-specification.md`
