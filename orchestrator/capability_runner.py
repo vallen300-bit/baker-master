@@ -272,10 +272,11 @@ class CapabilityRunner:
 
     def run_multi(self, plan: RoutingPlan, question: str,
                   history: list = None, domain: str = None,
-                  mode: str = None) -> AgentResult:
+                  mode: str = None, baker_task_id: int = None) -> AgentResult:
         """
         Sequential execution of multiple sub-tasks, each with its own capability.
         Results are accumulated and passed to the synthesizer.
+        Logs decomposition to decomposition_log for experience-informed retrieval.
         """
         from orchestrator.capability_registry import CapabilityRegistry
 
@@ -300,6 +301,21 @@ class CapabilityRunner:
             all_tool_calls.extend(result.tool_calls)
             total_in += result.total_input_tokens
             total_out += result.total_output_tokens
+
+        # Log decomposition to experience table (non-fatal)
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            caps_used = list({sr["slug"] for sr in sub_results})
+            store.insert_decomposition_log(
+                baker_task_id=baker_task_id,
+                original_task=question[:1000],
+                domain=domain,
+                sub_tasks=plan.sub_tasks,
+                capabilities_used=caps_used,
+            )
+        except Exception as e:
+            logger.debug(f"Decomposition logging failed (non-fatal): {e}")
 
         if not sub_results:
             return AgentResult(
