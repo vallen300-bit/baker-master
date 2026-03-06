@@ -553,6 +553,57 @@ async def delete_preference_endpoint(category: str, key: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ============================================================
+# AGENT-FRAMEWORK-1: Capability Observability API
+# ============================================================
+
+@app.get("/api/capabilities", tags=["capabilities"], dependencies=[Depends(verify_api_key)])
+async def get_capabilities_endpoint(
+    active_only: bool = Query(True),
+):
+    """List all capability sets."""
+    try:
+        store = _get_store()
+        caps = store.get_capability_sets(active_only=active_only)
+        caps = [_serialize(c) for c in caps]
+        return {"capabilities": caps, "count": len(caps)}
+    except Exception as e:
+        logger.error(f"GET /api/capabilities failed: {e}")
+        return {"capabilities": [], "count": 0, "error": str(e)}
+
+
+@app.get("/api/capability-runs", tags=["capabilities"], dependencies=[Depends(verify_api_key)])
+async def get_capability_runs_endpoint(
+    capability: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Recent capability run history. Optional filter by capability slug."""
+    try:
+        store = _get_store()
+        runs = store.get_capability_runs(capability_slug=capability, limit=limit)
+        runs = [_serialize(r) for r in runs]
+        return {"runs": runs, "count": len(runs)}
+    except Exception as e:
+        logger.error(f"GET /api/capability-runs failed: {e}")
+        return {"runs": [], "count": 0, "error": str(e)}
+
+
+@app.get("/api/decompositions", tags=["capabilities"], dependencies=[Depends(verify_api_key)])
+async def get_decompositions_endpoint(
+    domain: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """Recent decomposition log entries with feedback status."""
+    try:
+        store = _get_store()
+        logs = store.get_decomposition_logs(domain=domain, limit=limit)
+        logs = [_serialize(l) for l in logs]
+        return {"decompositions": logs, "count": len(logs)}
+    except Exception as e:
+        logger.error(f"GET /api/decompositions failed: {e}")
+        return {"decompositions": [], "count": 0, "error": str(e)}
+
+
 @app.get("/api/scheduler-status", tags=["health"], dependencies=[Depends(verify_api_key)])
 async def scheduler_status():
     """Return scheduler health and registered jobs."""
