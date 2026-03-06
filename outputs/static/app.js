@@ -571,28 +571,150 @@ function populateHome() {
 
 async function fetchPendingItems(container) {
     try {
-        const resp = await bakerFetch('/api/alerts?tier=1');
+        const resp = await bakerFetch('/api/alerts');
         if (!resp.ok) throw new Error('API ' + resp.status);
         const data = await resp.json();
         const alerts = (data && data.alerts) ? data.alerts : [];
 
         if (alerts.length === 0) {
-            container.innerHTML = '<div class="agenda-empty">No pending items. All clear.</div>';
+            container.textContent = '';
+            const empty = document.createElement('div');
+            empty.className = 'agenda-empty';
+            empty.textContent = 'No pending items. All clear.';
+            container.appendChild(empty);
             return;
         }
 
-        let html = '';
-        for (const a of alerts.slice(0, 5)) {
-            html += `<div class="agenda-item">
-                <span class="agenda-time" style="color:#ef4444;">T${a.tier || 1}</span>
-                <span class="agenda-type task">alert</span>
-                <span class="agenda-desc">${esc(a.title)}</span>
-            </div>`;
+        container.textContent = '';
+        for (const a of alerts.slice(0, 8)) {
+            if (a.structured_actions && a.structured_actions.parts) {
+                container.appendChild(renderStructuredAlert(a));
+            } else {
+                const div = document.createElement('div');
+                div.className = 'agenda-item';
+                const time = document.createElement('span');
+                time.className = 'agenda-time';
+                time.style.color = '#ef4444';
+                time.textContent = 'T' + (a.tier || 1);
+                const type = document.createElement('span');
+                type.className = 'agenda-type task';
+                type.textContent = 'alert';
+                const desc = document.createElement('span');
+                desc.className = 'agenda-desc';
+                desc.textContent = a.title;
+                div.appendChild(time);
+                div.appendChild(type);
+                div.appendChild(desc);
+                container.appendChild(div);
+            }
         }
-        container.innerHTML = html;
     } catch (e) {
-        container.innerHTML = '<div class="agenda-empty">No pending items. All clear.</div>';
+        container.textContent = '';
+        const empty = document.createElement('div');
+        empty.className = 'agenda-empty';
+        empty.textContent = 'No pending items. All clear.';
+        container.appendChild(empty);
     }
+}
+
+// ═══ STRUCTURED ALERT CARDS (COCKPIT-ALERT-UI) ═══
+
+const ACTION_TYPE_META = {
+    plan:       { emoji: '\ud83d\udccb', color: '#06b6d4', label: 'Plan' },
+    analyze:    { emoji: '\ud83d\udd0d', color: '#a855f7', label: 'Analyze' },
+    draft:      { emoji: '\u2709\ufe0f',  color: '#eab308', label: 'Draft' },
+    specialist: { emoji: '\ud83c\udfaf', color: '#10b981', label: 'Specialist' },
+};
+
+function renderStructuredAlert(alert) {
+    const sa = alert.structured_actions;
+    const card = document.createElement('div');
+    card.className = 'sa-card';
+    card.dataset.alertId = alert.id;
+
+    const tierColor = alert.tier === 1 ? '#ef4444' : alert.tier === 2 ? '#f59e0b' : '#64748b';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'sa-header';
+
+    const titleRow = document.createElement('div');
+    titleRow.className = 'sa-title-row';
+    const tierBadge = document.createElement('span');
+    tierBadge.className = 'sa-tier';
+    tierBadge.style.background = tierColor;
+    tierBadge.textContent = 'T' + alert.tier;
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'sa-title';
+    titleSpan.textContent = alert.title;
+    titleRow.appendChild(tierBadge);
+    titleRow.appendChild(titleSpan);
+    header.appendChild(titleRow);
+
+    for (const [key, label] of [['problem','Problem'],['cause','Cause'],['solution','Solution']]) {
+        if (sa[key]) {
+            const sec = document.createElement('div');
+            sec.className = 'sa-section';
+            const lbl = document.createElement('span');
+            lbl.className = 'sa-section-label';
+            lbl.textContent = label;
+            sec.appendChild(lbl);
+            sec.appendChild(document.createTextNode(' ' + sa[key]));
+            header.appendChild(sec);
+        }
+    }
+    card.appendChild(header);
+
+    // Parts with action cards (read-only)
+    const partsDiv = document.createElement('div');
+    partsDiv.className = 'sa-parts';
+
+    for (let pi = 0; pi < sa.parts.length; pi++) {
+        const part = sa.parts[pi];
+        const partDiv = document.createElement('div');
+        partDiv.className = 'sa-part';
+        partDiv.dataset.part = pi;
+
+        const partLabel = document.createElement('div');
+        partLabel.className = 'sa-part-label';
+        partLabel.textContent = part.label;
+        partDiv.appendChild(partLabel);
+
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'sa-actions';
+
+        for (let ai = 0; ai < part.actions.length; ai++) {
+            const action = part.actions[ai];
+            const meta = ACTION_TYPE_META[action.type] || ACTION_TYPE_META.analyze;
+
+            const actionDiv = document.createElement('div');
+            actionDiv.className = 'sa-action';
+            actionDiv.dataset.part = pi;
+            actionDiv.dataset.action = ai;
+
+            const descDiv = document.createElement('div');
+            descDiv.className = 'sa-action-desc';
+            descDiv.textContent = action.description || '';
+
+            const rightDiv = document.createElement('div');
+            rightDiv.className = 'sa-action-right';
+            const tag = document.createElement('span');
+            tag.className = 'sa-type-tag';
+            tag.style.background = meta.color;
+            tag.textContent = meta.emoji + ' ' + action.label;
+            rightDiv.appendChild(tag);
+
+            actionDiv.appendChild(descDiv);
+            actionDiv.appendChild(rightDiv);
+            actionsDiv.appendChild(actionDiv);
+        }
+
+        partDiv.appendChild(actionsDiv);
+        partsDiv.appendChild(partDiv);
+    }
+
+    card.appendChild(partsDiv);
+    return card;
 }
 
 // ═══ DEADLINES (DEADLINE-SYSTEM-1) ═══
