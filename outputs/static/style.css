@@ -1863,3 +1863,125 @@ body {
     max-height: 400px;
     overflow-y: auto;
 }
+
+/* Progress indicator */
+.sa-exec-progress {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: var(--accent-pm);
+    letter-spacing: 0.3px;
+    padding: 6px 0;
+}
+
+.sa-exec-progress--done {
+    color: var(--scan-green);
+}
+
+/* Running action pulse */
+.sa-action--running {
+    border-color: var(--accent-pm);
+    animation: saRunPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes saRunPulse {
+    0%, 100% { box-shadow: inset 0 0 0 1px var(--accent-pm); }
+    50% { box-shadow: inset 0 0 0 2px var(--accent-pm), 0 0 8px rgba(59,130,246,0.15); }
+}
+
+/* Completed action checkmark */
+.sa-action--done {
+    border-color: var(--scan-green);
+    background: rgba(52,208,88,0.04);
+}
+
+.sa-action--done::after {
+    content: '\2713';
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--scan-green);
+}
+
+.sa-action--error {
+    border-color: var(--scan-red);
+    background: rgba(245,101,101,0.04);
+}
+
+.sa-action {
+    position: relative;
+}
+
+/* Spinner / check in exec header */
+.sa-exec-spinner {
+    font-size: 0.6rem;
+    color: var(--accent-pm);
+    animation: saSpinDot 1s ease-in-out infinite;
+    margin-left: auto;
+}
+
+@keyframes saSpinDot {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+}
+
+.sa-exec-check {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--scan-green);
+    margin-left: auto;
+}
+
+.sa-exec-error {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--scan-red);
+    margin-left: auto;
+}
+
+/* Executed button state */
+.sa-exec-btn--done {
+    background: var(--scan-green);
+    opacity: 1;
+}
+
+/* ═══ STRUCTURED ALERTS — MOBILE RESPONSIVE ═══ */
+@media (max-width: 700px) {
+    .sa-card {
+        border-radius: 8px;
+    }
+
+    .sa-header {
+        padding: 12px 14px 10px;
+    }
+
+    .sa-title {
+        font-size: 0.85rem;
+    }
+
+    .sa-action {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+        padding: 8px 10px;
+    }
+
+    .sa-action-right {
+        align-self: flex-end;
+    }
+
+    .sa-global-freetext {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .sa-footer {
+        padding: 10px 14px;
+    }
+
+    .sa-exec-response {
+        max-height: 250px;
+    }
+}

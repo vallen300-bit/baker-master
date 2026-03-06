@@ -867,7 +867,7 @@ async function executeAlertActions(card, alertId) {
     const sa = card._saData;
     const prompts = [];
 
-    // Collect selected action prompts
+    // Collect selected action prompts (track pi/ai for card marking)
     for (const pi in state.selected) {
         for (const ai of state.selected[pi]) {
             const action = sa.parts[pi].actions[ai];
@@ -876,6 +876,8 @@ async function executeAlertActions(card, alertId) {
                 type: action.type,
                 label: action.label,
                 part: sa.parts[pi].label,
+                _pi: pi,
+                _ai: ai,
             });
         }
     }
@@ -915,10 +917,18 @@ async function executeAlertActions(card, alertId) {
     resultsDiv.hidden = false;
     resultsDiv.textContent = '';
 
+    // Progress counter
+    const progressDiv = document.createElement('div');
+    progressDiv.className = 'sa-exec-progress';
+    progressDiv.textContent = '0 / ' + prompts.length + ' actions';
+    resultsDiv.appendChild(progressDiv);
+
     // Execute each prompt sequentially via /api/scan
     for (let i = 0; i < prompts.length; i++) {
         const p = prompts[i];
         const meta = ACTION_TYPE_META[p.type] || ACTION_TYPE_META.analyze;
+
+        progressDiv.textContent = (i + 1) + ' / ' + prompts.length + ' — running: ' + p.label;
 
         // Execution header
         const execHeader = document.createElement('div');
@@ -930,8 +940,12 @@ async function executeAlertActions(card, alertId) {
         const headerLabel = document.createElement('span');
         headerLabel.className = 'sa-exec-part-label';
         headerLabel.textContent = p.part;
+        const spinner = document.createElement('span');
+        spinner.className = 'sa-exec-spinner';
+        spinner.textContent = '\u25cf';
         execHeader.appendChild(headerTag);
         execHeader.appendChild(headerLabel);
+        execHeader.appendChild(spinner);
         resultsDiv.appendChild(execHeader);
 
         // Response container
@@ -940,10 +954,14 @@ async function executeAlertActions(card, alertId) {
         responseDiv.textContent = '';
         resultsDiv.appendChild(responseDiv);
 
-        // Mark running action card
-        const runningCard = card.querySelector('.sa-action[data-part="' + (p._pi || '') + '"][data-action="' + (p._ai || '') + '"]');
+        // Mark running action card with pulse
+        const actionCard = (p._pi !== undefined && p._ai !== undefined)
+            ? card.querySelector('.sa-action[data-part="' + p._pi + '"][data-action="' + p._ai + '"]')
+            : null;
+        if (actionCard) actionCard.classList.add('sa-action--running');
 
         // Stream from /api/scan
+        let success = true;
         try {
             const resp = await bakerFetch('/api/scan', {
                 method: 'POST',
@@ -972,24 +990,32 @@ async function executeAlertActions(card, alertId) {
                         const data = JSON.parse(payload);
                         if (data.token) {
                             fullText += data.token;
-                            responseDiv.textContent = '';
-                            // Use safe DOM-based rendering for streamed content
-                            const rendered = document.createElement('span');
-                            rendered.textContent = fullText;
-                            responseDiv.appendChild(rendered);
+                            responseDiv.textContent = fullText;
                         }
                     } catch (_) { /* skip unparseable */ }
                 }
             }
         } catch (err) {
             responseDiv.textContent = 'Error: ' + err.message;
+            success = false;
         }
+
+        // Mark action card as completed with checkmark
+        if (actionCard) {
+            actionCard.classList.remove('sa-action--running');
+            actionCard.classList.add(success ? 'sa-action--done' : 'sa-action--error');
+        }
+        spinner.textContent = success ? '\u2713' : '\u2717';
+        spinner.className = success ? 'sa-exec-check' : 'sa-exec-error';
     }
+
+    progressDiv.textContent = prompts.length + ' / ' + prompts.length + ' — complete';
+    progressDiv.classList.add('sa-exec-progress--done');
 
     // Mark alert as acknowledged
     await bakerFetch('/api/alerts/' + alertId + '/acknowledge', { method: 'POST' });
 
-    if (execBtn) { execBtn.textContent = 'Executed'; }
+    if (execBtn) { execBtn.textContent = '\u2713 Executed'; execBtn.classList.add('sa-exec-btn--done'); }
     if (dismissBtn) dismissBtn.disabled = false;
 }
 
