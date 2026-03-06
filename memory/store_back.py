@@ -104,6 +104,12 @@ class SentinelStoreBack:
         self._ensure_director_preferences_table()
         self._ensure_vip_profile_columns()
 
+        # AGENT-FRAMEWORK-1: Ensure capability framework tables
+        self._ensure_capability_sets_table()
+        self._ensure_capability_runs_table()
+        self._ensure_decomposition_log_table()
+        self._ensure_baker_tasks_capability_columns()
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -897,6 +903,7 @@ class SentinelStoreBack:
         "agent_iterations", "agent_tool_calls",
         "agent_input_tokens", "agent_output_tokens", "agent_elapsed_ms",
         "director_feedback", "feedback_comment",
+        "capability_slugs", "decomposition",
     }
 
     def update_baker_task(self, task_id: int, **kwargs) -> bool:
@@ -934,6 +941,25 @@ class SentinelStoreBack:
             sql = f"UPDATE baker_tasks SET {', '.join(set_clauses)} WHERE id = %s"
             cur.execute(sql, values)
             conn.commit()
+
+            # AGENT-FRAMEWORK-1: Propagate feedback to decomposition_log
+            if "director_feedback" in updates:
+                try:
+                    feedback = updates["director_feedback"]
+                    quality = "good" if feedback in ("accepted", "good") else "partial" if feedback == "revised" else "poor"
+                    cur2 = conn.cursor()
+                    cur2.execute(
+                        """UPDATE decomposition_log
+                           SET director_feedback = %s, feedback_at = NOW(),
+                               outcome_quality = %s
+                           WHERE baker_task_id = %s""",
+                        (feedback, quality, task_id),
+                    )
+                    conn.commit()
+                    cur2.close()
+                except Exception as _fb_e:
+                    logger.debug(f"Feedback propagation to decomposition_log failed (non-fatal): {_fb_e}")
+
             cur.close()
             logger.info(f"Updated baker_task #{task_id}: {list(updates.keys())}")
             return True
@@ -1223,6 +1249,455 @@ class SentinelStoreBack:
                 pass
             logger.error(f"update_vip_profile failed for '{name}': {e}")
             return None
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # AGENT-FRAMEWORK-1: Capability Framework Tables
+    # -------------------------------------------------------
+
+    def _ensure_capability_sets_table(self):
+        """Create capability_sets table + indexes. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS capability_sets (
+                    id                  SERIAL PRIMARY KEY,
+                    slug                TEXT NOT NULL UNIQUE,
+                    name                TEXT NOT NULL,
+                    capability_type     TEXT NOT NULL DEFAULT 'domain',
+                    domain              TEXT NOT NULL,
+                    role_description    TEXT NOT NULL,
+                    system_prompt       TEXT DEFAULT '',
+                    tools               JSONB DEFAULT '[]'::jsonb,
+                    output_format       TEXT DEFAULT 'prose',
+                    autonomy_level      TEXT DEFAULT 'recommend_wait',
+                    trigger_patterns    JSONB DEFAULT '[]'::jsonb,
+                    max_iterations      INTEGER DEFAULT 5,
+                    timeout_seconds     REAL DEFAULT 30.0,
+                    active              BOOLEAN DEFAULT TRUE,
+                    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_capability_sets_slug ON capability_sets(slug)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_capability_sets_domain ON capability_sets(domain)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_capability_sets_type ON capability_sets(capability_type)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_capability_sets_active ON capability_sets(active) WHERE active = TRUE")
+
+            # Seed data — only if table is empty
+            cur.execute("SELECT COUNT(*) FROM capability_sets")
+            if cur.fetchone()[0] == 0:
+                self._seed_capability_sets(cur)
+
+            conn.commit()
+            cur.close()
+            logger.info("capability_sets table verified")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure capability_sets table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _seed_capability_sets(self, cur):
+        """Insert 12 capability sets (10 domain + 2 meta). Called once on first deploy."""
+        import json as _json
+        seed = [
+            # META capabilities
+            {
+                "slug": "decomposer", "name": "Task Decomposer",
+                "capability_type": "meta", "domain": "meta",
+                "role_description": "Analyzes incoming tasks and breaks them into independent sub-issues. For each sub-issue, identifies which capability set should handle it.",
+                "system_prompt": "You are Baker's task decomposer. Given a complex task, break it into independent sub-issues.\n\nFor each sub-issue, specify:\n1. A clear, self-contained sub-task description\n2. The capability_slug that should handle it\n\nAvailable capability slugs: sales, finance, legal, asset_mgmt, research, comms, it, ib, marketing, ai_dev\n\nRules:\n- If the task is simple (single domain, single question), return it as ONE sub-task with ONE capability. Do NOT over-decompose.\n- Only decompose when the task genuinely spans multiple domains or requires multiple independent analyses.\n- Each sub-task must be self-contained.\n- Maximum 4 sub-tasks.\n\nReturn JSON array: [{\"sub_task\": \"...\", \"capability_slug\": \"...\"}]\n\n## PAST PATTERNS\n{experience_context}",
+                "tools": _json.dumps([]),
+                "output_format": "json", "autonomy_level": "auto_execute",
+                "trigger_patterns": _json.dumps([]),
+                "max_iterations": 1, "timeout_seconds": 15.0,
+            },
+            {
+                "slug": "synthesizer", "name": "Result Synthesizer",
+                "capability_type": "meta", "domain": "meta",
+                "role_description": "Combines results from multiple capability runs into one coherent, unified deliverable for the Director.",
+                "system_prompt": "You are Baker's result synthesizer. You receive results from multiple capability runs that analyzed different aspects of the Director's task.\n\nYour job:\n1. Combine all results into ONE coherent answer\n2. Resolve any contradictions between results (flag if unresolvable)\n3. Remove redundancy\n4. Structure the output: bottom-line first, then supporting detail per domain\n5. Cite which capability produced each finding\n\nThe Director expects: warm but direct, like a trusted advisor. Bottom-line first.",
+                "tools": _json.dumps([]),
+                "output_format": "prose", "autonomy_level": "auto_execute",
+                "trigger_patterns": _json.dumps([]),
+                "max_iterations": 1, "timeout_seconds": 15.0,
+            },
+            # DOMAIN capabilities
+            {
+                "slug": "sales", "name": "Sales Capability",
+                "capability_type": "domain", "domain": "projects",
+                "role_description": "MO Residences sales — pitch decks, buyer follow-ups, market comparisons, unit availability, pricing analysis, broker relationships.",
+                "tools": _json.dumps(["search_memory", "search_emails", "search_whatsapp", "get_contact", "get_matter_context", "search_deals_insights"]),
+                "trigger_patterns": _json.dumps([r"\b(sales|pitch|buyer|unit|MO\s?residences|pricing|apartment|penthouse|broker)\b"]),
+                "output_format": "analysis_report", "autonomy_level": "recommend_wait",
+            },
+            {
+                "slug": "finance", "name": "Finance Capability",
+                "capability_type": "domain", "domain": "chairman",
+                "role_description": "Loan analysis, LP term sheets, cash flow models, investment returns, fund economics, capital allocation, treasury, bank communication.",
+                "tools": _json.dumps(["search_memory", "search_emails", "search_meetings", "get_contact", "get_matter_context", "search_deals_insights", "get_deadlines"]),
+                "trigger_patterns": _json.dumps([r"\b(finance|loan|term.?sheet|cash.?flow|LP|fund|capital|IRR|yield|interest|bank)\b"]),
+                "output_format": "analysis_report", "autonomy_level": "recommend_wait",
+            },
+            {
+                "slug": "legal", "name": "Legal/Claims Capability",
+                "capability_type": "domain", "domain": "projects",
+                "role_description": "Dispute analysis, construction claim tracking, deadline monitoring, evidence review, Gewaehrleistung, contract interpretation, Austrian law context.",
+                "tools": _json.dumps(["search_memory", "search_emails", "search_whatsapp", "search_meetings", "get_contact", "get_matter_context", "get_deadlines", "get_clickup_tasks"]),
+                "trigger_patterns": _json.dumps([r"\b(legal|claim|dispute|contract|lawsuit|evidence|Gew.hrleistung|arbitration|deadline|court)\b"]),
+                "output_format": "analysis_report", "autonomy_level": "recommend_wait",
+            },
+            {
+                "slug": "asset_mgmt", "name": "Asset Management Capability",
+                "capability_type": "domain", "domain": "projects",
+                "role_description": "Hotel KPI reporting, operational benchmarks, occupancy analysis, RevPAR tracking, property performance, MO Vienna operations.",
+                "tools": _json.dumps(["search_memory", "search_emails", "search_meetings", "get_matter_context", "search_deals_insights"]),
+                "trigger_patterns": _json.dumps([r"\b(hotel|KPI|RevPAR|occupancy|benchmark|asset.?management|property.?performance|ADR|GOP)\b"]),
+                "output_format": "analysis_report", "autonomy_level": "recommend_wait",
+            },
+            {
+                "slug": "research", "name": "Research Capability",
+                "capability_type": "domain", "domain": "network",
+                "role_description": "Market intelligence, competitor analysis, due diligence, industry trends, market sizing, investment thesis validation.",
+                "tools": _json.dumps(["search_memory", "search_emails", "search_meetings", "get_contact", "get_matter_context", "search_deals_insights"]),
+                "trigger_patterns": _json.dumps([r"\b(research|market.?intelligence|competitor|due.?diligence|industry|trend|benchmark)\b"]),
+                "output_format": "analysis_report", "autonomy_level": "recommend_wait",
+            },
+            {
+                "slug": "comms", "name": "Communications Capability",
+                "capability_type": "domain", "domain": "chairman",
+                "role_description": "Email drafts, presentation outlines, board memos, stakeholder communication, press releases — in the Director's voice and style.",
+                "tools": _json.dumps(["search_memory", "search_emails", "search_whatsapp", "get_contact", "get_matter_context"]),
+                "trigger_patterns": _json.dumps([r"\b(draft|memo|presentation|board.?memo|communication|stakeholder|press.?release|letter)\b"]),
+                "output_format": "email_draft", "autonomy_level": "recommend_wait",
+            },
+            {
+                "slug": "it", "name": "IT Infrastructure Capability",
+                "capability_type": "domain", "domain": "projects",
+                "role_description": "M365 migration, Entra ID, Conditional Access, Defender, BYOD security architecture, hardware specs, vendor management (BCOMM/EVOK), troubleshooting, Graph API, SharePoint/OneDrive, cybersecurity triage.",
+                "tools": _json.dumps(["search_memory", "search_emails", "search_whatsapp", "search_meetings", "get_contact", "get_matter_context", "get_clickup_tasks", "get_deadlines"]),
+                "trigger_patterns": _json.dumps([r"\b(IT|M365|Azure|migration|infrastructure|security|Microsoft|tenant|SharePoint|BCOMM|EVOK|Entra|Defender|laptop|printer|VPN|hardware|software)\b"]),
+                "output_format": "analysis_report", "autonomy_level": "recommend_wait",
+            },
+            {
+                "slug": "ib", "name": "Investment Banking Capability",
+                "capability_type": "domain", "domain": "chairman",
+                "role_description": "Raising finance, project economics analysis, investor relations, placement memoranda, co-investment structuring, LP communication, deal flow.",
+                "tools": _json.dumps(["search_memory", "search_emails", "search_meetings", "get_contact", "get_matter_context", "search_deals_insights", "get_deadlines"]),
+                "trigger_patterns": _json.dumps([r"\b(invest(?:ment|or)|placement|fundrais|LP.?relation|co.?invest|placement.?memo|capital.?raise|deal.?flow)\b"]),
+                "output_format": "analysis_report", "autonomy_level": "recommend_wait",
+            },
+            {
+                "slug": "marketing", "name": "Marketing & PR Capability",
+                "capability_type": "domain", "domain": "network",
+                "role_description": "Social media strategy, advertising campaigns, promotional materials, marketing collaterals, brand management, PR outreach.",
+                "tools": _json.dumps(["search_memory", "search_emails", "get_contact", "get_matter_context"]),
+                "trigger_patterns": _json.dumps([r"\b(marketing|PR|social.?media|campaign|brand|promotion|advertis|collateral)\b"]),
+                "output_format": "analysis_report", "autonomy_level": "recommend_wait",
+            },
+            {
+                "slug": "ai_dev", "name": "AI Development Capability",
+                "capability_type": "domain", "domain": "projects",
+                "role_description": "Baker system development — architecture decisions, feature planning, bug analysis, codebase context, deployment strategy.",
+                "tools": _json.dumps(["search_memory", "search_emails", "search_meetings", "get_clickup_tasks", "get_matter_context"]),
+                "trigger_patterns": _json.dumps([r"\b(Baker|Sentinel|AI.?development|agent.?framework|pipeline|RAG|MCP|Render)\b"]),
+                "output_format": "analysis_report", "autonomy_level": "recommend_wait",
+            },
+        ]
+        for cap in seed:
+            cols = list(cap.keys())
+            vals = [cap[c] for c in cols]
+            placeholders = ", ".join(["%s"] * len(cols))
+            col_names = ", ".join(cols)
+            cur.execute(
+                f"INSERT INTO capability_sets ({col_names}) VALUES ({placeholders}) ON CONFLICT (slug) DO NOTHING",
+                vals,
+            )
+        logger.info(f"Seeded {len(seed)} capability sets")
+
+    def _ensure_capability_runs_table(self):
+        """Create capability_runs table. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS capability_runs (
+                    id                  SERIAL PRIMARY KEY,
+                    baker_task_id       INTEGER,
+                    capability_slug     TEXT NOT NULL,
+                    sub_task            TEXT,
+                    answer              TEXT,
+                    tools_used          JSONB DEFAULT '[]'::jsonb,
+                    retrieved_docs      JSONB DEFAULT '[]'::jsonb,
+                    iterations          INTEGER,
+                    input_tokens        INTEGER,
+                    output_tokens       INTEGER,
+                    elapsed_ms          INTEGER,
+                    status              TEXT NOT NULL DEFAULT 'running',
+                    error_message       TEXT,
+                    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    completed_at        TIMESTAMPTZ
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_capability_runs_slug ON capability_runs(capability_slug)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_capability_runs_task ON capability_runs(baker_task_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_capability_runs_created ON capability_runs(created_at DESC)")
+            conn.commit()
+            cur.close()
+            logger.info("capability_runs table verified")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure capability_runs table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_decomposition_log_table(self):
+        """Create decomposition_log table. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS decomposition_log (
+                    id                  SERIAL PRIMARY KEY,
+                    baker_task_id       INTEGER,
+                    original_task       TEXT NOT NULL,
+                    domain              TEXT,
+                    sub_tasks           JSONB NOT NULL,
+                    capabilities_used   JSONB NOT NULL,
+                    director_feedback   TEXT,
+                    feedback_at         TIMESTAMPTZ,
+                    outcome_quality     TEXT,
+                    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_decomp_log_created ON decomposition_log(created_at DESC)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_decomp_log_domain ON decomposition_log(domain)")
+            conn.commit()
+            cur.close()
+            logger.info("decomposition_log table verified")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure decomposition_log table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_baker_tasks_capability_columns(self):
+        """Add capability_slugs + decomposition columns to baker_tasks. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("ALTER TABLE baker_tasks ADD COLUMN IF NOT EXISTS capability_slugs JSONB DEFAULT '[]'::jsonb")
+            cur.execute("ALTER TABLE baker_tasks ADD COLUMN IF NOT EXISTS decomposition JSONB")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_baker_tasks_capability ON baker_tasks USING gin(capability_slugs)")
+            conn.commit()
+            cur.close()
+            logger.info("baker_tasks capability columns verified")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure baker_tasks capability columns: {e}")
+        finally:
+            self._put_conn(conn)
+
+    # -- Capability CRUD helpers --
+
+    def insert_capability_run(self, baker_task_id=None, capability_slug="",
+                              sub_task=None, status="running") -> Optional[int]:
+        """INSERT a capability_run record. Returns ID."""
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO capability_runs
+                   (baker_task_id, capability_slug, sub_task, status)
+                   VALUES (%s, %s, %s, %s)
+                   RETURNING id""",
+                (baker_task_id, capability_slug, sub_task, status),
+            )
+            run_id = cur.fetchone()[0]
+            conn.commit()
+            cur.close()
+            return run_id
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"insert_capability_run failed: {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
+    def update_capability_run(self, run_id: int, **kwargs) -> bool:
+        """UPDATE a capability_run. Allowed: answer, tools_used, retrieved_docs,
+        iterations, input_tokens, output_tokens, elapsed_ms, status, error_message."""
+        allowed = {"answer", "tools_used", "retrieved_docs", "iterations",
+                    "input_tokens", "output_tokens", "elapsed_ms", "status",
+                    "error_message"}
+        updates = {k: v for k, v in kwargs.items() if k in allowed and v is not None}
+        if not updates:
+            return False
+        conn = self._get_conn()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            set_parts = []
+            params = []
+            for col, val in updates.items():
+                set_parts.append(f"{col} = %s")
+                params.append(val)
+            if updates.get("status") in ("completed", "failed", "timed_out"):
+                set_parts.append("completed_at = NOW()")
+            params.append(run_id)
+            cur.execute(
+                f"UPDATE capability_runs SET {', '.join(set_parts)} WHERE id = %s",
+                params,
+            )
+            conn.commit()
+            cur.close()
+            return True
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"update_capability_run failed: {e}")
+            return False
+        finally:
+            self._put_conn(conn)
+
+    def insert_decomposition_log(self, baker_task_id=None, original_task="",
+                                  domain=None, sub_tasks=None,
+                                  capabilities_used=None) -> Optional[int]:
+        """INSERT a decomposition_log record. Returns ID."""
+        import json as _json
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO decomposition_log
+                   (baker_task_id, original_task, domain, sub_tasks, capabilities_used)
+                   VALUES (%s, %s, %s, %s, %s)
+                   RETURNING id""",
+                (baker_task_id, original_task, domain,
+                 _json.dumps(sub_tasks or []), _json.dumps(capabilities_used or [])),
+            )
+            log_id = cur.fetchone()[0]
+            conn.commit()
+            cur.close()
+            return log_id
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"insert_decomposition_log failed: {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
+    def get_capability_sets(self, active_only: bool = True) -> list:
+        """Get all capability_sets rows as dicts."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            if active_only:
+                cur.execute("SELECT * FROM capability_sets WHERE active = TRUE ORDER BY slug")
+            else:
+                cur.execute("SELECT * FROM capability_sets ORDER BY slug")
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            return rows
+        except Exception as e:
+            logger.warning(f"get_capability_sets failed (non-fatal): {e}")
+            return []
+        finally:
+            self._put_conn(conn)
+
+    def get_capability_runs(self, capability_slug: str = None,
+                            limit: int = 20) -> list:
+        """Get recent capability runs. Optional filter by slug."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            if capability_slug:
+                cur.execute(
+                    """SELECT * FROM capability_runs
+                       WHERE capability_slug = %s
+                       ORDER BY created_at DESC LIMIT %s""",
+                    (capability_slug, limit),
+                )
+            else:
+                cur.execute(
+                    "SELECT * FROM capability_runs ORDER BY created_at DESC LIMIT %s",
+                    (limit,),
+                )
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            return rows
+        except Exception as e:
+            logger.warning(f"get_capability_runs failed (non-fatal): {e}")
+            return []
+        finally:
+            self._put_conn(conn)
+
+    def get_decomposition_logs(self, domain: str = None,
+                                limit: int = 20) -> list:
+        """Get recent decomposition logs. Optional filter by domain."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            if domain:
+                cur.execute(
+                    """SELECT * FROM decomposition_log
+                       WHERE domain = %s
+                       ORDER BY created_at DESC LIMIT %s""",
+                    (domain, limit),
+                )
+            else:
+                cur.execute(
+                    "SELECT * FROM decomposition_log ORDER BY created_at DESC LIMIT %s",
+                    (limit,),
+                )
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            return rows
+        except Exception as e:
+            logger.warning(f"get_decomposition_logs failed (non-fatal): {e}")
+            return []
         finally:
             self._put_conn(conn)
 

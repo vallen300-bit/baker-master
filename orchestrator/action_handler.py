@@ -15,6 +15,7 @@ Internal flow:
 """
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -318,6 +319,22 @@ If the message is a question, information request, or anything else → type: "q
 Only return the JSON object."""
 
 
+def _quick_capability_detect(question: str) -> Optional[dict]:
+    """
+    AGENT-FRAMEWORK-1: Detect explicit capability invocations.
+    'have the finance agent analyze...' → capability_task with hint='finance'.
+    Returns None if no match.
+    """
+    pattern = re.compile(
+        r"\b(?:have|ask|tell|get|use)\s+(?:the\s+)?(\w+)\s+(?:agent|capability)\b",
+        re.IGNORECASE,
+    )
+    match = pattern.search(question)
+    if match:
+        return {"type": "capability_task", "capability_hint": match.group(1).lower()}
+    return None
+
+
 def _quick_email_detect(question: str) -> dict:
     """
     EMAIL-DELIVERY-1: Fast regex pre-check for obvious email action patterns.
@@ -556,6 +573,12 @@ def classify_intent(question: str, conversation_history: str = "") -> dict:
     conversation_history: optional recent turns for resolving references.
     """
     _log_action("classify_intent:start", f"question={question[:200]}")
+
+    # AGENT-FRAMEWORK-1: Fast path — regex catches explicit capability invocations
+    quick_cap = _quick_capability_detect(question)
+    if quick_cap:
+        _log_action("classify_intent:regex_match", f"type=capability_task, hint={quick_cap.get('capability_hint')}")
+        return quick_cap
 
     # EMAIL-DELIVERY-1: Fast path — regex catches obvious email commands
     quick = _quick_email_detect(question)
