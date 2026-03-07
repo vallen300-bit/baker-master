@@ -282,9 +282,9 @@ Baker becomes an orchestrator that assembles **capability sets** dynamically per
 
 **Status:** Framework built and deployed. IT capability fully specified. 9 remaining capability specs pending PM interview.
 
-**Proactive alert format:** Structured command cards with 4 action types (Plan/Analyze/Draft/Specialist), per-part controls (select/skip/something else). Brief: `BRIEF_COCKPIT_ALERT_UI.md`.
+**COCKPIT-ALERT-UI** — SHIPPED. Structured command cards with 4 action types (Plan/Analyze/Draft/Specialist), per-part controls (select/skip/something else), sequential execution via /api/scan with SSE streaming. `structured_actions` JSONB column on alerts table. Haiku generates actions for T1/T2 alerts.
 
-**New plugins queued:** Web search (Tavily) + document reader. Brief: `BRIEF_PLUGINS_WEB_SEARCH_DOC_READER.md`.
+**PLUGINS-WEB-SEARCH-DOC-READER** — SHIPPED. 2 new agent tools: `web_search` (Tavily, tool #10) + `read_document` (email attachments + file paths, tool #11). 8 capabilities get web_search, 5 get read_document. Meta-agents have no tools by design.
 
 **Director decisions (Q2/Q9/Q12):** Quality bar 85-90% default. Director-only visibility at launch. Success = proactive answers before asked, 10-20% editing only.
 
@@ -366,6 +366,13 @@ Briefs written:
 - `BRIEF_PLUGINS_WEB_SEARCH_DOC_READER.md` (web search Tavily + document reader)
 
 Also: BCOMM M365 migration meeting briefing + response letter drafted. PM's architecture document reviewed and critiqued.
+
+### Session 10 — 2026-03-07 (dimitry300 machine, Code 300 supervisor)
+**Reviewed and merged Code Brisen's first deliveries.** Branch `feat/plugins-web-search-doc-reader` (8 commits) merged to main (`fddffd5`).
+
+Shipped:
+- **COCKPIT-ALERT-UI** (5 commits) — interactive alert command cards in CEO Cockpit. Haiku generates structured actions (problem/cause/solution + action parts) for T1/T2 alerts. Director selects/skips/customizes actions, executes sequentially via /api/scan SSE. New: `structured_actions` JSONB column, dismiss endpoint, mobile responsive CSS.
+- **PLUGINS-WEB-SEARCH-DOC-READER** (3 commits) — 2 new agent tools. `web_search` (Tavily SDK, graceful fallback). `read_document` (email attachment extraction via `=== ATTACHMENTS ===` marker + file path mode via extractors.py). Migration SQL run against Neon. TAVILY_API_KEY set on Render.
 
 ## Key Documents (Dropbox)
 
