@@ -1549,7 +1549,8 @@ def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
 
         async def _cap_stream():
             import asyncio
-            q = asyncio.Queue()
+            import queue as _queue
+            q = _queue.Queue()
             _agent_result = [None]
 
             def _run():
@@ -1578,8 +1579,8 @@ def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
             while True:
                 try:
                     item = await asyncio.wait_for(
-                        asyncio.get_event_loop().run_in_executor(None, q.get),
-                        timeout=2.0,
+                        asyncio.get_event_loop().run_in_executor(None, lambda: q.get(timeout=8)),
+                        timeout=10.0,
                     )
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
