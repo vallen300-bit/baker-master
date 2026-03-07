@@ -990,7 +990,7 @@ async function executeAlertActions(card, alertId) {
                         const data = JSON.parse(payload);
                         if (data.token) {
                             fullText += data.token;
-                            responseDiv.textContent = fullText;
+                            responseDiv.innerHTML = md(fullText);
                         }
                     } catch (_) { /* skip unparseable */ }
                 }
