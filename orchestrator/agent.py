@@ -298,6 +298,37 @@ TOOL_DEFINITIONS = [
             "required": ["query"],
         },
     },
+    # PLUGINS-1: Document reader tool (tool #11)
+    {
+        "name": "read_document",
+        "description": (
+            "Read and extract text from a document file. Supports PDF, DOCX, XLSX, "
+            "CSV, and plain text files.\n\n"
+            "Two modes:\n"
+            "1. By email reference: provide a sender name or subject keyword — Baker "
+            "   finds the most recent matching email with an attachment and extracts it.\n"
+            "2. By file path: provide a direct path to a file (Dropbox, temp download).\n\n"
+            "Use for:\n"
+            "- 'Read the PDF that BCOMM sent last week'\n"
+            "- 'Extract the spreadsheet from Dennis's migration email'\n"
+            "- 'What does the Hagenauer contract say about termination?'\n"
+            "- Analyzing vendor offers, contracts, term sheets, invoices"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "email_query": {
+                    "type": "string",
+                    "description": "Search for email attachment by sender name, subject keyword, or both. Baker finds the most recent match.",
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Direct path to a file. Use if you already know the file location.",
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 
@@ -339,6 +370,8 @@ class ToolExecutor:
                 return self._get_matter_context(tool_input)
             elif tool_name == "web_search":
                 return self._web_search(tool_input)
+            elif tool_name == "read_document":
+                return self._read_document(tool_input)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -545,6 +578,86 @@ class ToolExecutor:
             return "\n\n".join(parts) if len(parts) > 1 else "[No web results found]"
         except Exception as e:
             return json.dumps({"error": f"Web search failed: {str(e)}"})
+
+    # -- PLUGINS-1: Document reader --
+
+    def _read_document(self, inp: dict) -> str:
+        """Read and extract text from a document (email attachment or file path)."""
+        email_query = inp.get("email_query", "")
+        if email_query:
+            return self._read_email_attachment(email_query)
+
+        file_path = inp.get("file_path", "")
+        if file_path:
+            return self._read_file(file_path)
+
+        return json.dumps({"error": "Provide either email_query or file_path"})
+
+    def _read_email_attachment(self, query: str) -> str:
+        """Find the most recent email matching query that has attachments, return the attachment text."""
+        import psycopg2.extras
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            conn = store._get_conn()
+            if not conn:
+                return json.dumps({"error": "Database unavailable"})
+            try:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                # Search emails that contain attachment sections in their body
+                cur.execute("""
+                    SELECT subject, sender_name, sender_email, received_date, full_body
+                    FROM email_messages
+                    WHERE (subject ILIKE %s OR sender_name ILIKE %s OR sender_email ILIKE %s)
+                      AND full_body LIKE '%%=== ATTACHMENTS ===%'
+                    ORDER BY received_date DESC
+                    LIMIT 1
+                """, (f"%{query}%", f"%{query}%", f"%{query}%"))
+                row = cur.fetchone()
+                cur.close()
+                if not row:
+                    return json.dumps({"result": f"No email with attachment found matching '{query}'"})
+
+                # Extract attachment section from full_body
+                body = row["full_body"] or ""
+                att_marker = "=== ATTACHMENTS ==="
+                att_idx = body.find(att_marker)
+                if att_idx >= 0:
+                    attachment_text = body[att_idx + len(att_marker):].strip()
+                else:
+                    attachment_text = body
+
+                return (
+                    f"--- DOCUMENT from email ---\n"
+                    f"From: {row['sender_name'] or ''} <{row['sender_email'] or ''}>\n"
+                    f"Subject: {row['subject'] or ''}\n"
+                    f"Date: {row['received_date'] or ''}\n\n"
+                    f"{attachment_text[:8000]}"
+                )
+            finally:
+                store._put_conn(conn)
+        except Exception as e:
+            return json.dumps({"error": f"Email attachment search failed: {str(e)}"})
+
+    def _read_file(self, file_path: str) -> str:
+        """Extract text from a file at the given path."""
+        from pathlib import Path
+        try:
+            from tools.ingest.extractors import extract, SUPPORTED_EXTENSIONS
+            p = Path(file_path)
+            if not p.exists():
+                return json.dumps({"error": f"File not found: {file_path}"})
+            if p.suffix.lower() not in SUPPORTED_EXTENSIONS:
+                return json.dumps({"error": f"Unsupported file type: {p.suffix}"})
+            text = extract(p)
+            if not text:
+                return json.dumps({"result": "File extracted but no text content found"})
+            return (
+                f"--- DOCUMENT: {p.name} ---\n"
+                f"{text[:8000]}"
+            )
+        except Exception as e:
+            return json.dumps({"error": f"File extraction failed: {str(e)}"})
 
     @staticmethod
     def _format_contexts(contexts, label: str) -> str:
