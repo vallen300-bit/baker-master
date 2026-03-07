@@ -349,35 +349,135 @@ T1 special: never auto-expires. Travel special: expires only after date passes.
 
 ---
 
+## Architect Notes (gap repairs)
+
+### 1. "More Actions" inline behavior
+When Director clicks "Draft..." (or Analyze, Plan, Summarize, Search) from the More Actions row, an input field expands **inline on the card**, directly below the button row:
+```
+[Draft...] [Analyze...] [Plan...] [Summarize...] [Search...]
+
+Draft: [What should Baker draft?                       ] [Run]
+```
+No modal, no popup. Same inline pattern as the freetext "Something else" row. The matter context is automatically included — Baker knows which alert and matter this relates to.
+
+### 2. Morning narrative edge cases
+The Haiku-generated narrative must handle:
+- **Zero alerts:** "All clear. No fires overnight. 2 routine updates across MO Vienna and BCOMM."
+- **All T1:** Lead with the count and top issue, then list others.
+- **Weekend/holiday:** Adjust tone. "Weekend summary: Baker processed 42 emails since Friday..."
+
+Narrative is cached for 30 minutes. Invalidated when a new T1 alert is created.
+
+### 3. Board view is read-only
+Board view (kanban) in this brief is **display-only**. No drag-and-drop. No status changes by moving cards between columns. Cards are clickable (opens detail in right panel). Drag-and-drop is a Phase C+ feature if needed.
+
+### 4. Reply thread — separate table
+Do NOT store threads as JSONB on the alerts table. Use a separate table:
+```sql
+CREATE TABLE alert_threads (
+    id SERIAL PRIMARY KEY,
+    alert_id INTEGER REFERENCES alerts(id) NOT NULL,
+    role TEXT NOT NULL,           -- 'baker' or 'director'
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_alert_threads_alert ON alert_threads(alert_id);
+```
+This keeps the alerts table lean and allows threads to grow without bloating the main query. When rendering a card, fetch threads with `SELECT * FROM alert_threads WHERE alert_id = ? ORDER BY created_at`.
+
+When Director sends a reply (`POST /api/alerts/{id}/reply`), Baker receives the reply in context (alert title + body + structured_actions + thread history) and generates a response. Both messages are inserted into alert_threads.
+
+### 5. Ask Specialist = same chat, different routing
+Ask Baker and Ask Specialist use the **same chat UI component**. The only difference:
+- **Ask Baker:** Routes via normal capability detection (auto-picks best match)
+- **Ask Specialist:** Shows a capability picker at the top of the chat. Director selects a capability (Legal, Finance, IT...), then types. All messages force-route to that capability via `POST /api/scan/specialist?capability=legal`.
+
+Do NOT build two separate chat interfaces. One component, one flag.
+
+### 6. Phase A split for manageable delivery
+Phase A is too large for a single Brisen sprint. Split into:
+
+**Phase A1 — Layout + Navigation (ship first)**
+1. Sidebar with all 11 tab labels (only Morning Brief, Fires, Matters, Deadlines functional)
+2. Morning Brief landing page (narrative + stats + top fires + deadlines + activity)
+3. Fires tab (filtered T1 matters view)
+4. Command bar (basic — input field, no auto-detection yet)
+
+**Phase A2 — Cards + Interaction**
+5. Card redesign: one-click Run, PCS, Baker recommends + More actions menu
+6. Matters tab with sub-list navigation and matter detail view
+7. Reply thread on result cards
+8. Result toolbar (Copy, Word, Email, Save to Project)
+9. Deadlines tab (full view)
+
+---
+
+## Security Review
+
+### Input Validation
+- **Reply thread:** Director input via `POST /api/alerts/{id}/reply` must be sanitized. Max length 4000 chars. The `content` field is passed to Claude as user message — no raw HTML rendering. Store as plain text, render with `md()` (which escapes via `esc()` first).
+- **"More Actions" custom prompt:** Same rules. Director's typed instruction is passed to Claude as a user message within the alert context. Max length 2000 chars. No server-side template injection risk because the prompt is a Claude API message, not evaluated code.
+- **Tag creation:** Tags must be alphanumeric + hyphens only. Regex: `/^[a-z0-9-]{1,50}$/`. Reject anything else. Stored in JSONB array on alerts table.
+- **Matter assignment:** Dropdown only offers existing matter_slugs from DB. "New Project" creates a slug from the user-provided name — slugify (lowercase, hyphens, strip special chars, max 50 chars).
+
+### Authorization
+- All new endpoints require `X-Baker-Key` header (existing `verify_api_key` dependency). No changes to auth model.
+- **Alert thread replies:** Verify the alert_id exists before inserting. No user-to-user messaging — this is Director-to-Baker only.
+- **Artifact save (`POST /api/artifacts/save`):** Write path is constrained to `_BAKER_OUTPUTS/` directory only. The `matter_slug` parameter must match a known matter in matter_registry, or `_Ungrouped`. **Path traversal protection:** Reject any slug containing `..`, `/`, `\`, or non-alphanumeric characters (except hyphens and underscores). Construct the full path server-side: `BAKER_OUTPUTS_ROOT / sanitized_slug / filename`. Never use user-provided paths directly.
+
+### Data Exposure
+- **Morning narrative:** Generated by Haiku from alert titles and bodies. These already contain business-sensitive information. The narrative endpoint must require auth (same as all /api/* routes). No public caching.
+- **Capability detection (`GET /api/scan/detect`):** Returns only the matched capability slug (e.g., "legal"). Does not expose trigger patterns, system prompts, or internal routing logic.
+- **Board view:** Shows alert titles and tier badges. No full body content in board cards — only shown when card is clicked/expanded. Reduces data exposure in screenshots.
+
+### Rate Limiting
+- **Reply thread:** Max 20 replies per alert. Prevents runaway conversation loops. After 20, show "Continue in Ask Baker for extended conversation."
+- **Morning narrative generation:** Cached 30 min. At most 2 Haiku calls per hour. No abuse vector.
+- **"More Actions" execution:** Each Run button triggers a `/api/scan` call. Existing capability timeout (90s) and iteration limits (8) apply. No additional rate limiting needed beyond existing cost controls.
+
+### XSS Prevention
+- All text rendering in the frontend must use `textContent` (for plain text) or `md()` (which calls `esc()` first, then applies markdown regex). **Never use `innerHTML` with raw user input or raw Baker output.** The existing `md()` function is safe — it escapes first, then converts markdown patterns to HTML.
+- Reply thread messages: render with `md()` for Baker messages (may contain formatting), `esc()` for Director messages (plain text).
+- Tag badges: render with `textContent` only. Tags are alphanumeric — no HTML possible.
+
+### SQL Injection
+- All new endpoints must use parameterized queries (existing pattern with `%s` placeholders in psycopg2). No string concatenation for SQL. This is already the codebase standard — Brisen must follow it.
+- The `matter_slug` filter in queries must use parameterized `WHERE matter_slug = %s`, never `WHERE matter_slug = '{slug}'`.
+
+---
+
 ## Build Sequence
 
 This is a large brief. Recommended phasing:
 
-### Phase A (ship first — enables daily use)
-1. Sidebar navigation with all 11 tabs
-2. Morning Brief landing page (narrative + stats + fires + deadlines + activity)
-3. Matters tab with sub-list and matter detail view (list mode)
-4. Card redesign: one-click Run, PCS, Baker recommends + More actions
-5. Reply thread on result cards
-6. Result toolbar (Copy, Word, Email, Save to Project)
-7. Fires tab (filtered view of T1 matters)
-8. Deadlines tab
+### Phase A1 — Layout + Navigation (ship first)
+1. Sidebar with all 11 tab labels (Morning Brief, Fires, Matters, Deadlines functional; others show "Coming soon" placeholder)
+2. Morning Brief landing page (narrative + stats + top fires + deadlines + activity)
+3. Fires tab (filtered T1 matters view)
+4. Command bar (basic input field, quick action buttons, no auto-detection yet)
+
+### Phase A2 — Cards + Interaction
+5. Card redesign: one-click Run, PCS, Baker recommends + More actions menu (inline input)
+6. Matters tab with sub-list navigation and matter detail view (list mode)
+7. Reply thread on result cards (separate alert_threads table)
+8. Result toolbar (Copy, Word, Email, Save to Project)
+9. Deadlines tab (full view with color-coded dots)
 
 ### Phase B (extends functionality)
-9. Tags system (auto-tagging + manual + tag view)
-10. Board view toggle on Matters
-11. Ungrouped assignment (dropdown + New Project)
-12. Ask Specialist tab (force-route to capability)
-13. Command bar with capability auto-detection
-14. Artifact storage (Dropbox _BAKER_OUTPUTS)
+10. Tags system (auto-tagging + manual + tag tab view)
+11. Board view toggle on Matters (read-only)
+12. Ungrouped assignment (dropdown + New Project)
+13. Ask Specialist tab (capability picker + same chat component as Ask Baker)
+14. Command bar capability auto-detection badge
+15. Artifact storage (Dropbox _BAKER_OUTPUTS, path traversal protection)
 
 ### Phase C (completes the vision)
-15. People tab (contact-centric view)
-16. Search tab with filters
-17. Travel tab
-18. Media tab
-19. Alert auto-expiry (3-day rule)
-20. Alert matter auto-assignment (keyword match)
+16. People tab (contact-centric view + activity)
+17. Search tab with filters (matter, date, source, person)
+18. Travel tab (travel alerts, no expiry until date passes)
+19. Media tab (RSS, future Google Alerts)
+20. Alert auto-expiry (3-day rule for T2/T3/T4)
+21. Alert matter auto-assignment (keyword match against matter_registry)
 
 ---
 
