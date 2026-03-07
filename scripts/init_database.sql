@@ -148,6 +148,8 @@ CREATE TABLE IF NOT EXISTS alerts (
     status      TEXT DEFAULT 'pending',        -- pending, acknowledged, resolved, dismissed
     acknowledged_at TIMESTAMPTZ,
     resolved_at TIMESTAMPTZ,
+    -- Structured actions (COCKPIT-ALERT-UI)
+    structured_actions JSONB,
     -- Source
     trigger_id  INTEGER REFERENCES trigger_log(id),
     contact_id  UUID REFERENCES contacts(id),

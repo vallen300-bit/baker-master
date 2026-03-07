@@ -49,6 +49,9 @@ google-api-python-client>=2.100.0   # Gmail API client (googleapiclient)
 google-auth>=2.25.0                 # Google OAuth2 credentials
 google-auth-oauthlib>=1.2.0         # OAuth2 flow for Gmail
 
+# Web search (PLUGINS-1)
+tavily-python>=0.5.0         # Tavily AI search API
+
 # Future: Trigger integrations
 # msgraph-sdk>=1.0.0       # Microsoft 365 / Outlook
 slack-sdk>=3.0.0           # Slack

@@ -1335,7 +1335,7 @@ class SentinelStoreBack:
                 "slug": "sales", "name": "Sales Capability",
                 "capability_type": "domain", "domain": "projects",
                 "role_description": "MO Residences sales — pitch decks, buyer follow-ups, market comparisons, unit availability, pricing analysis, broker relationships.",
-                "tools": _json.dumps(["search_memory", "search_emails", "search_whatsapp", "get_contact", "get_matter_context", "search_deals_insights"]),
+                "tools": _json.dumps(["search_memory", "search_emails", "search_whatsapp", "get_contact", "get_matter_context", "search_deals_insights", "web_search"]),
                 "trigger_patterns": _json.dumps([r"\b(sales|pitch|buyer|unit|MO\s?residences|pricing|apartment|penthouse|broker)\b"]),
                 "output_format": "analysis_report", "autonomy_level": "recommend_wait",
             },
@@ -1343,7 +1343,7 @@ class SentinelStoreBack:
                 "slug": "finance", "name": "Finance Capability",
                 "capability_type": "domain", "domain": "chairman",
                 "role_description": "Loan analysis, LP term sheets, cash flow models, investment returns, fund economics, capital allocation, treasury, bank communication.",
-                "tools": _json.dumps(["search_memory", "search_emails", "search_meetings", "get_contact", "get_matter_context", "search_deals_insights", "get_deadlines"]),
+                "tools": _json.dumps(["search_memory", "search_emails", "search_meetings", "get_contact", "get_matter_context", "search_deals_insights", "get_deadlines", "web_search", "read_document"]),
                 "trigger_patterns": _json.dumps([r"\b(finance|loan|term.?sheet|cash.?flow|LP|fund|capital|IRR|yield|interest|bank)\b"]),
                 "output_format": "analysis_report", "autonomy_level": "recommend_wait",
             },
@@ -1351,7 +1351,7 @@ class SentinelStoreBack:
                 "slug": "legal", "name": "Legal/Claims Capability",
                 "capability_type": "domain", "domain": "projects",
                 "role_description": "Dispute analysis, construction claim tracking, deadline monitoring, evidence review, Gewaehrleistung, contract interpretation, Austrian law context.",
-                "tools": _json.dumps(["search_memory", "search_emails", "search_whatsapp", "search_meetings", "get_contact", "get_matter_context", "get_deadlines", "get_clickup_tasks"]),
+                "tools": _json.dumps(["search_memory", "search_emails", "search_whatsapp", "search_meetings", "get_contact", "get_matter_context", "get_deadlines", "get_clickup_tasks", "web_search", "read_document"]),
                 "trigger_patterns": _json.dumps([r"\b(legal|claim|dispute|contract|lawsuit|evidence|Gew.hrleistung|arbitration|deadline|court)\b"]),
                 "output_format": "analysis_report", "autonomy_level": "recommend_wait",
             },
@@ -1359,7 +1359,7 @@ class SentinelStoreBack:
                 "slug": "asset_mgmt", "name": "Asset Management Capability",
                 "capability_type": "domain", "domain": "projects",
                 "role_description": "Hotel KPI reporting, operational benchmarks, occupancy analysis, RevPAR tracking, property performance, MO Vienna operations.",
-                "tools": _json.dumps(["search_memory", "search_emails", "search_meetings", "get_matter_context", "search_deals_insights"]),
+                "tools": _json.dumps(["search_memory", "search_emails", "search_meetings", "get_matter_context", "search_deals_insights", "web_search"]),
                 "trigger_patterns": _json.dumps([r"\b(hotel|KPI|RevPAR|occupancy|benchmark|asset.?management|property.?performance|ADR|GOP)\b"]),
                 "output_format": "analysis_report", "autonomy_level": "recommend_wait",
             },
@@ -1367,7 +1367,7 @@ class SentinelStoreBack:
                 "slug": "research", "name": "Research Capability",
                 "capability_type": "domain", "domain": "network",
                 "role_description": "Market intelligence, competitor analysis, due diligence, industry trends, market sizing, investment thesis validation.",
-                "tools": _json.dumps(["search_memory", "search_emails", "search_meetings", "get_contact", "get_matter_context", "search_deals_insights"]),
+                "tools": _json.dumps(["search_memory", "search_emails", "search_meetings", "get_contact", "get_matter_context", "search_deals_insights", "web_search"]),
                 "trigger_patterns": _json.dumps([r"\b(research|market.?intelligence|competitor|due.?diligence|industry|trend|benchmark)\b"]),
                 "output_format": "analysis_report", "autonomy_level": "recommend_wait",
             },
@@ -1375,7 +1375,7 @@ class SentinelStoreBack:
                 "slug": "comms", "name": "Communications Capability",
                 "capability_type": "domain", "domain": "chairman",
                 "role_description": "Email drafts, presentation outlines, board memos, stakeholder communication, press releases — in the Director's voice and style.",
-                "tools": _json.dumps(["search_memory", "search_emails", "search_whatsapp", "get_contact", "get_matter_context"]),
+                "tools": _json.dumps(["search_memory", "search_emails", "search_whatsapp", "get_contact", "get_matter_context", "read_document"]),
                 "trigger_patterns": _json.dumps([r"\b(draft|memo|presentation|board.?memo|communication|stakeholder|press.?release|letter)\b"]),
                 "output_format": "email_draft", "autonomy_level": "recommend_wait",
             },
@@ -1383,7 +1383,7 @@ class SentinelStoreBack:
                 "slug": "it", "name": "IT Infrastructure Capability",
                 "capability_type": "domain", "domain": "projects",
                 "role_description": "M365 migration, Entra ID, Conditional Access, Defender, BYOD security architecture, hardware specs, vendor management (BCOMM/EVOK), troubleshooting, Graph API, SharePoint/OneDrive, cybersecurity triage.",
-                "tools": _json.dumps(["search_memory", "search_emails", "search_whatsapp", "search_meetings", "get_contact", "get_matter_context", "get_clickup_tasks", "get_deadlines"]),
+                "tools": _json.dumps(["search_memory", "search_emails", "search_whatsapp", "search_meetings", "get_contact", "get_matter_context", "get_clickup_tasks", "get_deadlines", "web_search", "read_document"]),
                 "trigger_patterns": _json.dumps([r"\b(IT|M365|Azure|migration|infrastructure|security|Microsoft|tenant|SharePoint|BCOMM|EVOK|Entra|Defender|laptop|printer|VPN|hardware|software)\b"]),
                 "output_format": "analysis_report", "autonomy_level": "recommend_wait",
             },
@@ -1391,7 +1391,7 @@ class SentinelStoreBack:
                 "slug": "ib", "name": "Investment Banking Capability",
                 "capability_type": "domain", "domain": "chairman",
                 "role_description": "Raising finance, project economics analysis, investor relations, placement memoranda, co-investment structuring, LP communication, deal flow.",
-                "tools": _json.dumps(["search_memory", "search_emails", "search_meetings", "get_contact", "get_matter_context", "search_deals_insights", "get_deadlines"]),
+                "tools": _json.dumps(["search_memory", "search_emails", "search_meetings", "get_contact", "get_matter_context", "search_deals_insights", "get_deadlines", "web_search", "read_document"]),
                 "trigger_patterns": _json.dumps([r"\b(invest(?:ment|or)|placement|fundrais|LP.?relation|co.?invest|placement.?memo|capital.?raise|deal.?flow)\b"]),
                 "output_format": "analysis_report", "autonomy_level": "recommend_wait",
             },
@@ -1399,7 +1399,7 @@ class SentinelStoreBack:
                 "slug": "marketing", "name": "Marketing & PR Capability",
                 "capability_type": "domain", "domain": "network",
                 "role_description": "Social media strategy, advertising campaigns, promotional materials, marketing collaterals, brand management, PR outreach.",
-                "tools": _json.dumps(["search_memory", "search_emails", "get_contact", "get_matter_context"]),
+                "tools": _json.dumps(["search_memory", "search_emails", "get_contact", "get_matter_context", "web_search"]),
                 "trigger_patterns": _json.dumps([r"\b(marketing|PR|social.?media|campaign|brand|promotion|advertis|collateral)\b"]),
                 "output_format": "analysis_report", "autonomy_level": "recommend_wait",
             },
@@ -2388,7 +2388,8 @@ class SentinelStoreBack:
 
     def create_alert(self, tier: int, title: str, body: str = None,
                      action_required: bool = False, trigger_id: int = None,
-                     contact_id: str = None, deal_id: str = None) -> Optional[int]:
+                     contact_id: str = None, deal_id: str = None,
+                     structured_actions: dict = None) -> Optional[int]:
         """Insert into alerts table. Returns alert ID."""
         conn = self._get_conn()
         if not conn:
@@ -2396,16 +2397,18 @@ class SentinelStoreBack:
             return None
         try:
             cur = conn.cursor()
+            import json as _json
+            sa_json = _json.dumps(structured_actions) if structured_actions else None
             cur.execute(
                 """
                 INSERT INTO alerts (tier, title, body, action_required,
-                    trigger_id, contact_id, deal_id, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW())
+                    trigger_id, contact_id, deal_id, structured_actions, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 RETURNING id
                 """,
                 (tier, title, body, action_required,
                  trigger_id, contact_id if contact_id else None,
-                 deal_id if deal_id else None),
+                 deal_id if deal_id else None, sa_json),
             )
             alert_id = cur.fetchone()[0]
             conn.commit()
@@ -2479,6 +2482,46 @@ class SentinelStoreBack:
         except Exception as e:
             conn.rollback()
             logger.error(f"resolve_alert failed for #{alert_id}: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def dismiss_alert(self, alert_id: int):
+        """Mark alert as dismissed without acting."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE alerts SET status = 'dismissed', resolved_at = NOW() WHERE id = %s",
+                (alert_id,),
+            )
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"dismiss_alert failed for #{alert_id}: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def update_alert_structured_actions(self, alert_id: int, structured_actions: dict):
+        """Store structured actions JSON on an existing alert."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            import json as _json
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE alerts SET structured_actions = %s WHERE id = %s",
+                (_json.dumps(structured_actions), alert_id),
+            )
+            conn.commit()
+            cur.close()
+            logger.info(f"Updated structured_actions for alert #{alert_id}")
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"update_alert_structured_actions failed for #{alert_id}: {e}")
         finally:
             self._put_conn(conn)
 

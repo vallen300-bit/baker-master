@@ -571,28 +571,452 @@ function populateHome() {
 
 async function fetchPendingItems(container) {
     try {
-        const resp = await bakerFetch('/api/alerts?tier=1');
+        const resp = await bakerFetch('/api/alerts');
         if (!resp.ok) throw new Error('API ' + resp.status);
         const data = await resp.json();
         const alerts = (data && data.alerts) ? data.alerts : [];
 
         if (alerts.length === 0) {
-            container.innerHTML = '<div class="agenda-empty">No pending items. All clear.</div>';
+            container.textContent = '';
+            const empty = document.createElement('div');
+            empty.className = 'agenda-empty';
+            empty.textContent = 'No pending items. All clear.';
+            container.appendChild(empty);
             return;
         }
 
-        let html = '';
-        for (const a of alerts.slice(0, 5)) {
-            html += `<div class="agenda-item">
-                <span class="agenda-time" style="color:#ef4444;">T${a.tier || 1}</span>
-                <span class="agenda-type task">alert</span>
-                <span class="agenda-desc">${esc(a.title)}</span>
-            </div>`;
+        container.textContent = '';
+        for (const a of alerts.slice(0, 8)) {
+            if (a.structured_actions && a.structured_actions.parts) {
+                container.appendChild(renderStructuredAlert(a));
+            } else {
+                const div = document.createElement('div');
+                div.className = 'agenda-item';
+                const time = document.createElement('span');
+                time.className = 'agenda-time';
+                time.style.color = '#ef4444';
+                time.textContent = 'T' + (a.tier || 1);
+                const type = document.createElement('span');
+                type.className = 'agenda-type task';
+                type.textContent = 'alert';
+                const desc = document.createElement('span');
+                desc.className = 'agenda-desc';
+                desc.textContent = a.title;
+                div.appendChild(time);
+                div.appendChild(type);
+                div.appendChild(desc);
+                container.appendChild(div);
+            }
         }
-        container.innerHTML = html;
     } catch (e) {
-        container.innerHTML = '<div class="agenda-empty">No pending items. All clear.</div>';
+        container.textContent = '';
+        const empty = document.createElement('div');
+        empty.className = 'agenda-empty';
+        empty.textContent = 'No pending items. All clear.';
+        container.appendChild(empty);
     }
+}
+
+// ═══ STRUCTURED ALERT CARDS (COCKPIT-ALERT-UI) ═══
+
+const ACTION_TYPE_META = {
+    plan:       { emoji: '\ud83d\udccb', color: '#06b6d4', label: 'Plan' },
+    analyze:    { emoji: '\ud83d\udd0d', color: '#a855f7', label: 'Analyze' },
+    draft:      { emoji: '\u2709\ufe0f',  color: '#eab308', label: 'Draft' },
+    specialist: { emoji: '\ud83c\udfaf', color: '#10b981', label: 'Specialist' },
+};
+
+function renderStructuredAlert(alert) {
+    const sa = alert.structured_actions;
+    const card = document.createElement('div');
+    card.className = 'sa-card';
+    card.dataset.alertId = alert.id;
+
+    // Per-card state
+    const state = { selected: {}, freetext: {}, skipped: {} };
+    card._saState = state;
+    card._saData = sa;
+
+    const tierColor = alert.tier === 1 ? '#ef4444' : alert.tier === 2 ? '#f59e0b' : '#64748b';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'sa-header';
+
+    const titleRow = document.createElement('div');
+    titleRow.className = 'sa-title-row';
+    const tierBadge = document.createElement('span');
+    tierBadge.className = 'sa-tier';
+    tierBadge.style.background = tierColor;
+    tierBadge.textContent = 'T' + alert.tier;
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'sa-title';
+    titleSpan.textContent = alert.title;
+    titleRow.appendChild(tierBadge);
+    titleRow.appendChild(titleSpan);
+    header.appendChild(titleRow);
+
+    for (const [key, label] of [['problem','Problem'],['cause','Cause'],['solution','Solution']]) {
+        if (sa[key]) {
+            const sec = document.createElement('div');
+            sec.className = 'sa-section';
+            const lbl = document.createElement('span');
+            lbl.className = 'sa-section-label';
+            lbl.textContent = label;
+            sec.appendChild(lbl);
+            sec.appendChild(document.createTextNode(' ' + sa[key]));
+            header.appendChild(sec);
+        }
+    }
+    card.appendChild(header);
+
+    // Parts with interactive action cards
+    const partsDiv = document.createElement('div');
+    partsDiv.className = 'sa-parts';
+
+    for (let pi = 0; pi < sa.parts.length; pi++) {
+        const part = sa.parts[pi];
+        state.selected[pi] = [];
+
+        const partDiv = document.createElement('div');
+        partDiv.className = 'sa-part';
+        partDiv.dataset.part = pi;
+
+        const partLabel = document.createElement('div');
+        partLabel.className = 'sa-part-label';
+        partLabel.textContent = part.label;
+        partDiv.appendChild(partLabel);
+
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'sa-actions';
+
+        for (let ai = 0; ai < part.actions.length; ai++) {
+            const action = part.actions[ai];
+            const meta = ACTION_TYPE_META[action.type] || ACTION_TYPE_META.analyze;
+
+            const actionDiv = document.createElement('div');
+            actionDiv.className = 'sa-action';
+            actionDiv.dataset.part = pi;
+            actionDiv.dataset.action = ai;
+
+            // Click to toggle selection
+            actionDiv.addEventListener('click', function() {
+                if (state.skipped[pi]) return;
+                const idx = state.selected[pi].indexOf(ai);
+                if (idx >= 0) {
+                    state.selected[pi].splice(idx, 1);
+                    actionDiv.classList.remove('sa-action--selected');
+                } else {
+                    state.selected[pi].push(ai);
+                    actionDiv.classList.add('sa-action--selected');
+                }
+                _updateExecBtn(card);
+            });
+
+            const descDiv = document.createElement('div');
+            descDiv.className = 'sa-action-desc';
+            descDiv.textContent = action.description || '';
+
+            const rightDiv = document.createElement('div');
+            rightDiv.className = 'sa-action-right';
+            const tag = document.createElement('span');
+            tag.className = 'sa-type-tag';
+            tag.style.background = meta.color;
+            tag.textContent = meta.emoji + ' ' + action.label;
+            const selectBtn = document.createElement('span');
+            selectBtn.className = 'sa-select-btn';
+            selectBtn.textContent = '\u25b6';
+            rightDiv.appendChild(tag);
+            rightDiv.appendChild(selectBtn);
+
+            actionDiv.appendChild(descDiv);
+            actionDiv.appendChild(rightDiv);
+            actionsDiv.appendChild(actionDiv);
+        }
+
+        // "Something else" freetext for this part
+        const ftDiv = document.createElement('div');
+        ftDiv.className = 'sa-action sa-freetext-row';
+        const ftInput = document.createElement('input');
+        ftInput.type = 'text';
+        ftInput.className = 'sa-freetext-input';
+        ftInput.placeholder = 'I have a different idea for this part...';
+        ftInput.maxLength = 2000;
+        ftInput.addEventListener('input', function() {
+            state.freetext[pi] = ftInput.value;
+            _updateExecBtn(card);
+        });
+        const ftRight = document.createElement('div');
+        ftRight.className = 'sa-action-right';
+        const ftTag = document.createElement('span');
+        ftTag.className = 'sa-type-tag sa-type-tag--freetext';
+        ftTag.textContent = '\u270e Something else';
+        ftRight.appendChild(ftTag);
+        ftDiv.appendChild(ftInput);
+        ftDiv.appendChild(ftRight);
+        actionsDiv.appendChild(ftDiv);
+
+        // "Skip this part" toggle
+        const skipDiv = document.createElement('div');
+        skipDiv.className = 'sa-skip-row';
+        const skipBtn = document.createElement('button');
+        skipBtn.className = 'sa-skip-btn';
+        skipBtn.textContent = '\u25cb Skip this part';
+        skipBtn.addEventListener('click', function() {
+            state.skipped[pi] = !state.skipped[pi];
+            if (state.skipped[pi]) {
+                state.selected[pi] = [];
+                state.freetext[pi] = '';
+                ftInput.value = '';
+                partDiv.classList.add('sa-part--skipped');
+                skipBtn.textContent = '\u25cf Unskip this part';
+                // Deselect all action cards in this part
+                partDiv.querySelectorAll('.sa-action--selected').forEach(function(el) {
+                    el.classList.remove('sa-action--selected');
+                });
+            } else {
+                partDiv.classList.remove('sa-part--skipped');
+                skipBtn.textContent = '\u25cb Skip this part';
+            }
+            _updateExecBtn(card);
+        });
+        skipDiv.appendChild(skipBtn);
+        actionsDiv.appendChild(skipDiv);
+
+        partDiv.appendChild(actionsDiv);
+        partsDiv.appendChild(partDiv);
+    }
+
+    // Global "Something else" freetext
+    const globalFt = document.createElement('div');
+    globalFt.className = 'sa-global-freetext';
+    const globalInput = document.createElement('input');
+    globalInput.type = 'text';
+    globalInput.className = 'sa-freetext-input';
+    globalInput.placeholder = 'Anything else not covered above...';
+    globalInput.maxLength = 2000;
+    globalInput.addEventListener('input', function() {
+        state.freetext.global = globalInput.value;
+        _updateExecBtn(card);
+    });
+    const globalRight = document.createElement('div');
+    globalRight.className = 'sa-action-right';
+    const globalTag = document.createElement('span');
+    globalTag.className = 'sa-type-tag sa-type-tag--freetext';
+    globalTag.textContent = '\u270e Something else';
+    globalRight.appendChild(globalTag);
+    globalFt.appendChild(globalInput);
+    globalFt.appendChild(globalRight);
+    partsDiv.appendChild(globalFt);
+
+    card.appendChild(partsDiv);
+
+    // Footer: Execute / Dismiss buttons
+    const footer = document.createElement('div');
+    footer.className = 'sa-footer';
+
+    const execBtn = document.createElement('button');
+    execBtn.className = 'sa-exec-btn';
+    execBtn.textContent = 'Execute Selected';
+    execBtn.disabled = true;
+    execBtn.addEventListener('click', function() {
+        executeAlertActions(card, alert.id);
+    });
+
+    const dismissBtn = document.createElement('button');
+    dismissBtn.className = 'sa-dismiss-btn';
+    dismissBtn.textContent = 'Dismiss';
+    dismissBtn.addEventListener('click', async function() {
+        await bakerFetch('/api/alerts/' + alert.id + '/dismiss', { method: 'POST' });
+        card.style.opacity = '0.5';
+        card.style.pointerEvents = 'none';
+        dismissBtn.textContent = 'Dismissed';
+    });
+
+    footer.appendChild(execBtn);
+    footer.appendChild(dismissBtn);
+    card.appendChild(footer);
+
+    // Results area (hidden until execution)
+    const resultsDiv = document.createElement('div');
+    resultsDiv.className = 'sa-results';
+    resultsDiv.hidden = true;
+    card.appendChild(resultsDiv);
+
+    return card;
+}
+
+function _updateExecBtn(card) {
+    const state = card._saState;
+    const btn = card.querySelector('.sa-exec-btn');
+    if (!btn) return;
+    let hasSelection = false;
+    for (const pi in state.selected) {
+        if (state.selected[pi].length > 0) { hasSelection = true; break; }
+    }
+    if (!hasSelection) {
+        for (const key in state.freetext) {
+            if (state.freetext[key] && state.freetext[key].trim()) { hasSelection = true; break; }
+        }
+    }
+    btn.disabled = !hasSelection;
+}
+
+async function executeAlertActions(card, alertId) {
+    const state = card._saState;
+    const sa = card._saData;
+    const prompts = [];
+
+    // Collect selected action prompts (track pi/ai for card marking)
+    for (const pi in state.selected) {
+        for (const ai of state.selected[pi]) {
+            const action = sa.parts[pi].actions[ai];
+            prompts.push({
+                prompt: action.prompt,
+                type: action.type,
+                label: action.label,
+                part: sa.parts[pi].label,
+                _pi: pi,
+                _ai: ai,
+            });
+        }
+    }
+
+    // Collect freetext prompts (per-part)
+    for (const pi in state.freetext) {
+        const text = state.freetext[pi];
+        if (text && text.trim() && pi !== 'global') {
+            prompts.push({
+                prompt: text.trim(),
+                type: 'analyze',
+                label: 'Custom request',
+                part: sa.parts[pi] ? sa.parts[pi].label : 'General',
+            });
+        }
+    }
+
+    // Global freetext
+    if (state.freetext.global && state.freetext.global.trim()) {
+        prompts.push({
+            prompt: state.freetext.global.trim(),
+            type: 'analyze',
+            label: 'Custom request',
+            part: 'General',
+        });
+    }
+
+    if (prompts.length === 0) return;
+
+    // Disable buttons during execution
+    const execBtn = card.querySelector('.sa-exec-btn');
+    const dismissBtn = card.querySelector('.sa-dismiss-btn');
+    if (execBtn) { execBtn.disabled = true; execBtn.textContent = 'Executing...'; }
+    if (dismissBtn) dismissBtn.disabled = true;
+
+    const resultsDiv = card.querySelector('.sa-results');
+    resultsDiv.hidden = false;
+    resultsDiv.textContent = '';
+
+    // Progress counter
+    const progressDiv = document.createElement('div');
+    progressDiv.className = 'sa-exec-progress';
+    progressDiv.textContent = '0 / ' + prompts.length + ' actions';
+    resultsDiv.appendChild(progressDiv);
+
+    // Execute each prompt sequentially via /api/scan
+    for (let i = 0; i < prompts.length; i++) {
+        const p = prompts[i];
+        const meta = ACTION_TYPE_META[p.type] || ACTION_TYPE_META.analyze;
+
+        progressDiv.textContent = (i + 1) + ' / ' + prompts.length + ' — running: ' + p.label;
+
+        // Execution header
+        const execHeader = document.createElement('div');
+        execHeader.className = 'sa-exec-header';
+        const headerTag = document.createElement('span');
+        headerTag.className = 'sa-type-tag';
+        headerTag.style.background = meta.color;
+        headerTag.textContent = meta.emoji + ' ' + p.label;
+        const headerLabel = document.createElement('span');
+        headerLabel.className = 'sa-exec-part-label';
+        headerLabel.textContent = p.part;
+        const spinner = document.createElement('span');
+        spinner.className = 'sa-exec-spinner';
+        spinner.textContent = '\u25cf';
+        execHeader.appendChild(headerTag);
+        execHeader.appendChild(headerLabel);
+        execHeader.appendChild(spinner);
+        resultsDiv.appendChild(execHeader);
+
+        // Response container
+        const responseDiv = document.createElement('div');
+        responseDiv.className = 'sa-exec-response';
+        responseDiv.textContent = '';
+        resultsDiv.appendChild(responseDiv);
+
+        // Mark running action card with pulse
+        const actionCard = (p._pi !== undefined && p._ai !== undefined)
+            ? card.querySelector('.sa-action[data-part="' + p._pi + '"][data-action="' + p._ai + '"]')
+            : null;
+        if (actionCard) actionCard.classList.add('sa-action--running');
+
+        // Stream from /api/scan
+        let success = true;
+        try {
+            const resp = await bakerFetch('/api/scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question: p.prompt, history: [] }),
+            });
+
+            if (!resp.ok) throw new Error('Scan API returned ' + resp.status);
+
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let fullText = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    const payload = line.slice(6).trim();
+                    if (payload === '[DONE]') continue;
+                    try {
+                        const data = JSON.parse(payload);
+                        if (data.token) {
+                            fullText += data.token;
+                            responseDiv.textContent = fullText;
+                        }
+                    } catch (_) { /* skip unparseable */ }
+                }
+            }
+        } catch (err) {
+            responseDiv.textContent = 'Error: ' + err.message;
+            success = false;
+        }
+
+        // Mark action card as completed with checkmark
+        if (actionCard) {
+            actionCard.classList.remove('sa-action--running');
+            actionCard.classList.add(success ? 'sa-action--done' : 'sa-action--error');
+        }
+        spinner.textContent = success ? '\u2713' : '\u2717';
+        spinner.className = success ? 'sa-exec-check' : 'sa-exec-error';
+    }
+
+    progressDiv.textContent = prompts.length + ' / ' + prompts.length + ' — complete';
+    progressDiv.classList.add('sa-exec-progress--done');
+
+    // Mark alert as acknowledged
+    await bakerFetch('/api/alerts/' + alertId + '/acknowledge', { method: 'POST' });
+
+    if (execBtn) { execBtn.textContent = '\u2713 Executed'; execBtn.classList.add('sa-exec-btn--done'); }
+    if (dismissBtn) dismissBtn.disabled = false;
 }
 
 // ═══ DEADLINES (DEADLINE-SYSTEM-1) ═══

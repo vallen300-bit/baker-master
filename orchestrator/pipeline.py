@@ -38,6 +38,73 @@ def _normalize_tier(raw_tier) -> int:
     return 3
 
 
+_STRUCTURED_ACTIONS_PROMPT = """You are Baker, an AI Chief of Staff. Given an alert, produce structured actions the Director can select and execute.
+
+Return ONLY valid JSON with this structure:
+{
+  "problem": "3-4 lines summarizing the issue",
+  "cause": "2 lines — root cause analysis",
+  "solution": "2-3 lines — what solved looks like",
+  "parts": [
+    {
+      "label": "Group label (e.g. Legal defense, Financial response)",
+      "actions": [
+        {
+          "label": "Short action name",
+          "description": "One line explaining what this produces",
+          "type": "draft|analyze|plan|specialist",
+          "prompt": "The full prompt Baker should execute if Director selects this action"
+        }
+      ]
+    }
+  ]
+}
+
+Action types:
+- "draft": produces an email, letter, memo, or message
+- "analyze": produces a report, comparison, study, or review
+- "plan": produces a ClickUp task structure, timeline, milestones
+- "specialist": deep domain analysis requiring named capability
+
+Rules:
+- 2-4 parts, each with 1-3 actions
+- Prompts must be self-contained — Baker will execute them independently
+- Be specific: name people, reference documents, include context from the alert
+- Every alert gets at least one "draft" action (communication is always needed)
+"""
+
+
+def _generate_structured_actions(claude_client, title: str, body: str, tier: int) -> dict:
+    """Generate structured actions JSON for an alert using Haiku (fast + cheap)."""
+    try:
+        resp = claude_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=2048,
+            system=_STRUCTURED_ACTIONS_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": f"Alert (Tier {tier}): {title}\n\n{body}",
+            }],
+        )
+        raw = resp.content[0].text.strip()
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+            if raw.endswith("```"):
+                raw = raw[:-3]
+            raw = raw.strip()
+        parsed = json.loads(raw)
+        # Validate minimal structure
+        if "parts" in parsed and isinstance(parsed["parts"], list):
+            logger.info(f"Generated structured actions: {len(parsed['parts'])} parts")
+            return parsed
+        logger.warning("Structured actions missing 'parts' key — discarding")
+        return None
+    except (json.JSONDecodeError, Exception) as e:
+        logger.warning(f"Structured actions generation error: {e}")
+        return None
+
+
 # ============================================================
 # Data Models
 # ============================================================
@@ -233,13 +300,26 @@ class SentinelPipeline:
             if response.alerts:
                 for alert in response.alerts:
                     tier = _normalize_tier(alert.get("tier"))
-                    self.store.create_alert(
+                    alert_id = self.store.create_alert(
                         tier=tier,
                         title=alert.get("title", "Untitled alert"),
                         body=alert.get("body", ""),
                         action_required=alert.get("action_required", False),
                         trigger_id=trigger_log_id,
                     )
+                    # COCKPIT-ALERT-UI: generate structured actions for T1/T2 alerts
+                    if alert_id and tier <= 2:
+                        try:
+                            sa = _generate_structured_actions(
+                                self.claude,
+                                alert.get("title", ""),
+                                alert.get("body", ""),
+                                tier,
+                            )
+                            if sa:
+                                self.store.update_alert_structured_actions(alert_id, sa)
+                        except Exception as sa_err:
+                            logger.warning(f"Structured actions generation failed for alert #{alert_id} (non-fatal): {sa_err}")
         except Exception as e:
             logger.warning(f"Store-back: alerts failed (non-fatal): {e}")
 

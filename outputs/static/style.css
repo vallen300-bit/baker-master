@@ -1551,3 +1551,437 @@ body {
     font-size: 11px;
     color: #f44336;
 }
+
+/* ═══ STRUCTURED ALERT CARDS (COCKPIT-ALERT-UI) ═══ */
+
+.sa-card {
+    background: var(--bg-card);
+    border: 1px solid #e2e5e9;
+    border-radius: var(--radius-card);
+    overflow: hidden;
+    margin-bottom: 10px;
+    box-shadow: var(--shadow-card);
+    transition: box-shadow 0.2s;
+}
+
+.sa-card:hover {
+    box-shadow: var(--shadow-card-hover);
+}
+
+.sa-header {
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid #e8eaed;
+}
+
+.sa-title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.sa-tier {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 700;
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: var(--radius-pill);
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+}
+
+.sa-title {
+    font-family: var(--font-heading);
+    font-weight: 700;
+    font-size: 0.95rem;
+    color: var(--text-primary);
+    line-height: 1.3;
+}
+
+.sa-section {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    margin-top: 4px;
+}
+
+.sa-section-label {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-right: 4px;
+}
+
+/* Parts */
+.sa-parts {
+    padding: 8px 18px 14px;
+}
+
+.sa-part {
+    margin-top: 10px;
+}
+
+.sa-part-label {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+}
+
+.sa-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.sa-action {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    background: #f8f9fa;
+    border: 1px solid #e8eaed;
+    border-radius: var(--radius-btn);
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+    cursor: default;
+}
+
+.sa-action:hover {
+    border-color: #d0d0d4;
+    background: #f0f2f5;
+}
+
+.sa-action-desc {
+    flex: 1;
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+.sa-action-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.sa-type-tag {
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 600;
+    color: #fff;
+    padding: 3px 10px;
+    border-radius: var(--radius-pill);
+    white-space: nowrap;
+    letter-spacing: 0.3px;
+}
+
+.sa-type-tag--freetext {
+    background: #94a3b8;
+}
+
+/* Selectable action cards */
+.sa-action {
+    cursor: pointer;
+}
+
+.sa-action--selected {
+    border-color: var(--accent-pm);
+    background: rgba(59,130,246,0.06);
+    box-shadow: inset 0 0 0 1px var(--accent-pm);
+}
+
+.sa-select-btn {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    transition: color 0.15s;
+    cursor: pointer;
+}
+
+.sa-action--selected .sa-select-btn {
+    color: var(--accent-pm);
+}
+
+/* Skip part */
+.sa-skip-row {
+    padding: 4px 0;
+}
+
+.sa-skip-btn {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: var(--radius-btn);
+    transition: color 0.15s, background 0.15s;
+}
+
+.sa-skip-btn:hover {
+    color: var(--text-secondary);
+    background: rgba(0,0,0,0.03);
+}
+
+.sa-part--skipped .sa-actions .sa-action,
+.sa-part--skipped .sa-freetext-row {
+    opacity: 0.35;
+    pointer-events: none;
+}
+
+/* Freetext */
+.sa-freetext-row {
+    border-style: dashed;
+}
+
+.sa-freetext-input {
+    flex: 1;
+    padding: 7px 10px;
+    border: none;
+    background: transparent;
+    font-family: var(--font-body);
+    font-size: 0.78rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    outline: none;
+}
+
+.sa-freetext-input::placeholder {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.sa-global-freetext {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    margin-top: 10px;
+    border: 1px dashed #d1d5db;
+    border-radius: var(--radius-btn);
+}
+
+/* Footer buttons */
+.sa-footer {
+    display: flex;
+    gap: 10px;
+    padding: 12px 18px;
+    border-top: 1px solid #e8eaed;
+}
+
+.sa-exec-btn {
+    padding: 8px 20px;
+    border: none;
+    border-radius: var(--radius-pill);
+    background: linear-gradient(135deg, var(--bar-from), var(--bar-to));
+    color: var(--text-white);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: 0.5px;
+    transition: opacity 0.15s;
+}
+
+.sa-exec-btn:hover:not(:disabled) {
+    opacity: 0.9;
+}
+
+.sa-exec-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.sa-dismiss-btn {
+    padding: 8px 16px;
+    border: 1px solid #d1d5db;
+    border-radius: var(--radius-pill);
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.sa-dismiss-btn:hover:not(:disabled) {
+    border-color: #94a3b8;
+    color: var(--text-primary);
+}
+
+.sa-dismiss-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Execution results */
+.sa-results {
+    padding: 0 18px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.sa-exec-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid #e8eaed;
+}
+
+.sa-exec-part-label {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    letter-spacing: 0.3px;
+}
+
+.sa-exec-response {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    line-height: 1.6;
+    padding: 8px 12px;
+    background: #f8f9fa;
+    border-radius: var(--radius-btn);
+    border: 1px solid #e8eaed;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+/* Progress indicator */
+.sa-exec-progress {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: var(--accent-pm);
+    letter-spacing: 0.3px;
+    padding: 6px 0;
+}
+
+.sa-exec-progress--done {
+    color: var(--scan-green);
+}
+
+/* Running action pulse */
+.sa-action--running {
+    border-color: var(--accent-pm);
+    animation: saRunPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes saRunPulse {
+    0%, 100% { box-shadow: inset 0 0 0 1px var(--accent-pm); }
+    50% { box-shadow: inset 0 0 0 2px var(--accent-pm), 0 0 8px rgba(59,130,246,0.15); }
+}
+
+/* Completed action checkmark */
+.sa-action--done {
+    border-color: var(--scan-green);
+    background: rgba(52,208,88,0.04);
+}
+
+.sa-action--done::after {
+    content: '\2713';
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--scan-green);
+}
+
+.sa-action--error {
+    border-color: var(--scan-red);
+    background: rgba(245,101,101,0.04);
+}
+
+.sa-action {
+    position: relative;
+}
+
+/* Spinner / check in exec header */
+.sa-exec-spinner {
+    font-size: 0.6rem;
+    color: var(--accent-pm);
+    animation: saSpinDot 1s ease-in-out infinite;
+    margin-left: auto;
+}
+
+@keyframes saSpinDot {
+    0%, 100% { opacity: 0.4; }
+    50% { opacity: 1; }
+}
+
+.sa-exec-check {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--scan-green);
+    margin-left: auto;
+}
+
+.sa-exec-error {
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--scan-red);
+    margin-left: auto;
+}
+
+/* Executed button state */
+.sa-exec-btn--done {
+    background: var(--scan-green);
+    opacity: 1;
+}
+
+/* ═══ STRUCTURED ALERTS — MOBILE RESPONSIVE ═══ */
+@media (max-width: 700px) {
+    .sa-card {
+        border-radius: 8px;
+    }
+
+    .sa-header {
+        padding: 12px 14px 10px;
+    }
+
+    .sa-title {
+        font-size: 0.85rem;
+    }
+
+    .sa-action {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+        padding: 8px 10px;
+    }
+
+    .sa-action-right {
+        align-self: flex-end;
+    }
+
+    .sa-global-freetext {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .sa-footer {
+        padding: 10px 14px;
+    }
+
+    .sa-exec-response {
+        max-height: 250px;
+    }
+}
