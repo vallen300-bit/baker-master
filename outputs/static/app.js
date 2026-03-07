@@ -1000,6 +1000,11 @@ async function executeAlertActions(card, alertId) {
             success = false;
         }
 
+        // Add copy button to completed response
+        if (success && fullText) {
+            _addCopyBtn(responseDiv, fullText);
+        }
+
         // Mark action card as completed with checkmark
         if (actionCard) {
             actionCard.classList.remove('sa-action--running');
