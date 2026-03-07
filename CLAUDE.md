@@ -43,11 +43,14 @@ Switch hats as needed. When coding, code. When scoping, think.
 | `orchestrator/pipeline.py` | 5-step RAG pipeline: Classify → Retrieve → Augment → Generate → Store |
 | `orchestrator/prompt_builder.py` | Pipeline prompt (structured JSON output) |
 | `orchestrator/scan_prompt.py` | Scan prompt + STEP1C domain/mode prompt extensions + STEP3 DB-driven preferences + build_mode_aware_prompt() |
-| `orchestrator/action_handler.py` | Intent router — email, WhatsApp, deadline, VIP, fireflies, ClickUp actions |
+| `orchestrator/action_handler.py` | Intent router — email, WhatsApp, deadline, VIP, fireflies, ClickUp, **capability_task** actions |
 | `orchestrator/decision_engine.py` | **DECISION-ENGINE-1A:** score_trigger() — domain, urgency, tier, mode, overrides, VIP SLA |
 | `orchestrator/agent.py` | **AGENTIC-RAG-1 + STEP1B + RETRIEVAL-FIX-1:** Agent loop with 9 tools, ToolExecutor, tier-based routing, matter-aware search |
+| `orchestrator/capability_registry.py` | **AGENT-FRAMEWORK-1:** Loads capability definitions from DB, 5-min cache, trigger pattern matching |
+| `orchestrator/capability_router.py` | **AGENT-FRAMEWORK-1:** Fast path (single capability) + delegate path (decomposer → multi-capability → synthesizer) |
+| `orchestrator/capability_runner.py` | **AGENT-FRAMEWORK-1:** Executes capability runs — run_single, run_streaming, run_multi, run_synthesizer |
 | `memory/retriever.py` | Read-side: Qdrant vector search + PostgreSQL structured queries |
-| `memory/store_back.py` | Write-side: PostgreSQL writes + Qdrant interaction embeddings + STEP3 director_preferences + VIP profiles |
+| `memory/store_back.py` | Write-side: PostgreSQL writes + Qdrant interaction embeddings + STEP3 director_preferences + VIP profiles + **capability framework tables** |
 
 ### API & Dashboard
 | File | Purpose |
@@ -90,15 +93,20 @@ User question → scan_chat()
   → check_pending_plan() (ClickUp plan approval loop)
   → check_pending_draft() (email draft approval loop)
   → classify_intent() (regex fast-path → Haiku fallback, with 15-turn conversation history)
+    → capability_task → _scan_chat_capability() → capability framework (AGENT-FRAMEWORK-1)
     → clickup_action / clickup_fetch / clickup_plan → action handler → SSE response
     → email_action → draft/send → SSE response
     → whatsapp_action → resolve VIP name → send via WAHA → SSE response
     → deadline_action / vip_action / fireflies_fetch → handler → SSE response
-    → question → score_trigger() → baker_task created → mode+tier routing:
-        → tier 1 + mode!=delegate: _scan_chat_legacy() → fast path (~3s) → stream SSE
-        → mode==delegate OR agentic flag: _scan_chat_agentic() → agent loop (8 tools, mode-aware prompt) → stream SSE
-        → else: _scan_chat_legacy() → single-pass RAG → stream SSE
-        → baker_task closed with deliverable + agent metadata
+    → question → score_trigger() → baker_task created →
+        → CapabilityRouter.route() → if capability match:
+            → fast path: single capability → CapabilityRunner.run_streaming() → SSE
+            → delegate path: decomposer → multi-capability → synthesizer → SSE
+        → else (no capability match) → mode+tier routing:
+            → tier 1 + mode!=delegate: _scan_chat_legacy() → fast path (~3s) → stream SSE
+            → mode==delegate OR agentic flag: _scan_chat_agentic() → agent loop → stream SSE
+            → else: _scan_chat_legacy() → single-pass RAG → stream SSE
+        → baker_task closed with deliverable + capability metadata
 ```
 
 ## Architecture: How WhatsApp Works
@@ -174,6 +182,7 @@ Backfill: scripts/extract_whatsapp.py
 | TODOIST_API_TOKEN | Todoist sync |
 | BAKER_AGENTIC_RAG | `true`/`false` — enable agentic RAG agent loop (default: false) |
 | BAKER_AGENT_TIMEOUT | Agent loop wall-clock timeout in seconds (default: 10) |
+| TAVILY_API_KEY | Web search API (pending — needed for web_search tool) |
 
 ## Qdrant Collections
 
@@ -188,7 +197,8 @@ baker-projects, sentinel-interactions, sentinel-email, sentinel-meetings, sentin
 `todoist_tasks`, `conversation_memory`, `sent_emails`, `deadlines`, `vip_contacts`,
 `meeting_transcripts` (ARCH-3), `email_messages` (ARCH-6), `whatsapp_messages` (ARCH-7),
 `insights` (INSIGHT-1), `baker_tasks` (STEP1C), `matter_registry` (RETRIEVAL-FIX-1),
-`director_preferences` (STEP3)
+`director_preferences` (STEP3), `capability_sets` (AGENT-FRAMEWORK-1),
+`capability_runs` (AGENT-FRAMEWORK-1), `decomposition_log` (AGENT-FRAMEWORK-1)
 
 ## Architecture: Role Division (Baker vs Cowork)
 
@@ -244,26 +254,39 @@ All shipped in sessions 1-8. Baker is a reactive Chief of Staff with memory, sco
 | MCP Bridge | DONE — 23 tools (15 read + 8 write), Cowork + Claude Code connected |
 
 ### Phase 2 — Multi-Agent Orchestration (NOW)
-Baker becomes an orchestrator that delegates to specialist AI agents. Each agent has its own system prompt, tools, and domain expertise.
+Baker becomes an orchestrator that assembles **capability sets** dynamically per task.
 
-**AGENT-FRAMEWORK-1** — 10 specialist agents:
+**Core concept: Capabilities, not fixed agents.** An "agent" is a temporary assembly of capability sets that Baker composes for a specific task, then dissolves. Capabilities are composable building blocks (domain knowledge + system prompt + tools + output format) stored as rows in `capability_sets` table.
 
-| # | Agent | Domain | Purpose |
-|---|-------|--------|---------|
-| 1 | Sales Agent | projects | MO Residences pitch decks, buyer follow-ups, market comps |
-| 2 | Finance Agent | chairman | Loan analysis, LP term sheets, cash flow models |
-| 3 | Legal/Claims Agent | projects | Dispute analysis, deadline tracking, evidence review |
-| 4 | Asset Management Agent | projects | Hotel KPI reports, operational benchmarks |
-| 5 | Research Agent | network | Market intelligence, competitor analysis, due diligence |
-| 6 | Comms/Draft Agent | chairman | Email drafts, presentations, board memos |
-| 7 | IT Agent | projects | M365 migration, Azure EU, infrastructure |
-| 8 | Investment Banking Manager | chairman | Raising finance, analyzing projects, investor relations |
-| 9 | Marketing & PR Agent | network | Social media, ads, promotion, marketing collaterals |
-| 10 | AI Development Agent | projects | Baker system development |
+**Architecture:**
+- **Fast path (80%):** Single capability, no decomposition. Baker picks the best match, runs it directly.
+- **Delegate path (20%):** Decomposer (itself a capability) breaks the task into sub-issues → each sub-issue runs with its own capability → Synthesizer (another capability) combines results into one unified answer.
+- **Experience-informed retrieval:** Every decomposition is logged. Decomposer consults past patterns before breaking down new tasks. Director feedback propagates to improve future routing.
 
-**Trigger model:** Option C — Director can trigger manually ("Baker, have the finance agent analyze X") AND Baker can trigger proactively on matching signals.
+**AGENT-FRAMEWORK-1** — 12 capability sets deployed (10 domain + 2 meta):
 
-**Process:** Director defines each agent's specs with Cowork PM → PM writes summary → Code 300 architects framework + writes brief → Code Brisen builds.
+| # | Capability | Domain | Purpose |
+|---|------------|--------|---------|
+| 1 | Sales | projects | MO Residences pitch decks, buyer follow-ups, market comps |
+| 2 | Finance | chairman | Loan analysis, LP term sheets, cash flow models |
+| 3 | Legal/Claims | projects | Dispute analysis, deadline tracking, evidence review |
+| 4 | Asset Management | projects | Hotel KPI reports, operational benchmarks |
+| 5 | Research | network | Market intelligence, competitor analysis, due diligence |
+| 6 | Comms/Draft | chairman | Email drafts, presentations, board memos |
+| 7 | IT Infrastructure | projects | M365 migration, BYOD security, hardware, vendor management (fully specified) |
+| 8 | Investment Banking | chairman | Raising finance, analyzing projects, investor relations |
+| 9 | Marketing & PR | network | Social media, ads, promotion, marketing collaterals |
+| 10 | AI Development | projects | Baker system development |
+| M1 | Decomposer | meta | Breaks complex tasks into sub-issues, assigns capabilities |
+| M2 | Synthesizer | meta | Combines multi-capability results into unified deliverable |
+
+**Status:** Framework built and deployed. IT capability fully specified. 9 remaining capability specs pending PM interview.
+
+**Proactive alert format:** Structured command cards with 4 action types (Plan/Analyze/Draft/Specialist), per-part controls (select/skip/something else). Brief: `BRIEF_COCKPIT_ALERT_UI.md`.
+
+**New plugins queued:** Web search (Tavily) + document reader. Brief: `BRIEF_PLUGINS_WEB_SEARCH_DOC_READER.md`.
+
+**Director decisions (Q2/Q9/Q12):** Quality bar 85-90% default. Director-only visibility at launch. Success = proactive answers before asked, 10-20% editing only.
 
 ### Phase 3 — Proactive Baker (NEXT after Phase 2)
 Baker executes the 7 standing orders autonomously. Requires Phase 2 agents + calendar integration.
@@ -316,6 +339,34 @@ STEP1C + RETRIEVAL-FIX-1 + SSE keepalive fix. baker_tasks table, mode-aware rout
 ### Session 8 — 2026-03-05 (dimitry300 machine)
 Step 3 Agentic Onboarding. director_preferences table + 3 VIP columns + DB-driven prompt injection. MCP server: 23 tools (15 read + 8 write). Onboarding completed via Cowork PM: 14 preferences + 13 matters. AGENT-FRAMEWORK-1 scoped (10 specialist agents). CLAUDE.md trimmed (sessions 1-6 archived). Roadmap consolidated.
 
+### Session 9 — 2026-03-06/07 (dimitry300 machine, Code 300 architect)
+**AGENT-FRAMEWORK-1 designed, built, and deployed.** Major architectural session.
+
+Key decisions:
+- Shift from fixed agents to **composable capability sets** (Director insight: "agent" = temporary assembly, not persistent entity)
+- **Decomposer + Synthesizer** as meta-capabilities for complex multi-domain tasks
+- **Experience-informed retrieval** — 3 mechanisms: experience log + retrieval, Director feedback loop, curated prompt evolution
+- **Fast path** (mode=handle, 80%) vs **delegate path** (mode=delegate, 20%)
+- LLMs don't learn — Baker **accumulates experience as data** and consults it before acting
+- Proactive alert format: structured command cards with 4 action types (Plan/Analyze/Draft/Specialist)
+- Per-part controls: select actions, "something else" freetext, skip
+- Director decisions: quality 85-90%, Director-only visibility, success = proactive + 10-20% editing
+
+Built and deployed:
+- 3 new files: capability_registry.py, capability_router.py, capability_runner.py
+- 4 modified: store_back.py, action_handler.py, dashboard.py, waha_webhook.py
+- 3 new DB tables: capability_sets, capability_runs, decomposition_log
+- 12 seed capabilities (10 domain + 2 meta)
+- 3 API endpoints: /api/capabilities, /api/capability-runs, /api/decompositions
+- IT capability fully specified (PM session)
+
+Briefs written:
+- `BRIEF_AGENT_FRAMEWORK_1.md` v2.1 (framework + Director decisions + alert format)
+- `BRIEF_COCKPIT_ALERT_UI.md` (interactive alert command interface)
+- `BRIEF_PLUGINS_WEB_SEARCH_DOC_READER.md` (web search Tavily + document reader)
+
+Also: BCOMM M365 migration meeting briefing + response letter drafted. PM's architecture document reviewed and critiqued.
+
 ## Key Documents (Dropbox)
 
 | Document | Path | Purpose |
@@ -327,6 +378,7 @@ Step 3 Agentic Onboarding. director_preferences table + 3 VIP columns + DB-drive
 | Architecture v5.1 | `vallen300-bit.github.io/brisen-dashboards/Baker_Architecture_v5.html` | Three actors, three jobs, one memory |
 | Operating Model v2.0 | `Baker-Project/pm/BAKER_OPERATING_MODEL_v2.md` | PM + Code + Director workflow |
 | PM Onboard | `Baker-Project/pm/PM_ONBOARD.md` | Cowork PM session startup |
+| Agent Framework Architecture | `Baker-Project/agent-framework-architecture.html` | PM's visual architecture (reviewed, partially adopted) |
 
 ## Director Preferences
 
