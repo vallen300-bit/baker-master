@@ -238,6 +238,42 @@ TOOL_DEFINITIONS = [
             "required": ["query"],
         },
     },
+    # PLUGINS-1: Web search tool (tool #10)
+    {
+        "name": "web_search",
+        "description": (
+            "Search the web for current information not available in Baker's memory. "
+            "Returns relevant web page excerpts ranked by relevance.\n\n"
+            "Use for:\n"
+            "- Hardware specifications and product comparisons\n"
+            "- Microsoft documentation (M365, Entra ID, Conditional Access policies)\n"
+            "- Market data, competitor information, industry reports\n"
+            "- Legal references (Austrian law, court decisions, regulatory updates)\n"
+            "- Current pricing and availability\n"
+            "- Any question where Baker's stored memory is insufficient or outdated\n\n"
+            "Do NOT use for information that Baker already has in memory — "
+            "search_memory, search_emails, search_meetings first."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query — use specific, descriptive terms.",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Max results to return (default 5, max 10).",
+                },
+                "search_depth": {
+                    "type": "string",
+                    "description": "'basic' (fast, 1 credit) or 'advanced' (thorough, 2 credits). Default: basic.",
+                    "enum": ["basic", "advanced"],
+                },
+            },
+            "required": ["query"],
+        },
+    },
     # RETRIEVAL-FIX-1: Matter context tool (tool #9)
     {
         "name": "get_matter_context",
@@ -301,6 +337,8 @@ class ToolExecutor:
                 return self._search_deals_insights(tool_input)
             elif tool_name == "get_matter_context":
                 return self._get_matter_context(tool_input)
+            elif tool_name == "web_search":
+                return self._web_search(tool_input)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -471,6 +509,42 @@ class ToolExecutor:
                 parts.append("\n[No recent emails or WhatsApp from connected people found]")
 
         return "\n".join(parts)
+
+    # -- PLUGINS-1: Web search --
+
+    def _web_search(self, inp: dict) -> str:
+        """Search the web via Tavily API."""
+        try:
+            from tavily import TavilyClient
+        except ImportError:
+            return json.dumps({"error": "tavily-python not installed"})
+
+        api_key = os.getenv("TAVILY_API_KEY")
+        if not api_key:
+            return json.dumps({"error": "Web search not configured (TAVILY_API_KEY missing)"})
+
+        try:
+            client = TavilyClient(api_key=api_key)
+            query = inp.get("query", "")
+            max_results = min(inp.get("max_results", 5), 10)
+            depth = inp.get("search_depth", "basic")
+
+            results = client.search(
+                query=query,
+                max_results=max_results,
+                search_depth=depth,
+            )
+
+            parts = [f"--- WEB SEARCH: '{query}' ({len(results.get('results', []))} results) ---"]
+            for r in results.get("results", []):
+                title = r.get("title", "")
+                url = r.get("url", "")
+                content = r.get("content", "")[:1500]
+                parts.append(f"[{title}] ({url})\n{content}")
+
+            return "\n\n".join(parts) if len(parts) > 1 else "[No web results found]"
+        except Exception as e:
+            return json.dumps({"error": f"Web search failed: {str(e)}"})
 
     @staticmethod
     def _format_contexts(contexts, label: str) -> str:
