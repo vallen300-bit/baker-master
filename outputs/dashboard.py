@@ -1582,7 +1582,8 @@ def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
                         asyncio.get_event_loop().run_in_executor(None, lambda: q.get(timeout=8)),
                         timeout=10.0,
                     )
-                except asyncio.TimeoutError:
+                except (asyncio.TimeoutError, Exception):
+                    # queue.Empty from q.get(timeout=8) or asyncio timeout
                     yield ": keepalive\n\n"
                     continue
 
