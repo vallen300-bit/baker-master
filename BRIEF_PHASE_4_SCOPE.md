@@ -91,10 +91,10 @@ Three sub-phases, ordered by value-to-effort ratio:
 
 ## Decision Points for Director
 
-1. **Cost circuit breaker threshold:** €5/day proposed. Too low? Too high? Should it alert-only or hard-stop?
-2. **Feedly:** Token expires March 14. Renew Pro+ ($100/yr) or keep free RSS polling?
-3. **Capability specs pace:** PM can interview Director for 1 domain per session. Which domain first after IT?
-4. **Browser Sentinel first tasks:** Seed hotel rate monitoring? Which competitors? Which URLs?
+1. ~~**Cost circuit breaker threshold:**~~ **DECIDED.** Alert at €15/day, hard-stop at €100/day.
+2. ~~**Feedly:**~~ **DECIDED.** Drop Feedly (€1,600 for press feed — too expensive). Keep free RSS polling.
+3. **Capability specs pace:** Director working on it now.
+4. ~~**Browser Sentinel first tasks:**~~ **DECIDED.** Agreed — seed with hotel rate monitoring per suggested URLs in brief (MO Vienna, Park Hyatt, Grundbuch).
 
 ---
 
