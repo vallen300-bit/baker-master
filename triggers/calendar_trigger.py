@@ -149,34 +149,34 @@ def _assemble_meeting_context(meeting: dict, store) -> str:
 
                     # Recent emails (last 30 days)
                     cur.execute(
-                        """SELECT subject, sender_name, received_at
+                        """SELECT subject, sender_name, received_date
                            FROM email_messages
                            WHERE (LOWER(sender_email) = LOWER(%s) OR LOWER(subject) ILIKE %s)
-                             AND received_at >= NOW() - INTERVAL '30 days'
-                           ORDER BY received_at DESC LIMIT 5""",
+                             AND received_date >= NOW() - INTERVAL '30 days'
+                           ORDER BY received_date DESC LIMIT 5""",
                         (email, f"%{name.split('@')[0]}%"),
                     )
                     emails = cur.fetchall()
                     if emails:
                         parts.append(f"  Recent emails ({len(emails)}):")
                         for em in emails:
-                            parts.append(f"    - {em['subject']} ({em['received_at'].strftime('%b %d') if em.get('received_at') else '?'})")
+                            parts.append(f"    - {em['subject']} ({em['received_date'].strftime('%b %d') if em.get('received_date') else '?'})")
 
                     # Recent WhatsApp (last 30 days)
                     cur.execute(
-                        """SELECT sender_name, body, received_at
+                        """SELECT sender_name, full_text, timestamp
                            FROM whatsapp_messages
                            WHERE LOWER(sender_name) ILIKE %s
-                             AND received_at >= NOW() - INTERVAL '30 days'
-                           ORDER BY received_at DESC LIMIT 3""",
+                             AND timestamp >= NOW() - INTERVAL '30 days'
+                           ORDER BY timestamp DESC LIMIT 3""",
                         (f"%{name.split('@')[0]}%",),
                     )
                     wa_msgs = cur.fetchall()
                     if wa_msgs:
                         parts.append(f"  Recent WhatsApp ({len(wa_msgs)}):")
                         for msg in wa_msgs:
-                            snippet = (msg.get('body') or '')[:80]
-                            parts.append(f"    - {snippet}... ({msg['received_at'].strftime('%b %d') if msg.get('received_at') else '?'})")
+                            snippet = (msg.get('full_text') or '')[:80]
+                            parts.append(f"    - {snippet}... ({msg['timestamp'].strftime('%b %d') if msg.get('timestamp') else '?'})")
 
                     # Past meetings with this person
                     cur.execute(
