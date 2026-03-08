@@ -169,6 +169,10 @@ class DocumentRequest(BaseModel):
     title: str = Field("Baker Document", max_length=200)
 
 
+class AlertReplyRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=4000)
+
+
 def _serialize(obj: dict) -> dict:
     """Convert datetime fields to ISO strings for JSON serialization."""
     out = {}
@@ -913,6 +917,206 @@ async def get_activity_feed(hours: int = Query(24, ge=1, le=168)):
     except Exception as e:
         logger.error(f"GET /api/activity failed: {e}")
         return {"activity": []}
+
+
+# ============================================================
+# V3 Phase A2 — Reply threads, matters detail, inline actions
+# ============================================================
+
+@app.get("/api/alerts/{alert_id}/threads", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_alert_threads(alert_id: int):
+    """Get thread messages for an alert card."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"threads": []}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT id, role, content, created_at FROM alert_threads WHERE alert_id = %s ORDER BY created_at",
+                (alert_id,),
+            )
+            threads = [_serialize(dict(r)) for r in cur.fetchall()]
+            cur.close()
+            return {"threads": threads, "count": len(threads)}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/alerts/{alert_id}/threads failed: {e}")
+        return {"threads": [], "count": 0}
+
+
+@app.post("/api/alerts/{alert_id}/reply", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def reply_to_alert(alert_id: int, req: AlertReplyRequest):
+    """
+    Reply to an alert card. Director's message is stored, then routed through
+    the existing agentic RAG pipeline (/api/scan) for Baker's response.
+    CRITICAL: Uses the same pipeline as Ask Baker — no separate Claude call.
+    """
+    try:
+        store = _get_store()
+        import psycopg2.extras
+
+        # 1. Verify alert exists and get context
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+            # Check reply count limit (max 50 per brief spec)
+            cur.execute("SELECT COUNT(*) AS cnt FROM alert_threads WHERE alert_id = %s", (alert_id,))
+            thread_count = cur.fetchone()["cnt"]
+            if thread_count >= 50:
+                cur.close()
+                raise HTTPException(
+                    status_code=429,
+                    detail="Thread limit reached (50). Continue in Ask Baker for extended conversation."
+                )
+
+            # Get alert context
+            cur.execute("SELECT id, tier, title, body, matter_slug, structured_actions FROM alerts WHERE id = %s", (alert_id,))
+            alert = cur.fetchone()
+            if not alert:
+                cur.close()
+                raise HTTPException(status_code=404, detail=f"Alert {alert_id} not found")
+            alert = dict(alert)
+
+            # Get existing thread for conversation history
+            cur.execute(
+                "SELECT role, content FROM alert_threads WHERE alert_id = %s ORDER BY created_at",
+                (alert_id,),
+            )
+            existing_thread = [dict(r) for r in cur.fetchall()]
+
+            # 2. Store director's message
+            cur.execute(
+                "INSERT INTO alert_threads (alert_id, role, content) VALUES (%s, 'director', %s)",
+                (alert_id, req.content),
+            )
+            conn.commit()
+            cur.close()
+        finally:
+            store._put_conn(conn)
+
+        # 3. Build context and route through existing /api/scan pipeline
+        # Construct the question with full alert context (same as Ask Baker)
+        context_parts = [
+            f"[Context: Alert T{alert['tier']} — {alert['title']}]",
+        ]
+        if alert.get("body"):
+            context_parts.append(f"[Alert body: {alert['body'][:500]}]")
+        if alert.get("matter_slug"):
+            context_parts.append(f"[Matter: {alert['matter_slug']}]")
+
+        # Build conversation history from thread
+        history = []
+        for msg in existing_thread:
+            role = "user" if msg["role"] == "director" else "assistant"
+            history.append({"role": role, "content": msg["content"]})
+
+        # The director's new message is the question
+        question = req.content
+        if not existing_thread:
+            # First reply — prepend alert context so Baker knows what this is about
+            question = "\n".join(context_parts) + "\n\n" + req.content
+
+        # Route through the SAME /api/scan pipeline — build a ScanRequest
+        scan_req = ScanRequest(
+            question=question,
+            history=history[-10:],  # Keep last 10 turns
+            project=alert.get("matter_slug"),
+        )
+
+        # Call the scan endpoint internally — returns StreamingResponse (SSE)
+        streaming_resp = await scan_chat(scan_req)
+
+        # Wrap the SSE stream to capture Baker's response and store in alert_threads.
+        # Brief spec (COCKPIT_V3 §4): "Both messages are inserted into alert_threads."
+        async def _capture_and_store_reply():
+            baker_tokens = []
+            async for chunk in streaming_resp.body_iterator:
+                yield chunk
+                if isinstance(chunk, str) and chunk.startswith("data: "):
+                    payload = chunk[6:].strip()
+                    if payload and payload != "[DONE]":
+                        try:
+                            d = json.loads(payload)
+                            if "token" in d:
+                                baker_tokens.append(d["token"])
+                        except (ValueError, KeyError):
+                            pass
+            # Store Baker's complete response (fault-tolerant)
+            full_reply = "".join(baker_tokens)
+            if full_reply.strip():
+                try:
+                    _s = _get_store()
+                    _c = _s._get_conn()
+                    if _c:
+                        try:
+                            _cur = _c.cursor()
+                            _cur.execute(
+                                "INSERT INTO alert_threads (alert_id, role, content) VALUES (%s, 'baker', %s)",
+                                (alert_id, full_reply),
+                            )
+                            _c.commit()
+                            _cur.close()
+                        finally:
+                            _s._put_conn(_c)
+                except Exception as store_err:
+                    logger.debug(f"Failed to store baker reply for alert {alert_id}: {store_err}")
+
+        return StreamingResponse(
+            _capture_and_store_reply(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"POST /api/alerts/{alert_id}/reply failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/matters/{matter_slug}/items", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_matter_items(matter_slug: str):
+    """
+    Get all pending alerts for a specific matter, sorted by tier then date.
+    T1/T2 include structured_actions for expanded display.
+    """
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            if matter_slug == '_ungrouped':
+                cur.execute("""
+                    SELECT * FROM alerts
+                    WHERE status = 'pending' AND matter_slug IS NULL
+                    ORDER BY tier, created_at DESC
+                """)
+            else:
+                cur.execute("""
+                    SELECT * FROM alerts
+                    WHERE status = 'pending' AND matter_slug = %s
+                    ORDER BY tier, created_at DESC
+                """, (matter_slug,))
+            items = [_serialize(dict(r)) for r in cur.fetchall()]
+            cur.close()
+            return {"items": items, "count": len(items), "matter_slug": matter_slug}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"GET /api/matters/{matter_slug}/items failed: {e}")
+        return {"items": [], "count": 0, "matter_slug": matter_slug}
 
 
 # --- Debug: Action Handler Log (EMAIL-DELIVERY-1 diagnosis) ---

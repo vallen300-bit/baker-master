@@ -150,6 +150,7 @@ function switchTab(tabName) {
 
     if (tabName === 'morning-brief') loadMorningBrief();
     else if (tabName === 'fires') loadFires();
+    else if (tabName === 'matters') loadMattersTab();
     else if (tabName === 'deadlines') loadDeadlinesTab();
     else if (tabName === 'ask-baker') focusScanInput();
 }
@@ -323,28 +324,6 @@ async function loadFires() {
 
 // ═══ DEADLINES TAB ═══
 
-async function loadDeadlinesTab() {
-    const container = document.getElementById('deadlinesContent');
-    if (!container) return;
-    container.textContent = 'Loading deadlines...';
-
-    try {
-        const resp = await bakerFetch('/api/deadlines');
-        if (!resp.ok) return;
-        const data = await resp.json();
-
-        if (!data.deadlines || data.deadlines.length === 0) {
-            container.textContent = 'No active deadlines.';
-            return;
-        }
-
-        setSafeHTML(container, data.deadlines.map(renderDeadlineCompact).join(''));
-    } catch (e) {
-        container.textContent = 'Failed to load deadlines.';
-        container.style.color = 'var(--red)';
-    }
-}
-
 // ═══ CARD RENDERING ═══
 // SECURITY: All dynamic text goes through esc(). Resulting HTML is safe for setSafeHTML().
 
@@ -354,8 +333,9 @@ function renderAlertCard(alert, expanded) {
     const isNew = isNewAlert(alert.created_at);
     const borderClass = tier === 1 ? ' t1-border' : tier === 2 ? ' t2-border' : '';
     const newClass = isNew ? ' new' : '';
+    var aid = esc(String(alert.id));
 
-    let html = '<div class="card' + newClass + borderClass + '" data-alert-id="' + esc(String(alert.id)) + '">';
+    var html = '<div class="card' + newClass + borderClass + '" data-alert-id="' + aid + '">';
 
     // Header
     html += '<div class="card-header">';
@@ -367,7 +347,7 @@ function renderAlertCard(alert, expanded) {
 
     // PCS (for T1/T2 with structured_actions)
     if (expanded && (tier <= 2) && alert.structured_actions) {
-        let sa = alert.structured_actions;
+        var sa = alert.structured_actions;
         if (typeof sa === 'string') { try { sa = JSON.parse(sa); } catch(e) { sa = {}; } }
 
         if (sa.problem || sa.cause || sa.solution) {
@@ -381,22 +361,25 @@ function renderAlertCard(alert, expanded) {
         // Baker recommends
         if (sa.parts && sa.parts.length > 0) {
             html += '<div class="recommends"><div class="recommends-label">Baker recommends</div>';
-            for (const part of sa.parts) {
+            for (var pi = 0; pi < sa.parts.length; pi++) {
+                var part = sa.parts[pi];
                 html += '<div class="part-label">' + esc(part.label || '') + '</div>';
                 if (part.actions) {
-                    for (let ai = 0; ai < part.actions.length; ai++) {
-                        const action = part.actions[ai];
-                        const prompt = action.prompt || action.label || '';
+                    for (var ai = 0; ai < part.actions.length; ai++) {
+                        var action = part.actions[ai];
+                        var prompt = action.prompt || action.label || '';
                         html += '<div class="action-row">';
                         html += '<span class="action-type">' + esc((action.type || 'Analyze').charAt(0).toUpperCase() + (action.type || 'analyze').slice(1)) + '</span>';
                         html += '<span class="action-label">' + esc(action.label || action.description || '') + '</span>';
-                        html += '<button class="run-btn" data-prompt="' + esc(prompt) + '" data-alert="' + alert.id + '" onclick="runCardAction(this.dataset.alert,this.dataset.prompt)">Run</button>';
+                        html += '<button class="run-btn" data-prompt="' + esc(prompt) + '" data-alert="' + aid + '" onclick="runCardAction(this)">Run</button>';
                         html += '</div>';
+                        // Inline result container for this action
+                        html += '<div class="card-result-area" id="result-' + aid + '-' + pi + '-' + ai + '" style="display:none;"></div>';
                     }
                 }
             }
-            html += '<div class="freetext"><input placeholder="Something else..." />';
-            html += '<button class="run-btn" style="opacity:0.3;" data-alert="' + alert.id + '" onclick="runFreetext(this,' + alert.id + ')">Run</button></div>';
+            html += '<div class="freetext"><input placeholder="Something else..." data-alert="' + aid + '" />';
+            html += '<button class="run-btn" style="opacity:0.3;" data-alert="' + aid + '" onclick="runFreetext(this)">Run</button></div>';
             html += '</div>';
         }
 
@@ -405,18 +388,27 @@ function renderAlertCard(alert, expanded) {
         html += '<div class="more-actions-row">';
         var moreActions = ['Draft', 'Analyze', 'Plan', 'Summarize', 'Search'];
         for (var mi = 0; mi < moreActions.length; mi++) {
-            html += '<button class="more-action-btn" data-action-type="' + esc(moreActions[mi]) + '" data-alert="' + alert.id + '" onclick="openMoreAction(this)">' + esc(moreActions[mi]) + '...</button>';
+            html += '<button class="more-action-btn" data-action-type="' + esc(moreActions[mi]) + '" data-alert="' + aid + '" onclick="openMoreAction(this)">' + esc(moreActions[mi]) + '...</button>';
         }
         html += '</div></div>';
     }
 
+    // Inline result area (for any action on the card)
+    html += '<div class="card-result-area" id="card-result-' + aid + '" style="display:none;"></div>';
+
+    // Reply thread area
+    html += '<div class="card-reply-area" id="card-reply-' + aid + '" style="display:none;padding:0 16px 10px;">';
+    html += '<div id="card-thread-' + aid + '"></div>';
+    html += '<div style="display:flex;gap:8px;margin-top:6px;">';
+    html += '<input class="reply-input" placeholder="Reply to Baker on this matter..." data-alert="' + aid + '" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:var(--font);outline:none;" maxlength="4000" />';
+    html += '<button class="run-btn" onclick="sendCardReply(this)" data-alert="' + aid + '">Send</button>';
+    html += '</div></div>';
+
     // Footer
     html += '<div class="card-footer">';
-    if (expanded && tier <= 2) {
-        html += '<button class="footer-btn primary" onclick="switchTab(\'ask-baker\')">Open in Scan</button>';
-    }
-    html += '<button class="footer-resolve" data-alert="' + alert.id + '" onclick="resolveAlert(' + alert.id + ',this)">Resolve</button>';
-    html += '<button class="footer-dismiss" data-alert="' + alert.id + '" onclick="dismissAlert(' + alert.id + ',this)">Dismiss</button>';
+    html += '<button class="footer-btn primary" onclick="switchTab(\'ask-baker\')">Open in Scan</button>';
+    html += '<button class="footer-resolve" data-alert="' + aid + '" onclick="resolveAlert(' + alert.id + ',this)">Resolve</button>';
+    html += '<button class="footer-dismiss" data-alert="' + aid + '" onclick="dismissAlert(' + alert.id + ',this)">Dismiss</button>';
     html += '</div></div>';
 
     return html;
@@ -470,7 +462,7 @@ function isNewAlert(createdAt) {
 async function resolveAlert(alertId, btnEl) {
     try {
         await bakerFetch('/api/alerts/' + alertId + '/resolve', { method: 'POST' });
-        const card = btnEl.closest('.card');
+        var card = btnEl.closest('.card');
         if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
     } catch (e) { console.error('resolveAlert failed:', e); }
 }
@@ -478,48 +470,302 @@ async function resolveAlert(alertId, btnEl) {
 async function dismissAlert(alertId, btnEl) {
     try {
         await bakerFetch('/api/alerts/' + alertId + '/dismiss', { method: 'POST' });
-        const card = btnEl.closest('.card');
+        var card = btnEl.closest('.card');
         if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
     } catch (e) { console.error('dismissAlert failed:', e); }
 }
 
-function runCardAction(alertId, prompt) {
-    switchTab('ask-baker');
-    setTimeout(function() { sendScanMessage(prompt); }, 100);
+/**
+ * Run a card action — streams result INLINE into the card (not switching to Ask Baker).
+ * CRITICAL: Routes through existing /api/scan pipeline (agentic RAG).
+ */
+function runCardAction(btnEl) {
+    var prompt = btnEl.dataset.prompt;
+    var alertId = btnEl.dataset.alert;
+    if (!prompt || !alertId) return;
+
+    // Find or create a result area right after the action row
+    var actionRow = btnEl.closest('.action-row');
+    var resultArea = actionRow ? actionRow.nextElementSibling : null;
+    if (!resultArea || !resultArea.classList.contains('card-result-area')) {
+        // Fallback: use the card-level result area
+        resultArea = document.getElementById('card-result-' + alertId);
+    }
+
+    // Mark button as running
+    btnEl.textContent = '...';
+    btnEl.disabled = true;
+
+    streamInlineResult(prompt, alertId, resultArea, btnEl);
 }
 
-function runFreetext(btn, alertId) {
-    const input = btn.previousElementSibling;
+function runFreetext(btn) {
+    var input = btn.previousElementSibling;
+    var alertId = btn.dataset.alert;
     if (!input || !input.value.trim()) return;
-    runCardAction(alertId, input.value.trim());
+    var prompt = input.value.trim();
+    input.value = '';
+
+    var resultArea = document.getElementById('card-result-' + alertId);
+    btn.textContent = '...';
+    btn.disabled = true;
+    streamInlineResult(prompt, alertId, resultArea, btn);
 }
 
 function openMoreAction(btn) {
-    const actionType = btn.dataset.actionType;
-    const alertId = btn.dataset.alert;
-    const existing = btn.parentElement.querySelector('.more-action-inline');
+    var actionType = btn.dataset.actionType;
+    var alertId = btn.dataset.alert;
+    var existing = btn.parentElement.querySelector('.more-action-inline');
     if (existing) { existing.remove(); return; }
 
-    const inline = document.createElement('div');
+    var inline = document.createElement('div');
     inline.className = 'more-action-inline';
     inline.style.cssText = 'display:flex;gap:8px;width:100%;margin-top:6px;';
 
-    const inp = document.createElement('input');
+    var inp = document.createElement('input');
     inp.style.cssText = 'flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:var(--font);outline:none;';
     inp.placeholder = 'What should Baker ' + actionType.toLowerCase() + '?';
     inp.maxLength = 2000;
 
-    const runBtn = document.createElement('button');
+    var runBtn = document.createElement('button');
     runBtn.className = 'run-btn';
     runBtn.textContent = 'Run';
     runBtn.addEventListener('click', function() {
-        if (inp.value.trim()) runCardAction(alertId, inp.value.trim());
+        if (!inp.value.trim()) return;
+        var resultArea = document.getElementById('card-result-' + alertId);
+        runBtn.textContent = '...';
+        runBtn.disabled = true;
+        streamInlineResult(inp.value.trim(), alertId, resultArea, runBtn);
     });
 
     inline.appendChild(inp);
     inline.appendChild(runBtn);
     btn.parentElement.appendChild(inline);
     inp.focus();
+}
+
+/**
+ * Stream an SSE result from /api/scan into an inline result area on a card.
+ * CRITICAL: Uses the SAME /api/scan pipeline as Ask Baker — agentic RAG, capability routing, full tool use.
+ */
+async function streamInlineResult(prompt, alertId, resultArea, triggerBtn) {
+    if (!resultArea) return;
+    resultArea.style.display = 'block';
+    resultArea.style.cssText = 'display:block;margin:4px 16px;padding:12px 14px;background:#f8fafc;border:1px solid var(--border);border-radius:7px;font-size:12px;line-height:1.7;max-height:300px;overflow-y:auto;';
+    resultArea.innerHTML = '<div class="thinking"><span class="thinking-dots"><span></span><span></span><span></span></span> Baker is thinking...</div>';
+
+    var fullResponse = '';
+    try {
+        var resp = await bakerFetch('/api/scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question: prompt, history: [] }),
+        });
+        if (!resp.ok) throw new Error('Scan API returned ' + resp.status);
+
+        var reader = resp.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+
+        while (true) {
+            var chunk = await reader.read();
+            if (chunk.done) break;
+            buffer += decoder.decode(chunk.value, { stream: true });
+            var lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (var i = 0; i < lines.length; i++) {
+                if (!lines[i].startsWith('data: ')) continue;
+                var payload = lines[i].slice(6).trim();
+                if (payload === '[DONE]') continue;
+                try {
+                    var data = JSON.parse(payload);
+                    if (data.token) {
+                        if (!fullResponse) resultArea.textContent = '';
+                        fullResponse += data.token;
+                        resultArea.innerHTML = '<div class="md-content">' + md(fullResponse) + '</div>'; // SECURITY: md() escapes first
+                    }
+                    if (data.error) {
+                        fullResponse += '\n[Error: ' + data.error + ']';
+                        resultArea.innerHTML = '<div class="md-content">' + md(fullResponse) + '</div>';
+                    }
+                } catch (e) { /* skip */ }
+            }
+        }
+    } catch (err) {
+        fullResponse = 'Error: ' + err.message;
+        resultArea.textContent = fullResponse;
+    }
+
+    // Add result toolbar
+    if (fullResponse) {
+        var toolbar = document.createElement('div');
+        toolbar.style.cssText = 'display:flex;gap:5px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);';
+        toolbar.innerHTML = '<button class="footer-btn" onclick="copyResult(this)">Copy</button>' +
+            '<button class="footer-btn" onclick="downloadResultAsWord(this)">Word</button>' +
+            '<button class="footer-btn" onclick="emailResult(this)">Email</button>';
+        toolbar.dataset.resultText = fullResponse;
+        resultArea.appendChild(toolbar);
+
+        // Show reply thread area
+        var replyArea = document.getElementById('card-reply-' + alertId);
+        if (replyArea) replyArea.style.display = 'block';
+    }
+
+    // Restore button
+    if (triggerBtn) {
+        triggerBtn.textContent = 'Done';
+        triggerBtn.classList.add('done');
+        triggerBtn.disabled = false;
+    }
+}
+
+/**
+ * Send a reply on a card thread.
+ * CRITICAL: Routes through existing agentic RAG pipeline via POST /api/alerts/{id}/reply.
+ */
+async function sendCardReply(btn) {
+    var alertId = btn.dataset.alert;
+    var input = btn.previousElementSibling;
+    if (!input || !input.value.trim()) return;
+    var content = input.value.trim();
+    input.value = '';
+    btn.disabled = true;
+
+    var threadEl = document.getElementById('card-thread-' + alertId);
+    if (!threadEl) return;
+
+    // Show director message
+    var dirMsg = document.createElement('div');
+    dirMsg.style.cssText = 'padding:8px 10px;margin:4px 0;background:#eff6ff;border-radius:6px;font-size:11px;';
+    dirMsg.innerHTML = '<div style="font-family:var(--mono);font-size:9px;font-weight:700;color:var(--text3);margin-bottom:2px;">YOU</div>';
+    var dirText = document.createElement('span');
+    dirText.textContent = content; // plain text — no HTML
+    dirMsg.appendChild(dirText);
+    threadEl.appendChild(dirMsg);
+
+    // Show thinking indicator
+    var thinkEl = document.createElement('div');
+    thinkEl.style.cssText = 'padding:6px 10px;font-size:11px;color:var(--text3);';
+    thinkEl.innerHTML = '<div class="thinking"><span class="thinking-dots"><span></span><span></span><span></span></span> Baker is thinking...</div>';
+    threadEl.appendChild(thinkEl);
+
+    // Stream reply via /api/alerts/{id}/reply (routes through /api/scan internally)
+    var fullResponse = '';
+    try {
+        var resp = await bakerFetch('/api/alerts/' + alertId + '/reply', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: content }),
+        });
+        if (!resp.ok) throw new Error('Reply API returned ' + resp.status);
+
+        var reader = resp.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+
+        // Replace thinking with baker message container
+        thinkEl.innerHTML = '<div style="font-family:var(--mono);font-size:9px;font-weight:700;color:var(--text3);margin-bottom:2px;">BAKER</div><div class="md-content" id="reply-stream-' + alertId + '"></div>';
+        var streamEl = document.getElementById('reply-stream-' + alertId);
+
+        while (true) {
+            var chunk = await reader.read();
+            if (chunk.done) break;
+            buffer += decoder.decode(chunk.value, { stream: true });
+            var lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (var i = 0; i < lines.length; i++) {
+                if (!lines[i].startsWith('data: ')) continue;
+                var payload = lines[i].slice(6).trim();
+                if (payload === '[DONE]') continue;
+                try {
+                    var data = JSON.parse(payload);
+                    if (data.token) {
+                        fullResponse += data.token;
+                        if (streamEl) streamEl.innerHTML = md(fullResponse); // SECURITY: md() escapes first
+                    }
+                } catch (e) { /* skip */ }
+            }
+        }
+    } catch (err) {
+        thinkEl.innerHTML = '<div style="color:var(--red);font-size:11px;">Reply failed: ' + esc(err.message) + '</div>';
+    }
+
+    btn.disabled = false;
+}
+
+// ═══ RESULT TOOLBAR ═══
+
+function copyResult(btn) {
+    var toolbar = btn.closest('[data-result-text]');
+    if (!toolbar) return;
+    navigator.clipboard.writeText(toolbar.dataset.resultText).then(function() {
+        btn.textContent = 'Copied';
+        setTimeout(function() { btn.textContent = 'Copy'; }, 2000);
+    });
+}
+
+function downloadResultAsWord(btn) {
+    var toolbar = btn.closest('[data-result-text]');
+    if (!toolbar) return;
+    bakerFetch('/api/scan/generate-document', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: toolbar.dataset.resultText, format: 'docx', title: 'Baker Result' }),
+    }).then(function(resp) {
+        if (resp.ok) return resp.json();
+        throw new Error('Generation failed');
+    }).then(function(data) {
+        if (data.download_url) window.open(data.download_url, '_blank');
+    }).catch(function(e) { console.error('Word download failed:', e); });
+}
+
+function emailResult(btn) {
+    var toolbar = btn.closest('[data-result-text]');
+    if (!toolbar) return;
+    var text = toolbar.dataset.resultText || '';
+    var subject = 'Baker Analysis';
+    window.location.href = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(text);
+}
+
+// ═══ MATTERS DETAIL VIEW ═══
+
+async function loadMatterDetail(matterSlug) {
+    var container = document.getElementById('mattersContent');
+    if (!container) return;
+    container.textContent = 'Loading...';
+
+    try {
+        var resp = await bakerFetch('/api/matters/' + encodeURIComponent(matterSlug) + '/items');
+        if (!resp.ok) return;
+        var data = await resp.json();
+
+        if (!data.items || data.items.length === 0) {
+            container.textContent = 'No items for this matter.';
+            container.style.cssText = 'color:var(--text3);font-size:13px;';
+            return;
+        }
+
+        var label = matterSlug === '_ungrouped' ? 'Ungrouped' : matterSlug.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+
+        container.textContent = '';
+        var header = document.createElement('div');
+        header.className = 'section-label';
+        header.textContent = label + ' (' + data.items.length + ' items)';
+        container.appendChild(header);
+
+        var cardsDiv = document.createElement('div');
+        var cardsHtml = data.items.map(function(a) {
+            var expanded = (a.tier || 3) <= 2;
+            return renderAlertCard(a, expanded);
+        }).join('');
+        setSafeHTML(cardsDiv, cardsHtml);
+        container.appendChild(cardsDiv);
+    } catch (e) {
+        container.textContent = 'Failed to load matter.';
+        container.style.color = 'var(--red)';
+    }
 }
 
 // ═══ ASK BAKER (SCAN SSE) ═══
@@ -731,6 +977,143 @@ function setupCommandBar() {
     });
 }
 
+// ═══ MATTERS TAB ═══
+
+var _currentMatterSlug = null;
+
+async function loadMattersTab() {
+    var container = document.getElementById('mattersContent');
+    if (!container) return;
+
+    // If a specific matter was selected, load its detail
+    if (_currentMatterSlug) {
+        loadMatterDetail(_currentMatterSlug);
+        _currentMatterSlug = null;
+        return;
+    }
+
+    // Otherwise show all matters overview
+    container.textContent = 'Loading matters...';
+    try {
+        var resp = await bakerFetch('/api/dashboard/matters-summary');
+        if (!resp.ok) return;
+        var data = await resp.json();
+
+        if (!data.matters || data.matters.length === 0) {
+            container.textContent = 'No active matters.';
+            container.style.cssText = 'color:var(--text3);font-size:13px;';
+            return;
+        }
+
+        container.textContent = '';
+        var header = document.createElement('div');
+        header.className = 'section-label';
+        header.textContent = 'All matters (' + data.matters.length + ')';
+        container.appendChild(header);
+
+        for (var i = 0; i < data.matters.length; i++) {
+            var m = data.matters[i];
+            var slug = m.matter_slug || '_ungrouped';
+            var label = slug === '_ungrouped' ? 'Ungrouped' : slug.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+            var dotClass = tierClass(m.worst_tier);
+
+            var card = document.createElement('div');
+            card.className = 'card card-compact';
+            card.style.cursor = 'pointer';
+            card.dataset.matter = slug;
+            card.addEventListener('click', function() {
+                loadMatterDetail(this.dataset.matter);
+            });
+
+            var hdr = document.createElement('div');
+            hdr.className = 'card-header';
+
+            var dot = document.createElement('span');
+            dot.className = 'nav-dot ' + dotClass;
+            dot.style.marginTop = '5px';
+            hdr.appendChild(dot);
+
+            var title = document.createElement('span');
+            title.className = 'card-title';
+            title.textContent = label;
+            hdr.appendChild(title);
+
+            var count = document.createElement('span');
+            count.className = 'card-time';
+            count.textContent = m.item_count + ' items';
+            hdr.appendChild(count);
+
+            if (m.new_count > 0) {
+                var newBadge = document.createElement('span');
+                newBadge.className = 'card-new-badge';
+                newBadge.textContent = m.new_count + ' new';
+                hdr.appendChild(newBadge);
+            }
+
+            card.appendChild(hdr);
+            container.appendChild(card);
+        }
+    } catch (e) {
+        container.textContent = 'Failed to load matters.';
+        container.style.color = 'var(--red)';
+    }
+}
+
+// ═══ ENHANCED DEADLINES TAB ═══
+
+async function loadDeadlinesTab() {
+    var container = document.getElementById('deadlinesContent');
+    if (!container) return;
+    container.textContent = 'Loading deadlines...';
+
+    try {
+        var resp = await bakerFetch('/api/deadlines');
+        if (!resp.ok) return;
+        var data = await resp.json();
+
+        if (!data.deadlines || data.deadlines.length === 0) {
+            container.textContent = 'No active deadlines.';
+            container.style.cssText = 'color:var(--text3);font-size:13px;';
+            return;
+        }
+
+        container.textContent = '';
+        var header = document.createElement('div');
+        header.className = 'section-label';
+        header.textContent = 'Active deadlines (' + data.deadlines.length + ')';
+        container.appendChild(header);
+
+        // Group by urgency: overdue/today, this week, later
+        var overdue = [], thisWeek = [], later = [];
+        for (var i = 0; i < data.deadlines.length; i++) {
+            var dl = data.deadlines[i];
+            var daysText = fmtDeadlineDays(dl.due_date);
+            if (daysText.includes('overdue') || daysText === 'Today') overdue.push(dl);
+            else if (daysText === 'Tomorrow' || parseInt(daysText) <= 7) thisWeek.push(dl);
+            else later.push(dl);
+        }
+
+        function renderGroup(label, items) {
+            if (items.length === 0) return;
+            var groupLabel = document.createElement('div');
+            groupLabel.style.cssText = 'font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--text3);margin:12px 0 6px;';
+            groupLabel.textContent = label;
+            container.appendChild(groupLabel);
+            var groupDiv = document.createElement('div');
+            setSafeHTML(groupDiv, items.map(renderDeadlineCompact).join(''));
+            container.appendChild(groupDiv);
+        }
+
+        renderGroup('Overdue / Today', overdue);
+        renderGroup('This week', thisWeek);
+        renderGroup('Later', later);
+
+    } catch (e) {
+        container.textContent = 'Failed to load deadlines.';
+        container.style.color = 'var(--red)';
+    }
+}
+
 // ═══ INIT ═══
 
 async function init() {
@@ -741,10 +1124,28 @@ async function init() {
     var greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
     setText('briefGreeting', greet + ', Dimitry');
 
-    // Sidebar navigation
+    // Sidebar navigation (static items)
     document.querySelectorAll('.nav-item[data-tab]').forEach(function(item) {
-        item.addEventListener('click', function() { switchTab(item.dataset.tab); });
+        item.addEventListener('click', function() {
+            // If clicking a matters sub-item, set the matter slug
+            if (item.dataset.matter) {
+                _currentMatterSlug = item.dataset.matter;
+            }
+            switchTab(item.dataset.tab);
+        });
     });
+
+    // Matters sub-list (delegated — items added dynamically by loadMattersSummary)
+    var mattersSubList = document.getElementById('mattersSubList');
+    if (mattersSubList) {
+        mattersSubList.addEventListener('click', function(e) {
+            var item = e.target.closest('.nav-item');
+            if (item && item.dataset.matter) {
+                _currentMatterSlug = item.dataset.matter;
+                switchTab('matters');
+            }
+        });
+    }
 
     // Scan form
     var scanForm = document.getElementById('scanForm');
