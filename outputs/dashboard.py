@@ -1357,7 +1357,7 @@ async def extract_commitments_retroactive(background_tasks: BackgroundTasks):
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
             # 1. Extract from meeting transcripts
-            cur.execute("SELECT transcript_id, title, participants, full_transcript FROM meeting_transcripts WHERE full_transcript IS NOT NULL")
+            cur.execute("SELECT id, title, participants, full_transcript FROM meeting_transcripts WHERE full_transcript IS NOT NULL")
             meetings = cur.fetchall()
             m_count = 0
             for m in meetings:
@@ -1367,11 +1367,11 @@ async def extract_commitments_retroactive(background_tasks: BackgroundTasks):
                         transcript_text=m["full_transcript"],
                         meeting_title=m.get("title", "Untitled"),
                         participants=m.get("participants", ""),
-                        source_id=m["transcript_id"],
+                        source_id=str(m["id"]),
                     )
                     m_count += 1
                 except Exception as e:
-                    logger.warning(f"Commitment extraction failed for meeting {m['transcript_id']}: {e}")
+                    logger.warning(f"Commitment extraction failed for meeting {m['id']}: {e}")
             logger.info(f"Retroactive commitment extraction: processed {m_count} meetings")
 
             # 2. Extract from emails
