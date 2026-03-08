@@ -480,6 +480,32 @@ Output formatting:
 
 **Baker current state:** 10 data sources, 16 scheduler jobs, 50+ commitments, 3,400+ alerts, 11-tab dashboard, all 7 standing orders functional. Slack alerts formatted. WhatsApp messages signed.
 
+### Session 14 — 2026-03-08 (dimitry300 machine, Code 300 supervisor)
+**Phase 4A shipped + all 11 capability specs + Browser Sentinel seeded.** 2 commits + 4 seed tasks.
+
+Phase 4A — Cost Monitor + Agent Observability:
+- **`api_cost_log` table** — every Anthropic API call logged (model, tokens, cost in EUR). 6 call sites instrumented (agent loops, capability runner, pipeline).
+- **Circuit breaker** — alert at €15/day (Slack + WhatsApp), hard-stop at €100/day. All API calls blocked when threshold hit.
+- **`agent_tool_calls` table** — every tool execution logged (latency_ms, success/fail, capability_id).
+- **4 new endpoints** — `/api/cost/today`, `/api/cost/history`, `/api/agent-metrics`, `/api/agent-metrics/errors`
+
+PM Handover — All 11 Capability Specs:
+- **Slug renames:** `asset_mgmt` → `asset_management`, `comms` → `communications`
+- **Retired:** `ib` (Investment Banking) → replaced by `pr_branding`
+- **New:** `profiling` (proactive_flag), `pr_branding` (proactive_flag)
+- **All 11 updated** with full Director-approved role_description, trigger_patterns, tools, output_format
+- **Decomposer** system_prompt updated with new slug list
+- **Seed data** in store_back.py updated for fresh deploys
+
+Browser Sentinel — 4 Seed Tasks:
+- **ID 1:** MO Vienna - Booking.com rates (browser mode, hotel_rates)
+- **ID 2:** Park Hyatt Vienna - Booking.com rates (browser mode, hotel_rates)
+- **ID 3:** Austrian Grundbuch - RG7 Baden (simple mode, public_records)
+- **ID 4:** MO Vienna - Availability monitor (browser mode, hotel_occupancy)
+- **BROWSER_USE_API_KEY** set on Render by Director
+
+**Baker current state:** 10 data sources, 16 scheduler jobs, 50+ commitments, 3,388 alerts, 11-tab dashboard, all 7 standing orders functional, 4 browser tasks active, 13 capabilities (11 domain + 2 meta), cost monitoring live.
+
 ## Key Documents (Dropbox)
 
 | Document | Path | Purpose |
