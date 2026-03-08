@@ -2633,13 +2633,22 @@ class SentinelStoreBack:
             conn.commit()
             cur.close()
             logger.info(f"Created alert #{alert_id}: tier={tier}, matter={matter_slug}, '{title}'")
-            # Invalidate morning narrative cache on T1 alert
+            # T1: Invalidate morning narrative cache + push to WhatsApp
             if tier == 1:
                 try:
                     from outputs.dashboard import invalidate_morning_narrative
                     invalidate_morning_narrative()
                 except Exception:
                     pass  # dashboard module may not be loaded in all contexts
+                # Push T1 alerts to Director via WhatsApp (always reachable)
+                try:
+                    from outputs.whatsapp_sender import send_whatsapp
+                    wa_text = f"*T1 Alert:* {title}"
+                    if body:
+                        wa_text += f"\n{body[:300]}"
+                    send_whatsapp(wa_text)
+                except Exception as e:
+                    logger.warning(f"T1 WhatsApp push failed (non-fatal): {e}")
             return alert_id
         except Exception as e:
             conn.rollback()
