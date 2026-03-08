@@ -3683,13 +3683,29 @@ async def list_browser_results(task_id: int, limit: int = 20):
 
 
 @app.post("/api/browser/tasks/{task_id}/run", tags=["browser"], dependencies=[Depends(verify_api_key)])
-async def run_browser_task_now(task_id: int):
-    """Trigger an immediate run of a specific browser task."""
-    from triggers.browser_trigger import run_single_task
-    result = run_single_task(task_id)
-    if result.get("error"):
-        raise HTTPException(status_code=400, detail=result["error"])
-    return result
+async def run_browser_task_now(task_id: int, background_tasks: BackgroundTasks):
+    """Trigger an immediate run of a specific browser task.
+    Browser-mode tasks run in background (up to 120s) to avoid Render HTTP timeout.
+    Simple-mode tasks run synchronously (fast, <30s).
+    """
+    from triggers.browser_trigger import run_single_task, _get_task_by_id
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    task = _get_task_by_id(store, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.get("mode") == "browser":
+        # Browser mode can take up to 120s — run in background
+        background_tasks.add_task(run_single_task, task_id)
+        return {"status": "running", "task_id": task_id, "mode": "browser",
+                "message": "Browser task submitted. Check GET /api/browser/results/{id} for output."}
+    else:
+        # Simple mode is fast — run synchronously
+        result = run_single_task(task_id)
+        if result.get("error"):
+            raise HTTPException(status_code=400, detail=result["error"])
+        return result
 
 
 @app.get("/api/browser/status", tags=["browser"], dependencies=[Depends(verify_api_key)])
