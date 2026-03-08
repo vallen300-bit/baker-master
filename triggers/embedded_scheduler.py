@@ -179,6 +179,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: vip_sla_check (every 5 minutes)")
 
+    # Calendar polling + meeting prep — every 15 minutes (Phase 3A)
+    from triggers.calendar_trigger import check_calendar_and_prep
+    scheduler.add_job(
+        check_calendar_and_prep,
+        IntervalTrigger(minutes=15),
+        id="calendar_prep", name="Calendar meeting prep",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: calendar_prep (every 15 minutes)")
+
     # Alert auto-expiry — every 6 hours (COCKPIT-V3 Phase C)
     from orchestrator.pipeline import run_alert_expiry_check
     scheduler.add_job(

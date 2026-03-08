@@ -218,6 +218,23 @@ async function loadMorningBrief() {
             }
         }
 
+        // Meetings today (Phase 3A)
+        var meetingsLabel = document.getElementById('meetingsSectionLabel');
+        var meetingsList = document.getElementById('meetingsTodayList');
+        if (meetingsList) {
+            if (data.meetings_today && data.meetings_today.length > 0) {
+                if (meetingsLabel) meetingsLabel.style.display = '';
+                setSafeHTML(meetingsList, data.meetings_today.map(renderMeetingCard).join(''));
+            } else {
+                if (meetingsLabel) meetingsLabel.style.display = 'none';
+                meetingsList.textContent = '';
+            }
+        }
+
+        // Update stats: add meeting count
+        var statMeetings = document.getElementById('statMeetings');
+        if (statMeetings) setText('statMeetings', data.meeting_count || 0);
+
         loadMattersSummary();
     } catch (e) {
         console.error('loadMorningBrief failed:', e);
@@ -438,6 +455,27 @@ function renderAlertCard(alert, expanded) {
     html += '</div></div>';
 
     return html;
+}
+
+function renderMeetingCard(m) {
+    var startTime = '';
+    try {
+        var d = new Date(m.start);
+        startTime = d.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+    } catch(e) { startTime = m.start || ''; }
+    var attendeeStr = (m.attendees || []).slice(0, 3).map(esc).join(', ');
+    if ((m.attendees || []).length > 3) attendeeStr += ' +' + ((m.attendees || []).length - 3);
+    var dotClass = m.prepped ? 'green' : 'amber';
+    var statusText = m.prepped ? 'Prepped' : 'Pending';
+    return '<div class="card card-compact"><div class="card-header">' +
+        '<span class="nav-dot ' + dotClass + '" style="margin-top:5px;"></span>' +
+        '<span class="card-title">' + esc(m.title || '') + '</span>' +
+        '<span class="card-time">' + esc(startTime) + '</span>' +
+        '</div>' +
+        '<div class="card-body" style="font-size:11px;color:var(--text3);padding:2px 0 4px 18px;">' +
+        (attendeeStr ? esc(attendeeStr) + ' &middot; ' : '') +
+        '<span style="color:var(--' + (m.prepped ? 'green' : 'amber') + ');">' + esc(statusText) + '</span>' +
+        '</div></div>';
 }
 
 function renderDeadlineCompact(dl) {

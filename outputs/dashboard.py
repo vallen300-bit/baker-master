@@ -806,6 +806,25 @@ async def get_morning_brief():
         # Generate narrative (Haiku, cached 30 min)
         narrative = _get_morning_narrative(fire_count, deadline_count, processed_overnight, top_fires)
 
+        # Phase 3A: Fetch today's meetings (graceful — returns [] if Calendar API unavailable)
+        meetings_today = []
+        try:
+            from triggers.calendar_trigger import poll_upcoming_meetings
+            from triggers.state import trigger_state
+            raw_meetings = poll_upcoming_meetings(hours_ahead=16)  # rest of today
+            for m in raw_meetings:
+                wk = f"calendar_prep_{m.get('id', '')}"
+                prepped = trigger_state.watermark_exists(wk)
+                attendee_names = [a.get('name', '') or a.get('email', '') for a in m.get('attendees', [])]
+                meetings_today.append({
+                    "title": m['title'],
+                    "start": m['start'],
+                    "attendees": attendee_names[:5],
+                    "prepped": prepped,
+                })
+        except Exception as e:
+            logger.warning(f"Morning brief: calendar unavailable: {e}")
+
         return {
             "fire_count": fire_count,
             "deadline_count": deadline_count,
@@ -815,6 +834,8 @@ async def get_morning_brief():
             "top_fires": top_fires,
             "deadlines": deadlines,
             "activity": activity,
+            "meetings_today": meetings_today,
+            "meeting_count": len(meetings_today),
         }
     except HTTPException:
         raise
@@ -824,6 +845,7 @@ async def get_morning_brief():
             "fire_count": 0, "deadline_count": 0, "processed_overnight": 0,
             "actions_completed": 0, "narrative": "Baker is loading...",
             "top_fires": [], "deadlines": [], "activity": [],
+            "meetings_today": [], "meeting_count": 0,
         }
 
 
@@ -1122,6 +1144,80 @@ async def get_person_activity(name: str, limit: int = Query(20, ge=1, le=100)):
     except Exception as e:
         logger.error(f"GET /api/people/{name}/activity failed: {e}")
         return {"name": name, "activity": [], "matters": [], "count": 0}
+
+
+# ============================================================
+# Phase 3A: Calendar — Upcoming Meetings
+# ============================================================
+
+@app.get("/api/calendar/upcoming", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_upcoming_meetings(hours: int = Query(48, ge=1, le=168)):
+    """
+    Upcoming meetings with prep status.
+    Polls Google Calendar and cross-references trigger_watermarks for prep state.
+    Returns meetings with prepped flag + alert_id if available.
+    """
+    try:
+        from triggers.calendar_trigger import poll_upcoming_meetings
+        from triggers.state import trigger_state
+
+        try:
+            meetings = poll_upcoming_meetings(hours_ahead=hours)
+        except Exception as e:
+            logger.warning(f"Calendar API unavailable: {e}")
+            return {"meetings": [], "count": 0, "prepped_count": 0, "error": str(e)}
+
+        store = _get_store()
+        result_meetings = []
+        prepped_count = 0
+
+        for m in meetings:
+            event_id = m.get('id', '')
+            watermark_key = f"calendar_prep_{event_id}"
+            prepped = trigger_state.watermark_exists(watermark_key)
+
+            # Look up alert_id if prepped
+            alert_id = None
+            if prepped:
+                prepped_count += 1
+                try:
+                    conn = store._get_conn()
+                    if conn:
+                        try:
+                            import psycopg2.extras
+                            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                            cur.execute(
+                                "SELECT id FROM alerts WHERE title LIKE %s ORDER BY created_at DESC LIMIT 1",
+                                (f"Meeting prep: {m['title']}%",),
+                            )
+                            row = cur.fetchone()
+                            if row:
+                                alert_id = row['id']
+                            cur.close()
+                        finally:
+                            store._put_conn(conn)
+                except Exception:
+                    pass
+
+            attendee_names = [a.get('name', '') or a.get('email', '') for a in m.get('attendees', [])]
+            result_meetings.append({
+                "title": m['title'],
+                "start": m['start'],
+                "end": m['end'],
+                "attendees": attendee_names,
+                "location": m.get('location', ''),
+                "prepped": prepped,
+                "alert_id": alert_id,
+            })
+
+        return {
+            "meetings": result_meetings,
+            "count": len(result_meetings),
+            "prepped_count": prepped_count,
+        }
+    except Exception as e:
+        logger.error(f"GET /api/calendar/upcoming failed: {e}")
+        return {"meetings": [], "count": 0, "prepped_count": 0}
 
 
 @app.get("/api/alerts/search", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
