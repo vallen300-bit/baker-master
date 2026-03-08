@@ -371,6 +371,46 @@ def _score_owner_signal(content: str, sender: str) -> int:
 
 
 # ============================================================
+# Proactive Capability Boost
+# ============================================================
+
+_proactive_patterns_cache = None
+_proactive_patterns_ts = 0
+
+
+def _check_proactive_patterns(content: str) -> str:
+    """Check if content matches any proactive_flag capability's trigger patterns.
+    Returns the matching capability slug, or empty string if no match.
+    Caches compiled patterns for 5 minutes."""
+    import time as _time
+    global _proactive_patterns_cache, _proactive_patterns_ts
+
+    now = _time.time()
+    if _proactive_patterns_cache is None or (now - _proactive_patterns_ts) > 300:
+        try:
+            from orchestrator.capability_registry import CapabilityRegistry
+            registry = CapabilityRegistry.get_instance()
+            compiled = []
+            for cap in registry.get_all_active():
+                if cap.autonomy_level == "proactive_flag" and cap.trigger_patterns:
+                    for p in cap.trigger_patterns:
+                        try:
+                            compiled.append((cap.slug, re.compile(p, re.IGNORECASE)))
+                        except re.error:
+                            pass
+            _proactive_patterns_cache = compiled
+            _proactive_patterns_ts = now
+        except Exception:
+            _proactive_patterns_cache = []
+            _proactive_patterns_ts = now
+
+    for slug, pattern in _proactive_patterns_cache:
+        if pattern.search(content):
+            return slug
+    return ""
+
+
+# ============================================================
 # Override Detector (2 overrides)
 # ============================================================
 
@@ -505,6 +545,14 @@ def score_trigger(content: str, sender: str = "", source: str = "",
         tier = override_tier
         _, channel = _assign_tier(urgency_score)  # recalc channel from adjusted score
 
+    # 4b. Proactive capability boost — if content matches a proactive_flag
+    # capability's trigger patterns, ensure it surfaces (min tier 2)
+    proactive_match = _check_proactive_patterns(content)
+    if proactive_match and tier > 2:
+        tier = 2
+        channel = "slack"
+        urgency_score = max(urgency_score, 6)
+
     # 5. Mode tagging
     mode = _tag_mode(content, domain, vips, sender)
 
@@ -516,6 +564,8 @@ def score_trigger(content: str, sender: str = "", source: str = "",
     )
     if override_name:
         reasoning += f" override={override_name}"
+    if proactive_match:
+        reasoning += f" proactive_boost={proactive_match}"
 
     return {
         "domain": domain,
