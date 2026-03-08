@@ -2863,6 +2863,7 @@ def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
                         store.update_baker_task(
                             task_id, status="completed",
                             deliverable=ar.answer[:2000],
+                            capability_slug=cap.slug,
                             agent_iterations=ar.iterations,
                             agent_tool_calls=len(ar.tool_calls),
                             agent_input_tokens=ar.total_input_tokens,
@@ -2872,6 +2873,9 @@ def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
                 except Exception as _e:
                     logger.warning(f"Capability run logging failed (non-fatal): {_e}")
 
+            # Yield task_id for frontend feedback buttons (LEARNING-LOOP)
+            if task_id:
+                yield f"data: {_json.dumps({'task_id': task_id})}\n\n"
             yield "data: [DONE]\n\n"
 
         return StreamingResponse(_cap_stream(), media_type="text/event-stream")
@@ -3770,6 +3774,50 @@ async def browser_status():
             "cloud_api_configured": bool(config.browser.cloud_api_key),
             "poll_interval_seconds": config.triggers.browser_check_interval,
         }
+    finally:
+        store._put_conn(conn)
+
+
+# ============================================================
+# Capability Quality (LEARNING-LOOP Part 4)
+# ============================================================
+
+@app.get("/api/capability-quality", tags=["learning-loop"], dependencies=[Depends(verify_api_key)])
+async def get_capability_quality():
+    """Aggregate feedback quality per capability."""
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        return {"capabilities": []}
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT capability_slug,
+                   COUNT(*) as total_tasks,
+                   SUM(CASE WHEN director_feedback = 'accepted' THEN 1 ELSE 0 END) as accepted,
+                   SUM(CASE WHEN director_feedback = 'revised' THEN 1 ELSE 0 END) as revised,
+                   SUM(CASE WHEN director_feedback = 'rejected' THEN 1 ELSE 0 END) as rejected,
+                   SUM(CASE WHEN director_feedback IS NULL THEN 1 ELSE 0 END) as no_feedback
+            FROM baker_tasks
+            WHERE capability_slug IS NOT NULL
+              AND status = 'completed'
+            GROUP BY capability_slug
+            ORDER BY total_tasks DESC
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        caps = []
+        for slug, total, acc, rev, rej, nf in rows:
+            rated = acc + rev + rej
+            quality = round(acc / rated * 100) if rated > 0 else None
+            caps.append({
+                "slug": slug, "total_tasks": total,
+                "accepted": acc, "revised": rev, "rejected": rej,
+                "no_feedback": nf, "quality_pct": quality,
+            })
+        return {"capabilities": caps}
+    except Exception as e:
+        return {"capabilities": [], "error": str(e)}
     finally:
         store._put_conn(conn)
 

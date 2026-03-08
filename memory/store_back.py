@@ -928,7 +928,7 @@ class SentinelStoreBack:
         "agent_iterations", "agent_tool_calls",
         "agent_input_tokens", "agent_output_tokens", "agent_elapsed_ms",
         "director_feedback", "feedback_comment",
-        "capability_slugs", "decomposition",
+        "capability_slugs", "decomposition", "capability_slug",
     }
 
     def update_baker_task(self, task_id: int, **kwargs) -> bool:
@@ -1542,7 +1542,9 @@ class SentinelStoreBack:
             cur = conn.cursor()
             cur.execute("ALTER TABLE baker_tasks ADD COLUMN IF NOT EXISTS capability_slugs JSONB DEFAULT '[]'::jsonb")
             cur.execute("ALTER TABLE baker_tasks ADD COLUMN IF NOT EXISTS decomposition JSONB")
+            cur.execute("ALTER TABLE baker_tasks ADD COLUMN IF NOT EXISTS capability_slug TEXT")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_baker_tasks_capability ON baker_tasks USING gin(capability_slugs)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_baker_tasks_cap_slug ON baker_tasks(capability_slug)")
             conn.commit()
             cur.close()
             logger.info("baker_tasks capability columns verified")

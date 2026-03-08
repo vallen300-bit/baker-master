@@ -463,8 +463,49 @@ class CapabilityRunner:
         )
         enriched = base + role_injection
 
+        # LEARNING-LOOP: Inject past feedback for this capability
+        feedback_context = self._get_capability_feedback(capability.slug)
+        if feedback_context:
+            enriched += f"\n\n## PAST FEEDBACK ON YOUR RESPONSES\n{feedback_context}\n"
+
         # Apply DB preferences + domain/mode extensions
         return build_mode_aware_prompt(enriched, domain=domain, mode=mode)
+
+    def _get_capability_feedback(self, slug: str, limit: int = 3) -> str:
+        """Fetch recent Director feedback on tasks handled by this capability (LEARNING-LOOP)."""
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            conn = store._get_conn()
+            if not conn:
+                return ""
+            try:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT title, director_feedback, feedback_comment
+                    FROM baker_tasks
+                    WHERE capability_slug = %s
+                      AND director_feedback IS NOT NULL
+                      AND director_feedback != 'accepted'
+                    ORDER BY feedback_at DESC
+                    LIMIT %s
+                """, (slug, limit))
+                rows = cur.fetchall()
+                cur.close()
+                if not rows:
+                    return ""
+                parts = ["The Director gave feedback on past responses from this capability:"]
+                for title, feedback, comment in rows:
+                    line = f"- Task \"{(title or '')[:80]}\": {feedback}"
+                    if comment:
+                        line += f" — \"{comment}\""
+                    parts.append(line)
+                parts.append("Adjust your approach based on this feedback.")
+                return "\n".join(parts)
+            finally:
+                store._put_conn(conn)
+        except Exception:
+            return ""
 
     def _get_filtered_tools(self, capability: CapabilityDef) -> list[dict]:
         """
