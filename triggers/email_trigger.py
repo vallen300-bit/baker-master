@@ -44,6 +44,94 @@ def poll_gmail() -> list:
     return extract_gmail.extract_poll(service)
 
 
+# -------------------------------------------------------
+# Phase 3C: Commitment extraction from emails
+# -------------------------------------------------------
+
+_EMAIL_COMMITMENT_PROMPT = """You are Baker. Extract commitments from this email.
+
+Look for:
+- Promises made BY the sender: "I'll send...", "We'll provide...", "Attached is..."
+- Requests TO the Director: "Please review...", "Could you approve...", "We need your..."
+- Deadlines mentioned: "by Friday", "before end of month", "within 5 business days"
+
+Return ONLY valid JSON:
+{"commitments": [
+    {"description": "...", "assigned_to": "sender_name or director", "due_date": "YYYY-MM-DD or null", "urgency": "high|medium|low"}
+]}
+
+If no clear commitments found, return {"commitments": []}
+"""
+
+
+def _extract_commitments_from_email(email_text: str, subject: str,
+                                     sender: str, source_id: str):
+    """Extract commitments from an email using Haiku. Fault-tolerant."""
+    import json
+    import anthropic
+    from memory.store_back import SentinelStoreBack
+
+    if not email_text or len(email_text.strip()) < 30:
+        return
+
+    try:
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1000,
+            system=_EMAIL_COMMITMENT_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": f"Today: {today}\nSubject: {subject}\nFrom: {sender}\n\n{email_text[:4000]}",
+            }],
+        )
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, Exception) as e:
+        logger.debug(f"Commitment extraction failed for email {source_id}: {e}")
+        return
+
+    commitments = parsed.get("commitments", [])
+    if not commitments:
+        return
+
+    store = SentinelStoreBack._get_global_instance()
+    inserted = 0
+    for c in commitments:
+        desc = (c.get("description") or "").strip()
+        if not desc:
+            continue
+        due_date = c.get("due_date")
+        if due_date == "null" or not due_date:
+            due_date = None
+
+        matter_slug = None
+        try:
+            from orchestrator.pipeline import _match_matter_slug
+            matter_slug = _match_matter_slug(desc, subject, store)
+        except Exception:
+            pass
+
+        cid = store.store_commitment(
+            description=desc,
+            assigned_to=c.get("assigned_to", sender or ""),
+            due_date=due_date,
+            source_type="email",
+            source_id=source_id,
+            source_context=f"Email: {subject}",
+            matter_slug=matter_slug,
+        )
+        if cid:
+            inserted += 1
+
+    if inserted:
+        logger.info(f"Extracted {inserted} commitments from email '{subject[:60]}'")
+
+
 def check_new_emails():
     """
     Main entry point — called by scheduler every 5 minutes.
@@ -189,6 +277,17 @@ def check_new_emails():
                 processed += 1
             except Exception as e:
                 logger.error(f"Email trigger: pipeline failed for message {message_id} (thread {thread_id}): {e}")
+
+            # Phase 3C: Extract commitments from high-priority emails
+            try:
+                _extract_commitments_from_email(
+                    email_text=thread["text"],
+                    subject=metadata.get("subject", ""),
+                    sender=metadata.get("primary_sender", ""),
+                    source_id=message_id,
+                )
+            except Exception as _e:
+                logger.debug(f"Commitment extraction failed for email {message_id}: {_e}")
         else:
             # Queue low-priority for daily briefing
             batch_for_briefing.append({

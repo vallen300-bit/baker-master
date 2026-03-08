@@ -112,6 +112,7 @@ class SentinelStoreBack:
         self._ensure_alerts_v3_columns()
         self._ensure_alert_threads_table()
         self._ensure_alert_artifacts_table()
+        self._ensure_commitments_table()
 
     # -------------------------------------------------------
     # Connection pool management
@@ -2469,6 +2470,86 @@ class SentinelStoreBack:
         except Exception as e:
             conn.rollback()
             logger.warning(f"Could not ensure alert_artifacts table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # Phase 3C: Commitments table
+    # -------------------------------------------------------
+
+    def _ensure_commitments_table(self):
+        """Create commitments table if missing. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS commitments (
+                    id SERIAL PRIMARY KEY,
+                    description TEXT NOT NULL,
+                    assigned_to TEXT,
+                    assigned_by TEXT DEFAULT 'director',
+                    due_date DATE,
+                    source_type TEXT NOT NULL,
+                    source_id TEXT,
+                    source_context TEXT,
+                    matter_slug TEXT,
+                    status TEXT DEFAULT 'open',
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_commitments_status ON commitments(status)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_commitments_due ON commitments(due_date)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_commitments_assigned ON commitments(assigned_to)")
+            conn.commit()
+            cur.close()
+            logger.info("commitments table verified")
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"Could not ensure commitments table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def store_commitment(self, description: str, assigned_to: str = None,
+                         assigned_by: str = "director", due_date=None,
+                         source_type: str = "", source_id: str = "",
+                         source_context: str = "", matter_slug: str = None) -> Optional[int]:
+        """Insert a commitment. Returns commitment ID. Dedup on source_id + description."""
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor()
+            # Dedup check: same source_id and similar description
+            if source_id:
+                cur.execute(
+                    "SELECT id FROM commitments WHERE source_id = %s AND LOWER(description) = LOWER(%s) LIMIT 1",
+                    (source_id, description),
+                )
+                if cur.fetchone():
+                    cur.close()
+                    return None  # duplicate
+            cur.execute(
+                """
+                INSERT INTO commitments (description, assigned_to, assigned_by, due_date,
+                    source_type, source_id, source_context, matter_slug, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'open')
+                RETURNING id
+                """,
+                (description, assigned_to, assigned_by, due_date,
+                 source_type, source_id, source_context, matter_slug),
+            )
+            cid = cur.fetchone()[0]
+            conn.commit()
+            cur.close()
+            logger.info(f"Commitment #{cid} stored: '{description[:60]}' assigned_to={assigned_to}")
+            return cid
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"store_commitment failed: {e}")
+            return None
         finally:
             self._put_conn(conn)
 

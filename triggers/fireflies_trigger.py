@@ -54,6 +54,103 @@ def fetch_new_transcripts(since: datetime) -> list:
     return new_transcripts
 
 
+# -------------------------------------------------------
+# Phase 3C: Commitment extraction from meetings
+# -------------------------------------------------------
+
+_COMMITMENT_EXTRACT_PROMPT = """You are Baker. Extract action items and commitments from this meeting transcript.
+
+For each commitment found, return:
+- description: What was promised or agreed to do
+- assigned_to: Who is responsible (use their name as spoken in the meeting)
+- due_date: When it's due (YYYY-MM-DD format, or null if no date mentioned)
+- urgency: high/medium/low
+
+Rules:
+- Only extract EXPLICIT commitments — someone clearly agreed to do something
+- Don't fabricate commitments from general discussion
+- If "we" agreed, assign to "director" (Dimitry is the decision-maker)
+- Include verbal promises: "I'll send you...", "We'll prepare...", "Let me follow up on..."
+- Skip vague statements like "we should consider..."
+
+Return ONLY valid JSON:
+{"commitments": [
+    {"description": "...", "assigned_to": "...", "due_date": "YYYY-MM-DD or null", "urgency": "high|medium|low"}
+]}
+
+If no clear commitments found, return {"commitments": []}
+"""
+
+
+def _extract_commitments_from_meeting(transcript_text: str, meeting_title: str,
+                                       participants: str, source_id: str):
+    """Extract commitments from a meeting transcript using Haiku. Fault-tolerant."""
+    import json
+    import anthropic
+    from memory.store_back import SentinelStoreBack
+
+    if not transcript_text or len(transcript_text.strip()) < 50:
+        return
+
+    try:
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
+            system=_COMMITMENT_EXTRACT_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": f"Today: {today}\nMeeting: {meeting_title}\nParticipants: {participants}\n\n{transcript_text[:8000]}",
+            }],
+        )
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
+        parsed = json.loads(raw)
+    except (json.JSONDecodeError, Exception) as e:
+        logger.debug(f"Commitment extraction failed for meeting {source_id}: {e}")
+        return
+
+    commitments = parsed.get("commitments", [])
+    if not commitments:
+        return
+
+    store = SentinelStoreBack._get_global_instance()
+    inserted = 0
+    for c in commitments:
+        desc = (c.get("description") or "").strip()
+        if not desc:
+            continue
+        due_date = c.get("due_date")
+        if due_date == "null" or not due_date:
+            due_date = None
+
+        # Auto-assign matter
+        matter_slug = None
+        try:
+            from orchestrator.pipeline import _match_matter_slug
+            matter_slug = _match_matter_slug(desc, meeting_title, store)
+        except Exception:
+            pass
+
+        cid = store.store_commitment(
+            description=desc,
+            assigned_to=c.get("assigned_to", ""),
+            due_date=due_date,
+            source_type="meeting",
+            source_id=source_id,
+            source_context=f"Meeting: {meeting_title}",
+            matter_slug=matter_slug,
+        )
+        if cid:
+            inserted += 1
+
+    if inserted:
+        logger.info(f"Extracted {inserted} commitments from meeting '{meeting_title}'")
+
+
 def check_new_transcripts():
     """
     Main entry point — called by scheduler every 2 hours.
@@ -132,6 +229,17 @@ def check_new_transcripts():
             )
         except Exception as _e:
             logger.debug(f"Deadline extraction failed for transcript {source_id}: {_e}")
+
+        # Phase 3C: Extract commitments from meeting transcript
+        try:
+            _extract_commitments_from_meeting(
+                transcript_text=transcript["text"],
+                meeting_title=metadata.get("meeting_title", "Untitled"),
+                participants=metadata.get("participants", ""),
+                source_id=source_id,
+            )
+        except Exception as _e:
+            logger.debug(f"Commitment extraction failed for transcript {source_id}: {_e}")
 
         try:
             pipeline.run(trigger)
