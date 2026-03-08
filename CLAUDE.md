@@ -471,9 +471,13 @@ Code review: feat/browser-sentinel (Brisen):
 - **BROWSER-1 merged** — Baker's 10th data source. Dual-mode web monitoring (simple HTTP + Browser-Use Cloud API). 9 files, 1,199 lines. 1 fix applied (async browser-mode manual runs to avoid Render timeout). Brisen's cleanest delivery yet — zero bugs in core logic.
 - **MCP tools verified** — `baker_browser_tasks` + `baker_browser_results` already in MCP server (Dropbox synced).
 
-Phase 4 scoped — see `BRIEF_PHASE_4_SCOPE.md`.
+Phase 4 scoped — see `BRIEF_PHASE_4_SCOPE.md`. Director decisions: €15 alert / €100 hard-stop, Feedly dropped, Browser seed tasks agreed.
 
-**Baker current state:** 10 data sources, 16 scheduler jobs, 50+ commitments, 3,400+ alerts, 11-tab dashboard, all 7 standing orders functional.
+Output formatting:
+- **Slack alert formatting** — bold summary (first sentence), Contact/Matter/Action as compact fields, divider, bullet points, auto-bold currencies (EUR/CHF/USD) and dates. Abbreviation-aware sentence detection (Mr. Dr. etc.).
+- **WhatsApp signature** — external messages prefixed with "📋 Baker AI — Office of Dimitry Vallen". Director messages sent without signature.
+
+**Baker current state:** 10 data sources, 16 scheduler jobs, 50+ commitments, 3,400+ alerts, 11-tab dashboard, all 7 standing orders functional. Slack alerts formatted. WhatsApp messages signed.
 
 ## Key Documents (Dropbox)
 
