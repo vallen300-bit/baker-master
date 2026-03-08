@@ -635,5 +635,114 @@ def run_vip_sla_check():
                 except Exception as e:
                     logger.warning(f"VIP SLA Slack alert failed: {e}")
 
+            # Phase 3B: For Tier 2+ breaches (>4h), create DB alert + auto-draft
+            if wait_minutes >= 240:
+                try:
+                    alert_title = f"VIP SLA: {sender_name} unanswered ({wait_str})"
+                    alert_body = (
+                        f"{sender_name} (Tier {vip_tier}) sent a message {wait_str} ago "
+                        f"with no reply.\n\nMessage: {preview}"
+                    )
+                    alert_id = store.create_alert(
+                        tier=2,
+                        title=alert_title,
+                        body=alert_body,
+                        action_required=True,
+                        tags=["vip-sla"],
+                    )
+                    if alert_id:
+                        draft = _generate_vip_draft(vip, msg, sender_name, wait_minutes)
+                        if draft:
+                            store.update_alert_structured_actions(alert_id, draft)
+                            logger.info(f"VIP auto-draft attached to alert #{alert_id}")
+                except Exception as e:
+                    logger.warning(f"VIP auto-draft failed for {sender_name}: {e}")
+
     except Exception as e:
         logger.error(f"VIP SLA check failed: {e}")
+
+
+# ============================================================
+# Phase 3B: VIP Auto-Draft (Haiku)
+# ============================================================
+
+_VIP_DRAFT_PROMPT = """You are Baker, AI Chief of Staff for Dimitry Vallen (Chairman, Brisen Group).
+
+A VIP contact has sent a message that hasn't been responded to. Generate action proposals.
+
+Rules:
+- Match the Director's tone: warm but direct, like a trusted advisor
+- Keep it concise — VIP messages deserve quick, substantive replies
+- If the message requires a decision the Director hasn't made, acknowledge receipt and set expectations
+- Always offer at least 2 options: a substantive draft and a quick acknowledgment
+
+Return ONLY valid JSON:
+{
+  "problem": "VIP waiting for response — relationship risk",
+  "cause": "Message received [time] ago, no reply detected",
+  "solution": "Send response to maintain VIP relationship",
+  "parts": [
+    {
+      "label": "Respond to [VIP name]",
+      "actions": [
+        {
+          "label": "Send draft reply",
+          "description": "Review and send Baker's draft response",
+          "type": "draft",
+          "prompt": "Draft a reply to [VIP name] regarding: [topic]. Tone: warm, direct."
+        },
+        {
+          "label": "Acknowledge and defer",
+          "description": "Quick acknowledgment — will reply in detail later",
+          "type": "draft",
+          "prompt": "Draft a short acknowledgment to [VIP name] saying you received their message and will reply in detail soon."
+        }
+      ]
+    }
+  ]
+}
+"""
+
+
+def _generate_vip_draft(vip: dict, msg: dict, sender_name: str, wait_minutes: float) -> dict:
+    """Generate auto-draft proposals for an unanswered VIP message using Haiku."""
+    try:
+        import json
+        import anthropic
+        from config.settings import config as _config
+
+        vip_role = vip.get("role") or vip.get("role_context") or ""
+        vip_tier = vip.get("tier", 2)
+        message_text = (msg.get("full_text") or "")[:500]
+        wait_str = f"{int(wait_minutes)} minutes"
+
+        context = (
+            f"VIP: {sender_name}\n"
+            f"Role: {vip_role}\n"
+            f"Tier: {vip_tier}\n"
+            f"Wait time: {wait_str}\n"
+            f"Message: {message_text}\n"
+        )
+
+        client = anthropic.Anthropic(api_key=_config.claude.api_key)
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
+            system=_VIP_DRAFT_PROMPT,
+            messages=[{"role": "user", "content": context}],
+        )
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+            if raw.endswith("```"):
+                raw = raw[:-3]
+            raw = raw.strip()
+        parsed = json.loads(raw)
+        if "parts" in parsed and isinstance(parsed["parts"], list):
+            logger.info(f"Generated VIP auto-draft for {sender_name}: {len(parsed['parts'])} parts")
+            return parsed
+        logger.warning("VIP draft missing 'parts' key — discarding")
+        return None
+    except (json.JSONDecodeError, Exception) as e:
+        logger.warning(f"VIP draft generation failed for {sender_name}: {e}")
+        return None
