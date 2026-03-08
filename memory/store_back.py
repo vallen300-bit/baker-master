@@ -117,6 +117,9 @@ class SentinelStoreBack:
         self._ensure_alert_artifacts_table()
         self._ensure_commitments_table()
 
+        # PHASE-4A: Cost monitor + agent observability tables
+        self._ensure_cost_and_metrics_tables()
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -153,6 +156,21 @@ class SentinelStoreBack:
                 self._pool.putconn(conn)
             except Exception:
                 pass
+
+    def _ensure_cost_and_metrics_tables(self):
+        """PHASE-4A: Create api_cost_log + agent_tool_calls tables."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            from orchestrator.cost_monitor import ensure_api_cost_log_table
+            from orchestrator.agent_metrics import ensure_agent_tool_calls_table
+            ensure_api_cost_log_table(conn)
+            ensure_agent_tool_calls_table(conn)
+        except Exception as e:
+            logger.warning(f"Could not ensure Phase 4A tables: {e}")
+        finally:
+            self._put_conn(conn)
 
     # -------------------------------------------------------
     # ClickUp table initialization

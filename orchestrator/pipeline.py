@@ -173,6 +173,13 @@ def _generate_structured_actions(claude_client, title: str, body: str, tier: int
                 "content": f"Alert (Tier {tier}): {title}\n\n{body}",
             }],
         )
+        # PHASE-4A: Log Haiku cost
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens,
+                         resp.usage.output_tokens, source="structured_actions")
+        except Exception:
+            pass
         raw = resp.content[0].text.strip()
         # Strip markdown code fences if present
         if raw.startswith("```"):
@@ -322,6 +329,13 @@ class SentinelPipeline:
             f"Claude responded: {response.usage.input_tokens} in, "
             f"{response.usage.output_tokens} out"
         )
+        # PHASE-4A: Log pipeline API cost
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost(config.claude.model, response.usage.input_tokens,
+                         response.usage.output_tokens, source="pipeline")
+        except Exception:
+            pass
         return raw_text
 
     # -------------------------------------------------------

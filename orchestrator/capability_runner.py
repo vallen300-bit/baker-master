@@ -37,6 +37,12 @@ class CapabilityRunner:
     def __init__(self):
         self.executor = ToolExecutor()
         self.claude = anthropic.Anthropic(api_key=config.claude.api_key)
+        # PHASE-4A: lazy imports for cost + metrics
+        from orchestrator.cost_monitor import log_api_cost, check_circuit_breaker
+        from orchestrator.agent_metrics import log_tool_call
+        self._log_api_cost = log_api_cost
+        self._check_circuit_breaker = check_circuit_breaker
+        self._log_tool_call = log_tool_call
 
     # ─────────────────────────────────────────────
     # Fast Path: Single Capability (blocking)
@@ -79,6 +85,17 @@ class CapabilityRunner:
                     elapsed_ms=int(elapsed * 1000), timed_out=True,
                 )
 
+            # PHASE-4A: Circuit breaker check
+            allowed, _daily = self._check_circuit_breaker()
+            if not allowed:
+                logger.error(f"Capability {capability.slug} blocked by cost circuit breaker")
+                return AgentResult(
+                    answer="Baker API budget exceeded for today. Resuming tomorrow.",
+                    tool_calls=tool_log, iterations=iteration,
+                    total_input_tokens=total_in, total_output_tokens=total_out,
+                    elapsed_ms=int((time.time() - t0) * 1000),
+                )
+
             response = self.claude.messages.create(
                 model=config.claude.model,
                 max_tokens=4096,
@@ -88,6 +105,12 @@ class CapabilityRunner:
             )
             total_in += response.usage.input_tokens
             total_out += response.usage.output_tokens
+
+            # PHASE-4A: Log API cost
+            self._log_api_cost(config.claude.model, response.usage.input_tokens,
+                               response.usage.output_tokens,
+                               source="capability_runner",
+                               capability_id=capability.slug)
 
             if response.stop_reason == "end_turn":
                 text_parts = [b.text for b in response.content if b.type == "text"]
@@ -122,12 +145,24 @@ class CapabilityRunner:
                 tool_results = []
                 for tu in tool_uses:
                     tool_t0 = time.time()
-                    result_text = self.executor.execute(tu.name, tu.input)
+                    tool_ok = True
+                    tool_err = None
+                    try:
+                        result_text = self.executor.execute(tu.name, tu.input)
+                    except Exception as e:
+                        tool_ok = False
+                        tool_err = str(e)[:500]
+                        result_text = f"Error: {tool_err}"
                     tool_ms = int((time.time() - tool_t0) * 1000)
                     tool_log.append({
                         "name": tu.name, "input": tu.input,
                         "duration_ms": tool_ms,
                     })
+                    # PHASE-4A: Log tool call
+                    self._log_tool_call(tu.name, latency_ms=tool_ms,
+                                        success=tool_ok, error_message=tool_err,
+                                        source="capability_runner",
+                                        capability_id=capability.slug)
                     tool_results.append({
                         "type": "tool_result", "tool_use_id": tu.id,
                         "content": result_text,
@@ -193,6 +228,19 @@ class CapabilityRunner:
                 yield {"_agent_result": result}
                 return
 
+            # PHASE-4A: Circuit breaker check
+            allowed, _daily = self._check_circuit_breaker()
+            if not allowed:
+                yield {"token": "Baker API budget exceeded for today. Resuming tomorrow."}
+                result = AgentResult(
+                    answer="Baker API budget exceeded for today. Resuming tomorrow.",
+                    tool_calls=tool_log, iterations=iteration,
+                    total_input_tokens=total_in, total_output_tokens=total_out,
+                    elapsed_ms=int((time.time() - t0) * 1000),
+                )
+                yield {"_agent_result": result}
+                return
+
             response = self.claude.messages.create(
                 model=config.claude.model,
                 max_tokens=4096,
@@ -202,6 +250,12 @@ class CapabilityRunner:
             )
             total_in += response.usage.input_tokens
             total_out += response.usage.output_tokens
+
+            # PHASE-4A: Log API cost
+            self._log_api_cost(config.claude.model, response.usage.input_tokens,
+                               response.usage.output_tokens,
+                               source="capability_runner_streaming",
+                               capability_id=capability.slug)
 
             if response.stop_reason == "end_turn":
                 for block in response.content:
@@ -239,12 +293,24 @@ class CapabilityRunner:
                 tool_results = []
                 for tu in tool_uses:
                     tool_t0 = time.time()
-                    result_text = self.executor.execute(tu.name, tu.input)
+                    tool_ok = True
+                    tool_err = None
+                    try:
+                        result_text = self.executor.execute(tu.name, tu.input)
+                    except Exception as e:
+                        tool_ok = False
+                        tool_err = str(e)[:500]
+                        result_text = f"Error: {tool_err}"
                     tool_ms = int((time.time() - tool_t0) * 1000)
                     tool_log.append({
                         "name": tu.name, "input": tu.input,
                         "duration_ms": tool_ms,
                     })
+                    # PHASE-4A: Log tool call
+                    self._log_tool_call(tu.name, latency_ms=tool_ms,
+                                        success=tool_ok, error_message=tool_err,
+                                        source="capability_runner_streaming",
+                                        capability_id=capability.slug)
                     tool_results.append({
                         "type": "tool_result", "tool_use_id": tu.id,
                         "content": result_text,

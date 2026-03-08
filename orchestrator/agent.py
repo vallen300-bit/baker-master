@@ -706,6 +706,9 @@ def run_agent_loop(
     Blocking agent loop.  Returns AgentResult with the final text answer.
     Used by WhatsApp (_handle_director_question).
     """
+    from orchestrator.cost_monitor import log_api_cost, check_circuit_breaker
+    from orchestrator.agent_metrics import log_tool_call
+
     t0 = time.time()
     timeout = timeout_override or AGENT_TIMEOUT_SECONDS
     executor = ToolExecutor()
@@ -738,6 +741,17 @@ def run_agent_loop(
                 timed_out=True,
             )
 
+        # PHASE-4A: Circuit breaker check
+        allowed, _daily = check_circuit_breaker()
+        if not allowed:
+            logger.error("Agent loop blocked by cost circuit breaker")
+            return AgentResult(
+                answer="Baker API budget exceeded for today. Resuming tomorrow.",
+                tool_calls=tool_log, iterations=iteration,
+                total_input_tokens=total_in, total_output_tokens=total_out,
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+
         response = claude.messages.create(
             model=config.claude.model,
             max_tokens=2048,
@@ -748,6 +762,10 @@ def run_agent_loop(
 
         total_in += response.usage.input_tokens
         total_out += response.usage.output_tokens
+
+        # PHASE-4A: Log API cost
+        log_api_cost(config.claude.model, response.usage.input_tokens,
+                     response.usage.output_tokens, source="agent_loop")
 
         # Check stop reason
         if response.stop_reason == "end_turn":
@@ -791,7 +809,14 @@ def run_agent_loop(
             tool_results = []
             for tu in tool_uses:
                 tool_t0 = time.time()
-                result_text = executor.execute(tu.name, tu.input)
+                tool_ok = True
+                tool_err = None
+                try:
+                    result_text = executor.execute(tu.name, tu.input)
+                except Exception as e:
+                    tool_ok = False
+                    tool_err = str(e)[:500]
+                    result_text = f"Error: {tool_err}"
                 tool_ms = int((time.time() - tool_t0) * 1000)
                 tool_log.append({
                     "name": tu.name,
@@ -799,6 +824,10 @@ def run_agent_loop(
                     "duration_ms": tool_ms,
                 })
                 logger.info(f"Tool {tu.name}: {tool_ms}ms")
+                # PHASE-4A: Log tool call metrics
+                log_tool_call(tu.name, latency_ms=tool_ms,
+                              success=tool_ok, error_message=tool_err,
+                              source="agent_loop")
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tu.id,
@@ -857,6 +886,9 @@ def run_agent_loop_streaming(
 
     The final AgentResult is also yielded as {"_agent_result": AgentResult}.
     """
+    from orchestrator.cost_monitor import log_api_cost, check_circuit_breaker
+    from orchestrator.agent_metrics import log_tool_call
+
     t0 = time.time()
     timeout = timeout_override or AGENT_TIMEOUT_SECONDS
     executor = ToolExecutor()
@@ -892,6 +924,19 @@ def run_agent_loop_streaming(
             yield {"_agent_result": result}
             return
 
+        # PHASE-4A: Circuit breaker check
+        allowed, _daily = check_circuit_breaker()
+        if not allowed:
+            yield {"token": "Baker API budget exceeded for today. Resuming tomorrow."}
+            result = AgentResult(
+                answer="Baker API budget exceeded for today. Resuming tomorrow.",
+                tool_calls=tool_log, iterations=iteration,
+                total_input_tokens=total_in, total_output_tokens=total_out,
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+            yield {"_agent_result": result}
+            return
+
         # Use non-streaming API to get tool_use blocks reliably
         # (streaming with tools is tricky — partial tool_use blocks)
         response = claude.messages.create(
@@ -904,6 +949,10 @@ def run_agent_loop_streaming(
 
         total_in += response.usage.input_tokens
         total_out += response.usage.output_tokens
+
+        # PHASE-4A: Log API cost
+        log_api_cost(config.claude.model, response.usage.input_tokens,
+                     response.usage.output_tokens, source="agent_loop_streaming")
 
         if response.stop_reason == "end_turn":
             # Stream the final text to client
@@ -956,7 +1005,14 @@ def run_agent_loop_streaming(
             tool_results = []
             for tu in tool_uses:
                 tool_t0 = time.time()
-                result_text = executor.execute(tu.name, tu.input)
+                tool_ok = True
+                tool_err = None
+                try:
+                    result_text = executor.execute(tu.name, tu.input)
+                except Exception as e:
+                    tool_ok = False
+                    tool_err = str(e)[:500]
+                    result_text = f"Error: {tool_err}"
                 tool_ms = int((time.time() - tool_t0) * 1000)
                 tool_log.append({
                     "name": tu.name,
@@ -964,6 +1020,10 @@ def run_agent_loop_streaming(
                     "duration_ms": tool_ms,
                 })
                 logger.info(f"Tool {tu.name}: {tool_ms}ms")
+                # PHASE-4A: Log tool call metrics
+                log_tool_call(tu.name, latency_ms=tool_ms,
+                              success=tool_ok, error_message=tool_err,
+                              source="agent_loop_streaming")
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tu.id,

@@ -1398,6 +1398,41 @@ async def extract_commitments_retroactive(background_tasks: BackgroundTasks):
     return {"status": "started", "message": "Retroactive commitment extraction running in background. Check /api/commitments for results."}
 
 
+# ============================================================
+# PHASE-4A: Cost Monitor + Agent Metrics API
+# ============================================================
+
+@app.get("/api/cost/today", tags=["phase-4a"], dependencies=[Depends(verify_api_key)])
+async def get_cost_today():
+    """Get today's API cost breakdown."""
+    from orchestrator.cost_monitor import get_daily_breakdown
+    return get_daily_breakdown()
+
+
+@app.get("/api/cost/history", tags=["phase-4a"], dependencies=[Depends(verify_api_key)])
+async def get_cost_history(days: int = Query(7, ge=1, le=90)):
+    """Get daily cost totals for the last N days."""
+    from orchestrator.cost_monitor import get_cost_history
+    return {"days": days, "history": get_cost_history(days)}
+
+
+@app.get("/api/agent-metrics", tags=["phase-4a"], dependencies=[Depends(verify_api_key)])
+async def get_agent_metrics(hours: int = Query(24, ge=1, le=168)):
+    """Get tool call metrics for the last N hours."""
+    from orchestrator.agent_metrics import get_tool_metrics, get_source_metrics
+    return {
+        "tool_metrics": get_tool_metrics(hours),
+        "source_metrics": get_source_metrics(hours),
+    }
+
+
+@app.get("/api/agent-metrics/errors", tags=["phase-4a"], dependencies=[Depends(verify_api_key)])
+async def get_agent_errors(limit: int = Query(20, ge=1, le=100)):
+    """Get recent tool call errors."""
+    from orchestrator.agent_metrics import get_recent_errors
+    return {"errors": get_recent_errors(limit)}
+
+
 @app.get("/api/alerts/search", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
 async def search_alerts(
     q: str = Query("", max_length=500),
