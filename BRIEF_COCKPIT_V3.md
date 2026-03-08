@@ -95,6 +95,26 @@ Both remove the card from active views immediately. Both are searchable in the S
 
 **Phase A1 scope** — this is just a button split + one column. No complex logic.
 
+### Baker-Recommended Resolution (never auto-resolve)
+Baker must **never** auto-resolve or auto-dismiss alerts. When a scan detects evidence that an open alert may be resolved (email confirmation, signed document, deadline passed, task completed), Baker:
+
+1. **Updates the existing card** with the new information
+2. **Adds a structured action** with type `resolve_recommendation` — a distinct green-bordered action row with Baker's reasoning and a one-click "Confirm Resolution" button
+3. **Card stays active** until Director clicks Confirm or Dismiss
+
+```
+BAKER RECOMMENDS RESOLUTION
+┌────────────────────────────────────────────────────────────┐
+│ [Resolve]  Hassa confirmed handover receipt by email      │
+│            (March 7, 14:22). All documentation delivered.  │
+│            No outstanding items.                [Confirm]  │
+└────────────────────────────────────────────────────────────┘
+```
+
+Auto-expiry (3-day rule for T2/T3/T4) is the **only** automated exit path. Resolution always requires Director confirmation. This is a trust and control principle consistent with the capability framework's `recommend_wait` autonomy level: Baker recommends, Director decides.
+
+**Phase A2 scope** — requires scan-to-existing-alert matching (same as card update logic) + a new action type in structured_actions generation.
+
 ### Grouping
 - Items grouped by **matter** (from matter_registry in DB)
 - Within a matter: sorted by tier (worst first), then newest on top
