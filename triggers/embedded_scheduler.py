@@ -127,6 +127,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info(f"Registered: slack_poll (every {config.triggers.slack_check_interval}s)")
 
+    # Browser task polling — every 30 minutes (BROWSER-1)
+    from triggers.browser_trigger import run_browser_poll
+    scheduler.add_job(
+        run_browser_poll,
+        IntervalTrigger(seconds=config.triggers.browser_check_interval),
+        id="browser_poll", name="Browser task polling",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info(f"Registered: browser_poll (every {config.triggers.browser_check_interval}s)")
+
     # WhatsApp re-sync — every 6 hours (catch missed webhook messages)
     from scripts.extract_whatsapp import backfill_whatsapp
     scheduler.add_job(

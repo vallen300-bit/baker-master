@@ -91,6 +91,9 @@ class SentinelStoreBack:
         # Ensure baker-health Qdrant collection exists
         self._ensure_collection("baker-health", size=1024)
 
+        # Ensure baker-browser Qdrant collection exists (BROWSER-1)
+        self._ensure_collection("baker-browser", size=1024)
+
         # STEP1C: Ensure baker_tasks table exists
         self._ensure_baker_tasks_table()
 
