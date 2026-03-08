@@ -1278,6 +1278,53 @@ async def get_upcoming_meetings(hours: int = Query(48, ge=1, le=168)):
         return {"meetings": [], "count": 0, "prepped_count": 0}
 
 
+# ============================================================
+# Phase 3C: Commitments
+# ============================================================
+
+@app.get("/api/commitments", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_commitments(
+    status: Optional[str] = None,
+    assigned_to: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+):
+    """List commitments with status/assignee filters."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"commitments": [], "count": 0, "overdue_count": 0}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            conditions = []
+            params = []
+            if status:
+                conditions.append("status = %s")
+                params.append(status)
+            if assigned_to:
+                conditions.append("LOWER(assigned_to) ILIKE %s")
+                params.append(f"%{assigned_to.lower()}%")
+            where = "WHERE " + " AND ".join(conditions) if conditions else ""
+            params.append(limit)
+            cur.execute(
+                f"SELECT * FROM commitments {where} ORDER BY COALESCE(due_date, '9999-12-31') ASC, created_at DESC LIMIT %s",
+                params,
+            )
+            rows = [_serialize(dict(r)) for r in cur.fetchall()]
+
+            cur.execute("SELECT COUNT(*) AS cnt FROM commitments WHERE status = 'overdue'")
+            overdue_count = cur.fetchone()["cnt"]
+
+            cur.close()
+            return {"commitments": rows, "count": len(rows), "overdue_count": overdue_count}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/commitments failed: {e}")
+        return {"commitments": [], "count": 0, "overdue_count": 0}
+
+
 @app.get("/api/alerts/search", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
 async def search_alerts(
     q: str = Query("", max_length=500),

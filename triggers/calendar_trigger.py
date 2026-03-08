@@ -330,5 +330,85 @@ def check_calendar_and_prep():
             prepped_count += 1
             logger.info(f"Meeting prep alert #{alert_id} created: {meeting['title']}")
 
+            # Phase 3C: Block 15 min prep time on calendar
+            _block_prep_time(meeting)
+
+    # Phase 3C: Detect calendar conflicts
+    _detect_and_alert_conflicts(meetings, store, trigger_state)
+
     if prepped_count:
         logger.info(f"Calendar prep complete: {prepped_count} new briefings created")
+
+
+# ============================================================
+# Phase 3C: Calendar Protection
+# ============================================================
+
+def _block_prep_time(meeting: dict):
+    """Create a 15-minute prep block before a meeting on the Director's calendar.
+    Uses Google Calendar API write (calendar scope is already authorized).
+    """
+    start_str = meeting.get('start', '')
+    if not start_str:
+        return
+
+    try:
+        service = _get_calendar_service()
+        start = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
+        prep_start = start - timedelta(minutes=15)
+        prep_end = start
+
+        event = {
+            'summary': f'[Baker Prep] {meeting["title"]}',
+            'description': 'Auto-blocked by Baker for meeting preparation.',
+            'start': {'dateTime': prep_start.isoformat(), 'timeZone': 'Europe/Zurich'},
+            'end': {'dateTime': prep_end.isoformat(), 'timeZone': 'Europe/Zurich'},
+            'reminders': {'useDefault': False},
+            'transparency': 'opaque',
+        }
+
+        service.events().insert(calendarId='primary', body=event).execute()
+        logger.info(f"Prep block created: {prep_start.strftime('%H:%M')}-{prep_end.strftime('%H:%M')} for '{meeting['title']}'")
+    except Exception as e:
+        logger.warning(f"Failed to create prep block for '{meeting['title']}': {e}")
+
+
+def _detect_conflicts(meetings: list) -> list:
+    """Detect overlapping meetings. Returns list of (meeting_a, meeting_b) tuples."""
+    conflicts = []
+    for i in range(len(meetings)):
+        for j in range(i + 1, len(meetings)):
+            a_end = meetings[i].get('end', '')
+            b_start = meetings[j].get('start', '')
+            if a_end and b_start and a_end > b_start:
+                conflicts.append((meetings[i], meetings[j]))
+    return conflicts
+
+
+def _detect_and_alert_conflicts(meetings: list, store, trigger_state):
+    """Detect calendar conflicts and create T2 alerts. Dedup via watermarks."""
+    conflicts = _detect_conflicts(meetings)
+    for a, b in conflicts:
+        a_id = a.get('id', '')
+        b_id = b.get('id', '')
+        # Consistent key regardless of order
+        ids = sorted([a_id, b_id])
+        wk = f"calendar_conflict_{ids[0]}_{ids[1]}"
+        if trigger_state.watermark_exists(wk):
+            continue
+
+        store.create_alert(
+            tier=2,
+            title=f"Calendar conflict: {a['title'][:40]} overlaps {b['title'][:40]}",
+            body=(
+                f"**{a['title']}** ({a.get('start', '?')})\n"
+                f"overlaps with\n"
+                f"**{b['title']}** ({b.get('start', '?')})\n\n"
+                f"Consider rescheduling one of these meetings."
+            ),
+            action_required=True,
+            tags=["calendar", "conflict"],
+        )
+        trigger_state.set_watermark(wk, datetime.now(timezone.utc))
+        logger.info(f"Calendar conflict alert: '{a['title']}' vs '{b['title']}'")
+
