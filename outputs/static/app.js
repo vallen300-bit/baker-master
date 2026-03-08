@@ -136,20 +136,11 @@ function switchTab(tabName) {
 
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
 
-    if (FUNCTIONAL_TABS.has(tabName)) {
-        const viewId = TAB_VIEW_MAP[tabName];
-        if (viewId) {
-            const el = document.getElementById(viewId);
-            if (el) el.classList.add('active');
-        }
-    } else {
-        const cs = document.getElementById('viewComingSoon');
-        if (cs) cs.classList.add('active');
-        const labels = {
-            'people': 'People', 'tags': 'Tags', 'search': 'Search',
-            'ask-specialist': 'Ask Specialist', 'travel': 'Travel', 'media': 'Media'
-        };
-        setText('comingSoonTitle', (labels[tabName] || tabName) + ' -- Coming soon');
+    // All 11 tabs are functional — no "Coming soon" fallback needed
+    var viewId = TAB_VIEW_MAP[tabName];
+    if (viewId) {
+        var el = document.getElementById(viewId);
+        if (el) el.classList.add('active');
     }
 
     currentTab = tabName;
