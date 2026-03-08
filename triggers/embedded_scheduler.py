@@ -219,6 +219,26 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: alert_expiry (every 6 hours)")
 
+    # Proactive signal scanner — every 30 minutes (PROACTIVE-FLAG-AO)
+    from triggers.proactive_scanner import run_proactive_scan
+    scheduler.add_job(
+        run_proactive_scan,
+        IntervalTrigger(minutes=30),
+        id="proactive_scan", name="Proactive signal scanner",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: proactive_scan (every 30 minutes)")
+
+    # Communication gap tracker — every 6 hours (PROACTIVE-FLAG-AO)
+    from triggers.proactive_scanner import run_communication_gap_check
+    scheduler.add_job(
+        run_communication_gap_check,
+        IntervalTrigger(hours=6),
+        id="communication_gap_check", name="Communication gap tracker",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: communication_gap_check (every 6 hours)")
+
 
 def start_scheduler():
     """Create and start the BackgroundScheduler. Idempotent — safe to call twice."""
