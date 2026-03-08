@@ -283,6 +283,21 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 .card-compact .card-header { padding: 10px 16px; }
 .card-compact .card-title { font-size: 12px; font-weight: 500; }
 
+/* Inline card result area */
+.card-result-area {
+  margin: 4px 16px; padding: 12px 14px;
+  background: #f8fafc; border: 1px solid var(--border);
+  border-radius: 7px; font-size: 12px; line-height: 1.7;
+  max-height: 300px; overflow-y: auto;
+}
+
+/* Reply thread on cards */
+.card-reply-area {
+  border-top: 1px solid var(--border-light);
+}
+.reply-input { transition: border-color 0.15s; }
+.reply-input:focus { border-color: var(--blue) !important; }
+
 /* === ACTIVITY === */
 .activity-row {
   display: flex; align-items: flex-start; gap: 10px;
