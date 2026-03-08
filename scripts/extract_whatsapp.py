@@ -34,6 +34,59 @@ logger = logging.getLogger("baker.extract_whatsapp")
 _backfill_running = False
 
 
+DIRECTOR_WHATSAPP_JID = "41799605092@s.whatsapp.net"
+DIRECTOR_WHATSAPP_CUS = "41799605092@c.us"
+
+
+def _store_messages_to_postgres(msgs: list, chat_id: str):
+    """Store individual WhatsApp messages to whatsapp_messages table.
+    This enables Phase 3 features (VIP SLA check, context assembly) which
+    query whatsapp_messages directly."""
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+
+        stored = 0
+        for m in msgs:
+            msg_id = m.get("id", {})
+            if isinstance(msg_id, dict):
+                msg_id = msg_id.get("id", msg_id.get("_serialized", ""))
+            if not msg_id:
+                continue
+
+            sender_jid = m.get("from", "")
+            from_me = m.get("fromMe", False)
+            name = _sender_name(m)
+            body = m.get("body", "") or ""
+            ts = m.get("timestamp", 0)
+
+            is_director = from_me or sender_jid in (DIRECTOR_WHATSAPP_JID, DIRECTOR_WHATSAPP_CUS)
+
+            ts_iso = None
+            if ts:
+                try:
+                    ts_iso = datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+                except (ValueError, OSError):
+                    pass
+
+            if body.strip():
+                store.store_whatsapp_message(
+                    msg_id=str(msg_id),
+                    sender=sender_jid,
+                    sender_name=name,
+                    chat_id=chat_id,
+                    full_text=body,
+                    timestamp=ts_iso,
+                    is_director=is_director,
+                )
+                stored += 1
+
+        if stored:
+            logger.info(f"Stored {stored} messages to whatsapp_messages for chat {chat_id[:20]}")
+    except Exception as e:
+        logger.warning(f"Failed to store messages to PostgreSQL for chat {chat_id[:20]}: {e}")
+
+
 # ------------------------------------------------------------------
 # Message formatting
 # ------------------------------------------------------------------
@@ -309,6 +362,9 @@ def extract_historical(
         if not msgs:
             time.sleep(0.3)
             continue
+
+        # Store individual messages to whatsapp_messages table (Phase 3 needs this)
+        _store_messages_to_postgres(msgs, cid)
 
         # Process media attachments
         media_texts = {}
