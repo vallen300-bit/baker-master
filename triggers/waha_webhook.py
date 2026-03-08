@@ -12,12 +12,24 @@ conversational reply using the same Scan-style RAG flow (retrieval →
 SCAN_SYSTEM_PROMPT → Claude → WhatsApp reply + store-back).
 """
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from fastapi import APIRouter, Header, Request
 
 router = APIRouter()
 logger = logging.getLogger("sentinel.trigger.whatsapp")
+
+# LEARNING-LOOP: WhatsApp feedback keywords
+_WA_FEEDBACK_POSITIVE = re.compile(
+    r"^(good|great|thanks|perfect|correct|exactly|yes)\s*$", re.IGNORECASE
+)
+_WA_FEEDBACK_NEGATIVE = re.compile(
+    r"^(wrong|no|bad|incorrect|not right|nein|falsch)\s*$", re.IGNORECASE
+)
+_WA_FEEDBACK_REVISE = re.compile(
+    r"^(revise|update|change|fix|adjust|anders|korrigier)\b", re.IGNORECASE
+)
 
 DIRECTOR_WHATSAPP = "41799605092@c.us"
 
@@ -29,6 +41,57 @@ def _wa_reply(text: str):
         send_whatsapp(text)
     except Exception as e:
         logger.warning(f"WhatsApp reply failed: {e}")
+
+
+def _is_wa_feedback(text: str) -> bool:
+    """Check if message looks like feedback (short, keyword match)."""
+    if len(text) > 100:
+        return False
+    return bool(
+        _WA_FEEDBACK_POSITIVE.match(text) or
+        _WA_FEEDBACK_NEGATIVE.match(text) or
+        _WA_FEEDBACK_REVISE.match(text)
+    )
+
+
+def _handle_wa_feedback(text: str):
+    """Store feedback on the most recent baker_task from WhatsApp."""
+    if _WA_FEEDBACK_POSITIVE.match(text):
+        feedback = "accepted"
+    elif _WA_FEEDBACK_NEGATIVE.match(text):
+        feedback = "rejected"
+    else:
+        feedback = "revised"
+
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id FROM baker_tasks
+                WHERE channel = 'whatsapp'
+                  AND status = 'completed'
+                  AND director_feedback IS NULL
+                ORDER BY completed_at DESC
+                LIMIT 1
+            """)
+            row = cur.fetchone()
+            if row:
+                task_id = row[0]
+                store.update_baker_task(task_id, director_feedback=feedback, feedback_comment=text)
+                logger.info(f"WA feedback stored: task {task_id} = {feedback}")
+                _wa_reply(f"Feedback noted: {feedback}. I'll adjust next time.")
+            else:
+                _wa_reply("No recent task found to apply feedback to.")
+            cur.close()
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.warning(f"WA feedback storage failed: {e}")
 
 
 def _get_retriever():
@@ -387,6 +450,11 @@ def _handle_director_message(message_body: str, msg_id: str, sender_name: str) -
     to the normal pipeline.
     """
     import orchestrator.action_handler as ah
+
+    # LEARNING-LOOP: Check if this is feedback on the last baker_task
+    if _is_wa_feedback(message_body):
+        _handle_wa_feedback(message_body)
+        return True
 
     # 0. Check for pending ClickUp plan interaction
     try:

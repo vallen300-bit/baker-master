@@ -1064,7 +1064,11 @@ async function sendScanMessage(question) {
                     if (data.token) {
                         if (!fullResponse && replyEl) replyEl.textContent = ''; // clear thinking indicator
                         fullResponse += data.token;
-                        if (replyEl) replyEl.innerHTML = '<div class="md-content">' + md(fullResponse) + '</div>'; // SECURITY: md() escapes first
+                        // SECURITY: md() calls esc() first to sanitize HTML entities before formatting
+                        if (replyEl) replyEl.innerHTML = '<div class="md-content">' + md(fullResponse) + '</div>';
+                    }
+                    if (data.task_id) {
+                        window._lastScanTaskId = data.task_id; // LEARNING-LOOP: capture for feedback buttons
                     }
                     if (data.error) {
                         fullResponse += '\n[Error: ' + data.error + ']';
@@ -1103,6 +1107,12 @@ async function sendScanMessage(question) {
 
     scanHistory.push({ role: 'assistant', content: fullResponse });
     if (scanHistory.length > 20) scanHistory = scanHistory.slice(-20);
+
+    // LEARNING-LOOP: Render feedback buttons if we got a task_id
+    if (window._lastScanTaskId && replyEl) {
+        renderFeedbackButtons(window._lastScanTaskId, replyEl);
+        window._lastScanTaskId = null;
+    }
 
     scanStreaming = false;
     if (sendBtn) sendBtn.disabled = false;
@@ -2100,3 +2110,57 @@ async function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+// ═══ LEARNING-LOOP: FEEDBACK BUTTONS ═══
+
+function renderFeedbackButtons(taskId, container) {
+    var fb = document.createElement('div');
+    fb.className = 'feedback-bar';
+    fb.style.cssText = 'margin-top:12px;padding:8px 0;border-top:1px solid #eee;';
+    var label = document.createElement('span');
+    label.textContent = 'Was this helpful? ';
+    label.style.cssText = 'font-size:13px;color:#888;margin-right:8px;';
+    fb.appendChild(label);
+
+    var btns = [
+        { text: '\u2713', feedback: 'accepted', color: '#4caf50', title: 'Good' },
+        { text: '\u270E', feedback: 'revised', color: '#ff9800', title: 'Needs revision' },
+        { text: '\u2717', feedback: 'rejected', color: '#f44336', title: 'Wrong' },
+    ];
+    btns.forEach(function(b) {
+        var btn = document.createElement('button');
+        btn.textContent = b.text;
+        btn.title = b.title;
+        btn.style.cssText = 'border:1px solid #ddd;background:white;border-radius:4px;padding:4px 10px;cursor:pointer;font-size:14px;margin-right:4px;';
+        btn.addEventListener('mouseenter', function() { btn.style.borderColor = b.color; btn.style.color = b.color; });
+        btn.addEventListener('mouseleave', function() { btn.style.borderColor = '#ddd'; btn.style.color = ''; });
+        btn.addEventListener('click', function() { submitFeedback(taskId, b.feedback, fb); });
+        fb.appendChild(btn);
+    });
+    container.appendChild(fb);
+}
+
+async function submitFeedback(taskId, feedback, barEl) {
+    var comment = null;
+    if (feedback !== 'accepted') {
+        comment = prompt('What should Baker do differently?');
+        if (comment === null) return;
+    }
+    var body = { feedback: feedback };
+    if (comment) body.comment = comment;
+
+    try {
+        await bakerFetch('/api/tasks/' + taskId + '/feedback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        barEl.textContent = '';
+        var done = document.createElement('span');
+        done.textContent = 'Feedback recorded: ' + feedback;
+        done.style.cssText = 'font-size:13px;color:#4caf50;';
+        barEl.appendChild(done);
+    } catch (e) {
+        console.warn('Feedback submission failed:', e);
+    }
+}
