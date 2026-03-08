@@ -71,6 +71,38 @@ def _match_matter_slug(title: str, body: str, store: SentinelStoreBack) -> Optio
         return None
 
 
+# Tag keyword groups for auto-tagging (COCKPIT-V3 Phase B)
+_TAG_KEYWORDS = {
+    "legal": ["lawsuit", "court", "litigation", "legal", "attorney", "lawyer", "claim", "dispute", "evidence"],
+    "finance": ["loan", "interest", "cashflow", "cash flow", "budget", "invoice", "payment", "term sheet", "lp"],
+    "deadline": ["deadline", "due date", "expires", "expiry", "overdue", "by end of"],
+    "follow-up": ["follow up", "follow-up", "following up", "check in", "check-in"],
+    "waiting-response": ["waiting for", "awaiting", "no response", "pending response", "haven't heard"],
+    "contract": ["contract", "agreement", "lease", "mou", "memorandum", "signed", "signature"],
+    "dispute": ["dispute", "arbitration", "mediation", "complaint", "grievance"],
+    "compliance": ["compliance", "regulatory", "regulation", "audit", "finma", "license"],
+    "meeting": ["meeting", "call", "session", "workshop", "conference"],
+    "travel": ["flight", "hotel", "booking", "travel", "airport", "train", "itinerary"],
+    "hr": ["employee", "hiring", "recruitment", "termination", "payroll", "hr"],
+    "it": ["it", "migration", "m365", "byod", "security", "infrastructure", "server", "cloud"],
+    "marketing": ["marketing", "pr", "campaign", "social media", "branding", "advertisement"],
+    "sales": ["sales", "buyer", "prospect", "pitch", "showing", "unit", "pricing"],
+    "investor": ["investor", "lp", "raise", "fund", "capital", "equity", "return"],
+}
+
+
+def _auto_tag(title: str, body: str) -> list:
+    """Auto-assign tags based on keyword matching. Max 5 tags per alert."""
+    search_text = ((title or "") + " " + (body or "")).lower()
+    matched = []
+    for tag, keywords in _TAG_KEYWORDS.items():
+        for kw in keywords:
+            if kw in search_text:
+                matched.append(tag)
+                break
+    return matched[:5]
+
+
 def _normalize_tier(raw_tier) -> int:
     """Normalize alert tier to integer 1/2/3. Defaults to 3 if invalid."""
     if isinstance(raw_tier, int) and raw_tier in (1, 2, 3):
@@ -354,6 +386,8 @@ class SentinelPipeline:
                     matter_slug = _match_matter_slug(alert_title, alert_body, self.store)
                     if matter_slug:
                         logger.info(f"Auto-assigned alert to matter '{matter_slug}'")
+                    # COCKPIT-V3 B1: Auto-tag by keyword matching
+                    tags = _auto_tag(alert_title, alert_body)
                     alert_id = self.store.create_alert(
                         tier=tier,
                         title=alert_title,
@@ -361,6 +395,7 @@ class SentinelPipeline:
                         action_required=alert.get("action_required", False),
                         trigger_id=trigger_log_id,
                         matter_slug=matter_slug,
+                        tags=tags,
                     )
                     # COCKPIT-ALERT-UI: generate structured actions for T1/T2 alerts
                     if alert_id and tier <= 2:

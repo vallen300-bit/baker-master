@@ -283,6 +283,23 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 .card-compact .card-header { padding: 10px 16px; }
 .card-compact .card-title { font-size: 12px; font-weight: 500; }
 
+/* Tag badges */
+.tag-badge {
+  display: inline-block; padding: 2px 7px; margin: 0 3px 3px 0;
+  background: #e8edf3; border-radius: 4px; font-size: 10px;
+  font-family: var(--mono); color: var(--text2); cursor: default;
+}
+.card-tags { padding: 0 16px 6px; }
+
+/* Ungrouped assign bar */
+.assign-bar {
+  display: flex; align-items: center; gap: 8px; padding: 4px 16px 8px;
+}
+.assign-select {
+  padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px;
+  font-size: 10px; font-family: var(--font); background: #fff; cursor: pointer;
+}
+
 /* Inline card result area */
 .card-result-area {
   margin: 4px 16px; padding: 12px 14px;

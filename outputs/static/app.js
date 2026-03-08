@@ -118,10 +118,12 @@ const TAB_VIEW_MAP = {
     'fires': 'viewFires',
     'matters': 'viewMatters',
     'deadlines': 'viewDeadlines',
+    'tags': 'viewTags',
     'ask-baker': 'viewAskBaker',
+    'ask-specialist': 'viewAskSpecialist',
 };
 
-const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'ask-baker']);
+const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'tags', 'ask-baker', 'ask-specialist']);
 
 function switchTab(tabName) {
     document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
@@ -152,7 +154,9 @@ function switchTab(tabName) {
     else if (tabName === 'fires') loadFires();
     else if (tabName === 'matters') loadMattersTab();
     else if (tabName === 'deadlines') loadDeadlinesTab();
+    else if (tabName === 'tags') loadTagsTab();
     else if (tabName === 'ask-baker') focusScanInput();
+    else if (tabName === 'ask-specialist') loadSpecialistTab();
 }
 
 // ═══ MORNING BRIEF ═══
@@ -316,6 +320,7 @@ async function loadFires() {
             setSafeHTML(cardsDiv, cardsHtml); // SECURITY: renderAlertCard uses esc() for all user data
             container.appendChild(cardsDiv);
         }
+        populateAssignDropdowns();
     } catch (e) {
         container.textContent = 'Failed to load fires.';
         container.style.color = 'var(--red)';
@@ -335,7 +340,8 @@ function renderAlertCard(alert, expanded) {
     const newClass = isNew ? ' new' : '';
     var aid = esc(String(alert.id));
 
-    var html = '<div class="card' + newClass + borderClass + '" data-alert-id="' + aid + '">';
+    var matterAttr = alert.matter_slug ? ' data-matter="' + esc(alert.matter_slug) + '"' : '';
+    var html = '<div class="card' + newClass + borderClass + '" data-alert-id="' + aid + '"' + matterAttr + '>';
 
     // Header
     html += '<div class="card-header">';
@@ -344,6 +350,27 @@ function renderAlertCard(alert, expanded) {
     if (isNew) html += '<span class="card-new-badge">new</span>';
     html += '<span class="card-time">' + esc(fmtRelativeTime(alert.created_at)) + '</span>';
     html += '</div>';
+
+    // Tag badges
+    var alertTags = alert.tags || [];
+    if (typeof alertTags === 'string') { try { alertTags = JSON.parse(alertTags); } catch(e) { alertTags = []; } }
+    if (alertTags.length > 0) {
+        html += '<div class="card-tags">';
+        for (var ti = 0; ti < alertTags.length; ti++) {
+            html += '<span class="tag-badge">' + esc(alertTags[ti]) + '</span>';
+        }
+        html += '</div>';
+    }
+
+    // Ungrouped assignment dropdown
+    if (!alert.matter_slug) {
+        html += '<div class="assign-bar">';
+        html += '<span style="font-size:10px;color:var(--amber);font-weight:600;">Assign to:</span>';
+        html += '<select class="assign-select" onchange="assignAlert(' + alert.id + ',this.value)" data-alert="' + aid + '">';
+        html += '<option value="">Select matter...</option>';
+        html += '</select>';
+        html += '</div>';
+    }
 
     // PCS (for T1/T2 with structured_actions)
     if (expanded && (tier <= 2) && alert.structured_actions) {
@@ -762,6 +789,7 @@ async function loadMatterDetail(matterSlug) {
         }).join('');
         setSafeHTML(cardsDiv, cardsHtml);
         container.appendChild(cardsDiv);
+        populateAssignDropdowns();
     } catch (e) {
         container.textContent = 'Failed to load matter.';
         container.style.color = 'var(--red)';
@@ -1056,6 +1084,149 @@ async function loadMattersTab() {
     } catch (e) {
         container.textContent = 'Failed to load matters.';
         container.style.color = 'var(--red)';
+    }
+}
+
+// ═══ TAGS TAB ═══
+
+async function loadTagsTab() {
+    var container = document.getElementById('tagsContent');
+    if (!container) return;
+    container.textContent = 'Loading tags...';
+
+    try {
+        var resp = await bakerFetch('/api/tags');
+        if (!resp.ok) return;
+        var data = await resp.json();
+
+        if (!data.tags || data.tags.length === 0) {
+            container.textContent = 'No tags found.';
+            container.style.cssText = 'color:var(--text3);font-size:13px;';
+            return;
+        }
+
+        container.textContent = '';
+        for (var i = 0; i < data.tags.length; i++) {
+            var t = data.tags[i];
+            var card = document.createElement('div');
+            card.className = 'card card-compact';
+            card.style.cursor = 'pointer';
+            card.dataset.tag = t.tag || t.name;
+            card.addEventListener('click', function() { loadTagItems(this.dataset.tag); });
+
+            var hdr = document.createElement('div');
+            hdr.className = 'card-header';
+
+            var badge = document.createElement('span');
+            badge.className = 'tag-badge';
+            badge.textContent = t.tag || t.name;
+            badge.style.marginTop = '3px';
+            hdr.appendChild(badge);
+
+            var title = document.createElement('span');
+            title.className = 'card-title';
+            title.textContent = '';
+            hdr.appendChild(title);
+
+            var count = document.createElement('span');
+            count.className = 'card-time';
+            count.textContent = t.count + ' items';
+            hdr.appendChild(count);
+
+            card.appendChild(hdr);
+            container.appendChild(card);
+        }
+    } catch (e) {
+        container.textContent = 'Failed to load tags.';
+        container.style.color = 'var(--red)';
+    }
+}
+
+async function loadTagItems(tag) {
+    var container = document.getElementById('tagsContent');
+    if (!container) return;
+    container.textContent = 'Loading...';
+
+    try {
+        var resp = await bakerFetch('/api/alerts/by-tag/' + encodeURIComponent(tag));
+        if (!resp.ok) return;
+        var data = await resp.json();
+
+        container.textContent = '';
+        var back = document.createElement('button');
+        back.className = 'footer-btn';
+        back.textContent = 'Back to all tags';
+        back.style.marginBottom = '12px';
+        back.addEventListener('click', function() { loadTagsTab(); });
+        container.appendChild(back);
+
+        var header = document.createElement('div');
+        header.className = 'section-label';
+        header.textContent = tag + ' (' + data.count + ' items)';
+        container.appendChild(header);
+
+        if (data.items.length === 0) {
+            var empty = document.createElement('div');
+            empty.textContent = 'No items with this tag.';
+            empty.style.cssText = 'color:var(--text3);font-size:13px;';
+            container.appendChild(empty);
+            return;
+        }
+
+        var cardsDiv = document.createElement('div');
+        setSafeHTML(cardsDiv, data.items.map(function(a) {
+            return renderAlertCard(a, (a.tier || 3) <= 2);
+        }).join(''));
+        container.appendChild(cardsDiv);
+        populateAssignDropdowns();
+    } catch (e) {
+        container.textContent = 'Failed to load items.';
+        container.style.color = 'var(--red)';
+    }
+}
+
+// ═══ UNGROUPED ASSIGNMENT ═══
+
+async function assignAlert(alertId, matterSlug) {
+    if (!matterSlug) return;
+    try {
+        await bakerFetch('/api/alerts/' + alertId + '/assign', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ matter_slug: matterSlug }),
+        });
+        // Reload current view to reflect change
+        if (currentTab === 'fires') loadFires();
+        else if (currentTab === 'matters') loadMattersTab();
+        else if (currentTab === 'morning-brief') loadMorningBrief();
+    } catch (e) {
+        console.error('assignAlert failed:', e);
+    }
+}
+
+/** Populate all assign dropdowns with active matters. Called after rendering cards. */
+async function populateAssignDropdowns() {
+    var selects = document.querySelectorAll('.assign-select');
+    if (selects.length === 0) return;
+    try {
+        var resp = await bakerFetch('/api/matters?status=active');
+        if (!resp.ok) return;
+        var data = await resp.json();
+        selects.forEach(function(sel) {
+            // Keep the first option
+            while (sel.options.length > 1) sel.remove(1);
+            if (data.matters) {
+                for (var i = 0; i < data.matters.length; i++) {
+                    var m = data.matters[i];
+                    var opt = document.createElement('option');
+                    opt.value = m.matter_name || m.slug;
+                    opt.textContent = m.matter_name || m.slug;
+                    sel.appendChild(opt);
+                }
+            }
+        });
+    } catch (e) {
+        console.error('populateAssignDropdowns failed:', e);
     }
 }
 

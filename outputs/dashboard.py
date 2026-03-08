@@ -173,6 +173,16 @@ class AlertReplyRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=4000)
 
 
+class AlertTagRequest(BaseModel):
+    action: str = Field(..., pattern=r"^(add|remove)$")
+    tag: str = Field(..., min_length=1, max_length=30, pattern=r"^[a-z0-9-]+$")
+
+
+class AlertAssignRequest(BaseModel):
+    matter_slug: str = Field(..., min_length=1, max_length=50)
+    new_name: Optional[str] = Field(None, max_length=200)
+
+
 def _serialize(obj: dict) -> dict:
     """Convert datetime fields to ISO strings for JSON serialization."""
     out = {}
@@ -917,6 +927,146 @@ async def get_activity_feed(hours: int = Query(24, ge=1, le=168)):
     except Exception as e:
         logger.error(f"GET /api/activity failed: {e}")
         return {"activity": []}
+
+
+# ============================================================
+# V3 Phase B1 — Tags, ungrouped assignment
+# ============================================================
+
+@app.get("/api/tags", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_tags():
+    """List distinct tags with item counts from pending alerts."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"tags": [], "total": 0}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT tag, COUNT(*) AS count
+                FROM alerts, jsonb_array_elements_text(tags) AS tag
+                WHERE status = 'pending'
+                GROUP BY tag
+                ORDER BY count DESC
+            """)
+            tags = [dict(r) for r in cur.fetchall()]
+            total = sum(t["count"] for t in tags)
+            cur.close()
+            return {"tags": tags, "total": total}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/tags failed: {e}")
+        return {"tags": [], "total": 0}
+
+
+@app.post("/api/alerts/{alert_id}/tag", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def tag_alert(alert_id: int, req: AlertTagRequest):
+    """Add or remove a tag on an alert."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            if req.action == "add":
+                cur.execute(
+                    "UPDATE alerts SET tags = tags || to_jsonb(%s::text) WHERE id = %s AND NOT tags ? %s RETURNING tags",
+                    (req.tag, alert_id, req.tag),
+                )
+            else:
+                cur.execute(
+                    "UPDATE alerts SET tags = tags - %s WHERE id = %s RETURNING tags",
+                    (req.tag, alert_id),
+                )
+            row = cur.fetchone()
+            conn.commit()
+            cur.close()
+            if not row:
+                return {"ok": True, "tags": []}
+            return {"ok": True, "tags": row["tags"]}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"POST /api/alerts/{alert_id}/tag failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/alerts/{alert_id}/assign", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def assign_alert(alert_id: int, req: AlertAssignRequest):
+    """Assign an ungrouped alert to a matter (existing or new)."""
+    import re
+    try:
+        store = _get_store()
+        slug = req.matter_slug
+
+        if slug == "_new":
+            if not req.new_name:
+                raise HTTPException(status_code=400, detail="new_name required when matter_slug is '_new'")
+            # Slugify: lowercase, replace spaces with _, strip special chars
+            slug = re.sub(r'[^a-z0-9_-]', '', req.new_name.lower().replace(' ', '_'))[:50]
+            if not slug:
+                raise HTTPException(status_code=400, detail="Invalid project name")
+            # Create new matter
+            store.create_matter(matter_name=slug, description=req.new_name)
+        else:
+            # Validate slug format
+            if not re.match(r'^[a-zA-Z0-9_-]+$', slug):
+                raise HTTPException(status_code=400, detail="Invalid matter_slug format")
+
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor()
+            cur.execute("UPDATE alerts SET matter_slug = %s WHERE id = %s", (slug, alert_id))
+            conn.commit()
+            cur.close()
+            return {"ok": True, "matter_slug": slug}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"POST /api/alerts/{alert_id}/assign failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/alerts/by-tag/{tag}", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_alerts_by_tag(tag: str):
+    """Get pending alerts filtered by tag."""
+    import re
+    if not re.match(r'^[a-z0-9-]+$', tag):
+        raise HTTPException(status_code=400, detail="Invalid tag format")
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"items": [], "count": 0, "tag": tag}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM alerts WHERE status = 'pending' AND tags ? %s ORDER BY tier, created_at DESC",
+                (tag,),
+            )
+            items = [_serialize(dict(r)) for r in cur.fetchall()]
+            cur.close()
+            return {"items": items, "count": len(items), "tag": tag}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"GET /api/alerts/by-tag/{tag} failed: {e}")
+        return {"items": [], "count": 0, "tag": tag}
 
 
 # ============================================================

@@ -2445,7 +2445,7 @@ class SentinelStoreBack:
                      action_required: bool = False, trigger_id: int = None,
                      contact_id: str = None, deal_id: str = None,
                      structured_actions: dict = None,
-                     matter_slug: str = None) -> Optional[int]:
+                     matter_slug: str = None, tags: list = None) -> Optional[int]:
         """Insert into alerts table. Returns alert ID."""
         conn = self._get_conn()
         if not conn:
@@ -2455,17 +2455,18 @@ class SentinelStoreBack:
             cur = conn.cursor()
             import json as _json
             sa_json = _json.dumps(structured_actions) if structured_actions else None
+            tags_json = _json.dumps(tags) if tags else '[]'
             cur.execute(
                 """
                 INSERT INTO alerts (tier, title, body, action_required,
                     trigger_id, contact_id, deal_id, structured_actions,
-                    matter_slug, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    matter_slug, tags, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 RETURNING id
                 """,
                 (tier, title, body, action_required,
                  trigger_id, contact_id if contact_id else None,
-                 deal_id if deal_id else None, sa_json, matter_slug),
+                 deal_id if deal_id else None, sa_json, matter_slug, tags_json),
             )
             alert_id = cur.fetchone()[0]
             conn.commit()
