@@ -37,6 +37,77 @@ def _truncate(text: str, max_len: int = 3000) -> str:
 # Alert formatters
 # ============================================================
 
+def _format_alert_body(body: str) -> str:
+    """Parse alert body into readable Slack mrkdwn with visual structure.
+
+    - First sentence becomes bold summary
+    - Lines starting with - or • become bullet points
+    - Key patterns (names, amounts, dates) get bolded
+    - Paragraphs get spacing
+    """
+    if not body:
+        return ""
+
+    lines = body.strip().split("\n")
+    result_lines = []
+    first_sentence_done = False
+
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            result_lines.append("")
+            continue
+
+        # Bold the first meaningful sentence as summary
+        if not first_sentence_done and len(stripped) > 10:
+            # Find sentence boundary — skip abbreviations (Mr. Dr. EUR. etc.)
+            _abbrevs = {"mr", "mrs", "ms", "dr", "prof", "inc", "ltd", "eur", "usd", "chf", "no", "vs", "st", "approx", "e.g", "i.e"}
+            dot_pos = -1
+            search_start = 0
+            while search_start < min(len(stripped), 300):
+                pos = stripped.find(". ", search_start)
+                if pos < 0:
+                    break
+                # Check if the word before the dot is an abbreviation
+                word_before = stripped[:pos].rsplit(None, 1)[-1].rstrip(".").lower() if pos > 0 else ""
+                if word_before not in _abbrevs:
+                    dot_pos = pos
+                    break
+                search_start = pos + 2
+            if dot_pos > 20 and dot_pos < 300:
+                summary = stripped[:dot_pos + 1]
+                remainder = stripped[dot_pos + 2:].strip()
+                result_lines.append(f"*{summary}*")
+                if remainder:
+                    result_lines.append("")
+                    result_lines.append(remainder)
+            else:
+                # No good sentence break — bold the whole first paragraph
+                result_lines.append(f"*{stripped[:300]}*")
+            first_sentence_done = True
+            continue
+
+        # Bullet points — ensure consistent formatting
+        if stripped.startswith(("- ", "• ", "* ")):
+            result_lines.append(f"  • {stripped[2:]}")
+            continue
+
+        # Numbered items
+        if len(stripped) > 2 and stripped[0].isdigit() and stripped[1] in (".", ")"):
+            result_lines.append(f"  {stripped}")
+            continue
+
+        result_lines.append(stripped)
+
+    text = "\n".join(result_lines)
+
+    # Bold key patterns: currency amounts, dates, percentages
+    text = re.sub(r'((?:EUR|CHF|USD|€|\$)\s?[\d,.]+[kKmM]?)', r'*\1*', text)
+    text = re.sub(r'(\d{1,2}[./]\d{1,2}[./]\d{2,4})', r'*\1*', text)
+
+    return text
+
+
 def format_alert_slack(alert: dict) -> dict:
     """
     Format a single alert as Slack Block Kit payload.
@@ -47,7 +118,7 @@ def format_alert_slack(alert: dict) -> dict:
     emoji = tier_emoji(tier)
     label = tier_label(tier)
     title = alert.get("title", "Untitled")
-    body = _truncate(alert.get("body", ""), 2800)
+    body = alert.get("body", "")
     contact = alert.get("contact_name")
     deal = alert.get("deal_name")
     action_required = alert.get("action_required", False)
@@ -61,31 +132,50 @@ def format_alert_slack(alert: dict) -> dict:
         }
     ]
 
-    # Body section — build mrkdwn with optional fields
-    body_parts = []
+    # Metadata fields (Contact, Deal) as compact side-by-side fields
+    fields = []
     if contact:
-        body_parts.append(f"*Contact:* {contact}")
+        fields.append({"type": "mrkdwn", "text": f"*Contact:* {contact}"})
     if deal:
-        body_parts.append(f"*Deal:* {deal}")
-    if body:
-        if body_parts:
-            body_parts.append("")  # blank line
-        body_parts.append(body)
-
-    if body_parts:
-        blocks.append({
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": _truncate("\n".join(body_parts))},
-        })
-
-    # Context line
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    ctx_parts = [f"Baker AI • {now}"]
+        fields.append({"type": "mrkdwn", "text": f"*Matter:* {deal}"})
     if action_required:
-        ctx_parts.append("Action required ✅")
+        fields.append({"type": "mrkdwn", "text": "✅ *Action required*"})
+    if fields:
+        blocks.append({"type": "section", "fields": fields})
+
+    # Divider between metadata and body
+    if fields and body:
+        blocks.append({"type": "divider"})
+
+    # Body — formatted for readability
+    if body:
+        formatted = _format_alert_body(body)
+        # Split into chunks if too long (Block Kit 3000 char limit per section)
+        chunks = []
+        current = []
+        current_len = 0
+        for line in formatted.split("\n"):
+            if current_len + len(line) + 1 > 2800:
+                chunks.append("\n".join(current))
+                current = [line]
+                current_len = len(line)
+            else:
+                current.append(line)
+                current_len += len(line) + 1
+        if current:
+            chunks.append("\n".join(current))
+
+        for chunk in chunks[:3]:  # Max 3 body sections
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": chunk},
+            })
+
+    # Context footer
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     blocks.append({
         "type": "context",
-        "elements": [{"type": "mrkdwn", "text": " • ".join(ctx_parts)}],
+        "elements": [{"type": "mrkdwn", "text": f"Baker AI • {now}"}],
     })
 
     return {"blocks": blocks}
