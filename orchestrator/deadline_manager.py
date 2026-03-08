@@ -288,8 +288,86 @@ def _determine_stage(hours_remaining: float) -> Optional[str]:
     return "30d"
 
 
+# ---------------------------------------------------------------------------
+# Phase 3B: Deadline proposal generation (Haiku)
+# ---------------------------------------------------------------------------
+
+_DEADLINE_PROPOSAL_PROMPT = """You are Baker, AI Chief of Staff for Dimitry Vallen (Chairman, Brisen Group).
+
+A deadline is approaching. Generate 2-3 specific, actionable proposals the Director should consider.
+
+For each proposal, specify:
+- label: Short name (e.g., "Send status check")
+- description: One line explaining what this produces
+- type: draft|analyze|plan
+- prompt: The full prompt Baker should execute if Director selects this
+
+Be specific — reference people, matters, and context provided.
+If the deadline is overdue, propose recovery actions.
+
+Return ONLY valid JSON with this structure:
+{
+  "problem": "What's at stake if this deadline is missed",
+  "cause": "Current status — what's been done, what hasn't",
+  "solution": "What success looks like",
+  "parts": [
+    {
+      "label": "Group label",
+      "actions": [
+        {"label": "Action name", "description": "...", "type": "draft", "prompt": "..."}
+      ]
+    }
+  ]
+}
+"""
+
+
+def _generate_deadline_proposal(deadline: dict, stage: str, hours_remaining: float) -> Optional[dict]:
+    """Generate action proposals for a deadline alert using Haiku (fast + cheap)."""
+    try:
+        description = deadline.get("description", "")
+        due_date = deadline.get("due_date")
+        due_str = due_date.strftime("%Y-%m-%d") if due_date else "TBD"
+        priority = deadline.get("priority", "normal")
+        source_snippet = (deadline.get("source_snippet") or "")[:500]
+
+        context = (
+            f"Deadline: {description}\n"
+            f"Due date: {due_str}\n"
+            f"Stage: {stage} ({int(hours_remaining)}h remaining)\n"
+            f"Priority: {priority}\n"
+        )
+        if source_snippet:
+            context += f"Source context: {source_snippet}\n"
+
+        claude = anthropic.Anthropic(api_key=config.claude.api_key)
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
+            system=_DEADLINE_PROPOSAL_PROMPT,
+            messages=[{"role": "user", "content": context}],
+        )
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+            if raw.endswith("```"):
+                raw = raw[:-3]
+            raw = raw.strip()
+        parsed = json.loads(raw)
+        if "parts" in parsed and isinstance(parsed["parts"], list):
+            logger.info(f"Generated deadline proposal: {len(parsed['parts'])} parts")
+            return parsed
+        logger.warning("Deadline proposal missing 'parts' key — discarding")
+        return None
+    except (json.JSONDecodeError, Exception) as e:
+        logger.warning(f"Deadline proposal generation failed: {e}")
+        return None
+
+
 def _fire_reminder(deadline: dict, stage: str, hours_remaining: float):
-    """Send a reminder via the appropriate channel based on stage."""
+    """Send a reminder via the appropriate channel based on stage.
+    Creates a DB alert for urgent stages and attaches Haiku proposals (Phase 3B).
+    """
     description = deadline.get("description", "Untitled")
     priority = deadline.get("priority", "normal")
     due_date = deadline.get("due_date")
@@ -299,33 +377,54 @@ def _fire_reminder(deadline: dict, stage: str, hours_remaining: float):
                       "high": "HIGH \u2014 VIP request",
                       "normal": "NORMAL"}.get(priority, priority)
 
-    # Stages 48h, day_of, overdue → push to digest buffer as alert
+    # Stages 48h, day_of, overdue → push to digest buffer + create DB alert
     if stage in ("48h", "day_of", "overdue"):
+        if stage == "overdue":
+            title = f"OVERDUE: {description}"
+        elif stage == "day_of":
+            title = f"DUE TODAY: {description}"
+        else:
+            title = f"Due in 48h: {description}"
+
+        body = f"{description} (due {due_str}, {priority_label})"
+        tier = 1
+
+        # Push to digest buffer
         try:
             from orchestrator.digest_manager import add_alert
-
-            if stage == "overdue":
-                title = f"OVERDUE: {description}"
-            elif stage == "day_of":
-                title = f"DUE TODAY: {description}"
-            else:
-                title = f"Due in 48h: {description}"
-
-            # Critical + urgent stages bypass digest
             is_critical = priority == "critical" and stage in ("48h", "day_of")
-
             add_alert(
                 title=title,
                 source_type="Deadline",
                 timestamp=datetime.now(timezone.utc).strftime("%H:%M UTC"),
-                tier=1,
+                tier=tier,
                 source_id=f"deadline:{deadline.get('id')}",
-                content=f"{description} (due {due_str}, {priority_label})",
+                content=body,
                 is_critical=is_critical,
             )
-            logger.info(f"Deadline alert [{stage}]: {description}")
         except Exception as e:
-            logger.warning(f"Deadline alert failed: {e}")
+            logger.warning(f"Deadline digest alert failed: {e}")
+
+        # Create DB alert + attach Haiku proposals (Phase 3B)
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            alert_id = store.create_alert(
+                tier=tier,
+                title=title,
+                body=body,
+                action_required=True,
+                tags=["deadline"],
+            )
+            if alert_id:
+                proposal = _generate_deadline_proposal(deadline, stage, hours_remaining)
+                if proposal:
+                    store.update_alert_structured_actions(alert_id, proposal)
+                    logger.info(f"Deadline proposal attached to alert #{alert_id}")
+        except Exception as e:
+            logger.warning(f"Deadline DB alert/proposal failed: {e}")
+
+        logger.info(f"Deadline alert [{stage}]: {description}")
 
     # Stages 30d, 7d, 2d → included in daily briefing (no separate alert)
     else:
