@@ -183,6 +183,10 @@ class WhoopConfig:
 @dataclass
 class SlackConfig:
     bot_token: str = os.getenv("SLACK_BOT_TOKEN", "")
+    # Signing secret for Events API request verification
+    signing_secret: str = os.getenv("SLACK_SIGNING_SECRET", "")
+    # events | polling (default: polling — Events API is additive, polling stays as fallback)
+    mode: str = os.getenv("SLACK_MODE", "polling")
     # Comma-separated channel IDs to poll for ingest (default: #cockpit)
     channel_ids: List[str] = field(default_factory=lambda: [
         c.strip() for c in os.getenv("SLACK_CHANNEL_IDS", "C0AF4FVN3FB").split(",") if c.strip()

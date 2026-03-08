@@ -84,6 +84,9 @@ _allowed_origins = [
 from triggers.waha_webhook import router as waha_router
 app.include_router(waha_router)
 
+from triggers.slack_events import router as slack_events_router
+app.include_router(slack_events_router, prefix="/webhook")
+
 from outputs.email_router import router as email_router
 app.include_router(email_router)
 
