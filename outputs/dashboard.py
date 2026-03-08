@@ -3573,6 +3573,24 @@ async def list_browser_tasks(active_only: bool = True):
         cur.execute(sql)
         cols = [d[0] for d in cur.description]
         rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+        # Fetch latest result per task (DASHBOARD-DATA-LAYER)
+        for row in rows:
+            cur.execute("""
+                SELECT content, structured_data, created_at, mode_used
+                FROM browser_results
+                WHERE task_id = %s
+                ORDER BY created_at DESC LIMIT 1
+            """, (row["id"],))
+            result = cur.fetchone()
+            if result:
+                row["latest_result"] = {
+                    "content": (result[0] or "")[:300],
+                    "structured_data": result[1],
+                    "created_at": result[2].isoformat() if result[2] else None,
+                    "mode_used": result[3],
+                }
+            else:
+                row["latest_result"] = None
         cur.close()
         # Convert datetimes
         for row in rows:

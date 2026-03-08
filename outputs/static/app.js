@@ -125,9 +125,11 @@ const TAB_VIEW_MAP = {
     'ask-specialist': 'viewAskSpecialist',
     'travel': 'viewTravel',
     'media': 'viewMedia',
+    'commitments': 'viewCommitments',
+    'browser': 'viewBrowser',
 };
 
-const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'tags', 'search', 'ask-baker', 'ask-specialist', 'travel', 'media']);
+const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'tags', 'search', 'ask-baker', 'ask-specialist', 'travel', 'media', 'commitments', 'browser']);
 
 function switchTab(tabName) {
     document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
@@ -156,6 +158,8 @@ function switchTab(tabName) {
     else if (tabName === 'ask-specialist') loadSpecialistTab();
     else if (tabName === 'travel') loadTravelTab();
     else if (tabName === 'media') loadMediaTab();
+    else if (tabName === 'commitments') loadCommitmentsTab();
+    else if (tabName === 'browser') loadBrowserTab();
 }
 
 // ═══ MORNING BRIEF ═══
@@ -2316,6 +2320,232 @@ async function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+// ═══ DASHBOARD-DATA-LAYER: COMMITMENTS + BROWSER TABS ═══
+
+function _injectDataLayerCSS() {
+    if (document.getElementById('data-layer-css')) return;
+    var s = document.createElement('style');
+    s.id = 'data-layer-css';
+    s.textContent = [
+        '.commitment-card{background:white;border:1px solid #e8e8e8;border-radius:8px;padding:12px 16px;margin-bottom:8px}',
+        '.commitment-card.overdue{border-left:3px solid #f44336}',
+        '.commitment-desc{font-size:14px;font-weight:500;margin-bottom:4px}',
+        '.commitment-meta{font-size:12px;color:#888}',
+        '.overdue-badge{background:#f44336;color:white;font-size:11px;padding:1px 6px;border-radius:3px;font-weight:600}',
+        '.filter-tabs{display:flex;gap:4px;margin:12px 0}',
+        '.filter-tab{border:1px solid #ddd;background:white;border-radius:4px;padding:4px 12px;font-size:13px;cursor:pointer}',
+        '.filter-tab.active{background:#333;color:white;border-color:#333}',
+        '.tab-header{display:flex;justify-content:flex-end;margin-bottom:8px}',
+        '.tab-count{font-size:13px;color:#888}',
+        '.empty-state{text-align:center;color:#aaa;padding:32px;font-size:14px}',
+        '.browser-card{background:white;border:1px solid #e8e8e8;border-radius:8px;padding:12px 16px;margin-bottom:8px}',
+        '.browser-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}',
+        '.browser-name{font-size:14px;font-weight:600}',
+        '.browser-meta{font-size:12px;color:#888;margin-top:2px}',
+        '.browser-warn{color:#f44336}',
+        '.browser-result{margin-top:8px;padding-top:8px;border-top:1px solid #f0f0f0}',
+        '.result-label{font-size:11px;color:#888;text-transform:uppercase;margin-bottom:4px}',
+        '.result-snippet{font-size:13px;color:#555;line-height:1.4}',
+        '.run-btn{border:1px solid #2196f3;color:#2196f3;background:white;border-radius:4px;padding:4px 10px;font-size:12px;cursor:pointer}',
+        '.run-btn:hover{background:#2196f3;color:white}',
+        '.run-btn:disabled{opacity:0.5;cursor:not-allowed}',
+    ].join('\n');
+    document.head.appendChild(s);
+}
+
+// --- Commitments Tab ---
+
+var _commitmentsFilter = 'active';
+
+async function loadCommitmentsTab() {
+    _injectDataLayerCSS();
+    var container = document.getElementById('commitmentsContent');
+    if (!container) return;
+    container.textContent = 'Loading...';
+
+    try {
+        var url = '/api/commitments';
+        if (_commitmentsFilter) url += '?status=' + _commitmentsFilter;
+        var data = await bakerFetch(url).then(function(r) { return r.json(); });
+        var items = data.commitments || [];
+        var overdue = data.overdue_count || 0;
+        var total = data.total || items.length;
+
+        var wrapper = document.createElement('div');
+
+        // Header
+        var header = document.createElement('div');
+        header.className = 'tab-header';
+        var count = document.createElement('span');
+        count.className = 'tab-count';
+        count.textContent = overdue + ' overdue / ' + total + ' total';
+        header.appendChild(count);
+        wrapper.appendChild(header);
+
+        // Filter tabs
+        var filters = document.createElement('div');
+        filters.className = 'filter-tabs';
+        ['active', 'overdue', 'completed', ''].forEach(function(f) {
+            var label = f || 'all';
+            var btn = document.createElement('button');
+            btn.className = _commitmentsFilter === f ? 'filter-tab active' : 'filter-tab';
+            btn.textContent = label.charAt(0).toUpperCase() + label.slice(1);
+            btn.addEventListener('click', function() { _commitmentsFilter = f; loadCommitmentsTab(); });
+            filters.appendChild(btn);
+        });
+        wrapper.appendChild(filters);
+
+        // Cards
+        if (items.length === 0) {
+            var empty = document.createElement('div');
+            empty.className = 'empty-state';
+            empty.textContent = 'No commitments with status "' + (_commitmentsFilter || 'all') + '"';
+            wrapper.appendChild(empty);
+        } else {
+            items.forEach(function(c) {
+                var isOverdue = c.status === 'overdue' || (c.due_date && new Date(c.due_date) < new Date() && c.status === 'active');
+                var card = document.createElement('div');
+                card.className = isOverdue ? 'commitment-card overdue' : 'commitment-card';
+
+                var desc = document.createElement('div');
+                desc.className = 'commitment-desc';
+                if (isOverdue) {
+                    var badge = document.createElement('span');
+                    badge.className = 'overdue-badge';
+                    badge.textContent = 'OVERDUE';
+                    desc.appendChild(badge);
+                    desc.appendChild(document.createTextNode(' '));
+                }
+                desc.appendChild(document.createTextNode(c.description || ''));
+                card.appendChild(desc);
+
+                var meta = document.createElement('div');
+                meta.className = 'commitment-meta';
+                var dueStr = c.due_date ? new Date(c.due_date).toLocaleDateString('en-GB', {month: 'short', day: 'numeric'}) : 'No date';
+                var metaText = 'Due: ' + dueStr + ' \u00B7 Source: ' + (c.source || '?');
+                if (c.assigned_to) metaText += ' \u00B7 Assigned: ' + c.assigned_to;
+                meta.textContent = metaText;
+                card.appendChild(meta);
+
+                wrapper.appendChild(card);
+            });
+        }
+
+        container.textContent = '';
+        container.appendChild(wrapper);
+    } catch (e) {
+        container.textContent = 'Failed to load commitments.';
+        console.warn('Commitments load failed:', e);
+    }
+}
+
+// --- Browser Monitor Tab ---
+
+function _timeAgo(date) {
+    var seconds = Math.floor((new Date() - date) / 1000);
+    if (seconds < 60) return seconds + 's ago';
+    var minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return minutes + ' min ago';
+    var hours = Math.floor(minutes / 60);
+    if (hours < 24) return hours + 'h ago';
+    return Math.floor(hours / 24) + 'd ago';
+}
+
+async function loadBrowserTab() {
+    _injectDataLayerCSS();
+    var container = document.getElementById('browserContent');
+    if (!container) return;
+    container.textContent = 'Loading...';
+
+    try {
+        var data = await bakerFetch('/api/browser/tasks').then(function(r) { return r.json(); });
+        var tasks = data.tasks || [];
+
+        var wrapper = document.createElement('div');
+
+        var header = document.createElement('div');
+        header.className = 'tab-header';
+        var count = document.createElement('span');
+        count.className = 'tab-count';
+        count.textContent = tasks.length + ' tasks';
+        header.appendChild(count);
+        wrapper.appendChild(header);
+
+        if (tasks.length === 0) {
+            var empty = document.createElement('div');
+            empty.className = 'empty-state';
+            empty.textContent = 'No browser monitoring tasks configured';
+            wrapper.appendChild(empty);
+        } else {
+            tasks.forEach(function(t) {
+                var card = document.createElement('div');
+                card.className = 'browser-card';
+
+                var hdr = document.createElement('div');
+                hdr.className = 'browser-header';
+                var name = document.createElement('span');
+                name.className = 'browser-name';
+                name.textContent = t.name;
+                var runBtn = document.createElement('button');
+                runBtn.className = 'run-btn';
+                runBtn.textContent = 'Run Now';
+                runBtn.addEventListener('click', function() { _runBrowserTask(t.id, runBtn); });
+                hdr.appendChild(name);
+                hdr.appendChild(runBtn);
+                card.appendChild(hdr);
+
+                var meta1 = document.createElement('div');
+                meta1.className = 'browser-meta';
+                meta1.textContent = 'Mode: ' + t.mode + ' \u00B7 Category: ' + (t.category || '\u2014');
+                card.appendChild(meta1);
+
+                var lastPolled = t.last_polled ? _timeAgo(new Date(t.last_polled)) : 'never';
+                var failures = t.consecutive_failures || 0;
+                var meta2 = document.createElement('div');
+                meta2.className = 'browser-meta' + (failures > 0 ? ' browser-warn' : '');
+                meta2.textContent = 'Last polled: ' + lastPolled + ' \u00B7 ' + failures + ' failures';
+                card.appendChild(meta2);
+
+                if (t.latest_result) {
+                    var snippet = (t.latest_result.content || '').substring(0, 200).replace(/\n/g, ' ');
+                    var resultDiv = document.createElement('div');
+                    resultDiv.className = 'browser-result';
+                    var label = document.createElement('div');
+                    label.className = 'result-label';
+                    label.textContent = 'Latest result:';
+                    var snipDiv = document.createElement('div');
+                    snipDiv.className = 'result-snippet';
+                    snipDiv.textContent = snippet;
+                    resultDiv.appendChild(label);
+                    resultDiv.appendChild(snipDiv);
+                    card.appendChild(resultDiv);
+                }
+
+                wrapper.appendChild(card);
+            });
+        }
+
+        container.textContent = '';
+        container.appendChild(wrapper);
+    } catch (e) {
+        container.textContent = 'Failed to load browser tasks.';
+        console.warn('Browser tab load failed:', e);
+    }
+}
+
+async function _runBrowserTask(taskId, btn) {
+    btn.disabled = true;
+    btn.textContent = 'Running...';
+    try {
+        await bakerFetch('/api/browser/tasks/' + taskId + '/run', { method: 'POST' });
+        btn.textContent = 'Done';
+        setTimeout(function() { btn.textContent = 'Run Now'; btn.disabled = false; }, 5000);
+    } catch (e) {
+        btn.textContent = 'Failed';
+        setTimeout(function() { btn.textContent = 'Run Now'; btn.disabled = false; }, 3000);
+    }
+}
 
 // ═══ LEARNING-LOOP: FEEDBACK BUTTONS ═══
 
