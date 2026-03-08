@@ -977,8 +977,6 @@ function setupCommandBar() {
     });
 }
 
-// ═══ INIT ═══
-
 // ═══ MATTERS TAB ═══
 
 var _currentMatterSlug = null;

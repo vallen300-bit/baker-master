@@ -1030,9 +1030,49 @@ async def reply_to_alert(alert_id: int, req: AlertReplyRequest):
             project=alert.get("matter_slug"),
         )
 
-        # Call the scan endpoint internally and collect the streamed response
-        # We use the agentic/capability pipeline directly
-        return await scan_chat(scan_req)
+        # Call the scan endpoint internally — returns StreamingResponse (SSE)
+        streaming_resp = await scan_chat(scan_req)
+
+        # Wrap the SSE stream to capture Baker's response and store in alert_threads.
+        # Brief spec (COCKPIT_V3 §4): "Both messages are inserted into alert_threads."
+        async def _capture_and_store_reply():
+            baker_tokens = []
+            async for chunk in streaming_resp.body_iterator:
+                yield chunk
+                if isinstance(chunk, str) and chunk.startswith("data: "):
+                    payload = chunk[6:].strip()
+                    if payload and payload != "[DONE]":
+                        try:
+                            d = json.loads(payload)
+                            if "token" in d:
+                                baker_tokens.append(d["token"])
+                        except (ValueError, KeyError):
+                            pass
+            # Store Baker's complete response (fault-tolerant)
+            full_reply = "".join(baker_tokens)
+            if full_reply.strip():
+                try:
+                    _s = _get_store()
+                    _c = _s._get_conn()
+                    if _c:
+                        try:
+                            _cur = _c.cursor()
+                            _cur.execute(
+                                "INSERT INTO alert_threads (alert_id, role, content) VALUES (%s, 'baker', %s)",
+                                (alert_id, full_reply),
+                            )
+                            _c.commit()
+                            _cur.close()
+                        finally:
+                            _s._put_conn(_c)
+                except Exception as store_err:
+                    logger.debug(f"Failed to store baker reply for alert {alert_id}: {store_err}")
+
+        return StreamingResponse(
+            _capture_and_store_reply(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+        )
 
     except HTTPException:
         raise
