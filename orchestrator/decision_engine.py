@@ -505,6 +505,7 @@ def run_vip_sla_check():
     de_config = config.decision_engine
     vips = _get_vips()
     if not vips:
+        logger.info("VIP SLA check: no VIP contacts configured — skipping")
         return
 
     # Build lookup: sender_name_lower -> vip
@@ -531,24 +532,25 @@ def run_vip_sla_check():
             return
         try:
             cur = conn.cursor()
-            # L2 fix: ORDER BY received_at DESC to get the MOST RECENT unanswered msg
+            # L2 fix: ORDER BY timestamp DESC to get the MOST RECENT unanswered msg
             # (SLA timer starts from latest message, not oldest)
+            # Fix: whatsapp_messages uses 'timestamp' not 'received_at'
             cur.execute("""
                 SELECT DISTINCT ON (wm.sender_name)
                     wm.sender_name,
                     wm.sender,
-                    wm.received_at,
+                    wm.timestamp AS received_at,
                     wm.full_text
                 FROM whatsapp_messages wm
                 WHERE wm.is_director = FALSE
-                  AND wm.received_at > NOW() - INTERVAL '24 hours'
+                  AND wm.timestamp > NOW() - INTERVAL '24 hours'
                   AND NOT EXISTS (
                       SELECT 1 FROM whatsapp_messages reply
                       WHERE reply.chat_id = wm.chat_id
                         AND reply.is_director = TRUE
-                        AND reply.received_at > wm.received_at
+                        AND reply.timestamp > wm.timestamp
                   )
-                ORDER BY wm.sender_name, wm.received_at DESC
+                ORDER BY wm.sender_name, wm.timestamp DESC
             """)
             unanswered = cur.fetchall()
             cols = [d[0] for d in cur.description]
@@ -649,6 +651,7 @@ def run_vip_sla_check():
                         body=alert_body,
                         action_required=True,
                         tags=["vip-sla"],
+                        source="vip_sla",
                     )
                     if alert_id:
                         draft = _generate_vip_draft(vip, msg, sender_name, wait_minutes)
@@ -657,6 +660,8 @@ def run_vip_sla_check():
                             logger.info(f"VIP auto-draft attached to alert #{alert_id}")
                 except Exception as e:
                     logger.warning(f"VIP auto-draft failed for {sender_name}: {e}")
+
+        logger.info(f"VIP SLA check complete: checked {len(unanswered)} unanswered messages against {len(vips)} VIPs")
 
     except Exception as e:
         logger.error(f"VIP SLA check failed: {e}")

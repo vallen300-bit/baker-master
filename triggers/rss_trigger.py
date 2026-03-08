@@ -504,6 +504,7 @@ def _check_article_relevance(article: dict, feed_title: str, store):
             action_required=bool(result.get("action_needed")),
             matter_slug=matter,
             tags=["intelligence", "media"],
+            source="rss_intelligence",
         )
         logger.info(f"Intelligence alert created: '{title[:60]}' (score {score})")
 

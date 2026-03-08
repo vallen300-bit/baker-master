@@ -322,6 +322,7 @@ def check_calendar_and_prep():
             action_required=False,
             matter_slug=matter_slug,
             tags=tags,
+            source="calendar_prep",
         )
 
         if alert_id:
@@ -336,8 +337,7 @@ def check_calendar_and_prep():
     # Phase 3C: Detect calendar conflicts
     _detect_and_alert_conflicts(meetings, store, trigger_state)
 
-    if prepped_count:
-        logger.info(f"Calendar prep complete: {prepped_count} new briefings created")
+    logger.info(f"Calendar prep complete: {prepped_count} new briefings created from {len(meetings)} upcoming meetings")
 
 
 # ============================================================
@@ -408,6 +408,7 @@ def _detect_and_alert_conflicts(meetings: list, store, trigger_state):
             ),
             action_required=True,
             tags=["calendar", "conflict"],
+            source="calendar_protection",
         )
         trigger_state.set_watermark(wk, datetime.now(timezone.utc))
         logger.info(f"Calendar conflict alert: '{a['title']}' vs '{b['title']}'")

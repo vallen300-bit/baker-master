@@ -159,6 +159,8 @@ CREATE TABLE IF NOT EXISTS alerts (
     trigger_id  INTEGER REFERENCES trigger_log(id),
     contact_id  UUID REFERENCES contacts(id),
     deal_id     UUID REFERENCES deals(id),
+    source      TEXT,                              -- subsystem that created this alert (pipeline, calendar_prep, vip_sla, etc.)
+    travel_date DATE,                              -- for travel-tagged alerts (COCKPIT-V3 Phase C)
     -- Timestamps
     created_at  TIMESTAMPTZ DEFAULT NOW()
 );
@@ -166,6 +168,7 @@ CREATE TABLE IF NOT EXISTS alerts (
 CREATE INDEX idx_alerts_status ON alerts(status) WHERE status = 'pending';
 CREATE INDEX idx_alerts_tier ON alerts(tier);
 CREATE INDEX idx_alerts_matter ON alerts(matter_slug) WHERE matter_slug IS NOT NULL;
+CREATE INDEX idx_alerts_source ON alerts(source) WHERE source IS NOT NULL;
 
 -- ============================================
 -- ALERT THREADS — Conversation per alert card (V3)

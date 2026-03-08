@@ -58,6 +58,7 @@ def run_commitment_check():
                 ),
                 action_required=True,
                 tags=["commitment", "overdue"],
+                source="commitment_check",
             )
             if alert_id:
                 trigger_state.set_watermark(wk, datetime.now(timezone.utc))
@@ -86,6 +87,7 @@ def run_commitment_check():
                 ),
                 action_required=False,
                 tags=["commitment"],
+                source="commitment_check",
             )
             if alert_id:
                 trigger_state.set_watermark(wk, datetime.now(timezone.utc))
@@ -94,8 +96,7 @@ def run_commitment_check():
         cur.close()
 
         total = len(overdue) + len(due_soon)
-        if total:
-            logger.info(f"Commitment check: {len(overdue)} overdue, {len(due_soon)} due soon")
+        logger.info(f"Commitment check complete: {len(overdue)} overdue, {len(due_soon)} due soon (total open commitments checked)")
 
     except Exception as e:
         logger.error(f"Commitment check failed: {e}")

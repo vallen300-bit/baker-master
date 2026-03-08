@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 import anthropic
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -386,26 +386,41 @@ async def email_backfill_endpoint(days: int = Query(14, ge=1, le=90)):
 
 
 @app.post("/api/whatsapp/backfill", tags=["whatsapp"], dependencies=[Depends(verify_api_key)])
-async def whatsapp_backfill_endpoint(days: int = Query(90, ge=1, le=365)):
-    """Backfill last N days of WhatsApp messages from WAHA API to Qdrant + PostgreSQL."""
-    import asyncio
-    try:
-        from scripts.extract_whatsapp import extract_historical, ingest_to_qdrant
-        from datetime import datetime, timedelta, timezone
+async def whatsapp_backfill_endpoint(
+    days: int = Query(90, ge=1, le=365),
+    background_tasks: BackgroundTasks = None,
+):
+    """Backfill last N days of WhatsApp messages from WAHA API to Qdrant + PostgreSQL.
+    Runs in background — returns immediately with job status.
+    """
+    from datetime import datetime, timedelta, timezone
 
-        since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
 
-        def _run():
+    def _run_backfill():
+        try:
+            from scripts.extract_whatsapp import extract_historical, ingest_to_qdrant
             items = extract_historical(since=since, limit=None, chat_id=None, dry_run=False, download_media=True)
             if items:
                 ingest_to_qdrant(items)
-            return len(items)
+            logger.info(f"WhatsApp backfill complete: {len(items)} chats ingested ({days} days)")
+        except Exception as e:
+            logger.error(f"WhatsApp backfill failed: {e}")
 
-        count = await asyncio.to_thread(_run)
-        return {"status": "ok", "message": f"Backfill completed — {count} chats ingested", "days": days}
-    except Exception as e:
-        logger.error(f"WhatsApp backfill endpoint failed: {e}")
-        return {"status": "error", "message": str(e)}
+    if background_tasks:
+        background_tasks.add_task(_run_backfill)
+        return {"status": "started", "message": f"Backfill started in background ({days} days from {since})", "days": days}
+    else:
+        # Fallback: run inline (for testing)
+        import asyncio
+        try:
+            count = await asyncio.to_thread(lambda: (
+                extract_historical(since=since, limit=None, chat_id=None, dry_run=False, download_media=True)
+            ))
+            return {"status": "ok", "message": f"Backfill completed — {len(count)} chats", "days": days}
+        except Exception as e:
+            logger.error(f"WhatsApp backfill endpoint failed: {e}")
+            return {"status": "error", "message": str(e)}
 
 
 # ============================================================

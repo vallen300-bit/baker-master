@@ -403,6 +403,7 @@ class SentinelPipeline:
                         trigger_id=trigger_log_id,
                         matter_slug=matter_slug,
                         tags=tags,
+                        source="pipeline",
                     )
                     # COCKPIT-ALERT-UI: generate structured actions for T1/T2 alerts
                     if alert_id and tier <= 2:
@@ -790,8 +791,7 @@ def run_alert_expiry_check():
 
             conn.commit()
             cur.close()
-            if expired_count > 0:
-                logger.info(f"Auto-expired {expired_count} stale alerts (T2/T3/T4, >3 days old)")
+            logger.info(f"Alert expiry check complete: {expired_count} expired out of {len(candidates)} candidates")
         finally:
             store._put_conn(conn)
     except Exception as e:

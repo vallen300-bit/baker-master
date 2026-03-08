@@ -202,6 +202,7 @@ def _check_email_intelligence(email_text: str, subject: str, sender: str):
             action_required=(urgency == "high"),
             matter_slug=matter,
             tags=["intelligence", signal_type] if signal_type else ["intelligence"],
+            source="email_intelligence",
         )
         logger.info(f"Email intelligence alert: {signal_type} — {summary[:60]}")
 
@@ -239,7 +240,7 @@ def check_new_emails():
                 try:
                     from memory.store_back import SentinelStoreBack
                     store = SentinelStoreBack._get_global_instance()
-                    store.create_alert(tier=1, title=gap_title, body=gap_body)
+                    store.create_alert(tier=1, title=gap_title, body=gap_body, source="email_gap")
                     from outputs.slack_notifier import SlackNotifier
                     SlackNotifier().post_alert({
                         "tier": 1,

@@ -2557,8 +2557,13 @@ class SentinelStoreBack:
                      action_required: bool = False, trigger_id: int = None,
                      contact_id: str = None, deal_id: str = None,
                      structured_actions: dict = None,
-                     matter_slug: str = None, tags: list = None) -> Optional[int]:
-        """Insert into alerts table. Returns alert ID."""
+                     matter_slug: str = None, tags: list = None,
+                     source: str = None) -> Optional[int]:
+        """Insert into alerts table. Returns alert ID.
+        source: identifies the subsystem that created this alert
+            (e.g. 'email_trigger', 'calendar_prep', 'vip_sla', 'deadline_cadence',
+             'commitment_check', 'rss_intelligence', 'calendar_protection', 'pipeline').
+        """
         conn = self._get_conn()
         if not conn:
             logger.warning("No DB connection — skipping create_alert")
@@ -2572,13 +2577,14 @@ class SentinelStoreBack:
                 """
                 INSERT INTO alerts (tier, title, body, action_required,
                     trigger_id, contact_id, deal_id, structured_actions,
-                    matter_slug, tags, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    matter_slug, tags, source, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 RETURNING id
                 """,
                 (tier, title, body, action_required,
                  trigger_id, contact_id if contact_id else None,
-                 deal_id if deal_id else None, sa_json, matter_slug, tags_json),
+                 deal_id if deal_id else None, sa_json, matter_slug, tags_json,
+                 source),
             )
             alert_id = cur.fetchone()[0]
             conn.commit()

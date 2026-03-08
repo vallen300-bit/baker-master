@@ -264,11 +264,11 @@ def run_cadence_check():
     # Auto-dismiss unconfirmed soft deadlines after 7 days
     dismissed = _auto_dismiss_soft_deadlines()
 
-    if alerts_fired or expired or dismissed:
-        logger.info(
-            f"Cadence check: {alerts_fired} reminders fired, "
-            f"{expired} expired, {dismissed} soft deadlines auto-dismissed"
-        )
+    logger.info(
+        f"Cadence check complete: {alerts_fired} reminders fired, "
+        f"{expired} expired, {dismissed} soft deadlines auto-dismissed, "
+        f"{len(deadlines)} active deadlines checked"
+    )
 
 
 def _determine_stage(hours_remaining: float) -> Optional[str]:
@@ -415,6 +415,7 @@ def _fire_reminder(deadline: dict, stage: str, hours_remaining: float):
                 body=body,
                 action_required=True,
                 tags=["deadline"],
+                source="deadline_cadence",
             )
             if alert_id:
                 proposal = _generate_deadline_proposal(deadline, stage, hours_remaining)
