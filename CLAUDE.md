@@ -288,18 +288,26 @@ Baker becomes an orchestrator that assembles **capability sets** dynamically per
 
 **Director decisions (Q2/Q9/Q12):** Quality bar 85-90% default. Director-only visibility at launch. Success = proactive answers before asked, 10-20% editing only.
 
-### Phase 3 — Proactive Baker (NEXT after Phase 2)
-Baker executes the 7 standing orders autonomously. Requires Phase 2 agents + calendar integration.
+### Phase 3 — Proactive Baker (SHIPPED, Session 11 + fixes Session 12)
+Baker executes the 7 standing orders autonomously. Code complete, deployed.
 
-| Standing Order | Depends On |
-|---|---|
-| No surprises in meetings — auto-prepare briefings | Calendar integration + Research Agent |
-| No deadline missed — status checks + proposals | Commitment Tracker + Legal Agent |
-| VIP 24h response — auto-draft responses | Comms/Draft Agent |
-| Morning briefing with proposals | Morning Briefing Upgrade + all agents |
-| Track commitments + follow-through | Commitment Tracker (new) |
-| Proactive intelligence — analysis on signals | RETRIEVAL-FIX-2 + Research Agent |
-| Protect calendar + prepare the day | Calendar integration |
+**Session 12 fixes (Code 300):**
+- VIP SLA check: `received_at` → `timestamp` column name fix (query crashed every 5 min)
+- VIP SLA check: dual-lookup by name AND WhatsApp ID (backfilled msgs have phone numbers as sender_name)
+- All Phase 3 jobs: always-on completion logging (previously silent when no data to process)
+- Alert source tracking: `source` column added to alerts table, all alert creation calls tagged
+- WhatsApp backfill: stores individual messages to `whatsapp_messages` table (was Qdrant-only)
+- WhatsApp backfill: async endpoint (BackgroundTasks) — no longer times out on long backfills
+
+| Standing Order | Status | Notes |
+|---|---|---|
+| #1 No surprises in meetings | Code deployed | Calendar auth may need re-verification |
+| #2 No deadline missed | Working | 112 active deadlines tracked |
+| #3 VIP 24h response | Fixed | Column name + WA ID matching fixed |
+| #4 Morning briefing | Code deployed | Runs daily 06:00 UTC |
+| #5 Track commitments | Empty table | Extraction code exists, 0 rows produced |
+| #6 Proactive intelligence | Code deployed | 1 insight produced |
+| #7 Protect calendar | Code deployed | Calendar auth may need re-verification |
 
 ### Phase 4 — Scale & Optimize (FUTURE)
 - **Cost Monitor (Step 4):** API cost tracking, circuit breaker at €5/day
@@ -310,8 +318,10 @@ Baker executes the 7 standing orders autonomously. Requires Phase 2 agents + cal
 - **Learning Loop:** Director feedback → tune Decision Engine weights + agent routing
 
 ### Open Items (operational)
-- **WhatsApp historical backfill:** Run `POST /api/whatsapp/backfill?days=365` (needs `WHATSAPP_API_KEY` on Render)
-- **Email backfill re-run:** Run POST /api/emails/backfill?days=14 for attachment text extraction
+- ~~**WhatsApp historical backfill:**~~ DONE (Session 12) — 1,490+ messages from 55 chats, 2 years of history
+- ~~**Email backfill re-run:**~~ DONE (Session 12) — 38 emails with attachment text extracted
+- **Slack full bot integration:** Brief written (`BRIEF_SLACK_BOT_INTEGRATION.md`). **Blocked:** Director must set `SLACK_BOT_TOKEN` on Render first. Current Slack polling code works but token is missing.
+- **Commitment seeding:** commitments table is empty — extraction code exists in email_trigger.py + fireflies_trigger.py but has never produced rows. Needs investigation or manual seeding.
 - **ClaimsMax / Philip emails:** Draft emails ready, need Philip's email address
 - **Wertheimer term sheet:** Financial decisions needed before Cowork can draft
 
@@ -394,6 +404,29 @@ Designed and specified **COCKPIT-V3** — full dashboard redesign with Director.
 
 **Dashboard status:** All 11 tabs live — Morning Brief (+ meetings today + proposals), Fires, Matters, People, Deadlines, Tags, Search, Ask Baker, Ask Specialist, Travel, Media.
 **Proactive Baker:** 15 scheduled jobs running. Calendar prep (15min), email poll (5min), VIP SLA (5min), deadline cadence (1h), commitment check (6h), alert expiry (6h), RSS (1h), + 8 more.
+
+### Session 12 — 2026-03-08 (dimitry300 machine, Code 300 supervisor)
+**Phase 3 production review + operational fixes.** 4 commits pushed.
+
+Production audit found Phase 3 deployed but producing zero observable output:
+- **VIP SLA bug:** `whatsapp_messages.received_at` doesn't exist (column is `timestamp`). Query crashed every 5 min. Same bug class as Session 11 Phase 3A.
+- **VIP SLA matching:** Backfilled WA messages have phone numbers as sender_name. Added dual-lookup by name AND WhatsApp ID.
+- **Observability gap:** All Phase 3 jobs returned silently when finding nothing to process. Added always-on completion logging.
+- **Alert source tracking:** Added `source` column to alerts table + migration. All create_alert() calls now tagged (pipeline, calendar_prep, vip_sla, deadline_cadence, commitment_check, rss_intelligence, calendar_protection, email_intelligence).
+- **WhatsApp backfill architecture gap:** Backfill stored to Qdrant only, not `whatsapp_messages` table. Phase 3 (VIP SLA, calendar context) queries PostgreSQL directly — invisible backfill. Fixed: individual messages now stored to PostgreSQL during extraction.
+- **WhatsApp backfill async:** Endpoint now uses BackgroundTasks — 365-day backfill no longer times out.
+
+Data operations:
+- **WhatsApp 365-day backfill:** Completed — 1,490+ messages from 55 chats, date range 2024-03-03 to 2026-03-08, 602 Director messages.
+- **Email re-extraction:** Completed — 38 emails with attachment text (was 26).
+
+Briefs:
+- **BRIEF_SLACK_BOT_INTEGRATION.md** — Slack Events API upgrade from polling. Blocked: Director must set SLACK_BOT_TOKEN on Render.
+
+Remaining:
+- Commitments table is empty (extraction never produced rows)
+- Calendar OAuth may need re-verification on Render
+- Slack bot: waiting on Director for SLACK_BOT_TOKEN
 
 ## Key Documents (Dropbox)
 
