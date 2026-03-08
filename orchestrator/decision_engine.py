@@ -508,12 +508,18 @@ def run_vip_sla_check():
         logger.info("VIP SLA check: no VIP contacts configured — skipping")
         return
 
-    # Build lookup: sender_name_lower -> vip
+    # Build lookups: name -> vip AND whatsapp_id -> vip
     vip_lookup = {}
+    vip_wa_lookup = {}
     for vip in vips:
         name = (vip.get("name") or "").lower()
         if name:
             vip_lookup[name] = vip
+        wa_id = vip.get("whatsapp_id") or ""
+        if wa_id:
+            # Normalize: strip @c.us/@s.whatsapp.net, store just the number
+            wa_num = wa_id.split("@")[0] if "@" in wa_id else wa_id
+            vip_wa_lookup[wa_num] = vip
 
     now = datetime.now(timezone.utc)
     now_ts = now.timestamp()
@@ -562,9 +568,10 @@ def run_vip_sla_check():
         for msg in unanswered:
             sender_name = (msg.get("sender_name") or "").strip()
             sender_lower = sender_name.lower()
+            sender_jid = (msg.get("sender") or "").strip()
             received_at = msg.get("received_at")
 
-            if not received_at or not sender_lower:
+            if not received_at:
                 continue
 
             # Ensure timezone-aware
@@ -573,15 +580,25 @@ def run_vip_sla_check():
 
             wait_minutes = (now - received_at).total_seconds() / 60
 
-            # Match against VIP list (L1: word-boundary match)
+            # Match against VIP list: try name first, then WhatsApp ID
             vip = None
-            for vip_name, vip_data in vip_lookup.items():
-                if _vip_name_matches(vip_name, sender_lower):
-                    vip = vip_data
-                    break
+            if sender_lower:
+                for vip_name, vip_data in vip_lookup.items():
+                    if _vip_name_matches(vip_name, sender_lower):
+                        vip = vip_data
+                        break
+
+            # Fallback: match by WhatsApp number (handles backfilled msgs with phone-only sender_name)
+            if not vip and sender_jid:
+                sender_num = sender_jid.split("@")[0] if "@" in sender_jid else sender_jid
+                vip = vip_wa_lookup.get(sender_num)
 
             if not vip:
                 continue
+
+            # Use VIP name if sender_name is just a phone number
+            if sender_name.isdigit() or not sender_name:
+                sender_name = vip.get("name", sender_name)
 
             vip_tier = vip.get("tier", 2)
 
