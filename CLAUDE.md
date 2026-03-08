@@ -386,7 +386,9 @@ Designed and specified **COCKPIT-V3** — full dashboard redesign with Director.
 
 - **COCKPIT-V3 Phase C** (4 commits) — reviewed, 1 fix applied (RSS URL sanitization: reject javascript:/data: schemes in article links), merged. People tab (GET /api/people merges VIP+contacts, GET /api/people/{name}/activity across emails/WA/meetings). Search tab (GET /api/alerts/search with 7 filter params, all parameterized dynamic SQL, debounced live search). Travel tab (travel_date column, upcoming/past split). Media tab (GET /api/rss/articles + GET /api/rss/feeds, grouped by date, category filter). Alert auto-expiry (run_alert_expiry_check every 6h, T2-T4 >3 days expired, T1 + travel never expire). "Coming soon" removed — all 11 sidebar tabs functional. **COCKPIT-V3 IS COMPLETE.**
 
-**Dashboard status:** All 11 tabs live — Morning Brief, Fires, Matters, People, Deadlines, Tags, Search, Ask Baker, Ask Specialist, Travel, Media.
+- **Phase 3A: Calendar Trigger** (4 commits) — reviewed, 1 fix applied (column name mismatches: email_messages.received_at→received_date, whatsapp_messages.body→full_text, received_at→timestamp), merged. Google Calendar polling every 15 min. Meeting auto-prep: detects meetings within 24h, assembles attendee context from memory (VIP contacts, emails, WhatsApp, past meetings), generates briefing via Haiku, creates T2 alert card. Dedup via trigger_watermarks. GET /api/calendar/upcoming with prep status. Morning Brief shows meetings today with prepped/pending badges. **Standing Order #1: "No surprises in meetings" — IMPLEMENTED.** Requires Director re-auth for calendar scope (pending).
+
+**Dashboard status:** All 11 tabs live — Morning Brief (+ meetings today), Fires, Matters, People, Deadlines, Tags, Search, Ask Baker, Ask Specialist, Travel, Media.
 
 ## Key Documents (Dropbox)
 
