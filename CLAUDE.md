@@ -374,6 +374,14 @@ Shipped:
 - **COCKPIT-ALERT-UI** (5 commits) — interactive alert command cards in CEO Cockpit. Haiku generates structured actions (problem/cause/solution + action parts) for T1/T2 alerts. Director selects/skips/customizes actions, executes sequentially via /api/scan SSE. New: `structured_actions` JSONB column, dismiss endpoint, mobile responsive CSS.
 - **PLUGINS-WEB-SEARCH-DOC-READER** (3 commits) — 2 new agent tools. `web_search` (Tavily SDK, graceful fallback). `read_document` (email attachment extraction via `=== ATTACHMENTS ===` marker + file path mode via extractors.py). Migration SQL run against Neon. TAVILY_API_KEY set on Render.
 
+Bugs fixed: capability streaming (asyncio.Queue → queue.Queue + Exception catch), alert card markdown rendering (textContent → md()), copy button added. Backfilled 20 existing alerts with structured_actions. Domain capability timeouts bumped 30s → 90s.
+
+Designed and specified **COCKPIT-V3** — full dashboard redesign with Director. Wrote `BRIEF_COCKPIT_V3.md` v1.5 (500+ lines). 11 sidebar tabs, split layout, 6-color system, matter grouping, Resolve/Dismiss exit paths, reply threads, Baker never auto-resolves, agentic RAG preservation rules. PM reviewed and approved. Prototype: `_01_INBOX_FROM_CLAUDE/baker_cockpit_v3_final.html`.
+
+- **COCKPIT-V3 Phase A1** (5 commits) — reviewed, 1 fix applied (cache invalidation), merged. Full dashboard rewrite: sidebar navigation, Morning Brief (Haiku narrative + stats), Fires tab, Deadlines tab, Ask Baker (SSE preserved), command bar (Cmd+K). New schema: matter_slug, exit_reason, tags, board_status on alerts + alert_threads table.
+
+**Next: Phase A2** — matter auto-assignment, inline card results, Matters detail view, reply threads, result toolbar.
+
 ## Key Documents (Dropbox)
 
 | Document | Path | Purpose |
