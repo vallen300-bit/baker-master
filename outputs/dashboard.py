@@ -1375,16 +1375,16 @@ async def extract_commitments_retroactive(background_tasks: BackgroundTasks):
             logger.info(f"Retroactive commitment extraction: processed {m_count} meetings")
 
             # 2. Extract from emails
-            cur.execute("SELECT thread_id, subject, body FROM email_messages WHERE body IS NOT NULL ORDER BY received_date DESC LIMIT 200")
+            cur.execute("SELECT thread_id, subject, full_body, sender_name FROM email_messages WHERE full_body IS NOT NULL ORDER BY received_date DESC LIMIT 200")
             emails = cur.fetchall()
             e_count = 0
             for em in emails:
                 try:
                     from triggers.email_trigger import _extract_commitments_from_email
                     _extract_commitments_from_email(
-                        email_text=em["body"],
+                        email_text=em["full_body"],
                         subject=em.get("subject", ""),
-                        sender=em.get("primary_sender", ""),
+                        sender=em.get("sender_name", ""),
                         source_id=em["thread_id"],
                     )
                     e_count += 1
