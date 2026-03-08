@@ -83,23 +83,30 @@ _TAG_KEYWORDS = {
     "compliance": ["compliance", "regulatory", "regulation", "audit", "finma", "license"],
     "meeting": ["meeting", "call", "session", "workshop", "conference"],
     "travel": ["flight", "hotel", "booking", "travel", "airport", "train", "itinerary"],
-    "hr": ["employee", "hiring", "recruitment", "termination", "payroll", "hr"],
-    "it": ["it", "migration", "m365", "byod", "security", "infrastructure", "server", "cloud"],
-    "marketing": ["marketing", "pr", "campaign", "social media", "branding", "advertisement"],
-    "sales": ["sales", "buyer", "prospect", "pitch", "showing", "unit", "pricing"],
-    "investor": ["investor", "lp", "raise", "fund", "capital", "equity", "return"],
+    "hr": ["employee", "hiring", "recruitment", "termination", "payroll"],
+    "it": ["migration", "m365", "byod", "infrastructure", "server", "cloud"],
+    "marketing": ["marketing", "campaign", "social media", "branding", "advertisement"],
+    "sales": ["sales", "buyer", "prospect", "pitch", "showing", "pricing"],
+    "investor": ["investor", "raise", "fund", "capital", "equity"],
 }
 
 
 def _auto_tag(title: str, body: str) -> list:
-    """Auto-assign tags based on keyword matching. Max 5 tags per alert."""
+    """Auto-assign tags based on keyword matching. Max 5 tags per alert.
+    Short keywords (≤3 chars) use word-boundary matching to avoid false positives
+    (e.g. 'lp' in 'helpful', 'hr' in 'three')."""
     search_text = ((title or "") + " " + (body or "")).lower()
     matched = []
     for tag, keywords in _TAG_KEYWORDS.items():
         for kw in keywords:
-            if kw in search_text:
-                matched.append(tag)
-                break
+            if len(kw) <= 3:
+                if re.search(r'\b' + re.escape(kw) + r'\b', search_text):
+                    matched.append(tag)
+                    break
+            else:
+                if kw in search_text:
+                    matched.append(tag)
+                    break
     return matched[:5]
 
 
