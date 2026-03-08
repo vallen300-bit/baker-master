@@ -236,9 +236,215 @@ async function loadMorningBrief() {
         if (statMeetings) setText('statMeetings', data.meeting_count || 0);
 
         loadMattersSummary();
+
+        // DASHBOARD-COST-WIDGET: Load system health widgets
+        loadSystemWidgets();
     } catch (e) {
         console.error('loadMorningBrief failed:', e);
     }
+}
+
+// ═══ SYSTEM HEALTH WIDGETS (DASHBOARD-COST-WIDGET) ═══
+
+function _injectSystemCSS() {
+    if (document.getElementById('system-widget-css')) return;
+    var s = document.createElement('style');
+    s.id = 'system-widget-css';
+    s.textContent = [
+        '.system-section-title{font-size:14px;font-weight:600;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin:24px 0 12px;padding-top:16px;border-top:2px solid #eee}',
+        '.system-widget{background:#fafafa;border:1px solid #eee;border-radius:8px;padding:12px 16px;margin-bottom:12px}',
+        '.widget-header{display:flex;justify-content:space-between;align-items:center;font-size:14px;font-weight:600;margin-bottom:8px}',
+        '.widget-value{font-size:18px;font-weight:700}',
+        '.widget-detail{font-size:12px;color:#888;margin-top:4px}',
+        '.cost-bar-track{height:6px;background:#eee;border-radius:3px;margin:6px 0;overflow:hidden}',
+        '.cost-bar-fill{height:100%;border-radius:3px;transition:width 0.3s}',
+        '.metric-row{display:flex;gap:12px;font-size:13px;padding:3px 0;border-bottom:1px solid #f0f0f0}',
+        '.metric-row:last-child{border-bottom:none}',
+        '.metric-name{flex:1;font-weight:500}',
+        '.metric-val{color:#666;white-space:nowrap}',
+        '.metric-good{color:#4caf50}',
+        '.metric-warn{color:#ff9800}',
+        '.metric-fail{color:#f44336}',
+    ].join('\n');
+    document.head.appendChild(s);
+}
+
+async function loadSystemWidgets() {
+    _injectSystemCSS();
+    var container = document.getElementById('systemWidgets');
+    if (!container) return;
+    container.textContent = '';
+    var title = document.createElement('h3');
+    title.className = 'system-section-title';
+    title.textContent = 'System Health';
+    container.appendChild(title);
+
+    await Promise.all([
+        renderCostWidget(container),
+        renderMetricsWidget(container),
+        renderQualityWidget(container),
+    ]);
+}
+
+async function renderCostWidget(container) {
+    try {
+        var results = await Promise.all([
+            bakerFetch('/api/cost/today').then(function(r) { return r.json(); }),
+            bakerFetch('/api/cost/history?days=7').then(function(r) { return r.json(); }),
+        ]);
+        var costData = results[0];
+        var historyData = results[1];
+
+        var total = costData.total_eur || 0;
+        var threshold = costData.alert_threshold_eur || 15;
+        var pct = Math.min((total / threshold) * 100, 100);
+        var barColor = pct > 80 ? '#f44336' : pct > 50 ? '#ff9800' : '#4caf50';
+
+        var models = Object.entries(costData.by_model || {})
+            .map(function(entry) {
+                var m = entry[0], d = entry[1];
+                var shortName = m.indexOf('haiku') >= 0 ? 'Haiku' : m.indexOf('sonnet') >= 0 ? 'Sonnet' : 'Opus';
+                return esc(shortName) + ': \u20AC' + Number(d.cost).toFixed(2) + ' (' + d.calls + ')';
+            }).join(' \u00B7 ') || 'No calls yet';
+
+        var trend = (historyData.history || [])
+            .slice(0, 7).reverse()
+            .map(function(d) { return '\u20AC' + Number(d.total_eur).toFixed(2); })
+            .join(' \u2192 ') || 'No history';
+
+        var w = document.createElement('div');
+        w.className = 'system-widget';
+
+        var header = document.createElement('div');
+        header.className = 'widget-header';
+        var hLabel = document.createElement('span');
+        hLabel.textContent = 'API Cost Today';
+        var hVal = document.createElement('span');
+        hVal.className = 'widget-value';
+        hVal.textContent = '\u20AC' + total.toFixed(2);
+        header.appendChild(hLabel);
+        header.appendChild(hVal);
+        w.appendChild(header);
+
+        var track = document.createElement('div');
+        track.className = 'cost-bar-track';
+        var fill = document.createElement('div');
+        fill.className = 'cost-bar-fill';
+        fill.style.width = pct + '%';
+        fill.style.background = barColor;
+        track.appendChild(fill);
+        w.appendChild(track);
+
+        var details = [
+            '\u20AC' + total.toFixed(2) + ' / \u20AC' + threshold + ' alert threshold',
+            models,
+            '7-day: ' + trend
+        ];
+        details.forEach(function(txt) {
+            var d = document.createElement('div');
+            d.className = 'widget-detail';
+            d.textContent = txt;
+            w.appendChild(d);
+        });
+        container.appendChild(w);
+    } catch (e) { console.warn('Cost widget failed:', e); }
+}
+
+async function renderMetricsWidget(container) {
+    try {
+        var data = await bakerFetch('/api/agent-metrics?hours=24').then(function(r) { return r.json(); });
+        var tools = (data.tool_metrics && data.tool_metrics.tools || []).slice(0, 5);
+        var total = (data.tool_metrics && data.tool_metrics.total_calls) || 0;
+
+        var w = document.createElement('div');
+        w.className = 'system-widget';
+
+        var header = document.createElement('div');
+        header.className = 'widget-header';
+        var hLabel = document.createElement('span');
+        hLabel.textContent = 'Agent Performance (24h)';
+        var hVal = document.createElement('span');
+        hVal.className = 'widget-value';
+        hVal.textContent = total + ' calls';
+        header.appendChild(hLabel);
+        header.appendChild(hVal);
+        w.appendChild(header);
+
+        if (tools.length === 0) {
+            var empty = document.createElement('div');
+            empty.className = 'widget-detail';
+            empty.textContent = 'No tool calls in last 24h';
+            w.appendChild(empty);
+        } else {
+            tools.forEach(function(t) {
+                var row = document.createElement('div');
+                row.className = 'metric-row';
+                var name = document.createElement('span');
+                name.className = 'metric-name';
+                name.textContent = t.tool_name;
+                var calls = document.createElement('span');
+                calls.className = 'metric-val';
+                calls.textContent = t.calls + ' calls';
+                var latency = document.createElement('span');
+                latency.className = 'metric-val';
+                latency.textContent = 'avg ' + t.avg_latency_ms + 'ms';
+                var fails = document.createElement('span');
+                fails.className = 'metric-val' + (t.failures > 0 ? ' metric-fail' : '');
+                fails.textContent = t.failures + ' fail';
+                row.appendChild(name);
+                row.appendChild(calls);
+                row.appendChild(latency);
+                row.appendChild(fails);
+                w.appendChild(row);
+            });
+        }
+        container.appendChild(w);
+    } catch (e) { console.warn('Metrics widget failed:', e); }
+}
+
+async function renderQualityWidget(container) {
+    try {
+        var data = await bakerFetch('/api/capability-quality').then(function(r) { return r.json(); });
+        var caps = (data.capabilities || []).slice(0, 6);
+
+        var w = document.createElement('div');
+        w.className = 'system-widget';
+
+        var header = document.createElement('div');
+        header.className = 'widget-header';
+        var hLabel = document.createElement('span');
+        hLabel.textContent = 'Capability Quality';
+        header.appendChild(hLabel);
+        w.appendChild(header);
+
+        if (caps.length === 0) {
+            var empty = document.createElement('div');
+            empty.className = 'widget-detail';
+            empty.textContent = 'No capability tasks yet';
+            w.appendChild(empty);
+        } else {
+            caps.forEach(function(c) {
+                var quality = c.quality_pct !== null ? c.quality_pct + '% accepted' : 'no feedback yet';
+                var qClass = c.quality_pct === null ? '' : c.quality_pct >= 80 ? ' metric-good' : c.quality_pct >= 50 ? ' metric-warn' : ' metric-fail';
+                var row = document.createElement('div');
+                row.className = 'metric-row';
+                var name = document.createElement('span');
+                name.className = 'metric-name';
+                name.textContent = c.slug;
+                var tasks = document.createElement('span');
+                tasks.className = 'metric-val';
+                tasks.textContent = c.total_tasks + ' tasks';
+                var q = document.createElement('span');
+                q.className = 'metric-val' + qClass;
+                q.textContent = quality;
+                row.appendChild(name);
+                row.appendChild(tasks);
+                row.appendChild(q);
+                w.appendChild(row);
+            });
+        }
+        container.appendChild(w);
+    } catch (e) { console.warn('Quality widget failed:', e); }
 }
 
 // ═══ MATTERS SUMMARY (sidebar) ═══
