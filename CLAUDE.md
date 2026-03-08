@@ -380,7 +380,9 @@ Designed and specified **COCKPIT-V3** — full dashboard redesign with Director.
 
 - **COCKPIT-V3 Phase A1** (5 commits) — reviewed, 1 fix applied (cache invalidation), merged. Full dashboard rewrite: sidebar navigation, Morning Brief (Haiku narrative + stats), Fires tab, Deadlines tab, Ask Baker (SSE preserved), command bar (Cmd+K). New schema: matter_slug, exit_reason, tags, board_status on alerts + alert_threads table.
 
-**Next: Phase A2** — matter auto-assignment, inline card results, Matters detail view, reply threads, result toolbar.
+- **COCKPIT-V3 Phase A2** (4 commits) — reviewed, 1 fix applied (baker reply storage in alert_threads), merged. Matter auto-assignment (score-based keyword matching in pipeline.py). Reply thread backend (POST /api/alerts/{id}/reply routes through scan_chat, GET /api/alerts/{id}/threads, 50-reply limit). Matters detail view (GET /api/matters/{slug}/items). Inline card results (SSE streams into card, not tab switch). Result toolbar (Copy, Word, Email). Enhanced deadlines (grouped by urgency). All 3 CRITICAL rules respected: every action routes through existing agentic RAG pipeline.
+
+**Next: Phase B** — per brief spec (security review, offline/error states, advanced features).
 
 ## Key Documents (Dropbox)
 
