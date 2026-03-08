@@ -23,6 +23,54 @@ logger = logging.getLogger("sentinel.pipeline")
 # Helpers
 # ============================================================
 
+def _match_matter_slug(title: str, body: str, store: SentinelStoreBack) -> Optional[str]:
+    """
+    Match alert title+body against matter_registry keywords to auto-assign matter_slug.
+    Returns matter_name (used as slug) if a match is found, None otherwise.
+    Uses simple case-insensitive keyword matching — same approach as capability trigger patterns.
+    """
+    try:
+        matters = store.get_matters(status="active")
+        if not matters:
+            return None
+
+        search_text = (title + " " + (body or "")).lower()
+
+        best_match = None
+        best_score = 0
+
+        for matter in matters:
+            score = 0
+            name = (matter.get("matter_name") or "").lower()
+            keywords = matter.get("keywords") or []
+            people = matter.get("people") or []
+
+            # Match on matter name (strongest signal)
+            if name and name in search_text:
+                score += 3
+
+            # Match on keywords
+            for kw in keywords:
+                if kw and kw.lower() in search_text:
+                    score += 2
+
+            # Match on people names
+            for person in people:
+                if person and person.lower() in search_text:
+                    score += 1
+
+            if score > best_score:
+                best_score = score
+                best_match = matter.get("matter_name")
+
+        if best_score >= 2:  # Require at least a keyword match
+            return best_match
+        return None
+    except Exception as e:
+        logger.debug(f"Matter matching failed (non-fatal): {e}")
+        return None
+
+
 def _normalize_tier(raw_tier) -> int:
     """Normalize alert tier to integer 1/2/3. Defaults to 3 if invalid."""
     if isinstance(raw_tier, int) and raw_tier in (1, 2, 3):
@@ -300,12 +348,19 @@ class SentinelPipeline:
             if response.alerts:
                 for alert in response.alerts:
                     tier = _normalize_tier(alert.get("tier"))
+                    alert_title = alert.get("title", "Untitled alert")
+                    alert_body = alert.get("body", "")
+                    # COCKPIT-V3 A2: Auto-assign matter_slug by keyword matching
+                    matter_slug = _match_matter_slug(alert_title, alert_body, self.store)
+                    if matter_slug:
+                        logger.info(f"Auto-assigned alert to matter '{matter_slug}'")
                     alert_id = self.store.create_alert(
                         tier=tier,
-                        title=alert.get("title", "Untitled alert"),
-                        body=alert.get("body", ""),
+                        title=alert_title,
+                        body=alert_body,
                         action_required=alert.get("action_required", False),
                         trigger_id=trigger_log_id,
+                        matter_slug=matter_slug,
                     )
                     # COCKPIT-ALERT-UI: generate structured actions for T1/T2 alerts
                     if alert_id and tier <= 2:
