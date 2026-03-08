@@ -390,7 +390,10 @@ Designed and specified **COCKPIT-V3** — full dashboard redesign with Director.
 
 - **Phase 3B: Proactive Upgrades** (3 commits) — reviewed, **no bugs found** (first clean delivery from Brisen), merged. Deadline proposals (Haiku generates action proposals for 48h/day_of/overdue alerts, attached as structured_actions). VIP auto-drafts (>4h unanswered → Haiku drafts substantive reply + acknowledge option, creates T2 alert with structured_actions). Morning briefing proposals (per-fire action proposals appended to Haiku narrative, inherits 30-min cache). **Standing Orders #2, #3, #4 — IMPLEMENTED.**
 
+- **Phase 3C: Advanced** (3 commits) — reviewed, **no bugs found** (second clean delivery), merged. Commitment tracker (commitments table, Haiku extraction from meetings + emails, overdue check every 6h, GET /api/commitments). Proactive intelligence (RSS relevance scoring threshold 7/10 for alerts + 5-6 for insights, email signal detection on high-priority). Calendar protection (15-min [Baker Prep] blocks auto-created, conflict detection with T2 alerts + sorted dedup keys). **Standing Orders #5, #6, #7 — IMPLEMENTED. ALL 7 STANDING ORDERS ARE LIVE.**
+
 **Dashboard status:** All 11 tabs live — Morning Brief (+ meetings today + proposals), Fires, Matters, People, Deadlines, Tags, Search, Ask Baker, Ask Specialist, Travel, Media.
+**Proactive Baker:** 15 scheduled jobs running. Calendar prep (15min), email poll (5min), VIP SLA (5min), deadline cadence (1h), commitment check (6h), alert expiry (6h), RSS (1h), + 8 more.
 
 ## Key Documents (Dropbox)
 
