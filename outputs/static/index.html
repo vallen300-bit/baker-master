@@ -78,6 +78,7 @@
     <div class="cmd-bar">
         <div class="cmd-input-wrap">
             <input class="cmd-input" id="cmdInput" placeholder="Ask Baker anything..." maxlength="4000" />
+            <span class="cmd-detect-badge" id="cmdDetectBadge" hidden></span>
             <span class="cmd-shortcut">Cmd+K</span>
         </div>
         <div class="cmd-quick-btns">
@@ -146,6 +147,12 @@
             <div id="deadlinesContent"></div>
         </div>
 
+        <!-- VIEW: Tags -->
+        <div class="view" id="viewTags">
+            <div class="section-label">Tags</div>
+            <div id="tagsContent"></div>
+        </div>
+
         <!-- VIEW: Ask Baker (Scan chat) -->
         <div class="view" id="viewAskBaker">
             <div class="scan-view-header">
@@ -156,6 +163,25 @@
                 <form id="scanForm" class="scan-form" autocomplete="off">
                     <input id="scanInput" type="text" class="scan-input" placeholder="Ask Baker..." maxlength="4000" required />
                     <button type="submit" class="scan-send" id="scanSendBtn">Send</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- VIEW: Ask Specialist -->
+        <div class="view" id="viewAskSpecialist">
+            <div class="scan-view-header">
+                <span class="scan-view-title">Ask Specialist</span>
+            </div>
+            <div style="padding:0 0 12px;">
+                <select id="specialistPicker" class="specialist-picker">
+                    <option value="">Select a specialist...</option>
+                </select>
+            </div>
+            <div class="scan-view-body">
+                <div id="specialistMessages" class="scan-messages"></div>
+                <form id="specialistForm" class="scan-form" autocomplete="off">
+                    <input id="specialistInput" type="text" class="scan-input" placeholder="Ask the specialist..." maxlength="4000" required disabled />
+                    <button type="submit" class="scan-send" id="specialistSendBtn" disabled>Send</button>
                 </form>
             </div>
         </div>

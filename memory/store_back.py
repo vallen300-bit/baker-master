@@ -111,6 +111,7 @@ class SentinelStoreBack:
         self._ensure_baker_tasks_capability_columns()
         self._ensure_alerts_v3_columns()
         self._ensure_alert_threads_table()
+        self._ensure_alert_artifacts_table()
 
     # -------------------------------------------------------
     # Connection pool management
@@ -2441,11 +2442,40 @@ class SentinelStoreBack:
         finally:
             self._put_conn(conn)
 
+    def _ensure_alert_artifacts_table(self):
+        """Create alert_artifacts table if missing. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS alert_artifacts (
+                    id SERIAL PRIMARY KEY,
+                    alert_id INTEGER REFERENCES alerts(id),
+                    matter_slug TEXT,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    format TEXT DEFAULT 'md',
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_alert_artifacts_matter ON alert_artifacts(matter_slug)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_alert_artifacts_alert ON alert_artifacts(alert_id)")
+            conn.commit()
+            cur.close()
+            logger.info("alert_artifacts table verified")
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"Could not ensure alert_artifacts table: {e}")
+        finally:
+            self._put_conn(conn)
+
     def create_alert(self, tier: int, title: str, body: str = None,
                      action_required: bool = False, trigger_id: int = None,
                      contact_id: str = None, deal_id: str = None,
                      structured_actions: dict = None,
-                     matter_slug: str = None) -> Optional[int]:
+                     matter_slug: str = None, tags: list = None) -> Optional[int]:
         """Insert into alerts table. Returns alert ID."""
         conn = self._get_conn()
         if not conn:
@@ -2455,17 +2485,18 @@ class SentinelStoreBack:
             cur = conn.cursor()
             import json as _json
             sa_json = _json.dumps(structured_actions) if structured_actions else None
+            tags_json = _json.dumps(tags) if tags else '[]'
             cur.execute(
                 """
                 INSERT INTO alerts (tier, title, body, action_required,
                     trigger_id, contact_id, deal_id, structured_actions,
-                    matter_slug, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    matter_slug, tags, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 RETURNING id
                 """,
                 (tier, title, body, action_required,
                  trigger_id, contact_id if contact_id else None,
-                 deal_id if deal_id else None, sa_json, matter_slug),
+                 deal_id if deal_id else None, sa_json, matter_slug, tags_json),
             )
             alert_id = cur.fetchone()[0]
             conn.commit()

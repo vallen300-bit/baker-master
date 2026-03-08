@@ -118,10 +118,12 @@ const TAB_VIEW_MAP = {
     'fires': 'viewFires',
     'matters': 'viewMatters',
     'deadlines': 'viewDeadlines',
+    'tags': 'viewTags',
     'ask-baker': 'viewAskBaker',
+    'ask-specialist': 'viewAskSpecialist',
 };
 
-const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'ask-baker']);
+const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'tags', 'ask-baker', 'ask-specialist']);
 
 function switchTab(tabName) {
     document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
@@ -152,7 +154,9 @@ function switchTab(tabName) {
     else if (tabName === 'fires') loadFires();
     else if (tabName === 'matters') loadMattersTab();
     else if (tabName === 'deadlines') loadDeadlinesTab();
+    else if (tabName === 'tags') loadTagsTab();
     else if (tabName === 'ask-baker') focusScanInput();
+    else if (tabName === 'ask-specialist') loadSpecialistTab();
 }
 
 // ═══ MORNING BRIEF ═══
@@ -316,6 +320,7 @@ async function loadFires() {
             setSafeHTML(cardsDiv, cardsHtml); // SECURITY: renderAlertCard uses esc() for all user data
             container.appendChild(cardsDiv);
         }
+        populateAssignDropdowns();
     } catch (e) {
         container.textContent = 'Failed to load fires.';
         container.style.color = 'var(--red)';
@@ -335,7 +340,8 @@ function renderAlertCard(alert, expanded) {
     const newClass = isNew ? ' new' : '';
     var aid = esc(String(alert.id));
 
-    var html = '<div class="card' + newClass + borderClass + '" data-alert-id="' + aid + '">';
+    var matterAttr = alert.matter_slug ? ' data-matter="' + esc(alert.matter_slug) + '"' : '';
+    var html = '<div class="card' + newClass + borderClass + '" data-alert-id="' + aid + '"' + matterAttr + '>';
 
     // Header
     html += '<div class="card-header">';
@@ -344,6 +350,27 @@ function renderAlertCard(alert, expanded) {
     if (isNew) html += '<span class="card-new-badge">new</span>';
     html += '<span class="card-time">' + esc(fmtRelativeTime(alert.created_at)) + '</span>';
     html += '</div>';
+
+    // Tag badges
+    var alertTags = alert.tags || [];
+    if (typeof alertTags === 'string') { try { alertTags = JSON.parse(alertTags); } catch(e) { alertTags = []; } }
+    if (alertTags.length > 0) {
+        html += '<div class="card-tags">';
+        for (var ti = 0; ti < alertTags.length; ti++) {
+            html += '<span class="tag-badge">' + esc(alertTags[ti]) + '</span>';
+        }
+        html += '</div>';
+    }
+
+    // Ungrouped assignment dropdown
+    if (!alert.matter_slug) {
+        html += '<div class="assign-bar">';
+        html += '<span style="font-size:10px;color:var(--amber);font-weight:600;">Assign to:</span>';
+        html += '<select class="assign-select" onchange="assignAlert(' + alert.id + ',this.value)" data-alert="' + aid + '">';
+        html += '<option value="">Select matter...</option>';
+        html += '</select>';
+        html += '</div>';
+    }
 
     // PCS (for T1/T2 with structured_actions)
     if (expanded && (tier <= 2) && alert.structured_actions) {
@@ -603,7 +630,8 @@ async function streamInlineResult(prompt, alertId, resultArea, triggerBtn) {
         toolbar.style.cssText = 'display:flex;gap:5px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);';
         toolbar.innerHTML = '<button class="footer-btn" onclick="copyResult(this)">Copy</button>' +
             '<button class="footer-btn" onclick="downloadResultAsWord(this)">Word</button>' +
-            '<button class="footer-btn" onclick="emailResult(this)">Email</button>';
+            '<button class="footer-btn" onclick="emailResult(this)">Email</button>' +
+            '<button class="footer-btn" onclick="saveArtifact(this)">Save</button>';
         toolbar.dataset.resultText = fullResponse;
         resultArea.appendChild(toolbar);
 
@@ -729,12 +757,51 @@ function emailResult(btn) {
     window.location.href = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(text);
 }
 
+function saveArtifact(btn) {
+    var toolbar = btn.closest('[data-result-text]');
+    if (!toolbar) return;
+    var text = toolbar.dataset.resultText || '';
+    // Get matter_slug from the card's data-matter attribute
+    var card = btn.closest('.card');
+    var matterSlug = card ? card.dataset.matter : null;
+    var alertId = card ? parseInt(card.dataset.alertId) : null;
+
+    btn.textContent = 'Saving...';
+    btn.disabled = true;
+    bakerFetch('/api/artifacts/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            content: text,
+            title: 'Baker Analysis',
+            matter_slug: matterSlug || null,
+            alert_id: alertId || null,
+            format: 'md',
+        }),
+    }).then(function(resp) {
+        if (resp.ok) {
+            btn.textContent = 'Saved';
+            setTimeout(function() { btn.textContent = 'Save'; btn.disabled = false; }, 2000);
+        } else {
+            throw new Error('Save failed');
+        }
+    }).catch(function(e) {
+        btn.textContent = 'Error';
+        setTimeout(function() { btn.textContent = 'Save'; btn.disabled = false; }, 2000);
+    });
+}
+
 // ═══ MATTERS DETAIL VIEW ═══
+
+var _matterDetailItems = null;
+var _matterDetailSlug = null;
+var _matterViewMode = 'list';
 
 async function loadMatterDetail(matterSlug) {
     var container = document.getElementById('mattersContent');
     if (!container) return;
     container.textContent = 'Loading...';
+    _matterDetailSlug = matterSlug;
 
     try {
         var resp = await bakerFetch('/api/matters/' + encodeURIComponent(matterSlug) + '/items');
@@ -747,25 +814,113 @@ async function loadMatterDetail(matterSlug) {
             return;
         }
 
-        var label = matterSlug === '_ungrouped' ? 'Ungrouped' : matterSlug.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
-
-        container.textContent = '';
-        var header = document.createElement('div');
-        header.className = 'section-label';
-        header.textContent = label + ' (' + data.items.length + ' items)';
-        container.appendChild(header);
-
-        var cardsDiv = document.createElement('div');
-        var cardsHtml = data.items.map(function(a) {
-            var expanded = (a.tier || 3) <= 2;
-            return renderAlertCard(a, expanded);
-        }).join('');
-        setSafeHTML(cardsDiv, cardsHtml);
-        container.appendChild(cardsDiv);
+        _matterDetailItems = data.items;
+        _matterViewMode = 'list';
+        renderMatterView(container, matterSlug, data.items);
     } catch (e) {
         container.textContent = 'Failed to load matter.';
         container.style.color = 'var(--red)';
     }
+}
+
+function renderMatterView(container, slug, items) {
+    var label = slug === '_ungrouped' ? 'Ungrouped' : slug.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+    container.textContent = '';
+
+    // Header with toggle
+    var headerRow = document.createElement('div');
+    headerRow.style.cssText = 'display:flex;align-items:center;margin-bottom:12px;';
+
+    var header = document.createElement('div');
+    header.className = 'section-label';
+    header.style.marginBottom = '0';
+    header.textContent = label + ' (' + items.length + ' items)';
+    headerRow.appendChild(header);
+
+    // View toggle
+    var toggle = document.createElement('div');
+    toggle.style.cssText = 'display:flex;gap:0;margin-left:auto;border:1px solid var(--border);border-radius:6px;overflow:hidden;';
+    var listBtn = document.createElement('button');
+    listBtn.textContent = 'List';
+    listBtn.style.cssText = 'padding:5px 12px;font-size:10px;font-weight:600;font-family:var(--mono);border:none;cursor:pointer;letter-spacing:0.3px;' + (_matterViewMode === 'list' ? 'background:var(--text);color:#fff;' : 'background:var(--card);color:var(--text3);');
+    listBtn.addEventListener('click', function() { _matterViewMode = 'list'; renderMatterView(container, slug, items); });
+
+    var boardBtn = document.createElement('button');
+    boardBtn.textContent = 'Board';
+    boardBtn.style.cssText = 'padding:5px 12px;font-size:10px;font-weight:600;font-family:var(--mono);border:none;cursor:pointer;letter-spacing:0.3px;' + (_matterViewMode === 'board' ? 'background:var(--text);color:#fff;' : 'background:var(--card);color:var(--text3);');
+    boardBtn.addEventListener('click', function() { _matterViewMode = 'board'; renderMatterView(container, slug, items); });
+
+    toggle.appendChild(listBtn);
+    toggle.appendChild(boardBtn);
+    headerRow.appendChild(toggle);
+    container.appendChild(headerRow);
+
+    if (_matterViewMode === 'list') {
+        var cardsDiv = document.createElement('div');
+        var cardsHtml = items.map(function(a) { return renderAlertCard(a, (a.tier || 3) <= 2); }).join('');
+        setSafeHTML(cardsDiv, cardsHtml);
+        container.appendChild(cardsDiv);
+        populateAssignDropdowns();
+    } else {
+        renderBoardView(container, items);
+    }
+}
+
+function renderBoardView(container, items) {
+    var cols = { 1: [], 2: [], 3: [], 4: [] };
+    for (var i = 0; i < items.length; i++) {
+        var tier = items[i].tier || 4;
+        if (tier > 4) tier = 4;
+        cols[tier].push(items[i]);
+    }
+
+    var colLabels = { 1: 'Fire', 2: 'Important', 3: 'Routine', 4: 'Other' };
+    var colDots = { 1: 'red', 2: 'amber', 3: 'slate', 4: 'lgray' };
+
+    var board = document.createElement('div');
+    board.className = 'board-view';
+
+    for (var t = 1; t <= 4; t++) {
+        var col = document.createElement('div');
+        col.className = 'board-column';
+
+        var colHeader = document.createElement('div');
+        colHeader.className = 'board-column-header';
+        colHeader.innerHTML = '<span class="nav-dot ' + colDots[t] + '"></span> ' + esc(colLabels[t]) + ' <span style="opacity:0.5;">(' + cols[t].length + ')</span>';
+        col.appendChild(colHeader);
+
+        if (cols[t].length === 0) {
+            var empty = document.createElement('div');
+            empty.style.cssText = 'color:var(--text4);font-size:11px;padding:8px 0;';
+            empty.textContent = 'No items';
+            col.appendChild(empty);
+        } else {
+            for (var ci = 0; ci < cols[t].length; ci++) {
+                var item = cols[t][ci];
+                var card = document.createElement('div');
+                card.className = 'board-card';
+                card.dataset.alertId = item.id;
+                card.addEventListener('click', function() {
+                    _matterViewMode = 'list';
+                    renderMatterView(document.getElementById('mattersContent'), _matterDetailSlug, _matterDetailItems);
+                });
+
+                var titleEl = document.createElement('div');
+                titleEl.style.cssText = 'font-size:12px;font-weight:500;line-height:1.4;margin-bottom:4px;';
+                titleEl.textContent = item.title;
+                card.appendChild(titleEl);
+
+                var meta = document.createElement('div');
+                meta.style.cssText = 'font-size:10px;color:var(--text3);';
+                meta.textContent = 'T' + (item.tier || '?') + ' — ' + fmtRelativeTime(item.created_at);
+                card.appendChild(meta);
+
+                col.appendChild(card);
+            }
+        }
+        board.appendChild(col);
+    }
+    container.appendChild(board);
 }
 
 // ═══ ASK BAKER (SCAN SSE) ═══
@@ -1059,6 +1214,149 @@ async function loadMattersTab() {
     }
 }
 
+// ═══ TAGS TAB ═══
+
+async function loadTagsTab() {
+    var container = document.getElementById('tagsContent');
+    if (!container) return;
+    container.textContent = 'Loading tags...';
+
+    try {
+        var resp = await bakerFetch('/api/tags');
+        if (!resp.ok) return;
+        var data = await resp.json();
+
+        if (!data.tags || data.tags.length === 0) {
+            container.textContent = 'No tags found.';
+            container.style.cssText = 'color:var(--text3);font-size:13px;';
+            return;
+        }
+
+        container.textContent = '';
+        for (var i = 0; i < data.tags.length; i++) {
+            var t = data.tags[i];
+            var card = document.createElement('div');
+            card.className = 'card card-compact';
+            card.style.cursor = 'pointer';
+            card.dataset.tag = t.tag || t.name;
+            card.addEventListener('click', function() { loadTagItems(this.dataset.tag); });
+
+            var hdr = document.createElement('div');
+            hdr.className = 'card-header';
+
+            var badge = document.createElement('span');
+            badge.className = 'tag-badge';
+            badge.textContent = t.tag || t.name;
+            badge.style.marginTop = '3px';
+            hdr.appendChild(badge);
+
+            var title = document.createElement('span');
+            title.className = 'card-title';
+            title.textContent = '';
+            hdr.appendChild(title);
+
+            var count = document.createElement('span');
+            count.className = 'card-time';
+            count.textContent = t.count + ' items';
+            hdr.appendChild(count);
+
+            card.appendChild(hdr);
+            container.appendChild(card);
+        }
+    } catch (e) {
+        container.textContent = 'Failed to load tags.';
+        container.style.color = 'var(--red)';
+    }
+}
+
+async function loadTagItems(tag) {
+    var container = document.getElementById('tagsContent');
+    if (!container) return;
+    container.textContent = 'Loading...';
+
+    try {
+        var resp = await bakerFetch('/api/alerts/by-tag/' + encodeURIComponent(tag));
+        if (!resp.ok) return;
+        var data = await resp.json();
+
+        container.textContent = '';
+        var back = document.createElement('button');
+        back.className = 'footer-btn';
+        back.textContent = 'Back to all tags';
+        back.style.marginBottom = '12px';
+        back.addEventListener('click', function() { loadTagsTab(); });
+        container.appendChild(back);
+
+        var header = document.createElement('div');
+        header.className = 'section-label';
+        header.textContent = tag + ' (' + data.count + ' items)';
+        container.appendChild(header);
+
+        if (data.items.length === 0) {
+            var empty = document.createElement('div');
+            empty.textContent = 'No items with this tag.';
+            empty.style.cssText = 'color:var(--text3);font-size:13px;';
+            container.appendChild(empty);
+            return;
+        }
+
+        var cardsDiv = document.createElement('div');
+        setSafeHTML(cardsDiv, data.items.map(function(a) {
+            return renderAlertCard(a, (a.tier || 3) <= 2);
+        }).join(''));
+        container.appendChild(cardsDiv);
+        populateAssignDropdowns();
+    } catch (e) {
+        container.textContent = 'Failed to load items.';
+        container.style.color = 'var(--red)';
+    }
+}
+
+// ═══ UNGROUPED ASSIGNMENT ═══
+
+async function assignAlert(alertId, matterSlug) {
+    if (!matterSlug) return;
+    try {
+        await bakerFetch('/api/alerts/' + alertId + '/assign', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ matter_slug: matterSlug }),
+        });
+        // Reload current view to reflect change
+        if (currentTab === 'fires') loadFires();
+        else if (currentTab === 'matters') loadMattersTab();
+        else if (currentTab === 'morning-brief') loadMorningBrief();
+    } catch (e) {
+        console.error('assignAlert failed:', e);
+    }
+}
+
+/** Populate all assign dropdowns with active matters. Called after rendering cards. */
+async function populateAssignDropdowns() {
+    var selects = document.querySelectorAll('.assign-select');
+    if (selects.length === 0) return;
+    try {
+        var resp = await bakerFetch('/api/matters?status=active');
+        if (!resp.ok) return;
+        var data = await resp.json();
+        selects.forEach(function(sel) {
+            // Keep the first option
+            while (sel.options.length > 1) sel.remove(1);
+            if (data.matters) {
+                for (var i = 0; i < data.matters.length; i++) {
+                    var m = data.matters[i];
+                    var opt = document.createElement('option');
+                    opt.value = m.matter_name || m.slug;
+                    opt.textContent = m.matter_name || m.slug;
+                    sel.appendChild(opt);
+                }
+            }
+        });
+    } catch (e) {
+        console.error('populateAssignDropdowns failed:', e);
+    }
+}
+
 // ═══ ENHANCED DEADLINES TAB ═══
 
 async function loadDeadlinesTab() {
@@ -1114,6 +1412,162 @@ async function loadDeadlinesTab() {
     }
 }
 
+// ═══ ASK SPECIALIST ═══
+
+var _specialistSlug = null;
+var _specialistHistory = [];
+var _specialistStreaming = false;
+
+async function loadSpecialistTab() {
+    var picker = document.getElementById('specialistPicker');
+    if (!picker || picker.options.length > 1) return; // Already populated
+
+    try {
+        var resp = await bakerFetch('/api/capabilities');
+        if (!resp.ok) return;
+        var data = await resp.json();
+        if (!data.capabilities) return;
+
+        for (var i = 0; i < data.capabilities.length; i++) {
+            var cap = data.capabilities[i];
+            if (cap.capability_type === 'domain' && cap.active) {
+                var opt = document.createElement('option');
+                opt.value = cap.slug;
+                opt.textContent = cap.name;
+                picker.appendChild(opt);
+            }
+        }
+    } catch (e) {
+        console.error('loadSpecialistTab failed:', e);
+    }
+}
+
+async function sendSpecialistMessage(question) {
+    if (_specialistStreaming || !question.trim() || !_specialistSlug) return;
+    _specialistStreaming = true;
+
+    var sendBtn = document.getElementById('specialistSendBtn');
+    var input = document.getElementById('specialistInput');
+    if (sendBtn) sendBtn.disabled = true;
+    if (input) { input.disabled = true; input.value = ''; }
+
+    _specialistHistory.push({ role: 'user', content: question });
+    appendSpecialistBubble('user', question);
+
+    var replyId = 'specialist-reply-' + Date.now();
+    appendSpecialistBubble('assistant', '', replyId);
+    var replyEl = document.getElementById(replyId);
+
+    var fullResponse = '';
+    try {
+        var resp = await bakerFetch('/api/scan/specialist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: question,
+                capability_slug: _specialistSlug,
+                history: _specialistHistory.slice(-10),
+            }),
+        });
+        if (!resp.ok) throw new Error('Specialist API returned ' + resp.status);
+
+        var reader = resp.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+
+        while (true) {
+            var chunk = await reader.read();
+            if (chunk.done) break;
+            buffer += decoder.decode(chunk.value, { stream: true });
+            var lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (var li = 0; li < lines.length; li++) {
+                if (!lines[li].startsWith('data: ')) continue;
+                var payload = lines[li].slice(6).trim();
+                if (payload === '[DONE]') continue;
+                try {
+                    var data = JSON.parse(payload);
+                    if (data.token) {
+                        if (!fullResponse && replyEl) replyEl.textContent = '';
+                        fullResponse += data.token;
+                        if (replyEl) replyEl.innerHTML = '<div class="md-content">' + md(fullResponse) + '</div>';
+                    }
+                } catch (e) { /* skip */ }
+            }
+        }
+    } catch (err) {
+        fullResponse = 'Error: ' + err.message;
+        if (replyEl) replyEl.textContent = fullResponse;
+    }
+
+    _specialistHistory.push({ role: 'assistant', content: fullResponse });
+    if (_specialistHistory.length > 20) _specialistHistory = _specialistHistory.slice(-20);
+
+    _specialistStreaming = false;
+    if (sendBtn) sendBtn.disabled = false;
+    if (input) { input.disabled = false; input.focus(); }
+
+    var container = document.getElementById('specialistMessages');
+    if (container) container.scrollTop = container.scrollHeight;
+}
+
+function appendSpecialistBubble(role, content, id) {
+    var container = document.getElementById('specialistMessages');
+    if (!container) return;
+    var div = document.createElement('div');
+    div.className = 'scan-msg ' + (role === 'user' ? 'user' : 'baker');
+    if (id) div.id = id;
+    if (role === 'assistant' && !content) {
+        div.innerHTML = '<div class="thinking"><span class="thinking-dots"><span></span><span></span><span></span></span> Specialist is thinking...</div>';
+    } else if (role === 'assistant') {
+        div.innerHTML = '<div class="md-content">' + md(content) + '</div>';
+    } else {
+        div.textContent = content;
+    }
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+    return div;
+}
+
+// ═══ DEBOUNCE + COMMAND BAR DETECTION ═══
+
+function debounce(fn, ms) {
+    var timer;
+    return function() {
+        var args = arguments;
+        var ctx = this;
+        clearTimeout(timer);
+        timer = setTimeout(function() { fn.apply(ctx, args); }, ms);
+    };
+}
+
+function setupDetectionBadge() {
+    var cmdInput = document.getElementById('cmdInput');
+    var badge = document.getElementById('cmdDetectBadge');
+    if (!cmdInput || !badge) return;
+
+    var detect = debounce(async function() {
+        var q = cmdInput.value.trim();
+        if (q.length < 3) { badge.hidden = true; return; }
+        try {
+            var resp = await bakerFetch('/api/scan/detect?q=' + encodeURIComponent(q));
+            if (!resp.ok) { badge.hidden = true; return; }
+            var data = await resp.json();
+            if (data.detected) {
+                badge.textContent = data.capability_name + ' detected';
+                badge.hidden = false;
+            } else {
+                badge.hidden = true;
+            }
+        } catch (e) { badge.hidden = true; }
+    }, 300);
+
+    cmdInput.addEventListener('input', detect);
+    cmdInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') badge.hidden = true;
+    });
+}
+
 // ═══ INIT ═══
 
 async function init() {
@@ -1159,6 +1613,32 @@ async function init() {
 
     // Command bar
     setupCommandBar();
+    setupDetectionBadge();
+
+    // Specialist form
+    var specialistForm = document.getElementById('specialistForm');
+    if (specialistForm) {
+        specialistForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var input = document.getElementById('specialistInput');
+            if (input && input.value.trim()) sendSpecialistMessage(input.value.trim());
+        });
+    }
+    var specialistPicker = document.getElementById('specialistPicker');
+    if (specialistPicker) {
+        specialistPicker.addEventListener('change', function() {
+            _specialistSlug = specialistPicker.value || null;
+            var input = document.getElementById('specialistInput');
+            var sendBtn = document.getElementById('specialistSendBtn');
+            if (input) input.disabled = !_specialistSlug;
+            if (sendBtn) sendBtn.disabled = !_specialistSlug;
+            // Clear messages on capability change
+            _specialistHistory = [];
+            var container = document.getElementById('specialistMessages');
+            if (container) container.textContent = '';
+            if (_specialistSlug && input) input.focus();
+        });
+    }
 
     // Load morning brief
     loadMorningBrief();

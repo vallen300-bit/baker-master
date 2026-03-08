@@ -173,6 +173,30 @@ class AlertReplyRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=4000)
 
 
+class SpecialistScanRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=4000)
+    capability_slug: str = Field(..., min_length=1, max_length=50)
+    history: list = Field(default_factory=list)
+
+
+class AlertTagRequest(BaseModel):
+    action: str = Field(..., pattern=r"^(add|remove)$")
+    tag: str = Field(..., min_length=1, max_length=30, pattern=r"^[a-z0-9-]+$")
+
+
+class AlertAssignRequest(BaseModel):
+    matter_slug: str = Field(..., min_length=1, max_length=50)
+    new_name: Optional[str] = Field(None, max_length=200)
+
+
+class SaveArtifactRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=100000)
+    title: str = Field("Baker Result", max_length=200)
+    matter_slug: Optional[str] = None
+    alert_id: Optional[int] = None
+    format: str = Field("md", pattern=r"^(md|txt)$")
+
+
 def _serialize(obj: dict) -> dict:
     """Convert datetime fields to ISO strings for JSON serialization."""
     out = {}
@@ -917,6 +941,253 @@ async def get_activity_feed(hours: int = Query(24, ge=1, le=168)):
     except Exception as e:
         logger.error(f"GET /api/activity failed: {e}")
         return {"activity": []}
+
+
+# ============================================================
+# V3 Phase B1 — Tags, ungrouped assignment
+# ============================================================
+
+@app.get("/api/tags", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_tags():
+    """List distinct tags with item counts from pending alerts."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"tags": [], "total": 0}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT tag, COUNT(*) AS count
+                FROM alerts, jsonb_array_elements_text(tags) AS tag
+                WHERE status = 'pending'
+                GROUP BY tag
+                ORDER BY count DESC
+            """)
+            tags = [dict(r) for r in cur.fetchall()]
+            total = sum(t["count"] for t in tags)
+            cur.close()
+            return {"tags": tags, "total": total}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/tags failed: {e}")
+        return {"tags": [], "total": 0}
+
+
+@app.post("/api/alerts/{alert_id}/tag", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def tag_alert(alert_id: int, req: AlertTagRequest):
+    """Add or remove a tag on an alert."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            if req.action == "add":
+                cur.execute(
+                    "UPDATE alerts SET tags = tags || to_jsonb(%s::text) WHERE id = %s AND NOT tags ? %s RETURNING tags",
+                    (req.tag, alert_id, req.tag),
+                )
+            else:
+                cur.execute(
+                    "UPDATE alerts SET tags = tags - %s WHERE id = %s RETURNING tags",
+                    (req.tag, alert_id),
+                )
+            row = cur.fetchone()
+            conn.commit()
+            cur.close()
+            if not row:
+                return {"ok": True, "tags": []}
+            return {"ok": True, "tags": row["tags"]}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"POST /api/alerts/{alert_id}/tag failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/alerts/{alert_id}/assign", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def assign_alert(alert_id: int, req: AlertAssignRequest):
+    """Assign an ungrouped alert to a matter (existing or new)."""
+    import re
+    try:
+        store = _get_store()
+        slug = req.matter_slug
+
+        if slug == "_new":
+            if not req.new_name:
+                raise HTTPException(status_code=400, detail="new_name required when matter_slug is '_new'")
+            # Slugify: lowercase, replace spaces with _, strip special chars
+            slug = re.sub(r'[^a-z0-9_-]', '', req.new_name.lower().replace(' ', '_'))[:50]
+            if not slug:
+                raise HTTPException(status_code=400, detail="Invalid project name")
+            # Create new matter
+            store.create_matter(matter_name=slug, description=req.new_name)
+        else:
+            # Validate slug format
+            if not re.match(r'^[a-zA-Z0-9_-]+$', slug):
+                raise HTTPException(status_code=400, detail="Invalid matter_slug format")
+
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor()
+            cur.execute("UPDATE alerts SET matter_slug = %s WHERE id = %s", (slug, alert_id))
+            conn.commit()
+            cur.close()
+            return {"ok": True, "matter_slug": slug}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"POST /api/alerts/{alert_id}/assign failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/alerts/by-tag/{tag}", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_alerts_by_tag(tag: str):
+    """Get pending alerts filtered by tag."""
+    import re
+    if not re.match(r'^[a-z0-9-]+$', tag):
+        raise HTTPException(status_code=400, detail="Invalid tag format")
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"items": [], "count": 0, "tag": tag}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM alerts WHERE status = 'pending' AND tags ? %s ORDER BY tier, created_at DESC",
+                (tag,),
+            )
+            items = [_serialize(dict(r)) for r in cur.fetchall()]
+            cur.close()
+            return {"items": items, "count": len(items), "tag": tag}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"GET /api/alerts/by-tag/{tag} failed: {e}")
+        return {"items": [], "count": 0, "tag": tag}
+
+
+# ============================================================
+# V3 Phase B2 — Ask Specialist + Command bar detection
+# ============================================================
+
+@app.post("/api/scan/specialist", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def scan_specialist(req: SpecialistScanRequest):
+    """
+    Force-route a question to a specific capability.
+    CRITICAL: Uses _scan_chat_capability() — same function as normal /api/scan.
+    Only difference: capability detection is bypassed, capability is provided directly.
+    """
+    start = time.time()
+    from orchestrator.capability_registry import CapabilityRegistry
+    from orchestrator.capability_router import RoutingPlan
+
+    registry = CapabilityRegistry.get_instance()
+    cap = registry.get_by_slug(req.capability_slug)
+    if not cap or not cap.active:
+        raise HTTPException(status_code=404, detail=f"Capability '{req.capability_slug}' not found or inactive")
+
+    plan = RoutingPlan(mode="fast", capabilities=[cap])
+    scan_req = ScanRequest(question=req.question, history=req.history)
+    return _scan_chat_capability(scan_req, start, {"plan": plan})
+
+
+@app.get("/api/scan/detect", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def detect_capability(q: str = Query("", max_length=500)):
+    """
+    Lightweight capability detection — runs regex match only, no LLM call.
+    Returns matched capability slug and name. Does NOT expose trigger patterns or system prompts.
+    """
+    if len(q.strip()) < 3:
+        return {"detected": False}
+    from orchestrator.capability_registry import CapabilityRegistry
+    cap = CapabilityRegistry.get_instance().match_trigger(q)
+    if cap:
+        return {"detected": True, "capability_slug": cap.slug, "capability_name": cap.name}
+    return {"detected": False}
+
+
+# V3 Phase B3 — Artifact storage
+# ============================================================
+
+@app.post("/api/artifacts/save", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def save_artifact(req: SaveArtifactRequest):
+    """Save a Baker result as an artifact (PostgreSQL storage)."""
+    import re
+    # Security: validate matter_slug format (defense in depth for future Dropbox sync)
+    if req.matter_slug and not re.match(r'^[a-zA-Z0-9_-]+$', req.matter_slug):
+        raise HTTPException(status_code=400, detail="Invalid matter_slug format")
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO alert_artifacts (alert_id, matter_slug, title, content, format)
+                   VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+                (req.alert_id, req.matter_slug, req.title, req.content, req.format),
+            )
+            artifact_id = cur.fetchone()[0]
+            conn.commit()
+            cur.close()
+            return {"ok": True, "artifact_id": artifact_id}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"POST /api/artifacts/save failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/artifacts", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_artifacts(matter_slug: Optional[str] = None, limit: int = Query(50, ge=1, le=200)):
+    """List saved artifacts, optionally filtered by matter."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"artifacts": [], "count": 0}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            if matter_slug:
+                cur.execute(
+                    "SELECT * FROM alert_artifacts WHERE matter_slug = %s ORDER BY created_at DESC LIMIT %s",
+                    (matter_slug, limit),
+                )
+            else:
+                cur.execute(
+                    "SELECT * FROM alert_artifacts ORDER BY created_at DESC LIMIT %s",
+                    (limit,),
+                )
+            artifacts = [_serialize(dict(r)) for r in cur.fetchall()]
+            cur.close()
+            return {"artifacts": artifacts, "count": len(artifacts)}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/artifacts failed: {e}")
+        return {"artifacts": [], "count": 0}
 
 
 # ============================================================
