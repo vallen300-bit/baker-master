@@ -2471,6 +2471,13 @@ class SentinelStoreBack:
             conn.commit()
             cur.close()
             logger.info(f"Created alert #{alert_id}: tier={tier}, matter={matter_slug}, '{title}'")
+            # Invalidate morning narrative cache on T1 alert
+            if tier == 1:
+                try:
+                    from outputs.dashboard import invalidate_morning_narrative
+                    invalidate_morning_narrative()
+                except Exception:
+                    pass  # dashboard module may not be loaded in all contexts
             return alert_id
         except Exception as e:
             conn.rollback()

@@ -702,6 +702,12 @@ async def dismiss_alert(alert_id: int):
 _morning_narrative_cache: dict = {"text": None, "generated_at": 0}
 
 
+def invalidate_morning_narrative():
+    """Called from store_back.create_alert() when a T1 alert is created."""
+    global _morning_narrative_cache
+    _morning_narrative_cache = {"text": None, "generated_at": 0}
+
+
 @app.get("/api/dashboard/morning-brief", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
 async def get_morning_brief():
     """
