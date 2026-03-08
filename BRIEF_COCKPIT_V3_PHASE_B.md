@@ -473,3 +473,59 @@ Step 3: feat: COCKPIT-V3 B3 -- board view + artifact storage
 ```
 
 3 commits on branch `feat/cockpit-v3-b`. Push to origin when complete. Code 300 will review before merge.
+
+---
+
+## Verification Report (Code 300, 2026-03-08)
+
+All references, dependencies, and integration points verified against codebase. Results below.
+
+### Gaps Brisen Must Address
+
+| # | Gap | Where | What to do |
+|---|-----|-------|------------|
+| 1 | `create_alert()` has no `tags` param | `store_back.py:2444` | Add `tags: list = None` to signature. Add `tags` to INSERT columns + VALUES. Serialize: `tags_json = _json.dumps(tags) if tags else '[]'` |
+| 2 | `pipeline.py` call to `create_alert` has no `tags=` | `pipeline.py:357` | After calling `_auto_tag()`, pass `tags=tags` to `create_alert()` |
+| 3 | `switchTab()` routes 'tags' to "Coming soon" | `app.js:126-156` | Add `'tags'` to `FUNCTIONAL_TABS` set, add `'tags': 'viewTags'` to `TAB_VIEW_MAP`, add `else if (tabName === 'tags') loadTagsTab();` |
+| 4 | `renderAlertCard()` has no tags rendering | `app.js:330` | Add tag badges after card header (see CSS in brief) |
+| 5 | `renderAlertCard()` has no `data-matter` attribute | `app.js:338` | Add `data-matter="..."` to the card div — needed for Save button to know the matter |
+| 6 | No debounce utility in `app.js` | — | Write a simple `debounce(fn, ms)` function for command bar detection |
+| 7 | `switchTab()` routes 'ask-specialist' to "Coming soon" | `app.js` | Add to `FUNCTIONAL_TABS` + `TAB_VIEW_MAP`, implement `loadSpecialistTab()` |
+
+### Verified OK (all exist and work)
+
+| Item | Location | Status |
+|------|----------|--------|
+| `alerts.tags` JSONB column | `init_database.sql:154` | Exists, DEFAULT '[]' |
+| `alerts.board_status` column | `init_database.sql:155` | Exists, DEFAULT 'new' |
+| `matter_registry` table + schema | `store_back.py:1717` | Full schema + indexes + seed data |
+| `get_matters(status)` method | `store_back.py:1880` | Returns list of dicts |
+| `_scan_chat_capability()` function | `dashboard.py:1935` | Accepts `(req, start, {"plan": plan})` — exact signature specialist needs |
+| `RoutingPlan` dataclass | `capability_router.py:24` | Has `mode`, `capabilities`, `sub_tasks` fields |
+| `CapabilityRegistry.get_instance()` | `capability_registry.py:50` | Thread-safe singleton, 5-min cache |
+| `CapabilityRegistry.match_trigger()` | `capability_registry.py:143` | Regex match, returns CapabilityDef or None |
+| `CapabilityRegistry.get_by_slug()` | `capability_registry.py:122` | Returns CapabilityDef or None |
+| `GET /api/capabilities` endpoint | `dashboard.py:578` | Returns `{capabilities, count}`, auth required |
+| `#cmdInput` HTML element | `index.html:80` | maxlength=4000 |
+| `.cmd-input-wrap` CSS | `style.css:91` | Has `position: relative` — ready for badge |
+| `_ensure_alert_threads_table()` pattern | `store_back.py:2416` | Pattern for `_ensure_alert_artifacts_table()` |
+| 25 `_ensure` calls in `__init__` | `store_back.py:53-113` | Add new ensure at line 114 |
+| `loadMatterDetail()` function | `app.js:734` | Works, renders cards with `renderAlertCard()` |
+| `streamInlineResult()` toolbar | `app.js:600-608` | 3 buttons (Copy/Word/Email), add Save after Email |
+| `/api/scan/generate-document` endpoint | `dashboard.py:2433` | Word button target, exists and working |
+| Command bar → Ask Baker flow | `app.js:925-937` | Enter → switchTab('ask-baker') → sendScanMessage(q) |
+
+### _scan_chat_capability() Exact Signature
+
+```python
+def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
+                          task_id: int = None, domain: str = None, mode: str = None):
+```
+
+For Ask Specialist, call as:
+```python
+plan = RoutingPlan(mode="fast", capabilities=[cap])
+return _scan_chat_capability(scan_req, start, {"plan": plan})
+```
+
+The function checks `intent_or_plan.get("plan")` first. If a pre-built plan is passed, it skips the router entirely. This is exactly what specialist needs.
