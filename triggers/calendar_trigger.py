@@ -198,6 +198,41 @@ def _assemble_meeting_context(meeting: dict, store) -> str:
         except Exception as e:
             logger.warning(f"Context assembly error for {name}: {e}")
 
+    # 2b. AO-specific enrichment: mood context for AO meetings
+    ao_keywords = ["oskolkov", "andrey", "aelio", "ao ", "andrej"]
+    attendee_names = [a.get('name', '') or a.get('email', '') for a in meeting.get('attendees', [])]
+    meeting_text = (meeting.get('title', '') + " " + " ".join(attendee_names)).lower()
+    is_ao_meeting = any(k in meeting_text for k in ao_keywords)
+
+    if is_ao_meeting:
+        try:
+            conn = store._get_conn()
+            if conn:
+                try:
+                    cur = conn.cursor()
+                    cur.execute("""
+                        SELECT full_text FROM whatsapp_messages
+                        WHERE (sender_name ILIKE '%oskolkov%' OR sender_name ILIKE '%andrey%')
+                          AND timestamp > NOW() - INTERVAL '7 days'
+                        ORDER BY timestamp DESC LIMIT 5
+                    """)
+                    ao_msgs = [r[0] for r in cur.fetchall() if r[0]]
+                    if ao_msgs:
+                        from triggers.proactive_scanner import classify_ao_mood
+                        combined = " ".join(ao_msgs)
+                        mood = classify_ao_mood(combined)
+                        parts.append(
+                            f"\n--- AO PROFILING CONTEXT ---\n"
+                            f"Recent mood: {mood.upper()}\n"
+                            f"Last {len(ao_msgs)} messages analyzed.\n"
+                            f"Approach: {'Collaborative, reinforce partnership' if mood == 'positive' else 'Careful, address concerns first' if mood == 'negative' else 'Neutral — standard engagement'}\n"
+                        )
+                    cur.close()
+                finally:
+                    store._put_conn(conn)
+        except Exception as e:
+            logger.warning(f"AO meeting enrichment failed: {e}")
+
     # 3. Related matters (check if meeting title matches any matter keywords)
     try:
         from orchestrator.pipeline import _match_matter_slug

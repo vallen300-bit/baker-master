@@ -2433,6 +2433,7 @@ class SentinelStoreBack:
                 ("tags", "JSONB DEFAULT '[]'::jsonb"),
                 ("board_status", "TEXT DEFAULT 'new'"),
                 ("travel_date", "DATE"),
+                ("source_id", "TEXT"),
             ]:
                 cur.execute(f"""
                     ALTER TABLE alerts ADD COLUMN IF NOT EXISTS {col} {defn}
@@ -2588,12 +2589,17 @@ class SentinelStoreBack:
                      contact_id: str = None, deal_id: str = None,
                      structured_actions: dict = None,
                      matter_slug: str = None, tags: list = None,
-                     source: str = None) -> Optional[int]:
+                     source: str = None, source_id: str = None) -> Optional[int]:
         """Insert into alerts table. Returns alert ID.
         source: identifies the subsystem that created this alert
             (e.g. 'email_trigger', 'calendar_prep', 'vip_sla', 'deadline_cadence',
              'commitment_check', 'rss_intelligence', 'calendar_protection', 'pipeline').
+        source_id: optional dedup key — if set, checked before insert to prevent duplicates.
         """
+        if source_id:
+            if self.alert_source_id_exists(source, source_id):
+                logger.info(f"Alert dedup: source_id {source_id} already exists — skipping")
+                return None
         conn = self._get_conn()
         if not conn:
             logger.warning("No DB connection — skipping create_alert")
@@ -2607,14 +2613,14 @@ class SentinelStoreBack:
                 """
                 INSERT INTO alerts (tier, title, body, action_required,
                     trigger_id, contact_id, deal_id, structured_actions,
-                    matter_slug, tags, source, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    matter_slug, tags, source, source_id, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 RETURNING id
                 """,
                 (tier, title, body, action_required,
                  trigger_id, contact_id if contact_id else None,
                  deal_id if deal_id else None, sa_json, matter_slug, tags_json,
-                 source),
+                 source, source_id),
             )
             alert_id = cur.fetchone()[0]
             conn.commit()
@@ -2632,6 +2638,26 @@ class SentinelStoreBack:
             conn.rollback()
             logger.error(f"create_alert failed: {e}")
             return None
+        finally:
+            self._put_conn(conn)
+
+    def alert_source_id_exists(self, source: str, source_id: str) -> bool:
+        """Check if an alert with this source + source_id already exists (for dedup)."""
+        conn = self._get_conn()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT 1 FROM alerts WHERE source = %s AND source_id = %s LIMIT 1",
+                (source, source_id),
+            )
+            exists = cur.fetchone() is not None
+            cur.close()
+            return exists
+        except Exception as e:
+            logger.warning(f"alert_source_id_exists check failed: {e}")
+            return False
         finally:
             self._put_conn(conn)
 
