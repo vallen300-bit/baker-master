@@ -267,24 +267,25 @@ Baker becomes an orchestrator that assembles **capability sets** dynamically per
 - **Delegate path (20%):** Decomposer (itself a capability) breaks the task into sub-issues → each sub-issue runs with its own capability → Synthesizer (another capability) combines results into one unified answer.
 - **Experience-informed retrieval:** Every decomposition is logged. Decomposer consults past patterns before breaking down new tasks. Director feedback propagates to improve future routing.
 
-**AGENT-FRAMEWORK-1** — 12 capability sets deployed (10 domain + 2 meta):
+**AGENT-FRAMEWORK-1** — 13 capability sets deployed (11 domain + 2 meta):
 
-| # | Capability | Domain | Purpose |
-|---|------------|--------|---------|
-| 1 | Sales | projects | MO Residences pitch decks, buyer follow-ups, market comps |
-| 2 | Finance | chairman | Loan analysis, LP term sheets, cash flow models |
-| 3 | Legal/Claims | projects | Dispute analysis, deadline tracking, evidence review |
-| 4 | Asset Management | projects | Hotel KPI reports, operational benchmarks |
-| 5 | Research | network | Market intelligence, competitor analysis, due diligence |
-| 6 | Comms/Draft | chairman | Email drafts, presentations, board memos |
-| 7 | IT Infrastructure | projects | M365 migration, BYOD security, hardware, vendor management (fully specified) |
-| 8 | Investment Banking | chairman | Raising finance, analyzing projects, investor relations |
-| 9 | Marketing & PR | network | Social media, ads, promotion, marketing collaterals |
-| 10 | AI Development | projects | Baker system development |
-| M1 | Decomposer | meta | Breaks complex tasks into sub-issues, assigns capabilities |
-| M2 | Synthesizer | meta | Combines multi-capability results into unified deliverable |
+| # | Slug | Domain | Autonomy | Purpose |
+|---|------|--------|----------|---------|
+| 1 | `sales` | projects | recommend_wait | MORV residences, investor pipeline, deal origination |
+| 2 | `finance` | chairman | recommend_wait | Group finances, project tracking, tax/audit |
+| 3 | `legal` | projects | recommend_wait | 5-jurisdiction legal, disputes, deadlines |
+| 4 | `asset_management` | projects | recommend_wait | Property ops, portfolio KPIs, capex, insurance |
+| 5 | `it` | projects | recommend_wait | M365, cybersecurity, vendor mgmt, Baker infra |
+| 6 | `profiling` | chairman | **proactive_flag** | Counterparty dossiers, negotiation tactics, game theory |
+| 7 | `research` | network | **proactive_flag** | Market/competitor intel, price monitoring, OSINT |
+| 8 | `communications` | chairman | recommend_wait | Email drafts, investor comms, meeting prep |
+| 9 | `pr_branding` | network | **proactive_flag** | Brand strategy, reputation, media, digital presence |
+| 10 | `marketing` | network | recommend_wait | Capability marketing, residence collateral, campaigns |
+| 11 | `ai_dev` | projects | recommend_wait | Project clAIm + Baker development |
+| M1 | `decomposer` | meta | auto_execute | Breaks complex tasks into sub-issues |
+| M2 | `synthesizer` | meta | auto_execute | Combines multi-capability results |
 
-**Status:** Framework built and deployed. IT capability fully specified. 9 remaining capability specs pending PM interview.
+**Status:** All 11 domain capabilities fully specified (PM Session D, Mar 8, 2026). `ib` (Investment Banking) retired, replaced by `pr_branding`. Slugs renamed: `asset_mgmt` → `asset_management`, `comms` → `communications`. New autonomy level: `proactive_flag` (Baker detects and flags, distinct from `recommend_wait`).
 
 **COCKPIT-ALERT-UI** — SHIPPED. Structured command cards with 4 action types (Plan/Analyze/Draft/Specialist), per-part controls (select/skip/something else), sequential execution via /api/scan with SSE streaming. `structured_actions` JSONB column on alerts table. Haiku generates actions for T1/T2 alerts.
 
@@ -330,7 +331,7 @@ See `BRIEF_PHASE_4_SCOPE.md` for full scope document.
 
 **4C — Intelligence & Learning**
 - Learning loop: Director feedback → tune Decision Engine weights + agent routing
-- Capability spec completion: 8 remaining (PM-paced)
+- ~~Capability spec completion: 8 remaining (PM-paced)~~ ALL 11 DONE (Session 14)
 - Dashboard data layer: CEO Cockpit frontend enhancements
 
 ### Open Items (operational)
