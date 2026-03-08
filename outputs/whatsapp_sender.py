@@ -13,8 +13,18 @@ WAHA_SESSION = os.getenv("WAHA_SESSION", "default")
 WAHA_API_KEY = os.getenv("WHATSAPP_API_KEY", "")
 DIRECTOR_WHATSAPP = "41799605092@c.us"  # Director's number, no + prefix
 
+_BAKER_SIGNATURE = "📋 *Baker AI — Office of Dimitry Vallen*\n\n"
+
+
 def send_whatsapp(text: str, chat_id: str = DIRECTOR_WHATSAPP) -> bool:
-    """Send a text message via WAHA. Returns True on success."""
+    """Send a text message via WAHA. Returns True on success.
+    Messages to external contacts get a Baker signature prefix.
+    Messages to the Director himself are sent without signature.
+    """
+    # Add signature for external recipients, not for Director
+    if chat_id != DIRECTOR_WHATSAPP:
+        text = _BAKER_SIGNATURE + text
+
     try:
         headers = {}
         if WAHA_API_KEY:
