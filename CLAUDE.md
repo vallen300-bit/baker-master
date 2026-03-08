@@ -74,6 +74,10 @@ Switch hats as needed. When coding, code. When scoping, think.
 | `triggers/rss_trigger.py` | RSS feed ingestion |
 | `triggers/whoop_trigger.py` | Whoop health data sync |
 | `triggers/dropbox_trigger.py` | Dropbox file watcher |
+| `triggers/slack_trigger.py` | Slack polling (every 5 min) — embed + @Baker pipeline |
+| `triggers/slack_events.py` | Slack Events API webhook (real-time, optional) |
+| `triggers/browser_client.py` | BROWSER-1: dual-mode client (simple HTTP + Browser-Use Cloud) |
+| `triggers/browser_trigger.py` | BROWSER-1: web monitoring, change detection, pipeline feed |
 
 ### ClickUp Integration
 | File | Purpose |
@@ -301,27 +305,40 @@ Baker executes the 7 standing orders autonomously. Code complete, deployed.
 
 | Standing Order | Status | Notes |
 |---|---|---|
-| #1 No surprises in meetings | Code deployed | Calendar auth may need re-verification |
+| #1 No surprises in meetings | Working | Calendar OAuth verified (Session 13) |
 | #2 No deadline missed | Working | 112 active deadlines tracked |
-| #3 VIP 24h response | Fixed | Column name + WA ID matching fixed |
-| #4 Morning briefing | Code deployed | Runs daily 06:00 UTC |
-| #5 Track commitments | Empty table | Extraction code exists, 0 rows produced |
-| #6 Proactive intelligence | Code deployed | 1 insight produced |
-| #7 Protect calendar | Code deployed | Calendar auth may need re-verification |
+| #3 VIP 24h response | Working | Column name + WA ID matching fixed (Session 12) |
+| #4 Morning briefing | Working | Runs daily 06:00 UTC |
+| #5 Track commitments | **Working** | 50+ commitments seeded (Session 13 — was 0) |
+| #6 Proactive intelligence | Working | 1 insight produced |
+| #7 Protect calendar | Working | Calendar OAuth verified (Session 13) |
 
-### Phase 4 — Scale & Optimize (FUTURE)
-- **Cost Monitor (Step 4):** API cost tracking, circuit breaker at €5/day
-- **Agent Observability:** PostgreSQL agent_tool_calls table, per-agent metrics
-- **Parallel Execution:** asyncio.gather for multi-tool calls, result caching (5-min TTL)
-- **Additional Integrations:** Slack (queued), Calendar, M365/Outlook (blocked — tenant not live), Dropbox, Whoop, Feedly
-- **Dashboard Data Layer:** CEO Cockpit frontend enhancements
-- **Learning Loop:** Director feedback → tune Decision Engine weights + agent routing
+### Phase 4 — Scale & Optimize (SCOPING — Session 13)
+See `BRIEF_PHASE_4_SCOPE.md` for full scope document.
+
+**4A — Operational Hardening (cost, observability, reliability)**
+- Cost monitor: API cost tracking per tool/capability, circuit breaker at €5/day
+- Agent observability: PostgreSQL agent_tool_calls table, per-agent metrics, latency tracking
+- Parallel execution: asyncio.gather for multi-tool calls, result caching (5-min TTL)
+- Email watermark resilience: advance watermark even when no substantive emails found
+
+**4B — Integration Expansion**
+- ~~Slack~~ DONE (Session 13 — polling live, Events API webhook ready)
+- ~~Calendar~~ DONE (Session 13 — OAuth verified, prep job running)
+- Browser Sentinel: SHIPPED (Session 13 — BROWSER-1 merged, 10th data source)
+- M365/Outlook: blocked (tenant not migrated)
+
+**4C — Intelligence & Learning**
+- Learning loop: Director feedback → tune Decision Engine weights + agent routing
+- Capability spec completion: 8 remaining (PM-paced)
+- Dashboard data layer: CEO Cockpit frontend enhancements
 
 ### Open Items (operational)
-- ~~**WhatsApp historical backfill:**~~ DONE (Session 12) — 1,490+ messages from 55 chats, 2 years of history
-- ~~**Email backfill re-run:**~~ DONE (Session 12) — 38 emails with attachment text extracted
-- **Slack full bot integration:** Brief written (`BRIEF_SLACK_BOT_INTEGRATION.md`). **Blocked:** Director must set `SLACK_BOT_TOKEN` on Render first. Current Slack polling code works but token is missing.
-- **Commitment seeding:** commitments table is empty — extraction code exists in email_trigger.py + fireflies_trigger.py but has never produced rows. Needs investigation or manual seeding.
+- ~~**WhatsApp historical backfill:**~~ DONE (Session 12)
+- ~~**Email backfill re-run:**~~ DONE (Session 12)
+- ~~**Slack bot integration:**~~ DONE (Session 13) — polling live, Events API webhook deployed
+- ~~**Commitment seeding:**~~ DONE (Session 13) — 50+ commitments extracted from meetings + emails
+- ~~**Calendar OAuth:**~~ DONE (Session 13) — verified working
 - **ClaimsMax / Philip emails:** Draft emails ready, need Philip's email address
 - **Wertheimer term sheet:** Financial decisions needed before Cowork can draft
 
@@ -424,9 +441,39 @@ Briefs:
 - **BRIEF_SLACK_BOT_INTEGRATION.md** — Slack Events API upgrade from polling. Blocked: Director must set SLACK_BOT_TOKEN on Render.
 
 Remaining:
-- Commitments table is empty (extraction never produced rows)
-- Calendar OAuth may need re-verification on Render
-- Slack bot: waiting on Director for SLACK_BOT_TOKEN
+- ~~Commitments table~~ FIXED Session 13 (50+ rows seeded)
+- ~~Calendar OAuth~~ VERIFIED Session 13
+- ~~Slack bot~~ LIVE Session 13
+
+### Session 13 — 2026-03-08 (dimitry300 machine, Code 300 supervisor)
+**Slack live + commitment extraction fixed + Browser Sentinel reviewed.** 7 commits + 1 merge.
+
+Slack integration:
+- **SLACK_BOT_TOKEN set on Render** — verified token (baker@BrisenGroup, user ID U0AFJLAP1BR)
+- **Slack polling live** — every 5 min, embed to Qdrant, @Baker → pipeline
+- **Events API webhook deployed** — `POST /webhook/slack` with url_verification, signature verification, event dedup. Optional upgrade from polling — Director chose polling for now.
+- **Baker posted to #cockpit** — "Baker is back online"
+
+Bugs fixed (3):
+- **Gmail `sys.exit(1)`** — `authenticate()` called `sys.exit(1)` on headless token failure. `SystemExit` (BaseException) bypassed all `except Exception` handlers, silently killing the email poll scheduler job every 5 min. Changed to `raise RuntimeError`. Latent bug — would have hit on next token expiry.
+- **Fireflies backfill missing commitment extraction** — `backfill_fireflies()` runs on every deploy, marks transcripts as "processed" via `pipeline.run()`, but never called `_extract_commitments_from_meeting()`. Regular poll then skipped them (already deduped). Root cause of 0 commitments.
+- **Commitment extraction logging** — `logger.debug` → `logger.warning` (invisible at INFO level in production)
+- **Column name mismatches** — `email_messages.body` → `full_body`, `meeting_transcripts.transcript_id` → `id`. Same bug class as Sessions 11-12.
+
+Data operations:
+- **Retroactive commitment extraction** — `POST /api/commitments/extract` endpoint. Processed 61 meeting transcripts + 180 emails via Haiku. Seeded 50+ commitments (was 0).
+- **Gmail token refreshed** and uploaded to Render as Secret File.
+
+Calendar OAuth:
+- **Verified working** — calendar API connects, queries, returns results. `bakerai200@gmail.com` has access to Director's `vallen300@gmail.com` calendar. Empty because no upcoming meetings (Sunday).
+
+Code review: feat/browser-sentinel (Brisen):
+- **BROWSER-1 merged** — Baker's 10th data source. Dual-mode web monitoring (simple HTTP + Browser-Use Cloud API). 9 files, 1,199 lines. 1 fix applied (async browser-mode manual runs to avoid Render timeout). Brisen's cleanest delivery yet — zero bugs in core logic.
+- **MCP tools verified** — `baker_browser_tasks` + `baker_browser_results` already in MCP server (Dropbox synced).
+
+Phase 4 scoped — see `BRIEF_PHASE_4_SCOPE.md`.
+
+**Baker current state:** 10 data sources, 16 scheduler jobs, 50+ commitments, 3,400+ alerts, 11-tab dashboard, all 7 standing orders functional.
 
 ## Key Documents (Dropbox)
 
