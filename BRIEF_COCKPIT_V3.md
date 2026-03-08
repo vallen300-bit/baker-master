@@ -407,6 +407,8 @@ Draft: [What should Baker draft?                       ] [Run]
 ```
 No modal, no popup. Same inline pattern as the freetext "Something else" row. The matter context is automatically included — Baker knows which alert and matter this relates to.
 
+**CRITICAL: Execution routes through the existing agentic RAG pipeline.** The Director's typed instruction + alert context is sent to `/api/scan` (which routes through capability detection → CapabilityRunner or agent loop). Do NOT create a separate Claude API call for card actions — use the same pipeline that powers Ask Baker and Baker's Scan.
+
 ### 2. Morning narrative edge cases
 The Haiku-generated narrative must handle:
 - **Zero alerts:** "All clear. No fires overnight. 2 routine updates across MO Vienna and BCOMM."
@@ -434,12 +436,16 @@ This keeps the alerts table lean and allows threads to grow without bloating the
 
 When Director sends a reply (`POST /api/alerts/{id}/reply`), Baker receives the reply in context (alert title + body + structured_actions + thread history) and generates a response. Both messages are inserted into alert_threads.
 
+**CRITICAL: Execution routes through the existing agentic RAG pipeline** (`run_streaming` via CapabilityRunner for capability-matched alerts, `run_agent_loop_streaming` for general). The alert context + thread history is passed as conversation history. Do NOT create a separate Claude API call path — that would bypass agentic RAG and create a parallel, dumber code path.
+
 ### 5. Ask Specialist = same chat, different routing
 Ask Baker and Ask Specialist use the **same chat UI component**. The only difference:
 - **Ask Baker:** Routes via normal capability detection (auto-picks best match)
 - **Ask Specialist:** Shows a capability picker at the top of the chat. Director selects a capability (Legal, Finance, IT...), then types. All messages force-route to that capability via `POST /api/scan/specialist?capability=legal`.
 
 Do NOT build two separate chat interfaces. One component, one flag.
+
+**CRITICAL: Execution routes through the existing agentic RAG pipeline.** `POST /api/scan/specialist` forces the CapabilityRouter to select the specified capability, then executes via `CapabilityRunner.run_streaming()` with the full agent loop (tool use, memory search, etc.). The only difference from normal `/api/scan` is that capability detection is skipped — the capability is provided by the Director. The underlying execution is identical.
 
 ### 6. Phase A split for manageable delivery
 Phase A is too large for a single Brisen sprint. Split into:
