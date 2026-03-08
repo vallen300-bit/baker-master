@@ -1285,6 +1285,162 @@ async function loadDeadlinesTab() {
     }
 }
 
+// ═══ ASK SPECIALIST ═══
+
+var _specialistSlug = null;
+var _specialistHistory = [];
+var _specialistStreaming = false;
+
+async function loadSpecialistTab() {
+    var picker = document.getElementById('specialistPicker');
+    if (!picker || picker.options.length > 1) return; // Already populated
+
+    try {
+        var resp = await bakerFetch('/api/capabilities');
+        if (!resp.ok) return;
+        var data = await resp.json();
+        if (!data.capabilities) return;
+
+        for (var i = 0; i < data.capabilities.length; i++) {
+            var cap = data.capabilities[i];
+            if (cap.capability_type === 'domain' && cap.active) {
+                var opt = document.createElement('option');
+                opt.value = cap.slug;
+                opt.textContent = cap.name;
+                picker.appendChild(opt);
+            }
+        }
+    } catch (e) {
+        console.error('loadSpecialistTab failed:', e);
+    }
+}
+
+async function sendSpecialistMessage(question) {
+    if (_specialistStreaming || !question.trim() || !_specialistSlug) return;
+    _specialistStreaming = true;
+
+    var sendBtn = document.getElementById('specialistSendBtn');
+    var input = document.getElementById('specialistInput');
+    if (sendBtn) sendBtn.disabled = true;
+    if (input) { input.disabled = true; input.value = ''; }
+
+    _specialistHistory.push({ role: 'user', content: question });
+    appendSpecialistBubble('user', question);
+
+    var replyId = 'specialist-reply-' + Date.now();
+    appendSpecialistBubble('assistant', '', replyId);
+    var replyEl = document.getElementById(replyId);
+
+    var fullResponse = '';
+    try {
+        var resp = await bakerFetch('/api/scan/specialist', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: question,
+                capability_slug: _specialistSlug,
+                history: _specialistHistory.slice(-10),
+            }),
+        });
+        if (!resp.ok) throw new Error('Specialist API returned ' + resp.status);
+
+        var reader = resp.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+
+        while (true) {
+            var chunk = await reader.read();
+            if (chunk.done) break;
+            buffer += decoder.decode(chunk.value, { stream: true });
+            var lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (var li = 0; li < lines.length; li++) {
+                if (!lines[li].startsWith('data: ')) continue;
+                var payload = lines[li].slice(6).trim();
+                if (payload === '[DONE]') continue;
+                try {
+                    var data = JSON.parse(payload);
+                    if (data.token) {
+                        if (!fullResponse && replyEl) replyEl.textContent = '';
+                        fullResponse += data.token;
+                        if (replyEl) replyEl.innerHTML = '<div class="md-content">' + md(fullResponse) + '</div>';
+                    }
+                } catch (e) { /* skip */ }
+            }
+        }
+    } catch (err) {
+        fullResponse = 'Error: ' + err.message;
+        if (replyEl) replyEl.textContent = fullResponse;
+    }
+
+    _specialistHistory.push({ role: 'assistant', content: fullResponse });
+    if (_specialistHistory.length > 20) _specialistHistory = _specialistHistory.slice(-20);
+
+    _specialistStreaming = false;
+    if (sendBtn) sendBtn.disabled = false;
+    if (input) { input.disabled = false; input.focus(); }
+
+    var container = document.getElementById('specialistMessages');
+    if (container) container.scrollTop = container.scrollHeight;
+}
+
+function appendSpecialistBubble(role, content, id) {
+    var container = document.getElementById('specialistMessages');
+    if (!container) return;
+    var div = document.createElement('div');
+    div.className = 'scan-msg ' + (role === 'user' ? 'user' : 'baker');
+    if (id) div.id = id;
+    if (role === 'assistant' && !content) {
+        div.innerHTML = '<div class="thinking"><span class="thinking-dots"><span></span><span></span><span></span></span> Specialist is thinking...</div>';
+    } else if (role === 'assistant') {
+        div.innerHTML = '<div class="md-content">' + md(content) + '</div>';
+    } else {
+        div.textContent = content;
+    }
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+    return div;
+}
+
+// ═══ DEBOUNCE + COMMAND BAR DETECTION ═══
+
+function debounce(fn, ms) {
+    var timer;
+    return function() {
+        var args = arguments;
+        var ctx = this;
+        clearTimeout(timer);
+        timer = setTimeout(function() { fn.apply(ctx, args); }, ms);
+    };
+}
+
+function setupDetectionBadge() {
+    var cmdInput = document.getElementById('cmdInput');
+    var badge = document.getElementById('cmdDetectBadge');
+    if (!cmdInput || !badge) return;
+
+    var detect = debounce(async function() {
+        var q = cmdInput.value.trim();
+        if (q.length < 3) { badge.hidden = true; return; }
+        try {
+            var resp = await bakerFetch('/api/scan/detect?q=' + encodeURIComponent(q));
+            if (!resp.ok) { badge.hidden = true; return; }
+            var data = await resp.json();
+            if (data.detected) {
+                badge.textContent = data.capability_name + ' detected';
+                badge.hidden = false;
+            } else {
+                badge.hidden = true;
+            }
+        } catch (e) { badge.hidden = true; }
+    }, 300);
+
+    cmdInput.addEventListener('input', detect);
+    cmdInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') badge.hidden = true;
+    });
+}
+
 // ═══ INIT ═══
 
 async function init() {
@@ -1330,6 +1486,32 @@ async function init() {
 
     // Command bar
     setupCommandBar();
+    setupDetectionBadge();
+
+    // Specialist form
+    var specialistForm = document.getElementById('specialistForm');
+    if (specialistForm) {
+        specialistForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var input = document.getElementById('specialistInput');
+            if (input && input.value.trim()) sendSpecialistMessage(input.value.trim());
+        });
+    }
+    var specialistPicker = document.getElementById('specialistPicker');
+    if (specialistPicker) {
+        specialistPicker.addEventListener('change', function() {
+            _specialistSlug = specialistPicker.value || null;
+            var input = document.getElementById('specialistInput');
+            var sendBtn = document.getElementById('specialistSendBtn');
+            if (input) input.disabled = !_specialistSlug;
+            if (sendBtn) sendBtn.disabled = !_specialistSlug;
+            // Clear messages on capability change
+            _specialistHistory = [];
+            var container = document.getElementById('specialistMessages');
+            if (container) container.textContent = '';
+            if (_specialistSlug && input) input.focus();
+        });
+    }
 
     // Load morning brief
     loadMorningBrief();

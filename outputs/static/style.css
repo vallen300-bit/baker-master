@@ -96,10 +96,20 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 }
 .cmd-input:focus { border-color: var(--blue); }
 .cmd-input::placeholder { color: var(--text3); }
+.cmd-detect-badge {
+  position: absolute; right: 60px; top: 50%; transform: translateY(-50%);
+  padding: 2px 8px; background: var(--blue); color: white;
+  border-radius: 4px; font-size: 10px; font-family: var(--mono);
+}
 .cmd-shortcut {
   position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
   font-family: var(--mono); font-size: 10px; color: var(--text4);
   border: 1px solid var(--border); border-radius: 4px; padding: 2px 5px;
+}
+.specialist-picker {
+  padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px;
+  font-size: 13px; font-family: var(--font); background: var(--bg);
+  cursor: pointer; min-width: 250px;
 }
 .cmd-quick-btns { display: flex; gap: 6px; margin-left: auto; }
 .cmd-quick {

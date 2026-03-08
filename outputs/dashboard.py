@@ -173,6 +173,12 @@ class AlertReplyRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=4000)
 
 
+class SpecialistScanRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=4000)
+    capability_slug: str = Field(..., min_length=1, max_length=50)
+    history: list = Field(default_factory=list)
+
+
 class AlertTagRequest(BaseModel):
     action: str = Field(..., pattern=r"^(add|remove)$")
     tag: str = Field(..., min_length=1, max_length=30, pattern=r"^[a-z0-9-]+$")
@@ -1067,6 +1073,46 @@ async def get_alerts_by_tag(tag: str):
     except Exception as e:
         logger.error(f"GET /api/alerts/by-tag/{tag} failed: {e}")
         return {"items": [], "count": 0, "tag": tag}
+
+
+# ============================================================
+# V3 Phase B2 — Ask Specialist + Command bar detection
+# ============================================================
+
+@app.post("/api/scan/specialist", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def scan_specialist(req: SpecialistScanRequest):
+    """
+    Force-route a question to a specific capability.
+    CRITICAL: Uses _scan_chat_capability() — same function as normal /api/scan.
+    Only difference: capability detection is bypassed, capability is provided directly.
+    """
+    start = time.time()
+    from orchestrator.capability_registry import CapabilityRegistry
+    from orchestrator.capability_router import RoutingPlan
+
+    registry = CapabilityRegistry.get_instance()
+    cap = registry.get_by_slug(req.capability_slug)
+    if not cap or not cap.active:
+        raise HTTPException(status_code=404, detail=f"Capability '{req.capability_slug}' not found or inactive")
+
+    plan = RoutingPlan(mode="fast", capabilities=[cap])
+    scan_req = ScanRequest(question=req.question, history=req.history)
+    return _scan_chat_capability(scan_req, start, {"plan": plan})
+
+
+@app.get("/api/scan/detect", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def detect_capability(q: str = Query("", max_length=500)):
+    """
+    Lightweight capability detection — runs regex match only, no LLM call.
+    Returns matched capability slug and name. Does NOT expose trigger patterns or system prompts.
+    """
+    if len(q.strip()) < 3:
+        return {"detected": False}
+    from orchestrator.capability_registry import CapabilityRegistry
+    cap = CapabilityRegistry.get_instance().match_trigger(q)
+    if cap:
+        return {"detected": True, "capability_slug": cap.slug, "capability_name": cap.name}
+    return {"detected": False}
 
 
 # ============================================================
