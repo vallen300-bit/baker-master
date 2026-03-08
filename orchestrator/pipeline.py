@@ -737,3 +737,62 @@ if __name__ == "__main__":
     else:
         response = ask_baker(args.query, args.contact)
         print(response.analysis)
+
+
+# ============================================================
+# Alert Auto-Expiry (COCKPIT-V3 Phase C)
+# ============================================================
+
+def run_alert_expiry_check():
+    """Auto-expire stale alerts. Called every 6 hours by scheduler.
+    Rules:
+    - T2/T3/T4 alerts older than 3 days → expired
+    - T1 alerts NEVER auto-expire
+    - Travel-tagged alerts NEVER auto-expire (handled by travel_date)
+    """
+    try:
+        import psycopg2.extras
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            logger.warning("Alert expiry: no DB connection")
+            return
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            # Find stale T2/T3/T4 alerts older than 3 days
+            cur.execute("""
+                SELECT id, tier, tags FROM alerts
+                WHERE status = 'pending'
+                  AND exit_reason IS NULL
+                  AND tier >= 2
+                  AND created_at < NOW() - INTERVAL '3 days'
+            """)
+            candidates = cur.fetchall()
+
+            expired_count = 0
+            for row in candidates:
+                # Skip travel-tagged alerts — they never auto-expire
+                tags = row.get("tags") or []
+                if isinstance(tags, str):
+                    import json as _json
+                    try:
+                        tags = _json.loads(tags)
+                    except Exception:
+                        tags = []
+                if "travel" in tags:
+                    continue
+
+                cur.execute(
+                    "UPDATE alerts SET status = 'dismissed', exit_reason = 'expired' WHERE id = %s",
+                    (row["id"],),
+                )
+                expired_count += 1
+
+            conn.commit()
+            cur.close()
+            if expired_count > 0:
+                logger.info(f"Auto-expired {expired_count} stale alerts (T2/T3/T4, >3 days old)")
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"Alert expiry check failed: {e}")

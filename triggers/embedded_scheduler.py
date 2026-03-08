@@ -179,6 +179,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: vip_sla_check (every 5 minutes)")
 
+    # Alert auto-expiry — every 6 hours (COCKPIT-V3 Phase C)
+    from orchestrator.pipeline import run_alert_expiry_check
+    scheduler.add_job(
+        run_alert_expiry_check,
+        IntervalTrigger(hours=6),
+        id="alert_expiry", name="Alert auto-expiry (T2-T4, 3-day rule)",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: alert_expiry (every 6 hours)")
+
 
 def start_scheduler():
     """Create and start the BackgroundScheduler. Idempotent — safe to call twice."""

@@ -944,6 +944,245 @@ async def get_activity_feed(hours: int = Query(24, ge=1, le=168)):
 
 
 # ============================================================
+# V3 Phase C2 — RSS articles + feeds (Media tab)
+# ============================================================
+
+@app.get("/api/rss/articles", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_rss_articles(
+    category: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+):
+    """List recent RSS articles, optionally filtered by feed category."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"articles": [], "count": 0}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            if category:
+                cur.execute("""
+                    SELECT a.*, f.title AS feed_title, f.category
+                    FROM rss_articles a JOIN rss_feeds f ON a.feed_id = f.id
+                    WHERE f.is_active = true AND f.category = %s
+                    ORDER BY a.published_at DESC NULLS LAST LIMIT %s
+                """, (category, limit))
+            else:
+                cur.execute("""
+                    SELECT a.*, f.title AS feed_title, f.category
+                    FROM rss_articles a JOIN rss_feeds f ON a.feed_id = f.id
+                    WHERE f.is_active = true
+                    ORDER BY a.published_at DESC NULLS LAST LIMIT %s
+                """, (limit,))
+            articles = [_serialize(dict(r)) for r in cur.fetchall()]
+            cur.close()
+            return {"articles": articles, "count": len(articles)}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/rss/articles failed: {e}")
+        return {"articles": [], "count": 0}
+
+
+@app.get("/api/rss/feeds", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_rss_feeds_list():
+    """List active RSS feeds with categories for the filter dropdown."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"feeds": [], "count": 0}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT f.id, f.title, f.category, f.feed_url,
+                       COUNT(a.id) AS article_count
+                FROM rss_feeds f LEFT JOIN rss_articles a ON a.feed_id = f.id
+                WHERE f.is_active = true
+                GROUP BY f.id, f.title, f.category, f.feed_url
+                ORDER BY f.category, f.title
+            """)
+            feeds = [_serialize(dict(r)) for r in cur.fetchall()]
+            cur.close()
+            return {"feeds": feeds, "count": len(feeds)}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/rss/feeds failed: {e}")
+        return {"feeds": [], "count": 0}
+
+
+# ============================================================
+# V3 Phase C1 — People + Search
+# ============================================================
+
+@app.get("/api/people", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def list_people():
+    """List all people — merge vip_contacts + contacts, deduplicate by name."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"people": [], "count": 0}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            vips = {}
+            try:
+                cur.execute("SELECT name, role, email, whatsapp_id, tier, domain, role_context FROM vip_contacts ORDER BY tier, name")
+                vips = {r["name"].lower(): {**dict(r), "is_vip": True} for r in cur.fetchall()}
+            except Exception:
+                pass  # vip_contacts may not exist
+
+            cur.execute("SELECT name, email, company, role, relationship, last_contact FROM contacts ORDER BY name")
+            contacts = {r["name"].lower(): dict(r) for r in cur.fetchall()}
+
+            merged = {}
+            for key, c in contacts.items():
+                merged[key] = {**c, "is_vip": False, "tier": None}
+            for key, v in vips.items():
+                if key in merged:
+                    merged[key].update(v)
+                else:
+                    merged[key] = v
+
+            people = sorted(merged.values(), key=lambda p: (
+                0 if p.get("tier") == 1 else 1 if p.get("tier") == 2 else 2,
+                (p.get("name") or "").lower()
+            ))
+            people = [_serialize(p) for p in people]
+            cur.close()
+            return {"people": people, "count": len(people)}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/people failed: {e}")
+        return {"people": [], "count": 0}
+
+
+@app.get("/api/people/{name}/activity", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_person_activity(name: str, limit: int = Query(20, ge=1, le=100)):
+    """Get recent activity for a person across emails, WhatsApp, meetings."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"name": name, "activity": [], "matters": [], "count": 0}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            activity = []
+            pattern = f"%{name}%"
+
+            cur.execute("""
+                SELECT subject, sender_name, sender_email, received_date
+                FROM email_messages WHERE sender_name ILIKE %s OR sender_email ILIKE %s
+                ORDER BY received_date DESC LIMIT %s
+            """, (pattern, pattern, limit))
+            for r in cur.fetchall():
+                activity.append({"type": "email", "title": r["subject"] or "",
+                    "date": r["received_date"].isoformat() if r["received_date"] else "",
+                    "preview": f"From: {r['sender_name'] or ''}"})
+
+            cur.execute("""
+                SELECT sender_name, full_text, timestamp FROM whatsapp_messages
+                WHERE sender_name ILIKE %s ORDER BY timestamp DESC LIMIT %s
+            """, (pattern, limit))
+            for r in cur.fetchall():
+                activity.append({"type": "whatsapp", "title": f"WhatsApp from {r['sender_name'] or ''}",
+                    "date": r["timestamp"].isoformat() if r.get("timestamp") else "",
+                    "preview": (r["full_text"] or "")[:200]})
+
+            try:
+                cur.execute("""
+                    SELECT title, organizer, participants, meeting_date FROM meeting_transcripts
+                    WHERE organizer ILIKE %s OR participants::text ILIKE %s
+                    ORDER BY meeting_date DESC LIMIT %s
+                """, (pattern, pattern, limit))
+                for r in cur.fetchall():
+                    activity.append({"type": "meeting", "title": r["title"] or "Meeting",
+                        "date": r["meeting_date"].isoformat() if r.get("meeting_date") else "",
+                        "preview": f"Organizer: {r['organizer'] or ''}"})
+            except Exception:
+                pass
+
+            activity.sort(key=lambda x: x.get("date", ""), reverse=True)
+
+            cur.execute("""
+                SELECT DISTINCT matter_slug FROM alerts
+                WHERE matter_slug IS NOT NULL AND (title ILIKE %s OR body ILIKE %s)
+            """, (pattern, pattern))
+            matters = [r["matter_slug"] for r in cur.fetchall()]
+            cur.close()
+            return {"name": name, "activity": activity[:limit], "matters": matters, "count": len(activity)}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/people/{name}/activity failed: {e}")
+        return {"name": name, "activity": [], "matters": [], "count": 0}
+
+
+@app.get("/api/alerts/search", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def search_alerts(
+    q: str = Query("", max_length=500),
+    matter: Optional[str] = None,
+    tag: Optional[str] = None,
+    tier: Optional[int] = Query(None, ge=1, le=4),
+    status: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Structured alert search with filters. All SQL parameterized — no string concatenation."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"items": [], "count": 0}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            conditions = []
+            params = []
+            if q and q.strip():
+                conditions.append("(title ILIKE %s OR body ILIKE %s)")
+                params.extend([f"%{q}%", f"%{q}%"])
+            if matter:
+                conditions.append("matter_slug = %s")
+                params.append(matter)
+            if tag:
+                conditions.append("tags ? %s")
+                params.append(tag)
+            if tier:
+                conditions.append("tier = %s")
+                params.append(tier)
+            if status:
+                conditions.append("status = %s")
+                params.append(status)
+            if date_from:
+                conditions.append("created_at >= %s")
+                params.append(date_from)
+            if date_to:
+                conditions.append("created_at <= %s")
+                params.append(date_to)
+            where = " AND ".join(conditions) if conditions else "TRUE"
+            cur.execute(
+                f"SELECT * FROM alerts WHERE {where} ORDER BY created_at DESC LIMIT %s",
+                tuple(params + [limit]),
+            )
+            items = [_serialize(dict(r)) for r in cur.fetchall()]
+            cur.close()
+            return {"items": items, "count": len(items)}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/alerts/search failed: {e}")
+        return {"items": [], "count": 0}
+
+
+# ============================================================
 # V3 Phase B1 — Tags, ungrouped assignment
 # ============================================================
 

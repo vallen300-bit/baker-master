@@ -118,12 +118,16 @@ const TAB_VIEW_MAP = {
     'fires': 'viewFires',
     'matters': 'viewMatters',
     'deadlines': 'viewDeadlines',
+    'people': 'viewPeople',
     'tags': 'viewTags',
+    'search': 'viewSearch',
     'ask-baker': 'viewAskBaker',
     'ask-specialist': 'viewAskSpecialist',
+    'travel': 'viewTravel',
+    'media': 'viewMedia',
 };
 
-const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'tags', 'ask-baker', 'ask-specialist']);
+const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'tags', 'search', 'ask-baker', 'ask-specialist', 'travel', 'media']);
 
 function switchTab(tabName) {
     document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
@@ -132,20 +136,11 @@ function switchTab(tabName) {
 
     document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
 
-    if (FUNCTIONAL_TABS.has(tabName)) {
-        const viewId = TAB_VIEW_MAP[tabName];
-        if (viewId) {
-            const el = document.getElementById(viewId);
-            if (el) el.classList.add('active');
-        }
-    } else {
-        const cs = document.getElementById('viewComingSoon');
-        if (cs) cs.classList.add('active');
-        const labels = {
-            'people': 'People', 'tags': 'Tags', 'search': 'Search',
-            'ask-specialist': 'Ask Specialist', 'travel': 'Travel', 'media': 'Media'
-        };
-        setText('comingSoonTitle', (labels[tabName] || tabName) + ' -- Coming soon');
+    // All 11 tabs are functional — no "Coming soon" fallback needed
+    var viewId = TAB_VIEW_MAP[tabName];
+    if (viewId) {
+        var el = document.getElementById(viewId);
+        if (el) el.classList.add('active');
     }
 
     currentTab = tabName;
@@ -154,9 +149,13 @@ function switchTab(tabName) {
     else if (tabName === 'fires') loadFires();
     else if (tabName === 'matters') loadMattersTab();
     else if (tabName === 'deadlines') loadDeadlinesTab();
+    else if (tabName === 'people') loadPeopleTab();
     else if (tabName === 'tags') loadTagsTab();
+    else if (tabName === 'search') loadSearchTab();
     else if (tabName === 'ask-baker') focusScanInput();
     else if (tabName === 'ask-specialist') loadSpecialistTab();
+    else if (tabName === 'travel') loadTravelTab();
+    else if (tabName === 'media') loadMediaTab();
 }
 
 // ═══ MORNING BRIEF ═══
@@ -1214,6 +1213,242 @@ async function loadMattersTab() {
     }
 }
 
+// ═══ PEOPLE TAB ═══
+
+async function loadPeopleTab() {
+    var container = document.getElementById('peopleContent');
+    if (!container) return;
+    container.textContent = 'Loading people...';
+    try {
+        var resp = await bakerFetch('/api/people');
+        if (!resp.ok) return;
+        var data = await resp.json();
+        if (!data.people || data.people.length === 0) {
+            container.textContent = 'No contacts found.';
+            return;
+        }
+        container.textContent = '';
+        for (var i = 0; i < data.people.length; i++) {
+            var p = data.people[i];
+            var card = document.createElement('div');
+            card.className = 'card card-compact person-card';
+            card.style.cursor = 'pointer';
+            card.dataset.personName = p.name || '';
+            card.addEventListener('click', function() { loadPersonDetail(this.dataset.personName); });
+            var hdr = document.createElement('div');
+            hdr.className = 'card-header';
+            if (p.is_vip) {
+                var vip = document.createElement('span');
+                vip.className = 'vip-badge';
+                vip.textContent = 'VIP';
+                hdr.appendChild(vip);
+            }
+            if (p.tier) {
+                var dot = document.createElement('span');
+                dot.className = 'nav-dot ' + tierClass(p.tier);
+                dot.style.marginTop = '5px';
+                hdr.appendChild(dot);
+            }
+            var nm = document.createElement('span');
+            nm.className = 'card-title';
+            nm.textContent = p.name || '';
+            hdr.appendChild(nm);
+            var role = document.createElement('span');
+            role.className = 'card-time';
+            role.textContent = [p.role, p.company].filter(Boolean).join(' — ');
+            hdr.appendChild(role);
+            card.appendChild(hdr);
+            container.appendChild(card);
+        }
+    } catch (e) {
+        container.textContent = 'Failed to load people.';
+    }
+}
+
+async function loadPersonDetail(name) {
+    var container = document.getElementById('peopleContent');
+    if (!container) return;
+    container.textContent = 'Loading...';
+    try {
+        var resp = await bakerFetch('/api/people/' + encodeURIComponent(name) + '/activity');
+        if (!resp.ok) return;
+        var data = await resp.json();
+        container.textContent = '';
+
+        var back = document.createElement('button');
+        back.className = 'footer-btn';
+        back.textContent = 'Back to all people';
+        back.style.marginBottom = '12px';
+        back.addEventListener('click', function() { loadPeopleTab(); });
+        container.appendChild(back);
+
+        var header = document.createElement('div');
+        header.className = 'section-label';
+        header.textContent = name;
+        container.appendChild(header);
+
+        // Related matters
+        if (data.matters && data.matters.length > 0) {
+            var mattersDiv = document.createElement('div');
+            mattersDiv.style.cssText = 'padding:0 0 10px;';
+            for (var mi = 0; mi < data.matters.length; mi++) {
+                var badge = document.createElement('span');
+                badge.className = 'tag-badge';
+                badge.textContent = data.matters[mi];
+                mattersDiv.appendChild(badge);
+            }
+            container.appendChild(mattersDiv);
+        }
+
+        // Activity feed
+        if (!data.activity || data.activity.length === 0) {
+            var empty = document.createElement('div');
+            empty.textContent = 'No recent activity found.';
+            empty.style.cssText = 'color:var(--text3);font-size:12px;';
+            container.appendChild(empty);
+            return;
+        }
+        for (var ai = 0; ai < data.activity.length; ai++) {
+            var item = data.activity[ai];
+            var row = document.createElement('div');
+            row.className = 'activity-row';
+            var typeBadge = document.createElement('span');
+            typeBadge.className = 'activity-type ' + (item.type || '');
+            typeBadge.textContent = (item.type || '').charAt(0).toUpperCase() + (item.type || '').slice(1);
+            row.appendChild(typeBadge);
+            var info = document.createElement('div');
+            var titleEl = document.createElement('div');
+            titleEl.className = 'activity-text';
+            titleEl.textContent = item.title || '';
+            info.appendChild(titleEl);
+            if (item.preview) {
+                var prevEl = document.createElement('div');
+                prevEl.style.cssText = 'font-size:11px;color:var(--text3);margin-top:2px;';
+                prevEl.textContent = item.preview;
+                info.appendChild(prevEl);
+            }
+            var dateEl = document.createElement('div');
+            dateEl.className = 'activity-time';
+            dateEl.textContent = item.date ? fmtRelativeTime(item.date) : '';
+            info.appendChild(dateEl);
+            row.appendChild(info);
+            container.appendChild(row);
+        }
+    } catch (e) {
+        container.textContent = 'Failed to load person details.';
+    }
+}
+
+// ═══ SEARCH TAB ═══
+
+var _searchInitialized = false;
+
+function loadSearchTab() {
+    if (_searchInitialized) return;
+    _searchInitialized = true;
+    var filtersEl = document.getElementById('searchFilters');
+    if (!filtersEl) return;
+
+    // Build filter bar using DOM methods
+    filtersEl.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;align-items:center;';
+
+    var searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Search alerts...';
+    searchInput.maxLength = 500;
+    searchInput.style.cssText = 'flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:var(--font);outline:none;';
+    searchInput.id = 'searchQueryInput';
+    filtersEl.appendChild(searchInput);
+
+    var matterSelect = document.createElement('select');
+    matterSelect.style.cssText = 'padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:var(--font);';
+    matterSelect.id = 'searchMatterFilter';
+    matterSelect.innerHTML = '<option value="">All matters</option>';
+    filtersEl.appendChild(matterSelect);
+
+    var tagSelect = document.createElement('select');
+    tagSelect.style.cssText = 'padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:var(--font);';
+    tagSelect.id = 'searchTagFilter';
+    tagSelect.innerHTML = '<option value="">All tags</option>';
+    filtersEl.appendChild(tagSelect);
+
+    var statusSelect = document.createElement('select');
+    statusSelect.style.cssText = 'padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:var(--font);';
+    statusSelect.id = 'searchStatusFilter';
+    statusSelect.innerHTML = '<option value="">All status</option><option value="pending">Pending</option><option value="resolved">Resolved</option><option value="dismissed">Dismissed</option>';
+    filtersEl.appendChild(statusSelect);
+
+    var searchBtn = document.createElement('button');
+    searchBtn.className = 'run-btn';
+    searchBtn.textContent = 'Search';
+    searchBtn.addEventListener('click', executeSearch);
+    filtersEl.appendChild(searchBtn);
+
+    // Debounced live search
+    searchInput.addEventListener('input', debounce(function() {
+        if (searchInput.value.trim().length >= 3) executeSearch();
+    }, 300));
+
+    // Populate dropdowns
+    bakerFetch('/api/dashboard/matters-summary').then(function(r) { return r.json(); }).then(function(d) {
+        if (d.matters) d.matters.forEach(function(m) {
+            var opt = document.createElement('option');
+            opt.value = m.matter_slug;
+            opt.textContent = m.matter_slug === '_ungrouped' ? 'Ungrouped' : m.matter_slug;
+            matterSelect.appendChild(opt);
+        });
+    }).catch(function() {});
+    bakerFetch('/api/tags').then(function(r) { return r.json(); }).then(function(d) {
+        if (d.tags) d.tags.forEach(function(t) {
+            var opt = document.createElement('option');
+            opt.value = t.tag || t.name;
+            opt.textContent = (t.tag || t.name) + ' (' + t.count + ')';
+            tagSelect.appendChild(opt);
+        });
+    }).catch(function() {});
+}
+
+async function executeSearch() {
+    var results = document.getElementById('searchResults');
+    if (!results) return;
+    results.textContent = 'Searching...';
+
+    var q = (document.getElementById('searchQueryInput') || {}).value || '';
+    var matter = (document.getElementById('searchMatterFilter') || {}).value || '';
+    var tag = (document.getElementById('searchTagFilter') || {}).value || '';
+    var status = (document.getElementById('searchStatusFilter') || {}).value || '';
+
+    var params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (matter) params.set('matter', matter);
+    if (tag) params.set('tag', tag);
+    if (status) params.set('status', status);
+    params.set('limit', '50');
+
+    try {
+        var resp = await bakerFetch('/api/alerts/search?' + params.toString());
+        if (!resp.ok) return;
+        var data = await resp.json();
+
+        results.textContent = '';
+        var countEl = document.createElement('div');
+        countEl.style.cssText = 'font-size:12px;color:var(--text3);margin-bottom:10px;';
+        countEl.textContent = data.count + ' results';
+        results.appendChild(countEl);
+
+        if (data.items.length === 0) return;
+
+        var cardsDiv = document.createElement('div');
+        setSafeHTML(cardsDiv, data.items.map(function(a) {
+            return renderAlertCard(a, (a.tier || 3) <= 2);
+        }).join(''));
+        results.appendChild(cardsDiv);
+        populateAssignDropdowns();
+    } catch (e) {
+        results.textContent = 'Search failed.';
+    }
+}
+
 // ═══ TAGS TAB ═══
 
 async function loadTagsTab() {
@@ -1409,6 +1644,188 @@ async function loadDeadlinesTab() {
     } catch (e) {
         container.textContent = 'Failed to load deadlines.';
         container.style.color = 'var(--red)';
+    }
+}
+
+// ═══ TRAVEL TAB ═══
+
+async function loadTravelTab() {
+    var container = document.getElementById('travelContent');
+    if (!container) return;
+    container.textContent = 'Loading travel items...';
+    try {
+        var resp = await bakerFetch('/api/alerts/by-tag/travel');
+        if (!resp.ok) return;
+        var data = await resp.json();
+
+        if (!data.items || data.items.length === 0) {
+            container.textContent = 'No travel alerts. Travel-related emails and bookings will appear here when detected.';
+            container.style.cssText = 'color:var(--text3);font-size:13px;';
+            return;
+        }
+
+        // Split into upcoming and past
+        var now = new Date();
+        now.setHours(0, 0, 0, 0);
+        var upcoming = [];
+        var past = [];
+        for (var i = 0; i < data.items.length; i++) {
+            var item = data.items[i];
+            if (item.travel_date) {
+                var td = new Date(item.travel_date);
+                if (td < now) { past.push(item); continue; }
+            }
+            upcoming.push(item);
+        }
+
+        container.textContent = '';
+
+        if (upcoming.length > 0) {
+            var upLabel = document.createElement('div');
+            upLabel.style.cssText = 'font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--text3);margin:0 0 8px;';
+            upLabel.textContent = 'Upcoming (' + upcoming.length + ')';
+            container.appendChild(upLabel);
+            var upDiv = document.createElement('div');
+            setSafeHTML(upDiv, upcoming.map(function(a) { return renderAlertCard(a, false); }).join(''));
+            container.appendChild(upDiv);
+        }
+
+        if (past.length > 0) {
+            var pastLabel = document.createElement('div');
+            pastLabel.style.cssText = 'font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--text4);margin:16px 0 8px;';
+            pastLabel.textContent = 'Past (' + past.length + ')';
+            container.appendChild(pastLabel);
+            var pastDiv = document.createElement('div');
+            pastDiv.style.opacity = '0.5';
+            setSafeHTML(pastDiv, past.map(function(a) { return renderAlertCard(a, false); }).join(''));
+            container.appendChild(pastDiv);
+        }
+    } catch (e) {
+        container.textContent = 'Failed to load travel items.';
+    }
+}
+
+// ═══ MEDIA TAB (RSS) ═══
+
+async function loadMediaTab() {
+    var container = document.getElementById('mediaContent');
+    if (!container) return;
+    container.textContent = 'Loading media...';
+    try {
+        // Fetch feeds for filter dropdown
+        var feedsResp = await bakerFetch('/api/rss/feeds');
+        var feedsData = feedsResp.ok ? await feedsResp.json() : { feeds: [] };
+
+        // Fetch articles
+        var articlesResp = await bakerFetch('/api/rss/articles?limit=50');
+        if (!articlesResp.ok) return;
+        var data = await articlesResp.json();
+
+        container.textContent = '';
+
+        // Category filter
+        if (feedsData.feeds && feedsData.feeds.length > 0) {
+            var filterRow = document.createElement('div');
+            filterRow.style.cssText = 'margin-bottom:12px;';
+            var catSelect = document.createElement('select');
+            catSelect.style.cssText = 'padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:var(--font);';
+            catSelect.innerHTML = '<option value="">All categories</option>';
+            var categories = {};
+            feedsData.feeds.forEach(function(f) {
+                if (f.category && !categories[f.category]) {
+                    categories[f.category] = true;
+                    var opt = document.createElement('option');
+                    opt.value = f.category;
+                    opt.textContent = f.category;
+                    catSelect.appendChild(opt);
+                }
+            });
+            catSelect.addEventListener('change', async function() {
+                var url = '/api/rss/articles?limit=50';
+                if (catSelect.value) url += '&category=' + encodeURIComponent(catSelect.value);
+                var r = await bakerFetch(url);
+                if (r.ok) {
+                    var d = await r.json();
+                    renderArticles(container, d.articles, filterRow);
+                }
+            });
+            filterRow.appendChild(catSelect);
+            container.appendChild(filterRow);
+        }
+
+        if (!data.articles || data.articles.length === 0) {
+            var empty = document.createElement('div');
+            empty.textContent = 'No media items yet. RSS feeds are polled every hour.';
+            empty.style.cssText = 'color:var(--text3);font-size:13px;';
+            container.appendChild(empty);
+            return;
+        }
+
+        var filterRow2 = container.querySelector('div');
+        renderArticles(container, data.articles, filterRow2);
+    } catch (e) {
+        container.textContent = 'Failed to load media.';
+    }
+}
+
+function renderArticles(container, articles, filterRow) {
+    // Clear existing articles but keep filter row
+    while (container.children.length > (filterRow ? 1 : 0)) {
+        container.removeChild(container.lastChild);
+    }
+
+    // Group by date
+    var today = new Date(); today.setHours(0,0,0,0);
+    var yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+    var weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7);
+
+    var groups = { 'Today': [], 'Yesterday': [], 'This Week': [], 'Older': [] };
+    for (var i = 0; i < articles.length; i++) {
+        var a = articles[i];
+        var d = a.published_at ? new Date(a.published_at) : new Date(0);
+        if (d >= today) groups['Today'].push(a);
+        else if (d >= yesterday) groups['Yesterday'].push(a);
+        else if (d >= weekAgo) groups['This Week'].push(a);
+        else groups['Older'].push(a);
+    }
+
+    for (var group in groups) {
+        if (groups[group].length === 0) continue;
+        var label = document.createElement('div');
+        label.style.cssText = 'font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--text3);margin:12px 0 6px;';
+        label.textContent = group + ' (' + groups[group].length + ')';
+        container.appendChild(label);
+
+        for (var j = 0; j < groups[group].length; j++) {
+            var art = groups[group][j];
+            var card = document.createElement('div');
+            card.className = 'article-card';
+
+            var link = document.createElement('a');
+            link.className = 'article-title';
+            // Security: only allow http/https URLs — reject javascript:, data:, etc.
+            var articleUrl = art.url || '#';
+            if (articleUrl !== '#' && !/^https?:\/\//i.test(articleUrl)) articleUrl = '#';
+            link.href = articleUrl;
+            link.target = '_blank';
+            link.rel = 'noopener';
+            link.textContent = art.title || 'Untitled';
+            card.appendChild(link);
+
+            var meta = document.createElement('div');
+            meta.className = 'article-meta';
+            meta.textContent = [art.feed_title, art.category, art.published_at ? fmtRelativeTime(art.published_at) : ''].filter(Boolean).join(' | ');
+            card.appendChild(meta);
+
+            if (art.summary) {
+                var summary = document.createElement('div');
+                summary.className = 'article-summary';
+                summary.textContent = (art.summary || '').substring(0, 200);
+                card.appendChild(summary);
+            }
+
+            container.appendChild(card);
+        }
     }
 }
 

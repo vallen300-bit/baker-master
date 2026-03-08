@@ -2401,6 +2401,7 @@ class SentinelStoreBack:
                 ("exit_reason", "TEXT"),
                 ("tags", "JSONB DEFAULT '[]'::jsonb"),
                 ("board_status", "TEXT DEFAULT 'new'"),
+                ("travel_date", "DATE"),
             ]:
                 cur.execute(f"""
                     ALTER TABLE alerts ADD COLUMN IF NOT EXISTS {col} {defn}
