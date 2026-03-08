@@ -109,6 +109,8 @@ class SentinelStoreBack:
         self._ensure_capability_runs_table()
         self._ensure_decomposition_log_table()
         self._ensure_baker_tasks_capability_columns()
+        self._ensure_alerts_v3_columns()
+        self._ensure_alert_threads_table()
 
     # -------------------------------------------------------
     # Connection pool management
@@ -2386,10 +2388,64 @@ class SentinelStoreBack:
     # Alerts
     # -------------------------------------------------------
 
+    def _ensure_alerts_v3_columns(self):
+        """Add V3 columns to alerts table if missing. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            for col, defn in [
+                ("matter_slug", "TEXT"),
+                ("exit_reason", "TEXT"),
+                ("tags", "JSONB DEFAULT '[]'::jsonb"),
+                ("board_status", "TEXT DEFAULT 'new'"),
+            ]:
+                cur.execute(f"""
+                    ALTER TABLE alerts ADD COLUMN IF NOT EXISTS {col} {defn}
+                """)
+            conn.commit()
+            cur.close()
+            logger.info("alerts V3 columns verified")
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"Could not ensure alerts V3 columns: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_alert_threads_table(self):
+        """Create alert_threads table if missing. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS alert_threads (
+                    id SERIAL PRIMARY KEY,
+                    alert_id INTEGER REFERENCES alerts(id) NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_alert_threads_alert ON alert_threads(alert_id)
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("alert_threads table verified")
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"Could not ensure alert_threads table: {e}")
+        finally:
+            self._put_conn(conn)
+
     def create_alert(self, tier: int, title: str, body: str = None,
                      action_required: bool = False, trigger_id: int = None,
                      contact_id: str = None, deal_id: str = None,
-                     structured_actions: dict = None) -> Optional[int]:
+                     structured_actions: dict = None,
+                     matter_slug: str = None) -> Optional[int]:
         """Insert into alerts table. Returns alert ID."""
         conn = self._get_conn()
         if not conn:
@@ -2402,18 +2458,26 @@ class SentinelStoreBack:
             cur.execute(
                 """
                 INSERT INTO alerts (tier, title, body, action_required,
-                    trigger_id, contact_id, deal_id, structured_actions, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    trigger_id, contact_id, deal_id, structured_actions,
+                    matter_slug, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                 RETURNING id
                 """,
                 (tier, title, body, action_required,
                  trigger_id, contact_id if contact_id else None,
-                 deal_id if deal_id else None, sa_json),
+                 deal_id if deal_id else None, sa_json, matter_slug),
             )
             alert_id = cur.fetchone()[0]
             conn.commit()
             cur.close()
-            logger.info(f"Created alert #{alert_id}: tier={tier}, '{title}'")
+            logger.info(f"Created alert #{alert_id}: tier={tier}, matter={matter_slug}, '{title}'")
+            # Invalidate morning narrative cache on T1 alert
+            if tier == 1:
+                try:
+                    from outputs.dashboard import invalidate_morning_narrative
+                    invalidate_morning_narrative()
+                except Exception:
+                    pass  # dashboard module may not be loaded in all contexts
             return alert_id
         except Exception as e:
             conn.rollback()
@@ -2467,14 +2531,14 @@ class SentinelStoreBack:
             self._put_conn(conn)
 
     def resolve_alert(self, alert_id: int):
-        """Mark alert as resolved."""
+        """Mark alert as resolved (real issue, handled)."""
         conn = self._get_conn()
         if not conn:
             return
         try:
             cur = conn.cursor()
             cur.execute(
-                "UPDATE alerts SET status = 'resolved', resolved_at = NOW() WHERE id = %s",
+                "UPDATE alerts SET status = 'resolved', exit_reason = 'resolved', resolved_at = NOW() WHERE id = %s",
                 (alert_id,),
             )
             conn.commit()
@@ -2486,14 +2550,14 @@ class SentinelStoreBack:
             self._put_conn(conn)
 
     def dismiss_alert(self, alert_id: int):
-        """Mark alert as dismissed without acting."""
+        """Mark alert as dismissed (noise, not relevant)."""
         conn = self._get_conn()
         if not conn:
             return
         try:
             cur = conn.cursor()
             cur.execute(
-                "UPDATE alerts SET status = 'dismissed', resolved_at = NOW() WHERE id = %s",
+                "UPDATE alerts SET status = 'dismissed', exit_reason = 'dismissed', resolved_at = NOW() WHERE id = %s",
                 (alert_id,),
             )
             conn.commit()

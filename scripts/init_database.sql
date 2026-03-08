@@ -140,7 +140,7 @@ CREATE INDEX idx_triggers_received ON trigger_log(received_at DESC);
 -- ============================================
 CREATE TABLE IF NOT EXISTS alerts (
     id          SERIAL PRIMARY KEY,
-    tier        INTEGER CHECK (tier IN (1, 2, 3)),
+    tier        INTEGER CHECK (tier IN (1, 2, 3, 4)),
     title       TEXT NOT NULL,
     body        TEXT,
     action_required BOOLEAN DEFAULT FALSE,
@@ -148,6 +148,11 @@ CREATE TABLE IF NOT EXISTS alerts (
     status      TEXT DEFAULT 'pending',        -- pending, acknowledged, resolved, dismissed
     acknowledged_at TIMESTAMPTZ,
     resolved_at TIMESTAMPTZ,
+    -- V3: Matter grouping + exit tracking
+    matter_slug TEXT,                           -- FK to matter_registry.matter_name (loose)
+    exit_reason TEXT,                           -- resolved, dismissed, expired, travel_passed (NULL = active)
+    tags        JSONB DEFAULT '[]'::jsonb,
+    board_status TEXT DEFAULT 'new',
     -- Structured actions (COCKPIT-ALERT-UI)
     structured_actions JSONB,
     -- Source
@@ -160,6 +165,20 @@ CREATE TABLE IF NOT EXISTS alerts (
 
 CREATE INDEX idx_alerts_status ON alerts(status) WHERE status = 'pending';
 CREATE INDEX idx_alerts_tier ON alerts(tier);
+CREATE INDEX idx_alerts_matter ON alerts(matter_slug) WHERE matter_slug IS NOT NULL;
+
+-- ============================================
+-- ALERT THREADS — Conversation per alert card (V3)
+-- ============================================
+CREATE TABLE IF NOT EXISTS alert_threads (
+    id          SERIAL PRIMARY KEY,
+    alert_id    INTEGER REFERENCES alerts(id) NOT NULL,
+    role        TEXT NOT NULL,                  -- 'baker' or 'director'
+    content     TEXT NOT NULL,
+    created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_alert_threads_alert ON alert_threads(alert_id);
 
 -- ============================================
 -- Ingestion log (INGEST-1 — CLI batch ingestion dedup tracking)
