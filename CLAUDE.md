@@ -382,7 +382,9 @@ Designed and specified **COCKPIT-V3** — full dashboard redesign with Director.
 
 - **COCKPIT-V3 Phase A2** (4 commits) — reviewed, 1 fix applied (baker reply storage in alert_threads), merged. Matter auto-assignment (score-based keyword matching in pipeline.py). Reply thread backend (POST /api/alerts/{id}/reply routes through scan_chat, GET /api/alerts/{id}/threads, 50-reply limit). Matters detail view (GET /api/matters/{slug}/items). Inline card results (SSE streams into card, not tab switch). Result toolbar (Copy, Word, Email). Enhanced deadlines (grouped by urgency). All 3 CRITICAL rules respected: every action routes through existing agentic RAG pipeline.
 
-**Next: Phase B** — per brief spec (security review, offline/error states, advanced features).
+- **COCKPIT-V3 Phase B** (4 commits) — reviewed, 1 fix applied (auto-tag false positives: removed "it" keyword, added word-boundary matching for short keywords), merged. Tags system (15 categories, keyword-based auto-tagging in pipeline.py, GET /api/tags, POST /api/alerts/{id}/tag, GET /api/alerts/by-tag/{tag}). Ungrouped assignment (POST /api/alerts/{id}/assign with new project creation). Ask Specialist (POST /api/scan/specialist routes through _scan_chat_capability, same agentic RAG pipeline). Command bar detection (GET /api/scan/detect, regex-only, debounced badge). Board view (read-only kanban, List/Board toggle on Matters). Artifact storage (alert_artifacts table in PostgreSQL, POST /api/artifacts/save, Save button on result toolbar). All 7 verification gaps from brief addressed.
+
+**Next: Phase C** — People tab, Search tab, Travel tab, Media tab, alert auto-expiry.
 
 ## Key Documents (Dropbox)
 
