@@ -92,7 +92,7 @@ def _extract_commitments_from_email(email_text: str, subject: str,
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
         parsed = json.loads(raw)
     except (json.JSONDecodeError, Exception) as e:
-        logger.debug(f"Commitment extraction failed for email {source_id}: {e}")
+        logger.warning(f"Commitment extraction failed for email {source_id}: {e}")
         return
 
     commitments = parsed.get("commitments", [])

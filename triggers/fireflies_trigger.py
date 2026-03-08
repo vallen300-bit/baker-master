@@ -110,7 +110,7 @@ def _extract_commitments_from_meeting(transcript_text: str, meeting_title: str,
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
         parsed = json.loads(raw)
     except (json.JSONDecodeError, Exception) as e:
-        logger.debug(f"Commitment extraction failed for meeting {source_id}: {e}")
+        logger.warning(f"Commitment extraction failed for meeting {source_id}: {e}")
         return
 
     commitments = parsed.get("commitments", [])
@@ -354,6 +354,17 @@ def backfill_fireflies():
                 )
             except Exception:
                 pass
+
+            # Phase 3C: Extract commitments from meeting transcript (was missing from backfill)
+            try:
+                _extract_commitments_from_meeting(
+                    transcript_text=formatted["text"],
+                    meeting_title=metadata.get("meeting_title", "Untitled"),
+                    participants=metadata.get("participants", ""),
+                    source_id=source_id,
+                )
+            except Exception as _e:
+                logger.warning(f"Backfill commitment extraction failed for {source_id}: {_e}")
 
         logger.info(
             f"Fireflies backfill complete: ingested {ingested} of {ingested + skipped} "

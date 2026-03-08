@@ -1343,6 +1343,61 @@ async def get_commitments(
         return {"commitments": [], "count": 0, "overdue_count": 0}
 
 
+@app.post("/api/commitments/extract", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def extract_commitments_retroactive(background_tasks: BackgroundTasks):
+    """Retroactive commitment extraction from existing meetings and emails."""
+    def _run_extraction():
+        import psycopg2.extras
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            logger.error("Commitment extraction: no DB connection")
+            return
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+            # 1. Extract from meeting transcripts
+            cur.execute("SELECT transcript_id, title, participants, full_transcript FROM meeting_transcripts WHERE full_transcript IS NOT NULL")
+            meetings = cur.fetchall()
+            m_count = 0
+            for m in meetings:
+                try:
+                    from triggers.fireflies_trigger import _extract_commitments_from_meeting
+                    _extract_commitments_from_meeting(
+                        transcript_text=m["full_transcript"],
+                        meeting_title=m.get("title", "Untitled"),
+                        participants=m.get("participants", ""),
+                        source_id=m["transcript_id"],
+                    )
+                    m_count += 1
+                except Exception as e:
+                    logger.warning(f"Commitment extraction failed for meeting {m['transcript_id']}: {e}")
+            logger.info(f"Retroactive commitment extraction: processed {m_count} meetings")
+
+            # 2. Extract from emails
+            cur.execute("SELECT thread_id, subject, body FROM email_messages WHERE body IS NOT NULL ORDER BY received_date DESC LIMIT 200")
+            emails = cur.fetchall()
+            e_count = 0
+            for em in emails:
+                try:
+                    from triggers.email_trigger import _extract_commitments_from_email
+                    _extract_commitments_from_email(
+                        email_text=em["body"],
+                        subject=em.get("subject", ""),
+                        sender=em.get("primary_sender", ""),
+                        source_id=em["thread_id"],
+                    )
+                    e_count += 1
+                except Exception as e:
+                    logger.warning(f"Commitment extraction failed for email {em['thread_id']}: {e}")
+            logger.info(f"Retroactive commitment extraction: processed {e_count} emails")
+        finally:
+            store._put_conn(conn)
+
+    background_tasks.add_task(_run_extraction)
+    return {"status": "started", "message": "Retroactive commitment extraction running in background. Check /api/commitments for results."}
+
+
 @app.get("/api/alerts/search", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
 async def search_alerts(
     q: str = Query("", max_length=500),

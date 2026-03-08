@@ -124,14 +124,15 @@ def authenticate() -> Credentials:
 
     if not creds or not creds.valid:
         if _HEADLESS:
-            # On Render / headless: cannot open browser — fail with instructions
-            print("ERROR: Gmail token invalid and cannot run OAuth browser flow on headless server.")
-            print()
-            print("  To fix:")
-            print("  1. Run locally: python scripts/extract_gmail.py --mode poll")
-            print("  2. This generates config/gmail_token.json")
-            print("  3. Upload it to Render as Secret File: /etc/secrets/gmail_token.json")
-            sys.exit(1)
+            # On Render / headless: cannot open browser — raise instead of sys.exit
+            # sys.exit(1) raises SystemExit (BaseException) which bypasses except Exception handlers
+            # and silently kills scheduler jobs. Use RuntimeError so callers can catch and log.
+            msg = (
+                "Gmail token invalid and cannot run OAuth browser flow on headless server. "
+                "Fix: run locally `python scripts/extract_gmail.py --mode poll`, "
+                "then upload config/gmail_token.json to Render as Secret File."
+            )
+            raise RuntimeError(msg)
         else:
             # Local dev: open browser for consent
             print("Gmail: Starting OAuth2 consent flow (will open browser)...")
