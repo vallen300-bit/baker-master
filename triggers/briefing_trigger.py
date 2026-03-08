@@ -106,6 +106,46 @@ def gather_briefing_context() -> str:
     except Exception as e:
         logger.warning(f"Could not fetch active deals: {e}")
 
+    # 4. Owner's Lens — strategic signals (MOHG, network contacts, deal flow)
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if conn:
+            try:
+                cur = conn.cursor()
+                # Find alerts with owner-relevant keywords from last 24h
+                cur.execute("""
+                    SELECT tier, title, body FROM alerts
+                    WHERE created_at > NOW() - INTERVAL '24 hours'
+                      AND status = 'pending'
+                      AND (
+                        title ~* '(Mandarin.Oriental|MOHG|MO.Vienna|MORV|branded.residence|luxury.hotel|sovereign.wealth|family.office|joint.venture|co.invest|strategic.partner)'
+                        OR title ~* '(Soulier|Yurkovich|UBM|Wertheimer|Kulibayev|Strothotte|CITIC|Al.Thani)'
+                        OR body ~* '(Mandarin.Oriental|MOHG|MO.Vienna|MORV|branded.residence|luxury.hotel|sovereign.wealth|family.office|joint.venture|co.invest|strategic.partner)'
+                        OR body ~* '(Soulier|Yurkovich|UBM|Wertheimer|Kulibayev|Strothotte|CITIC|Al.Thani)'
+                      )
+                    ORDER BY tier, created_at DESC
+                    LIMIT 10
+                """)
+                owner_alerts = cur.fetchall()
+                cur.close()
+                if owner_alerts:
+                    owner_lines = []
+                    for a in owner_alerts:
+                        tier_label = {1: "URGENT", 2: "IMPORTANT", 3: "INFO"}.get(a[0], "?")
+                        owner_lines.append(f"  [{tier_label}] {a[1]}: {(a[2] or '')[:120]}")
+                    sections.insert(0, f"OWNER'S LENS — STRATEGIC SIGNALS ({len(owner_alerts)}):\n" + "\n".join(owner_lines))
+                else:
+                    sections.insert(0, "OWNER'S LENS — STRATEGIC SIGNALS: No strategic signals in last 24h.")
+            except Exception as e:
+                logger.warning(f"Could not fetch owner lens alerts: {e}")
+                sections.insert(0, "OWNER'S LENS — STRATEGIC SIGNALS: [could not retrieve]")
+            finally:
+                store._put_conn(conn)
+    except Exception as e:
+        logger.warning(f"Owner's lens context failed: {e}")
+
     return "\n\n".join(sections)
 
 
@@ -154,20 +194,29 @@ def generate_morning_briefing():
         f"Generate Baker's executive daily briefing for {date_str}.\n\n"
         f"You are Baker, the CEO's AI chief of staff. Write a 2-minute-read executive summary.\n"
         f"Be concise, direct, and prioritize by relevance to the Director.\n\n"
+        f"The briefing has TWO parts — Owner's View first, then Operations.\n\n"
         f"Use EXACTLY this format (these sections are embedded into the daily email):\n\n"
+        f"\U0001f3e8 OWNER'S VIEW\n"
+        f"\u2022 [Strategic signals: MOHG activity, network contacts, luxury hospitality M&A, deal opportunities, co-investment signals]\n"
+        f"\u2022 [Item 2]\n"
+        f"(If no strategic signals: \"No strategic signals today.\" — always show this section.)\n\n"
         f"\U0001f4cc DECISIONS NEEDED\n"
         f"\u2022 [Item requiring Director action — be specific about what decision is needed]\n"
         f"\u2022 [Item 2]\n"
         f"(If none: \"No pending decisions today.\")\n\n"
-        f"\U0001f4ca KEY DEVELOPMENTS (last 24h)\n"
+        f"\U0001f4ca OPERATIONS (last 24h)\n"
         f"\u2022 [Top development — synthesize, don't just list raw data]\n"
         f"\u2022 [Development 2]\n"
         f"\u2022 [Development 3]\n"
         f"(Max 5 items. Prioritize by relevance to Director.)\n\n"
         f"Rules:\n"
+        f"- OWNER'S VIEW comes first — even if empty, show the section header.\n"
+        f"- Owner's View covers: Mandarin Oriental news, MOHG activity, luxury hospitality deals/M&A, "
+        f"any mention of strategic network contacts (Soulier, Yurkovich, UBM, Wertheimer, Kulibayev, "
+        f"Strothotte, CITIC, Al-Thani), co-investment opportunities, DACH region deal flow.\n"
+        f"- OPERATIONS covers: project updates, deadline status, team communications, routine alerts.\n"
         f"- Synthesize the information — do NOT just dump raw items.\n"
         f"- Write like a chief of staff briefing a CEO: what matters, what needs action.\n"
-        f"- If something needs a decision, put it in DECISIONS NEEDED, not KEY DEVELOPMENTS.\n"
         f"- Keep each bullet to 1-2 lines max.\n\n"
         f"---\n"
         f"Here is the overnight context to summarize:\n\n"

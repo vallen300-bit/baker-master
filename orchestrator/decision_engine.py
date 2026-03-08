@@ -329,6 +329,48 @@ def _score_relationship(sender: str, vips: list) -> int:
 
 
 # ============================================================
+# Owner's Lens Scoring (Phase 4 — strategic ownership signals)
+# ============================================================
+
+# MOHG + luxury hospitality ownership signals
+_OWNER_KEYWORDS = re.compile(
+    r"\b(Mandarin.Oriental|MOHG|MO.Vienna|MORV|branded.residence|"
+    r"co.owner|ownership|shareholder|equity.stake|"
+    r"luxury.hotel.?(acquisition|deal|M&A|transaction)|"
+    r"hotel.?(portfolio|investment|asset)|"
+    r"sovereign.wealth|family.office|"
+    r"DACH.?(deal|opportunity|acquisition)|"
+    r"JV|joint.venture|co.invest|strategic.partner)\b", re.IGNORECASE
+)
+
+# 8 strategic network contacts (Director's ownership network)
+_OWNER_NETWORK_CONTACTS = [
+    "soulier", "yurkovich", "ubm", "wertheimer",
+    "kulibayev", "strothotte", "citic", "al-thani", "al thani",
+]
+
+
+def _score_owner_signal(content: str, sender: str) -> int:
+    """Score 1-3: strategic relevance to Director as MO Vienna owner.
+    1 = no ownership signal
+    2 = tangential (industry news, general hospitality)
+    3 = direct (MOHG activity, strategic contact, deal opportunity)
+    """
+    score = 1
+    content_lower = content.lower()
+    sender_lower = (sender or "").lower()
+
+    # Direct ownership keywords → score 3
+    if _OWNER_KEYWORDS.search(content):
+        score = 3
+    # Strategic network contact mentioned or is sender → score 3
+    elif any(c in content_lower or c in sender_lower for c in _OWNER_NETWORK_CONTACTS):
+        score = 3
+
+    return score
+
+
+# ============================================================
 # Override Detector (2 overrides)
 # ============================================================
 
@@ -375,10 +417,11 @@ def _assign_tier(score: int) -> tuple:
 
     C3 fix: Tier 1 = most urgent (whatsapp), Tier 3 = least urgent (dashboard).
     Matches pipeline.py _normalize_tier and vip_contacts.tier convention.
+    Score range: 4-12 (4 sub-scores × 1-3 each).
     """
-    if score >= 7:
+    if score >= 9:
         return (1, "whatsapp")   # Tier 1 = most urgent
-    elif score >= 4:
+    elif score >= 6:
         return (2, "slack")      # Tier 2 = important
     else:
         return (3, "dashboard")  # Tier 3 = informational
@@ -448,7 +491,8 @@ def score_trigger(content: str, sender: str = "", source: str = "",
     time_score = _score_time_sensitivity(content)
     financial_score = _score_financial_exposure(content, domain)
     relationship_score = _score_relationship(sender, vips)
-    urgency_score = time_score + financial_score + relationship_score
+    owner_score = _score_owner_signal(content, sender)
+    urgency_score = time_score + financial_score + relationship_score + owner_score
 
     # 3. Tier assignment (1=urgent, 3=low)
     tier, channel = _assign_tier(urgency_score)
@@ -467,7 +511,7 @@ def score_trigger(content: str, sender: str = "", source: str = "",
     # Build reasoning string
     reasoning = (
         f"domain={domain}({domain_method},{domain_confidence}) "
-        f"scores=T{time_score}+F{financial_score}+R{relationship_score}={urgency_score} "
+        f"scores=T{time_score}+F{financial_score}+R{relationship_score}+O{owner_score}={urgency_score} "
         f"tier={tier} channel={channel} mode={mode}"
     )
     if override_name:
@@ -484,6 +528,7 @@ def score_trigger(content: str, sender: str = "", source: str = "",
         "time_score": time_score,
         "financial_score": financial_score,
         "relationship_score": relationship_score,
+        "owner_score": owner_score,
     }
 
 
