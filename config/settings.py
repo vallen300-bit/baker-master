@@ -217,6 +217,16 @@ class RssConfig:
 
 
 @dataclass
+class BrowserConfig:
+    cloud_api_key: str = os.getenv("BROWSER_USE_API_KEY", "")
+    cloud_base_url: str = "https://api.browser-use.com/api/v1"
+    simple_timeout: int = 30  # seconds for httpx fetch
+    browser_timeout: int = 120  # seconds for browser-use cloud task
+    max_retries: int = 2
+    collection: str = "baker-browser"
+
+
+@dataclass
 class TriggerConfig:
     # Fireflies scanning interval (seconds)
     fireflies_scan_interval: int = 900  # 15 minutes (was 7200; FIREFLIES-FIX-1)
@@ -233,6 +243,8 @@ class TriggerConfig:
     rss_check_interval: int = int(os.getenv("RSS_CHECK_INTERVAL", "3600"))  # 60 minutes
     # Slack polling interval
     slack_check_interval: int = int(os.getenv("SLACK_CHECK_INTERVAL", "300"))  # 5 minutes
+    # Browser task polling interval (BROWSER-1)
+    browser_check_interval: int = int(os.getenv("BROWSER_CHECK_INTERVAL", "1800"))  # 30 minutes
     # Daily briefing time (UTC)
     daily_briefing_hour: int = 6  # 06:00 UTC = 08:00 CET
     # Pending approval reminder interval
@@ -274,6 +286,7 @@ class SentinelConfig:
     rss: RssConfig = field(default_factory=RssConfig)
     slack: SlackConfig = field(default_factory=SlackConfig)
     waha: WahaConfig = field(default_factory=WahaConfig)
+    browser: BrowserConfig = field(default_factory=BrowserConfig)
     postgres: PostgresConfig = field(default_factory=PostgresConfig)
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
     outputs: OutputConfig = field(default_factory=OutputConfig)

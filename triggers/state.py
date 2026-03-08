@@ -85,6 +85,46 @@ class TriggerState:
                     ALTER TABLE rss_articles
                     ADD COLUMN IF NOT EXISTS summary TEXT
                 """)
+                # Browser Sentinel tables (BROWSER-1)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS browser_tasks (
+                        id                    SERIAL PRIMARY KEY,
+                        name                  TEXT NOT NULL,
+                        url                   TEXT NOT NULL,
+                        mode                  TEXT NOT NULL DEFAULT 'simple',
+                        task_prompt           TEXT,
+                        css_selectors         JSONB DEFAULT '{}',
+                        category              TEXT,
+                        is_active             BOOLEAN DEFAULT TRUE,
+                        consecutive_failures  INTEGER DEFAULT 0,
+                        last_polled           TIMESTAMPTZ,
+                        last_content_hash     TEXT,
+                        created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS browser_results (
+                        id              SERIAL PRIMARY KEY,
+                        task_id         INTEGER REFERENCES browser_tasks(id),
+                        content_hash    TEXT NOT NULL,
+                        content         TEXT,
+                        structured_data JSONB,
+                        mode_used       TEXT,
+                        steps_count     INTEGER DEFAULT 0,
+                        cost_usd        NUMERIC(10,4) DEFAULT 0,
+                        duration_ms     INTEGER DEFAULT 0,
+                        created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                """)
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_browser_results_task_id
+                    ON browser_results(task_id)
+                """)
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_browser_results_created
+                    ON browser_results(created_at DESC)
+                """)
                 conn.commit()
                 cur.close()
                 logger.info("Trigger state tables verified")

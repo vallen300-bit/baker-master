@@ -3433,6 +3433,313 @@ async def rss_import_opml(request: Request):
 
 
 # ============================================================
+# Browser Task Management (BROWSER-1)
+# ============================================================
+
+
+class BrowserTaskCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    url: str = Field(..., min_length=1)
+    mode: str = Field("simple")
+    task_prompt: Optional[str] = None
+    css_selectors: Optional[dict] = None
+    category: Optional[str] = None
+
+
+class BrowserTaskUpdate(BaseModel):
+    name: Optional[str] = None
+    url: Optional[str] = None
+    mode: Optional[str] = None
+    task_prompt: Optional[str] = None
+    css_selectors: Optional[dict] = None
+    is_active: Optional[bool] = None
+    category: Optional[str] = None
+
+
+@app.get("/api/browser/tasks", tags=["browser"], dependencies=[Depends(verify_api_key)])
+async def list_browser_tasks(active_only: bool = True):
+    """List all browser monitoring tasks."""
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        cur = conn.cursor()
+        sql = """SELECT id, name, url, mode, task_prompt, css_selectors, category,
+                        is_active, consecutive_failures, last_polled, last_content_hash,
+                        created_at, updated_at
+                 FROM browser_tasks"""
+        if active_only:
+            sql += " WHERE is_active = TRUE"
+        sql += " ORDER BY id"
+        cur.execute(sql)
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+        cur.close()
+        # Convert datetimes
+        for row in rows:
+            for k in ("last_polled", "created_at", "updated_at"):
+                if row.get(k):
+                    row[k] = row[k].isoformat()
+        return {"tasks": rows, "count": len(rows)}
+    finally:
+        store._put_conn(conn)
+
+
+@app.post("/api/browser/tasks", tags=["browser"], dependencies=[Depends(verify_api_key)])
+async def create_browser_task(req: BrowserTaskCreate):
+    """Create a new browser monitoring task."""
+    if req.mode not in ("simple", "browser"):
+        raise HTTPException(status_code=400, detail="mode must be 'simple' or 'browser'")
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """INSERT INTO browser_tasks (name, url, mode, task_prompt, css_selectors, category)
+               VALUES (%s, %s, %s, %s, %s::jsonb, %s)
+               RETURNING id, created_at""",
+            (
+                req.name, req.url, req.mode, req.task_prompt,
+                json.dumps(req.css_selectors) if req.css_selectors else "{}",
+                req.category,
+            ),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        cur.close()
+        return {"status": "created", "id": row[0], "created_at": row[1].isoformat()}
+    finally:
+        store._put_conn(conn)
+
+
+@app.get("/api/browser/tasks/{task_id}", tags=["browser"], dependencies=[Depends(verify_api_key)])
+async def get_browser_task(task_id: int):
+    """Get a browser task with recent results."""
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT id, name, url, mode, task_prompt, css_selectors, category,
+                      is_active, consecutive_failures, last_polled, last_content_hash,
+                      created_at, updated_at
+               FROM browser_tasks WHERE id = %s""",
+            (task_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Task not found")
+        cols = [d[0] for d in cur.description]
+        task = dict(zip(cols, row))
+        for k in ("last_polled", "created_at", "updated_at"):
+            if task.get(k):
+                task[k] = task[k].isoformat()
+
+        # Fetch recent results
+        cur.execute(
+            """SELECT id, content_hash, content, structured_data, mode_used,
+                      steps_count, cost_usd, duration_ms, created_at
+               FROM browser_results WHERE task_id = %s
+               ORDER BY created_at DESC LIMIT 10""",
+            (task_id,),
+        )
+        rcols = [d[0] for d in cur.description]
+        results = [dict(zip(rcols, r)) for r in cur.fetchall()]
+        for r in results:
+            if r.get("created_at"):
+                r["created_at"] = r["created_at"].isoformat()
+            if r.get("cost_usd"):
+                r["cost_usd"] = float(r["cost_usd"])
+            # Truncate content for list view
+            if r.get("content"):
+                r["content_preview"] = r["content"][:500]
+                del r["content"]
+        cur.close()
+
+        task["recent_results"] = results
+        return task
+    finally:
+        store._put_conn(conn)
+
+
+@app.put("/api/browser/tasks/{task_id}", tags=["browser"], dependencies=[Depends(verify_api_key)])
+async def update_browser_task(task_id: int, req: BrowserTaskUpdate):
+    """Update a browser task configuration."""
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        updates = []
+        params = []
+        if req.name is not None:
+            updates.append("name = %s")
+            params.append(req.name)
+        if req.url is not None:
+            updates.append("url = %s")
+            params.append(req.url)
+        if req.mode is not None:
+            if req.mode not in ("simple", "browser"):
+                raise HTTPException(status_code=400, detail="mode must be 'simple' or 'browser'")
+            updates.append("mode = %s")
+            params.append(req.mode)
+        if req.task_prompt is not None:
+            updates.append("task_prompt = %s")
+            params.append(req.task_prompt)
+        if req.css_selectors is not None:
+            updates.append("css_selectors = %s::jsonb")
+            params.append(json.dumps(req.css_selectors))
+        if req.is_active is not None:
+            updates.append("is_active = %s")
+            params.append(req.is_active)
+            if req.is_active:
+                updates.append("consecutive_failures = 0")
+        if req.category is not None:
+            updates.append("category = %s")
+            params.append(req.category)
+
+        if not updates:
+            raise HTTPException(status_code=400, detail="No fields to update")
+
+        updates.append("updated_at = NOW()")
+        params.append(task_id)
+
+        cur = conn.cursor()
+        cur.execute(
+            f"UPDATE browser_tasks SET {', '.join(updates)} WHERE id = %s RETURNING id",
+            params,
+        )
+        row = cur.fetchone()
+        conn.commit()
+        cur.close()
+        if not row:
+            raise HTTPException(status_code=404, detail="Task not found")
+        return {"status": "updated", "id": task_id}
+    finally:
+        store._put_conn(conn)
+
+
+@app.delete("/api/browser/tasks/{task_id}", tags=["browser"], dependencies=[Depends(verify_api_key)])
+async def delete_browser_task(task_id: int):
+    """Soft-delete (deactivate) a browser task."""
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE browser_tasks SET is_active = FALSE, updated_at = NOW() WHERE id = %s RETURNING id",
+            (task_id,),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        cur.close()
+        if not row:
+            raise HTTPException(status_code=404, detail="Task not found")
+        return {"status": "deactivated", "id": task_id}
+    finally:
+        store._put_conn(conn)
+
+
+@app.get("/api/browser/results/{task_id}", tags=["browser"], dependencies=[Depends(verify_api_key)])
+async def list_browser_results(task_id: int, limit: int = 20):
+    """List recent results for a browser task."""
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT id, task_id, content_hash, content, structured_data, mode_used,
+                      steps_count, cost_usd, duration_ms, created_at
+               FROM browser_results WHERE task_id = %s
+               ORDER BY created_at DESC LIMIT %s""",
+            (task_id, min(limit, 100)),
+        )
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        cur.close()
+        for r in rows:
+            if r.get("created_at"):
+                r["created_at"] = r["created_at"].isoformat()
+            if r.get("cost_usd"):
+                r["cost_usd"] = float(r["cost_usd"])
+        return {"results": rows, "count": len(rows), "task_id": task_id}
+    finally:
+        store._put_conn(conn)
+
+
+@app.post("/api/browser/tasks/{task_id}/run", tags=["browser"], dependencies=[Depends(verify_api_key)])
+async def run_browser_task_now(task_id: int, background_tasks: BackgroundTasks):
+    """Trigger an immediate run of a specific browser task.
+    Browser-mode tasks run in background (up to 120s) to avoid Render HTTP timeout.
+    Simple-mode tasks run synchronously (fast, <30s).
+    """
+    from triggers.browser_trigger import run_single_task, _get_task_by_id
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    task = _get_task_by_id(store, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.get("mode") == "browser":
+        # Browser mode can take up to 120s — run in background
+        background_tasks.add_task(run_single_task, task_id)
+        return {"status": "running", "task_id": task_id, "mode": "browser",
+                "message": "Browser task submitted. Check GET /api/browser/results/{id} for output."}
+    else:
+        # Simple mode is fast — run synchronously
+        result = run_single_task(task_id)
+        if result.get("error"):
+            raise HTTPException(status_code=400, detail=result["error"])
+        return result
+
+
+@app.get("/api/browser/status", tags=["browser"], dependencies=[Depends(verify_api_key)])
+async def browser_status():
+    """Browser sentinel health: active tasks, last poll, cloud API status."""
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM browser_tasks WHERE is_active = TRUE")
+        active_count = cur.fetchone()[0]
+        cur.execute("SELECT MAX(last_polled) FROM browser_tasks")
+        last_poll = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM browser_results")
+        total_results = cur.fetchone()[0]
+        cur.close()
+
+        from config.settings import config
+        return {
+            "status": "healthy",
+            "active_tasks": active_count,
+            "total_results": total_results,
+            "last_poll": last_poll.isoformat() if last_poll else None,
+            "cloud_api_configured": bool(config.browser.cloud_api_key),
+            "poll_interval_seconds": config.triggers.browser_check_interval,
+        }
+    finally:
+        store._put_conn(conn)
+
+
+# ============================================================
 # CLI runner
 # ============================================================
 
