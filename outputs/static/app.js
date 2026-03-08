@@ -1656,6 +1656,185 @@ async function loadDeadlinesTab() {
     }
 }
 
+// ═══ TRAVEL TAB ═══
+
+async function loadTravelTab() {
+    var container = document.getElementById('travelContent');
+    if (!container) return;
+    container.textContent = 'Loading travel items...';
+    try {
+        var resp = await bakerFetch('/api/alerts/by-tag/travel');
+        if (!resp.ok) return;
+        var data = await resp.json();
+
+        if (!data.items || data.items.length === 0) {
+            container.textContent = 'No travel alerts. Travel-related emails and bookings will appear here when detected.';
+            container.style.cssText = 'color:var(--text3);font-size:13px;';
+            return;
+        }
+
+        // Split into upcoming and past
+        var now = new Date();
+        now.setHours(0, 0, 0, 0);
+        var upcoming = [];
+        var past = [];
+        for (var i = 0; i < data.items.length; i++) {
+            var item = data.items[i];
+            if (item.travel_date) {
+                var td = new Date(item.travel_date);
+                if (td < now) { past.push(item); continue; }
+            }
+            upcoming.push(item);
+        }
+
+        container.textContent = '';
+
+        if (upcoming.length > 0) {
+            var upLabel = document.createElement('div');
+            upLabel.style.cssText = 'font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--text3);margin:0 0 8px;';
+            upLabel.textContent = 'Upcoming (' + upcoming.length + ')';
+            container.appendChild(upLabel);
+            var upDiv = document.createElement('div');
+            setSafeHTML(upDiv, upcoming.map(function(a) { return renderAlertCard(a, false); }).join(''));
+            container.appendChild(upDiv);
+        }
+
+        if (past.length > 0) {
+            var pastLabel = document.createElement('div');
+            pastLabel.style.cssText = 'font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--text4);margin:16px 0 8px;';
+            pastLabel.textContent = 'Past (' + past.length + ')';
+            container.appendChild(pastLabel);
+            var pastDiv = document.createElement('div');
+            pastDiv.style.opacity = '0.5';
+            setSafeHTML(pastDiv, past.map(function(a) { return renderAlertCard(a, false); }).join(''));
+            container.appendChild(pastDiv);
+        }
+    } catch (e) {
+        container.textContent = 'Failed to load travel items.';
+    }
+}
+
+// ═══ MEDIA TAB (RSS) ═══
+
+async function loadMediaTab() {
+    var container = document.getElementById('mediaContent');
+    if (!container) return;
+    container.textContent = 'Loading media...';
+    try {
+        // Fetch feeds for filter dropdown
+        var feedsResp = await bakerFetch('/api/rss/feeds');
+        var feedsData = feedsResp.ok ? await feedsResp.json() : { feeds: [] };
+
+        // Fetch articles
+        var articlesResp = await bakerFetch('/api/rss/articles?limit=50');
+        if (!articlesResp.ok) return;
+        var data = await articlesResp.json();
+
+        container.textContent = '';
+
+        // Category filter
+        if (feedsData.feeds && feedsData.feeds.length > 0) {
+            var filterRow = document.createElement('div');
+            filterRow.style.cssText = 'margin-bottom:12px;';
+            var catSelect = document.createElement('select');
+            catSelect.style.cssText = 'padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:var(--font);';
+            catSelect.innerHTML = '<option value="">All categories</option>';
+            var categories = {};
+            feedsData.feeds.forEach(function(f) {
+                if (f.category && !categories[f.category]) {
+                    categories[f.category] = true;
+                    var opt = document.createElement('option');
+                    opt.value = f.category;
+                    opt.textContent = f.category;
+                    catSelect.appendChild(opt);
+                }
+            });
+            catSelect.addEventListener('change', async function() {
+                var url = '/api/rss/articles?limit=50';
+                if (catSelect.value) url += '&category=' + encodeURIComponent(catSelect.value);
+                var r = await bakerFetch(url);
+                if (r.ok) {
+                    var d = await r.json();
+                    renderArticles(container, d.articles, filterRow);
+                }
+            });
+            filterRow.appendChild(catSelect);
+            container.appendChild(filterRow);
+        }
+
+        if (!data.articles || data.articles.length === 0) {
+            var empty = document.createElement('div');
+            empty.textContent = 'No media items yet. RSS feeds are polled every hour.';
+            empty.style.cssText = 'color:var(--text3);font-size:13px;';
+            container.appendChild(empty);
+            return;
+        }
+
+        var filterRow2 = container.querySelector('div');
+        renderArticles(container, data.articles, filterRow2);
+    } catch (e) {
+        container.textContent = 'Failed to load media.';
+    }
+}
+
+function renderArticles(container, articles, filterRow) {
+    // Clear existing articles but keep filter row
+    while (container.children.length > (filterRow ? 1 : 0)) {
+        container.removeChild(container.lastChild);
+    }
+
+    // Group by date
+    var today = new Date(); today.setHours(0,0,0,0);
+    var yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+    var weekAgo = new Date(today); weekAgo.setDate(weekAgo.getDate() - 7);
+
+    var groups = { 'Today': [], 'Yesterday': [], 'This Week': [], 'Older': [] };
+    for (var i = 0; i < articles.length; i++) {
+        var a = articles[i];
+        var d = a.published_at ? new Date(a.published_at) : new Date(0);
+        if (d >= today) groups['Today'].push(a);
+        else if (d >= yesterday) groups['Yesterday'].push(a);
+        else if (d >= weekAgo) groups['This Week'].push(a);
+        else groups['Older'].push(a);
+    }
+
+    for (var group in groups) {
+        if (groups[group].length === 0) continue;
+        var label = document.createElement('div');
+        label.style.cssText = 'font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--text3);margin:12px 0 6px;';
+        label.textContent = group + ' (' + groups[group].length + ')';
+        container.appendChild(label);
+
+        for (var j = 0; j < groups[group].length; j++) {
+            var art = groups[group][j];
+            var card = document.createElement('div');
+            card.className = 'article-card';
+
+            var link = document.createElement('a');
+            link.className = 'article-title';
+            link.href = art.url || '#';
+            link.target = '_blank';
+            link.rel = 'noopener';
+            link.textContent = art.title || 'Untitled';
+            card.appendChild(link);
+
+            var meta = document.createElement('div');
+            meta.className = 'article-meta';
+            meta.textContent = [art.feed_title, art.category, art.published_at ? fmtRelativeTime(art.published_at) : ''].filter(Boolean).join(' | ');
+            card.appendChild(meta);
+
+            if (art.summary) {
+                var summary = document.createElement('div');
+                summary.className = 'article-summary';
+                summary.textContent = (art.summary || '').substring(0, 200);
+                card.appendChild(summary);
+            }
+
+            container.appendChild(card);
+        }
+    }
+}
+
 // ═══ ASK SPECIALIST ═══
 
 var _specialistSlug = null;

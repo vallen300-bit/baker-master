@@ -944,6 +944,77 @@ async def get_activity_feed(hours: int = Query(24, ge=1, le=168)):
 
 
 # ============================================================
+# V3 Phase C2 — RSS articles + feeds (Media tab)
+# ============================================================
+
+@app.get("/api/rss/articles", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_rss_articles(
+    category: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+):
+    """List recent RSS articles, optionally filtered by feed category."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"articles": [], "count": 0}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            if category:
+                cur.execute("""
+                    SELECT a.*, f.title AS feed_title, f.category
+                    FROM rss_articles a JOIN rss_feeds f ON a.feed_id = f.id
+                    WHERE f.is_active = true AND f.category = %s
+                    ORDER BY a.published_at DESC NULLS LAST LIMIT %s
+                """, (category, limit))
+            else:
+                cur.execute("""
+                    SELECT a.*, f.title AS feed_title, f.category
+                    FROM rss_articles a JOIN rss_feeds f ON a.feed_id = f.id
+                    WHERE f.is_active = true
+                    ORDER BY a.published_at DESC NULLS LAST LIMIT %s
+                """, (limit,))
+            articles = [_serialize(dict(r)) for r in cur.fetchall()]
+            cur.close()
+            return {"articles": articles, "count": len(articles)}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/rss/articles failed: {e}")
+        return {"articles": [], "count": 0}
+
+
+@app.get("/api/rss/feeds", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_rss_feeds_list():
+    """List active RSS feeds with categories for the filter dropdown."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"feeds": [], "count": 0}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT f.id, f.title, f.category, f.feed_url,
+                       COUNT(a.id) AS article_count
+                FROM rss_feeds f LEFT JOIN rss_articles a ON a.feed_id = f.id
+                WHERE f.is_active = true
+                GROUP BY f.id, f.title, f.category, f.feed_url
+                ORDER BY f.category, f.title
+            """)
+            feeds = [_serialize(dict(r)) for r in cur.fetchall()]
+            cur.close()
+            return {"feeds": feeds, "count": len(feeds)}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/rss/feeds failed: {e}")
+        return {"feeds": [], "count": 0}
+
+
+# ============================================================
 # V3 Phase C1 — People + Search
 # ============================================================
 

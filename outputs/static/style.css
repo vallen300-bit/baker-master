@@ -326,6 +326,24 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
   font-size: 10px; font-family: var(--font); background: #fff; cursor: pointer;
 }
 
+/* Article cards (Media/RSS) */
+.article-card {
+  padding: 12px 16px; border-bottom: 1px solid var(--border-light);
+}
+.article-card:hover { background: #f8fafc; }
+.article-title {
+  font-size: 13px; font-weight: 500; color: var(--text);
+  text-decoration: none; line-height: 1.4; display: block;
+}
+.article-title:hover { color: var(--blue); }
+.article-meta {
+  font-size: 10px; color: var(--text3); margin-top: 4px;
+  font-family: var(--mono);
+}
+.article-summary {
+  font-size: 12px; color: var(--text2); margin-top: 4px; line-height: 1.5;
+}
+
 /* Board view (kanban) */
 .board-view { display: flex; gap: 12px; overflow-x: auto; }
 .board-column { flex: 1; min-width: 200px; }
