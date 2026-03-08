@@ -388,7 +388,9 @@ Designed and specified **COCKPIT-V3** — full dashboard redesign with Director.
 
 - **Phase 3A: Calendar Trigger** (4 commits) — reviewed, 1 fix applied (column name mismatches: email_messages.received_at→received_date, whatsapp_messages.body→full_text, received_at→timestamp), merged. Google Calendar polling every 15 min. Meeting auto-prep: detects meetings within 24h, assembles attendee context from memory (VIP contacts, emails, WhatsApp, past meetings), generates briefing via Haiku, creates T2 alert card. Dedup via trigger_watermarks. GET /api/calendar/upcoming with prep status. Morning Brief shows meetings today with prepped/pending badges. **Standing Order #1: "No surprises in meetings" — IMPLEMENTED.** Requires Director re-auth for calendar scope (pending).
 
-**Dashboard status:** All 11 tabs live — Morning Brief (+ meetings today), Fires, Matters, People, Deadlines, Tags, Search, Ask Baker, Ask Specialist, Travel, Media.
+- **Phase 3B: Proactive Upgrades** (3 commits) — reviewed, **no bugs found** (first clean delivery from Brisen), merged. Deadline proposals (Haiku generates action proposals for 48h/day_of/overdue alerts, attached as structured_actions). VIP auto-drafts (>4h unanswered → Haiku drafts substantive reply + acknowledge option, creates T2 alert with structured_actions). Morning briefing proposals (per-fire action proposals appended to Haiku narrative, inherits 30-min cache). **Standing Orders #2, #3, #4 — IMPLEMENTED.**
+
+**Dashboard status:** All 11 tabs live — Morning Brief (+ meetings today + proposals), Fires, Matters, People, Deadlines, Tags, Search, Ask Baker, Ask Specialist, Travel, Media.
 
 ## Key Documents (Dropbox)
 
