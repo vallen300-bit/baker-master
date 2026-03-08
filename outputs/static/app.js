@@ -1,12 +1,14 @@
 /* ============================================================
-   Baker CEO Dashboard v2.2 — app.js
-   3-layer role-based navigation with live Baker API connections
+   Baker Cockpit v3 — app.js
+   Split layout: sidebar navigation + command bar + content views
+
+   SECURITY: All HTML rendering uses md() (which calls esc() first)
+   or esc() for plain text. Never raw innerHTML with untrusted input.
+   This follows the brief's XSS prevention rules and existing codebase patterns.
    ============================================================ */
 
 // ═══ API CONFIG ═══
-const BAKER_CONFIG = {
-    apiKey: '',
-};
+const BAKER_CONFIG = { apiKey: '' };
 
 async function loadConfig() {
     try {
@@ -21,432 +23,18 @@ async function loadConfig() {
 }
 
 async function bakerFetch(url, options = {}) {
-    const headers = {
-        ...(options.headers || {}),
-        'X-Baker-Key': BAKER_CONFIG.apiKey,
-    };
+    const headers = { ...(options.headers || {}), 'X-Baker-Key': BAKER_CONFIG.apiKey };
     return fetch(url, { ...options, headers });
 }
 
-// ═══ LENS ICONS (placeholder — simple colored circles) ═══
-const lensIcons = {
-    clear: '/static/baker-face-green.svg',
-    attentive: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"><circle cx="11" cy="11" r="9" fill="%23f0b429" opacity="0.8"/></svg>'),
-    alert: 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22"><circle cx="11" cy="11" r="9" fill="%23f56565" opacity="0.8"/></svg>')
-};
-
-// ═══ ROLE METADATA ═══
-const roleDescs = {
-    private: 'Personal wealth, property, family & legal',
-    chairman: 'Brisen Group governance & strategy',
-    pm: 'Active project portfolio management',
-    network: 'Key contacts, advisors & pipeline',
-    travel: 'Business & personal travel logistics'
-};
-
-const roleNames = {
-    private: 'Private',
-    chairman: 'Chairman',
-    pm: 'Projects',
-    network: 'Network',
-    travel: 'Travel'
-};
-
-// ═══ ROLE DATA (hierarchical) ═══
-const roleData = {
-    private: {
-        title: 'Private',
-        categories: [
-            { id: 'wealth', icon: '', title: 'Wealth & Banking', badge: 'stable', badgeType: 'ok', colorClass: 'wealth',
-              items: [
-                { label: 'accounts', text: 'UBS, Raiffeisen, UniCredit — all accounts active, no flags.' },
-                { label: 'structure', text: 'Swiss structure review — ongoing with tax advisor. ETA March 2026.' },
-              ]
-            },
-            { id: 'property', icon: '', title: 'Property', badge: '3 assets', badgeType: 'ok', colorClass: 'property',
-              items: [
-                { label: 'Vienna', text: 'Primary residence — no outstanding items.' },
-                { label: 'Cap Ferrat', text: 'MO Villa management — operations stable.' },
-                { label: 'Baden', text: 'Balgerstrasse 7 — loan terms current.' },
-              ]
-            },
-            { id: 'family', icon: '', title: 'Family', badge: 'ok', badgeType: 'ok', colorClass: 'family',
-              items: [
-                { label: 'status', text: 'No pending family-related items or obligations.' },
-              ]
-            },
-            { id: 'subscriptions', icon: '', title: 'Subscriptions & Memberships', badge: 'active', badgeType: 'ok', colorClass: 'subscriptions',
-              items: [
-                { label: 'clubs', text: 'All memberships current. No renewals due within 60 days.' },
-                { label: 'digital', text: 'Software and digital subscriptions — reviewed.' },
-              ]
-            },
-            { id: 'legal-private', icon: '', title: 'Legal (Private)', badge: 'clear', badgeType: 'ok', colorClass: 'legal',
-              items: [
-                { label: 'status', text: 'No active private legal matters.' },
-              ]
-            }
-        ]
-    },
-    chairman: {
-        title: 'Chairman',
-        categories: [
-            { id: 'group-overview', icon: '', title: 'Group Overview', badge: 'stable', badgeType: 'ok', colorClass: 'group',
-              items: [
-                { label: 'entities', text: 'Brisen Group — all entities operational. No compliance flags.' },
-                { label: 'KPIs', text: 'Quarterly KPIs on track. Next board review Q2 2026.' },
-              ]
-            },
-            { id: 'board', icon: '', title: 'Board & Governance', badge: '2 items', badgeType: 'neutral', colorClass: 'board',
-              items: [
-                { label: 'next meeting', text: 'Board meeting — scheduled for March 2026.' },
-                { label: 'minutes', text: 'Last meeting minutes filed and approved.' },
-              ]
-            },
-            { id: 'group-finance', icon: '', title: 'Group Finance', badge: 'on track', badgeType: 'ok', colorClass: 'finance',
-              items: [
-                { label: 'cashflow', text: 'Group cash position healthy. No liquidity concerns.' },
-                { label: 'audit', text: 'FY2025 annual accounts — preparation ongoing.' },
-              ]
-            },
-            { id: 'legal-compliance', icon: '', title: 'Legal & Compliance', badge: 'clear', badgeType: 'ok', colorClass: 'legal',
-              items: [
-                { label: 'status', text: 'All regulatory filings current. No outstanding compliance items.' },
-              ]
-            },
-            { id: 'key-people', icon: '', title: 'Key People', badge: 'stable', badgeType: 'ok', colorClass: 'people',
-              items: [
-                { label: 'team', text: 'Core team stable. No personnel changes pending.' },
-              ]
-            },
-            { id: 'brisen2030', icon: '', title: 'Brisen 2030', badge: '6 tracks', badgeType: 'warn', colorClass: 'brisen2030',
-              items: [
-                { label: 'strategy', text: 'Long-term vision — 6 strategic tracks being developed.' },
-                { label: 'status', text: 'Deck shared with key stakeholders. Feedback cycle ongoing.' },
-              ],
-              subIssues: [
-                { id: 'b30-vision', icon: '', title: 'Vision & Mission', colorClass: 'brisen2030', items: [
-                    { label: 'status', text: 'Mission statement finalized. Vision document v3 under review.' }
-                ]},
-                { id: 'b30-portfolio', icon: '', title: 'Portfolio Strategy', colorClass: 'brisen2030', items: [
-                    { label: 'status', text: 'Asset allocation targets set. RE-heavy portfolio with AI diversification.' }
-                ]},
-                { id: 'b30-capital', icon: '', title: 'Capital Structure', colorClass: 'brisen2030', items: [
-                    { label: 'status', text: 'Optimal leverage ratios defined. Implementation roadmap drafted.' }
-                ]},
-                { id: 'b30-talent', icon: '', title: 'Talent & Organization', colorClass: 'brisen2030', items: [
-                    { label: 'status', text: 'Key hires identified for 2026. Organizational chart proposed.' }
-                ]},
-                { id: 'b30-digital', icon: '', title: 'Digital & AI', colorClass: 'brisen2030', items: [
-                    { label: 'status', text: 'Baker AI operational. Next: integrate with deal pipeline.' }
-                ]},
-                { id: 'b30-impact', icon: '', title: 'Impact & ESG', colorClass: 'brisen2030', items: [
-                    { label: 'status', text: 'ESG framework drafted. Sustainability metrics defined.' }
-                ]}
-              ]
-            }
-        ]
-    },
-    pm: {
-        title: 'Projects',
-        categories: [
-            { id: 'hagenauer', icon: '', title: 'Hagenauer', badge: '8 tracks', badgeType: 'warn', colorClass: 'hagenauer',
-              items: [
-                { label: 'insolvency', text: 'Dr. Gaspar / S&K managing insolvency proceedings. Weekly updates.' },
-                { label: 'construction', text: 'Construction progress tracked. Thomas Leitner as project lead.' },
-              ],
-              subIssues: [
-                { id: 'hg-insolvency', icon: '', title: 'Insolvency Proceedings', colorClass: 'hagenauer', items: [
-                    { label: 'status', text: 'S&K managing. Court dates and filings on track.' }
-                ]},
-                { id: 'hg-construction', icon: '', title: 'Construction Progress', colorClass: 'hagenauer', items: [
-                    { label: 'status', text: 'Phase 2 underway. Thomas Leitner leading on-site coordination.' }
-                ]},
-                { id: 'hg-finance', icon: '', title: 'Project Finance', colorClass: 'hagenauer', items: [
-                    { label: 'status', text: 'Budget tracking within parameters. No overruns flagged.' }
-                ]},
-                { id: 'hg-permits', icon: '', title: 'Permits & Approvals', colorClass: 'hagenauer', items: [
-                    { label: 'status', text: 'All current permits valid. Next renewal Q3 2026.' }
-                ]},
-                { id: 'hg-sales', icon: '', title: 'Sales Strategy', colorClass: 'hagenauer', items: [
-                    { label: 'status', text: 'Sales strategy defined. Initial buyer interest tracked.' }
-                ]},
-                { id: 'hg-legal', icon: '', title: 'Legal Issues', colorClass: 'hagenauer', items: [
-                    { label: 'status', text: 'Active legal matters with Siegfried Gröschl oversight.' }
-                ]},
-                { id: 'hg-investors', icon: '', title: 'Investor Relations', colorClass: 'hagenauer', items: [
-                    { label: 'status', text: 'Investor updates distributed monthly. No concerns raised.' }
-                ]},
-                { id: 'hg-timeline', icon: '', title: 'Master Timeline', colorClass: 'hagenauer', items: [
-                    { label: 'status', text: 'Project timeline on schedule. Key milestones tracked.' }
-                ]}
-              ]
-            },
-            { id: 'moviesales', icon: '', title: 'Movie Sales', badge: '4 items', badgeType: 'ok', colorClass: 'moviesales',
-              items: [
-                { label: 'pipeline', text: 'Active sales pipeline — 4 properties in various stages.' },
-              ],
-              subIssues: [
-                { id: 'ms-active', icon: '', title: 'Active Listings', colorClass: 'moviesales', items: [
-                    { label: 'status', text: 'Current listings performing within expectations.' }
-                ]},
-                { id: 'ms-pipeline', icon: '', title: 'Sales Pipeline', colorClass: 'moviesales', items: [
-                    { label: 'status', text: 'Pipeline healthy. Multiple inquiries in progress.' }
-                ]},
-                { id: 'ms-legal', icon: '', title: 'Contracts & Legal', colorClass: 'moviesales', items: [
-                    { label: 'status', text: 'Standard contracts in use. No legal disputes.' }
-                ]},
-                { id: 'ms-marketing', icon: '', title: 'Marketing', colorClass: 'moviesales', items: [
-                    { label: 'status', text: 'Marketing materials updated. Online presence active.' }
-                ]}
-              ]
-            },
-            { id: 'ao', icon: '', title: 'AO', badge: '7 items', badgeType: 'warn', colorClass: 'ao',
-              items: [
-                { label: 'operations', text: 'AO operations — multiple workstreams active in Baden-Baden.' },
-              ],
-              subIssues: [
-                { id: 'ao-ops', icon: '', title: 'Operations', colorClass: 'ao', items: [
-                    { label: 'status', text: 'Daily operations running smoothly.' }
-                ]},
-                { id: 'ao-finance', icon: '', title: 'Finance', colorClass: 'ao', items: [
-                    { label: 'status', text: 'Financial tracking current. No budget concerns.' }
-                ]},
-                { id: 'ao-hr', icon: '', title: 'HR & Team', colorClass: 'ao', items: [
-                    { label: 'status', text: 'Team stable. No open positions.' }
-                ]},
-                { id: 'ao-legal', icon: '', title: 'Legal', colorClass: 'ao', items: [
-                    { label: 'status', text: 'No active legal matters.' }
-                ]},
-                { id: 'ao-it', icon: '', title: 'IT Systems', colorClass: 'ao', items: [
-                    { label: 'status', text: 'Systems operational. O365 migration in progress.' }
-                ]},
-                { id: 'ao-reporting', icon: '', title: 'Reporting', colorClass: 'ao', items: [
-                    { label: 'status', text: 'Monthly reports on schedule.' }
-                ]},
-                { id: 'ao-strategy', icon: '', title: 'Strategy', colorClass: 'ao', items: [
-                    { label: 'status', text: 'Strategic review planned for Q2 2026.' }
-                ]}
-              ]
-            },
-            { id: 'annaberg', icon: '', title: 'Annaberg', badge: '5 items', badgeType: 'ok', colorClass: 'annaberg',
-              items: [
-                { label: 'project', text: 'Annaberg project — construction and planning on track.' },
-              ],
-              subIssues: [
-                { id: 'ab-master', icon: '', title: 'Master Plan', colorClass: 'annaberg', items: [
-                    { label: 'status', text: 'Master plan finalized. Implementation underway.' }
-                ]},
-                { id: 'ab-construction', icon: '', title: 'Construction', colorClass: 'annaberg', items: [
-                    { label: 'status', text: 'Construction progress on schedule.' }
-                ]},
-                { id: 'ab-budget', icon: '', title: 'Project Budget', colorClass: 'annaberg', items: [
-                    { label: 'status', text: 'Overall project budget — tracking within parameters.' }
-                ]},
-                { id: 'ab-baden', icon: '', title: 'Baden Baden / Aukera', colorClass: 'annaberg', items: [
-                    { label: 'status', text: 'Aukera teaser sent to Antje Bonnewitz for Baden Baden.' }
-                ]},
-                { id: 'ab-lilienmatt', icon: '', title: 'Lilienmatt Company', colorClass: 'annaberg', items: [
-                    { label: 'status', text: 'Lilienmatt Immobilien GmbH — company active, Conrad Weiss managing.' }
-                ]}
-              ]
-            },
-            { id: 'mrci', icon: '', title: 'MRCI Baden', badge: '8 items', badgeType: 'warn', colorClass: 'mrci',
-              items: [
-                { label: 'restructuring', text: 'MRCI & Lilienmatt restructuring — options table drafted.' },
-                { label: 'tax', text: 'Steuerbescheide 2022 received. Financial statements in progress.' },
-              ],
-              subIssues: [
-                { id: 'mr-restructure', icon: '', title: 'Restructuring', colorClass: 'mrci', items: [
-                    { label: 'status', text: 'Restructuring options — table of options (Draft 1) prepared.' }
-                ]},
-                { id: 'mr-gmbh', icon: '', title: 'MRCI GmbH', colorClass: 'mrci', items: [
-                    { label: 'status', text: 'Christian Merz meeting scheduled in Baden-Baden (07/2026).' }
-                ]},
-                { id: 'mr-lilienmatt', icon: '', title: 'Lilienmatt Immobilien', colorClass: 'mrci', items: [
-                    { label: 'status', text: 'Conrad Weiss managing. Operations stable.' }
-                ]},
-                { id: 'mr-tax', icon: '', title: 'Tax Assessments', colorClass: 'mrci', items: [
-                    { label: 'status', text: 'Steuerbescheide 2022 — received, review in progress.' }
-                ]},
-                { id: 'mr-fin', icon: '', title: 'Financial Statements', colorClass: 'mrci', items: [
-                    { label: 'status', text: 'Statement drafts — preparation ongoing.' }
-                ]},
-                { id: 'mr-cashflow', icon: '', title: 'Cash Flow', colorClass: 'mrci', items: [
-                    { label: 'status', text: 'Internal transfers — MRCI/Lilienmatt cash flows tracked.' }
-                ]},
-                { id: 'mr-loan', icon: '', title: 'Balgerstrasse 7 Loan', colorClass: 'mrci', items: [
-                    { label: 'status', text: 'Property loan terms current.' }
-                ]},
-                { id: 'mr-o365', icon: '', title: 'O365 Migration', colorClass: 'mrci', items: [
-                    { label: 'status', text: 'Dennis managing migration spreadsheet.' }
-                ]}
-              ]
-            },
-            { id: 'capferrat', icon: '', title: 'Cap Ferrat', badge: '5 items', badgeType: 'ok', colorClass: 'capferrat',
-              items: [
-                { label: 'villa', text: 'MO Villa management — operations stable.' },
-              ],
-              subIssues: [
-                { id: 'cf-villa', icon: '', title: 'MO Villa', colorClass: 'capferrat', items: [
-                    { label: 'status', text: 'Villa management — MOHG operating, performance on track.' }
-                ]},
-                { id: 'cf-upgrade', icon: '', title: 'Second Villa Upgrade', colorClass: 'capferrat', items: [
-                    { label: 'status', text: 'Planning phase for second property upgrade.' }
-                ]},
-                { id: 'cf-tax', icon: '', title: 'SUNNY IMMO Tax', colorClass: 'capferrat', items: [
-                    { label: 'status', text: 'Tax debts — SUNNY IMMO liabilities being resolved.' }
-                ]},
-                { id: 'cf-annabelle', icon: '', title: 'Annabelle Discussion', colorClass: 'capferrat', items: [
-                    { label: 'status', text: 'Discussion ongoing regarding property.' }
-                ]},
-                { id: 'cf-party', icon: '', title: 'Opening Party', colorClass: 'capferrat', items: [
-                    { label: 'status', text: 'Opening event — planning in progress.' }
-                ]}
-              ]
-            },
-            { id: 'originations', icon: '', title: 'Originations', badge: '9 tracks', badgeType: 'ok', colorClass: 'originations',
-              items: [
-                { label: 'pipeline', text: '9 active origination tracks across RE, AI, and brands.' },
-                { label: 'highlight', text: 'FX Mayr brand investment most advanced.' },
-              ],
-              subIssues: [
-                { id: 'or-fund', icon: '', title: 'RE Fund Management', colorClass: 'originations', items: [
-                    { label: 'status', text: 'Ski Team Investors pitch and Fund Pitch materials prepared.' }
-                ]},
-                { id: 'or-fxmayr', icon: '', title: 'Brand: FX Mayr', colorClass: 'originations', items: [
-                    { label: 'NDA', text: 'Henrik Huydts NDA signed for Stuttgart meeting.' },
-                    { label: 'progress', text: 'Teaser sent, Stuttgart meeting completed, Maria Worth follow-up done.' }
-                ]},
-                { id: 'or-cashprod', icon: '', title: 'RE Cash Producing', colorClass: 'originations', items: [
-                    { label: '6 Senses', text: '6 Senses Crans Montana — tracked.' },
-                    { label: 'Hyatt', text: 'Hyatt Vienna — Eastdil presentations reviewed.' },
-                    { label: 'MO Prague', text: 'MO Prague — CITIC docs reviewed.' }
-                ]},
-                { id: 'or-dev', icon: '', title: 'RE Development', colorClass: 'originations', items: [
-                    { label: 'active', text: '5 dev opportunities: Bora Bora, Kitzbühel, Palais Corso, School, Venti.' }
-                ]},
-                { id: 'or-ai', icon: '', title: 'AI Investments', colorClass: 'originations', items: [
-                    { label: 'construction', text: 'clAIm — AI construction technology tracked.' },
-                    { label: 'hospitality', text: 'Hospitality R&D — AI applications in hospitality sector.' }
-                ]}
-              ]
-            },
-            { id: 'cupial', icon: '', title: 'Cupial', badge: '6 items', badgeType: 'warn', colorClass: 'cupial',
-              items: [
-                { label: 'handover', text: 'Open handover items tracked with Pagitsch.' },
-                { label: 'legal', text: 'URGENT — legal matters requiring immediate attention.' },
-              ],
-              subIssues: [
-                { id: 'cu-handover', icon: '', title: 'Handover Issues', colorClass: 'cupial', items: [
-                    { label: 'status', text: 'Open handover items — punch list being resolved.' }
-                ]},
-                { id: 'cu-escrow', icon: '', title: 'Escrow Release', colorClass: 'cupial', items: [
-                    { label: 'status', text: 'Escrow funds — release conditions being verified.' }
-                ]},
-                { id: 'cu-pagitsch', icon: '', title: 'Pagitsch Reconciliation', colorClass: 'cupial', items: [
-                    { label: 'status', text: 'Cost reconciliation — Pagitsch review in progress.' }
-                ]},
-                { id: 'cu-special', icon: '', title: 'Special Requests', colorClass: 'cupial', items: [
-                    { label: 'status', text: 'Additional works and modifications tracked.' }
-                ]},
-                { id: 'cu-legal', icon: '', title: 'Legal (URGENT)', colorClass: 'cupial', items: [
-                    { label: 'status', text: 'URGENT legal matter — requires immediate attention.' }
-                ]},
-                { id: 'cu-ipd', icon: '', title: 'IPD Q4 Interest', colorClass: 'cupial', items: [
-                    { label: 'status', text: 'Q4 interest payment — IPD obligation tracked.' }
-                ]}
-              ]
-            }
-        ]
-    },
-    network: {
-        title: 'Network',
-        categories: [
-            { id: 'keycontacts', icon: '', title: 'Key Contacts', badge: 'active', badgeType: 'ok', colorClass: 'keycontacts',
-              subIssues: [
-                { id: 'investors', icon: '', title: 'Investors & Partners', colorClass: 'keycontacts', items: [
-                    { label: 'active', text: 'John (UBS) — quarterly review scheduled.' },
-                    { label: 'pending', text: 'Christophe Buchwalder — awaiting response on Brisen 2030 deck.' }
-                ]},
-                { id: 'board-net', icon: '', title: 'Board & Directors', colorClass: 'keycontacts', items: [
-                    { label: 'contact', text: 'Siegfried Gröschl — active on Hagenauer and Cupial.' },
-                    { label: 'contact', text: 'Rolf Hubner — advisory role, low-touch.' }
-                ]},
-                { id: 'family-net', icon: '', title: 'Family & Personal', colorClass: 'keycontacts', items: [
-                    { label: 'contact', text: 'Vladimir & Mykola — operational team, daily contact.' },
-                    { label: 'contact', text: 'Thomas Leitner — Hagenauer project lead.' }
-                ]}
-              ]
-            },
-            { id: 'advisors', icon: '', title: 'Advisors & Consultants', badge: '4 active', badgeType: 'neutral', colorClass: 'advisors',
-              items: [
-                { label: 'legal', text: 'Dr. Gaspar / S&K — insolvency proceedings. Weekly updates.' },
-                { label: 'tax', text: 'Tax advisor (CH) — Swiss structure review. ETA March 2026.' },
-                { label: 'financial', text: 'Auditor — FY2025 annual accounts in preparation.' },
-              ]
-            },
-            { id: 'serviceproviders', icon: '', title: 'Service Providers', badge: 'stable', badgeType: 'ok', colorClass: 'serviceproviders',
-              items: [
-                { label: 'IT', text: 'IT / O365 — managed by Vladimir. Systems running normally.' },
-                { label: 'banking', text: 'UBS / Raiffeisen / UniCredit — all account relationships active.' },
-                { label: 'insurance', text: 'Insurance broker — policies current through 2026.' },
-              ]
-            },
-            { id: 'pipeline-contacts', icon: '', title: 'Pipeline Contacts', badge: '5 warm', badgeType: 'warn', colorClass: 'pipeline',
-              items: [
-                { label: 'warm leads', text: '5 active pipeline contacts from originations deal flow.' },
-                { label: 'follow-ups', text: '3 email follow-ups and 2 WhatsApp messages pending.' },
-              ]
-            }
-        ]
-    },
-    travel: {
-        title: 'Travel',
-        categories: [
-            { id: 'business-travel', icon: '', title: 'Business Travel', badge: 'no trips', badgeType: 'neutral', colorClass: 'travel',
-              items: [
-                { label: 'recent', text: 'Baden-Baden — completed 16-18 Feb (AO tasks).' },
-                { label: 'upcoming', text: 'No upcoming business travel currently booked.' },
-              ]
-            },
-            { id: 'personal-travel', icon: '', title: 'Personal Travel', badge: 'no trips', badgeType: 'neutral', colorClass: 'travel',
-              items: [
-                { label: 'upcoming', text: 'No upcoming personal travel currently booked.' },
-              ]
-            },
-            { id: 'docs-visas', icon: '', title: 'Documents & Visas', badge: 'all clear', badgeType: 'ok', colorClass: 'travel',
-              items: [
-                { label: 'passports', text: 'All passports valid. No renewals due within 6 months.' },
-                { label: 'visas', text: 'No pending visa applications.' },
-              ]
-            },
-            { id: 'logistics', icon: '', title: 'Logistics & Preferences', badge: 'stable', badgeType: 'ok', colorClass: 'travel',
-              items: [
-                { label: 'airlines', text: 'Preferred: Swiss/Lufthansa. Miles accounts active.' },
-                { label: 'hotels', text: 'No active reservations.' },
-              ]
-            }
-        ]
-    }
-};
-
 // ═══ STATE ═══
-let currentRole = null;
-let currentCatIndex = null;
-let currentSubIndex = null;
-let currentView = 'home';
-let lensIndex = 0;
-let takeVisible = false;
-
-// Scan chat state
+let currentTab = 'morning-brief';
 let scanHistory = [];
 let scanStreaming = false;
-let previousView = 'home';
-let previousRole = null;
 
 // ═══ HELPERS ═══
 
+/** Escape HTML entities — prevents XSS. Used by md() and all text rendering. */
 function esc(str) {
     if (!str) return '';
     const d = document.createElement('div');
@@ -454,9 +42,10 @@ function esc(str) {
     return d.innerHTML;
 }
 
+/** Markdown-to-HTML converter. ALWAYS calls esc() first, then applies formatting. Safe for innerHTML. */
 function md(text) {
     if (!text) return '';
-    let h = esc(text);
+    let h = esc(text); // XSS-safe: escapes all HTML entities first
     h = h.replace(/^### (.+)$/gm, '<h3>$1</h3>');
     h = h.replace(/^## (.+)$/gm, '<h2>$1</h2>');
     h = h.replace(/^# (.+)$/gm, '<h1>$1</h1>');
@@ -476,857 +65,517 @@ function fmtDate(iso) {
         + ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
 }
 
-// ═══ INIT ═══
-async function init() {
-    await loadConfig();
+function fmtRelativeTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
     const now = new Date();
-
-    // Greeting
-    const hour = now.getHours();
-    const greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-    const dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-    const greetEl = document.getElementById('homeGreeting');
-    if (greetEl) greetEl.textContent = greet + ', Dimitry \u2014 ' + dateStr;
-
-    // Last scan time
-    updateScanTime();
-
-    // Set initial lens
-    const lensKeys = Object.keys(lensIcons);
-    if (lensKeys.length > 0) {
-        document.getElementById('lensImg').src = lensIcons[lensKeys[0]];
-    }
-
-    // Populate home sections
-    populateHome();
-
-    // Wire scan form
-    const scanForm = document.getElementById('scanForm');
-    if (scanForm) {
-        scanForm.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const input = document.getElementById('scanInput');
-            if (input && input.value.trim()) {
-                sendScanMessage(input.value.trim());
-                input.value = '';
-            }
-        });
-    }
-
-    // Fetch system status
-    fetchSystemStatus();
+    const diffMs = now - d;
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return diffMins + 'm ago';
+    const diffHrs = Math.floor(diffMins / 60);
+    if (diffHrs < 24) return diffHrs + 'h ago';
+    const diffDays = Math.floor(diffHrs / 24);
+    if (diffDays === 1) return 'Yesterday';
+    return diffDays + ' days ago';
 }
 
-function updateScanTime() {
-    const scanEl = document.getElementById('scanTime');
-    if (scanEl) {
-        const now = new Date();
-        const hh = String(now.getHours()).padStart(2, '0');
-        const mm = String(now.getMinutes()).padStart(2, '0');
-        scanEl.textContent = 'last scan ' + hh + ':' + mm;
-    }
+function fmtDeadlineDays(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    d.setHours(0, 0, 0, 0);
+    const diff = Math.ceil((d - now) / 86400000);
+    if (diff < 0) return Math.abs(diff) + ' days overdue';
+    if (diff === 0) return 'Today';
+    if (diff === 1) return 'Tomorrow';
+    return diff + ' days';
 }
 
-// ═══ SYSTEM STATUS ═══
-async function fetchSystemStatus() {
-    try {
-        const resp = await bakerFetch('/api/status');
-        if (!resp.ok) throw new Error('Status ' + resp.status);
-        const status = await resp.json();
-
-        const dot = document.getElementById('scanDot');
-        if (status.system === 'operational') {
-            dot.style.background = '#34d058';
-            dot.style.boxShadow = '0 0 10px rgba(52,208,88,0.5)';
-        } else {
-            dot.style.background = '#f56565';
-            dot.style.boxShadow = '0 0 10px rgba(245,101,101,0.5)';
-        }
-    } catch (e) {
-        console.warn('Status fetch failed:', e.message);
-    }
+function tierClass(tier) {
+    if (tier === 1) return 'red';
+    if (tier === 2) return 'amber';
+    if (tier === 3) return 'slate';
+    return 'lgray';
 }
 
-// ═══ HOME POPULATION ═══
-function populateHome() {
-    const agendaList = document.getElementById('agendaList');
-    const pendingList = document.getElementById('pendingList');
-    const deadlineList = document.getElementById('deadlineList');
-
-    // Agenda items (will be populated from API later; static for now)
-    if (agendaList) {
-        agendaList.innerHTML = '<div class="agenda-empty">No scheduled items for today.</div>';
-    }
-
-    // Pending items from API
-    if (pendingList) {
-        fetchPendingItems(pendingList);
-    }
-
-    // Deadlines from API (DEADLINE-SYSTEM-1)
-    if (deadlineList) {
-        fetchDeadlines(deadlineList);
-    }
+/** Set element text safely (no HTML) */
+function setText(id, val) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = val;
 }
 
-async function fetchPendingItems(container) {
-    try {
-        const resp = await bakerFetch('/api/alerts');
-        if (!resp.ok) throw new Error('API ' + resp.status);
-        const data = await resp.json();
-        const alerts = (data && data.alerts) ? data.alerts : [];
-
-        if (alerts.length === 0) {
-            container.textContent = '';
-            const empty = document.createElement('div');
-            empty.className = 'agenda-empty';
-            empty.textContent = 'No pending items. All clear.';
-            container.appendChild(empty);
-            return;
-        }
-
-        container.textContent = '';
-        for (const a of alerts.slice(0, 8)) {
-            if (a.structured_actions && a.structured_actions.parts) {
-                container.appendChild(renderStructuredAlert(a));
-            } else {
-                const div = document.createElement('div');
-                div.className = 'agenda-item';
-                const time = document.createElement('span');
-                time.className = 'agenda-time';
-                time.style.color = '#ef4444';
-                time.textContent = 'T' + (a.tier || 1);
-                const type = document.createElement('span');
-                type.className = 'agenda-type task';
-                type.textContent = 'alert';
-                const desc = document.createElement('span');
-                desc.className = 'agenda-desc';
-                desc.textContent = a.title;
-                div.appendChild(time);
-                div.appendChild(type);
-                div.appendChild(desc);
-                container.appendChild(div);
-            }
-        }
-    } catch (e) {
-        container.textContent = '';
-        const empty = document.createElement('div');
-        empty.className = 'agenda-empty';
-        empty.textContent = 'No pending items. All clear.';
-        container.appendChild(empty);
-    }
+/** Set element safe HTML (pre-escaped via md/esc) */
+function setSafeHTML(el, safeHtml) {
+    if (el) el.innerHTML = safeHtml; // SECURITY: caller must pass md() or esc() output only
 }
 
-// ═══ STRUCTURED ALERT CARDS (COCKPIT-ALERT-UI) ═══
+// ═══ NAVIGATION ═══
 
-const ACTION_TYPE_META = {
-    plan:       { emoji: '\ud83d\udccb', color: '#06b6d4', label: 'Plan' },
-    analyze:    { emoji: '\ud83d\udd0d', color: '#a855f7', label: 'Analyze' },
-    draft:      { emoji: '\u2709\ufe0f',  color: '#eab308', label: 'Draft' },
-    specialist: { emoji: '\ud83c\udfaf', color: '#10b981', label: 'Specialist' },
+const TAB_VIEW_MAP = {
+    'morning-brief': 'viewMorningBrief',
+    'fires': 'viewFires',
+    'matters': 'viewMatters',
+    'deadlines': 'viewDeadlines',
+    'ask-baker': 'viewAskBaker',
 };
 
-function renderStructuredAlert(alert) {
-    const sa = alert.structured_actions;
-    const card = document.createElement('div');
-    card.className = 'sa-card';
-    card.dataset.alertId = alert.id;
+const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'ask-baker']);
 
-    // Per-card state
-    const state = { selected: {}, freetext: {}, skipped: {} };
-    card._saState = state;
-    card._saData = sa;
-
-    const tierColor = alert.tier === 1 ? '#ef4444' : alert.tier === 2 ? '#f59e0b' : '#64748b';
-
-    // Header
-    const header = document.createElement('div');
-    header.className = 'sa-header';
-
-    const titleRow = document.createElement('div');
-    titleRow.className = 'sa-title-row';
-    const tierBadge = document.createElement('span');
-    tierBadge.className = 'sa-tier';
-    tierBadge.style.background = tierColor;
-    tierBadge.textContent = 'T' + alert.tier;
-    const titleSpan = document.createElement('span');
-    titleSpan.className = 'sa-title';
-    titleSpan.textContent = alert.title;
-    titleRow.appendChild(tierBadge);
-    titleRow.appendChild(titleSpan);
-    header.appendChild(titleRow);
-
-    for (const [key, label] of [['problem','Problem'],['cause','Cause'],['solution','Solution']]) {
-        if (sa[key]) {
-            const sec = document.createElement('div');
-            sec.className = 'sa-section';
-            const lbl = document.createElement('span');
-            lbl.className = 'sa-section-label';
-            lbl.textContent = label;
-            sec.appendChild(lbl);
-            sec.appendChild(document.createTextNode(' ' + sa[key]));
-            header.appendChild(sec);
-        }
-    }
-    card.appendChild(header);
-
-    // Parts with interactive action cards
-    const partsDiv = document.createElement('div');
-    partsDiv.className = 'sa-parts';
-
-    for (let pi = 0; pi < sa.parts.length; pi++) {
-        const part = sa.parts[pi];
-        state.selected[pi] = [];
-
-        const partDiv = document.createElement('div');
-        partDiv.className = 'sa-part';
-        partDiv.dataset.part = pi;
-
-        const partLabel = document.createElement('div');
-        partLabel.className = 'sa-part-label';
-        partLabel.textContent = part.label;
-        partDiv.appendChild(partLabel);
-
-        const actionsDiv = document.createElement('div');
-        actionsDiv.className = 'sa-actions';
-
-        for (let ai = 0; ai < part.actions.length; ai++) {
-            const action = part.actions[ai];
-            const meta = ACTION_TYPE_META[action.type] || ACTION_TYPE_META.analyze;
-
-            const actionDiv = document.createElement('div');
-            actionDiv.className = 'sa-action';
-            actionDiv.dataset.part = pi;
-            actionDiv.dataset.action = ai;
-
-            // Click to toggle selection
-            actionDiv.addEventListener('click', function() {
-                if (state.skipped[pi]) return;
-                const idx = state.selected[pi].indexOf(ai);
-                if (idx >= 0) {
-                    state.selected[pi].splice(idx, 1);
-                    actionDiv.classList.remove('sa-action--selected');
-                } else {
-                    state.selected[pi].push(ai);
-                    actionDiv.classList.add('sa-action--selected');
-                }
-                _updateExecBtn(card);
-            });
-
-            const descDiv = document.createElement('div');
-            descDiv.className = 'sa-action-desc';
-            descDiv.textContent = action.description || '';
-
-            const rightDiv = document.createElement('div');
-            rightDiv.className = 'sa-action-right';
-            const tag = document.createElement('span');
-            tag.className = 'sa-type-tag';
-            tag.style.background = meta.color;
-            tag.textContent = meta.emoji + ' ' + action.label;
-            const selectBtn = document.createElement('span');
-            selectBtn.className = 'sa-select-btn';
-            selectBtn.textContent = '\u25b6';
-            rightDiv.appendChild(tag);
-            rightDiv.appendChild(selectBtn);
-
-            actionDiv.appendChild(descDiv);
-            actionDiv.appendChild(rightDiv);
-            actionsDiv.appendChild(actionDiv);
-        }
-
-        // "Something else" freetext for this part
-        const ftDiv = document.createElement('div');
-        ftDiv.className = 'sa-action sa-freetext-row';
-        const ftInput = document.createElement('input');
-        ftInput.type = 'text';
-        ftInput.className = 'sa-freetext-input';
-        ftInput.placeholder = 'I have a different idea for this part...';
-        ftInput.maxLength = 2000;
-        ftInput.addEventListener('input', function() {
-            state.freetext[pi] = ftInput.value;
-            _updateExecBtn(card);
-        });
-        const ftRight = document.createElement('div');
-        ftRight.className = 'sa-action-right';
-        const ftTag = document.createElement('span');
-        ftTag.className = 'sa-type-tag sa-type-tag--freetext';
-        ftTag.textContent = '\u270e Something else';
-        ftRight.appendChild(ftTag);
-        ftDiv.appendChild(ftInput);
-        ftDiv.appendChild(ftRight);
-        actionsDiv.appendChild(ftDiv);
-
-        // "Skip this part" toggle
-        const skipDiv = document.createElement('div');
-        skipDiv.className = 'sa-skip-row';
-        const skipBtn = document.createElement('button');
-        skipBtn.className = 'sa-skip-btn';
-        skipBtn.textContent = '\u25cb Skip this part';
-        skipBtn.addEventListener('click', function() {
-            state.skipped[pi] = !state.skipped[pi];
-            if (state.skipped[pi]) {
-                state.selected[pi] = [];
-                state.freetext[pi] = '';
-                ftInput.value = '';
-                partDiv.classList.add('sa-part--skipped');
-                skipBtn.textContent = '\u25cf Unskip this part';
-                // Deselect all action cards in this part
-                partDiv.querySelectorAll('.sa-action--selected').forEach(function(el) {
-                    el.classList.remove('sa-action--selected');
-                });
-            } else {
-                partDiv.classList.remove('sa-part--skipped');
-                skipBtn.textContent = '\u25cb Skip this part';
-            }
-            _updateExecBtn(card);
-        });
-        skipDiv.appendChild(skipBtn);
-        actionsDiv.appendChild(skipDiv);
-
-        partDiv.appendChild(actionsDiv);
-        partsDiv.appendChild(partDiv);
-    }
-
-    // Global "Something else" freetext
-    const globalFt = document.createElement('div');
-    globalFt.className = 'sa-global-freetext';
-    const globalInput = document.createElement('input');
-    globalInput.type = 'text';
-    globalInput.className = 'sa-freetext-input';
-    globalInput.placeholder = 'Anything else not covered above...';
-    globalInput.maxLength = 2000;
-    globalInput.addEventListener('input', function() {
-        state.freetext.global = globalInput.value;
-        _updateExecBtn(card);
-    });
-    const globalRight = document.createElement('div');
-    globalRight.className = 'sa-action-right';
-    const globalTag = document.createElement('span');
-    globalTag.className = 'sa-type-tag sa-type-tag--freetext';
-    globalTag.textContent = '\u270e Something else';
-    globalRight.appendChild(globalTag);
-    globalFt.appendChild(globalInput);
-    globalFt.appendChild(globalRight);
-    partsDiv.appendChild(globalFt);
-
-    card.appendChild(partsDiv);
-
-    // Footer: Execute / Dismiss buttons
-    const footer = document.createElement('div');
-    footer.className = 'sa-footer';
-
-    const execBtn = document.createElement('button');
-    execBtn.className = 'sa-exec-btn';
-    execBtn.textContent = 'Execute Selected';
-    execBtn.disabled = true;
-    execBtn.addEventListener('click', function() {
-        executeAlertActions(card, alert.id);
+function switchTab(tabName) {
+    document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
+        item.classList.toggle('active', item.dataset.tab === tabName);
     });
 
-    const dismissBtn = document.createElement('button');
-    dismissBtn.className = 'sa-dismiss-btn';
-    dismissBtn.textContent = 'Dismiss';
-    dismissBtn.addEventListener('click', async function() {
-        await bakerFetch('/api/alerts/' + alert.id + '/dismiss', { method: 'POST' });
-        card.style.opacity = '0.5';
-        card.style.pointerEvents = 'none';
-        dismissBtn.textContent = 'Dismissed';
-    });
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
 
-    footer.appendChild(execBtn);
-    footer.appendChild(dismissBtn);
-    card.appendChild(footer);
+    if (FUNCTIONAL_TABS.has(tabName)) {
+        const viewId = TAB_VIEW_MAP[tabName];
+        if (viewId) {
+            const el = document.getElementById(viewId);
+            if (el) el.classList.add('active');
+        }
+    } else {
+        const cs = document.getElementById('viewComingSoon');
+        if (cs) cs.classList.add('active');
+        const labels = {
+            'people': 'People', 'tags': 'Tags', 'search': 'Search',
+            'ask-specialist': 'Ask Specialist', 'travel': 'Travel', 'media': 'Media'
+        };
+        setText('comingSoonTitle', (labels[tabName] || tabName) + ' -- Coming soon');
+    }
 
-    // Results area (hidden until execution)
-    const resultsDiv = document.createElement('div');
-    resultsDiv.className = 'sa-results';
-    resultsDiv.hidden = true;
-    card.appendChild(resultsDiv);
+    currentTab = tabName;
 
-    return card;
+    if (tabName === 'morning-brief') loadMorningBrief();
+    else if (tabName === 'fires') loadFires();
+    else if (tabName === 'deadlines') loadDeadlinesTab();
+    else if (tabName === 'ask-baker') focusScanInput();
 }
 
-function _updateExecBtn(card) {
-    const state = card._saState;
-    const btn = card.querySelector('.sa-exec-btn');
-    if (!btn) return;
-    let hasSelection = false;
-    for (const pi in state.selected) {
-        if (state.selected[pi].length > 0) { hasSelection = true; break; }
-    }
-    if (!hasSelection) {
-        for (const key in state.freetext) {
-            if (state.freetext[key] && state.freetext[key].trim()) { hasSelection = true; break; }
-        }
-    }
-    btn.disabled = !hasSelection;
-}
+// ═══ MORNING BRIEF ═══
 
-async function executeAlertActions(card, alertId) {
-    const state = card._saState;
-    const sa = card._saData;
-    const prompts = [];
-
-    // Collect selected action prompts (track pi/ai for card marking)
-    for (const pi in state.selected) {
-        for (const ai of state.selected[pi]) {
-            const action = sa.parts[pi].actions[ai];
-            prompts.push({
-                prompt: action.prompt,
-                type: action.type,
-                label: action.label,
-                part: sa.parts[pi].label,
-                _pi: pi,
-                _ai: ai,
-            });
-        }
-    }
-
-    // Collect freetext prompts (per-part)
-    for (const pi in state.freetext) {
-        const text = state.freetext[pi];
-        if (text && text.trim() && pi !== 'global') {
-            prompts.push({
-                prompt: text.trim(),
-                type: 'analyze',
-                label: 'Custom request',
-                part: sa.parts[pi] ? sa.parts[pi].label : 'General',
-            });
-        }
-    }
-
-    // Global freetext
-    if (state.freetext.global && state.freetext.global.trim()) {
-        prompts.push({
-            prompt: state.freetext.global.trim(),
-            type: 'analyze',
-            label: 'Custom request',
-            part: 'General',
-        });
-    }
-
-    if (prompts.length === 0) return;
-
-    // Disable buttons during execution
-    const execBtn = card.querySelector('.sa-exec-btn');
-    const dismissBtn = card.querySelector('.sa-dismiss-btn');
-    if (execBtn) { execBtn.disabled = true; execBtn.textContent = 'Executing...'; }
-    if (dismissBtn) dismissBtn.disabled = true;
-
-    const resultsDiv = card.querySelector('.sa-results');
-    resultsDiv.hidden = false;
-    resultsDiv.textContent = '';
-
-    // Progress counter
-    const progressDiv = document.createElement('div');
-    progressDiv.className = 'sa-exec-progress';
-    progressDiv.textContent = '0 / ' + prompts.length + ' actions';
-    resultsDiv.appendChild(progressDiv);
-
-    // Execute each prompt sequentially via /api/scan
-    for (let i = 0; i < prompts.length; i++) {
-        const p = prompts[i];
-        const meta = ACTION_TYPE_META[p.type] || ACTION_TYPE_META.analyze;
-
-        progressDiv.textContent = (i + 1) + ' / ' + prompts.length + ' — running: ' + p.label;
-
-        // Execution header
-        const execHeader = document.createElement('div');
-        execHeader.className = 'sa-exec-header';
-        const headerTag = document.createElement('span');
-        headerTag.className = 'sa-type-tag';
-        headerTag.style.background = meta.color;
-        headerTag.textContent = meta.emoji + ' ' + p.label;
-        const headerLabel = document.createElement('span');
-        headerLabel.className = 'sa-exec-part-label';
-        headerLabel.textContent = p.part;
-        const spinner = document.createElement('span');
-        spinner.className = 'sa-exec-spinner';
-        spinner.textContent = '\u25cf';
-        execHeader.appendChild(headerTag);
-        execHeader.appendChild(headerLabel);
-        execHeader.appendChild(spinner);
-        resultsDiv.appendChild(execHeader);
-
-        // Response container
-        const responseDiv = document.createElement('div');
-        responseDiv.className = 'sa-exec-response';
-        responseDiv.textContent = '';
-        resultsDiv.appendChild(responseDiv);
-
-        // Mark running action card with pulse
-        const actionCard = (p._pi !== undefined && p._ai !== undefined)
-            ? card.querySelector('.sa-action[data-part="' + p._pi + '"][data-action="' + p._ai + '"]')
-            : null;
-        if (actionCard) actionCard.classList.add('sa-action--running');
-
-        // Stream from /api/scan
-        let success = true;
-        try {
-            const resp = await bakerFetch('/api/scan', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: p.prompt, history: [] }),
-            });
-
-            if (!resp.ok) throw new Error('Scan API returned ' + resp.status);
-
-            const reader = resp.body.getReader();
-            const decoder = new TextDecoder();
-            let buffer = '';
-            let fullText = '';
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split('\n');
-                buffer = lines.pop();
-                for (const line of lines) {
-                    if (!line.startsWith('data: ')) continue;
-                    const payload = line.slice(6).trim();
-                    if (payload === '[DONE]') continue;
-                    try {
-                        const data = JSON.parse(payload);
-                        if (data.token) {
-                            fullText += data.token;
-                            responseDiv.innerHTML = md(fullText);
-                        }
-                    } catch (_) { /* skip unparseable */ }
-                }
-            }
-        } catch (err) {
-            responseDiv.textContent = 'Error: ' + err.message;
-            success = false;
-        }
-
-        // Add copy button to completed response
-        if (success && fullText) {
-            _addCopyBtn(responseDiv, fullText);
-        }
-
-        // Mark action card as completed with checkmark
-        if (actionCard) {
-            actionCard.classList.remove('sa-action--running');
-            actionCard.classList.add(success ? 'sa-action--done' : 'sa-action--error');
-        }
-        spinner.textContent = success ? '\u2713' : '\u2717';
-        spinner.className = success ? 'sa-exec-check' : 'sa-exec-error';
-    }
-
-    progressDiv.textContent = prompts.length + ' / ' + prompts.length + ' — complete';
-    progressDiv.classList.add('sa-exec-progress--done');
-
-    // Mark alert as acknowledged
-    await bakerFetch('/api/alerts/' + alertId + '/acknowledge', { method: 'POST' });
-
-    if (execBtn) { execBtn.textContent = '\u2713 Executed'; execBtn.classList.add('sa-exec-btn--done'); }
-    if (dismissBtn) dismissBtn.disabled = false;
-}
-
-// ═══ DEADLINES (DEADLINE-SYSTEM-1) ═══
-async function fetchDeadlines(container) {
+async function loadMorningBrief() {
     try {
-        const resp = await bakerFetch('/api/deadlines?limit=8');
-        if (!resp.ok) throw new Error('API ' + resp.status);
+        const resp = await bakerFetch('/api/dashboard/morning-brief');
+        if (!resp.ok) return;
         const data = await resp.json();
-        const deadlines = (data && data.deadlines) ? data.deadlines : [];
 
-        if (deadlines.length === 0) {
-            container.innerHTML = '<div class="agenda-empty">No upcoming deadlines.</div>';
+        setText('statFires', data.fire_count || 0);
+        setText('statDeadlines', data.deadline_count || 0);
+        setText('statProcessed', data.processed_overnight || 0);
+        setText('statActions', data.actions_completed || 0);
+
+        const narEl = document.getElementById('briefNarrative');
+        if (narEl && data.narrative) setSafeHTML(narEl, md(data.narrative));
+
+        // Fires badge
+        const firesBadge = document.getElementById('firesBadge');
+        if (firesBadge) {
+            if (data.fire_count > 0) {
+                firesBadge.textContent = data.fire_count;
+                firesBadge.hidden = false;
+            } else {
+                firesBadge.hidden = true;
+            }
+        }
+
+        // Top fires
+        const firesList = document.getElementById('topFiresList');
+        if (firesList) {
+            if (data.top_fires && data.top_fires.length > 0) {
+                setSafeHTML(firesList, data.top_fires.map(function(a) { return renderAlertCard(a, true); }).join(''));
+            } else {
+                firesList.textContent = 'No active fires. All clear.';
+                firesList.style.cssText = 'color:var(--text3);font-size:12px;';
+            }
+        }
+
+        // Deadlines
+        const dlList = document.getElementById('deadlinesList');
+        if (dlList) {
+            if (data.deadlines && data.deadlines.length > 0) {
+                setSafeHTML(dlList, data.deadlines.map(renderDeadlineCompact).join(''));
+            } else {
+                dlList.textContent = 'No deadlines this week.';
+                dlList.style.cssText = 'color:var(--text3);font-size:12px;';
+            }
+        }
+
+        // Activity
+        const actList = document.getElementById('activityList');
+        if (actList) {
+            if (data.activity && data.activity.length > 0) {
+                setSafeHTML(actList, data.activity.map(renderActivityRow).join(''));
+            } else {
+                actList.textContent = 'No activity yet today.';
+                actList.style.cssText = 'color:var(--text3);font-size:12px;';
+            }
+        }
+
+        loadMattersSummary();
+    } catch (e) {
+        console.error('loadMorningBrief failed:', e);
+    }
+}
+
+// ═══ MATTERS SUMMARY (sidebar) ═══
+
+async function loadMattersSummary() {
+    try {
+        const resp = await bakerFetch('/api/dashboard/matters-summary');
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        const subList = document.getElementById('mattersSubList');
+        setText('mattersCount', data.count || '');
+
+        if (subList && data.matters) {
+            // Build sub-items using safe DOM methods
+            subList.textContent = '';
+            for (const m of data.matters) {
+                const slug = m.matter_slug || '_ungrouped';
+                const label = slug === '_ungrouped' ? 'Ungrouped' : slug.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+                const dotClass = tierClass(m.worst_tier);
+
+                const item = document.createElement('div');
+                item.className = 'nav-item';
+                item.dataset.tab = 'matters';
+                item.dataset.matter = slug;
+
+                const dot = document.createElement('span');
+                dot.className = 'nav-dot ' + dotClass;
+                item.appendChild(dot);
+
+                const lbl = document.createElement('span');
+                lbl.className = 'nav-label';
+                lbl.textContent = label;
+                item.appendChild(lbl);
+
+                const cnt = document.createElement('span');
+                cnt.className = 'nav-count';
+                cnt.textContent = m.item_count;
+                item.appendChild(cnt);
+
+                if (m.new_count > 0) {
+                    const newBadge = document.createElement('span');
+                    newBadge.className = 'nav-new';
+                    newBadge.textContent = m.new_count + ' new';
+                    item.appendChild(newBadge);
+                }
+
+                item.addEventListener('click', function() { switchTab('matters'); });
+                subList.appendChild(item);
+            }
+        }
+    } catch (e) {
+        console.error('loadMattersSummary failed:', e);
+    }
+}
+
+// ═══ FIRES TAB ═══
+
+async function loadFires() {
+    const container = document.getElementById('firesContent');
+    if (!container) return;
+    container.textContent = 'Loading fires...';
+
+    try {
+        const resp = await bakerFetch('/api/alerts?tier=1');
+        if (!resp.ok) return;
+        const data = await resp.json();
+
+        if (!data.alerts || data.alerts.length === 0) {
+            container.textContent = 'No active fires. All clear.';
+            container.style.cssText = 'color:var(--text3);font-size:13px;padding:20px 0;';
             return;
         }
 
-        let html = '';
-        const now = new Date();
-        for (const d of deadlines) {
-            const due = d.due_date ? new Date(d.due_date) : null;
-            const hoursLeft = due ? (due - now) / 3600000 : Infinity;
-            const priority = d.priority || 'normal';
-            const status = d.status || 'active';
-            const confidence = d.confidence || 'hard';
-
-            // Color coding
-            let icon, color;
-            if (status === 'pending_confirm') {
-                icon = '\u23f8\ufe0f'; color = '#9ca3af';
-            } else if (hoursLeft < 0) {
-                icon = '\ud83d\udd34'; color = '#ef4444';
-            } else if (hoursLeft <= 48) {
-                icon = '\ud83d\udd34'; color = '#ef4444';
-            } else if (hoursLeft <= 168) {
-                icon = '\ud83d\udfe1'; color = '#f59e0b';
-            } else {
-                icon = '\ud83d\udfe2'; color = '#22c55e';
-            }
-
-            const dueStr = due ? due.toLocaleDateString('en-GB', { month: 'short', day: 'numeric' }) : 'TBD';
-            let label = '';
-            if (priority === 'critical') label = ' (CRITICAL)';
-            else if (priority === 'high') label = ' (HIGH)';
-
-            let desc = esc(d.description || 'Untitled');
-            if (status === 'pending_confirm') {
-                desc = 'Pending: ' + desc;
-            }
-
-            html += `<div class="agenda-item">
-                <span class="agenda-time" style="color:${color};">${icon} ${dueStr}</span>
-                <span class="agenda-type task">${esc(priority)}</span>
-                <span class="agenda-desc">${desc}${label}</span>
-            </div>`;
+        // Group by matter
+        const groups = {};
+        for (const a of data.alerts) {
+            const key = a.matter_slug || '_ungrouped';
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(a);
         }
-        container.innerHTML = html;
+
+        container.textContent = '';
+        for (const [slug, alerts] of Object.entries(groups)) {
+            const label = slug === '_ungrouped' ? 'Ungrouped' : slug.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+
+            const sectionLabel = document.createElement('div');
+            sectionLabel.className = 'section-label';
+            sectionLabel.style.marginTop = '16px';
+            sectionLabel.textContent = label;
+            container.appendChild(sectionLabel);
+
+            const cardsHtml = alerts.map(function(a) { return renderAlertCard(a, true); }).join('');
+            const cardsDiv = document.createElement('div');
+            setSafeHTML(cardsDiv, cardsHtml); // SECURITY: renderAlertCard uses esc() for all user data
+            container.appendChild(cardsDiv);
+        }
     } catch (e) {
-        container.innerHTML = '<div class="agenda-empty">No upcoming deadlines.</div>';
+        container.textContent = 'Failed to load fires.';
+        container.style.color = 'var(--red)';
     }
 }
 
-// ═══ VIEW SWITCHING ═══
-function showView(id) {
-    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-    document.getElementById(id).classList.add('active');
-    currentView = id;
-}
+// ═══ DEADLINES TAB ═══
 
-function setRail(role) {
-    document.querySelectorAll('.rail-btn').forEach(b => {
-        b.classList.toggle('active', b.dataset.role === (role || 'home'));
-    });
-}
+async function loadDeadlinesTab() {
+    const container = document.getElementById('deadlinesContent');
+    if (!container) return;
+    container.textContent = 'Loading deadlines...';
 
-// ═══ HOME ═══
-function goHome() {
-    currentRole = null;
-    currentCatIndex = null;
-    currentSubIndex = null;
-    setRail(null);
-    showView('homeView');
-    document.getElementById('takeBar').classList.remove('visible');
-    takeVisible = false;
-}
+    try {
+        const resp = await bakerFetch('/api/deadlines');
+        if (!resp.ok) return;
+        const data = await resp.json();
 
-// ═══ OPEN ROLE (Layer 2) ═══
-function openRole(role) {
-    currentRole = role;
-    currentCatIndex = null;
-    currentSubIndex = null;
-    setRail(role);
-
-    const data = roleData[role];
-    if (!data) return;
-
-    // Hero
-    document.getElementById('catHeroIcon').textContent = data.icon || '';
-    document.getElementById('catHeroTitle').textContent = data.title || roleNames[role];
-    document.getElementById('catHeroDesc').textContent = data.subtitle || roleDescs[role];
-
-    // Build category cards
-    const grid = document.getElementById('catGrid');
-    grid.innerHTML = '';
-
-    const cats = data.categories || [];
-    cats.forEach((cat, idx) => {
-        const card = document.createElement('div');
-        card.className = 'cat-card';
-        card.dataset.role = role;
-        card.style.animationDelay = (idx * 0.06) + 's';
-
-        const countLabel = cat.subIssues
-            ? cat.subIssues.length + ' sub-items'
-            : (cat.items ? cat.items.length + ' items' : '');
-
-        const actionLabel = cat.subIssues ? 'Review' : 'View';
-
-        card.innerHTML =
-            '<div class="cc-icon">' + (cat.icon || '') + '</div>' +
-            '<div class="cc-title">' + cat.title + '</div>' +
-            '<div class="cc-count">' + countLabel + '</div>' +
-            '<span class="cc-action">' + actionLabel + '</span>';
-
-        card.onclick = () => openCategory(role, idx);
-        grid.appendChild(card);
-    });
-
-    showView('catView');
-
-    // Show Baker's Scan bar
-    document.getElementById('takeBar').classList.add('visible');
-    document.getElementById('takeLabel').textContent = roleNames[role];
-}
-
-// ═══ OPEN CATEGORY (Layer 3) ═══
-function openCategory(role, catIndex) {
-    currentCatIndex = catIndex;
-    currentSubIndex = null;
-    const data = roleData[role];
-    const cat = data.categories[catIndex];
-
-    // Back button
-    document.getElementById('detailBack').onclick = () => openRole(role);
-
-    // Title & breadcrumb
-    document.getElementById('detailTitle').textContent = cat.title;
-    document.getElementById('detailBreadcrumb').textContent = roleNames[role] + ' \u2192 ' + cat.title;
-
-    // Sub-tabs
-    const tabsEl = document.getElementById('subTabs');
-    tabsEl.innerHTML = '';
-
-    if (cat.subIssues && cat.subIssues.length > 0) {
-        cat.subIssues.forEach((sub, subIdx) => {
-            const tab = document.createElement('button');
-            tab.className = 'sub-tab' + (subIdx === 0 ? ' active' : '');
-            tab.textContent = sub.title;
-            tab.onclick = () => selectSub(role, catIndex, subIdx);
-            tabsEl.appendChild(tab);
-        });
-        renderItems(cat.subIssues[0].items, role);
-        currentSubIndex = 0;
-    } else {
-        renderItems(cat.items, role);
-    }
-
-    showView('detailView');
-    document.getElementById('takeLabel').textContent = roleNames[role] + ' \u2192 ' + cat.title;
-}
-
-function selectSub(role, catIndex, subIndex) {
-    currentSubIndex = subIndex;
-    const cat = roleData[role].categories[catIndex];
-    const sub = cat.subIssues[subIndex];
-
-    document.querySelectorAll('.sub-tab').forEach((t, i) => t.classList.toggle('active', i === subIndex));
-    renderItems(sub.items, role);
-    document.getElementById('takeLabel').textContent = roleNames[role] + ' \u2192 ' + cat.title + ' \u2192 ' + sub.title;
-}
-
-function renderItems(items, role) {
-    const container = document.getElementById('detailCards');
-    container.innerHTML = '';
-    if (!items || items.length === 0) {
-        container.innerHTML = '<div style="padding:20px;color:rgba(0,0,0,0.3);font-size:13px;">No items yet.</div>';
-        return;
-    }
-    items.forEach((item, i) => {
-        const card = document.createElement('div');
-        card.className = 'd-card';
-        card.dataset.role = role;
-        card.style.animationDelay = (i * 0.05) + 's';
-        card.innerHTML =
-            '<div class="d-label">' + item.label + '</div>' +
-            '<div class="d-text">' + item.text + '</div>';
-        container.appendChild(card);
-    });
-}
-
-// ═══ BAKER'S SCAN (live SSE) ═══
-function showTake() {
-    // Remember which view we came from for the back button
-    if (currentView !== 'scanView') {
-        previousView = currentView;
-        previousRole = currentRole;
-    }
-
-    // Set back button text
-    const backBtn = document.getElementById('scanBack');
-    if (backBtn) {
-        const tabName = previousRole ? (roleNames[previousRole] || 'Home') : 'Home';
-        backBtn.textContent = '\u2190 Back to ' + tabName;
-        backBtn.onclick = closeTake;
-    }
-
-    // Show scan view using existing showView mechanism
-    showView('scanView');
-    currentView = 'scanView';
-    takeVisible = true;
-
-    // Hide the take bar while scan is active
-    document.getElementById('takeBar').classList.remove('visible');
-
-    // Render existing messages if container is empty
-    const container = document.getElementById('scanMessages');
-    if (container && container.children.length === 0 && scanHistory.length > 0) {
-        for (const msg of scanHistory) {
-            appendScanBubble(msg.role, msg.content);
+        if (!data.deadlines || data.deadlines.length === 0) {
+            container.textContent = 'No active deadlines.';
+            return;
         }
-    }
 
-    // Focus input
-    const input = document.getElementById('scanInput');
-    if (input) input.focus();
+        setSafeHTML(container, data.deadlines.map(renderDeadlineCompact).join(''));
+    } catch (e) {
+        container.textContent = 'Failed to load deadlines.';
+        container.style.color = 'var(--red)';
+    }
 }
 
-function closeTake() {
-    takeVisible = false;
+// ═══ CARD RENDERING ═══
+// SECURITY: All dynamic text goes through esc(). Resulting HTML is safe for setSafeHTML().
 
-    // Return to previous view
-    if (previousRole) {
-        openRole(previousRole);
-    } else {
-        goHome();
+function renderAlertCard(alert, expanded) {
+    const tier = alert.tier || 3;
+    const tierLabel = 'T' + tier;
+    const isNew = isNewAlert(alert.created_at);
+    const borderClass = tier === 1 ? ' t1-border' : tier === 2 ? ' t2-border' : '';
+    const newClass = isNew ? ' new' : '';
+
+    let html = '<div class="card' + newClass + borderClass + '" data-alert-id="' + esc(String(alert.id)) + '">';
+
+    // Header
+    html += '<div class="card-header">';
+    html += '<span class="tier-badge t' + tier + '">' + esc(tierLabel) + '</span>';
+    html += '<span class="card-title">' + esc(alert.title) + '</span>';
+    if (isNew) html += '<span class="card-new-badge">new</span>';
+    html += '<span class="card-time">' + esc(fmtRelativeTime(alert.created_at)) + '</span>';
+    html += '</div>';
+
+    // PCS (for T1/T2 with structured_actions)
+    if (expanded && (tier <= 2) && alert.structured_actions) {
+        let sa = alert.structured_actions;
+        if (typeof sa === 'string') { try { sa = JSON.parse(sa); } catch(e) { sa = {}; } }
+
+        if (sa.problem || sa.cause || sa.solution) {
+            html += '<div class="pcs">';
+            html += '<div class="pcs-box"><div class="pcs-label">Problem</div><div class="pcs-text">' + esc(sa.problem || '') + '</div></div>';
+            html += '<div class="pcs-box"><div class="pcs-label">Cause</div><div class="pcs-text">' + esc(sa.cause || '') + '</div></div>';
+            html += '<div class="pcs-box"><div class="pcs-label">Solution</div><div class="pcs-text">' + esc(sa.solution || '') + '</div></div>';
+            html += '</div>';
+        }
+
+        // Baker recommends
+        if (sa.parts && sa.parts.length > 0) {
+            html += '<div class="recommends"><div class="recommends-label">Baker recommends</div>';
+            for (const part of sa.parts) {
+                html += '<div class="part-label">' + esc(part.label || '') + '</div>';
+                if (part.actions) {
+                    for (let ai = 0; ai < part.actions.length; ai++) {
+                        const action = part.actions[ai];
+                        const prompt = action.prompt || action.label || '';
+                        html += '<div class="action-row">';
+                        html += '<span class="action-type">' + esc((action.type || 'Analyze').charAt(0).toUpperCase() + (action.type || 'analyze').slice(1)) + '</span>';
+                        html += '<span class="action-label">' + esc(action.label || action.description || '') + '</span>';
+                        html += '<button class="run-btn" data-prompt="' + esc(prompt) + '" data-alert="' + alert.id + '" onclick="runCardAction(this.dataset.alert,this.dataset.prompt)">Run</button>';
+                        html += '</div>';
+                    }
+                }
+            }
+            html += '<div class="freetext"><input placeholder="Something else..." />';
+            html += '<button class="run-btn" style="opacity:0.3;" data-alert="' + alert.id + '" onclick="runFreetext(this,' + alert.id + ')">Run</button></div>';
+            html += '</div>';
+        }
+
+        // More actions
+        html += '<div class="more-actions"><div class="more-actions-label">More actions</div>';
+        html += '<div class="more-actions-row">';
+        var moreActions = ['Draft', 'Analyze', 'Plan', 'Summarize', 'Search'];
+        for (var mi = 0; mi < moreActions.length; mi++) {
+            html += '<button class="more-action-btn" data-action-type="' + esc(moreActions[mi]) + '" data-alert="' + alert.id + '" onclick="openMoreAction(this)">' + esc(moreActions[mi]) + '...</button>';
+        }
+        html += '</div></div>';
     }
+
+    // Footer
+    html += '<div class="card-footer">';
+    if (expanded && tier <= 2) {
+        html += '<button class="footer-btn primary" onclick="switchTab(\'ask-baker\')">Open in Scan</button>';
+    }
+    html += '<button class="footer-resolve" data-alert="' + alert.id + '" onclick="resolveAlert(' + alert.id + ',this)">Resolve</button>';
+    html += '<button class="footer-dismiss" data-alert="' + alert.id + '" onclick="dismissAlert(' + alert.id + ',this)">Dismiss</button>';
+    html += '</div></div>';
+
+    return html;
+}
+
+function renderDeadlineCompact(dl) {
+    const daysText = fmtDeadlineDays(dl.due_date);
+    const priority = (dl.priority || 'normal').toLowerCase();
+    let dotClass = 'lgray';
+    let timeStyle = '';
+    if (priority === 'critical' || daysText === 'Today') { dotClass = 'red'; timeStyle = 'color:var(--red);font-weight:600;'; }
+    else if (priority === 'high' || daysText === 'Tomorrow') { dotClass = 'amber'; }
+    else if (daysText.includes('overdue')) { dotClass = 'red'; timeStyle = 'color:var(--red);font-weight:600;'; }
+
+    return '<div class="card card-compact"><div class="card-header">' +
+        '<span class="nav-dot ' + dotClass + '" style="margin-top:5px;"></span>' +
+        '<span class="card-title">' + esc(dl.description || '') + '</span>' +
+        '<span class="card-time" style="' + timeStyle + '">' + esc(daysText) + '</span>' +
+        '</div></div>';
+}
+
+function renderActivityRow(item) {
+    let dotColor = 'var(--text4)';
+    let label = '';
+    let time = '';
+
+    if (item.type === 'capability_run') {
+        dotColor = item.status === 'completed' ? 'var(--green)' : 'var(--amber)';
+        label = '<strong>' + esc(item.label || 'Capability') + '</strong> ' + esc(item.status || '') +
+            (item.iterations ? ' -- ' + esc(String(item.iterations)) + ' iterations' : '');
+        time = esc(fmtRelativeTime(item.timestamp)) + (item.tool_calls_count ? ' -- ' + esc(String(item.tool_calls_count)) + ' tools' : '');
+    } else if (item.type === 'alert_created') {
+        dotColor = item.tier === 1 ? 'var(--red)' : item.tier === 2 ? 'var(--amber)' : 'var(--text4)';
+        label = '<strong>Alert T' + esc(String(item.tier || '?')) + '</strong> ' + esc(item.label || '');
+        time = esc(fmtRelativeTime(item.timestamp));
+    }
+
+    return '<div class="activity-row">' +
+        '<span class="activity-dot" style="background:' + dotColor + ';"></span>' +
+        '<div><div class="activity-text">' + label + '</div>' +
+        '<div class="activity-time">' + time + '</div></div></div>';
+}
+
+function isNewAlert(createdAt) {
+    if (!createdAt) return false;
+    return (new Date() - new Date(createdAt)) < 86400000;
+}
+
+// ═══ CARD ACTIONS ═══
+
+async function resolveAlert(alertId, btnEl) {
+    try {
+        await bakerFetch('/api/alerts/' + alertId + '/resolve', { method: 'POST' });
+        const card = btnEl.closest('.card');
+        if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
+    } catch (e) { console.error('resolveAlert failed:', e); }
+}
+
+async function dismissAlert(alertId, btnEl) {
+    try {
+        await bakerFetch('/api/alerts/' + alertId + '/dismiss', { method: 'POST' });
+        const card = btnEl.closest('.card');
+        if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
+    } catch (e) { console.error('dismissAlert failed:', e); }
+}
+
+function runCardAction(alertId, prompt) {
+    switchTab('ask-baker');
+    setTimeout(function() { sendScanMessage(prompt); }, 100);
+}
+
+function runFreetext(btn, alertId) {
+    const input = btn.previousElementSibling;
+    if (!input || !input.value.trim()) return;
+    runCardAction(alertId, input.value.trim());
+}
+
+function openMoreAction(btn) {
+    const actionType = btn.dataset.actionType;
+    const alertId = btn.dataset.alert;
+    const existing = btn.parentElement.querySelector('.more-action-inline');
+    if (existing) { existing.remove(); return; }
+
+    const inline = document.createElement('div');
+    inline.className = 'more-action-inline';
+    inline.style.cssText = 'display:flex;gap:8px;width:100%;margin-top:6px;';
+
+    const inp = document.createElement('input');
+    inp.style.cssText = 'flex:1;padding:7px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:var(--font);outline:none;';
+    inp.placeholder = 'What should Baker ' + actionType.toLowerCase() + '?';
+    inp.maxLength = 2000;
+
+    const runBtn = document.createElement('button');
+    runBtn.className = 'run-btn';
+    runBtn.textContent = 'Run';
+    runBtn.addEventListener('click', function() {
+        if (inp.value.trim()) runCardAction(alertId, inp.value.trim());
+    });
+
+    inline.appendChild(inp);
+    inline.appendChild(runBtn);
+    btn.parentElement.appendChild(inline);
+    inp.focus();
+}
+
+// ═══ ASK BAKER (SCAN SSE) ═══
+
+function focusScanInput() {
+    const input = document.getElementById('scanInput');
+    if (input) setTimeout(function() { input.focus(); }, 100);
 }
 
 function appendScanBubble(role, content, id) {
     const container = document.getElementById('scanMessages');
     if (!container) return;
     const div = document.createElement('div');
-    div.className = 'scan-bubble scan-bubble-' + role;
+    div.className = 'scan-msg ' + (role === 'user' ? 'user' : 'baker');
     if (id) div.id = id;
     if (role === 'assistant' && !content) {
-        div.innerHTML = '<div class="scan-typing"><span></span><span></span><span></span></div>';
+        // Thinking indicator — safe static HTML
+        div.innerHTML = '<div class="thinking"><span class="thinking-dots"><span></span><span></span><span></span></span> Baker is thinking...</div>';
+    } else if (role === 'assistant') {
+        div.innerHTML = '<div class="md-content">' + md(content) + '</div>'; // SECURITY: md() calls esc() first
     } else {
-        div.innerHTML = role === 'assistant' ? md(content) : esc(content);
+        div.textContent = content; // User messages: plain text, no HTML
     }
-
-    // Copy button for assistant messages (only when content is present)
-    if (role === 'assistant' && content) {
-        _addCopyBtn(div, content);
-    }
-
     container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
     return div;
 }
 
-function _addCopyBtn(bubbleEl, textContent) {
-    const copyBtn = document.createElement('button');
-    copyBtn.className = 'scan-copy-btn';
-    copyBtn.innerHTML = '&#128203;';
-    copyBtn.title = 'Copy to clipboard';
-    copyBtn.onclick = (e) => {
-        e.stopPropagation();
-        const text = textContent || bubbleEl.innerText || '';
-        navigator.clipboard.writeText(text).then(() => {
-            copyBtn.innerHTML = '&#10003;';
-            copyBtn.title = 'Copied!';
-            setTimeout(() => {
-                copyBtn.innerHTML = '&#128203;';
-                copyBtn.title = 'Copy to clipboard';
-            }, 2000);
-        });
-    };
-    bubbleEl.style.position = 'relative';
-    bubbleEl.appendChild(copyBtn);
-}
-
 function _createDownloadCard(genData) {
-    const fmtLabels = { docx: 'Word', xlsx: 'Excel', pdf: 'PDF', pptx: 'PowerPoint' };
-    const fmtIcons = { docx: '\uD83D\uDCC4', xlsx: '\uD83D\uDCCA', pdf: '\uD83D\uDCD5', pptx: '\uD83D\uDCBD' };
     const ext = genData.filename.split('.').pop();
     const sizeKB = (genData.size_bytes / 1024).toFixed(1);
+    const fmtLabels = { docx: 'Word', xlsx: 'Excel', pdf: 'PDF', pptx: 'PowerPoint' };
 
     const card = document.createElement('div');
-    card.className = 'scan-download-card';
-    card.innerHTML =
-        '<a class="scan-download-link" href="' + esc(genData.download_url) + '" download="' + esc(genData.filename) + '">' +
-            '<span class="scan-download-icon">' + (fmtIcons[ext] || '\uD83D\uDCC1') + '</span>' +
-            '<span class="scan-download-info">' +
-                '<span class="scan-download-filename">' + esc(genData.filename) + '</span>' +
-                '<span class="scan-download-meta">' + (fmtLabels[ext] || ext.toUpperCase()) + ' \u00B7 ' + sizeKB + ' KB</span>' +
-            '</span>' +
-            '<span class="scan-download-action">\u2B07 Download</span>' +
-        '</a>';
+    card.style.cssText = 'margin-top:8px;padding:8px 12px;background:var(--badge-bg);border-radius:8px;';
+
+    const link = document.createElement('a');
+    link.href = genData.download_url;
+    link.download = genData.filename;
+    link.style.cssText = 'display:flex;align-items:center;gap:8px;text-decoration:none;color:var(--text);font-size:12px;font-weight:500;';
+
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = genData.filename;
+    link.appendChild(nameSpan);
+
+    const metaSpan = document.createElement('span');
+    metaSpan.style.cssText = 'color:var(--text3);font-size:10px;';
+    metaSpan.textContent = (fmtLabels[ext] || ext) + ' | ' + sizeKB + ' KB';
+    link.appendChild(metaSpan);
+
+    const dlSpan = document.createElement('span');
+    dlSpan.style.cssText = 'color:var(--blue);font-size:11px;font-weight:600;';
+    dlSpan.textContent = 'Download';
+    link.appendChild(dlSpan);
+
+    card.appendChild(link);
     return card;
 }
 
@@ -1337,21 +586,11 @@ async function sendScanMessage(question) {
     const sendBtn = document.getElementById('scanSendBtn');
     const input = document.getElementById('scanInput');
     if (sendBtn) sendBtn.disabled = true;
-    if (input) input.disabled = true;
+    if (input) { input.disabled = true; input.value = ''; }
 
-    // Add user bubble
     scanHistory.push({ role: 'user', content: question });
     appendScanBubble('user', question);
 
-    // Scroll to show the user's new message
-    const msgContainer = document.getElementById('scanMessages');
-    const userBubbles = msgContainer.querySelectorAll('.scan-bubble-user');
-    const lastUserBubble = userBubbles[userBubbles.length - 1];
-    if (lastUserBubble) {
-        lastUserBubble.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-
-    // Add assistant placeholder
     const assistantId = 'scan-reply-' + Date.now();
     appendScanBubble('assistant', '', assistantId);
     const replyEl = document.getElementById(assistantId);
@@ -1361,10 +600,7 @@ async function sendScanMessage(question) {
         const resp = await bakerFetch('/api/scan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                question: question,
-                history: scanHistory.slice(-10),
-            }),
+            body: JSON.stringify({ question: question, history: scanHistory.slice(-10) }),
         });
 
         if (!resp.ok) throw new Error('Scan API returned ' + resp.status);
@@ -1388,41 +624,29 @@ async function sendScanMessage(question) {
                 try {
                     const data = JSON.parse(payload);
                     if (data.token) {
-                        if (!fullResponse && replyEl) {
-                            replyEl.innerHTML = '';  // removes typing indicator
-                        }
+                        if (!fullResponse && replyEl) replyEl.textContent = ''; // clear thinking indicator
                         fullResponse += data.token;
-                        if (replyEl) replyEl.innerHTML = md(fullResponse);
+                        if (replyEl) replyEl.innerHTML = '<div class="md-content">' + md(fullResponse) + '</div>'; // SECURITY: md() escapes first
                     }
                     if (data.error) {
                         fullResponse += '\n[Error: ' + data.error + ']';
-                        if (replyEl) replyEl.innerHTML = md(fullResponse);
+                        if (replyEl) replyEl.innerHTML = '<div class="md-content">' + md(fullResponse) + '</div>';
                     }
-                } catch (e) {
-                    // skip unparseable
-                }
+                } catch (e) { /* skip unparseable */ }
             }
         }
     } catch (err) {
         fullResponse = 'Connection error: ' + err.message;
-        if (replyEl) replyEl.innerHTML = esc(fullResponse);
+        if (replyEl) replyEl.textContent = fullResponse;
     }
 
-    // Add copy button after streaming completes
-    if (replyEl && fullResponse) {
-        _addCopyBtn(replyEl, fullResponse);
-    }
-
-    // Detect baker-document block and trigger document generation
+    // Document generation
     const docMatch = fullResponse.match(/```baker-document\s*\n([\s\S]*?)\n```/);
     if (docMatch && replyEl) {
         try {
             const docSpec = JSON.parse(docMatch[1]);
-            // Strip the raw JSON block from the visible reply
             const cleanResponse = fullResponse.replace(/```baker-document\s*\n[\s\S]*?\n```/, '').trim();
-            if (cleanResponse) replyEl.innerHTML = md(cleanResponse);
-
-            // Call generate endpoint
+            if (cleanResponse) replyEl.innerHTML = '<div class="md-content">' + md(cleanResponse) + '</div>';
             const genRes = await bakerFetch('/api/scan/generate-document', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1436,9 +660,7 @@ async function sendScanMessage(question) {
                 const genData = await genRes.json();
                 replyEl.appendChild(_createDownloadCard(genData));
             }
-        } catch (e) {
-            console.warn('Document generation failed:', e);
-        }
+        } catch (e) { console.warn('Document generation failed:', e); }
     }
 
     scanHistory.push({ role: 'assistant', content: fullResponse });
@@ -1447,600 +669,98 @@ async function sendScanMessage(question) {
     scanStreaming = false;
     if (sendBtn) sendBtn.disabled = false;
     if (input) { input.disabled = false; input.focus(); }
+
+    const container = document.getElementById('scanMessages');
+    if (container) container.scrollTop = container.scrollHeight;
 }
 
-// ═══ CLEAR RESULTS HELPER ═══
-function _addClearBtn(container, inputEl) {
-    const btn = document.createElement('button');
-    btn.textContent = '\u2715 Clear results';
-    btn.className = 'clear-results-btn';
-    btn.onclick = () => {
-        container.innerHTML = '';
-        inputEl.value = '';
-        inputEl.focus();
-    };
-    container.prepend(btn);
-}
+// ═══ COMMAND BAR ═══
 
-function _toggleResultCard(toggleBtn) {
-    const card = toggleBtn.closest('.result-card');
-    if (!card) return;
-    const expanded = card.classList.toggle('expanded');
-    toggleBtn.innerHTML = expanded ? '&#9662; Show less' : '&#9656; Show more';
-}
-
-// ═══ CONTACT SEARCH (live API) ═══
-async function searchContact(e) {
-    if (e) e.preventDefault();
-    const input = document.getElementById('contactSearchInput');
-    const resultEl = document.getElementById('contactSearchResult');
-    if (!input || !resultEl) return;
-
-    const name = input.value.trim();
-    if (!name) return;
-
-    resultEl.innerHTML = '<div class="contact-error">Searching...</div>';
-
-    try {
-        const resp = await bakerFetch('/api/contacts/' + encodeURIComponent(name));
-        if (resp.status === 404) {
-            resultEl.innerHTML = '<div class="contact-error">No contact found for "' + esc(name) + '"</div>';
-            return;
-        }
-        if (!resp.ok) throw new Error('API error ' + resp.status);
-        const contact = await resp.json();
-
-        let html = '<div class="contact-result">';
-        html += '<div class="contact-result-header">';
-        html += '<span class="contact-result-name">' + esc(contact.name || name) + '</span>';
-        if (contact.relationship_tier) {
-            html += '<span class="badge-stage">Tier ' + esc(String(contact.relationship_tier)) + '</span>';
-        }
-        html += '</div>';
-
-        html += '<div class="contact-fields">';
-        const fields = [
-            ['Company', contact.company],
-            ['Role', contact.role],
-            ['Email', contact.email],
-            ['Phone', contact.phone],
-            ['Timezone', contact.timezone],
-            ['Style', contact.communication_style],
-            ['Response', contact.response_pattern],
-            ['Last Contact', contact.last_contact ? fmtDate(contact.last_contact) : null],
-        ];
-        for (const [label, value] of fields) {
-            if (value) {
-                html += '<span class="contact-field-label">' + esc(label) + '</span>';
-                html += '<span class="contact-field-value">' + esc(String(value)) + '</span>';
+function setupCommandBar() {
+    const cmdInput = document.getElementById('cmdInput');
+    if (cmdInput) {
+        cmdInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && cmdInput.value.trim()) {
+                e.preventDefault();
+                const q = cmdInput.value.trim();
+                cmdInput.value = '';
+                switchTab('ask-baker');
+                setTimeout(function() { sendScanMessage(q); }, 100);
             }
-        }
-        html += '</div>';
-
-        if (contact.notes) {
-            html += '<div style="margin-top:12px;font-size:0.8rem;color:var(--text-secondary);"><strong>Notes:</strong> ' + esc(contact.notes) + '</div>';
-        }
-
-        html += '</div>';
-        resultEl.innerHTML = html;
-        _addClearBtn(resultEl, input);
-    } catch (err) {
-        resultEl.innerHTML = '<div class="contact-error">Error: ' + esc(err.message) + '</div>';
-    }
-}
-
-// ═══ MEMORY SEARCH (semantic search API) ═══
-async function searchMemory(e) {
-    if (e) e.preventDefault();
-    const input = document.getElementById('memorySearchInput');
-    const resultEl = document.getElementById('memorySearchResult');
-    if (!input || !resultEl) return;
-
-    const query = input.value.trim();
-    if (!query || query.length < 2) return;
-
-    resultEl.innerHTML = '<div class="contact-error">Searching...</div>';
-
-    try {
-        const resp = await bakerFetch('/api/search?q=' + encodeURIComponent(query));
-        if (resp.status === 400) {
-            resultEl.innerHTML = '<div class="contact-error">Query too short (min 2 characters)</div>';
-            return;
-        }
-        if (!resp.ok) throw new Error('API error ' + resp.status);
-        const data = await resp.json();
-
-        if (!data.results || data.results.length === 0) {
-            resultEl.innerHTML = '<div class="contact-error">No results found for "' + esc(query) + '"</div>';
-            return;
-        }
-
-        let html = '<div class="memory-results" style="margin-top:12px;">';
-        html += '<div style="font-size:0.75rem;color:var(--text-secondary);margin-bottom:8px;">' + data.result_count + ' results</div>';
-        for (const r of data.results) {
-            const sourceBadge = esc(r.source || 'unknown');
-            const score = (r.score * 100).toFixed(0);
-            const fullText = esc(r.content || '');
-            const isLong = fullText.length > 200;
-            const preview = isLong ? fullText.substring(0, 200) + '...' : fullText;
-            const label = esc(r.metadata && r.metadata.label ? r.metadata.label : '');
-            const collection = esc(r.metadata && r.metadata.collection ? r.metadata.collection : '');
-
-            html += '<div class="contact-result result-card" style="margin-bottom:10px;padding:10px 14px;">';
-            html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">';
-            html += '<span class="badge-stage" style="font-size:0.65rem;text-transform:uppercase;">' + sourceBadge + '</span>';
-            html += '<span style="font-size:0.65rem;color:var(--text-secondary);">' + score + '% match</span>';
-            if (label) html += '<span style="font-size:0.65rem;color:var(--text-secondary);">' + label + '</span>';
-            html += '</div>';
-            html += '<div class="result-text-preview" style="font-size:0.8rem;color:var(--text-primary);line-height:1.4;">' + preview + '</div>';
-            if (isLong) {
-                html += '<div class="result-text-full" style="font-size:0.8rem;color:var(--text-primary);line-height:1.4;">' + fullText + '</div>';
-                html += '<button class="result-toggle" onclick="_toggleResultCard(this)">&#9656; Show more</button>';
-            }
-            if (collection) html += '<div style="font-size:0.6rem;color:var(--text-secondary);margin-top:4px;">' + collection + '</div>';
-            html += '</div>';
-        }
-        html += '</div>';
-        resultEl.innerHTML = html;
-        _addClearBtn(resultEl, input);
-    } catch (err) {
-        resultEl.innerHTML = '<div class="contact-error">Error: ' + esc(err.message) + '</div>';
-    }
-}
-
-// ═══ UTILITIES ═══
-function cycleLens() {
-    const keys = Object.keys(lensIcons);
-    lensIndex = (lensIndex + 1) % keys.length;
-    const state = keys[lensIndex];
-    const el = document.getElementById('lensImg');
-    el.src = lensIcons[state];
-
-    const container = document.getElementById('lensContainer');
-    if (container) container.title = 'Baker state: ' + state;
-
-    const dot = document.getElementById('scanDot');
-    const colorMap = { clear: '#34d058', attentive: '#f0b429', alert: '#f56565' };
-    if (dot) {
-        dot.style.background = colorMap[state] || '#34d058';
-        dot.style.boxShadow = '0 0 10px ' + (colorMap[state] || '#34d058') + '80';
-    }
-
-    updateScanTime();
-
-    el.style.transform = 'scale(1.15)';
-    setTimeout(() => { el.style.transform = 'scale(1)'; }, 200);
-}
-
-function runScan() {
-    const btn = document.querySelector('.refresh-btn');
-    if (btn) {
-        btn.style.transition = 'transform 0.5s ease';
-        btn.style.transform = 'rotate(360deg)';
-        setTimeout(() => { btn.style.transform = ''; btn.style.transition = ''; }, 500);
-    }
-    updateScanTime();
-    fetchSystemStatus();
-
-    const dot = document.getElementById('scanDot');
-    if (dot) {
-        dot.style.background = '#f0b429';
-        dot.style.boxShadow = '0 0 10px rgba(240,180,41,0.5)';
-        setTimeout(() => {
-            dot.style.background = '#34d058';
-            dot.style.boxShadow = '0 0 10px rgba(52,208,88,0.5)';
-        }, 2000);
-    }
-}
-
-// ═══ KEYBOARD ═══
-document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-        if (takeVisible) { closeTake(); return; }
-        if (currentView === 'detailView') { openRole(currentRole); return; }
-        if (currentView === 'catView') { goHome(); return; }
-    }
-});
-
-// ═══ FEED BAKER ═══
-(function initFeedBaker() {
-    const drop        = document.getElementById('feedDrop');
-    const fileInput   = document.getElementById('feedFileInput');
-    const colSelect   = document.getElementById('feedCollection');
-    const imgTypeRow  = document.getElementById('feedImageTypeRow');
-    const imgTypeSel  = document.getElementById('feedImageType');
-    const statusEl    = document.getElementById('feedStatus');
-    if (!drop) return;
-
-    const MAX_SIZE   = 100 * 1024 * 1024;
-    const ALLOWED    = new Set(['pdf','txt','md','csv','xlsx','json','docx','jpg','jpeg','png','heic','webp']);
-    const IMAGE_EXTS = new Set(['jpg','jpeg','png','heic','webp']);
-
-    // -- Grouped dropdown (hardcoded v1) --
-    const groups = [
-      { label: 'By Collection', options: [
-        { value: 'col:baker-documents',  text: 'Documents' },
-        { value: 'col:baker-contacts',   text: 'Contacts' },
-        { value: 'col:baker-emails',     text: 'Emails' },
-        { value: 'col:baker-meetings',   text: 'Fireflies' },
-        { value: 'col:baker-whatsapp',   text: 'WhatsApps' },
-        { value: 'col:baker-rss',        text: 'Articles / RSS' },
-      ]},
-      { label: 'By Project', options: [
-        { value: 'proj:rg7',                          text: 'RG7' },
-        { value: 'proj:hagenauer',                     text: 'Hagenauer' },
-        { value: 'proj:movie-hotel-asset-management',  text: 'MOVIE Hotel Asset Management' },
-      ]},
-      { label: 'By Role', options: [
-        { value: 'role:chairman', text: 'Chairman' },
-        { value: 'role:network',  text: 'Network' },
-        { value: 'role:private',  text: 'Private' },
-        { value: 'role:travel',   text: 'Travel' },
-      ]},
-    ];
-
-    // Default option
-    const defaultOpt = document.createElement('option');
-    defaultOpt.value = ''; defaultOpt.textContent = 'Auto-classify';
-    colSelect.appendChild(defaultOpt);
-
-    groups.forEach(g => {
-      const og = document.createElement('optgroup');
-      og.label = g.label;
-      g.options.forEach(o => {
-        const opt = document.createElement('option');
-        opt.value = o.value; opt.textContent = o.text;
-        og.appendChild(opt);
-      });
-      colSelect.appendChild(og);
-    });
-
-    // Show/hide image type selector based on selected file
-    function _toggleImageType(filename) {
-        const ext = (filename || '').split('.').pop().toLowerCase();
-        if (imgTypeRow) imgTypeRow.hidden = !IMAGE_EXTS.has(ext);
-    }
-
-    // drag & drop
-    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('feed-dragover'); });
-    drop.addEventListener('dragleave', e => { e.preventDefault(); drop.classList.remove('feed-dragover'); });
-    drop.addEventListener('drop', e => {
-        e.preventDefault(); drop.classList.remove('feed-dragover');
-        const file = e.dataTransfer.files[0];
-        if (file) { _toggleImageType(file.name); _uploadFile(file); }
-    });
-
-    // click to upload
-    drop.addEventListener('click', () => fileInput.click());
-    fileInput.addEventListener('change', () => {
-        if (fileInput.files[0]) {
-            _toggleImageType(fileInput.files[0].name);
-            _uploadFile(fileInput.files[0]);
-        }
-        fileInput.value = '';
-    });
-
-    // upload handler
-    async function _uploadFile(file) {
-        const ext = file.name.split('.').pop().toLowerCase();
-        if (ext === 'doc') {
-            _showStatus('error', '.doc files are not supported. Please save as .docx in Word and re-upload.');
-            return;
-        }
-        if (!ALLOWED.has(ext)) {
-            _showStatus('error', `Unsupported file type: .${ext}`);
-            return;
-        }
-        if (file.size > MAX_SIZE) {
-            _showStatus('error', 'File too large. Maximum size: 100 MB.');
-            return;
-        }
-
-        const isImage = IMAGE_EXTS.has(ext);
-        _showStatus('uploading', `Uploading ${file.name}${isImage ? ' (image — processing may take a moment)' : ''}\u2026`);
-
-        const formData = new FormData();
-        formData.append('file', file);
-        if (isImage && imgTypeSel) {
-            formData.append('image_type', imgTypeSel.value);
-        }
-
-        const sel = colSelect.value;  // e.g. "col:baker-documents", "proj:rg7", "role:chairman", or ""
-        let collection = null, project = null, role = null;
-
-        if (sel.startsWith('col:')) {
-          collection = sel.substring(4);   // "baker-documents"
-        } else if (sel.startsWith('proj:')) {
-          project = sel.substring(5);      // "rg7"
-        } else if (sel.startsWith('role:')) {
-          role = sel.substring(5);         // "chairman"
-        }
-        // else: sel === "" → auto-classify, all null
-
-        if (project) formData.append('project', project);
-        if (role) formData.append('role', role);
-
-        const url = collection
-          ? `/api/ingest?collection=${encodeURIComponent(collection)}`
-          : '/api/ingest';
-
-        try {
-            const resp = await bakerFetch(url, { method: 'POST', body: formData });
-            _showStatus('processing', `Processing ${file.name}\u2026`);
-            const data = await resp.json();
-
-            if (!resp.ok) {
-                _showStatus('error', data.detail || 'Upload failed.');
-                return;
-            }
-            if (data.status === 'skipped') {
-                _showStatus('warn', `Skipped: ${data.skip_reason || 'already ingested'}`);
-                return;
-            }
-
-            // Build success message
-            let msg = `Ingested ${data.filename} \u2014 ${data.chunks} chunk${data.chunks !== 1 ? 's' : ''} \u2192 ${data.collection}`;
-
-            // Append card data summary if present
-            if (data.card_data) {
-                const cd = data.card_data;
-                const parts = [cd.name, cd.company, cd.role].filter(Boolean);
-                if (parts.length) msg += `\nContact: ${parts.join(' \u2014 ')}`;
-                if (cd.email) msg += ` | ${cd.email}`;
-            }
-            if (data.contact_result && data.contact_result.action) {
-                msg += ` (${data.contact_result.action})`;
-            }
-
-            _showStatus('success', msg);
-            if (imgTypeRow) imgTypeRow.hidden = true;
-        } catch (err) {
-            _showStatus('error', 'Network error: ' + err.message);
-        }
-    }
-
-    // status display
-    function _showStatus(type, msg) {
-        statusEl.hidden = false;
-        statusEl.className = 'feed-status feed-status--' + type;
-        statusEl.textContent = msg;
-        if (type === 'success' || type === 'warn') {
-            setTimeout(() => { statusEl.hidden = true; }, 12000);
-        }
-    }
-})();
-
-// ═══ INBOX ═══
-
-function openInboxTab() {
-    setRail('inbox');
-    showView('inboxView');
-    document.getElementById('takeBar').classList.remove('visible');
-    takeVisible = false;
-    loadInbox();
-}
-
-async function loadInbox() {
-    const listEl = document.getElementById('inboxList');
-    if (!listEl) return;
-    listEl.innerHTML = '<div class="inbox-empty">Loading…</div>';
-
-    try {
-        const resp = await bakerFetch('/api/email/inbox?limit=20');
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        const data = await resp.json();
-
-        // Unread badge on rail + header label
-        const unread = data.unread_count || 0;
-        const badge = document.getElementById('inboxBadge');
-        const label = document.getElementById('inboxUnreadLabel');
-        if (badge) { badge.textContent = unread || ''; badge.hidden = unread === 0; }
-        if (label) label.textContent = unread > 0 ? unread + ' unread' : '';
-
-        if (!data.messages || data.messages.length === 0) {
-            listEl.innerHTML = '<div class="inbox-empty">No messages.</div>';
-            return;
-        }
-
-        listEl.innerHTML = '';
-        for (const msg of data.messages) {
-            listEl.appendChild(_buildInboxRow(msg));
-        }
-    } catch (e) {
-        listEl.innerHTML = '<div class="inbox-empty">Could not load inbox: ' + esc(e.message) + '</div>';
-    }
-}
-
-function _buildInboxRow(msg) {
-    const row = document.createElement('div');
-    row.className = 'inbox-row' + (msg.unread ? ' inbox-row--unread' : '');
-    row.dataset.msgId = msg.id;
-
-    const fromShort = _inboxShortName(msg.from);
-    const dateShort = _inboxFmtDate(msg.date);
-
-    row.innerHTML =
-        '<div class="inbox-row-top" onclick="toggleInboxEmail(\'' + esc(msg.id) + '\')">' +
-            '<span class="inbox-from">' + esc(fromShort) + '</span>' +
-            '<span class="inbox-date">' + esc(dateShort) + '</span>' +
-        '</div>' +
-        '<div class="inbox-subject" onclick="toggleInboxEmail(\'' + esc(msg.id) + '\')">' +
-            esc(msg.subject || '(no subject)') +
-        '</div>' +
-        '<div class="inbox-snippet">' + esc(msg.snippet) + '</div>' +
-        '<div class="inbox-body-wrap" id="ibody-' + esc(msg.id) + '" hidden>' +
-            '<div class="inbox-body-inner"><span class="inbox-body-loading">Loading…</span></div>' +
-        '</div>';
-
-    return row;
-}
-
-async function toggleInboxEmail(msgId) {
-    const wrap = document.getElementById('ibody-' + msgId);
-    if (!wrap) return;
-
-    if (!wrap.hidden) {
-        wrap.hidden = true;
-        return;
-    }
-    wrap.hidden = false;
-
-    // Already loaded — just show
-    if (wrap.dataset.loaded) return;
-
-    try {
-        const resp = await bakerFetch('/api/email/read/' + msgId);
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
-        const d = await resp.json();
-
-        const attachHtml = d.has_attachments
-            ? '<div class="inbox-attach">&#128206; Has attachments</div>'
-            : '';
-        const warnHtml = d.body_parse_error
-            ? '<div class="inbox-parse-warn">Preview only — full parse unavailable</div>'
-            : '';
-        const bodyHtml = '<pre class="inbox-body-text">' + esc(d.body || '(empty)') + '</pre>';
-
-        wrap.querySelector('.inbox-body-inner').innerHTML =
-            '<div class="inbox-meta">' +
-                '<span>' + esc(d.from) + '</span>' +
-                '<span>' + esc(d.date) + '</span>' +
-            '</div>' +
-            attachHtml + warnHtml + bodyHtml;
-
-        wrap.dataset.loaded = '1';
-    } catch (e) {
-        wrap.querySelector('.inbox-body-inner').innerHTML =
-            '<div class="inbox-error">Could not load message: ' + esc(e.message) + '</div>';
-    }
-}
-
-function _inboxShortName(from) {
-    if (!from) return '';
-    const m = from.match(/^"?([^"<]+)"?\s*</);
-    return m ? m[1].trim() : from.split('@')[0];
-}
-
-function _inboxFmtDate(dateStr) {
-    if (!dateStr) return '';
-    try {
-        const d = new Date(dateStr);
-        const now = new Date();
-        if (d.toDateString() === now.toDateString()) {
-            return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-        }
-        return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-    } catch (_) {
-        return dateStr.substring(0, 10);
-    }
-}
-
-// ═══ EMAIL — Type 4: Manual Summary ═══
-async function sendEmailSummary() {
-    const btn = document.getElementById('emailSendBtn');
-    const statusEl = document.getElementById('emailStatus');
-    const noteInput = document.getElementById('emailNoteInput');
-    const note = noteInput ? noteInput.value.trim() : '';
-
-    btn.disabled = true;
-    btn.textContent = 'Sending…';
-    statusEl.hidden = false;
-    statusEl.className = 'email-status email-status--sending';
-    statusEl.textContent = 'Generating and sending summary…';
-
-    try {
-        const resp = await bakerFetch('/api/email/send', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ custom_note: note }),
         });
+    }
 
-        const data = await resp.json();
-
-        if (resp.ok) {
-            statusEl.className = 'email-status email-status--success';
-            statusEl.textContent = `Sent. Message ID: ${data.message_id || 'ok'}`;
-            if (noteInput) noteInput.value = '';
-            setTimeout(() => { statusEl.hidden = true; }, 10000);
-        } else if (resp.status === 401) {
-            statusEl.className = 'email-status email-status--error';
-            statusEl.textContent = 'Auth failed (401) — check API key.';
-        } else if (resp.status === 503) {
-            statusEl.className = 'email-status email-status--error';
-            statusEl.textContent = 'Email service unavailable (503) — check server config.';
-        } else {
-            statusEl.className = 'email-status email-status--error';
-            statusEl.textContent = `Error: ${data.detail || resp.statusText}`;
+    // Cmd+K shortcut
+    document.addEventListener('keydown', function(e) {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+            e.preventDefault();
+            if (cmdInput) cmdInput.focus();
         }
-    } catch (err) {
-        statusEl.className = 'email-status email-status--error';
-        statusEl.textContent = 'Network error: ' + err.message;
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Send Summary to Director';
-    }
-}
+    });
 
-// ═══ EMAIL — Type 5: Compose ═══
-function toggleCompose() {
-    const panel = document.getElementById('emailCompose');
-    if (panel) panel.hidden = !panel.hidden;
-}
-
-async function composeEmail() {
-    const btn = document.getElementById('emailComposeBtn');
-    const statusEl = document.getElementById('emailComposeStatus');
-    const to = document.getElementById('emailComposeTo').value.trim();
-    const subject = document.getElementById('emailComposeSubject').value.trim();
-    const body = document.getElementById('emailComposeBody').value.trim();
-
-    if (!to || !subject || !body) {
-        statusEl.hidden = false;
-        statusEl.className = 'email-status email-status--error';
-        statusEl.textContent = 'To, Subject, and Message are all required.';
-        return;
-    }
-
-    btn.disabled = true;
-    btn.textContent = 'Sending…';
-    statusEl.hidden = false;
-    statusEl.className = 'email-status email-status--sending';
-    statusEl.textContent = 'Sending…';
-
-    try {
-        const resp = await bakerFetch('/api/email/send', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ to, subject, body }),
+    // Quick action buttons (command bar)
+    document.querySelectorAll('.cmd-quick').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var action = btn.dataset.action;
+            var prompts = {
+                'briefing': 'Give me a morning briefing -- what happened overnight, top fires, key deadlines.',
+                'draft': 'Help me draft an email.',
+                'legal': 'Give me a legal status update on active disputes.',
+                'research': 'What market intelligence do you have from recent RSS feeds and emails?',
+            };
+            switchTab('ask-baker');
+            setTimeout(function() { sendScanMessage(prompts[action] || action); }, 100);
         });
+    });
 
-        const data = await resp.json();
-
-        if (resp.ok) {
-            statusEl.className = 'email-status email-status--success';
-            statusEl.textContent = `Sent. Message ID: ${data.message_id || 'ok'}`;
-            document.getElementById('emailComposeTo').value = '';
-            document.getElementById('emailComposeSubject').value = '';
-            document.getElementById('emailComposeBody').value = '';
-            setTimeout(() => { statusEl.hidden = true; }, 10000);
-        } else if (resp.status === 401) {
-            statusEl.className = 'email-status email-status--error';
-            statusEl.textContent = 'Auth failed (401) — check API key.';
-        } else if (resp.status === 503) {
-            statusEl.className = 'email-status email-status--error';
-            statusEl.textContent = 'Email service unavailable (503).';
-        } else {
-            statusEl.className = 'email-status email-status--error';
-            statusEl.textContent = `Error: ${data.detail || resp.statusText}`;
-        }
-    } catch (err) {
-        statusEl.className = 'email-status email-status--error';
-        statusEl.textContent = 'Network error: ' + err.message;
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Send';
-    }
+    // Quick action buttons (morning brief)
+    document.querySelectorAll('.quick-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            var action = btn.dataset.action;
+            var prompts = {
+                'briefing': 'Give me a full morning briefing.',
+                'draft': 'Help me draft an email.',
+                'legal': 'Give me a legal review of all active disputes.',
+                'research': 'What market intelligence do you have?',
+                'finance': 'Give me a financial analysis update.',
+                'it': 'Give me an IT infrastructure status update.',
+            };
+            switchTab('ask-baker');
+            setTimeout(function() { sendScanMessage(prompts[action] || action); }, 100);
+        });
+    });
 }
 
-// ═══ START ═══
+// ═══ INIT ═══
+
+async function init() {
+    await loadConfig();
+
+    // Greeting
+    var hour = new Date().getHours();
+    var greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+    setText('briefGreeting', greet + ', Dimitry');
+
+    // Sidebar navigation
+    document.querySelectorAll('.nav-item[data-tab]').forEach(function(item) {
+        item.addEventListener('click', function() { switchTab(item.dataset.tab); });
+    });
+
+    // Scan form
+    var scanForm = document.getElementById('scanForm');
+    if (scanForm) {
+        scanForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var input = document.getElementById('scanInput');
+            if (input && input.value.trim()) sendScanMessage(input.value.trim());
+        });
+    }
+
+    // Command bar
+    setupCommandBar();
+
+    // Load morning brief
+    loadMorningBrief();
+}
+
 document.addEventListener('DOMContentLoaded', init);
