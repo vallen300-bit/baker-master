@@ -26,6 +26,7 @@ All decisions below were made in a live session with the Director on 2026-03-07.
 - **Command bar** sits at top of the right area (not full width — sidebar is independent)
 - **Morning narrative** sits below command bar in the content area
 - **Target devices:** Laptop + iPad. No phone for now.
+- **Mobile fallback (<768px):** Show a centered message: "Baker Cockpit is designed for laptop and tablet. Open on a larger screen for the full experience." No responsive layout needed.
 
 ### Navigation Tabs (sidebar)
 ```
@@ -74,6 +75,8 @@ Media
 
 ### Fires vs Matters
 **A matter lives in one place only.** If any item in a matter is T1, the entire matter moves to Fires in the sidebar. It disappears from the Matters list. When all T1 items are resolved/dismissed, the matter drops back to Matters with its next-worst tier. No duplication.
+
+**Demotion timing:** Matter demotion from Fires to Matters happens **immediately** when the last T1 item is dismissed or resolved. No waiting for next scan. This is a frontend query — the sidebar groups matters by their worst active tier on each render.
 
 ### Card Updates
 When Baker scans again and finds new info about an existing item, it **updates the existing card** (adds new info, marks "Updated 10:45 AM"). No duplicate cards.
@@ -287,7 +290,7 @@ _BAKER_OUTPUTS/Hagenauer/2026-03-07_evidence_preservation_memo.md
 
 ## Command Bar
 
-Persistent at top of right area (below sidebar logo level). Visible on every tab.
+Persistent at top of right area (below sidebar logo level). Visible on every tab. **Replaces the v2 "Baker's Scan" button entirely.** Remove the floating Scan button from all pages — its function is now served by the Command Bar + Ask Baker tab.
 
 - **Input field:** "Ask Baker anything..."
 - **Keyboard shortcut:** Cmd+K focuses the input
@@ -320,14 +323,17 @@ Persistent at top of right area (below sidebar logo level). Visible on every tab
 ### Schema Changes
 | Table | Change |
 |-------|--------|
-| `alerts` | Add `matter_slug TEXT`, `tags JSONB DEFAULT '[]'`, `thread JSONB DEFAULT '[]'`, `board_status TEXT DEFAULT 'new'` |
+| `alerts` | Add `matter_slug TEXT`, `tags JSONB DEFAULT '[]'`, `board_status TEXT DEFAULT 'new'` |
 | `matter_registry` | Add `dropbox_path TEXT` for artifact storage |
+| New: `alert_threads` | `id SERIAL, alert_id INTEGER REFERENCES alerts(id), role TEXT, content TEXT, created_at TIMESTAMPTZ DEFAULT NOW()` (see Architect Note #4) |
 | New: `alert_artifacts` | `id, alert_id, matter_slug, title, content, file_path, created_at` |
+
+**Note:** No `thread JSONB` on alerts table. Threads live in the separate `alert_threads` table (Architect Note #4).
 
 ### Alert Lifecycle
 ```
 New → [Baker scans, creates alert, generates structured_actions]
-  → Assigns matter_slug (auto by keyword match to matter_registry)
+  → Assigns matter_slug (auto by keyword match to matter_registry — see Note below)
   → Auto-tags (legal, finance, deadline, etc.)
   → If T1/T2: push to Slack sb-inbox
 
@@ -346,6 +352,13 @@ Expired → [3 days old, T2/T3/T4 only]
 
 T1 special: never auto-expires. Travel special: expires only after date passes.
 ```
+
+### Matter Auto-Assignment (required for Phase A2)
+When Baker creates an alert, it must assign `matter_slug` automatically. Without this, all alerts land in "Ungrouped" and the Matters tab is useless.
+
+**Implementation:** In `pipeline.py`, after creating an alert, run the alert title + body against `matter_registry` names and aliases using keyword matching (same trigger_pattern approach as capability routing). If a match is found, set `matter_slug`. If no match, leave NULL (goes to Ungrouped).
+
+This is a **Phase A2 requirement**, not Phase C. The manual Ungrouped dropdown (Phase B) is a fallback for when auto-assignment fails, not the primary path.
 
 ---
 
@@ -366,7 +379,7 @@ The Haiku-generated narrative must handle:
 - **All T1:** Lead with the count and top issue, then list others.
 - **Weekend/holiday:** Adjust tone. "Weekend summary: Baker processed 42 emails since Friday..."
 
-Narrative is cached for 30 minutes. Invalidated when a new T1 alert is created.
+Narrative is cached for 30 minutes. Invalidated when a new T1 alert is created. **Mechanism:** Application-level. After any `INSERT INTO alerts WHERE tier = 1` in `store_back.py`, delete the in-memory cached narrative (use a module-level dict with timestamp, no Redis needed). Next `GET /api/dashboard/morning-brief` regenerates via Haiku.
 
 ### 3. Board view is read-only
 Board view (kanban) in this brief is **display-only**. No drag-and-drop. No status changes by moving cards between columns. Cards are clickable (opens detail in right panel). Drag-and-drop is a Phase C+ feature if needed.
@@ -431,7 +444,7 @@ Phase A is too large for a single Brisen sprint. Split into:
 - **Board view:** Shows alert titles and tier badges. No full body content in board cards — only shown when card is clicked/expanded. Reduces data exposure in screenshots.
 
 ### Rate Limiting
-- **Reply thread:** Max 20 replies per alert. Prevents runaway conversation loops. After 20, show "Continue in Ask Baker for extended conversation."
+- **Reply thread:** Max 50 replies per alert (raised from 20 — complex matters like Hagenauer need extended dialogue). After 50, show "Continue in Ask Baker for extended conversation." The "Continue in Ask Baker" link pre-fills the Scan context with the alert + thread history so no context is lost.
 - **Morning narrative generation:** Cached 30 min. At most 2 Haiku calls per hour. No abuse vector.
 - **"More Actions" execution:** Each Run button triggers a `/api/scan` call. Existing capability timeout (90s) and iteration limits (8) apply. No additional rate limiting needed beyond existing cost controls.
 
@@ -457,27 +470,29 @@ This is a large brief. Recommended phasing:
 4. Command bar (basic input field, quick action buttons, no auto-detection yet)
 
 ### Phase A2 — Cards + Interaction
-5. Card redesign: one-click Run, PCS, Baker recommends + More actions menu (inline input)
-6. Matters tab with sub-list navigation and matter detail view (list mode)
-7. Reply thread on result cards (separate alert_threads table)
-8. Result toolbar (Copy, Word, Email, Save to Project)
-9. Deadlines tab (full view with color-coded dots)
+5. **Matter auto-assignment** — keyword match alert title+body against matter_registry on creation (required for Matters tab to work)
+6. Card redesign: one-click Run, PCS, Baker recommends + More actions menu (inline input)
+7. Matters tab with sub-list navigation and matter detail view (list mode)
+8. Reply thread on result cards (separate alert_threads table)
+9. Result toolbar (Copy, Word, Email, Save to Project)
+10. Deadlines tab (full view with color-coded dots)
 
 ### Phase B (extends functionality)
-10. Tags system (auto-tagging + manual + tag tab view)
-11. Board view toggle on Matters (read-only)
-12. Ungrouped assignment (dropdown + New Project)
-13. Ask Specialist tab (capability picker + same chat component as Ask Baker)
-14. Command bar capability auto-detection badge
-15. Artifact storage (Dropbox _BAKER_OUTPUTS, path traversal protection)
+11. Tags system (auto-tagging + manual + tag tab view)
+12. Board view toggle on Matters (read-only)
+13. Ungrouped assignment (dropdown + New Project)
+14. Ask Specialist tab (capability picker + same chat component as Ask Baker)
+15. Command bar capability auto-detection badge
+16. Artifact storage (Dropbox _BAKER_OUTPUTS, path traversal protection)
 
 ### Phase C (completes the vision)
-16. People tab (contact-centric view + activity)
-17. Search tab with filters (matter, date, source, person)
-18. Travel tab (travel alerts, no expiry until date passes)
-19. Media tab (RSS, future Google Alerts)
-20. Alert auto-expiry (3-day rule for T2/T3/T4)
-21. Alert matter auto-assignment (keyword match against matter_registry)
+17. People tab (contact-centric view + activity)
+18. Search tab with filters (matter, date, source, person)
+19. Travel tab (travel alerts, no expiry until date passes)
+20. Media tab (RSS, future Google Alerts)
+21. Alert auto-expiry (3-day rule for T2/T3/T4)
+
+**Note:** Matter auto-assignment moved from Phase C to Phase A2 (item #5). Without it, the Matters tab would be empty.
 
 ---
 
