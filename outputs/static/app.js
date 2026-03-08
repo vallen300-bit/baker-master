@@ -1803,7 +1803,10 @@ function renderArticles(container, articles, filterRow) {
 
             var link = document.createElement('a');
             link.className = 'article-title';
-            link.href = art.url || '#';
+            // Security: only allow http/https URLs — reject javascript:, data:, etc.
+            var articleUrl = art.url || '#';
+            if (articleUrl !== '#' && !/^https?:\/\//i.test(articleUrl)) articleUrl = '#';
+            link.href = articleUrl;
             link.target = '_blank';
             link.rel = 'noopener';
             link.textContent = art.title || 'Untitled';
