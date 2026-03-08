@@ -161,6 +161,12 @@ def run_rss_poll():
             # Feed to pipeline
             _feed_to_pipeline(article, feed_title, url_h)
 
+            # Phase 3C: Relevance scoring for proactive intelligence
+            try:
+                _check_article_relevance(article, feed_title, store)
+            except Exception as _rel_e:
+                logger.debug(f"Relevance check failed for '{article.get('title', '?')[:40]}': {_rel_e}")
+
             articles_ingested += 1
 
             # Track latest published date
@@ -423,6 +429,96 @@ def _embed_article(store, article: dict, feed_title: str, collection: str):
 # -------------------------------------------------------
 # Pipeline feed
 # -------------------------------------------------------
+
+# -------------------------------------------------------
+# Phase 3C: Proactive intelligence — RSS relevance scoring
+# -------------------------------------------------------
+
+_RELEVANCE_PROMPT = """You are Baker. Evaluate if this news article is strategically relevant to the Director (Dimitry Vallen, Chairman, Brisen Group).
+
+Relevant topics: real estate (Vienna, Baden, Germany), hospitality (Mandarin Oriental), finance (Swiss banking, loans, LP structures), legal (Austrian law, construction disputes), M365/IT migration, competitors, regulatory changes.
+
+Return ONLY valid JSON:
+{
+    "relevant": true/false,
+    "relevance_score": 1-10,
+    "reason": "One sentence explaining why this matters",
+    "related_matter": "matter_slug or null",
+    "action_needed": true/false,
+    "suggested_action": "What Director should do, or null"
+}
+
+If relevance_score < 5, set relevant: false.
+"""
+
+
+def _check_article_relevance(article: dict, feed_title: str, store):
+    """Haiku relevance check on RSS article. Creates alert if score >= 7."""
+    import json
+    import anthropic
+    from config.settings import config
+
+    title = article.get("title", "")
+    summary = article.get("summary", "") or article.get("content", "")
+    link = article.get("link", "")
+    if not title:
+        return
+
+    try:
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            system=_RELEVANCE_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": f"Feed: {feed_title}\nTitle: {title}\nSummary: {summary[:500]}",
+            }],
+        )
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
+        result = json.loads(raw)
+    except (json.JSONDecodeError, Exception) as e:
+        logger.debug(f"Relevance scoring failed for '{title[:40]}': {e}")
+        return
+
+    score = result.get("relevance_score", 0)
+    reason = result.get("reason", "")
+    matter = result.get("related_matter")
+    if matter == "null":
+        matter = None
+
+    if score >= 7:
+        # Create intelligence alert
+        body = f"{reason}\n\n**Source:** {feed_title}\n{link}"
+        suggested = result.get("suggested_action")
+        if suggested and suggested != "null":
+            body += f"\n\n**Suggested action:** {suggested}"
+
+        store.create_alert(
+            tier=3,
+            title=f"Intelligence: {title[:80]}",
+            body=body,
+            action_required=bool(result.get("action_needed")),
+            matter_slug=matter,
+            tags=["intelligence", "media"],
+        )
+        logger.info(f"Intelligence alert created: '{title[:60]}' (score {score})")
+
+    elif score >= 5:
+        # Store as insight (queryable but no alert)
+        try:
+            store.store_insight(
+                title=f"RSS: {title[:80]}",
+                content=f"{reason}\n\nSource: {feed_title}\n{link}",
+                tags=["intelligence", "rss"],
+                source="rss_sentinel",
+            )
+        except Exception:
+            pass
+
 
 def _feed_to_pipeline(article: dict, feed_title: str, url_hash: str):
     """Feed article into Sentinel pipeline."""
