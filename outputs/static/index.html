@@ -3,217 +3,176 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Baker · CEO Dashboard</title>
+    <title>Baker Cockpit</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Jura:wght@300;400;500;600;700&family=Work+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="app">
-        <!-- Top Bar -->
-        <div class="top-bar">
-            <div class="tb-left">
-                <span class="tb-title">baker</span>
-                <span class="tb-sub">chief of staff</span>
-            </div>
-            <div class="tb-right">
-                <span class="scan-dot" id="scanDot"></span>
-                <span class="scan-info" id="scanTime">last scan --:--</span>
-                <div class="lens-container" id="lensContainer" title="Baker state: clear" onclick="cycleLens()">
-                    <img class="lens-img" id="lensImg" alt="lens" />
-                </div>
-                <button class="refresh-btn" onclick="runScan()" title="Refresh scan">&#8635;</button>
-            </div>
+
+<!-- Mobile fallback -->
+<div class="mobile-fallback">
+    Baker Cockpit is designed for laptop and tablet. Open on a larger screen for the full experience.
+</div>
+
+<!-- Main app (hidden on mobile) -->
+<div class="app-wrap">
+
+<!-- SIDEBAR -->
+<div class="sidebar">
+    <div class="sidebar-logo">Baker</div>
+    <nav class="sidebar-nav">
+        <div class="nav-item active" data-tab="morning-brief">
+            <span class="nav-label">Morning Brief</span>
+        </div>
+        <div class="nav-item" data-tab="fires">
+            <span class="nav-label">Fires</span>
+            <span class="nav-fire-count" id="firesBadge" hidden>0</span>
+        </div>
+        <div class="nav-item" data-tab="matters">
+            <span class="nav-label">Matters</span>
+            <span class="nav-count" id="mattersCount"></span>
+        </div>
+        <!-- Matters sub-list (populated by JS) -->
+        <div class="nav-sub" id="mattersSubList"></div>
+
+        <div class="nav-item" data-tab="people">
+            <span class="nav-label">People</span>
+        </div>
+        <div class="nav-item" data-tab="deadlines">
+            <span class="nav-label">Deadlines</span>
+            <span class="nav-count" id="deadlinesCount"></span>
+        </div>
+        <div class="nav-item" data-tab="tags">
+            <span class="nav-label">Tags</span>
         </div>
 
-        <!-- Main layout: sidebar + content -->
-        <div class="main">
-            <!-- Sidebar rail -->
-            <div class="rail">
-                <button class="rail-btn active" data-role="home" onclick="goHome()">
-                    <span class="r-label">Home</span>
-                </button>
-                <button class="rail-btn" data-role="inbox" onclick="openInboxTab()">
-                    <span class="r-label">Inbox</span>
-                    <span class="r-badge" id="inboxBadge" hidden></span>
-                </button>
-                <button class="rail-btn" data-role="chairman" onclick="openRole('chairman')">
-                    <span class="r-label">Chairman</span>
-                </button>
-                <button class="rail-btn" data-role="pm" onclick="openRole('pm')">
-                    <span class="r-label">Projects</span>
-                </button>
-                <button class="rail-btn" data-role="network" onclick="openRole('network')">
-                    <span class="r-label">Network</span>
-                </button>
-                <button class="rail-btn" data-role="private" onclick="openRole('private')">
-                    <span class="r-label">Private</span>
-                </button>
-                <button class="rail-btn" data-role="travel" onclick="openRole('travel')">
-                    <span class="r-label">Travel</span>
-                </button>
-            </div>
+        <div class="nav-divider"></div>
 
-            <!-- Content area with 3 views -->
-            <div class="content">
-
-                <!-- VIEW 1: Home -->
-                <div class="view active" id="homeView">
-                    <div class="home-greeting" id="homeGreeting">Good morning, Dimitry</div>
-
-                    <!-- Today's agenda -->
-                    <div class="home-section-label">Today</div>
-                    <div class="agenda-list" id="agendaList">
-                        <!-- Populated by JS -->
-                    </div>
-
-                    <!-- Pending items -->
-                    <div class="home-section-label">Pending</div>
-                    <div class="agenda-list" id="pendingList">
-                        <!-- Populated by JS -->
-                    </div>
-
-                    <!-- Deadlines (DEADLINE-SYSTEM-1) -->
-                    <div class="home-section-label">Deadlines</div>
-                    <div class="agenda-list" id="deadlineList">
-                        <!-- Populated by JS -->
-                    </div>
-
-                    <!-- Memory search -->
-                    <div class="home-section-label">Search Baker's Memory</div>
-                    <form class="contact-search-form" onsubmit="searchMemory(event)">
-                        <input id="memorySearchInput" type="text" class="contact-input" placeholder="Search Baker's memory..." maxlength="500" />
-                        <button type="submit" class="contact-btn">Search</button>
-                    </form>
-                    <div id="memorySearchResult"></div>
-
-                    <!-- Contact search -->
-                    <div class="home-section-label">Contact Search</div>
-                    <form class="contact-search-form" onsubmit="searchContact(event)">
-                        <input id="contactSearchInput" type="text" class="contact-input" placeholder="Search by name..." maxlength="200" />
-                        <button type="submit" class="contact-btn">Search</button>
-                    </form>
-                    <div id="contactSearchResult"></div>
-
-                    <!-- Email -->
-                    <div class="home-section-label">Email</div>
-                    <div class="email-panel" id="emailPanel">
-
-                        <!-- Type 4: Manual Summary -->
-                        <textarea id="emailNoteInput" class="email-note-input" placeholder="Add a note (optional)" rows="2" maxlength="1000"></textarea>
-                        <button class="email-send-btn" id="emailSendBtn" onclick="sendEmailSummary()">Send Summary to Director</button>
-                        <div class="email-status" id="emailStatus" hidden></div>
-
-                        <!-- Type 5: Compose -->
-                        <div class="email-compose-toggle" onclick="toggleCompose()">&#9662; Compose email</div>
-                        <div class="email-compose" id="emailCompose" hidden>
-                            <input id="emailComposeTo" type="email" class="email-compose-input" placeholder="To: email address" />
-                            <input id="emailComposeSubject" type="text" class="email-compose-input" placeholder="Subject" maxlength="200" />
-                            <textarea id="emailComposeBody" class="email-compose-body" placeholder="Message" rows="4" maxlength="5000"></textarea>
-                            <button class="email-send-btn" id="emailComposeBtn" onclick="composeEmail()">Send</button>
-                            <div class="email-status" id="emailComposeStatus" hidden></div>
-                        </div>
-                    </div>
-
-                    <!-- Feed Baker -->
-                    <div class="home-section-label">Feed Baker</div>
-                    <div id="feedBakerZone" class="feed-zone">
-                        <div class="feed-drop" id="feedDrop">
-                            <span class="feed-drop-icon">📂</span>
-                            <span class="feed-drop-text">Drop files here or click to upload</span>
-                            <span class="feed-drop-hint">PDF, TXT, MD, CSV, XLSX, JSON, DOCX, JPG, PNG, HEIC, WEBP — max 100 MB</span>
-                            <input type="file" id="feedFileInput" accept=".pdf,.txt,.md,.csv,.xlsx,.json,.docx,.jpg,.jpeg,.png,.heic,.webp" hidden />
-                        </div>
-                        <div id="feedCollectionRow" class="feed-collection-row">
-                            <label for="feedCollection" class="feed-label">Collection:</label>
-                            <select id="feedCollection" class="feed-select">
-                                <option value="">Auto-classify</option>
-                            </select>
-                        </div>
-                        <div id="feedImageTypeRow" class="feed-collection-row" hidden>
-                            <label for="feedImageType" class="feed-label">Image type:</label>
-                            <select id="feedImageType" class="feed-select">
-                                <option value="auto">Auto-detect</option>
-                                <option value="card">Business Card</option>
-                                <option value="whiteboard">Whiteboard / Notes</option>
-                            </select>
-                        </div>
-                        <div id="feedStatus" class="feed-status" hidden></div>
-                    </div>
-                </div>
-
-                <!-- VIEW 2: Category (Layer 2) -->
-                <div class="view" id="catView">
-                    <div class="cat-hero">
-                        <span class="cat-hero-icon" id="catHeroIcon"></span>
-                        <div>
-                            <div class="cat-hero-title" id="catHeroTitle"></div>
-                            <div class="cat-hero-desc" id="catHeroDesc"></div>
-                        </div>
-                    </div>
-                    <div class="cat-grid" id="catGrid">
-                        <!-- Category cards populated by JS -->
-                    </div>
-                </div>
-
-                <!-- VIEW 3: Detail (Layer 3) -->
-                <div class="view" id="detailView">
-                    <button class="back-btn" id="detailBack">&larr; Back</button>
-                    <div class="detail-breadcrumb" id="detailBreadcrumb"></div>
-                    <div class="detail-title" id="detailTitle"></div>
-                    <div class="sub-tabs" id="subTabs">
-                        <!-- Sub-issue tabs populated by JS -->
-                    </div>
-                    <div class="detail-cards" id="detailCards">
-                        <!-- Detail items populated by JS -->
-                    </div>
-                </div>
-
-                <!-- VIEW 4: Scan (full content area) -->
-                <div class="view" id="scanView">
-                    <button class="back-btn" id="scanBack">&larr; Back to Home</button>
-                    <div class="scan-view-header">
-                        <span class="scan-view-title">Baker's Scan</span>
-                    </div>
-                    <div class="scan-view-body">
-                        <div id="scanMessages" class="scan-messages"></div>
-                        <form id="scanForm" class="scan-form" autocomplete="off">
-                            <input id="scanInput" type="text" class="scan-input" placeholder="Ask Baker..." maxlength="4000" required />
-                            <button type="submit" class="scan-send" id="scanSendBtn">Send</button>
-                        </form>
-                    </div>
-                </div>
-                <!-- VIEW 5: Inbox -->
-                <div class="view" id="inboxView">
-                    <div class="inbox-header">
-                        <span class="inbox-title">Inbox</span>
-                        <span class="inbox-unread-label" id="inboxUnreadLabel"></span>
-                        <button class="inbox-refresh" onclick="loadInbox()" title="Refresh">&#8635;</button>
-                    </div>
-                    <div id="inboxList" class="inbox-list">
-                        <div class="inbox-empty">Loading…</div>
-                    </div>
-                </div>
-
-            </div>
+        <div class="nav-item" data-tab="search">
+            <span class="nav-label">Search</span>
+        </div>
+        <div class="nav-item" data-tab="ask-baker">
+            <span class="nav-label">Ask Baker</span>
+        </div>
+        <div class="nav-item" data-tab="ask-specialist">
+            <span class="nav-label">Ask Specialist</span>
         </div>
 
-        <!-- Baker's Scan bar (bottom action) -->
-        <div class="take-bar" id="takeBar">
-            <div class="take-bar-inner">
-                <span class="take-label" id="takeLabel">Baker's Scan</span>
-                <button class="take-btn" onclick="showTake()">Baker's Scan</button>
-            </div>
-        </div>
+        <div class="nav-divider"></div>
 
-        <!-- Footer -->
-        <div class="footer">
-            <span>auto-scan active</span>
-            <span>baker v2.2 &middot; feb 2026</span>
+        <div class="nav-item" data-tab="travel">
+            <span class="nav-label">Travel</span>
+        </div>
+        <div class="nav-item" data-tab="media">
+            <span class="nav-label">Media</span>
+        </div>
+    </nav>
+</div>
+
+<!-- RIGHT AREA -->
+<div class="right-area">
+
+    <!-- Command bar -->
+    <div class="cmd-bar">
+        <div class="cmd-input-wrap">
+            <input class="cmd-input" id="cmdInput" placeholder="Ask Baker anything..." maxlength="4000" />
+            <span class="cmd-shortcut">Cmd+K</span>
+        </div>
+        <div class="cmd-quick-btns">
+            <button class="cmd-quick" data-action="briefing">Briefing</button>
+            <button class="cmd-quick" data-action="draft">Draft</button>
+            <button class="cmd-quick" data-action="legal">Legal</button>
+            <button class="cmd-quick" data-action="research">Research</button>
         </div>
     </div>
 
-    <script src="/static/app.js"></script>
+    <!-- Content area (views swap here) -->
+    <div class="content">
+
+        <!-- VIEW: Morning Brief -->
+        <div class="view active" id="viewMorningBrief">
+            <div class="brief-header">
+                <div class="brief-greeting" id="briefGreeting">Good morning, Dimitry</div>
+                <div class="brief-narrative" id="briefNarrative">Baker is loading your morning summary...</div>
+            </div>
+
+            <div class="stats" id="briefStats">
+                <div class="stat"><div class="stat-num red" id="statFires">-</div><div class="stat-label">Fires</div></div>
+                <div class="stat"><div class="stat-num amber" id="statDeadlines">-</div><div class="stat-label">Deadlines this week</div></div>
+                <div class="stat"><div class="stat-num blue" id="statProcessed">-</div><div class="stat-label">Processed overnight</div></div>
+                <div class="stat"><div class="stat-num green" id="statActions">-</div><div class="stat-label">Actions completed</div></div>
+            </div>
+
+            <div class="quick-row">
+                <button class="quick-btn" data-action="briefing">Morning Briefing</button>
+                <button class="quick-btn" data-action="draft">Draft Email</button>
+                <button class="quick-btn" data-action="legal">Legal Review</button>
+                <button class="quick-btn" data-action="research">Research</button>
+                <button class="quick-btn" data-action="finance">Financial Analysis</button>
+                <button class="quick-btn" data-action="it">IT Status</button>
+            </div>
+
+            <div class="section-label">Top fires</div>
+            <div id="topFiresList"></div>
+
+            <div style="margin-top:16px;">
+                <div class="section-label">Deadlines this week</div>
+                <div id="deadlinesList"></div>
+            </div>
+
+            <div class="activity" style="margin-top:16px;">
+                <div class="section-label">Baker activity today</div>
+                <div id="activityList"></div>
+            </div>
+        </div>
+
+        <!-- VIEW: Fires -->
+        <div class="view" id="viewFires">
+            <div class="section-label">Fires</div>
+            <div id="firesContent"></div>
+        </div>
+
+        <!-- VIEW: Matters -->
+        <div class="view" id="viewMatters">
+            <div class="section-label">Matters</div>
+            <div id="mattersContent"></div>
+        </div>
+
+        <!-- VIEW: Deadlines -->
+        <div class="view" id="viewDeadlines">
+            <div class="section-label">Deadlines</div>
+            <div id="deadlinesContent"></div>
+        </div>
+
+        <!-- VIEW: Ask Baker (Scan chat) -->
+        <div class="view" id="viewAskBaker">
+            <div class="scan-view-header">
+                <span class="scan-view-title">Ask Baker</span>
+            </div>
+            <div class="scan-view-body">
+                <div id="scanMessages" class="scan-messages"></div>
+                <form id="scanForm" class="scan-form" autocomplete="off">
+                    <input id="scanInput" type="text" class="scan-input" placeholder="Ask Baker..." maxlength="4000" required />
+                    <button type="submit" class="scan-send" id="scanSendBtn">Send</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- VIEW: Coming Soon (placeholder for non-functional tabs) -->
+        <div class="view" id="viewComingSoon">
+            <div class="coming-soon">
+                <div class="coming-soon-title" id="comingSoonTitle">Coming soon</div>
+                <div class="coming-soon-desc">This tab is under development and will be available in a future update.</div>
+            </div>
+        </div>
+
+    </div><!-- /content -->
+</div><!-- /right-area -->
+
+</div><!-- /app-wrap -->
+
+<script src="/static/app.js"></script>
 </body>
 </html>
