@@ -803,8 +803,8 @@ async def get_morning_brief():
         finally:
             store._put_conn(conn)
 
-        # Generate narrative (Haiku, cached 30 min)
-        narrative = _get_morning_narrative(fire_count, deadline_count, processed_overnight, top_fires)
+        # Generate narrative (Haiku, cached 30 min) — Phase 3B: includes per-fire proposals
+        narrative = _get_morning_narrative(fire_count, deadline_count, processed_overnight, top_fires, deadlines)
 
         # Phase 3A: Fetch today's meetings (graceful — returns [] if Calendar API unavailable)
         meetings_today = []
@@ -850,8 +850,9 @@ async def get_morning_brief():
 
 
 def _get_morning_narrative(fire_count: int, deadline_count: int,
-                           processed: int, top_fires: list) -> str:
-    """Generate morning narrative via Haiku. Cached 30 min."""
+                           processed: int, top_fires: list,
+                           deadlines: list = None) -> str:
+    """Generate morning narrative via Haiku. Cached 30 min. Phase 3B: includes per-fire proposals."""
     global _morning_narrative_cache
     now = time.time()
     if _morning_narrative_cache["text"] and (now - _morning_narrative_cache["generated_at"]) < 1800:
@@ -876,11 +877,68 @@ def _get_morning_narrative(fire_count: int, deadline_count: int,
             messages=[{"role": "user", "content": prompt}],
         )
         narrative = resp.content[0].text.strip()
+
+        # Phase 3B: Generate per-fire proposals
+        if top_fires:
+            proposals = _generate_morning_proposals(client, top_fires[:3], deadlines or [])
+            if proposals:
+                narrative += "\n\n" + proposals
+
         _morning_narrative_cache = {"text": narrative, "generated_at": now}
         return narrative
     except Exception as e:
         logger.error(f"Morning narrative generation failed: {e}")
         return "Good morning. Baker is analyzing your latest updates."
+
+
+_MORNING_PROPOSALS_PROMPT = """You are Baker. Given the Director's top fires and upcoming deadlines, propose ONE specific action for each fire.
+
+Rules:
+- One line per fire. Start with the matter name or topic.
+- Be specific: name the person, document, or action.
+- Format each line as: "**Matter** → Action"
+- Max 3 proposals.
+- If a deadline is attached to a fire, mention the timeline.
+
+Examples:
+- **Hagenauer** → Draft status update to Ofenheimer before Friday filing deadline
+- **BCOMM M365** → Schedule kickoff call with Benjamin Schuster
+- **Cupial** → Review FM List counter-proposal, prepare negotiation position
+"""
+
+
+def _generate_morning_proposals(client, top_fires: list, deadlines: list) -> str:
+    """Generate per-fire action proposals for the morning narrative. Returns markdown text."""
+    try:
+        fires_text = ""
+        for f in top_fires:
+            title = f.get("title", "")
+            body = (f.get("body") or "")[:200]
+            fires_text += f"- {title}: {body}\n"
+
+        deadlines_text = ""
+        for dl in deadlines[:5]:
+            desc = dl.get("description", "")
+            due = dl.get("due_date", "")
+            deadlines_text += f"- {desc} (due {due})\n"
+
+        context = f"Top fires:\n{fires_text}"
+        if deadlines_text:
+            context += f"\nUpcoming deadlines:\n{deadlines_text}"
+
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            system=_MORNING_PROPOSALS_PROMPT,
+            messages=[{"role": "user", "content": context}],
+        )
+        proposals = resp.content[0].text.strip()
+        if proposals:
+            return "**Recommended actions:**\n" + proposals
+        return ""
+    except Exception as e:
+        logger.warning(f"Morning proposals generation failed: {e}")
+        return ""
 
 
 @app.get("/api/dashboard/matters-summary", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
