@@ -225,8 +225,12 @@ def check_new_emails():
 
     if not new_threads:
         logger.info("Email trigger: no new threads")
-        # Gap detection: alert if no email activity for 48+ hours
-        # ALERT-DEDUP-1: only fire once per 24h to avoid spamming Slack every 5 min
+        # PHASE-4A: Advance watermark even when no emails found — prevents
+        # false "gap alert" when inbox is quiet (cosmetic but confusing).
+        # Separate "last_checked" (now) from "last_email_seen" (watermark).
+        trigger_state.set_watermark("email_poll_checked", datetime.now(timezone.utc))
+        # Gap detection: alert if no SUBSTANTIVE email for 48+ hours
+        # Uses the real watermark (last email seen), not last_checked
         global _last_gap_alert_time
         import time as _time
         now_ts = _time.time()
@@ -235,19 +239,16 @@ def check_new_emails():
             gap_hours = (datetime.now(timezone.utc) - wm).total_seconds() / 3600
             if gap_hours > 48 and (now_ts - _last_gap_alert_time) > _GAP_ALERT_COOLDOWN:
                 gap_title = f"Email gap alert: {gap_hours:.0f}h since last email"
-                gap_body = f"Watermark stuck at {wm.isoformat()}. Check Gmail auth and poll health."
+                gap_body = (
+                    f"Last email seen: {wm.isoformat()} ({gap_hours:.0f}h ago).\n"
+                    f"Last successful poll: just now (no new emails).\n"
+                    f"This may be normal if inbox is quiet."
+                )
                 logger.warning(gap_title)
                 try:
                     from memory.store_back import SentinelStoreBack
                     store = SentinelStoreBack._get_global_instance()
-                    store.create_alert(tier=1, title=gap_title, body=gap_body, source="email_gap")
-                    from outputs.slack_notifier import SlackNotifier
-                    SlackNotifier().post_alert({
-                        "tier": 1,
-                        "title": gap_title,
-                        "body": gap_body,
-                        "action_required": True,
-                    })
+                    store.create_alert(tier=2, title=gap_title, body=gap_body, source="email_gap")
                     _last_gap_alert_time = now_ts
                 except Exception as e:
                     logger.error(f"Gap alert dispatch failed: {e}")

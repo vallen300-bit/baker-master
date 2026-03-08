@@ -150,8 +150,13 @@ class SentinelStoreBack:
             return None
 
     def _put_conn(self, conn):
-        """Return connection to pool."""
+        """Return connection to pool. Rollback any uncommitted transaction first
+        to prevent returning a dirty connection that poisons the next caller."""
         if self._pool and conn:
+            try:
+                conn.rollback()  # No-op if already committed, safe always
+            except Exception:
+                pass
             try:
                 self._pool.putconn(conn)
             except Exception:
