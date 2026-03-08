@@ -310,6 +310,22 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
   font-size: 10px; font-family: var(--font); background: #fff; cursor: pointer;
 }
 
+/* Board view (kanban) */
+.board-view { display: flex; gap: 12px; overflow-x: auto; }
+.board-column { flex: 1; min-width: 200px; }
+.board-column-header {
+  font-family: var(--mono); font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.5px; color: var(--text3);
+  padding: 8px 0; border-bottom: 2px solid var(--border);
+  display: flex; align-items: center; gap: 6px;
+}
+.board-card {
+  padding: 10px 12px; margin: 6px 0; background: var(--card);
+  border: 1px solid var(--border); border-radius: 6px;
+  font-size: 12px; cursor: pointer; box-shadow: var(--shadow);
+}
+.board-card:hover { border-color: var(--blue); }
+
 /* Inline card result area */
 .card-result-area {
   margin: 4px 16px; padding: 12px 14px;

@@ -111,6 +111,7 @@ class SentinelStoreBack:
         self._ensure_baker_tasks_capability_columns()
         self._ensure_alerts_v3_columns()
         self._ensure_alert_threads_table()
+        self._ensure_alert_artifacts_table()
 
     # -------------------------------------------------------
     # Connection pool management
@@ -2438,6 +2439,35 @@ class SentinelStoreBack:
         except Exception as e:
             conn.rollback()
             logger.warning(f"Could not ensure alert_threads table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_alert_artifacts_table(self):
+        """Create alert_artifacts table if missing. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS alert_artifacts (
+                    id SERIAL PRIMARY KEY,
+                    alert_id INTEGER REFERENCES alerts(id),
+                    matter_slug TEXT,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    format TEXT DEFAULT 'md',
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_alert_artifacts_matter ON alert_artifacts(matter_slug)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_alert_artifacts_alert ON alert_artifacts(alert_id)")
+            conn.commit()
+            cur.close()
+            logger.info("alert_artifacts table verified")
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"Could not ensure alert_artifacts table: {e}")
         finally:
             self._put_conn(conn)
 

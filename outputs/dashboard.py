@@ -189,6 +189,14 @@ class AlertAssignRequest(BaseModel):
     new_name: Optional[str] = Field(None, max_length=200)
 
 
+class SaveArtifactRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=100000)
+    title: str = Field("Baker Result", max_length=200)
+    matter_slug: Optional[str] = None
+    alert_id: Optional[int] = None
+    format: str = Field("md", pattern=r"^(md|txt)$")
+
+
 def _serialize(obj: dict) -> dict:
     """Convert datetime fields to ISO strings for JSON serialization."""
     out = {}
@@ -1113,6 +1121,73 @@ async def detect_capability(q: str = Query("", max_length=500)):
     if cap:
         return {"detected": True, "capability_slug": cap.slug, "capability_name": cap.name}
     return {"detected": False}
+
+
+# V3 Phase B3 — Artifact storage
+# ============================================================
+
+@app.post("/api/artifacts/save", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def save_artifact(req: SaveArtifactRequest):
+    """Save a Baker result as an artifact (PostgreSQL storage)."""
+    import re
+    # Security: validate matter_slug format (defense in depth for future Dropbox sync)
+    if req.matter_slug and not re.match(r'^[a-zA-Z0-9_-]+$', req.matter_slug):
+        raise HTTPException(status_code=400, detail="Invalid matter_slug format")
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO alert_artifacts (alert_id, matter_slug, title, content, format)
+                   VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+                (req.alert_id, req.matter_slug, req.title, req.content, req.format),
+            )
+            artifact_id = cur.fetchone()[0]
+            conn.commit()
+            cur.close()
+            return {"ok": True, "artifact_id": artifact_id}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"POST /api/artifacts/save failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/artifacts", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_artifacts(matter_slug: Optional[str] = None, limit: int = Query(50, ge=1, le=200)):
+    """List saved artifacts, optionally filtered by matter."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"artifacts": [], "count": 0}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            if matter_slug:
+                cur.execute(
+                    "SELECT * FROM alert_artifacts WHERE matter_slug = %s ORDER BY created_at DESC LIMIT %s",
+                    (matter_slug, limit),
+                )
+            else:
+                cur.execute(
+                    "SELECT * FROM alert_artifacts ORDER BY created_at DESC LIMIT %s",
+                    (limit,),
+                )
+            artifacts = [_serialize(dict(r)) for r in cur.fetchall()]
+            cur.close()
+            return {"artifacts": artifacts, "count": len(artifacts)}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/artifacts failed: {e}")
+        return {"artifacts": [], "count": 0}
 
 
 # ============================================================

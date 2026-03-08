@@ -630,7 +630,8 @@ async function streamInlineResult(prompt, alertId, resultArea, triggerBtn) {
         toolbar.style.cssText = 'display:flex;gap:5px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);';
         toolbar.innerHTML = '<button class="footer-btn" onclick="copyResult(this)">Copy</button>' +
             '<button class="footer-btn" onclick="downloadResultAsWord(this)">Word</button>' +
-            '<button class="footer-btn" onclick="emailResult(this)">Email</button>';
+            '<button class="footer-btn" onclick="emailResult(this)">Email</button>' +
+            '<button class="footer-btn" onclick="saveArtifact(this)">Save</button>';
         toolbar.dataset.resultText = fullResponse;
         resultArea.appendChild(toolbar);
 
@@ -756,12 +757,51 @@ function emailResult(btn) {
     window.location.href = 'mailto:?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(text);
 }
 
+function saveArtifact(btn) {
+    var toolbar = btn.closest('[data-result-text]');
+    if (!toolbar) return;
+    var text = toolbar.dataset.resultText || '';
+    // Get matter_slug from the card's data-matter attribute
+    var card = btn.closest('.card');
+    var matterSlug = card ? card.dataset.matter : null;
+    var alertId = card ? parseInt(card.dataset.alertId) : null;
+
+    btn.textContent = 'Saving...';
+    btn.disabled = true;
+    bakerFetch('/api/artifacts/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            content: text,
+            title: 'Baker Analysis',
+            matter_slug: matterSlug || null,
+            alert_id: alertId || null,
+            format: 'md',
+        }),
+    }).then(function(resp) {
+        if (resp.ok) {
+            btn.textContent = 'Saved';
+            setTimeout(function() { btn.textContent = 'Save'; btn.disabled = false; }, 2000);
+        } else {
+            throw new Error('Save failed');
+        }
+    }).catch(function(e) {
+        btn.textContent = 'Error';
+        setTimeout(function() { btn.textContent = 'Save'; btn.disabled = false; }, 2000);
+    });
+}
+
 // ═══ MATTERS DETAIL VIEW ═══
+
+var _matterDetailItems = null;
+var _matterDetailSlug = null;
+var _matterViewMode = 'list';
 
 async function loadMatterDetail(matterSlug) {
     var container = document.getElementById('mattersContent');
     if (!container) return;
     container.textContent = 'Loading...';
+    _matterDetailSlug = matterSlug;
 
     try {
         var resp = await bakerFetch('/api/matters/' + encodeURIComponent(matterSlug) + '/items');
@@ -774,26 +814,113 @@ async function loadMatterDetail(matterSlug) {
             return;
         }
 
-        var label = matterSlug === '_ungrouped' ? 'Ungrouped' : matterSlug.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
-
-        container.textContent = '';
-        var header = document.createElement('div');
-        header.className = 'section-label';
-        header.textContent = label + ' (' + data.items.length + ' items)';
-        container.appendChild(header);
-
-        var cardsDiv = document.createElement('div');
-        var cardsHtml = data.items.map(function(a) {
-            var expanded = (a.tier || 3) <= 2;
-            return renderAlertCard(a, expanded);
-        }).join('');
-        setSafeHTML(cardsDiv, cardsHtml);
-        container.appendChild(cardsDiv);
-        populateAssignDropdowns();
+        _matterDetailItems = data.items;
+        _matterViewMode = 'list';
+        renderMatterView(container, matterSlug, data.items);
     } catch (e) {
         container.textContent = 'Failed to load matter.';
         container.style.color = 'var(--red)';
     }
+}
+
+function renderMatterView(container, slug, items) {
+    var label = slug === '_ungrouped' ? 'Ungrouped' : slug.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+    container.textContent = '';
+
+    // Header with toggle
+    var headerRow = document.createElement('div');
+    headerRow.style.cssText = 'display:flex;align-items:center;margin-bottom:12px;';
+
+    var header = document.createElement('div');
+    header.className = 'section-label';
+    header.style.marginBottom = '0';
+    header.textContent = label + ' (' + items.length + ' items)';
+    headerRow.appendChild(header);
+
+    // View toggle
+    var toggle = document.createElement('div');
+    toggle.style.cssText = 'display:flex;gap:0;margin-left:auto;border:1px solid var(--border);border-radius:6px;overflow:hidden;';
+    var listBtn = document.createElement('button');
+    listBtn.textContent = 'List';
+    listBtn.style.cssText = 'padding:5px 12px;font-size:10px;font-weight:600;font-family:var(--mono);border:none;cursor:pointer;letter-spacing:0.3px;' + (_matterViewMode === 'list' ? 'background:var(--text);color:#fff;' : 'background:var(--card);color:var(--text3);');
+    listBtn.addEventListener('click', function() { _matterViewMode = 'list'; renderMatterView(container, slug, items); });
+
+    var boardBtn = document.createElement('button');
+    boardBtn.textContent = 'Board';
+    boardBtn.style.cssText = 'padding:5px 12px;font-size:10px;font-weight:600;font-family:var(--mono);border:none;cursor:pointer;letter-spacing:0.3px;' + (_matterViewMode === 'board' ? 'background:var(--text);color:#fff;' : 'background:var(--card);color:var(--text3);');
+    boardBtn.addEventListener('click', function() { _matterViewMode = 'board'; renderMatterView(container, slug, items); });
+
+    toggle.appendChild(listBtn);
+    toggle.appendChild(boardBtn);
+    headerRow.appendChild(toggle);
+    container.appendChild(headerRow);
+
+    if (_matterViewMode === 'list') {
+        var cardsDiv = document.createElement('div');
+        var cardsHtml = items.map(function(a) { return renderAlertCard(a, (a.tier || 3) <= 2); }).join('');
+        setSafeHTML(cardsDiv, cardsHtml);
+        container.appendChild(cardsDiv);
+        populateAssignDropdowns();
+    } else {
+        renderBoardView(container, items);
+    }
+}
+
+function renderBoardView(container, items) {
+    var cols = { 1: [], 2: [], 3: [], 4: [] };
+    for (var i = 0; i < items.length; i++) {
+        var tier = items[i].tier || 4;
+        if (tier > 4) tier = 4;
+        cols[tier].push(items[i]);
+    }
+
+    var colLabels = { 1: 'Fire', 2: 'Important', 3: 'Routine', 4: 'Other' };
+    var colDots = { 1: 'red', 2: 'amber', 3: 'slate', 4: 'lgray' };
+
+    var board = document.createElement('div');
+    board.className = 'board-view';
+
+    for (var t = 1; t <= 4; t++) {
+        var col = document.createElement('div');
+        col.className = 'board-column';
+
+        var colHeader = document.createElement('div');
+        colHeader.className = 'board-column-header';
+        colHeader.innerHTML = '<span class="nav-dot ' + colDots[t] + '"></span> ' + esc(colLabels[t]) + ' <span style="opacity:0.5;">(' + cols[t].length + ')</span>';
+        col.appendChild(colHeader);
+
+        if (cols[t].length === 0) {
+            var empty = document.createElement('div');
+            empty.style.cssText = 'color:var(--text4);font-size:11px;padding:8px 0;';
+            empty.textContent = 'No items';
+            col.appendChild(empty);
+        } else {
+            for (var ci = 0; ci < cols[t].length; ci++) {
+                var item = cols[t][ci];
+                var card = document.createElement('div');
+                card.className = 'board-card';
+                card.dataset.alertId = item.id;
+                card.addEventListener('click', function() {
+                    _matterViewMode = 'list';
+                    renderMatterView(document.getElementById('mattersContent'), _matterDetailSlug, _matterDetailItems);
+                });
+
+                var titleEl = document.createElement('div');
+                titleEl.style.cssText = 'font-size:12px;font-weight:500;line-height:1.4;margin-bottom:4px;';
+                titleEl.textContent = item.title;
+                card.appendChild(titleEl);
+
+                var meta = document.createElement('div');
+                meta.style.cssText = 'font-size:10px;color:var(--text3);';
+                meta.textContent = 'T' + (item.tier || '?') + ' — ' + fmtRelativeTime(item.created_at);
+                card.appendChild(meta);
+
+                col.appendChild(card);
+            }
+        }
+        board.appendChild(col);
+    }
+    container.appendChild(board);
 }
 
 // ═══ ASK BAKER (SCAN SSE) ═══
