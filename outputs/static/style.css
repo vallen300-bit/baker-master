@@ -293,6 +293,22 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 .card-compact .card-header { padding: 10px 16px; }
 .card-compact .card-title { font-size: 12px; font-weight: 500; }
 
+/* People tab */
+.person-card { cursor: pointer; }
+.vip-badge {
+  display: inline-block; padding: 2px 6px; background: var(--amber);
+  color: white; border-radius: 3px; font-size: 9px; font-weight: 700;
+  font-family: var(--mono); letter-spacing: 0.3px; margin-top: 3px;
+}
+.activity-type {
+  display: inline-block; padding: 2px 6px; border-radius: 3px;
+  font-size: 9px; font-weight: 600; font-family: var(--mono);
+  flex-shrink: 0; margin-top: 4px;
+}
+.activity-type.email { background: #dbeafe; color: #1d4ed8; }
+.activity-type.whatsapp { background: #dcfce7; color: #15803d; }
+.activity-type.meeting { background: #fef3c7; color: #b45309; }
+
 /* Tag badges */
 .tag-badge {
   display: inline-block; padding: 2px 7px; margin: 0 3px 3px 0;
