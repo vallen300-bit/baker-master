@@ -151,6 +151,13 @@ def run_slack_poll():
             is_mention = bool(baker_uid and f"<@{baker_uid}>" in text)
 
             if is_mention and not trigger_state.is_processed("slack", source_id):
+                # LEARNING-LOOP: Check if this is feedback (short message after @Baker)
+                clean_text = text.replace(f"<@{baker_uid}>", "").strip() if baker_uid else text
+                if _is_slack_feedback(clean_text):
+                    _handle_slack_feedback(clean_text, channel_id, ts, client)
+                    trigger_state.mark_processed("slack", source_id)
+                    continue
+
                 _feed_to_pipeline(
                     channel_id=channel_id,
                     ts=ts,
@@ -247,6 +254,79 @@ def _feed_to_pipeline(channel_id: str, ts: str, user_name: str, text: str, sourc
         pipeline.run(trigger)
     except Exception as e:
         logger.warning(f"Slack: pipeline feed failed for message ts={ts}: {e}")
+
+
+# -------------------------------------------------------
+# LEARNING-LOOP: Slack feedback detection
+# -------------------------------------------------------
+
+import re as _re
+
+_SLACK_FB_POSITIVE = _re.compile(
+    r"^(good|great|thanks|perfect|correct|exactly|yes)\s*$", _re.IGNORECASE
+)
+_SLACK_FB_NEGATIVE = _re.compile(
+    r"^(wrong|no|bad|incorrect|not right|nein|falsch)\s*$", _re.IGNORECASE
+)
+_SLACK_FB_REVISE = _re.compile(
+    r"^(revise|update|change|fix|adjust|anders|korrigier)\b", _re.IGNORECASE
+)
+
+
+def _is_slack_feedback(text: str) -> bool:
+    """Check if @Baker message is short feedback rather than a question."""
+    if len(text) > 100:
+        return False
+    return bool(
+        _SLACK_FB_POSITIVE.match(text) or
+        _SLACK_FB_NEGATIVE.match(text) or
+        _SLACK_FB_REVISE.match(text)
+    )
+
+
+def _handle_slack_feedback(text: str, channel_id: str, ts: str, client):
+    """Store feedback on the most recent baker_task and reply in thread."""
+    if _SLACK_FB_POSITIVE.match(text):
+        feedback = "accepted"
+    elif _SLACK_FB_NEGATIVE.match(text):
+        feedback = "rejected"
+    else:
+        feedback = "revised"
+
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id FROM baker_tasks
+                WHERE status = 'completed'
+                  AND director_feedback IS NULL
+                ORDER BY completed_at DESC
+                LIMIT 1
+            """)
+            row = cur.fetchone()
+            if row:
+                task_id = row[0]
+                store.update_baker_task(task_id, director_feedback=feedback, feedback_comment=text)
+                logger.info(f"Slack feedback stored: task {task_id} = {feedback}")
+                reply = f"Feedback noted: {feedback}. I'll adjust next time."
+            else:
+                reply = "No recent task found to apply feedback to."
+            cur.close()
+        finally:
+            store._put_conn(conn)
+
+        # Reply in thread
+        try:
+            client.chat_postMessage(channel=channel_id, text=reply, thread_ts=ts)
+        except Exception as e:
+            logger.warning(f"Slack feedback reply failed: {e}")
+    except Exception as e:
+        logger.warning(f"Slack feedback storage failed: {e}")
 
 
 if __name__ == "__main__":
