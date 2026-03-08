@@ -81,6 +81,20 @@ Media
 ### Card Updates
 When Baker scans again and finds new info about an existing item, it **updates the existing card** (adds new info, marks "Updated 10:45 AM"). No duplicate cards.
 
+### Resolve vs Dismiss (alert exit paths)
+Every card footer has two exit buttons instead of one:
+
+| Action | Meaning | What Baker learns |
+|--------|---------|-------------------|
+| **Resolve** | Real issue, handled. Archives as a confirmed outcome. | This was a valid alert. Strengthens similar future alerts. |
+| **Dismiss** | Noise, not relevant. Archives as a false positive. | This was a bad alert. Baker can use this signal to improve future alert quality. |
+
+Both remove the card from active views immediately. Both are searchable in the Search tab afterward.
+
+**Schema:** Add `exit_reason TEXT` column to alerts table. Values: `resolved`, `dismissed`, `expired` (auto-expiry), `travel_passed` (travel date passed). Default NULL (active alert). Auto-expiry sets `expired`. Travel date pass sets `travel_passed`.
+
+**Phase A1 scope** — this is just a button split + one column. No complex logic.
+
 ### Grouping
 - Items grouped by **matter** (from matter_registry in DB)
 - Within a matter: sorted by tier (worst first), then newest on top
@@ -216,7 +230,7 @@ Every alert card has the same structure, with sections shown/hidden based on tie
 │ Baker: "Understood. Drafting now."                      │
 │ [Reply to Baker on this matter...              [Send]]  │
 ├─────────────────────────────────────────────────────────┤
-│ [Run All]  [Create Task]  [Create Project]    Dismiss   │  ← footer
+│ [Run All]  [Create Task]  [Create Project]  Resolve  Dismiss │  ← footer
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -323,7 +337,7 @@ Persistent at top of right area (below sidebar logo level). Visible on every tab
 ### Schema Changes
 | Table | Change |
 |-------|--------|
-| `alerts` | Add `matter_slug TEXT`, `tags JSONB DEFAULT '[]'`, `board_status TEXT DEFAULT 'new'` |
+| `alerts` | Add `matter_slug TEXT`, `tags JSONB DEFAULT '[]'`, `board_status TEXT DEFAULT 'new'`, `exit_reason TEXT` (resolved/dismissed/expired/travel_passed, default NULL = active) |
 | `matter_registry` | Add `dropbox_path TEXT` for artifact storage |
 | New: `alert_threads` | `id SERIAL, alert_id INTEGER REFERENCES alerts(id), role TEXT, content TEXT, created_at TIMESTAMPTZ DEFAULT NOW()` (see Architect Note #4) |
 | New: `alert_artifacts` | `id, alert_id, matter_slug, title, content, file_path, created_at` |
@@ -340,7 +354,7 @@ New → [Baker scans, creates alert, generates structured_actions]
 Visible → [Director sees card on dashboard]
   → Can Run actions, Reply, Create Task, Create Project
   → Can reassign matter, add tags
-  → Can Dismiss
+  → Can Resolve (real issue, handled) or Dismiss (noise, not relevant)
 
 Updated → [Next scan finds new info]
   → Baker updates existing card, adds timestamp
