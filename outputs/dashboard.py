@@ -674,6 +674,38 @@ async def scheduler_status():
 # Root — serve index.html
 # ============================================================
 
+@app.get("/health", tags=["system"], include_in_schema=False)
+async def health_check():
+    """Public health endpoint for Render + monitoring. No auth required."""
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        db_ok = conn is not None
+        if conn:
+            store._put_conn(conn)
+    except Exception:
+        db_ok = False
+
+    scheduler_ok = False
+    job_count = 0
+    try:
+        from triggers.embedded_scheduler import _scheduler
+        if _scheduler and _scheduler.running:
+            scheduler_ok = True
+            job_count = len(_scheduler.get_jobs())
+    except Exception:
+        pass
+
+    status = "healthy" if db_ok and scheduler_ok else "degraded"
+    return {
+        "status": status,
+        "database": "connected" if db_ok else "disconnected",
+        "scheduler": "running" if scheduler_ok else "stopped",
+        "scheduled_jobs": job_count,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @app.get("/", include_in_schema=False)
 async def root():
     """Serve the dashboard frontend."""
@@ -2166,6 +2198,32 @@ async def get_status():
         status_data["email_watermark"] = email_wm
         status_data["email_watermark_age_hours"] = email_wm_age_hours
         status_data["email_watermark_healthy"] = email_wm_healthy
+
+        # Email poll last checked (PHASE-4A: separate from watermark)
+        try:
+            checked_wm = trigger_state.get_watermark("email_poll_checked")
+            if checked_wm:
+                status_data["email_last_polled"] = checked_wm.isoformat()
+        except Exception:
+            pass
+
+        # PHASE-4A: Today's API cost
+        try:
+            from orchestrator.cost_monitor import get_daily_cost, COST_ALERT_EUR, COST_HARD_STOP_EUR
+            daily_cost = get_daily_cost()
+            status_data["cost_today_eur"] = round(daily_cost, 4)
+            status_data["cost_alert_threshold_eur"] = COST_ALERT_EUR
+            status_data["cost_hard_stop_eur"] = COST_HARD_STOP_EUR
+        except Exception:
+            pass
+
+        # Scheduler job count
+        try:
+            from triggers.embedded_scheduler import _scheduler
+            if _scheduler and _scheduler.running:
+                status_data["scheduled_jobs"] = len(_scheduler.get_jobs())
+        except Exception:
+            pass
 
         return status_data
     except Exception as e:
