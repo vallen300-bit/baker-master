@@ -483,28 +483,58 @@ Output formatting:
 ### Session 14 — 2026-03-08 (dimitry300 machine, Code 300 supervisor)
 **Phase 4A shipped + all 11 capability specs + Browser Sentinel seeded.** 2 commits + 4 seed tasks.
 
-Phase 4A — Cost Monitor + Agent Observability:
-- **`api_cost_log` table** — every Anthropic API call logged (model, tokens, cost in EUR). 6 call sites instrumented (agent loops, capability runner, pipeline).
-- **Circuit breaker** — alert at €15/day (Slack + WhatsApp), hard-stop at €100/day. All API calls blocked when threshold hit.
-- **`agent_tool_calls` table** — every tool execution logged (latency_ms, success/fail, capability_id).
+**The biggest session yet — 18 commits + 4 merges + 4 seed tasks. Brisen: 6 consecutive clean deliveries.**
+
+Phase 4A — Cost Monitor + Agent Observability (300):
+- **`api_cost_log` table** — every Anthropic API call logged (model, tokens, cost in EUR). 6 call sites instrumented.
+- **Circuit breaker** — €15 alert (Slack + WhatsApp), €100 hard-stop.
+- **`agent_tool_calls` table** — every tool execution logged (latency, success/fail, capability).
 - **4 new endpoints** — `/api/cost/today`, `/api/cost/history`, `/api/agent-metrics`, `/api/agent-metrics/errors`
+- **`/health` endpoint** — public, no auth, for Render + monitoring.
+- **`/api/status` enriched** — now includes cost_today_eur, scheduled_jobs, email_last_polled.
 
-PM Handover — All 11 Capability Specs:
+PM Handover — All 11 Capability Specs (300):
 - **Slug renames:** `asset_mgmt` → `asset_management`, `comms` → `communications`
-- **Retired:** `ib` (Investment Banking) → replaced by `pr_branding`
+- **Retired:** `ib` → replaced by `pr_branding`
 - **New:** `profiling` (proactive_flag), `pr_branding` (proactive_flag)
-- **All 11 updated** with full Director-approved role_description, trigger_patterns, tools, output_format
-- **Decomposer** system_prompt updated with new slug list
-- **Seed data** in store_back.py updated for fresh deploys
+- **All 11 updated** with Director-approved full specs. Decomposer updated. Seed data updated.
 
-Browser Sentinel — 4 Seed Tasks:
-- **ID 1:** MO Vienna - Booking.com rates (browser mode, hotel_rates)
-- **ID 2:** Park Hyatt Vienna - Booking.com rates (browser mode, hotel_rates)
-- **ID 3:** Austrian Grundbuch - RG7 Baden (simple mode, public_records)
-- **ID 4:** MO Vienna - Availability monitor (browser mode, hotel_occupancy)
-- **BROWSER_USE_API_KEY** set on Render by Director
+Owner's Lens C+D (300):
+- **Enhanced scoring** — `_score_owner_signal()` as 4th scoring axis (MOHG, 8 strategic contacts, JV/co-invest). Tier thresholds adjusted (4-axis range 4-12).
+- **Briefing split** — Owner's View (top, always shown) → Decisions Needed → Operations.
 
-**Baker current state:** 10 data sources, 16 scheduler jobs, 50+ commitments, 3,388 alerts, 11-tab dashboard, all 7 standing orders functional, 4 browser tasks active, 13 capabilities (11 domain + 2 meta), cost monitoring live.
+Proactive Flag + AO Profiling (Brisen, clean):
+- **Proactive scanner** — 30-min job scanning content against proactive_flag capability patterns.
+- **AO mood classification** — Russian + English keywords, negative → T1 alert.
+- **Communication gap tracker** — 6h job, 3-day AO threshold.
+- **Calendar prep enrichment** — AO meetings get mood context.
+- **Real-time pipeline boost** — proactive_flag patterns boost to min tier 2.
+
+Learning Loop (Brisen, clean):
+- **Cockpit feedback buttons** — Good/Revise/Wrong after Scan responses.
+- **WhatsApp + Slack feedback** — "good"/"wrong"/"revise" detected and stored.
+- **Fast-path experience retrieval** — capability prompts include past negative feedback.
+- **Capability quality endpoint** — `/api/capability-quality` with acceptance rates.
+
+Dashboard (Brisen, clean × 2):
+- **System Health widgets** — cost today, agent metrics, capability quality on Morning Brief.
+- **Commitments tab** — 50+ items, filter by status, overdue badges. (13 sidebar tabs total)
+- **Browser Monitor tab** — 4 tasks, latest results, Run Now button.
+
+Operational Fixes (300):
+- **Email watermark resilience** — separate last_checked from last_email_seen, gap alert downgraded to T2.
+- **Connection pool health** — `_put_conn()` always rollbacks before returning to pool.
+- **T1 WhatsApp delivery** — all T1 alerts push to Director's WhatsApp automatically.
+- **Slack feedback** — @Baker good/wrong/revise detected and stored.
+
+Data Operations:
+- **4 Browser Sentinel tasks seeded** — MO rates, Park Hyatt rates, Grundbuch, MO occupancy. BROWSER_USE_API_KEY set.
+- **Philip Vallen email** — unblocked (philipvallen@ellietechnologies.co.uk).
+- **6 VIPs created** — Oskolkov (T1), Yurkovich (T1), Steininger (T2), Walter Steininger (T2), Zangenfeind (T2), Zimmermann (T2).
+- **11 duplicate VIP records cleaned.**
+- **17 stale git branches deleted** (local + remote).
+
+**Baker current state:** 10 data sources, 20 scheduler jobs, 50+ commitments, 3,388+ alerts, 13-tab dashboard, all 7 standing orders functional, 4 browser tasks active, 13 capabilities (all fully specified), cost monitoring + agent observability live, learning loop active, proactive scanning live, Owner's Lens scoring live, T1 WhatsApp delivery live.
 
 ## Key Documents (Dropbox)
 
