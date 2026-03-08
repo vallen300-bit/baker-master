@@ -384,7 +384,9 @@ Designed and specified **COCKPIT-V3** — full dashboard redesign with Director.
 
 - **COCKPIT-V3 Phase B** (4 commits) — reviewed, 1 fix applied (auto-tag false positives: removed "it" keyword, added word-boundary matching for short keywords), merged. Tags system (15 categories, keyword-based auto-tagging in pipeline.py, GET /api/tags, POST /api/alerts/{id}/tag, GET /api/alerts/by-tag/{tag}). Ungrouped assignment (POST /api/alerts/{id}/assign with new project creation). Ask Specialist (POST /api/scan/specialist routes through _scan_chat_capability, same agentic RAG pipeline). Command bar detection (GET /api/scan/detect, regex-only, debounced badge). Board view (read-only kanban, List/Board toggle on Matters). Artifact storage (alert_artifacts table in PostgreSQL, POST /api/artifacts/save, Save button on result toolbar). All 7 verification gaps from brief addressed.
 
-**Next: Phase C** — People tab, Search tab, Travel tab, Media tab, alert auto-expiry.
+- **COCKPIT-V3 Phase C** (4 commits) — reviewed, 1 fix applied (RSS URL sanitization: reject javascript:/data: schemes in article links), merged. People tab (GET /api/people merges VIP+contacts, GET /api/people/{name}/activity across emails/WA/meetings). Search tab (GET /api/alerts/search with 7 filter params, all parameterized dynamic SQL, debounced live search). Travel tab (travel_date column, upcoming/past split). Media tab (GET /api/rss/articles + GET /api/rss/feeds, grouped by date, category filter). Alert auto-expiry (run_alert_expiry_check every 6h, T2-T4 >3 days expired, T1 + travel never expire). "Coming soon" removed — all 11 sidebar tabs functional. **COCKPIT-V3 IS COMPLETE.**
+
+**Dashboard status:** All 11 tabs live — Morning Brief, Fires, Matters, People, Deadlines, Tags, Search, Ask Baker, Ask Specialist, Travel, Media.
 
 ## Key Documents (Dropbox)
 
