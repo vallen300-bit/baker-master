@@ -634,6 +634,11 @@ def classify_intent(question: str, conversation_history: str = "") -> dict:
             system=_INTENT_SYSTEM,
             messages=[{"role": "user", "content": user_content}],
         )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="classify_intent")
+        except Exception:
+            pass
         raw = resp.content[0].text.strip()
         # Strip markdown code fences if model adds them
         if raw.startswith("```"):
@@ -730,6 +735,11 @@ def generate_email_body(content_request: str, retriever, project=None, role=None
             system=system,
             messages=[{"role": "user", "content": f"Compose this email now: {content_request}"}],
         )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost(config.claude.model, resp.usage.input_tokens, resp.usage.output_tokens, source="email_draft")
+        except Exception:
+            pass
         return resp.content[0].text.strip()
     except Exception as e:
         logger.error(f"Email body generation failed: {e}")
@@ -1283,6 +1293,11 @@ def _extract_fireflies_params(message: str) -> dict:
                 "content": f"Today is {today}.\n\nMessage: {message}",
             }],
         )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="fireflies_params")
+        except Exception:
+            pass
         raw = resp.content[0].text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
@@ -1642,6 +1657,11 @@ Return ONLY valid JSON, no markdown."""
         system=extraction_prompt,
         messages=[{"role": "user", "content": message}],
     )
+    try:
+        from orchestrator.cost_monitor import log_api_cost
+        log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="clickup_params")
+    except Exception:
+        pass
     raw = resp.content[0].text.strip()
     if raw.startswith("```"):
         lines = raw.split("\n")
@@ -1953,6 +1973,11 @@ Return ONLY valid JSON, no markdown fences."""
             system="You are a project planning assistant. Return only JSON.",
             messages=[{"role": "user", "content": plan_prompt}],
         )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost(config.claude.model, resp.usage.input_tokens, resp.usage.output_tokens, source="clickup_plan")
+        except Exception:
+            pass
         raw = resp.content[0].text.strip()
         if raw.startswith("```"):
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
@@ -2075,6 +2100,11 @@ Return the REVISED plan as JSON in the same format. Return ONLY valid JSON."""
             system="You are a project planning assistant. Return only JSON.",
             messages=[{"role": "user", "content": revision_prompt}],
         )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost(config.claude.model, resp.usage.input_tokens, resp.usage.output_tokens, source="clickup_plan_revise")
+        except Exception:
+            pass
         raw = resp.content[0].text.strip()
         if raw.startswith("```"):
             raw = re.sub(r"^```(?:json)?\s*", "", raw)

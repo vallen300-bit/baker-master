@@ -267,6 +267,11 @@ def _generate_meeting_briefing(meeting: dict, context: str) -> Optional[str]:
                 "content": f"Prepare a briefing for this meeting.\n\n{context}",
             }],
         )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="meeting_prep")
+        except Exception:
+            pass
         briefing = resp.content[0].text.strip()
         logger.info(f"Generated meeting briefing for '{meeting['title']}' ({len(briefing)} chars)")
         return briefing

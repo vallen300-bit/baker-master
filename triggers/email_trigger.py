@@ -86,6 +86,11 @@ def _extract_commitments_from_email(email_text: str, subject: str,
                 "content": f"Today: {today}\nSubject: {subject}\nFrom: {sender}\n\n{email_text[:4000]}",
             }],
         )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="email_commitments")
+        except Exception:
+            pass
         raw = resp.content[0].text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
@@ -173,6 +178,11 @@ def _check_email_intelligence(email_text: str, subject: str, sender: str):
                 "content": f"Subject: {subject}\nFrom: {sender}\n\n{email_text[:3000]}",
             }],
         )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="email_intelligence")
+        except Exception:
+            pass
         raw = resp.content[0].text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
@@ -402,6 +412,9 @@ def check_new_emails():
             latest_seen_dt = now_utc
         trigger_state.set_watermark("email_poll", latest_seen_dt)
         logger.info(f"Email watermark advanced to {latest_seen_dt.isoformat()}")
+
+    # Always update last-checked (whether emails found or not)
+    trigger_state.set_watermark("email_poll_checked", datetime.now(timezone.utc))
 
     logger.info(
         f"Email trigger complete: {processed} processed, "

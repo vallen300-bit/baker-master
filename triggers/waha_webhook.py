@@ -392,6 +392,11 @@ def _handle_director_question_legacy(question: str, start: float,
             system=system_prompt,
             messages=[{"role": "user", "content": question}],
         )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost(config.claude.model, response.usage.input_tokens, response.usage.output_tokens, source="wa_question")
+        except Exception:
+            pass
         return response.content[0].text
     except Exception as e:
         logger.error(f"WA question: Claude call failed: {e}")

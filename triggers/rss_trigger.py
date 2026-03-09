@@ -475,6 +475,11 @@ def _check_article_relevance(article: dict, feed_title: str, store):
                 "content": f"Feed: {feed_title}\nTitle: {title}\nSummary: {summary[:500]}",
             }],
         )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="rss_relevance")
+        except Exception:
+            pass
         raw = resp.content[0].text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")

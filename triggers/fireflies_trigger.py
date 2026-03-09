@@ -104,6 +104,11 @@ def _extract_commitments_from_meeting(transcript_text: str, meeting_title: str,
                 "content": f"Today: {today}\nMeeting: {meeting_title}\nParticipants: {participants}\n\n{transcript_text[:8000]}",
             }],
         )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="commitment_extract")
+        except Exception:
+            pass
         raw = resp.content[0].text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")

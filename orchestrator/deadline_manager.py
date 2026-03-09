@@ -80,6 +80,11 @@ def extract_deadlines(
                 "content": f"Today's date: {today}\n\nContent to analyze:\n{content[:4000]}",
             }],
         )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="extract_deadlines")
+        except Exception:
+            pass
         raw = resp.content[0].text.strip()
         # Strip markdown code fences
         if raw.startswith("```"):
@@ -347,6 +352,11 @@ def _generate_deadline_proposal(deadline: dict, stage: str, hours_remaining: flo
             system=_DEADLINE_PROPOSAL_PROMPT,
             messages=[{"role": "user", "content": context}],
         )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="deadline_proposal")
+        except Exception:
+            pass
         raw = resp.content[0].text.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]

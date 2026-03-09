@@ -222,6 +222,11 @@ def _classify_domain_haiku(content: str) -> tuple:
         max_tokens=10,
         messages=[{"role": "user", "content": prompt}],
     )
+    try:
+        from orchestrator.cost_monitor import log_api_cost
+        log_api_cost(config.decision_engine.haiku_model, response.usage.input_tokens, response.usage.output_tokens, source="classify_domain")
+    except Exception:
+        pass
     domain = response.content[0].text.strip().lower()
     if domain in _DOMAIN_PATTERNS:
         return (domain, "medium", "haiku_llm")
@@ -848,6 +853,11 @@ def _generate_vip_draft(vip: dict, msg: dict, sender_name: str, wait_minutes: fl
             system=_VIP_DRAFT_PROMPT,
             messages=[{"role": "user", "content": context}],
         )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="vip_auto_draft")
+        except Exception:
+            pass
         raw = resp.content[0].text.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]

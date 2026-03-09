@@ -157,6 +157,11 @@ class CapabilityRouter:
                 system=system,
                 messages=[{"role": "user", "content": text}],
             )
+            try:
+                from orchestrator.cost_monitor import log_api_cost
+                log_api_cost(config.claude.model, resp.usage.input_tokens, resp.usage.output_tokens, source="decomposer")
+            except Exception:
+                pass
             raw = resp.content[0].text.strip()
             # Strip markdown code fences
             if raw.startswith("```"):
