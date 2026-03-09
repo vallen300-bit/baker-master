@@ -402,6 +402,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 }
 .scan-msg.baker {
   align-self: flex-start; background: var(--card); border: 1px solid var(--border);
+  max-width: 100%; width: 100%;
 }
 .scan-form { display: flex; gap: 8px; margin-top: 8px; }
 .scan-input {
