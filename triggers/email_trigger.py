@@ -334,6 +334,20 @@ def check_new_emails():
 
     logger.info(f"Email trigger: {len(new_threads)} new threads found")
 
+    try:
+        _process_email_threads(new_threads)
+    except Exception as e:
+        logger.error(f"Email trigger: thread processing crashed: {e}")
+    finally:
+        # ALWAYS update checked watermark and report success (poll itself worked)
+        trigger_state.set_watermark("email_poll_checked", datetime.now(timezone.utc))
+        _health_success("email")
+
+    logger.info("Email trigger: poll cycle complete")
+
+
+def _process_email_threads(new_threads: list):
+    """Process email threads — extracted so outer function always updates health."""
     from orchestrator.pipeline import SentinelPipeline, TriggerEvent
     pipeline = SentinelPipeline()
     batch_for_briefing = []
@@ -481,12 +495,8 @@ def check_new_emails():
         trigger_state.set_watermark("email_poll", latest_seen_dt)
         logger.info(f"Email watermark advanced to {latest_seen_dt.isoformat()}")
 
-    # Always update last-checked (whether emails found or not)
-    trigger_state.set_watermark("email_poll_checked", datetime.now(timezone.utc))
-
-    _health_success("email")
     logger.info(
-        f"Email trigger complete: {processed} processed, "
+        f"Email trigger: {processed} processed, "
         f"{len(batch_for_briefing)} queued for briefing, {skipped} skipped (dedup)"
     )
 
