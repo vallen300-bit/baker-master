@@ -22,6 +22,10 @@ logger = logging.getLogger("sentinel.trigger.email")
 _last_gap_alert_time: float = 0.0
 _GAP_ALERT_COOLDOWN = 24 * 3600  # 24 hours between gap alerts
 
+# Diagnostic: last poll error (exposed via /api/status for debugging)
+_last_poll_error: str = ""
+_last_poll_success_at: str = ""
+
 
 def _get_gmail_service():
     """Authenticate and return Gmail API service object."""
@@ -225,13 +229,20 @@ def check_new_emails():
     3. Runs pipeline immediately for high/medium priority
     4. Queues low-priority for daily briefing
     """
+    global _last_poll_error, _last_poll_success_at
     logger.info("Email trigger: checking for new threads...")
 
     try:
         new_threads = poll_gmail()
     except Exception as e:
+        _last_poll_error = f"{datetime.now(timezone.utc).isoformat()}: {e}"
         logger.error(f"Email trigger: Gmail poll failed: {e}")
+        # Still update checked watermark so we can distinguish "poll crashed"
+        # from "poll never ran" in /api/status
+        trigger_state.set_watermark("email_poll_checked", datetime.now(timezone.utc))
         return
+
+    _last_poll_success_at = datetime.now(timezone.utc).isoformat()
 
     if not new_threads:
         logger.info("Email trigger: no new threads")

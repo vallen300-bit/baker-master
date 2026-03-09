@@ -2206,6 +2206,16 @@ async def get_status():
         except Exception:
             pass
 
+        # Email poll diagnostics (Session 15: debug silent failures)
+        try:
+            from triggers.email_trigger import _last_poll_error, _last_poll_success_at
+            if _last_poll_error:
+                status_data["email_poll_error"] = _last_poll_error
+            if _last_poll_success_at:
+                status_data["email_poll_last_success"] = _last_poll_success_at
+        except Exception:
+            pass
+
         # PHASE-4A: Today's API cost
         try:
             from orchestrator.cost_monitor import get_daily_cost, COST_ALERT_EUR, COST_HARD_STOP_EUR
