@@ -299,58 +299,62 @@ def _poll_workspace(client, store, workspace_id: str) -> int:
                 continue
 
             for task in tasks:
-                task_data = _build_task_data(task, space_id, workspace_id)
-
-                # Check if this is a new task (date_created == date_updated within 1 second)
-                is_new = False
-                dc = task_data.get("date_created")
-                du = task_data.get("date_updated")
-                if dc and du and isinstance(dc, datetime) and isinstance(du, datetime):
-                    is_new = abs((du - dc).total_seconds()) < 2
-
                 try:
-                    result = store.upsert_clickup_task(task_data)
-                    if result:
-                        tasks_upserted += 1
-                except Exception as e:
-                    logger.error(f"Failed to upsert task {task.get('id')}: {e}")
+                    task_data = _build_task_data(task, space_id, workspace_id)
 
-                # Embed task description to Qdrant baker-clickup
-                _embed_task_to_qdrant(store, task_data)
+                    # Check if this is a new task (date_created == date_updated within 1 second)
+                    is_new = False
+                    dc = task_data.get("date_created")
+                    du = task_data.get("date_updated")
+                    if dc and du and isinstance(dc, datetime) and isinstance(du, datetime):
+                        is_new = abs((du - dc).total_seconds()) < 2
 
-                # Fetch and embed comments
-                comment_count = task.get("comment_count", 0)
-                comments = []
-                if comment_count and isinstance(comment_count, int) and comment_count > 0:
                     try:
-                        comments = client.get_task_comments(task.get("id"))
-                        _embed_comments_to_qdrant(store, task_data, comments)
-                        logger.debug(
-                            f"Task {task.get('id')}: {len(comments)} comments embedded"
-                        )
+                        result = store.upsert_clickup_task(task_data)
+                        if result:
+                            tasks_upserted += 1
                     except Exception as e:
-                        logger.error(f"Failed to fetch/embed comments for task {task.get('id')}: {e}")
+                        logger.error(f"Failed to upsert task {task.get('id')}: {e}")
 
-                # DEADLINE-SYSTEM-1: Extract deadlines from ClickUp task
-                try:
-                    from orchestrator.deadline_manager import extract_deadlines
-                    task_content = (
-                        f"Task: {task_data.get('name', '')}\n"
-                        f"Description: {task_data.get('description', '')}\n"
-                        f"Due date: {task_data.get('due_date', 'none')}\n"
-                        f"Status: {task_data.get('status', 'unknown')}"
-                    )
-                    extract_deadlines(
-                        content=task_content,
-                        source_type="clickup",
-                        source_id=f"clickup:{task_data.get('id', '')}",
-                    )
-                except Exception as _e:
-                    logger.debug(f"Deadline extraction failed for task {task.get('id')}: {_e}")
+                    # Embed task description to Qdrant baker-clickup
+                    _embed_task_to_qdrant(store, task_data)
 
-                # Classify and feed to pipeline
-                classification = _classify_task_change(task_data, is_new)
-                _feed_to_pipeline(task_data, classification)
+                    # Fetch and embed comments
+                    comment_count = task.get("comment_count", 0)
+                    comments = []
+                    if comment_count and isinstance(comment_count, int) and comment_count > 0:
+                        try:
+                            comments = client.get_task_comments(task.get("id"))
+                            _embed_comments_to_qdrant(store, task_data, comments)
+                            logger.debug(
+                                f"Task {task.get('id')}: {len(comments)} comments embedded"
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to fetch/embed comments for task {task.get('id')}: {e}")
+
+                    # DEADLINE-SYSTEM-1: Extract deadlines from ClickUp task
+                    try:
+                        from orchestrator.deadline_manager import extract_deadlines
+                        task_content = (
+                            f"Task: {task_data.get('name', '')}\n"
+                            f"Description: {task_data.get('description', '')}\n"
+                            f"Due date: {task_data.get('due_date', 'none')}\n"
+                            f"Status: {task_data.get('status', 'unknown')}"
+                        )
+                        extract_deadlines(
+                            content=task_content,
+                            source_type="clickup",
+                            source_id=f"clickup:{task_data.get('id', '')}",
+                        )
+                    except Exception as _e:
+                        logger.debug(f"Deadline extraction failed for task {task.get('id')}: {_e}")
+
+                    # Classify and feed to pipeline
+                    classification = _classify_task_change(task_data, is_new)
+                    _feed_to_pipeline(task_data, classification)
+                except Exception as e:
+                    logger.error(f"Failed to process task {task.get('id', '?')}: {e}")
+                    continue
 
     # Update watermark after successful processing
     trigger_state.set_watermark(watermark_key, datetime.now(timezone.utc))
