@@ -982,6 +982,11 @@ def _get_morning_narrative(fire_count: int, deadline_count: int,
             max_tokens=200,
             messages=[{"role": "user", "content": prompt}],
         )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="morning_narrative")
+        except Exception:
+            pass
         narrative = resp.content[0].text.strip()
 
         # Phase 3B: Generate per-fire proposals
@@ -1038,6 +1043,11 @@ def _generate_morning_proposals(client, top_fires: list, deadlines: list) -> str
             system=_MORNING_PROPOSALS_PROMPT,
             messages=[{"role": "user", "content": context}],
         )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="morning_proposals")
+        except Exception:
+            pass
         proposals = resp.content[0].text.strip()
         if proposals:
             return "**Recommended actions:**\n" + proposals

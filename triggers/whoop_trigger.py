@@ -339,6 +339,7 @@ def run_whoop_poll():
         try:
             client = _get_client()
         except Exception as e:
+            report_failure("whoop", f"Client init failed: {e}")
             logger.error(f"Whoop trigger: failed to init client: {e}")
             return
 

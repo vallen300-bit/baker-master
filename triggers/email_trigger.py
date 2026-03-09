@@ -22,6 +22,10 @@ logger = logging.getLogger("sentinel.trigger.email")
 _last_gap_alert_time: float = 0.0
 _GAP_ALERT_COOLDOWN = 24 * 3600  # 24 hours between gap alerts
 
+# Gmail 429 backoff: skip polls until this timestamp (epoch seconds)
+_gmail_retry_after: float = 0.0
+_gmail_backoff_seconds: float = 0.0  # exponential backoff tracker
+
 # Sentinel health monitoring
 from triggers.sentinel_health import report_success as _health_success, report_failure as _health_failure
 
@@ -228,17 +232,57 @@ def check_new_emails():
     3. Runs pipeline immediately for high/medium priority
     4. Queues low-priority for daily briefing
     """
+    import time as _time
+    global _gmail_retry_after, _gmail_backoff_seconds
+
+    # Skip poll if we're in a 429 backoff window
+    now_ts = _time.time()
+    if now_ts < _gmail_retry_after:
+        remaining = int(_gmail_retry_after - now_ts)
+        logger.info(f"Email trigger: skipping poll — Gmail 429 backoff ({remaining}s remaining)")
+        trigger_state.set_watermark("email_poll_checked", datetime.now(timezone.utc))
+        return
+
     logger.info("Email trigger: checking for new threads...")
 
     try:
         new_threads = poll_gmail()
     except Exception as e:
-        _health_failure("email", str(e))
+        error_str = str(e)
+        _health_failure("email", error_str)
         logger.error(f"Email trigger: Gmail poll failed: {e}")
+
+        # Parse 429 Retry-After and set backoff
+        if "429" in error_str or "rateLimitExceeded" in error_str:
+            # Try to parse "Retry after YYYY-MM-DDTHH:MM:SS" from error
+            import re
+            retry_match = re.search(r'Retry after (\d{4}-\d{2}-\d{2}T[\d:.]+Z?)', error_str)
+            if retry_match:
+                try:
+                    retry_dt = datetime.fromisoformat(retry_match.group(1).replace("Z", "+00:00"))
+                    _gmail_retry_after = retry_dt.timestamp() + 60  # add 60s buffer
+                    _gmail_backoff_seconds = 0  # reset exponential — we have a real timestamp
+                    logger.info(f"Email trigger: 429 retry-after parsed → backoff until {retry_dt.isoformat()} + 60s")
+                except (ValueError, TypeError):
+                    pass
+
+            if _gmail_retry_after <= now_ts:
+                # No parsed timestamp — use exponential backoff
+                if _gmail_backoff_seconds == 0:
+                    _gmail_backoff_seconds = 600  # start at 10 min
+                else:
+                    _gmail_backoff_seconds = min(_gmail_backoff_seconds * 2, 3600)  # max 1 hour
+                _gmail_retry_after = now_ts + _gmail_backoff_seconds
+                logger.info(f"Email trigger: 429 exponential backoff → {int(_gmail_backoff_seconds)}s")
+
         # Still update checked watermark so we can distinguish "poll crashed"
         # from "poll never ran" in /api/status
         trigger_state.set_watermark("email_poll_checked", datetime.now(timezone.utc))
         return
+
+    # Poll succeeded — reset 429 backoff state
+    _gmail_retry_after = 0.0
+    _gmail_backoff_seconds = 0.0
 
     if not new_threads:
         logger.info("Email trigger: no new threads")
