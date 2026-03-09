@@ -576,6 +576,7 @@ async function loadMattersSummary() {
                 const lbl = document.createElement('span');
                 lbl.className = 'nav-label';
                 lbl.textContent = label;
+                item.title = label + ' (' + m.item_count + ')';
                 item.appendChild(lbl);
 
                 const cnt = document.createElement('span');

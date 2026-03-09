@@ -15,7 +15,7 @@
   --radius: 10px; --shadow: 0 1px 3px rgba(0,0,0,0.05);
   --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-  --sidebar-w: 192px;
+  --sidebar-w: 250px;
 }
 
 body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
@@ -45,11 +45,11 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
   padding: 18px 20px 14px; font-weight: 800; font-size: 16px;
   letter-spacing: -0.5px; color: var(--text); border-bottom: 1px solid var(--border);
 }
-.sidebar-nav { padding: 10px 10px; flex: 1; }
+.sidebar-nav { padding: 10px 8px; flex: 1; }
 
 .nav-item {
   display: flex; align-items: center; gap: 8px;
-  padding: 9px 10px 9px 12px; border-radius: 8px; cursor: pointer;
+  padding: 8px 8px 8px 10px; border-radius: 8px; cursor: pointer;
   transition: background 0.1s; margin-bottom: 1px; font-size: 13px; font-weight: 500;
   color: var(--text2); overflow: hidden; flex-wrap: nowrap;
 }
@@ -74,9 +74,9 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 .nav-divider { height: 1px; background: var(--border); margin: 8px 12px; }
 
 /* Matters sub-list */
-.nav-sub { padding-left: 12px; }
-.nav-sub .nav-item { padding: 7px 8px 7px 10px; font-size: 12px; }
-.nav-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.nav-sub { padding-left: 6px; }
+.nav-sub .nav-item { padding: 6px 6px 6px 8px; font-size: 11px; gap: 6px; }
+.nav-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .nav-dot.red { background: var(--red); }
 .nav-dot.amber { background: var(--amber); }
 .nav-dot.green { background: var(--green); }
