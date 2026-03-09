@@ -1130,24 +1130,89 @@ class SentinelStoreBack:
             self._put_conn(conn)
 
     def _ensure_vip_profile_columns(self):
-        """Add role_context, communication_pref, expertise columns to vip_contacts. Idempotent."""
+        """Add profile + networking columns to vip_contacts. Idempotent."""
         conn = self._get_conn()
         if not conn:
             return
         try:
             cur = conn.cursor()
+            # Original profile columns
             cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS role_context TEXT")
             cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS communication_pref TEXT DEFAULT 'email'")
             cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS expertise TEXT")
+            # NETWORKING-PHASE-1: extended columns
+            cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS contact_type VARCHAR(20)")
+            cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS relationship_score INTEGER DEFAULT 0")
+            cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS net_worth_tier VARCHAR(20)")
+            cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS investment_thesis TEXT")
+            cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS personal_interests TEXT[]")
+            cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS gatekeeper_name VARCHAR(200)")
+            cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS gatekeeper_contact VARCHAR(200)")
+            cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS last_contact_date TIMESTAMPTZ")
+            cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS sentiment_trend VARCHAR(20)")
+            cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS source_of_introduction TEXT")
             conn.commit()
             cur.close()
-            logger.info("vip_contacts profile columns verified (role_context, communication_pref, expertise)")
+            logger.info("vip_contacts profile + networking columns verified")
         except Exception as e:
             try:
                 conn.rollback()
             except Exception:
                 pass
             logger.warning(f"Could not ensure VIP profile columns: {e}")
+        finally:
+            self._put_conn(conn)
+
+        # NETWORKING-PHASE-1: contact_interactions + networking_events tables
+        self._ensure_networking_tables()
+
+    def _ensure_networking_tables(self):
+        """Create contact_interactions and networking_events tables. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS contact_interactions (
+                    id SERIAL PRIMARY KEY,
+                    contact_id INTEGER REFERENCES vip_contacts(id),
+                    channel VARCHAR(30),
+                    direction VARCHAR(10),
+                    timestamp TIMESTAMPTZ NOT NULL,
+                    subject TEXT,
+                    sentiment VARCHAR(20),
+                    source_ref TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_contact_interactions_contact
+                ON contact_interactions (contact_id, timestamp DESC)
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS networking_events (
+                    id SERIAL PRIMARY KEY,
+                    event_name VARCHAR(300) NOT NULL,
+                    dates_start DATE,
+                    dates_end DATE,
+                    location VARCHAR(200),
+                    category VARCHAR(50),
+                    brisen_relevance_score INTEGER DEFAULT 5,
+                    source_url TEXT,
+                    notes TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("Networking tables verified (contact_interactions, networking_events)")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure networking tables: {e}")
         finally:
             self._put_conn(conn)
 
