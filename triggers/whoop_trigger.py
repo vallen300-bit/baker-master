@@ -331,96 +331,100 @@ def run_whoop_poll():
        classify, and feed non-routine events to pipeline
     5. Update watermark
     """
+    from triggers.sentinel_health import report_success, report_failure
     logger.info("Whoop trigger: starting poll...")
 
+
     try:
-        client = _get_client()
+        try:
+            client = _get_client()
+        except Exception as e:
+            logger.error(f"Whoop trigger: failed to init client: {e}")
+            return
+
+        store = _get_store()
+
+        # Determine date range
+        last_poll = trigger_state.get_watermark(_WATERMARK_KEY)
+        now_utc = datetime.now(timezone.utc)
+
+        # First run: backfill 7 days
+        if last_poll is None or (now_utc - last_poll) > timedelta(days=8):
+            start_dt = now_utc - timedelta(days=7)
+            logger.info("Whoop: first run or stale watermark — backfilling 7 days")
+        else:
+            start_dt = last_poll
+
+        # Format as ISO 8601 for Whoop API
+        start_str = start_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        end_str = now_utc.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+        logger.info(f"Whoop poll range: {start_str} → {end_str}")
+
+        # Counters
+        counts = {"recovery": 0, "sleep": 0, "cycle": 0, "workout": 0}
+        skipped = 0
+        qdrant_writes = 0
+        pipeline_feeds = 0
+
+        # Get HRV rolling average for anomaly detection
+        hrv_avg = _get_hrv_rolling_avg(store)
+
+        # Fetch all record types
+        record_batches = []
+        for rtype, fetch_fn in [
+            ("recovery", client.get_recovery),
+            ("sleep", client.get_sleep),
+            ("cycle", client.get_cycle),
+            ("workout", client.get_workout),
+        ]:
+            try:
+                records = fetch_fn(start_str, end_str)
+                logger.info(f"Whoop: fetched {len(records)} {rtype} records")
+                for rec in records:
+                    record_batches.append((rec, rtype))
+            except Exception as e:
+                logger.error(f"Whoop: failed to fetch {rtype}: {e}")
+
+        # Process all records
+        for record, rtype in record_batches:
+            try:
+                record_data = _build_record_data(record, rtype)
+
+                # Upsert to PostgreSQL
+                result = store.upsert_whoop_record(record_data)
+                if result == "skipped":
+                    skipped += 1
+                    continue
+
+                counts[rtype] = counts.get(rtype, 0) + 1
+
+                # Embed to Qdrant
+                _embed_to_qdrant(store, record_data)
+                qdrant_writes += 1
+
+                # Classify and feed pipeline
+                classification = _classify_health_event(record_data, hrv_avg)
+                if classification != "whoop_routine":
+                    _feed_to_pipeline(record_data, classification)
+                    pipeline_feeds += 1
+
+            except Exception as e:
+                logger.error(f"Whoop: failed to process {rtype} record {record.get('id')}: {e}")
+
+        # Update watermark
+        trigger_state.set_watermark(_WATERMARK_KEY, now_utc)
+
+        report_success("whoop")
+        logger.info(
+            f"Whoop poll complete: "
+            f"{counts['recovery']} recovery, {counts['sleep']} sleep, "
+            f"{counts['cycle']} cycle, {counts['workout']} workout processed, "
+            f"{skipped} skipped (unchanged), {qdrant_writes} Qdrant writes, "
+            f"{pipeline_feeds} pipeline feeds"
+        )
+
     except Exception as e:
-        logger.error(f"Whoop trigger: failed to init client: {e}")
-        return
+        report_failure("whoop", str(e))
+        logger.error(f"whoop poll failed: {e}")
 
-    store = _get_store()
-
-    # Determine date range
-    last_poll = trigger_state.get_watermark(_WATERMARK_KEY)
-    now_utc = datetime.now(timezone.utc)
-
-    # First run: backfill 7 days
-    if last_poll is None or (now_utc - last_poll) > timedelta(days=8):
-        start_dt = now_utc - timedelta(days=7)
-        logger.info("Whoop: first run or stale watermark — backfilling 7 days")
-    else:
-        start_dt = last_poll
-
-    # Format as ISO 8601 for Whoop API
-    start_str = start_dt.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-    end_str = now_utc.strftime("%Y-%m-%dT%H:%M:%S.000Z")
-
-    logger.info(f"Whoop poll range: {start_str} → {end_str}")
-
-    # Counters
-    counts = {"recovery": 0, "sleep": 0, "cycle": 0, "workout": 0}
-    skipped = 0
-    qdrant_writes = 0
-    pipeline_feeds = 0
-
-    # Get HRV rolling average for anomaly detection
-    hrv_avg = _get_hrv_rolling_avg(store)
-
-    # Fetch all record types
-    record_batches = []
-    for rtype, fetch_fn in [
-        ("recovery", client.get_recovery),
-        ("sleep", client.get_sleep),
-        ("cycle", client.get_cycle),
-        ("workout", client.get_workout),
-    ]:
-        try:
-            records = fetch_fn(start_str, end_str)
-            logger.info(f"Whoop: fetched {len(records)} {rtype} records")
-            for rec in records:
-                record_batches.append((rec, rtype))
-        except Exception as e:
-            logger.error(f"Whoop: failed to fetch {rtype}: {e}")
-
-    # Process all records
-    for record, rtype in record_batches:
-        try:
-            record_data = _build_record_data(record, rtype)
-
-            # Upsert to PostgreSQL
-            result = store.upsert_whoop_record(record_data)
-            if result == "skipped":
-                skipped += 1
-                continue
-
-            counts[rtype] = counts.get(rtype, 0) + 1
-
-            # Embed to Qdrant
-            _embed_to_qdrant(store, record_data)
-            qdrant_writes += 1
-
-            # Classify and feed pipeline
-            classification = _classify_health_event(record_data, hrv_avg)
-            if classification != "whoop_routine":
-                _feed_to_pipeline(record_data, classification)
-                pipeline_feeds += 1
-
-        except Exception as e:
-            logger.error(f"Whoop: failed to process {rtype} record {record.get('id')}: {e}")
-
-    # Update watermark
-    trigger_state.set_watermark(_WATERMARK_KEY, now_utc)
-
-    logger.info(
-        f"Whoop poll complete: "
-        f"{counts['recovery']} recovery, {counts['sleep']} sleep, "
-        f"{counts['cycle']} cycle, {counts['workout']} workout processed, "
-        f"{skipped} skipped (unchanged), {qdrant_writes} Qdrant writes, "
-        f"{pipeline_feeds} pipeline feeds"
-    )
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(name)s | %(message)s")
-    run_whoop_poll()

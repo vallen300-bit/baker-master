@@ -291,98 +291,102 @@ def check_calendar_and_prep():
     2. For each meeting not yet prepped → generate briefing
     3. Store briefing as T2 alert card
     """
+    from triggers.sentinel_health import report_success, report_failure
     from memory.store_back import SentinelStoreBack
     from triggers.state import trigger_state
     from orchestrator.pipeline import _match_matter_slug, _auto_tag
 
+
     try:
-        meetings = poll_upcoming_meetings(hours_ahead=24)
-    except Exception as e:
-        logger.warning(f"Calendar poll failed (API unreachable or token expired): {e}")
-        return  # Graceful failure — don't crash scheduler
-
-    if not meetings:
-        logger.info("No upcoming meetings — nothing to prep")
-        return
-
-    store = SentinelStoreBack._get_global_instance()
-    prepped_count = 0
-
-    for meeting in meetings:
-        event_id = meeting.get('id', '')
-        if not event_id:
-            continue
-
-        # Dedup: check if already prepped
-        watermark_key = f"calendar_prep_{event_id}"
-        if trigger_state.watermark_exists(watermark_key):
-            logger.debug(f"Already prepped: {meeting['title']} ({event_id})")
-            continue
-
-        # Assemble context from Baker's memory
-        context = _assemble_meeting_context(meeting, store)
-
-        # Generate briefing via Haiku
-        briefing = _generate_meeting_briefing(meeting, context)
-        if not briefing:
-            continue
-
-        # Build alert title + body
-        start_str = meeting.get('start', '')
         try:
-            start_dt = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
-            time_label = start_dt.strftime('%H:%M %b %d')
-        except (ValueError, AttributeError):
-            time_label = start_str
+            meetings = poll_upcoming_meetings(hours_ahead=24)
+        except Exception as e:
+            logger.warning(f"Calendar poll failed (API unreachable or token expired): {e}")
+            return  # Graceful failure — don't crash scheduler
 
-        attendee_names = [a.get('name', '') or a.get('email', '') for a in meeting.get('attendees', [])]
-        attendee_str = ", ".join(attendee_names[:5])
-        if len(attendee_names) > 5:
-            attendee_str += f" +{len(attendee_names) - 5} more"
+        if not meetings:
+            logger.info("No upcoming meetings — nothing to prep")
+            return
 
-        alert_title = f"Meeting prep: {meeting['title']}"
-        alert_body = f"**{time_label}**"
-        if attendee_str:
-            alert_body += f" | {attendee_str}"
-        if meeting.get('location'):
-            alert_body += f" | {meeting['location']}"
-        alert_body += f"\n\n{briefing}"
+        store = SentinelStoreBack._get_global_instance()
+        prepped_count = 0
 
-        # Auto-assign matter + tags
-        matter_slug = _match_matter_slug(alert_title, alert_body, store)
-        tags = _auto_tag(alert_title, alert_body)
-        if "meeting" not in tags:
-            tags.append("meeting")
+        for meeting in meetings:
+            event_id = meeting.get('id', '')
+            if not event_id:
+                continue
 
-        # Create T2 alert
-        alert_id = store.create_alert(
-            tier=2,
-            title=alert_title,
-            body=alert_body,
-            action_required=False,
-            matter_slug=matter_slug,
-            tags=tags,
-            source="calendar_prep",
-        )
+            # Dedup: check if already prepped
+            watermark_key = f"calendar_prep_{event_id}"
+            if trigger_state.watermark_exists(watermark_key):
+                logger.debug(f"Already prepped: {meeting['title']} ({event_id})")
+                continue
 
-        if alert_id:
-            # Mark as prepped (dedup)
-            trigger_state.set_watermark(watermark_key, datetime.now(timezone.utc))
-            prepped_count += 1
-            logger.info(f"Meeting prep alert #{alert_id} created: {meeting['title']}")
+            # Assemble context from Baker's memory
+            context = _assemble_meeting_context(meeting, store)
 
-            # Phase 3C: Block 15 min prep time on calendar
-            _block_prep_time(meeting)
+            # Generate briefing via Haiku
+            briefing = _generate_meeting_briefing(meeting, context)
+            if not briefing:
+                continue
 
-    # Phase 3C: Detect calendar conflicts
-    _detect_and_alert_conflicts(meetings, store, trigger_state)
+            # Build alert title + body
+            start_str = meeting.get('start', '')
+            try:
+                start_dt = datetime.fromisoformat(start_str.replace('Z', '+00:00'))
+                time_label = start_dt.strftime('%H:%M %b %d')
+            except (ValueError, AttributeError):
+                time_label = start_str
 
-    logger.info(f"Calendar prep complete: {prepped_count} new briefings created from {len(meetings)} upcoming meetings")
+            attendee_names = [a.get('name', '') or a.get('email', '') for a in meeting.get('attendees', [])]
+            attendee_str = ", ".join(attendee_names[:5])
+            if len(attendee_names) > 5:
+                attendee_str += f" +{len(attendee_names) - 5} more"
 
+            alert_title = f"Meeting prep: {meeting['title']}"
+            alert_body = f"**{time_label}**"
+            if attendee_str:
+                alert_body += f" | {attendee_str}"
+            if meeting.get('location'):
+                alert_body += f" | {meeting['location']}"
+            alert_body += f"\n\n{briefing}"
 
-# ============================================================
-# Phase 3C: Calendar Protection
-# ============================================================
+            # Auto-assign matter + tags
+            matter_slug = _match_matter_slug(alert_title, alert_body, store)
+            tags = _auto_tag(alert_title, alert_body)
+            if "meeting" not in tags:
+                tags.append("meeting")
+
+            # Create T2 alert
+            alert_id = store.create_alert(
+                tier=2,
+                title=alert_title,
+                body=alert_body,
+                action_required=False,
+                matter_slug=matter_slug,
+                tags=tags,
+                source="calendar_prep",
+            )
+
+            if alert_id:
+                # Mark as prepped (dedup)
+                trigger_state.set_watermark(watermark_key, datetime.now(timezone.utc))
+                prepped_count += 1
+                logger.info(f"Meeting prep alert #{alert_id} created: {meeting['title']}")
+
+                # Phase 3C: Block 15 min prep time on calendar
+                _block_prep_time(meeting)
+
+        # Phase 3C: Detect calendar conflicts
+        _detect_and_alert_conflicts(meetings, store, trigger_state)
+
+        report_success("calendar")
+        logger.info(f"Calendar prep complete: {prepped_count} new briefings created from {len(meetings)} upcoming meetings")
+
+    except Exception as e:
+        report_failure("calendar", str(e))
+        logger.error(f"calendar poll failed: {e}")
+
 
 def _block_prep_time(meeting: dict):
     """Create a 15-minute prep block before a meeting on the Director's calendar.

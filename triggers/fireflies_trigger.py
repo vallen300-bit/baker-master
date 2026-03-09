@@ -164,98 +164,107 @@ def check_new_transcripts():
     3. Runs pipeline for each new transcript
     4. Updates watermark
     """
-    # FIREFLIES-FETCH-1: Skip if backfill is running
-    if _backfill_running:
-        logger.info("Fireflies trigger: skipping — backfill in progress")
-        return
-
-    logger.info("Fireflies trigger: scanning for new transcripts...")
-
-    watermark = trigger_state.get_watermark("fireflies")
-    logger.info(f"Fireflies watermark: {watermark.isoformat()}")
+    from triggers.sentinel_health import report_success, report_failure
 
     try:
-        new_transcripts = fetch_new_transcripts(watermark)
-    except Exception as e:
-        logger.error(f"Fireflies trigger: fetch failed: {e}")
-        return
+        # FIREFLIES-FETCH-1: Skip if backfill is running
+        if _backfill_running:
+            logger.info("Fireflies trigger: skipping — backfill in progress")
+            return
 
-    if not new_transcripts:
-        logger.info("Fireflies trigger: no new transcripts")
-        return
+        logger.info("Fireflies trigger: scanning for new transcripts...")
 
-    logger.info(f"Fireflies trigger: {len(new_transcripts)} new transcripts found")
-
-    from orchestrator.pipeline import SentinelPipeline, TriggerEvent
-    pipeline = SentinelPipeline()
-    processed = 0
-
-    for transcript in new_transcripts:
-        metadata = transcript.get("metadata", {})
-        source_id = transcript.get("raw_id") or metadata.get("transcript_id", "unknown")
-
-        # Skip if already processed
-        if trigger_state.is_processed("meeting", source_id):
-            continue
-
-        trigger = TriggerEvent(
-            type="meeting",
-            content=transcript["text"],
-            source_id=source_id,
-            contact_name=metadata.get("organizer"),
-            priority="medium",
-        )
-
-        # ARCH-3: Store full transcript in PostgreSQL
-        try:
-            from memory.store_back import SentinelStoreBack
-            store = SentinelStoreBack._get_global_instance()
-            store.store_meeting_transcript(
-                transcript_id=source_id,
-                title=metadata.get("meeting_title", "Untitled"),
-                meeting_date=metadata.get("date"),
-                duration=metadata.get("duration"),
-                organizer=metadata.get("organizer"),
-                participants=metadata.get("participants"),
-                summary=transcript["text"] if "Summary:" in transcript["text"] else None,
-                full_transcript=transcript["text"],
-            )
-        except Exception as _e:
-            logger.warning(f"Failed to store transcript {source_id} in PostgreSQL (non-fatal): {_e}")
-
-        # DEADLINE-SYSTEM-1: Extract deadlines from transcript
-        try:
-            from orchestrator.deadline_manager import extract_deadlines
-            extract_deadlines(
-                content=transcript["text"],
-                source_type="fireflies",
-                source_id=source_id,
-                sender_name=metadata.get("organizer", ""),
-            )
-        except Exception as _e:
-            logger.debug(f"Deadline extraction failed for transcript {source_id}: {_e}")
-
-        # Phase 3C: Extract commitments from meeting transcript
-        try:
-            _extract_commitments_from_meeting(
-                transcript_text=transcript["text"],
-                meeting_title=metadata.get("meeting_title", "Untitled"),
-                participants=metadata.get("participants", ""),
-                source_id=source_id,
-            )
-        except Exception as _e:
-            logger.debug(f"Commitment extraction failed for transcript {source_id}: {_e}")
+        watermark = trigger_state.get_watermark("fireflies")
+        logger.info(f"Fireflies watermark: {watermark.isoformat()}")
 
         try:
-            pipeline.run(trigger)
-            processed += 1
+            new_transcripts = fetch_new_transcripts(watermark)
         except Exception as e:
-            logger.error(f"Fireflies trigger: pipeline failed for transcript {source_id}: {e}")
+            logger.error(f"Fireflies trigger: fetch failed: {e}")
+            return
 
-    # Update watermark
-    trigger_state.set_watermark("fireflies")
+        if not new_transcripts:
+            logger.info("Fireflies trigger: no new transcripts")
+            return
 
-    logger.info(f"Fireflies trigger complete: {processed} transcripts processed")
+        logger.info(f"Fireflies trigger: {len(new_transcripts)} new transcripts found")
+
+        from orchestrator.pipeline import SentinelPipeline, TriggerEvent
+        pipeline = SentinelPipeline()
+        processed = 0
+
+        for transcript in new_transcripts:
+            metadata = transcript.get("metadata", {})
+            source_id = transcript.get("raw_id") or metadata.get("transcript_id", "unknown")
+
+            # Skip if already processed
+            if trigger_state.is_processed("meeting", source_id):
+                continue
+
+            trigger = TriggerEvent(
+                type="meeting",
+                content=transcript["text"],
+                source_id=source_id,
+                contact_name=metadata.get("organizer"),
+                priority="medium",
+            )
+
+            # ARCH-3: Store full transcript in PostgreSQL
+            try:
+                from memory.store_back import SentinelStoreBack
+                store = SentinelStoreBack._get_global_instance()
+                store.store_meeting_transcript(
+                    transcript_id=source_id,
+                    title=metadata.get("meeting_title", "Untitled"),
+                    meeting_date=metadata.get("date"),
+                    duration=metadata.get("duration"),
+                    organizer=metadata.get("organizer"),
+                    participants=metadata.get("participants"),
+                    summary=transcript["text"] if "Summary:" in transcript["text"] else None,
+                    full_transcript=transcript["text"],
+                )
+            except Exception as _e:
+                logger.warning(f"Failed to store transcript {source_id} in PostgreSQL (non-fatal): {_e}")
+
+            # DEADLINE-SYSTEM-1: Extract deadlines from transcript
+            try:
+                from orchestrator.deadline_manager import extract_deadlines
+                extract_deadlines(
+                    content=transcript["text"],
+                    source_type="fireflies",
+                    source_id=source_id,
+                    sender_name=metadata.get("organizer", ""),
+                )
+            except Exception as _e:
+                logger.debug(f"Deadline extraction failed for transcript {source_id}: {_e}")
+
+            # Phase 3C: Extract commitments from meeting transcript
+            try:
+                _extract_commitments_from_meeting(
+                    transcript_text=transcript["text"],
+                    meeting_title=metadata.get("meeting_title", "Untitled"),
+                    participants=metadata.get("participants", ""),
+                    source_id=source_id,
+                )
+            except Exception as _e:
+                logger.debug(f"Commitment extraction failed for transcript {source_id}: {_e}")
+
+            try:
+                pipeline.run(trigger)
+                processed += 1
+            except Exception as e:
+                logger.error(f"Fireflies trigger: pipeline failed for transcript {source_id}: {e}")
+
+        # Update watermark
+        trigger_state.set_watermark("fireflies")
+
+        report_success("fireflies")
+        logger.info(f"Fireflies trigger complete: {processed} transcripts processed")
+
+    except Exception as e:
+        report_failure("fireflies", str(e))
+        logger.error(f"fireflies poll failed: {e}")
+
 
 
 def backfill_fireflies():

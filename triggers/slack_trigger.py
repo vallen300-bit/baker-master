@@ -72,6 +72,7 @@ def _resolve_user_name(client, user_id: str) -> str:
 
 def run_slack_poll():
     """Main entry point — called by scheduler every 5 minutes."""
+    from triggers.sentinel_health import report_success, report_failure
     logger.info("Slack trigger: starting poll...")
 
     from config.settings import config
@@ -80,112 +81,118 @@ def run_slack_poll():
         logger.warning("SLACK_BOT_TOKEN not set — skipping Slack poll")
         return
 
-    client = _get_webclient()
-    store = _get_store()
+    try:
+        client = _get_webclient()
+        store = _get_store()
 
-    channels_polled = 0
-    messages_ingested = 0
-    messages_skipped = 0
-    mentions_pipelined = 0
+        channels_polled = 0
+        messages_ingested = 0
+        messages_skipped = 0
+        mentions_pipelined = 0
 
-    for channel_id in config.slack.channel_ids:
-        watermark_key = f"slack:{channel_id}"
-        watermark = trigger_state.get_watermark(watermark_key)
+        for channel_id in config.slack.channel_ids:
+            watermark_key = f"slack:{channel_id}"
+            watermark = trigger_state.get_watermark(watermark_key)
 
-        # Slack `oldest` is an exclusive lower bound (Unix timestamp string)
-        oldest_ts = f"{watermark.timestamp():.6f}"
+            # Slack `oldest` is an exclusive lower bound (Unix timestamp string)
+            oldest_ts = f"{watermark.timestamp():.6f}"
 
-        try:
-            resp = client.conversations_history(
-                channel=channel_id,
-                oldest=oldest_ts,
-                limit=200,
-            )
-        except Exception as e:
-            logger.warning(f"Slack: error fetching history for channel {channel_id}: {e}")
-            continue
-
-        if not resp.get("ok"):
-            logger.warning(
-                f"Slack: conversations_history failed for {channel_id}: {resp.get('error')}"
-            )
-            continue
-
-        channels_polled += 1
-        messages = resp.get("messages", [])
-
-        if not messages:
-            continue
-
-        latest_ts_dt = watermark
-
-        # Process oldest-first (messages come newest-first from API)
-        for msg in reversed(messages):
-            ts = msg.get("ts", "")
-            if not ts:
+            try:
+                resp = client.conversations_history(
+                    channel=channel_id,
+                    oldest=oldest_ts,
+                    limit=200,
+                )
+            except Exception as e:
+                logger.warning(f"Slack: error fetching history for channel {channel_id}: {e}")
                 continue
 
-            # Skip bot messages, app messages, and Slack system events
-            if msg.get("subtype") or msg.get("bot_id"):
-                messages_skipped += 1
+            if not resp.get("ok"):
+                logger.warning(
+                    f"Slack: conversations_history failed for {channel_id}: {resp.get('error')}"
+                )
                 continue
 
-            user_id = msg.get("user", "")
-            if not user_id:
-                messages_skipped += 1
+            channels_polled += 1
+            messages = resp.get("messages", [])
+
+            if not messages:
                 continue
 
-            text = (msg.get("text") or "").strip()
-            if not text:
-                messages_skipped += 1
-                continue
+            latest_ts_dt = watermark
 
-            user_name = _resolve_user_name(client, user_id)
-            source_id = f"slack:{channel_id}:{ts}"
-
-            # 1. Silent ingest — embed every human message to Qdrant baker-slack
-            _embed_message(store, channel_id, user_name, text, ts, config.slack.collection)
-
-            # 2. @Baker mention — run full pipeline (S3 posts thread reply)
-            baker_uid = config.slack.baker_bot_user_id
-            is_mention = bool(baker_uid and f"<@{baker_uid}>" in text)
-
-            if is_mention and not trigger_state.is_processed("slack", source_id):
-                # LEARNING-LOOP: Check if this is feedback (short message after @Baker)
-                clean_text = text.replace(f"<@{baker_uid}>", "").strip() if baker_uid else text
-                if _is_slack_feedback(clean_text):
-                    _handle_slack_feedback(clean_text, channel_id, ts, client)
-                    trigger_state.mark_processed("slack", source_id)
+            # Process oldest-first (messages come newest-first from API)
+            for msg in reversed(messages):
+                ts = msg.get("ts", "")
+                if not ts:
                     continue
 
-                _feed_to_pipeline(
-                    channel_id=channel_id,
-                    ts=ts,
-                    user_name=user_name,
-                    text=text,
-                    source_id=source_id,
-                )
-                mentions_pipelined += 1
+                # Skip bot messages, app messages, and Slack system events
+                if msg.get("subtype") or msg.get("bot_id"):
+                    messages_skipped += 1
+                    continue
 
-            messages_ingested += 1
+                user_id = msg.get("user", "")
+                if not user_id:
+                    messages_skipped += 1
+                    continue
 
-            # Advance local watermark tracker
-            try:
-                msg_dt = datetime.fromtimestamp(float(ts), tz=timezone.utc)
-                if msg_dt > latest_ts_dt:
-                    latest_ts_dt = msg_dt
-            except (ValueError, OSError):
-                pass
+                text = (msg.get("text") or "").strip()
+                if not text:
+                    messages_skipped += 1
+                    continue
 
-        # Persist watermark for this channel
-        if latest_ts_dt > watermark:
-            trigger_state.set_watermark(watermark_key, latest_ts_dt)
+                user_name = _resolve_user_name(client, user_id)
+                source_id = f"slack:{channel_id}:{ts}"
 
-    logger.info(
-        f"Slack poll complete: {channels_polled} channels polled, "
-        f"{messages_ingested} messages ingested, {messages_skipped} skipped, "
-        f"{mentions_pipelined} mentions pipelined"
-    )
+                # 1. Silent ingest — embed every human message to Qdrant baker-slack
+                _embed_message(store, channel_id, user_name, text, ts, config.slack.collection)
+
+                # 2. @Baker mention — run full pipeline (S3 posts thread reply)
+                baker_uid = config.slack.baker_bot_user_id
+                is_mention = bool(baker_uid and f"<@{baker_uid}>" in text)
+
+                if is_mention and not trigger_state.is_processed("slack", source_id):
+                    # LEARNING-LOOP: Check if this is feedback (short message after @Baker)
+                    clean_text = text.replace(f"<@{baker_uid}>", "").strip() if baker_uid else text
+                    if _is_slack_feedback(clean_text):
+                        _handle_slack_feedback(clean_text, channel_id, ts, client)
+                        trigger_state.mark_processed("slack", source_id)
+                        continue
+
+                    _feed_to_pipeline(
+                        channel_id=channel_id,
+                        ts=ts,
+                        user_name=user_name,
+                        text=text,
+                        source_id=source_id,
+                    )
+                    mentions_pipelined += 1
+
+                messages_ingested += 1
+
+                # Advance local watermark tracker
+                try:
+                    msg_dt = datetime.fromtimestamp(float(ts), tz=timezone.utc)
+                    if msg_dt > latest_ts_dt:
+                        latest_ts_dt = msg_dt
+                except (ValueError, OSError):
+                    pass
+
+            # Persist watermark for this channel
+            if latest_ts_dt > watermark:
+                trigger_state.set_watermark(watermark_key, latest_ts_dt)
+
+        report_success("slack")
+        logger.info(
+            f"Slack poll complete: {channels_polled} channels polled, "
+            f"{messages_ingested} messages ingested, {messages_skipped} skipped, "
+            f"{mentions_pipelined} mentions pipelined"
+        )
+
+    except Exception as e:
+        report_failure("slack", str(e))
+        logger.error(f"Slack poll failed: {e}")
 
 
 # -------------------------------------------------------

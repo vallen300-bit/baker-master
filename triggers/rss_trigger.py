@@ -50,145 +50,154 @@ def _url_hash(url: str) -> str:
 
 def run_rss_poll():
     """Main entry point — called by scheduler every 60 minutes."""
+    from triggers.sentinel_health import report_success, report_failure
     logger.info("RSS trigger: starting poll...")
 
     from config.settings import config
 
-    client = _get_client()
-    store = _get_store()
-    rss_config = config.rss
+    try:
+        client = _get_client()
+        store = _get_store()
+        rss_config = config.rss
 
-    # 1. Load active feeds from PostgreSQL
-    feeds = _get_active_feeds(store)
-    if not feeds:
-        logger.warning(
-            "No RSS feeds configured. Upload OPML via POST /api/rss/import-opml"
-        )
-        return
+        # 1. Load active feeds from PostgreSQL
+        feeds = _get_active_feeds(store)
+        if not feeds:
+            logger.warning(
+                "No RSS feeds configured. Upload OPML via POST /api/rss/import-opml"
+            )
+            report_success("rss")
+            return
 
-    feeds_polled = 0
-    articles_ingested = 0
-    articles_skipped = 0
-    feeds_errored = 0
+        feeds_polled = 0
+        articles_ingested = 0
+        articles_skipped = 0
+        feeds_errored = 0
 
-    # 2. Poll each feed
-    for feed in feeds:
-        feed_id = feed["id"]
-        feed_url = feed["feed_url"]
-        feed_title = feed.get("title") or feed_url
-        url_h = _url_hash(feed_url)
-        watermark_key = f"rss:{url_h}"
+        # 2. Poll each feed
+        for feed in feeds:
+            feed_id = feed["id"]
+            feed_url = feed["feed_url"]
+            feed_title = feed.get("title") or feed_url
+            url_h = _url_hash(feed_url)
+            watermark_key = f"rss:{url_h}"
 
-        # 2a. Get watermark — detect first-ever connect for this feed
-        is_first_connect = not trigger_state.watermark_exists(watermark_key)
-        watermark = trigger_state.get_watermark(watermark_key)
-        if is_first_connect:
-            logger.info(f"RSS feed '{feed_title}': first connect — backfilling all available articles")
+            # 2a. Get watermark — detect first-ever connect for this feed
+            is_first_connect = not trigger_state.watermark_exists(watermark_key)
+            watermark = trigger_state.get_watermark(watermark_key)
+            if is_first_connect:
+                logger.info(f"RSS feed '{feed_title}': first connect — backfilling all available articles")
 
-        # 2b. Fetch feed
-        try:
-            articles = client.fetch_feed(feed_url)
-        except Exception as e:
-            logger.warning(f"Error fetching feed {feed_title}: {e}")
-            _increment_failures(store, feed_id)
-            feeds_errored += 1
-            continue
-
-        if articles is None:
-            articles = []
-
-        feeds_polled += 1
-
-        # If fetch returned empty (client logs its own warnings)
-        if not articles:
-            _update_last_polled(store, feed_id)
-            continue
-
-        # 2c. Filter by watermark + age
-        # On first connect: skip BOTH the watermark filter and the age cutoff to
-        # backfill ALL available articles in the feed.
-        # Dedup via _article_exists() still prevents double-ingestion.
-        cutoff = datetime.now(timezone.utc) - timedelta(days=rss_config.max_article_age_days)
-        new_articles = []
-        for article in articles:
-            pub = article.get("published")
-            if pub is None:
-                # No publish date — include it but it won't advance watermark
-                new_articles.append(article)
-                continue
-            if not is_first_connect and pub <= watermark:
-                articles_skipped += 1
-                continue
-            if not is_first_connect and pub < cutoff:
-                articles_skipped += 1
-                continue
-            new_articles.append(article)
-
-        # Safety cap
-        new_articles = new_articles[:rss_config.max_articles_per_feed]
-
-        if new_articles:
-            _reset_failures(store, feed_id)
-        elif is_first_connect:
-            # No articles on first connect — feed is live but may be sparse.
-            # Don't count as failure; we'll still set the watermark below.
-            logger.info(f"RSS feed '{feed_title}': first connect, no articles to backfill")
-        else:
-            _increment_failures(store, feed_id)
-            logger.warning(f"RSS feed {feed_title}: no new articles after filtering, incrementing failures")
-
-        # 2d. Process each new article
-        latest_pub = watermark
-        for article in new_articles:
-            link = article.get("link", "")
-            if not link:
-                articles_skipped += 1
-                continue
-
-            article_hash = _url_hash(link)
-
-            # Dedup check
-            if _article_exists(store, article_hash):
-                articles_skipped += 1
-                continue
-
-            # Store metadata in PostgreSQL
-            _store_article(store, feed_id, article, article_hash)
-
-            # Embed to Qdrant
-            _embed_article(store, article, feed_title, rss_config.collection)
-
-            # Feed to pipeline
-            _feed_to_pipeline(article, feed_title, url_h)
-
-            # Phase 3C: Relevance scoring for proactive intelligence
+            # 2b. Fetch feed
             try:
-                _check_article_relevance(article, feed_title, store)
-            except Exception as _rel_e:
-                logger.debug(f"Relevance check failed for '{article.get('title', '?')[:40]}': {_rel_e}")
+                articles = client.fetch_feed(feed_url)
+            except Exception as e:
+                logger.warning(f"Error fetching feed {feed_title}: {e}")
+                _increment_failures(store, feed_id)
+                feeds_errored += 1
+                continue
 
-            articles_ingested += 1
+            if articles is None:
+                articles = []
 
-            # Track latest published date
-            pub = article.get("published")
-            if pub and pub > latest_pub:
-                latest_pub = pub
+            feeds_polled += 1
 
-        # 2e. Update watermark
-        # On first connect: always set watermark (even if no articles were ingested)
-        # so subsequent polls don't re-trigger backfill mode.
-        if is_first_connect or latest_pub > watermark:
-            wm_ts = latest_pub if latest_pub > watermark else datetime.now(timezone.utc)
-            trigger_state.set_watermark(watermark_key, wm_ts)
+            # If fetch returned empty (client logs its own warnings)
+            if not articles:
+                _update_last_polled(store, feed_id)
+                continue
 
-        _update_last_polled(store, feed_id)
+            # 2c. Filter by watermark + age
+            # On first connect: skip BOTH the watermark filter and the age cutoff to
+            # backfill ALL available articles in the feed.
+            # Dedup via _article_exists() still prevents double-ingestion.
+            cutoff = datetime.now(timezone.utc) - timedelta(days=rss_config.max_article_age_days)
+            new_articles = []
+            for article in articles:
+                pub = article.get("published")
+                if pub is None:
+                    # No publish date — include it but it won't advance watermark
+                    new_articles.append(article)
+                    continue
+                if not is_first_connect and pub <= watermark:
+                    articles_skipped += 1
+                    continue
+                if not is_first_connect and pub < cutoff:
+                    articles_skipped += 1
+                    continue
+                new_articles.append(article)
 
-    # 3. Summary
-    logger.info(
-        f"RSS poll complete: {feeds_polled} feeds polled, "
-        f"{articles_ingested} articles ingested, {articles_skipped} skipped, "
-        f"{feeds_errored} errors"
-    )
+            # Safety cap
+            new_articles = new_articles[:rss_config.max_articles_per_feed]
+
+            if new_articles:
+                _reset_failures(store, feed_id)
+            elif is_first_connect:
+                # No articles on first connect — feed is live but may be sparse.
+                # Don't count as failure; we'll still set the watermark below.
+                logger.info(f"RSS feed '{feed_title}': first connect, no articles to backfill")
+            else:
+                _increment_failures(store, feed_id)
+                logger.warning(f"RSS feed {feed_title}: no new articles after filtering, incrementing failures")
+
+            # 2d. Process each new article
+            latest_pub = watermark
+            for article in new_articles:
+                link = article.get("link", "")
+                if not link:
+                    articles_skipped += 1
+                    continue
+
+                article_hash = _url_hash(link)
+
+                # Dedup check
+                if _article_exists(store, article_hash):
+                    articles_skipped += 1
+                    continue
+
+                # Store metadata in PostgreSQL
+                _store_article(store, feed_id, article, article_hash)
+
+                # Embed to Qdrant
+                _embed_article(store, article, feed_title, rss_config.collection)
+
+                # Feed to pipeline
+                _feed_to_pipeline(article, feed_title, url_h)
+
+                # Phase 3C: Relevance scoring for proactive intelligence
+                try:
+                    _check_article_relevance(article, feed_title, store)
+                except Exception as _rel_e:
+                    logger.debug(f"Relevance check failed for '{article.get('title', '?')[:40]}': {_rel_e}")
+
+                articles_ingested += 1
+
+                # Track latest published date
+                pub = article.get("published")
+                if pub and pub > latest_pub:
+                    latest_pub = pub
+
+            # 2e. Update watermark
+            # On first connect: always set watermark (even if no articles were ingested)
+            # so subsequent polls don't re-trigger backfill mode.
+            if is_first_connect or latest_pub > watermark:
+                wm_ts = latest_pub if latest_pub > watermark else datetime.now(timezone.utc)
+                trigger_state.set_watermark(watermark_key, wm_ts)
+
+            _update_last_polled(store, feed_id)
+
+        report_success("rss")
+
+        # 3. Summary
+        logger.info(
+            f"RSS poll complete: {feeds_polled} feeds polled, "
+            f"{articles_ingested} articles ingested, {articles_skipped} skipped, "
+            f"{feeds_errored} errors"
+        )
+
+    except Exception as e:
+        report_failure("rss", str(e))
+        logger.error(f"RSS poll failed: {e}")
 
 
 # -------------------------------------------------------

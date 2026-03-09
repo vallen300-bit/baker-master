@@ -366,36 +366,40 @@ def run_clickup_poll():
     Main entry point — called by scheduler every 5 minutes.
     Polls all 6 ClickUp workspaces for updated tasks, upserts to PostgreSQL.
     """
+    from triggers.sentinel_health import report_success, report_failure
     logger.info("ClickUp trigger: starting multi-workspace poll...")
 
-    client = _get_client()
-    store = _get_store()
 
-    # Reset per-cycle write counter
-    client.reset_cycle_counter()
+    try:
+        client = _get_client()
+        store = _get_store()
 
-    total_tasks = 0
-    workspaces_processed = 0
-    request_count_start = client._request_count
+        # Reset per-cycle write counter
+        client.reset_cycle_counter()
 
-    for workspace_id in CLICKUP_WORKSPACE_IDS:
-        try:
-            tasks = _poll_workspace(client, store, workspace_id)
-            total_tasks += tasks
-            workspaces_processed += 1
-            logger.info(f"Workspace {workspace_id}: {tasks} tasks upserted")
-        except Exception as e:
-            logger.error(f"ClickUp trigger: workspace {workspace_id} failed: {e}")
-            # Continue to next workspace — never let one failure crash the poll
+        total_tasks = 0
+        workspaces_processed = 0
+        request_count_start = client._request_count
 
-    requests_used = client._request_count - request_count_start
+        for workspace_id in CLICKUP_WORKSPACE_IDS:
+            try:
+                tasks = _poll_workspace(client, store, workspace_id)
+                total_tasks += tasks
+                workspaces_processed += 1
+                logger.info(f"Workspace {workspace_id}: {tasks} tasks upserted")
+            except Exception as e:
+                logger.error(f"ClickUp trigger: workspace {workspace_id} failed: {e}")
+                # Continue to next workspace — never let one failure crash the poll
 
-    logger.info(
-        f"ClickUp poll complete: {total_tasks} tasks upserted across "
-        f"{workspaces_processed} workspaces ({requests_used} API requests)"
-    )
+        requests_used = client._request_count - request_count_start
 
+        report_success("clickup")
+        logger.info(
+            f"ClickUp poll complete: {total_tasks} tasks upserted across "
+            f"{workspaces_processed} workspaces ({requests_used} API requests)"
+        )
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(name)s | %(message)s")
-    run_clickup_poll()
+    except Exception as e:
+        report_failure("clickup", str(e))
+        logger.error(f"clickup poll failed: {e}")
+
