@@ -46,6 +46,30 @@ function esc(str) {
 function md(text) {
     if (!text) return '';
     let h = esc(text); // XSS-safe: escapes all HTML entities first
+
+    // Tables: detect markdown table blocks and convert to HTML tables
+    h = h.replace(/((?:^\|.+\|$\n?)+)/gm, function(tableBlock) {
+        var rows = tableBlock.trim().split('\n');
+        if (rows.length < 2) return tableBlock;
+        var html = '<table style="border-collapse:collapse;width:100%;font-size:12px;margin:8px 0;">';
+        for (var ri = 0; ri < rows.length; ri++) {
+            var row = rows[ri].trim();
+            if (!row.startsWith('|')) continue;
+            // Skip separator row (|---|---|)
+            if (/^\|[\s\-:|]+\|$/.test(row)) continue;
+            var cells = row.split('|').filter(function(c, i, a) { return i > 0 && i < a.length - 1; });
+            var tag = ri === 0 ? 'th' : 'td';
+            var bgStyle = ri === 0 ? 'background:var(--bg2);font-weight:600;' : '';
+            html += '<tr>';
+            for (var ci = 0; ci < cells.length; ci++) {
+                html += '<' + tag + ' style="padding:4px 8px;border:1px solid var(--border);text-align:left;' + bgStyle + '">' + cells[ci].trim() + '</' + tag + '>';
+            }
+            html += '</tr>';
+        }
+        html += '</table>';
+        return html;
+    });
+
     h = h.replace(/^### (.+)$/gm, '<h3>$1</h3>');
     h = h.replace(/^## (.+)$/gm, '<h2>$1</h2>');
     h = h.replace(/^# (.+)$/gm, '<h1>$1</h1>');
