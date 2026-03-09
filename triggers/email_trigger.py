@@ -22,9 +22,8 @@ logger = logging.getLogger("sentinel.trigger.email")
 _last_gap_alert_time: float = 0.0
 _GAP_ALERT_COOLDOWN = 24 * 3600  # 24 hours between gap alerts
 
-# Diagnostic: last poll error (exposed via /api/status for debugging)
-_last_poll_error: str = ""
-_last_poll_success_at: str = ""
+# Sentinel health monitoring
+from triggers.sentinel_health import report_success as _health_success, report_failure as _health_failure
 
 
 def _get_gmail_service():
@@ -229,20 +228,17 @@ def check_new_emails():
     3. Runs pipeline immediately for high/medium priority
     4. Queues low-priority for daily briefing
     """
-    global _last_poll_error, _last_poll_success_at
     logger.info("Email trigger: checking for new threads...")
 
     try:
         new_threads = poll_gmail()
     except Exception as e:
-        _last_poll_error = f"{datetime.now(timezone.utc).isoformat()}: {e}"
+        _health_failure("email", str(e))
         logger.error(f"Email trigger: Gmail poll failed: {e}")
         # Still update checked watermark so we can distinguish "poll crashed"
         # from "poll never ran" in /api/status
         trigger_state.set_watermark("email_poll_checked", datetime.now(timezone.utc))
         return
-
-    _last_poll_success_at = datetime.now(timezone.utc).isoformat()
 
     if not new_threads:
         logger.info("Email trigger: no new threads")
@@ -273,6 +269,7 @@ def check_new_emails():
                     _last_gap_alert_time = now_ts
                 except Exception as e:
                     logger.error(f"Gap alert dispatch failed: {e}")
+        _health_success("email")
         return
 
     logger.info(f"Email trigger: {len(new_threads)} new threads found")
@@ -427,6 +424,7 @@ def check_new_emails():
     # Always update last-checked (whether emails found or not)
     trigger_state.set_watermark("email_poll_checked", datetime.now(timezone.utc))
 
+    _health_success("email")
     logger.info(
         f"Email trigger complete: {processed} processed, "
         f"{len(batch_for_briefing)} queued for briefing, {skipped} skipped (dedup)"

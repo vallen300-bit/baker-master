@@ -284,10 +284,78 @@ async function loadSystemWidgets() {
     container.appendChild(title);
 
     await Promise.all([
+        renderSentinelWidget(container),
         renderCostWidget(container),
         renderMetricsWidget(container),
         renderQualityWidget(container),
     ]);
+}
+
+async function renderSentinelWidget(container) {
+    try {
+        var resp = await bakerFetch('/api/sentinel-health');
+        if (!resp.ok) return;
+        var data = await resp.json();
+        var sentinels = data.sentinels || [];
+        var summary = data.summary || {};
+
+        if (sentinels.length === 0) return;
+
+        var card = document.createElement('div');
+        card.className = 'system-widget';
+
+        var header = document.createElement('div');
+        header.className = 'system-widget-header';
+        var title = document.createElement('span');
+        title.textContent = 'Sentinel Status';
+        header.appendChild(title);
+
+        var badge = document.createElement('span');
+        var downCount = summary.down || 0;
+        var degradedCount = summary.degraded || 0;
+        if (downCount > 0) {
+            badge.textContent = downCount + ' down';
+            badge.style.cssText = 'color:#f44336;font-weight:600;font-size:11px;';
+        } else if (degradedCount > 0) {
+            badge.textContent = degradedCount + ' degraded';
+            badge.style.cssText = 'color:#ff9800;font-weight:600;font-size:11px;';
+        } else {
+            badge.textContent = 'All healthy';
+            badge.style.cssText = 'color:#4caf50;font-weight:600;font-size:11px;';
+        }
+        header.appendChild(badge);
+        card.appendChild(header);
+
+        var grid = document.createElement('div');
+        grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;';
+
+        sentinels.forEach(function(s) {
+            var dot = document.createElement('div');
+            dot.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2);';
+
+            var circle = document.createElement('span');
+            circle.style.cssText = 'display:inline-block;width:8px;height:8px;border-radius:50%;';
+            var statusColors = {healthy:'#4caf50', degraded:'#ff9800', down:'#f44336', unknown:'#9e9e9e'};
+            circle.style.backgroundColor = statusColors[s.status] || '#9e9e9e';
+            if (s.status === 'down') {
+                circle.style.animation = 'pulse 1.5s infinite';
+            }
+            dot.appendChild(circle);
+
+            var label = document.createElement('span');
+            label.textContent = esc(s.source);
+            if (s.consecutive_failures > 0) {
+                label.title = 'Failures: ' + s.consecutive_failures + (s.last_error ? '\n' + s.last_error : '');
+            }
+            dot.appendChild(label);
+            grid.appendChild(dot);
+        });
+
+        card.appendChild(grid);
+        container.appendChild(card);
+    } catch (e) {
+        console.error('renderSentinelWidget failed:', e);
+    }
 }
 
 async function renderCostWidget(container) {

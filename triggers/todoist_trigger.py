@@ -256,151 +256,150 @@ def run_todoist_poll():
     8. Update watermark
     """
     logger.info("Todoist trigger: starting poll...")
+    from triggers.sentinel_health import report_success, report_failure
 
-    client = _get_client()
-    store = _get_store()
-
-    tasks_upserted = 0
-    tasks_skipped = 0
-    qdrant_writes = 0
-    request_count_start = client._request_count
-
-    # -------------------------------------------------------
-    # Step 1: Fetch projects → build lookup map
-    # -------------------------------------------------------
     try:
+        client = _get_client()
+        store = _get_store()
+
+        tasks_upserted = 0
+        tasks_skipped = 0
+        qdrant_writes = 0
+        request_count_start = client._request_count
+
+        # -------------------------------------------------------
+        # Step 1: Fetch projects → build lookup map
+        # -------------------------------------------------------
         projects = client.get_projects()
         project_map = {str(p["id"]): p.get("name", "") for p in projects}
         logger.info(f"Fetched {len(projects)} Todoist projects")
-    except Exception as e:
-        logger.error(f"Failed to fetch Todoist projects: {e}")
-        return
 
-    # -------------------------------------------------------
-    # Step 2: Fetch sections → build lookup map
-    # -------------------------------------------------------
-    try:
-        sections = client.get_sections()
-        section_map = {str(s["id"]): s.get("name", "") for s in sections}
-        logger.info(f"Fetched {len(sections)} Todoist sections")
-    except Exception as e:
-        logger.warning(f"Failed to fetch Todoist sections (non-fatal): {e}")
-        section_map = {}
+        # -------------------------------------------------------
+        # Step 2: Fetch sections → build lookup map
+        # -------------------------------------------------------
+        try:
+            sections = client.get_sections()
+            section_map = {str(s["id"]): s.get("name", "") for s in sections}
+            logger.info(f"Fetched {len(sections)} Todoist sections")
+        except Exception as e:
+            logger.warning(f"Failed to fetch Todoist sections (non-fatal): {e}")
+            section_map = {}
 
-    # -------------------------------------------------------
-    # Step 3: Fetch labels (for metadata, not critically needed)
-    # -------------------------------------------------------
-    try:
-        labels = client.get_labels()
-        logger.info(f"Fetched {len(labels)} Todoist labels")
-    except Exception as e:
-        logger.warning(f"Failed to fetch Todoist labels (non-fatal): {e}")
-        labels = []
+        # -------------------------------------------------------
+        # Step 3: Fetch labels (for metadata, not critically needed)
+        # -------------------------------------------------------
+        try:
+            labels = client.get_labels()
+            logger.info(f"Fetched {len(labels)} Todoist labels")
+        except Exception as e:
+            logger.warning(f"Failed to fetch Todoist labels (non-fatal): {e}")
+            labels = []
 
-    # -------------------------------------------------------
-    # Step 4-5: Fetch all active tasks and process
-    # -------------------------------------------------------
-    try:
+        # -------------------------------------------------------
+        # Step 4-5: Fetch all active tasks and process
+        # -------------------------------------------------------
         active_tasks = client.get_tasks()
         logger.info(f"Fetched {len(active_tasks)} active Todoist tasks")
-    except Exception as e:
-        logger.error(f"Failed to fetch Todoist tasks: {e}")
-        return
 
-    for task in active_tasks:
-        task_data = _build_task_data(task, project_map, section_map, status="active")
+        for task in active_tasks:
+            task_data = _build_task_data(task, project_map, section_map, status="active")
 
-        # Upsert to PostgreSQL — returns (task_id, changed) tuple
-        try:
-            result = store.upsert_todoist_task(task_data)
-            if result:
-                upserted_id, content_changed = result
-                tasks_upserted += 1
-
-                # Only re-embed to Qdrant if content actually changed
-                if content_changed:
-                    _embed_task_to_qdrant(store, task_data)
-                    qdrant_writes += 1
-                else:
-                    tasks_skipped += 1
-            else:
-                tasks_skipped += 1
-        except Exception as e:
-            logger.error(f"Failed to upsert task {task_data.get('todoist_id')}: {e}")
-            continue
-
-        # Fetch and embed comments
-        comment_count = task.get("comment_count", 0)
-        if comment_count and isinstance(comment_count, int) and comment_count > 0:
-            try:
-                comments = client.get_comments(str(task["id"]))
-                if comments:
-                    _embed_comments_to_qdrant(store, task_data, comments)
-                    qdrant_writes += len(comments)
-            except Exception as e:
-                logger.warning(f"Failed to fetch comments for task {task.get('id')}: {e}")
-
-        # Classify and feed to pipeline (only for new/changed tasks)
-        if result and result[1]:  # content_changed
-            is_new = result and not result[1]  # first upsert = changed but no prior hash
-            classification = _classify_task_change(task_data, is_new=False)
-            _feed_to_pipeline(task_data, classification)
-
-    # -------------------------------------------------------
-    # Step 6-7: Fetch completed tasks since last watermark
-    # -------------------------------------------------------
-    watermark_dt = trigger_state.get_watermark(_WATERMARK_KEY)
-    since_str = watermark_dt.isoformat()
-
-    completed_count = 0
-    offset = 0
-    while True:
-        try:
-            completed_tasks = client.get_completed_tasks(
-                since=since_str, limit=200, offset=offset
-            )
-        except Exception as e:
-            logger.warning(f"Failed to fetch completed tasks (offset={offset}): {e}")
-            break
-
-        if not completed_tasks:
-            break
-
-        for task in completed_tasks:
-            task_data = _build_task_data(task, project_map, section_map, status="completed")
-
+            # Upsert to PostgreSQL — returns (task_id, changed) tuple
             try:
                 result = store.upsert_todoist_task(task_data)
                 if result:
                     upserted_id, content_changed = result
                     tasks_upserted += 1
+
+                    # Only re-embed to Qdrant if content actually changed
                     if content_changed:
                         _embed_task_to_qdrant(store, task_data)
                         qdrant_writes += 1
-
-                    classification = _classify_task_change(task_data, is_new=False)
-                    _feed_to_pipeline(task_data, classification)
-                    completed_count += 1
+                    else:
+                        tasks_skipped += 1
+                else:
+                    tasks_skipped += 1
             except Exception as e:
-                logger.error(f"Failed to process completed task {task_data.get('todoist_id')}: {e}")
+                logger.error(f"Failed to upsert task {task_data.get('todoist_id')}: {e}")
+                continue
 
-        # Paginate
-        if len(completed_tasks) < 200:
-            break
-        offset += 200
+            # Fetch and embed comments
+            comment_count = task.get("comment_count", 0)
+            if comment_count and isinstance(comment_count, int) and comment_count > 0:
+                try:
+                    comments = client.get_comments(str(task["id"]))
+                    if comments:
+                        _embed_comments_to_qdrant(store, task_data, comments)
+                        qdrant_writes += len(comments)
+                except Exception as e:
+                    logger.warning(f"Failed to fetch comments for task {task.get('id')}: {e}")
 
-    # -------------------------------------------------------
-    # Step 8: Update watermark
-    # -------------------------------------------------------
-    trigger_state.set_watermark(_WATERMARK_KEY, datetime.now(timezone.utc))
+            # Classify and feed to pipeline (only for new/changed tasks)
+            if result and result[1]:  # content_changed
+                is_new = result and not result[1]  # first upsert = changed but no prior hash
+                classification = _classify_task_change(task_data, is_new=False)
+                _feed_to_pipeline(task_data, classification)
 
-    requests_used = client._request_count - request_count_start
+        # -------------------------------------------------------
+        # Step 6-7: Fetch completed tasks since last watermark
+        # -------------------------------------------------------
+        watermark_dt = trigger_state.get_watermark(_WATERMARK_KEY)
+        since_str = watermark_dt.isoformat()
 
-    logger.info(
-        f"Todoist poll complete: {tasks_upserted} upserted, {tasks_skipped} skipped (unchanged), "
-        f"{qdrant_writes} Qdrant writes, {completed_count} completed tasks "
-        f"({requests_used} API requests)"
-    )
+        completed_count = 0
+        offset = 0
+        while True:
+            try:
+                completed_tasks = client.get_completed_tasks(
+                    since=since_str, limit=200, offset=offset
+                )
+            except Exception as e:
+                logger.warning(f"Failed to fetch completed tasks (offset={offset}): {e}")
+                break
+
+            if not completed_tasks:
+                break
+
+            for task in completed_tasks:
+                task_data = _build_task_data(task, project_map, section_map, status="completed")
+
+                try:
+                    result = store.upsert_todoist_task(task_data)
+                    if result:
+                        upserted_id, content_changed = result
+                        tasks_upserted += 1
+                        if content_changed:
+                            _embed_task_to_qdrant(store, task_data)
+                            qdrant_writes += 1
+
+                        classification = _classify_task_change(task_data, is_new=False)
+                        _feed_to_pipeline(task_data, classification)
+                        completed_count += 1
+                except Exception as e:
+                    logger.error(f"Failed to process completed task {task_data.get('todoist_id')}: {e}")
+
+            # Paginate
+            if len(completed_tasks) < 200:
+                break
+            offset += 200
+
+        # -------------------------------------------------------
+        # Step 8: Update watermark (only on success path)
+        # -------------------------------------------------------
+        trigger_state.set_watermark(_WATERMARK_KEY, datetime.now(timezone.utc))
+
+        requests_used = client._request_count - request_count_start
+        report_success("todoist")
+
+        logger.info(
+            f"Todoist poll complete: {tasks_upserted} upserted, {tasks_skipped} skipped (unchanged), "
+            f"{qdrant_writes} Qdrant writes, {completed_count} completed tasks "
+            f"({requests_used} API requests)"
+        )
+
+    except Exception as e:
+        report_failure("todoist", str(e))
+        logger.error(f"Todoist poll failed: {e}")
 
 
 if __name__ == "__main__":

@@ -42,104 +42,108 @@ def _get_store():
 
 def run_browser_poll():
     """Main entry point — called by scheduler every 30 minutes."""
+    from triggers.sentinel_health import report_success, report_failure
     logger.info("Browser trigger: starting poll...")
 
     from config.settings import config
 
-    client = _get_client()
-    store = _get_store()
 
-    # 1. Load active browser tasks from PostgreSQL
-    tasks = _get_active_tasks(store)
-    if not tasks:
-        logger.info("No browser tasks configured. Create via POST /api/browser/tasks")
-        return
+    try:
+        client = _get_client()
+        store = _get_store()
 
-    tasks_polled = 0
-    tasks_changed = 0
-    tasks_unchanged = 0
-    tasks_errored = 0
+        # 1. Load active browser tasks from PostgreSQL
+        tasks = _get_active_tasks(store)
+        if not tasks:
+            logger.info("No browser tasks configured. Create via POST /api/browser/tasks")
+            return
 
-    # 2. Execute each task
-    for task in tasks:
-        task_id = task["id"]
-        task_name = task["name"]
-        task_url = task["url"]
-        task_mode = task.get("mode", "simple")
+        tasks_polled = 0
+        tasks_changed = 0
+        tasks_unchanged = 0
+        tasks_errored = 0
 
-        try:
-            start_ms = int(time.time() * 1000)
+        # 2. Execute each task
+        for task in tasks:
+            task_id = task["id"]
+            task_name = task["name"]
+            task_url = task["url"]
+            task_mode = task.get("mode", "simple")
 
-            # 2a. Execute task (simple or browser mode)
-            result = _execute_task(client, task)
+            try:
+                start_ms = int(time.time() * 1000)
 
-            duration_ms = int(time.time() * 1000) - start_ms
+                # 2a. Execute task (simple or browser mode)
+                result = _execute_task(client, task)
 
-            if result.get("error"):
-                logger.warning(f"Browser task '{task_name}' error: {result['error']}")
+                duration_ms = int(time.time() * 1000) - start_ms
+
+                if result.get("error"):
+                    logger.warning(f"Browser task '{task_name}' error: {result['error']}")
+                    _increment_failures(store, task_id)
+                    tasks_errored += 1
+                    continue
+
+                content = result.get("content", "")
+                content_hash = result.get("content_hash", "")
+
+                if not content:
+                    logger.info(f"Browser task '{task_name}': empty result")
+                    _update_last_polled(store, task_id)
+                    tasks_polled += 1
+                    continue
+
+                # 2b. Change detection
+                last_hash = task.get("last_content_hash")
+                if content_hash == last_hash:
+                    logger.info(f"Browser task '{task_name}': no change detected")
+                    _update_last_polled(store, task_id)
+                    tasks_unchanged += 1
+                    tasks_polled += 1
+                    continue
+
+                # 2c. Content changed — store result
+                _store_result(
+                    store, task_id, content, content_hash,
+                    mode_used=task_mode,
+                    steps_count=result.get("steps", 0),
+                    cost_usd=0,
+                    duration_ms=duration_ms,
+                    structured_data=result.get("extracted"),
+                )
+
+                # 2d. Embed to Qdrant
+                _embed_result(store, content, task, config.browser.collection)
+
+                # 2e. Feed to pipeline
+                _feed_to_pipeline(content, task)
+
+                # 2f. Update task state
+                _update_content_hash(store, task_id, content_hash)
+                _update_last_polled(store, task_id)
+                _reset_failures(store, task_id)
+
+                tasks_changed += 1
+                tasks_polled += 1
+                logger.info(f"Browser task '{task_name}': change detected and processed")
+
+            except Exception as e:
+                logger.error(f"Browser task '{task_name}' failed: {e}", exc_info=True)
                 _increment_failures(store, task_id)
                 tasks_errored += 1
-                continue
 
-            content = result.get("content", "")
-            content_hash = result.get("content_hash", "")
+        # 3. Summary
+        report_success("browser")
+        logger.info(
+            f"Browser poll complete: {tasks_polled} polled, "
+            f"{tasks_changed} changed, {tasks_unchanged} unchanged, "
+            f"{tasks_errored} errors"
+        )
 
-            if not content:
-                logger.info(f"Browser task '{task_name}': empty result")
-                _update_last_polled(store, task_id)
-                tasks_polled += 1
-                continue
+    except Exception as e:
+        report_failure("browser", str(e))
+        logger.error(f"browser poll failed: {e}")
 
-            # 2b. Change detection
-            last_hash = task.get("last_content_hash")
-            if content_hash == last_hash:
-                logger.info(f"Browser task '{task_name}': no change detected")
-                _update_last_polled(store, task_id)
-                tasks_unchanged += 1
-                tasks_polled += 1
-                continue
-
-            # 2c. Content changed — store result
-            _store_result(
-                store, task_id, content, content_hash,
-                mode_used=task_mode,
-                steps_count=result.get("steps", 0),
-                cost_usd=0,
-                duration_ms=duration_ms,
-                structured_data=result.get("extracted"),
-            )
-
-            # 2d. Embed to Qdrant
-            _embed_result(store, content, task, config.browser.collection)
-
-            # 2e. Feed to pipeline
-            _feed_to_pipeline(content, task)
-
-            # 2f. Update task state
-            _update_content_hash(store, task_id, content_hash)
-            _update_last_polled(store, task_id)
-            _reset_failures(store, task_id)
-
-            tasks_changed += 1
-            tasks_polled += 1
-            logger.info(f"Browser task '{task_name}': change detected and processed")
-
-        except Exception as e:
-            logger.error(f"Browser task '{task_name}' failed: {e}", exc_info=True)
-            _increment_failures(store, task_id)
-            tasks_errored += 1
-
-    # 3. Summary
-    logger.info(
-        f"Browser poll complete: {tasks_polled} polled, "
-        f"{tasks_changed} changed, {tasks_unchanged} unchanged, "
-        f"{tasks_errored} errors"
-    )
-
-
-# -------------------------------------------------------
-# Single task execution (used by poll + manual trigger)
-# -------------------------------------------------------
 
 def run_single_task(task_id: int) -> dict:
     """Execute a single browser task by ID. Used by POST /api/browser/tasks/{id}/run."""

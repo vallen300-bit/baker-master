@@ -695,14 +695,71 @@ async def health_check():
     except Exception:
         pass
 
-    status = "healthy" if db_ok and scheduler_ok else "degraded"
+    # Sentinel health summary
+    sentinels_healthy = 0
+    sentinels_down = 0
+    sentinels_down_list = []
+    try:
+        from triggers.sentinel_health import get_all_sentinel_health
+        for s in get_all_sentinel_health():
+            if s.get("status") == "healthy":
+                sentinels_healthy += 1
+            elif s.get("status") == "down":
+                sentinels_down += 1
+                sentinels_down_list.append(s.get("source", "?"))
+    except Exception:
+        pass
+
+    status = "healthy"
+    if not db_ok or not scheduler_ok or sentinels_down > 0:
+        status = "degraded"
     return {
         "status": status,
         "database": "connected" if db_ok else "disconnected",
         "scheduler": "running" if scheduler_ok else "stopped",
         "scheduled_jobs": job_count,
+        "sentinels_healthy": sentinels_healthy,
+        "sentinels_down": sentinels_down,
+        "sentinels_down_list": sentinels_down_list,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@app.get("/api/sentinel-health", tags=["system"], dependencies=[Depends(verify_api_key)])
+async def get_sentinel_health():
+    """Sentinel health status for all monitored triggers."""
+    try:
+        from triggers.sentinel_health import get_all_sentinel_health
+        rows = get_all_sentinel_health()
+    except Exception:
+        rows = []
+
+    sentinels = []
+    summary = {"healthy": 0, "degraded": 0, "down": 0, "unknown": 0}
+    for r in rows:
+        st = r.get("status", "unknown")
+        sentinels.append({
+            "source": r.get("source"),
+            "status": st,
+            "last_success": _serialize_val(r.get("last_success_at")),
+            "last_error": r.get("last_error_msg"),
+            "consecutive_failures": r.get("consecutive_failures", 0),
+        })
+        if st in summary:
+            summary[st] += 1
+        else:
+            summary["unknown"] += 1
+
+    return {"sentinels": sentinels, "summary": summary}
+
+
+def _serialize_val(v):
+    """Serialize a single value for JSON."""
+    if v is None:
+        return None
+    if hasattr(v, "isoformat"):
+        return v.isoformat()
+    return str(v)
 
 
 @app.get("/", include_in_schema=False)
@@ -2206,13 +2263,17 @@ async def get_status():
         except Exception:
             pass
 
-        # Email poll diagnostics (Session 15: debug silent failures)
+        # Email poll diagnostics (from sentinel_health table)
         try:
-            from triggers.email_trigger import _last_poll_error, _last_poll_success_at
-            if _last_poll_error:
-                status_data["email_poll_error"] = _last_poll_error
-            if _last_poll_success_at:
-                status_data["email_poll_last_success"] = _last_poll_success_at
+            from triggers.sentinel_health import get_all_sentinel_health
+            email_rows = [r for r in get_all_sentinel_health() if r.get("source") == "email"]
+            if email_rows:
+                eh = email_rows[0]
+                if eh.get("last_error_msg"):
+                    status_data["email_poll_error"] = eh["last_error_msg"]
+                if eh.get("last_success_at"):
+                    ts = eh["last_success_at"]
+                    status_data["email_poll_last_success"] = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
         except Exception:
             pass
 
