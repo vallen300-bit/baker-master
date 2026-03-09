@@ -2566,7 +2566,7 @@ async function sendSpecialistMessage(question) {
             body: JSON.stringify({
                 question: question,
                 capability_slug: _specialistSlug,
-                history: _specialistHistory.slice(-10),
+                history: _specialistHistory.slice(-30),
             }),
         });
         if (!resp.ok) throw new Error('Specialist API returned ' + resp.status);
@@ -2601,7 +2601,7 @@ async function sendSpecialistMessage(question) {
     }
 
     _specialistHistory.push({ role: 'assistant', content: fullResponse });
-    if (_specialistHistory.length > 20) _specialistHistory = _specialistHistory.slice(-20);
+    if (_specialistHistory.length > 30) _specialistHistory = _specialistHistory.slice(-30);
 
     // Add copy button after response
     if (replyEl && fullResponse && !fullResponse.startsWith('Error:')) {
