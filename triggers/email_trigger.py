@@ -235,8 +235,14 @@ def check_new_emails():
     import time as _time
     global _gmail_retry_after, _gmail_backoff_seconds
 
-    # Skip poll if we're in a 429 backoff window
+    # Load persisted backoff state (survives deploys)
     now_ts = _time.time()
+    if _gmail_retry_after == 0.0:
+        persisted = trigger_state.get_watermark("email_429_backoff")
+        if persisted:
+            _gmail_retry_after = persisted.timestamp()
+
+    # Skip poll if we're in a 429 backoff window
     if now_ts < _gmail_retry_after:
         remaining = int(_gmail_retry_after - now_ts)
         logger.info(f"Email trigger: skipping poll — Gmail 429 backoff ({remaining}s remaining)")
@@ -262,6 +268,9 @@ def check_new_emails():
                     retry_dt = datetime.fromisoformat(retry_match.group(1).replace("Z", "+00:00"))
                     _gmail_retry_after = retry_dt.timestamp() + 60  # add 60s buffer
                     _gmail_backoff_seconds = 0  # reset exponential — we have a real timestamp
+                    # Persist to DB so backoff survives deploys
+                    backoff_until = datetime.fromtimestamp(_gmail_retry_after, tz=timezone.utc)
+                    trigger_state.set_watermark("email_429_backoff", backoff_until)
                     logger.info(f"Email trigger: 429 retry-after parsed → backoff until {retry_dt.isoformat()} + 60s")
                 except (ValueError, TypeError):
                     pass
@@ -273,6 +282,8 @@ def check_new_emails():
                 else:
                     _gmail_backoff_seconds = min(_gmail_backoff_seconds * 2, 3600)  # max 1 hour
                 _gmail_retry_after = now_ts + _gmail_backoff_seconds
+                backoff_until = datetime.fromtimestamp(_gmail_retry_after, tz=timezone.utc)
+                trigger_state.set_watermark("email_429_backoff", backoff_until)
                 logger.info(f"Email trigger: 429 exponential backoff → {int(_gmail_backoff_seconds)}s")
 
         # Still update checked watermark so we can distinguish "poll crashed"
@@ -283,6 +294,11 @@ def check_new_emails():
     # Poll succeeded — reset 429 backoff state
     _gmail_retry_after = 0.0
     _gmail_backoff_seconds = 0.0
+    # Clear persisted backoff
+    try:
+        trigger_state.set_watermark("email_429_backoff", datetime(2000, 1, 1, tzinfo=timezone.utc))
+    except Exception:
+        pass
 
     if not new_threads:
         logger.info("Email trigger: no new threads")
