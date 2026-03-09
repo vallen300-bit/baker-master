@@ -39,8 +39,8 @@ def ensure_agent_tool_calls_table(conn):
             )
         """)
         cur.execute("""
-            CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_date
-            ON agent_tool_calls (DATE(called_at))
+            CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_called_at
+            ON agent_tool_calls (called_at)
         """)
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_tool

@@ -62,8 +62,8 @@ def ensure_api_cost_log_table(conn):
             )
         """)
         cur.execute("""
-            CREATE INDEX IF NOT EXISTS idx_api_cost_log_date
-            ON api_cost_log (DATE(logged_at))
+            CREATE INDEX IF NOT EXISTS idx_api_cost_log_logged_at
+            ON api_cost_log (logged_at)
         """)
         conn.commit()
         cur.close()

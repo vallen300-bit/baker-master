@@ -93,7 +93,9 @@ def run_dropbox_poll():
             # 409 path not found → folder may not exist yet
             if "409" in str(e) or "path/not_found" in str(e):
                 logger.warning(f"Dropbox folder {watch_path} not found — skipping poll (create the folder to start)")
+                report_success("dropbox")  # not an error — folder just doesn't exist yet
                 return
+            report_failure("dropbox", str(e))
             logger.error(f"Failed to list Dropbox folder {watch_path}: {e}")
             return
 
