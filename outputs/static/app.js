@@ -1335,7 +1335,7 @@ async function sendScanMessage(question) {
     const assistantId = 'scan-reply-' + Date.now();
     appendScanBubble('assistant', '', assistantId);
     const replyEl = document.getElementById(assistantId);
-    if (replyEl) replyEl.innerHTML = '<span style="color:var(--text3);font-size:12px;">Baker is thinking\u2026</span>';
+    if (replyEl) replyEl.innerHTML = '<div class="thinking"><span class="thinking-dots"><span></span><span></span><span></span></span> Baker is thinking...</div>';
 
     let fullResponse = '';
     try {
@@ -1858,7 +1858,7 @@ async function _loadContactExpand(expandArea, contact) {
 }
 
 async function _runNetworkingAction(contactId, actionKey, responseArea) {
-    responseArea.textContent = 'Baker is thinking...';
+    responseArea.innerHTML = '<div class="thinking"><span class="thinking-dots"><span></span><span></span><span></span></span> Baker is thinking...</div>';
     try {
         var resp = await bakerFetch('/api/networking/contact/' + contactId + '/action', {
             method: 'POST',
@@ -2556,7 +2556,7 @@ async function sendSpecialistMessage(question) {
     var replyId = 'specialist-reply-' + Date.now();
     appendSpecialistBubble('assistant', '', replyId);
     var replyEl = document.getElementById(replyId);
-    if (replyEl) replyEl.innerHTML = '<span style="color:var(--text3);font-size:12px;">Baker is thinking\u2026</span>';
+    if (replyEl) replyEl.innerHTML = '<div class="thinking"><span class="thinking-dots"><span></span><span></span><span></span></span> Baker is thinking...</div>';
 
     var fullResponse = '';
     try {
