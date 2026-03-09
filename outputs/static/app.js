@@ -1311,6 +1311,7 @@ async function sendScanMessage(question) {
     const assistantId = 'scan-reply-' + Date.now();
     appendScanBubble('assistant', '', assistantId);
     const replyEl = document.getElementById(assistantId);
+    if (replyEl) replyEl.innerHTML = '<span style="color:var(--text3);font-size:12px;">Baker is thinking\u2026</span>';
 
     let fullResponse = '';
     try {
@@ -2315,6 +2316,7 @@ async function sendSpecialistMessage(question) {
     var replyId = 'specialist-reply-' + Date.now();
     appendSpecialistBubble('assistant', '', replyId);
     var replyEl = document.getElementById(replyId);
+    if (replyEl) replyEl.innerHTML = '<span style="color:var(--text3);font-size:12px;">Baker is thinking\u2026</span>';
 
     var fullResponse = '';
     try {
