@@ -27,8 +27,10 @@ def _match_matter_slug(title: str, body: str, store: SentinelStoreBack) -> Optio
     """
     Match alert title+body against matter_registry keywords to auto-assign matter_slug.
     Returns matter_name (used as slug) if a match is found, None otherwise.
-    Uses simple case-insensitive keyword matching — same approach as capability trigger patterns.
+    Uses case-insensitive matching: keywords as substrings, short keywords (<=3 chars)
+    as word-boundary matches, people as partial name matches (last name sufficient).
     """
+    import re as _re
     try:
         matters = store.get_matters(status="active")
         if not matters:
@@ -49,21 +51,39 @@ def _match_matter_slug(title: str, body: str, store: SentinelStoreBack) -> Optio
             if name and name in search_text:
                 score += 3
 
-            # Match on keywords
+            # Match on keywords — word-boundary for short terms, substring for longer
             for kw in keywords:
-                if kw and kw.lower() in search_text:
-                    score += 2
+                if not kw:
+                    continue
+                kw_lower = kw.lower()
+                if len(kw_lower) <= 3:
+                    # Short keywords (BB, MO, AO) — require word boundary
+                    if _re.search(r'\b' + _re.escape(kw_lower) + r'\b', search_text):
+                        score += 2
+                else:
+                    if kw_lower in search_text:
+                        score += 2
 
-            # Match on people names
+            # Match on people — check each name part (last name match is enough)
             for person in people:
-                if person and person.lower() in search_text:
-                    score += 1
+                if not person:
+                    continue
+                person_lower = person.lower()
+                # Full name match
+                if person_lower in search_text:
+                    score += 2
+                    continue
+                # Partial: any name part >= 4 chars (avoids matching "Mr", "Dr")
+                for part in person_lower.split():
+                    if len(part) >= 4 and part in search_text:
+                        score += 1
+                        break
 
             if score > best_score:
                 best_score = score
                 best_match = matter.get("matter_name")
 
-        if best_score >= 2:  # Require at least a keyword match
+        if best_score >= 1:  # Even a single person-name match is meaningful
             return best_match
         return None
     except Exception as e:
@@ -419,8 +439,8 @@ class SentinelPipeline:
                         tags=tags,
                         source="pipeline",
                     )
-                    # COCKPIT-ALERT-UI: generate structured actions for T1/T2 alerts
-                    if alert_id and tier <= 2:
+                    # COCKPIT-ALERT-UI: generate structured actions for T1/T2/T3 alerts
+                    if alert_id and tier <= 3:
                         try:
                             sa = _generate_structured_actions(
                                 self.claude,

@@ -536,7 +536,7 @@ async function loadMattersSummary() {
             for (const m of data.matters) {
                 const slug = m.matter_slug || '_ungrouped';
                 const label = slug === '_ungrouped' ? 'Ungrouped' : slug.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
-                const dotClass = tierClass(m.worst_tier);
+                const dotClass = (m.worst_tier && m.worst_tier <= 2) ? 'red' : 'slate';
 
                 const item = document.createElement('div');
                 item.className = 'nav-item';

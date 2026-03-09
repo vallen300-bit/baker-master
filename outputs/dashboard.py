@@ -865,6 +865,49 @@ async def dismiss_alert(alert_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/alerts/reassign-matters", tags=["alerts"], dependencies=[Depends(verify_api_key)])
+async def reassign_matters():
+    """Re-run matter matching on all pending alerts with NULL matter_slug."""
+    try:
+        store = _get_store()
+        from orchestrator.pipeline import _match_matter_slug
+        import psycopg2.extras
+
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT id, title, body FROM alerts
+                WHERE status = 'pending' AND matter_slug IS NULL
+            """)
+            rows = cur.fetchall()
+
+            updated = 0
+            for row in rows:
+                slug = _match_matter_slug(row["title"], row.get("body") or "", store)
+                if slug:
+                    cur.execute(
+                        "UPDATE alerts SET matter_slug = %s WHERE id = %s",
+                        (slug, row["id"]),
+                    )
+                    updated += 1
+
+            conn.commit()
+            cur.close()
+        finally:
+            store._put_conn(conn)
+
+        return {"reassigned": updated, "total_checked": len(rows)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"reassign-matters failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ============================================================
 # V3 Dashboard endpoints
 # ============================================================
