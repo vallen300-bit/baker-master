@@ -1383,10 +1383,20 @@ class SentinelStoreBack:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_capability_sets_type ON capability_sets(capability_type)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_capability_sets_active ON capability_sets(active) WHERE active = TRUE")
 
+            # SPECIALIST-THINKING-1: Add use_thinking column
+            cur.execute("ALTER TABLE capability_sets ADD COLUMN IF NOT EXISTS use_thinking BOOLEAN DEFAULT FALSE")
+
             # Seed data — only if table is empty
             cur.execute("SELECT COUNT(*) FROM capability_sets")
             if cur.fetchone()[0] == 0:
                 self._seed_capability_sets(cur)
+
+            # SPECIALIST-THINKING-1: Set use_thinking for analytical specialists
+            cur.execute("""
+                UPDATE capability_sets SET use_thinking = TRUE
+                WHERE slug IN ('legal', 'finance', 'profiling', 'sales', 'asset_management', 'research')
+                  AND use_thinking = FALSE
+            """)
 
             conn.commit()
             cur.close()

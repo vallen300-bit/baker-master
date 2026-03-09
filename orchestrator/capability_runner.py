@@ -96,17 +96,23 @@ class CapabilityRunner:
                     elapsed_ms=int((time.time() - t0) * 1000),
                 )
 
-            response = self.claude.messages.create(
-                model=config.claude.model,
-                max_tokens=4096,
-                system=system,
-                messages=messages,
-                tools=tools,
-            )
+            # Build API params — SPECIALIST-THINKING-1: add extended thinking
+            api_params = {
+                "model": config.claude.model,
+                "max_tokens": 4096,
+                "system": system,
+                "messages": messages,
+                "tools": tools,
+            }
+            if capability.use_thinking:
+                api_params["thinking"] = {"type": "enabled", "budget_tokens": 10000}
+                api_params["max_tokens"] = max(api_params["max_tokens"], 16000)
+
+            response = self.claude.messages.create(**api_params)
             total_in += response.usage.input_tokens
             total_out += response.usage.output_tokens
 
-            # PHASE-4A: Log API cost
+            # PHASE-4A: Log API cost (includes thinking tokens if present)
             self._log_api_cost(config.claude.model, response.usage.input_tokens,
                                response.usage.output_tokens,
                                source="capability_runner",
@@ -131,6 +137,8 @@ class CapabilityRunner:
                 assistant_content = []
                 tool_uses = []
                 for block in response.content:
+                    if block.type == "thinking":
+                        continue  # SPECIALIST-THINKING-1: skip thinking blocks
                     if block.type == "text":
                         assistant_content.append({"type": "text", "text": block.text})
                     elif block.type == "tool_use":
@@ -241,17 +249,23 @@ class CapabilityRunner:
                 yield {"_agent_result": result}
                 return
 
-            response = self.claude.messages.create(
-                model=config.claude.model,
-                max_tokens=4096,
-                system=system,
-                messages=messages,
-                tools=tools,
-            )
+            # Build API params — SPECIALIST-THINKING-1: add extended thinking
+            api_params = {
+                "model": config.claude.model,
+                "max_tokens": 4096,
+                "system": system,
+                "messages": messages,
+                "tools": tools,
+            }
+            if capability.use_thinking:
+                api_params["thinking"] = {"type": "enabled", "budget_tokens": 10000}
+                api_params["max_tokens"] = max(api_params["max_tokens"], 16000)
+
+            response = self.claude.messages.create(**api_params)
             total_in += response.usage.input_tokens
             total_out += response.usage.output_tokens
 
-            # PHASE-4A: Log API cost
+            # PHASE-4A: Log API cost (includes thinking tokens if present)
             self._log_api_cost(config.claude.model, response.usage.input_tokens,
                                response.usage.output_tokens,
                                source="capability_runner_streaming",
@@ -259,6 +273,9 @@ class CapabilityRunner:
 
             if response.stop_reason == "end_turn":
                 for block in response.content:
+                    # SPECIALIST-THINKING-1: skip thinking blocks (internal reasoning)
+                    if block.type == "thinking":
+                        continue
                     if block.type == "text" and block.text:
                         full_answer += block.text
                         yield {"token": block.text}
@@ -275,6 +292,8 @@ class CapabilityRunner:
                 assistant_content = []
                 tool_uses = []
                 for block in response.content:
+                    if block.type == "thinking":
+                        continue  # SPECIALIST-THINKING-1: skip thinking blocks
                     if block.type == "text":
                         assistant_content.append({"type": "text", "text": block.text})
                         if block.text:
@@ -459,7 +478,13 @@ class CapabilityRunner:
             f"\n\n## CAPABILITY ROLE: {capability.name}\n"
             f"{capability.role_description}\n\n"
             f"Focus your analysis on this domain. Use your tools to retrieve "
-            f"relevant information before answering."
+            f"relevant information before answering.\n\n"
+            f"## CITATION RULES\n"
+            f"When referencing information from retrieved sources, cite them using "
+            f"[Source: label] format inline. The sources are marked with [SOURCE:label]...[/SOURCE] "
+            f"tags in the tool results.\n"
+            f'Example: "The payment deadline is March 11 [Source: Email from Ofenheimer, 6 Mar 2026]."\n'
+            f"Always cite the specific source — never fabricate citations."
         )
         enriched = base + role_injection
 

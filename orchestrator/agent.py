@@ -665,14 +665,45 @@ class ToolExecutor:
             return f"[No {label.lower()} results found]"
         parts = [f"--- {label} ({len(contexts)} results) ---"]
         for ctx in contexts:
-            source = ctx.source.upper()
-            ctx_label = ctx.metadata.get("label", "unknown")
-            date_str = ctx.metadata.get("date", "")
-            meta = f" [{date_str}]" if date_str else ""
+            source_label = _build_source_label(ctx.metadata, ctx.source)
             # Cap individual results at 2000 chars to keep tool results reasonable
             content = ctx.content[:2000]
-            parts.append(f"[{source}] {ctx_label}{meta}: {content}")
+            parts.append(f"[SOURCE:{source_label}]\n{content}\n[/SOURCE]")
         return "\n".join(parts)
+
+
+def _build_source_label(metadata: dict, source: str = "") -> str:
+    """Build human-readable source label from chunk metadata for citations."""
+    content_type = metadata.get("content_type", source or "")
+
+    if "email" in content_type.lower():
+        sender = metadata.get("sender", metadata.get("sender_name", "Unknown"))
+        subject = metadata.get("subject", "")[:40]
+        date = (metadata.get("date", "") or "")[:10]
+        return f"Email from {sender}: {subject}, {date}".rstrip(", ")
+
+    elif "meeting" in content_type.lower() or "transcript" in content_type.lower():
+        title = metadata.get("title", metadata.get("label", "Meeting"))[:40]
+        date = (metadata.get("date", "") or "")[:10]
+        return f"Meeting: {title}, {date}".rstrip(", ")
+
+    elif "whatsapp" in content_type.lower():
+        sender = metadata.get("sender", metadata.get("author", "Unknown"))
+        date = (metadata.get("date", "") or "")[:10]
+        return f"WhatsApp from {sender}, {date}".rstrip(", ")
+
+    elif "clickup" in content_type.lower():
+        name = metadata.get("name", metadata.get("label", "Task"))[:40]
+        return f"ClickUp: {name}"
+
+    elif "document" in content_type.lower():
+        label = metadata.get("label", metadata.get("filename", "Document"))[:40]
+        return f"Document: {label}"
+
+    else:
+        label = metadata.get("label", content_type or source or "Source")[:40]
+        date = (metadata.get("date", "") or "")[:10]
+        return f"{label}, {date}".rstrip(", ") if date else label
 
 
 # ─────────────────────────────────────────────────

@@ -36,6 +36,7 @@ class CapabilityDef:
     max_iterations: int = 5
     timeout_seconds: float = 30.0
     active: bool = True
+    use_thinking: bool = False  # SPECIALIST-THINKING-1: extended thinking for analytical specialists
     # Compiled regex patterns (not stored in DB, built at cache refresh)
     _compiled_patterns: list = field(default_factory=list, repr=False)
 
@@ -100,6 +101,7 @@ class CapabilityRegistry:
                         max_iterations=row.get("max_iterations", 5),
                         timeout_seconds=row.get("timeout_seconds", 30.0),
                         active=row.get("active", True),
+                        use_thinking=row.get("use_thinking", False),
                         _compiled_patterns=compiled,
                     )
                     caps.append(cap)

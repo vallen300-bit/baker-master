@@ -76,6 +76,8 @@ function md(text) {
     h = h.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
     h = h.replace(/\*(.+?)\*/g, '<em>$1</em>');
     h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    // SPECIALIST-THINKING-1: Render citation badges [Source: label]
+    h = h.replace(/\[Source: ([^\]]+)\]/g, '<span class="citation" title="$1">$1</span>');
     h = h.replace(/^- (.+)$/gm, '<li>$1</li>');
     h = h.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
     h = h.replace(/\n/g, '<br>');

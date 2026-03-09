@@ -440,6 +440,13 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
   50% { opacity: 0.4; }
 }
 
+/* === CITATIONS (SPECIALIST-THINKING-1) === */
+.citation {
+  font-size: 10px; background: var(--bg2); color: var(--text3);
+  padding: 1px 6px; border-radius: 3px; cursor: help;
+  white-space: nowrap; vertical-align: baseline;
+}
+
 /* === COMING SOON PLACEHOLDER === */
 .coming-soon {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
