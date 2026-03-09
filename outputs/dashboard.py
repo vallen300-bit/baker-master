@@ -819,7 +819,7 @@ async def get_morning_brief():
             # Stats: actions completed (capability_runs in last 24h)
             cur.execute("""
                 SELECT COUNT(*) AS cnt FROM capability_runs
-                WHERE started_at >= NOW() - INTERVAL '24 hours' AND status = 'completed'
+                WHERE created_at >= NOW() - INTERVAL '24 hours' AND status = 'completed'
             """)
             actions_completed = cur.fetchone()["cnt"]
 
@@ -841,10 +841,10 @@ async def get_morning_brief():
 
             # Activity feed (recent capability runs)
             cur.execute("""
-                SELECT capability_slug, status, started_at, finished_at, iterations, tool_calls_count
+                SELECT capability_slug, status, created_at, completed_at, iterations
                 FROM capability_runs
-                WHERE started_at >= NOW() - INTERVAL '24 hours'
-                ORDER BY started_at DESC LIMIT 10
+                WHERE created_at >= NOW() - INTERVAL '24 hours'
+                ORDER BY created_at DESC LIMIT 10
             """)
             activity = [_serialize(dict(r)) for r in cur.fetchall()]
 
@@ -1043,10 +1043,10 @@ async def get_activity_feed(hours: int = Query(24, ge=1, le=168)):
             # Capability runs
             cur.execute("""
                 SELECT 'capability_run' AS type, capability_slug AS label,
-                       status, started_at AS timestamp, iterations, tool_calls_count
+                       status, created_at AS timestamp, iterations
                 FROM capability_runs
-                WHERE started_at >= NOW() - INTERVAL '%s hours'
-                ORDER BY started_at DESC LIMIT 20
+                WHERE created_at >= NOW() - INTERVAL '%s hours'
+                ORDER BY created_at DESC LIMIT 20
             """, (hours,))
             runs = [_serialize(dict(r)) for r in cur.fetchall()]
 
