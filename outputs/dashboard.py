@@ -2308,6 +2308,39 @@ async def get_clickup_task(task_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/trigger-watermarks", tags=["system"], dependencies=[Depends(verify_api_key)])
+async def get_trigger_watermarks():
+    """Diagnostic: show all trigger watermarks for polling health checks."""
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            return {"error": "no db connection"}
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT source, last_seen, updated_at FROM trigger_watermarks ORDER BY source"
+            )
+            rows = cur.fetchall()
+            cur.close()
+            now = datetime.now(timezone.utc)
+            return {
+                "watermarks": [
+                    {
+                        "source": r[0],
+                        "last_seen": r[1].isoformat() if r[1] else None,
+                        "updated_at": r[2].isoformat() if r[2] else None,
+                        "age_hours": round((now - r[1]).total_seconds() / 3600, 1) if r[1] else None,
+                    }
+                    for r in rows
+                ]
+            }
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/clickup/sync-status", tags=["clickup"], dependencies=[Depends(verify_api_key)])
 async def get_clickup_sync_status():
     """Get ClickUp sync health: last poll per workspace, total count."""
