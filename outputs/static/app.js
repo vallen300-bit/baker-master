@@ -2319,7 +2319,13 @@ async function init() {
     // Greeting
     var hour = new Date().getHours();
     var greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
-    setText('briefGreeting', greet + ', Dimitry');
+    var greetEl = document.getElementById('briefGreeting');
+    if (greetEl) {
+        var now = new Date();
+        var dateStr = now.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+        var timeStr = now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+        greetEl.innerHTML = '<span>' + esc(greet + ', Dimitry') + '</span><span style="font-size:14px;color:var(--text3);font-weight:400;">' + esc(dateStr + ' \u00B7 ' + timeStr) + '</span>';
+    }
 
     // Sidebar navigation (static items)
     document.querySelectorAll('.nav-item[data-tab]').forEach(function(item) {
