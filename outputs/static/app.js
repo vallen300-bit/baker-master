@@ -1412,6 +1412,23 @@ async function sendScanMessage(question) {
     scanHistory.push({ role: 'assistant', content: fullResponse });
     if (scanHistory.length > 20) scanHistory = scanHistory.slice(-20);
 
+    // Copy button for Ask Baker responses
+    if (replyEl && fullResponse && !fullResponse.startsWith('Connection error:')) {
+        var copyBar = document.createElement('div');
+        copyBar.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
+        var cpBtn = document.createElement('button');
+        cpBtn.textContent = 'Copy';
+        cpBtn.style.cssText = 'font-size:11px;padding:3px 10px;border:1px solid var(--border);color:var(--text2);background:var(--bg1);border-radius:4px;cursor:pointer;';
+        cpBtn.addEventListener('click', function() {
+            navigator.clipboard.writeText(fullResponse).then(function() {
+                cpBtn.textContent = 'Copied';
+                setTimeout(function() { cpBtn.textContent = 'Copy'; }, 2000);
+            });
+        });
+        copyBar.appendChild(cpBtn);
+        replyEl.appendChild(copyBar);
+    }
+
     // LEARNING-LOOP: Render feedback buttons if we got a task_id
     if (window._lastScanTaskId && replyEl) {
         renderFeedbackButtons(window._lastScanTaskId, replyEl);
@@ -2386,6 +2403,44 @@ async function sendSpecialistMessage(question) {
 
     _specialistHistory.push({ role: 'assistant', content: fullResponse });
     if (_specialistHistory.length > 20) _specialistHistory = _specialistHistory.slice(-20);
+
+    // Add copy button after response
+    if (replyEl && fullResponse && !fullResponse.startsWith('Error:')) {
+        var toolbar = document.createElement('div');
+        toolbar.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
+
+        var copyBtn = document.createElement('button');
+        copyBtn.textContent = 'Copy';
+        copyBtn.style.cssText = 'font-size:11px;padding:3px 10px;border:1px solid var(--border);color:var(--text2);background:var(--bg1);border-radius:4px;cursor:pointer;';
+        copyBtn.addEventListener('click', function() {
+            navigator.clipboard.writeText(fullResponse).then(function() {
+                copyBtn.textContent = 'Copied';
+                setTimeout(function() { copyBtn.textContent = 'Copy'; }, 2000);
+            });
+        });
+        toolbar.appendChild(copyBtn);
+
+        var saveBtn = document.createElement('button');
+        saveBtn.textContent = 'Save to Memory';
+        saveBtn.style.cssText = 'font-size:11px;padding:3px 10px;border:1px solid var(--blue);color:var(--blue);background:transparent;border-radius:4px;cursor:pointer;';
+        saveBtn.addEventListener('click', function() {
+            bakerFetch('/api/artifacts/save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    content: fullResponse,
+                    title: 'Specialist: ' + (_specialistSlug || 'analysis'),
+                    source: 'specialist_' + (_specialistSlug || 'unknown'),
+                }),
+            }).then(function(r) {
+                if (r.ok) { saveBtn.textContent = 'Saved'; saveBtn.disabled = true; }
+                else { saveBtn.textContent = 'Failed'; }
+            });
+        });
+        toolbar.appendChild(saveBtn);
+
+        replyEl.appendChild(toolbar);
+    }
 
     _specialistStreaming = false;
     if (sendBtn) sendBtn.disabled = false;
