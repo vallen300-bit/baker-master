@@ -1924,53 +1924,167 @@ async function populateAssignDropdowns() {
 async function loadDeadlinesTab() {
     var container = document.getElementById('deadlinesContent');
     if (!container) return;
-    container.textContent = 'Loading deadlines...';
+    container.textContent = 'Loading...';
 
     try {
-        var resp = await bakerFetch('/api/deadlines');
-        if (!resp.ok) return;
-        var data = await resp.json();
+        // Fetch both deadlines and commitments, merge into one list
+        var [dlResp, cmResp] = await Promise.all([
+            bakerFetch('/api/deadlines?limit=100'),
+            bakerFetch('/api/commitments?status=active&limit=200'),
+        ]);
+        var allItems = [];
 
-        if (!data.deadlines || data.deadlines.length === 0) {
-            container.textContent = 'No active deadlines.';
+        if (dlResp.ok) {
+            var dlData = await dlResp.json();
+            (dlData.deadlines || []).forEach(function(d) {
+                allItems.push({ type: 'deadline', id: d.id, description: d.description, due_date: d.due_date, source: d.source_type || 'deadline', matter: d.matter_slug, priority: d.priority, status: d.status });
+            });
+        }
+        if (cmResp.ok) {
+            var cmData = await cmResp.json();
+            (cmData.commitments || []).forEach(function(c) {
+                allItems.push({ type: 'commitment', id: c.id, description: c.description, due_date: c.due_date, source: c.source_type || c.source || 'commitment', matter: c.matter_slug, assigned_to: c.assigned_to, status: c.status });
+            });
+        }
+
+        // Also fetch overdue commitments
+        var ovResp = await bakerFetch('/api/commitments?status=overdue&limit=200');
+        if (ovResp.ok) {
+            var ovData = await ovResp.json();
+            (ovData.commitments || []).forEach(function(c) {
+                allItems.push({ type: 'commitment', id: c.id, description: c.description, due_date: c.due_date, source: c.source_type || c.source || 'commitment', matter: c.matter_slug, assigned_to: c.assigned_to, status: c.status });
+            });
+        }
+
+        // Dedup by type+id
+        var seen = {};
+        allItems = allItems.filter(function(item) {
+            var key = item.type + ':' + item.id;
+            if (seen[key]) return false;
+            seen[key] = true;
+            return true;
+        });
+
+        // Sort by due_date (nulls last)
+        allItems.sort(function(a, b) {
+            var da = a.due_date || '9999-12-31';
+            var db = b.due_date || '9999-12-31';
+            return da < db ? -1 : da > db ? 1 : 0;
+        });
+
+        if (allItems.length === 0) {
+            container.textContent = 'No active deadlines or commitments.';
             container.style.cssText = 'color:var(--text3);font-size:13px;';
             return;
         }
 
+        // Group by urgency
+        var overdue = [], today = [], thisWeek = [], later = [];
+        for (var i = 0; i < allItems.length; i++) {
+            var item = allItems[i];
+            var daysText = fmtDeadlineDays(item.due_date);
+            if (daysText.includes('overdue')) overdue.push(item);
+            else if (daysText === 'Today') today.push(item);
+            else if (daysText === 'Tomorrow' || (parseInt(daysText) > 0 && parseInt(daysText) <= 7)) thisWeek.push(item);
+            else later.push(item);
+        }
+
         container.textContent = '';
+
         var header = document.createElement('div');
         header.className = 'section-label';
-        header.textContent = 'Active deadlines (' + data.deadlines.length + ')';
+        header.textContent = 'Deadlines & Commitments (' + allItems.length + ')';
         container.appendChild(header);
 
-        // Group by urgency: overdue/today, this week, later
-        var overdue = [], thisWeek = [], later = [];
-        for (var i = 0; i < data.deadlines.length; i++) {
-            var dl = data.deadlines[i];
-            var daysText = fmtDeadlineDays(dl.due_date);
-            if (daysText.includes('overdue') || daysText === 'Today') overdue.push(dl);
-            else if (daysText === 'Tomorrow' || parseInt(daysText) <= 7) thisWeek.push(dl);
-            else later.push(dl);
-        }
-
-        function renderGroup(label, items) {
+        function renderTimeGroup(label, items, isUrgent) {
             if (items.length === 0) return;
             var groupLabel = document.createElement('div');
-            groupLabel.style.cssText = 'font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--text3);margin:12px 0 6px;';
-            groupLabel.textContent = label;
+            groupLabel.style.cssText = 'font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:' + (isUrgent ? 'var(--red)' : 'var(--text3)') + ';margin:16px 0 6px;';
+            groupLabel.textContent = label + ' (' + items.length + ')';
             container.appendChild(groupLabel);
-            var groupDiv = document.createElement('div');
-            setSafeHTML(groupDiv, items.map(renderDeadlineCompact).join(''));
-            container.appendChild(groupDiv);
+
+            items.forEach(function(item) {
+                var row = document.createElement('div');
+                row.style.cssText = 'display:flex;gap:12px;padding:8px 10px;border-bottom:1px solid var(--border);cursor:pointer;transition:background 0.15s;';
+                row.addEventListener('mouseenter', function() { row.style.background = 'var(--bg2)'; });
+                row.addEventListener('mouseleave', function() { row.style.background = ''; });
+
+                // LEFT: date
+                var dateCol = document.createElement('div');
+                dateCol.style.cssText = 'min-width:70px;font-size:11px;font-weight:600;color:' + (isUrgent ? 'var(--red)' : 'var(--text2)') + ';padding-top:2px;';
+                var dueStr = item.due_date ? new Date(item.due_date).toLocaleDateString('en-GB', {day:'numeric', month:'short'}) : 'No date';
+                dateCol.textContent = dueStr;
+                row.appendChild(dateCol);
+
+                // RIGHT: description + source tag
+                var descCol = document.createElement('div');
+                descCol.style.cssText = 'flex:1;font-size:13px;color:var(--text1);';
+                descCol.textContent = item.description || '';
+                if (item.matter) {
+                    var tag = document.createElement('span');
+                    tag.style.cssText = 'font-size:10px;color:var(--text3);margin-left:8px;';
+                    tag.textContent = item.matter.replace(/_/g, ' ');
+                    descCol.appendChild(tag);
+                }
+                row.appendChild(descCol);
+
+                // Click to expand actions
+                var actionsDiv = document.createElement('div');
+                actionsDiv.style.cssText = 'display:none;padding:8px 10px 8px 82px;background:var(--bg2);border-bottom:1px solid var(--border);';
+                var expanded = false;
+
+                row.addEventListener('click', function() {
+                    expanded = !expanded;
+                    actionsDiv.style.display = expanded ? 'flex' : 'none';
+                    actionsDiv.style.gap = '8px';
+                });
+
+                function makeBtn(label, color, onClick) {
+                    var btn = document.createElement('button');
+                    btn.textContent = label;
+                    btn.style.cssText = 'font-size:11px;padding:4px 12px;border:1px solid ' + color + ';color:' + color + ';background:transparent;border-radius:4px;cursor:pointer;';
+                    btn.addEventListener('click', function(e) { e.stopPropagation(); onClick(); });
+                    return btn;
+                }
+
+                actionsDiv.appendChild(makeBtn('Dismiss', 'var(--text3)', function() {
+                    var endpoint = item.type === 'deadline'
+                        ? '/api/deadlines/' + item.id + '/dismiss'
+                        : '/api/commitments/' + item.id + '/dismiss';
+                    bakerFetch(endpoint, { method: 'POST' }).then(function() { loadDeadlinesTab(); });
+                }));
+
+                actionsDiv.appendChild(makeBtn('+1 Week', 'var(--amber)', function() {
+                    var newDate = new Date(item.due_date || new Date());
+                    newDate.setDate(newDate.getDate() + 7);
+                    var endpoint = item.type === 'deadline'
+                        ? '/api/deadlines/' + item.id + '/reschedule'
+                        : '/api/commitments/' + item.id + '/reschedule';
+                    bakerFetch(endpoint, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({due_date: newDate.toISOString()}) }).then(function() { loadDeadlinesTab(); });
+                }));
+
+                actionsDiv.appendChild(makeBtn('Ask Baker', 'var(--blue)', function() {
+                    var input = document.getElementById('scanInput');
+                    if (input) {
+                        input.value = 'What should I do about: ' + (item.description || '');
+                        switchTab('ask-baker');
+                    }
+                }));
+
+                container.appendChild(row);
+                container.appendChild(actionsDiv);
+            });
         }
 
-        renderGroup('Overdue / Today', overdue);
-        renderGroup('This week', thisWeek);
-        renderGroup('Later', later);
+        renderTimeGroup('Overdue', overdue, true);
+        renderTimeGroup('Today', today, true);
+        renderTimeGroup('This Week', thisWeek, false);
+        renderTimeGroup('Later', later, false);
 
     } catch (e) {
         container.textContent = 'Failed to load deadlines.';
         container.style.color = 'var(--red)';
+        console.warn('Deadlines tab failed:', e);
     }
 }
 

@@ -2191,6 +2191,75 @@ async def complete_deadline_api(deadline_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/deadlines/{deadline_id}/reschedule", tags=["deadlines"], dependencies=[Depends(verify_api_key)])
+async def reschedule_deadline_api(deadline_id: int, body: dict = None):
+    """Reschedule a deadline to a new due_date."""
+    try:
+        from models.deadlines import update_deadline, get_deadline_by_id
+        dl = get_deadline_by_id(deadline_id)
+        if not dl:
+            raise HTTPException(status_code=404, detail=f"Deadline {deadline_id} not found")
+        new_date = (body or {}).get("due_date")
+        if not new_date:
+            raise HTTPException(status_code=400, detail="due_date required")
+        update_deadline(deadline_id, due_date=new_date)
+        return {"status": "rescheduled", "id": deadline_id, "new_due_date": new_date}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"/api/deadlines/{deadline_id}/reschedule failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/commitments/{commitment_id}/dismiss", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def dismiss_commitment(commitment_id: int):
+    """Dismiss a commitment."""
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor()
+            cur.execute("UPDATE commitments SET status = 'dismissed' WHERE id = %s", (commitment_id,))
+            conn.commit()
+            cur.close()
+        finally:
+            store._put_conn(conn)
+        return {"status": "dismissed", "id": commitment_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"dismiss commitment {commitment_id} failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/commitments/{commitment_id}/reschedule", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def reschedule_commitment(commitment_id: int, body: dict = None):
+    """Reschedule a commitment to a new due_date."""
+    try:
+        new_date = (body or {}).get("due_date")
+        if not new_date:
+            raise HTTPException(status_code=400, detail="due_date required")
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor()
+            cur.execute("UPDATE commitments SET due_date = %s, status = 'open' WHERE id = %s", (new_date, commitment_id))
+            conn.commit()
+            cur.close()
+        finally:
+            store._put_conn(conn)
+        return {"status": "rescheduled", "id": commitment_id, "new_due_date": new_date}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"reschedule commitment {commitment_id} failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # --- Deals ---
 
 @app.get("/api/deals", tags=["deals"], dependencies=[Depends(verify_api_key)])
