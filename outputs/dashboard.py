@@ -1418,8 +1418,17 @@ async def get_commitments(
             conditions = []
             params = []
             if status:
-                conditions.append("status = %s")
-                params.append(status)
+                # Map frontend filter names to DB values
+                if status == "active":
+                    conditions.append("status = 'open'")
+                elif status == "overdue":
+                    # Include both explicit 'overdue' and open items past due
+                    conditions.append("(status = 'overdue' OR (status = 'open' AND due_date < NOW()))")
+                elif status == "completed":
+                    conditions.append("status IN ('completed', 'dismissed')")
+                else:
+                    conditions.append("status = %s")
+                    params.append(status)
             if assigned_to:
                 conditions.append("LOWER(assigned_to) ILIKE %s")
                 params.append(f"%{assigned_to.lower()}%")
@@ -1431,11 +1440,14 @@ async def get_commitments(
             )
             rows = [_serialize(dict(r)) for r in cur.fetchall()]
 
-            cur.execute("SELECT COUNT(*) AS cnt FROM commitments WHERE status = 'overdue'")
+            cur.execute("SELECT COUNT(*) AS cnt FROM commitments WHERE status = 'overdue' OR (status = 'open' AND due_date < NOW())")
             overdue_count = cur.fetchone()["cnt"]
 
+            cur.execute("SELECT COUNT(*) AS cnt FROM commitments")
+            total_count = cur.fetchone()["cnt"]
+
             cur.close()
-            return {"commitments": rows, "count": len(rows), "overdue_count": overdue_count}
+            return {"commitments": rows, "count": len(rows), "total": total_count, "overdue_count": overdue_count}
         finally:
             store._put_conn(conn)
     except Exception as e:
