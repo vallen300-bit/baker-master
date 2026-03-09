@@ -620,6 +620,12 @@ async def waha_webhook(
                     media_text = extract_media_text(filepath, mimetype)
                     if media_text:
                         logger.info(f"Extracted {len(media_text)} chars from WA media ({mimetype})")
+                    # Clean up temp file to prevent /tmp accumulation
+                    try:
+                        import os
+                        os.unlink(filepath)
+                    except OSError:
+                        pass
         except Exception as e:
             logger.warning(f"WhatsApp media processing failed (continuing with text only): {e}")
 

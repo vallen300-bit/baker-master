@@ -16,6 +16,7 @@ Usage:
 """
 import argparse
 import logging
+import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -261,6 +262,12 @@ def _process_media(messages: list[dict]) -> dict:
             media_texts[msg_id] = text
             logger.info(f"Extracted {len(text)} chars from {mimetype} in msg {msg_id[:30]}")
 
+        # Clean up temp file to prevent /tmp accumulation (OOM fix)
+        try:
+            os.unlink(filepath)
+        except OSError:
+            pass
+
         time.sleep(0.5)  # Rate limit media downloads
 
     return media_texts
@@ -452,7 +459,8 @@ def ingest_to_qdrant(items: list[dict]):
 
 def backfill_whatsapp():
     """
-    Startup catch-up: sync last 7 days of WhatsApp messages.
+    Startup catch-up: sync last 2 days of WhatsApp messages.
+    Stream-processes one chat at a time to avoid OOM on Render (4GB limit).
     Safe to run repeatedly — dedup via trigger_log.
     Called by dashboard.py in a background thread on every deploy.
     """
@@ -467,20 +475,95 @@ def backfill_whatsapp():
         return
 
     _backfill_running = True
-    logger.info("WhatsApp backfill: starting 7-day catch-up...")
+    logger.info("WhatsApp backfill: starting 2-day catch-up (streaming)...")
 
     try:
-        since = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
-        items = extract_historical(
-            since=since,
-            limit=None,
-            chat_id=None,
-            dry_run=False,
-            download_media=True,
+        from memory.store_back import SentinelStoreBack
+        from triggers.state import trigger_state
+        from triggers.waha_client import list_chats, fetch_messages
+
+        since_dt = datetime.now(timezone.utc) - timedelta(days=2)
+        since_ts = int(since_dt.timestamp())
+
+        chats = list_chats(limit=500)
+        logger.info(f"WhatsApp backfill: {len(chats)} chats found")
+
+        store = SentinelStoreBack._get_global_instance()
+        collection = "baker-whatsapp"
+        ingested = 0
+        skipped = 0
+        errors = 0
+
+        for i, chat in enumerate(chats):
+            cid = chat.get("id", "?")
+            name = _chat_name(chat)
+
+            try:
+                msgs = fetch_messages(cid, limit=100, download_media=True)
+            except Exception as e:
+                logger.warning(f"WhatsApp backfill: fetch failed for {cid}: {e}")
+                errors += 1
+                time.sleep(0.5)
+                continue
+
+            msgs = [m for m in msgs if m.get("timestamp", 0) >= since_ts]
+            if not msgs:
+                time.sleep(0.3)
+                continue
+
+            # Store individual messages to PostgreSQL
+            _store_messages_to_postgres(msgs, cid)
+
+            # Process media (temp files cleaned up inside _process_media)
+            media_texts = _process_media(msgs)
+
+            # Format chat
+            formatted = format_chat(
+                chat_id=cid,
+                chat_name=name,
+                is_group=_is_group(cid),
+                messages=msgs,
+                media_texts=media_texts,
+            )
+            if not formatted:
+                time.sleep(0.3)
+                continue
+
+            source_id = formatted["source_id"]
+
+            # Dedup check
+            if trigger_state.is_processed("whatsapp", source_id):
+                skipped += 1
+                time.sleep(0.3)
+                continue
+
+            # Ingest immediately (no accumulation)
+            try:
+                store.store_document(
+                    formatted["text"],
+                    formatted["metadata"],
+                    collection=collection,
+                )
+            except Exception as e:
+                logger.warning(f"Qdrant store failed for {source_id}: {e}")
+
+            try:
+                store.log_trigger(
+                    trigger_type="whatsapp",
+                    source_id=source_id,
+                    content=formatted["text"],
+                    priority="low",
+                )
+            except Exception as e:
+                logger.warning(f"trigger_log write failed for {source_id}: {e}")
+
+            ingested += 1
+            time.sleep(2)  # Voyage AI rate limit
+
+        logger.info(
+            f"WhatsApp backfill complete: {ingested} ingested, "
+            f"{skipped} deduped, {errors} errors"
         )
-        if items:
-            ingest_to_qdrant(items)
-        logger.info(f"WhatsApp backfill complete: {len(items)} chats processed")
     except Exception as e:
         logger.error(f"WhatsApp backfill failed: {e}")
     finally:

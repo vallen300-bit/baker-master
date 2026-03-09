@@ -249,30 +249,29 @@ async def startup():
     except Exception as e:
         logger.error(f"Scheduler failed to start: {e}")
 
-    # FIREFLIES-FETCH-1 + DEPLOY-FIX-1: Backfill in background thread — don't block startup
+    # Backfills in background threads — delayed 60s to let scheduler stabilize (OOM fix)
     import threading
-    try:
-        from triggers.fireflies_trigger import backfill_fireflies
-        threading.Thread(
-            target=backfill_fireflies,
-            name="fireflies-backfill",
-            daemon=True,
-        ).start()
-        logger.info("Fireflies backfill launched in background thread")
-    except Exception as e:
-        logger.warning(f"Fireflies backfill failed to launch (non-fatal): {e}")
 
-    # WhatsApp backfill — 7-day catch-up on startup (like Fireflies above)
-    try:
-        from scripts.extract_whatsapp import backfill_whatsapp
-        threading.Thread(
-            target=backfill_whatsapp,
-            name="whatsapp-backfill",
-            daemon=True,
-        ).start()
-        logger.info("WhatsApp backfill launched in background thread")
-    except Exception as e:
-        logger.warning(f"WhatsApp backfill failed to launch (non-fatal): {e}")
+    def _delayed_backfills():
+        time.sleep(60)
+        logger.info("Starting delayed backfills (60s after startup)...")
+        try:
+            from triggers.fireflies_trigger import backfill_fireflies
+            backfill_fireflies()
+        except Exception as e:
+            logger.warning(f"Fireflies backfill failed (non-fatal): {e}")
+        try:
+            from scripts.extract_whatsapp import backfill_whatsapp
+            backfill_whatsapp()
+        except Exception as e:
+            logger.warning(f"WhatsApp backfill failed (non-fatal): {e}")
+
+    threading.Thread(
+        target=_delayed_backfills,
+        name="delayed-backfills",
+        daemon=True,
+    ).start()
+    logger.info("Backfills scheduled (60s delay, sequential to limit memory)")
 
     # Mount static files if directory exists
     if _static_dir.exists():
