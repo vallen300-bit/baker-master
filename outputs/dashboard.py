@@ -762,6 +762,38 @@ def _serialize_val(v):
     return str(v)
 
 
+@app.get("/api/health", tags=["system"], include_in_schema=True)
+async def api_health():
+    """Public health endpoint — no auth required.
+    Returns per-sentinel status for the Cowork nightly health check.
+    """
+    try:
+        from triggers.sentinel_health import get_all_sentinel_health
+        rows = get_all_sentinel_health()
+    except Exception:
+        rows = []
+
+    sentinels = []
+    any_down = False
+    for r in rows:
+        st = r.get("status", "unknown")
+        if st in ("down", "degraded"):
+            any_down = True
+        sentinels.append({
+            "name": r.get("source"),
+            "status": st,
+            "last_poll": _serialize_val(r.get("last_success_at")),
+            "issue": r.get("last_error_msg") or "",
+            "fail_count": r.get("consecutive_failures", 0),
+        })
+
+    return {
+        "status": "degraded" if any_down else "healthy",
+        "sentinels": sentinels,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @app.get("/", include_in_schema=False)
 async def root():
     """Serve the dashboard frontend."""
