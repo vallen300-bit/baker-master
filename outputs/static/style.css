@@ -15,7 +15,7 @@
   --radius: 10px; --shadow: 0 1px 3px rgba(0,0,0,0.05);
   --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   --mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-  --sidebar-w: 160px;
+  --sidebar-w: 192px;
 }
 
 body { font-family: var(--font); background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
