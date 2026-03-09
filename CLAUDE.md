@@ -536,6 +536,26 @@ Data Operations:
 
 **Baker current state:** 10 data sources, 20 scheduler jobs, 50+ commitments, 3,388+ alerts, 13-tab dashboard, all 7 standing orders functional, 4 browser tasks active, 13 capabilities (all fully specified), cost monitoring + agent observability live, learning loop active, proactive scanning live, Owner's Lens scoring live, T1 WhatsApp delivery live.
 
+### Session 15 — 2026-03-09 (dimitry300 machine, Code 300 supervisor)
+**Production health + Sentinel Health Monitor.** 7 commits + 2 Brisen merges. Fixed OOM, email watermark, cost tracking instrumentation, ClickUp watermark, 4 missing credentials. Merged SENTINEL-HEALTH-1 (Brisen). Render env var crisis (PUT replaces all — 15-min outage, fully restored).
+
+### Session 16 — 2026-03-09 (dimitry300 machine, Code 300 supervisor)
+**Production health audit + 3 fixes.** 1 commit.
+
+Investigations:
+- Email 429: no backoff, every 5-min poll re-triggered rate limit for 67+ hours
+- Dropbox: refresh token on Render is malformed (Director must regenerate)
+- Whoop: OAuth credentials invalid (Director must re-authorize)
+- ClickUp: all 6 workspaces authenticate, 4 have 0 spaces (not a bug)
+- Cost tracking: 2 daily Haiku calls uninstrumented
+
+Fixes shipped:
+- **Email 429 backoff** — parse Retry-After timestamp, skip polls during backoff, exponential fallback (10min→1h max)
+- **Cost tracking** — `log_api_cost()` added to `_get_morning_narrative()` + `_generate_morning_proposals()`
+- **Whoop sentinel** — `report_failure()` on client init error (was invisible to sentinel_health)
+
+**Blocked:** Dropbox + Whoop need valid OAuth credentials from Director.
+
 ## Key Documents (Dropbox)
 
 | Document | Path | Purpose |
