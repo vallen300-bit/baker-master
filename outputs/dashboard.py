@@ -888,9 +888,11 @@ async def get_morning_brief():
             """)
             top_fires = [_serialize(dict(r)) for r in cur.fetchall()]
 
-            # Deadlines this week
+            # Deadlines this week (exclude source_snippet — can be 80KB per row)
             cur.execute("""
-                SELECT * FROM deadlines
+                SELECT id, description, due_date, source_type, confidence,
+                       priority, status, created_at
+                FROM deadlines
                 WHERE status = 'active' AND due_date <= NOW() + INTERVAL '7 days'
                 ORDER BY due_date ASC LIMIT 10
             """)
