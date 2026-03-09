@@ -2607,6 +2607,23 @@ class SentinelStoreBack:
             if self.alert_source_id_exists(source, source_id):
                 logger.info(f"Alert dedup: source_id {source_id} already exists — skipping")
                 return None
+        # T1 daily cap: max 5 T1 alerts per day — excess auto-downgraded to T2
+        if tier == 1:
+            try:
+                _cap_conn = self._get_conn()
+                if _cap_conn:
+                    try:
+                        _cap_cur = _cap_conn.cursor()
+                        _cap_cur.execute("SELECT COUNT(*) FROM alerts WHERE tier = 1 AND status = 'pending' AND created_at >= CURRENT_DATE")
+                        t1_today = _cap_cur.fetchone()[0]
+                        _cap_cur.close()
+                    finally:
+                        self._put_conn(_cap_conn)
+                    if t1_today >= 5:
+                        logger.info(f"T1 daily cap reached ({t1_today}/5) — downgrading to T2: {title[:60]}")
+                        tier = 2
+            except Exception:
+                pass  # cap check failed — proceed with original tier
         conn = self._get_conn()
         if not conn:
             logger.warning("No DB connection — skipping create_alert")

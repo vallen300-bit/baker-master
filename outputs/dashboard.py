@@ -810,14 +810,19 @@ async def root():
 # --- Alerts ---
 
 @app.get("/api/alerts", tags=["alerts"], dependencies=[Depends(verify_api_key)])
-async def get_alerts(tier: Optional[int] = Query(None, ge=1, le=4)):
+async def get_alerts(
+    tier: Optional[int] = Query(None, ge=1, le=4),
+    min_tier: Optional[int] = Query(None, ge=1, le=4),
+):
     """
-    Get pending alerts. Optionally filter by tier (1=FIRE, 2=IMPORTANT, 3=ROUTINE, 4=OTHER).
+    Get pending alerts. Filter by exact tier, or min_tier (T2+ = upcoming, excludes T1).
     """
     try:
         store = _get_store()
         alerts = store.get_pending_alerts(tier=tier)
         alerts = [_serialize(a) for a in alerts]
+        if min_tier:
+            alerts = [a for a in alerts if a.get('tier', 1) >= min_tier]
         return {"alerts": alerts, "count": len(alerts)}
     except Exception as e:
         logger.error(f"/api/alerts failed: {e}")

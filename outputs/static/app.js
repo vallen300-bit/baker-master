@@ -578,15 +578,16 @@ async function loadMattersSummary() {
 async function loadFires() {
     const container = document.getElementById('firesContent');
     if (!container) return;
-    container.textContent = 'Loading fires...';
+    container.textContent = 'Loading...';
 
     try {
-        const resp = await bakerFetch('/api/alerts?tier=1');
+        // Upcoming: show T2+ only (T1s are on Dashboard)
+        const resp = await bakerFetch('/api/alerts?min_tier=2');
         if (!resp.ok) return;
         const data = await resp.json();
 
         if (!data.alerts || data.alerts.length === 0) {
-            container.textContent = 'No active fires. All clear.';
+            container.textContent = 'No upcoming items.';
             container.style.cssText = 'color:var(--text3);font-size:13px;padding:20px 0;';
             return;
         }
