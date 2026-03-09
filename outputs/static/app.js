@@ -1584,128 +1584,327 @@ async function loadMattersTab() {
 
 // ═══ PEOPLE TAB ═══
 
+// ═══ NETWORKING TAB (NETWORKING-PHASE-1) ═══
+
+var _networkingFilter = 'all';
+
 async function loadPeopleTab() {
     var container = document.getElementById('peopleContent');
     if (!container) return;
-    container.textContent = 'Loading people...';
+    container.textContent = 'Loading networking...';
+
     try {
-        var resp = await bakerFetch('/api/people');
-        if (!resp.ok) return;
-        var data = await resp.json();
-        if (!data.people || data.people.length === 0) {
-            container.textContent = 'No contacts found.';
-            return;
-        }
+        var results = await Promise.all([
+            bakerFetch('/api/networking/contacts' + (_networkingFilter !== 'all' ? '?contact_type=' + _networkingFilter : '')).then(function(r) { return r.json(); }),
+            bakerFetch('/api/networking/alerts').then(function(r) { return r.json(); }),
+            bakerFetch('/api/networking/events').then(function(r) { return r.json(); }),
+        ]);
+        var contactsData = results[0];
+        var alertsData = results[1];
+        var eventsData = results[2];
+
         container.textContent = '';
-        for (var i = 0; i < data.people.length; i++) {
-            var p = data.people[i];
-            var card = document.createElement('div');
-            card.className = 'card card-compact person-card';
-            card.style.cursor = 'pointer';
-            card.dataset.personName = p.name || '';
-            card.addEventListener('click', function() { loadPersonDetail(this.dataset.personName); });
-            var hdr = document.createElement('div');
-            hdr.className = 'card-header';
-            if (p.is_vip) {
-                var vip = document.createElement('span');
-                vip.className = 'vip-badge';
-                vip.textContent = 'VIP';
-                hdr.appendChild(vip);
-            }
-            if (p.tier) {
-                var dot = document.createElement('span');
-                dot.className = 'nav-dot ' + tierClass(p.tier);
-                dot.style.marginTop = '5px';
-                hdr.appendChild(dot);
-            }
-            var nm = document.createElement('span');
-            nm.className = 'card-title';
-            nm.textContent = p.name || '';
-            hdr.appendChild(nm);
-            var role = document.createElement('span');
-            role.className = 'card-time';
-            role.textContent = [p.role, p.company].filter(Boolean).join(' — ');
-            hdr.appendChild(role);
-            card.appendChild(hdr);
-            container.appendChild(card);
+
+        // A. Alert Strip
+        var strip = document.createElement('div');
+        strip.style.cssText = 'display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;';
+
+        if (alertsData.going_cold_count > 0) {
+            var badge = document.createElement('span');
+            badge.style.cssText = 'background:var(--red);color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;cursor:pointer;';
+            badge.textContent = alertsData.going_cold_count + ' going cold';
+            strip.appendChild(badge);
         }
+        if (alertsData.unreciprocated_count > 0) {
+            var badge2 = document.createElement('span');
+            badge2.style.cssText = 'background:var(--amber);color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;';
+            badge2.textContent = alertsData.unreciprocated_count + ' unreciprocated';
+            strip.appendChild(badge2);
+        }
+        if (alertsData.upcoming_events_count > 0) {
+            var badge3 = document.createElement('span');
+            badge3.style.cssText = 'background:var(--blue);color:#fff;padding:4px 10px;border-radius:12px;font-size:11px;font-weight:600;';
+            badge3.textContent = alertsData.upcoming_events_count + ' upcoming events';
+            strip.appendChild(badge3);
+        }
+        if (strip.children.length === 0) {
+            var allGood = document.createElement('span');
+            allGood.style.cssText = 'color:var(--green);font-size:12px;font-weight:600;';
+            allGood.textContent = 'All contacts healthy';
+            strip.appendChild(allGood);
+        }
+        container.appendChild(strip);
+
+        // B. Filter Buttons
+        var filters = document.createElement('div');
+        filters.style.cssText = 'display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;';
+        var types = ['all', 'principal', 'introducer', 'operator', 'institutional', 'connector'];
+        types.forEach(function(t) {
+            var btn = document.createElement('button');
+            btn.className = _networkingFilter === t ? 'filter-tab active' : 'filter-tab';
+            btn.textContent = t.charAt(0).toUpperCase() + t.slice(1);
+            btn.addEventListener('click', function() { _networkingFilter = t; loadPeopleTab(); });
+            filters.appendChild(btn);
+        });
+        container.appendChild(filters);
+
+        // C. Contact List
+        var contacts = contactsData.contacts || [];
+        if (contacts.length === 0) {
+            var empty = document.createElement('div');
+            empty.textContent = 'No contacts found.';
+            empty.style.cssText = 'color:var(--text3);font-size:12px;';
+            container.appendChild(empty);
+        }
+
+        for (var i = 0; i < contacts.length; i++) {
+            (function(c) {
+                var card = document.createElement('div');
+                card.className = 'card card-compact person-card';
+                card.style.cursor = 'pointer';
+
+                var hdr = document.createElement('div');
+                hdr.className = 'card-header';
+                hdr.style.cssText = 'display:flex;align-items:center;gap:8px;';
+
+                // Tier badge
+                if (c.tier) {
+                    var tierBadge = document.createElement('span');
+                    tierBadge.style.cssText = 'font-size:10px;font-weight:700;color:var(--text3);min-width:20px;';
+                    tierBadge.textContent = 'T' + c.tier;
+                    hdr.appendChild(tierBadge);
+                }
+
+                // Health dot
+                var healthDot = document.createElement('span');
+                healthDot.className = 'nav-dot';
+                var hColors = {red: 'var(--red)', amber: 'var(--amber)', green: 'var(--green)', grey: 'var(--lgray)'};
+                healthDot.style.cssText = 'width:8px;height:8px;border-radius:50;background:' + (hColors[c.health] || 'var(--lgray)') + ';flex-shrink:0;';
+                hdr.appendChild(healthDot);
+
+                // Name + type
+                var nameWrap = document.createElement('div');
+                nameWrap.style.cssText = 'flex:1;min-width:0;';
+                var nm = document.createElement('div');
+                nm.className = 'card-title';
+                nm.textContent = c.name || '';
+                nameWrap.appendChild(nm);
+                var sub = document.createElement('div');
+                sub.style.cssText = 'font-size:11px;color:var(--text3);';
+                var subParts = [];
+                if (c.contact_type) subParts.push(c.contact_type);
+                if (c.role) subParts.push(c.role);
+                sub.textContent = subParts.join(' \u00B7 ');
+                nameWrap.appendChild(sub);
+                hdr.appendChild(nameWrap);
+
+                // Last contact
+                if (c.last_contact_date) {
+                    var lastC = document.createElement('span');
+                    lastC.style.cssText = 'font-size:11px;color:var(--text3);white-space:nowrap;';
+                    lastC.textContent = fmtRelativeTime(c.last_contact_date);
+                    hdr.appendChild(lastC);
+                }
+
+                card.appendChild(hdr);
+
+                // Matters badges
+                if (c.matters && c.matters.length > 0) {
+                    var mattersRow = document.createElement('div');
+                    mattersRow.style.cssText = 'padding:4px 0 0;display:flex;gap:4px;flex-wrap:wrap;';
+                    c.matters.forEach(function(m) {
+                        var badge = document.createElement('span');
+                        badge.className = 'tag-badge';
+                        badge.textContent = m;
+                        mattersRow.appendChild(badge);
+                    });
+                    card.appendChild(mattersRow);
+                }
+
+                // Expand area (hidden initially)
+                var expandArea = document.createElement('div');
+                expandArea.style.cssText = 'display:none;padding:10px 0 0;border-top:1px solid var(--border);margin-top:8px;';
+                expandArea.dataset.contactId = c.id;
+                card.appendChild(expandArea);
+
+                // Click to expand/collapse
+                hdr.addEventListener('click', function() {
+                    if (expandArea.style.display === 'none') {
+                        expandArea.style.display = '';
+                        _loadContactExpand(expandArea, c);
+                    } else {
+                        expandArea.style.display = 'none';
+                    }
+                });
+
+                container.appendChild(card);
+            })(contacts[i]);
+        }
+
+        // D. Events Section
+        var events = eventsData.events || [];
+        if (events.length > 0) {
+            var evLabel = document.createElement('div');
+            evLabel.className = 'section-label';
+            evLabel.textContent = 'Events of Interest';
+            evLabel.style.marginTop = '16px';
+            container.appendChild(evLabel);
+
+            events.forEach(function(ev) {
+                var row = document.createElement('div');
+                row.className = 'card card-compact';
+                var hdr = document.createElement('div');
+                hdr.className = 'card-header';
+                var title = document.createElement('span');
+                title.className = 'card-title';
+                title.textContent = ev.event_name || '';
+                hdr.appendChild(title);
+                var meta = document.createElement('span');
+                meta.style.cssText = 'font-size:11px;color:var(--text3);';
+                var parts = [];
+                if (ev.dates_start) parts.push(ev.dates_start);
+                if (ev.location) parts.push(ev.location);
+                if (ev.category) parts.push(ev.category);
+                meta.textContent = parts.join(' \u00B7 ');
+                hdr.appendChild(meta);
+                row.appendChild(hdr);
+                container.appendChild(row);
+            });
+        }
+
     } catch (e) {
-        container.textContent = 'Failed to load people.';
+        console.error('loadPeopleTab (networking) failed:', e);
+        container.textContent = 'Failed to load networking.';
     }
 }
 
-async function loadPersonDetail(name) {
-    var container = document.getElementById('peopleContent');
-    if (!container) return;
-    container.textContent = 'Loading...';
+// Action buttons for contact expand
+var _NETWORKING_ACTIONS = [
+    {key: 'new_topic', label: 'New Topic'},
+    {key: 'engaged_by_brisen', label: 'Engaged by Brisen'},
+    {key: 'engaged_by_person', label: 'Engaged by Person'},
+    {key: 'possible_connector', label: 'Possible Connector'},
+    {key: 'possible_place', label: 'Possible Place'},
+    {key: 'possible_date', label: 'Possible Date'},
+];
+
+async function _loadContactExpand(expandArea, contact) {
+    expandArea.textContent = '';
+    var cid = contact.id;
+
+    // 1. Quick stats line
+    var stats = document.createElement('div');
+    stats.style.cssText = 'font-size:11px;color:var(--text2);margin-bottom:8px;';
+    var statParts = [];
+    if (contact.last_contact_date) statParts.push('Last: ' + fmtRelativeTime(contact.last_contact_date));
+    if (contact.sentiment_trend) statParts.push('Sentiment: ' + contact.sentiment_trend);
+    if (contact.relationship_score) statParts.push('Score: ' + contact.relationship_score);
+    stats.textContent = statParts.join(' \u00B7 ') || 'No stats yet';
+    expandArea.appendChild(stats);
+
+    // 2. Recent interactions
     try {
-        var resp = await bakerFetch('/api/people/' + encodeURIComponent(name) + '/activity');
-        if (!resp.ok) return;
-        var data = await resp.json();
-        container.textContent = '';
-
-        var back = document.createElement('button');
-        back.className = 'footer-btn';
-        back.textContent = 'Back to all people';
-        back.style.marginBottom = '12px';
-        back.addEventListener('click', function() { loadPeopleTab(); });
-        container.appendChild(back);
-
-        var header = document.createElement('div');
-        header.className = 'section-label';
-        header.textContent = name;
-        container.appendChild(header);
-
-        // Related matters
-        if (data.matters && data.matters.length > 0) {
-            var mattersDiv = document.createElement('div');
-            mattersDiv.style.cssText = 'padding:0 0 10px;';
-            for (var mi = 0; mi < data.matters.length; mi++) {
-                var badge = document.createElement('span');
-                badge.className = 'tag-badge';
-                badge.textContent = data.matters[mi];
-                mattersDiv.appendChild(badge);
+        var resp = await bakerFetch('/api/networking/contact/' + cid + '/interactions');
+        if (resp.ok) {
+            var iData = await resp.json();
+            if (iData.interactions && iData.interactions.length > 0) {
+                var iLabel = document.createElement('div');
+                iLabel.style.cssText = 'font-size:11px;font-weight:600;color:var(--text2);margin:6px 0 4px;';
+                iLabel.textContent = 'Recent interactions';
+                expandArea.appendChild(iLabel);
+                iData.interactions.slice(0, 5).forEach(function(ix) {
+                    var row = document.createElement('div');
+                    row.style.cssText = 'font-size:11px;color:var(--text3);padding:2px 0;display:flex;gap:6px;';
+                    var ch = document.createElement('span');
+                    ch.style.fontWeight = '600';
+                    ch.textContent = (ix.channel || '?').toUpperCase();
+                    row.appendChild(ch);
+                    var dir = document.createElement('span');
+                    dir.textContent = ix.direction === 'inbound' ? '\u2190' : '\u2192';
+                    row.appendChild(dir);
+                    var subj = document.createElement('span');
+                    subj.style.cssText = 'flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+                    subj.textContent = ix.subject || '';
+                    row.appendChild(subj);
+                    if (ix.timestamp) {
+                        var ts = document.createElement('span');
+                        ts.textContent = fmtRelativeTime(ix.timestamp);
+                        row.appendChild(ts);
+                    }
+                    expandArea.appendChild(row);
+                });
             }
-            container.appendChild(mattersDiv);
         }
+    } catch (e) { /* non-fatal */ }
 
-        // Activity feed
-        if (!data.activity || data.activity.length === 0) {
-            var empty = document.createElement('div');
-            empty.textContent = 'No recent activity found.';
-            empty.style.cssText = 'color:var(--text3);font-size:12px;';
-            container.appendChild(empty);
+    // 3. Action buttons
+    var btnRow = document.createElement('div');
+    btnRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;';
+    var responseArea = document.createElement('div');
+    responseArea.style.cssText = 'margin-top:8px;font-size:12px;color:var(--text2);';
+
+    _NETWORKING_ACTIONS.forEach(function(action) {
+        var btn = document.createElement('button');
+        btn.className = 'quick-btn';
+        btn.style.cssText = 'font-size:11px;padding:4px 10px;';
+        btn.textContent = action.label;
+        btn.addEventListener('click', function() {
+            _runNetworkingAction(cid, action.key, responseArea);
+        });
+        btnRow.appendChild(btn);
+    });
+    expandArea.appendChild(btnRow);
+    expandArea.appendChild(responseArea);
+}
+
+async function _runNetworkingAction(contactId, actionKey, responseArea) {
+    responseArea.textContent = 'Baker is thinking...';
+    try {
+        var resp = await bakerFetch('/api/networking/contact/' + contactId + '/action', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({action: actionKey}),
+        });
+        if (!resp.ok) {
+            responseArea.textContent = 'Action failed.';
             return;
         }
-        for (var ai = 0; ai < data.activity.length; ai++) {
-            var item = data.activity[ai];
-            var row = document.createElement('div');
-            row.className = 'activity-row';
-            var typeBadge = document.createElement('span');
-            typeBadge.className = 'activity-type ' + (item.type || '');
-            typeBadge.textContent = (item.type || '').charAt(0).toUpperCase() + (item.type || '').slice(1);
-            row.appendChild(typeBadge);
-            var info = document.createElement('div');
-            var titleEl = document.createElement('div');
-            titleEl.className = 'activity-text';
-            titleEl.textContent = item.title || '';
-            info.appendChild(titleEl);
-            if (item.preview) {
-                var prevEl = document.createElement('div');
-                prevEl.style.cssText = 'font-size:11px;color:var(--text3);margin-top:2px;';
-                prevEl.textContent = item.preview;
-                info.appendChild(prevEl);
+        // SSE streaming response
+        var reader = resp.body.getReader();
+        var decoder = new TextDecoder();
+        var text = '';
+        responseArea.textContent = '';
+        while (true) {
+            var chunk = await reader.read();
+            if (chunk.done) break;
+            var raw = decoder.decode(chunk.value, {stream: true});
+            // Parse SSE data lines
+            var lines = raw.split('\n');
+            for (var li = 0; li < lines.length; li++) {
+                var line = lines[li];
+                if (line.startsWith('data: ')) {
+                    try {
+                        var payload = JSON.parse(line.slice(6));
+                        if (payload.token) text += payload.token;
+                        if (payload.answer) text = payload.answer;
+                    } catch (pe) {
+                        // plain text token
+                        text += line.slice(6);
+                    }
+                }
             }
-            var dateEl = document.createElement('div');
-            dateEl.className = 'activity-time';
-            dateEl.textContent = item.date ? fmtRelativeTime(item.date) : '';
-            info.appendChild(dateEl);
-            row.appendChild(info);
-            container.appendChild(row);
+            setSafeHTML(responseArea, md(text));
         }
+        if (!text) responseArea.textContent = 'No response.';
     } catch (e) {
-        container.textContent = 'Failed to load person details.';
+        console.error('Networking action failed:', e);
+        responseArea.textContent = 'Action failed: ' + (e.message || 'unknown error');
     }
+}
+
+// Legacy alias — loadPersonDetail still called from old code paths
+async function loadPersonDetail(name) {
+    loadPeopleTab();
 }
 
 // ═══ SEARCH TAB ═══

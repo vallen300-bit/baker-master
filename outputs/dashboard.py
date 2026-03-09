@@ -1403,6 +1403,346 @@ async def get_person_activity(name: str, limit: int = Query(20, ge=1, le=100)):
 
 
 # ============================================================
+# NETWORKING-PHASE-1: Networking Tab Endpoints
+# ============================================================
+
+@app.get("/api/networking/contacts", tags=["networking"], dependencies=[Depends(verify_api_key)])
+async def get_networking_contacts(
+    contact_type: Optional[str] = Query(None),
+    tier: Optional[int] = Query(None),
+):
+    """List VIP contacts with networking fields. Filterable by type and tier."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"contacts": [], "count": 0}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            sql = """
+                SELECT id, name, role, email, tier, domain, contact_type,
+                       relationship_score, net_worth_tier, last_contact_date,
+                       sentiment_trend, role_context, expertise, gatekeeper_name
+                FROM vip_contacts
+                WHERE 1=1
+            """
+            params = []
+            if contact_type:
+                sql += " AND contact_type = %s"
+                params.append(contact_type)
+            if tier:
+                sql += " AND tier = %s"
+                params.append(tier)
+            sql += " ORDER BY tier, relationship_score DESC NULLS LAST, name"
+            cur.execute(sql, params)
+            rows = [_serialize(dict(r)) for r in cur.fetchall()]
+
+            # Compute health dot for each contact
+            now = datetime.now(timezone.utc)
+            for c in rows:
+                c["health"] = _compute_contact_health(c, now)
+
+                # Fetch connected matters
+                try:
+                    name_pattern = f"%{c.get('name', '')}%"
+                    cur.execute("""
+                        SELECT DISTINCT matter_slug FROM alerts
+                        WHERE matter_slug IS NOT NULL AND (title ILIKE %s OR body ILIKE %s)
+                        LIMIT 5
+                    """, (name_pattern, name_pattern))
+                    c["matters"] = [r["matter_slug"] for r in cur.fetchall()]
+                except Exception:
+                    c["matters"] = []
+
+            cur.close()
+            return {"contacts": rows, "count": len(rows)}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/networking/contacts failed: {e}")
+        return {"contacts": [], "count": 0}
+
+
+def _compute_contact_health(contact: dict, now) -> str:
+    """Compute health dot color: red, amber, green, grey."""
+    tier = contact.get("tier") or 3
+    last_contact = contact.get("last_contact_date")
+
+    if tier >= 4:
+        return "grey"
+
+    if not last_contact:
+        return "red" if tier <= 2 else "grey"
+
+    if isinstance(last_contact, str):
+        try:
+            last_contact = datetime.fromisoformat(last_contact)
+        except (ValueError, TypeError):
+            return "grey"
+
+    days_since = (now - last_contact).days
+    threshold = 14 if tier == 1 else 30 if tier == 2 else 60
+    warning_buffer = 7
+
+    if days_since >= threshold:
+        return "red"
+    elif days_since >= (threshold - warning_buffer):
+        return "amber"
+    else:
+        return "green"
+
+
+@app.get("/api/networking/alerts", tags=["networking"], dependencies=[Depends(verify_api_key)])
+async def get_networking_alerts():
+    """Networking alerts: contacts going cold, unreciprocated outreach, upcoming events."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"going_cold": [], "unreciprocated": [], "upcoming_events": []}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            now = datetime.now(timezone.utc)
+
+            # Going cold: T1 no contact 14+ days, T2 no contact 30+ days
+            cur.execute("""
+                SELECT id, name, tier, last_contact_date FROM vip_contacts
+                WHERE tier <= 2 AND (
+                    (tier = 1 AND last_contact_date < NOW() - INTERVAL '14 days')
+                    OR (tier = 2 AND last_contact_date < NOW() - INTERVAL '30 days')
+                    OR (tier <= 2 AND last_contact_date IS NULL)
+                )
+                ORDER BY tier, last_contact_date NULLS FIRST
+            """)
+            going_cold = [_serialize(dict(r)) for r in cur.fetchall()]
+
+            # Unreciprocated: 2+ outbound with no inbound reply in 14 days
+            unreciprocated = []
+            try:
+                cur.execute("""
+                    SELECT ci.contact_id, vc.name, COUNT(*) as outbound_count
+                    FROM contact_interactions ci
+                    JOIN vip_contacts vc ON ci.contact_id = vc.id
+                    WHERE ci.direction = 'outbound'
+                      AND ci.timestamp > NOW() - INTERVAL '14 days'
+                      AND ci.contact_id NOT IN (
+                          SELECT contact_id FROM contact_interactions
+                          WHERE direction = 'inbound'
+                            AND timestamp > NOW() - INTERVAL '14 days'
+                      )
+                    GROUP BY ci.contact_id, vc.name
+                    HAVING COUNT(*) >= 2
+                    ORDER BY COUNT(*) DESC
+                """)
+                unreciprocated = [_serialize(dict(r)) for r in cur.fetchall()]
+            except Exception:
+                pass
+
+            # Upcoming events (next 90 days)
+            upcoming_events = []
+            try:
+                cur.execute("""
+                    SELECT id, event_name, dates_start, dates_end, location, category
+                    FROM networking_events
+                    WHERE dates_start >= CURRENT_DATE AND dates_start <= CURRENT_DATE + INTERVAL '90 days'
+                    ORDER BY dates_start
+                    LIMIT 10
+                """)
+                upcoming_events = [_serialize(dict(r)) for r in cur.fetchall()]
+            except Exception:
+                pass
+
+            cur.close()
+            return {
+                "going_cold": going_cold,
+                "going_cold_count": len(going_cold),
+                "unreciprocated": unreciprocated,
+                "unreciprocated_count": len(unreciprocated),
+                "upcoming_events": upcoming_events,
+                "upcoming_events_count": len(upcoming_events),
+            }
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/networking/alerts failed: {e}")
+        return {"going_cold": [], "unreciprocated": [], "upcoming_events": []}
+
+
+@app.get("/api/networking/events", tags=["networking"], dependencies=[Depends(verify_api_key)])
+async def get_networking_events():
+    """List upcoming networking events."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"events": []}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT id, event_name, dates_start, dates_end, location, category,
+                       brisen_relevance_score, source_url, notes
+                FROM networking_events
+                ORDER BY dates_start NULLS LAST
+                LIMIT 50
+            """)
+            events = [_serialize(dict(r)) for r in cur.fetchall()]
+            cur.close()
+            return {"events": events, "count": len(events)}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/networking/events failed: {e}")
+        return {"events": [], "count": 0}
+
+
+class NetworkingEventRequest(BaseModel):
+    event_name: str = Field(..., min_length=1, max_length=300)
+    dates_start: Optional[str] = None
+    dates_end: Optional[str] = None
+    location: Optional[str] = None
+    category: Optional[str] = None
+    brisen_relevance_score: Optional[int] = 5
+    source_url: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@app.post("/api/networking/events", tags=["networking"], dependencies=[Depends(verify_api_key)])
+async def create_networking_event(req: NetworkingEventRequest):
+    """Create a networking event."""
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO networking_events
+                    (event_name, dates_start, dates_end, location, category,
+                     brisen_relevance_score, source_url, notes)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (req.event_name, req.dates_start, req.dates_end, req.location,
+                  req.category, req.brisen_relevance_score, req.source_url, req.notes))
+            event_id = cur.fetchone()[0]
+            conn.commit()
+            cur.close()
+            return {"id": event_id, "status": "created"}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"POST /api/networking/events failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/networking/contact/{contact_id}/interactions", tags=["networking"],
+         dependencies=[Depends(verify_api_key)])
+async def get_contact_interactions(contact_id: int, limit: int = Query(10, ge=1, le=50)):
+    """Recent interactions for a contact."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"interactions": []}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT channel, direction, timestamp, subject, sentiment, source_ref
+                FROM contact_interactions
+                WHERE contact_id = %s
+                ORDER BY timestamp DESC LIMIT %s
+            """, (contact_id, limit))
+            rows = [_serialize(dict(r)) for r in cur.fetchall()]
+            cur.close()
+            return {"interactions": rows, "count": len(rows)}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/networking/contact/{contact_id}/interactions failed: {e}")
+        return {"interactions": [], "count": 0}
+
+
+class NetworkingActionRequest(BaseModel):
+    action: str = Field(..., min_length=1)
+    # Values: new_topic, engaged_by_brisen, engaged_by_person,
+    #         possible_connector, possible_place, possible_date
+
+
+_NETWORKING_ACTION_PROMPTS = {
+    "new_topic": "Suggest a new conversation topic for {name} based on their interests and recent news. "
+                 "Profile: {profile}",
+    "engaged_by_brisen": "What topics has Dimitry previously discussed with {name}? "
+                         "Search emails, meetings, WhatsApp. Profile: {profile}",
+    "engaged_by_person": "What topics has {name} shown interest in? "
+                         "Search their messages and meeting contributions. Profile: {profile}",
+    "possible_connector": "Who in my network could introduce me to {name} or strengthen this relationship? "
+                          "Profile: {profile}",
+    "possible_place": "Where could I naturally meet {name}? Check upcoming events, shared locations, "
+                      "industry conferences. Profile: {profile}",
+    "possible_date": "When would be a good time to meet {name}? Check calendar availability and "
+                     "their timezone/travel patterns. Profile: {profile}",
+}
+
+
+@app.post("/api/networking/contact/{contact_id}/action", tags=["networking"],
+          dependencies=[Depends(verify_api_key)])
+async def networking_contact_action(contact_id: int, req: NetworkingActionRequest):
+    """Route an action button to Baker scan with contact context pre-loaded."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT * FROM vip_contacts WHERE id = %s", (contact_id,))
+            contact = cur.fetchone()
+            cur.close()
+            if not contact:
+                raise HTTPException(status_code=404, detail="Contact not found")
+        finally:
+            store._put_conn(conn)
+
+        contact = dict(contact)
+        name = contact.get("name", "Unknown")
+        profile_parts = [f"Name: {name}"]
+        if contact.get("role"):
+            profile_parts.append(f"Role: {contact['role']}")
+        if contact.get("expertise"):
+            profile_parts.append(f"Expertise: {contact['expertise']}")
+        if contact.get("investment_thesis"):
+            profile_parts.append(f"Investment thesis: {contact['investment_thesis']}")
+        if contact.get("personal_interests"):
+            profile_parts.append(f"Interests: {', '.join(contact['personal_interests'] or [])}")
+        if contact.get("domain"):
+            profile_parts.append(f"Domain: {contact['domain']}")
+        profile = "; ".join(profile_parts)
+
+        template = _NETWORKING_ACTION_PROMPTS.get(req.action)
+        if not template:
+            raise HTTPException(status_code=400, detail=f"Unknown action: {req.action}")
+
+        question = template.format(name=name, profile=profile)
+
+        # Route to scan_chat via internal call
+        scan_req = ScanRequest(question=question)
+        return await scan_chat(scan_req)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"POST /api/networking/contact/{contact_id}/action failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
 # Phase 3A: Calendar — Upcoming Meetings
 # ============================================================
 
