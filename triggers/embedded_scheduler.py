@@ -179,15 +179,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: deadline_cadence (every 60 minutes)")
 
-    # VIP SLA monitoring — every 5 minutes (DECISION-ENGINE-1A)
-    from orchestrator.decision_engine import run_vip_sla_check
-    scheduler.add_job(
-        run_vip_sla_check,
-        IntervalTrigger(minutes=5),
-        id="vip_sla_check", name="VIP SLA monitoring",
-        coalesce=True, max_instances=1, replace_existing=True,
-    )
-    logger.info("Registered: vip_sla_check (every 5 minutes)")
+    # VIP SLA monitoring — DISABLED (Director decision, Session 19).
+    # Director doesn't want unanswered-email reminders.
+    # from orchestrator.decision_engine import run_vip_sla_check
+    # scheduler.add_job(
+    #     run_vip_sla_check,
+    #     IntervalTrigger(minutes=5),
+    #     id="vip_sla_check", name="VIP SLA monitoring",
+    #     coalesce=True, max_instances=1, replace_existing=True,
+    # )
+    logger.info("vip_sla_check DISABLED (Director decision — no unanswered-email reminders)")
 
     # Commitment overdue check — every 6 hours (Phase 3C)
     from orchestrator.commitment_checker import run_commitment_check
