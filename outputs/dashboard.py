@@ -992,7 +992,18 @@ async def get_morning_brief():
             store._put_conn(conn)
 
         # Generate narrative (Haiku, cached 30 min) — Phase 3B: includes per-fire proposals
-        narrative = _get_morning_narrative(fire_count, deadline_count, processed_overnight, top_fires, deadlines)
+        # 20s timeout: if Haiku is slow/unreachable after restart, return stats without narrative
+        try:
+            narrative = await asyncio.wait_for(
+                asyncio.to_thread(
+                    _get_morning_narrative, fire_count, deadline_count,
+                    processed_overnight, top_fires, deadlines,
+                ),
+                timeout=20.0,
+            )
+        except (asyncio.TimeoutError, Exception) as e:
+            logger.warning(f"Morning narrative timed out or failed: {e}")
+            narrative = "Good morning. Baker is online — narrative generation is warming up."
 
         # Phase 3A: Fetch today's meetings (graceful — returns [] if Calendar API unavailable)
         meetings_today = []
@@ -1058,7 +1069,10 @@ def _get_morning_narrative(fire_count: int, deadline_count: int,
             f"If fires exist: lead with the top issue and deadline, then mention others.\n"
             f"Keep it under 50 words. No bullet points. Plain text only."
         )
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        client = anthropic.Anthropic(
+            api_key=config.claude.api_key,
+            timeout=15.0,
+        )
         resp = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=200,
