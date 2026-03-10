@@ -746,6 +746,54 @@ def generate_email_body(content_request: str, retriever, project=None, role=None
         return f"[Error generating email body: {e}]"
 
 
+def _generate_whatsapp_body(content_request: str, retriever, recipient_name: str) -> str:
+    """Generate a WhatsApp message body. Short, conversational, no markdown."""
+    try:
+        contexts = retriever.search_all_collections(
+            query=content_request, limit_per_collection=5, score_threshold=0.3,
+        )
+        context_block = "\n\n".join(
+            f"[{c.source.upper()}]\n{c.content[:400]}" for c in contexts[:6]
+        )
+    except Exception as e:
+        logger.warning(f"RAG retrieval for WhatsApp body failed: {e}")
+        context_block = ""
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    system = (
+        "You are Baker, Dimitry Vallen's AI Chief of Staff. You ARE sending a WhatsApp message right now.\n\n"
+        "CRITICAL RULES:\n"
+        "- Write ONLY the message text. Nothing else.\n"
+        "- WhatsApp style: short, warm, conversational. Not a formal email.\n"
+        "- No markdown (no **, no #, no -). Plain text only.\n"
+        "- No subject line, no signature block. Just the message.\n"
+        "- If asked to introduce yourself as Baker, do so naturally in the message.\n"
+        "- Do NOT say you cannot send WhatsApp. You ARE sending it.\n"
+        "- Do NOT ask for clarification. Write the message now.\n"
+        "- Keep it under 200 words.\n"
+        f"Today's date: {now}\n"
+        f"Recipient: {recipient_name}\n\n"
+        f"CONTEXT:\n{context_block}"
+    )
+
+    try:
+        claude = anthropic.Anthropic(api_key=config.claude.api_key)
+        resp = claude.messages.create(
+            model=config.claude.model, max_tokens=500,
+            system=system,
+            messages=[{"role": "user", "content": f"Write this WhatsApp message now: {content_request}"}],
+        )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost(config.claude.model, resp.usage.input_tokens, resp.usage.output_tokens, source="whatsapp_draft")
+        except Exception:
+            pass
+        return resp.content[0].text.strip()
+    except Exception as e:
+        logger.error(f"WhatsApp body generation failed: {e}")
+        return content_request  # fallback: send the Director's original words
+
+
 # ---------------------------------------------------------------------------
 # REPLY-TRACK-1: Sent email logging helper
 # ---------------------------------------------------------------------------
@@ -1254,7 +1302,7 @@ def handle_whatsapp_action(intent: dict, retriever, channel: str = "scan",
             f"You can add it with: \"Add {raw_recipient} to the VIP list with WhatsApp [number]\""
         )
 
-    # Generate message body — include conversation history for "same message" references
+    # Generate WhatsApp message body
     enhanced_request = content_request
     if conversation_history:
         enhanced_request = (
@@ -1262,10 +1310,7 @@ def handle_whatsapp_action(intent: dict, retriever, channel: str = "scan",
             f"RECENT CONVERSATION (use this to resolve references like 'the same message'):\n"
             f"{conversation_history}"
         )
-    body = generate_email_body(enhanced_request, retriever)
-    # Clean up — strip meta-commentary and markdown
-    body = _clean_email_body(body)
-    body = _strip_markdown(body)
+    body = _generate_whatsapp_body(enhanced_request, retriever, resolved[0][0])
 
     results = []
     from outputs.whatsapp_sender import send_whatsapp
