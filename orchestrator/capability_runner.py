@@ -126,6 +126,13 @@ class CapabilityRunner:
                     f"Capability {capability.slug} done: {iteration + 1} iter, "
                     f"{len(tool_log)} tools, {elapsed_ms}ms"
                 )
+                # Auto-insight extraction (fire-and-forget)
+                import threading
+                threading.Thread(
+                    target=self._maybe_store_insight,
+                    args=(capability, question, answer),
+                    daemon=True,
+                ).start()
                 return AgentResult(
                     answer=answer, tool_calls=tool_log,
                     iterations=iteration + 1,
@@ -279,6 +286,13 @@ class CapabilityRunner:
                     if block.type == "text" and block.text:
                         full_answer += block.text
                         yield {"token": block.text}
+                # Auto-insight extraction (fire-and-forget)
+                import threading
+                threading.Thread(
+                    target=self._maybe_store_insight,
+                    args=(capability, question, full_answer),
+                    daemon=True,
+                ).start()
                 result = AgentResult(
                     answer=full_answer, tool_calls=tool_log,
                     iterations=iteration + 1,
@@ -536,6 +550,88 @@ class CapabilityRunner:
                 store._put_conn(conn)
         except Exception:
             return ""
+
+    def _maybe_store_insight(self, capability, question: str, answer: str,
+                              baker_task_id: int = None):
+        """Auto-extract key findings from specialist response. Entirely non-fatal."""
+        try:
+            # Guards
+            if len(answer) < 200:
+                return
+            if capability.slug in ("decomposer", "synthesizer"):
+                return
+            allowed, _ = self._check_circuit_breaker()
+            if not allowed:
+                return
+
+            _HAIKU = "claude-haiku-4-5-20251001"
+            prompt = (
+                "Extract 1-3 key factual findings from this specialist response. "
+                "Only extract concrete facts: amounts, dates, legal positions, decisions, deadlines. "
+                "Skip opinions, hedging, generic statements. "
+                "Return JSON array: [{\"content\": \"...\", \"matter_slug\": \"...\"|null, "
+                "\"confidence\": \"high\"|\"medium\"|\"low\"}]. "
+                "Return empty array [] if no concrete findings.\n\n"
+                f"Question: {question[:500]}\n\nResponse:\n{answer[:4000]}"
+            )
+
+            resp = self.claude.messages.create(
+                model=_HAIKU,
+                max_tokens=500,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            self._log_api_cost(
+                _HAIKU, resp.usage.input_tokens, resp.usage.output_tokens,
+                source="auto_insight", capability_id=capability.slug,
+            )
+
+            raw = resp.content[0].text.strip()
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+                if raw.endswith("```"):
+                    raw = raw[:-3]
+                raw = raw.strip()
+
+            import json
+            findings = json.loads(raw)
+            if not isinstance(findings, list) or not findings:
+                return
+
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            conn = store._get_conn()
+            if not conn:
+                return
+            try:
+                cur = conn.cursor()
+                stored = 0
+                for f in findings:
+                    if not isinstance(f, dict) or not f.get("content"):
+                        continue
+                    if f.get("confidence") == "low":
+                        continue
+                    cur.execute("""
+                        INSERT INTO baker_insights
+                            (insight_type, content, matter_slug, source_capability,
+                             source_task_id, confidence, validated_by)
+                        VALUES ('finding', %s, %s, %s, %s, %s, 'auto')
+                    """, (
+                        f["content"],
+                        f.get("matter_slug"),
+                        capability.slug,
+                        baker_task_id,
+                        f.get("confidence", "medium"),
+                    ))
+                    stored += 1
+                conn.commit()
+                cur.close()
+                if stored:
+                    logger.info(f"Auto-stored {stored} insights from {capability.slug}")
+            finally:
+                store._put_conn(conn)
+
+        except Exception as e:
+            logger.debug(f"Auto-insight extraction failed (non-fatal): {e}")
 
     def _get_shared_insights(self, slug: str, domain: str = None, limit: int = 5) -> str:
         """Fetch active shared insights relevant to all specialists (SPECIALIST-UPGRADE-1B)."""
