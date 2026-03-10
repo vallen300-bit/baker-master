@@ -1142,13 +1142,17 @@ var _matterViewMode = 'list';
 
 async function loadMatterDetail(matterSlug) {
     var container = document.getElementById('mattersContent');
-    if (!container) return;
-    container.textContent = 'Loading...';
+    if (!container) { console.error('mattersContent container not found'); return; }
+    container.textContent = 'Loading ' + matterSlug + '...';
     _matterDetailSlug = matterSlug;
 
     try {
         var resp = await bakerFetch('/api/matters/' + encodeURIComponent(matterSlug) + '/items');
-        if (!resp.ok) return;
+        if (!resp.ok) {
+            container.textContent = 'Error loading matter (HTTP ' + resp.status + ')';
+            container.style.color = 'var(--red)';
+            return;
+        }
         var data = await resp.json();
 
         if (!data.items || data.items.length === 0) {
