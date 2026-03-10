@@ -219,8 +219,10 @@ def _fire_down_alert(source: str, failures: int, error_msg: str):
             f"Failed {failures}x since {last_success}\n"
             f"Last error: {error_msg}"
         )
+        # T2 not T1 — infrastructure alerts shouldn't consume T1 budget
+        # or push to Director channels. Dashboard + Slack visibility is sufficient.
         store.create_alert(
-            tier=1,
+            tier=2,
             title=title,
             body=body,
             source="sentinel_health",

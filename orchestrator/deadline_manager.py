@@ -420,6 +420,9 @@ def _fire_reminder(deadline: dict, stage: str, hours_remaining: float):
             logger.warning(f"Deadline digest alert failed: {e}")
 
         # Create DB alert + attach Haiku proposals (Phase 3B)
+        # source_id dedup: same deadline + same stage = one alert only.
+        # Prevents duplicate T1 alerts (and wasted Haiku proposal API calls).
+        dl_source_id = f"deadline:{deadline.get('id')}:{stage}"
         try:
             from memory.store_back import SentinelStoreBack
             store = SentinelStoreBack._get_global_instance()
@@ -430,6 +433,7 @@ def _fire_reminder(deadline: dict, stage: str, hours_remaining: float):
                 action_required=True,
                 tags=["deadline"],
                 source="deadline_cadence",
+                source_id=dl_source_id,
             )
             if alert_id:
                 proposal = _generate_deadline_proposal(deadline, stage, hours_remaining)
