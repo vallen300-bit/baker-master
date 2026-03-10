@@ -23,8 +23,15 @@ async function loadConfig() {
 }
 
 async function bakerFetch(url, options = {}) {
-    const headers = { ...(options.headers || {}), 'X-Baker-Key': BAKER_CONFIG.apiKey };
-    return fetch(url, { ...options, headers });
+    var headers = { ...(options.headers || {}), 'X-Baker-Key': BAKER_CONFIG.apiKey };
+    var timeoutMs = options.timeout || 30000;
+    var controller = new AbortController();
+    var timer = setTimeout(function() { controller.abort(); }, timeoutMs);
+    try {
+        return await fetch(url, { ...options, headers: headers, signal: controller.signal });
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 // ═══ STATE ═══
@@ -192,16 +199,19 @@ function switchTab(tabName) {
 
 async function loadMorningBrief() {
     try {
-        const resp = await bakerFetch('/api/dashboard/morning-brief');
-        if (!resp.ok) return;
-        const data = await resp.json();
+        var resp = await bakerFetch('/api/dashboard/morning-brief', { timeout: 25000 });
+        if (!resp.ok) {
+            _showBriefingUnavailable('Server returned ' + resp.status);
+            return;
+        }
+        var data = await resp.json();
 
         setText('statFires', data.fire_count || 0);
         setText('statDeadlines', data.deadline_count || 0);
         setText('statProcessed', data.processed_overnight || 0);
         setText('statActions', data.actions_completed || 0);
 
-        const narEl = document.getElementById('briefNarrative');
+        var narEl = document.getElementById('briefNarrative');
         if (narEl && data.narrative) setSafeHTML(narEl, md(data.narrative));
 
         // Fires badge
@@ -271,7 +281,22 @@ async function loadMorningBrief() {
         loadSystemWidgets();
     } catch (e) {
         console.error('loadMorningBrief failed:', e);
+        _showBriefingUnavailable(e.name === 'AbortError' ? 'Request timed out' : String(e));
     }
+}
+
+function _showBriefingUnavailable(reason) {
+    var narEl = document.getElementById('briefNarrative');
+    if (!narEl) return;
+    var retryBtn = document.createElement('button');
+    retryBtn.textContent = 'Retry';
+    retryBtn.style.cssText = 'margin-left:8px;padding:2px 10px;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--text1);cursor:pointer;font-size:12px;';
+    retryBtn.onclick = function() {
+        narEl.textContent = 'Retrying...';
+        loadMorningBrief();
+    };
+    narEl.textContent = 'Briefing unavailable (' + reason + '). ';
+    narEl.appendChild(retryBtn);
 }
 
 // ═══ SYSTEM HEALTH WIDGETS (DASHBOARD-COST-WIDGET) ═══

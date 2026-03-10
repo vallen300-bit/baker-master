@@ -92,9 +92,11 @@ def backfill_from_dropbox(limit: int = None, dry_run: bool = False):
     logger.info(f"Existing documents in table: {len(existing_hashes)}")
 
     processed = 0
-    skipped = 0
+    skipped_hash = 0
+    skipped_empty = 0
     errors = 0
     classified = 0
+    circuit_breaker_stopped = False
     temp_dir = tempfile.mkdtemp(prefix="baker_backfill_")
 
     try:
@@ -109,15 +111,15 @@ def backfill_from_dropbox(limit: int = None, dry_run: bool = False):
                 # Hash check
                 file_hash = compute_file_hash(local_path)
                 if file_hash in existing_hashes:
-                    logger.debug(f"  Skipped (already stored): {name}")
-                    skipped += 1
+                    logger.info(f"  Skipped (hash match): {name}")
+                    skipped_hash += 1
                     continue
 
                 # Extract full text
                 full_text = extract(local_path)
                 if not full_text or len(full_text.strip()) < 10:
-                    logger.debug(f"  Skipped (empty extraction): {name}")
-                    skipped += 1
+                    logger.info(f"  Skipped (empty/short text): {name}")
+                    skipped_empty += 1
                     continue
 
                 # Store
@@ -144,6 +146,7 @@ def backfill_from_dropbox(limit: int = None, dry_run: bool = False):
                         classified += 1
                     else:
                         logger.warning(f"  Circuit breaker hit at €{daily_cost:.2f}, stopping extraction")
+                        circuit_breaker_stopped = True
                         break
 
                 # Rate limit: 5 files/minute = 12s between downloads
@@ -162,19 +165,28 @@ def backfill_from_dropbox(limit: int = None, dry_run: bool = False):
                 except Exception:
                     pass
 
-            # Progress log every 20 files
-            if (i + 1) % 20 == 0:
-                logger.info(
-                    f"Progress: {i + 1}/{len(file_entries)} — "
-                    f"{processed} stored, {classified} classified, {skipped} skipped, {errors} errors"
-                )
+                # Progress log every 100 files (inside finally so continues don't skip it)
+                if (i + 1) % 100 == 0:
+                    logger.info(
+                        f"Progress: {i + 1}/{len(file_entries)} — "
+                        f"{processed} stored, {classified} classified, "
+                        f"{skipped_hash} hash-skipped, {skipped_empty} empty-skipped, {errors} errors"
+                    )
 
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
     logger.info(
-        f"Backfill complete: {processed} stored, {classified} classified, "
-        f"{skipped} skipped, {errors} errors (of {len(file_entries)} total)"
+        f"\n{'='*60}\n"
+        f"BACKFILL COMPLETE\n"
+        f"  Total files listed:       {len(file_entries)}\n"
+        f"  Skipped (hash match):     {skipped_hash}\n"
+        f"  Skipped (empty/short):    {skipped_empty}\n"
+        f"  Stored (new documents):   {processed}\n"
+        f"  Classified:               {classified}\n"
+        f"  Errors:                   {errors}\n"
+        f"  Circuit breaker stopped:  {circuit_breaker_stopped}\n"
+        f"{'='*60}"
     )
 
 
