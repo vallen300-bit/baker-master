@@ -130,6 +130,34 @@ def _auto_tag(title: str, body: str) -> list:
     return matched[:5]
 
 
+def _baker_already_commented(task_id: str, hours: int = 24) -> bool:
+    """Check if Baker has posted a comment on this ClickUp task within the last N hours.
+    Prevents duplicate comments caused by Baker's own comment bumping date_updated.
+    """
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT COUNT(*) FROM baker_actions
+                WHERE action_type = 'post_comment'
+                  AND target_task_id = %s
+                  AND created_at > NOW() - make_interval(hours => %s)
+            """, (task_id, hours))
+            count = cur.fetchone()[0]
+            cur.close()
+            return count > 0
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.warning(f"Baker comment dedup check failed (allowing comment): {e}")
+        return False
+
+
 def _normalize_tier(raw_tier) -> int:
     """Normalize alert tier to integer 1/2/3. Defaults to 3 if invalid."""
     if isinstance(raw_tier, int) and raw_tier in (1, 2, 3):
@@ -542,6 +570,11 @@ class SentinelPipeline:
         if response.alerts:
             tiers = [_normalize_tier(a.get("tier")) for a in response.alerts]
             max_tier = min(tiers) if tiers else 3
+
+        # Dedup: skip if Baker already commented on this task in the last 24h
+        if _baker_already_commented(source_task_id):
+            logger.info(f"M3: Skipping comment — Baker already commented on {source_task_id} recently")
+            return
 
         try:
             if trigger.type == "clickup_handoff_note":

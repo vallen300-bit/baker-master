@@ -269,9 +269,13 @@ def run_cadence_check():
     # Auto-dismiss unconfirmed soft deadlines after 7 days
     dismissed = _auto_dismiss_soft_deadlines()
 
+    # Auto-dismiss active deadlines that are overdue by 7+ days
+    overdue_dismissed = _auto_dismiss_overdue_deadlines()
+
     logger.info(
         f"Cadence check complete: {alerts_fired} reminders fired, "
-        f"{expired} expired, {dismissed} soft deadlines auto-dismissed, "
+        f"{expired} expired, {dismissed} soft auto-dismissed, "
+        f"{overdue_dismissed} overdue auto-dismissed, "
         f"{len(deadlines)} active deadlines checked"
     )
 
@@ -468,6 +472,38 @@ def run_expiry_check() -> int:
         return expired
     except Exception as e:
         logger.error(f"Expiry check failed: {e}")
+        return 0
+    finally:
+        put_conn(conn)
+
+
+def _auto_dismiss_overdue_deadlines() -> int:
+    """Auto-dismiss active deadlines that are overdue by 7+ days.
+    Prevents stale overdue deadlines from accumulating indefinitely.
+    """
+    from models.deadlines import get_conn, put_conn
+    conn = get_conn()
+    if not conn:
+        return 0
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE deadlines
+            SET status = 'dismissed',
+                dismissed_reason = 'auto-dismissed (overdue by 7+ days)',
+                updated_at = NOW()
+            WHERE status = 'active'
+              AND due_date < %s
+        """, (cutoff,))
+        dismissed = cur.rowcount
+        conn.commit()
+        cur.close()
+        if dismissed > 0:
+            logger.info(f"Auto-dismissed {dismissed} deadlines overdue by 7+ days")
+        return dismissed
+    except Exception as e:
+        logger.error(f"Auto-dismiss overdue deadlines failed: {e}")
         return 0
     finally:
         put_conn(conn)
