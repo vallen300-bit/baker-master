@@ -154,7 +154,26 @@ def run_dropbox_poll():
                     local_path = client.download_file(entry_path, Path(temp_dir))
                     logger.info(f"Downloaded: {entry_name} ({entry_size:,} bytes)")
 
-                    # 5b. Ingest
+                    # 5a2. Store full text in PostgreSQL (SPECIALIST-UPGRADE-1A)
+                    try:
+                        from tools.ingest.extractors import extract
+                        from tools.ingest.dedup import compute_file_hash
+                        full_text = extract(local_path)
+                        file_hash = compute_file_hash(local_path)
+                        store = _get_store()
+                        doc_id = store.store_document_full(
+                            source_path=entry_path,
+                            filename=entry_name,
+                            file_hash=file_hash,
+                            full_text=full_text,
+                            token_count=len(full_text) // 4 if full_text else 0,
+                        )
+                        if doc_id:
+                            logger.info(f"Full text stored: {entry_name} → documents.id={doc_id} ({len(full_text):,} chars)")
+                    except Exception as e:
+                        logger.warning(f"Full text storage failed for {entry_name} (non-fatal): {e}")
+
+                    # 5b. Ingest (chunks to Qdrant — unchanged)
                     from tools.ingest.pipeline import ingest_file
                     result = ingest_file(local_path, collection="baker-documents")
 

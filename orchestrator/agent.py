@@ -666,8 +666,13 @@ class ToolExecutor:
         parts = [f"--- {label} ({len(contexts)} results) ---"]
         for ctx in contexts:
             source_label = _build_source_label(ctx.metadata, ctx.source)
-            # Cap individual results at 2000 chars to keep tool results reasonable
-            content = ctx.content[:2000]
+            # SPECIALIST-UPGRADE-1A: enriched full-text results get 12K chars (~3K tokens)
+            if ctx.metadata.get("enriched"):
+                content = ctx.content[:12000]
+                if len(ctx.content) > 12000:
+                    content += "\n[TRUNCATED — full document available]"
+            else:
+                content = ctx.content[:2000]
             parts.append(f"[SOURCE:{source_label}]\n{content}\n[/SOURCE]")
         return "\n".join(parts)
 

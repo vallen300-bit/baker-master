@@ -166,14 +166,14 @@ class SentinelRetriever:
 
     def _enrich_with_full_text(self, contexts: list["RetrievedContext"]) -> list["RetrievedContext"]:
         """
-        For top-scoring meeting/email chunks from Qdrant, replace truncated
-        content with full source text from PostgreSQL.
-        Only enriches the top 5 results to stay within token budget.
+        For top-scoring meeting/email/document chunks from Qdrant, replace
+        truncated content with full source text from PostgreSQL.
+        SPECIALIST-UPGRADE-1A: added document enrichment + increased limits.
         """
         enriched_ids = set()  # avoid duplicating the same source
 
-        for i, ctx in enumerate(contexts[:10]):  # scan top 10 candidates
-            if len(enriched_ids) >= 3:  # max 3 full-text enrichments
+        for i, ctx in enumerate(contexts[:15]):  # scan top 15 candidates
+            if len(enriched_ids) >= 5:  # max 5 full-text enrichments
                 break
 
             try:
@@ -209,6 +209,27 @@ class SentinelRetriever:
                         )
                         enriched_ids.add(source_id)
                         logger.info(f"Enriched email {source_id} with full content")
+                        continue
+
+                # Documents — match by source_path or filename (SPECIALIST-UPGRADE-1A)
+                is_document = "document" in collection
+                source_path = ctx.metadata.get("source_path", "")
+                filename_meta = ctx.metadata.get("filename", ctx.metadata.get("label", ""))
+                if is_document and (source_path or filename_meta):
+                    doc_key = source_path or filename_meta
+                    if doc_key not in enriched_ids:
+                        full = self._get_full_document_text(source_path, filename_meta)
+                        if full:
+                            contexts[i] = RetrievedContext(
+                                content=full,
+                                source=ctx.source,
+                                score=ctx.score,
+                                metadata={**ctx.metadata, "enriched": True},
+                                token_estimate=self._estimate_tokens(full),
+                            )
+                            enriched_ids.add(doc_key)
+                            logger.info(f"Enriched document {doc_key} with full text")
+                            continue
 
             except Exception as e:
                 logger.debug(f"Enrichment failed for context {i} (non-fatal): {e}")
@@ -246,6 +267,33 @@ class SentinelRetriever:
             return row[0] if row and row[0] else None
         except Exception as e:
             logger.debug(f"Full trigger content lookup failed for {source_id}: {e}")
+            self._pg_pool = None
+            return None
+
+    def _get_full_document_text(self, source_path: str = None,
+                                filename: str = None) -> Optional[str]:
+        """Fetch full document text from documents table (SPECIALIST-UPGRADE-1A)."""
+        try:
+            conn = self._get_pg_conn()
+            cur = conn.cursor()
+            if source_path:
+                cur.execute(
+                    "SELECT full_text FROM documents WHERE source_path = %s LIMIT 1",
+                    (source_path,),
+                )
+            elif filename:
+                cur.execute(
+                    "SELECT full_text FROM documents WHERE filename = %s ORDER BY ingested_at DESC LIMIT 1",
+                    (filename,),
+                )
+            else:
+                cur.close()
+                return None
+            row = cur.fetchone()
+            cur.close()
+            return row[0] if row and row[0] else None
+        except Exception as e:
+            logger.debug(f"Full document lookup failed: {e}")
             self._pg_pool = None
             return None
 

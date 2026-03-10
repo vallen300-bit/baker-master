@@ -117,6 +117,9 @@ class SentinelStoreBack:
         self._ensure_alert_artifacts_table()
         self._ensure_commitments_table()
 
+        # SPECIALIST-UPGRADE-1A: Full document storage
+        self._ensure_documents_table()
+
         # PHASE-4A: Cost monitor + agent observability tables
         self._ensure_cost_and_metrics_tables()
 
@@ -174,6 +177,81 @@ class SentinelStoreBack:
             ensure_agent_tool_calls_table(conn)
         except Exception as e:
             logger.warning(f"Could not ensure Phase 4A tables: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_documents_table(self):
+        """SPECIALIST-UPGRADE-1A: Full document text storage."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS documents (
+                    id SERIAL PRIMARY KEY,
+                    source_path TEXT,
+                    filename VARCHAR(500),
+                    file_hash VARCHAR(64) UNIQUE,
+                    document_type VARCHAR(50),
+                    language VARCHAR(10),
+                    matter_slug VARCHAR(200),
+                    parties TEXT[],
+                    tags TEXT[],
+                    full_text TEXT,
+                    page_count INTEGER,
+                    token_count INTEGER,
+                    ingested_at TIMESTAMPTZ DEFAULT NOW(),
+                    classified_at TIMESTAMPTZ,
+                    extracted_at TIMESTAMPTZ
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_matter ON documents(matter_slug)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(document_type)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(file_hash)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source_path)")
+            conn.commit()
+            cur.close()
+            logger.info("documents table verified")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure documents table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def store_document_full(self, source_path: str, filename: str,
+                            file_hash: str, full_text: str,
+                            token_count: int = 0):
+        """Store full document text in PostgreSQL. Returns document ID or None."""
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO documents (source_path, filename, file_hash, full_text, token_count)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (file_hash) DO UPDATE SET
+                    source_path = EXCLUDED.source_path,
+                    full_text = EXCLUDED.full_text,
+                    token_count = EXCLUDED.token_count,
+                    ingested_at = NOW()
+                RETURNING id
+            """, (source_path, filename, file_hash, full_text, token_count))
+            row = cur.fetchone()
+            conn.commit()
+            cur.close()
+            return row[0] if row else None
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"store_document_full failed (non-fatal): {e}")
+            return None
         finally:
             self._put_conn(conn)
 
