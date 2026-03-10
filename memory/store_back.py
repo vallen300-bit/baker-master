@@ -117,8 +117,10 @@ class SentinelStoreBack:
         self._ensure_alert_artifacts_table()
         self._ensure_commitments_table()
 
-        # SPECIALIST-UPGRADE-1A: Full document storage
+        # SPECIALIST-UPGRADE-1A/1B: Document intelligence
         self._ensure_documents_table()
+        self._ensure_document_extractions_table()
+        self._ensure_baker_insights_table()
 
         # PHASE-4A: Cost monitor + agent observability tables
         self._ensure_cost_and_metrics_tables()
@@ -252,6 +254,72 @@ class SentinelStoreBack:
                 pass
             logger.warning(f"store_document_full failed (non-fatal): {e}")
             return None
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_document_extractions_table(self):
+        """SPECIALIST-UPGRADE-1B: Structured extraction results."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS document_extractions (
+                    id SERIAL PRIMARY KEY,
+                    document_id INTEGER REFERENCES documents(id),
+                    extraction_type VARCHAR(50),
+                    structured_data JSONB,
+                    confidence VARCHAR(20),
+                    extracted_by VARCHAR(50),
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_doc_extractions_doc ON document_extractions(document_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_doc_extractions_type ON document_extractions(extraction_type)")
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure document_extractions table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_baker_insights_table(self):
+        """SPECIALIST-UPGRADE-1B: Shared specialist insights."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS baker_insights (
+                    id SERIAL PRIMARY KEY,
+                    insight_type VARCHAR(30) NOT NULL,
+                    content TEXT NOT NULL,
+                    matter_slug VARCHAR(200),
+                    source_capability VARCHAR(50),
+                    source_task_id INTEGER,
+                    confidence VARCHAR(20) DEFAULT 'medium',
+                    validated_by VARCHAR(50),
+                    active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    expires_at TIMESTAMPTZ
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_baker_insights_matter ON baker_insights(matter_slug)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_baker_insights_active ON baker_insights(active) WHERE active = TRUE")
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure baker_insights table: {e}")
         finally:
             self._put_conn(conn)
 

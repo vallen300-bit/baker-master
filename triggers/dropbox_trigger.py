@@ -170,6 +170,12 @@ def run_dropbox_poll():
                         )
                         if doc_id:
                             logger.info(f"Full text stored: {entry_name} → documents.id={doc_id} ({len(full_text):,} chars)")
+                            # Queue classification + extraction (SPECIALIST-UPGRADE-1B)
+                            try:
+                                from tools.document_pipeline import queue_extraction
+                                queue_extraction(doc_id)
+                            except Exception as qe:
+                                logger.warning(f"Queue extraction failed for doc {doc_id} (non-fatal): {qe}")
                     except Exception as e:
                         logger.warning(f"Full text storage failed for {entry_name} (non-fatal): {e}")
 

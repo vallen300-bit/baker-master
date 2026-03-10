@@ -493,6 +493,11 @@ class CapabilityRunner:
         if feedback_context:
             enriched += f"\n\n## PAST FEEDBACK ON YOUR RESPONSES\n{feedback_context}\n"
 
+        # SPECIALIST-UPGRADE-1B: Inject shared Baker team insights
+        insights = self._get_shared_insights(capability.slug, domain)
+        if insights:
+            enriched += f"\n\n## BAKER TEAM INSIGHTS\n{insights}\n"
+
         # Apply DB preferences + domain/mode extensions
         return build_mode_aware_prompt(enriched, domain=domain, mode=mode)
 
@@ -526,6 +531,41 @@ class CapabilityRunner:
                         line += f" — \"{comment}\""
                     parts.append(line)
                 parts.append("Adjust your approach based on this feedback.")
+                return "\n".join(parts)
+            finally:
+                store._put_conn(conn)
+        except Exception:
+            return ""
+
+    def _get_shared_insights(self, slug: str, domain: str = None, limit: int = 5) -> str:
+        """Fetch active shared insights relevant to all specialists (SPECIALIST-UPGRADE-1B)."""
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            conn = store._get_conn()
+            if not conn:
+                return ""
+            try:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT content, source_capability, matter_slug, validated_by
+                    FROM baker_insights
+                    WHERE active = TRUE
+                      AND (expires_at IS NULL OR expires_at > NOW())
+                    ORDER BY
+                        CASE WHEN validated_by = 'director' THEN 0 ELSE 1 END,
+                        created_at DESC
+                    LIMIT %s
+                """, (limit,))
+                rows = cur.fetchall()
+                cur.close()
+                if not rows:
+                    return ""
+                parts = ["Baker's accumulated insights (shared across all specialists):"]
+                for content, source_cap, matter, validated in rows:
+                    prefix = "[Director-confirmed] " if validated == "director" else ""
+                    matter_tag = f"[{matter}] " if matter else ""
+                    parts.append(f"- {prefix}{matter_tag}{content}")
                 return "\n".join(parts)
             finally:
                 store._put_conn(conn)

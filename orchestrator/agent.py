@@ -329,6 +329,34 @@ TOOL_DEFINITIONS = [
             "required": [],
         },
     },
+    # SPECIALIST-UPGRADE-1B: Document search tool (tool #12)
+    {
+        "name": "search_documents",
+        "description": (
+            "Search Baker's document store for full documents by type, matter, "
+            "parties, or keywords. Returns full text and any structured extractions "
+            "(amounts, dates, terms, clauses). Use when you need complete contracts, "
+            "invoices, Nachträge, Schlussrechnungen, or correspondence — not fragments."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search terms to match against document text, filename, or parties",
+                },
+                "document_type": {
+                    "type": "string",
+                    "description": "Filter by type: contract, invoice, nachtrag, schlussrechnung, correspondence, protocol, report",
+                },
+                "matter_slug": {
+                    "type": "string",
+                    "description": "Filter by matter name",
+                },
+            },
+            "required": ["query"],
+        },
+    },
 ]
 
 
@@ -372,6 +400,8 @@ class ToolExecutor:
                 return self._web_search(tool_input)
             elif tool_name == "read_document":
                 return self._read_document(tool_input)
+            elif tool_name == "search_documents":
+                return self._search_documents(tool_input)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -658,6 +688,77 @@ class ToolExecutor:
             )
         except Exception as e:
             return json.dumps({"error": f"File extraction failed: {str(e)}"})
+
+    def _search_documents(self, inp: dict) -> str:
+        """Search documents table for full documents with optional type/matter filter (SPECIALIST-UPGRADE-1B)."""
+        query = inp.get("query", "")
+        doc_type = inp.get("document_type")
+        matter = inp.get("matter_slug")
+
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            conn = store._get_conn()
+            if not conn:
+                return json.dumps({"error": "Database unavailable"})
+            try:
+                cur = conn.cursor()
+                conditions = ["full_text IS NOT NULL"]
+                params = []
+
+                if doc_type:
+                    conditions.append("document_type = %s")
+                    params.append(doc_type)
+                if matter:
+                    conditions.append("matter_slug ILIKE %s")
+                    params.append(f"%{matter}%")
+                if query:
+                    conditions.append("(full_text ILIKE %s OR filename ILIKE %s OR %s = ANY(parties))")
+                    params.extend([f"%{query}%", f"%{query}%", query])
+
+                where = " AND ".join(conditions)
+                cur.execute(f"""
+                    SELECT d.id, d.filename, d.source_path, d.document_type,
+                           d.matter_slug, d.parties, d.token_count,
+                           LEFT(d.full_text, 12000),
+                           de.structured_data
+                    FROM documents d
+                    LEFT JOIN document_extractions de ON de.document_id = d.id
+                    WHERE {where}
+                    ORDER BY d.ingested_at DESC
+                    LIMIT 3
+                """, params)
+                rows = cur.fetchall()
+                cur.close()
+
+                if not rows:
+                    return f"[No documents found matching '{query}']"
+
+                parts = [f"--- Documents ({len(rows)} results) ---"]
+                for doc_id, fname, spath, dtype, mslug, parties, tokens, text, extraction in rows:
+                    meta = f"[Document: {fname}"
+                    if dtype:
+                        meta += f", type={dtype}"
+                    if mslug:
+                        meta += f", matter={mslug}"
+                    if parties:
+                        meta += f", parties={', '.join(parties)}"
+                    meta += "]"
+
+                    parts.append(f"[SOURCE:{meta}]")
+                    if text:
+                        parts.append(text)
+                        if tokens and tokens > 3000:
+                            parts.append("[TRUNCATED — full document available]")
+                    if extraction:
+                        parts.append(f"\n--- Structured Extraction ---\n{json.dumps(extraction, indent=2, default=str)}")
+                    parts.append("[/SOURCE]")
+
+                return "\n".join(parts)
+            finally:
+                store._put_conn(conn)
+        except Exception as e:
+            return json.dumps({"error": f"Document search failed: {str(e)}"})
 
     @staticmethod
     def _format_contexts(contexts, label: str) -> str:

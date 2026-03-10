@@ -579,6 +579,32 @@ def extract_attachments_text(service, message: Dict) -> List[Dict]:
                 f"Failed to download attachment {filename}: {e}"
             )
 
+    # SPECIALIST-UPGRADE-1B: Store each attachment as a standalone document
+    if results:
+        try:
+            import hashlib
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            for att in results:
+                att_hash = hashlib.sha256(att["text"].encode()).hexdigest()
+                doc_id = store.store_document_full(
+                    source_path=f"email:{message_id}/{att['filename']}",
+                    filename=att["filename"],
+                    file_hash=att_hash,
+                    full_text=att["text"],
+                    token_count=len(att["text"]) // 4,
+                )
+                if doc_id:
+                    from tools.document_pipeline import queue_extraction
+                    queue_extraction(doc_id)
+                    logging.getLogger("sentinel.gmail").info(
+                        f"Email attachment stored as doc {doc_id}: {att['filename']}"
+                    )
+        except Exception as e:
+            logging.getLogger("sentinel.gmail").warning(
+                f"Email attachment document storage failed (non-fatal): {e}"
+            )
+
     return results
 
 
