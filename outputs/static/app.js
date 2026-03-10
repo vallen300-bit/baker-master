@@ -2616,10 +2616,26 @@ function renderArticles(container, articles, filterRow) {
 // ═══ ASK SPECIALIST ═══
 
 var _specialistSlug = null;
-var _specialistHistory = [];
+var _specialistHistories = {};   // keyed by 'global' or 'matter:<slug>' + ':' + capSlug
 var _specialistStreaming = false;
+var _specialistContext = 'global'; // active matter context for specialist
+
+function _specialistContextKey() {
+    return (_specialistContext || 'global') + ':' + (_specialistSlug || '');
+}
+
+function _getSpecialistHistory() {
+    var key = _specialistContextKey();
+    if (!_specialistHistories[key]) _specialistHistories[key] = [];
+    return _specialistHistories[key];
+}
 
 async function loadSpecialistTab() {
+    // Capture matter context if navigating from a matter
+    if (_currentMatterSlug) {
+        _specialistContext = 'matter:' + _currentMatterSlug;
+    }
+
     var picker = document.getElementById('specialistPicker');
     if (!picker || picker.options.length > 1) return; // Already populated
 
@@ -2652,7 +2668,7 @@ async function sendSpecialistMessage(question) {
     if (sendBtn) sendBtn.disabled = true;
     if (input) { input.disabled = true; input.value = ''; }
 
-    _specialistHistory.push({ role: 'user', content: question });
+    _getSpecialistHistory().push({ role: 'user', content: question });
     appendSpecialistBubble('user', question);
 
     var replyId = 'specialist-reply-' + Date.now();
@@ -2668,7 +2684,7 @@ async function sendSpecialistMessage(question) {
             body: JSON.stringify({
                 question: question,
                 capability_slug: _specialistSlug,
-                history: _specialistHistory.slice(-30),
+                history: _getSpecialistHistory().slice(-30),
             }),
         });
         if (!resp.ok) throw new Error('Specialist API returned ' + resp.status);
@@ -2702,8 +2718,12 @@ async function sendSpecialistMessage(question) {
         if (replyEl) replyEl.textContent = fullResponse;
     }
 
-    _specialistHistory.push({ role: 'assistant', content: fullResponse });
-    if (_specialistHistory.length > 30) _specialistHistory = _specialistHistory.slice(-30);
+    var hist = _getSpecialistHistory();
+    hist.push({ role: 'assistant', content: fullResponse });
+    if (hist.length > 30) {
+        var key = _specialistContextKey();
+        _specialistHistories[key] = hist.slice(-30);
+    }
 
     // Add copy button after response
     if (replyEl && fullResponse && !fullResponse.startsWith('Error:')) {
@@ -2882,10 +2902,15 @@ async function init() {
             var sendBtn = document.getElementById('specialistSendBtn');
             if (input) input.disabled = !_specialistSlug;
             if (sendBtn) sendBtn.disabled = !_specialistSlug;
-            // Clear messages on capability change
-            _specialistHistory = [];
+            // Restore per-context history for this slug+matter combo
             var container = document.getElementById('specialistMessages');
-            if (container) container.textContent = '';
+            if (container) {
+                container.textContent = '';
+                var existing = _getSpecialistHistory();
+                for (var i = 0; i < existing.length; i++) {
+                    appendSpecialistBubble(existing[i].role, existing[i].content);
+                }
+            }
             if (_specialistSlug && input) input.focus();
         });
     }
