@@ -2678,7 +2678,10 @@ async function loadSpecialistTab() {
     }
 
     var picker = document.getElementById('specialistPicker');
-    if (!picker || picker.options.length > 1) return; // Already populated
+    if (!picker) return;
+
+    // Only populate once — check for data attribute flag
+    if (picker.dataset.loaded) return;
 
     try {
         var resp = await bakerFetch('/api/capabilities');
@@ -2686,15 +2689,21 @@ async function loadSpecialistTab() {
         var data = await resp.json();
         if (!data.capabilities) return;
 
+        // Clear existing options except the placeholder
+        while (picker.options.length > 1) picker.remove(1);
+
+        var seen = {};
         for (var i = 0; i < data.capabilities.length; i++) {
             var cap = data.capabilities[i];
-            if (cap.capability_type === 'domain' && cap.active) {
+            if (cap.capability_type === 'domain' && cap.active && !seen[cap.slug]) {
+                seen[cap.slug] = true;
                 var opt = document.createElement('option');
                 opt.value = cap.slug;
                 opt.textContent = cap.name;
                 picker.appendChild(opt);
             }
         }
+        picker.dataset.loaded = 'true';
     } catch (e) {
         console.error('loadSpecialistTab failed:', e);
     }

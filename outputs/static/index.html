@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=19">
+    <link rel="stylesheet" href="/static/style.css?v=20">
 </head>
 <body>
 
@@ -192,15 +192,13 @@
 
         <!-- VIEW: Ask Specialist -->
         <div class="view" id="viewAskSpecialist">
-            <div class="scan-view-header">
+            <div class="scan-view-header" style="display:flex;align-items:center;gap:14px;margin-bottom:14px;">
                 <span class="scan-view-title">Ask Specialist</span>
-            </div>
-            <div style="padding:0 0 12px;">
                 <select id="specialistPicker" class="specialist-picker">
                     <option value="">Select a specialist...</option>
                 </select>
             </div>
-            <div class="scan-view-body">
+            <div class="scan-view-body specialist-body">
                 <div id="specialistMessages" class="scan-messages"></div>
                 <div id="specialistUploadStatus" class="upload-status" hidden></div>
                 <form id="specialistForm" class="scan-form" autocomplete="off">
@@ -241,6 +239,6 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=19"></script>
+<script src="/static/app.js?v=20"></script>
 </body>
 </html>
