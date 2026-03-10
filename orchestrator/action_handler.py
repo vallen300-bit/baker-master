@@ -377,11 +377,21 @@ def _quick_whatsapp_detect(question: str) -> dict:
     Returns intent dict if detected, None otherwise.
     """
     import re
-    q = question.lower()
+    q = question.lower().strip()
+
+    # Questions about WhatsApp are NOT send commands
+    question_starts = ("what ", "who ", "where ", "when ", "how ", "why ",
+                       "do you ", "did you ", "can you tell", "have you ",
+                       "is there", "are there", "do i ", "did i ")
+    if any(q.startswith(qs) for qs in question_starts):
+        return None
 
     # Must mention WhatsApp / WA (including common misspellings)
     # Normalize common misspellings before checking
-    q_normalized = q.replace("whats up", "whatsapp").replace("whats app", "whatsapp").replace("watsapp", "whatsapp").replace("whatsup", "whatsapp").replace("whatssapp", "whatsapp").replace("watsap", "whatsapp").replace("whats-app", "whatsapp")
+    q_normalized = q.replace("whats app", "whatsapp").replace("watsapp", "whatsapp").replace("whatsup", "whatsapp").replace("whatssapp", "whatsapp").replace("watsap", "whatsapp").replace("whats-app", "whatsapp")
+    # Only normalize "whats up" when near send-like context (not in "we exchanged whats up messages")
+    if "whats up" in q_normalized and any(v in q_normalized for v in ("send", "write", "tell")):
+        q_normalized = q_normalized.replace("whats up", "whatsapp")
     wa_refs = ["whatsapp", "wa message", "wa to ", "on wa ", "the wa "]
     has_wa = any(ref in q_normalized for ref in wa_refs)
     if not has_wa:
@@ -389,9 +399,9 @@ def _quick_whatsapp_detect(question: str) -> dict:
     # Use normalized form for subsequent matching
     q = q_normalized
 
-    # Must contain a send-like verb
+    # Must contain a send-like verb (not just "message" alone — too loose)
     send_verbs = [
-        "send", "write", "message", "tell", "ask",
+        "send", "write", "tell", "ask",
         "whatsapp",  # "WhatsApp Edita about..." acts as verb
     ]
     has_verb = any(v in q for v in send_verbs)

@@ -3105,12 +3105,18 @@ def _chunk_conversation(text, max_chars=8000):
 def _action_stream_response(text: str, question: str) -> StreamingResponse:
     """
     Wrap an action result as a single-token SSE response (bypasses RAG pipeline).
-    Also fires the Type 2 scan result email so the Director gets a copy.
+    Also logs to conversation_memory and fires Type 2 email if requested.
     """
     async def _stream():
         payload = json.dumps({"token": text})
         yield f"data: {payload}\n\n"
         yield "data: [DONE]\n\n"
+        # Log to conversation memory so Baker remembers action results
+        try:
+            store = _get_store()
+            store.log_conversation(question, text, answer_length=len(text))
+        except Exception as _e:
+            logger.warning(f"Action conversation log failed (non-fatal): {_e}")
         # EMAIL-REFORM-1: Type 2 email only when Director explicitly requests it
         try:
             from outputs.email_alerts import has_email_intent, send_scan_result_email
