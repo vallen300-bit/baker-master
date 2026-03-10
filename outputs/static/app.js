@@ -2837,8 +2837,12 @@ function _injectDataLayerCSS() {
 // --- Commitments Tab ---
 
 var _commitmentsFilter = 'active';
+var _commitmentsRequestId = 0;
 
-async function loadCommitmentsTab() {
+async function loadCommitmentsTab(filter) {
+    if (filter !== undefined) _commitmentsFilter = filter;
+    var currentFilter = _commitmentsFilter;
+    var requestId = ++_commitmentsRequestId;
     _injectDataLayerCSS();
     var container = document.getElementById('commitmentsContent');
     if (!container) return;
@@ -2846,8 +2850,12 @@ async function loadCommitmentsTab() {
 
     try {
         var url = '/api/commitments';
-        if (_commitmentsFilter) url += '?status=' + _commitmentsFilter;
+        if (currentFilter) url += '?status=' + encodeURIComponent(currentFilter);
         var data = await bakerFetch(url).then(function(r) { return r.json(); });
+
+        // Discard stale response if a newer request was fired
+        if (requestId !== _commitmentsRequestId) return;
+
         var items = data.commitments || [];
         var overdue = data.overdue_count || 0;
         var total = data.total || items.length;
@@ -2869,9 +2877,9 @@ async function loadCommitmentsTab() {
         ['active', 'overdue', 'completed', ''].forEach(function(f) {
             var label = f || 'all';
             var btn = document.createElement('button');
-            btn.className = _commitmentsFilter === f ? 'filter-tab active' : 'filter-tab';
+            btn.className = currentFilter === f ? 'filter-tab active' : 'filter-tab';
             btn.textContent = label.charAt(0).toUpperCase() + label.slice(1);
-            btn.addEventListener('click', function() { _commitmentsFilter = f; loadCommitmentsTab(); });
+            btn.addEventListener('click', function() { loadCommitmentsTab(f); });
             filters.appendChild(btn);
         });
         wrapper.appendChild(filters);
@@ -2880,7 +2888,7 @@ async function loadCommitmentsTab() {
         if (items.length === 0) {
             var empty = document.createElement('div');
             empty.className = 'empty-state';
-            empty.textContent = 'No commitments with status "' + (_commitmentsFilter || 'all') + '"';
+            empty.textContent = 'No commitments with status \u201c' + (currentFilter || 'all') + '\u201d';
             wrapper.appendChild(empty);
         } else {
             items.forEach(function(c) {
