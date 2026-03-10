@@ -1020,6 +1020,7 @@ async function streamInlineResult(prompt, alertId, resultArea, triggerBtn) {
         var resp = await bakerFetch('/api/scan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            timeout: 180000, // 3 min — SSE stream
             body: JSON.stringify({ question: prompt, history: [] }),
         });
         if (!resp.ok) throw new Error('Scan API returned ' + resp.status);
@@ -1118,6 +1119,7 @@ async function sendCardReply(btn) {
         var resp = await bakerFetch('/api/alerts/' + alertId + '/reply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            timeout: 180000, // 3 min — SSE stream
             body: JSON.stringify({ content: content }),
         });
         if (!resp.ok) throw new Error('Reply API returned ' + resp.status);
@@ -1440,6 +1442,7 @@ async function sendScanMessage(question) {
         const resp = await bakerFetch('/api/scan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            timeout: 180000, // 3 min — SSE streams need time for retrieval + generation
             body: JSON.stringify({
                 question: question,
                 history: getScanHistory().slice(-10),
@@ -2681,6 +2684,7 @@ async function sendSpecialistMessage(question) {
         var resp = await bakerFetch('/api/scan/specialist', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            timeout: 180000, // 3 min — SSE stream
             body: JSON.stringify({
                 question: question,
                 capability_slug: _specialistSlug,
