@@ -280,6 +280,58 @@ def _check_all_down():
 
 
 # ─────────────────────────────────────────────
+# Circuit Breaker (H2)
+# ─────────────────────────────────────────────
+
+_CIRCUIT_BREAKER_THRESHOLD = 20
+
+
+def should_skip_poll(source: str) -> bool:
+    """Check if a sentinel should skip its poll cycle.
+
+    Returns True if:
+    - status == 'disabled' (manually disabled by PM/Director)
+    - consecutive_failures >= 20 (circuit breaker — prevents memory-leaking retry loops)
+
+    Call this at the top of every trigger's run function.
+    """
+    conn, store = _get_conn()
+    if not conn:
+        return False  # fail open — allow poll if DB is unreachable
+    try:
+        _ensure_table(conn)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT status, consecutive_failures FROM sentinel_health WHERE source = %s",
+            (source,),
+        )
+        row = cur.fetchone()
+        cur.close()
+
+        if not row:
+            return False  # no record yet — allow first poll
+
+        status, failures = row[0], row[1] or 0
+
+        if status == "disabled":
+            logger.info(f"Sentinel {source}: DISABLED — skipping poll")
+            return True
+
+        if failures >= _CIRCUIT_BREAKER_THRESHOLD:
+            logger.warning(
+                f"Sentinel {source}: circuit breaker OPEN ({failures} consecutive failures) — skipping poll"
+            )
+            return True
+
+        return False
+    except Exception as e:
+        logger.warning(f"should_skip_poll({source}) check failed (allowing poll): {e}")
+        return False
+    finally:
+        _put_conn(store, conn)
+
+
+# ─────────────────────────────────────────────
 # Read API (for dashboard)
 # ─────────────────────────────────────────────
 

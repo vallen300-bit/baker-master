@@ -72,7 +72,11 @@ def _resolve_user_name(client, user_id: str) -> str:
 
 def run_slack_poll():
     """Main entry point — called by scheduler every 5 minutes."""
-    from triggers.sentinel_health import report_success, report_failure
+    from triggers.sentinel_health import report_success, report_failure, should_skip_poll
+
+    if should_skip_poll("slack"):
+        return
+
     logger.info("Slack trigger: starting poll...")
 
     from config.settings import config

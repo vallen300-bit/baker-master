@@ -232,6 +232,11 @@ def check_new_emails():
     3. Runs pipeline immediately for high/medium priority
     4. Queues low-priority for daily briefing
     """
+    from triggers.sentinel_health import should_skip_poll
+
+    if should_skip_poll("email"):
+        return
+
     import time as _time
     global _gmail_retry_after, _gmail_backoff_seconds
 

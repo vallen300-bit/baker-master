@@ -366,9 +366,12 @@ def run_clickup_poll():
     Main entry point — called by scheduler every 5 minutes.
     Polls all 6 ClickUp workspaces for updated tasks, upserts to PostgreSQL.
     """
-    from triggers.sentinel_health import report_success, report_failure
-    logger.info("ClickUp trigger: starting multi-workspace poll...")
+    from triggers.sentinel_health import report_success, report_failure, should_skip_poll
 
+    if should_skip_poll("clickup"):
+        return
+
+    logger.info("ClickUp trigger: starting multi-workspace poll...")
 
     try:
         client = _get_client()

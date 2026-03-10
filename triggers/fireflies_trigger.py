@@ -164,7 +164,10 @@ def check_new_transcripts():
     3. Runs pipeline for each new transcript
     4. Updates watermark
     """
-    from triggers.sentinel_health import report_success, report_failure
+    from triggers.sentinel_health import report_success, report_failure, should_skip_poll
+
+    if should_skip_poll("fireflies"):
+        return
 
     try:
         # FIREFLIES-FETCH-1: Skip if backfill is running

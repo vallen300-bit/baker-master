@@ -64,11 +64,14 @@ def run_dropbox_poll():
     6. Store new cursor
     7. Log summary
     """
-    from triggers.sentinel_health import report_success, report_failure
+    from triggers.sentinel_health import report_success, report_failure, should_skip_poll
+
+    if should_skip_poll("dropbox"):
+        return
+
     logger.info("Dropbox trigger: starting poll...")
 
     from config.settings import config
-
 
     try:
         client = _get_client()
@@ -85,6 +88,32 @@ def run_dropbox_poll():
         # -------------------------------------------------------
         cursor = trigger_state.get_cursor("dropbox")
         had_cursor = cursor is not None
+
+        # PM-OOM-1 H4: Stale watermark safeguard. If last poll was >24h ago,
+        # don't batch-process the backlog (OOM risk). Get a fresh cursor only.
+        from datetime import timedelta
+        last_poll = trigger_state.get_watermark("dropbox")
+        stale = (datetime.now(timezone.utc) - last_poll) > timedelta(hours=24) if last_poll else True
+        if stale and had_cursor:
+            logger.warning(
+                f"Dropbox: watermark stale (last poll: {last_poll}) — "
+                "resetting cursor to skip backlog"
+            )
+            # Get fresh cursor without processing files
+            try:
+                _entries, new_cursor = client.list_folder(watch_path, cursor=cursor)
+                if new_cursor:
+                    trigger_state.set_cursor("dropbox", new_cursor)
+                trigger_state.set_watermark("dropbox", datetime.now(timezone.utc))
+                report_success("dropbox")
+                logger.info(
+                    f"Dropbox: cursor reset complete ({len(_entries)} backlog entries skipped). "
+                    "Next poll will process only new changes."
+                )
+            except Exception as e:
+                report_failure("dropbox", f"Cursor reset failed: {e}")
+                logger.error(f"Dropbox cursor reset failed: {e}")
+            return
 
         try:
             entries, new_cursor = client.list_folder(watch_path, cursor=cursor)

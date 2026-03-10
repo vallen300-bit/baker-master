@@ -50,7 +50,11 @@ def _url_hash(url: str) -> str:
 
 def run_rss_poll():
     """Main entry point — called by scheduler every 60 minutes."""
-    from triggers.sentinel_health import report_success, report_failure
+    from triggers.sentinel_health import report_success, report_failure, should_skip_poll
+
+    if should_skip_poll("rss"):
+        return
+
     logger.info("RSS trigger: starting poll...")
 
     from config.settings import config

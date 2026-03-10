@@ -331,9 +331,12 @@ def run_whoop_poll():
        classify, and feed non-routine events to pipeline
     5. Update watermark
     """
-    from triggers.sentinel_health import report_success, report_failure
-    logger.info("Whoop trigger: starting poll...")
+    from triggers.sentinel_health import report_success, report_failure, should_skip_poll
 
+    if should_skip_poll("whoop"):
+        return
+
+    logger.info("Whoop trigger: starting poll...")
 
     try:
         try:

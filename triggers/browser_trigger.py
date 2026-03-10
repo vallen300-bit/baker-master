@@ -42,11 +42,14 @@ def _get_store():
 
 def run_browser_poll():
     """Main entry point — called by scheduler every 30 minutes."""
-    from triggers.sentinel_health import report_success, report_failure
+    from triggers.sentinel_health import report_success, report_failure, should_skip_poll
+
+    if should_skip_poll("browser"):
+        return
+
     logger.info("Browser trigger: starting poll...")
 
     from config.settings import config
-
 
     try:
         client = _get_client()

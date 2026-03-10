@@ -255,8 +255,12 @@ def run_todoist_poll():
     7. For each completed task: same as steps 5a-5e
     8. Update watermark
     """
+    from triggers.sentinel_health import report_success, report_failure, should_skip_poll
+
+    if should_skip_poll("todoist"):
+        return
+
     logger.info("Todoist trigger: starting poll...")
-    from triggers.sentinel_health import report_success, report_failure
 
     try:
         client = _get_client()
