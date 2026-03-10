@@ -21,9 +21,15 @@ def send_whatsapp(text: str, chat_id: str = DIRECTOR_WHATSAPP) -> bool:
     Messages to external contacts get a Baker signature prefix.
     Messages to the Director himself are sent without signature.
     """
-    # Add signature for external recipients, not for Director
-    if chat_id != DIRECTOR_WHATSAPP:
-        text = _BAKER_SIGNATURE + text
+    # DIRECTOR-WA-MUTE: Block all outbound messages to Director.
+    # Sends to other contacts (when Director asks Baker to message someone) still work.
+    # WhatsApp monitoring/ingestion is unaffected (that's in waha_webhook.py).
+    # To restore: remove this guard.
+    if chat_id == DIRECTOR_WHATSAPP:
+        logger.info(f"WhatsApp to Director suppressed (DIRECTOR-WA-MUTE): {text[:80]}...")
+        return True  # return True so callers don't retry or error
+
+    text = _BAKER_SIGNATURE + text
 
     try:
         headers = {}
