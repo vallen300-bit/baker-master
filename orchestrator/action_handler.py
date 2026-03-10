@@ -1217,9 +1217,36 @@ def handle_whatsapp_action(intent: dict, retriever, channel: str = "scan",
             "Please specify a name (e.g. \"Send a WhatsApp to Edita about dinner tonight\")."
         )
 
+    # Check if a phone number was provided inline (e.g. "Sergey +1 860 309 9075")
+    import re as _re
+    _original_question = intent.get("original_question", "")
+    _phone_match = _re.search(r'\+?[\d\s\-()]{10,}', _original_question)
+    _inline_phone = None
+    if _phone_match:
+        _inline_phone = _re.sub(r'[\s\-()]', '', _phone_match.group().strip())
+        if not _inline_phone.endswith('@c.us'):
+            # Strip leading + and add @c.us suffix for WAHA
+            _inline_phone = _inline_phone.lstrip('+') + '@c.us'
+        _log_action("handle_whatsapp_action:phone_from_message", f"extracted={_inline_phone}")
+
     # Resolve name → WhatsApp ID
     resolved = _resolve_names_to_whatsapp_ids(raw_recipient)
     _log_action("handle_whatsapp_action:resolved", f"raw={raw_recipient}, resolved={resolved}")
+
+    # If no VIP match but we have an inline phone number, use it and auto-add VIP
+    if not resolved and _inline_phone:
+        # Auto-add to VIP contacts for future use
+        _clean_name = _re.sub(r'\+?[\d\s\-()]+', '', raw_recipient).strip()
+        if not _clean_name:
+            _clean_name = raw_recipient.split()[0] if raw_recipient.split() else raw_recipient
+        try:
+            from memory.store_back import StoreBack
+            store = StoreBack()
+            store.upsert_vip_contact(_clean_name, whatsapp_id=_inline_phone)
+            _log_action("handle_whatsapp_action:auto_vip", f"added {_clean_name} with {_inline_phone}")
+        except Exception as _e:
+            logger.warning(f"Auto-VIP add failed (non-fatal): {_e}")
+        resolved = [(_clean_name, _inline_phone)]
 
     if not resolved:
         return (

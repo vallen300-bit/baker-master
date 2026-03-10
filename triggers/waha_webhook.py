@@ -530,6 +530,7 @@ def _handle_director_message(message_body: str, msg_id: str, sender_name: str) -
         return True
 
     elif intent_type == "whatsapp_action":
+        intent["original_question"] = combined_body  # pass full text for phone extraction
         result = ah.handle_whatsapp_action(
             intent, _get_retriever(), channel="whatsapp",
             conversation_history=_conv_history,
