@@ -960,11 +960,16 @@ async def get_morning_brief():
             """)
             actions_completed = cur.fetchone()["cnt"]
 
-            # Top fires (T1 alerts, most recent 5)
+            # Top fires (T1 alerts, most recent per matter, limit 5)
             cur.execute("""
-                SELECT * FROM alerts
-                WHERE status = 'pending' AND tier = 1
-                ORDER BY created_at DESC LIMIT 5
+                SELECT * FROM (
+                    SELECT DISTINCT ON (COALESCE(matter_slug, id::text)) *
+                    FROM alerts
+                    WHERE status = 'pending' AND tier = 1
+                    ORDER BY COALESCE(matter_slug, id::text), created_at DESC
+                ) deduped
+                ORDER BY created_at DESC
+                LIMIT 5
             """)
             top_fires = [_serialize(dict(r)) for r in cur.fetchall()]
 
@@ -993,17 +998,23 @@ async def get_morning_brief():
 
         # Generate narrative (Haiku, cached 30 min) — Phase 3B: includes per-fire proposals
         # 20s timeout: if Haiku is slow/unreachable after restart, return stats without narrative
+        proposals = []
         try:
-            narrative = await asyncio.wait_for(
+            narr_result = await asyncio.wait_for(
                 asyncio.to_thread(
                     _get_morning_narrative, fire_count, deadline_count,
                     processed_overnight, top_fires, deadlines,
                 ),
                 timeout=20.0,
             )
+            if isinstance(narr_result, dict):
+                narrative = narr_result.get("narrative", "")
+                proposals = narr_result.get("proposals", [])
+            else:
+                narrative = narr_result  # legacy cached string
         except (asyncio.TimeoutError, Exception) as e:
             logger.warning(f"Morning narrative timed out or failed: {e}")
-            narrative = "Good morning. Baker is online — narrative generation is warming up."
+            narrative = "Baker is online — narrative generation is warming up."
 
         # Phase 3A: Fetch today's meetings (graceful — returns [] if Calendar API unavailable)
         meetings_today = []
@@ -1030,6 +1041,7 @@ async def get_morning_brief():
             "processed_overnight": processed_overnight,
             "actions_completed": actions_completed,
             "narrative": narrative,
+            "proposals": proposals,
             "top_fires": top_fires,
             "deadlines": deadlines,
             "activity": activity,
@@ -1043,6 +1055,7 @@ async def get_morning_brief():
         return {
             "fire_count": 0, "deadline_count": 0, "processed_overnight": 0,
             "actions_completed": 0, "narrative": "Baker is loading...",
+            "proposals": [],
             "top_fires": [], "deadlines": [], "activity": [],
             "meetings_today": [], "meeting_count": 0,
         }
@@ -1061,7 +1074,9 @@ def _get_morning_narrative(fire_count: int, deadline_count: int,
         fire_titles = [f.get("title", "") for f in top_fires[:3]]
         prompt = (
             f"You are Baker, chief of staff for Dimitry Vallen. "
-            f"Write a 2-3 sentence morning summary. Be warm but direct.\n\n"
+            f"Write a 2-3 sentence status summary. Be warm but direct.\n\n"
+            f"IMPORTANT: Do NOT start with 'Good morning' or any greeting — "
+            f"the page header already shows the greeting. Jump straight to content.\n\n"
             f"Stats: {fire_count} fires, {deadline_count} deadlines this week, "
             f"{processed} items processed overnight.\n"
             f"Top fires: {'; '.join(fire_titles) if fire_titles else 'None'}\n\n"
@@ -1085,37 +1100,39 @@ def _get_morning_narrative(fire_count: int, deadline_count: int,
             pass
         narrative = resp.content[0].text.strip()
 
-        # Phase 3B: Generate per-fire proposals
+        # Phase 3B: Generate per-fire proposals (returned separately as structured data)
+        proposals = []
         if top_fires:
             proposals = _generate_morning_proposals(client, top_fires[:3], deadlines or [])
-            if proposals:
-                narrative += "\n\n" + proposals
 
-        _morning_narrative_cache = {"text": narrative, "generated_at": now}
-        return narrative
+        result = {"narrative": narrative, "proposals": proposals}
+        _morning_narrative_cache = {"text": result, "generated_at": now}
+        return result
     except Exception as e:
         logger.error(f"Morning narrative generation failed: {e}")
-        return "Good morning. Baker is analyzing your latest updates."
+        return {"narrative": "Baker is analyzing your latest updates.", "proposals": []}
 
 
 _MORNING_PROPOSALS_PROMPT = """You are Baker. Given the Director's top fires and upcoming deadlines, propose ONE specific action for each fire.
 
 Rules:
-- One line per fire. Start with the matter name or topic.
+- One line per fire.
 - Be specific: name the person, document, or action.
-- Format each line as: "**Matter** → Action"
+- Format EXACTLY as: PROPOSAL|<short label>|<full Baker instruction>
+  - <short label> = 2-5 word button text (e.g., "Draft email to Ofenheimer")
+  - <full Baker instruction> = what Baker should do if the Director clicks (a question/instruction Baker can execute)
 - Max 3 proposals.
-- If a deadline is attached to a fire, mention the timeline.
+- If a deadline is attached to a fire, mention the timeline in the instruction.
 
 Examples:
-- **Hagenauer** → Draft status update to Ofenheimer before Friday filing deadline
-- **BCOMM M365** → Schedule kickoff call with Benjamin Schuster
-- **Cupial** → Review FM List counter-proposal, prepare negotiation position
+PROPOSAL|Draft email to Ofenheimer|Draft a status update email to Ofenheimer about the Hagenauer filing deadline this Friday
+PROPOSAL|Schedule BCOMM kickoff|Prepare a meeting request email to Benjamin Schuster for the BCOMM M365 kickoff
+PROPOSAL|Prepare Cupial position|Analyze the FM List counter-proposal for Cupial and prepare our negotiation position
 """
 
 
-def _generate_morning_proposals(client, top_fires: list, deadlines: list) -> str:
-    """Generate per-fire action proposals for the morning narrative. Returns markdown text."""
+def _generate_morning_proposals(client, top_fires: list, deadlines: list) -> list:
+    """Generate per-fire action proposals. Returns list of {label, instruction} dicts."""
     try:
         fires_text = ""
         for f in top_fires:
@@ -1144,13 +1161,18 @@ def _generate_morning_proposals(client, top_fires: list, deadlines: list) -> str
             log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="morning_proposals")
         except Exception:
             pass
-        proposals = resp.content[0].text.strip()
-        if proposals:
-            return "**Recommended actions:**\n" + proposals
-        return ""
+        raw = resp.content[0].text.strip()
+        proposals = []
+        for line in raw.splitlines():
+            line = line.strip()
+            if line.startswith("PROPOSAL|"):
+                parts = line.split("|", 2)
+                if len(parts) == 3:
+                    proposals.append({"label": parts[1].strip(), "instruction": parts[2].strip()})
+        return proposals
     except Exception as e:
         logger.warning(f"Morning proposals generation failed: {e}")
-        return ""
+        return []
 
 
 @app.get("/api/dashboard/matters-summary", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])

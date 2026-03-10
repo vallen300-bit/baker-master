@@ -280,6 +280,44 @@ async function loadMorningBrief() {
         var narEl = document.getElementById('briefNarrative');
         if (narEl && data.narrative) setSafeHTML(narEl, md(data.narrative));
 
+        // Render actionable proposals as buttons
+        var proposalsEl = document.getElementById('briefProposals');
+        if (!proposalsEl) {
+            proposalsEl = document.createElement('div');
+            proposalsEl.id = 'briefProposals';
+            proposalsEl.style.cssText = 'margin-top:12px;';
+            if (narEl) narEl.parentNode.insertBefore(proposalsEl, narEl.nextSibling);
+        }
+        proposalsEl.textContent = '';
+        if (data.proposals && data.proposals.length > 0) {
+            var pLabel = document.createElement('div');
+            pLabel.style.cssText = 'font-size:11px;font-weight:700;color:var(--text2);font-family:var(--mono);letter-spacing:0.3px;margin-bottom:8px;';
+            pLabel.textContent = 'RECOMMENDED ACTIONS';
+            proposalsEl.appendChild(pLabel);
+            data.proposals.forEach(function(p) {
+                var row = document.createElement('div');
+                row.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:6px;padding:8px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px;';
+                var label = document.createElement('span');
+                label.style.cssText = 'flex:1;font-size:12px;color:var(--text1);';
+                label.textContent = p.label;
+                row.appendChild(label);
+                var btn = document.createElement('button');
+                btn.textContent = 'Do it';
+                btn.style.cssText = 'padding:4px 14px;font-size:11px;font-weight:600;border:none;border-radius:6px;background:var(--blue);color:#fff;cursor:pointer;font-family:var(--mono);white-space:nowrap;';
+                btn.addEventListener('click', (function(instruction) {
+                    return function() {
+                        openMatterScan('');
+                        var input = document.getElementById('scanInput');
+                        if (input) input.value = instruction;
+                        switchTab('ask-baker');
+                        setTimeout(function() { sendScanMessage(instruction); }, 150);
+                    };
+                })(p.instruction));
+                row.appendChild(btn);
+                proposalsEl.appendChild(row);
+            });
+        }
+
         // Fires badge
         const firesBadge = document.getElementById('firesBadge');
         if (firesBadge) {
