@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=17">
+    <link rel="stylesheet" href="/static/style.css?v=18">
 </head>
 <body>
 
@@ -180,7 +180,10 @@
             </div>
             <div class="scan-view-body">
                 <div id="scanMessages" class="scan-messages"></div>
+                <div id="scanUploadStatus" class="upload-status" hidden></div>
                 <form id="scanForm" class="scan-form" autocomplete="off">
+                    <input id="scanFile" type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.png,.jpg" hidden />
+                    <button type="button" class="scan-upload-btn" onclick="document.getElementById('scanFile').click()" title="Upload document">&#x1F4CE;</button>
                     <input id="scanInput" type="text" class="scan-input" placeholder="Ask Baker..." maxlength="4000" required />
                     <button type="submit" class="scan-send" id="scanSendBtn">Send</button>
                 </form>
@@ -199,7 +202,10 @@
             </div>
             <div class="scan-view-body">
                 <div id="specialistMessages" class="scan-messages"></div>
+                <div id="specialistUploadStatus" class="upload-status" hidden></div>
                 <form id="specialistForm" class="scan-form" autocomplete="off">
+                    <input id="specialistFile" type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.png,.jpg" hidden />
+                    <button type="button" class="scan-upload-btn" onclick="document.getElementById('specialistFile').click()" title="Upload document">&#x1F4CE;</button>
                     <input id="specialistInput" type="text" class="scan-input" placeholder="Ask the specialist..." maxlength="4000" required disabled />
                     <button type="submit" class="scan-send" id="specialistSendBtn" disabled>Send</button>
                 </form>
@@ -235,6 +241,6 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=17"></script>
+<script src="/static/app.js?v=18"></script>
 </body>
 </html>

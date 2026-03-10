@@ -422,6 +422,22 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 .scan-send:hover { opacity: 0.8; }
 .scan-send:disabled { opacity: 0.4; cursor: not-allowed; }
 
+/* Upload button + status */
+.scan-upload-btn {
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--card); cursor: pointer; font-size: 16px; line-height: 1;
+  flex-shrink: 0; transition: background 0.1s;
+}
+.scan-upload-btn:hover { background: #f1f5f9; }
+.upload-status {
+  font-size: 12px; padding: 8px 12px; border-radius: 8px;
+  margin-bottom: 4px; display: flex; align-items: center; gap: 8px;
+}
+.upload-status.uploading { background: #eff6ff; color: var(--blue); }
+.upload-status.success { background: #f0fdf4; color: #16a34a; }
+.upload-status.error { background: #fef2f2; color: var(--red); }
+.scan-view-body.drag-over { outline: 2px dashed var(--blue); outline-offset: -4px; border-radius: 8px; }
+
 /* Thinking indicator */
 .thinking {
   display: inline-flex; align-items: center; gap: 6px;
