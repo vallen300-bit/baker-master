@@ -131,6 +131,7 @@ def run_dropbox_poll():
             if new_cursor:
                 trigger_state.set_cursor("dropbox", new_cursor)
             requests_used = client._request_count - request_count_start
+            report_success("dropbox")
             logger.info(
                 f"Dropbox poll complete: 0 processed, {files_skipped} skipped, 0 errors "
                 f"({requests_used} API requests)"
