@@ -431,8 +431,14 @@ body {
 /* === SCAN / ASK BAKER VIEW === */
 .scan-view-header { margin-bottom: 14px; display: flex; align-items: center; }
 .scan-view-title { font-size: 24px; font-weight: 700; letter-spacing: -0.3px; }
-.scan-view-body { display: flex; flex-direction: column; height: calc(100vh - 200px); }
-.scan-view-body.specialist-body { height: calc(100vh - 190px); }
+.scan-view-body { display: flex; flex-direction: column; height: calc(100vh - 190px); }
+
+/* Input-at-top layout (Cowork style) */
+.scan-view-body.scan-top-input { flex-direction: column; }
+.scan-view-body.scan-top-input .scan-form { margin-bottom: 16px; flex-shrink: 0; }
+.scan-view-body.scan-top-input .scan-messages { order: 2; }
+.scan-view-body.scan-top-input .upload-status { order: 1; }
+
 .scan-messages {
   flex: 1; overflow-y: auto; padding: 10px 0;
   display: flex; flex-direction: column; gap: 14px;
