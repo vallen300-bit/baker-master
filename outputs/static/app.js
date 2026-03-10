@@ -66,7 +66,8 @@ function renderScanHistory() {
     if (!container) return;
     container.textContent = '';
     var history = getScanHistory();
-    for (var i = 0; i < history.length; i++) {
+    // Render oldest first — prepend puts each on top, so oldest ends at bottom
+    for (var i = history.length - 1; i >= 0; i--) {
         appendScanBubble(history[i].role, history[i].content);
     }
     // Update context badge
@@ -1415,15 +1416,27 @@ function appendScanBubble(role, content, id) {
     div.className = 'scan-msg ' + (role === 'user' ? 'user' : 'baker');
     if (id) div.id = id;
     if (role === 'assistant' && !content) {
-        // Thinking indicator — safe static HTML
-        div.innerHTML = '<div class="thinking"><span class="thinking-dots"><span></span><span></span><span></span></span> Baker is thinking...</div>';
+        // Thinking indicator — safe static HTML (no user input)
+        var dots = document.createElement('div');
+        dots.className = 'thinking';
+        var span = document.createElement('span');
+        span.className = 'thinking-dots';
+        for (var i = 0; i < 3; i++) span.appendChild(document.createElement('span'));
+        dots.appendChild(span);
+        dots.appendChild(document.createTextNode(' Baker is thinking...'));
+        div.appendChild(dots);
     } else if (role === 'assistant') {
-        div.innerHTML = '<div class="md-content">' + md(content) + '</div>'; // SECURITY: md() calls esc() first
+        // SECURITY: md() calls esc() first to sanitize HTML entities before formatting
+        var mdDiv = document.createElement('div');
+        mdDiv.className = 'md-content';
+        setSafeHTML(mdDiv, md(content));
+        div.appendChild(mdDiv);
     } else {
         div.textContent = content; // User messages: plain text, no HTML
     }
-    container.appendChild(div);
-    container.scrollTop = container.scrollHeight;
+    // Newest messages at top (Cowork style — input is at top)
+    container.prepend(div);
+    container.scrollTop = 0;
     return div;
 }
 
@@ -1583,7 +1596,7 @@ async function sendScanMessage(question) {
     if (input) { input.disabled = false; input.focus(); }
 
     const container = document.getElementById('scanMessages');
-    if (container) container.scrollTop = container.scrollHeight;
+    if (container) container.scrollTop = 0;
 }
 
 // ═══ COMMAND BAR ═══
@@ -2819,7 +2832,7 @@ async function sendSpecialistMessage(question) {
     if (input) { input.disabled = false; input.focus(); }
 
     var container = document.getElementById('specialistMessages');
-    if (container) container.scrollTop = container.scrollHeight;
+    if (container) container.scrollTop = 0;
 }
 
 function appendSpecialistBubble(role, content, id) {
@@ -2829,14 +2842,24 @@ function appendSpecialistBubble(role, content, id) {
     div.className = 'scan-msg ' + (role === 'user' ? 'user' : 'baker');
     if (id) div.id = id;
     if (role === 'assistant' && !content) {
-        div.innerHTML = '<div class="thinking"><span class="thinking-dots"><span></span><span></span><span></span></span> Specialist is thinking...</div>';
+        var dots = document.createElement('div');
+        dots.className = 'thinking';
+        var span = document.createElement('span');
+        span.className = 'thinking-dots';
+        for (var i = 0; i < 3; i++) span.appendChild(document.createElement('span'));
+        dots.appendChild(span);
+        dots.appendChild(document.createTextNode(' Specialist is thinking...'));
+        div.appendChild(dots);
     } else if (role === 'assistant') {
-        div.innerHTML = '<div class="md-content">' + md(content) + '</div>';
+        var mdDiv = document.createElement('div');
+        mdDiv.className = 'md-content';
+        setSafeHTML(mdDiv, md(content));
+        div.appendChild(mdDiv);
     } else {
         div.textContent = content;
     }
-    container.appendChild(div);
-    container.scrollTop = container.scrollHeight;
+    container.prepend(div);
+    container.scrollTop = 0;
     return div;
 }
 
