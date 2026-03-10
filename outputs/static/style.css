@@ -125,7 +125,7 @@ body {
   background: var(--bg); border-bottom: 1px solid var(--border);
   padding: 12px 24px; display: flex; align-items: center; gap: 14px; flex-shrink: 0;
 }
-.cmd-input-wrap { flex: 1; max-width: 520px; position: relative; }
+.cmd-input-wrap { flex: 1; position: relative; }
 .cmd-input {
   width: 100%; padding: 10px 16px; border: 1px solid var(--border);
   border-radius: var(--radius-sm); font-size: 14px; font-family: var(--font);
