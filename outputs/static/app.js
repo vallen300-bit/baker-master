@@ -41,6 +41,13 @@ let scanStreaming = false;
 
 // ═══ HELPERS ═══
 
+/** Show animated thinking dots inside a container element. */
+function showLoading(el, label) {
+    el.innerHTML = '<div class="thinking"><span class="thinking-dots">' +
+        '<span></span><span></span><span></span></span> ' +
+        esc(label || 'Loading') + '...</div>';
+}
+
 /** Escape HTML entities — prevents XSS. Used by md() and all text rendering. */
 function esc(str) {
     if (!str) return '';
@@ -292,7 +299,7 @@ function _showBriefingUnavailable(reason) {
     retryBtn.textContent = 'Retry';
     retryBtn.style.cssText = 'margin-left:8px;padding:2px 10px;border-radius:4px;border:1px solid var(--border);background:var(--bg2);color:var(--text1);cursor:pointer;font-size:12px;';
     retryBtn.onclick = function() {
-        narEl.textContent = 'Retrying...';
+        showLoading(narEl, 'Retrying');
         loadMorningBrief();
     };
     narEl.textContent = 'Briefing unavailable (' + reason + '). ';
@@ -630,7 +637,7 @@ async function loadMattersSummary() {
 async function loadFires() {
     const container = document.getElementById('firesContent');
     if (!container) return;
-    container.textContent = 'Loading...';
+    showLoading(container, 'Loading alerts');
 
     try {
         // Upcoming: show T2+ only (T1s are on Dashboard)
@@ -1168,7 +1175,7 @@ var _matterViewMode = 'list';
 async function loadMatterDetail(matterSlug) {
     var container = document.getElementById('mattersContent');
     if (!container) { console.error('mattersContent container not found'); return; }
-    container.textContent = 'Loading ' + matterSlug + '...';
+    showLoading(container, 'Loading ' + matterSlug);
     _matterDetailSlug = matterSlug;
 
     try {
@@ -1548,7 +1555,7 @@ async function loadMattersTab() {
     }
 
     // Otherwise show all matters overview
-    container.textContent = 'Loading matters...';
+    showLoading(container, 'Loading matters');
     try {
         var resp = await bakerFetch('/api/dashboard/matters-summary');
         if (!resp.ok) return;
@@ -1623,7 +1630,7 @@ var _networkingFilter = 'all';
 async function loadPeopleTab() {
     var container = document.getElementById('peopleContent');
     if (!container) return;
-    container.textContent = 'Loading networking...';
+    showLoading(container, 'Loading networking');
 
     try {
         var results = await Promise.all([
@@ -2054,7 +2061,7 @@ async function executeSearch() {
 async function loadTagsTab() {
     var container = document.getElementById('tagsContent');
     if (!container) return;
-    container.textContent = 'Loading tags...';
+    showLoading(container, 'Loading tags');
 
     try {
         var resp = await bakerFetch('/api/tags');
@@ -2107,7 +2114,7 @@ async function loadTagsTab() {
 async function loadTagItems(tag) {
     var container = document.getElementById('tagsContent');
     if (!container) return;
-    container.textContent = 'Loading...';
+    showLoading(container, 'Loading tag items');
 
     try {
         var resp = await bakerFetch('/api/alerts/by-tag/' + encodeURIComponent(tag));
@@ -2197,7 +2204,7 @@ async function populateAssignDropdowns() {
 async function loadDeadlinesTab() {
     var container = document.getElementById('deadlinesContent');
     if (!container) return;
-    container.textContent = 'Loading...';
+    showLoading(container, 'Loading deadlines');
 
     try {
         // Fetch both deadlines and commitments, merge into one list
@@ -2366,7 +2373,7 @@ async function loadDeadlinesTab() {
 async function loadTravelTab() {
     var container = document.getElementById('travelContent');
     if (!container) return;
-    container.textContent = 'Loading travel items...';
+    showLoading(container, 'Loading travel items');
     try {
         var resp = await bakerFetch('/api/alerts/by-tag/travel');
         if (!resp.ok) return;
@@ -2424,7 +2431,7 @@ async function loadTravelTab() {
 async function loadMediaTab() {
     var container = document.getElementById('mediaContent');
     if (!container) return;
-    container.textContent = 'Loading media...';
+    showLoading(container, 'Loading media');
     try {
         // Fetch feeds for filter dropdown
         var feedsResp = await bakerFetch('/api/rss/feeds');
@@ -2871,7 +2878,7 @@ async function loadCommitmentsTab(filter) {
     _injectDataLayerCSS();
     var container = document.getElementById('commitmentsContent');
     if (!container) return;
-    container.textContent = 'Loading...';
+    showLoading(container, 'Loading commitments');
 
     try {
         var url = '/api/commitments';
@@ -2969,7 +2976,7 @@ async function loadBrowserTab() {
     _injectDataLayerCSS();
     var container = document.getElementById('browserContent');
     if (!container) return;
-    container.textContent = 'Loading...';
+    showLoading(container, 'Loading browser monitor');
 
     try {
         var data = await bakerFetch('/api/browser/tasks').then(function(r) { return r.json(); });
