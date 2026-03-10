@@ -591,7 +591,7 @@ async function loadMattersSummary() {
                     item.appendChild(newBadge);
                 }
 
-                item.addEventListener('click', function() { switchTab('matters'); });
+                // Click handled by delegated handler on mattersSubList (line ~2742)
                 subList.appendChild(item);
             }
         }
