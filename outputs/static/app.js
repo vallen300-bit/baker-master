@@ -36,8 +36,67 @@ async function bakerFetch(url, options = {}) {
 
 // ═══ STATE ═══
 let currentTab = 'morning-brief';
-let scanHistory = [];
+var _scanHistories = {};   // keyed by context: 'global', 'matter:oskolkov-rg7', etc.
+var _scanCurrentContext = 'global';
 let scanStreaming = false;
+
+function getScanHistory() {
+    if (!_scanHistories[_scanCurrentContext]) _scanHistories[_scanCurrentContext] = [];
+    return _scanHistories[_scanCurrentContext];
+}
+
+function openMatterScan(matterSlug) {
+    if (matterSlug) {
+        _scanCurrentContext = 'matter:' + matterSlug;
+    } else {
+        _scanCurrentContext = 'global';
+    }
+    renderScanHistory();
+    switchTab('ask-baker');
+    var input = document.getElementById('scanInput');
+    if (input && matterSlug) {
+        input.placeholder = 'Ask about ' + matterSlug.replace(/[-_]/g, ' ') + '...';
+    } else if (input) {
+        input.placeholder = 'Ask Baker...';
+    }
+}
+
+function renderScanHistory() {
+    var container = document.getElementById('scanMessages');
+    if (!container) return;
+    container.textContent = '';
+    var history = getScanHistory();
+    for (var i = 0; i < history.length; i++) {
+        appendScanBubble(history[i].role, history[i].content);
+    }
+    // Update context badge
+    updateScanContextBadge();
+}
+
+function updateScanContextBadge() {
+    var header = document.querySelector('.scan-view-header');
+    if (!header) return;
+    var existing = document.getElementById('scanContextBadge');
+    if (existing) existing.remove();
+    if (_scanCurrentContext === 'global') return;
+    var slug = _scanCurrentContext.replace('matter:', '');
+    var label = slug.replace(/[-_]/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+    var badge = document.createElement('span');
+    badge.id = 'scanContextBadge';
+    badge.style.cssText = 'display:inline-flex;align-items:center;gap:6px;margin-left:12px;padding:3px 10px;background:var(--blue);color:#fff;border-radius:12px;font-size:11px;font-weight:600;font-family:var(--mono);letter-spacing:0.3px;cursor:default;';
+    badge.textContent = label;
+    var closeBtn = document.createElement('span');
+    closeBtn.textContent = '\u00D7';
+    closeBtn.style.cssText = 'cursor:pointer;font-size:14px;line-height:1;opacity:0.8;';
+    closeBtn.addEventListener('click', function() {
+        _scanCurrentContext = 'global';
+        renderScanHistory();
+        var input = document.getElementById('scanInput');
+        if (input) input.placeholder = 'Ask Baker...';
+    });
+    badge.appendChild(closeBtn);
+    header.appendChild(badge);
+}
 
 // ═══ HELPERS ═══
 
@@ -194,7 +253,7 @@ function switchTab(tabName) {
     else if (tabName === 'people') loadPeopleTab();
     else if (tabName === 'tags') loadTagsTab();
     else if (tabName === 'search') loadSearchTab();
-    else if (tabName === 'ask-baker') focusScanInput();
+    else if (tabName === 'ask-baker') { updateScanContextBadge(); focusScanInput(); }
     else if (tabName === 'ask-specialist') loadSpecialistTab();
     else if (tabName === 'travel') loadTravelTab();
     else if (tabName === 'media') loadMediaTab();
@@ -787,7 +846,7 @@ function renderAlertCard(alert, expanded) {
 
     // Footer
     html += '<div class="card-footer">';
-    html += '<button class="footer-btn primary" onclick="switchTab(\'ask-baker\')">Open in Scan</button>';
+    html += '<button class="footer-btn primary" onclick="openMatterScan(\'' + esc(alert.matter_slug || '') + '\')">Open in Scan</button>';
     html += '<button class="footer-resolve" data-alert="' + aid + '" onclick="resolveAlert(' + alert.id + ',this)">Resolve</button>';
     html += '<button class="footer-dismiss" data-alert="' + aid + '" onclick="dismissAlert(' + alert.id + ',this)">Dismiss</button>';
     html += '</div></div>';
@@ -1368,7 +1427,7 @@ async function sendScanMessage(question) {
     if (sendBtn) sendBtn.disabled = true;
     if (input) { input.disabled = true; input.value = ''; }
 
-    scanHistory.push({ role: 'user', content: question });
+    getScanHistory().push({ role: 'user', content: question });
     appendScanBubble('user', question);
 
     const assistantId = 'scan-reply-' + Date.now();
@@ -1381,7 +1440,11 @@ async function sendScanMessage(question) {
         const resp = await bakerFetch('/api/scan', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question: question, history: scanHistory.slice(-10) }),
+            body: JSON.stringify({
+                question: question,
+                history: getScanHistory().slice(-10),
+                project: _scanCurrentContext.startsWith('matter:') ? _scanCurrentContext.replace('matter:', '') : null
+            }),
         });
 
         if (!resp.ok) throw new Error('Scan API returned ' + resp.status);
@@ -1448,8 +1511,8 @@ async function sendScanMessage(question) {
         } catch (e) { console.warn('Document generation failed:', e); }
     }
 
-    scanHistory.push({ role: 'assistant', content: fullResponse });
-    if (scanHistory.length > 20) scanHistory = scanHistory.slice(-20);
+    getScanHistory().push({ role: 'assistant', content: fullResponse });
+    if (getScanHistory().length > 20) _scanHistories[_scanCurrentContext] = getScanHistory().slice(-20);
 
     // Copy button for Ask Baker responses
     if (replyEl && fullResponse && !fullResponse.startsWith('Connection error:')) {
