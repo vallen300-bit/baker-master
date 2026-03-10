@@ -445,7 +445,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
   align-self: flex-start; padding: 8px 14px;
 }
 .thinking-dots span {
-  width: 5px; height: 5px; border-radius: 50%; background: var(--text3);
+  width: 6px; height: 6px; border-radius: 50%; background: #f57c00;
   display: inline-block; animation: dot-pulse 1.2s infinite;
 }
 .thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
