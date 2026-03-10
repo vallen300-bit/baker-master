@@ -2859,7 +2859,7 @@ function setupDetectionBadge() {
 
     var detect = debounce(async function() {
         var q = cmdInput.value.trim();
-        if (q.length < 3) { badge.hidden = true; return; }
+        if (q.length < 8) { badge.hidden = true; return; }
         try {
             var resp = await bakerFetch('/api/scan/detect?q=' + encodeURIComponent(q));
             if (!resp.ok) { badge.hidden = true; return; }

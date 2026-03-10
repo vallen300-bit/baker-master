@@ -135,9 +135,9 @@ body {
 .cmd-input:focus { border-color: var(--blue); background: var(--bg); }
 .cmd-input::placeholder { color: var(--text3); }
 .cmd-detect-badge {
-  position: absolute; right: 60px; top: 50%; transform: translateY(-50%);
-  padding: 3px 10px; background: var(--blue); color: white;
-  border-radius: 12px; font-size: 10px; font-family: var(--mono);
+  padding: 4px 12px; background: var(--blue-bg); color: var(--blue);
+  border-radius: 12px; font-size: 11px; font-family: var(--mono); font-weight: 500;
+  white-space: nowrap; flex-shrink: 0;
 }
 .cmd-shortcut {
   position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
