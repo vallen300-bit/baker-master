@@ -59,6 +59,7 @@ def run_commitment_check():
                 action_required=True,
                 tags=["commitment", "overdue"],
                 source="commitment_check",
+                source_id=f"overdue-{c['id']}",
             )
             if alert_id:
                 trigger_state.set_watermark(wk, datetime.now(timezone.utc))
@@ -88,6 +89,7 @@ def run_commitment_check():
                 action_required=False,
                 tags=["commitment"],
                 source="commitment_check",
+                source_id=f"due-soon-{c['id']}",
             )
             if alert_id:
                 trigger_state.set_watermark(wk, datetime.now(timezone.utc))

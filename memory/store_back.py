@@ -2851,6 +2851,17 @@ class SentinelStoreBack:
             return None
         try:
             cur = conn.cursor()
+            # Dedup guard: skip if same source+source_id exists within 1 hour
+            if source and source_id:
+                cur.execute(
+                    "SELECT id FROM alerts WHERE source = %s AND source_id = %s "
+                    "AND created_at > NOW() - INTERVAL '1 hour' LIMIT 1",
+                    (source, source_id),
+                )
+                if cur.fetchone():
+                    cur.close()
+                    logger.info(f"Alert dedup: skipped duplicate source={source} source_id={source_id}")
+                    return None
             import json as _json
             sa_json = _json.dumps(structured_actions) if structured_actions else None
             tags_json = _json.dumps(tags) if tags else '[]'
@@ -2911,6 +2922,27 @@ class SentinelStoreBack:
             return exists
         except Exception as e:
             logger.warning(f"alert_source_id_exists check failed: {e}")
+            return False
+        finally:
+            self._put_conn(conn)
+
+    def alert_exists_recent(self, source: str, source_id: str, hours: int = 4) -> bool:
+        """Check if an alert with this source + source_id was created within the last N hours."""
+        conn = self._get_conn()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT 1 FROM alerts WHERE source = %s AND source_id = %s "
+                "AND created_at > NOW() - make_interval(hours => %s) LIMIT 1",
+                (source, source_id, hours),
+            )
+            exists = cur.fetchone() is not None
+            cur.close()
+            return exists
+        except Exception as e:
+            logger.warning(f"alert_exists_recent check failed: {e}")
             return False
         finally:
             self._put_conn(conn)

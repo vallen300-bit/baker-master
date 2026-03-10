@@ -712,11 +712,11 @@ def run_vip_sla_check():
             if not sla_breached:
                 continue
 
-            # Check alert storm prevention (1 alert per sender per hour)
+            # Check alert storm prevention (4h cooldown, in-memory fast path)
             cache_key = sender_lower
             with _sla_lock:
                 last_alert = _sla_alert_cache.get(cache_key, 0)
-                if now_ts - last_alert < 3600:
+                if now_ts - last_alert < 14400:  # 4 hours
                     continue
                 # Reserve the slot immediately to prevent races
                 _sla_alert_cache[cache_key] = now_ts
@@ -755,8 +755,14 @@ def run_vip_sla_check():
                     logger.warning(f"VIP SLA Slack alert failed: {e}")
 
             # Phase 3B: For Tier 2+ breaches (>4h), create DB alert + auto-draft
+            # DB-backed 4h cooldown (survives Render redeploys unlike in-memory cache)
             if wait_minutes >= 240:
                 try:
+                    sla_source_id = f"vip-sla-{sender_lower}"
+                    if store.alert_exists_recent(
+                        source="vip_sla", source_id=sla_source_id, hours=4
+                    ):
+                        continue
                     alert_title = f"VIP SLA: {sender_name} unanswered ({wait_str})"
                     alert_body = (
                         f"{sender_name} (Tier {vip_tier}) sent a message {wait_str} ago "
@@ -769,6 +775,7 @@ def run_vip_sla_check():
                         action_required=True,
                         tags=["vip-sla"],
                         source="vip_sla",
+                        source_id=sla_source_id,
                     )
                     if alert_id:
                         draft = _generate_vip_draft(vip, msg, sender_name, wait_minutes)
