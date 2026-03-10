@@ -300,26 +300,76 @@ async function loadMorningBrief() {
             pLabel.textContent = 'RECOMMENDED ACTIONS';
             proposalsEl.appendChild(pLabel);
             data.proposals.forEach(function(p) {
+                var card = document.createElement('div');
+                card.style.cssText = 'margin-bottom:8px;border:1px solid var(--border);border-radius:' + 'var(--radius-sm)' + ';overflow:hidden;';
                 var row = document.createElement('div');
-                row.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:6px;padding:8px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px;';
+                row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--card);';
                 var label = document.createElement('span');
-                label.style.cssText = 'flex:1;font-size:12px;color:var(--text1);';
+                label.style.cssText = 'flex:1;font-size:13px;color:var(--text);';
                 label.textContent = p.label;
                 row.appendChild(label);
                 var btn = document.createElement('button');
                 btn.textContent = 'Do it';
-                btn.style.cssText = 'padding:4px 14px;font-size:11px;font-weight:600;border:none;border-radius:6px;background:var(--blue);color:#fff;cursor:pointer;font-family:var(--mono);white-space:nowrap;';
-                btn.addEventListener('click', (function(instruction) {
-                    return function() {
-                        openMatterScan('');
-                        var input = document.getElementById('scanInput');
-                        if (input) input.value = instruction;
-                        switchTab('ask-baker');
-                        setTimeout(function() { sendScanMessage(instruction); }, 150);
+                btn.className = 'run-btn';
+                btn.addEventListener('click', (function(instruction, btnRef, cardRef) {
+                    return async function() {
+                        if (btnRef.disabled) return;
+                        btnRef.disabled = true;
+                        btnRef.textContent = 'Working...';
+                        btnRef.style.opacity = '0.7';
+                        // Result area below the row
+                        var resultEl = document.createElement('div');
+                        resultEl.style.cssText = 'padding:12px 14px;background:var(--bg-subtle);border-top:1px solid var(--border);font-size:13px;line-height:1.7;max-height:300px;overflow-y:auto;';
+                        resultEl.textContent = 'Baker is working on this...';
+                        cardRef.appendChild(resultEl);
+                        // Stream response
+                        var fullResponse = '';
+                        try {
+                            var resp = await bakerFetch('/api/scan', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                timeout: 180000,
+                                body: JSON.stringify({ question: instruction, history: [] }),
+                            });
+                            if (!resp.ok) throw new Error('API returned ' + resp.status);
+                            var reader = resp.body.getReader();
+                            var decoder = new TextDecoder();
+                            var buffer = '';
+                            while (true) {
+                                var chunk = await reader.read();
+                                if (chunk.done) break;
+                                buffer += decoder.decode(chunk.value, { stream: true });
+                                var lines = buffer.split('\n');
+                                buffer = lines.pop();
+                                for (var li = 0; li < lines.length; li++) {
+                                    if (!lines[li].startsWith('data: ')) continue;
+                                    var payload = lines[li].slice(6).trim();
+                                    if (payload === '[DONE]') continue;
+                                    try {
+                                        var d = JSON.parse(payload);
+                                        if (d.token) {
+                                            fullResponse += d.token;
+                                            setSafeHTML(resultEl, '<div class="md-content">' + md(fullResponse) + '</div>');
+                                        }
+                                    } catch (e) {}
+                                }
+                            }
+                        } catch (err) {
+                            fullResponse = 'Error: ' + err.message;
+                            resultEl.textContent = fullResponse;
+                        }
+                        btnRef.textContent = 'Done';
+                        btnRef.style.opacity = '1';
+                        btnRef.style.background = 'var(--green)';
+                        btnRef.style.cursor = 'default';
+                        // Also store in scan history
+                        getScanHistory().push({ role: 'user', content: instruction });
+                        getScanHistory().push({ role: 'assistant', content: fullResponse });
                     };
-                })(p.instruction));
+                })(p.instruction, btn, card));
                 row.appendChild(btn);
-                proposalsEl.appendChild(row);
+                card.appendChild(row);
+                proposalsEl.appendChild(card);
             });
         }
 
