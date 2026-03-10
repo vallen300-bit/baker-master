@@ -379,32 +379,31 @@ def _quick_whatsapp_detect(question: str) -> dict:
     import re
     q = question.lower().strip()
 
-    # Questions about WhatsApp are NOT send commands
-    question_starts = ("what ", "who ", "where ", "when ", "how ", "why ",
-                       "do you ", "did you ", "can you tell", "have you ",
-                       "is there", "are there", "do i ", "did i ")
-    if any(q.startswith(qs) for qs in question_starts):
+    # Questions and statements ABOUT WhatsApp are NOT send commands.
+    # Only match explicit imperative commands like "send X a whatsapp"
+    question_words = ("what ", "who ", "where ", "when ", "how ", "why ",
+                      "do you ", "did you ", "can you tell", "have you ",
+                      "is there", "are there", "do i ", "did i ",
+                      "if ", "this ", "i am ", "i'm ", "he ", "she ",
+                      "we ", "they ", "it ", "the ", "my ", "from ",
+                      "about ", "know ", "check ", "show ", "find ",
+                      "search ", "look ", "any ", "can i ", "could ")
+    if any(q.startswith(qs) for qs in question_words):
         return None
 
     # Must mention WhatsApp / WA (including common misspellings)
-    # Normalize common misspellings before checking
     q_normalized = q.replace("whats app", "whatsapp").replace("watsapp", "whatsapp").replace("whatsup", "whatsapp").replace("whatssapp", "whatsapp").replace("watsap", "whatsapp").replace("whats-app", "whatsapp")
-    # Only normalize "whats up" when near send-like context (not in "we exchanged whats up messages")
     if "whats up" in q_normalized and any(v in q_normalized for v in ("send", "write", "tell")):
         q_normalized = q_normalized.replace("whats up", "whatsapp")
-    wa_refs = ["whatsapp", "wa message", "wa to ", "on wa ", "the wa "]
+    wa_refs = ["whatsapp", "wa message", "wa to ", "on wa "]
     has_wa = any(ref in q_normalized for ref in wa_refs)
     if not has_wa:
         return None
-    # Use normalized form for subsequent matching
     q = q_normalized
 
-    # Must contain a send-like verb (not just "message" alone — too loose)
-    send_verbs = [
-        "send", "write", "tell", "ask",
-        "whatsapp",  # "WhatsApp Edita about..." acts as verb
-    ]
-    has_verb = any(v in q for v in send_verbs)
+    # Must contain an explicit send verb — NOT "ask" (too ambiguous) or "whatsapp" alone
+    send_verbs = ["send", "write", "tell"]
+    has_verb = any(re.search(r'\b' + v + r'\b', q) for v in send_verbs)
     if not has_verb:
         return None
 
