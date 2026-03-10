@@ -247,6 +247,10 @@ function switchTab(tabName) {
 
     currentTab = tabName;
 
+    // Show/hide back button (hidden on Dashboard)
+    var backBtn = document.getElementById('cmdBack');
+    if (backBtn) backBtn.hidden = (tabName === 'morning-brief');
+
     if (tabName === 'morning-brief') loadMorningBrief();
     else if (tabName === 'fires') loadFires();
     else if (tabName === 'matters') loadMattersTab();
