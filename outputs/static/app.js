@@ -2762,6 +2762,10 @@ async function init() {
         });
     }
 
+    // File upload handlers (Ask Baker + Ask Specialist)
+    setupDocumentUpload('scanFile', 'scanUploadStatus', 'viewAskBaker');
+    setupDocumentUpload('specialistFile', 'specialistUploadStatus', 'viewAskSpecialist');
+
     // Command bar
     setupCommandBar();
     setupDetectionBadge();
@@ -3075,4 +3079,98 @@ async function submitFeedback(taskId, feedback, barEl) {
     } catch (e) {
         console.warn('Feedback submission failed:', e);
     }
+}
+
+// ═══ DOCUMENT UPLOAD (SPECIALIST-UPGRADE-1B) ═══
+
+function setupDocumentUpload(fileInputId, statusId, viewId) {
+    var fileInput = document.getElementById(fileInputId);
+    if (!fileInput) return;
+
+    // File picker change handler
+    fileInput.addEventListener('change', function() {
+        if (fileInput.files.length > 0) {
+            uploadDocument(fileInput.files[0], statusId);
+            fileInput.value = '';
+        }
+    });
+
+    // Drag-and-drop on the view body
+    var viewEl = document.getElementById(viewId);
+    if (!viewEl) return;
+    var body = viewEl.querySelector('.scan-view-body');
+    if (!body) return;
+
+    body.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        body.classList.add('drag-over');
+    });
+    body.addEventListener('dragleave', function() {
+        body.classList.remove('drag-over');
+    });
+    body.addEventListener('drop', function(e) {
+        e.preventDefault();
+        body.classList.remove('drag-over');
+        if (e.dataTransfer.files.length > 0) {
+            uploadDocument(e.dataTransfer.files[0], statusId);
+        }
+    });
+}
+
+async function uploadDocument(file, statusId) {
+    var statusEl = document.getElementById(statusId);
+    if (!statusEl) return;
+
+    // Validate extension
+    var ext = file.name.split('.').pop().toLowerCase();
+    var allowed = ['pdf', 'docx', 'xlsx', 'csv', 'txt', 'png', 'jpg'];
+    if (allowed.indexOf(ext) === -1) {
+        showUploadStatus(statusEl, 'error', 'Unsupported file type: .' + ext);
+        return;
+    }
+
+    // Show uploading state
+    showUploadStatus(statusEl, 'uploading', 'Uploading ' + file.name + '...');
+
+    try {
+        var formData = new FormData();
+        formData.append('file', file);
+
+        // Update status through stages
+        showUploadStatus(statusEl, 'uploading', 'Extracting text from ' + file.name + '...');
+
+        var resp = await fetch('/api/documents/upload', {
+            method: 'POST',
+            headers: { 'X-Baker-Key': BAKER_CONFIG.apiKey },
+            body: formData,
+        });
+
+        if (!resp.ok) {
+            var err = await resp.json().catch(function() { return { detail: 'Upload failed' }; });
+            showUploadStatus(statusEl, 'error', err.detail || 'Upload failed (HTTP ' + resp.status + ')');
+            return;
+        }
+
+        var data = await resp.json();
+        var summary = 'Uploaded: ' + data.filename;
+        if (data.document_type) summary += ' — ' + data.document_type;
+        if (data.matter_slug) summary += ', matter: ' + data.matter_slug;
+        if (data.parties && data.parties.length > 0) summary += ', parties: ' + data.parties.join(', ');
+
+        showUploadStatus(statusEl, 'success', summary);
+
+        // Auto-hide after 10s
+        setTimeout(function() {
+            statusEl.hidden = true;
+        }, 10000);
+
+    } catch (e) {
+        showUploadStatus(statusEl, 'error', 'Upload failed: ' + e.message);
+    }
+}
+
+function showUploadStatus(el, state, message) {
+    el.hidden = false;
+    el.className = 'upload-status ' + state;
+    el.textContent = message;
 }

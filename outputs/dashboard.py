@@ -4086,6 +4086,91 @@ async def list_collections():
     return {"collections": sorted(VALID_COLLECTIONS)}
 
 
+@app.post("/api/documents/upload", tags=["documents"], dependencies=[Depends(verify_api_key)])
+async def upload_document(file: UploadFile = File(...)):
+    """Upload a document for full-text storage + classification + extraction.
+
+    SPECIALIST-UPGRADE-1B: Stores complete text in documents table,
+    runs classify + extract pipeline synchronously, returns results.
+    Document immediately available via search_documents tool.
+    """
+    ext = Path(file.filename).suffix.lower()
+    if ext not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {ext}. Accepted: {', '.join(sorted(SUPPORTED_EXTENSIONS))}",
+        )
+
+    contents = await file.read()
+    if len(contents) > 100 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large. Maximum size: 100MB.")
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            delete=False, suffix=ext,
+            prefix=Path(file.filename).stem + "_",
+        ) as tmp:
+            tmp.write(contents)
+            tmp_path = Path(tmp.name)
+
+        # Extract full text
+        from tools.ingest.extractors import extract
+        full_text = await asyncio.to_thread(extract, tmp_path)
+        if not full_text or len(full_text.strip()) < 10:
+            raise HTTPException(status_code=400, detail="Could not extract text from file.")
+
+        # Compute hash + store full text
+        from tools.ingest.dedup import compute_file_hash
+        file_hash = compute_file_hash(tmp_path)
+
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        doc_id = store.store_document_full(
+            source_path=f"upload:{file.filename}",
+            filename=file.filename,
+            file_hash=file_hash,
+            full_text=full_text,
+            token_count=len(full_text) // 4,
+        )
+        if not doc_id:
+            raise HTTPException(status_code=500, detail="Failed to store document.")
+
+        # Run classify + extract synchronously (user is waiting)
+        from tools.document_pipeline import classify_document, extract_document
+        classification = await asyncio.to_thread(classify_document, doc_id, full_text)
+
+        extraction_summary = None
+        if classification and classification.get("document_type", "other") != "other":
+            import time
+            time.sleep(1)
+            extraction = await asyncio.to_thread(
+                extract_document, doc_id, full_text,
+                classification["document_type"],
+            )
+            if extraction:
+                extraction_summary = extraction
+
+        return {
+            "document_id": doc_id,
+            "filename": file.filename,
+            "document_type": classification.get("document_type") if classification else None,
+            "matter_slug": classification.get("matter_slug") if classification else None,
+            "parties": classification.get("parties", []) if classification else [],
+            "tags": classification.get("tags", []) if classification else [],
+            "token_count": len(full_text) // 4,
+            "extraction_summary": extraction_summary,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Document upload failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+    finally:
+        if tmp_path and tmp_path.exists():
+            tmp_path.unlink()
+
+
 # ============================================================
 # STEP1C: Baker Tasks API (Task Ledger)
 # ============================================================
