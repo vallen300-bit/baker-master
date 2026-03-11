@@ -33,6 +33,31 @@ _processing_lock = threading.Lock()
 # Classification
 # ─────────────────────────────────────────────
 
+# DOC-RECLASSIFY-1: Controlled tag vocabulary (40 tags)
+_TAG_VOCABULARY = [
+    # Legal
+    "warranty", "gewaehrleistung", "litigation", "settlement", "court", "arbitration",
+    "contract", "amendment", "nachtrag", "termination", "deadline", "statute-of-limitations",
+    # Financial
+    "invoice", "payment", "budget", "capex", "tax", "audit", "insurance", "valuation",
+    "capital-call", "distribution", "loan", "covenant",
+    # Construction
+    "construction", "defect", "snagging", "permit", "baubewilligung", "handover",
+    "contractor", "subcontractor", "final-account", "retention",
+    # Property
+    "sales", "marketing", "brochure", "floor-plan", "residence", "hotel-operations",
+    "tenant", "lease", "service-charge", "facility-management",
+    # Corporate
+    "governance", "shareholder", "board", "compliance", "kyc", "aml",
+    # People / Relationships
+    "investor", "lp", "introducer", "broker", "buyer", "seller",
+    # Misc
+    "meeting", "minutes", "correspondence", "internal", "external", "confidential",
+]
+
+_TAGS_INSTRUCTION = f'Pick 1-4 tags from this list: {json.dumps(_TAG_VOCABULARY)}. Do NOT invent new tags.'
+
+# DOC-RECLASSIFY-1: Expanded taxonomy (8 → 16 types)
 _CLASSIFY_PROMPT = """Classify this document. Return ONLY valid JSON.
 
 Active matters (match if relevant):
@@ -40,11 +65,11 @@ Active matters (match if relevant):
 
 JSON schema:
 {{
-  "document_type": "contract" | "invoice" | "nachtrag" | "schlussrechnung" | "correspondence" | "protocol" | "report" | "other",
-  "language": "de" | "en" | "fr",
+  "document_type": "contract" | "invoice" | "nachtrag" | "schlussrechnung" | "correspondence" | "protocol" | "report" | "proposal" | "legal_opinion" | "financial_model" | "land_register" | "brochure" | "floor_plan" | "meeting_notes" | "presentation" | "media_asset" | "other",
+  "language": "de" | "en" | "fr" | "ru",
   "matter_slug": "<exact slug from list above, or null if no match>",
   "parties": ["<party name 1>", "<party name 2>"],
-  "tags": ["<keyword1>", "<keyword2>"]
+  "tags": {tags_instruction}
 }}
 
 Document text (first 8000 chars):
@@ -84,6 +109,7 @@ def classify_document(doc_id: int, full_text: str) -> Optional[dict]:
     prompt = _CLASSIFY_PROMPT.format(
         matters_list=matters_list,
         text=source_hint + full_text[:8000],
+        tags_instruction=_TAGS_INSTRUCTION,
     )
 
     try:
@@ -122,14 +148,22 @@ def classify_document(doc_id: int, full_text: str) -> Optional[dict]:
 # Extraction
 # ─────────────────────────────────────────────
 
+# DOC-RECLASSIFY-1: Expanded extraction schemas (7 → 13 types)
+# brochure, floor_plan, media_asset don't need extraction — reference material
 _EXTRACTION_SCHEMAS = {
     "contract": "parties, value (gross/net in EUR), dates (signed, start, end), penalty_clauses, retention_pct, governing_law, jurisdiction",
     "invoice": "amounts (gross/net/vat in EUR), period, cumulative_total, deductions, retention, payment_terms, due_date",
-    "nachtrag": "base_contract_ref, scope_change_description, value_delta, approval_status, approval_date",
-    "schlussrechnung": "final_amount, prior_payments, outstanding_balance, disputed_items, retention_release",
-    "correspondence": "sender, recipient, date, subject, key_demands, positions_stated, deadlines_mentioned",
-    "protocol": "meeting_date, attendees, decisions, action_items, next_meeting",
-    "report": "report_type, period, key_metrics, conclusions, recommendations",
+    "nachtrag": "amendment_number, original_contract_ref, scope_change, price_change (EUR), new_total, approval_status",
+    "schlussrechnung": "total_claimed (EUR), total_approved (EUR), retentions, deductions, open_items",
+    "correspondence": "sender, recipient, date, subject, key_points, action_items",
+    "protocol": "meeting_date, attendees, key_decisions, action_items, next_meeting",
+    "report": "report_type, period, key_findings, recommendations",
+    "legal_opinion": "author, date, jurisdiction, question, conclusion, risks, recommendations",
+    "financial_model": "model_type, assumptions, key_outputs (IRR/NPV/cashflow), scenarios",
+    "land_register": "property_address, plot_number, registered_owner, encumbrances, area_sqm",
+    "meeting_notes": "date, attendees, topics, decisions, action_items",
+    "proposal": "proposer, recipient, scope, value (EUR), timeline, conditions",
+    "presentation": "title, author, date, key_slides_summary, audience",
 }
 
 _EXTRACT_PROMPT = """Extract structured data from this {doc_type}.
@@ -209,8 +243,8 @@ def run_pipeline(doc_id: int):
 
     doc_type = classification.get("document_type", "other")
 
-    # Stage 2: Extract
-    if doc_type != "other":
+    # Stage 2: Extract (skip types without extraction schemas)
+    if doc_type in _EXTRACTION_SCHEMAS:
         import time
         time.sleep(2)  # Rate limit between API calls
         extract_document(doc_id, full_text, doc_type)
@@ -329,6 +363,12 @@ def _store_extraction(doc_id: int, doc_type: str, structured: dict):
         "correspondence": "correspondence_summary",
         "protocol": "meeting_protocol",
         "report": "report_summary",
+        "legal_opinion": "legal_opinion",
+        "financial_model": "financial_model",
+        "land_register": "land_register",
+        "meeting_notes": "meeting_notes",
+        "proposal": "proposal_summary",
+        "presentation": "presentation_summary",
     }.get(doc_type, doc_type)
 
     try:
