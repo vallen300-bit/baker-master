@@ -660,6 +660,34 @@ async def waha_webhook(
     except Exception as _e:
         logger.warning(f"Failed to store WhatsApp msg {msg_id} to PostgreSQL (non-fatal): {_e}")
 
+    # Auto-create contact for every WhatsApp sender (WhatsApp = real people, no spam)
+    if sender and sender != DIRECTOR_WHATSAPP and sender_name:
+        try:
+            from memory.store_back import SentinelStoreBack
+            _store = SentinelStoreBack._get_global_instance()
+            _conn = _store._get_conn()
+            if _conn:
+                try:
+                    _cur = _conn.cursor()
+                    # Only insert if this whatsapp_id doesn't exist yet
+                    _cur.execute(
+                        "SELECT id FROM vip_contacts WHERE whatsapp_id = %s LIMIT 1",
+                        (sender,),
+                    )
+                    if not _cur.fetchone():
+                        _cur.execute(
+                            """INSERT INTO vip_contacts (name, whatsapp_id, communication_pref, created_at)
+                               VALUES (%s, %s, 'whatsapp', NOW())""",
+                            (sender_name, sender),
+                        )
+                        _conn.commit()
+                        logger.info(f"Auto-created contact from WhatsApp: {sender_name} ({sender})")
+                    _cur.close()
+                finally:
+                    _store._put_conn(_conn)
+        except Exception as _ce:
+            logger.debug(f"Auto-contact creation failed (non-fatal): {_ce}")
+
     # DECISION-ENGINE-1A: Score trigger (no LLM fallback for webhook latency)
     _scored = None
     try:
