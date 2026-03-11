@@ -502,6 +502,79 @@ body {
 .upload-status.error { background: rgba(220,49,48,0.06); color: var(--red); }
 .scan-view-body.drag-over { outline: 2px dashed var(--blue); outline-offset: -4px; border-radius: var(--radius-sm); }
 
+/* === SCAN LAYOUT (chat + artifact panel) === */
+.scan-layout { display: flex; gap: 0; height: calc(100vh - 190px); }
+.scan-layout > .scan-view-body { flex: 1; min-width: 0; height: 100%; overflow: hidden; }
+
+/* Artifact panel — right column */
+.artifact-panel {
+  width: 0; overflow: hidden; opacity: 0;
+  transition: width 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
+  border-left: 0 solid var(--border);
+  display: flex; flex-direction: column;
+  background: var(--bg);
+}
+.artifact-panel.open {
+  width: 320px; min-width: 320px; opacity: 1;
+  border-left: 1px solid var(--border);
+  padding: 16px;
+}
+.artifact-items {
+  flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 14px;
+}
+
+/* Artifact sections */
+.artifact-section-label {
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.8px; color: var(--text3);
+  margin-bottom: 6px;
+}
+.artifact-capability {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; background: var(--blue-bg); color: var(--blue);
+  border-radius: var(--radius-pill); font-size: 12px; font-weight: 500;
+  font-family: var(--font);
+}
+.artifact-capability .artifact-cap-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--blue);
+  animation: pulse 1.5s infinite;
+}
+.artifact-capability.done .artifact-cap-dot { animation: none; }
+
+/* Source items (tool calls) */
+.artifact-source {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; background: var(--bg-subtle); border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm); font-size: 12px; color: var(--text2);
+}
+.artifact-source-icon {
+  width: 20px; height: 20px; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; flex-shrink: 0;
+}
+.artifact-source-label { flex: 1; font-weight: 500; }
+.artifact-source-check {
+  color: var(--green); font-size: 11px; flex-shrink: 0;
+}
+
+/* Download items in panel */
+.artifact-download {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; background: var(--bg-subtle); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); text-decoration: none; color: var(--text);
+  transition: border-color 0.15s;
+}
+.artifact-download:hover { border-color: var(--blue); }
+.artifact-download-icon { font-size: 18px; flex-shrink: 0; }
+.artifact-download-info { flex: 1; }
+.artifact-download-name { font-size: 12px; font-weight: 500; }
+.artifact-download-meta { font-size: 10px; color: var(--text3); margin-top: 2px; }
+
+/* Timing / metadata in panel */
+.artifact-meta {
+  font-family: var(--mono); font-size: 10px; color: var(--text3);
+  padding: 6px 0; border-top: 1px solid var(--border-light); margin-top: auto;
+}
+
 /* Thinking indicator */
 .thinking {
   display: inline-flex; align-items: center; gap: 8px;
@@ -532,11 +605,11 @@ body {
 }
 
 /* === SCROLLBARS === */
-.sidebar::-webkit-scrollbar, .content::-webkit-scrollbar, .scan-messages::-webkit-scrollbar { width: 4px; }
-.sidebar::-webkit-scrollbar-thumb, .content::-webkit-scrollbar-thumb, .scan-messages::-webkit-scrollbar-thumb {
+.sidebar::-webkit-scrollbar, .content::-webkit-scrollbar, .scan-messages::-webkit-scrollbar, .artifact-items::-webkit-scrollbar { width: 4px; }
+.sidebar::-webkit-scrollbar-thumb, .content::-webkit-scrollbar-thumb, .scan-messages::-webkit-scrollbar-thumb, .artifact-items::-webkit-scrollbar-thumb {
   background: rgba(0,0,0,0.12); border-radius: 4px;
 }
-.sidebar::-webkit-scrollbar-thumb:hover, .content::-webkit-scrollbar-thumb:hover, .scan-messages::-webkit-scrollbar-thumb:hover {
+.sidebar::-webkit-scrollbar-thumb:hover, .content::-webkit-scrollbar-thumb:hover, .scan-messages::-webkit-scrollbar-thumb:hover, .artifact-items::-webkit-scrollbar-thumb:hover {
   background: rgba(0,0,0,0.22);
 }
 

@@ -40,6 +40,193 @@ var _scanHistories = {};   // keyed by context: 'global', 'matter:oskolkov-rg7',
 var _scanCurrentContext = 'global';
 let scanStreaming = false;
 
+// ═══ ARTIFACT PANEL ═══
+var _toolLabels = {
+    search_emails: ['Emails', '\u2709\uFE0F'],
+    search_meetings: ['Meetings', '\uD83D\uDCCB'],
+    search_memory: ['Memory', '\uD83E\uDDE0'],
+    search_whatsapp: ['WhatsApp', '\uD83D\uDCAC'],
+    search_contacts: ['Contacts', '\uD83D\uDC64'],
+    search_deadlines: ['Deadlines', '\u23F0'],
+    search_clickup: ['ClickUp', '\u2705'],
+    search_deals: ['Deals', '\uD83D\uDCBC'],
+    search_matters: ['Matters', '\uD83D\uDCC1'],
+    web_search: ['Web', '\uD83C\uDF10'],
+    read_document: ['Documents', '\uD83D\uDCC4'],
+    search_documents: ['Documents', '\uD83D\uDCC4'],
+};
+var _capLabels = {
+    sales: 'Sales', finance: 'Finance', legal: 'Legal',
+    asset_management: 'Asset Management', it: 'IT',
+    profiling: 'Profiling', research: 'Research',
+    communications: 'Communications', pr_branding: 'PR & Branding',
+    marketing: 'Marketing', ai_dev: 'AI Dev',
+};
+
+function _artifactPanel(panelId) {
+    return document.getElementById(panelId);
+}
+
+function _artifactItems(itemsId) {
+    return document.getElementById(itemsId);
+}
+
+function clearArtifactPanel(panelId, itemsId) {
+    var panel = _artifactPanel(panelId);
+    var items = _artifactItems(itemsId);
+    if (items) items.textContent = '';
+    if (panel) panel.classList.remove('open');
+}
+
+function openArtifactPanel(panelId) {
+    var panel = _artifactPanel(panelId);
+    if (panel && !panel.classList.contains('open')) {
+        panel.classList.add('open');
+    }
+}
+
+function addArtifactCapability(itemsId, panelId, slugs) {
+    var items = _artifactItems(itemsId);
+    if (!items) return;
+    openArtifactPanel(panelId);
+
+    var section = document.createElement('div');
+    var label = document.createElement('div');
+    label.className = 'artifact-section-label';
+    label.textContent = 'Capability';
+    section.appendChild(label);
+
+    for (var i = 0; i < slugs.length; i++) {
+        var badge = document.createElement('span');
+        badge.className = 'artifact-capability';
+        badge.id = 'artifact-cap-' + slugs[i];
+        var dot = document.createElement('span');
+        dot.className = 'artifact-cap-dot';
+        badge.appendChild(dot);
+        badge.appendChild(document.createTextNode(_capLabels[slugs[i]] || slugs[i]));
+        section.appendChild(badge);
+    }
+    items.appendChild(section);
+
+    // Add sources section (populated by tool calls)
+    var srcSection = document.createElement('div');
+    srcSection.id = itemsId + '-sources';
+    var srcLabel = document.createElement('div');
+    srcLabel.className = 'artifact-section-label';
+    srcLabel.textContent = 'Sources searched';
+    srcSection.appendChild(srcLabel);
+    items.appendChild(srcSection);
+}
+
+function addArtifactSource(itemsId, panelId, toolName) {
+    var srcSection = document.getElementById(itemsId + '-sources');
+    if (!srcSection) {
+        // No capability was set — create sources section directly
+        var items = _artifactItems(itemsId);
+        if (!items) return;
+        openArtifactPanel(panelId);
+        srcSection = document.createElement('div');
+        srcSection.id = itemsId + '-sources';
+        var srcLabel = document.createElement('div');
+        srcLabel.className = 'artifact-section-label';
+        srcLabel.textContent = 'Sources searched';
+        srcSection.appendChild(srcLabel);
+        items.appendChild(srcSection);
+    }
+
+    // Avoid duplicate source entries
+    if (document.getElementById('artifact-src-' + toolName)) return;
+
+    openArtifactPanel(panelId);
+    var info = _toolLabels[toolName];
+    if (!info) return; // unknown tool — skip
+
+    var row = document.createElement('div');
+    row.className = 'artifact-source';
+    row.id = 'artifact-src-' + toolName;
+
+    var icon = document.createElement('span');
+    icon.className = 'artifact-source-icon';
+    icon.textContent = info[1];
+    row.appendChild(icon);
+
+    var lbl = document.createElement('span');
+    lbl.className = 'artifact-source-label';
+    lbl.textContent = info[0];
+    row.appendChild(lbl);
+
+    var check = document.createElement('span');
+    check.className = 'artifact-source-check';
+    check.textContent = '\u2713';
+    row.appendChild(check);
+
+    srcSection.appendChild(row);
+}
+
+function addArtifactDownload(itemsId, panelId, genData) {
+    var items = _artifactItems(itemsId);
+    if (!items) return;
+    openArtifactPanel(panelId);
+
+    // Add downloads section if not present
+    var dlSection = document.getElementById(itemsId + '-downloads');
+    if (!dlSection) {
+        dlSection = document.createElement('div');
+        dlSection.id = itemsId + '-downloads';
+        var dlLabel = document.createElement('div');
+        dlLabel.className = 'artifact-section-label';
+        dlLabel.textContent = 'Generated files';
+        dlSection.appendChild(dlLabel);
+        items.appendChild(dlSection);
+    }
+
+    var ext = genData.filename.split('.').pop();
+    var sizeKB = (genData.size_bytes / 1024).toFixed(1);
+    var fmtLabels = { docx: 'Word', xlsx: 'Excel', pdf: 'PDF', pptx: 'PowerPoint' };
+    var fmtIcons = { docx: '\uD83D\uDCC3', xlsx: '\uD83D\uDCCA', pdf: '\uD83D\uDCC4', pptx: '\uD83D\uDCCA' };
+
+    var link = document.createElement('a');
+    link.className = 'artifact-download';
+    link.href = genData.download_url;
+    link.download = genData.filename;
+
+    var ic = document.createElement('span');
+    ic.className = 'artifact-download-icon';
+    ic.textContent = fmtIcons[ext] || '\uD83D\uDCC4';
+    link.appendChild(ic);
+
+    var info = document.createElement('div');
+    info.className = 'artifact-download-info';
+    var name = document.createElement('div');
+    name.className = 'artifact-download-name';
+    name.textContent = genData.filename;
+    info.appendChild(name);
+    var meta = document.createElement('div');
+    meta.className = 'artifact-download-meta';
+    meta.textContent = (fmtLabels[ext] || ext.toUpperCase()) + ' \u00B7 ' + sizeKB + ' KB';
+    info.appendChild(meta);
+    link.appendChild(info);
+
+    dlSection.appendChild(link);
+}
+
+function finalizeArtifactPanel(itemsId, startTime) {
+    // Stop capability dot animation
+    var items = _artifactItems(itemsId);
+    if (!items) return;
+    var caps = items.querySelectorAll('.artifact-capability');
+    for (var i = 0; i < caps.length; i++) caps[i].classList.add('done');
+
+    // Add timing metadata
+    if (startTime) {
+        var elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        var metaDiv = document.createElement('div');
+        metaDiv.className = 'artifact-meta';
+        metaDiv.textContent = elapsed + 's';
+        items.appendChild(metaDiv);
+    }
+}
+
 function getScanHistory() {
     if (!_scanHistories[_scanCurrentContext]) _scanHistories[_scanCurrentContext] = [];
     return _scanHistories[_scanCurrentContext];
@@ -1529,6 +1716,11 @@ async function sendScanMessage(question) {
     if (scanStreaming || !question.trim()) return;
     scanStreaming = true;
 
+    var _panelId = 'scanArtifactPanel';
+    var _itemsId = 'scanArtifactItems';
+    clearArtifactPanel(_panelId, _itemsId);
+    var _scanStart = Date.now();
+
     const sendBtn = document.getElementById('scanSendBtn');
     const input = document.getElementById('scanInput');
     if (sendBtn) sendBtn.disabled = true;
@@ -1581,12 +1773,18 @@ async function sendScanMessage(question) {
                         // SECURITY: md() calls esc() first to sanitize HTML entities before formatting
                         if (replyEl) replyEl.innerHTML = '<div class="md-content">' + md(fullResponse) + '</div>';
                     }
+                    if (data.capabilities) {
+                        addArtifactCapability(_itemsId, _panelId, data.capabilities);
+                    }
+                    if (data.tool_call) {
+                        addArtifactSource(_itemsId, _panelId, data.tool_call);
+                    }
                     if (data.task_id) {
                         window._lastScanTaskId = data.task_id; // LEARNING-LOOP: capture for feedback buttons
                     }
                     if (data.error) {
                         fullResponse += '\n[Error: ' + data.error + ']';
-                        if (replyEl) replyEl.innerHTML = '<div class="md-content">' + md(fullResponse) + '</div>';
+                        if (replyEl) setSafeHTML(replyEl, '<div class="md-content">' + md(fullResponse) + '</div>');
                     }
                 } catch (e) { /* skip unparseable */ }
             }
@@ -1602,7 +1800,7 @@ async function sendScanMessage(question) {
         try {
             const docSpec = JSON.parse(docMatch[1]);
             const cleanResponse = fullResponse.replace(/```baker-document\s*\n[\s\S]*?\n```/, '').trim();
-            if (cleanResponse) replyEl.innerHTML = '<div class="md-content">' + md(cleanResponse) + '</div>';
+            if (cleanResponse) setSafeHTML(replyEl, '<div class="md-content">' + md(cleanResponse) + '</div>');
             const genRes = await bakerFetch('/api/scan/generate-document', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1615,9 +1813,12 @@ async function sendScanMessage(question) {
             if (genRes.ok) {
                 const genData = await genRes.json();
                 replyEl.appendChild(_createDownloadCard(genData));
+                addArtifactDownload(_itemsId, _panelId, genData);
             }
         } catch (e) { console.warn('Document generation failed:', e); }
     }
+
+    finalizeArtifactPanel(_itemsId, _scanStart);
 
     getScanHistory().push({ role: 'assistant', content: fullResponse });
     if (getScanHistory().length > 20) _scanHistories[_scanCurrentContext] = getScanHistory().slice(-20);
@@ -2780,6 +2981,14 @@ async function sendSpecialistMessage(question) {
     if (_specialistStreaming || !question.trim() || !_specialistSlug) return;
     _specialistStreaming = true;
 
+    var _panelId = 'specialistArtifactPanel';
+    var _itemsId = 'specialistArtifactItems';
+    clearArtifactPanel(_panelId, _itemsId);
+    var _specStart = Date.now();
+
+    // Pre-populate capability badge from selected specialist
+    addArtifactCapability(_itemsId, _panelId, [_specialistSlug]);
+
     var sendBtn = document.getElementById('specialistSendBtn');
     var input = document.getElementById('specialistInput');
     if (sendBtn) sendBtn.disabled = true;
@@ -2791,7 +3000,7 @@ async function sendSpecialistMessage(question) {
     var replyId = 'specialist-reply-' + Date.now();
     appendSpecialistBubble('assistant', '', replyId);
     var replyEl = document.getElementById(replyId);
-    if (replyEl) replyEl.innerHTML = '<div class="thinking"><span class="thinking-dots"><span></span><span></span><span></span></span> Baker is thinking...</div>';
+    if (replyEl) setSafeHTML(replyEl, '<div class="thinking"><span class="thinking-dots"><span></span><span></span><span></span></span> Specialist is thinking...</div>');
 
     var fullResponse = '';
     try {
@@ -2826,7 +3035,13 @@ async function sendSpecialistMessage(question) {
                     if (data.token) {
                         if (!fullResponse && replyEl) replyEl.textContent = '';
                         fullResponse += data.token;
-                        if (replyEl) replyEl.innerHTML = '<div class="md-content">' + md(fullResponse) + '</div>';
+                        if (replyEl) setSafeHTML(replyEl, '<div class="md-content">' + md(fullResponse) + '</div>');
+                    }
+                    if (data.capabilities) {
+                        // capabilities already set from picker — skip
+                    }
+                    if (data.tool_call) {
+                        addArtifactSource(_itemsId, _panelId, data.tool_call);
                     }
                 } catch (e) { /* skip */ }
             }
@@ -2835,6 +3050,8 @@ async function sendSpecialistMessage(question) {
         fullResponse = 'Error: ' + err.message;
         if (replyEl) replyEl.textContent = fullResponse;
     }
+
+    finalizeArtifactPanel(_itemsId, _specStart);
 
     var hist = _getSpecialistHistory();
     hist.push({ role: 'assistant', content: fullResponse });
