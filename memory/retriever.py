@@ -156,6 +156,9 @@ class SentinelRetriever:
                 logger.warning(f"Failed to search {coll}: {e}")
                 continue
 
+        # RETRIEVAL-RERANK-1: Boost scores by term match, name match, recency
+        all_contexts = self._rerank_results(all_contexts, query)
+
         # Sort by relevance score (highest first)
         all_contexts.sort(key=lambda c: c.score, reverse=True)
 
@@ -163,6 +166,82 @@ class SentinelRetriever:
         all_contexts = self._enrich_with_full_text(all_contexts)
 
         return all_contexts
+
+    def _rerank_results(self, contexts: list["RetrievedContext"],
+                        query: str) -> list["RetrievedContext"]:
+        """RETRIEVAL-RERANK-1: Boost Qdrant scores with lexical + recency signals.
+
+        Pure Python — zero API cost. Applied BEFORE enrichment so the best
+        results get enriched with full text.
+
+        Boosts (additive, capped so we never exceed 1.0):
+          +0.15  exact query term match (>=2 significant terms found in content)
+          +0.20  proper name match (capitalized multi-word term from query in content)
+          +0.10  recent (<7 days) | +0.05 semi-recent (<30 days)
+        """
+        import re
+        from datetime import datetime, timezone, timedelta
+
+        now = datetime.now(timezone.utc)
+
+        # Extract significant query terms (3+ chars, skip stop words)
+        _STOP = {"the", "and", "for", "are", "but", "not", "you", "all",
+                 "can", "had", "her", "was", "one", "our", "out", "has",
+                 "his", "how", "its", "may", "new", "now", "old", "see",
+                 "way", "who", "did", "get", "let", "say", "she", "too",
+                 "use", "what", "where", "when", "which", "why", "with",
+                 "about", "could", "from", "have", "been", "some", "than",
+                 "that", "them", "then", "they", "this", "will", "would",
+                 "there", "their", "these", "those", "should", "baker",
+                 "tell", "show", "give", "know", "does", "status", "update"}
+        q_lower = query.lower()
+        terms = [w for w in re.findall(r'\b\w{3,}\b', q_lower) if w not in _STOP]
+
+        # Extract proper names: capitalized words from original query (2+ chars)
+        proper_names = re.findall(r'\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})*\b', query)
+        proper_lower = [n.lower() for n in proper_names]
+
+        for ctx in contexts:
+            boost = 0.0
+            content_lower = ctx.content.lower()
+
+            # 1. Exact query term match: >=2 significant terms found
+            if terms:
+                matched = sum(1 for t in terms if t in content_lower)
+                if matched >= 2:
+                    boost += 0.15
+
+            # 2. Proper name match: any capitalized name from query in content
+            if proper_lower:
+                if any(name in content_lower for name in proper_lower):
+                    boost += 0.20
+
+            # 3. Recency boost from metadata date fields
+            date_str = (ctx.metadata.get("date")
+                        or ctx.metadata.get("timestamp")
+                        or ctx.metadata.get("created_at")
+                        or ctx.metadata.get("ingested_at")
+                        or "")
+            if date_str:
+                try:
+                    # Handle various date formats
+                    ds = str(date_str).strip()
+                    if "T" in ds or " " in ds:
+                        # ISO or datetime string — parse date part
+                        ds = ds[:10]
+                    doc_date = datetime.strptime(ds, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                    age = now - doc_date
+                    if age < timedelta(days=7):
+                        boost += 0.10
+                    elif age < timedelta(days=30):
+                        boost += 0.05
+                except (ValueError, TypeError):
+                    pass
+
+            if boost > 0:
+                ctx.score = min(ctx.score + boost, 1.0)
+
+        return contexts
 
     def _enrich_with_full_text(self, contexts: list["RetrievedContext"]) -> list["RetrievedContext"]:
         """
