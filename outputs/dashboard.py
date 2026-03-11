@@ -3259,47 +3259,16 @@ async def scan_chat(req: ScanRequest):
             return _scan_chat_capability(req, start, intent)
     # draft_action == "dismiss" or regular question → fall through to RAG pipeline
 
-    # DECISION-ENGINE-1A: Score the question for domain context
-    # M4 fix: allow_llm=False to avoid blocking Haiku call in async event loop
-    _domain_context = ""
-    _scored = None
-    try:
-        from orchestrator.decision_engine import score_trigger as _score_trigger
-        _scored = _score_trigger(req.question, "director", "scan", {}, allow_llm=False)
-        _domain_context = f"\n\n## DOMAIN CONTEXT\nThis question relates to the {_scored['domain']} domain.\n"
-        logger.info(
-            f"Decision Engine (Scan): domain={_scored['domain']} "
-            f"score={_scored['urgency_score']} tier={_scored['tier']}"
-        )
-    except Exception as _e:
-        logger.warning(f"Decision Engine scoring failed (non-fatal): {_e}")
-
-    # RICHER-CONTEXT-1: Auto-detect people and matters mentioned in the question
-    try:
-        from orchestrator.scan_prompt import build_entity_context
-        _entity_ctx = build_entity_context(req.question)
-        if _entity_ctx:
-            _domain_context += _entity_ctx
-    except Exception as _ec:
-        logger.debug(f"Entity context build failed (non-fatal): {_ec}")
-
-    # STEP1C: Mode+tier routing.
-    # mode=handle/delegate/escalate from Decision Engine.
-    # delegate forces agentic path with more iterations + timeout.
-    from orchestrator.agent import is_agentic_rag_enabled
-
-    _tier = _scored.get("tier", 3) if _scored else 3
-    _mode = _scored.get("mode", "escalate") if _scored else "escalate"
-    _domain = _scored.get("domain", "projects") if _scored else "projects"
+    # DEEP-MODE-1: All Ask Baker questions go straight to deep agentic path.
+    # No capability routing, no tier/mode routing. Pre-stuffed context + tools.
+    # Action routing (email/WA/ClickUp) already handled above.
 
     # Create baker_task (non-fatal tracking)
     _task_id = None
     try:
         store = _get_store()
         _task_id = store.create_baker_task(
-            domain=_domain,
-            urgency_score=_scored.get("urgency_score") if _scored else None,
-            tier=_tier, mode=_mode, task_type="question",
+            domain="projects", task_type="question",
             title=req.question[:200], description=req.question,
             sender="director", source="scan", channel="scan",
             status="in_progress",
@@ -3307,28 +3276,246 @@ async def scan_chat(req: ScanRequest):
     except Exception as _te:
         logger.warning(f"baker_task creation failed (non-fatal): {_te}")
 
-    # AGENT-FRAMEWORK-1: Try implicit capability routing before generic RAG
-    try:
-        from orchestrator.capability_router import CapabilityRouter
-        _cap_plan = CapabilityRouter().route(req.question, _domain, _mode, _scored)
-        if _cap_plan and _cap_plan.capabilities:
-            return _scan_chat_capability(
-                req, start, {"plan": _cap_plan},
-                task_id=_task_id, domain=_domain, mode=_mode,
-            )
-    except Exception as _cap_e:
-        logger.warning(f"Capability routing failed (non-fatal, falling through): {_cap_e}")
+    return _scan_chat_deep(req, start, task_id=_task_id)
 
-    # Tier/mode routing — agentic by default for quality (INTELLIGENCE-GAP-1)
-    # T1 alerts keep legacy path for speed (~3s vs ~30s)
-    if _tier == 1 and _mode != "delegate":
-        logger.info("Scan: Tier 1 detected — forcing legacy path for speed")
-        return _scan_chat_legacy(req, start, _domain_context,
-                                 task_id=_task_id, mode=_mode, domain=_domain)
-    else:
-        # Agentic RAG: agent loop with 12 tools — much better than single-pass
-        return _scan_chat_agentic(req, start, _domain_context,
-                                  task_id=_task_id, mode=_mode, domain=_domain)
+
+def _scan_chat_deep(req, start: float, task_id: int = None):
+    """DEEP-MODE-1: Deep agentic path for all Ask Baker questions.
+
+    Pre-stuffs recent emails, WhatsApp, meetings, decisions, and analyses
+    into the system prompt, PLUS gives the agent all tools for deeper search.
+    90s timeout, 15 iterations, full session history. No capability routing.
+    """
+    from orchestrator.agent import run_agent_loop_streaming
+    from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT, build_mode_aware_prompt
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    # --- Pre-stuff context from DB (fault-tolerant, each block independent) ---
+    context_blocks = []
+
+    # Entity context (people + matters mentioned in question)
+    try:
+        from orchestrator.scan_prompt import build_entity_context
+        entity_ctx = build_entity_context(req.question)
+        if entity_ctx:
+            context_blocks.append(entity_ctx)
+    except Exception:
+        pass
+
+    # Recent emails (keyword + recent)
+    try:
+        retriever = _get_retriever()
+        emails = retriever.get_email_messages(req.question, limit=5)
+        recent_emails = retriever.get_recent_emails(limit=5)
+        seen = {c.metadata.get("message_id") for c in emails}
+        for r in recent_emails:
+            if r.metadata.get("message_id") not in seen:
+                emails.append(r)
+        if emails:
+            lines = ["## RECENT EMAILS"]
+            for e in emails[:8]:
+                label = e.metadata.get("label", "email")
+                date = e.metadata.get("date", "")
+                lines.append(f"[EMAIL: {label} | {date}]\n{e.content[:1500]}")
+            context_blocks.append("\n\n".join(lines))
+    except Exception:
+        pass
+
+    # Recent WhatsApp
+    try:
+        retriever = _get_retriever()
+        wa = retriever.get_whatsapp_messages(req.question, limit=5)
+        recent_wa = retriever.get_recent_whatsapp(limit=5)
+        seen = {c.metadata.get("msg_id") for c in wa}
+        for r in recent_wa:
+            if r.metadata.get("msg_id") not in seen:
+                wa.append(r)
+        if wa:
+            lines = ["## RECENT WHATSAPP"]
+            for w in wa[:8]:
+                label = w.metadata.get("label", w.metadata.get("sender_name", ""))
+                date = w.metadata.get("date", "")
+                lines.append(f"[WA: {label} | {date}]\n{w.content[:1000]}")
+            context_blocks.append("\n\n".join(lines))
+    except Exception:
+        pass
+
+    # Meeting transcripts
+    try:
+        retriever = _get_retriever()
+        meetings = retriever.get_meeting_transcripts(req.question, limit=3)
+        recent_meetings = retriever.get_recent_meeting_transcripts(limit=3)
+        seen = {c.metadata.get("meeting_id") for c in meetings}
+        for r in recent_meetings:
+            if r.metadata.get("meeting_id") not in seen:
+                meetings.append(r)
+        if meetings:
+            lines = ["## MEETING TRANSCRIPTS"]
+            for m in meetings[:5]:
+                label = m.metadata.get("label", "meeting")
+                date = m.metadata.get("date", "")
+                lines.append(f"[MEETING: {label} | {date}]\n{m.content[:2000]}")
+            context_blocks.append("\n\n".join(lines))
+    except Exception:
+        pass
+
+    # Recent decisions
+    try:
+        retriever = _get_retriever()
+        decisions = retriever.get_recent_decisions(limit=5)
+        if decisions:
+            lines = ["## RECENT DECISIONS"]
+            for d in decisions:
+                date = d.metadata.get("date", "")
+                lines.append(f"[DECISION | {date}]\n{d.content[:800]}")
+            context_blocks.append("\n\n".join(lines))
+    except Exception:
+        pass
+
+    # Deep analyses (from Cowork/Claude Code)
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if conn:
+            try:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT title, summary, created_at FROM deep_analyses
+                    ORDER BY created_at DESC LIMIT 5
+                """)
+                rows = cur.fetchall()
+                cur.close()
+                if rows:
+                    lines = ["## STORED ANALYSES"]
+                    for title, summary, created in rows:
+                        date = created.strftime("%Y-%m-%d") if created else ""
+                        lines.append(f"[ANALYSIS: {title} | {date}]\n{(summary or '')[:1000]}")
+                    context_blocks.append("\n\n".join(lines))
+            finally:
+                store._put_conn(conn)
+    except Exception:
+        pass
+
+    # Deadlines
+    try:
+        from models.deadlines import get_active_deadlines
+        deadlines = get_active_deadlines(limit=15)
+        if deadlines:
+            dl_lines = ["## ACTIVE DEADLINES"]
+            for dl in deadlines:
+                due = dl.get("due_date")
+                due_str = due.strftime("%Y-%m-%d") if due else "TBD"
+                priority = dl.get("priority", "normal")
+                desc = dl.get("description", "")
+                dl_lines.append(f"- [{priority.upper()}] {due_str}: {desc}")
+            context_blocks.append("\n".join(dl_lines))
+    except Exception:
+        pass
+
+    pre_stuffed = "\n\n".join(context_blocks) if context_blocks else ""
+
+    # Build system prompt: base + pre-stuffed context + preferences
+    system_prompt = (
+        f"{SCAN_SYSTEM_PROMPT}\n\n"
+        f"## CURRENT TIME\n{now}\n\n"
+        f"{pre_stuffed}"
+    )
+    system_prompt = build_mode_aware_prompt(system_prompt, domain=None, mode="delegate")
+
+    logger.info(f"DEEP-MODE: system prompt {len(system_prompt)} chars, "
+                f"{len(context_blocks)} context blocks pre-stuffed")
+
+    # Full session history — no cap
+    history = []
+    for msg in (req.history or []):
+        role = msg.get("role", "user") if isinstance(msg, dict) else "user"
+        content = msg.get("content", "") if isinstance(msg, dict) else str(msg)
+        if role in ("user", "assistant") and content:
+            history.append({"role": role, "content": content})
+
+    async def event_stream():
+        full_response = ""
+        agent_result = None
+
+        import queue as _queue
+        item_queue = _queue.Queue()
+
+        def _run_agent():
+            try:
+                gen = run_agent_loop_streaming(
+                    question=req.question,
+                    system_prompt=system_prompt,
+                    history=history,
+                    max_iterations=15,
+                    timeout_override=90.0,
+                )
+                for item in gen:
+                    item_queue.put(item)
+            except Exception as e:
+                item_queue.put({"error": str(e)})
+            finally:
+                item_queue.put(None)
+
+        agent_thread = asyncio.get_event_loop().run_in_executor(None, _run_agent)
+
+        try:
+            while True:
+                try:
+                    item = await asyncio.wait_for(
+                        asyncio.get_event_loop().run_in_executor(
+                            None, lambda: item_queue.get(timeout=8)
+                        ),
+                        timeout=10,
+                    )
+                except (asyncio.TimeoutError, Exception):
+                    yield ": keepalive\n\n"
+                    continue
+
+                if item is None:
+                    break
+
+                if "_agent_result" in item:
+                    agent_result = item["_agent_result"]
+                elif "token" in item:
+                    full_response += item["token"]
+                    payload = json.dumps({"token": item["token"]})
+                    yield f"data: {payload}\n\n"
+                elif "tool_call" in item:
+                    yield f"data: {json.dumps({'tool_call': item['tool_call']})}\n\n"
+                elif "error" in item:
+                    logger.error(f"Deep scan error: {item['error']}")
+                    yield f"data: {json.dumps({'error': item['error']})}\n\n"
+        except Exception as e:
+            logger.error(f"Deep scan error: {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+        await agent_thread
+        yield "data: [DONE]\n\n"
+
+        extra_meta = {"deep_mode": True}
+        if agent_result:
+            extra_meta.update({
+                "agentic": True,
+                "agent_iterations": agent_result.iterations,
+                "agent_tool_calls": len(agent_result.tool_calls),
+                "agent_input_tokens": agent_result.total_input_tokens,
+                "agent_output_tokens": agent_result.total_output_tokens,
+                "agent_elapsed_ms": agent_result.elapsed_ms,
+            })
+            logger.info(
+                f"DEEP-MODE scan: {agent_result.iterations} iter, "
+                f"{len(agent_result.tool_calls)} tools, "
+                f"{agent_result.total_input_tokens}+{agent_result.total_output_tokens} tokens, "
+                f"{agent_result.elapsed_ms}ms"
+            )
+        _scan_store_back(req, full_response, start, extra_meta, task_id=task_id)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 def _build_scan_system_prompt(deadline_only: bool = False, contexts=None,
