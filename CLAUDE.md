@@ -45,12 +45,13 @@ Switch hats as needed. When coding, code. When scoping, think.
 | `orchestrator/scan_prompt.py` | Scan prompt + STEP1C domain/mode prompt extensions + STEP3 DB-driven preferences + build_mode_aware_prompt() |
 | `orchestrator/action_handler.py` | Intent router — email, WhatsApp, deadline, VIP, fireflies, ClickUp, **capability_task** actions |
 | `orchestrator/decision_engine.py` | **DECISION-ENGINE-1A:** score_trigger() — domain, urgency, tier, mode, overrides, VIP SLA |
-| `orchestrator/agent.py` | **AGENTIC-RAG-1 + STEP1B + RETRIEVAL-FIX-1:** Agent loop with 9 tools, ToolExecutor, tier-based routing, matter-aware search |
+| `orchestrator/agent.py` | **AGENTIC-RAG-1 + STEP1B + RETRIEVAL-FIX-1:** Agent loop with 12 tools, ToolExecutor, tier-based routing, matter-aware search |
 | `orchestrator/capability_registry.py` | **AGENT-FRAMEWORK-1:** Loads capability definitions from DB, 5-min cache, trigger pattern matching |
 | `orchestrator/capability_router.py` | **AGENT-FRAMEWORK-1:** Fast path (single capability) + delegate path (decomposer → multi-capability → synthesizer) |
 | `orchestrator/capability_runner.py` | **AGENT-FRAMEWORK-1:** Executes capability runs — run_single, run_streaming, run_multi, run_synthesizer |
-| `memory/retriever.py` | Read-side: Qdrant vector search + PostgreSQL structured queries |
-| `memory/store_back.py` | Write-side: PostgreSQL writes + Qdrant interaction embeddings + STEP3 director_preferences + VIP profiles + **capability framework tables** |
+| `memory/retriever.py` | Read-side: Qdrant vector search + PostgreSQL structured queries + **full-text enrichment (meetings, emails, documents)** |
+| `memory/store_back.py` | Write-side: PostgreSQL writes + Qdrant interaction embeddings + STEP3 director_preferences + VIP profiles + **capability framework tables** + **document storage** |
+| `tools/document_pipeline.py` | **SPECIALIST-UPGRADE-1B:** Haiku classify → extract pipeline for documents + email attachments |
 
 ### API & Dashboard
 | File | Purpose |
@@ -202,7 +203,9 @@ baker-projects, sentinel-interactions, sentinel-email, sentinel-meetings, sentin
 `meeting_transcripts` (ARCH-3), `email_messages` (ARCH-6), `whatsapp_messages` (ARCH-7),
 `insights` (INSIGHT-1), `baker_tasks` (STEP1C), `matter_registry` (RETRIEVAL-FIX-1),
 `director_preferences` (STEP3), `capability_sets` (AGENT-FRAMEWORK-1),
-`capability_runs` (AGENT-FRAMEWORK-1), `decomposition_log` (AGENT-FRAMEWORK-1)
+`capability_runs` (AGENT-FRAMEWORK-1), `decomposition_log` (AGENT-FRAMEWORK-1),
+`documents` (SPECIALIST-UPGRADE-1A), `document_extractions` (SPECIALIST-UPGRADE-1B),
+`baker_insights` (SPECIALIST-UPGRADE-1B)
 
 ## Architecture: Role Division (Baker vs Cowork)
 
@@ -291,6 +294,10 @@ Baker becomes an orchestrator that assembles **capability sets** dynamically per
 
 **PLUGINS-WEB-SEARCH-DOC-READER** — SHIPPED. 2 new agent tools: `web_search` (Tavily, tool #10) + `read_document` (email attachments + file paths, tool #11). 8 capabilities get web_search, 5 get read_document. Meta-agents have no tools by design.
 
+**SPECIALIST-UPGRADE-1A** — SHIPPED (Session 17). Full document storage in PostgreSQL `documents` table. Dropbox trigger stores complete text before chunking. Retriever swaps Qdrant chunks with full PostgreSQL text (same pattern as meetings/emails). Budget-aware truncation: 12K chars for enriched results (6x over 2K cap). Zero API cost.
+
+**SPECIALIST-UPGRADE-1B** — SHIPPED (Session 17). Document intelligence pipeline: Haiku classify + extract → `document_extractions` table (structured JSON). Email attachments stored as standalone documents + extraction pipeline. `search_documents` tool (#12) on 5 capabilities (legal, finance, asset_management, sales, research). Shared `baker_insights` table injected into all specialist prompts. **Remaining:** file upload UI, backfill scripts (~$130), auto-insight extraction after specialist runs.
+
 **Director decisions (Q2/Q9/Q12):** Quality bar 85-90% default. Director-only visibility at launch. Success = proactive answers before asked, 10-20% editing only.
 
 ### Phase 3 — Proactive Baker (SHIPPED, Session 11 + fixes Session 12)
@@ -332,6 +339,10 @@ See `BRIEF_PHASE_4_SCOPE.md` for full scope document.
 **4C — Intelligence & Learning**
 - Learning loop: Director feedback → tune Decision Engine weights + agent routing
 - ~~Capability spec completion: 8 remaining (PM-paced)~~ ALL 11 DONE (Session 14)
+- ~~Full document storage + retrieval~~ DONE (Session 17 — SPECIALIST-UPGRADE-1A)
+- ~~Document intelligence pipeline (classify + extract)~~ DONE (Session 17 — SPECIALIST-UPGRADE-1B)
+- ~~Email attachments as standalone documents~~ DONE (Session 17 — SPECIALIST-UPGRADE-1B)
+- ~~Shared specialist memory (baker_insights)~~ DONE (Session 17 — SPECIALIST-UPGRADE-1B)
 - Dashboard data layer: CEO Cockpit frontend enhancements
 
 ### Open Items (operational)
@@ -342,6 +353,9 @@ See `BRIEF_PHASE_4_SCOPE.md` for full scope document.
 - ~~**Calendar OAuth:**~~ DONE (Session 13) — verified working
 - **ClaimsMax / Philip emails:** Draft emails ready, need Philip's email address
 - **Wertheimer term sheet:** Financial decisions needed before Cowork can draft
+- **Document backfill:** ~3,188 Dropbox docs + ~2,000 email attachments need full-text storage + extraction (~$130 Haiku cost)
+- **File upload UI:** Dashboard upload endpoint + drag-and-drop (SPECIALIST-UPGRADE-1B Item 4)
+- **Auto-insight extraction:** Haiku call after specialist runs to store findings to baker_insights (deferred — needs testing)
 
 ## End-of-Session Checklist
 
@@ -373,6 +387,9 @@ Sessions 1-16 archived in `SESSION_LOG.md`. One-liner summaries:
 | 14 | Mar 8 | Phase 4A (cost monitor, observability), all 11 capability specs, learning loop |
 | 15 | Mar 9 | Sentinel Health Monitor, OOM fix, email watermark resilience |
 | 16 | Mar 9 | Email 429 backoff, Networking tab, specialist thinking + citations, 11 Claude Code agents |
+| 17 | Mar 10 | SPECIALIST-UPGRADE-1A+1B: full document storage, Haiku classify+extract pipeline, email attachments, shared baker_insights, search_documents tool #12 |
+| 18 | Mar 10 | Backfill completion (1,354 docs), PM-OOM-1, Dropbox trigger fix, handoff cleanup |
+| 19 | Mar 11 | **Dashboard UX overhaul (19 commits)**: ClaimsMax banking design, Cowork-style chat, per-matter scoping, WhatsApp send/body/intent fixes, contact disambiguation, auto-contacts from WA, action memory logging |
 
 ## Key Documents (Dropbox)
 
@@ -386,6 +403,8 @@ Sessions 1-16 archived in `SESSION_LOG.md`. One-liner summaries:
 | Operating Model v2.0 | `Baker-Project/pm/BAKER_OPERATING_MODEL_v2.md` | PM + Code + Director workflow |
 | PM Onboard | `Baker-Project/pm/PM_ONBOARD.md` | Cowork PM session startup |
 | Agent Framework Architecture | `Baker-Project/agent-framework-architecture.html` | PM's visual architecture (reviewed, partially adopted) |
+| Specialist Upgrade 1A Brief | `briefs/BRIEF_SPECIALIST_UPGRADE_1A.md` | Full document storage + retrieval (SHIPPED) |
+| Specialist Upgrade 1B Brief | `briefs/BRIEF_SPECIALIST_UPGRADE_1B.md` | Document intelligence pipeline + shared memory (SHIPPED, backfill TODO) |
 
 ## Director Preferences
 
