@@ -286,9 +286,9 @@ Deadline action patterns:
 - "Confirm [X] for March 15" → type: "deadline_action", deadline_action: "confirm", deadline_date: "2026-03-15"
 - "Disregard the [X] deadline" → type: "deadline_action", deadline_action: "dismiss"
 
-VIP action patterns:
-- "Add [name] to the VIP list" → type: "vip_action", vip_action_type: "add"
-- "Remove [name] from the VIP list" → type: "vip_action", vip_action_type: "remove"
+Contact action patterns:
+- "Add [name] to contacts" → type: "vip_action", vip_action_type: "add"
+- "Remove [name] from contacts" → type: "vip_action", vip_action_type: "remove"
 
 Fireflies fetch patterns:
 - "Pull the Fireflies recording with [name]" → type: "fireflies_fetch"
@@ -1307,8 +1307,8 @@ def handle_whatsapp_action(intent: dict, retriever, channel: str = "scan",
 
     if not resolved:
         return (
-            f"I don't have {raw_recipient}'s WhatsApp number in the VIP contacts list. "
-            f"You can add it with: \"Add {raw_recipient} to the VIP list with WhatsApp [number]\""
+            f"I don't have {raw_recipient}'s WhatsApp number in the contacts list. "
+            f"You can add it with: \"Add {raw_recipient} to contacts with WhatsApp [number]\""
         )
 
     # Generate WhatsApp message body

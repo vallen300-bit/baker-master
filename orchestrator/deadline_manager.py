@@ -625,8 +625,8 @@ def add_vip(name: str, email: str = None, whatsapp_id: str = None, role: str = N
     from models.deadlines import add_vip_contact
     vip_id = add_vip_contact(name=name, role=role, email=email, whatsapp_id=whatsapp_id)
     if vip_id:
-        return f"\u2705 Added {name} to the VIP list (ID: {vip_id})"
-    return f"\u274c Failed to add {name} to the VIP list."
+        return f"\u2705 Added {name} to contacts (ID: {vip_id})"
+    return f"\u274c Failed to add {name} to contacts."
 
 
 def remove_vip(name: str) -> str:
@@ -634,8 +634,8 @@ def remove_vip(name: str) -> str:
     from models.deadlines import remove_vip_contact
     removed = remove_vip_contact(name)
     if removed:
-        return f"\u2705 Removed {name} from the VIP list."
-    return f"I couldn't find a VIP contact matching \"{name}\"."
+        return f"\u2705 Removed {name} from contacts."
+    return f"I couldn't find a contact matching \"{name}\"."
 
 
 # ---------------------------------------------------------------------------

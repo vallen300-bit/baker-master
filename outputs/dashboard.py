@@ -1447,7 +1447,7 @@ async def get_networking_contacts(
     contact_type: Optional[str] = Query(None),
     tier: Optional[int] = Query(None),
 ):
-    """List VIP contacts with networking fields. Filterable by type and tier."""
+    """List contacts with networking fields. Filterable by type and tier."""
     try:
         store = _get_store()
         import psycopg2.extras
@@ -3522,9 +3522,9 @@ def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
                         if "_agent_result" in chunk:
                             _agent_result[0] = chunk["_agent_result"]
                         elif "token" in chunk:
-                            q.put_nowait(chunk["token"])
+                            q.put_nowait(("token", chunk["token"]))
                         elif "tool_call" in chunk:
-                            q.put_nowait(None)  # keepalive
+                            q.put_nowait(("tool_call", chunk["tool_call"]))
                 except Exception as e:
                     logger.error(f"Capability stream error: {e}")
                 finally:
@@ -3550,10 +3550,14 @@ def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
 
                 if item is StopIteration:
                     break
-                if item is None:
+                if isinstance(item, tuple):
+                    kind, value = item
+                    if kind == "tool_call":
+                        yield f"data: {_json.dumps({'tool_call': value})}\n\n"
+                    else:
+                        yield f"data: {_json.dumps({'token': value})}\n\n"
+                else:
                     yield ": keepalive\n\n"
-                    continue
-                yield f"data: {_json.dumps({'token': item})}\n\n"
 
             # Log capability run
             ar = _agent_result[0]
