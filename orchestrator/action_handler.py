@@ -233,7 +233,7 @@ _INTENT_SYSTEM = """You are Baker's intent classifier. Given a Director's messag
 
 Return exactly this JSON structure (no other text, no markdown):
 {
-  "type": "email_action" | "whatsapp_action" | "deadline_action" | "vip_action" | "fireflies_fetch" | "clickup_action" | "clickup_fetch" | "clickup_plan" | "question",
+  "type": "email_action" | "whatsapp_action" | "deadline_action" | "contact_action" | "fireflies_fetch" | "clickup_action" | "clickup_fetch" | "clickup_plan" | "question",
   "recipient": "<email address OR name of recipient(s). For multiple recipients, return comma-separated (e.g. 'Edita Vallen, Philip Vallen, dvallen@brisengroup.com'). 'myself' or 'me' means dvallen@brisengroup.com. Return null only if no recipient at all.>",
   "subject": "<inferred subject line or null>",
   "content_request": "<what Baker should include in the email body, or null>",
@@ -287,8 +287,8 @@ Deadline action patterns:
 - "Disregard the [X] deadline" → type: "deadline_action", deadline_action: "dismiss"
 
 Contact action patterns:
-- "Add [name] to contacts" → type: "vip_action", vip_action_type: "add"
-- "Remove [name] from contacts" → type: "vip_action", vip_action_type: "remove"
+- "Add [name] to contacts" → type: "contact_action", vip_action_type: "add"
+- "Remove [name] from contacts" → type: "contact_action", vip_action_type: "remove"
 
 Fireflies fetch patterns:
 - "Pull the Fireflies recording with [name]" → type: "fireflies_fetch"
@@ -589,47 +589,14 @@ def classify_intent(question: str, conversation_history: str = "") -> dict:
         _log_action("classify_intent:regex_match", f"type=capability_task, hint={quick_cap.get('capability_hint')}")
         return quick_cap
 
-    # EMAIL-DELIVERY-1: Fast path — regex catches obvious email commands
+    # EMAIL-DELIVERY-1: Fast path — regex catches emails with explicit addresses
+    # SMART-ROUTING-1: Only this + capability detect survive as regex fast-paths.
+    # All other intents (WhatsApp, Fireflies, deadlines, ClickUp) go through Haiku
+    # for better accuracy — regex was causing misroutes.
     quick = _quick_email_detect(question)
     if quick:
         _log_action("classify_intent:regex_match", f"type={quick.get('type')}, recipient={quick.get('recipient')}")
         return quick
-
-    # WA-SEND-1: Fast path — regex catches WhatsApp send commands
-    quick_wa = _quick_whatsapp_detect(question)
-    if quick_wa:
-        _log_action("classify_intent:regex_match", f"type=whatsapp_action, recipient={quick_wa.get('whatsapp_recipient')}")
-        return quick_wa
-
-    # Fast path — regex catches Fireflies fetch requests
-    quick_ff = _quick_fireflies_detect(question)
-    if quick_ff:
-        _log_action("classify_intent:regex_match", f"type=fireflies_fetch")
-        return quick_ff
-
-    # Fast path — regex catches deadline management actions (dismiss/complete/confirm)
-    quick_dl = _quick_deadline_detect(question)
-    if quick_dl:
-        _log_action("classify_intent:regex_match", f"type={quick_dl.get('type')}")
-        return quick_dl
-
-    # Fast path — regex catches ClickUp action commands
-    quick_cu_action = _quick_clickup_action_detect(question)
-    if quick_cu_action:
-        _log_action("classify_intent:regex_match", "type=clickup_action")
-        return quick_cu_action
-
-    # Fast path — regex catches ClickUp plan commands (before fetch, since plan is more specific)
-    quick_cu_plan = _quick_clickup_plan_detect(question)
-    if quick_cu_plan:
-        _log_action("classify_intent:regex_match", "type=clickup_plan")
-        return quick_cu_plan
-
-    # Fast path — regex catches ClickUp fetch queries
-    quick_cu_fetch = _quick_clickup_fetch_detect(question)
-    if quick_cu_fetch:
-        _log_action("classify_intent:regex_match", "type=clickup_fetch")
-        return quick_cu_fetch
 
     try:
         claude = anthropic.Anthropic(api_key=config.claude.api_key)

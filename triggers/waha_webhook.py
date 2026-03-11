@@ -545,10 +545,10 @@ def _handle_director_message(message_body: str, msg_id: str, sender_name: str) -
         logger.info(f"WhatsApp action: deadline action processed")
         return True
 
-    elif intent_type == "vip_action":
+    elif intent_type in ("vip_action", "contact_action"):
         result = ah.handle_vip_action(intent)
         _wa_reply(result)
-        logger.info(f"WhatsApp action: VIP action processed")
+        logger.info(f"WhatsApp action: contact action processed")
         return True
 
     elif intent_type == "fireflies_fetch":

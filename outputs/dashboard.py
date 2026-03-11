@@ -3222,7 +3222,7 @@ async def scan_chat(req: ScanRequest):
                 _ah.handle_deadline_action(intent),
                 req.question,
             )
-        elif intent.get("type") == "vip_action":
+        elif intent.get("type") in ("vip_action", "contact_action"):
             return _action_stream_response(
                 _ah.handle_vip_action(intent),
                 req.question,
