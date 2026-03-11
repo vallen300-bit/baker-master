@@ -179,17 +179,9 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: deadline_cadence (every 60 minutes)")
 
-    # WhatsApp SLA monitoring — every 5 min (CHANNEL-TRUST-1)
-    # Re-enabled: now monitors ALL WhatsApp conversations, not just VIPs.
-    # WhatsApp is a high-trust personal channel — anyone messaging deserves SLA.
-    from orchestrator.decision_engine import run_vip_sla_check
-    scheduler.add_job(
-        run_vip_sla_check,
-        IntervalTrigger(minutes=5),
-        id="vip_sla_check", name="WhatsApp SLA monitoring",
-        coalesce=True, max_instances=1, replace_existing=True,
-    )
-    logger.info("Registered: vip_sla_check (every 5 minutes — CHANNEL-TRUST-1, all WA conversations)")
+    # VIP SLA monitoring — KILLED (Director decision, Session 21).
+    # Unanswered message tracking is not helpful — creates noise, not value.
+    logger.info("vip_sla_check REMOVED (Director decision — not helpful)")
 
     # Commitment overdue check — every 6 hours (Phase 3C)
     from orchestrator.commitment_checker import run_commitment_check
