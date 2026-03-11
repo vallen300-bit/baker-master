@@ -280,9 +280,9 @@ def _handle_director_question_agentic(question: str, start: float,
     except Exception:
         pass
 
-    # STEP1C: delegate mode gets more iterations + longer timeout
-    _max_iter = 5 if mode == "delegate" else 3
-    _timeout = 15.0 if mode == "delegate" else None
+    # WhatsApp agent: 5 iterations / 45s default, delegate gets more
+    _max_iter = 7 if mode == "delegate" else 5
+    _timeout = 60.0 if mode == "delegate" else 45.0
 
     try:
         result = run_agent_loop(
