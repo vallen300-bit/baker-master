@@ -390,6 +390,7 @@ Sessions 1-16 archived in `SESSION_LOG.md`. One-liner summaries:
 | 17 | Mar 10 | SPECIALIST-UPGRADE-1A+1B: full document storage, Haiku classify+extract pipeline, email attachments, shared baker_insights, search_documents tool #12 |
 | 18 | Mar 10 | Backfill completion (1,354 docs), PM-OOM-1, Dropbox trigger fix, handoff cleanup |
 | 19 | Mar 11 | **Dashboard UX overhaul (19 commits)**: ClaimsMax banking design, Cowork-style chat, per-matter scoping, WhatsApp send/body/intent fixes, contact disambiguation, auto-contacts from WA, action memory logging |
+| 20 | Mar 11 | Artifact panel (320px right column in chat views), VIP→Contacts rename, WhatsApp send audit (clean), capability tool_call SSE fix |
 
 ## Key Documents (Dropbox)
 
