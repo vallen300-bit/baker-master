@@ -3455,6 +3455,62 @@ class SentinelStoreBack:
         finally:
             self._put_conn(conn)
 
+    def get_relevant_conversations(self, question: str, limit: int = 5) -> list:
+        """DEEP-MODE-2: Fetch prior conversations relevant to the current question.
+
+        Uses ILIKE keyword match on conversation_memory.question + answer.
+        Excludes last hour to avoid duplicating the current session.
+        Returns list of dicts: [{question, answer, created_at}, ...] newest-first.
+        Fault-tolerant: returns [] on any failure.
+        """
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            import re
+            # Extract significant keywords (3+ chars, skip stop words)
+            _STOP = {"the", "and", "for", "are", "but", "not", "you", "all",
+                      "can", "had", "her", "was", "one", "our", "out", "has",
+                      "how", "its", "may", "new", "now", "old", "see", "who",
+                      "did", "get", "let", "say", "she", "too", "use", "what",
+                      "where", "when", "which", "why", "with", "about", "could",
+                      "from", "have", "been", "some", "than", "that", "them",
+                      "then", "they", "this", "will", "would", "there", "their",
+                      "these", "those", "should", "baker", "tell", "show",
+                      "give", "know", "does", "status", "update", "please"}
+            terms = [w for w in re.findall(r'\b\w{3,}\b', question.lower()) if w not in _STOP]
+            if not terms:
+                return []
+
+            # Build ILIKE conditions: match any keyword in question or answer
+            like_clauses = []
+            params = []
+            for term in terms[:6]:  # cap at 6 keywords to keep query fast
+                like_clauses.append("(question ILIKE %s OR answer ILIKE %s)")
+                params.extend([f"%{term}%", f"%{term}%"])
+
+            where = " OR ".join(like_clauses)
+
+            import psycopg2.extras
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(f"""
+                SELECT question, answer, created_at
+                FROM conversation_memory
+                WHERE ({where})
+                  AND created_at < NOW() - INTERVAL '1 hour'
+                  AND answer IS NOT NULL AND LENGTH(answer) > 50
+                ORDER BY created_at DESC
+                LIMIT %s
+            """, params + [limit])
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            return rows
+        except Exception as e:
+            logger.warning(f"get_relevant_conversations failed: {e}")
+            return []
+        finally:
+            self._put_conn(conn)
+
     # -------------------------------------------------------
     # Cleanup
     # -------------------------------------------------------

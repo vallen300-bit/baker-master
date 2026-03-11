@@ -3413,6 +3413,24 @@ def _scan_chat_deep(req, start: float, task_id: int = None):
     except Exception:
         pass
 
+    # DEEP-MODE-2: Prior Baker conversations relevant to this question
+    try:
+        store = _get_store()
+        prior_convos = store.get_relevant_conversations(req.question, limit=5)
+        if prior_convos:
+            lines = ["## PRIOR BAKER CONVERSATIONS"]
+            for conv in prior_convos:
+                date = conv.get("created_at", "")
+                date_str = date.strftime("%Y-%m-%d %H:%M") if hasattr(date, "strftime") else str(date)[:16]
+                q = (conv.get("question") or "")[:200]
+                a = (conv.get("answer") or "")[:800]
+                lines.append(f"[{date_str}] Director: {q}")
+                if a:
+                    lines.append(f"Baker: {a}")
+            context_blocks.append("\n\n".join(lines))
+    except Exception:
+        pass
+
     pre_stuffed = "\n\n".join(context_blocks) if context_blocks else ""
 
     # Build system prompt: base + pre-stuffed context + preferences
