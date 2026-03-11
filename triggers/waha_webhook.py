@@ -194,15 +194,14 @@ def _handle_director_question(question: str, msg_id: str, scored: dict = None):
     except Exception as _cap_e:
         logger.warning(f"WA capability routing failed (non-fatal): {_cap_e}")
 
-    # Fallback: existing mode+tier routing
+    # Fallback: agentic by default for quality (INTELLIGENCE-GAP-1)
+    # T1 keeps legacy for speed (~3s WhatsApp reply)
     if not answer:
         if _tier == 1 and _mode != "delegate":
             logger.info("WA question: Tier 1 — forcing legacy path for speed")
             answer = _handle_director_question_legacy(question, start, mode=_mode, domain=_domain)
-        elif is_agentic_rag_enabled() or _mode == "delegate":
-            answer = _handle_director_question_agentic(question, start, mode=_mode, domain=_domain)
         else:
-            answer = _handle_director_question_legacy(question, start, mode=_mode, domain=_domain)
+            answer = _handle_director_question_agentic(question, start, mode=_mode, domain=_domain)
 
     if not answer:
         return  # error already handled inside the helper
@@ -262,7 +261,24 @@ def _handle_director_question_agentic(question: str, start: float,
         f"No markdown headers or bullet formatting. Use *bold* sparingly (WhatsApp supports it).\n"
         f"No document blocks. No numbered lists longer than 5 items.\n"
     )
-    system_prompt = build_mode_aware_prompt(base_prompt, domain, mode)
+    # RICHER-CONTEXT-1: inject entity context (people + matters mentioned)
+    system_prompt = build_mode_aware_prompt(base_prompt, domain, mode, question=question)
+
+    # Fetch recent conversation history for context
+    _history = []
+    try:
+        from memory.store_back import SentinelStoreBack
+        _store = SentinelStoreBack._get_global_instance()
+        _recent = _store.get_recent_conversations(limit=10)
+        for turn in reversed(_recent or []):
+            q = (turn.get("question") or "")[:300]
+            a = (turn.get("answer") or "")[:500]
+            if q:
+                _history.append({"role": "user", "content": q})
+            if a:
+                _history.append({"role": "assistant", "content": a})
+    except Exception:
+        pass
 
     # STEP1C: delegate mode gets more iterations + longer timeout
     _max_iter = 5 if mode == "delegate" else 3
@@ -272,6 +288,7 @@ def _handle_director_question_agentic(question: str, start: float,
         result = run_agent_loop(
             question=question,
             system_prompt=system_prompt,
+            history=_history,
             max_iterations=_max_iter,
             timeout_override=_timeout,
         )
@@ -380,7 +397,8 @@ def _handle_director_question_legacy(question: str, start: float,
         f"No markdown headers or bullet formatting. Use *bold* sparingly (WhatsApp supports it).\n"
         f"No document blocks. No numbered lists longer than 5 items.\n"
     )
-    system_prompt = build_mode_aware_prompt(base_prompt, domain, mode)
+    # RICHER-CONTEXT-1: inject entity context (people + matters mentioned)
+    system_prompt = build_mode_aware_prompt(base_prompt, domain, mode, question=question)
 
     # --- 3. Call Claude (non-streaming, WhatsApp doesn't support SSE) ---
     try:
