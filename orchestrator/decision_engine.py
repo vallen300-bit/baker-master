@@ -320,8 +320,13 @@ def _score_financial_exposure(content: str, domain: str) -> int:
     return score
 
 
-def _score_relationship(sender: str, vips: list) -> int:
-    """Score 1-3: relationship weight from VIP tier."""
+def _score_relationship(sender: str, vips: list, source: str = "") -> int:
+    """Score 1-3: relationship weight from VIP tier + channel trust.
+
+    CHANNEL-TRUST-1: WhatsApp is a high-trust personal channel.
+    Any WhatsApp sender gets at least score 2 (even if not in VIP list),
+    because only real contacts have the Director's WhatsApp number.
+    """
     sender_lower = (sender or "").lower().strip()
     for vip in vips:
         vip_name = (vip.get("name") or "").lower()
@@ -330,6 +335,9 @@ def _score_relationship(sender: str, vips: list) -> int:
             if tier == 1:
                 return 3
             return 2
+    # Channel trust: WhatsApp senders are inherently trusted contacts
+    if source in ("whatsapp", "whatsapp_webhook"):
+        return 2
     return 1
 
 
@@ -535,7 +543,7 @@ def score_trigger(content: str, sender: str = "", source: str = "",
     # 2. Urgency sub-scores
     time_score = _score_time_sensitivity(content)
     financial_score = _score_financial_exposure(content, domain)
-    relationship_score = _score_relationship(sender, vips)
+    relationship_score = _score_relationship(sender, vips, source=source)
     owner_score = _score_owner_signal(content, sender)
     urgency_score = time_score + financial_score + relationship_score + owner_score
 
@@ -693,14 +701,16 @@ def run_vip_sla_check():
                 sender_num = sender_jid.split("@")[0] if "@" in sender_jid else sender_jid
                 vip = vip_wa_lookup.get(sender_num)
 
-            if not vip:
-                continue
+            # CHANNEL-TRUST-1: Monitor ALL WhatsApp conversations, not just VIPs.
+            # WhatsApp is a high-trust personal channel — anyone messaging
+            # the Director deserves a response SLA.
+            # Non-VIP senders default to tier 2 SLA (4h).
 
             # Use VIP name if sender_name is just a phone number
-            if sender_name.isdigit() or not sender_name:
+            if vip and (sender_name.isdigit() or not sender_name):
                 sender_name = vip.get("name", sender_name)
 
-            vip_tier = vip.get("tier", 2)
+            vip_tier = vip.get("tier", 2) if vip else 2
 
             # Check SLA breach
             sla_breached = False
