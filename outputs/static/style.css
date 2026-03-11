@@ -627,3 +627,18 @@ body {
 .md-content table { border-collapse: collapse; width: 100%; margin: 8px 0; }
 .md-content th, .md-content td { border: 1px solid var(--border); padding: 6px 10px; font-size: 12px; text-align: left; }
 .md-content th { background: var(--bg-subtle); font-weight: 600; }
+
+/* FOLLOWUP-SUGGESTIONS-1 */
+.followup-bar {
+  display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px;
+  padding-top: 10px; border-top: 1px solid var(--border-light);
+}
+.followup-btn {
+  padding: 6px 14px; border: 1px solid var(--border); border-radius: var(--radius-pill);
+  background: var(--bg); font-size: 12px; font-weight: 400;
+  color: var(--text2); cursor: pointer; font-family: var(--font);
+  transition: all 0.15s; text-align: left;
+}
+.followup-btn:hover {
+  border-color: var(--blue); color: var(--blue); background: var(--blue-bg);
+}

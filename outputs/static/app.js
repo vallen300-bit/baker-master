@@ -1845,12 +1845,57 @@ async function sendScanMessage(question) {
         window._lastScanTaskId = null;
     }
 
+    // FOLLOWUP-SUGGESTIONS-1: Show follow-up questions after substantive responses
+    if (fullResponse && fullResponse.length > 100 && !fullResponse.startsWith('Error:') && replyEl) {
+        _fetchFollowups(replyEl, question, fullResponse, 'scan');
+    }
+
     scanStreaming = false;
     if (sendBtn) sendBtn.disabled = false;
     if (input) { input.disabled = false; input.focus(); }
 
     const container = document.getElementById('scanMessages');
     if (container) container.scrollTop = 0;
+}
+
+// ═══ FOLLOW-UP SUGGESTIONS ═══
+
+async function _fetchFollowups(replyEl, question, answer, source) {
+    try {
+        var resp = await bakerFetch('/api/scan/followups', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                question: question.substring(0, 300),
+                answer: answer.substring(0, 1500),
+            }),
+        });
+        if (!resp.ok) return;
+        var data = await resp.json();
+        if (!data.suggestions || data.suggestions.length === 0) return;
+
+        var bar = document.createElement('div');
+        bar.className = 'followup-bar';
+
+        for (var i = 0; i < data.suggestions.length; i++) {
+            var btn = document.createElement('button');
+            btn.className = 'followup-btn';
+            btn.textContent = data.suggestions[i];
+            btn.addEventListener('click', (function(text, src) {
+                return function() {
+                    if (src === 'specialist') sendSpecialistMessage(text);
+                    else sendScanMessage(text);
+                };
+            })(data.suggestions[i], source));
+            bar.appendChild(btn);
+        }
+
+        replyEl.appendChild(bar);
+        var container = replyEl.closest('.scan-messages, #specialistMessages, #scanMessages');
+        if (container) container.scrollTop = container.scrollHeight;
+    } catch (e) {
+        // Non-fatal — just don't show suggestions
+    }
 }
 
 // ═══ COMMAND BAR ═══
@@ -3095,6 +3140,11 @@ async function sendSpecialistMessage(question) {
         toolbar.appendChild(saveBtn);
 
         replyEl.appendChild(toolbar);
+    }
+
+    // FOLLOWUP-SUGGESTIONS-1: Show follow-up questions after specialist responses
+    if (fullResponse && fullResponse.length > 100 && !fullResponse.startsWith('Error:') && replyEl) {
+        _fetchFollowups(replyEl, question, fullResponse, 'specialist');
     }
 
     _specialistStreaming = false;

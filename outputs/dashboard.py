@@ -187,6 +187,11 @@ class AlertTagRequest(BaseModel):
     tag: str = Field(..., min_length=1, max_length=30, pattern=r"^[a-z0-9-]+$")
 
 
+class FollowupRequest(BaseModel):
+    question: str = Field(..., min_length=1, max_length=500)
+    answer: str = Field(..., min_length=1, max_length=2000)
+
+
 class AlertAssignRequest(BaseModel):
     matter_slug: str = Field(..., min_length=1, max_length=50)
     new_name: Optional[str] = Field(None, max_length=200)
@@ -2305,6 +2310,54 @@ async def detect_capability(q: str = Query("", max_length=500)):
     if cap:
         return {"detected": True, "capability_slug": cap.slug, "capability_name": cap.name}
     return {"detected": False}
+
+
+@app.post("/api/scan/followups", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def generate_followups(req: FollowupRequest):
+    """FOLLOWUP-SUGGESTIONS-1: Generate 3 follow-up questions after a Baker/Specialist response."""
+    try:
+        import anthropic as _anthropic
+        client = _anthropic.Anthropic(api_key=config.claude.api_key)
+
+        prompt = (
+            f"Based on this conversation, suggest exactly 3 brief follow-up questions "
+            f"the Director might want to ask next. Each should be a different angle: "
+            f"one action-oriented (draft/send/create), one analytical (analyze/compare/assess), "
+            f"one exploratory (what about/any updates on/related to).\n\n"
+            f"Return ONLY a JSON array of 3 strings, no other text.\n"
+            f"Keep each under 50 characters.\n\n"
+            f"Question: {req.question[:300]}\n"
+            f"Answer: {req.answer[:1000]}"
+        )
+
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens,
+                         resp.usage.output_tokens, source="followup_suggestions")
+        except Exception:
+            pass
+
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+            if raw.endswith("```"):
+                raw = raw[:-3]
+            raw = raw.strip()
+
+        suggestions = json.loads(raw)
+        if isinstance(suggestions, list) and len(suggestions) >= 2:
+            return {"suggestions": suggestions[:3]}
+        return {"suggestions": []}
+
+    except Exception as e:
+        logger.debug(f"Followup generation failed (non-fatal): {e}")
+        return {"suggestions": []}
 
 
 # V3 Phase B3 — Artifact storage
