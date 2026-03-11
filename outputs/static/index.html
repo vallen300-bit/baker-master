@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=28">
+    <link rel="stylesheet" href="/static/style.css?v=29">
 </head>
 <body>
 
@@ -70,6 +70,11 @@
         <div class="nav-item" data-tab="media">
             <span class="nav-label">Media</span>
         </div>
+
+        <div class="nav-divider"></div>
+        <div class="nav-item" data-tab="baker-data">
+            <span class="nav-label">Baker Data</span>
+        </div>
     </nav>
 </div>
 
@@ -104,11 +109,10 @@
             </div>
 
             <div class="stats" id="briefStats">
-                <div class="stat"><div class="stat-num red" id="statFires">-</div><div class="stat-label">Fires</div></div>
-                <div class="stat"><div class="stat-num amber" id="statDeadlines">-</div><div class="stat-label">Deadlines this week</div></div>
-                <div class="stat"><div class="stat-num blue" id="statProcessed">-</div><div class="stat-label">Processed overnight</div></div>
-                <div class="stat"><div class="stat-num green" id="statActions">-</div><div class="stat-label">Actions completed</div></div>
-                <div class="stat"><div class="stat-num blue" id="statMeetings">-</div><div class="stat-label">Meetings today</div></div>
+                <div class="stat"><div class="stat-num" id="statUnanswered">-</div><div class="stat-label">Awaiting reply</div></div>
+                <div class="stat"><div class="stat-num" id="statFires">-</div><div class="stat-label">Fires</div></div>
+                <div class="stat"><div class="stat-num" id="statDeadlines">-</div><div class="stat-label">Due this week</div></div>
+                <div class="stat"><div class="stat-num" id="statMeetings">-</div><div class="stat-label">Meetings today</div></div>
             </div>
 
             <div class="quick-row">
@@ -246,11 +250,16 @@
             <div id="mediaContent"></div>
         </div>
 
+        <div class="view" id="viewBakerData">
+            <div class="section-label">Baker Data</div>
+            <div id="bakerDataContent"></div>
+        </div>
+
     </div><!-- /content -->
 </div><!-- /right-area -->
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=28"></script>
+<script src="/static/app.js?v=29"></script>
 </body>
 </html>

@@ -414,9 +414,10 @@ const TAB_VIEW_MAP = {
     'media': 'viewMedia',
     'commitments': 'viewCommitments',
     'browser': 'viewBrowser',
+    'baker-data': 'viewBakerData',
 };
 
-const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'tags', 'search', 'ask-baker', 'ask-specialist', 'travel', 'media', 'commitments', 'browser']);
+const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'tags', 'search', 'ask-baker', 'ask-specialist', 'travel', 'media', 'commitments', 'browser', 'baker-data']);
 
 function switchTab(tabName) {
     document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
@@ -451,6 +452,7 @@ function switchTab(tabName) {
     else if (tabName === 'media') loadMediaTab();
     else if (tabName === 'commitments') loadCommitmentsTab();
     else if (tabName === 'browser') loadBrowserTab();
+    else if (tabName === 'baker-data') loadBakerData();
 }
 
 // ═══ MORNING BRIEF ═══
@@ -464,10 +466,10 @@ async function loadMorningBrief() {
         }
         var data = await resp.json();
 
+        setText('statUnanswered', data.unanswered_count || 0);
         setText('statFires', data.fire_count || 0);
         setText('statDeadlines', data.deadline_count || 0);
-        setText('statProcessed', data.processed_overnight || 0);
-        setText('statActions', data.actions_completed || 0);
+        setText('statMeetings', data.meeting_count || 0);
 
         var narEl = document.getElementById('briefNarrative');
         if (narEl && data.narrative) setSafeHTML(narEl, md(data.narrative));
@@ -1953,6 +1955,94 @@ function setupCommandBar() {
             setTimeout(function() { sendScanMessage(prompts[action] || action); }, 100);
         });
     });
+}
+
+// ═══ BAKER DATA TAB ═══
+
+async function loadBakerData() {
+    var container = document.getElementById('bakerDataContent');
+    if (!container) return;
+    showLoading(container, 'Loading Baker Data');
+
+    try {
+        var resp = await bakerFetch('/api/dashboard/morning-brief', { timeout: 20000 });
+        if (!resp.ok) { container.textContent = 'Failed to load.'; return; }
+        var data = await resp.json();
+
+        container.textContent = '';
+
+        // Activity Today
+        var actLabel = document.createElement('div');
+        actLabel.style.cssText = 'font-size:11px;font-weight:700;color:var(--text3);font-family:var(--mono);letter-spacing:0.3px;margin-bottom:8px;';
+        actLabel.textContent = 'ACTIVITY (24H)';
+        container.appendChild(actLabel);
+
+        var actGrid = document.createElement('div');
+        actGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:20px;';
+
+        var procBox = document.createElement('div');
+        procBox.style.cssText = 'background:var(--card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;';
+        var procNum = document.createElement('div');
+        procNum.style.cssText = 'font-size:20px;font-weight:700;color:var(--text);';
+        procNum.textContent = data.processed_overnight || 0;
+        procBox.appendChild(procNum);
+        var procLbl = document.createElement('div');
+        procLbl.style.cssText = 'font-size:12px;color:var(--text3);';
+        procLbl.textContent = 'Processed';
+        procBox.appendChild(procLbl);
+        actGrid.appendChild(procBox);
+
+        var actBox = document.createElement('div');
+        actBox.style.cssText = 'background:var(--card);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;';
+        var actNum = document.createElement('div');
+        actNum.style.cssText = 'font-size:20px;font-weight:700;color:var(--text);';
+        actNum.textContent = data.actions_completed || 0;
+        actBox.appendChild(actNum);
+        var actLbl = document.createElement('div');
+        actLbl.style.cssText = 'font-size:12px;color:var(--text3);';
+        actLbl.textContent = 'Actions completed';
+        actBox.appendChild(actLbl);
+        actGrid.appendChild(actBox);
+
+        container.appendChild(actGrid);
+
+        // Recent Capability Runs
+        if (data.activity && data.activity.length > 0) {
+            var capLabel = document.createElement('div');
+            capLabel.style.cssText = 'font-size:11px;font-weight:700;color:var(--text3);font-family:var(--mono);letter-spacing:0.3px;margin-bottom:8px;';
+            capLabel.textContent = 'RECENT CAPABILITY RUNS';
+            container.appendChild(capLabel);
+
+            for (var i = 0; i < data.activity.length; i++) {
+                var run = data.activity[i];
+                var row = document.createElement('div');
+                row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border-light);font-size:12px;';
+
+                var slug = document.createElement('span');
+                slug.style.cssText = 'font-weight:500;color:var(--text);';
+                slug.textContent = run.capability_slug || '?';
+                row.appendChild(slug);
+
+                var meta = document.createElement('span');
+                meta.style.cssText = 'color:var(--text3);font-family:var(--mono);font-size:11px;';
+                var status = run.status || '?';
+                var iter = run.iterations || '?';
+                var time = run.created_at ? new Date(run.created_at).toLocaleTimeString('en-GB', {hour:'2-digit', minute:'2-digit'}) : '';
+                meta.textContent = status + ' | ' + iter + ' iter | ' + time;
+                row.appendChild(meta);
+
+                container.appendChild(row);
+            }
+        } else {
+            var empty = document.createElement('div');
+            empty.style.cssText = 'color:var(--text3);font-size:13px;padding:12px 0;';
+            empty.textContent = 'No capability runs in the last 24 hours.';
+            container.appendChild(empty);
+        }
+
+    } catch (e) {
+        container.textContent = 'Failed to load Baker Data.';
+    }
 }
 
 // ═══ MATTERS TAB ═══

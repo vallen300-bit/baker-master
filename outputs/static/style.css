@@ -80,11 +80,11 @@ body {
 
 .nav-item {
   display: flex; align-items: center; gap: 8px;
-  padding: 9px 12px; border-radius: var(--radius-sm); cursor: pointer;
-  transition: background 0.15s; margin-bottom: 2px; font-size: 14px; font-weight: 400;
-  color: var(--text2); overflow: hidden; flex-wrap: nowrap;
+  padding: 8px 12px; border-radius: var(--radius-sm); cursor: pointer;
+  transition: background 0.15s; margin-bottom: 1px; font-size: 13px; font-weight: 400;
+  color: var(--text3); overflow: hidden; flex-wrap: nowrap;
 }
-.nav-item:hover { background: rgba(0,0,0,0.04); color: var(--text); }
+.nav-item:hover { background: rgba(0,0,0,0.04); color: var(--text2); }
 .nav-item.active {
   background: var(--blue-bg); color: var(--blue); font-weight: 500;
   border-left: 3px solid var(--blue); padding-left: 9px;

@@ -943,6 +943,21 @@ async def get_morning_brief():
         try:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
+            # Stats: unanswered WhatsApp conversations (DASHBOARD-STATS-1)
+            cur.execute("""
+                SELECT COUNT(DISTINCT sender_name) AS cnt
+                FROM whatsapp_messages wm
+                WHERE wm.is_director = FALSE
+                  AND wm.timestamp > NOW() - INTERVAL '24 hours'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM whatsapp_messages reply
+                      WHERE reply.chat_id = wm.chat_id
+                        AND reply.is_director = TRUE
+                        AND reply.timestamp > wm.timestamp
+                  )
+            """)
+            unanswered_count = cur.fetchone()["cnt"]
+
             # Stats: fire count
             cur.execute("SELECT COUNT(*) AS cnt FROM alerts WHERE status = 'pending' AND tier = 1")
             fire_count = cur.fetchone()["cnt"]
@@ -1041,6 +1056,7 @@ async def get_morning_brief():
             logger.warning(f"Morning brief: calendar unavailable: {e}")
 
         return {
+            "unanswered_count": unanswered_count,
             "fire_count": fire_count,
             "deadline_count": deadline_count,
             "processed_overnight": processed_overnight,
