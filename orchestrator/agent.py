@@ -357,6 +357,41 @@ TOOL_DEFINITIONS = [
             "required": ["query"],
         },
     },
+    # CLICKUP-CREATE-1: Allow specialists to create ClickUp tasks
+    {
+        "name": "clickup_create",
+        "description": (
+            "Create a new task in ClickUp (BAKER space, Handoff Notes list). "
+            "Use when the Director asks to track something, create a follow-up, "
+            "or when analysis reveals an action item that should be tracked.\n\n"
+            "Use for:\n"
+            "- 'Create a task to follow up on the Hagenauer claim'\n"
+            "- 'Track this as a ClickUp task'\n"
+            "- 'Add a task for Mykola to review the invoice'"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Task name — short, actionable (e.g. 'Follow up on Hagenauer claim').",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Task description with context. Optional.",
+                },
+                "priority": {
+                    "type": "integer",
+                    "description": "Priority: 1=Urgent, 2=High, 3=Normal, 4=Low. Default: 3.",
+                },
+                "due_date": {
+                    "type": "string",
+                    "description": "Due date in ISO format (YYYY-MM-DD). Optional.",
+                },
+            },
+            "required": ["name"],
+        },
+    },
 ]
 
 
@@ -402,6 +437,8 @@ class ToolExecutor:
                 return self._read_document(tool_input)
             elif tool_name == "search_documents":
                 return self._search_documents(tool_input)
+            elif tool_name == "clickup_create":
+                return self._clickup_create(tool_input)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -806,6 +843,50 @@ class ToolExecutor:
                 store._put_conn(conn)
         except Exception as e:
             return json.dumps({"error": f"Document search failed: {str(e)}"})
+
+    def _clickup_create(self, inp: dict) -> str:
+        """Create a ClickUp task in BAKER space (Handoff Notes list). CLICKUP-CREATE-1."""
+        name = inp.get("name", "Untitled Task")
+        description = inp.get("description", "")
+        priority = inp.get("priority", 3)
+        due_date_str = inp.get("due_date")
+
+        due_ms = None
+        if due_date_str:
+            try:
+                from datetime import datetime, timezone
+                dt = datetime.fromisoformat(due_date_str.replace("Z", "+00:00"))
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                due_ms = int(dt.timestamp() * 1000)
+            except (ValueError, TypeError):
+                pass
+
+        try:
+            from clickup_client import ClickUpClient
+            client = ClickUpClient._get_global_instance()
+            result = client.create_task(
+                list_id="901521426367",  # Handoff Notes list
+                name=name,
+                description=description,
+                priority=priority,
+                due_date=due_ms,
+            )
+            if result:
+                task_id = result.get("id", "unknown")
+                task_url = result.get("url", f"https://app.clickup.com/t/{task_id}")
+                prio_labels = {1: "Urgent", 2: "High", 3: "Normal", 4: "Low"}
+                parts = [f"ClickUp task created: **{name}**", f"- ID: {task_id}"]
+                if priority:
+                    parts.append(f"- Priority: {prio_labels.get(priority, str(priority))}")
+                if due_date_str:
+                    parts.append(f"- Due: {due_date_str}")
+                parts.append(f"- [Open in ClickUp]({task_url})")
+                return "\n".join(parts)
+            return "Failed to create task in ClickUp."
+        except Exception as e:
+            logger.error(f"clickup_create failed: {e}")
+            return json.dumps({"error": f"ClickUp create failed: {str(e)}"})
 
     @staticmethod
     def _format_contexts(contexts, label: str) -> str:

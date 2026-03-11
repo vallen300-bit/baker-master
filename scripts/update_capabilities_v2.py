@@ -135,7 +135,7 @@ def run():
             ]),
             "output_format": "Prose with structured tables for legal data (deadline registers, jurisdiction comparisons, contract summaries). PCS (Problem/Cause/Solution) for alerts. Always state: jurisdiction, applicable law, key deadlines, recommended next step.",
             "autonomy_level": "recommend_wait",
-            "tools": json.dumps(["search_memory", "search_emails", "web_search", "read_document", "search_meetings", "get_contact", "get_matter_context", "get_deadlines", "get_clickup_tasks"]),
+            "tools": json.dumps(["search_memory", "search_emails", "web_search", "read_document", "search_meetings", "get_contact", "get_matter_context", "get_deadlines", "get_clickup_tasks", "clickup_create"]),
         },
         # [3/11] SALES
         {
@@ -152,7 +152,7 @@ def run():
             ]),
             "output_format": "Prose with structured tables for sales data (unit inventory, pipeline, investor commitments, deal comparisons). PCS for alerts. MORV: factual, discreet tone — never promotional. Investor materials: McKinsey-style structure.",
             "autonomy_level": "recommend_wait",
-            "tools": json.dumps(["search_memory", "search_emails", "web_search", "read_document", "search_whatsapp", "get_contact", "get_matter_context", "search_deals_insights"]),
+            "tools": json.dumps(["search_memory", "search_emails", "web_search", "read_document", "search_whatsapp", "get_contact", "get_matter_context", "search_deals_insights", "clickup_create"]),
         },
         # [4/11] IT
         {
@@ -187,7 +187,7 @@ def run():
             ]),
             "output_format": "Prose with structured tables for asset inventories, portfolio performance, fund reporting. PCS for maintenance issues and insurance claims. Capex tables with budget vs actual. Gewaehrleistung tracking in date-sorted tables with expiry alerts. Bottom-line first.",
             "autonomy_level": "recommend_wait",
-            "tools": json.dumps(["search_memory", "search_emails", "web_search", "read_document", "search_meetings", "get_contact", "get_matter_context", "search_deals_insights", "get_deadlines"]),
+            "tools": json.dumps(["search_memory", "search_emails", "web_search", "read_document", "search_meetings", "get_contact", "get_matter_context", "search_deals_insights", "get_deadlines", "clickup_create"]),
         },
         # [6/11] PROFILING
         {
