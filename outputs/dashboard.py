@@ -3319,17 +3319,16 @@ async def scan_chat(req: ScanRequest):
     except Exception as _cap_e:
         logger.warning(f"Capability routing failed (non-fatal, falling through): {_cap_e}")
 
-    # Existing tier/mode routing (generic RAG fallback)
+    # Tier/mode routing — agentic by default for quality (INTELLIGENCE-GAP-1)
+    # T1 alerts keep legacy path for speed (~3s vs ~30s)
     if _tier == 1 and _mode != "delegate":
         logger.info("Scan: Tier 1 detected — forcing legacy path for speed")
         return _scan_chat_legacy(req, start, _domain_context,
                                  task_id=_task_id, mode=_mode, domain=_domain)
-    elif is_agentic_rag_enabled() or _mode == "delegate":
+    else:
+        # Agentic RAG: agent loop with 12 tools — much better than single-pass
         return _scan_chat_agentic(req, start, _domain_context,
                                   task_id=_task_id, mode=_mode, domain=_domain)
-    else:
-        return _scan_chat_legacy(req, start, _domain_context,
-                                 task_id=_task_id, mode=_mode, domain=_domain)
 
 
 def _build_scan_system_prompt(deadline_only: bool = False, contexts=None,
