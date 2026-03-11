@@ -470,9 +470,56 @@ class ToolExecutor:
 
     def _get_contact(self, inp: dict) -> str:
         name = inp.get("name", "")
+        parts = []
+
+        # 1. Search VIP contacts (enriched profiles with role_context, expertise)
+        try:
+            conn = self._retriever._get_pg_conn()
+            cur = conn.cursor(cursor_factory=__import__('psycopg2.extras', fromlist=['RealDictCursor']).RealDictCursor)
+            # Full-name exact match first, then fuzzy
+            cur.execute("""
+                SELECT * FROM vip_contacts
+                WHERE LOWER(name) = LOWER(%s)
+                   OR similarity(name, %s) > 0.35
+                ORDER BY
+                    CASE WHEN LOWER(name) = LOWER(%s) THEN 0 ELSE 1 END,
+                    similarity(name, %s) DESC
+                LIMIT 3
+            """, (name, name, name, name))
+            vips = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            if vips:
+                for v in vips:
+                    # Remove None values
+                    v = {k: str(val) for k, val in v.items() if val is not None}
+                    parts.append(f"[VIP CONTACT] {json.dumps(v, default=str)}")
+        except Exception as e:
+            logger.warning(f"VIP contact lookup failed (non-fatal): {e}")
+
+        # 2. Search old contacts table
         result = self._retriever.get_contact_profile(name)
         if result:
-            return result.content
+            parts.append(result.content)
+
+        # 3. Search decisions/analyses mentioning this person
+        try:
+            conn = self._retriever._get_pg_conn()
+            cur = conn.cursor(cursor_factory=__import__('psycopg2.extras', fromlist=['RealDictCursor']).RealDictCursor)
+            cur.execute("""
+                SELECT decision, reasoning, project, created_at
+                FROM decisions
+                WHERE decision ILIKE %s OR reasoning ILIKE %s
+                ORDER BY created_at DESC LIMIT 3
+            """, (f'%{name}%', f'%{name}%'))
+            decisions = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            for d in decisions:
+                parts.append(f"[DECISION] {d.get('decision', '')} | {d.get('reasoning', '')}")
+        except Exception as e:
+            logger.debug(f"Decision lookup for contact failed: {e}")
+
+        if parts:
+            return "\n\n".join(parts)
         return json.dumps({"result": f"No contact found matching '{name}'"})
 
     # -- STEP1B: 3 new tool implementations --

@@ -309,10 +309,44 @@ class SentinelRetriever:
         return self._pg_pool
 
     def get_contact_profile(self, contact_name: str) -> Optional[RetrievedContext]:
-        """Retrieve structured contact profile from PostgreSQL using fuzzy match."""
+        """Retrieve structured contact profile from PostgreSQL.
+        Searches both contacts and vip_contacts tables.
+        Full-name matches are preferred over first-name-only matches."""
         try:
             conn = self._get_pg_conn()
             cur = conn.cursor()
+
+            # Search VIP contacts first (richer profiles)
+            cur.execute(
+                """
+                SELECT id, name, role, email, whatsapp_id, tier, domain,
+                       role_context, communication_pref, expertise
+                FROM vip_contacts
+                WHERE LOWER(name) = LOWER(%s)
+                   OR similarity(name, %s) > 0.35
+                ORDER BY
+                    CASE WHEN LOWER(name) = LOWER(%s) THEN 0 ELSE 1 END,
+                    similarity(name, %s) DESC
+                LIMIT 1
+                """,
+                (contact_name, contact_name, contact_name, contact_name),
+            )
+            vip_row = cur.fetchone()
+            if vip_row:
+                cols = ["id", "name", "role", "email", "whatsapp_id", "tier",
+                        "domain", "role_context", "communication_pref", "expertise"]
+                profile = {c: v for c, v in zip(cols, vip_row) if v is not None}
+                content = json.dumps(profile, default=str, indent=2)
+                cur.close()
+                return RetrievedContext(
+                    content=f"[VIP CONTACT PROFILE] {content}",
+                    source="postgres",
+                    score=1.0,
+                    metadata={"type": "vip_contact_profile", "name": profile.get("name")},
+                    token_estimate=self._estimate_tokens(content),
+                )
+
+            # Fallback: old contacts table
             cur.execute(
                 """
                 SELECT id, name, role, company, email, phone, relationship_tier,
