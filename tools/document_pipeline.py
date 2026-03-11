@@ -63,9 +63,27 @@ def classify_document(doc_id: int, full_text: str) -> Optional[dict]:
     # Fetch active matters for slug matching
     matters_list = _get_active_matters()
 
+    # DOC-TRIAGE-1: Include source_path as a hint for matter detection
+    source_hint = ""
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if conn:
+            try:
+                cur = conn.cursor()
+                cur.execute("SELECT source_path, filename FROM documents WHERE id = %s", (doc_id,))
+                row = cur.fetchone()
+                cur.close()
+                if row and row[0]:
+                    source_hint = f"\nFile path (use as context hint): {row[0]}\nFilename: {row[1] or ''}\n"
+            finally:
+                store._put_conn(conn)
+    except Exception:
+        pass
+
     prompt = _CLASSIFY_PROMPT.format(
         matters_list=matters_list,
-        text=full_text[:8000],
+        text=source_hint + full_text[:8000],
     )
 
     try:

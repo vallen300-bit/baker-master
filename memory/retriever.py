@@ -351,18 +351,22 @@ class SentinelRetriever:
 
     def _get_full_document_text(self, source_path: str = None,
                                 filename: str = None) -> Optional[str]:
-        """Fetch full document text from documents table (SPECIALIST-UPGRADE-1A)."""
+        """Fetch full document text from documents table (SPECIALIST-UPGRADE-1A).
+        DOC-TRIAGE-1: Excludes media_asset type — no point enriching image descriptions."""
         try:
             conn = self._get_pg_conn()
             cur = conn.cursor()
             if source_path:
                 cur.execute(
-                    "SELECT full_text FROM documents WHERE source_path = %s LIMIT 1",
+                    "SELECT full_text FROM documents WHERE source_path = %s"
+                    " AND COALESCE(document_type, '') != 'media_asset' LIMIT 1",
                     (source_path,),
                 )
             elif filename:
                 cur.execute(
-                    "SELECT full_text FROM documents WHERE filename = %s ORDER BY ingested_at DESC LIMIT 1",
+                    "SELECT full_text FROM documents WHERE filename = %s"
+                    " AND COALESCE(document_type, '') != 'media_asset'"
+                    " ORDER BY ingested_at DESC LIMIT 1",
                     (filename,),
                 )
             else:
