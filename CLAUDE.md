@@ -390,7 +390,7 @@ Sessions 1-16 archived in `SESSION_LOG.md`. One-liner summaries:
 | 17 | Mar 10 | SPECIALIST-UPGRADE-1A+1B: full document storage, Haiku classify+extract pipeline, email attachments, shared baker_insights, search_documents tool #12 |
 | 18 | Mar 10 | Backfill completion (1,354 docs), PM-OOM-1, Dropbox trigger fix, handoff cleanup |
 | 19 | Mar 11 | **Dashboard UX overhaul (19 commits)**: ClaimsMax banking design, Cowork-style chat, per-matter scoping, WhatsApp send/body/intent fixes, contact disambiguation, auto-contacts from WA, action memory logging |
-| 20 | Mar 11 | **13 deliverables**: DEEP-MODE-1+2 (dashboard=max intelligence + cross-session memory), INTELLIGENCE-GAP-1 (richer context, Haiku routing, retrieval reranking, agentic default), CHANNEL-TRUST-1, artifact panel, VIP→Contacts, capability tool gaps, extended thinking |
+| 20 | Mar 11 | **20 deliverables**: DEEP-MODE-1+2 (dashboard=max intelligence + cross-session memory), SPECIALIST-DEEP-1, INTELLIGENCE-GAP-1 (richer context, Haiku routing, retrieval reranking), CHANNEL-TRUST-1, DOC-TRIAGE+RECLASSIFY (42%→0.9% "other"), EMAIL-ATTACH-FIX-1, artifact panel, follow-up suggestions, DASHBOARD-STATS-1, Baker Data tab, VIP→Contacts, clickup_create removal |
 
 ## Key Documents (Dropbox)
 
