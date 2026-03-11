@@ -394,6 +394,10 @@ TOOL_DEFINITIONS = [
     },
 ]
 
+# Agent loop tools — exclude clickup_create (Director prefers results in artifact panel,
+# not ClickUp task creation). Specialists keep clickup_create via their own tool lists.
+AGENT_TOOLS = [t for t in TOOL_DEFINITIONS if t["name"] != "clickup_create"]
+
 
 # ─────────────────────────────────────────────────
 # Tool Executor
@@ -1022,7 +1026,7 @@ def run_agent_loop(
             max_tokens=2048,
             system=system_prompt,
             messages=messages,
-            tools=TOOL_DEFINITIONS,
+            tools=AGENT_TOOLS,
         )
 
         total_in += response.usage.input_tokens
@@ -1209,7 +1213,7 @@ def run_agent_loop_streaming(
             max_tokens=4096,
             system=system_prompt,
             messages=messages,
-            tools=TOOL_DEFINITIONS,
+            tools=AGENT_TOOLS,
         )
 
         total_in += response.usage.input_tokens
