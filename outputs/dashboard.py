@@ -2206,9 +2206,9 @@ async def get_alerts_by_tag(tag: str):
 @app.post("/api/scan/specialist", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
 async def scan_specialist(req: SpecialistScanRequest):
     """
-    Force-route a question to a specific capability.
-    CRITICAL: Uses _scan_chat_capability() — same function as normal /api/scan.
-    Only difference: capability detection is bypassed, capability is provided directly.
+    SPECIALIST-DEEP-1: Force-route to a specific capability with deep context.
+    Pre-stuffs relevant emails, WA, meetings, decisions, cross-session memory
+    so the specialist starts with maximum context.
     """
     start = time.time()
     from orchestrator.capability_registry import CapabilityRegistry
@@ -2219,9 +2219,77 @@ async def scan_specialist(req: SpecialistScanRequest):
     if not cap or not cap.active:
         raise HTTPException(status_code=404, detail=f"Capability '{req.capability_slug}' not found or inactive")
 
+    # --- Pre-fetch context (same pattern as _scan_chat_deep) ---
+    pre_parts = []
+
+    # Entity context (people + matters)
+    try:
+        from orchestrator.scan_prompt import build_entity_context
+        entity_ctx = build_entity_context(req.question)
+        if entity_ctx:
+            pre_parts.append(entity_ctx)
+    except Exception:
+        pass
+
+    # Relevant emails
+    try:
+        retriever = _get_retriever()
+        emails = retriever.get_email_messages(req.question, limit=5)
+        recent_emails = retriever.get_recent_emails(limit=3)
+        seen = {c.metadata.get("message_id") for c in emails}
+        for r in recent_emails:
+            if r.metadata.get("message_id") not in seen:
+                emails.append(r)
+        if emails:
+            lines = [f"[EMAIL: {e.metadata.get('label', '')} | {e.metadata.get('date', '')}]\n{e.content[:2000]}"
+                     for e in emails[:6]]
+            pre_parts.append("## PRE-FETCHED EMAILS\n" + "\n\n".join(lines))
+    except Exception:
+        pass
+
+    # Relevant WhatsApp
+    try:
+        retriever = _get_retriever()
+        wa = retriever.get_whatsapp_messages(req.question, limit=5)
+        if wa:
+            lines = [f"[WA: {w.metadata.get('label', '')} | {w.metadata.get('date', '')}]\n{w.content[:1000]}"
+                     for w in wa[:6]]
+            pre_parts.append("## PRE-FETCHED WHATSAPP\n" + "\n\n".join(lines))
+    except Exception:
+        pass
+
+    # Relevant meetings
+    try:
+        retriever = _get_retriever()
+        meetings = retriever.get_meeting_transcripts(req.question, limit=3)
+        if meetings:
+            lines = [f"[MEETING: {m.metadata.get('label', '')} | {m.metadata.get('date', '')}]\n{m.content[:3000]}"
+                     for m in meetings[:3]]
+            pre_parts.append("## PRE-FETCHED MEETINGS\n" + "\n\n".join(lines))
+    except Exception:
+        pass
+
+    # Cross-session memory
+    try:
+        store = _get_store()
+        prior = store.get_relevant_conversations(req.question, limit=5)
+        if prior:
+            lines = []
+            for c in prior:
+                d = c.get("created_at")
+                ds = d.strftime("%Y-%m-%d %H:%M") if hasattr(d, "strftime") else str(d)[:16]
+                lines.append(f"[{ds}] Director: {(c.get('question') or '')[:200]}\nBaker: {(c.get('answer') or '')[:800]}")
+            pre_parts.append("## PRIOR CONVERSATIONS ON THIS TOPIC\n" + "\n---\n".join(lines))
+    except Exception:
+        pass
+
+    entity_context = "\n\n".join(pre_parts)
+    logger.info(f"Specialist pre-fetch: {len(pre_parts)} blocks, {len(entity_context)} chars for {req.capability_slug}")
+
     plan = RoutingPlan(mode="fast", capabilities=[cap])
     scan_req = ScanRequest(question=req.question, history=req.history)
-    return _scan_chat_capability(scan_req, start, {"plan": plan})
+    return _scan_chat_capability(scan_req, start, {"plan": plan},
+                                  entity_context=entity_context)
 
 
 @app.get("/api/scan/detect", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
@@ -3682,9 +3750,11 @@ def _scan_store_back(req, full_response: str, start: float,
 
 
 def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
-                          task_id: int = None, domain: str = None, mode: str = None):
+                          task_id: int = None, domain: str = None, mode: str = None,
+                          entity_context: str = ""):
     """AGENT-FRAMEWORK-1: Route through capability framework.
-    Handles both explicit ('have the finance agent...') and implicit (router match) paths."""
+    Handles both explicit ('have the finance agent...') and implicit (router match) paths.
+    SPECIALIST-DEEP-1: entity_context forwarded to capability runner for pre-stuffed context."""
     import json as _json
 
     from orchestrator.capability_router import CapabilityRouter, RoutingPlan
@@ -3731,7 +3801,8 @@ def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
                 try:
                     for chunk in runner.run_streaming(cap, req.question,
                                                       history=req.history,
-                                                      domain=domain, mode=mode):
+                                                      domain=domain, mode=mode,
+                                                      entity_context=entity_context):
                         if "_agent_result" in chunk:
                             _agent_result[0] = chunk["_agent_result"]
                         elif "token" in chunk:
@@ -3817,7 +3888,8 @@ def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
     elif plan.mode == "delegate":
         # Delegate path — multi-capability, blocking then stream result
         result = runner.run_multi(plan, req.question, history=req.history,
-                                  domain=domain, mode=mode)
+                                  domain=domain, mode=mode,
+                                  entity_context=entity_context)
 
         async def _delegate_stream():
             yield f"data: {_json.dumps({'capabilities': cap_slugs, 'phase': 'synthesizing'})}\n\n"

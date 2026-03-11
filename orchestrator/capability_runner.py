@@ -50,7 +50,8 @@ class CapabilityRunner:
 
     def run_single(self, capability: CapabilityDef, question: str,
                    history: list = None, domain: str = None,
-                   mode: str = None) -> AgentResult:
+                   mode: str = None,
+                   entity_context: str = "") -> AgentResult:
         """
         Fast path — one capability, one question.
         Builds system prompt from capability definition.
@@ -60,7 +61,7 @@ class CapabilityRunner:
         t0 = time.time()
         timeout = capability.timeout_seconds
         max_iter = capability.max_iterations
-        system = self._build_system_prompt(capability, domain, mode, question=question)
+        system = self._build_system_prompt(capability, domain, mode, question=question, entity_context=entity_context)
         tools = self._get_filtered_tools(capability)
 
         messages = []
@@ -207,7 +208,8 @@ class CapabilityRunner:
 
     def run_streaming(self, capability: CapabilityDef, question: str,
                       history: list = None, domain: str = None,
-                      mode: str = None) -> Generator[dict, None, None]:
+                      mode: str = None,
+                      entity_context: str = "") -> Generator[dict, None, None]:
         """
         SSE streaming variant for Scan dashboard.
         Yields {"token": text}, {"tool_call": name}, {"_agent_result": AgentResult}.
@@ -215,7 +217,7 @@ class CapabilityRunner:
         t0 = time.time()
         timeout = capability.timeout_seconds
         max_iter = capability.max_iterations
-        system = self._build_system_prompt(capability, domain, mode, question=question)
+        system = self._build_system_prompt(capability, domain, mode, question=question, entity_context=entity_context)
         tools = self._get_filtered_tools(capability)
 
         messages = []
@@ -371,7 +373,8 @@ class CapabilityRunner:
 
     def run_multi(self, plan: RoutingPlan, question: str,
                   history: list = None, domain: str = None,
-                  mode: str = None, baker_task_id: int = None) -> AgentResult:
+                  mode: str = None, baker_task_id: int = None,
+                  entity_context: str = "") -> AgentResult:
         """
         Sequential execution of multiple sub-tasks, each with its own capability.
         Results are accumulated and passed to the synthesizer.
@@ -395,7 +398,8 @@ class CapabilityRunner:
 
             logger.info(f"Delegate sub-task {i + 1}/{len(plan.sub_tasks)}: {slug} — {sub_task_text[:80]}")
             result = self.run_single(cap, sub_task_text, history=history,
-                                     domain=domain, mode=mode)
+                                     domain=domain, mode=mode,
+                                     entity_context=entity_context)
             sub_results.append({"slug": slug, "sub_task": sub_task_text, "result": result})
             all_tool_calls.extend(result.tool_calls)
             total_in += result.total_input_tokens
@@ -476,13 +480,15 @@ class CapabilityRunner:
 
     def _build_system_prompt(self, capability: CapabilityDef,
                               domain: str = None, mode: str = None,
-                              question: str = None) -> str:
+                              question: str = None,
+                              entity_context: str = "") -> str:
         """
         Build system prompt for a capability run.
         1. If capability.system_prompt is non-empty → use it verbatim
         2. Otherwise → base_prompt + capability role injection
         3. Apply build_mode_aware_prompt() for domain/mode/preferences
         4. RICHER-CONTEXT-1: Inject entity context from question
+        5. SPECIALIST-DEEP-1: Inject pre-fetched entity_context if provided
         """
         if capability.system_prompt:
             # Meta capabilities (decomposer, synthesizer) use their own prompt
@@ -515,7 +521,8 @@ class CapabilityRunner:
             enriched += f"\n\n## BAKER TEAM INSIGHTS\n{insights}\n"
 
         # RICHER-CONTEXT-1: Inject entity context (people/matters from question)
-        if question:
+        if question and not entity_context:
+            # Only auto-detect if no pre-fetched context was provided
             try:
                 from orchestrator.scan_prompt import build_entity_context
                 entity_ctx = build_entity_context(question)
@@ -523,6 +530,10 @@ class CapabilityRunner:
                     enriched += entity_ctx
             except Exception:
                 pass
+
+        # SPECIALIST-DEEP-1: Inject pre-fetched context (emails, WA, meetings, etc.)
+        if entity_context:
+            enriched += f"\n\n{entity_context}"
 
         # Apply DB preferences + domain/mode extensions
         return build_mode_aware_prompt(enriched, domain=domain, mode=mode)
