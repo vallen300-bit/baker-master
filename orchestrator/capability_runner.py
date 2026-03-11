@@ -60,7 +60,7 @@ class CapabilityRunner:
         t0 = time.time()
         timeout = capability.timeout_seconds
         max_iter = capability.max_iterations
-        system = self._build_system_prompt(capability, domain, mode)
+        system = self._build_system_prompt(capability, domain, mode, question=question)
         tools = self._get_filtered_tools(capability)
 
         messages = []
@@ -215,7 +215,7 @@ class CapabilityRunner:
         t0 = time.time()
         timeout = capability.timeout_seconds
         max_iter = capability.max_iterations
-        system = self._build_system_prompt(capability, domain, mode)
+        system = self._build_system_prompt(capability, domain, mode, question=question)
         tools = self._get_filtered_tools(capability)
 
         messages = []
@@ -475,12 +475,14 @@ class CapabilityRunner:
     # ─────────────────────────────────────────────
 
     def _build_system_prompt(self, capability: CapabilityDef,
-                              domain: str = None, mode: str = None) -> str:
+                              domain: str = None, mode: str = None,
+                              question: str = None) -> str:
         """
         Build system prompt for a capability run.
         1. If capability.system_prompt is non-empty → use it verbatim
         2. Otherwise → base_prompt + capability role injection
         3. Apply build_mode_aware_prompt() for domain/mode/preferences
+        4. RICHER-CONTEXT-1: Inject entity context from question
         """
         if capability.system_prompt:
             # Meta capabilities (decomposer, synthesizer) use their own prompt
@@ -511,6 +513,16 @@ class CapabilityRunner:
         insights = self._get_shared_insights(capability.slug, domain)
         if insights:
             enriched += f"\n\n## BAKER TEAM INSIGHTS\n{insights}\n"
+
+        # RICHER-CONTEXT-1: Inject entity context (people/matters from question)
+        if question:
+            try:
+                from orchestrator.scan_prompt import build_entity_context
+                entity_ctx = build_entity_context(question)
+                if entity_ctx:
+                    enriched += entity_ctx
+            except Exception:
+                pass
 
         # Apply DB preferences + domain/mode extensions
         return build_mode_aware_prompt(enriched, domain=domain, mode=mode)

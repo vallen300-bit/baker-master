@@ -207,6 +207,92 @@ def _get_preferences_safe(category: str = None) -> list:
         return []
 
 
+def build_entity_context(question: str) -> str:
+    """Auto-detect people and matters mentioned in the question and return
+    a prompt block with their profiles from the DB.
+
+    RICHER-CONTEXT-1: Gives Baker instant context on who/what is being asked about,
+    so it doesn't have to waste a tool call discovering basic facts.
+
+    Fault-tolerant: returns empty string on any failure.
+    """
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return ""
+
+        parts = []
+        q_lower = question.lower()
+
+        try:
+            cur = conn.cursor()
+
+            # 1. Match matters: check if any active matter name appears in the question
+            cur.execute("""
+                SELECT matter_name, description, people, keywords, projects
+                FROM matter_registry WHERE status = 'active'
+            """)
+            for row in cur.fetchall():
+                name, desc, people, keywords, projects = row
+                if name.lower() in q_lower:
+                    lines = [f"**{name}**"]
+                    if desc:
+                        lines.append(f"  {desc}")
+                    if people:
+                        lines.append(f"  People: {', '.join(people)}")
+                    if keywords:
+                        lines.append(f"  Keywords: {', '.join(keywords[:8])}")
+                    parts.append("\n".join(lines))
+
+            # 2. Match VIP contacts: check if any VIP name appears in the question
+            cur.execute("""
+                SELECT name, role, email, domain, role_context, expertise
+                FROM vip_contacts
+                WHERE name IS NOT NULL AND LENGTH(name) > 2
+            """)
+            matched_vips = []
+            for row in cur.fetchall():
+                vip_name, role, email, domain, role_ctx, expertise = row
+                # Skip phone-number-only names
+                if vip_name.replace("+", "").replace(" ", "").isdigit():
+                    continue
+                # Check if the VIP's last name or full name appears in the question
+                name_parts = vip_name.lower().split()
+                if len(name_parts) >= 2:
+                    # Match on last name (3+ chars) or full name
+                    last = name_parts[-1]
+                    if (len(last) >= 3 and last in q_lower) or vip_name.lower() in q_lower:
+                        matched_vips.append((vip_name, role, email, domain, role_ctx, expertise))
+                elif vip_name.lower() in q_lower:
+                    matched_vips.append((vip_name, role, email, domain, role_ctx, expertise))
+
+            for vip_name, role, email, vip_domain, role_ctx, expertise in matched_vips[:5]:
+                lines = [f"**{vip_name}**"]
+                if role:
+                    lines.append(f"  Role: {role}")
+                if email:
+                    lines.append(f"  Email: {email}")
+                if role_ctx:
+                    lines.append(f"  Context: {role_ctx[:200]}")
+                if expertise:
+                    lines.append(f"  Expertise: {expertise[:150]}")
+                parts.append("\n".join(lines))
+
+            cur.close()
+        finally:
+            store._put_conn(conn)
+
+        if not parts:
+            return ""
+
+        return "\n\n## ENTITY CONTEXT (auto-detected)\n" + "\n\n".join(parts) + "\n"
+
+    except Exception:
+        return ""
+
+
 def build_mode_aware_prompt(base_prompt: str, domain: str = None,
                             mode: str = None) -> str:
     """Concatenate base prompt + domain expertise (DB overrides hardcoded)

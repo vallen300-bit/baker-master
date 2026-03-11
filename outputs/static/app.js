@@ -1742,7 +1742,7 @@ async function sendScanMessage(question) {
             timeout: 180000, // 3 min — SSE streams need time for retrieval + generation
             body: JSON.stringify({
                 question: question,
-                history: getScanHistory().slice(-10),
+                history: getScanHistory().slice(-25),
                 project: _scanCurrentContext.startsWith('matter:') ? _scanCurrentContext.replace('matter:', '') : null
             }),
         });
@@ -1821,7 +1821,7 @@ async function sendScanMessage(question) {
     finalizeArtifactPanel(_itemsId, _scanStart);
 
     getScanHistory().push({ role: 'assistant', content: fullResponse });
-    if (getScanHistory().length > 20) _scanHistories[_scanCurrentContext] = getScanHistory().slice(-20);
+    if (getScanHistory().length > 50) _scanHistories[_scanCurrentContext] = getScanHistory().slice(-50);
 
     // Copy button for Ask Baker responses
     if (replyEl && fullResponse && !fullResponse.startsWith('Connection error:')) {

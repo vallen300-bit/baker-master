@@ -2413,7 +2413,7 @@ async def reply_to_alert(alert_id: int, req: AlertReplyRequest):
         # Route through the SAME /api/scan pipeline — build a ScanRequest
         scan_req = ScanRequest(
             question=question,
-            history=history[-10:],  # Keep last 10 turns
+            history=history[-25:],  # RICHER-CONTEXT-1: 25 turns
             project=alert.get("matter_slug"),
         )
 
@@ -3274,6 +3274,15 @@ async def scan_chat(req: ScanRequest):
     except Exception as _e:
         logger.warning(f"Decision Engine scoring failed (non-fatal): {_e}")
 
+    # RICHER-CONTEXT-1: Auto-detect people and matters mentioned in the question
+    try:
+        from orchestrator.scan_prompt import build_entity_context
+        _entity_ctx = build_entity_context(req.question)
+        if _entity_ctx:
+            _domain_context += _entity_ctx
+    except Exception as _ec:
+        logger.debug(f"Entity context build failed (non-fatal): {_ec}")
+
     # STEP1C: Mode+tier routing.
     # mode=handle/delegate/escalate from Decision Engine.
     # delegate forces agentic path with more iterations + timeout.
@@ -3658,7 +3667,7 @@ def _scan_chat_agentic(req, start: float, domain_context: str = "",
 
     # Build history
     history = []
-    for msg in (req.history or [])[-10:]:
+    for msg in (req.history or [])[-25:]:
         role = msg.get("role", "user") if isinstance(msg, dict) else "user"
         content = msg.get("content", "") if isinstance(msg, dict) else str(msg)
         if role in ("user", "assistant") and content:
@@ -3826,7 +3835,7 @@ async def _scan_chat_legacy_stream(req, start: float, domain_context: str = "",
     system_prompt = build_mode_aware_prompt(base_prompt, domain, mode)
 
     messages = []
-    for msg in (req.history or [])[-10:]:
+    for msg in (req.history or [])[-25:]:
         role = msg.get("role", "user") if isinstance(msg, dict) else "user"
         content = msg.get("content", "") if isinstance(msg, dict) else str(msg)
         if role in ("user", "assistant") and content:
@@ -3924,7 +3933,7 @@ def _scan_chat_legacy(req, start: float, domain_context: str = "",
 
     # 3. Build messages (include history for follow-ups)
     messages = []
-    for msg in (req.history or [])[-10:]:  # last 10 messages max
+    for msg in (req.history or [])[-25:]:
         role = msg.get("role", "user") if isinstance(msg, dict) else "user"
         content = msg.get("content", "") if isinstance(msg, dict) else str(msg)
         if role in ("user", "assistant") and content:
