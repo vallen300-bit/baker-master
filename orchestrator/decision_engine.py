@@ -701,16 +701,22 @@ def run_vip_sla_check():
                 sender_num = sender_jid.split("@")[0] if "@" in sender_jid else sender_jid
                 vip = vip_wa_lookup.get(sender_num)
 
-            # CHANNEL-TRUST-1: Monitor ALL WhatsApp conversations, not just VIPs.
-            # WhatsApp is a high-trust personal channel — anyone messaging
-            # the Director deserves a response SLA.
-            # Non-VIP senders default to tier 2 SLA (4h).
+            # CHANNEL-TRUST-1 revised: Only alert on named VIP contacts.
+            # Phone-only entries and unknown senders are excluded — Director
+            # intentionally doesn't reply to all WhatsApp messages.
+            if not vip:
+                continue
+
+            # Skip phone-only VIP entries (backfilled without real names)
+            vip_name_check = (vip.get("name") or "").strip()
+            if not vip_name_check or vip_name_check.replace("+", "").replace(" ", "").isdigit():
+                continue
 
             # Use VIP name if sender_name is just a phone number
-            if vip and (sender_name.isdigit() or not sender_name):
+            if sender_name.isdigit() or not sender_name:
                 sender_name = vip.get("name", sender_name)
 
-            vip_tier = vip.get("tier", 2) if vip else 2
+            vip_tier = vip.get("tier", 2)
 
             # Check SLA breach
             sla_breached = False
