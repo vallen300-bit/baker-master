@@ -517,6 +517,23 @@ _MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024
 _gmail_service = None
 
 
+def _collect_attachment_parts(payload: dict) -> list:
+    """
+    EMAIL-ATTACH-FIX-1: Recursively collect all MIME parts that have filenames.
+    Handles forwarded emails where attachments are nested in sub-parts.
+    """
+    results = []
+    parts = payload.get("parts", [])
+    for part in parts:
+        filename = part.get("filename", "")
+        if filename:
+            results.append(part)
+        # Recurse into nested multipart sections
+        if part.get("parts"):
+            results.extend(_collect_attachment_parts(part))
+    return results
+
+
 def extract_attachments_text(service, message: Dict) -> List[Dict]:
     """
     Extract text content from email attachments.
@@ -527,11 +544,13 @@ def extract_attachments_text(service, message: Dict) -> List[Dict]:
     payload = message.get("payload", {})
     message_id = message.get("id", "")
 
-    parts = payload.get("parts", [])
-    if not parts:
+    # EMAIL-ATTACH-FIX-1: Recursively collect attachment parts from all MIME levels
+    # (handles forwarded emails with nested attachments)
+    attachment_parts = _collect_attachment_parts(payload)
+    if not attachment_parts:
         return results
 
-    for part in parts:
+    for part in attachment_parts:
         filename = part.get("filename", "")
         if not filename:
             continue
