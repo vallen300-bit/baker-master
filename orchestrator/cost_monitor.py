@@ -31,8 +31,8 @@ DEFAULT_COSTS = {"input": 15.00, "output": 75.00}
 # EUR/USD conversion rate (approximate)
 USD_TO_EUR = float(os.getenv("BAKER_USD_TO_EUR", "0.92"))
 
-# Thresholds (EUR/day) — Director decisions from Session 13
-COST_ALERT_EUR = float(os.getenv("BAKER_COST_ALERT_EUR", "15.0"))
+# Thresholds (EUR/day) — raised Session 21 (€15 was too noisy)
+COST_ALERT_EUR = float(os.getenv("BAKER_COST_ALERT_EUR", "50.0"))
 COST_HARD_STOP_EUR = float(os.getenv("BAKER_COST_HARD_STOP_EUR", "100.0"))
 
 # Track if alert was already sent today (avoid spamming)
@@ -346,25 +346,5 @@ def _send_cost_alert(daily_cost: float, hard_stop: bool = False):
     except Exception as e:
         logger.warning(f"Could not send cost alert: {e}")
 
-    # Also send via WhatsApp to Director
-    try:
-        import requests
-        waha_url = os.getenv("WAHA_BASE_URL", "https://baker-waha.onrender.com")
-        waha_key = os.getenv("WHATSAPP_API_KEY", "")
-        director_wa = "41799605092@c.us"
-        if not waha_key:
-            return
-
-        prefix = "HARD STOP" if hard_stop else "Cost Alert"
-        wa_msg = (
-            f"Baker {prefix}: Daily API spend €{daily_cost:.2f}. "
-            f"{'All API calls blocked until tomorrow.' if hard_stop else f'Alert threshold €{COST_ALERT_EUR:.2f}, hard stop €{COST_HARD_STOP_EUR:.2f}.'}"
-        )
-        requests.post(
-            f"{waha_url}/api/sendText",
-            headers={"X-Api-Key": waha_key},
-            json={"chatId": director_wa, "text": wa_msg, "session": "default"},
-            timeout=10,
-        )
-    except Exception as e:
-        logger.warning(f"Could not send WA cost alert: {e}")
+    # WhatsApp cost alerts REMOVED (Director decision, Session 21 — noisy, not helpful).
+    # Slack alert above is sufficient. Hard stop still blocks API calls.
