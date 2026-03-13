@@ -298,6 +298,17 @@ class SentinelStoreBack:
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_doc_extractions_doc ON document_extractions(document_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_doc_extractions_type ON document_extractions(extraction_type)")
+            # CROSSLINK-IDEMPOTENT-1B: Dedup existing rows before adding unique constraint
+            cur.execute("""
+                DELETE FROM document_extractions a USING document_extractions b
+                WHERE a.id < b.id
+                  AND a.document_id = b.document_id
+                  AND a.extraction_type = b.extraction_type
+            """)
+            cur.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_doc_extractions_uq
+                ON document_extractions(document_id, extraction_type)
+            """)
             conn.commit()
             cur.close()
         except Exception as e:

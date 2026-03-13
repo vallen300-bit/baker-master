@@ -254,13 +254,14 @@ def run_pipeline(doc_id: int):
     doc_type = classification.get("document_type", "other")
 
     # Stage 2: Extract (skip types without extraction schemas)
+    extraction = None
     if doc_type in _EXTRACTION_SCHEMAS:
         import time
         time.sleep(2)  # Rate limit between API calls
-        extract_document(doc_id, full_text, doc_type)
+        extraction = extract_document(doc_id, full_text, doc_type)
 
     # Stage 3: Cross-link (no Claude call)
-    _cross_link(doc_id, classification)
+    _cross_link(doc_id, classification, extraction)
 
 
 def queue_extraction(doc_id: int):
@@ -392,6 +393,11 @@ def _store_extraction(doc_id: int, doc_type: str, structured: dict, confidence: 
                 INSERT INTO document_extractions
                     (document_id, extraction_type, structured_data, confidence, extracted_by)
                 VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (document_id, extraction_type) DO UPDATE SET
+                    structured_data = EXCLUDED.structured_data,
+                    confidence = EXCLUDED.confidence,
+                    extracted_by = EXCLUDED.extracted_by,
+                    created_at = NOW()
             """, (doc_id, extraction_type, json.dumps(structured), confidence, _HAIKU_MODEL))
             conn.commit()
             cur.close()
@@ -407,11 +413,14 @@ def _store_extraction(doc_id: int, doc_type: str, structured: dict, confidence: 
         logger.warning(f"Failed to store extraction for doc {doc_id}: {e}")
 
 
-def _cross_link(doc_id: int, classification: dict):
-    """Cross-link extracted data with VIPs, matters, deadlines. No Claude calls."""
+def _cross_link(doc_id: int, classification: dict, extraction: dict = None):
+    """Cross-link extracted data with VIPs, matters, deadlines. No Claude calls.
+
+    1. Match classification.parties to vip_contacts by surname
+    2. Scan extraction for future dates → create soft deadlines
+    """
+    parties = classification.get("parties") or []
     matter_slug = classification.get("matter_slug")
-    if not matter_slug:
-        return
 
     try:
         store = _get_store()
@@ -419,14 +428,130 @@ def _cross_link(doc_id: int, classification: dict):
         if not conn:
             return
         try:
-            # Verify matter exists
             cur = conn.cursor()
-            cur.execute("SELECT id FROM matter_registry WHERE matter_name = %s", (matter_slug,))
-            row = cur.fetchone()
+
+            # --- Party → VIP matching ---
+            if parties:
+                # Fetch all VIP names for matching
+                cur.execute("SELECT id, name FROM vip_contacts")
+                vips = cur.fetchall()  # [(id, name), ...]
+
+                matched_vips = []
+                for party in parties:
+                    party_lower = party.lower().strip()
+                    if not party_lower or len(party_lower) < 3:
+                        continue
+                    # Split to get surname (last word)
+                    party_parts = party_lower.split()
+                    surname = party_parts[-1] if party_parts else party_lower
+
+                    for vip_id, vip_name in vips:
+                        vip_lower = vip_name.lower()
+                        # Match: full name, or surname appears in VIP name
+                        if party_lower == vip_lower or (len(surname) >= 3 and surname in vip_lower):
+                            matched_vips.append((vip_id, vip_name, party))
+                            break
+
+                # Update last_contact_date for matched VIPs (document = contact evidence)
+                for vip_id, vip_name, party in matched_vips:
+                    try:
+                        cur.execute("""
+                            UPDATE vip_contacts SET last_contact_date = GREATEST(
+                                last_contact_date,
+                                (SELECT COALESCE(classified_at, created_at) FROM documents WHERE id = %s)
+                            ) WHERE id = %s
+                        """, (doc_id, vip_id))
+                    except Exception:
+                        pass
+                    logger.info(f"Cross-link doc {doc_id}: party '{party}' → VIP '{vip_name}' (id={vip_id})")
+
+            # --- Future dates → deadlines ---
+            if extraction:
+                _extract_deadlines_from_fields(doc_id, extraction, matter_slug, cur)
+
+            conn.commit()
             cur.close()
-            if not row:
-                logger.debug(f"Matter '{matter_slug}' not found in registry for doc {doc_id}")
         finally:
             store._put_conn(conn)
     except Exception as e:
-        logger.debug(f"Cross-link failed for doc {doc_id}: {e}")
+        logger.warning(f"Cross-link failed for doc {doc_id}: {e}")
+
+
+def _extract_deadlines_from_fields(doc_id: int, extraction: dict, matter_slug: str, cur):
+    """Scan extraction fields for future dates and create soft deadlines."""
+    import re
+    from datetime import datetime, timezone, timedelta
+
+    # Fields likely to contain actionable dates
+    _DATE_FIELD_NAMES = {
+        "due_date", "end", "payment_terms", "next_meeting",
+        "deadline", "expiry", "expiry_date", "end_date",
+    }
+
+    # Common date formats (no external dependency)
+    _DATE_FORMATS = [
+        "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S%z",
+        "%d.%m.%Y", "%d/%m/%Y", "%m/%d/%Y",
+        "%d %B %Y", "%d %b %Y", "%B %d, %Y", "%b %d, %Y",
+    ]
+
+    def _try_parse_date(s: str):
+        """Try common date formats. Returns datetime or None."""
+        s = s.strip()[:30]  # limit length
+        # Strip trailing timezone abbreviations like "UTC", "CET"
+        s = re.sub(r'\s+[A-Z]{2,4}$', '', s)
+        for fmt in _DATE_FORMATS:
+            try:
+                return datetime.strptime(s, fmt)
+            except ValueError:
+                continue
+        return None
+
+    now = datetime.now(timezone.utc)
+    max_future = now + timedelta(days=365)
+
+    for key, value in extraction.items():
+        if not isinstance(value, str) or not value:
+            continue
+
+        # Only check fields whose names suggest dates
+        key_lower = key.lower()
+        is_date_field = any(df in key_lower for df in _DATE_FIELD_NAMES)
+        if not is_date_field:
+            continue
+
+        try:
+            dt = _try_parse_date(value)
+            if not dt:
+                continue
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+
+            # Only future dates, within 1 year
+            if dt <= now or dt > max_future:
+                continue
+
+            # Dedup: check if deadline already exists for this doc + date
+            cur.execute("""
+                SELECT id FROM deadlines
+                WHERE source_type = 'document' AND source_id = %s
+                  AND due_date::date = %s::date
+                LIMIT 1
+            """, (str(doc_id), dt.isoformat()))
+            if cur.fetchone():
+                continue
+
+            # Create soft deadline
+            from models.deadlines import insert_deadline
+            dl_id = insert_deadline(
+                description=f"[Auto-extracted] {key}: {value}" + (f" ({matter_slug})" if matter_slug else ""),
+                due_date=dt.isoformat(),
+                source_type="document",
+                source_id=str(doc_id),
+                confidence="soft",
+                priority="normal",
+            )
+            if dl_id:
+                logger.info(f"Cross-link doc {doc_id}: deadline #{dl_id} from field '{key}' = {value}")
+        except (ValueError, TypeError, OverflowError):
+            continue
