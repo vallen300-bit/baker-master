@@ -120,6 +120,7 @@ class SentinelStoreBack:
         # SPECIALIST-UPGRADE-1A/1B: Document intelligence
         self._ensure_documents_table()
         self._ensure_document_extractions_table()
+        self._ensure_doc_pipeline_jobs_table()
         self._ensure_baker_insights_table()
 
         # PHASE-4A: Cost monitor + agent observability tables
@@ -317,6 +318,44 @@ class SentinelStoreBack:
             except Exception:
                 pass
             logger.warning(f"Could not ensure document_extractions table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_doc_pipeline_jobs_table(self):
+        """PIPELINE-JOBQUEUE-1: DB-backed job queue for document pipeline."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS doc_pipeline_jobs (
+                    id SERIAL PRIMARY KEY,
+                    document_id INTEGER NOT NULL REFERENCES documents(id),
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    error TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    started_at TIMESTAMPTZ,
+                    completed_at TIMESTAMPTZ
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_dpj_status ON doc_pipeline_jobs(status)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_dpj_doc ON doc_pipeline_jobs(document_id)")
+            # Partial unique index: only one pending/running job per document
+            cur.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_dpj_doc_active
+                ON doc_pipeline_jobs(document_id)
+                WHERE status IN ('pending', 'running')
+            """)
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure doc_pipeline_jobs table: {e}")
         finally:
             self._put_conn(conn)
 

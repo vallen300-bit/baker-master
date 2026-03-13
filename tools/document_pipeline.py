@@ -1,5 +1,5 @@
 """
-Document Intelligence Pipeline — SPECIALIST-UPGRADE-1B
+Document Intelligence Pipeline — SPECIALIST-UPGRADE-1B + PIPELINE-JOBQUEUE-1
 
 Classify + extract structured data from documents stored in the
 `documents` table (Package 1A). Runs after full text storage.
@@ -9,11 +9,16 @@ Stages:
   2. extract_document()  — Haiku extracts type-specific structured fields
   3. cross_link()        — Match parties to VIPs, flag new deadlines
 
+Job queue: DB-backed `doc_pipeline_jobs` table replaces daemon threads.
+  - queue_extraction() inserts a pending job
+  - drain_doc_pipeline() runs on scheduler (every 2 min), processes batch
+  - Max 3 retries, exponential backoff, observable via /api/doc-pipeline/status
+
 All Claude calls go through Phase 4A cost tracking + circuit breaker.
 """
 import json
 import logging
-import threading
+import time
 from typing import Optional
 
 import anthropic
@@ -24,9 +29,10 @@ logger = logging.getLogger("baker.document_pipeline")
 
 _HAIKU_MODEL = "claude-haiku-4-5-20251001"
 
-# Rate limiter: max 10 docs per batch, 2s between API calls
+# Job queue settings
 _MAX_PER_BATCH = 10
-_processing_lock = threading.Lock()
+_MAX_ATTEMPTS = 3
+_RATE_LIMIT_DELAY = 2  # seconds between API calls
 
 
 # ─────────────────────────────────────────────
@@ -265,22 +271,156 @@ def run_pipeline(doc_id: int):
 
 
 def queue_extraction(doc_id: int):
-    """Queue document for background classification + extraction."""
-    thread = threading.Thread(
-        target=_safe_run_pipeline,
-        args=(doc_id,),
-        daemon=True,
-    )
-    thread.start()
-
-
-def _safe_run_pipeline(doc_id: int):
-    """Thread-safe wrapper for run_pipeline."""
-    with _processing_lock:
-        try:
+    """Queue document for background classification + extraction.
+    PIPELINE-JOBQUEUE-1: Inserts into doc_pipeline_jobs table instead of spawning thread.
+    """
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            logger.warning(f"No DB — falling back to sync pipeline for doc {doc_id}")
             run_pipeline(doc_id)
-        except Exception as e:
-            logger.error(f"Document pipeline failed for doc {doc_id}: {e}")
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO doc_pipeline_jobs (document_id, status)
+                VALUES (%s, 'pending')
+                ON CONFLICT (document_id) WHERE status IN ('pending', 'running') DO NOTHING
+            """, (doc_id,))
+            conn.commit()
+            cur.close()
+            logger.info(f"Queued doc {doc_id} for pipeline processing")
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.warning(f"Queue insert failed for doc {doc_id}, running sync: {e}")
+        run_pipeline(doc_id)
+
+
+def drain_doc_pipeline():
+    """Process pending jobs from doc_pipeline_jobs. Called by scheduler every 2 min.
+
+    Picks up to _MAX_PER_BATCH pending jobs, runs each through the pipeline,
+    marks complete or failed. Max _MAX_ATTEMPTS retries per job.
+    """
+    from triggers.sentinel_health import report_success, report_failure
+
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            # Claim pending jobs (oldest first, skip recently failed)
+            cur.execute("""
+                UPDATE doc_pipeline_jobs
+                SET status = 'running', started_at = NOW(), attempts = attempts + 1
+                WHERE id IN (
+                    SELECT id FROM doc_pipeline_jobs
+                    WHERE status = 'pending' AND attempts < %s
+                    ORDER BY created_at
+                    LIMIT %s
+                    FOR UPDATE SKIP LOCKED
+                )
+                RETURNING id, document_id, attempts
+            """, (_MAX_ATTEMPTS, _MAX_PER_BATCH))
+            jobs = cur.fetchall()
+            conn.commit()
+            cur.close()
+        finally:
+            store._put_conn(conn)
+
+        if not jobs:
+            return
+
+        processed = 0
+        failed = 0
+        for job_id, doc_id, attempt in jobs:
+            try:
+                run_pipeline(doc_id)
+                _update_job_status(job_id, "complete")
+                processed += 1
+                time.sleep(_RATE_LIMIT_DELAY)
+            except Exception as e:
+                failed += 1
+                if attempt >= _MAX_ATTEMPTS:
+                    _update_job_status(job_id, "failed", str(e))
+                    logger.error(f"Job {job_id} (doc {doc_id}) permanently failed after {attempt} attempts: {e}")
+                else:
+                    _update_job_status(job_id, "pending", str(e))
+                    logger.warning(f"Job {job_id} (doc {doc_id}) attempt {attempt} failed, will retry: {e}")
+
+        report_success("doc_pipeline")
+        logger.info(f"Doc pipeline drain: {processed} processed, {failed} failed out of {len(jobs)} jobs")
+
+    except Exception as e:
+        report_failure("doc_pipeline", str(e))
+        logger.error(f"Doc pipeline drain failed: {e}")
+
+
+def _update_job_status(job_id: int, status: str, error: str = None):
+    """Update a job's status in the queue."""
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            if status == "complete":
+                cur.execute("""
+                    UPDATE doc_pipeline_jobs
+                    SET status = 'complete', completed_at = NOW(), error = NULL
+                    WHERE id = %s
+                """, (job_id,))
+            else:
+                cur.execute("""
+                    UPDATE doc_pipeline_jobs
+                    SET status = %s, error = %s
+                    WHERE id = %s
+                """, (status, error, job_id))
+            conn.commit()
+            cur.close()
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.warning(f"Failed to update job {job_id} status: {e}")
+
+
+def get_pipeline_status() -> dict:
+    """Return job queue stats for /api/doc-pipeline/status."""
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            return {"error": "no db"}
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT status, COUNT(*) FROM doc_pipeline_jobs GROUP BY status
+            """)
+            counts = {row[0]: row[1] for row in cur.fetchall()}
+            cur.execute("""
+                SELECT id, document_id, status, attempts, error, created_at
+                FROM doc_pipeline_jobs
+                WHERE status IN ('pending', 'running', 'failed')
+                ORDER BY created_at DESC LIMIT 20
+            """)
+            active = []
+            for row in cur.fetchall():
+                active.append({
+                    "id": row[0], "document_id": row[1], "status": row[2],
+                    "attempts": row[3], "error": row[4],
+                    "created_at": row[5].isoformat() if row[5] else None,
+                })
+            cur.close()
+            return {"counts": counts, "active_jobs": active}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ─────────────────────────────────────────────

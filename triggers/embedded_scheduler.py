@@ -233,6 +233,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: communication_gap_check (every 6 hours)")
 
+    # Document pipeline job queue drain — every 2 minutes (PIPELINE-JOBQUEUE-1)
+    from tools.document_pipeline import drain_doc_pipeline
+    scheduler.add_job(
+        drain_doc_pipeline,
+        IntervalTrigger(minutes=2),
+        id="doc_pipeline_drain", name="Document pipeline job queue",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: doc_pipeline_drain (every 2 minutes)")
+
 
 def start_scheduler():
     """Create and start the BackgroundScheduler. Idempotent — safe to call twice."""

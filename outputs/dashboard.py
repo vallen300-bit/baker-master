@@ -796,6 +796,13 @@ async def backfill_documents_fts():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/doc-pipeline/status", tags=["system"], dependencies=[Depends(verify_api_key)])
+async def doc_pipeline_status():
+    """Document pipeline job queue status — counts by state + active jobs."""
+    from tools.document_pipeline import get_pipeline_status
+    return get_pipeline_status()
+
+
 def _serialize_val(v):
     """Serialize a single value for JSON."""
     if v is None:
