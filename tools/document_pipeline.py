@@ -170,6 +170,11 @@ _EXTRACT_PROMPT = """Extract structured data from this {doc_type}.
 Return ONLY valid JSON with these fields: {schema}
 Use null for fields you cannot determine. Use EUR for all amounts.
 
+Additionally, include a "_confidence" field with value "high", "medium", or "low":
+- "high": document is clear, fields are unambiguous, amounts/dates are explicit
+- "medium": some fields are inferred or partially legible
+- "low": poor OCR, truncated text, or most fields are uncertain
+
 Document text (first 12000 chars):
 {text}"""
 
@@ -215,9 +220,14 @@ def extract_document(doc_id: int, full_text: str, document_type: str) -> Optiona
 
         structured = json.loads(raw)
 
+        # Pull confidence from Haiku's response, default to "medium"
+        confidence = structured.pop("_confidence", "medium")
+        if confidence not in ("high", "medium", "low"):
+            confidence = "medium"
+
         # Store extraction
-        _store_extraction(doc_id, document_type, structured)
-        logger.info(f"Extracted doc {doc_id}: type={document_type}, fields={len(structured)}")
+        _store_extraction(doc_id, document_type, structured, confidence=confidence)
+        logger.info(f"Extracted doc {doc_id}: type={document_type}, confidence={confidence}, fields={len(structured)}")
         return structured
 
     except Exception as e:
@@ -353,7 +363,7 @@ def _update_document_classification(doc_id: int, classification: dict):
         logger.warning(f"Failed to update classification for doc {doc_id}: {e}")
 
 
-def _store_extraction(doc_id: int, doc_type: str, structured: dict):
+def _store_extraction(doc_id: int, doc_type: str, structured: dict, confidence: str = "medium"):
     """Store extraction results in document_extractions table."""
     extraction_type = {
         "contract": "contract_terms",
@@ -382,7 +392,7 @@ def _store_extraction(doc_id: int, doc_type: str, structured: dict):
                 INSERT INTO document_extractions
                     (document_id, extraction_type, structured_data, confidence, extracted_by)
                 VALUES (%s, %s, %s, %s, %s)
-            """, (doc_id, extraction_type, json.dumps(structured), "medium", _HAIKU_MODEL))
+            """, (doc_id, extraction_type, json.dumps(structured), confidence, _HAIKU_MODEL))
             conn.commit()
             cur.close()
 

@@ -501,12 +501,19 @@ class CapabilityRunner:
             f"{capability.role_description}\n\n"
             f"Focus your analysis on this domain. Use your tools to retrieve "
             f"relevant information before answering.\n\n"
-            f"## CITATION RULES\n"
-            f"When referencing information from retrieved sources, cite them using "
-            f"[Source: label] format inline. The sources are marked with [SOURCE:label]...[/SOURCE] "
-            f"tags in the tool results.\n"
-            f'Example: "The payment deadline is March 11 [Source: Email from Ofenheimer, 6 Mar 2026]."\n'
-            f"Always cite the specific source — never fabricate citations."
+            f"## CITATION RULES (MANDATORY)\n"
+            f"You MUST cite sources for every factual claim. This is non-negotiable.\n\n"
+            f"Format: [Source: label] inline after the fact it supports.\n"
+            f"Source labels come from [SOURCE:label]...[/SOURCE] tags in tool results.\n\n"
+            f"Examples:\n"
+            f'- "The TC contract termination is expected Saturday 15 March [Source: Email from Ofenheimer, 12 Mar 2026]."\n'
+            f'- "Outstanding amount is approximately EUR 4.85M [Source: Meeting transcript, 25 Feb 2026]."\n'
+            f'- "Hagenauer filed for debtor moratorium in Germany [Source: WhatsApp from Ofenheimer, 6 Mar 2026]."\n\n'
+            f"Rules:\n"
+            f"- Cite after EACH specific fact (dates, amounts, decisions, quotes)\n"
+            f"- Use the exact source label from the tool results\n"
+            f"- Never fabricate citations — if no source, state the fact without a citation\n"
+            f"- A response with zero citations is unacceptable if you retrieved any sources"
         )
         enriched = base + role_injection
 
