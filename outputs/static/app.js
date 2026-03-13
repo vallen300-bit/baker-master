@@ -1146,10 +1146,10 @@ function renderMeetingCard(m) {
     var dotClass = m.prepped ? 'green' : 'amber';
     var statusText = m.prepped ? 'Prepped' : 'Pending';
     var hasNotes = m.prep_notes && m.prep_notes.trim().length > 0;
-    var clickAttr = hasNotes ? ' onclick="this.querySelector(\'.prep-notes\').classList.toggle(\'prep-open\')" style="cursor:pointer;"' : '';
+    var clickAttr = hasNotes ? ' onclick="var n=this.querySelector(\'.prep-notes\');n.style.display=n.style.display===\'none\'?\'block\':\'none\'" style="cursor:pointer;"' : '';
     var chevron = hasNotes ? ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span>' : '';
     var notesHtml = hasNotes
-        ? '<div class="prep-notes" style="display:none;font-size:12px;color:var(--text2);padding:8px 0 4px 18px;line-height:1.5;white-space:pre-wrap;">' + esc(m.prep_notes).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') + '</div>'
+        ? '<div class="prep-notes" style="display:none;font-size:12px;color:var(--text2);padding:8px 18px 12px 18px;line-height:1.5;white-space:pre-wrap;border-top:1px solid var(--border-light);margin-top:4px;">' + esc(m.prep_notes).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') + '</div>'
         : '';
     return '<div class="card card-compact"' + clickAttr + '><div class="card-header">' +
         '<span class="nav-dot ' + dotClass + '" style="margin-top:5px;"></span>' +
