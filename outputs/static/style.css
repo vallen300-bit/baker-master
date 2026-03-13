@@ -350,6 +350,10 @@ body {
 .card-compact .card-header { padding: 12px 18px; }
 .card-compact .card-title { font-size: 13px; font-weight: 500; }
 
+/* Travel prep notes (click to expand) */
+.prep-notes { display: none; border-top: 1px solid var(--border-light); margin-top: 4px; }
+.prep-notes.prep-open { display: block; }
+
 /* People tab */
 .person-card { cursor: pointer; }
 .vip-badge {

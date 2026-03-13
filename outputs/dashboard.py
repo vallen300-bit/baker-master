@@ -1091,11 +1091,34 @@ async def get_morning_brief():
                 wk = f"calendar_prep_{m.get('id', '')}"
                 prepped = trigger_state.watermark_exists(wk)
                 attendee_names = [a.get('name', '') or a.get('email', '') for a in m.get('attendees', [])]
+                # Fetch Baker's prep notes from alerts table
+                prep_notes = ""
+                if prepped:
+                    try:
+                        prep_title = f"Meeting prep: {m['title']}"
+                        conn_prep = store._get_conn()
+                        if conn_prep:
+                            try:
+                                cur_prep = conn_prep.cursor()
+                                cur_prep.execute("""
+                                    SELECT body FROM alerts
+                                    WHERE title = %s AND source = 'calendar_prep'
+                                    ORDER BY created_at DESC LIMIT 1
+                                """, (prep_title,))
+                                row_prep = cur_prep.fetchone()
+                                if row_prep:
+                                    prep_notes = row_prep[0] or ""
+                                cur_prep.close()
+                            finally:
+                                store._put_conn(conn_prep)
+                    except Exception:
+                        pass
                 meetings_today.append({
                     "title": m['title'],
                     "start": m['start'],
                     "attendees": attendee_names[:5],
                     "prepped": prepped,
+                    "prep_notes": prep_notes,
                 })
         except Exception as e:
             logger.warning(f"Morning brief: calendar unavailable: {e}")
