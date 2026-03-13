@@ -1677,6 +1677,7 @@ async def backfill_last_contact():
             cur = conn.cursor()
             # Build reversed name for "Last First" matching
             # For each VIP contact, find the most recent interaction across all channels
+            # Note: no psycopg2 params, so use single % for LIKE wildcards (not %%)
             cur.execute("""
                 UPDATE vip_contacts vc
                 SET last_contact_date = sub.last_contact
@@ -1685,17 +1686,17 @@ async def backfill_last_contact():
                         (SELECT MAX(received_date) FROM email_messages
                          WHERE LOWER(sender_name) = LOWER(vc2.name)
                             OR LOWER(sender_email) = LOWER(vc2.email)
-                            OR (vc2.name LIKE '%% %%' AND LOWER(sender_name) = LOWER(
+                            OR (POSITION(' ' IN vc2.name) > 0 AND LOWER(sender_name) = LOWER(
                                 SPLIT_PART(vc2.name, ' ', 2) || ' ' || SPLIT_PART(vc2.name, ' ', 1)
                             ))
-                            OR LOWER(sender_name) LIKE '%%' || LOWER(SPLIT_PART(vc2.name, ' ', 2)) || '%%'),
+                            OR LOWER(sender_name) LIKE '%' || LOWER(SPLIT_PART(vc2.name, ' ', 2)) || '%'),
                         (SELECT MAX(timestamp) FROM whatsapp_messages
                          WHERE LOWER(sender_name) = LOWER(vc2.name)
                             OR sender = vc2.whatsapp_id
-                            OR LOWER(sender_name) LIKE '%%' || LOWER(SPLIT_PART(vc2.name, ' ', 2)) || '%%'),
+                            OR LOWER(sender_name) LIKE '%' || LOWER(SPLIT_PART(vc2.name, ' ', 2)) || '%'),
                         (SELECT MAX(meeting_date) FROM meeting_transcripts
-                         WHERE LOWER(participants) LIKE '%%' || LOWER(vc2.name) || '%%'
-                            OR LOWER(participants) LIKE '%%' || LOWER(SPLIT_PART(vc2.name, ' ', 2)) || '%%')
+                         WHERE LOWER(participants) LIKE '%' || LOWER(vc2.name) || '%'
+                            OR LOWER(participants) LIKE '%' || LOWER(SPLIT_PART(vc2.name, ' ', 2)) || '%')
                     ) AS last_contact
                     FROM vip_contacts vc2
                 ) sub
