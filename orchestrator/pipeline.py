@@ -5,6 +5,7 @@ Implements the 5-step flow from the Sentinel architecture:
 """
 import json
 import logging
+import re
 from typing import Optional
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict, field

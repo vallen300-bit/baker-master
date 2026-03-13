@@ -16,6 +16,7 @@ import logging
 import shutil
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 # Ensure project root is on sys.path
@@ -91,7 +92,6 @@ def run_dropbox_poll():
 
         # PM-OOM-1 H4: Stale watermark safeguard. If last poll was >24h ago,
         # don't batch-process the backlog (OOM risk). Get a fresh cursor only.
-        from datetime import datetime, timedelta, timezone
         last_poll = trigger_state.get_watermark("dropbox")
         stale = (datetime.now(timezone.utc) - last_poll) > timedelta(hours=24) if last_poll else True
         if stale and had_cursor:

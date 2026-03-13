@@ -360,3 +360,34 @@ def get_all_sentinel_health() -> list:
         return []
     finally:
         _put_conn(store, conn)
+
+
+def reset_sentinel(source: str) -> bool:
+    """Reset a sentinel's circuit breaker — clear failures, set status to 'healthy'.
+    Returns True on success."""
+    conn, store = _get_conn()
+    if not conn:
+        return False
+    try:
+        _ensure_table(conn)
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE sentinel_health
+            SET consecutive_failures = 0, status = 'healthy', last_error_msg = NULL, updated_at = NOW()
+            WHERE source = %s
+        """, (source,))
+        conn.commit()
+        affected = cur.rowcount
+        cur.close()
+        if affected:
+            logger.info(f"Sentinel {source}: circuit breaker RESET by operator")
+        return affected > 0
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(f"reset_sentinel({source}) failed: {e}")
+        return False
+    finally:
+        _put_conn(store, conn)

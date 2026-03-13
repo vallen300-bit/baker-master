@@ -758,6 +758,16 @@ async def get_sentinel_health():
     return {"sentinels": sentinels, "summary": summary}
 
 
+@app.post("/api/sentinel-health/{source}/reset", tags=["system"], dependencies=[Depends(verify_api_key)])
+async def reset_sentinel_health(source: str):
+    """Reset a sentinel's circuit breaker — clear failures, restore to healthy."""
+    from triggers.sentinel_health import reset_sentinel
+    ok = reset_sentinel(source)
+    if ok:
+        return {"status": "reset", "source": source}
+    raise HTTPException(status_code=404, detail=f"Sentinel '{source}' not found")
+
+
 def _serialize_val(v):
     """Serialize a single value for JSON."""
     if v is None:
