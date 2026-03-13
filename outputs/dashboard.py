@@ -1637,6 +1637,48 @@ async def get_networking_alerts():
         return {"going_cold": [], "unreciprocated": [], "upcoming_events": []}
 
 
+@app.post("/api/networking/backfill-last-contact", tags=["networking"], dependencies=[Depends(verify_api_key)])
+async def backfill_last_contact():
+    """Backfill last_contact_date on vip_contacts from emails, WhatsApp, and meetings."""
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor()
+            # For each VIP contact, find the most recent interaction across all channels
+            cur.execute("""
+                UPDATE vip_contacts vc
+                SET last_contact_date = sub.last_contact
+                FROM (
+                    SELECT vc2.id, GREATEST(
+                        (SELECT MAX(received_date) FROM email_messages
+                         WHERE LOWER(sender_name) = LOWER(vc2.name)
+                            OR LOWER(sender_email) = LOWER(vc2.email)),
+                        (SELECT MAX(timestamp) FROM whatsapp_messages
+                         WHERE LOWER(sender_name) = LOWER(vc2.name)
+                            OR sender = vc2.whatsapp_id),
+                        (SELECT MAX(meeting_date) FROM meeting_transcripts
+                         WHERE LOWER(participants) LIKE '%%' || LOWER(vc2.name) || '%%')
+                    ) AS last_contact
+                    FROM vip_contacts vc2
+                ) sub
+                WHERE vc.id = sub.id AND sub.last_contact IS NOT NULL
+            """)
+            updated = cur.rowcount
+            conn.commit()
+            cur.close()
+            return {"status": "ok", "contacts_updated": updated}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Backfill last_contact_date failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/networking/events", tags=["networking"], dependencies=[Depends(verify_api_key)])
 async def get_networking_events():
     """List upcoming networking events."""
