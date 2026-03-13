@@ -1411,7 +1411,7 @@ async def list_people():
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             vips = {}
             try:
-                cur.execute("SELECT name, role, email, whatsapp_id, tier, domain, role_context FROM vip_contacts ORDER BY tier, name")
+                cur.execute("SELECT name, role, email, whatsapp_id, tier, domain, role_context FROM contacts ORDER BY tier, name")
                 vips = {r["name"].lower(): {**dict(r), "is_vip": True} for r in cur.fetchall()}
             except Exception:
                 pass  # vip_contacts may not exist
@@ -1526,7 +1526,7 @@ async def get_networking_contacts(
                 SELECT id, name, role, email, tier, domain, contact_type,
                        relationship_score, net_worth_tier, last_contact_date,
                        sentiment_trend, role_context, expertise, gatekeeper_name
-                FROM vip_contacts
+                FROM contacts
                 WHERE 1=1
             """
             params = []
@@ -1610,7 +1610,7 @@ async def get_networking_alerts():
 
             # Going cold: T1 no contact 14+ days, T2 no contact 30+ days
             cur.execute("""
-                SELECT id, name, tier, last_contact_date FROM vip_contacts
+                SELECT id, name, tier, last_contact_date FROM contacts
                 WHERE tier <= 2 AND (
                     (tier = 1 AND last_contact_date < NOW() - INTERVAL '14 days')
                     OR (tier = 2 AND last_contact_date < NOW() - INTERVAL '30 days')
@@ -1626,7 +1626,7 @@ async def get_networking_alerts():
                 cur.execute("""
                     SELECT ci.contact_id, vc.name, COUNT(*) as outbound_count
                     FROM contact_interactions ci
-                    JOIN vip_contacts vc ON ci.contact_id = vc.id
+                    JOIN contacts vc ON ci.contact_id = vc.id
                     WHERE ci.direction = 'outbound'
                       AND ci.timestamp > NOW() - INTERVAL '14 days'
                       AND ci.contact_id NOT IN (
@@ -1686,7 +1686,7 @@ async def backfill_last_contact():
             # For each VIP contact, find the most recent interaction across all channels
             # Note: no psycopg2 params, so use single % for LIKE wildcards (not %%)
             cur.execute("""
-                UPDATE vip_contacts vc
+                UPDATE contacts vc
                 SET last_contact_date = sub.last_contact
                 FROM (
                     SELECT vc2.id, GREATEST(
@@ -1705,7 +1705,7 @@ async def backfill_last_contact():
                          WHERE LOWER(participants) LIKE '%' || LOWER(vc2.name) || '%'
                             OR LOWER(participants) LIKE '%' || LOWER(SPLIT_PART(vc2.name, ' ', 2)) || '%')
                     ) AS last_contact
-                    FROM vip_contacts vc2
+                    FROM contacts vc2
                 ) sub
                 WHERE vc.id = sub.id AND sub.last_contact IS NOT NULL
             """)
@@ -1854,7 +1854,7 @@ async def networking_contact_action(contact_id: int, req: NetworkingActionReques
             raise HTTPException(status_code=503, detail="Database unavailable")
         try:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("SELECT * FROM vip_contacts WHERE id = %s", (contact_id,))
+            cur.execute("SELECT * FROM contacts WHERE id = %s", (contact_id,))
             contact = cur.fetchone()
             cur.close()
             if not contact:

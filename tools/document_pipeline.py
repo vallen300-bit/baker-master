@@ -573,7 +573,7 @@ def _cross_link(doc_id: int, classification: dict, extraction: dict = None):
             # --- Party → VIP matching ---
             if parties:
                 # Fetch all VIP names for matching
-                cur.execute("SELECT id, name FROM vip_contacts")
+                cur.execute("SELECT id, name FROM contacts")
                 vips = cur.fetchall()  # [(id, name), ...]
 
                 matched_vips = []
@@ -596,7 +596,7 @@ def _cross_link(doc_id: int, classification: dict, extraction: dict = None):
                 for vip_id, vip_name, party in matched_vips:
                     try:
                         cur.execute("""
-                            UPDATE vip_contacts SET last_contact_date = GREATEST(
+                            UPDATE contacts SET last_contact_date = GREATEST(
                                 last_contact_date,
                                 (SELECT COALESCE(classified_at, created_at) FROM documents WHERE id = %s)
                             ) WHERE id = %s

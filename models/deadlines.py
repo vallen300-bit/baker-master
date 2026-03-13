@@ -107,9 +107,14 @@ def ensure_tables():
             )
         """)
 
+        # CONTACTS-RENAME-1: Create view so `contacts` and `vip_contacts` both work
+        cur.execute("""
+            CREATE OR REPLACE VIEW contacts AS SELECT * FROM vip_contacts
+        """)
+
         conn.commit()
         cur.close()
-        logger.info("deadlines: tables verified (deadlines, vip_contacts)")
+        logger.info("deadlines: tables verified (deadlines, vip_contacts, contacts view)")
     except Exception as e:
         logger.error(f"deadlines: table creation failed: {e}")
     finally:
