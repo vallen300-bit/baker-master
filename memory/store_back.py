@@ -2866,6 +2866,13 @@ class SentinelStoreBack:
                         tier = 2
             except Exception:
                 pass  # cap check failed — proceed with original tier
+        # Auto-assign matter_slug if not provided
+        if not matter_slug and (title or body):
+            try:
+                from orchestrator.pipeline import _match_matter_slug
+                matter_slug = _match_matter_slug(title or "", body or "", self)
+            except Exception:
+                pass  # non-fatal — matter assignment is best-effort
         conn = self._get_conn()
         if not conn:
             logger.warning("No DB connection — skipping create_alert")
