@@ -212,9 +212,29 @@ class SentinelStoreBack:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(document_type)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(file_hash)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source_path)")
+            # FTS: tsvector column + GIN index for full-text search
+            cur.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS search_vector tsvector")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_fts ON documents USING GIN(search_vector)")
+            # Auto-populate search_vector on INSERT/UPDATE via trigger
+            cur.execute("""
+                CREATE OR REPLACE FUNCTION documents_search_vector_update() RETURNS trigger AS $$
+                BEGIN
+                    NEW.search_vector := to_tsvector('simple', COALESCE(NEW.full_text, ''));
+                    RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+            """)
+            cur.execute("""
+                DO $$ BEGIN
+                    CREATE TRIGGER documents_search_vector_trigger
+                    BEFORE INSERT OR UPDATE OF full_text ON documents
+                    FOR EACH ROW EXECUTE FUNCTION documents_search_vector_update();
+                EXCEPTION WHEN duplicate_object THEN NULL;
+                END $$
+            """)
             conn.commit()
             cur.close()
-            logger.info("documents table verified")
+            logger.info("documents table verified (with FTS index)")
         except Exception as e:
             try:
                 conn.rollback()
@@ -234,15 +254,16 @@ class SentinelStoreBack:
         try:
             cur = conn.cursor()
             cur.execute("""
-                INSERT INTO documents (source_path, filename, file_hash, full_text, token_count)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO documents (source_path, filename, file_hash, full_text, token_count, search_vector)
+                VALUES (%s, %s, %s, %s, %s, to_tsvector('simple', COALESCE(%s, '')))
                 ON CONFLICT (file_hash) DO UPDATE SET
                     source_path = EXCLUDED.source_path,
                     full_text = EXCLUDED.full_text,
                     token_count = EXCLUDED.token_count,
+                    search_vector = EXCLUDED.search_vector,
                     ingested_at = NOW()
                 RETURNING id
-            """, (source_path, filename, file_hash, full_text, token_count))
+            """, (source_path, filename, file_hash, full_text, token_count, full_text))
             row = cur.fetchone()
             conn.commit()
             cur.close()

@@ -801,8 +801,12 @@ class ToolExecutor:
                     conditions.append("matter_slug ILIKE %s")
                     params.append(f"%{matter}%")
                 if query:
-                    conditions.append("(full_text ILIKE %s OR filename ILIKE %s OR %s = ANY(parties))")
-                    params.extend([f"%{query}%", f"%{query}%", query])
+                    # FTS: use tsvector GIN index for fast full-text search, fall back to ILIKE for filename/parties
+                    fts_terms = " & ".join(w for w in query.split() if w.strip())
+                    conditions.append(
+                        "(search_vector @@ to_tsquery('simple', %s) OR filename ILIKE %s OR %s = ANY(parties))"
+                    )
+                    params.extend([fts_terms, f"%{query}%", query])
 
                 where = " AND ".join(conditions)
                 cur.execute(f"""

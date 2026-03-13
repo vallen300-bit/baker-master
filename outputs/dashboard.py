@@ -768,6 +768,34 @@ async def reset_sentinel_health(source: str):
     raise HTTPException(status_code=404, detail=f"Sentinel '{source}' not found")
 
 
+@app.post("/api/documents/backfill-fts", tags=["system"], dependencies=[Depends(verify_api_key)])
+async def backfill_documents_fts():
+    """One-time backfill: populate search_vector on all existing documents."""
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE documents
+                SET search_vector = to_tsvector('simple', COALESCE(full_text, ''))
+                WHERE search_vector IS NULL AND full_text IS NOT NULL
+            """)
+            updated = cur.rowcount
+            conn.commit()
+            cur.close()
+            return {"status": "ok", "documents_updated": updated}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"FTS backfill failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 def _serialize_val(v):
     """Serialize a single value for JSON."""
     if v is None:
