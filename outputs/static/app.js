@@ -573,50 +573,76 @@ async function loadMorningBrief() {
             }
         }
 
-        // Top fires
-        const firesList = document.getElementById('topFiresList');
-        if (firesList) {
-            if (data.top_fires && data.top_fires.length > 0) {
-                setSafeHTML(firesList, data.top_fires.map(function(a) { return renderAlertCard(a, true); }).join(''));
+        // LANDING-GRID-1: Populate 2x2 grid cells
+
+        // Grid: Travel & Meetings (top-left)
+        var gridTravel = document.getElementById('gridTravel');
+        var gridTravelCount = document.getElementById('gridTravelCount');
+        if (gridTravel) {
+            var travelItems = (data.meetings_today || []).map(renderMeetingCard);
+            // Also include travel-tagged alerts
+            var travelAlerts = (data.top_fires || []).filter(function(a) {
+                var tags = a.tags || [];
+                if (typeof tags === 'string') try { tags = JSON.parse(tags); } catch(e) { tags = []; }
+                return tags.indexOf('travel') >= 0 || (a.title || '').toLowerCase().indexOf('flight') >= 0 ||
+                       (a.title || '').toLowerCase().indexOf('travel') >= 0;
+            });
+            travelItems = travelItems.concat(travelAlerts.map(function(a) { return renderAlertCard(a, false); }));
+            if (travelItems.length > 0) {
+                setSafeHTML(gridTravel, travelItems.join(''));
             } else {
-                firesList.textContent = 'No active fires. All clear.';
-                firesList.style.cssText = 'color:var(--text3);font-size:12px;';
+                gridTravel.innerHTML = '<div class="grid-empty">No meetings or travel today.</div>';
             }
+            if (gridTravelCount) gridTravelCount.textContent = travelItems.length > 0 ? travelItems.length : '';
         }
 
-        // Deadlines
-        const dlList = document.getElementById('deadlinesList');
-        if (dlList) {
+        // Grid: Fires (top-right)
+        var gridFires = document.getElementById('gridFires');
+        var gridFiresCount = document.getElementById('gridFiresCount');
+        if (gridFires) {
+            var fireItems = (data.top_fires || []).filter(function(a) {
+                var tags = a.tags || [];
+                if (typeof tags === 'string') try { tags = JSON.parse(tags); } catch(e) { tags = []; }
+                return tags.indexOf('travel') < 0 && (a.title || '').toLowerCase().indexOf('flight') < 0 &&
+                       (a.title || '').toLowerCase().indexOf('travel') < 0;
+            });
+            if (fireItems.length > 0) {
+                setSafeHTML(gridFires, fireItems.map(function(a) { return renderAlertCard(a, false); }).join(''));
+            } else {
+                gridFires.innerHTML = '<div class="grid-empty">No active fires. All clear.</div>';
+            }
+            if (gridFiresCount) gridFiresCount.textContent = fireItems.length > 0 ? fireItems.length : '';
+        }
+
+        // Grid: Deadlines (bottom-left)
+        var gridDeadlines = document.getElementById('gridDeadlines');
+        var gridDeadlinesCount = document.getElementById('gridDeadlinesCount');
+        if (gridDeadlines) {
             if (data.deadlines && data.deadlines.length > 0) {
-                setSafeHTML(dlList, data.deadlines.map(renderDeadlineCompact).join(''));
+                setSafeHTML(gridDeadlines, data.deadlines.map(renderDeadlineCompact).join(''));
             } else {
-                dlList.textContent = 'No deadlines this week.';
-                dlList.style.cssText = 'color:var(--text3);font-size:12px;';
+                gridDeadlines.innerHTML = '<div class="grid-empty">No deadlines this week.</div>';
             }
+            if (gridDeadlinesCount) gridDeadlinesCount.textContent = (data.deadlines || []).length || '';
         }
 
-        // Activity
-        const actList = document.getElementById('activityList');
-        if (actList) {
-            if (data.activity && data.activity.length > 0) {
-                setSafeHTML(actList, data.activity.map(renderActivityRow).join(''));
+        // Grid: Commitments (bottom-right)
+        var gridCommitments = document.getElementById('gridCommitments');
+        var gridCommitmentsCount = document.getElementById('gridCommitmentsCount');
+        if (gridCommitments) {
+            var commitItems = (data.overdue_commitments || []);
+            if (commitItems.length > 0) {
+                setSafeHTML(gridCommitments, commitItems.map(function(c) {
+                    return '<div class="card card-compact"><div class="card-header">' +
+                        '<span class="nav-dot amber" style="margin-top:5px;"></span>' +
+                        '<span class="card-title">' + esc(c.description || c.title || '') + '</span>' +
+                        '<span class="card-time">' + esc(fmtRelativeTime(c.due_date || c.created_at)) + '</span>' +
+                        '</div></div>';
+                }).join(''));
             } else {
-                actList.textContent = 'No activity yet today.';
-                actList.style.cssText = 'color:var(--text3);font-size:12px;';
+                gridCommitments.innerHTML = '<div class="grid-empty">No overdue commitments.</div>';
             }
-        }
-
-        // Meetings today (Phase 3A)
-        var meetingsLabel = document.getElementById('meetingsSectionLabel');
-        var meetingsList = document.getElementById('meetingsTodayList');
-        if (meetingsList) {
-            if (data.meetings_today && data.meetings_today.length > 0) {
-                if (meetingsLabel) meetingsLabel.style.display = '';
-                setSafeHTML(meetingsList, data.meetings_today.map(renderMeetingCard).join(''));
-            } else {
-                if (meetingsLabel) meetingsLabel.style.display = 'none';
-                meetingsList.textContent = '';
-            }
+            if (gridCommitmentsCount) gridCommitmentsCount.textContent = commitItems.length || '';
         }
 
         // Update stats: add meeting count

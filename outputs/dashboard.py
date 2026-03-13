@@ -1057,6 +1057,19 @@ async def get_morning_brief():
             """)
             activity = [_serialize(dict(r)) for r in cur.fetchall()]
 
+            # LANDING-GRID-1: Overdue commitments for bottom-right grid cell
+            overdue_commitments = []
+            try:
+                cur.execute("""
+                    SELECT id, description, due_date, status
+                    FROM commitments
+                    WHERE status = 'active' AND due_date < NOW()
+                    ORDER BY due_date ASC LIMIT 5
+                """)
+                overdue_commitments = [_serialize(dict(r)) for r in cur.fetchall()]
+            except Exception:
+                pass  # commitments table may not exist
+
             cur.close()
         finally:
             store._put_conn(conn)
@@ -1136,6 +1149,7 @@ async def get_morning_brief():
             "activity": activity,
             "meetings_today": meetings_today,
             "meeting_count": len(meetings_today),
+            "overdue_commitments": overdue_commitments,
         }
     except HTTPException:
         raise
@@ -1147,6 +1161,7 @@ async def get_morning_brief():
             "proposals": [],
             "top_fires": [], "deadlines": [], "activity": [],
             "meetings_today": [], "meeting_count": 0,
+            "overdue_commitments": [],
         }
 
 

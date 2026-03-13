@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=30">
+    <link rel="stylesheet" href="/static/style.css?v=31">
 </head>
 <body>
 
@@ -101,7 +101,7 @@
     <!-- Content area (views swap here) -->
     <div class="content">
 
-        <!-- VIEW: Morning Brief -->
+        <!-- VIEW: Morning Brief (LANDING-GRID-1: 2x2 grid) -->
         <div class="view active" id="viewMorningBrief">
             <div class="brief-header">
                 <div class="brief-greeting" id="briefGreeting" style="display:flex;justify-content:space-between;align-items:baseline;">Good morning, Dimitry</div>
@@ -115,18 +115,44 @@
                 <div class="stat"><div class="stat-num" id="statMeetings">-</div><div class="stat-label">Travel</div></div>
             </div>
 
-            <div class="section-label" id="meetingsSectionLabel" style="display:none">Travel</div>
-            <div id="meetingsTodayList"></div>
-
-            <div class="section-label">Top fires</div>
-            <div id="topFiresList"></div>
-
-            <div style="margin-top:16px;">
-                <div class="section-label">Deadlines this week</div>
-                <div id="deadlinesList"></div>
+            <div class="landing-grid">
+                <div class="grid-cell">
+                    <div class="grid-cell-header">
+                        <span class="section-label" style="margin:0">Travel &amp; Meetings</span>
+                        <span class="grid-cell-count" id="gridTravelCount"></span>
+                    </div>
+                    <div class="grid-cell-body" id="gridTravel">
+                        <div class="grid-empty">No meetings or travel today.</div>
+                    </div>
+                </div>
+                <div class="grid-cell">
+                    <div class="grid-cell-header">
+                        <span class="section-label" style="margin:0">Fires</span>
+                        <span class="grid-cell-count" id="gridFiresCount"></span>
+                    </div>
+                    <div class="grid-cell-body" id="gridFires">
+                        <div class="grid-empty">No active fires. All clear.</div>
+                    </div>
+                </div>
+                <div class="grid-cell">
+                    <div class="grid-cell-header">
+                        <span class="section-label" style="margin:0">Deadlines</span>
+                        <span class="grid-cell-count" id="gridDeadlinesCount"></span>
+                    </div>
+                    <div class="grid-cell-body" id="gridDeadlines">
+                        <div class="grid-empty">No deadlines this week.</div>
+                    </div>
+                </div>
+                <div class="grid-cell">
+                    <div class="grid-cell-header">
+                        <span class="section-label" style="margin:0">Commitments</span>
+                        <span class="grid-cell-count" id="gridCommitmentsCount"></span>
+                    </div>
+                    <div class="grid-cell-body" id="gridCommitments">
+                        <div class="grid-empty">No overdue commitments.</div>
+                    </div>
+                </div>
             </div>
-
-            <!-- System widgets moved to Baker Data tab (BAKER-DATA-TUCK-1) -->
         </div>
 
         <!-- VIEW: Fires -->
@@ -247,6 +273,6 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=30"></script>
+<script src="/static/app.js?v=31"></script>
 </body>
 </html>
