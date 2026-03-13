@@ -1897,7 +1897,7 @@ async def get_commitments(
             if status:
                 # Map frontend filter names to DB values
                 if status == "active":
-                    conditions.append("status = 'open'")
+                    conditions.append("status IN ('open', 'overdue')")
                 elif status == "overdue":
                     # Include both explicit 'overdue' and open items past due
                     conditions.append("(status = 'overdue' OR (status = 'open' AND due_date < NOW()))")

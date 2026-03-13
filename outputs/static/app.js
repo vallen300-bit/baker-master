@@ -3496,7 +3496,7 @@ async function loadCommitmentsTab(filter) {
             wrapper.appendChild(empty);
         } else {
             items.forEach(function(c) {
-                var isOverdue = c.status === 'overdue' || (c.due_date && new Date(c.due_date) < new Date() && c.status === 'active');
+                var isOverdue = c.status === 'overdue' || (c.due_date && new Date(c.due_date) < new Date() && c.status === 'open');
                 var card = document.createElement('div');
                 card.className = isOverdue ? 'commitment-card overdue' : 'commitment-card';
 
