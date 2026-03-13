@@ -1038,10 +1038,11 @@ async def get_morning_brief():
             """)
             top_fires = [_serialize(dict(r)) for r in cur.fetchall()]
 
-            # Deadlines this week (exclude source_snippet — can be 80KB per row)
+            # Deadlines this week (truncate source_snippet to 500 chars for expandable cards)
             cur.execute("""
                 SELECT id, description, due_date, source_type, confidence,
-                       priority, status, created_at
+                       priority, status, created_at,
+                       LEFT(source_snippet, 500) AS source_snippet
                 FROM deadlines
                 WHERE status = 'active' AND due_date <= NOW() + INTERVAL '7 days'
                 ORDER BY due_date ASC LIMIT 10
@@ -2320,6 +2321,53 @@ async def assign_alert(alert_id: int, req: AlertAssignRequest):
         raise
     except Exception as e:
         logger.error(f"POST /api/alerts/{alert_id}/assign failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/alerts/quick-add", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def quick_add_alert(body: dict):
+    """Director quick-adds an issue. Creates T2 alert, Baker auto-enriches in background."""
+    title = (body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+    try:
+        store = _get_store()
+        alert_id = store.create_alert(
+            tier=2,
+            title=title,
+            body="",
+            action_required=True,
+            tags=["manual"],
+            source="director_quick_add",
+        )
+        if not alert_id:
+            raise HTTPException(status_code=500, detail="Failed to create alert")
+        # Background: ask Haiku to enrich the alert with structured_actions
+        import threading
+        def _enrich():
+            try:
+                import anthropic
+                client = anthropic.Anthropic(api_key=config.claude.api_key)
+                resp = client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=800,
+                    messages=[{"role": "user", "content": f"The Director flagged this issue: \"{title}\"\n\nGenerate a JSON object with: problem (1 sentence), cause (1 sentence), solution (1 sentence). Return ONLY valid JSON."}],
+                )
+                import json as _json
+                raw = resp.content[0].text.strip()
+                if raw.startswith("```"): raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+                sa = _json.loads(raw)
+                store.update_alert_structured_actions(alert_id, sa)
+                from orchestrator.cost_monitor import log_api_cost
+                log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="quick_add_enrich")
+            except Exception as e:
+                logger.warning(f"Quick-add enrichment failed for alert {alert_id}: {e}")
+        threading.Thread(target=_enrich, daemon=True).start()
+        return {"ok": True, "alert_id": alert_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"POST /api/alerts/quick-add failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

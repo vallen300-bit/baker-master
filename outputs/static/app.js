@@ -579,7 +579,9 @@ async function loadMorningBrief() {
         var gridTravel = document.getElementById('gridTravel');
         var gridTravelCount = document.getElementById('gridTravelCount');
         if (gridTravel) {
-            var travelItems = (data.meetings_today || []).map(renderMeetingCard);
+            var travelItems = (data.meetings_today || []).filter(function(m) {
+                return !(m.title || '').startsWith('[Baker Prep]');
+            }).map(renderMeetingCard);
             // Also include travel-tagged alerts
             var travelAlerts = (data.top_fires || []).filter(function(a) {
                 var tags = a.tags || [];
@@ -607,7 +609,7 @@ async function loadMorningBrief() {
                        (a.title || '').toLowerCase().indexOf('travel') < 0;
             });
             if (fireItems.length > 0) {
-                setSafeHTML(gridFires, fireItems.map(function(a) { return renderAlertCard(a, false); }).join(''));
+                setSafeHTML(gridFires, fireItems.map(function(a) { return renderFireCompact(a); }).join(''));
             } else {
                 gridFires.innerHTML = '<div class="grid-empty">No active fires. All clear.</div>';
             }
@@ -998,6 +1000,43 @@ async function loadMattersSummary() {
     }
 }
 
+// ═══ QUICK ADD (Upcoming tab) ═══
+
+function toggleQuickAdd() {
+    var form = document.getElementById('quickAddForm');
+    if (!form) return;
+    form.style.display = form.style.display === 'none' ? 'block' : 'none';
+    if (form.style.display === 'block') document.getElementById('quickAddInput').focus();
+}
+
+async function submitQuickAdd(e) {
+    e.preventDefault();
+    var input = document.getElementById('quickAddInput');
+    var btn = document.getElementById('quickAddSubmit');
+    var title = (input.value || '').trim();
+    if (!title) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Adding...';
+    try {
+        var resp = await bakerFetch('/api/alerts/quick-add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: title }),
+        });
+        if (resp.ok) {
+            input.value = '';
+            document.getElementById('quickAddForm').style.display = 'none';
+            loadFires();  // refresh list
+        }
+    } catch (err) {
+        console.error('Quick add failed:', err);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Add';
+    }
+}
+
 // ═══ FIRES TAB ═══
 
 async function loadFires() {
@@ -1199,11 +1238,39 @@ function renderDeadlineCompact(dl) {
     else if (priority === 'high' || daysText === 'Tomorrow') { dotClass = 'amber'; }
     else if (daysText.includes('overdue')) { dotClass = 'red'; timeStyle = 'color:var(--red);font-weight:600;'; }
 
-    return '<div class="card card-compact"><div class="card-header">' +
+    var hasSnippet = dl.source_snippet && dl.source_snippet.trim().length > 0;
+    var clickAttr = hasSnippet ? ' onclick="var n=this.querySelector(\'.dl-detail\');n.style.display=n.style.display===\'none\'?\'block\':\'none\'" style="cursor:pointer;"' : '';
+    var chevron = hasSnippet ? ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span>' : '';
+    var detailHtml = hasSnippet
+        ? '<div class="dl-detail" style="display:none;font-size:12px;color:var(--text2);padding:6px 18px 10px 18px;line-height:1.5;border-top:1px solid var(--border-light);white-space:pre-wrap;">' + esc(dl.source_snippet) + '</div>'
+        : '';
+
+    return '<div class="card card-compact"' + clickAttr + '><div class="card-header">' +
         '<span class="nav-dot ' + dotClass + '" style="margin-top:5px;"></span>' +
-        '<span class="card-title">' + esc(dl.description || '') + '</span>' +
+        '<span class="card-title">' + esc(dl.description || '') + chevron + '</span>' +
         '<span class="card-time" style="' + timeStyle + '">' + esc(daysText) + '</span>' +
-        '</div></div>';
+        '</div>' + detailHtml + '</div>';
+}
+
+function renderFireCompact(alert) {
+    var tier = alert.tier || 1;
+    var dotClass = tier === 1 ? 'red' : 'amber';
+    var body = (alert.body || '').trim();
+    var hasBody = body.length > 0;
+    var truncBody = body.length > 500 ? body.substring(0, 500) + '...' : body;
+    var clickAttr = hasBody ? ' onclick="var n=this.querySelector(\'.fire-detail\');n.style.display=n.style.display===\'none\'?\'block\':\'none\'" style="cursor:pointer;"' : '';
+    var chevron = hasBody ? ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span>' : '';
+    var detailHtml = hasBody
+        ? '<div class="fire-detail" style="display:none;font-size:12px;color:var(--text2);padding:6px 18px 10px 18px;line-height:1.5;border-top:1px solid var(--border-light);white-space:pre-wrap;">' +
+          esc(truncBody) +
+          (body.length > 500 ? ' <a href="#" onclick="event.stopPropagation();switchTab(\'fires\');return false;" style="color:var(--blue);font-weight:600;text-decoration:none;">See full &rarr;</a>' : '') +
+          '</div>'
+        : '';
+    return '<div class="card card-compact"' + clickAttr + '><div class="card-header">' +
+        '<span class="nav-dot ' + dotClass + '" style="margin-top:5px;"></span>' +
+        '<span class="card-title">' + esc(alert.title || '') + chevron + '</span>' +
+        '<span class="card-time">' + esc(fmtRelativeTime(alert.created_at)) + '</span>' +
+        '</div>' + detailHtml + '</div>';
 }
 
 function renderActivityRow(item) {

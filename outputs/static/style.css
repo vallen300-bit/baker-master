@@ -244,6 +244,14 @@ body {
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
+.grid-cell-header .section-label {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  color: var(--text);
+  text-transform: none;
+  font-family: var(--font);
+}
 .grid-cell-count {
   font-family: var(--mono);
   font-size: 11px;
@@ -263,6 +271,14 @@ body {
   padding: 16px 4px;
   text-align: center;
 }
+.quick-add-btn {
+  width: 24px; height: 24px; border-radius: 50%;
+  border: 1px solid var(--border); background: var(--bg);
+  font-size: 16px; font-weight: 700; color: var(--text2);
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  line-height: 1; padding: 0; transition: all 0.15s;
+}
+.quick-add-btn:hover { border-color: var(--blue); color: var(--blue); background: var(--blue-bg); }
 @media (max-width: 900px) {
   .landing-grid { grid-template-columns: 1fr; }
 }
