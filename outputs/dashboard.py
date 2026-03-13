@@ -1657,7 +1657,7 @@ async def backfill_last_contact():
                         (SELECT MAX(received_date) FROM email_messages
                          WHERE LOWER(sender_name) = LOWER(vc2.name)
                             OR LOWER(sender_email) = LOWER(vc2.email)
-                            OR (vc2.name LIKE '%%  %%' AND LOWER(sender_name) = LOWER(
+                            OR (vc2.name LIKE '%% %%' AND LOWER(sender_name) = LOWER(
                                 SPLIT_PART(vc2.name, ' ', 2) || ' ' || SPLIT_PART(vc2.name, ' ', 1)
                             ))
                             OR LOWER(sender_name) LIKE '%%' || LOWER(SPLIT_PART(vc2.name, ' ', 2)) || '%%'),
