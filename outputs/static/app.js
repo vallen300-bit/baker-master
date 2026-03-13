@@ -625,8 +625,7 @@ async function loadMorningBrief() {
 
         loadMattersSummary();
 
-        // DASHBOARD-COST-WIDGET: Load system health widgets
-        loadSystemWidgets();
+        // System widgets moved to Baker Data tab (BAKER-DATA-TUCK-1)
     } catch (e) {
         console.error('loadMorningBrief failed:', e);
         _showBriefingUnavailable(e.name === 'AbortError' ? 'Request timed out' : String(e));
@@ -2039,6 +2038,19 @@ async function loadBakerData() {
             empty.textContent = 'No capability runs in the last 24 hours.';
             container.appendChild(empty);
         }
+
+        // BAKER-DATA-TUCK-1: System health widgets (moved from landing page)
+        var sysLabel = document.createElement('div');
+        sysLabel.style.cssText = 'font-size:11px;font-weight:700;color:var(--text3);font-family:var(--mono);letter-spacing:0.3px;margin-bottom:8px;margin-top:24px;';
+        sysLabel.textContent = 'SYSTEM HEALTH';
+        container.appendChild(sysLabel);
+
+        await Promise.all([
+            renderSentinelWidget(container),
+            renderCostWidget(container),
+            renderMetricsWidget(container),
+            renderQualityWidget(container),
+        ]);
 
     } catch (e) {
         container.textContent = 'Failed to load Baker Data.';
