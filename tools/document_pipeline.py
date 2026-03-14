@@ -283,6 +283,17 @@ def queue_extraction(doc_id: int):
             return
         try:
             cur = conn.cursor()
+            # Skip if document is already classified + extracted
+            cur.execute(
+                "SELECT extracted_at FROM documents WHERE id = %s",
+                (doc_id,),
+            )
+            row = cur.fetchone()
+            if row and row[0] is not None:
+                cur.close()
+                logger.debug(f"Doc {doc_id} already extracted, skipping queue")
+                return
+
             cur.execute("""
                 INSERT INTO doc_pipeline_jobs (document_id, status)
                 VALUES (%s, 'pending')

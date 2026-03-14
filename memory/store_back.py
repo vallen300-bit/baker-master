@@ -3025,8 +3025,8 @@ class SentinelStoreBack:
         finally:
             self._put_conn(conn)
 
-    def get_pending_alerts(self, tier: int = None) -> list:
-        """Fetch unresolved alerts, optionally filtered by tier."""
+    def get_pending_alerts(self, tier: int = None, limit: int = 100) -> list:
+        """Fetch unresolved alerts, optionally filtered by tier. Capped at limit."""
         conn = self._get_conn()
         if not conn:
             return []
@@ -3034,12 +3034,13 @@ class SentinelStoreBack:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             if tier:
                 cur.execute(
-                    "SELECT * FROM alerts WHERE status = 'pending' AND tier = %s ORDER BY created_at DESC",
-                    (tier,),
+                    "SELECT * FROM alerts WHERE status = 'pending' AND tier = %s ORDER BY created_at DESC LIMIT %s",
+                    (tier, limit),
                 )
             else:
                 cur.execute(
-                    "SELECT * FROM alerts WHERE status = 'pending' ORDER BY tier, created_at DESC"
+                    "SELECT * FROM alerts WHERE status = 'pending' ORDER BY tier, created_at DESC LIMIT %s",
+                    (limit,),
                 )
             rows = cur.fetchall()
             cur.close()

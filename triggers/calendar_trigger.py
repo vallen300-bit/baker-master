@@ -58,6 +58,12 @@ def poll_upcoming_meetings(hours_ahead: int = 24) -> list:
         if 'date' in start and 'dateTime' not in start:
             continue
 
+        # Skip Baker-created prep blocks to prevent cascade
+        # (_block_prep_time creates "[Baker Prep] ..." events)
+        summary = event.get('summary', '')
+        if '[Baker Prep]' in summary:
+            continue
+
         attendees = event.get('attendees', [])
         meetings.append({
             'id': event.get('id', ''),

@@ -1007,15 +1007,21 @@ async def get_morning_brief():
             cur.execute("SELECT COUNT(*) AS cnt FROM alerts WHERE status = 'pending' AND tier = 1")
             fire_count = cur.fetchone()["cnt"]
 
-            # Stats: deadlines this week
+            # Stats: deadlines this week (due between today and +7 days)
             cur.execute("""
                 SELECT COUNT(*) AS cnt FROM deadlines
-                WHERE status = 'active' AND due_date <= NOW() + INTERVAL '7 days'
+                WHERE status = 'active'
+                  AND due_date >= CURRENT_DATE
+                  AND due_date <= CURRENT_DATE + INTERVAL '7 days'
             """)
             deadline_count = cur.fetchone()["cnt"]
 
-            # Stats: processed overnight (alerts created in last 24h)
-            cur.execute("SELECT COUNT(*) AS cnt FROM alerts WHERE created_at >= NOW() - INTERVAL '24 hours'")
+            # Stats: processed overnight (alerts created in last 12h, excluding cascade junk)
+            cur.execute("""
+                SELECT COUNT(*) AS cnt FROM alerts
+                WHERE created_at >= NOW() - INTERVAL '12 hours'
+                  AND title NOT LIKE '%%[Baker Prep]%%'
+            """)
             processed_overnight = cur.fetchone()["cnt"]
 
             # Stats: actions completed (capability_runs in last 24h)
@@ -1044,7 +1050,9 @@ async def get_morning_brief():
                        priority, status, created_at,
                        LEFT(source_snippet, 500) AS source_snippet
                 FROM deadlines
-                WHERE status = 'active' AND due_date <= NOW() + INTERVAL '7 days'
+                WHERE status = 'active'
+                  AND due_date >= CURRENT_DATE
+                  AND due_date <= CURRENT_DATE + INTERVAL '7 days'
                 ORDER BY due_date ASC LIMIT 10
             """)
             deadlines = [_serialize(dict(r)) for r in cur.fetchall()]
