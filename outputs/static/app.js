@@ -575,29 +575,25 @@ async function loadMorningBrief() {
 
         // LANDING-GRID-1: Populate 2x2 grid cells
 
-        // Grid: Travel & Meetings (top-left)
+        // Grid: Travel (top-left) — TRAVEL-FIX-2: dedicated travel cell with route cards
         var gridTravel = document.getElementById('gridTravel');
         var gridTravelCount = document.getElementById('gridTravelCount');
         if (gridTravel) {
-            // TRAVEL-FIX-1: meetings_today now includes full day (past + future)
-            var travelItems = (data.meetings_today || []).filter(function(m) {
-                return !(m.title || '').startsWith('[Baker Prep]');
-            }).map(renderMeetingCard);
-            // TRAVEL-FIX-1: Dedicated travel_alerts (any tier, not just top_fires tier=1)
+            var travelEvents = (data.travel_today || []).map(renderTravelCard);
+            // Also include travel-tagged alerts not already covered by calendar
             var travelAlerts = (data.travel_alerts || []);
-            // Dedup: skip travel alerts whose title already appears in meetings
-            var meetingTitles = (data.meetings_today || []).map(function(m) { return (m.title || '').toLowerCase(); });
+            var calTitles = (data.travel_today || []).map(function(t) { return (t.title || '').toLowerCase(); });
             travelAlerts = travelAlerts.filter(function(a) {
                 var t = (a.title || '').replace('Meeting prep: ', '').toLowerCase();
-                return !meetingTitles.some(function(mt) { return mt.toLowerCase().indexOf(t) >= 0 || t.indexOf(mt.toLowerCase()) >= 0; });
+                return !calTitles.some(function(ct) { return ct.indexOf(t) >= 0 || t.indexOf(ct) >= 0; });
             });
-            travelItems = travelItems.concat(travelAlerts.map(function(a) { return renderAlertCard(a, false); }));
-            if (travelItems.length > 0) {
-                setSafeHTML(gridTravel, travelItems.join(''));
+            var allTravel = travelEvents.concat(travelAlerts.map(function(a) { return renderAlertCard(a, false); }));
+            if (allTravel.length > 0) {
+                setSafeHTML(gridTravel, allTravel.join(''));
             } else {
-                gridTravel.innerHTML = '<div class="grid-empty">No meetings or travel today.</div>';
+                setSafeHTML(gridTravel, '<div class="grid-empty">No travel today.</div>');
             }
-            if (gridTravelCount) gridTravelCount.textContent = travelItems.length > 0 ? travelItems.length : '';
+            if (gridTravelCount) gridTravelCount.textContent = allTravel.length > 0 ? allTravel.length : '';
         }
 
         // Grid: Fires (top-right)
@@ -626,28 +622,27 @@ async function loadMorningBrief() {
             if (gridDeadlinesCount) gridDeadlinesCount.textContent = (data.deadlines || []).length || '';
         }
 
-        // Grid: Commitments (bottom-right)
-        var gridCommitments = document.getElementById('gridCommitments');
-        var gridCommitmentsCount = document.getElementById('gridCommitmentsCount');
-        if (gridCommitments) {
-            var commitItems = (data.overdue_commitments || []);
-            if (commitItems.length > 0) {
-                setSafeHTML(gridCommitments, commitItems.map(function(c) {
-                    return '<div class="card card-compact"><div class="card-header">' +
-                        '<span class="nav-dot amber" style="margin-top:5px;"></span>' +
-                        '<span class="card-title">' + esc(c.description || c.title || '') + '</span>' +
-                        '<span class="card-time">' + esc(fmtRelativeTime(c.due_date || c.created_at)) + '</span>' +
-                        '</div></div>';
-                }).join(''));
+        // Grid: Meetings (bottom-right) — TRAVEL-FIX-2: meetings separated from travel
+        var gridMeetings = document.getElementById('gridMeetings');
+        var gridMeetingsCount = document.getElementById('gridMeetingsCount');
+        if (gridMeetings) {
+            var meetingItems = (data.meetings_today || []).filter(function(m) {
+                return !(m.title || '').startsWith('[Baker Prep]');
+            }).map(renderMeetingCard);
+            if (meetingItems.length > 0) {
+                setSafeHTML(gridMeetings, meetingItems.join(''));
             } else {
-                gridCommitments.innerHTML = '<div class="grid-empty">No overdue commitments.</div>';
+                setSafeHTML(gridMeetings, '<div class="grid-empty">No meetings today.</div>');
             }
-            if (gridCommitmentsCount) gridCommitmentsCount.textContent = commitItems.length || '';
+            if (gridMeetingsCount) gridMeetingsCount.textContent = meetingItems.length > 0 ? meetingItems.length : '';
         }
 
-        // Update stats: add meeting count
+        // Update stats: show travel + meeting counts
         var statMeetings = document.getElementById('statMeetings');
-        if (statMeetings) setText('statMeetings', data.meeting_count || 0);
+        if (statMeetings) {
+            var totalEvents = (data.travel_today || []).length + (data.meetings_today || []).length;
+            setText('statMeetings', totalEvents || 0);
+        }
 
         loadMattersSummary();
 
@@ -1196,6 +1191,95 @@ function renderAlertCard(alert, expanded) {
     html += '</div></div>';
 
     return html;
+}
+
+// TRAVEL-FIX-2: Route card for flights/travel events
+function renderTravelCard(t) {
+    var startTime = '';
+    var endTime = '';
+    var duration = '';
+    try {
+        var ds = new Date(t.start);
+        startTime = ds.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+        if (t.end) {
+            var de = new Date(t.end);
+            endTime = de.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+            var diffMs = de - ds;
+            if (diffMs > 0) {
+                var hrs = Math.floor(diffMs / 3600000);
+                var mins = Math.round((diffMs % 3600000) / 60000);
+                duration = hrs > 0 ? hrs + 'h' + (mins > 0 ? String(mins).padStart(2, '0') : '') : mins + 'min';
+            }
+        }
+    } catch(e) { startTime = t.start || ''; }
+
+    // Parse route from title: "Flight to San Francisco (LH 454)" or "Flight to Frankfurt am Main (OS 201)"
+    var title = t.title || '';
+    var flightNum = '';
+    var destination = title;
+    var fnMatch = title.match(/\(([A-Z]{2}\s?\d{2,4})\)/);
+    if (fnMatch) {
+        flightNum = fnMatch[1];
+        destination = title.replace(fnMatch[0], '').trim();
+    }
+    // Extract "to <place>" pattern
+    var toMatch = destination.match(/(?:flight|flug)\s+to\s+(.+)/i);
+    if (toMatch) destination = toMatch[1].trim();
+
+    // Origin from location field (e.g. "Vienna VIE" or "Frankfurt am Main FRA")
+    var origin = '';
+    var loc = t.location || '';
+    var iataMatch = loc.match(/\b([A-Z]{3})\b/);
+    if (iataMatch) origin = iataMatch[1];
+    // Also check destination for IATA
+    var destIata = '';
+    var destIataMatch = destination.match(/\b([A-Z]{3})\b/);
+    if (destIataMatch) destIata = destIataMatch[1];
+
+    // Time-based dot: green=past, amber=in progress, gray=upcoming
+    var now = new Date();
+    var dotClass = 'lgray';
+    try {
+        var evStart = new Date(t.start);
+        var evEnd = t.end ? new Date(t.end) : null;
+        if (evEnd && now > evEnd) dotClass = 'green';
+        else if (now >= evStart) dotClass = 'amber';
+    } catch(e) {}
+
+    // Route display
+    var routeStr = '';
+    if (origin && destIata && origin !== destIata) {
+        routeStr = origin + ' &rarr; ' + destIata;
+    } else if (origin) {
+        routeStr = origin + ' &rarr; ' + esc(destination);
+    } else if (destIata) {
+        routeStr = '&rarr; ' + destIata;
+    } else {
+        routeStr = esc(destination);
+    }
+
+    // Detail line: flight number, airline hint, duration
+    var detailParts = [];
+    if (flightNum) detailParts.push(esc(flightNum));
+    if (duration) detailParts.push(duration);
+    if (endTime && dotClass !== 'green') detailParts.push('arr ' + endTime);
+    var detailStr = detailParts.join(' &middot; ');
+
+    var hasNotes = t.prep_notes && t.prep_notes.trim().length > 0;
+    var clickAttr = hasNotes ? ' onclick="var n=this.querySelector(\'.prep-notes\');n.style.display=n.style.display===\'none\'?\'block\':\'none\'" style="cursor:pointer;"' : '';
+    var chevron = hasNotes ? ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span>' : '';
+    var notesHtml = hasNotes
+        ? '<div class="prep-notes" style="display:none;font-size:12px;color:var(--text2);padding:8px 18px 12px 18px;line-height:1.5;white-space:pre-wrap;border-top:1px solid var(--border-light);margin-top:4px;">' + esc(t.prep_notes).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') + '</div>'
+        : '';
+
+    return '<div class="card card-compact"' + clickAttr + '><div class="card-header">' +
+        '<span class="nav-dot ' + dotClass + '" style="margin-top:5px;"></span>' +
+        '<span class="card-title">' + routeStr + chevron + '</span>' +
+        '<span class="card-time">' + esc(startTime) + '</span>' +
+        '</div>' +
+        (detailStr ? '<div class="card-body" style="font-size:11px;color:var(--text3);padding:2px 0 4px 18px;">' + detailStr + '</div>' : '') +
+        notesHtml +
+        '</div>';
 }
 
 function renderMeetingCard(m) {

@@ -1103,9 +1103,11 @@ async def get_morning_brief():
             logger.warning(f"Morning narrative timed out or failed: {e}")
             narrative = "Baker is online — narrative generation is warming up."
 
-        # Phase 3A: Fetch today's meetings (graceful — returns [] if Calendar API unavailable)
+        # Phase 3A: Fetch today's calendar events, classify as meeting vs travel
         # TRAVEL-FIX-1: Use poll_todays_meetings() so past flights/events still show
+        # TRAVEL-FIX-2: Split into meetings_today + travel_today
         meetings_today = []
+        travel_today = []
         try:
             from triggers.calendar_trigger import poll_todays_meetings
             from triggers.state import trigger_state
@@ -1136,13 +1138,24 @@ async def get_morning_brief():
                                 store._put_conn(conn_prep)
                     except Exception:
                         pass
-                meetings_today.append({
+
+                event_data = {
                     "title": m['title'],
                     "start": m['start'],
+                    "end": m.get('end', ''),
+                    "location": m.get('location', ''),
                     "attendees": attendee_names[:5],
                     "prepped": prepped,
                     "prep_notes": prep_notes,
-                })
+                }
+
+                # TRAVEL-FIX-2: Classify as travel vs meeting
+                if _is_travel_event(m['title'], m.get('location', '')):
+                    event_data["event_type"] = "travel"
+                    travel_today.append(event_data)
+                else:
+                    event_data["event_type"] = "meeting"
+                    meetings_today.append(event_data)
         except Exception as e:
             logger.warning(f"Morning brief: calendar unavailable: {e}")
 
@@ -1175,6 +1188,7 @@ async def get_morning_brief():
             "activity": activity,
             "meetings_today": meetings_today,
             "meeting_count": len(meetings_today),
+            "travel_today": travel_today,
             "overdue_commitments": overdue_commitments,
             "travel_alerts": travel_alerts,
         }
@@ -1188,8 +1202,27 @@ async def get_morning_brief():
             "proposals": [],
             "top_fires": [], "deadlines": [], "activity": [],
             "meetings_today": [], "meeting_count": 0,
+            "travel_today": [],
             "overdue_commitments": [], "travel_alerts": [],
         }
+
+
+import re as _re
+
+# TRAVEL-FIX-2: Detect travel events from calendar title/location
+_TRAVEL_PATTERNS = _re.compile(
+    r'(?i)\b(flight|flug|fly|airport|airline|boarding|check.?in)\b'
+    r'|(?i)\b(train|zug|bahn|rail)\b'
+    r'|(?i)\b(transfer|taxi|uber|car.?rental)\b'
+    r'|\b[A-Z]{2}\s?\d{2,4}\b'  # Flight numbers: LH 454, OS 201, BA 123
+    r'|\b(?:VIE|FRA|SFO|JFK|LHR|CDG|ZRH|MUC|LAX|SIN|DXB|FCO|BCN|AMS)\b'  # IATA codes
+)
+
+
+def _is_travel_event(title: str, location: str = "") -> bool:
+    """Detect if a calendar event is travel (flight, train, transfer) vs a meeting."""
+    combined = f"{title} {location}"
+    return bool(_TRAVEL_PATTERNS.search(combined))
 
 
 def _get_morning_narrative(fire_count: int, deadline_count: int,
