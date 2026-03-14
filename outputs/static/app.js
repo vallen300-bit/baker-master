@@ -579,15 +579,17 @@ async function loadMorningBrief() {
         var gridTravel = document.getElementById('gridTravel');
         var gridTravelCount = document.getElementById('gridTravelCount');
         if (gridTravel) {
+            // TRAVEL-FIX-1: meetings_today now includes full day (past + future)
             var travelItems = (data.meetings_today || []).filter(function(m) {
                 return !(m.title || '').startsWith('[Baker Prep]');
             }).map(renderMeetingCard);
-            // Also include travel-tagged alerts
-            var travelAlerts = (data.top_fires || []).filter(function(a) {
-                var tags = a.tags || [];
-                if (typeof tags === 'string') try { tags = JSON.parse(tags); } catch(e) { tags = []; }
-                return tags.indexOf('travel') >= 0 || (a.title || '').toLowerCase().indexOf('flight') >= 0 ||
-                       (a.title || '').toLowerCase().indexOf('travel') >= 0;
+            // TRAVEL-FIX-1: Dedicated travel_alerts (any tier, not just top_fires tier=1)
+            var travelAlerts = (data.travel_alerts || []);
+            // Dedup: skip travel alerts whose title already appears in meetings
+            var meetingTitles = (data.meetings_today || []).map(function(m) { return (m.title || '').toLowerCase(); });
+            travelAlerts = travelAlerts.filter(function(a) {
+                var t = (a.title || '').replace('Meeting prep: ', '').toLowerCase();
+                return !meetingTitles.some(function(mt) { return mt.toLowerCase().indexOf(t) >= 0 || t.indexOf(mt.toLowerCase()) >= 0; });
             });
             travelItems = travelItems.concat(travelAlerts.map(function(a) { return renderAlertCard(a, false); }));
             if (travelItems.length > 0) {
@@ -602,12 +604,8 @@ async function loadMorningBrief() {
         var gridFires = document.getElementById('gridFires');
         var gridFiresCount = document.getElementById('gridFiresCount');
         if (gridFires) {
-            var fireItems = (data.top_fires || []).filter(function(a) {
-                var tags = a.tags || [];
-                if (typeof tags === 'string') try { tags = JSON.parse(tags); } catch(e) { tags = []; }
-                return tags.indexOf('travel') < 0 && (a.title || '').toLowerCase().indexOf('flight') < 0 &&
-                       (a.title || '').toLowerCase().indexOf('travel') < 0;
-            });
+            // TRAVEL-FIX-1: travel alerts now served separately, no need to filter from fires
+            var fireItems = (data.top_fires || []);
             if (fireItems.length > 0) {
                 setSafeHTML(gridFires, fireItems.map(function(a) { return renderFireCompact(a); }).join(''));
             } else {

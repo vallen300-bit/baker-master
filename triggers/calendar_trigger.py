@@ -88,6 +88,61 @@ def poll_upcoming_meetings(hours_ahead: int = 24) -> list:
     return meetings
 
 
+def poll_todays_meetings() -> list:
+    """
+    Fetch ALL of today's timed events (past + future).
+    Used by dashboard landing grid so flights/meetings don't vanish once started.
+    Same output format as poll_upcoming_meetings().
+    """
+    service = _get_calendar_service()
+    now = datetime.now(timezone.utc)
+    # Start of today (UTC midnight)
+    start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_of_day = start_of_day + timedelta(hours=24)
+
+    events_result = service.events().list(
+        calendarId='primary',
+        timeMin=start_of_day.isoformat(),
+        timeMax=end_of_day.isoformat(),
+        singleEvents=True,
+        orderBy='startTime',
+        maxResults=30,
+    ).execute()
+
+    events = events_result.get('items', [])
+    meetings = []
+    for event in events:
+        start = event.get('start', {})
+        if 'date' in start and 'dateTime' not in start:
+            continue
+        summary = event.get('summary', '')
+        if '[Baker Prep]' in summary:
+            continue
+
+        attendees = event.get('attendees', [])
+        meetings.append({
+            'id': event.get('id', ''),
+            'title': event.get('summary', 'Untitled event'),
+            'start': start.get('dateTime', ''),
+            'end': event.get('end', {}).get('dateTime', ''),
+            'attendees': [
+                {
+                    'name': a.get('displayName', ''),
+                    'email': a.get('email', ''),
+                    'response': a.get('responseStatus', ''),
+                }
+                for a in attendees
+            ],
+            'description': event.get('description', ''),
+            'location': event.get('location', ''),
+            'organizer': event.get('organizer', {}).get('email', ''),
+            'html_link': event.get('htmlLink', ''),
+        })
+
+    logger.info(f"Calendar today: {len(meetings)} events for {start_of_day.date()}")
+    return meetings
+
+
 # ============================================================
 # Meeting Prep Prompt
 # ============================================================

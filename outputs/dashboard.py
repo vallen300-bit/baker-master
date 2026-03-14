@@ -1104,11 +1104,12 @@ async def get_morning_brief():
             narrative = "Baker is online — narrative generation is warming up."
 
         # Phase 3A: Fetch today's meetings (graceful — returns [] if Calendar API unavailable)
+        # TRAVEL-FIX-1: Use poll_todays_meetings() so past flights/events still show
         meetings_today = []
         try:
-            from triggers.calendar_trigger import poll_upcoming_meetings
+            from triggers.calendar_trigger import poll_todays_meetings
             from triggers.state import trigger_state
-            raw_meetings = poll_upcoming_meetings(hours_ahead=16)  # rest of today
+            raw_meetings = poll_todays_meetings()  # all of today (past + future)
             for m in raw_meetings:
                 wk = f"calendar_prep_{m.get('id', '')}"
                 prepped = trigger_state.watermark_exists(wk)
@@ -1145,6 +1146,22 @@ async def get_morning_brief():
         except Exception as e:
             logger.warning(f"Morning brief: calendar unavailable: {e}")
 
+        # TRAVEL-FIX-1: Dedicated travel alerts (any tier, not just top_fires tier=1)
+        travel_alerts = []
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT * FROM alerts
+                WHERE status = 'pending'
+                  AND (tags ? 'travel' OR title ILIKE '%%flight%%')
+                ORDER BY created_at DESC
+                LIMIT 10
+            """)
+            travel_alerts = [_serialize(dict(r)) for r in cur.fetchall()]
+            cur.close()
+        except Exception as e:
+            logger.warning(f"Morning brief: travel alerts query failed: {e}")
+
         return {
             "unanswered_count": unanswered_count,
             "fire_count": fire_count,
@@ -1159,6 +1176,7 @@ async def get_morning_brief():
             "meetings_today": meetings_today,
             "meeting_count": len(meetings_today),
             "overdue_commitments": overdue_commitments,
+            "travel_alerts": travel_alerts,
         }
     except HTTPException:
         raise
@@ -1170,7 +1188,7 @@ async def get_morning_brief():
             "proposals": [],
             "top_fires": [], "deadlines": [], "activity": [],
             "meetings_today": [], "meeting_count": 0,
-            "overdue_commitments": [],
+            "overdue_commitments": [], "travel_alerts": [],
         }
 
 

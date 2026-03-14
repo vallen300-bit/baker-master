@@ -71,7 +71,7 @@ Active matters (match if relevant):
 
 JSON schema:
 {{
-  "document_type": "contract" | "invoice" | "nachtrag" | "schlussrechnung" | "correspondence" | "protocol" | "report" | "proposal" | "legal_opinion" | "financial_model" | "land_register" | "brochure" | "floor_plan" | "meeting_notes" | "presentation" | "media_asset" | "other",
+  "document_type": "contract" | "invoice" | "nachtrag" | "schlussrechnung" | "correspondence" | "protocol" | "report" | "proposal" | "legal_opinion" | "financial_model" | "land_register" | "brochure" | "floor_plan" | "meeting_notes" | "presentation" | "media_asset" | "travel_booking" | "other",
   "language": "de" | "en" | "fr" | "ru",
   "matter_slug": "<exact slug from list above, or null if no match>",
   "parties": ["<party name 1>", "<party name 2>"],
@@ -170,6 +170,7 @@ _EXTRACTION_SCHEMAS = {
     "meeting_notes": "date, attendees, topics, decisions, action_items",
     "proposal": "proposer, recipient, scope, value (EUR), timeline, conditions",
     "presentation": "title, author, date, key_slides_summary, audience",
+    "travel_booking": "booking_type (flight/hotel/train/car), origin, destination, departure_date, return_date, confirmation_number, provider, price (EUR), notes",
 }
 
 _EXTRACT_PROMPT = """Extract structured data from this {doc_type}.
@@ -542,6 +543,7 @@ def _store_extraction(doc_id: int, doc_type: str, structured: dict, confidence: 
         "meeting_notes": "meeting_notes",
         "proposal": "proposal_summary",
         "presentation": "presentation_summary",
+        "travel_booking": "travel_booking",
     }.get(doc_type, doc_type)
 
     try:

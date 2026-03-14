@@ -224,6 +224,20 @@ class PresentationExtraction(_ExtractionBase):
     audience: Optional[Any] = None
 
 
+class TravelBookingExtraction(_ExtractionBase):
+    booking_type: Optional[Any] = None    # flight, hotel, train, car
+    origin: Optional[Any] = None
+    destination: Optional[Any] = None
+    departure_date: Optional[Any] = None
+    return_date: Optional[Any] = None
+    confirmation_number: Optional[Any] = None
+    provider: Optional[Any] = None
+    price: Optional[Any] = None
+    notes: Optional[Any] = None
+
+    _coerce_price = field_validator('price', mode='before')(_amount_validator)
+
+
 # ─────────────────────────────────────────────
 # Registry: doc_type → model class
 # ─────────────────────────────────────────────
@@ -242,6 +256,7 @@ _SCHEMA_MAP: dict[str, type[_ExtractionBase]] = {
     "meeting_notes": MeetingNotesExtraction,
     "proposal": ProposalExtraction,
     "presentation": PresentationExtraction,
+    "travel_booking": TravelBookingExtraction,
 }
 
 
