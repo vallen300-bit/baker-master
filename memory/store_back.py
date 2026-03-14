@@ -126,6 +126,11 @@ class SentinelStoreBack:
         # PHASE-4A: Cost monitor + agent observability tables
         self._ensure_cost_and_metrics_tables()
 
+        # TRIP-INTELLIGENCE-1: Trip lifecycle tables
+        self._ensure_trips_table()
+        self._ensure_trip_contacts_table()
+        self._seed_location_preferences()
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -3593,6 +3598,358 @@ class SentinelStoreBack:
         except Exception as e:
             logger.warning(f"get_relevant_conversations failed: {e}")
             return []
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # TRIP-INTELLIGENCE-1: Trip lifecycle
+    # -------------------------------------------------------
+
+    def _ensure_trips_table(self):
+        """Create trips table. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS trips (
+                    id SERIAL PRIMARY KEY,
+                    destination VARCHAR(200),
+                    origin VARCHAR(200),
+                    category VARCHAR(20) DEFAULT 'meeting',
+                    status VARCHAR(20) DEFAULT 'planned',
+                    start_date DATE,
+                    end_date DATE,
+                    event_name VARCHAR(200),
+                    strategic_objective TEXT,
+                    calendar_event_ids JSONB DEFAULT '[]',
+                    notes JSONB DEFAULT '[]',
+                    auto_context JSONB DEFAULT '[]',
+                    outcomes JSONB DEFAULT '[]',
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_trips_status
+                ON trips(status) WHERE status IN ('planned', 'confirmed')
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_trips_dates
+                ON trips(start_date, end_date)
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("Trips table verified")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure trips table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_trip_contacts_table(self):
+        """Create trip_contacts table. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS trip_contacts (
+                    id SERIAL PRIMARY KEY,
+                    trip_id INTEGER REFERENCES trips(id) ON DELETE CASCADE,
+                    contact_id INTEGER REFERENCES vip_contacts(id),
+                    role VARCHAR(50),
+                    roi_type VARCHAR(50),
+                    roi_score INTEGER,
+                    outreach_status VARCHAR(20) DEFAULT 'none',
+                    notes TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_trip_contacts_trip
+                ON trip_contacts(trip_id)
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("Trip contacts table verified")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure trip_contacts table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _seed_location_preferences(self):
+        """Seed commute/home city preferences if not already set."""
+        seeds = [
+            ("domain_context", "commute_cities", "Vienna, Frankfurt"),
+            ("domain_context", "home_city", "Zurich"),
+            ("domain_context", "home_cities", "Zurich, Geneva"),
+        ]
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            for category, key, value in seeds:
+                cur.execute(
+                    """INSERT INTO director_preferences (category, pref_key, pref_value)
+                       VALUES (%s, %s, %s)
+                       ON CONFLICT (category, pref_key) DO NOTHING""",
+                    (category, key, value),
+                )
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.debug(f"Location preference seeding skipped: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def upsert_trip(self, destination: str, origin: str = None,
+                    start_date=None, end_date=None, category: str = "meeting",
+                    calendar_event_ids: list = None, event_name: str = None,
+                    strategic_objective: str = None) -> Optional[dict]:
+        """Create or match a trip. Idempotent by destination + overlapping dates.
+        Returns the trip dict."""
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+            # Try to find existing trip by calendar_event_id
+            if calendar_event_ids:
+                for cal_id in calendar_event_ids:
+                    if cal_id:
+                        cur.execute(
+                            """SELECT * FROM trips
+                               WHERE calendar_event_ids ? %s
+                                 AND status IN ('planned', 'confirmed')
+                               LIMIT 1""",
+                            (cal_id,),
+                        )
+                        existing = cur.fetchone()
+                        if existing:
+                            cur.close()
+                            return dict(existing)
+
+            # Try to find by destination + overlapping dates
+            if destination and start_date:
+                cur.execute(
+                    """SELECT * FROM trips
+                       WHERE LOWER(destination) = LOWER(%s)
+                         AND status IN ('planned', 'confirmed')
+                         AND start_date <= %s + INTERVAL '1 day'
+                         AND (end_date IS NULL OR end_date >= %s - INTERVAL '1 day')
+                       LIMIT 1""",
+                    (destination, start_date, start_date),
+                )
+                existing = cur.fetchone()
+                if existing:
+                    # Merge calendar_event_ids
+                    if calendar_event_ids:
+                        merged = list(set(
+                            (existing.get("calendar_event_ids") or []) + calendar_event_ids
+                        ))
+                        cur.execute(
+                            "UPDATE trips SET calendar_event_ids = %s, updated_at = NOW() WHERE id = %s",
+                            (json.dumps(merged), existing["id"]),
+                        )
+                        conn.commit()
+                    cur.close()
+                    return dict(existing)
+
+            # Create new trip
+            cal_ids_json = json.dumps(calendar_event_ids or [])
+            cur.execute(
+                """INSERT INTO trips (destination, origin, category, start_date, end_date,
+                                      event_name, strategic_objective, calendar_event_ids)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                   RETURNING *""",
+                (destination, origin, category, start_date, end_date,
+                 event_name, strategic_objective, cal_ids_json),
+            )
+            trip = dict(cur.fetchone())
+            conn.commit()
+            cur.close()
+            logger.info(f"Created trip #{trip['id']}: {destination} ({start_date})")
+            return trip
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"upsert_trip failed: {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
+    def get_active_trips(self) -> list:
+        """All trips with status planned/confirmed, plus recently completed (last 7 days)."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT * FROM trips
+                WHERE status IN ('planned', 'confirmed')
+                   OR (status = 'completed' AND updated_at > NOW() - INTERVAL '7 days')
+                ORDER BY start_date ASC NULLS LAST
+                LIMIT 50
+            """)
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            return rows
+        except Exception as e:
+            logger.error(f"get_active_trips failed: {e}")
+            return []
+        finally:
+            self._put_conn(conn)
+
+    def get_trip(self, trip_id: int) -> Optional[dict]:
+        """Get a single trip with its contacts."""
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT * FROM trips WHERE id = %s", (trip_id,))
+            trip = cur.fetchone()
+            if not trip:
+                cur.close()
+                return None
+            trip = dict(trip)
+
+            # Fetch linked contacts
+            cur.execute("""
+                SELECT tc.*, vc.name as contact_name, vc.role as contact_role
+                FROM trip_contacts tc
+                LEFT JOIN vip_contacts vc ON vc.id = tc.contact_id
+                WHERE tc.trip_id = %s
+                ORDER BY tc.roi_score DESC NULLS LAST
+            """, (trip_id,))
+            trip["contacts"] = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            return trip
+        except Exception as e:
+            logger.error(f"get_trip failed: {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
+    def update_trip(self, trip_id: int, **kwargs) -> Optional[dict]:
+        """Partial update of a trip. Returns updated trip dict."""
+        allowed = {"destination", "origin", "category", "status", "start_date",
+                    "end_date", "event_name", "strategic_objective"}
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            set_parts = []
+            values = []
+            for k, v in kwargs.items():
+                if k in allowed and v is not None:
+                    set_parts.append(f"{k} = %s")
+                    values.append(v)
+            if not set_parts:
+                return self.get_trip(trip_id)
+            set_parts.append("updated_at = NOW()")
+            values.append(trip_id)
+
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                f"UPDATE trips SET {', '.join(set_parts)} WHERE id = %s RETURNING *",
+                values,
+            )
+            row = cur.fetchone()
+            conn.commit()
+            cur.close()
+            if row:
+                logger.info(f"Updated trip #{trip_id}: {list(kwargs.keys())}")
+                return dict(row)
+            return None
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"update_trip failed: {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
+    def add_trip_note(self, trip_id: int, text: str, source: str = "manual") -> bool:
+        """Append a note to a trip's notes JSONB array."""
+        conn = self._get_conn()
+        if not conn:
+            return False
+        try:
+            note = json.dumps({
+                "text": text,
+                "source": source,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+            cur = conn.cursor()
+            cur.execute(
+                """UPDATE trips
+                   SET notes = notes || %s::jsonb,
+                       updated_at = NOW()
+                   WHERE id = %s""",
+                (f"[{note}]", trip_id),
+            )
+            affected = cur.rowcount
+            conn.commit()
+            cur.close()
+            return affected > 0
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"add_trip_note failed: {e}")
+            return False
+        finally:
+            self._put_conn(conn)
+
+    def auto_complete_trips(self) -> int:
+        """Auto-complete trips where end_date has passed. Returns count updated."""
+        conn = self._get_conn()
+        if not conn:
+            return 0
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE trips
+                SET status = 'completed', updated_at = NOW()
+                WHERE status = 'confirmed'
+                  AND end_date < CURRENT_DATE - INTERVAL '1 day'
+            """)
+            count = cur.rowcount
+            conn.commit()
+            cur.close()
+            if count > 0:
+                logger.info(f"Auto-completed {count} trips")
+            return count
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"auto_complete_trips failed: {e}")
+            return 0
         finally:
             self._put_conn(conn)
 

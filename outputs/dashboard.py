@@ -206,10 +206,13 @@ class SaveArtifactRequest(BaseModel):
 
 
 def _serialize(obj: dict) -> dict:
-    """Convert datetime fields to ISO strings for JSON serialization."""
+    """Convert datetime/date fields to ISO strings for JSON serialization."""
+    import datetime as _dt_mod
     out = {}
     for k, v in obj.items():
         if isinstance(v, datetime):
+            out[k] = v.isoformat()
+        elif isinstance(v, _dt_mod.date):
             out[k] = v.isoformat()
         elif isinstance(v, memoryview):
             out[k] = bytes(v).decode("utf-8", errors="replace")
@@ -1159,6 +1162,69 @@ async def get_morning_brief():
         except Exception as e:
             logger.warning(f"Morning brief: calendar unavailable: {e}")
 
+        # TRIP-INTELLIGENCE-1: Match/create trips for travel events
+        active_trips = []
+        try:
+            active_trips = store.get_active_trips()
+            home_cities = ""
+            commute_cities = ""
+            prefs = store.get_preferences("domain_context")
+            for p in prefs:
+                if p.get("pref_key") == "home_cities":
+                    home_cities = p.get("pref_value", "")
+                elif p.get("pref_key") == "commute_cities":
+                    commute_cities = p.get("pref_value", "")
+
+            for event_data in travel_today:
+                origin_city, dest_city = _extract_trip_cities(event_data)
+                if not dest_city:
+                    continue
+
+                # Skip home cities
+                home_list = [c.strip().lower() for c in home_cities.split(",") if c.strip()]
+                if dest_city.lower() in home_list:
+                    continue
+
+                # Find existing trip
+                event_data["calendar_event_id"] = ""  # may not have it
+                trip = _match_trip(active_trips, event_data, dest_city)
+
+                if not trip:
+                    category = _classify_trip_category(dest_city, home_cities, commute_cities)
+                    if category:
+                        # Check for conference keywords → auto-upgrade
+                        title = event_data.get("title", "")
+                        if _CONF_KEYWORDS_RE.search(title):
+                            category = "event"
+
+                        event_date = None
+                        try:
+                            event_date = datetime.fromisoformat(
+                                event_data["start"].replace("Z", "+00:00")
+                            ).date().isoformat()
+                        except Exception:
+                            pass
+
+                        trip = store.upsert_trip(
+                            destination=dest_city,
+                            origin=origin_city,
+                            start_date=event_date,
+                            end_date=event_date,
+                            category=category,
+                        )
+                        if trip:
+                            active_trips.append(trip)
+
+                if trip:
+                    event_data["trip_id"] = trip["id"]
+                    event_data["trip_status"] = trip["status"]
+                    event_data["trip_category"] = trip.get("category", "meeting")
+
+            # Auto-complete past trips
+            store.auto_complete_trips()
+        except Exception as e:
+            logger.warning(f"Morning brief: trip auto-detection failed: {e}")
+
         # TRAVEL-FIX-1: Dedicated travel alerts (any tier, not just top_fires tier=1)
         travel_alerts = []
         try:
@@ -1191,6 +1257,7 @@ async def get_morning_brief():
             "travel_today": travel_today,
             "overdue_commitments": overdue_commitments,
             "travel_alerts": travel_alerts,
+            "trips": [_serialize(t) for t in active_trips],
         }
     except HTTPException:
         raise
@@ -1203,8 +1270,100 @@ async def get_morning_brief():
             "top_fires": [], "deadlines": [], "activity": [],
             "meetings_today": [], "meeting_count": 0,
             "travel_today": [],
-            "overdue_commitments": [], "travel_alerts": [],
+            "overdue_commitments": [], "travel_alerts": [], "trips": [],
         }
+
+
+# ============================================================
+# TRIP-INTELLIGENCE-1: Trip API endpoints
+# ============================================================
+
+@app.get("/api/trips", tags=["trips"], dependencies=[Depends(verify_api_key)])
+async def list_trips():
+    """List active + recently completed trips."""
+    store = _get_store()
+    trips = store.get_active_trips()
+    return {"trips": [_serialize(t) for t in trips]}
+
+
+@app.get("/api/trips/{trip_id}", tags=["trips"], dependencies=[Depends(verify_api_key)])
+async def get_trip_detail(trip_id: int):
+    """Full trip detail with contacts."""
+    store = _get_store()
+    trip = store.get_trip(trip_id)
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    return _serialize(trip)
+
+
+class TripCreate(BaseModel):
+    destination: str
+    origin: str = None
+    start_date: str = None
+    end_date: str = None
+    category: str = "meeting"
+    event_name: str = None
+    strategic_objective: str = None
+
+
+@app.post("/api/trips", tags=["trips"], dependencies=[Depends(verify_api_key)])
+async def create_trip(body: TripCreate):
+    """Manually create a trip."""
+    store = _get_store()
+    trip = store.upsert_trip(
+        destination=body.destination,
+        origin=body.origin,
+        start_date=body.start_date,
+        end_date=body.end_date,
+        category=body.category,
+        event_name=body.event_name,
+        strategic_objective=body.strategic_objective,
+    )
+    if not trip:
+        raise HTTPException(status_code=500, detail="Failed to create trip")
+    return _serialize(trip)
+
+
+class TripUpdate(BaseModel):
+    status: str = None
+    category: str = None
+    event_name: str = None
+    strategic_objective: str = None
+    destination: str = None
+    origin: str = None
+    start_date: str = None
+    end_date: str = None
+
+
+@app.patch("/api/trips/{trip_id}", tags=["trips"], dependencies=[Depends(verify_api_key)])
+async def update_trip(trip_id: int, body: TripUpdate):
+    """Update trip status, category, or other fields."""
+    store = _get_store()
+    updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    trip = store.update_trip(trip_id, **updates)
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    return _serialize(trip)
+
+
+class TripNote(BaseModel):
+    text: str
+
+
+@app.post("/api/trips/{trip_id}/note", tags=["trips"], dependencies=[Depends(verify_api_key)])
+async def add_trip_note(trip_id: int, body: TripNote):
+    """Add a note to a trip."""
+    store = _get_store()
+    # Verify trip exists
+    trip = store.get_trip(trip_id)
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    success = store.add_trip_note(trip_id, body.text)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to add note")
+    return {"ok": True}
 
 
 import re as _re
@@ -1223,6 +1382,84 @@ def _is_travel_event(title: str, location: str = "") -> bool:
     """Detect if a calendar event is travel (flight, train, transfer) vs a meeting."""
     combined = f"{title} {location}"
     return bool(_TRAVEL_PATTERNS.search(combined))
+
+
+# TRIP-INTELLIGENCE-1: IATA → City mapping for trip auto-detection
+_IATA_TO_CITY = {
+    'VIE': 'Vienna', 'FRA': 'Frankfurt', 'ZRH': 'Zurich', 'GVA': 'Geneva',
+    'SFO': 'San Francisco', 'JFK': 'New York', 'LHR': 'London', 'CDG': 'Paris',
+    'MUC': 'Munich', 'LAX': 'Los Angeles', 'SIN': 'Singapore', 'DXB': 'Dubai',
+    'FCO': 'Rome', 'BCN': 'Barcelona', 'AMS': 'Amsterdam', 'PMI': 'Palma de Mallorca',
+    'NCE': 'Nice', 'TXL': 'Berlin', 'BER': 'Berlin',
+}
+
+_FLIGHT_TO_RE = _re.compile(r'(?:flight|flug)\s+to\s+(.+?)(?:\s*\(|$)', _re.IGNORECASE)
+_IATA_CODE_RE = _re.compile(r'\b([A-Z]{3})\b')
+_CONF_KEYWORDS_RE = _re.compile(r'(?i)\b(conference|summit|forum|congress|symposium|expo|mipim|ihif)\b')
+
+
+def _extract_trip_cities(event: dict) -> tuple:
+    """Extract (origin_city, dest_city) from a calendar event.
+    Returns (str|None, str|None)."""
+    title = event.get("title", "")
+    location = event.get("location", "")
+
+    # Destination: "Flight to San Francisco (LH454)" → "San Francisco"
+    dest_city = None
+    to_match = _FLIGHT_TO_RE.search(title)
+    if to_match:
+        dest_city = to_match.group(1).strip()
+
+    # Check title for IATA → city
+    if not dest_city:
+        for code_match in _IATA_CODE_RE.finditer(title):
+            code = code_match.group(1)
+            if code in _IATA_TO_CITY:
+                dest_city = _IATA_TO_CITY[code]
+                break
+
+    # Origin from location field ("Vienna VIE" or "FRA")
+    origin_city = None
+    for code_match in _IATA_CODE_RE.finditer(location):
+        code = code_match.group(1)
+        if code in _IATA_TO_CITY:
+            origin_city = _IATA_TO_CITY[code]
+            break
+
+    # If destination is an IATA code, resolve it
+    if dest_city and dest_city.upper() in _IATA_TO_CITY:
+        dest_city = _IATA_TO_CITY[dest_city.upper()]
+
+    return (origin_city, dest_city)
+
+
+def _classify_trip_category(dest_city: str, home_cities: str, commute_cities: str) -> str:
+    """Classify a destination into a trip category. Returns category or None (no trip card).
+    home_cities/commute_cities are comma-separated strings."""
+    if not dest_city:
+        return None
+    home_list = [c.strip().lower() for c in (home_cities or "").split(",") if c.strip()]
+    commute_list = [c.strip().lower() for c in (commute_cities or "").split(",") if c.strip()]
+    dl = dest_city.lower()
+    if dl in home_list:
+        return None  # Going home — no trip card
+    if dl in commute_list:
+        return "meeting"  # Commute — logistics only
+    return "meeting"  # Default; user can toggle to event/personal
+
+
+def _match_trip(active_trips: list, event_data: dict, dest_city: str) -> dict:
+    """Find existing trip matching this event by calendar_event_id or dest+date."""
+    cal_id = event_data.get("calendar_event_id", "")
+    for trip in active_trips:
+        # Match by calendar event ID
+        if cal_id and cal_id in (trip.get("calendar_event_ids") or []):
+            return trip
+        # Match by destination + date proximity
+        if dest_city and trip.get("destination"):
+            if dest_city.lower() == trip["destination"].lower():
+                return trip
+    return None
 
 
 def _get_morning_narrative(fire_count: int, deadline_count: int,

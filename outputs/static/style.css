@@ -116,6 +116,7 @@ body {
 .nav-dot.green { background: var(--green); }
 .nav-dot.slate { background: var(--slate); }
 .nav-dot.lgray { background: var(--lgray); }
+.nav-dot.blue { background: var(--blue); }
 
 /* === RIGHT AREA === */
 .right-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }

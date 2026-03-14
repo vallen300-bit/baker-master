@@ -1193,7 +1193,9 @@ function renderAlertCard(alert, expanded) {
     return html;
 }
 
-// TRAVEL-FIX-2: Route card for flights/travel events
+// TRAVEL-FIX-2 + TRIP-INTELLIGENCE-1: Route card for flights/travel events
+var _CATEGORY_LABELS = { meeting: 'MTG', event: 'EVT', personal: 'PER' };
+
 function renderTravelCard(t) {
     var startTime = '';
     var endTime = '';
@@ -1236,15 +1238,23 @@ function renderTravelCard(t) {
     var destIataMatch = destination.match(/\b([A-Z]{3})\b/);
     if (destIataMatch) destIata = destIataMatch[1];
 
-    // Time-based dot: green=past, amber=in progress, gray=upcoming
-    var now = new Date();
+    // TRIP-INTELLIGENCE-1: Trip status dot overrides time-based dot
     var dotClass = 'lgray';
-    try {
-        var evStart = new Date(t.start);
-        var evEnd = t.end ? new Date(t.end) : null;
-        if (evEnd && now > evEnd) dotClass = 'green';
-        else if (now >= evStart) dotClass = 'amber';
-    } catch(e) {}
+    if (t.trip_status) {
+        if (t.trip_status === 'planned') dotClass = 'blue';
+        else if (t.trip_status === 'confirmed') dotClass = 'green';
+        else if (t.trip_status === 'discarded') dotClass = 'red';
+        else if (t.trip_status === 'completed') dotClass = 'amber';
+    } else {
+        // Time-based dot: green=past, amber=in progress, gray=upcoming
+        var now = new Date();
+        try {
+            var evStart = new Date(t.start);
+            var evEnd = t.end ? new Date(t.end) : null;
+            if (evEnd && now > evEnd) dotClass = 'green';
+            else if (now >= evStart) dotClass = 'amber';
+        } catch(e) {}
+    }
 
     // Route display
     var routeStr = '';
@@ -1258,6 +1268,12 @@ function renderTravelCard(t) {
         routeStr = esc(destination);
     }
 
+    // TRIP-INTELLIGENCE-1: Category badge
+    var catBadge = '';
+    if (t.trip_category && _CATEGORY_LABELS[t.trip_category]) {
+        catBadge = ' <span style="font-size:9px;font-weight:600;color:var(--text3);background:var(--bg2);padding:1px 4px;border-radius:3px;margin-left:6px;">' + _CATEGORY_LABELS[t.trip_category] + '</span>';
+    }
+
     // Detail line: flight number, airline hint, duration
     var detailParts = [];
     if (flightNum) detailParts.push(esc(flightNum));
@@ -1265,16 +1281,24 @@ function renderTravelCard(t) {
     if (endTime && dotClass !== 'green') detailParts.push('arr ' + endTime);
     var detailStr = detailParts.join(' &middot; ');
 
+    // TRIP-INTELLIGENCE-1: Click → trip view if trip exists, else toggle notes
     var hasNotes = t.prep_notes && t.prep_notes.trim().length > 0;
-    var clickAttr = hasNotes ? ' onclick="var n=this.querySelector(\'.prep-notes\');n.style.display=n.style.display===\'none\'?\'block\':\'none\'" style="cursor:pointer;"' : '';
-    var chevron = hasNotes ? ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span>' : '';
-    var notesHtml = hasNotes
+    var clickAttr = '';
+    var chevron = '';
+    if (t.trip_id) {
+        clickAttr = ' onclick="showTripView(' + t.trip_id + ')" style="cursor:pointer;"';
+        chevron = ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9656;</span>';
+    } else if (hasNotes) {
+        clickAttr = ' onclick="var n=this.querySelector(\'.prep-notes\');n.style.display=n.style.display===\'none\'?\'block\':\'none\'" style="cursor:pointer;"';
+        chevron = ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span>';
+    }
+    var notesHtml = hasNotes && !t.trip_id
         ? '<div class="prep-notes" style="display:none;font-size:12px;color:var(--text2);padding:8px 18px 12px 18px;line-height:1.5;white-space:pre-wrap;border-top:1px solid var(--border-light);margin-top:4px;">' + esc(t.prep_notes).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') + '</div>'
         : '';
 
     return '<div class="card card-compact"' + clickAttr + '><div class="card-header">' +
         '<span class="nav-dot ' + dotClass + '" style="margin-top:5px;"></span>' +
-        '<span class="card-title">' + routeStr + chevron + '</span>' +
+        '<span class="card-title">' + routeStr + catBadge + chevron + '</span>' +
         '<span class="card-time">' + esc(startTime) + '</span>' +
         '</div>' +
         (detailStr ? '<div class="card-body" style="font-size:11px;color:var(--text3);padding:2px 0 4px 18px;">' + detailStr + '</div>' : '') +
@@ -3076,51 +3100,92 @@ async function loadTravelTab() {
     if (!container) return;
     showLoading(container, 'Loading travel items');
     try {
-        var resp = await bakerFetch('/api/alerts/by-tag/travel');
-        if (!resp.ok) return;
-        var data = await resp.json();
-
-        if (!data.items || data.items.length === 0) {
-            container.textContent = 'No travel alerts. Travel-related emails and bookings will appear here when detected.';
-            container.style.cssText = 'color:var(--text3);font-size:13px;';
-            return;
-        }
-
-        // Split into upcoming and past
-        var now = new Date();
-        now.setHours(0, 0, 0, 0);
-        var upcoming = [];
-        var past = [];
-        for (var i = 0; i < data.items.length; i++) {
-            var item = data.items[i];
-            if (item.travel_date) {
-                var td = new Date(item.travel_date);
-                if (td < now) { past.push(item); continue; }
-            }
-            upcoming.push(item);
-        }
+        // Fetch trips and alerts in parallel
+        var [tripsResp, alertsResp] = await Promise.all([
+            bakerFetch('/api/trips'),
+            bakerFetch('/api/alerts/by-tag/travel'),
+        ]);
 
         container.textContent = '';
+        var hasContent = false;
 
-        if (upcoming.length > 0) {
-            var upLabel = document.createElement('div');
-            upLabel.style.cssText = 'font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--text3);margin:0 0 8px;';
-            upLabel.textContent = 'Upcoming (' + upcoming.length + ')';
-            container.appendChild(upLabel);
-            var upDiv = document.createElement('div');
-            setSafeHTML(upDiv, upcoming.map(function(a) { return renderAlertCard(a, false); }).join(''));
-            container.appendChild(upDiv);
+        // TRIP-INTELLIGENCE-1: Show trips section
+        if (tripsResp.ok) {
+            var tripsData = await tripsResp.json();
+            var trips = tripsData.trips || [];
+            if (trips.length > 0) {
+                hasContent = true;
+                var tripsLabel = document.createElement('div');
+                tripsLabel.style.cssText = 'font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--text3);margin:0 0 8px;';
+                tripsLabel.textContent = 'Trips (' + trips.length + ')';
+                container.appendChild(tripsLabel);
+
+                var tripsDiv = document.createElement('div');
+                var tripsHtml = trips.map(function(trip) {
+                    var statusColor = _tripStatusColors[trip.status] || 'var(--text3)';
+                    var catLabel = _tripCategoryLabels[trip.category] || '';
+                    var dateStr = trip.start_date || '';
+                    if (trip.end_date && trip.end_date !== trip.start_date) dateStr += ' — ' + trip.end_date;
+                    return '<div class="card card-compact" onclick="showTripView(' + trip.id + ')" style="cursor:pointer;"><div class="card-header">' +
+                        '<span class="nav-dot" style="margin-top:5px;background:' + statusColor + ';"></span>' +
+                        '<span class="card-title">' + esc(trip.destination || 'Trip') +
+                        (catLabel ? ' <span style="font-size:9px;font-weight:600;color:var(--text3);background:var(--bg2);padding:1px 4px;border-radius:3px;margin-left:6px;">' + esc(catLabel) + '</span>' : '') +
+                        ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9656;</span></span>' +
+                        '<span class="card-time">' + esc(dateStr) + '</span>' +
+                        '</div>' +
+                        (trip.origin ? '<div class="card-body" style="font-size:11px;color:var(--text3);padding:2px 0 4px 18px;">From: ' + esc(trip.origin) + '</div>' : '') +
+                        '</div>';
+                }).join('');
+                setSafeHTML(tripsDiv, tripsHtml);
+                container.appendChild(tripsDiv);
+            }
         }
 
-        if (past.length > 0) {
-            var pastLabel = document.createElement('div');
-            pastLabel.style.cssText = 'font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--text4);margin:16px 0 8px;';
-            pastLabel.textContent = 'Past (' + past.length + ')';
-            container.appendChild(pastLabel);
-            var pastDiv = document.createElement('div');
-            pastDiv.style.opacity = '0.5';
-            setSafeHTML(pastDiv, past.map(function(a) { return renderAlertCard(a, false); }).join(''));
-            container.appendChild(pastDiv);
+        // Show travel alerts
+        if (alertsResp.ok) {
+            var data = await alertsResp.json();
+            var items = data.items || [];
+            if (items.length > 0) {
+                hasContent = true;
+                var now = new Date();
+                now.setHours(0, 0, 0, 0);
+                var upcoming = [];
+                var past = [];
+                for (var i = 0; i < items.length; i++) {
+                    var item = items[i];
+                    if (item.travel_date) {
+                        var td = new Date(item.travel_date);
+                        if (td < now) { past.push(item); continue; }
+                    }
+                    upcoming.push(item);
+                }
+
+                if (upcoming.length > 0) {
+                    var upLabel = document.createElement('div');
+                    upLabel.style.cssText = 'font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--text3);margin:16px 0 8px;';
+                    upLabel.textContent = 'Travel Alerts — Upcoming (' + upcoming.length + ')';
+                    container.appendChild(upLabel);
+                    var upDiv = document.createElement('div');
+                    setSafeHTML(upDiv, upcoming.map(function(a) { return renderAlertCard(a, false); }).join(''));
+                    container.appendChild(upDiv);
+                }
+
+                if (past.length > 0) {
+                    var pastLabel = document.createElement('div');
+                    pastLabel.style.cssText = 'font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--text4);margin:16px 0 8px;';
+                    pastLabel.textContent = 'Travel Alerts — Past (' + past.length + ')';
+                    container.appendChild(pastLabel);
+                    var pastDiv = document.createElement('div');
+                    pastDiv.style.opacity = '0.5';
+                    setSafeHTML(pastDiv, past.map(function(a) { return renderAlertCard(a, false); }).join(''));
+                    container.appendChild(pastDiv);
+                }
+            }
+        }
+
+        if (!hasContent) {
+            container.textContent = 'No trips or travel alerts. Travel-related items will appear here when detected.';
+            container.style.cssText = 'color:var(--text3);font-size:13px;';
         }
     } catch (e) {
         container.textContent = 'Failed to load travel items.';
@@ -3980,4 +4045,201 @@ function showUploadStatus(el, state, message) {
     el.hidden = false;
     el.className = 'upload-status ' + state;
     el.textContent = message;
+}
+
+// ═══ TRIP-INTELLIGENCE-1: Full-screen Trip View ═══
+// All user-provided values escaped via esc() (DOM-based HTML escaper at line 299)
+
+var _tripStatusColors = { planned: 'var(--blue, #0a6fdb)', confirmed: 'var(--green, #22c55e)', discarded: 'var(--red, #ef4444)', completed: 'var(--amber, #f59e0b)' };
+var _tripCategoryLabels = { meeting: 'Meeting', event: 'Event', personal: 'Personal' };
+
+async function showTripView(tripId) {
+    var container = document.getElementById('tripDetailContent');
+    var tripView = document.getElementById('viewTripDetail');
+    if (!container || !tripView) return;
+
+    // Hide all views, show trip view
+    document.querySelectorAll('.view').forEach(function(v) { v.classList.remove('active'); });
+    tripView.style.display = 'block';
+    tripView.classList.add('active');
+    container.textContent = 'Loading trip...';
+
+    // Show back button
+    var backBtn = document.getElementById('cmdBack');
+    if (backBtn) backBtn.hidden = false;
+
+    try {
+        var resp = await bakerFetch('/api/trips/' + tripId);
+        if (!resp.ok) {
+            container.textContent = 'Trip not found.';
+            return;
+        }
+        var trip = await resp.json();
+        setSafeHTML(container, renderTripView(trip));
+    } catch (e) {
+        container.textContent = 'Failed to load trip: ' + e.message;
+    }
+}
+
+function hideTripView() {
+    var tripView = document.getElementById('viewTripDetail');
+    if (tripView) {
+        tripView.style.display = 'none';
+        tripView.classList.remove('active');
+    }
+    switchTab('morning-brief');
+}
+
+function renderTripView(trip) {
+    var statusColor = _tripStatusColors[trip.status] || 'var(--text3)';
+    var startStr = trip.start_date || '';
+    var endStr = trip.end_date || '';
+    var dateRange = startStr;
+    if (endStr && endStr !== startStr) dateRange += ' — ' + endStr;
+
+    var html = '';
+
+    // Back button
+    html += '<div style="margin-bottom:16px;">';
+    html += '<button onclick="hideTripView()" style="background:none;border:none;color:var(--blue);cursor:pointer;font-size:13px;font-family:var(--font);padding:0;">&larr; Back to Dashboard</button>';
+    html += '</div>';
+
+    // Header
+    html += '<div style="margin-bottom:24px;">';
+    html += '<div style="display:flex;align-items:baseline;gap:12px;margin-bottom:8px;">';
+    html += '<h2 style="margin:0;font-size:22px;font-weight:700;">' + esc(trip.destination || 'Trip') + '</h2>';
+    html += '<span style="color:' + statusColor + ';font-size:13px;font-weight:600;text-transform:capitalize;">' + esc(trip.status || 'planned') + '</span>';
+    html += '</div>';
+    if (dateRange) html += '<div style="font-size:13px;color:var(--text3);margin-bottom:4px;">' + esc(dateRange) + '</div>';
+    if (trip.origin) html += '<div style="font-size:13px;color:var(--text3);">From: ' + esc(trip.origin) + '</div>';
+    if (trip.event_name) html += '<div style="font-size:13px;color:var(--text2);margin-top:4px;">' + esc(trip.event_name) + '</div>';
+    html += '</div>';
+
+    // Status + Category controls
+    html += '<div style="display:flex;gap:24px;margin-bottom:24px;flex-wrap:wrap;">';
+
+    // Status buttons
+    html += '<div><span style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;">Status</span><div style="display:flex;gap:6px;margin-top:6px;">';
+    ['planned', 'confirmed', 'completed', 'discarded'].forEach(function(s) {
+        var active = trip.status === s;
+        var col = _tripStatusColors[s];
+        html += '<button onclick="updateTripField(' + trip.id + ',\'' + s + '\',\'status\')" style="font-size:12px;font-family:var(--font);padding:4px 10px;border-radius:4px;cursor:pointer;border:1px solid ' + (active ? col : 'var(--border)') + ';background:' + (active ? col : 'transparent') + ';color:' + (active ? '#fff' : 'var(--text2)') + ';">' + s.charAt(0).toUpperCase() + s.slice(1) + '</button>';
+    });
+    html += '</div></div>';
+
+    // Category buttons
+    html += '<div><span style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;">Category</span><div style="display:flex;gap:6px;margin-top:6px;">';
+    ['meeting', 'event', 'personal'].forEach(function(c) {
+        var active = trip.category === c;
+        html += '<button onclick="updateTripField(' + trip.id + ',\'' + c + '\',\'category\')" style="font-size:12px;font-family:var(--font);padding:4px 10px;border-radius:4px;cursor:pointer;border:1px solid ' + (active ? 'var(--blue)' : 'var(--border)') + ';background:' + (active ? 'var(--blue)' : 'transparent') + ';color:' + (active ? '#fff' : 'var(--text2)') + ';">' + esc(_tripCategoryLabels[c]) + '</button>';
+    });
+    html += '</div></div>';
+    html += '</div>';
+
+    // Strategic objective
+    html += '<div style="margin-bottom:24px;">';
+    html += '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Strategic Objective</div>';
+    html += '<div id="tripObjective" style="font-size:13px;color:var(--text2);padding:10px 12px;background:var(--bg2);border-radius:6px;min-height:36px;cursor:pointer;" onclick="editTripObjective(' + trip.id + ')" title="Click to edit">';
+    html += trip.strategic_objective ? esc(trip.strategic_objective) : '<span style="color:var(--text3);font-style:italic;">Click to add objective...</span>';
+    html += '</div></div>';
+
+    // Trip cards placeholder (8 cards for Batch 2)
+    var cardTitles = ['Logistics', 'Agenda', 'People', 'Pre-reading', 'Radar', 'Timezone & Weather', 'Outreach', 'Outcomes'];
+    html += '<div style="margin-bottom:24px;">';
+    html += '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Trip Cards</div>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;">';
+    cardTitles.forEach(function(title) {
+        html += '<div style="padding:16px;background:var(--bg2);border-radius:8px;border:1px solid var(--border);">';
+        html += '<div style="font-size:13px;font-weight:600;color:var(--text1);margin-bottom:4px;">' + esc(title) + '</div>';
+        html += '<div style="font-size:11px;color:var(--text3);">Coming in Batch 2</div>';
+        html += '</div>';
+    });
+    html += '</div></div>';
+
+    // Notes section
+    html += '<div style="margin-bottom:24px;">';
+    html += '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Notes</div>';
+    var notes = trip.notes || [];
+    if (notes.length > 0) {
+        notes.forEach(function(n) {
+            var ts = n.timestamp ? new Date(n.timestamp).toLocaleDateString() : '';
+            html += '<div style="padding:8px 12px;background:var(--bg2);border-radius:6px;margin-bottom:6px;font-size:13px;">';
+            html += '<div style="color:var(--text1);">' + esc(n.text || '') + '</div>';
+            if (ts || n.source) html += '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + esc(ts) + (n.source ? ' · ' + esc(n.source) : '') + '</div>';
+            html += '</div>';
+        });
+    }
+    html += '<form onsubmit="addTripNote(event,' + trip.id + ')" style="display:flex;gap:8px;margin-top:8px;">';
+    html += '<input id="tripNoteInput" type="text" placeholder="Add a note..." style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:var(--font);outline:none;background:var(--bg1);color:var(--text1);" />';
+    html += '<button type="submit" style="padding:6px 14px;background:var(--blue);color:#fff;border:none;border-radius:6px;font-size:12px;font-family:var(--font);cursor:pointer;">Add</button>';
+    html += '</form>';
+    html += '</div>';
+
+    // Contacts section (populated by Batch 3)
+    if (trip.contacts && trip.contacts.length > 0) {
+        html += '<div style="margin-bottom:24px;">';
+        html += '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Trip Contacts</div>';
+        trip.contacts.forEach(function(c) {
+            html += '<div style="padding:8px 12px;background:var(--bg2);border-radius:6px;margin-bottom:4px;font-size:13px;">';
+            html += esc(c.contact_name || 'Unknown');
+            if (c.role) html += ' <span style="color:var(--text3);">(' + esc(c.role) + ')</span>';
+            html += '</div>';
+        });
+        html += '</div>';
+    }
+
+    return html;
+}
+
+async function updateTripField(tripId, value, field) {
+    try {
+        var body = {};
+        body[field] = value;
+        var resp = await bakerFetch('/api/trips/' + tripId, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (resp.ok) showTripView(tripId);  // Refresh
+    } catch (e) {
+        console.error('Failed to update trip:', e);
+    }
+}
+
+async function addTripNote(event, tripId) {
+    event.preventDefault();
+    var input = document.getElementById('tripNoteInput');
+    if (!input || !input.value.trim()) return;
+    try {
+        var resp = await bakerFetch('/api/trips/' + tripId + '/note', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: input.value.trim() }),
+        });
+        if (resp.ok) {
+            input.value = '';
+            showTripView(tripId);  // Refresh
+        }
+    } catch (e) {
+        console.error('Failed to add note:', e);
+    }
+}
+
+async function editTripObjective(tripId) {
+    var el = document.getElementById('tripObjective');
+    if (!el) return;
+    var current = el.textContent.trim();
+    if (current === 'Click to add objective...') current = '';
+    var newVal = prompt('Strategic objective for this trip:', current);
+    if (newVal === null) return;
+    try {
+        var resp = await bakerFetch('/api/trips/' + tripId, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ strategic_objective: newVal }),
+        });
+        if (resp.ok) showTripView(tripId);
+    } catch (e) {
+        console.error('Failed to update objective:', e);
+    }
 }

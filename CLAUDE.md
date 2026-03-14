@@ -206,7 +206,8 @@ baker-projects, sentinel-interactions, sentinel-email, sentinel-meetings, sentin
 `director_preferences` (STEP3), `capability_sets` (AGENT-FRAMEWORK-1),
 `capability_runs` (AGENT-FRAMEWORK-1), `decomposition_log` (AGENT-FRAMEWORK-1),
 `documents` (SPECIALIST-UPGRADE-1A), `document_extractions` (SPECIALIST-UPGRADE-1B),
-`baker_insights` (SPECIALIST-UPGRADE-1B)
+`baker_insights` (SPECIALIST-UPGRADE-1B),
+`trips` (TRIP-INTELLIGENCE-1), `trip_contacts` (TRIP-INTELLIGENCE-1)
 
 ## Architecture: Role Division (Baker vs Cowork)
 
@@ -360,7 +361,8 @@ See `BRIEF_PHASE_4_SCOPE.md` for full scope document.
 - ~~**Extraction validation:**~~ DONE (Session 23) — 14 Pydantic models, validated column, amount coercion
 - ~~**Travel card bug (flights vanishing):**~~ DONE (Session 23) — poll_todays_meetings(), dedicated travel_alerts query
 - ~~**Travel/Meeting grid split:**~~ DONE (Session 23) — route card renderer, Travel | Fires | Deadlines | Meetings layout
-- **TRIP-INTELLIGENCE-1:** Full travel ROI engine — 4 batches, brief approved. Next major feature.
+- ~~**TRIP-INTELLIGENCE-1 Batch 0+1:**~~ DONE (Session 24) — trips+trip_contacts tables, city extraction, auto-detection in morning brief, 5 API endpoints, full-screen trip view, route card enhancements
+- **TRIP-INTELLIGENCE-1 Batch 2+3:** Trip intelligence cards, people intelligence, Proxycurl LinkedIn. Next major feature.
 - **OBLIGATIONS-UNIFY-1:** Merge commitments + deadlines into one table with severity. Brief needed.
 - **Proxycurl LinkedIn integration:** ~EUR 40/month, needed for TRIP-INTELLIGENCE-1 Batch 3. Account setup required.
 
@@ -401,6 +403,7 @@ Sessions 1-16 archived in `SESSION_LOG.md`. One-liner summaries:
 | 21 | Mar 13 | **10/10 sentinels HEALTHY**: missing `import re` (pipeline.py), datetime hoist (dropbox), circuit breaker reset endpoint, auto-matter assignment on all alerts, last_contact_date backfill (9/11 VIPs), cost tracking verified (EUR 8.98/day) |
 | 22 | Mar 14 | Calendar cascade fix, doc pipeline re-queuing fix, briefing data bugs, DB cleanup (9,636 junk alerts). GCal cleanup (988 Baker Prep events). |
 | 23 | Mar 14 | **EXTRACTION-VALIDATION-1**: 14 Pydantic models (13 types + travel_booking), validate_extraction(), amount coercion (European format). **TRAVEL-FIX-1+2**: flights visible all day (poll_todays_meetings), travel/meeting grid split, route card renderer (origin→dest, time-based dots). **TRIP-INTELLIGENCE-1 brief**: full travel ROI engine designed with Director. |
+| 24 | Mar 14 | **TRIP-INTELLIGENCE-1 Batch 0+1**: trips + trip_contacts tables, IATA city extraction, auto-detection in morning brief, trip lifecycle automation, 5 REST endpoints, full-screen trip view with status/category/notes, route card trip status colors + category badges, Travel tab shows trips. |
 
 ## Key Documents (Dropbox)
 
