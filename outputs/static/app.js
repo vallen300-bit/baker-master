@@ -466,10 +466,18 @@ async function loadMorningBrief() {
         }
         var data = await resp.json();
 
-        setText('statUnanswered', data.unanswered_count || 0);
-        setText('statFires', data.fire_count || 0);
-        setText('statDeadlines', data.deadline_count || 0);
-        setText('statMeetings', data.meeting_count || 0);
+        // Unanswered badge in greeting line
+        var uBadge = document.getElementById('unansweredBadge');
+        if (uBadge) {
+            var uCount = data.unanswered_count || 0;
+            if (uCount > 0) {
+                uBadge.textContent = uCount + ' awaiting reply';
+                uBadge.className = 'unanswered-badge has-items';
+                uBadge.hidden = false;
+            } else {
+                uBadge.hidden = true;
+            }
+        }
 
         var narEl = document.getElementById('briefNarrative');
         if (narEl && data.narrative) setSafeHTML(narEl, md(data.narrative));

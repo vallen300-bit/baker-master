@@ -188,21 +188,14 @@ body {
 }
 .brief-narrative strong { color: var(--text); font-weight: 600; }
 
-/* Stats row */
-.stats { display: flex; gap: 14px; margin-bottom: 28px; }
-.stat {
-  flex: 1; background: var(--card-muted); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 20px 20px; box-shadow: var(--shadow-sm);
+/* Unanswered badge (inline in greeting) */
+.unanswered-badge {
+  font-size: 12px; font-weight: 500; color: var(--text3);
+  background: var(--bg2); border: 1px solid var(--border);
+  padding: 3px 10px; border-radius: var(--radius-pill);
+  margin-left: 12px; font-family: var(--mono); letter-spacing: 0.3px;
 }
-.stat-num {
-  font-size: 32px; font-weight: 700; letter-spacing: -1px; color: var(--text);
-}
-/* Stat numbers: all one color (no red/amber in UI chrome) — tier dots handle semantics */
-.stat-num.red, .stat-num.amber, .stat-num.blue, .stat-num.green { color: var(--text); }
-.stat-label {
-  font-family: var(--mono); font-size: 11px; font-weight: 600;
-  text-transform: uppercase; letter-spacing: 0.8px; color: var(--text3); margin-top: 4px;
-}
+.unanswered-badge.has-items { color: var(--amber); border-color: var(--amber); background: rgba(245,158,11,0.06); }
 
 /* Quick actions */
 .quick-row { display: flex; gap: 8px; margin-bottom: 24px; flex-wrap: wrap; }
@@ -254,11 +247,12 @@ body {
   font-family: var(--font);
 }
 .grid-cell-count {
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text3);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  color: var(--text);
 }
+.grid-cell-count:empty { display: none; }
 .grid-cell-body {
   padding: 8px 12px;
   overflow-y: auto;
