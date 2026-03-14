@@ -173,8 +173,14 @@ _EXTRACTION_SCHEMAS = {
 }
 
 _EXTRACT_PROMPT = """Extract structured data from this {doc_type}.
-Return ONLY valid JSON with these fields: {schema}
-Use null for fields you cannot determine. Use EUR for all amounts.
+Return ONLY valid JSON with **EXACTLY** these fields: {schema}
+
+Rules:
+- Use null for fields you cannot determine.
+- Use EUR for all amounts (numeric values, not strings).
+- Dates as ISO strings (YYYY-MM-DD).
+- Do NOT add any fields not listed above (no _notes, no _confidence_notes, no commentary).
+- Do NOT wrap values in explanation text — just the value.
 
 Additionally, include a "_confidence" field with value "high", "medium", or "low":
 - "high": document is clear, fields are unambiguous, amounts/dates are explicit
@@ -231,10 +237,15 @@ def extract_document(doc_id: int, full_text: str, document_type: str) -> Optiona
         if confidence not in ("high", "medium", "low"):
             confidence = "medium"
 
+        # Validate and normalize via Pydantic schema
+        from tools.extraction_schemas import validate_extraction
+        validated_data, is_validated = validate_extraction(document_type, structured)
+
         # Store extraction
-        _store_extraction(doc_id, document_type, structured, confidence=confidence)
-        logger.info(f"Extracted doc {doc_id}: type={document_type}, confidence={confidence}, fields={len(structured)}")
-        return structured
+        _store_extraction(doc_id, document_type, validated_data, confidence=confidence, validated=is_validated)
+        extra_count = len(validated_data.get("_extra", {})) if isinstance(validated_data.get("_extra"), dict) else 0
+        logger.info(f"Extracted doc {doc_id}: type={document_type}, confidence={confidence}, validated={is_validated}, fields={len(validated_data)}, extras={extra_count}")
+        return validated_data
 
     except Exception as e:
         logger.warning(f"Document extraction failed for doc {doc_id}: {e}")
@@ -515,7 +526,7 @@ def _update_document_classification(doc_id: int, classification: dict):
         logger.warning(f"Failed to update classification for doc {doc_id}: {e}")
 
 
-def _store_extraction(doc_id: int, doc_type: str, structured: dict, confidence: str = "medium"):
+def _store_extraction(doc_id: int, doc_type: str, structured: dict, confidence: str = "medium", validated: bool = False):
     """Store extraction results in document_extractions table."""
     extraction_type = {
         "contract": "contract_terms",
@@ -542,14 +553,15 @@ def _store_extraction(doc_id: int, doc_type: str, structured: dict, confidence: 
             cur = conn.cursor()
             cur.execute("""
                 INSERT INTO document_extractions
-                    (document_id, extraction_type, structured_data, confidence, extracted_by)
-                VALUES (%s, %s, %s, %s, %s)
+                    (document_id, extraction_type, structured_data, confidence, extracted_by, validated)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (document_id, extraction_type) DO UPDATE SET
                     structured_data = EXCLUDED.structured_data,
                     confidence = EXCLUDED.confidence,
                     extracted_by = EXCLUDED.extracted_by,
+                    validated = EXCLUDED.validated,
                     created_at = NOW()
-            """, (doc_id, extraction_type, json.dumps(structured), confidence, _HAIKU_MODEL))
+            """, (doc_id, extraction_type, json.dumps(structured), confidence, _HAIKU_MODEL, validated))
             conn.commit()
             cur.close()
 

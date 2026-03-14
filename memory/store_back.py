@@ -310,6 +310,12 @@ class SentinelStoreBack:
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_doc_extractions_uq
                 ON document_extractions(document_id, extraction_type)
             """)
+            # EXTRACTION-VALIDATION-1: validated flag for Pydantic-checked rows
+            cur.execute("ALTER TABLE document_extractions ADD COLUMN IF NOT EXISTS validated BOOLEAN DEFAULT FALSE")
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_doc_extractions_validated
+                ON document_extractions(validated) WHERE validated = TRUE
+            """)
             conn.commit()
             cur.close()
         except Exception as e:
