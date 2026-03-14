@@ -2016,6 +2016,76 @@ async def get_upcoming_meetings(hours: int = Query(48, ge=1, le=168)):
 
 
 # ============================================================
+# One-time: Calendar cleanup (remove cascade [Baker Prep] junk)
+# ============================================================
+
+@app.post("/api/calendar/cleanup-baker-prep", tags=["system"], dependencies=[Depends(verify_api_key)])
+async def cleanup_baker_prep_events(dry_run: bool = Query(True)):
+    """
+    One-time cleanup: delete all [Baker Prep] cascade junk events from Google Calendar.
+    Pass ?dry_run=false to actually delete. Defaults to dry_run=true (safe).
+    """
+    try:
+        from scripts.extract_gmail import authenticate
+        from googleapiclient.discovery import build
+        from datetime import timedelta
+
+        creds = authenticate()
+        service = build("calendar", "v3", credentials=creds)
+
+        time_min = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        time_max = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+
+        page_token = None
+        found = []
+        deleted = 0
+        errors = []
+
+        while True:
+            events_result = service.events().list(
+                calendarId="primary",
+                timeMin=time_min,
+                timeMax=time_max,
+                singleEvents=True,
+                maxResults=250,
+                pageToken=page_token,
+                q="Baker Prep",
+            ).execute()
+
+            for event in events_result.get("items", []):
+                summary = event.get("summary", "")
+                if "[Baker Prep]" not in summary:
+                    continue
+                event_id = event["id"]
+                start = event.get("start", {}).get("dateTime", "?")
+                found.append({"id": event_id, "summary": summary[:100], "start": start})
+
+                if not dry_run:
+                    try:
+                        service.events().delete(
+                            calendarId="primary", eventId=event_id
+                        ).execute()
+                        deleted += 1
+                    except Exception as e:
+                        errors.append({"id": event_id, "error": str(e)})
+
+            page_token = events_result.get("nextPageToken")
+            if not page_token:
+                break
+
+        return {
+            "dry_run": dry_run,
+            "total_found": len(found),
+            "total_deleted": deleted,
+            "errors": errors,
+            "events": found[:50],  # First 50 for inspection
+        }
+    except Exception as e:
+        logger.error(f"Calendar cleanup failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
 # Phase 3C: Commitments
 # ============================================================
 
