@@ -52,6 +52,7 @@ Switch hats as needed. When coding, code. When scoping, think.
 | `memory/retriever.py` | Read-side: Qdrant vector search + PostgreSQL structured queries + **full-text enrichment (meetings, emails, documents)** |
 | `memory/store_back.py` | Write-side: PostgreSQL writes + Qdrant interaction embeddings + STEP3 director_preferences + VIP profiles + **capability framework tables** + **document storage** |
 | `tools/document_pipeline.py` | **SPECIALIST-UPGRADE-1B:** Haiku classify → extract pipeline for documents + email attachments |
+| `tools/extraction_schemas.py` | **EXTRACTION-VALIDATION-1:** 14 Pydantic v2 models, validate_extraction(), amount coercion, promotion SQL |
 
 ### API & Dashboard
 | File | Purpose |
@@ -356,6 +357,12 @@ See `BRIEF_PHASE_4_SCOPE.md` for full scope document.
 - **Document backfill:** ~3,188 Dropbox docs + ~2,000 email attachments need full-text storage + extraction (~$130 Haiku cost)
 - **File upload UI:** Dashboard upload endpoint + drag-and-drop (SPECIALIST-UPGRADE-1B Item 4)
 - **Auto-insight extraction:** Haiku call after specialist runs to store findings to baker_insights (deferred — needs testing)
+- ~~**Extraction validation:**~~ DONE (Session 23) — 14 Pydantic models, validated column, amount coercion
+- ~~**Travel card bug (flights vanishing):**~~ DONE (Session 23) — poll_todays_meetings(), dedicated travel_alerts query
+- ~~**Travel/Meeting grid split:**~~ DONE (Session 23) — route card renderer, Travel | Fires | Deadlines | Meetings layout
+- **TRIP-INTELLIGENCE-1:** Full travel ROI engine — 4 batches, brief approved. Next major feature.
+- **OBLIGATIONS-UNIFY-1:** Merge commitments + deadlines into one table with severity. Brief needed.
+- **Proxycurl LinkedIn integration:** ~EUR 40/month, needed for TRIP-INTELLIGENCE-1 Batch 3. Account setup required.
 
 ## End-of-Session Checklist
 
@@ -392,6 +399,8 @@ Sessions 1-16 archived in `SESSION_LOG.md`. One-liner summaries:
 | 19 | Mar 11 | **Dashboard UX overhaul (19 commits)**: ClaimsMax banking design, Cowork-style chat, per-matter scoping, WhatsApp send/body/intent fixes, contact disambiguation, auto-contacts from WA, action memory logging |
 | 20 | Mar 11 | **20 deliverables**: DEEP-MODE-1+2 (dashboard=max intelligence + cross-session memory), SPECIALIST-DEEP-1, INTELLIGENCE-GAP-1 (richer context, Haiku routing, retrieval reranking), CHANNEL-TRUST-1, DOC-TRIAGE+RECLASSIFY (42%→0.9% "other"), EMAIL-ATTACH-FIX-1, artifact panel, follow-up suggestions, DASHBOARD-STATS-1, Baker Data tab, VIP→Contacts, clickup_create removal |
 | 21 | Mar 13 | **10/10 sentinels HEALTHY**: missing `import re` (pipeline.py), datetime hoist (dropbox), circuit breaker reset endpoint, auto-matter assignment on all alerts, last_contact_date backfill (9/11 VIPs), cost tracking verified (EUR 8.98/day) |
+| 22 | Mar 14 | Calendar cascade fix, doc pipeline re-queuing fix, briefing data bugs, DB cleanup (9,636 junk alerts). GCal cleanup (988 Baker Prep events). |
+| 23 | Mar 14 | **EXTRACTION-VALIDATION-1**: 14 Pydantic models (13 types + travel_booking), validate_extraction(), amount coercion (European format). **TRAVEL-FIX-1+2**: flights visible all day (poll_todays_meetings), travel/meeting grid split, route card renderer (origin→dest, time-based dots). **TRIP-INTELLIGENCE-1 brief**: full travel ROI engine designed with Director. |
 
 ## Key Documents (Dropbox)
 
@@ -407,6 +416,7 @@ Sessions 1-16 archived in `SESSION_LOG.md`. One-liner summaries:
 | Agent Framework Architecture | `Baker-Project/agent-framework-architecture.html` | PM's visual architecture (reviewed, partially adopted) |
 | Specialist Upgrade 1A Brief | `briefs/BRIEF_SPECIALIST_UPGRADE_1A.md` | Full document storage + retrieval (SHIPPED) |
 | Specialist Upgrade 1B Brief | `briefs/BRIEF_SPECIALIST_UPGRADE_1B.md` | Document intelligence pipeline + shared memory (SHIPPED, backfill TODO) |
+| Trip Intelligence Brief | `briefs/BRIEF_TRIP_INTELLIGENCE_1.md` | Travel ROI engine — trip cards, conference intelligence, LinkedIn, outcomes (APPROVED) |
 
 ## Director Preferences
 
