@@ -4030,8 +4030,8 @@ class SentinelStoreBack:
                     """SELECT * FROM trips
                        WHERE LOWER(destination) = LOWER(%s)
                          AND status IN ('planned', 'confirmed')
-                         AND start_date <= %s + INTERVAL '1 day'
-                         AND (end_date IS NULL OR end_date >= %s - INTERVAL '1 day')
+                         AND start_date <= %s::date + INTERVAL '1 day'
+                         AND (end_date IS NULL OR end_date >= %s::date - INTERVAL '1 day')
                        LIMIT 1""",
                     (destination, start_date, start_date),
                 )
@@ -4043,7 +4043,7 @@ class SentinelStoreBack:
                             (existing.get("calendar_event_ids") or []) + calendar_event_ids
                         ))
                         cur.execute(
-                            "UPDATE trips SET calendar_event_ids = %s, updated_at = NOW() WHERE id = %s",
+                            "UPDATE trips SET calendar_event_ids = %s::jsonb, updated_at = NOW() WHERE id = %s",
                             (json.dumps(merged), existing["id"]),
                         )
                         conn.commit()
@@ -4055,7 +4055,7 @@ class SentinelStoreBack:
             cur.execute(
                 """INSERT INTO trips (destination, origin, category, start_date, end_date,
                                       event_name, strategic_objective, calendar_event_ids)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)
                    RETURNING *""",
                 (destination, origin, category, start_date, end_date,
                  event_name, strategic_objective, cal_ids_json),
