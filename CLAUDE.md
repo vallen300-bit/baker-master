@@ -403,7 +403,7 @@ Sessions 1-16 archived in `SESSION_LOG.md`. One-liner summaries:
 | 21 | Mar 13 | **10/10 sentinels HEALTHY**: missing `import re` (pipeline.py), datetime hoist (dropbox), circuit breaker reset endpoint, auto-matter assignment on all alerts, last_contact_date backfill (9/11 VIPs), cost tracking verified (EUR 8.98/day) |
 | 22 | Mar 14 | Calendar cascade fix, doc pipeline re-queuing fix, briefing data bugs, DB cleanup (9,636 junk alerts). GCal cleanup (988 Baker Prep events). |
 | 23 | Mar 14 | **EXTRACTION-VALIDATION-1**: 14 Pydantic models (13 types + travel_booking), validate_extraction(), amount coercion (European format). **TRAVEL-FIX-1+2**: flights visible all day (poll_todays_meetings), travel/meeting grid split, route card renderer (origin→dest, time-based dots). **TRIP-INTELLIGENCE-1 brief**: full travel ROI engine designed with Director. |
-| 24 | Mar 14 | **TRIP-INTELLIGENCE-1 Batch 0+1**: trips + trip_contacts tables, IATA city extraction, auto-detection in morning brief, trip lifecycle automation, 5 REST endpoints, full-screen trip view with status/category/notes, route card trip status colors + category badges, Travel tab shows trips. |
+| 24 | Mar 14-16 | **TRIP-INTELLIGENCE-1 Batch 0+1**: trips + trip_contacts tables, IATA city extraction, auto-detection, 5 REST endpoints, full-screen trip view, route card enhancements. **INTERACTION-PIPELINE-1**: contact_interactions populated (2,936 rows), trigger hooks on email/WA/Fireflies, daily sync. **WAHA contact sync**: 512 contacts (was 11), all typed. Stats bar → inline grid counts. Python 3.12 regex fix + VARCHAR(20) fix. Email sender metadata extraction. 9 commits, 7 deploys. |
 
 ## Key Documents (Dropbox)
 
