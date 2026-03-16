@@ -2950,7 +2950,7 @@ async function loadDeadlinesTab() {
         if (dlResp.ok) {
             var dlData = await dlResp.json();
             (dlData.deadlines || []).forEach(function(d) {
-                allItems.push({ type: 'deadline', id: d.id, description: d.description, due_date: d.due_date, source: d.source_type || 'deadline', matter: d.matter_slug, priority: d.priority, status: d.status });
+                allItems.push({ type: 'deadline', id: d.id, description: d.description, due_date: d.due_date, source: d.source_type || 'deadline', matter: d.matter_slug, priority: d.priority, status: d.status, severity: d.severity, obligation_type: d.obligation_type, assigned_to: d.assigned_to });
             });
         }
         if (cmResp.ok) {
@@ -3006,7 +3006,7 @@ async function loadDeadlinesTab() {
 
         var header = document.createElement('div');
         header.className = 'section-label';
-        header.textContent = 'Deadlines & Commitments (' + allItems.length + ')';
+        header.textContent = 'Obligations (' + allItems.length + ')';
         container.appendChild(header);
 
         function renderTimeGroup(label, items, isUrgent) {
@@ -3029,10 +3029,26 @@ async function loadDeadlinesTab() {
                 dateCol.textContent = dueStr;
                 row.appendChild(dateCol);
 
-                // RIGHT: description + source tag
+                // SEVERITY badge
+                if (item.severity) {
+                    var sevBadge = document.createElement('span');
+                    var sevColors = { hard: 'var(--red)', firm: 'var(--amber)', soft: 'var(--blue)' };
+                    var sevCol = sevColors[item.severity] || 'var(--text3)';
+                    sevBadge.style.cssText = 'font-size:9px;font-weight:600;color:' + sevCol + ';border:1px solid ' + sevCol + ';padding:1px 5px;border-radius:3px;min-width:32px;text-align:center;margin-top:2px;';
+                    sevBadge.textContent = item.severity.toUpperCase();
+                    row.appendChild(sevBadge);
+                }
+
+                // RIGHT: description + source tag + assigned_to
                 var descCol = document.createElement('div');
                 descCol.style.cssText = 'flex:1;font-size:13px;color:var(--text1);';
                 descCol.textContent = item.description || '';
+                if (item.assigned_to) {
+                    var aTag = document.createElement('span');
+                    aTag.style.cssText = 'font-size:10px;color:var(--blue);margin-left:8px;';
+                    aTag.textContent = '\u2192 ' + item.assigned_to;
+                    descCol.appendChild(aTag);
+                }
                 if (item.matter) {
                     var tag = document.createElement('span');
                     tag.style.cssText = 'font-size:10px;color:var(--text3);margin-left:8px;';
