@@ -676,6 +676,9 @@ class SentinelStoreBack:
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (message_id) DO UPDATE SET
                     full_body = EXCLUDED.full_body,
+                    sender_name = COALESCE(EXCLUDED.sender_name, email_messages.sender_name),
+                    sender_email = COALESCE(EXCLUDED.sender_email, email_messages.sender_email),
+                    subject = COALESCE(EXCLUDED.subject, email_messages.subject),
                     ingested_at = NOW()
             """, (message_id, thread_id, sender_name, sender_email,
                   subject, full_body, received_date, priority))

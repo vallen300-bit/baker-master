@@ -439,6 +439,27 @@ def format_thread(thread_data: Dict, messages: List[Dict]) -> Optional[Dict]:
     all_messages = thread_data.get("messages", [])
     all_message_ids = [m.get("id") for m in all_messages if m.get("id")]
     latest_message_id = all_message_ids[-1] if all_message_ids else thread_id
+    # INTERACTION-PIPELINE-1: Extract primary sender (most recent non-Brisen sender)
+    primary_sender = ""
+    primary_sender_email = ""
+    for msg in reversed(messages):
+        _hdrs = msg.get("payload", {}).get("headers", [])
+        _hmap = {h["name"].lower(): h["value"] for h in _hdrs}
+        _from = _hmap.get("from", "")
+        _sname, _semail = parseaddr(_from)
+        if _semail and "@brisengroup.com" not in _semail.lower():
+            primary_sender = _sname or _semail
+            primary_sender_email = _semail
+            break
+    # Fallback: use first sender if all are Brisen
+    if not primary_sender and messages:
+        _hdrs = messages[0].get("payload", {}).get("headers", [])
+        _hmap = {h["name"].lower(): h["value"] for h in _hdrs}
+        _from = _hmap.get("from", "")
+        _sname, _semail = parseaddr(_from)
+        primary_sender = _sname or _semail or ""
+        primary_sender_email = _semail or ""
+
     metadata = {
         "subject": subject,
         "date": first_date,
@@ -446,6 +467,8 @@ def format_thread(thread_data: Dict, messages: List[Dict]) -> Optional[Dict]:
         "received_date": received_date,
         "sender_domain": first_sender_domain,
         "participants": participants_str,
+        "primary_sender": primary_sender,
+        "primary_sender_email": primary_sender_email,
         "message_count": len(msg_blocks),
         "thread_id": thread_id,
         "message_id": latest_message_id,
