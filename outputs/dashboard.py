@@ -1370,11 +1370,12 @@ import re as _re
 
 # TRAVEL-FIX-2: Detect travel events from calendar title/location
 _TRAVEL_PATTERNS = _re.compile(
-    r'(?i)\b(flight|flug|fly|airport|airline|boarding|check.?in)\b'
-    r'|(?i)\b(train|zug|bahn|rail)\b'
-    r'|(?i)\b(transfer|taxi|uber|car.?rental)\b'
+    r'\b(flight|flug|fly|airport|airline|boarding|check.?in)\b'
+    r'|\b(train|zug|bahn|rail)\b'
+    r'|\b(transfer|taxi|uber|car.?rental)\b'
     r'|\b[A-Z]{2}\s?\d{2,4}\b'  # Flight numbers: LH 454, OS 201, BA 123
-    r'|\b(?:VIE|FRA|SFO|JFK|LHR|CDG|ZRH|MUC|LAX|SIN|DXB|FCO|BCN|AMS)\b'  # IATA codes
+    r'|\b(?:VIE|FRA|SFO|JFK|LHR|CDG|ZRH|MUC|LAX|SIN|DXB|FCO|BCN|AMS)\b',  # IATA codes
+    _re.IGNORECASE,
 )
 
 
@@ -1395,7 +1396,7 @@ _IATA_TO_CITY = {
 
 _FLIGHT_TO_RE = _re.compile(r'(?:flight|flug)\s+to\s+(.+?)(?:\s*\(|$)', _re.IGNORECASE)
 _IATA_CODE_RE = _re.compile(r'\b([A-Z]{3})\b')
-_CONF_KEYWORDS_RE = _re.compile(r'(?i)\b(conference|summit|forum|congress|symposium|expo|mipim|ihif)\b')
+_CONF_KEYWORDS_RE = _re.compile(r'\b(conference|summit|forum|congress|symposium|expo|mipim|ihif)\b', _re.IGNORECASE)
 
 
 def _extract_trip_cities(event: dict) -> tuple:
