@@ -2075,6 +2075,98 @@ async def backfill_interactions():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/networking/sync-whatsapp-contacts", tags=["networking"], dependencies=[Depends(verify_api_key)])
+async def sync_whatsapp_contacts():
+    """INTERACTION-PIPELINE-1: Sync WhatsApp contact names from WAHA chats.
+    Creates/updates vip_contacts and fixes phone-number-only sender_names in whatsapp_messages."""
+    try:
+        from triggers.waha_client import list_chats
+        store = _get_store()
+        import psycopg2.extras
+
+        chats = list_chats(limit=300)
+        created = 0
+        updated_names = 0
+        updated_msgs = 0
+
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+            for chat in chats:
+                chat_id = chat.get("id", "")
+                # Skip groups, broadcasts, status
+                if "@g.us" in chat_id or "status@" in chat_id or "@lid" in chat_id:
+                    continue
+
+                name = chat.get("name", "") or chat.get("pushname", "") or ""
+                if not name or name == chat_id.split("@")[0]:
+                    continue  # Still just a phone number
+
+                wa_id = chat_id  # e.g. "41799605092@c.us"
+
+                # Skip Director's own number
+                if "41799605092" in wa_id:
+                    continue
+
+                # Check if contact already exists by whatsapp_id
+                cur.execute(
+                    "SELECT id, name FROM vip_contacts WHERE whatsapp_id = %s LIMIT 1",
+                    (wa_id,),
+                )
+                existing = cur.fetchone()
+
+                if existing:
+                    # Update name if it was a phone number
+                    if existing["name"] and existing["name"].isdigit():
+                        cur.execute(
+                            "UPDATE vip_contacts SET name = %s WHERE id = %s",
+                            (name, existing["id"]),
+                        )
+                        updated_names += 1
+                else:
+                    # Create new contact
+                    cur.execute(
+                        """INSERT INTO vip_contacts (name, whatsapp_id, tier, communication_pref)
+                           VALUES (%s, %s, 3, 'whatsapp')
+                           ON CONFLICT DO NOTHING""",
+                        (name, wa_id),
+                    )
+                    if cur.rowcount > 0:
+                        created += 1
+
+                # Fix phone-number sender_names in whatsapp_messages
+                phone = wa_id.split("@")[0]
+                cur.execute(
+                    """UPDATE whatsapp_messages
+                       SET sender_name = %s
+                       WHERE (sender = %s OR chat_id = %s)
+                         AND (sender_name = %s OR sender_name = %s)""",
+                    (name, wa_id, wa_id, phone, wa_id),
+                )
+                updated_msgs += cur.rowcount
+
+            conn.commit()
+            cur.close()
+        finally:
+            store._put_conn(conn)
+
+        return {
+            "status": "ok",
+            "chats_scanned": len(chats),
+            "contacts_created": created,
+            "names_updated": updated_names,
+            "messages_fixed": updated_msgs,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Sync WhatsApp contacts failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/networking/events", tags=["networking"], dependencies=[Depends(verify_api_key)])
 async def get_networking_events():
     """List upcoming networking events."""
