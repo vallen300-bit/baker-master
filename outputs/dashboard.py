@@ -2305,6 +2305,80 @@ async def backfill_last_contact():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/obligations/migrate-commitments", tags=["obligations"], dependencies=[Depends(verify_api_key)])
+async def migrate_commitments():
+    """OBLIGATIONS-UNIFY-1: Migrate commitments into deadlines table. Idempotent."""
+    store = _get_store()
+    import psycopg2.extras
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        cur = conn.cursor()
+        # Migrate commitments → deadlines (skip if source_id already exists)
+        cur.execute("""
+            INSERT INTO deadlines (description, due_date, source_type, source_id, status,
+                                    matter_slug, assigned_to, assigned_by, severity,
+                                    obligation_type, confidence, priority, created_at)
+            SELECT
+                c.description,
+                c.due_date,
+                COALESCE(c.source_type, 'commitment'),
+                'commitment:' || c.id,
+                CASE c.status
+                    WHEN 'open' THEN 'active'
+                    WHEN 'overdue' THEN 'active'
+                    WHEN 'dismissed' THEN 'dismissed'
+                    ELSE 'active'
+                END,
+                c.matter_slug,
+                c.assigned_to,
+                c.assigned_by,
+                CASE WHEN c.due_date IS NOT NULL THEN 'firm' ELSE 'soft' END,
+                'commitment',
+                'medium',
+                'normal',
+                c.created_at
+            FROM commitments c
+            WHERE NOT EXISTS (
+                SELECT 1 FROM deadlines d WHERE d.source_id = 'commitment:' || c.id
+            )
+        """)
+        migrated = cur.rowcount
+
+        # Classify existing deadlines that don't have severity set
+        cur.execute("""
+            UPDATE deadlines SET severity = 'hard'
+            WHERE severity IS NULL OR severity = 'firm'
+              AND obligation_type IS NULL OR obligation_type = 'deadline'
+              AND (LOWER(description) LIKE '%%legal%%'
+                OR LOWER(description) LIKE '%%contract%%'
+                OR LOWER(description) LIKE '%%gewaehr%%'
+                OR LOWER(description) LIKE '%%frist%%'
+                OR LOWER(description) LIKE '%%regulatory%%'
+                OR priority = 'critical')
+        """)
+        hard_classified = cur.rowcount
+
+        conn.commit()
+        cur.close()
+
+        return {
+            "status": "ok",
+            "commitments_migrated": migrated,
+            "hard_deadlines_classified": hard_classified,
+        }
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"Migrate commitments failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        store._put_conn(conn)
+
+
 @app.post("/api/networking/backfill-interactions", tags=["networking"], dependencies=[Depends(verify_api_key)])
 async def backfill_interactions():
     """INTERACTION-PIPELINE-1: Backfill contact_interactions from emails, WhatsApp, meetings.

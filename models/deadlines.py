@@ -92,6 +92,16 @@ def ensure_tables():
             )
         """)
 
+        # OBLIGATIONS-UNIFY-1: Add severity + assignment columns for commitment merger
+        cur.execute("ALTER TABLE deadlines ADD COLUMN IF NOT EXISTS severity VARCHAR(10) DEFAULT 'firm'")
+        cur.execute("ALTER TABLE deadlines ADD COLUMN IF NOT EXISTS assigned_to TEXT")
+        cur.execute("ALTER TABLE deadlines ADD COLUMN IF NOT EXISTS assigned_by TEXT")
+        cur.execute("ALTER TABLE deadlines ADD COLUMN IF NOT EXISTS matter_slug TEXT")
+        cur.execute("ALTER TABLE deadlines ADD COLUMN IF NOT EXISTS obligation_type VARCHAR(20) DEFAULT 'deadline'")
+        # Make due_date nullable for soft commitments (no specific date)
+        cur.execute("ALTER TABLE deadlines ALTER COLUMN due_date DROP NOT NULL")
+        cur.execute("ALTER TABLE deadlines ALTER COLUMN confidence DROP NOT NULL")
+
         cur.execute("""
             CREATE TABLE IF NOT EXISTS vip_contacts (
                 id SERIAL PRIMARY KEY,
