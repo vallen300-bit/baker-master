@@ -698,6 +698,19 @@ async def waha_webhook(
     except Exception:
         pass  # Non-fatal
 
+    # TRIP-INTELLIGENCE-1: Auto-link to active trip if content mentions destination
+    try:
+        from memory.store_back import SentinelStoreBack
+        _store_tc = SentinelStoreBack._get_global_instance()
+        _wa_ts2 = datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat() if timestamp else None
+        _store_tc.link_to_trip_context(
+            content=combined_body[:500] if combined_body else "",
+            source_type="whatsapp", source_ref=f"wa:{msg_id}",
+            timestamp=_wa_ts2,
+        )
+    except Exception:
+        pass
+
     # Auto-create contact for every WhatsApp sender (WhatsApp = real people, no spam)
     if sender and sender != DIRECTOR_WHATSAPP and sender_name:
         try:

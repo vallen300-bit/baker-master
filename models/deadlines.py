@@ -196,7 +196,7 @@ def get_active_deadlines(limit: int = 50) -> list:
         cur.execute("""
             SELECT * FROM deadlines
             WHERE status IN ('active', 'pending_confirm')
-            ORDER BY due_date ASC
+            ORDER BY due_date ASC NULLS LAST
             LIMIT %s
         """, (limit,))
         rows = cur.fetchall()

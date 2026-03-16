@@ -443,6 +443,18 @@ def _process_email_threads(new_threads: list):
         except Exception:
             pass  # Non-fatal — pipeline continues
 
+        # TRIP-INTELLIGENCE-1: Auto-link to active trip if content mentions destination
+        try:
+            from memory.store_back import SentinelStoreBack
+            _store_tc = SentinelStoreBack._get_global_instance()
+            _store_tc.link_to_trip_context(
+                content=metadata.get("subject", "") + " " + thread["text"][:500],
+                source_type="email", source_ref=f"email:{message_id}",
+                timestamp=metadata.get("received_date"),
+            )
+        except Exception:
+            pass
+
         trigger = TriggerEvent(
             type="email",
             content=thread["text"],

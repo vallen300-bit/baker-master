@@ -4205,6 +4205,66 @@ class SentinelStoreBack:
         finally:
             self._put_conn(conn)
 
+    def link_to_trip_context(self, content: str, source_type: str,
+                              source_ref: str, timestamp=None) -> Optional[int]:
+        """TRIP-INTELLIGENCE-1: Auto-link content to an active trip if it mentions the destination.
+        Appends to trip.auto_context JSONB. Returns trip_id if linked, None otherwise."""
+        if not content:
+            return None
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            # Get active trips
+            cur.execute("""
+                SELECT id, destination, start_date, end_date
+                FROM trips
+                WHERE status IN ('planned', 'confirmed')
+                  AND destination IS NOT NULL
+                LIMIT 20
+            """)
+            trips = cur.fetchall()
+            content_lower = content.lower()
+
+            for trip in trips:
+                dest = (trip["destination"] or "").lower()
+                if not dest or len(dest) < 3:
+                    continue
+                if dest not in content_lower:
+                    continue
+
+                # Found a match — append to auto_context
+                ctx_entry = json.dumps({
+                    "type": source_type,
+                    "ref": source_ref,
+                    "summary": content[:200],
+                    "timestamp": str(timestamp) if timestamp else datetime.now(timezone.utc).isoformat(),
+                })
+                cur.execute(
+                    """UPDATE trips
+                       SET auto_context = auto_context || %s::jsonb,
+                           updated_at = NOW()
+                       WHERE id = %s""",
+                    (f"[{ctx_entry}]", trip["id"]),
+                )
+                conn.commit()
+                cur.close()
+                logger.debug(f"Linked content to trip #{trip['id']} ({trip['destination']})")
+                return trip["id"]
+
+            cur.close()
+            return None
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.debug(f"link_to_trip_context failed: {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
     def auto_complete_trips(self) -> int:
         """Auto-complete trips where end_date has passed. Returns count updated."""
         conn = self._get_conn()
