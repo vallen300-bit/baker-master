@@ -2308,10 +2308,6 @@ async def backfill_last_contact():
 @app.post("/api/obligations/migrate-commitments", tags=["obligations"], dependencies=[Depends(verify_api_key)])
 async def migrate_commitments():
     """OBLIGATIONS-UNIFY-1: Migrate commitments into deadlines table. Idempotent."""
-    # Ensure schema columns exist (ALTER TABLE IF NOT EXISTS)
-    from models.deadlines import ensure_tables
-    ensure_tables()
-
     store = _get_store()
     import psycopg2.extras
     conn = store._get_conn()
@@ -2319,6 +2315,15 @@ async def migrate_commitments():
         raise HTTPException(status_code=503, detail="Database unavailable")
     try:
         cur = conn.cursor()
+        # Ensure schema columns exist on the SAME connection used for migration
+        cur.execute("ALTER TABLE deadlines ADD COLUMN IF NOT EXISTS severity VARCHAR(10) DEFAULT 'firm'")
+        cur.execute("ALTER TABLE deadlines ADD COLUMN IF NOT EXISTS assigned_to TEXT")
+        cur.execute("ALTER TABLE deadlines ADD COLUMN IF NOT EXISTS assigned_by TEXT")
+        cur.execute("ALTER TABLE deadlines ADD COLUMN IF NOT EXISTS matter_slug TEXT")
+        cur.execute("ALTER TABLE deadlines ADD COLUMN IF NOT EXISTS obligation_type VARCHAR(20) DEFAULT 'deadline'")
+        cur.execute("ALTER TABLE deadlines ALTER COLUMN due_date DROP NOT NULL")
+        cur.execute("ALTER TABLE deadlines ALTER COLUMN confidence DROP NOT NULL")
+        conn.commit()
         # Migrate commitments → deadlines (skip if source_id already exists)
         cur.execute("""
             INSERT INTO deadlines (description, due_date, source_type, source_id, status,
