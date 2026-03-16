@@ -369,30 +369,23 @@ async def fireflies_backfill_endpoint():
 
 
 @app.post("/api/emails/backfill", tags=["emails"], dependencies=[Depends(verify_api_key)])
-async def email_backfill_endpoint(days: int = Query(14, ge=1, le=365)):
-    """Backfill last N days of emails from Gmail API to PostgreSQL + Qdrant."""
-    import asyncio
-    try:
-        from triggers.email_trigger import backfill_emails
-        await asyncio.to_thread(backfill_emails, days)
-
-        # Check count
+async def email_backfill_endpoint(
+    days: int = Query(14, ge=1, le=365),
+    background_tasks: BackgroundTasks = None,
+):
+    """Backfill last N days of emails from Gmail API to PostgreSQL + Qdrant.
+    Runs in background — returns immediately with job status.
+    """
+    def _run_email_backfill():
         try:
-            store = _get_store()
-            conn = store._get_conn()
-            if conn:
-                cur = conn.cursor()
-                cur.execute("SELECT COUNT(*) FROM email_messages")
-                count = cur.fetchone()[0]
-                cur.close()
-                store._put_conn(conn)
-                return {"status": "ok", "message": f"Backfill completed — {count} emails in PostgreSQL", "days": days}
-        except Exception:
-            pass
-        return {"status": "ok", "message": "Backfill completed", "days": days}
-    except Exception as e:
-        logger.error(f"Email backfill endpoint failed: {e}")
-        return {"status": "error", "message": str(e)}
+            from triggers.email_trigger import backfill_emails
+            backfill_emails(days)
+            logger.info(f"Email backfill ({days} days) completed in background")
+        except Exception as e:
+            logger.error(f"Email backfill ({days} days) failed in background: {e}")
+
+    background_tasks.add_task(_run_email_backfill)
+    return {"status": "ok", "message": f"Email backfill ({days} days) started in background", "days": days}
 
 
 @app.post("/api/whatsapp/backfill", tags=["whatsapp"], dependencies=[Depends(verify_api_key)])
