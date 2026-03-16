@@ -1418,6 +1418,19 @@ class SentinelStoreBack:
                 CREATE INDEX IF NOT EXISTS idx_contact_interactions_contact
                 ON contact_interactions (contact_id, timestamp DESC)
             """)
+            # INTERACTION-PIPELINE-1: unique constraint + performance indexes
+            cur.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_ci_source_ref
+                ON contact_interactions (source_ref) WHERE source_ref IS NOT NULL
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_ci_timestamp
+                ON contact_interactions (timestamp DESC)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_ci_direction
+                ON contact_interactions (contact_id, direction, timestamp DESC)
+            """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS networking_events (
                     id SERIAL PRIMARY KEY,
@@ -1441,6 +1454,265 @@ class SentinelStoreBack:
             except Exception:
                 pass
             logger.warning(f"Could not ensure networking tables: {e}")
+        finally:
+            self._put_conn(conn)
+
+    # -- INTERACTION-PIPELINE-1: Contact interaction extraction --
+
+    def record_interaction(self, contact_id: int, channel: str, direction: str,
+                           timestamp, subject: str = None,
+                           source_ref: str = None) -> bool:
+        """Insert a contact interaction and update last_contact_date. Idempotent by source_ref."""
+        conn = self._get_conn()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            # Insert interaction (skip if source_ref already exists)
+            cur.execute(
+                """INSERT INTO contact_interactions
+                   (contact_id, channel, direction, timestamp, subject, source_ref)
+                   VALUES (%s, %s, %s, %s, %s, %s)
+                   ON CONFLICT DO NOTHING""",
+                (contact_id, channel, direction, timestamp,
+                 (subject[:200] if subject else None), source_ref),
+            )
+            # Update last_contact_date if this is more recent
+            if cur.rowcount > 0:
+                cur.execute(
+                    """UPDATE vip_contacts
+                       SET last_contact_date = GREATEST(last_contact_date, %s)
+                       WHERE id = %s""",
+                    (timestamp, contact_id),
+                )
+            conn.commit()
+            cur.close()
+            return True
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.debug(f"record_interaction failed: {e}")
+            return False
+        finally:
+            self._put_conn(conn)
+
+    def match_contact_by_name(self, name: str, email: str = None,
+                               whatsapp_id: str = None) -> Optional[int]:
+        """Find a contact_id by name, email, or WhatsApp ID. Returns id or None."""
+        if not name and not email and not whatsapp_id:
+            return None
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor()
+            # Try exact email match first (most reliable)
+            if email:
+                cur.execute(
+                    "SELECT id FROM vip_contacts WHERE LOWER(email) = LOWER(%s) LIMIT 1",
+                    (email,),
+                )
+                row = cur.fetchone()
+                if row:
+                    cur.close()
+                    return row[0]
+
+            # Try WhatsApp ID match
+            if whatsapp_id:
+                cur.execute(
+                    "SELECT id FROM vip_contacts WHERE whatsapp_id = %s LIMIT 1",
+                    (whatsapp_id,),
+                )
+                row = cur.fetchone()
+                if row:
+                    cur.close()
+                    return row[0]
+
+            # Try exact name match
+            if name:
+                cur.execute(
+                    "SELECT id FROM vip_contacts WHERE LOWER(name) = LOWER(%s) LIMIT 1",
+                    (name,),
+                )
+                row = cur.fetchone()
+                if row:
+                    cur.close()
+                    return row[0]
+
+                # Try reversed name ("Vallen Dimitry" → "Dimitry Vallen")
+                parts = name.strip().split()
+                if len(parts) == 2:
+                    reversed_name = f"{parts[1]} {parts[0]}"
+                    cur.execute(
+                        "SELECT id FROM vip_contacts WHERE LOWER(name) = LOWER(%s) LIMIT 1",
+                        (reversed_name,),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        cur.close()
+                        return row[0]
+
+                # Try last-name match (only for multi-word names to avoid false positives)
+                if len(parts) >= 2:
+                    last_name = parts[-1]
+                    if len(last_name) >= 3:  # Skip very short last names
+                        cur.execute(
+                            """SELECT id FROM vip_contacts
+                               WHERE LOWER(name) LIKE '%%' || LOWER(%s) || '%%'
+                               LIMIT 1""",
+                            (last_name,),
+                        )
+                        row = cur.fetchone()
+                        if row:
+                            cur.close()
+                            return row[0]
+
+            cur.close()
+            return None
+        except Exception as e:
+            logger.debug(f"match_contact_by_name failed: {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
+    def backfill_interactions(self) -> dict:
+        """Backfill contact_interactions from email_messages, whatsapp_messages, meeting_transcripts.
+        Returns counts per channel. Idempotent (skips existing source_refs)."""
+        conn = self._get_conn()
+        if not conn:
+            return {"error": "no connection"}
+        try:
+            cur = conn.cursor()
+            counts = {}
+
+            # 1. Emails → interactions
+            cur.execute("""
+                INSERT INTO contact_interactions (contact_id, channel, direction, timestamp, subject, source_ref)
+                SELECT
+                    vc.id,
+                    'email',
+                    CASE WHEN LOWER(em.sender_email) LIKE '%%@brisengroup.com' THEN 'outbound' ELSE 'inbound' END,
+                    em.received_date,
+                    LEFT(em.subject, 200),
+                    'email:' || em.message_id
+                FROM email_messages em
+                JOIN vip_contacts vc ON (
+                    LOWER(em.sender_name) = LOWER(vc.name)
+                    OR LOWER(em.sender_email) = LOWER(vc.email)
+                    OR (POSITION(' ' IN vc.name) > 0 AND LOWER(em.sender_name) = LOWER(
+                        SPLIT_PART(vc.name, ' ', 2) || ' ' || SPLIT_PART(vc.name, ' ', 1)
+                    ))
+                )
+                WHERE em.received_date IS NOT NULL
+                ON CONFLICT DO NOTHING
+            """)
+            counts["email"] = cur.rowcount
+
+            # 2. WhatsApp → interactions
+            cur.execute("""
+                INSERT INTO contact_interactions (contact_id, channel, direction, timestamp, subject, source_ref)
+                SELECT
+                    vc.id,
+                    'whatsapp',
+                    CASE WHEN wm.is_director THEN 'outbound' ELSE 'inbound' END,
+                    wm.timestamp,
+                    LEFT(wm.full_text, 200),
+                    'wa:' || wm.id
+                FROM whatsapp_messages wm
+                JOIN vip_contacts vc ON (
+                    LOWER(wm.sender_name) = LOWER(vc.name)
+                    OR wm.sender = vc.whatsapp_id
+                    OR (vc.whatsapp_id IS NOT NULL AND wm.chat_id = vc.whatsapp_id)
+                )
+                WHERE wm.timestamp IS NOT NULL
+                ON CONFLICT DO NOTHING
+            """)
+            counts["whatsapp"] = cur.rowcount
+
+            # 3. Meetings → interactions
+            cur.execute("""
+                INSERT INTO contact_interactions (contact_id, channel, direction, timestamp, subject, source_ref)
+                SELECT
+                    vc.id,
+                    'meeting',
+                    'bidirectional',
+                    mt.meeting_date,
+                    LEFT(mt.title, 200),
+                    'meeting:' || mt.id || ':' || vc.id
+                FROM meeting_transcripts mt
+                JOIN vip_contacts vc ON (
+                    LOWER(mt.participants) LIKE '%%' || LOWER(vc.name) || '%%'
+                    OR (POSITION(' ' IN vc.name) > 0
+                        AND LOWER(mt.participants) LIKE '%%' || LOWER(SPLIT_PART(vc.name, ' ', 2)) || '%%')
+                )
+                WHERE mt.meeting_date IS NOT NULL
+                ON CONFLICT DO NOTHING
+            """)
+            counts["meeting"] = cur.rowcount
+
+            # 4. Sync last_contact_date from interactions
+            cur.execute("""
+                UPDATE vip_contacts vc
+                SET last_contact_date = sub.max_ts
+                FROM (
+                    SELECT contact_id, MAX(timestamp) as max_ts
+                    FROM contact_interactions
+                    GROUP BY contact_id
+                ) sub
+                WHERE vc.id = sub.contact_id
+                  AND (vc.last_contact_date IS NULL OR vc.last_contact_date < sub.max_ts)
+            """)
+            counts["contacts_updated"] = cur.rowcount
+
+            conn.commit()
+            cur.close()
+
+            total = counts.get("email", 0) + counts.get("whatsapp", 0) + counts.get("meeting", 0)
+            logger.info(f"Backfill interactions: {total} total ({counts})")
+            return counts
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"backfill_interactions failed: {e}")
+            return {"error": str(e)}
+        finally:
+            self._put_conn(conn)
+
+    def sync_last_contact_dates(self) -> int:
+        """Sync last_contact_date from contact_interactions. Returns count updated."""
+        conn = self._get_conn()
+        if not conn:
+            return 0
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE vip_contacts vc
+                SET last_contact_date = sub.max_ts
+                FROM (
+                    SELECT contact_id, MAX(timestamp) as max_ts
+                    FROM contact_interactions
+                    GROUP BY contact_id
+                ) sub
+                WHERE vc.id = sub.contact_id
+                  AND (vc.last_contact_date IS NULL OR vc.last_contact_date < sub.max_ts)
+            """)
+            count = cur.rowcount
+            conn.commit()
+            cur.close()
+            if count > 0:
+                logger.info(f"Synced last_contact_date for {count} contacts")
+            return count
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"sync_last_contact_dates failed: {e}")
+            return 0
         finally:
             self._put_conn(conn)
 

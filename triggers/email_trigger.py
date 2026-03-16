@@ -423,6 +423,26 @@ def _process_email_threads(new_threads: list):
         except Exception as _e:
             logger.warning(f"Failed to store email {message_id} to PostgreSQL (non-fatal): {_e}")
 
+        # INTERACTION-PIPELINE-1: Record contact interaction from email
+        try:
+            from memory.store_back import SentinelStoreBack
+            _store_ip = SentinelStoreBack._get_global_instance()
+            _sender_email = metadata.get("primary_sender_email", "")
+            _direction = "outbound" if _sender_email and "@brisengroup.com" in _sender_email.lower() else "inbound"
+            _cid = _store_ip.match_contact_by_name(
+                name=metadata.get("primary_sender", ""),
+                email=_sender_email,
+            )
+            if _cid:
+                _store_ip.record_interaction(
+                    contact_id=_cid, channel="email", direction=_direction,
+                    timestamp=metadata.get("received_date"),
+                    subject=metadata.get("subject", "")[:200],
+                    source_ref=f"email:{message_id}",
+                )
+        except Exception:
+            pass  # Non-fatal — pipeline continues
+
         trigger = TriggerEvent(
             type="email",
             content=thread["text"],

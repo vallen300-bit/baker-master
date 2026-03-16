@@ -243,6 +243,23 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: doc_pipeline_drain (every 2 minutes)")
 
+    # INTERACTION-PIPELINE-1: Daily last_contact_date sync from contact_interactions
+    def _sync_contact_dates():
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            store.sync_last_contact_dates()
+        except Exception as e:
+            logger.warning(f"sync_last_contact_dates failed: {e}")
+
+    scheduler.add_job(
+        _sync_contact_dates,
+        CronTrigger(hour=5, minute=0),
+        id="sync_contact_dates", name="Sync last_contact_date from interactions",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: sync_contact_dates (daily at 05:00 UTC)")
+
 
 def start_scheduler():
     """Create and start the BackgroundScheduler. Idempotent — safe to call twice."""

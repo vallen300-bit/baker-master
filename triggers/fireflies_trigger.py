@@ -229,6 +229,28 @@ def check_new_transcripts():
             except Exception as _e:
                 logger.warning(f"Failed to store transcript {source_id} in PostgreSQL (non-fatal): {_e}")
 
+            # INTERACTION-PIPELINE-1: Record contact interactions from meeting participants
+            try:
+                from memory.store_back import SentinelStoreBack
+                _store_ip = SentinelStoreBack._get_global_instance()
+                _participants_str = metadata.get("participants", "")
+                # Parse participants — typically comma-separated names
+                for _pname in _participants_str.split(","):
+                    _pname = _pname.strip()
+                    if not _pname or len(_pname) < 2:
+                        continue
+                    _cid = _store_ip.match_contact_by_name(name=_pname)
+                    if _cid:
+                        _store_ip.record_interaction(
+                            contact_id=_cid, channel="meeting",
+                            direction="bidirectional",
+                            timestamp=metadata.get("date"),
+                            subject=metadata.get("meeting_title", "")[:200],
+                            source_ref=f"meeting:{source_id}:{_cid}",
+                        )
+            except Exception:
+                pass  # Non-fatal
+
             # DEADLINE-SYSTEM-1: Extract deadlines from transcript
             try:
                 from orchestrator.deadline_manager import extract_deadlines

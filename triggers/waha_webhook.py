@@ -678,6 +678,26 @@ async def waha_webhook(
     except Exception as _e:
         logger.warning(f"Failed to store WhatsApp msg {msg_id} to PostgreSQL (non-fatal): {_e}")
 
+    # INTERACTION-PIPELINE-1: Record contact interaction from WhatsApp
+    try:
+        from memory.store_back import SentinelStoreBack
+        _store_ip = SentinelStoreBack._get_global_instance()
+        _is_dir = (sender == DIRECTOR_WHATSAPP)
+        _cid = _store_ip.match_contact_by_name(
+            name=sender_name or "",
+            whatsapp_id=sender,
+        )
+        if _cid and not _is_dir:  # Don't record Director's own messages as contact interactions
+            _wa_ts = datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat() if timestamp else None
+            _store_ip.record_interaction(
+                contact_id=_cid, channel="whatsapp", direction="inbound",
+                timestamp=_wa_ts,
+                subject=(combined_body[:200] if combined_body else None),
+                source_ref=f"wa:{msg_id}",
+            )
+    except Exception:
+        pass  # Non-fatal
+
     # Auto-create contact for every WhatsApp sender (WhatsApp = real people, no spam)
     if sender and sender != DIRECTOR_WHATSAPP and sender_name:
         try:

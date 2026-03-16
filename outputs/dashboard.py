@@ -2057,6 +2057,23 @@ async def backfill_last_contact():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/networking/backfill-interactions", tags=["networking"], dependencies=[Depends(verify_api_key)])
+async def backfill_interactions():
+    """INTERACTION-PIPELINE-1: Backfill contact_interactions from emails, WhatsApp, meetings.
+    Idempotent — safe to run multiple times."""
+    try:
+        store = _get_store()
+        counts = store.backfill_interactions()
+        if "error" in counts:
+            raise HTTPException(status_code=500, detail=counts["error"])
+        return {"status": "ok", **counts}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Backfill interactions failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/networking/events", tags=["networking"], dependencies=[Depends(verify_api_key)])
 async def get_networking_events():
     """List upcoming networking events."""
