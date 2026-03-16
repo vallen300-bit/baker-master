@@ -361,10 +361,17 @@ See `BRIEF_PHASE_4_SCOPE.md` for full scope document.
 - ~~**Extraction validation:**~~ DONE (Session 23) — 14 Pydantic models, validated column, amount coercion
 - ~~**Travel card bug (flights vanishing):**~~ DONE (Session 23) — poll_todays_meetings(), dedicated travel_alerts query
 - ~~**Travel/Meeting grid split:**~~ DONE (Session 23) — route card renderer, Travel | Fires | Deadlines | Meetings layout
-- ~~**TRIP-INTELLIGENCE-1 Batch 0+1:**~~ DONE (Session 24) — trips+trip_contacts tables, city extraction, auto-detection in morning brief, 5 API endpoints, full-screen trip view, route card enhancements
-- **TRIP-INTELLIGENCE-1 Batch 2+3:** Trip intelligence cards, people intelligence, Proxycurl LinkedIn. Next major feature.
+- ~~**TRIP-INTELLIGENCE-1 Batch 0+1:**~~ DONE (Session 24) — trips+trip_contacts tables, city extraction, auto-detection, 5 API endpoints, full-screen trip view, route card enhancements
+- ~~**TRIP-INTELLIGENCE-1 Batch 2:**~~ DONE (Session 24) — 6 trip cards with real data (Logistics, Agenda, Reading, Radar, Timezone, Objective). Zero LLM cost.
+- ~~**INTERACTION-PIPELINE-1:**~~ DONE (Session 24) — contact_interactions populated (2,936+ rows), trigger hooks, daily sync, WAHA contact sync (512 contacts)
+- ~~**Stats bar cleanup:**~~ DONE (Session 24) — removed separate stats bar, counts inline in grid headers, unanswered badge
+- ~~**Python 3.12 regex fix:**~~ DONE (Session 24) — inline (?i) flags → re.IGNORECASE
+- ~~**Email sender metadata:**~~ DONE (Session 24) — format_thread() populates primary_sender, upsert COALESCE
+- **TRIP-INTELLIGENCE-1 Batch 3:** People intelligence, Proxycurl LinkedIn, conference attendees. Next major feature.
+- **TRIP-INTELLIGENCE-1 Batch 4:** Trip outcomes + Networking bridge.
 - **OBLIGATIONS-UNIFY-1:** Merge commitments + deadlines into one table with severity. Brief needed.
-- **Proxycurl LinkedIn integration:** ~EUR 40/month, needed for TRIP-INTELLIGENCE-1 Batch 3. Account setup required.
+- **Proxycurl LinkedIn integration:** ~EUR 40/month, needed for Batch 3. Account setup required.
+- **Contact enrichment:** 501 contacts default to connector/tier 3 — batch Haiku classification (~$2-3) or manual via Cowork.
 
 ## End-of-Session Checklist
 
@@ -403,7 +410,7 @@ Sessions 1-16 archived in `SESSION_LOG.md`. One-liner summaries:
 | 21 | Mar 13 | **10/10 sentinels HEALTHY**: missing `import re` (pipeline.py), datetime hoist (dropbox), circuit breaker reset endpoint, auto-matter assignment on all alerts, last_contact_date backfill (9/11 VIPs), cost tracking verified (EUR 8.98/day) |
 | 22 | Mar 14 | Calendar cascade fix, doc pipeline re-queuing fix, briefing data bugs, DB cleanup (9,636 junk alerts). GCal cleanup (988 Baker Prep events). |
 | 23 | Mar 14 | **EXTRACTION-VALIDATION-1**: 14 Pydantic models (13 types + travel_booking), validate_extraction(), amount coercion (European format). **TRAVEL-FIX-1+2**: flights visible all day (poll_todays_meetings), travel/meeting grid split, route card renderer (origin→dest, time-based dots). **TRIP-INTELLIGENCE-1 brief**: full travel ROI engine designed with Director. |
-| 24 | Mar 14-16 | **TRIP-INTELLIGENCE-1 Batch 0+1**: trips + trip_contacts tables, IATA city extraction, auto-detection, 5 REST endpoints, full-screen trip view, route card enhancements. **INTERACTION-PIPELINE-1**: contact_interactions populated (2,936 rows), trigger hooks on email/WA/Fireflies, daily sync. **WAHA contact sync**: 512 contacts (was 11), all typed. Stats bar → inline grid counts. Python 3.12 regex fix + VARCHAR(20) fix. Email sender metadata extraction. 9 commits, 7 deploys. |
+| 24 | Mar 14-16 | **Massive session (12 commits, 9 deploys).** TRIP-INTELLIGENCE-1 Batch 0+1 (trip lifecycle) + Batch 2 (6 trip cards with real data). INTERACTION-PIPELINE-1 (2,936+ interactions from email/WA/meetings). WAHA contact sync (11→512 contacts). Stats bar → inline grid counts. Python 3.12 regex fix, VARCHAR(20) fix, email sender metadata extraction. |
 
 ## Key Documents (Dropbox)
 
