@@ -2077,14 +2077,19 @@ async def backfill_interactions():
 
 @app.post("/api/networking/sync-whatsapp-contacts", tags=["networking"], dependencies=[Depends(verify_api_key)])
 async def sync_whatsapp_contacts():
-    """INTERACTION-PIPELINE-1: Sync WhatsApp contact names from WAHA chats.
-    Creates/updates vip_contacts and fixes phone-number-only sender_names in whatsapp_messages."""
+    """INTERACTION-PIPELINE-1: Sync WhatsApp contact names from WAHA contacts API.
+    Creates/updates vip_contacts and fixes phone-number-only sender_names in whatsapp_messages.
+    Uses /api/contacts/all (address book names) with list_chats as fallback."""
     try:
-        from triggers.waha_client import list_chats
+        from triggers.waha_client import list_contacts, list_chats
         store = _get_store()
         import psycopg2.extras
 
-        chats = list_chats(limit=300)
+        # Primary: WAHA contacts API (has address book names)
+        chats = list_contacts(limit=500)
+        if not chats:
+            # Fallback: chat list (may only have phone numbers)
+            chats = list_chats(limit=300)
         created = 0
         updated_names = 0
         updated_msgs = 0

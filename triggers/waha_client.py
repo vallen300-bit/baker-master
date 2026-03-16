@@ -37,6 +37,33 @@ def _rewrite_media_url(url: str) -> str:
 
 
 # ------------------------------------------------------------------
+# Contacts endpoint (INTERACTION-PIPELINE-1)
+# ------------------------------------------------------------------
+
+def list_contacts(limit: int = 500) -> list[dict]:
+    """
+    GET /api/contacts/all?session={session}&limit=N
+    Returns WhatsApp address book contacts with real display names.
+    """
+    url = f"{config.waha.base_url}/api/contacts/all"
+    params = {"session": config.waha.session, "limit": limit}
+    try:
+        with httpx.Client(timeout=30, headers=_headers()) as client:
+            resp = client.get(url, params=params)
+            resp.raise_for_status()
+        contacts = resp.json()
+        return [
+            c for c in contacts
+            if c.get("id", "").endswith("@c.us")
+            and not c.get("isGroup", False)
+            and not c.get("isMe", False)
+        ]
+    except Exception as e:
+        logger.warning(f"list_contacts failed: {e}")
+        return []
+
+
+# ------------------------------------------------------------------
 # Chat & message endpoints
 # ------------------------------------------------------------------
 
