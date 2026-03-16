@@ -369,7 +369,7 @@ async def fireflies_backfill_endpoint():
 
 
 @app.post("/api/emails/backfill", tags=["emails"], dependencies=[Depends(verify_api_key)])
-async def email_backfill_endpoint(days: int = Query(14, ge=1, le=90)):
+async def email_backfill_endpoint(days: int = Query(14, ge=1, le=365)):
     """Backfill last N days of emails from Gmail API to PostgreSQL + Qdrant."""
     import asyncio
     try:
