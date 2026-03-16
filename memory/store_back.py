@@ -1382,6 +1382,8 @@ class SentinelStoreBack:
             cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS last_contact_date TIMESTAMPTZ")
             cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS sentiment_trend VARCHAR(20)")
             cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS source_of_introduction TEXT")
+            # TRIP-INTELLIGENCE-1: location for Radar card
+            cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS primary_location VARCHAR(100)")
             conn.commit()
             cur.close()
             logger.info("vip_contacts profile + networking columns verified")

@@ -1533,17 +1533,20 @@ async def get_trip_cards(trip_id: int):
                 cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                 dest_lower = dest.lower()
                 cur.execute("""
-                    SELECT id, name, role, role_context, tier, last_contact_date
+                    SELECT id, name, role, role_context, tier, last_contact_date, primary_location
                     FROM vip_contacts
-                    WHERE (LOWER(role_context) LIKE %s
+                    WHERE (LOWER(primary_location) = %s
+                        OR LOWER(role_context) LIKE %s
                         OR LOWER(expertise) LIKE %s
                         OR LOWER(role) LIKE %s
                         OR LOWER(name) LIKE %s)
                       AND (last_contact_date IS NULL
                         OR last_contact_date < NOW() - INTERVAL '30 days')
-                    ORDER BY last_contact_date ASC NULLS FIRST
+                    ORDER BY
+                        CASE WHEN LOWER(primary_location) = %s THEN 0 ELSE 1 END,
+                        last_contact_date ASC NULLS FIRST
                     LIMIT 10
-                """, (f"%{dest_lower}%", f"%{dest_lower}%", f"%{dest_lower}%", f"%{dest_lower}%"))
+                """, (dest_lower, f"%{dest_lower}%", f"%{dest_lower}%", f"%{dest_lower}%", f"%{dest_lower}%", dest_lower))
                 for r in cur.fetchall():
                     contact = _serialize(dict(r))
                     if contact.get("last_contact_date"):
