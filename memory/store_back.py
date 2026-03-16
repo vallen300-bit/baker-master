@@ -1406,7 +1406,7 @@ class SentinelStoreBack:
                     id SERIAL PRIMARY KEY,
                     contact_id INTEGER REFERENCES vip_contacts(id),
                     channel VARCHAR(30),
-                    direction VARCHAR(10),
+                    direction VARCHAR(20),
                     timestamp TIMESTAMPTZ NOT NULL,
                     subject TEXT,
                     sentiment VARCHAR(20),
@@ -1430,6 +1430,10 @@ class SentinelStoreBack:
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_ci_direction
                 ON contact_interactions (contact_id, direction, timestamp DESC)
+            """)
+            # Migration: widen direction column for 'bidirectional' (was VARCHAR(10))
+            cur.execute("""
+                ALTER TABLE contact_interactions ALTER COLUMN direction TYPE VARCHAR(20)
             """)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS networking_events (
