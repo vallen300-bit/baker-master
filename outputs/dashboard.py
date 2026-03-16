@@ -2308,6 +2308,10 @@ async def backfill_last_contact():
 @app.post("/api/obligations/migrate-commitments", tags=["obligations"], dependencies=[Depends(verify_api_key)])
 async def migrate_commitments():
     """OBLIGATIONS-UNIFY-1: Migrate commitments into deadlines table. Idempotent."""
+    # Ensure schema columns exist (ALTER TABLE IF NOT EXISTS)
+    from models.deadlines import ensure_tables
+    ensure_tables()
+
     store = _get_store()
     import psycopg2.extras
     conn = store._get_conn()
