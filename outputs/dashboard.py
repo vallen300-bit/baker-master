@@ -1366,6 +1366,257 @@ async def add_trip_note(trip_id: int, body: TripNote):
     return {"ok": True}
 
 
+# ============================================================
+# TRIP-INTELLIGENCE-1 Batch 2: Trip Cards
+# ============================================================
+
+_CITY_TIMEZONE = {
+    'Vienna': 'Europe/Vienna', 'Frankfurt': 'Europe/Berlin', 'Zurich': 'Europe/Zurich',
+    'Geneva': 'Europe/Zurich', 'San Francisco': 'America/Los_Angeles',
+    'New York': 'America/New_York', 'London': 'Europe/London', 'Paris': 'Europe/Paris',
+    'Munich': 'Europe/Berlin', 'Los Angeles': 'America/Los_Angeles',
+    'Singapore': 'Asia/Singapore', 'Dubai': 'Asia/Dubai', 'Rome': 'Europe/Rome',
+    'Barcelona': 'Europe/Madrid', 'Amsterdam': 'Europe/Amsterdam',
+    'Palma de Mallorca': 'Europe/Madrid', 'Nice': 'Europe/Paris', 'Berlin': 'Europe/Berlin',
+}
+
+
+def _get_timezone_info(dest_city: str) -> dict:
+    """Get timezone info for a destination city."""
+    from zoneinfo import ZoneInfo
+    tz_name = _CITY_TIMEZONE.get(dest_city)
+    if not tz_name:
+        return {"tz": None, "diff": None, "local_now": None}
+    dest_tz = ZoneInfo(tz_name)
+    home_tz = ZoneInfo("Europe/Zurich")
+    now_utc = datetime.now(timezone.utc)
+    dest_now = now_utc.astimezone(dest_tz)
+    home_now = now_utc.astimezone(home_tz)
+    diff_hours = (dest_now.utcoffset().total_seconds() - home_now.utcoffset().total_seconds()) / 3600
+    diff_str = f"{diff_hours:+.0f}h" if diff_hours != 0 else "same"
+    return {
+        "tz": tz_name,
+        "diff": diff_str,
+        "diff_hours": diff_hours,
+        "local_now": dest_now.strftime("%H:%M"),
+        "home_now": home_now.strftime("%H:%M"),
+    }
+
+
+@app.get("/api/trips/{trip_id}/cards", tags=["trips"], dependencies=[Depends(verify_api_key)])
+async def get_trip_cards(trip_id: int):
+    """TRIP-INTELLIGENCE-1 Batch 2: All trip card data in one response."""
+    store = _get_store()
+    trip = store.get_trip(trip_id)
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+
+    dest = trip.get("destination", "") or ""
+    start_date = str(trip.get("start_date", "")) if trip.get("start_date") else None
+    end_date = str(trip.get("end_date", "")) if trip.get("end_date") else start_date
+    import psycopg2.extras
+
+    cards = {}
+
+    # --- Card 1: Logistics & Comms ---
+    logistics = {"emails": [], "whatsapp": [], "timezone": _get_timezone_info(dest)}
+    if dest:
+        conn = store._get_conn()
+        if conn:
+            try:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                dest_lower = dest.lower()
+                # Emails mentioning destination
+                if start_date:
+                    cur.execute("""
+                        SELECT sender_name, sender_email, subject, received_date,
+                               LEFT(full_body, 400) as snippet
+                        FROM email_messages
+                        WHERE (LOWER(subject) LIKE %s OR LOWER(full_body) LIKE %s)
+                          AND received_date >= %s::date - INTERVAL '3 days'
+                          AND received_date <= %s::date + INTERVAL '1 day'
+                        ORDER BY received_date DESC LIMIT 10
+                    """, (f"%{dest_lower}%", f"%{dest_lower}%", start_date, end_date or start_date))
+                else:
+                    cur.execute("""
+                        SELECT sender_name, sender_email, subject, received_date,
+                               LEFT(full_body, 400) as snippet
+                        FROM email_messages
+                        WHERE (LOWER(subject) LIKE %s OR LOWER(full_body) LIKE %s)
+                        ORDER BY received_date DESC LIMIT 10
+                    """, (f"%{dest_lower}%", f"%{dest_lower}%"))
+                logistics["emails"] = [_serialize(dict(r)) for r in cur.fetchall()]
+
+                # WhatsApp mentioning destination
+                if start_date:
+                    cur.execute("""
+                        SELECT sender_name, LEFT(full_text, 300) as snippet, timestamp
+                        FROM whatsapp_messages
+                        WHERE LOWER(full_text) LIKE %s
+                          AND timestamp >= %s::date - INTERVAL '7 days'
+                          AND timestamp <= %s::date + INTERVAL '1 day'
+                        ORDER BY timestamp DESC LIMIT 10
+                    """, (f"%{dest_lower}%", start_date, end_date or start_date))
+                else:
+                    cur.execute("""
+                        SELECT sender_name, LEFT(full_text, 300) as snippet, timestamp
+                        FROM whatsapp_messages
+                        WHERE LOWER(full_text) LIKE %s
+                        ORDER BY timestamp DESC LIMIT 10
+                    """, (f"%{dest_lower}%",))
+                logistics["whatsapp"] = [_serialize(dict(r)) for r in cur.fetchall()]
+                cur.close()
+            except Exception as e:
+                logger.warning(f"Trip card logistics failed: {e}")
+            finally:
+                store._put_conn(conn)
+    cards["logistics"] = logistics
+
+    # --- Card 3: Daily Agenda ---
+    agenda = {"days": []}
+    if start_date and end_date:
+        try:
+            from triggers.calendar_trigger import poll_meetings_by_date_range
+            raw_events = poll_meetings_by_date_range(start_date, end_date)
+            # Group by date
+            by_date = {}
+            for ev in raw_events:
+                ev_date = ev["start"][:10] if ev.get("start") else "unknown"
+                by_date.setdefault(ev_date, []).append(ev)
+            for date_key in sorted(by_date.keys()):
+                agenda["days"].append({"date": date_key, "events": by_date[date_key]})
+        except Exception as e:
+            logger.warning(f"Trip card agenda failed: {e}")
+    cards["agenda"] = agenda
+
+    # --- Card 5: Flight Reading ---
+    reading = {"documents": []}
+    conn = store._get_conn()
+    if conn:
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            # Recent high-priority documents
+            cur.execute("""
+                SELECT id, filename, document_type, ingested_at,
+                       LEFT(full_text, 500) as preview
+                FROM documents
+                WHERE document_type IN ('legal_opinion', 'financial_model', 'report',
+                                        'proposal', 'contract', 'correspondence')
+                  AND ingested_at >= NOW() - INTERVAL '30 days'
+                ORDER BY ingested_at DESC LIMIT 5
+            """)
+            docs = [_serialize(dict(r)) for r in cur.fetchall()]
+            seen_ids = {d["id"] for d in docs}
+
+            # Also search by destination FTS
+            if dest:
+                cur.execute("""
+                    SELECT id, filename, document_type, ingested_at,
+                           LEFT(full_text, 500) as preview
+                    FROM documents
+                    WHERE search_vector @@ plainto_tsquery('simple', %s)
+                    ORDER BY ingested_at DESC LIMIT 5
+                """, (dest,))
+                for r in cur.fetchall():
+                    d = _serialize(dict(r))
+                    if d["id"] not in seen_ids:
+                        docs.append(d)
+                        seen_ids.add(d["id"])
+
+            reading["documents"] = docs[:5]
+            cur.close()
+        except Exception as e:
+            logger.warning(f"Trip card reading failed: {e}")
+        finally:
+            store._put_conn(conn)
+    cards["reading"] = reading
+
+    # --- Card 6: Opportunistic Radar ---
+    radar = {"dormant_contacts": []}
+    if dest:
+        conn = store._get_conn()
+        if conn:
+            try:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                dest_lower = dest.lower()
+                cur.execute("""
+                    SELECT id, name, role, role_context, tier, last_contact_date
+                    FROM vip_contacts
+                    WHERE (LOWER(role_context) LIKE %s
+                        OR LOWER(expertise) LIKE %s
+                        OR LOWER(role) LIKE %s
+                        OR LOWER(name) LIKE %s)
+                      AND (last_contact_date IS NULL
+                        OR last_contact_date < NOW() - INTERVAL '30 days')
+                    ORDER BY last_contact_date ASC NULLS FIRST
+                    LIMIT 10
+                """, (f"%{dest_lower}%", f"%{dest_lower}%", f"%{dest_lower}%", f"%{dest_lower}%"))
+                for r in cur.fetchall():
+                    contact = _serialize(dict(r))
+                    if contact.get("last_contact_date"):
+                        from datetime import datetime as _dt
+                        try:
+                            lcd = _dt.fromisoformat(str(contact["last_contact_date"]))
+                            days_ago = (datetime.now(timezone.utc) - lcd).days
+                            contact["days_since_contact"] = days_ago
+                        except Exception:
+                            contact["days_since_contact"] = None
+                    else:
+                        contact["days_since_contact"] = None
+                    radar["dormant_contacts"].append(contact)
+                cur.close()
+            except Exception as e:
+                logger.warning(f"Trip card radar failed: {e}")
+            finally:
+                store._put_conn(conn)
+    cards["radar"] = radar
+
+    # --- Card 7: Europe While You Sleep ---
+    tz_card = {"vip_messages": [], "urgent_alerts": [], "deadlines": [], "timezone": _get_timezone_info(dest)}
+    conn = store._get_conn()
+    if conn:
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            # VIP messages from last 24h
+            cur.execute("""
+                SELECT wm.sender_name, LEFT(wm.full_text, 200) as snippet, wm.timestamp
+                FROM whatsapp_messages wm
+                JOIN vip_contacts vc ON wm.sender = vc.whatsapp_id
+                WHERE vc.tier <= 2
+                  AND wm.timestamp >= NOW() - INTERVAL '24 hours'
+                  AND wm.is_director = false
+                ORDER BY wm.timestamp DESC LIMIT 10
+            """)
+            tz_card["vip_messages"] = [_serialize(dict(r)) for r in cur.fetchall()]
+
+            # Pending urgent alerts
+            cur.execute("""
+                SELECT title, LEFT(body, 200) as snippet, created_at
+                FROM alerts
+                WHERE status = 'pending' AND tier <= 2
+                ORDER BY created_at DESC LIMIT 5
+            """)
+            tz_card["urgent_alerts"] = [_serialize(dict(r)) for r in cur.fetchall()]
+
+            # Deadlines due soon
+            cur.execute("""
+                SELECT description, due_date, priority
+                FROM deadlines
+                WHERE status = 'active'
+                  AND due_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '3 days'
+                ORDER BY due_date LIMIT 5
+            """)
+            tz_card["deadlines"] = [_serialize(dict(r)) for r in cur.fetchall()]
+            cur.close()
+        except Exception as e:
+            logger.warning(f"Trip card timezone failed: {e}")
+        finally:
+            store._put_conn(conn)
+    cards["timezone"] = tz_card
+
+    return cards
+
+
 import re as _re
 
 # TRAVEL-FIX-2: Detect travel events from calendar title/location

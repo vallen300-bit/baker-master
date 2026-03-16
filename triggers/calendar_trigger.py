@@ -143,6 +143,52 @@ def poll_todays_meetings() -> list:
     return meetings
 
 
+def poll_meetings_by_date_range(start_date_str: str, end_date_str: str) -> list:
+    """
+    TRIP-INTELLIGENCE-1 Batch 2: Fetch calendar events for a date range.
+    start_date_str/end_date_str: ISO date strings (YYYY-MM-DD).
+    Returns same format as poll_todays_meetings().
+    """
+    service = _get_calendar_service()
+    start_dt = datetime.fromisoformat(start_date_str + "T00:00:00+00:00")
+    end_dt = datetime.fromisoformat(end_date_str + "T23:59:59+00:00")
+
+    events_result = service.events().list(
+        calendarId='primary',
+        timeMin=start_dt.isoformat(),
+        timeMax=end_dt.isoformat(),
+        singleEvents=True,
+        orderBy='startTime',
+        maxResults=100,
+    ).execute()
+
+    events = events_result.get('items', [])
+    meetings = []
+    for event in events:
+        start = event.get('start', {})
+        if 'date' in start and 'dateTime' not in start:
+            continue
+        summary = event.get('summary', '')
+        if '[Baker Prep]' in summary:
+            continue
+
+        meetings.append({
+            'id': event.get('id', ''),
+            'title': summary or 'Untitled event',
+            'start': start.get('dateTime', ''),
+            'end': event.get('end', {}).get('dateTime', ''),
+            'attendees': [
+                {'name': a.get('displayName', ''), 'email': a.get('email', '')}
+                for a in event.get('attendees', [])
+            ],
+            'description': event.get('description', ''),
+            'location': event.get('location', ''),
+        })
+
+    logger.info(f"Calendar range {start_date_str} to {end_date_str}: {len(meetings)} events")
+    return meetings
+
+
 # ============================================================
 # Meeting Prep Prompt
 # ============================================================

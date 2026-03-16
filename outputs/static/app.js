@@ -4084,6 +4084,8 @@ async function showTripView(tripId) {
         }
         var trip = await resp.json();
         setSafeHTML(container, renderTripView(trip));
+        // Batch 2: Load trip card data async
+        loadTripCards(trip.id);
     } catch (e) {
         container.textContent = 'Failed to load trip: ' + e.message;
     }
@@ -4151,18 +4153,11 @@ function renderTripView(trip) {
     html += trip.strategic_objective ? esc(trip.strategic_objective) : '<span style="color:var(--text3);font-style:italic;">Click to add objective...</span>';
     html += '</div></div>';
 
-    // Trip cards placeholder (8 cards for Batch 2)
-    var cardTitles = ['Logistics', 'Agenda', 'People', 'Pre-reading', 'Radar', 'Timezone & Weather', 'Outreach', 'Outcomes'];
-    html += '<div style="margin-bottom:24px;">';
-    html += '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Trip Cards</div>';
-    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;">';
-    cardTitles.forEach(function(title) {
-        html += '<div style="padding:16px;background:var(--bg2);border-radius:8px;border:1px solid var(--border);">';
-        html += '<div style="font-size:13px;font-weight:600;color:var(--text1);margin-bottom:4px;">' + esc(title) + '</div>';
-        html += '<div style="font-size:11px;color:var(--text3);">Coming in Batch 2</div>';
-        html += '</div>';
-    });
-    html += '</div></div>';
+    // TRIP-INTELLIGENCE-1 Batch 2: Trip cards (loaded async)
+    html += '<div id="tripCards-' + trip.id + '" style="margin-bottom:24px;">';
+    html += '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Trip Intelligence</div>';
+    html += '<div style="color:var(--text3);font-size:12px;">Loading trip cards...</div>';
+    html += '</div>';
 
     // Notes section
     html += '<div style="margin-bottom:24px;">';
@@ -4250,4 +4245,169 @@ async function editTripObjective(tripId) {
     } catch (e) {
         console.error('Failed to update objective:', e);
     }
+}
+
+// ═══ TRIP-INTELLIGENCE-1 Batch 2: Trip Card Renderers ═══
+// All user content escaped via esc()
+
+async function loadTripCards(tripId) {
+    var container = document.getElementById('tripCards-' + tripId);
+    if (!container) return;
+    try {
+        var resp = await bakerFetch('/api/trips/' + tripId + '/cards');
+        if (!resp.ok) {
+            container.textContent = 'Failed to load trip cards.';
+            return;
+        }
+        var cards = await resp.json();
+        var html = '';
+        html += renderTripCardSection('Logistics & Comms', renderLogisticsCard(cards.logistics || {}));
+        html += renderTripCardSection('Daily Agenda', renderAgendaCard(cards.agenda || {}));
+        html += renderTripCardSection('People to Meet', '<div style="font-size:12px;color:var(--text3);">Coming in Batch 3 (Proxycurl integration)</div>');
+        html += renderTripCardSection('Flight Reading', renderReadingCard(cards.reading || {}));
+        html += renderTripCardSection('Opportunistic Radar', renderRadarCard(cards.radar || {}));
+        html += renderTripCardSection('Europe While You Sleep', renderTimezoneCard(cards.timezone || {}));
+        html += renderTripCardSection('Outreach', '<div style="font-size:12px;color:var(--text3);">Coming in Batch 3</div>');
+        html += renderTripCardSection('Trip Outcomes', '<div style="font-size:12px;color:var(--text3);">Coming in Batch 4</div>');
+        setSafeHTML(container, '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Trip Intelligence</div>' + html);
+    } catch (e) {
+        container.textContent = 'Failed to load trip cards.';
+        console.error('Trip cards error:', e);
+    }
+}
+
+function renderTripCardSection(title, content) {
+    return '<div style="margin-bottom:12px;background:var(--bg2);border-radius:8px;border:1px solid var(--border);overflow:hidden;">' +
+        '<div style="padding:12px 16px;font-size:13px;font-weight:600;color:var(--text1);border-bottom:1px solid var(--border);cursor:pointer;" onclick="var b=this.nextElementSibling;b.style.display=b.style.display===\'none\'?\'block\':\'none\'">' +
+        esc(title) + ' <span style="font-size:10px;color:var(--text3);float:right;">&#9662;</span></div>' +
+        '<div style="padding:12px 16px;">' + content + '</div></div>';
+}
+
+function renderLogisticsCard(data) {
+    var html = '';
+    // Timezone info
+    var tz = data.timezone || {};
+    if (tz.diff) {
+        html += '<div style="font-size:12px;color:var(--text2);margin-bottom:12px;padding:8px 10px;background:var(--bg1);border-radius:6px;">';
+        html += 'Local time: <strong>' + esc(tz.local_now || '?') + '</strong>';
+        html += ' &middot; Home (Zurich): ' + esc(tz.home_now || '?');
+        html += ' &middot; Diff: <strong>' + esc(tz.diff) + '</strong>';
+        html += '</div>';
+    }
+    // Emails
+    var emails = data.emails || [];
+    if (emails.length > 0) {
+        html += '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin-bottom:6px;">Emails (' + emails.length + ')</div>';
+        emails.forEach(function(e) {
+            html += '<div style="font-size:12px;margin-bottom:6px;padding:6px 0;border-bottom:1px solid var(--border-light);">';
+            html += '<div style="font-weight:500;color:var(--text1);">' + esc(e.subject || 'No subject') + '</div>';
+            html += '<div style="color:var(--text3);font-size:11px;">' + esc(e.sender_name || '') + ' &middot; ' + (e.received_date ? new Date(e.received_date).toLocaleDateString() : '') + '</div>';
+            html += '</div>';
+        });
+    }
+    // WhatsApp
+    var wa = data.whatsapp || [];
+    if (wa.length > 0) {
+        html += '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin:12px 0 6px;">WhatsApp (' + wa.length + ')</div>';
+        wa.forEach(function(m) {
+            html += '<div style="font-size:12px;margin-bottom:6px;padding:6px 0;border-bottom:1px solid var(--border-light);">';
+            html += '<strong style="color:var(--text2);">' + esc(m.sender_name || '') + '</strong> ';
+            html += '<span style="color:var(--text3);">' + esc(m.snippet || '').substring(0, 150) + '</span>';
+            html += '</div>';
+        });
+    }
+    if (!emails.length && !wa.length) html += '<div style="font-size:12px;color:var(--text3);">No logistics messages found for this destination.</div>';
+    return html;
+}
+
+function renderAgendaCard(data) {
+    var days = data.days || [];
+    if (days.length === 0) return '<div style="font-size:12px;color:var(--text3);">No calendar events for this trip period.</div>';
+    var html = '';
+    days.forEach(function(day) {
+        html += '<div style="font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin:10px 0 6px;">' + esc(day.date) + '</div>';
+        (day.events || []).forEach(function(ev) {
+            var startTime = '';
+            try { startTime = new Date(ev.start).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}); } catch(e) {}
+            html += '<div style="display:flex;gap:8px;margin-bottom:6px;font-size:12px;">';
+            html += '<span style="color:var(--text3);min-width:50px;">' + esc(startTime) + '</span>';
+            html += '<span style="color:var(--text1);">' + esc(ev.title || '') + '</span>';
+            if (ev.location) html += ' <span style="color:var(--text3);">@ ' + esc(ev.location) + '</span>';
+            html += '</div>';
+        });
+    });
+    return html;
+}
+
+function renderReadingCard(data) {
+    var docs = data.documents || [];
+    if (docs.length === 0) return '<div style="font-size:12px;color:var(--text3);">No priority documents found.</div>';
+    var html = '';
+    var typeColors = { legal_opinion: 'var(--red)', financial_model: 'var(--blue)', report: 'var(--green)', proposal: 'var(--amber)', contract: 'var(--text3)' };
+    docs.forEach(function(d) {
+        var col = typeColors[d.document_type] || 'var(--text3)';
+        html += '<div style="font-size:12px;margin-bottom:8px;padding:8px 0;border-bottom:1px solid var(--border-light);">';
+        html += '<span style="font-size:9px;font-weight:600;color:' + col + ';background:var(--bg1);padding:1px 5px;border-radius:3px;margin-right:6px;">' + esc((d.document_type || '').replace(/_/g, ' ').toUpperCase()) + '</span>';
+        html += '<span style="color:var(--text1);font-weight:500;">' + esc(d.filename || 'Document') + '</span>';
+        if (d.ingested_at) html += '<div style="font-size:11px;color:var(--text3);margin-top:2px;">' + new Date(d.ingested_at).toLocaleDateString() + '</div>';
+        html += '</div>';
+    });
+    return html;
+}
+
+function renderRadarCard(data) {
+    var contacts = data.dormant_contacts || [];
+    if (contacts.length === 0) return '<div style="font-size:12px;color:var(--text3);">No dormant contacts found in this destination.</div>';
+    var html = '';
+    contacts.forEach(function(c) {
+        var daysStr = c.days_since_contact ? c.days_since_contact + ' days ago' : 'Never contacted';
+        var dotClass = c.days_since_contact && c.days_since_contact < 60 ? 'amber' : 'red';
+        html += '<div style="display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:6px;padding:6px 0;border-bottom:1px solid var(--border-light);">';
+        html += '<span class="nav-dot ' + dotClass + '" style="margin-top:1px;"></span>';
+        html += '<span style="color:var(--text1);font-weight:500;">' + esc(c.name || '') + '</span>';
+        if (c.role) html += '<span style="color:var(--text3);">(' + esc(c.role) + ')</span>';
+        html += '<span style="color:var(--text3);margin-left:auto;font-size:11px;">' + esc(daysStr) + '</span>';
+        html += '</div>';
+    });
+    return html;
+}
+
+function renderTimezoneCard(data) {
+    var html = '';
+    var tz = data.timezone || {};
+    if (tz.diff) {
+        html += '<div style="font-size:12px;color:var(--text2);margin-bottom:12px;padding:8px 10px;background:var(--bg1);border-radius:6px;">';
+        html += 'Destination: <strong>' + esc(tz.local_now || '?') + '</strong>';
+        html += ' &middot; Zurich: ' + esc(tz.home_now || '?');
+        html += ' &middot; ' + esc(tz.diff) + ' from home';
+        html += '</div>';
+    }
+    // VIP messages
+    var msgs = data.vip_messages || [];
+    if (msgs.length > 0) {
+        html += '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin-bottom:6px;">VIP Messages (last 24h)</div>';
+        msgs.forEach(function(m) {
+            html += '<div style="font-size:12px;margin-bottom:4px;"><strong>' + esc(m.sender_name || '') + ':</strong> ' + esc(m.snippet || '').substring(0, 120) + '</div>';
+        });
+    }
+    // Urgent alerts
+    var alerts = data.urgent_alerts || [];
+    if (alerts.length > 0) {
+        html += '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin:10px 0 6px;">Urgent Alerts</div>';
+        alerts.forEach(function(a) {
+            html += '<div style="font-size:12px;margin-bottom:4px;color:var(--text1);">' + esc(a.title || '') + '</div>';
+        });
+    }
+    // Deadlines
+    var dls = data.deadlines || [];
+    if (dls.length > 0) {
+        html += '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin:10px 0 6px;">Upcoming Deadlines</div>';
+        dls.forEach(function(d) {
+            html += '<div style="font-size:12px;margin-bottom:4px;">' + esc(d.description || '') + ' <span style="color:var(--text3);">(' + esc(d.due_date || '') + ')</span></div>';
+        });
+    }
+    if (!msgs.length && !alerts.length && !dls.length) {
+        html += '<div style="font-size:12px;color:var(--text3);">All quiet. No urgent items.</div>';
+    }
+    return html;
 }
