@@ -103,7 +103,7 @@ _TAG_KEYWORDS = {
     "dispute": ["dispute", "arbitration", "mediation", "complaint", "grievance"],
     "compliance": ["compliance", "regulatory", "regulation", "audit", "finma", "license"],
     "meeting": ["meeting", "call", "session", "workshop", "conference"],
-    "travel": ["flight", "hotel", "booking", "travel", "airport", "train", "itinerary"],
+    "travel": ["flight", "airport", "airline", "boarding pass", "itinerary", "layover", "luggage"],
     "hr": ["employee", "hiring", "recruitment", "termination", "payroll"],
     "it": ["migration", "m365", "byod", "infrastructure", "server", "cloud"],
     "marketing": ["marketing", "campaign", "social media", "branding", "advertisement"],
