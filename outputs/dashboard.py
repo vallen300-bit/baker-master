@@ -1396,6 +1396,68 @@ def _get_timezone_info(dest_city: str) -> dict:
     }
 
 
+def _haiku_filter_reading(candidates: list, trip_context: str) -> list:
+    """Use Haiku to pick the 5 most trip-relevant documents from candidates."""
+    try:
+        items_text = "\n".join(
+            f"[{i}] {d.get('filename', 'unknown')} ({d.get('document_type', '?')}) — {(d.get('preview') or '')[:200]}"
+            for i, d in enumerate(candidates)
+        )
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            system="You select documents relevant to a business trip. Return ONLY a JSON array of indices (e.g. [0, 3, 7]) of the most relevant documents. Pick up to 5. If none are relevant, return []. No explanation.",
+            messages=[{"role": "user", "content": f"Trip context:\n{trip_context}\n\nDocuments:\n{items_text}"}],
+        )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="trip_reading_filter")
+        except Exception:
+            pass
+        import re
+        text = resp.content[0].text.strip()
+        match = re.search(r'\[[\d,\s]*\]', text)
+        if match:
+            indices = json.loads(match.group())
+            return [candidates[i] for i in indices if 0 <= i < len(candidates)][:5]
+    except Exception as e:
+        logger.warning(f"Haiku reading filter failed: {e}")
+    # Fallback: return first 5
+    return candidates[:5]
+
+
+def _haiku_filter_messages(messages: list, trip_context: str) -> list:
+    """Use Haiku to pick trip-relevant VIP messages from the last 24h."""
+    try:
+        items_text = "\n".join(
+            f"[{i}] {m.get('sender_name', '?')}: {(m.get('snippet') or '')[:150]}"
+            for i, m in enumerate(messages)
+        )
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            system="You filter WhatsApp messages for relevance to a business trip. Return ONLY a JSON array of indices (e.g. [0, 2, 5]) of messages that are: (1) directly about the trip, OR (2) urgent business matters the Director needs to know about while traveling. Skip casual chat and low-priority items. Return [] if nothing is relevant. No explanation.",
+            messages=[{"role": "user", "content": f"Trip context:\n{trip_context}\n\nMessages:\n{items_text}"}],
+        )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="trip_message_filter")
+        except Exception:
+            pass
+        import re
+        text = resp.content[0].text.strip()
+        match = re.search(r'\[[\d,\s]*\]', text)
+        if match:
+            indices = json.loads(match.group())
+            return [messages[i] for i in indices if 0 <= i < len(messages)]
+    except Exception as e:
+        logger.warning(f"Haiku message filter failed: {e}")
+    # Fallback: return all
+    return messages
+
+
 @app.get("/api/trips/{trip_id}/cards", tags=["trips"], dependencies=[Depends(verify_api_key)])
 async def get_trip_cards(trip_id: int):
     """TRIP-INTELLIGENCE-1 Batch 2: All trip card data in one response."""
@@ -1419,44 +1481,68 @@ async def get_trip_cards(trip_id: int):
             try:
                 cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                 dest_lower = dest.lower()
-                # Emails mentioning destination
+                # Emails mentioning destination or event name
+                email_search_terms = [dest_lower]
+                event_name_lower = (trip.get("event_name") or "").lower()
+                if event_name_lower:
+                    for word in event_name_lower.split():
+                        if len(word) >= 3:
+                            email_search_terms.append(word)
+                email_like_parts = []
+                email_params = []
+                for term in email_search_terms:
+                    email_like_parts.append("LOWER(subject) LIKE %s OR LOWER(full_body) LIKE %s")
+                    email_params.extend([f"%{term}%", f"%{term}%"])
+                email_where = " OR ".join(email_like_parts)
                 if start_date:
-                    cur.execute("""
+                    cur.execute(f"""
                         SELECT sender_name, sender_email, subject, received_date,
                                LEFT(full_body, 400) as snippet
                         FROM email_messages
-                        WHERE (LOWER(subject) LIKE %s OR LOWER(full_body) LIKE %s)
-                          AND received_date >= %s::date - INTERVAL '3 days'
+                        WHERE ({email_where})
+                          AND received_date >= %s::date - INTERVAL '14 days'
                           AND received_date <= %s::date + INTERVAL '1 day'
                         ORDER BY received_date DESC LIMIT 10
-                    """, (f"%{dest_lower}%", f"%{dest_lower}%", start_date, end_date or start_date))
+                    """, (*email_params, start_date, end_date or start_date))
                 else:
-                    cur.execute("""
+                    cur.execute(f"""
                         SELECT sender_name, sender_email, subject, received_date,
                                LEFT(full_body, 400) as snippet
                         FROM email_messages
-                        WHERE (LOWER(subject) LIKE %s OR LOWER(full_body) LIKE %s)
+                        WHERE ({email_where})
                         ORDER BY received_date DESC LIMIT 10
-                    """, (f"%{dest_lower}%", f"%{dest_lower}%"))
+                    """, (*email_params,))
                 logistics["emails"] = [_serialize(dict(r)) for r in cur.fetchall()]
 
-                # WhatsApp mentioning destination
+                # WhatsApp mentioning destination or event — resolve phone numbers to names
+                event_name_lower = (trip.get("event_name") or "").lower()
+                search_terms = [f"%{dest_lower}%"]
+                if event_name_lower:
+                    # Add event name keywords (e.g. "GTC" from "NVIDIA GTC 2026")
+                    for word in event_name_lower.split():
+                        if len(word) >= 3:
+                            search_terms.append(f"%{word}%")
+                like_clause = " OR ".join(["LOWER(wm.full_text) LIKE %s"] * len(search_terms))
                 if start_date:
-                    cur.execute("""
-                        SELECT sender_name, LEFT(full_text, 300) as snippet, timestamp
-                        FROM whatsapp_messages
-                        WHERE LOWER(full_text) LIKE %s
-                          AND timestamp >= %s::date - INTERVAL '7 days'
-                          AND timestamp <= %s::date + INTERVAL '1 day'
-                        ORDER BY timestamp DESC LIMIT 10
-                    """, (f"%{dest_lower}%", start_date, end_date or start_date))
+                    cur.execute(f"""
+                        SELECT COALESCE(vc.name, wm.sender_name) as sender_name,
+                               LEFT(wm.full_text, 300) as snippet, wm.timestamp
+                        FROM whatsapp_messages wm
+                        LEFT JOIN vip_contacts vc ON wm.sender = vc.whatsapp_id
+                        WHERE ({like_clause})
+                          AND wm.timestamp >= %s::date - INTERVAL '7 days'
+                          AND wm.timestamp <= %s::date + INTERVAL '1 day'
+                        ORDER BY wm.timestamp DESC LIMIT 10
+                    """, (*search_terms, start_date, end_date or start_date))
                 else:
-                    cur.execute("""
-                        SELECT sender_name, LEFT(full_text, 300) as snippet, timestamp
-                        FROM whatsapp_messages
-                        WHERE LOWER(full_text) LIKE %s
-                        ORDER BY timestamp DESC LIMIT 10
-                    """, (f"%{dest_lower}%",))
+                    cur.execute(f"""
+                        SELECT COALESCE(vc.name, wm.sender_name) as sender_name,
+                               LEFT(wm.full_text, 300) as snippet, wm.timestamp
+                        FROM whatsapp_messages wm
+                        LEFT JOIN vip_contacts vc ON wm.sender = vc.whatsapp_id
+                        WHERE ({like_clause})
+                        ORDER BY wm.timestamp DESC LIMIT 10
+                    """, (*search_terms,))
                 logistics["whatsapp"] = [_serialize(dict(r)) for r in cur.fetchall()]
                 cur.close()
             except Exception as e:
@@ -1482,13 +1568,26 @@ async def get_trip_cards(trip_id: int):
             logger.warning(f"Trip card agenda failed: {e}")
     cards["agenda"] = agenda
 
-    # --- Card 5: Flight Reading ---
+    # --- Card 5: Flight Reading (Haiku-curated) ---
+    # Build trip context string for Haiku filtering
+    trip_keywords = [dest]
+    if trip.get("event_name"):
+        trip_keywords.append(trip["event_name"])
+    if trip.get("strategic_objective"):
+        trip_keywords.append(trip["strategic_objective"][:200])
+    trip_contact_names = [c.get("contact_name", "") for c in trip.get("contacts", []) if c.get("contact_name")]
+    trip_keywords.extend(trip_contact_names)
+    trip_context_str = f"Trip: {trip.get('event_name') or dest} ({trip.get('category', 'meeting')}). " \
+                       f"Destination: {dest}. " \
+                       f"Purpose: {trip.get('strategic_objective', 'Not specified')}. " \
+                       f"Key people: {', '.join(trip_contact_names) if trip_contact_names else 'None'}."
+
     reading = {"documents": []}
     conn = store._get_conn()
     if conn:
         try:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            # Recent high-priority documents
+            # Fetch MORE candidates (15), then Haiku picks the best 5
             cur.execute("""
                 SELECT id, filename, document_type, ingested_at,
                        LEFT(full_text, 500) as preview
@@ -1496,28 +1595,31 @@ async def get_trip_cards(trip_id: int):
                 WHERE document_type IN ('legal_opinion', 'financial_model', 'report',
                                         'proposal', 'contract', 'correspondence')
                   AND ingested_at >= NOW() - INTERVAL '30 days'
-                ORDER BY ingested_at DESC LIMIT 5
+                ORDER BY ingested_at DESC LIMIT 15
             """)
-            docs = [_serialize(dict(r)) for r in cur.fetchall()]
-            seen_ids = {d["id"] for d in docs}
+            candidates = [_serialize(dict(r)) for r in cur.fetchall()]
+            seen_ids = {d["id"] for d in candidates}
 
-            # Also search by destination FTS
-            if dest:
-                cur.execute("""
-                    SELECT id, filename, document_type, ingested_at,
-                           LEFT(full_text, 500) as preview
-                    FROM documents
-                    WHERE search_vector @@ plainto_tsquery('simple', %s)
-                    ORDER BY ingested_at DESC LIMIT 5
-                """, (dest,))
-                for r in cur.fetchall():
-                    d = _serialize(dict(r))
-                    if d["id"] not in seen_ids:
-                        docs.append(d)
-                        seen_ids.add(d["id"])
-
-            reading["documents"] = docs[:5]
+            # Also search by destination + event name FTS
+            for kw in [dest, trip.get("event_name", "")]:
+                if kw:
+                    cur.execute("""
+                        SELECT id, filename, document_type, ingested_at,
+                               LEFT(full_text, 500) as preview
+                        FROM documents
+                        WHERE search_vector @@ plainto_tsquery('simple', %s)
+                        ORDER BY ingested_at DESC LIMIT 5
+                    """, (kw,))
+                    for r in cur.fetchall():
+                        d = _serialize(dict(r))
+                        if d["id"] not in seen_ids:
+                            candidates.append(d)
+                            seen_ids.add(d["id"])
             cur.close()
+
+            # Haiku picks the 5 most relevant to the trip
+            if candidates:
+                reading["documents"] = _haiku_filter_reading(candidates, trip_context_str)
         except Exception as e:
             logger.warning(f"Trip card reading failed: {e}")
         finally:
@@ -1573,17 +1675,24 @@ async def get_trip_cards(trip_id: int):
     if conn:
         try:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            # VIP messages from last 24h
+            # VIP messages from last 24h — resolve phone numbers to names
             cur.execute("""
-                SELECT wm.sender_name, LEFT(wm.full_text, 200) as snippet, wm.timestamp
+                SELECT COALESCE(vc.name, wm.sender_name) as sender_name,
+                       LEFT(wm.full_text, 200) as snippet, wm.timestamp
                 FROM whatsapp_messages wm
                 JOIN vip_contacts vc ON wm.sender = vc.whatsapp_id
                 WHERE vc.tier <= 2
                   AND wm.timestamp >= NOW() - INTERVAL '24 hours'
                   AND wm.is_director = false
-                ORDER BY wm.timestamp DESC LIMIT 10
+                ORDER BY wm.timestamp DESC LIMIT 15
             """)
-            tz_card["vip_messages"] = [_serialize(dict(r)) for r in cur.fetchall()]
+            vip_msgs = [_serialize(dict(r)) for r in cur.fetchall()]
+
+            # Haiku filters to trip-relevant messages
+            if vip_msgs:
+                tz_card["vip_messages"] = _haiku_filter_messages(vip_msgs, trip_context_str)
+            else:
+                tz_card["vip_messages"] = []
 
             # Pending urgent alerts
             cur.execute("""
