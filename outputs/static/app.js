@@ -583,19 +583,42 @@ async function loadMorningBrief() {
 
         // LANDING-GRID-1: Populate 2x2 grid cells
 
-        // Grid: Travel (top-left) — TRAVEL-FIX-2: dedicated travel cell with route cards
+        // Grid: Travel (top-left) — trips + today's travel events
         var gridTravel = document.getElementById('gridTravel');
         var gridTravelCount = document.getElementById('gridTravelCount');
         if (gridTravel) {
-            var travelEvents = (data.travel_today || []).map(renderTravelCard);
-            // Also include travel-tagged alerts not already covered by calendar
-            var travelAlerts = (data.travel_alerts || []);
-            var calTitles = (data.travel_today || []).map(function(t) { return (t.title || '').toLowerCase(); });
-            travelAlerts = travelAlerts.filter(function(a) {
-                var t = (a.title || '').replace('Meeting prep: ', '').toLowerCase();
-                return !calTitles.some(function(ct) { return ct.indexOf(t) >= 0 || t.indexOf(ct) >= 0; });
-            });
-            var allTravel = travelEvents.concat(travelAlerts.map(function(a) { return renderFireCompact(a); }));
+            var allTravel = [];
+
+            // 1. Active trips (primary content)
+            var trips = data.trips || [];
+            for (var ti = 0; ti < trips.length; ti++) {
+                var trip = trips[ti];
+                var statusColor = _tripStatusColors[trip.status] || 'var(--text3)';
+                var catLabel = _tripCategoryLabels[trip.category] || '';
+                var dateStr = trip.start_date || '';
+                if (trip.end_date && trip.end_date !== trip.start_date) dateStr += ' \u2014 ' + trip.end_date;
+                allTravel.push(
+                    '<div class="card card-compact" onclick="showTripView(' + trip.id + ')" style="cursor:pointer;"><div class="card-header">' +
+                    '<span class="nav-dot" style="margin-top:5px;background:' + statusColor + ';"></span>' +
+                    '<span class="card-title">' + esc(trip.event_name || trip.destination || 'Trip') +
+                    (catLabel ? ' <span style="font-size:9px;font-weight:600;color:var(--text3);background:var(--bg2);padding:1px 4px;border-radius:3px;margin-left:6px;">' + esc(catLabel) + '</span>' : '') +
+                    ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9656;</span></span>' +
+                    '<span class="card-time">' + esc(dateStr) + '</span>' +
+                    '</div></div>'
+                );
+            }
+
+            // 2. Today's calendar travel events (flights not yet linked to trips)
+            var travelEvents = (data.travel_today || []);
+            var tripDests = trips.map(function(t) { return (t.destination || '').toLowerCase(); });
+            for (var ei = 0; ei < travelEvents.length; ei++) {
+                var ev = travelEvents[ei];
+                // Skip if already covered by a trip card
+                var evTitle = (ev.title || '').toLowerCase();
+                var covered = tripDests.some(function(d) { return d && evTitle.indexOf(d) >= 0; });
+                if (!covered) allTravel.push(renderTravelCard(ev));
+            }
+
             if (allTravel.length > 0) {
                 setSafeHTML(gridTravel, allTravel.join(''));
             } else {
