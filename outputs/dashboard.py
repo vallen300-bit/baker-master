@@ -426,6 +426,138 @@ async def whatsapp_backfill_endpoint(
             return {"status": "error", "message": str(e)}
 
 
+@app.post("/api/contacts/enrich", tags=["contacts"], dependencies=[Depends(verify_api_key)])
+async def enrich_contacts_endpoint(
+    limit: int = Query(500, ge=1, le=1000),
+    background_tasks: BackgroundTasks = None,
+):
+    """Batch-classify default-tier contacts using Haiku from their interaction history.
+    Updates tier, contact_type, role_context. Runs in background.
+    """
+    def _run_enrichment():
+        import json as _json
+        import re as _re
+        import time as _time
+
+        _client = anthropic.Anthropic()
+        _store = _get_store()
+
+        _PROMPT = (
+            "You are classifying a business contact for a luxury real estate CEO's contact management system.\n"
+            "Given the contact name and their recent interaction subjects, classify this person.\n\n"
+            "Return a JSON object with exactly these fields:\n"
+            "- \"tier\": 1 (inner circle — family, close partners, key advisors), "
+            "2 (active business — regular counterparties, lawyers, brokers), "
+            "or 3 (peripheral — one-off contacts, service providers, marketing)\n"
+            "- \"contact_type\": one of \"partner\", \"advisor\", \"investor\", \"broker\", \"lawyer\", "
+            "\"service_provider\", \"team_member\", \"connector\", \"family\", \"prospect\"\n"
+            "- \"role_context\": a concise 5-15 word description of who this person is and their relationship\n\n"
+            "Rules:\n"
+            "- If the person has frequent, substantive interactions, they are likely tier 2\n"
+            "- If interactions are mostly personal/family or show deep trust, they are likely tier 1\n"
+            "- If interactions are sparse or transactional, they are likely tier 3\n\n"
+            "Contact: {name}\nChannels: {channels}\nInteraction count: {count}\n"
+            "Recent subjects:\n{subjects}\n\nReturn ONLY the JSON object."
+        )
+
+        # Fetch contacts
+        conn = _store._get_conn()
+        if not conn:
+            logger.error("Enrich: no DB connection")
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT c.id, c.name,
+                    STRING_AGG(DISTINCT ci.channel, ', ') as channels,
+                    COUNT(ci.id) as interaction_count,
+                    ARRAY_AGG(DISTINCT LEFT(ci.subject, 100) ORDER BY LEFT(ci.subject, 100))
+                        FILTER (WHERE ci.subject IS NOT NULL AND ci.subject != '') as subjects
+                FROM vip_contacts c
+                JOIN contact_interactions ci ON ci.contact_id = c.id
+                WHERE c.tier = 3 AND c.contact_type = 'connector'
+                GROUP BY c.id, c.name
+                HAVING COUNT(ci.id) >= 2
+                ORDER BY COUNT(ci.id) DESC
+                LIMIT %s
+            """, (limit,))
+            cols = [d[0] for d in cur.description]
+            contacts = [dict(zip(cols, r)) for r in cur.fetchall()]
+            cur.close()
+        finally:
+            _store._put_conn(conn)
+
+        logger.info(f"Enrich: found {len(contacts)} contacts to classify")
+        updated = 0
+        failed = 0
+        valid_types = {"partner", "advisor", "investor", "broker", "lawyer",
+                       "service_provider", "team_member", "connector", "family", "prospect"}
+
+        for i, c in enumerate(contacts):
+            subjects = c.get("subjects") or []
+            subj_text = "\n".join(f"- {s}" for s in subjects[:30])
+            prompt = _PROMPT.format(
+                name=c["name"], channels=c.get("channels", "unknown"),
+                count=c.get("interaction_count", 0), subjects=subj_text or "(no data)",
+            )
+            try:
+                resp = _client.messages.create(
+                    model="claude-haiku-4-5-20251001",
+                    max_tokens=200,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                text = resp.content[0].text.strip()
+                data = None
+                if text.startswith("{"):
+                    data = _json.loads(text)
+                else:
+                    m = _re.search(r'\{[^}]+\}', text, _re.DOTALL)
+                    if m:
+                        data = _json.loads(m.group())
+                if not data:
+                    failed += 1
+                    continue
+
+                tier = data.get("tier", 3)
+                if tier not in (1, 2, 3):
+                    tier = 3
+                ctype = data.get("contact_type", "connector")
+                if ctype not in valid_types:
+                    ctype = "connector"
+                role = data.get("role_context", "")
+
+                uconn = _store._get_conn()
+                if uconn:
+                    try:
+                        ucur = uconn.cursor()
+                        ucur.execute(
+                            "UPDATE vip_contacts SET tier = %s, contact_type = %s, role_context = %s WHERE id = %s",
+                            (tier, ctype, role, c["id"]),
+                        )
+                        uconn.commit()
+                        ucur.close()
+                        updated += 1
+                    except Exception as ue:
+                        uconn.rollback()
+                        failed += 1
+                        logger.warning(f"Enrich update failed for {c['name']}: {ue}")
+                    finally:
+                        _store._put_conn(uconn)
+
+                if (i + 1) % 50 == 0:
+                    logger.info(f"Enrich progress: {i+1}/{len(contacts)} ({updated} updated, {failed} failed)")
+                _time.sleep(0.5)  # Rate limit
+
+            except Exception as e:
+                failed += 1
+                logger.warning(f"Enrich failed for {c['name']}: {e}")
+
+        logger.info(f"Enrich complete: {updated} updated, {failed} failed out of {len(contacts)}")
+
+    background_tasks.add_task(_run_enrichment)
+    return {"status": "started", "message": f"Contact enrichment started (limit={limit})", "limit": limit}
+
+
 # ============================================================
 # Insights (INSIGHT-1 — Claude Code → Baker memory)
 # ============================================================
@@ -847,6 +979,15 @@ async def root():
     if index_path.exists():
         return FileResponse(str(index_path))
     return {"message": "Baker Dashboard — no frontend deployed yet"}
+
+
+@app.get("/mobile", include_in_schema=False)
+async def mobile():
+    """Serve the mobile-optimized frontend (Ask Baker + Ask Specialist)."""
+    mobile_path = _static_dir / "mobile.html"
+    if mobile_path.exists():
+        return FileResponse(str(mobile_path))
+    return {"message": "Mobile page not deployed yet"}
 
 
 # ============================================================

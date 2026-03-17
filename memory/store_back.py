@@ -3317,6 +3317,35 @@ class SentinelStoreBack:
         finally:
             self._put_conn(conn)
 
+    def alert_title_dedup(self, title: str, hours: int = 24) -> bool:
+        """Check if a pending alert with the same title prefix (first 60 chars) exists within N hours.
+        ALERT-DEDUP-2: Prevents duplicate pipeline alerts from repeated trigger processing.
+        """
+        if not title:
+            return False
+        prefix = title[:60]
+        conn = self._get_conn()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT 1 FROM alerts WHERE status = 'pending' "
+                "AND LEFT(title, 60) = %s "
+                "AND created_at > NOW() - make_interval(hours => %s) LIMIT 1",
+                (prefix, hours),
+            )
+            exists = cur.fetchone() is not None
+            cur.close()
+            if exists:
+                logger.info(f"Alert title dedup: similar pending alert found — skipping: {prefix}...")
+            return exists
+        except Exception as e:
+            logger.warning(f"alert_title_dedup check failed: {e}")
+            return False
+        finally:
+            self._put_conn(conn)
+
     def get_pending_alerts(self, tier: int = None, limit: int = 100) -> list:
         """Fetch unresolved alerts, optionally filtered by tier. Capped at limit."""
         conn = self._get_conn()

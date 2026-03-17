@@ -1,0 +1,17 @@
+{
+  "name": "Baker AI",
+  "short_name": "Baker",
+  "description": "Baker AI Chief of Staff — Mobile",
+  "start_url": "/mobile",
+  "display": "standalone",
+  "background_color": "#0a0e14",
+  "theme_color": "#0a6fdb",
+  "icons": [
+    {
+      "src": "/static/baker-face-green.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

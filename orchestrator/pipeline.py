@@ -452,6 +452,9 @@ class SentinelPipeline:
                     tier = _normalize_tier(alert.get("tier"))
                     alert_title = alert.get("title", "Untitled alert")
                     alert_body = alert.get("body", "")
+                    # ALERT-DEDUP-2: Skip if similar pending alert exists within 24h
+                    if self.store.alert_title_dedup(alert_title, hours=24):
+                        continue
                     # COCKPIT-V3 A2: Auto-assign matter_slug by keyword matching
                     matter_slug = _match_matter_slug(alert_title, alert_body, self.store)
                     if matter_slug:

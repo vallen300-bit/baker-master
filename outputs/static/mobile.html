@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0a0e14" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+    <title>Baker AI</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="icon" href="/static/baker-face-green.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/static/baker-face-green.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/mobile.css?v=1">
+</head>
+<body>
+<div class="app">
+
+    <!-- Header -->
+    <div class="header">
+        <img src="/static/baker-face-green.svg" alt="Baker">
+        <div class="brand">Baker<span class="brand-sub">AI Chief of Staff</span></div>
+    </div>
+
+    <!-- Tab bar -->
+    <div class="tab-bar">
+        <button class="tab-btn active" data-tab="baker">Baker</button>
+        <button class="tab-btn" data-tab="specialist">Specialist</button>
+    </div>
+
+    <!-- Baker panel -->
+    <div class="chat-panel active" id="panel-baker">
+        <div class="input-area">
+            <form id="bakerForm" class="input-row">
+                <textarea class="chat-input" id="bakerInput" placeholder="Ask Baker anything..." rows="1" maxlength="4000" enterkeyhint="send"></textarea>
+                <button type="submit" class="send-btn" id="bakerSendBtn" aria-label="Send">&#x2191;</button>
+            </form>
+        </div>
+        <div class="messages" id="bakerMessages">
+            <div class="empty-state">
+                <div class="icon">&#x1F4AC;</div>
+                Ask Baker anything about your business, deals, contacts, or upcoming meetings.
+            </div>
+        </div>
+    </div>
+
+    <!-- Specialist panel -->
+    <div class="chat-panel" id="panel-specialist">
+        <div class="input-area">
+            <div class="specialist-picker">
+                <select class="cap-select" id="capPicker">
+                    <option value="">Select a specialist...</option>
+                </select>
+            </div>
+            <form id="specialistForm" class="input-row">
+                <textarea class="chat-input" id="specialistInput" placeholder="Ask the specialist..." rows="1" maxlength="4000" disabled enterkeyhint="send"></textarea>
+                <button type="submit" class="send-btn" id="specialistSendBtn" disabled aria-label="Send">&#x2191;</button>
+            </form>
+        </div>
+        <div class="messages" id="specialistMessages">
+            <div class="empty-state">
+                <div class="icon">&#x1F9E0;</div>
+                Pick a specialist above, then ask a deep question in their domain.
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script src="/static/mobile.js?v=1"></script>
+</body>
+</html>
