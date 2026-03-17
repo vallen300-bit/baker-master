@@ -4083,8 +4083,7 @@ async function showTripView(tripId) {
     if (!container || !tripView) return;
 
     // Hide all views, show trip view
-    document.querySelectorAll('.view').forEach(function(v) { v.classList.remove('active'); });
-    tripView.style.display = 'block';
+    document.querySelectorAll('.view').forEach(function(v) { v.classList.remove('active'); v.style.display = ''; });
     tripView.classList.add('active');
     container.textContent = 'Loading trip...';
 
@@ -4110,7 +4109,7 @@ async function showTripView(tripId) {
 function hideTripView() {
     var tripView = document.getElementById('viewTripDetail');
     if (tripView) {
-        tripView.style.display = 'none';
+        tripView.style.display = '';
         tripView.classList.remove('active');
     }
     switchTab('morning-brief');
