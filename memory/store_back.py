@@ -3956,6 +3956,10 @@ class SentinelStoreBack:
                 CREATE INDEX IF NOT EXISTS idx_trip_contacts_trip
                 ON trip_contacts(trip_id)
             """)
+            cur.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_trip_contacts_unique
+                ON trip_contacts(trip_id, contact_id)
+            """)
             conn.commit()
             cur.close()
             logger.info("Trip contacts table verified")
@@ -4114,9 +4118,11 @@ class SentinelStoreBack:
                 return None
             trip = dict(trip)
 
-            # Fetch linked contacts
+            # Fetch linked contacts with VIP profile data
             cur.execute("""
-                SELECT tc.*, vc.name as contact_name, vc.role as contact_role
+                SELECT tc.*, vc.name as contact_name, vc.role as contact_role,
+                       vc.tier as contact_tier, vc.role_context as contact_role_context,
+                       vc.expertise as contact_expertise
                 FROM trip_contacts tc
                 LEFT JOIN vip_contacts vc ON vc.id = tc.contact_id
                 WHERE tc.trip_id = %s
@@ -4218,6 +4224,11 @@ class SentinelStoreBack:
             cur.execute("""
                 INSERT INTO trip_contacts (trip_id, contact_id, role, roi_type, roi_score, notes)
                 VALUES (%s, %s, %s, %s, %s, %s)
+                ON CONFLICT (trip_id, contact_id) DO UPDATE SET
+                    role = COALESCE(EXCLUDED.role, trip_contacts.role),
+                    roi_type = COALESCE(EXCLUDED.roi_type, trip_contacts.roi_type),
+                    roi_score = COALESCE(EXCLUDED.roi_score, trip_contacts.roi_score),
+                    notes = COALESCE(EXCLUDED.notes, trip_contacts.notes)
                 RETURNING *
             """, (trip_id, contact_id, role, roi_type, roi_score, notes))
             row = cur.fetchone()

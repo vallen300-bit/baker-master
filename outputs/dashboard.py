@@ -1421,24 +1421,13 @@ def _build_people_dossiers(store, trip: dict) -> list:
                 "interactions": [],
                 "obligations": [],
                 "emails": [],
-                "tier": None,
-                "role_context": "",
-                "expertise": "",
+                "tier": tc.get("contact_tier"),
+                "role_context": tc.get("contact_role_context") or "",
+                "expertise": tc.get("contact_expertise") or "",
             }
             if not cid:
                 dossiers.append(dossier)
                 continue
-
-            # Pull contact profile
-            cur.execute("""
-                SELECT tier, role_context, expertise
-                FROM vip_contacts WHERE id = %s
-            """, (cid,))
-            profile = cur.fetchone()
-            if profile:
-                dossier["tier"] = profile["tier"]
-                dossier["role_context"] = profile["role_context"] or ""
-                dossier["expertise"] = profile["expertise"] or ""
 
             # Recent interactions (last 90 days, max 5)
             cur.execute("""
@@ -1499,12 +1488,12 @@ def _people_stub(tc: dict) -> dict:
         "roi_type": tc.get("roi_type") or "",
         "outreach_status": tc.get("outreach_status") or "none",
         "notes": tc.get("notes") or "",
+        "tier": tc.get("contact_tier"),
+        "role_context": tc.get("contact_role_context") or "",
+        "expertise": tc.get("contact_expertise") or "",
         "interactions": [],
         "obligations": [],
         "emails": [],
-        "tier": None,
-        "role_context": "",
-        "expertise": "",
     }
 
 _CITY_TIMEZONE = {
