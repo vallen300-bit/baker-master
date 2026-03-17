@@ -5045,6 +5045,9 @@ def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
             q = _queue.Queue()
             _agent_result = [None]
 
+            # THINKING-DOTS-FIX: Signal retrieval phase immediately
+            yield f"data: {_json.dumps({'status': 'retrieving'})}\n\n"
+
             def _run():
                 try:
                     for chunk in runner.run_streaming(cap, req.question,
@@ -5134,13 +5137,17 @@ def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
         return StreamingResponse(_cap_stream(), media_type="text/event-stream")
 
     elif plan.mode == "delegate":
-        # Delegate path — multi-capability, blocking then stream result
-        result = runner.run_multi(plan, req.question, history=req.history,
-                                  domain=domain, mode=mode,
-                                  entity_context=entity_context)
-
+        # Delegate path — multi-capability
+        # THINKING-DOTS-FIX: run_multi moved inside generator so status events stream during execution
         async def _delegate_stream():
-            yield f"data: {_json.dumps({'capabilities': cap_slugs, 'phase': 'synthesizing'})}\n\n"
+            yield f"data: {_json.dumps({'status': 'retrieving'})}\n\n"
+            yield f"data: {_json.dumps({'capabilities': cap_slugs})}\n\n"
+
+            result = runner.run_multi(plan, req.question, history=req.history,
+                                      domain=domain, mode=mode,
+                                      entity_context=entity_context)
+
+            yield f"data: {_json.dumps({'status': 'generating', 'phase': 'synthesizing'})}\n\n"
             if result.answer:
                 yield f"data: {_json.dumps({'token': result.answer})}\n\n"
             # Log
@@ -5198,6 +5205,9 @@ def _scan_chat_agentic(req, start: float, domain_context: str = "",
             history.append({"role": role, "content": content})
 
     async def event_stream():
+        # THINKING-DOTS-FIX: Signal retrieval phase immediately
+        yield f"data: {json.dumps({'status': 'retrieving'})}\n\n"
+
         full_response = ""
         agent_result = None
 
@@ -5387,86 +5397,96 @@ async def _scan_chat_legacy_stream(req, start: float, domain_context: str = "",
 
 def _scan_chat_legacy(req, start: float, domain_context: str = "",
                       task_id: int = None, mode: str = None, domain: str = None):
-    """Legacy single-pass RAG — unchanged behavior, refactored into own function."""
+    """Legacy single-pass RAG — unchanged behavior, refactored into own function.
+    THINKING-DOTS-FIX: Retrieval moved inside generator so status events stream during each phase."""
 
-    # 1. Retrieve context
-    try:
-        retriever = _get_retriever()
-        contexts = retriever.search_all_collections(
-            query=req.question,
-            limit_per_collection=8,
-            score_threshold=0.3,
-            project=req.project,
-            role=req.role,
-        )
-        logger.info(f"Scan: retrieved {len(contexts)} contexts for: {req.question[:80]}")
-    except Exception as e:
-        logger.error(f"Scan retrieval failed: {e}")
-        contexts = []
-
-    # 1b. ARCH-3: Also search full meeting transcripts from PostgreSQL
-    try:
-        retriever = _get_retriever()
-        transcripts = retriever.get_meeting_transcripts(req.question, limit=3)
-        if transcripts:
-            contexts.extend(transcripts)
-            logger.info(f"Scan: added {len(transcripts)} keyword-matched transcripts")
-        recent = retriever.get_recent_meeting_transcripts(limit=3)
-        existing_ids = {c.metadata.get("meeting_id") for c in transcripts}
-        added = 0
-        for r in recent:
-            if r.metadata.get("meeting_id") not in existing_ids:
-                contexts.append(r)
-                added += 1
-        if added:
-            logger.info(f"Scan: added {added} recent meeting transcripts")
-    except Exception as e:
-        logger.warning(f"Meeting transcript retrieval failed (non-fatal): {e}")
-
-    # 1c. ARCH-6/7: Also search full emails + WhatsApp from PostgreSQL
-    try:
-        retriever = _get_retriever()
-        emails = retriever.get_email_messages(req.question, limit=3)
-        if emails:
-            contexts.extend(emails)
-            logger.info(f"Scan: added {len(emails)} email messages from PostgreSQL")
-        recent_emails = retriever.get_recent_emails(limit=3)
-        existing_eids = {c.metadata.get("message_id") for c in emails}
-        for r in recent_emails:
-            if r.metadata.get("message_id") not in existing_eids:
-                contexts.append(r)
-
-        wa_msgs = retriever.get_whatsapp_messages(req.question, limit=3)
-        if wa_msgs:
-            contexts.extend(wa_msgs)
-            logger.info(f"Scan: added {len(wa_msgs)} WhatsApp messages from PostgreSQL")
-        recent_wa = retriever.get_recent_whatsapp(limit=3)
-        existing_wids = {c.metadata.get("msg_id") for c in wa_msgs}
-        for r in recent_wa:
-            if r.metadata.get("msg_id") not in existing_wids:
-                contexts.append(r)
-    except Exception as e:
-        logger.warning(f"Email/WhatsApp retrieval failed (non-fatal): {e}")
-
-    # 2. Build system prompt with context (STEP1C: mode-aware prompt)
-    from orchestrator.scan_prompt import build_mode_aware_prompt
-    base_prompt = _build_scan_system_prompt(
-        deadline_only=False, contexts=contexts, domain_context=domain_context,
-    )
-    system_prompt = build_mode_aware_prompt(base_prompt, domain, mode)
-
-    # 3. Build messages (include history for follow-ups)
-    messages = []
-    for msg in (req.history or [])[-25:]:
-        role = msg.get("role", "user") if isinstance(msg, dict) else "user"
-        content = msg.get("content", "") if isinstance(msg, dict) else str(msg)
-        if role in ("user", "assistant") and content:
-            messages.append({"role": role, "content": content})
-    # Current question
-    messages.append({"role": "user", "content": req.question})
-
-    # 4. Stream Claude response via SSE
     async def event_stream():
+        # THINKING-DOTS-FIX: Signal retrieval phase immediately
+        yield f"data: {json.dumps({'status': 'retrieving'})}\n\n"
+
+        # 1. Retrieve context
+        try:
+            retriever = _get_retriever()
+            contexts = retriever.search_all_collections(
+                query=req.question,
+                limit_per_collection=8,
+                score_threshold=0.3,
+                project=req.project,
+                role=req.role,
+            )
+            logger.info(f"Scan: retrieved {len(contexts)} contexts for: {req.question[:80]}")
+        except Exception as e:
+            logger.error(f"Scan retrieval failed: {e}")
+            contexts = []
+
+        # 1b. ARCH-3: Also search full meeting transcripts from PostgreSQL
+        try:
+            retriever = _get_retriever()
+            transcripts = retriever.get_meeting_transcripts(req.question, limit=3)
+            if transcripts:
+                contexts.extend(transcripts)
+                logger.info(f"Scan: added {len(transcripts)} keyword-matched transcripts")
+            recent = retriever.get_recent_meeting_transcripts(limit=3)
+            existing_ids = {c.metadata.get("meeting_id") for c in transcripts}
+            added = 0
+            for r in recent:
+                if r.metadata.get("meeting_id") not in existing_ids:
+                    contexts.append(r)
+                    added += 1
+            if added:
+                logger.info(f"Scan: added {added} recent meeting transcripts")
+        except Exception as e:
+            logger.warning(f"Meeting transcript retrieval failed (non-fatal): {e}")
+
+        # 1c. ARCH-6/7: Also search full emails + WhatsApp from PostgreSQL
+        try:
+            retriever = _get_retriever()
+            emails = retriever.get_email_messages(req.question, limit=3)
+            if emails:
+                contexts.extend(emails)
+                logger.info(f"Scan: added {len(emails)} email messages from PostgreSQL")
+            recent_emails = retriever.get_recent_emails(limit=3)
+            existing_eids = {c.metadata.get("message_id") for c in emails}
+            for r in recent_emails:
+                if r.metadata.get("message_id") not in existing_eids:
+                    contexts.append(r)
+
+            wa_msgs = retriever.get_whatsapp_messages(req.question, limit=3)
+            if wa_msgs:
+                contexts.extend(wa_msgs)
+                logger.info(f"Scan: added {len(wa_msgs)} WhatsApp messages from PostgreSQL")
+            recent_wa = retriever.get_recent_whatsapp(limit=3)
+            existing_wids = {c.metadata.get("msg_id") for c in wa_msgs}
+            for r in recent_wa:
+                if r.metadata.get("msg_id") not in existing_wids:
+                    contexts.append(r)
+        except Exception as e:
+            logger.warning(f"Email/WhatsApp retrieval failed (non-fatal): {e}")
+
+        # THINKING-DOTS-FIX: Signal augmentation phase
+        yield f"data: {json.dumps({'status': 'thinking'})}\n\n"
+
+        # 2. Build system prompt with context (STEP1C: mode-aware prompt)
+        from orchestrator.scan_prompt import build_mode_aware_prompt
+        base_prompt = _build_scan_system_prompt(
+            deadline_only=False, contexts=contexts, domain_context=domain_context,
+        )
+        system_prompt = build_mode_aware_prompt(base_prompt, domain, mode)
+
+        # 3. Build messages (include history for follow-ups)
+        messages = []
+        for msg in (req.history or [])[-25:]:
+            role = msg.get("role", "user") if isinstance(msg, dict) else "user"
+            content = msg.get("content", "") if isinstance(msg, dict) else str(msg)
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+        # Current question
+        messages.append({"role": "user", "content": req.question})
+
+        # THINKING-DOTS-FIX: Signal generation phase
+        yield f"data: {json.dumps({'status': 'generating'})}\n\n"
+
+        # 4. Stream Claude response
         full_response = ""
         try:
             claude = anthropic.Anthropic(api_key=config.claude.api_key)

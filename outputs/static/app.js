@@ -2006,11 +2006,31 @@ async function sendScanMessage(question) {
                 if (payload === '[DONE]') continue;
                 try {
                     const data = JSON.parse(payload);
+                    // THINKING-DOTS-FIX: Update thinking label on status events
+                    if (data.status && !fullResponse && replyEl) {
+                        var _statusLabels = {
+                            'retrieving': 'Searching memory...',
+                            'thinking': 'Analyzing context...',
+                            'generating': 'Writing response...'
+                        };
+                        var _label = _statusLabels[data.status];
+                        if (_label) {
+                            var _thinkDiv = replyEl.querySelector('.thinking');
+                            if (_thinkDiv) {
+                                // Replace text node only — preserve dots animation
+                                var _nodes = _thinkDiv.childNodes;
+                                for (var _ni = _nodes.length - 1; _ni >= 0; _ni--) {
+                                    if (_nodes[_ni].nodeType === 3) _thinkDiv.removeChild(_nodes[_ni]);
+                                }
+                                _thinkDiv.appendChild(document.createTextNode(' ' + _label));
+                            }
+                        }
+                    }
                     if (data.token) {
                         if (!fullResponse && replyEl) replyEl.textContent = ''; // clear thinking indicator
                         fullResponse += data.token;
                         // SECURITY: md() calls esc() first to sanitize HTML entities before formatting
-                        if (replyEl) replyEl.innerHTML = '<div class="md-content">' + md(fullResponse) + '</div>';
+                        if (replyEl) setSafeHTML(replyEl, '<div class="md-content">' + md(fullResponse) + '</div>');
                     }
                     if (data.capabilities) {
                         addArtifactCapability(_itemsId, _panelId, data.capabilities);
@@ -3473,6 +3493,25 @@ async function sendSpecialistMessage(question) {
                 if (payload === '[DONE]') continue;
                 try {
                     var data = JSON.parse(payload);
+                    // THINKING-DOTS-FIX: Update thinking label on status events
+                    if (data.status && !fullResponse && replyEl) {
+                        var _sLabels = {
+                            'retrieving': 'Searching memory...',
+                            'thinking': 'Analyzing context...',
+                            'generating': 'Writing response...'
+                        };
+                        var _sLabel = _sLabels[data.status];
+                        if (_sLabel) {
+                            var _sThink = replyEl.querySelector('.thinking');
+                            if (_sThink) {
+                                var _sNodes = _sThink.childNodes;
+                                for (var _si = _sNodes.length - 1; _si >= 0; _si--) {
+                                    if (_sNodes[_si].nodeType === 3) _sThink.removeChild(_sNodes[_si]);
+                                }
+                                _sThink.appendChild(document.createTextNode(' ' + _sLabel));
+                            }
+                        }
+                    }
                     if (data.token) {
                         if (!fullResponse && replyEl) replyEl.textContent = '';
                         fullResponse += data.token;
