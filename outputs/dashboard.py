@@ -4607,159 +4607,6 @@ def _scan_chat_deep(req, start: float, task_id: int = None):
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-    # --- Pre-stuff context from DB (fault-tolerant, each block independent) ---
-    context_blocks = []
-
-    # Entity context (people + matters mentioned in question)
-    try:
-        from orchestrator.scan_prompt import build_entity_context
-        entity_ctx = build_entity_context(req.question)
-        if entity_ctx:
-            context_blocks.append(entity_ctx)
-    except Exception:
-        pass
-
-    # Recent emails (keyword + recent)
-    try:
-        retriever = _get_retriever()
-        emails = retriever.get_email_messages(req.question, limit=5)
-        recent_emails = retriever.get_recent_emails(limit=5)
-        seen = {c.metadata.get("message_id") for c in emails}
-        for r in recent_emails:
-            if r.metadata.get("message_id") not in seen:
-                emails.append(r)
-        if emails:
-            lines = ["## RECENT EMAILS"]
-            for e in emails[:8]:
-                label = e.metadata.get("label", "email")
-                date = e.metadata.get("date", "")
-                lines.append(f"[EMAIL: {label} | {date}]\n{e.content[:1500]}")
-            context_blocks.append("\n\n".join(lines))
-    except Exception:
-        pass
-
-    # Recent WhatsApp
-    try:
-        retriever = _get_retriever()
-        wa = retriever.get_whatsapp_messages(req.question, limit=5)
-        recent_wa = retriever.get_recent_whatsapp(limit=5)
-        seen = {c.metadata.get("msg_id") for c in wa}
-        for r in recent_wa:
-            if r.metadata.get("msg_id") not in seen:
-                wa.append(r)
-        if wa:
-            lines = ["## RECENT WHATSAPP"]
-            for w in wa[:8]:
-                label = w.metadata.get("label", w.metadata.get("sender_name", ""))
-                date = w.metadata.get("date", "")
-                lines.append(f"[WA: {label} | {date}]\n{w.content[:1000]}")
-            context_blocks.append("\n\n".join(lines))
-    except Exception:
-        pass
-
-    # Meeting transcripts
-    try:
-        retriever = _get_retriever()
-        meetings = retriever.get_meeting_transcripts(req.question, limit=3)
-        recent_meetings = retriever.get_recent_meeting_transcripts(limit=3)
-        seen = {c.metadata.get("meeting_id") for c in meetings}
-        for r in recent_meetings:
-            if r.metadata.get("meeting_id") not in seen:
-                meetings.append(r)
-        if meetings:
-            lines = ["## MEETING TRANSCRIPTS"]
-            for m in meetings[:5]:
-                label = m.metadata.get("label", "meeting")
-                date = m.metadata.get("date", "")
-                lines.append(f"[MEETING: {label} | {date}]\n{m.content[:2000]}")
-            context_blocks.append("\n\n".join(lines))
-    except Exception:
-        pass
-
-    # Recent decisions
-    try:
-        retriever = _get_retriever()
-        decisions = retriever.get_recent_decisions(limit=5)
-        if decisions:
-            lines = ["## RECENT DECISIONS"]
-            for d in decisions:
-                date = d.metadata.get("date", "")
-                lines.append(f"[DECISION | {date}]\n{d.content[:800]}")
-            context_blocks.append("\n\n".join(lines))
-    except Exception:
-        pass
-
-    # Deep analyses (from Cowork/Claude Code)
-    try:
-        store = _get_store()
-        conn = store._get_conn()
-        if conn:
-            try:
-                cur = conn.cursor()
-                cur.execute("""
-                    SELECT title, summary, created_at FROM deep_analyses
-                    ORDER BY created_at DESC LIMIT 5
-                """)
-                rows = cur.fetchall()
-                cur.close()
-                if rows:
-                    lines = ["## STORED ANALYSES"]
-                    for title, summary, created in rows:
-                        date = created.strftime("%Y-%m-%d") if created else ""
-                        lines.append(f"[ANALYSIS: {title} | {date}]\n{(summary or '')[:1000]}")
-                    context_blocks.append("\n\n".join(lines))
-            finally:
-                store._put_conn(conn)
-    except Exception:
-        pass
-
-    # Deadlines
-    try:
-        from models.deadlines import get_active_deadlines
-        deadlines = get_active_deadlines(limit=15)
-        if deadlines:
-            dl_lines = ["## ACTIVE DEADLINES"]
-            for dl in deadlines:
-                due = dl.get("due_date")
-                due_str = due.strftime("%Y-%m-%d") if due else "TBD"
-                priority = dl.get("priority", "normal")
-                desc = dl.get("description", "")
-                dl_lines.append(f"- [{priority.upper()}] {due_str}: {desc}")
-            context_blocks.append("\n".join(dl_lines))
-    except Exception:
-        pass
-
-    # DEEP-MODE-2: Prior Baker conversations relevant to this question
-    try:
-        store = _get_store()
-        prior_convos = store.get_relevant_conversations(req.question, limit=5)
-        if prior_convos:
-            lines = ["## PRIOR BAKER CONVERSATIONS"]
-            for conv in prior_convos:
-                date = conv.get("created_at", "")
-                date_str = date.strftime("%Y-%m-%d %H:%M") if hasattr(date, "strftime") else str(date)[:16]
-                q = (conv.get("question") or "")[:200]
-                a = (conv.get("answer") or "")[:800]
-                lines.append(f"[{date_str}] Director: {q}")
-                if a:
-                    lines.append(f"Baker: {a}")
-            context_blocks.append("\n\n".join(lines))
-    except Exception:
-        pass
-
-    pre_stuffed = "\n\n".join(context_blocks) if context_blocks else ""
-
-    # Build system prompt: base + pre-stuffed context + preferences
-    system_prompt = (
-        f"{SCAN_SYSTEM_PROMPT}\n\n"
-        f"## CURRENT TIME\n{now}\n\n"
-        f"{pre_stuffed}"
-    )
-    system_prompt = build_mode_aware_prompt(system_prompt, domain=None, mode="delegate")
-
-    logger.info(f"DEEP-MODE: system prompt {len(system_prompt)} chars, "
-                f"{len(context_blocks)} context blocks pre-stuffed")
-
     # Full session history — no cap
     history = []
     for msg in (req.history or []):
@@ -4769,8 +4616,165 @@ def _scan_chat_deep(req, start: float, task_id: int = None):
             history.append({"role": role, "content": content})
 
     async def event_stream():
-        # THINKING-DOTS-FIX: Signal retrieval phase for deep mode
+        # THINKING-DOTS-FIX: Signal retrieval phase BEFORE doing retrieval
+        # This yield opens the SSE connection and shows "Searching memory..." to the user
         yield f"data: {json.dumps({'status': 'retrieving'})}\n\n"
+
+        # --- Pre-stuff context from DB (moved inside generator so status streams first) ---
+        context_blocks = []
+
+        # Entity context (people + matters mentioned in question)
+        try:
+            from orchestrator.scan_prompt import build_entity_context
+            entity_ctx = build_entity_context(req.question)
+            if entity_ctx:
+                context_blocks.append(entity_ctx)
+        except Exception:
+            pass
+
+        # Recent emails (keyword + recent)
+        try:
+            retriever = _get_retriever()
+            emails = retriever.get_email_messages(req.question, limit=5)
+            recent_emails = retriever.get_recent_emails(limit=5)
+            seen = {c.metadata.get("message_id") for c in emails}
+            for r in recent_emails:
+                if r.metadata.get("message_id") not in seen:
+                    emails.append(r)
+            if emails:
+                lines = ["## RECENT EMAILS"]
+                for e in emails[:8]:
+                    label = e.metadata.get("label", "email")
+                    date = e.metadata.get("date", "")
+                    lines.append(f"[EMAIL: {label} | {date}]\n{e.content[:1500]}")
+                context_blocks.append("\n\n".join(lines))
+        except Exception:
+            pass
+
+        # Recent WhatsApp
+        try:
+            retriever = _get_retriever()
+            wa = retriever.get_whatsapp_messages(req.question, limit=5)
+            recent_wa = retriever.get_recent_whatsapp(limit=5)
+            seen = {c.metadata.get("msg_id") for c in wa}
+            for r in recent_wa:
+                if r.metadata.get("msg_id") not in seen:
+                    wa.append(r)
+            if wa:
+                lines = ["## RECENT WHATSAPP"]
+                for w in wa[:8]:
+                    label = w.metadata.get("label", w.metadata.get("sender_name", ""))
+                    date = w.metadata.get("date", "")
+                    lines.append(f"[WA: {label} | {date}]\n{w.content[:1000]}")
+                context_blocks.append("\n\n".join(lines))
+        except Exception:
+            pass
+
+        # Meeting transcripts
+        try:
+            retriever = _get_retriever()
+            meetings = retriever.get_meeting_transcripts(req.question, limit=3)
+            recent_meetings = retriever.get_recent_meeting_transcripts(limit=3)
+            seen = {c.metadata.get("meeting_id") for c in meetings}
+            for r in recent_meetings:
+                if r.metadata.get("meeting_id") not in seen:
+                    meetings.append(r)
+            if meetings:
+                lines = ["## MEETING TRANSCRIPTS"]
+                for m in meetings[:5]:
+                    label = m.metadata.get("label", "meeting")
+                    date = m.metadata.get("date", "")
+                    lines.append(f"[MEETING: {label} | {date}]\n{m.content[:2000]}")
+                context_blocks.append("\n\n".join(lines))
+        except Exception:
+            pass
+
+        # Recent decisions
+        try:
+            retriever = _get_retriever()
+            decisions = retriever.get_recent_decisions(limit=5)
+            if decisions:
+                lines = ["## RECENT DECISIONS"]
+                for d in decisions:
+                    date = d.metadata.get("date", "")
+                    lines.append(f"[DECISION | {date}]\n{d.content[:800]}")
+                context_blocks.append("\n\n".join(lines))
+        except Exception:
+            pass
+
+        # Deep analyses (from Cowork/Claude Code)
+        try:
+            store = _get_store()
+            conn = store._get_conn()
+            if conn:
+                try:
+                    cur = conn.cursor()
+                    cur.execute("""
+                        SELECT title, summary, created_at FROM deep_analyses
+                        ORDER BY created_at DESC LIMIT 5
+                    """)
+                    rows = cur.fetchall()
+                    cur.close()
+                    if rows:
+                        lines = ["## STORED ANALYSES"]
+                        for title, summary, created in rows:
+                            date = created.strftime("%Y-%m-%d") if created else ""
+                            lines.append(f"[ANALYSIS: {title} | {date}]\n{(summary or '')[:1000]}")
+                        context_blocks.append("\n\n".join(lines))
+                finally:
+                    store._put_conn(conn)
+        except Exception:
+            pass
+
+        # Deadlines
+        try:
+            from models.deadlines import get_active_deadlines
+            deadlines = get_active_deadlines(limit=15)
+            if deadlines:
+                dl_lines = ["## ACTIVE DEADLINES"]
+                for dl in deadlines:
+                    due = dl.get("due_date")
+                    due_str = due.strftime("%Y-%m-%d") if due else "TBD"
+                    priority = dl.get("priority", "normal")
+                    desc = dl.get("description", "")
+                    dl_lines.append(f"- [{priority.upper()}] {due_str}: {desc}")
+                context_blocks.append("\n".join(dl_lines))
+        except Exception:
+            pass
+
+        # DEEP-MODE-2: Prior Baker conversations relevant to this question
+        try:
+            store = _get_store()
+            prior_convos = store.get_relevant_conversations(req.question, limit=5)
+            if prior_convos:
+                lines = ["## PRIOR BAKER CONVERSATIONS"]
+                for conv in prior_convos:
+                    date = conv.get("created_at", "")
+                    date_str = date.strftime("%Y-%m-%d %H:%M") if hasattr(date, "strftime") else str(date)[:16]
+                    q = (conv.get("question") or "")[:200]
+                    a = (conv.get("answer") or "")[:800]
+                    lines.append(f"[{date_str}] Director: {q}")
+                    if a:
+                        lines.append(f"Baker: {a}")
+                context_blocks.append("\n\n".join(lines))
+        except Exception:
+            pass
+
+        pre_stuffed = "\n\n".join(context_blocks) if context_blocks else ""
+
+        # Build system prompt: base + pre-stuffed context + preferences
+        system_prompt = (
+            f"{SCAN_SYSTEM_PROMPT}\n\n"
+            f"## CURRENT TIME\n{now}\n\n"
+            f"{pre_stuffed}"
+        )
+        system_prompt = build_mode_aware_prompt(system_prompt, domain=None, mode="delegate")
+
+        logger.info(f"DEEP-MODE: system prompt {len(system_prompt)} chars, "
+                    f"{len(context_blocks)} context blocks pre-stuffed")
+
+        # THINKING-DOTS-FIX: Signal generation phase after retrieval is done
+        yield f"data: {json.dumps({'status': 'generating'})}\n\n"
 
         full_response = ""
         agent_result = None
@@ -4794,7 +4798,6 @@ def _scan_chat_deep(req, start: float, task_id: int = None):
             finally:
                 item_queue.put(None)
 
-        yield f"data: {json.dumps({'status': 'generating'})}\n\n"
         agent_thread = asyncio.get_event_loop().run_in_executor(None, _run_agent)
 
         try:
