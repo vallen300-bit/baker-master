@@ -206,6 +206,12 @@ Be specific — reference real names, projects, dates from the context provided.
 Keep it concise and actionable. No filler. Bottom-line first.
 
 If you have no context on an attendee, say so — don't fabricate.
+
+IMPORTANT — Travel events (flights, trains):
+- If the event is a flight/travel, do NOT generate generic filler like "confirm what you're traveling for".
+- If trip context is provided (trip purpose, contacts, obligations), lead with that.
+- Focus on: trip purpose, who you're meeting at the destination, key obligations, logistics that need attention.
+- If there is NO trip context and NO attendees, keep the briefing very short: just flight details and a note that no trip context was found. Do NOT pad with generic advice like "prepare travel documents" or "brief absence coverage".
 """
 
 
@@ -224,6 +230,69 @@ def _assemble_meeting_context(meeting: dict, store) -> str:
         parts.append(f"Location: {meeting['location']}")
     if meeting.get('description'):
         parts.append(f"Description: {meeting['description']}")
+
+    # 1b. Trip context — check if this event is linked to a known trip
+    try:
+        conn = store._get_conn()
+        if conn:
+            try:
+                import psycopg2.extras
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                # Match trip by date overlap and destination mention in title/location
+                meeting_start = meeting.get('start', '')[:10]  # YYYY-MM-DD
+                cur.execute("""
+                    SELECT t.id, t.destination, t.origin, t.category, t.status, t.event_name,
+                           t.strategic_objective, t.start_date, t.end_date
+                    FROM trips t
+                    WHERE t.status IN ('planned', 'confirmed')
+                      AND t.start_date <= %s::date + INTERVAL '1 day'
+                      AND COALESCE(t.end_date, t.start_date) >= %s::date - INTERVAL '1 day'
+                    ORDER BY t.start_date
+                    LIMIT 3
+                """, (meeting_start, meeting_start))
+                trips = cur.fetchall()
+                for trip in trips:
+                    parts.append(f"\n--- LINKED TRIP: {trip.get('destination', '')} ({trip.get('event_name') or trip.get('category', '')}) ---")
+                    parts.append(f"  Status: {trip.get('status', '')} | {trip.get('start_date', '')} to {trip.get('end_date', '')}")
+                    if trip.get('strategic_objective'):
+                        parts.append(f"  Purpose: {trip['strategic_objective']}")
+
+                    # Trip contacts
+                    cur.execute("""
+                        SELECT tc.role, tc.roi_type, tc.roi_score, tc.notes, vc.name, vc.role as contact_role
+                        FROM trip_contacts tc
+                        JOIN vip_contacts vc ON vc.id = tc.contact_id
+                        WHERE tc.trip_id = %s
+                        ORDER BY tc.roi_score DESC NULLS LAST
+                        LIMIT 10
+                    """, (trip['id'],))
+                    trip_contacts = cur.fetchall()
+                    if trip_contacts:
+                        parts.append(f"  Key people ({len(trip_contacts)}):")
+                        for tc in trip_contacts:
+                            parts.append(f"    - {tc['name']} ({tc.get('contact_role', '')}) — {tc.get('notes', '')[:100]}")
+
+                    # Related obligations
+                    cur.execute("""
+                        SELECT description, due_date, severity, priority
+                        FROM deadlines
+                        WHERE status = 'active'
+                          AND (LOWER(description) ILIKE %s OR LOWER(description) ILIKE %s)
+                        ORDER BY due_date
+                        LIMIT 5
+                    """, (f"%{trip.get('destination', '').lower()}%",
+                          f"%{(trip.get('event_name') or '').lower()}%" if trip.get('event_name') else '%ZZZNEVERMATCH%'))
+                    trip_obligations = cur.fetchall()
+                    if trip_obligations:
+                        parts.append(f"  Obligations ({len(trip_obligations)}):")
+                        for ob in trip_obligations:
+                            parts.append(f"    - [{ob.get('severity', '').upper()}] {ob['description'][:100]} (due {ob.get('due_date', '?')})")
+
+                cur.close()
+            finally:
+                store._put_conn(conn)
+    except Exception as e:
+        logger.warning(f"Trip context assembly failed: {e}")
 
     # 2. Attendee context
     for att in meeting.get('attendees', []):
