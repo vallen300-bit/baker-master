@@ -1582,7 +1582,7 @@ def _haiku_filter_messages(messages: list, trip_context: str) -> list:
         resp = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=200,
-            system="You filter WhatsApp messages for relevance to a business trip. Return ONLY a JSON array of indices (e.g. [0, 2, 5]) of messages that are: (1) directly about the trip, OR (2) urgent business matters the Director needs to know about while traveling. Skip casual chat and low-priority items. Return [] if nothing is relevant. No explanation.",
+            system="You filter WhatsApp messages for a traveling CEO. Return ONLY a JSON array of indices (e.g. [0, 2, 5]) of messages worth surfacing. INCLUDE: (1) anything about the trip itself, (2) business decisions or strategy discussions, (3) requests that need a response, (4) deal/project updates. EXCLUDE ONLY: single-word replies ('Ok', 'Thanks'), links with no context, purely social pleasantries. When in doubt, INCLUDE. No explanation.",
             messages=[{"role": "user", "content": f"Trip context:\n{trip_context}\n\nMessages:\n{items_text}"}],
         )
         try:
