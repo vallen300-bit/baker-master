@@ -4099,8 +4099,10 @@ function showUploadStatus(el, state, message) {
 
 var _tripStatusColors = { planned: 'var(--blue, #0a6fdb)', confirmed: 'var(--green, #22c55e)', discarded: 'var(--red, #ef4444)', completed: 'var(--amber, #f59e0b)' };
 var _tripCategoryLabels = { meeting: 'Meeting', event: 'Event', personal: 'Personal' };
+var _currentTripId = null;
 
 async function showTripView(tripId) {
+    _currentTripId = tripId;
     var container = document.getElementById('tripDetailContent');
     var tripView = document.getElementById('viewTripDetail');
     if (!container || !tripView) return;
@@ -4216,18 +4218,7 @@ function renderTripView(trip) {
     html += '</form>';
     html += '</div>';
 
-    // Contacts section (populated by Batch 3)
-    if (trip.contacts && trip.contacts.length > 0) {
-        html += '<div style="margin-bottom:24px;">';
-        html += '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Trip Contacts</div>';
-        trip.contacts.forEach(function(c) {
-            html += '<div style="padding:8px 12px;background:var(--bg2);border-radius:6px;margin-bottom:4px;font-size:13px;">';
-            html += esc(c.contact_name || 'Unknown');
-            if (c.role) html += ' <span style="color:var(--text3);">(' + esc(c.role) + ')</span>';
-            html += '</div>';
-        });
-        html += '</div>';
-    }
+    // Trip Contacts section removed — now shown in People to Meet card (Batch 3)
 
     return html;
 }
@@ -4301,11 +4292,11 @@ async function loadTripCards(tripId) {
         var html = '';
         html += renderTripCardSection('Logistics & Comms', renderLogisticsCard(cards.logistics || {}));
         html += renderTripCardSection('Daily Agenda', renderAgendaCard(cards.agenda || {}));
-        html += renderTripCardSection('People to Meet', '<div style="font-size:12px;color:var(--text3);">Coming in Batch 3 (Proxycurl integration)</div>');
+        html += renderTripCardSection('People to Meet (' + (cards.people || []).length + ')', renderPeopleCard(cards.people || []));
         html += renderTripCardSection('Flight Reading', renderReadingCard(cards.reading || {}));
         html += renderTripCardSection('Opportunistic Radar', renderRadarCard(cards.radar || {}));
         html += renderTripCardSection('Europe While You Sleep', renderTimezoneCard(cards.timezone || {}));
-        html += renderTripCardSection('Outreach', '<div style="font-size:12px;color:var(--text3);">Coming in Batch 3</div>');
+        html += renderTripCardSection('Outreach', renderOutreachCard(cards.people || []));
         html += renderTripCardSection('Trip Outcomes', '<div style="font-size:12px;color:var(--text3);">Coming in Batch 4</div>');
         setSafeHTML(container, '<div style="font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Trip Intelligence</div>' + html);
     } catch (e) {
@@ -4448,4 +4439,189 @@ function renderTimezoneCard(data) {
         html += '<div style="font-size:12px;color:var(--text3);">All quiet. No urgent items.</div>';
     }
     return html;
+}
+
+// ═══ TRIP-INTELLIGENCE-1 Batch 3: Card 4 — People to Meet ═══
+
+function renderPeopleCard(people) {
+    var html = '';
+    if (!people || people.length === 0) {
+        html += '<div style="font-size:12px;color:var(--text3);margin-bottom:8px;">No contacts linked to this trip yet.</div>';
+    } else {
+        people.forEach(function(p, idx) {
+            var roiBg = (p.roi_score || 0) >= 8 ? 'var(--green, #22c55e)' : (p.roi_score || 0) >= 5 ? 'var(--amber, #f59e0b)' : 'var(--text3)';
+            var tierDot = p.tier === 1 ? 'green' : p.tier === 2 ? 'amber' : 'gray';
+            var panelId = 'people-detail-' + idx;
+
+            // Header row (always visible)
+            html += '<div style="border:1px solid var(--border);border-radius:6px;margin-bottom:8px;overflow:hidden;">';
+            html += '<div onclick="var el=document.getElementById(\'' + panelId + '\');el.style.display=el.style.display===\'none\'?\'block\':\'none\'" style="display:flex;align-items:center;gap:8px;padding:10px 12px;cursor:pointer;background:var(--bg1);">';
+            // Tier dot
+            html += '<span class="nav-dot ' + tierDot + '" style="margin-top:1px;flex-shrink:0;"></span>';
+            // Name
+            html += '<span style="font-size:13px;font-weight:600;color:var(--text1);">' + esc(p.name) + '</span>';
+            // Role
+            if (p.role) html += '<span style="font-size:11px;color:var(--text3);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(p.role) + '</span>';
+            // ROI badge
+            if (p.roi_score) {
+                html += '<span style="font-size:10px;font-weight:700;color:#fff;background:' + roiBg + ';padding:2px 7px;border-radius:10px;flex-shrink:0;">ROI ' + p.roi_score + '</span>';
+            }
+            // Outreach status pill
+            if (p.outreach_status && p.outreach_status !== 'none') {
+                var oCol = p.outreach_status === 'confirmed' ? 'var(--green)' : p.outreach_status === 'sent' ? 'var(--amber)' : 'var(--text3)';
+                html += '<span style="font-size:10px;color:' + oCol + ';border:1px solid ' + oCol + ';padding:1px 6px;border-radius:8px;flex-shrink:0;">' + esc(p.outreach_status) + '</span>';
+            }
+            html += '<span style="font-size:10px;color:var(--text3);flex-shrink:0;">&#9662;</span>';
+            html += '</div>';
+
+            // Expandable detail panel (hidden by default)
+            html += '<div id="' + panelId + '" style="display:none;padding:10px 12px;border-top:1px solid var(--border);">';
+
+            // Notes / context
+            if (p.notes) {
+                html += '<div style="font-size:12px;color:var(--text2);margin-bottom:10px;padding:8px;background:var(--bg2);border-radius:4px;">' + esc(p.notes) + '</div>';
+            }
+
+            // Role context + Expertise
+            if (p.role_context || p.expertise) {
+                html += '<div style="display:flex;gap:16px;margin-bottom:10px;flex-wrap:wrap;">';
+                if (p.role_context) {
+                    html += '<div style="flex:1;min-width:140px;"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin-bottom:3px;">Context</div>';
+                    html += '<div style="font-size:12px;color:var(--text2);">' + esc(p.role_context) + '</div></div>';
+                }
+                if (p.expertise) {
+                    html += '<div style="flex:1;min-width:140px;"><div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin-bottom:3px;">Expertise</div>';
+                    html += '<div style="font-size:12px;color:var(--text2);">' + esc(p.expertise) + '</div></div>';
+                }
+                html += '</div>';
+            }
+
+            // Interactions
+            var interactions = p.interactions || [];
+            if (interactions.length > 0) {
+                html += '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin-bottom:4px;">Recent Interactions (' + interactions.length + ')</div>';
+                interactions.forEach(function(i) {
+                    var chIcon = i.channel === 'email' ? '&#9993;' : i.channel === 'whatsapp' ? '&#128172;' : i.channel === 'meeting' ? '&#128100;' : '&#8226;';
+                    var dirArrow = i.direction === 'outbound' ? '&rarr;' : i.direction === 'inbound' ? '&larr;' : '&harr;';
+                    html += '<div style="font-size:11px;color:var(--text2);margin-bottom:3px;display:flex;gap:6px;">';
+                    html += '<span>' + chIcon + '</span>';
+                    html += '<span>' + dirArrow + '</span>';
+                    html += '<span style="flex:1;">' + esc(i.subject || i.channel || '') + '</span>';
+                    if (i.timestamp) html += '<span style="color:var(--text3);font-size:10px;">' + new Date(i.timestamp).toLocaleDateString() + '</span>';
+                    html += '</div>';
+                });
+                html += '<div style="height:8px;"></div>';
+            }
+
+            // Obligations
+            var obls = p.obligations || [];
+            if (obls.length > 0) {
+                html += '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin-bottom:4px;">Mutual Obligations (' + obls.length + ')</div>';
+                obls.forEach(function(o) {
+                    var sevCol = o.severity === 'hard' ? 'var(--red)' : o.severity === 'firm' ? 'var(--amber)' : 'var(--text3)';
+                    html += '<div style="font-size:11px;color:var(--text2);margin-bottom:3px;">';
+                    if (o.severity) html += '<span style="font-size:9px;font-weight:700;color:' + sevCol + ';margin-right:4px;">' + esc(o.severity.toUpperCase()) + '</span>';
+                    html += esc(o.description || '');
+                    if (o.due_date) html += ' <span style="color:var(--text3);">(' + esc(o.due_date) + ')</span>';
+                    html += '</div>';
+                });
+                html += '<div style="height:8px;"></div>';
+            }
+
+            // Emails
+            var emails = p.emails || [];
+            if (emails.length > 0) {
+                html += '<div style="font-size:10px;color:var(--text3);text-transform:uppercase;margin-bottom:4px;">Recent Emails (' + emails.length + ')</div>';
+                emails.forEach(function(e) {
+                    html += '<div style="font-size:11px;margin-bottom:4px;">';
+                    html += '<div style="color:var(--text1);font-weight:500;">' + esc(e.subject || 'No subject') + '</div>';
+                    html += '<div style="color:var(--text3);font-size:10px;">' + esc(e.sender_name || '') + (e.received_date ? ' &middot; ' + new Date(e.received_date).toLocaleDateString() : '') + '</div>';
+                    html += '</div>';
+                });
+            }
+
+            if (!interactions.length && !obls.length && !emails.length && !p.notes && !p.role_context) {
+                html += '<div style="font-size:12px;color:var(--text3);">No additional context available yet.</div>';
+            }
+
+            html += '</div>'; // end detail panel
+            html += '</div>'; // end card
+        });
+    }
+
+    // Add person button
+    html += '<button onclick="showAddTripPerson()" style="font-size:12px;font-family:var(--font);padding:6px 14px;background:transparent;border:1px dashed var(--border);border-radius:6px;color:var(--text3);cursor:pointer;width:100%;margin-top:4px;">+ Add person</button>';
+    return html;
+}
+
+function renderOutreachCard(people) {
+    if (!people || people.length === 0) {
+        return '<div style="font-size:12px;color:var(--text3);">Add people to the trip first to track outreach.</div>';
+    }
+    var html = '';
+    var statusOrder = { confirmed: 0, sent: 1, none: 2 };
+    var sorted = people.slice().sort(function(a, b) {
+        return (statusOrder[a.outreach_status] || 9) - (statusOrder[b.outreach_status] || 9);
+    });
+    sorted.forEach(function(p) {
+        var st = p.outreach_status || 'none';
+        var stColor = st === 'confirmed' ? 'var(--green)' : st === 'sent' ? 'var(--amber)' : 'var(--text3)';
+        var stLabel = st === 'none' ? 'Not reached out' : st.charAt(0).toUpperCase() + st.slice(1);
+        html += '<div style="display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:6px;padding:6px 0;border-bottom:1px solid var(--border-light);">';
+        html += '<span class="nav-dot" style="background:' + stColor + ';margin-top:1px;"></span>';
+        html += '<span style="color:var(--text1);font-weight:500;">' + esc(p.name) + '</span>';
+        html += '<span style="color:var(--text3);margin-left:auto;font-size:11px;">' + esc(stLabel) + '</span>';
+        html += '</div>';
+    });
+    return html;
+}
+
+async function showAddTripPerson() {
+    if (!_currentTripId) return;
+    var name = prompt('Search contact by name:');
+    if (!name || !name.trim()) return;
+    try {
+        var resp = await bakerFetch('/api/networking/contacts');
+        if (!resp.ok) return;
+        var data = await resp.json();
+        var contacts = data.contacts || [];
+        var q = name.trim().toLowerCase();
+        var matches = contacts.filter(function(c) {
+            return (c.name || '').toLowerCase().indexOf(q) !== -1;
+        }).slice(0, 10);
+        if (matches.length === 0) {
+            alert('No contacts found matching "' + name.trim() + '"');
+            return;
+        }
+        var pickList = matches.map(function(c, i) {
+            return (i + 1) + '. ' + c.name + (c.role ? ' (' + c.role + ')' : '');
+        }).join('\n');
+        var pick = prompt('Select a contact (enter number):\n' + pickList);
+        if (!pick) return;
+        var idx = parseInt(pick, 10) - 1;
+        if (isNaN(idx) || idx < 0 || idx >= matches.length) return;
+        var selected = matches[idx];
+        var notes = prompt('Notes for this trip contact (optional):') || '';
+        var roiStr = prompt('ROI score 1-10 (optional):') || '';
+        var roi = roiStr ? parseInt(roiStr, 10) : null;
+        if (roi !== null && (isNaN(roi) || roi < 1 || roi > 10)) roi = null;
+
+        var addResp = await bakerFetch('/api/trips/' + _currentTripId + '/people', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                contact_id: selected.id,
+                role: 'counterparty',
+                roi_score: roi,
+                notes: notes || null,
+            }),
+        });
+        if (addResp.ok) {
+            showTripView(_currentTripId);
+        } else {
+            alert('Failed to add contact.');
+        }
+    } catch (e) {
+        console.error('showAddTripPerson failed:', e);
+    }
 }

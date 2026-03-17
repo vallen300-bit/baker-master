@@ -4205,6 +4205,44 @@ class SentinelStoreBack:
         finally:
             self._put_conn(conn)
 
+    def add_trip_contact(self, trip_id: int, contact_id: int,
+                         role: str = "counterparty", roi_type: str = None,
+                         roi_score: int = None, notes: str = None) -> Optional[dict]:
+        """Add a contact to a trip. Returns the trip_contact row or None."""
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            import psycopg2.extras
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                INSERT INTO trip_contacts (trip_id, contact_id, role, roi_type, roi_score, notes)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING *
+            """, (trip_id, contact_id, role, roi_type, roi_score, notes))
+            row = cur.fetchone()
+            conn.commit()
+            # Fetch the contact name for the response
+            if row:
+                row = dict(row)
+                cur.execute("SELECT name, role FROM vip_contacts WHERE id = %s", (contact_id,))
+                vc = cur.fetchone()
+                if vc:
+                    row["contact_name"] = vc["name"]
+                    row["contact_role"] = vc["role"]
+            cur.close()
+            logger.info(f"Added contact #{contact_id} to trip #{trip_id}")
+            return row
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"add_trip_contact failed: {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
     def link_to_trip_context(self, content: str, source_type: str,
                               source_ref: str, timestamp=None) -> Optional[int]:
         """TRIP-INTELLIGENCE-1: Auto-link content to an active trip if it mentions the destination.

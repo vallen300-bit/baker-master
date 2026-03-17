@@ -1359,9 +1359,153 @@ async def add_trip_note(trip_id: int, body: TripNote):
     return {"ok": True}
 
 
+class TripPersonAdd(BaseModel):
+    contact_id: int
+    role: str = "counterparty"
+    roi_type: str = None
+    roi_score: int = None
+    notes: str = None
+
+
+@app.post("/api/trips/{trip_id}/people", tags=["trips"], dependencies=[Depends(verify_api_key)])
+async def add_trip_person(trip_id: int, body: TripPersonAdd):
+    """Add a contact to a trip."""
+    store = _get_store()
+    trip = store.get_trip(trip_id)
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    tc = store.add_trip_contact(
+        trip_id=trip_id,
+        contact_id=body.contact_id,
+        role=body.role,
+        roi_type=body.roi_type,
+        roi_score=body.roi_score,
+        notes=body.notes,
+    )
+    if not tc:
+        raise HTTPException(status_code=500, detail="Failed to add contact")
+    return _serialize(tc)
+
+
 # ============================================================
-# TRIP-INTELLIGENCE-1 Batch 2: Trip Cards
+# TRIP-INTELLIGENCE-1 Batch 2+3: Trip Cards
 # ============================================================
+
+
+def _build_people_dossiers(store, trip: dict) -> list:
+    """TRIP-INTELLIGENCE-1 Batch 3 — Card 4: People to Meet.
+    For each trip_contact, pull interactions, obligations, and emails."""
+    contacts = trip.get("contacts") or []
+    if not contacts:
+        return []
+
+    import psycopg2.extras
+    conn = store._get_conn()
+    if not conn:
+        return [_people_stub(c) for c in contacts]
+
+    dossiers = []
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        for tc in contacts:
+            cid = tc.get("contact_id")
+            dossier = {
+                "trip_contact_id": tc.get("id"),
+                "contact_id": cid,
+                "name": tc.get("contact_name") or "Unknown",
+                "role": tc.get("contact_role") or tc.get("role") or "",
+                "roi_score": tc.get("roi_score"),
+                "roi_type": tc.get("roi_type") or "",
+                "outreach_status": tc.get("outreach_status") or "none",
+                "notes": tc.get("notes") or "",
+                "interactions": [],
+                "obligations": [],
+                "emails": [],
+                "tier": None,
+                "role_context": "",
+                "expertise": "",
+            }
+            if not cid:
+                dossiers.append(dossier)
+                continue
+
+            # Pull contact profile
+            cur.execute("""
+                SELECT tier, role_context, expertise
+                FROM vip_contacts WHERE id = %s
+            """, (cid,))
+            profile = cur.fetchone()
+            if profile:
+                dossier["tier"] = profile["tier"]
+                dossier["role_context"] = profile["role_context"] or ""
+                dossier["expertise"] = profile["expertise"] or ""
+
+            # Recent interactions (last 90 days, max 5)
+            cur.execute("""
+                SELECT channel, direction, timestamp, subject
+                FROM contact_interactions
+                WHERE contact_id = %s
+                ORDER BY timestamp DESC LIMIT 5
+            """, (cid,))
+            dossier["interactions"] = [_serialize(dict(r)) for r in cur.fetchall()]
+
+            # Mutual obligations (deadlines assigned to or mentioning this contact)
+            contact_name = dossier["name"]
+            cur.execute("""
+                SELECT description, due_date, priority, severity, status
+                FROM deadlines
+                WHERE status = 'active'
+                  AND (LOWER(assigned_to) LIKE %s
+                    OR LOWER(description) LIKE %s)
+                ORDER BY due_date ASC NULLS LAST LIMIT 5
+            """, (f"%{contact_name.lower()}%", f"%{contact_name.lower()}%"))
+            dossier["obligations"] = [_serialize(dict(r)) for r in cur.fetchall()]
+
+            # Recent emails to/from this contact (last 60 days, max 5)
+            cur.execute("""
+                SELECT subject, sender_name, sender_email, received_date,
+                       LEFT(full_body, 300) as snippet
+                FROM email_messages
+                WHERE (LOWER(sender_name) LIKE %s
+                    OR LOWER(sender_email) LIKE %s
+                    OR LOWER(recipients) LIKE %s)
+                  AND received_date >= NOW() - INTERVAL '60 days'
+                ORDER BY received_date DESC LIMIT 5
+            """, (f"%{contact_name.lower()}%", f"%{contact_name.lower()}%",
+                  f"%{contact_name.lower()}%"))
+            dossier["emails"] = [_serialize(dict(r)) for r in cur.fetchall()]
+
+            dossiers.append(dossier)
+        cur.close()
+    except Exception as e:
+        logger.warning(f"_build_people_dossiers failed: {e}")
+        # Return stubs for any contacts not yet processed
+        while len(dossiers) < len(contacts):
+            dossiers.append(_people_stub(contacts[len(dossiers)]))
+    finally:
+        store._put_conn(conn)
+
+    return dossiers
+
+
+def _people_stub(tc: dict) -> dict:
+    """Minimal dossier when DB is unavailable."""
+    return {
+        "trip_contact_id": tc.get("id"),
+        "contact_id": tc.get("contact_id"),
+        "name": tc.get("contact_name") or "Unknown",
+        "role": tc.get("contact_role") or tc.get("role") or "",
+        "roi_score": tc.get("roi_score"),
+        "roi_type": tc.get("roi_type") or "",
+        "outreach_status": tc.get("outreach_status") or "none",
+        "notes": tc.get("notes") or "",
+        "interactions": [],
+        "obligations": [],
+        "emails": [],
+        "tier": None,
+        "role_context": "",
+        "expertise": "",
+    }
 
 _CITY_TIMEZONE = {
     'Vienna': 'Europe/Vienna', 'Frankfurt': 'Europe/Berlin', 'Zurich': 'Europe/Zurich',
@@ -1481,13 +1625,18 @@ async def get_trip_cards(trip_id: int):
             try:
                 cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                 dest_lower = dest.lower()
-                # Emails mentioning destination or event name
+                # Emails mentioning destination, event name, or trip contacts
                 email_search_terms = [dest_lower]
                 event_name_lower = (trip.get("event_name") or "").lower()
                 if event_name_lower:
                     for word in event_name_lower.split():
-                        if len(word) >= 3:
+                        if len(word) >= 3 and not word.isdigit():
                             email_search_terms.append(word)
+                # Add trip contact names
+                for tc in trip.get("contacts", []):
+                    cname = (tc.get("contact_name") or "").strip()
+                    if cname and len(cname) >= 3:
+                        email_search_terms.append(cname.lower())
                 email_like_parts = []
                 email_params = []
                 for term in email_search_terms:
@@ -1514,14 +1663,17 @@ async def get_trip_cards(trip_id: int):
                     """, (*email_params,))
                 logistics["emails"] = [_serialize(dict(r)) for r in cur.fetchall()]
 
-                # WhatsApp mentioning destination or event — resolve phone numbers to names
+                # WhatsApp mentioning destination, event, or trip contacts — resolve phone numbers to names
                 event_name_lower = (trip.get("event_name") or "").lower()
                 search_terms = [f"%{dest_lower}%"]
                 if event_name_lower:
-                    # Add event name keywords (e.g. "GTC" from "NVIDIA GTC 2026")
                     for word in event_name_lower.split():
-                        if len(word) >= 3:
+                        if len(word) >= 3 and not word.isdigit():
                             search_terms.append(f"%{word}%")
+                for tc in trip.get("contacts", []):
+                    cname = (tc.get("contact_name") or "").strip()
+                    if cname and len(cname) >= 3:
+                        search_terms.append(f"%{cname.lower()}%")
                 like_clause = " OR ".join(["LOWER(wm.full_text) LIKE %s"] * len(search_terms))
                 if start_date:
                     cur.execute(f"""
@@ -1600,8 +1752,12 @@ async def get_trip_cards(trip_id: int):
             candidates = [_serialize(dict(r)) for r in cur.fetchall()]
             seen_ids = {d["id"] for d in candidates}
 
-            # Also search by destination + event name FTS
-            for kw in [dest, trip.get("event_name", "")]:
+            # Also search by destination, event name, and contact names via FTS
+            fts_terms = [dest]
+            if trip.get("event_name"):
+                fts_terms.append(trip["event_name"])
+            fts_terms.extend(trip_contact_names)
+            for kw in fts_terms:
                 if kw:
                     cur.execute("""
                         SELECT id, filename, document_type, ingested_at,
@@ -1718,6 +1874,9 @@ async def get_trip_cards(trip_id: int):
         finally:
             store._put_conn(conn)
     cards["timezone"] = tz_card
+
+    # --- Card 4: People to Meet (Batch 3) ---
+    cards["people"] = _build_people_dossiers(store, trip)
 
     return cards
 
