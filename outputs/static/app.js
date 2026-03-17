@@ -595,7 +595,7 @@ async function loadMorningBrief() {
                 var t = (a.title || '').replace('Meeting prep: ', '').toLowerCase();
                 return !calTitles.some(function(ct) { return ct.indexOf(t) >= 0 || t.indexOf(ct) >= 0; });
             });
-            var allTravel = travelEvents.concat(travelAlerts.map(function(a) { return renderAlertCard(a, false); }));
+            var allTravel = travelEvents.concat(travelAlerts.map(function(a) { return renderFireCompact(a); }));
             if (allTravel.length > 0) {
                 setSafeHTML(gridTravel, allTravel.join(''));
             } else {
@@ -3190,7 +3190,7 @@ async function loadTravelTab() {
                     upLabel.textContent = 'Travel Alerts — Upcoming (' + upcoming.length + ')';
                     container.appendChild(upLabel);
                     var upDiv = document.createElement('div');
-                    setSafeHTML(upDiv, upcoming.map(function(a) { return renderAlertCard(a, false); }).join(''));
+                    setSafeHTML(upDiv, upcoming.map(function(a) { return renderFireCompact(a); }).join(''));
                     container.appendChild(upDiv);
                 }
 
@@ -3201,7 +3201,7 @@ async function loadTravelTab() {
                     container.appendChild(pastLabel);
                     var pastDiv = document.createElement('div');
                     pastDiv.style.opacity = '0.5';
-                    setSafeHTML(pastDiv, past.map(function(a) { return renderAlertCard(a, false); }).join(''));
+                    setSafeHTML(pastDiv, past.map(function(a) { return renderFireCompact(a); }).join(''));
                     container.appendChild(pastDiv);
                 }
             }
