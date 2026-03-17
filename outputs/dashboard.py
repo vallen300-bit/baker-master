@@ -4769,6 +4769,9 @@ def _scan_chat_deep(req, start: float, task_id: int = None):
             history.append({"role": role, "content": content})
 
     async def event_stream():
+        # THINKING-DOTS-FIX: Signal retrieval phase for deep mode
+        yield f"data: {json.dumps({'status': 'retrieving'})}\n\n"
+
         full_response = ""
         agent_result = None
 
@@ -4791,6 +4794,7 @@ def _scan_chat_deep(req, start: float, task_id: int = None):
             finally:
                 item_queue.put(None)
 
+        yield f"data: {json.dumps({'status': 'generating'})}\n\n"
         agent_thread = asyncio.get_event_loop().run_in_executor(None, _run_agent)
 
         try:
