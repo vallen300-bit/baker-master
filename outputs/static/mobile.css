@@ -388,12 +388,8 @@ html, body {
   -webkit-tap-highlight-color: transparent;
 }
 
-.header-btn:first-of-type {
+.header-btn {
   margin-left: auto;
-}
-
-.header-btn.voice-off {
-  opacity: 0.4;
 }
 
 /* Empty state */

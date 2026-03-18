@@ -22,31 +22,25 @@ let bakerHistory = [];
 let specialistHistory = [];
 let specialistSlug = null;
 let streaming = false;
-let voiceEnabled = true; // auto-read responses aloud
-
-// ═══ VOICE READBACK (SpeechSynthesis) ═══
+// ═══ VOICE READBACK (SpeechSynthesis — tap to play) ═══
 function speakText(text) {
-    if (!voiceEnabled || !text || !window.speechSynthesis) return;
-    // Stop any ongoing speech
+    if (!text || !window.speechSynthesis) return;
     window.speechSynthesis.cancel();
-    // Strip markdown formatting for cleaner speech
     var clean = text
         .replace(/\*\*(.+?)\*\*/g, '$1')
         .replace(/\*(.+?)\*/g, '$1')
         .replace(/^#{1,3}\s+/gm, '')
         .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
         .replace(/\[Source: [^\]]+\]/g, '')
-        .replace(/^\|.*\|$/gm, '') // strip table rows
+        .replace(/^\|.*\|$/gm, '')
         .replace(/^-{3,}$/gm, '')
         .replace(/\n{2,}/g, '\n')
         .trim();
     if (!clean) return;
-    // Truncate very long responses to avoid iOS TTS cutting out
     if (clean.length > 2000) clean = clean.substring(0, 2000) + '... end of summary.';
     var utterance = new SpeechSynthesisUtterance(clean);
     utterance.rate = 1.05;
     utterance.pitch = 1.0;
-    // Prefer a natural English voice on iOS
     var voices = window.speechSynthesis.getVoices();
     var preferred = voices.find(function(v) { return v.name === 'Samantha' || v.name === 'Daniel'; })
         || voices.find(function(v) { return v.lang.startsWith('en') && v.localService; })
@@ -59,14 +53,46 @@ function stopSpeaking() {
     if (window.speechSynthesis) window.speechSynthesis.cancel();
 }
 
-function toggleVoice() {
-    voiceEnabled = !voiceEnabled;
-    var btn = document.getElementById('voiceToggle');
-    if (btn) {
-        btn.textContent = voiceEnabled ? '\uD83D\uDD0A' : '\uD83D\uDD07';
-        btn.classList.toggle('voice-off', !voiceEnabled);
+function addResponseToolbar(replyEl, text) {
+    if (!replyEl || !text) return;
+    var toolbar = document.createElement('div');
+    toolbar.className = 'msg-toolbar';
+
+    // Copy
+    var copyBtn = document.createElement('button');
+    copyBtn.textContent = 'Copy';
+    copyBtn.addEventListener('click', function() {
+        navigator.clipboard.writeText(text).then(function() {
+            copyBtn.textContent = 'Copied';
+            setTimeout(function() { copyBtn.textContent = 'Copy'; }, 2000);
+        });
+    });
+    toolbar.appendChild(copyBtn);
+
+    // Play / Stop (iOS needs direct user tap to allow speech)
+    if (window.speechSynthesis) {
+        var playBtn = document.createElement('button');
+        playBtn.textContent = 'Play';
+        playBtn.addEventListener('click', function() {
+            if (window.speechSynthesis.speaking) {
+                stopSpeaking();
+                playBtn.textContent = 'Play';
+            } else {
+                speakText(text);
+                playBtn.textContent = 'Stop';
+                // Reset button when speech ends
+                var checkDone = setInterval(function() {
+                    if (!window.speechSynthesis.speaking) {
+                        playBtn.textContent = 'Play';
+                        clearInterval(checkDone);
+                    }
+                }, 500);
+            }
+        });
+        toolbar.appendChild(playBtn);
     }
-    if (!voiceEnabled) stopSpeaking();
+
+    replyEl.appendChild(toolbar);
 }
 
 // ═══ HTML SAFETY ═══
@@ -261,37 +287,9 @@ async function streamChat(url, body, containerId, history) {
     history.push({ role: 'assistant', content: full });
     if (history.length > 40) history.splice(0, history.length - 40);
 
-    // Auto-read response aloud
+    // Toolbar: Copy + Play (tap to hear)
     if (full && !full.startsWith('Connection error')) {
-        speakText(full);
-    }
-
-    // Toolbar: Copy + Stop Speaking
-    if (replyEl && full && !full.startsWith('Connection error')) {
-        var toolbar = document.createElement('div');
-        toolbar.className = 'msg-toolbar';
-        var copyBtn = document.createElement('button');
-        copyBtn.textContent = 'Copy';
-        copyBtn.addEventListener('click', function() {
-            navigator.clipboard.writeText(full).then(function() {
-                copyBtn.textContent = 'Copied';
-                setTimeout(function() { copyBtn.textContent = 'Copy'; }, 2000);
-            });
-        });
-        toolbar.appendChild(copyBtn);
-
-        if (voiceEnabled) {
-            var stopBtn = document.createElement('button');
-            stopBtn.textContent = 'Stop';
-            stopBtn.addEventListener('click', function() {
-                stopSpeaking();
-                stopBtn.textContent = 'Stopped';
-                setTimeout(function() { stopBtn.textContent = 'Stop'; }, 2000);
-            });
-            toolbar.appendChild(stopBtn);
-        }
-
-        replyEl.appendChild(toolbar);
+        addResponseToolbar(replyEl, full);
     }
 
     streaming = false;
@@ -430,29 +428,9 @@ async function sendImage(question) {
 
     bakerHistory.push({ role: 'assistant', content: full });
 
-    // Voice readback
-    if (full && !full.startsWith('Error:')) speakText(full);
-
-    // Toolbar
-    if (replyEl && full && !full.startsWith('Error:')) {
-        var toolbar = document.createElement('div');
-        toolbar.className = 'msg-toolbar';
-        var copyBtn = document.createElement('button');
-        copyBtn.textContent = 'Copy';
-        copyBtn.addEventListener('click', function() {
-            navigator.clipboard.writeText(full).then(function() {
-                copyBtn.textContent = 'Copied';
-                setTimeout(function() { copyBtn.textContent = 'Copy'; }, 2000);
-            });
-        });
-        toolbar.appendChild(copyBtn);
-        if (voiceEnabled) {
-            var stopBtn = document.createElement('button');
-            stopBtn.textContent = 'Stop';
-            stopBtn.addEventListener('click', function() { stopSpeaking(); });
-            toolbar.appendChild(stopBtn);
-        }
-        replyEl.appendChild(toolbar);
+    // Toolbar: Copy + Play
+    if (full && !full.startsWith('Error:')) {
+        addResponseToolbar(replyEl, full);
     }
 
     // Clear image state
@@ -519,12 +497,11 @@ async function init() {
     await loadConfig();
     await loadCapabilities();
 
-    // Camera, New Chat, Voice toggle
+    // Camera, New Chat
     setupCamera();
     document.getElementById('newChatBtn').addEventListener('click', function() { stopSpeaking(); newChat(); });
-    document.getElementById('voiceToggle').addEventListener('click', toggleVoice);
 
-    // Pre-load voices (iOS requires this)
+    // Pre-load voices for Play button (iOS requires this)
     if (window.speechSynthesis) {
         window.speechSynthesis.getVoices();
         window.speechSynthesis.onvoiceschanged = function() { window.speechSynthesis.getVoices(); };
