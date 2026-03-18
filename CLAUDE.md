@@ -372,7 +372,10 @@ See `BRIEF_PHASE_4_SCOPE.md` for full scope document.
 - ~~**Email sender metadata:**~~ DONE (Session 24) — format_thread() populates primary_sender, upsert COALESCE
 - **TRIP-INTELLIGENCE-1 Batch 3:** People intelligence, Proxycurl LinkedIn, conference attendees. Next major feature.
 - **TRIP-INTELLIGENCE-1 Batch 4:** Trip outcomes + Networking bridge.
-- **OBLIGATIONS-UNIFY-1:** Merge commitments + deadlines into one table with severity. Brief needed.
+- ~~**OBLIGATIONS-UNIFY-1:**~~ DONE (Session 24+25) — migrated to deadlines, triaged 503→408 active. Old commitments table marked 'migrated' to stop false alerts.
+- ~~**Commitment checker bug:**~~ FIXED (Session 25) — was querying old commitments table, generating ~13 false alerts every 6h.
+- ~~**Email noise filter:**~~ FIXED (Session 25) — removed x-mailer, loosened list-unsubscribe filter. Backfill re-running.
+- ~~**Alert bulk cleanup:**~~ DONE (Session 25) — 297→113 pending alerts. Duplicates, stale, commitment-based alerts dismissed.
 - **Proxycurl LinkedIn integration:** ~EUR 40/month, needed for Batch 3. Account setup required.
 - ~~**Contact enrichment:**~~ DONE (Session 25) — 55 contacts classified by Haiku (15 T1, 32 T2, 8 T3). Remaining 427 have <2 interactions. POST /api/contacts/enrich endpoint for re-runs.
 - ~~**Mobile web:**~~ DONE (Session 25) — /mobile page with Ask Baker + Ask Specialist, PWA, dark mode.
@@ -417,7 +420,7 @@ Sessions 1-16 archived in `SESSION_LOG.md`. One-liner summaries:
 | 22 | Mar 14 | Calendar cascade fix, doc pipeline re-queuing fix, briefing data bugs, DB cleanup (9,636 junk alerts). GCal cleanup (988 Baker Prep events). |
 | 23 | Mar 14 | **EXTRACTION-VALIDATION-1**: 14 Pydantic models (13 types + travel_booking), validate_extraction(), amount coercion (European format). **TRAVEL-FIX-1+2**: flights visible all day (poll_todays_meetings), travel/meeting grid split, route card renderer (origin→dest, time-based dots). **TRIP-INTELLIGENCE-1 brief**: full travel ROI engine designed with Director. |
 | 24 | Mar 14-16 | **Massive session (12 commits, 9 deploys).** TRIP-INTELLIGENCE-1 Batch 0+1 (trip lifecycle) + Batch 2 (6 trip cards with real data). INTERACTION-PIPELINE-1 (2,936+ interactions from email/WA/meetings). WAHA contact sync (11→512 contacts). Stats bar → inline grid counts. Python 3.12 regex fix, VARCHAR(20) fix, email sender metadata extraction. |
-| 25 | Mar 17 | **MOBILE-WEB-1**: /mobile standalone page (Ask Baker + Ask Specialist, PWA, dark mode). **ALERT-DEDUP-2**: title-based fuzzy dedup in pipeline. **CONTACT-ENRICH-1**: 55 contacts classified by Haiku (15 T1, 32 T2, 8 T3). Email 365-day backfill run (267 emails — ceiling with noise filters). POST /api/contacts/enrich endpoint. |
+| 25 | Mar 17-18 | **MOBILE-WEB-1**: /mobile page (Ask Baker + Specialist, PWA, dark mode, New Chat button). **ALERT-DEDUP-2**: title-based fuzzy dedup. **CONTACT-ENRICH-1**: 55 contacts classified by Haiku. Alert cleanup (297→113 pending). Obligation triage (503→408). Commitment checker bug fix (old table generating false alerts). Email noise filter fix (x-mailer + list-unsubscribe). Interaction backfill (+590 to 3,548). |
 
 ## Key Documents (Dropbox)
 
