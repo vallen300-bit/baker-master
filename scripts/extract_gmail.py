@@ -165,8 +165,9 @@ def is_noise_sender(from_header: str) -> bool:
 
 def has_unsubscribe_signals(headers: List[Dict]) -> bool:
     """Check if the message has List-Unsubscribe or mailing list headers."""
+    # Note: x-mailer intentionally excluded — Outlook, Apple Mail, Thunderbird set it on real emails
     noise_headers = {"list-unsubscribe", "list-id", "list-post", "list-help",
-                     "x-mailer", "x-campaign", "x-mailgun-tag",
+                     "x-campaign", "x-mailgun-tag",
                      "x-sg-eid", "x-sendgrid-eid"}
     for h in headers:
         name = h.get("name", "").lower()
