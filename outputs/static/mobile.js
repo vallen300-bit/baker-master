@@ -616,8 +616,89 @@ async function init() {
     refreshAlertBadge();
     setInterval(refreshAlertBadge, 5 * 60 * 1000);
 
+    // REALTIME-PUSH-1: Request notification permission + connect live stream
+    if (window.Notification && Notification.permission === 'default') {
+        Notification.requestPermission();
+    }
+    _connectMobileAlertStream();
+
     // Default tab
     switchTab('baker');
+}
+
+// ═══ REALTIME-PUSH-1: Live alert stream (mobile) ═══
+var _mobileMuted = false;
+
+function _mobileBeep() {
+    if (_mobileMuted) return;
+    try {
+        var ctx = new (window.AudioContext || window.webkitAudioContext)();
+        var osc = ctx.createOscillator();
+        var gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 880;
+        osc.type = 'sine';
+        gain.gain.value = 0.3;
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.4);
+    } catch (e) { /* no audio */ }
+}
+
+function _showMobileToast(alert) {
+    var isT1 = alert.tier === 1;
+    var toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;padding:14px 16px;font-size:13px;font-family:inherit;color:#fff;cursor:pointer;'
+        + (isT1 ? 'background:#dc2626;' : 'background:#0a6fdb;');
+
+    var text = document.createElement('span');
+    text.textContent = 'T' + alert.tier + '  ' + (alert.title || '').substring(0, 60);
+    toast.appendChild(text);
+
+    toast.addEventListener('click', function() { toast.remove(); });
+    document.body.appendChild(toast);
+
+    setTimeout(function() {
+        toast.style.transition = 'opacity 0.3s';
+        toast.style.opacity = '0';
+        setTimeout(function() { toast.remove(); }, 300);
+    }, isT1 ? 30000 : 10000);
+}
+
+function _connectMobileAlertStream() {
+    var key = BAKER.apiKey || '';
+    if (!key) {
+        setTimeout(_connectMobileAlertStream, 3000);
+        return;
+    }
+    var es = new EventSource('/api/alerts/stream?key=' + encodeURIComponent(key));
+
+    es.onmessage = function(event) {
+        try {
+            var data = JSON.parse(event.data);
+            if (data.type === 'new_alert' && data.tier <= 2) {
+                _showMobileToast(data);
+                refreshAlertBadge();
+                if (data.tier === 1) _mobileBeep();
+                // Browser notification
+                if (window.Notification && Notification.permission === 'granted') {
+                    try {
+                        new Notification('Baker T' + data.tier, {
+                            body: (data.title || '').substring(0, 100),
+                            icon: '/static/baker-face-green.svg',
+                            tag: 'baker-alert-' + data.id,
+                        });
+                    } catch (e) { /* silent */ }
+                }
+            }
+        } catch (e) { /* skip */ }
+    };
+
+    es.onerror = function() {
+        es.close();
+        setTimeout(_connectMobileAlertStream, 30000);
+    };
 }
 
 document.addEventListener('DOMContentLoaded', init);

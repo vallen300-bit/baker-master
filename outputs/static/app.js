@@ -3818,6 +3818,13 @@ function setupDetectionBadge() {
 async function init() {
     await loadConfig();
 
+    // REALTIME-PUSH-1: Store API key for EventSource + request notification permission
+    window._bakerApiKey = BAKER_CONFIG.apiKey || '';
+    if (window.Notification && Notification.permission === 'default') {
+        Notification.requestPermission();
+    }
+    _connectAlertStream();
+
     // Greeting
     var hour = new Date().getHours();
     var greet = hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -3927,6 +3934,110 @@ async function refreshFiresBadge() {
             badge.hidden = true;
         }
     } catch (e) { /* silent */ }
+}
+
+// ═══ REALTIME-PUSH-1: Live alert stream ═══
+var _alertsMuted = false;
+
+function _playT1Beep() {
+    if (_alertsMuted) return;
+    try {
+        var ctx = new (window.AudioContext || window.webkitAudioContext)();
+        var osc = ctx.createOscillator();
+        var gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 880;
+        osc.type = 'sine';
+        gain.gain.value = 0.3;
+        osc.start();
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+        osc.stop(ctx.currentTime + 0.4);
+    } catch (e) { /* no audio support */ }
+}
+
+function _showAlertToast(alert) {
+    var isT1 = alert.tier === 1;
+    var toast = document.createElement('div');
+    toast.style.cssText = 'position:fixed;top:12px;right:12px;z-index:9999;max-width:400px;padding:12px 16px;border-radius:10px;font-size:13px;font-family:var(--font);color:#fff;cursor:pointer;box-shadow:0 4px 20px rgba(0,0,0,0.25);transition:opacity 0.3s;'
+        + (isT1 ? 'background:#dc2626;' : 'background:#0a6fdb;');
+
+    var tierSpan = document.createElement('span');
+    tierSpan.style.cssText = 'font-weight:700;margin-right:8px;';
+    tierSpan.textContent = 'T' + alert.tier;
+    toast.appendChild(tierSpan);
+
+    var titleSpan = document.createElement('span');
+    titleSpan.textContent = (alert.title || '').substring(0, 80);
+    toast.appendChild(titleSpan);
+
+    toast.addEventListener('click', function() {
+        toast.remove();
+        // Navigate to Fires tab
+        var firesTab = document.querySelector('[data-tab="fires"]');
+        if (firesTab) firesTab.click();
+    });
+
+    document.body.appendChild(toast);
+
+    // Auto-dismiss: T1 sticky (30s), T2 quick (15s)
+    var dismissMs = isT1 ? 30000 : 15000;
+    setTimeout(function() {
+        toast.style.opacity = '0';
+        setTimeout(function() { toast.remove(); }, 300);
+    }, dismissMs);
+}
+
+function _sendBrowserNotification(alert) {
+    if (!window.Notification || Notification.permission !== 'granted') return;
+    try {
+        var n = new Notification('Baker T' + alert.tier + ' Alert', {
+            body: (alert.title || '').substring(0, 100),
+            icon: '/static/baker-face-green.svg',
+            tag: 'baker-alert-' + alert.id,
+        });
+        n.onclick = function() {
+            window.focus();
+            var firesTab = document.querySelector('[data-tab="fires"]');
+            if (firesTab) firesTab.click();
+            n.close();
+        };
+    } catch (e) { /* silent */ }
+}
+
+function _connectAlertStream() {
+    var key = (window._bakerApiKey || '');
+    if (!key) {
+        // Retry after config loads
+        setTimeout(_connectAlertStream, 3000);
+        return;
+    }
+    var url = '/api/alerts/stream?key=' + encodeURIComponent(key);
+    var es = new EventSource(url);
+
+    es.onmessage = function(event) {
+        try {
+            var data = JSON.parse(event.data);
+            if (data.type === 'new_alert' && data.tier <= 2) {
+                _showAlertToast(data);
+                _sendBrowserNotification(data);
+                refreshFiresBadge();
+                if (data.tier === 1) _playT1Beep();
+            }
+        } catch (e) { /* skip */ }
+    };
+
+    es.onerror = function() {
+        es.close();
+        // Reconnect after 30s
+        setTimeout(_connectAlertStream, 30000);
+    };
+}
+
+function toggleMute(btn) {
+    _alertsMuted = !_alertsMuted;
+    if (btn) btn.textContent = _alertsMuted ? '\uD83D\uDD15' : '\uD83D\uDD14';
+    if (btn) btn.title = _alertsMuted ? 'Unmute alert sounds' : 'Mute alert sounds';
 }
 
 document.addEventListener('DOMContentLoaded', init);
