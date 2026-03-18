@@ -236,6 +236,47 @@ async function streamChat(url, body, containerId, history) {
     if (btn) btn.disabled = false;
 }
 
+// ═══ NEW CHAT ═══
+function newChat() {
+    // Determine which panel is active
+    var bakerPanel = document.getElementById('panel-baker');
+    var isBaker = bakerPanel && bakerPanel.classList.contains('active');
+
+    if (isBaker) {
+        bakerHistory = [];
+        var container = document.getElementById('bakerMessages');
+        if (container) {
+            container.textContent = '';
+            var empty = document.createElement('div');
+            empty.className = 'empty-state';
+            var icon = document.createElement('div');
+            icon.className = 'icon';
+            icon.textContent = '\uD83D\uDCAC';
+            empty.appendChild(icon);
+            empty.appendChild(document.createTextNode('Ask Baker anything about your business, deals, contacts, or upcoming meetings.'));
+            container.appendChild(empty);
+        }
+        var input = document.getElementById('bakerInput');
+        if (input) { input.value = ''; input.style.height = 'auto'; input.focus(); }
+    } else {
+        specialistHistory = [];
+        var container = document.getElementById('specialistMessages');
+        if (container) {
+            container.textContent = '';
+            var empty = document.createElement('div');
+            empty.className = 'empty-state';
+            var icon = document.createElement('div');
+            icon.className = 'icon';
+            icon.textContent = '\uD83E\uDDE0';
+            empty.appendChild(icon);
+            empty.appendChild(document.createTextNode('Pick a specialist above, then ask a deep question in their domain.'));
+            container.appendChild(empty);
+        }
+        var input = document.getElementById('specialistInput');
+        if (input) { input.value = ''; input.style.height = 'auto'; input.focus(); }
+    }
+}
+
 // ═══ SEND FUNCTIONS ═══
 function sendBaker() {
     var input = document.getElementById('bakerInput');
@@ -283,6 +324,9 @@ async function loadCapabilities() {
 async function init() {
     await loadConfig();
     await loadCapabilities();
+
+    // New Chat button
+    document.getElementById('newChatBtn').addEventListener('click', newChat);
 
     // Tab switching
     document.querySelectorAll('.tab-btn').forEach(function(btn) {

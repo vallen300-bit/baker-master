@@ -336,6 +336,19 @@ html, body {
   margin-left: 6px;
 }
 
+.new-chat-btn {
+  margin-left: auto;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--blue);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
 /* Empty state */
 .empty-state {
   text-align: center;
