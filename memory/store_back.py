@@ -3232,6 +3232,29 @@ class SentinelStoreBack:
                     cur.close()
                     logger.info(f"Alert dedup: skipped duplicate source={source} source_id={source_id}")
                     return None
+            # ALERT-DEDUP-3: Universal title-based dedup (all sources)
+            # Normalize title: strip common prefixes for better matching
+            import re as _re
+            _dedup_title = _re.sub(
+                r'^(Intelligence:\s*|Commitment due today:\s*|OVERDUE:\s*|DUE TODAY:\s*|Due in 48h:\s*)',
+                '', title or '', flags=_re.IGNORECASE,
+            ).strip()
+            _dedup_prefix = _dedup_title[:50].lower()
+            if _dedup_prefix:
+                cur.execute(
+                    """SELECT id FROM alerts
+                       WHERE status = 'pending'
+                         AND LOWER(LEFT(regexp_replace(title,
+                               '^(Intelligence:\\s*|Commitment due today:\\s*|OVERDUE:\\s*|DUE TODAY:\\s*|Due in 48h:\\s*)',
+                               '', 'i'), 50)) = %s
+                         AND created_at > NOW() - INTERVAL '6 hours'
+                       LIMIT 1""",
+                    (_dedup_prefix,),
+                )
+                if cur.fetchone():
+                    cur.close()
+                    logger.info(f"Alert dedup (title): similar pending alert exists — skipping: {_dedup_prefix}...")
+                    return None
             import json as _json
             sa_json = _json.dumps(structured_actions) if structured_actions else None
             tags_json = _json.dumps(tags) if tags else '[]'
