@@ -1372,6 +1372,7 @@ async def get_morning_brief():
                 asyncio.to_thread(
                     _get_morning_narrative, fire_count, deadline_count,
                     processed_overnight, top_fires, deadlines,
+                    silent_contacts,
                 ),
                 timeout=20.0,
             )
@@ -2256,7 +2257,8 @@ def _match_trip(active_trips: list, event_data: dict, dest_city: str) -> dict:
 
 def _get_morning_narrative(fire_count: int, deadline_count: int,
                            processed: int, top_fires: list,
-                           deadlines: list = None) -> str:
+                           deadlines: list = None,
+                           silent_contacts: list = None) -> str:
     """Generate morning narrative via Haiku. Cached 30 min. Phase 3B: includes per-fire proposals."""
     global _morning_narrative_cache
     now = time.time()
@@ -2265,6 +2267,7 @@ def _get_morning_narrative(fire_count: int, deadline_count: int,
 
     try:
         fire_titles = [f.get("title", "") for f in top_fires[:3]]
+        silent_names = [f"{c.get('name', '?')} ({c.get('days_silent', '?')}d)" for c in (silent_contacts or [])[:3]]
         prompt = (
             f"You are Baker, chief of staff for Dimitry Vallen. "
             f"Write a 2-3 sentence status summary. Be warm but direct.\n\n"
@@ -2272,10 +2275,15 @@ def _get_morning_narrative(fire_count: int, deadline_count: int,
             f"the page header already shows the greeting. Jump straight to content.\n\n"
             f"Stats: {fire_count} fires, {deadline_count} deadlines this week, "
             f"{processed} items processed overnight.\n"
-            f"Top fires: {'; '.join(fire_titles) if fire_titles else 'None'}\n\n"
-            f"If zero fires: 'All clear. No fires overnight.' then mention routine updates.\n"
+            f"Top fires: {'; '.join(fire_titles) if fire_titles else 'None'}\n"
+        )
+        if silent_names:
+            prompt += f"Relationships cooling: {', '.join(silent_names)} — no contact 30+ days.\n"
+        prompt += (
+            f"\nIf zero fires: 'All clear. No fires overnight.' then mention routine updates.\n"
             f"If fires exist: lead with the top issue and deadline, then mention others.\n"
-            f"Keep it under 50 words. No bullet points. Plain text only."
+            f"If relationships cooling: mention briefly at end ('Consider reaching out to X').\n"
+            f"Keep it under 60 words. No bullet points. Plain text only."
         )
         client = anthropic.Anthropic(
             api_key=config.claude.api_key,
