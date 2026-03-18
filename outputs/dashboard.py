@@ -1331,18 +1331,34 @@ async def get_morning_brief():
             """)
             activity = [_serialize(dict(r)) for r in cur.fetchall()]
 
-            # LANDING-GRID-1: Overdue commitments for bottom-right grid cell
+            # LANDING-GRID-1: Overdue obligations (deadlines table, replaces old commitments)
             overdue_commitments = []
             try:
                 cur.execute("""
-                    SELECT id, description, due_date, status
-                    FROM commitments
-                    WHERE status = 'active' AND due_date < NOW()
+                    SELECT id, description, due_date, priority, severity
+                    FROM deadlines
+                    WHERE status = 'active' AND due_date < CURRENT_DATE
                     ORDER BY due_date ASC LIMIT 5
                 """)
                 overdue_commitments = [_serialize(dict(r)) for r in cur.fetchall()]
             except Exception:
-                pass  # commitments table may not exist
+                pass
+
+            # F1: Contacts going silent (30+ days, for morning brief awareness)
+            silent_contacts = []
+            try:
+                cur.execute("""
+                    SELECT name, last_contact_date,
+                           EXTRACT(DAY FROM NOW() - last_contact_date)::int as days_silent
+                    FROM vip_contacts
+                    WHERE last_contact_date IS NOT NULL
+                      AND last_contact_date < NOW() - INTERVAL '30 days'
+                      AND tier <= 2
+                    ORDER BY last_contact_date ASC LIMIT 5
+                """)
+                silent_contacts = [_serialize(dict(r)) for r in cur.fetchall()]
+            except Exception:
+                pass
 
             cur.close()
         finally:
@@ -1518,6 +1534,7 @@ async def get_morning_brief():
             "meeting_count": len(meetings_today),
             "travel_today": travel_today,
             "overdue_commitments": overdue_commitments,
+            "silent_contacts": silent_contacts,
             "travel_alerts": travel_alerts,
             "trips": [_serialize(t) for t in active_trips],
         }
@@ -1532,7 +1549,8 @@ async def get_morning_brief():
             "top_fires": [], "deadlines": [], "activity": [],
             "meetings_today": [], "meeting_count": 0,
             "travel_today": [],
-            "overdue_commitments": [], "travel_alerts": [], "trips": [],
+            "overdue_commitments": [], "silent_contacts": [],
+            "travel_alerts": [], "trips": [],
         }
 
 
