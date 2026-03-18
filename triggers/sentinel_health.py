@@ -343,7 +343,7 @@ _WATERMARK_MAX_AGE = {
     "fireflies": 48,         # polls every 15 min, but may have no new data
     "todoist": 2,            # polls every 5 min
     "dropbox": 6,            # polls every 5 min
-    "whoop": 48,             # polls every 6 hours
+    # "whoop": 48,           # KILLED Session 26 — unreliable OAuth
     "slack": 2,              # polls every 5 min
 }
 

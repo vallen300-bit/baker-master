@@ -95,17 +95,12 @@ def _register_jobs(scheduler: BackgroundScheduler):
     logger.info(f"Registered: todoist_poll (every {config.triggers.todoist_check_interval}s)")
 
     # Whoop polling — every 24 hours (daily health data)
-    # PM-OOM-1 H1: removed next_run_time=now. Whoop is disabled (88 consecutive
-    # failures, OAuth broken). No need to fire on every deploy. The circuit breaker
-    # (H2) will also skip if consecutive_failures >= 20.
-    from triggers.whoop_trigger import run_whoop_poll
-    scheduler.add_job(
-        run_whoop_poll,
-        IntervalTrigger(seconds=config.triggers.whoop_check_interval),
-        id="whoop_poll", name="Whoop health polling",
-        coalesce=True, max_instances=1, replace_existing=True,
-    )
-    logger.info(f"Registered: whoop_poll (every {config.triggers.whoop_check_interval}s)")
+    # Whoop — KILLED (Session 26, Director decision). Unreliable OAuth, 88+ failures.
+    # Can re-enable later if needed by uncommenting below.
+    # from triggers.whoop_trigger import run_whoop_poll
+    # scheduler.add_job(run_whoop_poll, IntervalTrigger(seconds=config.triggers.whoop_check_interval),
+    #     id="whoop_poll", name="Whoop health polling", coalesce=True, max_instances=1, replace_existing=True)
+    logger.info("Skipped: whoop_poll (killed — unreliable OAuth)")
 
     # RSS polling — every 60 minutes (RSS-1)
     from triggers.rss_trigger import run_rss_poll
@@ -238,6 +233,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
         coalesce=True, max_instances=1, replace_existing=True,
     )
     logger.info("Registered: stale_watermark_check (every 6 hours)")
+
+    # F1: Compounding risk detector — every 2 hours (Session 26)
+    from orchestrator.risk_detector import run_risk_detection
+    scheduler.add_job(
+        run_risk_detection,
+        IntervalTrigger(hours=2),
+        id="risk_detection", name="Compounding risk detector",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: risk_detection (every 2 hours)")
 
     # Document pipeline job queue drain — every 2 minutes (PIPELINE-JOBQUEUE-1)
     from tools.document_pipeline import drain_doc_pipeline

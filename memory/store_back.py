@@ -3833,7 +3833,7 @@ class SentinelStoreBack:
             self._put_conn(conn)
 
     def log_conversation(self, question, answer="", answer_length=0, project="general", chunk_count=1):
-        """Catalogue a scan conversation in PostgreSQL."""
+        """Catalogue a scan conversation in PostgreSQL + embed to Qdrant (B1)."""
         conn = self._get_conn()
         if not conn:
             logger.warning("No DB connection — skipping log_conversation")
@@ -3851,6 +3851,28 @@ class SentinelStoreBack:
             logger.error(f"Failed to log conversation: {e}")
         finally:
             self._put_conn(conn)
+
+        # B1: Embed Q+A into Qdrant baker-conversations for semantic retrieval
+        if question and answer and len(answer) > 50:
+            try:
+                import threading
+                def _embed():
+                    try:
+                        from datetime import datetime, timezone
+                        text = f"Question: {question}\n\nAnswer: {answer[:4000]}"
+                        metadata = {
+                            "source": "conversation",
+                            "project": project,
+                            "question": question[:500],
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
+                        self.store_document(text, metadata, collection="baker-conversations")
+                        logger.info(f"B1: Conversation embedded to Qdrant ({len(text)} chars)")
+                    except Exception as e:
+                        logger.warning(f"B1: Conversation embedding failed (non-fatal): {e}")
+                threading.Thread(target=_embed, daemon=True).start()
+            except Exception:
+                pass  # threading import or start failed — non-fatal
 
     def get_recent_conversations(self, limit: int = 5) -> list:
         """
