@@ -340,10 +340,141 @@ function newChat() {
     }
 }
 
+// ═══ IMAGE UPLOAD ═══
+var pendingImage = null; // File object
+
+function setupCamera() {
+    var camBtn = document.getElementById('bakerCamBtn');
+    var fileInput = document.getElementById('bakerCamera');
+    var preview = document.getElementById('bakerImgPreview');
+
+    camBtn.addEventListener('click', function() {
+        fileInput.click();
+    });
+
+    fileInput.addEventListener('change', function() {
+        var file = fileInput.files[0];
+        if (!file) return;
+        pendingImage = file;
+
+        // Show preview
+        preview.hidden = false;
+        preview.textContent = '';
+        var img = document.createElement('img');
+        img.src = URL.createObjectURL(file);
+        preview.appendChild(img);
+
+        var label = document.createElement('span');
+        label.style.cssText = 'font-size:12px;color:var(--text2);';
+        label.textContent = file.name.length > 20 ? file.name.substring(0, 20) + '...' : file.name;
+        preview.appendChild(label);
+
+        var removeBtn = document.createElement('button');
+        removeBtn.className = 'remove-img';
+        removeBtn.textContent = 'Remove';
+        removeBtn.addEventListener('click', function() {
+            pendingImage = null;
+            preview.hidden = true;
+            preview.textContent = '';
+            fileInput.value = '';
+        });
+        preview.appendChild(removeBtn);
+
+        // Focus the input for optional question
+        var input = document.getElementById('bakerInput');
+        if (input) {
+            input.placeholder = 'Add a question about this image (optional)...';
+            input.focus();
+        }
+    });
+}
+
+async function sendImage(question) {
+    if (!pendingImage) return;
+    if (streaming) return;
+    streaming = true;
+
+    var displayQ = question || 'Analyze this image';
+    bakerHistory.push({ role: 'user', content: '[Image: ' + pendingImage.name + '] ' + displayQ });
+    addMessage('bakerMessages', 'user', displayQ + ' [with image]');
+
+    var replyId = 'reply-' + Date.now();
+    addMessage('bakerMessages', 'assistant', '', replyId);
+    var replyEl = document.getElementById(replyId);
+    if (replyEl) updateThinkingLabel(replyEl, 'Analyzing image...');
+
+    var input = document.getElementById('bakerInput');
+    var btn = document.getElementById('bakerSendBtn');
+    if (input) { input.disabled = true; input.value = ''; input.style.height = 'auto'; }
+    if (btn) btn.disabled = true;
+
+    var full = '';
+    try {
+        var formData = new FormData();
+        formData.append('file', pendingImage);
+        formData.append('question', question || 'What is this? Analyze it and tell me anything relevant.');
+
+        var resp = await bakerFetch('/api/scan/image', {
+            method: 'POST',
+            body: formData,
+            timeout: 60000,
+        });
+        if (!resp.ok) throw new Error('API returned ' + resp.status);
+        var data = await resp.json();
+        full = data.answer || 'No response';
+        if (replyEl) setSafeHTML(replyEl, '<div class="md-content">' + md(full) + '</div>');
+    } catch (err) {
+        full = 'Error: ' + err.message;
+        if (replyEl) replyEl.textContent = full;
+    }
+
+    bakerHistory.push({ role: 'assistant', content: full });
+
+    // Voice readback
+    if (full && !full.startsWith('Error:')) speakText(full);
+
+    // Toolbar
+    if (replyEl && full && !full.startsWith('Error:')) {
+        var toolbar = document.createElement('div');
+        toolbar.className = 'msg-toolbar';
+        var copyBtn = document.createElement('button');
+        copyBtn.textContent = 'Copy';
+        copyBtn.addEventListener('click', function() {
+            navigator.clipboard.writeText(full).then(function() {
+                copyBtn.textContent = 'Copied';
+                setTimeout(function() { copyBtn.textContent = 'Copy'; }, 2000);
+            });
+        });
+        toolbar.appendChild(copyBtn);
+        if (voiceEnabled) {
+            var stopBtn = document.createElement('button');
+            stopBtn.textContent = 'Stop';
+            stopBtn.addEventListener('click', function() { stopSpeaking(); });
+            toolbar.appendChild(stopBtn);
+        }
+        replyEl.appendChild(toolbar);
+    }
+
+    // Clear image state
+    pendingImage = null;
+    var preview = document.getElementById('bakerImgPreview');
+    if (preview) { preview.hidden = true; preview.textContent = ''; }
+    var fileInput = document.getElementById('bakerCamera');
+    if (fileInput) fileInput.value = '';
+    if (input) { input.disabled = false; input.placeholder = 'Ask Baker anything...'; input.focus(); }
+    if (btn) btn.disabled = false;
+    streaming = false;
+}
+
 // ═══ SEND FUNCTIONS ═══
 function sendBaker() {
     var input = document.getElementById('bakerInput');
     var q = input ? input.value.trim() : '';
+    // If there's a pending image, send via image endpoint
+    if (pendingImage) {
+        sendImage(q);
+        return;
+    }
     if (!q) return;
     streamChat('/api/scan', {
         question: q,
@@ -388,7 +519,8 @@ async function init() {
     await loadConfig();
     await loadCapabilities();
 
-    // New Chat button + Voice toggle
+    // Camera, New Chat, Voice toggle
+    setupCamera();
     document.getElementById('newChatBtn').addEventListener('click', function() { stopSpeaking(); newChat(); });
     document.getElementById('voiceToggle').addEventListener('click', toggleVoice);
 

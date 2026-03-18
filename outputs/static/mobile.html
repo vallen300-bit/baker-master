@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/mobile.css?v=3">
+    <link rel="stylesheet" href="/static/mobile.css?v=4">
 </head>
 <body>
 <div class="app">
@@ -37,9 +37,12 @@
     <div class="chat-panel active" id="panel-baker">
         <div class="input-area">
             <form id="bakerForm" class="input-row">
+                <input type="file" id="bakerCamera" accept="image/*" capture="environment" hidden>
+                <button type="button" class="cam-btn" id="bakerCamBtn" aria-label="Camera" title="Take photo or choose image">&#x1F4F7;</button>
                 <textarea class="chat-input" id="bakerInput" placeholder="Ask Baker anything..." rows="1" maxlength="4000" enterkeyhint="send"></textarea>
                 <button type="submit" class="send-btn" id="bakerSendBtn" aria-label="Send">&#x2191;</button>
             </form>
+            <div class="img-preview" id="bakerImgPreview" hidden></div>
         </div>
         <div class="messages" id="bakerMessages">
             <div class="empty-state">
@@ -72,6 +75,6 @@
 
 </div>
 
-<script src="/static/mobile.js?v=3"></script>
+<script src="/static/mobile.js?v=4"></script>
 </body>
 </html>
