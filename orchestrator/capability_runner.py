@@ -527,6 +527,12 @@ class CapabilityRunner:
         if insights:
             enriched += f"\n\n## BAKER TEAM INSIGHTS\n{insights}\n"
 
+        # B3: Inject relevant past decisions when question references a known matter
+        if question:
+            decisions_ctx = self._get_relevant_decisions(question)
+            if decisions_ctx:
+                enriched += f"\n\n## PAST DECISIONS (from Director/Cowork sessions)\n{decisions_ctx}\n"
+
         # RICHER-CONTEXT-1: Inject entity context (people/matters from question)
         if question and not entity_context:
             # Only auto-detect if no pre-fetched context was provided
@@ -692,6 +698,49 @@ class CapabilityRunner:
                     prefix = "[Director-confirmed] " if validated == "director" else ""
                     matter_tag = f"[{matter}] " if matter else ""
                     parts.append(f"- {prefix}{matter_tag}{content}")
+                return "\n".join(parts)
+            finally:
+                store._put_conn(conn)
+        except Exception:
+            return ""
+
+    def _get_relevant_decisions(self, question: str, limit: int = 5) -> str:
+        """B3: Fetch past decisions relevant to the question's matter context."""
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            conn = store._get_conn()
+            if not conn:
+                return ""
+            try:
+                cur = conn.cursor()
+                # Search decisions by keyword match against question
+                words = [w for w in question.lower().split() if len(w) > 3][:5]
+                if not words:
+                    return ""
+                # Build OR condition for word matching
+                conditions = " OR ".join(["decision ILIKE %s"] * len(words))
+                params = [f"%{w}%" for w in words]
+                params.append(limit)
+                cur.execute(f"""
+                    SELECT decision, project, reasoning, created_at
+                    FROM decisions
+                    WHERE confidence != 'low'
+                      AND ({conditions})
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                """, params)
+                rows = cur.fetchall()
+                cur.close()
+                if not rows:
+                    return ""
+                parts = ["Relevant past decisions stored by Baker:"]
+                for decision, project, reasoning, created_at in rows:
+                    date_str = created_at.strftime("%Y-%m-%d") if created_at else ""
+                    tag = f"[{project}] " if project else ""
+                    parts.append(f"- {tag}{decision} ({date_str})")
+                    if reasoning:
+                        parts.append(f"  Reasoning: {reasoning[:200]}")
                 return "\n".join(parts)
             finally:
                 store._put_conn(conn)
