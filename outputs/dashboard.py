@@ -924,6 +924,84 @@ async def backfill_documents_fts():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/documents", tags=["documents"], dependencies=[Depends(verify_api_key)])
+async def get_documents(
+    search: str = Query("", max_length=500),
+    doc_type: str = Query("", max_length=50),
+    matter_slug: str = Query("", max_length=100),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    """
+    DOCUMENT-BROWSER-1: Browse and search stored documents.
+    Returns paginated list with text preview.
+    """
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            import psycopg2.extras
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+            # Build query with optional filters
+            conditions = []
+            params = []
+
+            if search.strip():
+                conditions.append("(filename ILIKE %s OR full_text ILIKE %s)")
+                params.extend([f"%{search.strip()}%", f"%{search.strip()}%"])
+            if doc_type.strip():
+                conditions.append("doc_type = %s")
+                params.append(doc_type.strip())
+            if matter_slug.strip():
+                conditions.append("matter_slug = %s")
+                params.append(matter_slug.strip())
+
+            where = "WHERE " + " AND ".join(conditions) if conditions else ""
+
+            # Count total
+            cur.execute(f"SELECT COUNT(*) AS total FROM documents {where}", params)
+            total = cur.fetchone()["total"]
+
+            # Fetch page
+            cur.execute(
+                f"SELECT id, filename, doc_type, matter_slug, source_path, ingested_at, "
+                f"LEFT(full_text, 200) AS text_preview "
+                f"FROM documents {where} ORDER BY ingested_at DESC LIMIT %s OFFSET %s",
+                params + [limit, offset],
+            )
+            rows = [dict(r) for r in cur.fetchall()]
+            for r in rows:
+                if r.get("ingested_at"):
+                    r["ingested_at"] = r["ingested_at"].isoformat()
+            cur.close()
+
+            # Stats (on first page only for efficiency)
+            stats = None
+            if offset == 0:
+                cur2 = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur2.execute("""
+                    SELECT COUNT(*) AS total_docs,
+                           COUNT(DISTINCT doc_type) AS type_count,
+                           (SELECT doc_type FROM documents GROUP BY doc_type ORDER BY COUNT(*) DESC LIMIT 1) AS top_type,
+                           (SELECT matter_slug FROM documents WHERE matter_slug IS NOT NULL GROUP BY matter_slug ORDER BY COUNT(*) DESC LIMIT 1) AS top_matter
+                    FROM documents
+                """)
+                stats = dict(cur2.fetchone())
+                cur2.close()
+
+            return {"documents": rows, "total": total, "limit": limit, "offset": offset, "stats": stats}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"GET /api/documents failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/doc-pipeline/status", tags=["system"], dependencies=[Depends(verify_api_key)])
 async def doc_pipeline_status():
     """Document pipeline job queue status — counts by state + active jobs."""

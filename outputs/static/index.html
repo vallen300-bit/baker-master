@@ -58,6 +58,10 @@
 
         <div class="nav-divider"></div>
 
+        <div class="nav-item" data-tab="documents">
+            <span class="nav-label">Documents</span>
+            <span class="nav-count" id="docsCount"></span>
+        </div>
         <div class="nav-item" data-tab="browser">
             <span class="nav-label">Browser</span>
         </div>
@@ -244,10 +248,12 @@
             </div>
         </div>
 
-        <!-- VIEW: Commitments -->
-        <div class="view" id="viewCommitments">
-            <div class="section-label">Commitments</div>
-            <div id="commitmentsContent"></div>
+        <!-- VIEW: Documents -->
+        <div class="view" id="viewDocuments">
+            <div class="section-label">Documents</div>
+            <div id="docsStats" style="font-size:12px;color:var(--text3);margin-bottom:8px;"></div>
+            <div id="docsToolbar" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;"></div>
+            <div id="docsContent"></div>
         </div>
 
         <!-- VIEW: Browser Monitor -->
@@ -283,6 +289,6 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=39"></script>
+<script src="/static/app.js?v=40"></script>
 </body>
 </html>

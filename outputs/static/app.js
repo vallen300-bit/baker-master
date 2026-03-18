@@ -413,11 +413,12 @@ const TAB_VIEW_MAP = {
     'travel': 'viewTravel',
     'media': 'viewMedia',
     'commitments': 'viewCommitments',
+    'documents': 'viewDocuments',
     'browser': 'viewBrowser',
     'baker-data': 'viewBakerData',
 };
 
-const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'tags', 'search', 'ask-baker', 'ask-specialist', 'travel', 'media', 'commitments', 'browser', 'baker-data']);
+const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'tags', 'search', 'ask-baker', 'ask-specialist', 'travel', 'media', 'commitments', 'documents', 'browser', 'baker-data']);
 
 function switchTab(tabName) {
     document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
@@ -451,6 +452,7 @@ function switchTab(tabName) {
     else if (tabName === 'travel') loadTravelTab();
     else if (tabName === 'media') loadMediaTab();
     else if (tabName === 'commitments') loadCommitmentsTab();
+    else if (tabName === 'documents') loadDocumentsTab();
     else if (tabName === 'browser') loadBrowserTab();
     else if (tabName === 'baker-data') loadBakerData();
 }
@@ -4073,6 +4075,224 @@ function _injectDataLayerCSS() {
         '.run-btn:disabled{opacity:0.5;cursor:not-allowed}',
     ].join('\n');
     document.head.appendChild(s);
+}
+
+// ═══ DOCUMENTS TAB ═══
+
+var _docsSearch = '';
+var _docsTypeFilter = '';
+var _docsMatterFilter = '';
+var _docsOffset = 0;
+var _docsDebounceTimer = null;
+
+async function loadDocumentsTab() {
+    _docsOffset = 0;
+    _buildDocsToolbar();
+    await _fetchDocs();
+}
+
+function _buildDocsToolbar() {
+    var toolbar = document.getElementById('docsToolbar');
+    if (!toolbar) return;
+    toolbar.textContent = '';
+
+    // Search input
+    var searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.placeholder = 'Search documents...';
+    searchInput.value = _docsSearch;
+    searchInput.style.cssText = 'flex:1;min-width:200px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:var(--font);outline:none;background:var(--bg1);color:var(--text);';
+    searchInput.addEventListener('input', function() {
+        clearTimeout(_docsDebounceTimer);
+        _docsDebounceTimer = setTimeout(function() {
+            _docsSearch = searchInput.value;
+            _docsOffset = 0;
+            _fetchDocs();
+        }, 300);
+    });
+    toolbar.appendChild(searchInput);
+
+    // Type filter
+    var typeSelect = document.createElement('select');
+    typeSelect.style.cssText = 'font-size:11px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg1);color:var(--text);font-family:var(--font);';
+    var typeDefault = document.createElement('option');
+    typeDefault.value = '';
+    typeDefault.textContent = 'All types';
+    typeSelect.appendChild(typeDefault);
+    var types = ['contract', 'invoice', 'correspondence', 'report', 'proposal', 'legal', 'financial', 'presentation', 'minutes', 'agreement', 'certificate', 'receipt', 'travel_booking', 'other'];
+    for (var ti = 0; ti < types.length; ti++) {
+        var opt = document.createElement('option');
+        opt.value = types[ti];
+        opt.textContent = types[ti].replace(/_/g, ' ');
+        if (types[ti] === _docsTypeFilter) opt.selected = true;
+        typeSelect.appendChild(opt);
+    }
+    typeSelect.addEventListener('change', function() {
+        _docsTypeFilter = typeSelect.value;
+        _docsOffset = 0;
+        _fetchDocs();
+    });
+    toolbar.appendChild(typeSelect);
+
+    // Matter filter
+    var matterSelect = document.createElement('select');
+    matterSelect.style.cssText = 'font-size:11px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg1);color:var(--text);font-family:var(--font);';
+    var matterDefault = document.createElement('option');
+    matterDefault.value = '';
+    matterDefault.textContent = 'All matters';
+    matterSelect.appendChild(matterDefault);
+    matterSelect.addEventListener('change', function() {
+        _docsMatterFilter = matterSelect.value;
+        _docsOffset = 0;
+        _fetchDocs();
+    });
+    // Populate matters from existing sidebar matters list
+    var matterItems = document.querySelectorAll('.nav-sub .nav-item[data-tab]');
+    matterItems.forEach(function(item) {
+        var slug = (item.dataset.tab || '').replace('matter-', '');
+        if (slug) {
+            var opt = document.createElement('option');
+            opt.value = slug;
+            opt.textContent = slug.replace(/_/g, ' ');
+            if (slug === _docsMatterFilter) opt.selected = true;
+            matterSelect.appendChild(opt);
+        }
+    });
+    toolbar.appendChild(matterSelect);
+}
+
+async function _fetchDocs() {
+    var container = document.getElementById('docsContent');
+    if (!container) return;
+
+    if (_docsOffset === 0) {
+        showLoading(container, 'Loading documents');
+    }
+
+    var params = new URLSearchParams();
+    if (_docsSearch) params.set('search', _docsSearch);
+    if (_docsTypeFilter) params.set('doc_type', _docsTypeFilter);
+    if (_docsMatterFilter) params.set('matter_slug', _docsMatterFilter);
+    params.set('limit', '20');
+    params.set('offset', String(_docsOffset));
+
+    try {
+        var r = await bakerFetch('/api/documents?' + params.toString());
+        if (!r.ok) throw new Error('API ' + r.status);
+        var data = await r.json();
+
+        // Stats header
+        if (data.stats && _docsOffset === 0) {
+            var statsEl = document.getElementById('docsStats');
+            if (statsEl) {
+                statsEl.textContent = (data.stats.total_docs || 0) + ' documents | '
+                    + (data.stats.type_count || 0) + ' types'
+                    + (data.stats.top_matter ? ' | Top matter: ' + data.stats.top_matter : '');
+            }
+            var countEl = document.getElementById('docsCount');
+            if (countEl) countEl.textContent = data.stats.total_docs || '';
+        }
+
+        if (_docsOffset === 0) container.textContent = '';
+
+        var docs = data.documents || [];
+        if (docs.length === 0 && _docsOffset === 0) {
+            container.textContent = '';
+            var empty = document.createElement('div');
+            empty.style.cssText = 'color:var(--text3);font-size:13px;padding:20px 0;';
+            empty.textContent = _docsSearch ? 'No documents matching "' + _docsSearch + '".' : 'No documents found.';
+            container.appendChild(empty);
+            return;
+        }
+
+        for (var i = 0; i < docs.length; i++) {
+            container.appendChild(_createDocCard(docs[i]));
+        }
+
+        // Load more button
+        var existingMore = container.querySelector('.load-more-btn');
+        if (existingMore) existingMore.remove();
+
+        if (data.total > _docsOffset + docs.length) {
+            var moreBtn = document.createElement('button');
+            moreBtn.className = 'load-more-btn';
+            moreBtn.style.cssText = 'display:block;margin:12px auto;padding:8px 20px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg1);color:var(--text2);cursor:pointer;font-family:var(--font);';
+            moreBtn.textContent = 'Load more (' + (data.total - _docsOffset - docs.length) + ' remaining)';
+            moreBtn.addEventListener('click', function() {
+                _docsOffset += 20;
+                _fetchDocs();
+            });
+            container.appendChild(moreBtn);
+        }
+    } catch (e) {
+        if (_docsOffset === 0) {
+            container.textContent = '';
+            var err = document.createElement('div');
+            err.style.cssText = 'color:var(--red);font-size:13px;';
+            err.textContent = 'Failed to load documents.';
+            container.appendChild(err);
+        }
+    }
+}
+
+function _createDocCard(doc) {
+    var card = document.createElement('div');
+    card.className = 'card';
+    card.style.cssText = 'margin-bottom:8px;cursor:pointer;';
+
+    // Header
+    var header = document.createElement('div');
+    header.className = 'card-header';
+    header.style.cssText = 'display:flex;align-items:center;gap:8px;';
+
+    // Type badge
+    if (doc.doc_type) {
+        var typeBadge = document.createElement('span');
+        typeBadge.style.cssText = 'font-size:9px;font-weight:600;padding:2px 6px;border-radius:4px;background:var(--blue-bg);color:var(--blue);text-transform:uppercase;flex-shrink:0;';
+        typeBadge.textContent = doc.doc_type.replace(/_/g, ' ');
+        header.appendChild(typeBadge);
+    }
+
+    // Filename
+    var fname = document.createElement('span');
+    fname.style.cssText = 'font-size:12px;font-weight:500;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;';
+    fname.textContent = doc.filename || 'Untitled';
+    header.appendChild(fname);
+
+    // Date
+    if (doc.ingested_at) {
+        var dateSpan = document.createElement('span');
+        dateSpan.style.cssText = 'font-size:10px;color:var(--text3);flex-shrink:0;';
+        try {
+            var d = new Date(doc.ingested_at);
+            dateSpan.textContent = d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+        } catch (e) { dateSpan.textContent = ''; }
+        header.appendChild(dateSpan);
+    }
+
+    card.appendChild(header);
+
+    // Matter tag
+    if (doc.matter_slug) {
+        var matterTag = document.createElement('div');
+        matterTag.style.cssText = 'font-size:10px;color:var(--text3);margin-top:2px;';
+        matterTag.textContent = doc.matter_slug.replace(/_/g, ' ');
+        card.appendChild(matterTag);
+    }
+
+    // Preview (collapsed by default)
+    var previewDiv = document.createElement('div');
+    previewDiv.style.cssText = 'display:none;font-size:11px;color:var(--text2);margin-top:6px;line-height:1.5;border-top:1px solid var(--border-light);padding-top:6px;white-space:pre-wrap;max-height:200px;overflow-y:auto;';
+    previewDiv.textContent = doc.text_preview || '';
+    card.appendChild(previewDiv);
+
+    // Click to expand/collapse
+    card.addEventListener('click', function() {
+        var showing = previewDiv.style.display !== 'none';
+        previewDiv.style.display = showing ? 'none' : 'block';
+    });
+
+    return card;
 }
 
 // --- Commitments Tab ---
