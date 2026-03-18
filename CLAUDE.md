@@ -379,8 +379,14 @@ See `BRIEF_PHASE_4_SCOPE.md` for full scope document.
 - **Proxycurl LinkedIn integration:** ~EUR 40/month, needed for Batch 3. Account setup required.
 - ~~**Contact enrichment:**~~ DONE (Session 25) — 55 contacts classified by Haiku (15 T1, 32 T2, 8 T3). Remaining 427 have <2 interactions. POST /api/contacts/enrich endpoint for re-runs.
 - ~~**Mobile web:**~~ DONE (Session 25) — /mobile page with Ask Baker + Ask Specialist, PWA, dark mode.
-- ~~**Alert dedup fix:**~~ DONE (Session 25) — ALERT-DEDUP-2: title-based fuzzy dedup (first 60 chars, 24h window) in pipeline.py.
+- ~~**Alert dedup fix:**~~ DONE (Session 25+26) — ALERT-DEDUP-2 (pipeline.py) + ALERT-DEDUP-3 (universal in create_alert(), case-insensitive, prefix-normalized, 6h window).
 - ~~**Email 365-day backfill:**~~ RUN (Session 25) — 267 emails (ceiling with current noise filters). No new historical emails found beyond existing ~30-day window.
+- ~~**Commitment checker disabled:**~~ DONE (Session 26) — all 625 commitments migrated to deadlines. Scheduler job removed. deadline_cadence covers all reminders.
+- ~~**Soft obligation triage:**~~ DONE (Session 26) — 391→77 soft obligations. Auto-dismiss for undated soft items after 14 days added to cadence check.
+- ~~**Alert bulk cleanup (round 2):**~~ DONE (Session 26) — 198→95 pending alerts. Duplicates, stale deadlines, cross-source near-duplicates dismissed.
+- ~~**Email intelligence dedup:**~~ FIXED (Session 26) — source_id now passed from email trigger, prevents same thread generating duplicate intelligence alerts.
+- ~~**Desktop alert triage UI:**~~ DONE (Session 26, Code Brisen) — desktop alert badge, bulk dismiss, source filter, matter grouping.
+- ~~**Mobile polish:**~~ DONE (Session 26, Code Brisen) — capability loading state, scroll fix, cache bump.
 
 ## End-of-Session Checklist
 
@@ -421,6 +427,7 @@ Sessions 1-16 archived in `SESSION_LOG.md`. One-liner summaries:
 | 23 | Mar 14 | **EXTRACTION-VALIDATION-1**: 14 Pydantic models (13 types + travel_booking), validate_extraction(), amount coercion (European format). **TRAVEL-FIX-1+2**: flights visible all day (poll_todays_meetings), travel/meeting grid split, route card renderer (origin→dest, time-based dots). **TRIP-INTELLIGENCE-1 brief**: full travel ROI engine designed with Director. |
 | 24 | Mar 14-16 | **Massive session (12 commits, 9 deploys).** TRIP-INTELLIGENCE-1 Batch 0+1 (trip lifecycle) + Batch 2 (6 trip cards with real data). INTERACTION-PIPELINE-1 (2,936+ interactions from email/WA/meetings). WAHA contact sync (11→512 contacts). Stats bar → inline grid counts. Python 3.12 regex fix, VARCHAR(20) fix, email sender metadata extraction. |
 | 25 | Mar 17-18 | **11 commits, parallel with Code Brisen.** MOBILE-WEB-1: /mobile page (Ask Baker + Specialist, PWA, dark mode, New Chat, camera with Haiku Vision, Play-to-hear, auto-resize). /api/scan/image endpoint. ALERT-DEDUP-2 (title fuzzy dedup). CONTACT-ENRICH-1 (55 contacts classified). Alert cleanup (297→113). Obligation triage (503→409). Commitment checker bug fix. Email noise filter fix. Interaction backfill (+650 to 3,608). 7 missing contacts added. Code Brisen: SENTINEL-SAFETY-1. |
+| 26 | Mar 18 | **Alert noise elimination.** ALERT-DEDUP-3: universal title dedup in create_alert() (case-insensitive, prefix-normalized, 6h window). Commitment checker disabled (625 migrated, 0 open). Soft obligation auto-dismiss (391→77, 14-day TTL for undated items). Email intelligence source_id dedup. Alert cleanup 198→95. Code Brisen: desktop alert triage UI (bulk dismiss, source filter, badge), mobile polish (capability loading, scroll fix). |
 
 ## Key Documents (Dropbox)
 
