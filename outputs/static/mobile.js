@@ -155,9 +155,13 @@ function switchTab(tab) {
     document.querySelectorAll('.chat-panel').forEach(function(p) {
         p.classList.toggle('active', p.id === 'panel-' + tab);
     });
-    const inputId = tab === 'baker' ? 'bakerInput' : 'specialistInput';
-    const input = document.getElementById(inputId);
-    if (input) setTimeout(function() { input.focus(); }, 100);
+    if (tab === 'alerts') {
+        loadMobileAlerts();
+    } else {
+        var inputId = tab === 'baker' ? 'bakerInput' : 'specialistInput';
+        var input = document.getElementById(inputId);
+        if (input) setTimeout(function() { input.focus(); }, 100);
+    }
 }
 
 // ═══ MESSAGES ═══
@@ -570,6 +574,16 @@ async function init() {
         btn.addEventListener('click', function() { switchTab(btn.dataset.tab); });
     });
 
+    // Badge click → alerts tab
+    var alertBadge = document.getElementById('alertBadge');
+    if (alertBadge) {
+        alertBadge.style.cursor = 'pointer';
+        alertBadge.addEventListener('click', function(e) {
+            e.stopPropagation();
+            switchTab('alerts');
+        });
+    }
+
     // Baker form
     document.getElementById('bakerForm').addEventListener('submit', function(e) {
         e.preventDefault();
@@ -626,6 +640,304 @@ async function init() {
     switchTab('baker');
 }
 
+// ═══ MOBILE ALERTS VIEW ═══
+var _mobileAlerts = [];
+var _alertTierFilter = '';
+var _alertSourceFilter = '';
+
+function _fmtTimeAgo(dateStr) {
+    if (!dateStr) return '';
+    var d = new Date(dateStr);
+    var now = new Date();
+    var diffMs = now - d;
+    var mins = Math.floor(diffMs / 60000);
+    if (mins < 60) return mins + 'm ago';
+    var hrs = Math.floor(mins / 60);
+    if (hrs < 24) return hrs + 'h ago';
+    var days = Math.floor(hrs / 24);
+    return days + 'd ago';
+}
+
+async function loadMobileAlerts() {
+    var list = document.getElementById('alertsList');
+    if (!list) return;
+    list.textContent = '';
+    var loadDiv = document.createElement('div');
+    loadDiv.className = 'empty-state';
+    loadDiv.textContent = 'Loading alerts...';
+    list.appendChild(loadDiv);
+
+    try {
+        var r = await bakerFetch('/api/alerts');
+        if (!r.ok) throw new Error('API ' + r.status);
+        var data = await r.json();
+        _mobileAlerts = data.alerts || [];
+        _buildAlertToolbar();
+        _renderMobileAlerts();
+        _buildAlertFooter();
+    } catch (e) {
+        list.textContent = '';
+        var err = document.createElement('div');
+        err.className = 'empty-state';
+        err.textContent = 'Failed to load alerts.';
+        list.appendChild(err);
+    }
+}
+
+function _buildAlertToolbar() {
+    var toolbar = document.getElementById('alertsToolbar');
+    if (!toolbar) return;
+    toolbar.textContent = '';
+
+    // Tier filter chips
+    var tiers = [
+        { value: '', label: 'All' },
+        { value: '1', label: 'T1' },
+        { value: '2', label: 'T2' },
+        { value: '3', label: 'T3+' },
+    ];
+    for (var i = 0; i < tiers.length; i++) {
+        var chip = document.createElement('button');
+        chip.className = 'filter-chip' + (_alertTierFilter === tiers[i].value ? ' active' : '');
+        chip.textContent = tiers[i].label;
+        chip.dataset.tier = tiers[i].value;
+        chip.addEventListener('click', function() {
+            _alertTierFilter = this.dataset.tier;
+            _alertSourceFilter = '';
+            _buildAlertToolbar();
+            _renderMobileAlerts();
+        });
+        toolbar.appendChild(chip);
+    }
+
+    // Source filter chips (only show sources that exist)
+    var sources = {};
+    for (var si = 0; si < _mobileAlerts.length; si++) {
+        var src = _mobileAlerts[si].source || 'unknown';
+        sources[src] = (sources[src] || 0) + 1;
+    }
+    var srcKeys = Object.keys(sources).sort();
+    if (srcKeys.length > 1) {
+        var sep = document.createElement('span');
+        sep.style.cssText = 'width:1px;height:16px;background:var(--border);flex-shrink:0;';
+        toolbar.appendChild(sep);
+        for (var ski = 0; ski < srcKeys.length; ski++) {
+            var sChip = document.createElement('button');
+            sChip.className = 'filter-chip' + (_alertSourceFilter === srcKeys[ski] ? ' active' : '');
+            sChip.textContent = srcKeys[ski].replace(/_/g, ' ');
+            sChip.dataset.source = srcKeys[ski];
+            sChip.addEventListener('click', function() {
+                _alertSourceFilter = _alertSourceFilter === this.dataset.source ? '' : this.dataset.source;
+                _buildAlertToolbar();
+                _renderMobileAlerts();
+            });
+            toolbar.appendChild(sChip);
+        }
+    }
+}
+
+function _renderMobileAlerts() {
+    var list = document.getElementById('alertsList');
+    if (!list) return;
+    list.textContent = '';
+
+    var filtered = _mobileAlerts.filter(function(a) {
+        if (_alertTierFilter) {
+            var tf = parseInt(_alertTierFilter);
+            if (tf === 3) { if (a.tier < 3) return false; }
+            else { if (a.tier !== tf) return false; }
+        }
+        if (_alertSourceFilter && (a.source || 'unknown') !== _alertSourceFilter) return false;
+        return true;
+    });
+
+    // Update tab count
+    var tabCount = document.getElementById('tabAlertCount');
+    if (tabCount) {
+        if (_mobileAlerts.length > 0) {
+            tabCount.textContent = _mobileAlerts.length;
+            tabCount.hidden = false;
+        } else {
+            tabCount.hidden = true;
+        }
+    }
+
+    if (filtered.length === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = _mobileAlerts.length > 0 ? 'No alerts matching filter.' : 'No pending alerts.';
+        list.appendChild(empty);
+        return;
+    }
+
+    for (var i = 0; i < filtered.length; i++) {
+        list.appendChild(_createAlertCard(filtered[i]));
+    }
+}
+
+function _createAlertCard(alert) {
+    var tier = alert.tier || 3;
+    var card = document.createElement('div');
+    card.className = 'alert-card t' + Math.min(tier, 3);
+    card.dataset.alertId = alert.id;
+
+    // Header row
+    var header = document.createElement('div');
+    header.className = 'alert-card-header';
+
+    var tierBadge = document.createElement('span');
+    tierBadge.className = 'alert-tier t' + Math.min(tier, 3);
+    tierBadge.textContent = 'T' + tier;
+    header.appendChild(tierBadge);
+
+    var title = document.createElement('span');
+    title.className = 'alert-title';
+    title.textContent = alert.title || 'Untitled';
+    header.appendChild(title);
+
+    var time = document.createElement('span');
+    time.className = 'alert-time';
+    time.textContent = _fmtTimeAgo(alert.created_at);
+    header.appendChild(time);
+
+    card.appendChild(header);
+
+    // Meta (source)
+    if (alert.source) {
+        var meta = document.createElement('div');
+        meta.className = 'alert-meta';
+        meta.textContent = (alert.source || '').replace(/_/g, ' ');
+        if (alert.matter_slug) meta.textContent += ' · ' + alert.matter_slug.replace(/_/g, ' ');
+        card.appendChild(meta);
+    }
+
+    // Expandable body
+    if (alert.body) {
+        var body = document.createElement('div');
+        body.className = 'alert-body';
+        body.textContent = alert.body;
+        card.appendChild(body);
+    }
+
+    // Tap to expand/collapse
+    card.addEventListener('click', function(e) {
+        if (e.target.tagName === 'BUTTON') return;
+        card.classList.toggle('expanded');
+    });
+
+    // Swipe to dismiss
+    _setupSwipeDismiss(card, alert.id);
+
+    return card;
+}
+
+function _setupSwipeDismiss(card, alertId) {
+    var startX = 0;
+    var currentX = 0;
+    var swiping = false;
+
+    card.addEventListener('touchstart', function(e) {
+        startX = e.touches[0].clientX;
+        swiping = true;
+    }, { passive: true });
+
+    card.addEventListener('touchmove', function(e) {
+        if (!swiping) return;
+        currentX = e.touches[0].clientX - startX;
+        if (currentX > 0) {
+            card.style.transform = 'translateX(' + Math.min(currentX, 150) + 'px)';
+            card.style.opacity = Math.max(1 - currentX / 200, 0.3);
+        }
+    }, { passive: true });
+
+    card.addEventListener('touchend', function() {
+        if (!swiping) return;
+        swiping = false;
+        if (currentX > 80) {
+            // Dismiss
+            card.style.transform = 'translateX(100%)';
+            card.style.opacity = '0';
+            setTimeout(function() { card.remove(); }, 200);
+            _dismissAlertWithUndo(alertId);
+        } else {
+            card.style.transform = '';
+            card.style.opacity = '';
+        }
+        currentX = 0;
+    });
+}
+
+function _dismissAlertWithUndo(alertId) {
+    var undoTimeout = null;
+
+    // Show undo toast
+    var toast = document.createElement('div');
+    toast.className = 'undo-toast';
+    var text = document.createElement('span');
+    text.textContent = 'Alert dismissed';
+    toast.appendChild(text);
+
+    var undoBtn = document.createElement('button');
+    undoBtn.textContent = 'Undo';
+    undoBtn.addEventListener('click', function() {
+        clearTimeout(undoTimeout);
+        toast.remove();
+        // Re-render (alert still in _mobileAlerts)
+        _renderMobileAlerts();
+    });
+    toast.appendChild(undoBtn);
+    document.body.appendChild(toast);
+
+    // Actually dismiss after 3s
+    undoTimeout = setTimeout(function() {
+        toast.remove();
+        // Remove from local cache
+        _mobileAlerts = _mobileAlerts.filter(function(a) { return a.id !== alertId; });
+        // API call
+        bakerFetch('/api/alerts/' + alertId + '/dismiss', { method: 'POST' })
+            .then(function() { refreshAlertBadge(); })
+            .catch(function() { /* silent */ });
+        _buildAlertFooter();
+    }, 3000);
+}
+
+function _buildAlertFooter() {
+    var footer = document.getElementById('alertsFooter');
+    if (!footer) return;
+    footer.textContent = '';
+
+    var t3Count = 0;
+    for (var i = 0; i < _mobileAlerts.length; i++) {
+        if (_mobileAlerts[i].tier >= 3) t3Count++;
+    }
+
+    if (t3Count > 0) {
+        var t3Btn = document.createElement('button');
+        t3Btn.className = 'danger';
+        t3Btn.textContent = 'Dismiss all T3+ (' + t3Count + ')';
+        t3Btn.addEventListener('click', function() { _bulkDismissT3(); });
+        footer.appendChild(t3Btn);
+        footer.hidden = false;
+    } else {
+        footer.hidden = true;
+    }
+}
+
+async function _bulkDismissT3() {
+    try {
+        var r = await bakerFetch('/api/alerts/bulk-dismiss', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tier: 3 }),
+        });
+        if (!r.ok) throw new Error('API ' + r.status);
+        _mobileAlerts = _mobileAlerts.filter(function(a) { return a.tier < 3; });
+        _renderMobileAlerts();
+        _buildAlertFooter();
+        refreshAlertBadge();
+    } catch (e) { console.error('bulkDismissT3 failed:', e); }
+}
+
 // ═══ REALTIME-PUSH-1: Live alert stream (mobile) ═══
 var _mobileMuted = false;
 
@@ -656,7 +968,7 @@ function _showMobileToast(alert) {
     text.textContent = 'T' + alert.tier + '  ' + (alert.title || '').substring(0, 60);
     toast.appendChild(text);
 
-    toast.addEventListener('click', function() { toast.remove(); });
+    toast.addEventListener('click', function() { toast.remove(); switchTab('alerts'); });
     document.body.appendChild(toast);
 
     setTimeout(function() {
