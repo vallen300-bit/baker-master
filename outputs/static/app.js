@@ -1063,51 +1063,206 @@ async function submitQuickAdd(e) {
 
 // ═══ FIRES TAB ═══
 
+var _firesAllAlerts = []; // cached for filtering
+var _firesSourceFilter = ''; // active source filter
+
 async function loadFires() {
     const container = document.getElementById('firesContent');
     if (!container) return;
     showLoading(container, 'Loading alerts');
 
     try {
-        // Upcoming: show T2+ only (T1s are on Dashboard)
-        const resp = await bakerFetch('/api/alerts?min_tier=2');
+        const resp = await bakerFetch('/api/alerts');
         if (!resp.ok) return;
         const data = await resp.json();
 
-        if (!data.alerts || data.alerts.length === 0) {
-            container.textContent = 'No upcoming items.';
+        _firesAllAlerts = data.alerts || [];
+
+        if (_firesAllAlerts.length === 0) {
+            container.textContent = 'No pending alerts.';
             container.style.cssText = 'color:var(--text3);font-size:13px;padding:20px 0;';
+            _buildFiresToolbar([]);
             return;
         }
 
-        // Group by matter
-        const groups = {};
-        for (const a of data.alerts) {
-            const key = a.matter_slug || '_ungrouped';
-            if (!groups[key]) groups[key] = [];
-            groups[key].push(a);
-        }
+        // Build toolbar (source filter + bulk actions)
+        _buildFiresToolbar(_firesAllAlerts);
 
-        container.textContent = '';
-        for (const [slug, alerts] of Object.entries(groups)) {
-            const label = slug === '_ungrouped' ? 'Ungrouped' : slug.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
-
-            const sectionLabel = document.createElement('div');
-            sectionLabel.className = 'section-label';
-            sectionLabel.style.marginTop = '16px';
-            sectionLabel.textContent = label;
-            container.appendChild(sectionLabel);
-
-            const cardsHtml = alerts.map(function(a) { return renderAlertCard(a, true); }).join('');
-            const cardsDiv = document.createElement('div');
-            setSafeHTML(cardsDiv, cardsHtml); // SECURITY: renderAlertCard uses esc() for all user data
-            container.appendChild(cardsDiv);
-        }
+        // Render with current filter
+        _renderFiresFiltered();
         populateAssignDropdowns();
     } catch (e) {
         container.textContent = 'Failed to load fires.';
         container.style.color = 'var(--red)';
     }
+}
+
+function _buildFiresToolbar(alerts) {
+    var toolbar = document.getElementById('firesToolbar');
+    if (!toolbar) return;
+    toolbar.textContent = '';
+    toolbar.style.display = alerts.length > 0 ? 'flex' : 'none';
+
+    if (alerts.length === 0) return;
+
+    // Source filter
+    var sources = {};
+    for (var i = 0; i < alerts.length; i++) {
+        var src = alerts[i].source || 'unknown';
+        sources[src] = (sources[src] || 0) + 1;
+    }
+
+    var select = document.createElement('select');
+    select.style.cssText = 'font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg1);color:var(--text);font-family:var(--font);';
+    var allOpt = document.createElement('option');
+    allOpt.value = '';
+    allOpt.textContent = 'All sources (' + alerts.length + ')';
+    select.appendChild(allOpt);
+    var sortedSources = Object.keys(sources).sort();
+    for (var si = 0; si < sortedSources.length; si++) {
+        var opt = document.createElement('option');
+        opt.value = sortedSources[si];
+        opt.textContent = sortedSources[si].replace(/_/g, ' ') + ' (' + sources[sortedSources[si]] + ')';
+        select.appendChild(opt);
+    }
+    select.value = _firesSourceFilter;
+    select.addEventListener('change', function() {
+        _firesSourceFilter = select.value;
+        _renderFiresFiltered();
+    });
+    toolbar.appendChild(select);
+
+    // Select all checkbox
+    var selAll = document.createElement('label');
+    selAll.style.cssText = 'display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2);cursor:pointer;margin-left:8px;';
+    var cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.id = 'firesSelectAll';
+    cb.addEventListener('change', function() {
+        var boxes = document.querySelectorAll('.fire-check');
+        for (var bi = 0; bi < boxes.length; bi++) boxes[bi].checked = cb.checked;
+    });
+    selAll.appendChild(cb);
+    selAll.appendChild(document.createTextNode('Select all'));
+    toolbar.appendChild(selAll);
+
+    // Dismiss selected
+    var dismissBtn = document.createElement('button');
+    dismissBtn.style.cssText = 'font-size:11px;padding:4px 10px;border:1px solid var(--border);color:var(--text2);background:var(--bg1);border-radius:6px;cursor:pointer;';
+    dismissBtn.textContent = 'Dismiss selected';
+    dismissBtn.addEventListener('click', bulkDismissSelected);
+    toolbar.appendChild(dismissBtn);
+
+    // Dismiss all T3
+    var t3Count = 0;
+    for (var ti = 0; ti < alerts.length; ti++) { if (alerts[ti].tier >= 3) t3Count++; }
+    if (t3Count > 0) {
+        var t3Btn = document.createElement('button');
+        t3Btn.style.cssText = 'font-size:11px;padding:4px 10px;border:1px solid var(--amber);color:var(--amber);background:transparent;border-radius:6px;cursor:pointer;';
+        t3Btn.textContent = 'Dismiss all T3+ (' + t3Count + ')';
+        t3Btn.addEventListener('click', function() { bulkDismissByTier(3); });
+        toolbar.appendChild(t3Btn);
+    }
+}
+
+function _renderFiresFiltered() {
+    var container = document.getElementById('firesContent');
+    if (!container) return;
+
+    var filtered = _firesAllAlerts;
+    if (_firesSourceFilter) {
+        filtered = _firesAllAlerts.filter(function(a) { return (a.source || 'unknown') === _firesSourceFilter; });
+    }
+
+    if (filtered.length === 0) {
+        container.textContent = 'No alerts matching filter.';
+        container.style.cssText = 'color:var(--text3);font-size:13px;padding:20px 0;';
+        return;
+    }
+
+    // Group by matter
+    var groups = {};
+    for (var i = 0; i < filtered.length; i++) {
+        var key = filtered[i].matter_slug || '_ungrouped';
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(filtered[i]);
+    }
+
+    container.textContent = '';
+    container.style.cssText = '';
+    var keys = Object.keys(groups);
+    for (var gi = 0; gi < keys.length; gi++) {
+        var slug = keys[gi];
+        var alerts = groups[slug];
+        var label = slug === '_ungrouped' ? 'Ungrouped' : slug.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+
+        var sectionLabel = document.createElement('div');
+        sectionLabel.className = 'section-label';
+        sectionLabel.style.marginTop = '16px';
+        sectionLabel.textContent = label + ' (' + alerts.length + ')';
+        container.appendChild(sectionLabel);
+
+        for (var ai = 0; ai < alerts.length; ai++) {
+            var cardHtml = renderAlertCard(alerts[ai], true);
+            // Wrap with checkbox
+            var wrapper = document.createElement('div');
+            wrapper.style.cssText = 'display:flex;align-items:flex-start;gap:6px;';
+
+            var checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'fire-check';
+            checkbox.dataset.alertId = alerts[ai].id;
+            checkbox.style.cssText = 'margin-top:14px;flex-shrink:0;cursor:pointer;';
+            wrapper.appendChild(checkbox);
+
+            var cardDiv = document.createElement('div');
+            cardDiv.style.cssText = 'flex:1;min-width:0;';
+            setSafeHTML(cardDiv, cardHtml);
+            wrapper.appendChild(cardDiv);
+
+            container.appendChild(wrapper);
+        }
+    }
+    populateAssignDropdowns();
+}
+
+async function bulkDismissSelected() {
+    var boxes = document.querySelectorAll('.fire-check:checked');
+    if (boxes.length === 0) return;
+    var ids = [];
+    for (var i = 0; i < boxes.length; i++) ids.push(parseInt(boxes[i].dataset.alertId));
+
+    try {
+        var r = await bakerFetch('/api/alerts/bulk-dismiss', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ alert_ids: ids }),
+        });
+        if (!r.ok) throw new Error('API returned ' + r.status);
+        var data = await r.json();
+        // Remove dismissed from cached list
+        _firesAllAlerts = _firesAllAlerts.filter(function(a) { return ids.indexOf(a.id) === -1; });
+        _buildFiresToolbar(_firesAllAlerts);
+        _renderFiresFiltered();
+        refreshFiresBadge();
+    } catch (e) { console.error('bulkDismissSelected failed:', e); }
+}
+
+async function bulkDismissByTier(tier) {
+    try {
+        var r = await bakerFetch('/api/alerts/bulk-dismiss', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tier: tier }),
+        });
+        if (!r.ok) throw new Error('API returned ' + r.status);
+        var data = await r.json();
+        // Remove dismissed from cached list
+        _firesAllAlerts = _firesAllAlerts.filter(function(a) { return a.tier < tier; });
+        _buildFiresToolbar(_firesAllAlerts);
+        _renderFiresFiltered();
+        refreshFiresBadge();
+    } catch (e) { console.error('bulkDismissByTier failed:', e); }
 }
 
 // ═══ DEADLINES TAB ═══
@@ -3747,6 +3902,31 @@ async function init() {
 
     // Load morning brief
     loadMorningBrief();
+
+    // Alert badge auto-refresh every 5 min (T1+T2 count on sidebar)
+    setInterval(refreshFiresBadge, 5 * 60 * 1000);
+}
+
+/** Refresh sidebar fires badge independently (T1+T2 pending count). */
+async function refreshFiresBadge() {
+    try {
+        var r = await bakerFetch('/api/alerts');
+        if (!r.ok) return;
+        var data = await r.json();
+        var alerts = data.alerts || [];
+        var count = 0;
+        for (var i = 0; i < alerts.length; i++) {
+            if (alerts[i].tier <= 2) count++;
+        }
+        var badge = document.getElementById('firesBadge');
+        if (!badge) return;
+        if (count > 0) {
+            badge.textContent = count;
+            badge.hidden = false;
+        } else {
+            badge.hidden = true;
+        }
+    } catch (e) { /* silent */ }
 }
 
 document.addEventListener('DOMContentLoaded', init);

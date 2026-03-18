@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 import anthropic
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -1052,6 +1052,59 @@ async def dismiss_alert(alert_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/alerts/bulk-dismiss", tags=["alerts"], dependencies=[Depends(verify_api_key)])
+async def bulk_dismiss_alerts(req: dict = Body(...)):
+    """Bulk dismiss alerts by IDs or by tier+age filter."""
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor()
+            dismissed = 0
+
+            alert_ids = req.get("alert_ids")
+            tier = req.get("tier")
+            older_than_days = req.get("older_than_days", 0)
+
+            if alert_ids and isinstance(alert_ids, list):
+                # Dismiss specific IDs
+                cur.execute(
+                    "UPDATE alerts SET status = 'dismissed', exit_reason = 'bulk-dismiss', resolved_at = NOW() "
+                    "WHERE id = ANY(%s) AND status = 'pending' RETURNING id",
+                    (alert_ids,),
+                )
+                dismissed = cur.rowcount
+            elif tier is not None:
+                # Dismiss by tier (+ optional age)
+                if older_than_days > 0:
+                    cur.execute(
+                        "UPDATE alerts SET status = 'dismissed', exit_reason = 'bulk-dismiss', resolved_at = NOW() "
+                        "WHERE status = 'pending' AND tier = %s AND created_at < NOW() - INTERVAL '%s days' RETURNING id",
+                        (tier, older_than_days),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE alerts SET status = 'dismissed', exit_reason = 'bulk-dismiss', resolved_at = NOW() "
+                        "WHERE status = 'pending' AND tier = %s RETURNING id",
+                        (tier,),
+                    )
+                dismissed = cur.rowcount
+
+            conn.commit()
+            cur.close()
+            logger.info(f"Bulk dismiss: {dismissed} alerts dismissed")
+            return {"dismissed": dismissed}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"/api/alerts/bulk-dismiss failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/alerts/reassign-matters", tags=["alerts"], dependencies=[Depends(verify_api_key)])
 async def reassign_matters():
     """Re-run matter matching on all pending alerts with NULL matter_slug."""
@@ -1140,8 +1193,8 @@ async def get_morning_brief():
             """)
             unanswered_count = cur.fetchone()["cnt"]
 
-            # Stats: fire count
-            cur.execute("SELECT COUNT(*) AS cnt FROM alerts WHERE status = 'pending' AND tier = 1")
+            # Stats: fire count (T1+T2 — matches mobile badge)
+            cur.execute("SELECT COUNT(*) AS cnt FROM alerts WHERE status = 'pending' AND tier <= 2")
             fire_count = cur.fetchone()["cnt"]
 
             # Stats: deadlines this week (due between today and +7 days)
