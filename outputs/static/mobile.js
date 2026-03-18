@@ -271,6 +271,9 @@ async function streamChat(url, body, containerId, history) {
                         full += data.token;
                         // SECURITY: md() calls esc() first — all user input sanitized
                         if (replyEl) setSafeHTML(replyEl, '<div class="md-content">' + md(full) + '</div>');
+                        // Keep scroll pinned to top (newest-first layout)
+                        var msgContainer = document.getElementById(containerId);
+                        if (msgContainer) msgContainer.scrollTop = 0;
                     }
                     if (data.error) {
                         full += '\n[Error: ' + data.error + ']';
@@ -478,23 +481,73 @@ function sendSpecialist() {
 
 // ═══ CAPABILITY LOADER ═══
 async function loadCapabilities() {
+    var select = document.getElementById('capPicker');
+    if (!select) return;
+
+    // Show loading state while fetching
+    var loadingOpt = document.createElement('option');
+    loadingOpt.value = '';
+    loadingOpt.textContent = 'Loading specialists...';
+    loadingOpt.disabled = true;
+    select.textContent = '';
+    select.appendChild(loadingOpt);
+    select.disabled = true;
+
     try {
         var r = await bakerFetch('/api/capabilities');
         if (!r.ok) return;
         var data = await r.json();
-        var select = document.getElementById('capPicker');
-        if (!select) return;
         var caps = (data.capabilities || []).filter(function(c) {
             return c.active && c.slug !== 'decomposer' && c.slug !== 'synthesizer';
         });
         caps.sort(function(a, b) { return (a.name || '').localeCompare(b.name || ''); });
+
+        // Replace loading with real options
+        select.textContent = '';
+        var defaultOpt = document.createElement('option');
+        defaultOpt.value = '';
+        defaultOpt.textContent = 'Select a specialist...';
+        select.appendChild(defaultOpt);
+
         for (var i = 0; i < caps.length; i++) {
             var opt = document.createElement('option');
             opt.value = caps[i].slug;
             opt.textContent = caps[i].name || caps[i].slug;
             select.appendChild(opt);
         }
-    } catch (e) { console.error('Failed to load capabilities:', e); }
+        select.disabled = false;
+    } catch (e) {
+        console.error('Failed to load capabilities:', e);
+        select.textContent = '';
+        var errOpt = document.createElement('option');
+        errOpt.value = '';
+        errOpt.textContent = 'Failed to load — tap to retry';
+        select.appendChild(errOpt);
+        select.disabled = false;
+    }
+}
+
+// ═══ ALERT BADGE ═══
+async function refreshAlertBadge() {
+    try {
+        // API returns only pending alerts; count T1+T2
+        var r = await bakerFetch('/api/alerts');
+        if (!r.ok) return;
+        var data = await r.json();
+        var alerts = data.alerts || [];
+        var count = 0;
+        for (var i = 0; i < alerts.length; i++) {
+            if (alerts[i].tier <= 2) count++;
+        }
+        var badge = document.getElementById('alertBadge');
+        if (!badge) return;
+        if (count > 0) {
+            badge.textContent = count;
+            badge.hidden = false;
+        } else {
+            badge.hidden = true;
+        }
+    } catch (e) { /* silent */ }
 }
 
 // ═══ INIT ═══
@@ -558,6 +611,10 @@ async function init() {
             ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
         });
     });
+
+    // Alert badge — load now + refresh every 5 min
+    refreshAlertBadge();
+    setInterval(refreshAlertBadge, 5 * 60 * 1000);
 
     // Default tab
     switchTab('baker');

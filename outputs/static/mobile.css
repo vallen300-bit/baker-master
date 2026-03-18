@@ -376,6 +376,22 @@ html, body {
   margin-left: 6px;
 }
 
+.alert-badge {
+  display: inline-block;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--red);
+  border-radius: 9px;
+  padding: 0 5px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
 .header-btn {
   padding: 6px 14px;
   font-size: 13px;
