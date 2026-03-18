@@ -1,11 +1,13 @@
 """
-Proactive Signal Scanner + AO Mood Classification + Communication Gap Tracker
-Phase 4 — PROACTIVE-FLAG-AO
+Proactive Signal Scanner
+Phase 4 — PROACTIVE-FLAG
 
-Two scheduled jobs:
+Scheduled job:
   - run_proactive_scan() every 30 min: scans recent content against proactive_flag
-    capability trigger patterns, creates T2/T1 alerts
-  - run_communication_gap_check() every 6h: alerts if no Director→VIP message in N days
+    capability trigger patterns, creates T2 alerts
+
+Session 26: AO mood detection + communication gap tracker removed (Director decision:
+all contacts treated equally, no VIP-specific monitoring).
 """
 import logging
 import re
@@ -15,43 +17,7 @@ logger = logging.getLogger("baker.proactive_scanner")
 
 
 # -------------------------------------------------------
-# AO Mood Detection Keywords (Russian + English)
-# -------------------------------------------------------
-
-_AO_POSITIVE = re.compile(
-    r"\b(appreciate|grateful|thank.you|good.news|progress|agreed|"
-    r"looking.forward|pleased|excellent|partnership|together|"
-    r"constructive|opportunity|optimistic|"
-    r"спасибо|отлично|хорошо|договорились|рад|благодарю|"
-    r"прогресс|партнёрство|вместе|конструктивно)\b", re.IGNORECASE
-)
-
-_AO_NEGATIVE = re.compile(
-    r"\b(disappointed|unacceptable|demand|legal.action|breach|"
-    r"concerned|overdue|default|penalty|lawyer|litigation|"
-    r"frustrat|delay|unresponsive|broken.promise|"
-    r"неприемлемо|разочарован|требую|юрист|нарушение|штраф|"
-    r"задержка|обещание|претензия|ответственность)\b", re.IGNORECASE
-)
-
-_AO_IDENTIFIERS = re.compile(
-    r"\b(oskolkov|andrey|aelio|andrej)\b", re.IGNORECASE
-)
-
-
-def classify_ao_mood(content: str) -> str:
-    """Classify AO message mood: positive, neutral, or negative."""
-    pos = len(_AO_POSITIVE.findall(content))
-    neg = len(_AO_NEGATIVE.findall(content))
-    if neg >= 2 or (neg > 0 and neg > pos):
-        return "negative"
-    elif pos >= 2 or (pos > 0 and pos > neg):
-        return "positive"
-    return "neutral"
-
-
-# -------------------------------------------------------
-# Part 1 + 2: Proactive Signal Scanner
+# Proactive Signal Scanner
 # -------------------------------------------------------
 
 def run_proactive_scan():
@@ -158,33 +124,6 @@ def run_proactive_scan():
             # Check if already flagged
             if store.alert_source_id_exists("proactive_scan", dedup_key):
                 continue
-
-            # AO-specific mood detection (Part 2)
-            if cap.slug == "profiling" and _AO_IDENTIFIERS.search(content):
-                mood = classify_ao_mood(content)
-                sender = item.get("sender_name") or item["source_type"]
-                if mood == "negative":
-                    store.create_alert(
-                        tier=1,
-                        title=f"[Profiling] AO mood shift: NEGATIVE signal from {sender}",
-                        body=content[:500],
-                        source="proactive_scan",
-                        source_id=dedup_key,
-                        matter_slug="oskolkov-rg7",
-                    )
-                    flagged += 1
-                    break
-                elif mood == "positive":
-                    store.create_alert(
-                        tier=2,
-                        title=f"[Profiling] AO mood: positive signal from {sender}",
-                        body=content[:500],
-                        source="proactive_scan",
-                        source_id=dedup_key,
-                        matter_slug="oskolkov-rg7",
-                    )
-                    flagged += 1
-                    break
 
             # Generic proactive flag alert (T2)
             sender = item.get("sender_name") or item["source_type"]

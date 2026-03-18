@@ -447,6 +447,39 @@ TOOL_DEFINITIONS = [
             "required": ["description", "due_date"],
         },
     },
+    # A3: Calendar write tool (Session 26)
+    {
+        "name": "create_calendar_event",
+        "description": (
+            "Create an event on the Director's Google Calendar. Use for:\n"
+            "- Blocking focus time ('Block 2 hours tomorrow morning for strategy review')\n"
+            "- Scheduling follow-ups ('Add a call with Piras on Thursday at 3pm')\n"
+            "- Setting reminders ('Block 15 min Friday to review the term sheet')\n\n"
+            "Returns confirmation with event link."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Event title (e.g. 'Focus: Kempinski strategy review')",
+                },
+                "start": {
+                    "type": "string",
+                    "description": "Start time in ISO format (YYYY-MM-DDTHH:MM, e.g. '2026-03-20T09:00')",
+                },
+                "end": {
+                    "type": "string",
+                    "description": "End time in ISO format. If not provided, defaults to 1 hour after start.",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Optional event description/notes",
+                },
+            },
+            "required": ["title", "start"],
+        },
+    },
 ]
 
 # Agent loop tools — exclude clickup_create (Director prefers results in artifact panel,
@@ -502,6 +535,8 @@ class ToolExecutor:
                 return self._query_baker_data(tool_input)
             elif tool_name == "create_deadline":
                 return self._create_deadline(tool_input)
+            elif tool_name == "create_calendar_event":
+                return self._create_calendar_event(tool_input)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -1069,6 +1104,52 @@ class ToolExecutor:
         except Exception as e:
             logger.error(f"create_deadline failed: {e}")
             return json.dumps({"error": f"Deadline creation failed: {str(e)}"})
+
+    def _create_calendar_event(self, inp: dict) -> str:
+        """A3: Create a Google Calendar event from the agent loop."""
+        title = inp.get("title", "Baker Event")
+        start_str = inp.get("start", "")
+        end_str = inp.get("end", "")
+        description = inp.get("description", "")
+
+        if not start_str:
+            return "[start time is required (ISO format: YYYY-MM-DDTHH:MM)]"
+
+        try:
+            from triggers.calendar_trigger import _get_calendar_service
+            from datetime import datetime, timezone, timedelta
+
+            start = datetime.fromisoformat(start_str)
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+
+            if end_str:
+                end = datetime.fromisoformat(end_str)
+                if end.tzinfo is None:
+                    end = end.replace(tzinfo=timezone.utc)
+            else:
+                end = start + timedelta(hours=1)
+
+            event = {
+                "summary": title,
+                "description": description or "Created by Baker",
+                "start": {"dateTime": start.isoformat(), "timeZone": "Europe/Zurich"},
+                "end": {"dateTime": end.isoformat(), "timeZone": "Europe/Zurich"},
+                "reminders": {"useDefault": True},
+            }
+
+            service = _get_calendar_service()
+            result = service.events().insert(calendarId="primary", body=event).execute()
+            event_link = result.get("htmlLink", "")
+
+            return (
+                f"Calendar event created: **{title}**\n"
+                f"- When: {start.strftime('%a %b %-d, %H:%M')} – {end.strftime('%H:%M')}\n"
+                f"- [Open in Calendar]({event_link})"
+            )
+        except Exception as e:
+            logger.error(f"create_calendar_event failed: {e}")
+            return json.dumps({"error": f"Calendar event creation failed: {str(e)}"})
 
     @staticmethod
     def _format_contexts(contexts, label: str) -> str:
