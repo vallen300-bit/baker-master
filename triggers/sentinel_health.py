@@ -334,6 +334,121 @@ def should_skip_poll(source: str) -> bool:
 
 
 # ─────────────────────────────────────────────
+# Stale Watermark Detector (SENTINEL-SAFETY-1)
+# ─────────────────────────────────────────────
+
+# Expected max age (hours) per trigger source before it's flagged stale
+_WATERMARK_MAX_AGE = {
+    "email_poll": 2,         # polls every 5 min
+    "fireflies": 48,         # polls every 15 min, but may have no new data
+    "todoist": 2,            # polls every 5 min
+    "dropbox": 6,            # polls every 5 min
+    "whoop": 48,             # polls every 6 hours
+    "slack": 2,              # polls every 5 min
+}
+
+# ClickUp workspaces — all should advance within 2 hours
+_CLICKUP_WORKSPACE_IDS = ["2652545", "24368967", "24382372", "24382764", "24385290", "9004065517"]
+
+
+def check_stale_watermarks():
+    """SENTINEL-SAFETY-1: Check trigger_watermarks for sources that haven't
+    advanced in longer than expected. Fires a T2 alert per stale source.
+    Run every 6 hours."""
+    conn, store = _get_conn()
+    if not conn:
+        return
+    try:
+        import psycopg2.extras
+        _ensure_table(conn)
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        now = datetime.now(timezone.utc)
+        stale_sources = []
+
+        # Check named sources
+        for source, max_hours in _WATERMARK_MAX_AGE.items():
+            cur.execute(
+                "SELECT last_seen, updated_at FROM trigger_watermarks WHERE source = %s",
+                (source,),
+            )
+            row = cur.fetchone()
+            if not row:
+                continue  # source never ran — separate issue
+            last_seen = row["last_seen"]
+            if last_seen and last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            if last_seen:
+                hours_stale = (now - last_seen).total_seconds() / 3600
+                if hours_stale > max_hours:
+                    stale_sources.append({
+                        "source": source,
+                        "last_seen": last_seen.isoformat(),
+                        "hours_stale": round(hours_stale, 1),
+                        "max_hours": max_hours,
+                    })
+
+        # Check ClickUp workspaces
+        for ws_id in _CLICKUP_WORKSPACE_IDS:
+            source = f"clickup_{ws_id}"
+            cur.execute(
+                "SELECT last_seen FROM trigger_watermarks WHERE source = %s",
+                (source,),
+            )
+            row = cur.fetchone()
+            if not row or not row["last_seen"]:
+                continue
+            last_seen = row["last_seen"]
+            if last_seen.tzinfo is None:
+                last_seen = last_seen.replace(tzinfo=timezone.utc)
+            hours_stale = (now - last_seen).total_seconds() / 3600
+            if hours_stale > 24:  # ClickUp should advance at least daily
+                stale_sources.append({
+                    "source": source,
+                    "last_seen": last_seen.isoformat(),
+                    "hours_stale": round(hours_stale, 1),
+                    "max_hours": 24,
+                })
+
+        cur.close()
+
+        if not stale_sources:
+            logger.info("Stale watermark check: all sources fresh")
+            return
+
+        # Fire one alert per stale source (with dedup via source_id)
+        for s in stale_sources:
+            alert_id = f"stale_watermark_{s['source']}"
+            title = f"STALE DATA: {s['source']} — no new data for {s['hours_stale']}h"
+            body = (
+                f"Source: {s['source']}\n"
+                f"Last data: {s['last_seen']}\n"
+                f"Expected max gap: {s['max_hours']}h\n"
+                f"Actual gap: {s['hours_stale']}h\n\n"
+                f"Likely cause: missing API key, expired credentials, or upstream API down.\n"
+                f"Check Render env vars and sentinel_health table."
+            )
+            try:
+                from memory.store_back import SentinelStoreBack
+                st = SentinelStoreBack._get_global_instance()
+                st.create_alert(
+                    tier=2,
+                    title=title,
+                    body=body,
+                    source="sentinel_health",
+                    source_id=alert_id,
+                )
+                logger.warning(f"STALE WATERMARK alert: {s['source']} ({s['hours_stale']}h)")
+            except Exception as e:
+                logger.error(f"Failed to fire stale watermark alert for {s['source']}: {e}")
+
+    except Exception as e:
+        logger.warning(f"check_stale_watermarks failed: {e}")
+    finally:
+        _put_conn(store, conn)
+
+
+# ─────────────────────────────────────────────
 # Read API (for dashboard)
 # ─────────────────────────────────────────────
 

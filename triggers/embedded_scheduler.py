@@ -233,6 +233,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: communication_gap_check (every 6 hours)")
 
+    # SENTINEL-SAFETY-1: Stale watermark detector — every 6 hours
+    from triggers.sentinel_health import check_stale_watermarks
+    scheduler.add_job(
+        check_stale_watermarks,
+        IntervalTrigger(hours=6),
+        id="stale_watermark_check", name="Stale watermark detector",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: stale_watermark_check (every 6 hours)")
+
     # Document pipeline job queue drain — every 2 minutes (PIPELINE-JOBQUEUE-1)
     from tools.document_pipeline import drain_doc_pipeline
     scheduler.add_job(
