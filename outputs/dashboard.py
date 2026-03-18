@@ -1148,6 +1148,81 @@ async def reassign_matters():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/alerts/stream", tags=["alerts"])
+async def alerts_stream(key: str = Query(..., alias="key")):
+    """
+    REALTIME-PUSH-1: SSE stream for live alert notifications.
+    Auth via query param (SSE/EventSource doesn't support custom headers).
+    Polls every 10s for new pending alerts since last check.
+    """
+    import os as _os
+    expected = _os.environ.get("BAKER_API_KEY", "")
+    if not expected or key != expected:
+        raise HTTPException(status_code=401, detail="Invalid key")
+
+    async def _event_gen():
+        import psycopg2.extras
+        last_id = 0
+        # Seed last_id to current max
+        try:
+            store = _get_store()
+            conn = store._get_conn()
+            if conn:
+                try:
+                    cur = conn.cursor()
+                    cur.execute("SELECT COALESCE(MAX(id), 0) FROM alerts WHERE status = 'pending'")
+                    last_id = cur.fetchone()[0]
+                    cur.close()
+                finally:
+                    store._put_conn(conn)
+        except Exception:
+            pass
+
+        while True:
+            await asyncio.sleep(10)
+            try:
+                store = _get_store()
+                conn = store._get_conn()
+                if not conn:
+                    yield ": keepalive\n\n"
+                    continue
+                try:
+                    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                    cur.execute(
+                        "SELECT id, tier, title, source FROM alerts "
+                        "WHERE status = 'pending' AND id > %s ORDER BY id",
+                        (last_id,),
+                    )
+                    rows = cur.fetchall()
+                    cur.close()
+                finally:
+                    store._put_conn(conn)
+
+                for row in rows:
+                    evt = json.dumps({
+                        "type": "new_alert",
+                        "id": row["id"],
+                        "tier": row["tier"],
+                        "title": row["title"],
+                        "source": row.get("source", ""),
+                    })
+                    yield f"data: {evt}\n\n"
+                    if row["id"] > last_id:
+                        last_id = row["id"]
+
+                if not rows:
+                    yield ": keepalive\n\n"
+            except Exception as e:
+                logger.debug(f"alerts/stream poll error: {e}")
+                yield ": keepalive\n\n"
+
+    return StreamingResponse(
+        _event_gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"},
+    )
+
+
 # ============================================================
 # V3 Dashboard endpoints
 # ============================================================
