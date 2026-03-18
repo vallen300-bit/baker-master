@@ -1463,6 +1463,18 @@ async def get_morning_brief():
             """)
             actions_completed = cur.fetchone()["cnt"]
 
+            # Stats: overdue Todoist tasks
+            todoist_overdue = 0
+            try:
+                cur.execute("""
+                    SELECT COUNT(*) AS cnt FROM todoist_tasks
+                    WHERE completed_at IS NULL
+                      AND due_date IS NOT NULL AND due_date < NOW()::text
+                """)
+                todoist_overdue = cur.fetchone()["cnt"]
+            except Exception:
+                pass
+
             # Top fires (T1 alerts, most recent per matter, limit 5)
             cur.execute("""
                 SELECT * FROM (
@@ -1693,6 +1705,7 @@ async def get_morning_brief():
             "deadline_count": deadline_count,
             "processed_overnight": processed_overnight,
             "actions_completed": actions_completed,
+            "todoist_overdue": todoist_overdue,
             "narrative": narrative,
             "proposals": proposals,
             "top_fires": top_fires,
