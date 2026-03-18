@@ -3633,6 +3633,59 @@ async def scan_specialist(req: SpecialistScanRequest):
                                   entity_context=entity_context)
 
 
+@app.post("/api/scan/image", tags=["scan"], dependencies=[Depends(verify_api_key)])
+async def scan_image(
+    file: UploadFile = File(...),
+    question: str = Form("What is this? Analyze it and tell me anything relevant."),
+):
+    """
+    MOBILE-VOICE-1: Accept an image + optional question, analyze with Claude Vision.
+    Returns a JSON response (not SSE) for iOS Shortcuts compatibility.
+    Supports JPEG, PNG, GIF, WebP.
+    """
+    # Validate file type
+    content_type = file.content_type or ""
+    if not content_type.startswith("image/"):
+        ext = Path(file.filename or "").suffix.lower()
+        type_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+                    ".gif": "image/gif", ".webp": "image/webp"}
+        content_type = type_map.get(ext, "")
+    if content_type not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
+        raise HTTPException(400, "Unsupported image type. Accepted: JPEG, PNG, GIF, WebP.")
+
+    # Read and base64-encode
+    import base64
+    image_bytes = await file.read()
+    if len(image_bytes) > 10 * 1024 * 1024:  # 10MB limit
+        raise HTTPException(400, "Image too large (max 10MB).")
+    b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
+
+    # Call Claude Vision
+    try:
+        client = anthropic.Anthropic()
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=2000,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": content_type, "data": b64}},
+                    {"type": "text", "text": question},
+                ],
+            }],
+        )
+        answer = resp.content[0].text
+        # Log cost
+        from orchestrator.cost_monitor import log_api_cost
+        log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="scan_image")
+        logger.info(f"Scan image: {file.filename}, {len(image_bytes)} bytes, question='{question[:60]}'")
+        return {"answer": answer, "model": "claude-haiku-4-5-20251001",
+                "tokens": {"input": resp.usage.input_tokens, "output": resp.usage.output_tokens}}
+    except Exception as e:
+        logger.error(f"POST /api/scan/image failed: {e}")
+        raise HTTPException(500, f"Image analysis failed: {e}")
+
+
 @app.get("/api/scan/detect", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
 async def detect_capability(q: str = Query("", max_length=500)):
     """
