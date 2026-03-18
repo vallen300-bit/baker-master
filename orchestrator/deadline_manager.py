@@ -272,10 +272,14 @@ def run_cadence_check():
     # Auto-dismiss active deadlines that are overdue by 7+ days
     overdue_dismissed = _auto_dismiss_overdue_deadlines()
 
+    # Auto-dismiss undated soft obligations after 14 days (Session 26)
+    undated_dismissed = _auto_dismiss_undated_soft()
+
     logger.info(
         f"Cadence check complete: {alerts_fired} reminders fired, "
         f"{expired} expired, {dismissed} soft auto-dismissed, "
         f"{overdue_dismissed} overdue auto-dismissed, "
+        f"{undated_dismissed} undated soft auto-dismissed, "
         f"{len(deadlines)} active deadlines checked"
     )
 
@@ -535,6 +539,41 @@ def _auto_dismiss_soft_deadlines() -> int:
         return dismissed
     except Exception as e:
         logger.error(f"Auto-dismiss soft deadlines failed: {e}")
+        return 0
+    finally:
+        put_conn(conn)
+
+
+def _auto_dismiss_undated_soft() -> int:
+    """Auto-dismiss soft obligations with no due_date after 14 days.
+    These are extracted action items with no specific deadline — they accumulate
+    indefinitely without this cleanup.
+    """
+    from models.deadlines import get_conn, put_conn
+    conn = get_conn()
+    if not conn:
+        return 0
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE deadlines
+            SET status = 'dismissed',
+                dismissed_reason = 'auto-dismissed (undated soft obligation, 14+ days old)',
+                updated_at = NOW()
+            WHERE status = 'active'
+              AND severity = 'soft'
+              AND due_date IS NULL
+              AND created_at < %s
+        """, (cutoff,))
+        dismissed = cur.rowcount
+        conn.commit()
+        cur.close()
+        if dismissed > 0:
+            logger.info(f"Auto-dismissed {dismissed} undated soft obligations (14+ days old)")
+        return dismissed
+    except Exception as e:
+        logger.error(f"Auto-dismiss undated soft failed: {e}")
         return 0
     finally:
         put_conn(conn)
