@@ -886,6 +886,95 @@ async def get_sentinel_health():
     return {"sentinels": sentinels, "summary": summary}
 
 
+@app.get("/api/data-freshness", tags=["system"], dependencies=[Depends(verify_api_key)])
+async def get_data_freshness():
+    """G6: Data freshness overview — when each source last polled, row counts, health status."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            sources = []
+
+            # Define data sources with their tables and watermark keys
+            _SOURCES = [
+                ("Email", "email_messages", "email_poll", "received_date"),
+                ("WhatsApp", "whatsapp_messages", None, "timestamp"),
+                ("Meetings", "meeting_transcripts", "fireflies", "meeting_date"),
+                ("ClickUp", "clickup_tasks", None, "updated_at"),
+                ("Todoist", "todoist_tasks", "todoist", None),
+                ("Documents", "documents", "dropbox", "ingested_at"),
+                ("Slack", None, "slack", None),
+                ("RSS", None, "rss", None),
+                ("Alerts", "alerts", None, "created_at"),
+                ("Deadlines", "deadlines", None, "created_at"),
+                ("Contacts", "vip_contacts", None, None),
+            ]
+
+            for name, table, watermark_key, date_col in _SOURCES:
+                entry = {"source": name, "count": 0, "latest": None, "watermark": None, "status": "unknown"}
+
+                # Row count + latest
+                if table:
+                    try:
+                        if date_col:
+                            cur.execute(f"SELECT COUNT(*) as cnt, MAX({date_col}) as latest FROM {table}")
+                        else:
+                            cur.execute(f"SELECT COUNT(*) as cnt FROM {table}")
+                        row = dict(cur.fetchone())
+                        entry["count"] = row.get("cnt", 0)
+                        if row.get("latest"):
+                            entry["latest"] = _serialize_val(row["latest"])
+                    except Exception:
+                        pass
+
+                # Watermark
+                if watermark_key:
+                    try:
+                        cur.execute("SELECT last_seen FROM trigger_watermarks WHERE source = %s", (watermark_key,))
+                        wm = cur.fetchone()
+                        if wm:
+                            entry["watermark"] = _serialize_val(wm["last_seen"])
+                    except Exception:
+                        pass
+
+                # Status based on freshness
+                from datetime import datetime, timezone, timedelta
+                now = datetime.now(timezone.utc)
+                _THRESHOLDS = {"Email": 1, "WhatsApp": 6, "Meetings": 48, "Documents": 6, "Slack": 1, "Todoist": 1}
+                threshold_hours = _THRESHOLDS.get(name)
+                if threshold_hours and entry.get("watermark"):
+                    try:
+                        from dateutil.parser import parse as parse_date
+                        wm_dt = parse_date(entry["watermark"])
+                        age_hours = (now - wm_dt).total_seconds() / 3600
+                        if age_hours < threshold_hours * 2:
+                            entry["status"] = "green"
+                        elif age_hours < threshold_hours * 6:
+                            entry["status"] = "amber"
+                        else:
+                            entry["status"] = "red"
+                    except Exception:
+                        entry["status"] = "unknown"
+                elif entry["count"] > 0:
+                    entry["status"] = "green"
+
+                sources.append(entry)
+
+            cur.close()
+            return {"sources": sources, "total_records": sum(s["count"] for s in sources)}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"/api/data-freshness failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/sentinel-health/{source}/reset", tags=["system"], dependencies=[Depends(verify_api_key)])
 async def reset_sentinel_health(source: str):
     """Reset a sentinel's circuit breaker — clear failures, restore to healthy."""

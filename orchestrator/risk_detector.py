@@ -116,16 +116,49 @@ def _score_matter(cur, slug: str, now: datetime) -> tuple:
         signals["pending_alerts"] = min(pending_alerts, 3)
 
     # 4. Unanswered sent emails (sent by Director, no reply in 48h+) (weight: 2 per email, max 4)
-    cur.execute("""
-        SELECT COUNT(*) FROM sent_emails
-        WHERE created_at > NOW() - INTERVAL '14 days'
-          AND created_at < NOW() - INTERVAL '48 hours'
-          AND replied_at IS NULL
-          AND (subject ILIKE %s OR body ILIKE %s)
-    """, (f"%{slug}%", f"%{slug}%"))
-    unanswered = cur.fetchone()["count"]
-    if unanswered > 0:
-        signals["unanswered_emails"] = min(unanswered, 2)
+    try:
+        cur.execute("""
+            SELECT COUNT(*) FROM sent_emails
+            WHERE created_at > NOW() - INTERVAL '14 days'
+              AND created_at < NOW() - INTERVAL '48 hours'
+              AND reply_received = FALSE
+              AND (subject ILIKE %s OR body_preview ILIKE %s)
+        """, (f"%{slug}%", f"%{slug}%"))
+        unanswered = cur.fetchone()["count"]
+        if unanswered > 0:
+            signals["unanswered_emails"] = min(unanswered, 2)
+    except Exception:
+        pass  # sent_emails may not have matching columns
+
+    # 5. Overdue ClickUp tasks (weight: 1 per task, max 3)
+    try:
+        cur.execute("""
+            SELECT COUNT(*) FROM clickup_tasks
+            WHERE status NOT IN ('complete', 'closed', 'done')
+              AND due_date IS NOT NULL AND due_date < NOW()
+              AND (name ILIKE %s OR description ILIKE %s)
+        """, (f"%{slug}%", f"%{slug}%"))
+        overdue_tasks = cur.fetchone()["count"]
+        if overdue_tasks > 0:
+            signals["overdue_clickup_tasks"] = min(overdue_tasks, 3)
+    except Exception:
+        pass  # clickup_tasks schema may vary
+
+    # 6. Days since last interaction with matter contacts (weight: 1 if >14d, 2 if >30d)
+    try:
+        cur.execute("""
+            SELECT MIN(EXTRACT(DAY FROM NOW() - last_contact_date)) as min_days
+            FROM vip_contacts
+            WHERE last_contact_date IS NOT NULL
+              AND name ILIKE ANY(
+                SELECT unnest(people) FROM matter_registry WHERE matter_name = %s
+              )
+        """, (slug,))
+        row = cur.fetchone()
+        if row and row.get("min_days") and row["min_days"] > 14:
+            signals["contact_silence"] = 2 if row["min_days"] > 30 else 1
+    except Exception:
+        pass  # matter_registry people array may not match
 
     # Calculate total score
     weights = {
@@ -133,6 +166,8 @@ def _score_matter(cur, slug: str, now: datetime) -> tuple:
         "approaching_deadlines": 1,
         "pending_alerts": 1,
         "unanswered_emails": 2,
+        "overdue_clickup_tasks": 1,
+        "contact_silence": 1,
     }
     score = sum(signals.get(k, 0) * weights[k] for k in weights)
 
@@ -150,6 +185,10 @@ def _summarize_signals(signals: dict) -> str:
         parts.append(f"{signals['approaching_deadlines']} deadline(s) within 7d")
     if signals.get("pending_alerts"):
         parts.append(f"{signals['pending_alerts']} unresolved alert(s)")
+    if signals.get("overdue_clickup_tasks"):
+        parts.append(f"{signals['overdue_clickup_tasks']} overdue task(s)")
+    if signals.get("contact_silence"):
+        parts.append("contact(s) going silent")
     return ", ".join(parts) if parts else "multiple signals"
 
 

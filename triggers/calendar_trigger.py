@@ -368,13 +368,18 @@ def _assemble_meeting_context(meeting: dict, store) -> str:
                         for pm in past_meetings:
                             parts.append(f"    - {pm['title']} ({pm['meeting_date'].strftime('%b %d') if pm.get('meeting_date') else '?'})")
 
+                    # F7: Gap detection — flag when Baker has no data about attendee
+                    has_data = bool(vip) or bool(emails) or bool(wa_msgs) or bool(past_meetings)
+                    if not has_data:
+                        parts.append(f"  ⚠ KNOWLEDGE GAP: Baker has NO data about {name}. Consider researching before the meeting.")
+
                     cur.close()
                 finally:
                     store._put_conn(conn)
         except Exception as e:
             logger.warning(f"Context assembly error for {name}: {e}")
 
-    # 2b. AO-specific enrichment: mood context for AO meetings
+    # 2b. Historical enrichment
     ao_keywords = ["oskolkov", "andrey", "aelio", "ao ", "andrej"]
     attendee_names = [a.get('name', '') or a.get('email', '') for a in meeting.get('attendees', [])]
     meeting_text = (meeting.get('title', '') + " " + " ".join(attendee_names)).lower()
