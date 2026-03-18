@@ -3686,6 +3686,82 @@ async def scan_specialist(req: SpecialistScanRequest):
                                   entity_context=entity_context)
 
 
+class QuickScanRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=4000)
+
+
+@app.post("/api/scan/quick", tags=["scan"], dependencies=[Depends(verify_api_key)])
+async def scan_quick(req: QuickScanRequest):
+    """
+    IOS-SHORTCUTS-1: Non-streaming Ask Baker for iOS Shortcuts.
+    Uses legacy single-pass RAG (no agent loop) to stay within 30s timeout.
+    Returns JSON: {"response": "string"}
+    """
+    start = time.time()
+    try:
+        # 1. Retrieve context (same as legacy path)
+        retriever = _get_retriever()
+        contexts = retriever.search_all_collections(
+            query=req.message, limit_per_collection=6, score_threshold=0.3,
+        )
+    except Exception as e:
+        logger.error(f"scan_quick retrieval failed: {e}")
+        contexts = []
+
+    try:
+        retriever = _get_retriever()
+        transcripts = retriever.get_meeting_transcripts(req.message, limit=2)
+        if transcripts:
+            contexts.extend(transcripts)
+        emails = retriever.get_email_messages(req.message, limit=2)
+        if emails:
+            contexts.extend(emails)
+        wa_msgs = retriever.get_whatsapp_messages(req.message, limit=2)
+        if wa_msgs:
+            contexts.extend(wa_msgs)
+    except Exception:
+        pass
+
+    # 2. Build system prompt
+    system_prompt = _build_scan_system_prompt(
+        deadline_only=False, contexts=contexts,
+    )
+
+    # 3. Single Claude call (non-streaming, timeout-friendly)
+    try:
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        resp = client.messages.create(
+            model=config.claude.model,
+            max_tokens=2048,
+            system=system_prompt,
+            messages=[{"role": "user", "content": req.message}],
+        )
+        answer = resp.content[0].text
+
+        # Log cost
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost(config.claude.model, resp.usage.input_tokens,
+                         resp.usage.output_tokens, source="scan_quick")
+        except Exception:
+            pass
+
+        # Store-back
+        try:
+            scan_req = ScanRequest(question=req.message)
+            _scan_store_back(scan_req, answer, start)
+        except Exception:
+            pass
+
+        elapsed = round(time.time() - start, 1)
+        logger.info(f"scan_quick: {elapsed}s, {resp.usage.input_tokens}+{resp.usage.output_tokens} tokens")
+        return {"response": answer, "elapsed_s": elapsed}
+
+    except Exception as e:
+        logger.error(f"POST /api/scan/quick failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Baker quick scan failed: {e}")
+
+
 @app.post("/api/scan/image", tags=["scan"], dependencies=[Depends(verify_api_key)])
 async def scan_image(
     file: UploadFile = File(...),
