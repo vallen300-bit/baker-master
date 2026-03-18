@@ -22,6 +22,52 @@ let bakerHistory = [];
 let specialistHistory = [];
 let specialistSlug = null;
 let streaming = false;
+let voiceEnabled = true; // auto-read responses aloud
+
+// ═══ VOICE READBACK (SpeechSynthesis) ═══
+function speakText(text) {
+    if (!voiceEnabled || !text || !window.speechSynthesis) return;
+    // Stop any ongoing speech
+    window.speechSynthesis.cancel();
+    // Strip markdown formatting for cleaner speech
+    var clean = text
+        .replace(/\*\*(.+?)\*\*/g, '$1')
+        .replace(/\*(.+?)\*/g, '$1')
+        .replace(/^#{1,3}\s+/gm, '')
+        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+        .replace(/\[Source: [^\]]+\]/g, '')
+        .replace(/^\|.*\|$/gm, '') // strip table rows
+        .replace(/^-{3,}$/gm, '')
+        .replace(/\n{2,}/g, '\n')
+        .trim();
+    if (!clean) return;
+    // Truncate very long responses to avoid iOS TTS cutting out
+    if (clean.length > 2000) clean = clean.substring(0, 2000) + '... end of summary.';
+    var utterance = new SpeechSynthesisUtterance(clean);
+    utterance.rate = 1.05;
+    utterance.pitch = 1.0;
+    // Prefer a natural English voice on iOS
+    var voices = window.speechSynthesis.getVoices();
+    var preferred = voices.find(function(v) { return v.name === 'Samantha' || v.name === 'Daniel'; })
+        || voices.find(function(v) { return v.lang.startsWith('en') && v.localService; })
+        || voices[0];
+    if (preferred) utterance.voice = preferred;
+    window.speechSynthesis.speak(utterance);
+}
+
+function stopSpeaking() {
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+}
+
+function toggleVoice() {
+    voiceEnabled = !voiceEnabled;
+    var btn = document.getElementById('voiceToggle');
+    if (btn) {
+        btn.textContent = voiceEnabled ? '\uD83D\uDD0A' : '\uD83D\uDD07';
+        btn.classList.toggle('voice-off', !voiceEnabled);
+    }
+    if (!voiceEnabled) stopSpeaking();
+}
 
 // ═══ HTML SAFETY ═══
 function esc(s) {
@@ -215,7 +261,12 @@ async function streamChat(url, body, containerId, history) {
     history.push({ role: 'assistant', content: full });
     if (history.length > 40) history.splice(0, history.length - 40);
 
-    // Copy button
+    // Auto-read response aloud
+    if (full && !full.startsWith('Connection error')) {
+        speakText(full);
+    }
+
+    // Toolbar: Copy + Stop Speaking
     if (replyEl && full && !full.startsWith('Connection error')) {
         var toolbar = document.createElement('div');
         toolbar.className = 'msg-toolbar';
@@ -228,6 +279,18 @@ async function streamChat(url, body, containerId, history) {
             });
         });
         toolbar.appendChild(copyBtn);
+
+        if (voiceEnabled) {
+            var stopBtn = document.createElement('button');
+            stopBtn.textContent = 'Stop';
+            stopBtn.addEventListener('click', function() {
+                stopSpeaking();
+                stopBtn.textContent = 'Stopped';
+                setTimeout(function() { stopBtn.textContent = 'Stop'; }, 2000);
+            });
+            toolbar.appendChild(stopBtn);
+        }
+
         replyEl.appendChild(toolbar);
     }
 
@@ -325,8 +388,15 @@ async function init() {
     await loadConfig();
     await loadCapabilities();
 
-    // New Chat button
-    document.getElementById('newChatBtn').addEventListener('click', newChat);
+    // New Chat button + Voice toggle
+    document.getElementById('newChatBtn').addEventListener('click', function() { stopSpeaking(); newChat(); });
+    document.getElementById('voiceToggle').addEventListener('click', toggleVoice);
+
+    // Pre-load voices (iOS requires this)
+    if (window.speechSynthesis) {
+        window.speechSynthesis.getVoices();
+        window.speechSynthesis.onvoiceschanged = function() { window.speechSynthesis.getVoices(); };
+    }
 
     // Tab switching
     document.querySelectorAll('.tab-btn').forEach(function(btn) {

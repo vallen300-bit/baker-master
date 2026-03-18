@@ -336,8 +336,7 @@ html, body {
   margin-left: 6px;
 }
 
-.new-chat-btn {
-  margin-left: auto;
+.header-btn {
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 600;
@@ -347,6 +346,14 @@ html, body {
   border-radius: 8px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+}
+
+.header-btn:first-of-type {
+  margin-left: auto;
+}
+
+.header-btn.voice-off {
+  opacity: 0.4;
 }
 
 /* Empty state */
