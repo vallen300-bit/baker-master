@@ -183,15 +183,11 @@ def _register_jobs(scheduler: BackgroundScheduler):
     # Unanswered message tracking is not helpful — creates noise, not value.
     logger.info("vip_sla_check REMOVED (Director decision — not helpful)")
 
-    # Commitment overdue check — every 6 hours (Phase 3C)
-    from orchestrator.commitment_checker import run_commitment_check
-    scheduler.add_job(
-        run_commitment_check,
-        IntervalTrigger(hours=6),
-        id="commitment_check", name="Commitment overdue check",
-        coalesce=True, max_instances=1, replace_existing=True,
-    )
-    logger.info("Registered: commitment_check (every 6 hours)")
+    # Commitment overdue check — DISABLED (Session 26)
+    # All commitments migrated to deadlines table (OBLIGATIONS-UNIFY-1).
+    # Deadline cadence (run_cadence_check) handles reminders now.
+    # from orchestrator.commitment_checker import run_commitment_check
+    logger.info("Skipped: commitment_check (disabled — migrated to deadlines)")
 
     # Calendar polling + meeting prep — every 15 minutes (Phase 3A)
     from triggers.calendar_trigger import check_calendar_and_prep
