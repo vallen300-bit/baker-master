@@ -165,7 +165,7 @@ If no clear signal, set signal_detected: false.
 """
 
 
-def _check_email_intelligence(email_text: str, subject: str, sender: str):
+def _check_email_intelligence(email_text: str, subject: str, sender: str, source_id: str = None):
     """Check high-priority email for intelligence signals. Creates alert if found."""
     import json
     import anthropic
@@ -220,6 +220,7 @@ def _check_email_intelligence(email_text: str, subject: str, sender: str):
             matter_slug=matter,
             tags=["intelligence", signal_type] if signal_type else ["intelligence"],
             source="email_intelligence",
+            source_id=f"email-intel-{source_id}" if source_id else None,
         )
         logger.info(f"Email intelligence alert: {signal_type} — {summary[:60]}")
 
@@ -501,6 +502,7 @@ def _process_email_threads(new_threads: list):
                         email_text=thread["text"],
                         subject=metadata.get("subject", ""),
                         sender=metadata.get("primary_sender", ""),
+                        source_id=message_id,
                     )
                 except Exception as _e:
                     logger.debug(f"Email intelligence check failed for {message_id}: {_e}")
