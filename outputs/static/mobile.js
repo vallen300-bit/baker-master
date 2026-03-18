@@ -412,12 +412,17 @@ async function sendImage(question) {
         formData.append('file', pendingImage);
         formData.append('question', question || 'What is this? Analyze it and tell me anything relevant.');
 
-        var resp = await bakerFetch('/api/scan/image', {
+        // Direct fetch (not bakerFetch) — avoid abort controller issues on slow mobile uploads
+        var resp = await fetch('/api/scan/image', {
             method: 'POST',
+            headers: { 'X-Baker-Key': BAKER.apiKey },
             body: formData,
-            timeout: 60000,
         });
-        if (!resp.ok) throw new Error('API returned ' + resp.status);
+        if (!resp.ok) {
+            var errText = '';
+            try { errText = (await resp.json()).detail || resp.status; } catch(e) { errText = resp.status; }
+            throw new Error(errText);
+        }
         var data = await resp.json();
         full = data.answer || 'No response';
         if (replyEl) setSafeHTML(replyEl, '<div class="md-content">' + md(full) + '</div>');
