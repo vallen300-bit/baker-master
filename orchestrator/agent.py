@@ -392,6 +392,61 @@ TOOL_DEFINITIONS = [
             "required": ["name"],
         },
     },
+    # A7: Structured data query tool (Session 26)
+    {
+        "name": "query_baker_data",
+        "description": (
+            "Query Baker's structured data (PostgreSQL). Use for statistics, counts, "
+            "trends, and operational questions that need exact numbers.\n\n"
+            "Examples:\n"
+            "- 'How many alerts this week by source?'\n"
+            "- 'What matters have the most overdue deadlines?'\n"
+            "- 'How many emails were processed in the last 7 days?'\n"
+            "- 'Show me contacts with the most interactions'\n\n"
+            "Returns structured results. Only SELECT queries (read-only)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "Natural language question about Baker's data",
+                },
+            },
+            "required": ["question"],
+        },
+    },
+    # A1: Create deadline from agent loop (Session 26)
+    {
+        "name": "create_deadline",
+        "description": (
+            "Create a new deadline or obligation in Baker's tracking system. "
+            "Use when analysis reveals a date-bound action item, or when the "
+            "Director asks to track something with a due date.\n\n"
+            "Examples:\n"
+            "- 'Track that the Hagenauer response is due March 25'\n"
+            "- 'Create a deadline for the IHIF follow-up emails'\n"
+            "- 'Remind me to review the term sheet by Friday'"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "description": "What needs to happen — clear, actionable",
+                },
+                "due_date": {
+                    "type": "string",
+                    "description": "Due date in YYYY-MM-DD format",
+                },
+                "priority": {
+                    "type": "string",
+                    "description": "critical, high, or normal (default: normal)",
+                },
+            },
+            "required": ["description", "due_date"],
+        },
+    },
 ]
 
 # Agent loop tools — exclude clickup_create (Director prefers results in artifact panel,
@@ -443,6 +498,10 @@ class ToolExecutor:
                 return self._search_documents(tool_input)
             elif tool_name == "clickup_create":
                 return self._clickup_create(tool_input)
+            elif tool_name == "query_baker_data":
+                return self._query_baker_data(tool_input)
+            elif tool_name == "create_deadline":
+                return self._create_deadline(tool_input)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -895,6 +954,109 @@ class ToolExecutor:
         except Exception as e:
             logger.error(f"clickup_create failed: {e}")
             return json.dumps({"error": f"ClickUp create failed: {str(e)}"})
+
+    def _query_baker_data(self, inp: dict) -> str:
+        """A7: Answer structured data questions by generating and running SQL."""
+        question = inp.get("question", "")
+        if not question:
+            return "[Please provide a question about Baker's data]"
+
+        # Use Haiku to generate a safe SELECT query
+        import anthropic
+        try:
+            client = anthropic.Anthropic(api_key=config.claude.api_key)
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=500,
+                system=(
+                    "Generate a PostgreSQL SELECT query to answer the user's question about Baker's data. "
+                    "ONLY SELECT — no mutations. Available tables:\n"
+                    "- alerts (id, tier, title, status, source, matter_slug, created_at)\n"
+                    "- deadlines (id, description, due_date, status, priority, confidence, severity, source_type)\n"
+                    "- vip_contacts (id, name, email, tier, domain, last_contact_date)\n"
+                    "- contact_interactions (id, contact_id, interaction_type, subject, interaction_date)\n"
+                    "- email_messages (id, subject, sender, created_at)\n"
+                    "- whatsapp_messages (id, sender_name, body, timestamp, is_director)\n"
+                    "- matter_registry (matter_name, status, keywords, people)\n"
+                    "- baker_tasks (id, title, capability_slug, status, created_at)\n"
+                    "- documents (id, filename, doc_type, matter_slug, created_at)\n"
+                    "- sent_emails (id, to_address, subject, created_at, replied_at)\n\n"
+                    "Return ONLY the SQL query, nothing else. Always include LIMIT (max 20)."
+                ),
+                messages=[{"role": "user", "content": question}],
+            )
+            try:
+                from orchestrator.cost_monitor import log_api_cost
+                log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="query_baker_data")
+            except Exception:
+                pass
+            sql = resp.content[0].text.strip()
+            # Strip markdown fences
+            if sql.startswith("```"):
+                sql = "\n".join(sql.split("\n")[1:-1])
+            sql = sql.strip().rstrip(";")
+
+            # Safety: only SELECT
+            if not sql.upper().startswith("SELECT"):
+                return "[Safety: only SELECT queries allowed]"
+
+            # Execute
+            from memory.store_back import SentinelStoreBack
+            import psycopg2.extras
+            store = SentinelStoreBack._get_global_instance()
+            conn = store._get_conn()
+            if not conn:
+                return "[Database unavailable]"
+            try:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute(sql)
+                rows = [dict(r) for r in cur.fetchall()]
+                cur.close()
+
+                if not rows:
+                    return f"Query returned no results.\nSQL: {sql}"
+
+                # Format results
+                parts = [f"Query: {sql}", f"Results ({len(rows)} rows):"]
+                for row in rows:
+                    parts.append(str(row))
+                return "\n".join(parts)
+            finally:
+                store._put_conn(conn)
+        except Exception as e:
+            logger.error(f"query_baker_data failed: {e}")
+            return json.dumps({"error": f"Data query failed: {str(e)}"})
+
+    def _create_deadline(self, inp: dict) -> str:
+        """A1: Create a deadline from the agent loop."""
+        description = inp.get("description", "")
+        due_date_str = inp.get("due_date", "")
+        priority = inp.get("priority", "normal")
+
+        if not description or not due_date_str:
+            return "[Both description and due_date are required]"
+
+        try:
+            from models.deadlines import insert_deadline
+            from datetime import datetime, timezone
+
+            due_date = datetime.fromisoformat(due_date_str)
+            if due_date.tzinfo is None:
+                due_date = due_date.replace(tzinfo=timezone.utc)
+
+            dl_id = insert_deadline(
+                description=description,
+                due_date=due_date,
+                source_type="agent",
+                confidence="hard",
+                priority=priority,
+            )
+            if dl_id:
+                return f"Deadline created (#{dl_id}): **{description}** — due {due_date_str}, priority {priority}"
+            return "Failed to create deadline."
+        except Exception as e:
+            logger.error(f"create_deadline failed: {e}")
+            return json.dumps({"error": f"Deadline creation failed: {str(e)}"})
 
     @staticmethod
     def _format_contexts(contexts, label: str) -> str:
