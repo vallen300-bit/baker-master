@@ -53,7 +53,7 @@ function stopSpeaking() {
     if (window.speechSynthesis) window.speechSynthesis.cancel();
 }
 
-function addResponseToolbar(replyEl, text) {
+function addResponseToolbar(replyEl, text, taskId) {
     if (!replyEl || !text) return;
     var toolbar = document.createElement('div');
     toolbar.className = 'msg-toolbar';
@@ -92,7 +92,57 @@ function addResponseToolbar(replyEl, text) {
         toolbar.appendChild(playBtn);
     }
 
+    // A6 LEARNING-LOOP: Feedback buttons (only if we have a task_id)
+    if (taskId) {
+        var sep = document.createElement('span');
+        sep.style.cssText = 'width:1px;height:14px;background:var(--border);margin:0 2px;';
+        toolbar.appendChild(sep);
+
+        var fbBtns = [
+            { text: '\u2713', feedback: 'accepted', title: 'Good' },
+            { text: '\u2717', feedback: 'rejected', title: 'Wrong' },
+        ];
+        fbBtns.forEach(function(b) {
+            var btn = document.createElement('button');
+            btn.textContent = b.text;
+            btn.title = b.title;
+            btn.addEventListener('click', function() { _submitMobileFeedback(taskId, b.feedback, toolbar); });
+            toolbar.appendChild(btn);
+        });
+    }
+
     replyEl.appendChild(toolbar);
+}
+
+function _submitMobileFeedback(taskId, feedback, toolbarEl) {
+    var comment = null;
+    if (feedback !== 'accepted') {
+        comment = prompt('What should Baker do differently?');
+        if (comment === null) return;
+    }
+    var body = { feedback: feedback };
+    if (comment) body.comment = comment;
+
+    bakerFetch('/api/tasks/' + taskId + '/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    }).then(function(r) {
+        if (!r.ok) throw new Error('API ' + r.status);
+        // Replace feedback buttons with confirmation
+        var btns = toolbarEl.querySelectorAll('button');
+        for (var i = 0; i < btns.length; i++) {
+            if (btns[i].title === 'Good' || btns[i].title === 'Wrong') btns[i].remove();
+        }
+        var sep = toolbarEl.querySelector('span');
+        if (sep) sep.remove();
+        var done = document.createElement('span');
+        done.style.cssText = 'font-size:11px;color:var(--text2);';
+        done.textContent = feedback === 'accepted' ? 'Thanks!' : 'Noted';
+        toolbarEl.appendChild(done);
+    }).catch(function(e) {
+        console.error('Feedback failed:', e);
+    });
 }
 
 // ═══ HTML SAFETY ═══
@@ -233,6 +283,7 @@ async function streamChat(url, body, containerId, history) {
     if (btn) btn.disabled = true;
 
     var full = '';
+    var capturedTaskId = null;
     var statusLabels = {
         'retrieving': 'Searching memory...',
         'thinking': 'Analyzing...',
@@ -279,6 +330,9 @@ async function streamChat(url, body, containerId, history) {
                         var msgContainer = document.getElementById(containerId);
                         if (msgContainer) msgContainer.scrollTop = 0;
                     }
+                    if (data.task_id) {
+                        capturedTaskId = data.task_id;
+                    }
                     if (data.error) {
                         full += '\n[Error: ' + data.error + ']';
                         if (replyEl) setSafeHTML(replyEl, '<div class="md-content">' + md(full) + '</div>');
@@ -294,9 +348,9 @@ async function streamChat(url, body, containerId, history) {
     history.push({ role: 'assistant', content: full });
     if (history.length > 40) history.splice(0, history.length - 40);
 
-    // Toolbar: Copy + Play (tap to hear)
+    // Toolbar: Copy + Play + Feedback (tap to hear)
     if (full && !full.startsWith('Connection error')) {
-        addResponseToolbar(replyEl, full);
+        addResponseToolbar(replyEl, full, capturedTaskId);
     }
 
     streaming = false;

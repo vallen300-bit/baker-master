@@ -447,7 +447,10 @@ class SentinelPipeline:
 
         try:
             # 4. Create alerts from response
-            if response.alerts:
+            # ALERT-BATCH-1: Suppress individual alerts for document ingestion triggers.
+            # The Dropbox trigger creates a batch summary alert instead.
+            _BATCH_TRIGGER_TYPES = {"dropbox_file_new", "dropbox_file_modified"}
+            if response.alerts and trigger.type not in _BATCH_TRIGGER_TYPES:
                 for alert in response.alerts:
                     tier = _normalize_tier(alert.get("tier"))
                     alert_title = alert.get("title", "Untitled alert")

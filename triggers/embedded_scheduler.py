@@ -249,6 +249,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: weekly_digest (Sundays 18:00 UTC)")
 
+    # F3: Communication cadence tracker — every 6 hours (Session 27)
+    from orchestrator.cadence_tracker import run_cadence_tracker
+    scheduler.add_job(
+        run_cadence_tracker,
+        IntervalTrigger(hours=6),
+        id="cadence_tracker", name="Communication cadence tracker",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: cadence_tracker (every 6 hours)")
+
     # Document pipeline job queue drain — every 2 minutes (PIPELINE-JOBQUEUE-1)
     from tools.document_pipeline import drain_doc_pipeline
     scheduler.add_job(

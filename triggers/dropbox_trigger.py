@@ -82,6 +82,7 @@ def run_dropbox_poll():
         files_processed = 0
         files_skipped = 0
         files_errored = 0
+        processed_file_names = []  # ALERT-BATCH-1: collect for summary alert
         request_count_start = client._request_count
 
         # -------------------------------------------------------
@@ -226,6 +227,7 @@ def run_dropbox_poll():
                             f"({result.chunk_count} chunks, hash={result.file_hash[:12]})"
                         )
                         files_processed += 1
+                        processed_file_names.append(entry_name)
 
                         # 5d. Feed to Sentinel pipeline
                         classification = "dropbox_file_new" if not had_cursor else "dropbox_file_modified"
@@ -252,6 +254,12 @@ def run_dropbox_poll():
                 logger.warning(f"Failed to clean up temp dir {temp_dir}: {e}")
 
         # -------------------------------------------------------
+        # Step 5e: ALERT-BATCH-1 — One summary alert for the batch
+        # -------------------------------------------------------
+        if processed_file_names:
+            _create_batch_alert(processed_file_names)
+
+        # -------------------------------------------------------
         # Step 6: Store new cursor
         # -------------------------------------------------------
         if new_cursor:
@@ -271,6 +279,52 @@ def run_dropbox_poll():
         report_failure("dropbox", str(e))
         logger.error(f"dropbox poll failed: {e}")
 
+
+
+def _create_batch_alert(file_names: list):
+    """ALERT-BATCH-1: Create one summary alert for a batch of ingested documents."""
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+
+        count = len(file_names)
+        # Group by common path prefix or just list them
+        if count == 1:
+            title = f"Document ingested: {file_names[0]}"
+        else:
+            title = f"{count} documents ingested from Dropbox"
+
+        # Build body with file list (max 20 lines)
+        body_lines = [f"**{count} file(s)** ingested and stored:\n"]
+        for name in file_names[:20]:
+            body_lines.append(f"- {name}")
+        if count > 20:
+            body_lines.append(f"- ... and {count - 20} more")
+
+        # Try to detect matter from file names
+        matter_slug = None
+        try:
+            from orchestrator.pipeline import _match_matter_slug
+            combined = " ".join(file_names)
+            matter_slug = _match_matter_slug(combined, "", store)
+        except Exception:
+            pass
+
+        from datetime import date
+        source_id = f"dropbox-batch-{date.today().isoformat()}-{count}"
+
+        store.create_alert(
+            tier=3,  # Info tier — not urgent
+            title=title[:120],
+            body="\n".join(body_lines),
+            action_required=False,
+            matter_slug=matter_slug,
+            tags=["documents", "dropbox"],
+            source="dropbox_batch",
+            source_id=source_id,
+        )
+    except Exception as e:
+        logger.warning(f"Batch alert creation failed (non-fatal): {e}")
 
 
 def _feed_to_pipeline(entry: dict, classification: str):

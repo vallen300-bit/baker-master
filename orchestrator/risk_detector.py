@@ -34,6 +34,12 @@ def run_risk_detection():
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
+        # Transaction-level advisory lock — auto-releases on commit/rollback
+        cur.execute("SELECT pg_try_advisory_xact_lock(900100)")
+        if not cur.fetchone()["pg_try_advisory_xact_lock"]:
+            logger.info("Risk detection: another instance running — skipping")
+            return
+
         # Get all active matters (exclude internal/development matters)
         _INTERNAL_MATTERS = {'Baker', 'Brisen-AI', "Owner's Lens"}
         cur.execute("SELECT matter_name, keywords, people FROM matter_registry WHERE status = 'active'")

@@ -1526,18 +1526,41 @@ async def get_morning_brief():
             # F1: Contacts going silent (30+ days, for morning brief awareness)
             silent_contacts = []
             try:
+                # F3: Cadence-relative silence detection (replaces fixed 30-day threshold)
                 cur.execute("""
-                    SELECT name, last_contact_date,
-                           EXTRACT(DAY FROM NOW() - last_contact_date)::int as days_silent
+                    SELECT name, last_inbound_at as last_contact_date,
+                           EXTRACT(DAY FROM NOW() - last_inbound_at)::int as days_silent,
+                           avg_inbound_gap_days,
+                           CASE WHEN avg_inbound_gap_days > 0
+                                THEN ROUND((EXTRACT(EPOCH FROM NOW() - last_inbound_at)/86400.0
+                                      / avg_inbound_gap_days)::numeric, 1)
+                                ELSE 0 END as deviation
                     FROM vip_contacts
-                    WHERE last_contact_date IS NOT NULL
-                      AND last_contact_date < NOW() - INTERVAL '30 days'
-                      AND tier <= 2
-                    ORDER BY last_contact_date ASC LIMIT 5
+                    WHERE avg_inbound_gap_days IS NOT NULL
+                      AND last_inbound_at IS NOT NULL
+                      AND last_inbound_at < NOW() - INTERVAL '7 days'
+                      AND (EXTRACT(EPOCH FROM NOW() - last_inbound_at)/86400.0
+                           / NULLIF(avg_inbound_gap_days, 0)) >= 3.0
+                    ORDER BY (EXTRACT(EPOCH FROM NOW() - last_inbound_at)/86400.0
+                              / NULLIF(avg_inbound_gap_days, 0)) DESC
+                    LIMIT 5
                 """)
                 silent_contacts = [_serialize(dict(r)) for r in cur.fetchall()]
             except Exception:
-                pass
+                # Fallback to old fixed-threshold query if cadence columns don't exist yet
+                try:
+                    cur.execute("""
+                        SELECT name, last_contact_date,
+                               EXTRACT(DAY FROM NOW() - last_contact_date)::int as days_silent
+                        FROM vip_contacts
+                        WHERE last_contact_date IS NOT NULL
+                          AND last_contact_date < NOW() - INTERVAL '30 days'
+                          AND tier <= 2
+                        ORDER BY last_contact_date ASC LIMIT 5
+                    """)
+                    silent_contacts = [_serialize(dict(r)) for r in cur.fetchall()]
+                except Exception:
+                    pass
 
             cur.close()
         finally:
@@ -2447,7 +2470,15 @@ def _get_morning_narrative(fire_count: int, deadline_count: int,
 
     try:
         fire_titles = [f.get("title", "") for f in top_fires[:3]]
-        silent_names = [f"{c.get('name', '?')} ({c.get('days_silent', '?')}d)" for c in (silent_contacts or [])[:3]]
+        # F3: Cadence-aware silent contact descriptions
+        def _fmt_silent(c):
+            name = c.get('name', '?')
+            days = c.get('days_silent', '?')
+            dev = c.get('deviation')
+            if dev:
+                return f"{name} ({days}d silent, {dev}x normal)"
+            return f"{name} ({days}d)"
+        silent_names = [_fmt_silent(c) for c in (silent_contacts or [])[:3]]
         prompt = (
             f"You are Baker, chief of staff for Dimitry Vallen. "
             f"Write a 2-3 sentence status summary. Be warm but direct.\n\n"
@@ -2458,7 +2489,7 @@ def _get_morning_narrative(fire_count: int, deadline_count: int,
             f"Top fires: {'; '.join(fire_titles) if fire_titles else 'None'}\n"
         )
         if silent_names:
-            prompt += f"Relationships cooling: {', '.join(silent_names)} — no contact 30+ days.\n"
+            prompt += f"Relationships cooling: {', '.join(silent_names)} — unusually silent.\n"
         prompt += (
             f"\nIf zero fires: 'All clear. No fires overnight.' then mention routine updates.\n"
             f"If fires exist: lead with the top issue and deadline, then mention others.\n"
@@ -4535,6 +4566,41 @@ async def get_contact(name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# --- F3: Communication Cadence ---
+
+@app.get("/api/contacts/cadence", tags=["contacts"], dependencies=[Depends(verify_api_key)])
+async def contact_cadence():
+    """F3: Return contacts with cadence data, sorted by deviation from normal."""
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        return {"contacts": []}
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT name, tier, avg_inbound_gap_days, last_inbound_at,
+                   EXTRACT(DAY FROM NOW() - last_inbound_at)::float as days_silent,
+                   CASE WHEN avg_inbound_gap_days > 0
+                        THEN ROUND((EXTRACT(EPOCH FROM NOW() - last_inbound_at)/86400.0
+                              / avg_inbound_gap_days)::numeric, 1)
+                        ELSE 0 END as deviation
+            FROM vip_contacts
+            WHERE avg_inbound_gap_days IS NOT NULL
+              AND last_inbound_at IS NOT NULL
+            ORDER BY deviation DESC
+            LIMIT 30
+        """)
+        contacts = [_serialize(dict(r)) for r in cur.fetchall()]
+        cur.close()
+        return {"contacts": contacts}
+    except Exception as e:
+        logger.error(f"/api/contacts/cadence failed: {e}")
+        return {"contacts": [], "error": str(e)}
+    finally:
+        store._put_conn(conn)
+
+
 # --- Semantic Search ---
 
 @app.get("/api/search", tags=["search"], dependencies=[Depends(verify_api_key)])
@@ -5382,6 +5448,9 @@ def _scan_chat_deep(req, start: float, task_id: int = None):
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
 
         await agent_thread
+        # A6 LEARNING-LOOP: Yield task_id for frontend feedback buttons
+        if task_id:
+            yield f"data: {json.dumps({'task_id': task_id})}\n\n"
         yield "data: [DONE]\n\n"
 
         extra_meta = {"deep_mode": True}
