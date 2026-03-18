@@ -164,20 +164,30 @@ def is_noise_sender(from_header: str) -> bool:
 
 
 def has_unsubscribe_signals(headers: List[Dict]) -> bool:
-    """Check if the message has List-Unsubscribe or mailing list headers."""
-    # Note: x-mailer intentionally excluded — Outlook, Apple Mail, Thunderbird set it on real emails
-    noise_headers = {"list-unsubscribe", "list-id", "list-post", "list-help",
-                     "x-campaign", "x-mailgun-tag",
-                     "x-sg-eid", "x-sendgrid-eid"}
+    """Check if the message has mass-mail headers indicating newsletters/marketing.
+    Note: list-unsubscribe alone is NOT sufficient — Gmail, Google Workspace, and many
+    corporate email platforms add it to ALL emails. Only flag when combined with other
+    mass-mail indicators (list-id, campaign headers, bulk precedence).
+    """
+    # Strong mass-mail signals — any one of these = noise
+    strong_noise = {"list-id", "list-post", "list-help",
+                    "x-campaign", "x-mailgun-tag",
+                    "x-sg-eid", "x-sendgrid-eid"}
+    has_unsubscribe = False
+    has_bulk_precedence = False
     for h in headers:
         name = h.get("name", "").lower()
-        if name in noise_headers:
+        if name in strong_noise:
             return True
-        # Check for Precedence: bulk/list
+        if name == "list-unsubscribe":
+            has_unsubscribe = True
         if name == "precedence":
             val = h.get("value", "").lower()
             if val in ("bulk", "list", "junk"):
-                return True
+                has_bulk_precedence = True
+    # list-unsubscribe + bulk precedence together = likely mass mail
+    if has_unsubscribe and has_bulk_precedence:
+        return True
     return False
 
 
