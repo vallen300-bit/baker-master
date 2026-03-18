@@ -677,6 +677,58 @@ async function loadMorningBrief() {
             setText('statMeetings', totalEvents || 0);
         }
 
+        // SILENT-CONTACTS-CARD-1: Render relationship cooling warnings
+        var silentCard = document.getElementById('silentContactsCard');
+        if (silentCard) {
+            var silentContacts = data.silent_contacts || [];
+            if (silentContacts.length > 0) {
+                silentCard.hidden = false;
+                silentCard.textContent = '';
+                silentCard.style.cssText = 'margin-top:16px;border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:var(--radius-sm);padding:12px 16px;background:var(--card);';
+
+                var scLabel = document.createElement('div');
+                scLabel.style.cssText = 'font-size:11px;font-weight:700;color:var(--amber);font-family:var(--mono);letter-spacing:0.3px;margin-bottom:8px;';
+                scLabel.textContent = 'RELATIONSHIPS COOLING';
+                silentCard.appendChild(scLabel);
+
+                for (var sci = 0; sci < silentContacts.length; sci++) {
+                    var sc = silentContacts[sci];
+                    var row = document.createElement('div');
+                    row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border-light);';
+
+                    var nameSpan = document.createElement('span');
+                    nameSpan.style.cssText = 'flex:1;font-size:13px;font-weight:500;color:var(--text);';
+                    nameSpan.textContent = sc.name || '';
+                    row.appendChild(nameSpan);
+
+                    var daysSpan = document.createElement('span');
+                    daysSpan.style.cssText = 'font-size:11px;color:var(--amber);font-weight:600;flex-shrink:0;';
+                    daysSpan.textContent = (sc.days_silent || 0) + 'd silent';
+                    row.appendChild(daysSpan);
+
+                    var reachBtn = document.createElement('button');
+                    reachBtn.className = 'run-btn';
+                    reachBtn.style.cssText = 'font-size:11px;padding:3px 10px;';
+                    reachBtn.textContent = 'Reach out';
+                    reachBtn.dataset.name = sc.name || '';
+                    reachBtn.addEventListener('click', function() {
+                        var name = this.dataset.name;
+                        switchTab('ask-baker');
+                        var input = document.getElementById('scanInput') || document.getElementById('cmdInput');
+                        if (input) {
+                            input.value = 'Draft an email to ' + name;
+                            input.focus();
+                        }
+                    });
+                    row.appendChild(reachBtn);
+
+                    silentCard.appendChild(row);
+                }
+            } else {
+                silentCard.hidden = true;
+            }
+        }
+
         loadMattersSummary();
 
         // System widgets moved to Baker Data tab (BAKER-DATA-TUCK-1)
