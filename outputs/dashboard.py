@@ -3653,11 +3653,33 @@ async def scan_image(
     if content_type not in ("image/jpeg", "image/png", "image/gif", "image/webp"):
         raise HTTPException(400, "Unsupported image type. Accepted: JPEG, PNG, GIF, WebP.")
 
-    # Read and base64-encode
+    # Read, resize if needed, and base64-encode
     import base64
+    from io import BytesIO
     image_bytes = await file.read()
-    if len(image_bytes) > 10 * 1024 * 1024:  # 10MB limit
-        raise HTTPException(400, "Image too large (max 10MB).")
+    if len(image_bytes) > 20 * 1024 * 1024:  # 20MB hard limit
+        raise HTTPException(400, "Image too large (max 20MB).")
+
+    # Resize if over 4.5MB (Claude limit is 5MB base64, ~3.75MB raw)
+    if len(image_bytes) > 3_500_000:
+        try:
+            from PIL import Image as PILImage
+            img = PILImage.open(BytesIO(image_bytes))
+            # Progressive downscale until under 3.5MB
+            quality = 85
+            while len(image_bytes) > 3_500_000 and quality >= 30:
+                w, h = img.size
+                if w > 2048 or h > 2048:
+                    img.thumbnail((2048, 2048), PILImage.LANCZOS)
+                buf = BytesIO()
+                img.save(buf, format="JPEG", quality=quality, optimize=True)
+                image_bytes = buf.getvalue()
+                content_type = "image/jpeg"
+                quality -= 10
+            logger.info(f"Image resized: {len(image_bytes)} bytes, quality={quality+10}")
+        except Exception as resize_err:
+            logger.warning(f"Image resize failed (will try raw): {resize_err}")
+
     b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
 
     # Call Claude Vision
