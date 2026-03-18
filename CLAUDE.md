@@ -53,6 +53,8 @@ Switch hats as needed. When coding, code. When scoping, think.
 | `memory/store_back.py` | Write-side: PostgreSQL writes + Qdrant interaction embeddings + STEP3 director_preferences + VIP profiles + **capability framework tables** + **document storage** |
 | `tools/document_pipeline.py` | **SPECIALIST-UPGRADE-1B:** Haiku classify → extract pipeline for documents + email attachments |
 | `tools/extraction_schemas.py` | **EXTRACTION-VALIDATION-1:** 14 Pydantic v2 models, validate_extraction(), amount coercion, promotion SQL |
+| `orchestrator/cadence_tracker.py` | **F3:** Per-contact communication cadence (avg_inbound_gap_days), cadence-relative silence detection, 6h scheduled job |
+| `orchestrator/risk_detector.py` | **F1:** Compounding risk detector (6 signals, 2h cycle), advisory xact locks |
 
 ### API & Dashboard
 | File | Purpose |
@@ -387,6 +389,12 @@ See `BRIEF_PHASE_4_SCOPE.md` for full scope document.
 - ~~**Email intelligence dedup:**~~ FIXED (Session 26) — source_id now passed from email trigger, prevents same thread generating duplicate intelligence alerts.
 - ~~**Desktop alert triage UI:**~~ DONE (Session 26, Code Brisen) — desktop alert badge, bulk dismiss, source filter, matter grouping.
 - ~~**Mobile polish:**~~ DONE (Session 26, Code Brisen) — capability loading state, scroll fix, cache bump.
+- ~~**B1 conversation embeddings backfill:**~~ DONE (Session 27) — 89/89 embedded into Qdrant baker-conversations.
+- ~~**ALERT-BATCH-1:**~~ DONE (Session 27) — pipeline alerts suppressed for Dropbox ingestion, replaced with batch summary. 142→37 pending alerts.
+- ~~**A6 Learning loop:**~~ DONE (Session 27) — mobile feedback buttons, task_id in main scan SSE, desktop+mobile thumbs-up/down.
+- ~~**F3 Cadence tracker:**~~ DONE (Session 27) — per-contact avg_inbound_gap_days, cadence-relative silence detection (replaces fixed 30d), /api/contacts/cadence endpoint, 6h scheduled job, morning brief upgraded.
+- ~~**Advisory lock fix:**~~ DONE (Session 27) — risk detector + cadence tracker use pg_try_advisory_xact_lock (auto-release).
+- **Proxycurl LinkedIn integration:** ~EUR 40/month, needed for Batch 3. Account setup required.
 
 ## End-of-Session Checklist
 
@@ -428,6 +436,7 @@ Sessions 1-16 archived in `SESSION_LOG.md`. One-liner summaries:
 | 24 | Mar 14-16 | **Massive session (12 commits, 9 deploys).** TRIP-INTELLIGENCE-1 Batch 0+1 (trip lifecycle) + Batch 2 (6 trip cards with real data). INTERACTION-PIPELINE-1 (2,936+ interactions from email/WA/meetings). WAHA contact sync (11→512 contacts). Stats bar → inline grid counts. Python 3.12 regex fix, VARCHAR(20) fix, email sender metadata extraction. |
 | 25 | Mar 17-18 | **11 commits, parallel with Code Brisen.** MOBILE-WEB-1: /mobile page (Ask Baker + Specialist, PWA, dark mode, New Chat, camera with Haiku Vision, Play-to-hear, auto-resize). /api/scan/image endpoint. ALERT-DEDUP-2 (title fuzzy dedup). CONTACT-ENRICH-1 (55 contacts classified). Alert cleanup (297→113). Obligation triage (503→409). Commitment checker bug fix. Email noise filter fix. Interaction backfill (+650 to 3,608). 7 missing contacts added. Code Brisen: SENTINEL-SAFETY-1. |
 | 26 | Mar 18 | **35 commits, record session.** Operational: DEDUP-3, 198→95 alerts, 391→77 obligations, killed Whoop/commitment_checker/VIP gap. Intelligence: B1 conversation Qdrant, B2 recency decay, B3 decision injection, F1 compounding risk (6 signals), F2 news-counterparty, F5 weekly digest, F7 meeting gap detection, C2 contact silence. Agent: 13→17 tools (query_baker_data, create_deadline, draft_email, create_calendar_event). APIs: G6 data freshness, morning brief silent contacts. Strategy: Backlog v1 (48 items). Code Brisen: alert triage, mobile polish, pipeline dedup, iOS Shortcuts, push alerts (SSE), mobile alerts view, document browser. |
+| 27 | Mar 19 | **B1 backfill** (89 conversations → Qdrant). **ALERT-BATCH-1**: pipeline alert batching (90 noise alerts/day → 1 per batch), 142→37 pending alerts. **A6 Learning loop**: mobile feedback buttons, task_id in main scan SSE. **F3 Cadence tracker**: per-contact avg_inbound_gap_days (36 contacts), cadence-relative silence detection (replaces fixed 30d), /api/contacts/cadence endpoint, 6h scheduled job, morning brief upgraded. Advisory locks → pg_try_advisory_xact_lock. Risk detector verified working (ClaimsMax score 5/16). |
 
 ## Key Documents (Dropbox)
 
