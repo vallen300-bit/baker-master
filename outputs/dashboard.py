@@ -4550,24 +4550,7 @@ async def get_deals():
 
 # --- Contacts ---
 
-@app.get("/api/contacts/{name}", tags=["contacts"], dependencies=[Depends(verify_api_key)])
-async def get_contact(name: str):
-    """Look up a contact by name (fuzzy match)."""
-    try:
-        store = _get_store()
-        contact = store.get_contact_by_name(name)
-        if not contact:
-            raise HTTPException(status_code=404, detail=f"Contact '{name}' not found")
-        return _serialize(contact)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"/api/contacts/{name} failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# --- F3: Communication Cadence ---
-
+# F3: Cadence endpoint MUST come before {name} route (FastAPI matches in order)
 @app.get("/api/contacts/cadence", tags=["contacts"], dependencies=[Depends(verify_api_key)])
 async def contact_cadence():
     """F3: Return contacts with cadence data, sorted by deviation from normal."""
@@ -4599,6 +4582,22 @@ async def contact_cadence():
         return {"contacts": [], "error": str(e)}
     finally:
         store._put_conn(conn)
+
+
+@app.get("/api/contacts/{name}", tags=["contacts"], dependencies=[Depends(verify_api_key)])
+async def get_contact(name: str):
+    """Look up a contact by name (fuzzy match)."""
+    try:
+        store = _get_store()
+        contact = store.get_contact_by_name(name)
+        if not contact:
+            raise HTTPException(status_code=404, detail=f"Contact '{name}' not found")
+        return _serialize(contact)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"/api/contacts/{name} failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # --- Semantic Search ---
