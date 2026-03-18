@@ -461,6 +461,8 @@ class SentinelPipeline:
                         logger.info(f"Auto-assigned alert to matter '{matter_slug}'")
                     # COCKPIT-V3 B1: Auto-tag by keyword matching
                     tags = _auto_tag(alert_title, alert_body)
+                    # PIPELINE-DEDUP-1: pass source_id for dedup
+                    _source_id = f"pipeline-{trigger.source_id}" if trigger.source_id else None
                     alert_id = self.store.create_alert(
                         tier=tier,
                         title=alert_title,
@@ -470,6 +472,7 @@ class SentinelPipeline:
                         matter_slug=matter_slug,
                         tags=tags,
                         source="pipeline",
+                        source_id=_source_id,
                     )
                     # COCKPIT-ALERT-UI: generate structured actions for T1/T2/T3 alerts
                     if alert_id and tier <= 3:

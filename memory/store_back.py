@@ -3236,7 +3236,7 @@ class SentinelStoreBack:
             # Normalize title: strip common prefixes for better matching
             import re as _re
             _dedup_title = _re.sub(
-                r'^(Intelligence:\s*|Commitment due today:\s*|OVERDUE:\s*|DUE TODAY:\s*|Due in 48h:\s*)',
+                r'^(\[ALERT\]\s*|Intelligence:\s*|Commitment due today:\s*|OVERDUE:\s*|DUE TODAY:\s*|Due in 48h:\s*|Overdue commitment:\s*)',
                 '', title or '', flags=_re.IGNORECASE,
             ).strip()
             _dedup_prefix = _dedup_title[:50].lower()
@@ -3245,7 +3245,7 @@ class SentinelStoreBack:
                     """SELECT id FROM alerts
                        WHERE status = 'pending'
                          AND LOWER(LEFT(regexp_replace(title,
-                               '^(Intelligence:\\s*|Commitment due today:\\s*|OVERDUE:\\s*|DUE TODAY:\\s*|Due in 48h:\\s*)',
+                               '^(\\[ALERT\\]\\s*|Intelligence:\\s*|Commitment due today:\\s*|OVERDUE:\\s*|DUE TODAY:\\s*|Due in 48h:\\s*|Overdue commitment:\\s*)',
                                '', 'i'), 50)) = %s
                          AND created_at > NOW() - INTERVAL '6 hours'
                        LIMIT 1""",
