@@ -34,9 +34,10 @@ def run_risk_detection():
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-        # Get all active matters
+        # Get all active matters (exclude internal/development matters)
+        _INTERNAL_MATTERS = {'Baker', 'Brisen-AI', "Owner's Lens"}
         cur.execute("SELECT matter_name, keywords, people FROM matter_registry WHERE status = 'active'")
-        matters = [dict(r) for r in cur.fetchall()]
+        matters = [dict(r) for r in cur.fetchall() if r['matter_name'] not in _INTERNAL_MATTERS]
 
         if not matters:
             logger.info("Risk detection: no active matters found")

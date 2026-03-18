@@ -447,6 +447,39 @@ TOOL_DEFINITIONS = [
             "required": ["description", "due_date"],
         },
     },
+    # A1: Draft email tool (Session 26)
+    {
+        "name": "draft_email",
+        "description": (
+            "Draft an email for the Director's review and approval. "
+            "Baker queues the draft — Director must approve before sending.\n\n"
+            "Use when analysis suggests an email should be sent:\n"
+            "- Follow-up after a meeting\n"
+            "- Response to a counterparty\n"
+            "- Status update to stakeholders\n"
+            "- Request for information\n\n"
+            "External emails always require Director approval. "
+            "Internal (@brisengroup.com) can auto-send."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to": {
+                    "type": "string",
+                    "description": "Recipient email address",
+                },
+                "subject": {
+                    "type": "string",
+                    "description": "Email subject line",
+                },
+                "body": {
+                    "type": "string",
+                    "description": "Email body (plain text, professional tone)",
+                },
+            },
+            "required": ["to", "subject", "body"],
+        },
+    },
     # A3: Calendar write tool (Session 26)
     {
         "name": "create_calendar_event",
@@ -537,6 +570,8 @@ class ToolExecutor:
                 return self._create_deadline(tool_input)
             elif tool_name == "create_calendar_event":
                 return self._create_calendar_event(tool_input)
+            elif tool_name == "draft_email":
+                return self._draft_email(tool_input)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -1104,6 +1139,41 @@ class ToolExecutor:
         except Exception as e:
             logger.error(f"create_deadline failed: {e}")
             return json.dumps({"error": f"Deadline creation failed: {str(e)}"})
+
+    def _draft_email(self, inp: dict) -> str:
+        """A1: Queue an email draft for Director approval."""
+        to = inp.get("to", "")
+        subject = inp.get("subject", "")
+        body = inp.get("body", "")
+
+        if not to or not subject or not body:
+            return "[to, subject, and body are all required]"
+
+        try:
+            from orchestrator.action_handler import _save_pending_draft
+            _save_pending_draft(
+                to_address=to,
+                subject=subject,
+                body=body,
+                content_req="",
+                channel="agent",
+            )
+            is_internal = to.lower().endswith("@brisengroup.com")
+            if is_internal:
+                return (
+                    f"Email draft queued (internal — will auto-send):\n"
+                    f"- **To:** {to}\n- **Subject:** {subject}\n"
+                    f"- Preview: {body[:100]}..."
+                )
+            return (
+                f"Email draft queued for Director approval:\n"
+                f"- **To:** {to}\n- **Subject:** {subject}\n"
+                f"- Preview: {body[:100]}...\n\n"
+                f"Director can approve via chat ('send it') or WhatsApp."
+            )
+        except Exception as e:
+            logger.error(f"draft_email failed: {e}")
+            return json.dumps({"error": f"Email draft failed: {str(e)}"})
 
     def _create_calendar_event(self, inp: dict) -> str:
         """A3: Create a Google Calendar event from the agent loop."""
