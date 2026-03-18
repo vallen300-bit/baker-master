@@ -214,15 +214,10 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: proactive_scan (every 30 minutes)")
 
-    # Communication gap tracker — every 6 hours (PROACTIVE-FLAG-AO)
-    from triggers.proactive_scanner import run_communication_gap_check
-    scheduler.add_job(
-        run_communication_gap_check,
-        IntervalTrigger(hours=6),
-        id="communication_gap_check", name="Communication gap tracker",
-        coalesce=True, max_instances=1, replace_existing=True,
-    )
-    logger.info("Registered: communication_gap_check (every 6 hours)")
+    # Communication gap tracker — DISABLED (Session 26, Director decision)
+    # All contacts treated equally — no VIP-specific gap monitoring.
+    # from triggers.proactive_scanner import run_communication_gap_check
+    logger.info("Skipped: communication_gap_check (disabled — all contacts equal)")
 
     # SENTINEL-SAFETY-1: Stale watermark detector — every 6 hours
     from triggers.sentinel_health import check_stale_watermarks

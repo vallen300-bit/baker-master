@@ -466,7 +466,9 @@ If relevance_score < 5, set relevant: false.
 
 
 def _check_article_relevance(article: dict, feed_title: str, store):
-    """Haiku relevance check on RSS article. Creates alert if score >= 7."""
+    """Haiku relevance check on RSS article. Creates alert if score >= 7.
+    F2 enhancement: injects real matter keywords + VIP names for better matching.
+    """
     import json
     import anthropic
     from config.settings import config
@@ -477,12 +479,43 @@ def _check_article_relevance(article: dict, feed_title: str, store):
     if not title:
         return
 
+    # F2: Build dynamic context from matter registry + VIP contacts
+    context_lines = []
+    try:
+        conn = store._get_conn()
+        if conn:
+            try:
+                import psycopg2.extras
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur.execute("SELECT matter_name, keywords FROM matter_registry WHERE status = 'active' LIMIT 20")
+                matters = cur.fetchall()
+                if matters:
+                    matter_kw = ", ".join(
+                        f"{m['matter_name']} ({', '.join(m['keywords'][:3]) if m.get('keywords') else ''})"
+                        for m in matters
+                    )
+                    context_lines.append(f"Active matters: {matter_kw}")
+                cur.execute("SELECT name FROM vip_contacts WHERE tier <= 2 LIMIT 30")
+                vips = cur.fetchall()
+                if vips:
+                    context_lines.append(f"Key contacts: {', '.join(v['name'] for v in vips)}")
+                cur.close()
+            finally:
+                store._put_conn(conn)
+    except Exception:
+        pass  # non-fatal — fall back to static prompt
+
+    dynamic_context = "\n".join(context_lines)
+    system_prompt = _RELEVANCE_PROMPT
+    if dynamic_context:
+        system_prompt += f"\n\nDirector's active matters and contacts:\n{dynamic_context}"
+
     try:
         client = anthropic.Anthropic(api_key=config.claude.api_key)
         resp = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=300,
-            system=_RELEVANCE_PROMPT,
+            system=system_prompt,
             messages=[{
                 "role": "user",
                 "content": f"Feed: {feed_title}\nTitle: {title}\nSummary: {summary[:500]}",
