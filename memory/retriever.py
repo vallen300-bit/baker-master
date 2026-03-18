@@ -216,7 +216,9 @@ class SentinelRetriever:
                 if any(name in content_lower for name in proper_lower):
                     boost += 0.20
 
-            # 3. Recency boost from metadata date fields
+            # 3. B2: Smooth recency decay (Session 26)
+            # Exponential decay: +0.15 today → +0.10 at 7d → +0.05 at 30d → +0.01 at 90d → 0 at 180d+
+            import math
             date_str = (ctx.metadata.get("date")
                         or ctx.metadata.get("timestamp")
                         or ctx.metadata.get("created_at")
@@ -224,17 +226,15 @@ class SentinelRetriever:
                         or "")
             if date_str:
                 try:
-                    # Handle various date formats
                     ds = str(date_str).strip()
                     if "T" in ds or " " in ds:
-                        # ISO or datetime string — parse date part
                         ds = ds[:10]
                     doc_date = datetime.strptime(ds, "%Y-%m-%d").replace(tzinfo=timezone.utc)
-                    age = now - doc_date
-                    if age < timedelta(days=7):
-                        boost += 0.10
-                    elif age < timedelta(days=30):
-                        boost += 0.05
+                    age_days = max((now - doc_date).days, 0)
+                    if age_days < 180:
+                        # Decay: 0.15 * e^(-age_days/30)
+                        recency_boost = 0.15 * math.exp(-age_days / 30.0)
+                        boost += recency_boost
                 except (ValueError, TypeError):
                     pass
 
