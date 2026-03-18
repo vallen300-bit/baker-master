@@ -239,6 +239,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: risk_detection (every 2 hours)")
 
+    # F5: Weekly intelligence digest — Sundays 18:00 UTC (Session 26)
+    from orchestrator.weekly_digest import run_weekly_digest
+    scheduler.add_job(
+        run_weekly_digest,
+        CronTrigger(day_of_week="sun", hour=18, minute=0),
+        id="weekly_digest", name="Weekly intelligence digest",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: weekly_digest (Sundays 18:00 UTC)")
+
     # Document pipeline job queue drain — every 2 minutes (PIPELINE-JOBQUEUE-1)
     from tools.document_pipeline import drain_doc_pipeline
     scheduler.add_job(
