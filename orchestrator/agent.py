@@ -589,7 +589,19 @@ class ToolExecutor:
             vips = [dict(r) for r in cur.fetchall()]
             cur.close()
             if vips:
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc)
                 for v in vips:
+                    # Calculate silence period
+                    last_contact = v.get("last_contact_date")
+                    if last_contact:
+                        if last_contact.tzinfo is None:
+                            last_contact = last_contact.replace(tzinfo=timezone.utc)
+                        days_silent = (now - last_contact).days
+                        if days_silent > 30:
+                            v["_silence_warning"] = f"NO CONTACT FOR {days_silent} DAYS — relationship may be cooling"
+                        elif days_silent > 14:
+                            v["_days_since_contact"] = f"{days_silent} days"
                     # Remove None values
                     v = {k: str(val) for k, val in v.items() if val is not None}
                     parts.append(f"[VIP CONTACT] {json.dumps(v, default=str)}")
