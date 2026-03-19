@@ -358,19 +358,30 @@ class SentinelPipeline:
     # Step 4: Generate (Claude API call)
     # -------------------------------------------------------
 
-    def generate(self, prompt: dict, max_output_tokens: int = 8192) -> str:
-        """Send assembled prompt to Claude and get response."""
+    # Trigger types that should use Haiku instead of Opus (cost optimization)
+    _HAIKU_TRIGGER_TYPES = {"dropbox_file_new", "dropbox_file_modified", "rss_article"}
+
+    def generate(self, prompt: dict, max_output_tokens: int = 8192,
+                 trigger_type: str = None) -> str:
+        """Send assembled prompt to Claude and get response.
+        Uses Haiku for low-value triggers (document ingestion, RSS) to cut costs."""
+        # COST-OPT-1: Route document ingestion to Haiku (~EUR 0.002/call vs EUR 1.31)
+        if trigger_type in self._HAIKU_TRIGGER_TYPES:
+            model = "claude-haiku-4-5-20251001"
+        else:
+            model = config.claude.model
+
         logger.info(
-            f"Calling Claude API: model={config.claude.model}, "
+            f"Calling Claude API: model={model}, "
             f"≈{prompt['metadata']['tokens_estimated']} input tokens"
         )
 
         response = self.claude.messages.create(
-            model=config.claude.model,
+            model=model,
             max_tokens=max_output_tokens,
             system=prompt["system"],
             messages=prompt["messages"],
-            extra_headers={"anthropic-beta": config.claude.beta_header},
+            extra_headers={"anthropic-beta": config.claude.beta_header} if model == config.claude.model else {},
         )
 
         raw_text = response.content[0].text
@@ -381,7 +392,7 @@ class SentinelPipeline:
         # PHASE-4A: Log pipeline API cost
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost(config.claude.model, response.usage.input_tokens,
+            log_api_cost(model, response.usage.input_tokens,
                          response.usage.output_tokens, source="pipeline")
         except Exception:
             pass
@@ -732,8 +743,8 @@ class SentinelPipeline:
         prompt = self.build_prompt(trigger, contexts)
         logger.info(f"Step 3 complete: prompt assembled ({prompt['metadata']['tokens_estimated']} tokens)")
 
-        # Step 4: Generate
-        raw_response = self.generate(prompt)
+        # Step 4: Generate (COST-OPT-1: Haiku for document/RSS triggers)
+        raw_response = self.generate(prompt, trigger_type=trigger.type)
         logger.info(f"Step 4 complete: Claude responded")
 
         # Parse response
