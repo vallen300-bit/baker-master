@@ -459,6 +459,81 @@ function switchTab(tabName) {
 
 // ═══ MORNING BRIEF ═══
 
+function _inferProposalType(label, instruction) {
+    var t = (label + ' ' + instruction).toLowerCase();
+    if (/\bdraft\b|\bwrite an?\b|\bfollow.?up\b|\bsend .* email\b/.test(t)) return 'draft';
+    if (/\bdismiss\b|\bclean\b|\bclear\b|\bremove\b/.test(t)) return 'dismiss';
+    if (/\bspecialist\b/.test(t)) return 'specialist';
+    if (/\bcall\b|\bphone\b|\bring\b/.test(t)) return 'call';
+    return 'analyze';
+}
+
+function _proposalMeta(actionType) {
+    var map = {
+        analyze:    { icon: '\uD83D\uDD0D', btnLabel: 'Go \u2192',      color: 'blue' },
+        draft:      { icon: '\u2709\uFE0F',  btnLabel: 'Draft \u2192',   color: 'amber' },
+        dismiss:    { icon: '\uD83E\uDDF9',  btnLabel: 'Do it \u2192',   color: 'green' },
+        specialist: { icon: '\uD83E\uDDE0',  btnLabel: 'Ask \u2192',     color: 'purple' },
+        call:       { icon: '\uD83D\uDCDE',  btnLabel: 'Details \u2192', color: 'blue' }
+    };
+    return map[actionType] || map.analyze;
+}
+
+function _makeProposalHandler(actionType, instruction, proposal, btn, card) {
+    return async function() {
+        if (btn.disabled) return;
+        btn.disabled = true;
+
+        if (actionType === 'dismiss' && proposal.params && proposal.params.tier) {
+            // Inline bulk dismiss
+            btn.textContent = 'Working...';
+            try {
+                var r = await bakerFetch('/api/alerts/bulk-dismiss', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tier: proposal.params.tier }),
+                });
+                if (!r.ok) throw new Error('API returned ' + r.status);
+                btn.textContent = '\u2713 Done';
+                btn.className = 'proposal-btn is-done';
+                card.classList.add('done');
+                refreshFiresBadge();
+            } catch (e) {
+                btn.textContent = 'Failed';
+                btn.disabled = false;
+                console.error('Proposal dismiss failed:', e);
+            }
+            return;
+        }
+
+        if (actionType === 'specialist' && proposal.params && proposal.params.capability_slug) {
+            // Open specialist tab with pre-filled question
+            btn.textContent = '\u2713 Sent';
+            btn.className = 'proposal-btn is-done';
+            card.classList.add('done');
+            switchTab('ask-specialist');
+            setTimeout(function() {
+                var picker = document.getElementById('specialistPicker');
+                if (picker) {
+                    picker.value = proposal.params.capability_slug;
+                    picker.dispatchEvent(new Event('change'));
+                }
+                setTimeout(function() {
+                    sendSpecialistMessage(instruction);
+                }, 150);
+            }, 100);
+            return;
+        }
+
+        // Default: open chat tab and auto-send (analyze, draft, call, or dismiss without params)
+        btn.textContent = '\u2713 Sent';
+        btn.className = 'proposal-btn is-done';
+        card.classList.add('done');
+        switchTab('ask-baker');
+        setTimeout(function() { sendScanMessage(instruction); }, 100);
+    };
+}
+
 async function loadMorningBrief() {
     try {
         var resp = await bakerFetch('/api/dashboard/morning-brief', { timeout: 25000 });
@@ -484,91 +559,60 @@ async function loadMorningBrief() {
         var narEl = document.getElementById('briefNarrative');
         if (narEl && data.narrative) setSafeHTML(narEl, md(data.narrative));
 
-        // Render actionable proposals as buttons
+        // Render actionable proposal cards (D7 Morning Brief v2)
         var proposalsEl = document.getElementById('briefProposals');
         if (!proposalsEl) {
             proposalsEl = document.createElement('div');
             proposalsEl.id = 'briefProposals';
-            proposalsEl.style.cssText = 'margin-top:12px;';
             if (narEl) narEl.parentNode.insertBefore(proposalsEl, narEl.nextSibling);
         }
         proposalsEl.textContent = '';
         if (data.proposals && data.proposals.length > 0) {
             var pLabel = document.createElement('div');
-            pLabel.style.cssText = 'font-size:11px;font-weight:700;color:var(--text2);font-family:var(--mono);letter-spacing:0.3px;margin-bottom:8px;';
+            pLabel.style.cssText = 'font-size:11px;font-weight:700;color:var(--text2);font-family:var(--mono);letter-spacing:0.3px;margin-bottom:6px;';
             pLabel.textContent = 'RECOMMENDED ACTIONS';
             proposalsEl.appendChild(pLabel);
-            data.proposals.forEach(function(p) {
+
+            var strip = document.createElement('div');
+            strip.className = 'proposal-strip';
+            proposalsEl.appendChild(strip);
+
+            data.proposals.slice(0, 5).forEach(function(p) {
+                var instruction = p.instruction || (p.params && p.params.question) || p.label;
+                var actionType = p.action || _inferProposalType(p.label, instruction);
+                var meta = _proposalMeta(actionType);
+
                 var card = document.createElement('div');
-                card.style.cssText = 'margin-bottom:8px;border:1px solid var(--border);border-radius:' + 'var(--radius-sm)' + ';overflow:hidden;';
-                var row = document.createElement('div');
-                row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--card);';
-                var label = document.createElement('span');
-                label.style.cssText = 'flex:1;font-size:13px;color:var(--text);';
-                label.textContent = p.label;
-                row.appendChild(label);
+                card.className = 'proposal-card type-' + actionType;
+
+                var body = document.createElement('div');
+                body.className = 'proposal-body';
+
+                var icon = document.createElement('span');
+                icon.className = 'proposal-icon';
+                icon.textContent = meta.icon;
+                body.appendChild(icon);
+
+                var text = document.createElement('div');
+                text.className = 'proposal-text';
+                var lbl = document.createElement('div');
+                lbl.className = 'proposal-label';
+                lbl.textContent = p.label;
+                text.appendChild(lbl);
+                var sub = document.createElement('div');
+                sub.className = 'proposal-sub';
+                sub.textContent = instruction.length > 80 ? instruction.slice(0, 77) + '...' : instruction;
+                text.appendChild(sub);
+                body.appendChild(text);
+
                 var btn = document.createElement('button');
-                btn.textContent = 'Do it';
-                btn.className = 'run-btn';
-                btn.addEventListener('click', (function(instruction, btnRef, cardRef) {
-                    return async function() {
-                        if (btnRef.disabled) return;
-                        btnRef.disabled = true;
-                        btnRef.textContent = 'Working...';
-                        btnRef.style.opacity = '0.7';
-                        // Result area below the row
-                        var resultEl = document.createElement('div');
-                        resultEl.style.cssText = 'padding:12px 14px;background:var(--bg-subtle);border-top:1px solid var(--border);font-size:13px;line-height:1.7;max-height:300px;overflow-y:auto;';
-                        resultEl.textContent = 'Baker is working on this...';
-                        cardRef.appendChild(resultEl);
-                        // Stream response
-                        var fullResponse = '';
-                        try {
-                            var resp = await bakerFetch('/api/scan', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                timeout: 180000,
-                                body: JSON.stringify({ question: instruction, history: [] }),
-                            });
-                            if (!resp.ok) throw new Error('API returned ' + resp.status);
-                            var reader = resp.body.getReader();
-                            var decoder = new TextDecoder();
-                            var buffer = '';
-                            while (true) {
-                                var chunk = await reader.read();
-                                if (chunk.done) break;
-                                buffer += decoder.decode(chunk.value, { stream: true });
-                                var lines = buffer.split('\n');
-                                buffer = lines.pop();
-                                for (var li = 0; li < lines.length; li++) {
-                                    if (!lines[li].startsWith('data: ')) continue;
-                                    var payload = lines[li].slice(6).trim();
-                                    if (payload === '[DONE]') continue;
-                                    try {
-                                        var d = JSON.parse(payload);
-                                        if (d.token) {
-                                            fullResponse += d.token;
-                                            setSafeHTML(resultEl, '<div class="md-content">' + md(fullResponse) + '</div>');
-                                        }
-                                    } catch (e) {}
-                                }
-                            }
-                        } catch (err) {
-                            fullResponse = 'Error: ' + err.message;
-                            resultEl.textContent = fullResponse;
-                        }
-                        btnRef.textContent = 'Done';
-                        btnRef.style.opacity = '1';
-                        btnRef.style.background = 'var(--green)';
-                        btnRef.style.cursor = 'default';
-                        // Also store in scan history
-                        getScanHistory().push({ role: 'user', content: instruction });
-                        getScanHistory().push({ role: 'assistant', content: fullResponse });
-                    };
-                })(p.instruction, btn, card));
-                row.appendChild(btn);
-                card.appendChild(row);
-                proposalsEl.appendChild(card);
+                btn.className = 'proposal-btn color-' + meta.color;
+                btn.textContent = meta.btnLabel;
+                btn.addEventListener('click', _makeProposalHandler(actionType, instruction, p, btn, card));
+                body.appendChild(btn);
+
+                card.appendChild(body);
+                strip.appendChild(card);
             });
         }
 

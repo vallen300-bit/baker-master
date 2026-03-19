@@ -193,6 +193,60 @@ body {
 }
 .brief-narrative strong { color: var(--text); font-weight: 600; }
 
+/* Proposal action cards (D7 Morning Brief v2) */
+.proposal-strip {
+  display: flex; gap: 10px; overflow-x: auto; padding: 2px 0 6px;
+  scrollbar-width: thin; scrollbar-color: var(--border) transparent;
+  margin-top: 14px;
+}
+.proposal-strip::-webkit-scrollbar { height: 4px; }
+.proposal-strip::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+.proposal-card {
+  flex: 0 0 auto; width: 280px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--card); overflow: hidden;
+  border-left: 3px solid var(--blue);
+  transition: box-shadow 0.15s, border-color 0.15s;
+  cursor: default;
+}
+.proposal-card:hover { box-shadow: var(--shadow-sm); }
+.proposal-card.type-draft    { border-left-color: var(--amber); }
+.proposal-card.type-dismiss  { border-left-color: var(--green); }
+.proposal-card.type-specialist { border-left-color: #7c3aed; }
+.proposal-card.type-call     { border-left-color: var(--text3); }
+.proposal-card.done          { opacity: 0.6; pointer-events: none; }
+
+.proposal-body {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+}
+.proposal-icon { font-size: 16px; flex-shrink: 0; width: 20px; text-align: center; }
+.proposal-text { flex: 1; min-width: 0; }
+.proposal-label {
+  font-size: 13px; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.proposal-sub {
+  font-size: 12px; color: var(--text3); line-height: 1.4; margin-top: 2px;
+  display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden;
+}
+.proposal-btn {
+  padding: 4px 12px; border: none; border-radius: var(--radius-pill);
+  font-family: var(--mono); font-size: 11px; font-weight: 600;
+  cursor: pointer; white-space: nowrap; flex-shrink: 0;
+  transition: background 0.15s, opacity 0.15s;
+}
+.proposal-btn.color-blue   { background: var(--blue); color: #fff; }
+.proposal-btn.color-blue:hover { background: var(--blue-hover); }
+.proposal-btn.color-amber  { background: var(--amber); color: #fff; }
+.proposal-btn.color-amber:hover { background: #b36e00; }
+.proposal-btn.color-green  { background: var(--green); color: #fff; }
+.proposal-btn.color-green:hover { background: #1a8a3e; }
+.proposal-btn.color-purple { background: #7c3aed; color: #fff; }
+.proposal-btn.color-purple:hover { background: #6429c7; }
+.proposal-btn:disabled { opacity: 0.7; cursor: default; }
+.proposal-btn.is-done { background: var(--green) !important; cursor: default; }
+
 /* Unanswered badge (inline in greeting) */
 .unanswered-badge {
   font-size: 12px; font-weight: 500; color: var(--text3);
