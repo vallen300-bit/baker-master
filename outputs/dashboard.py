@@ -3875,6 +3875,32 @@ async def quick_add_alert(body: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ═══ E3: Web Push ═══
+
+@app.get("/api/push/vapid-key", tags=["push"])
+async def get_vapid_key():
+    """Return the VAPID public key for Web Push subscription (no auth — needed before login)."""
+    pub = config.web_push.vapid_public_key
+    if not pub:
+        raise HTTPException(status_code=503, detail="VAPID not configured")
+    return {"public_key": pub}
+
+
+@app.post("/api/push/subscribe", tags=["push"], dependencies=[Depends(verify_api_key)])
+async def push_subscribe(request: Request):
+    """Store a Web Push subscription from the client."""
+    body = await request.json()
+    endpoint = body.get("endpoint", "")
+    keys = body.get("keys", {})
+    p256dh = keys.get("p256dh", "")
+    auth = keys.get("auth", "")
+    if not endpoint or not p256dh or not auth:
+        raise HTTPException(status_code=400, detail="Missing subscription fields")
+    store = _get_store()
+    ok = store.store_push_subscription(endpoint, p256dh, auth)
+    return {"status": "ok" if ok else "error"}
+
+
 @app.get("/api/alerts/by-tag/{tag}", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
 async def get_alerts_by_tag(tag: str):
     """Get pending alerts filtered by tag."""

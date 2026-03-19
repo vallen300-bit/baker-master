@@ -690,6 +690,36 @@ async function init() {
     }
     _connectMobileAlertStream();
 
+    // E3: Register service worker + subscribe to Web Push
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/static/sw.js').then(function(reg) {
+            console.log('SW registered:', reg.scope);
+            return reg.pushManager.getSubscription().then(function(sub) {
+                if (sub) return sub; // already subscribed
+                return fetch('/api/push/vapid-key').then(function(r) { return r.json(); }).then(function(d) {
+                    if (!d.public_key) return null;
+                    var raw = atob(d.public_key.replace(/-/g, '+').replace(/_/g, '/'));
+                    var arr = new Uint8Array(raw.length);
+                    for (var i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+                    return reg.pushManager.subscribe({
+                        userVisibleOnly: true,
+                        applicationServerKey: arr,
+                    });
+                });
+            });
+        }).then(function(sub) {
+            if (sub) {
+                bakerFetch('/api/push/subscribe', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(sub.toJSON()),
+                });
+            }
+        }).catch(function(e) {
+            console.warn('Push subscription failed (non-fatal):', e);
+        });
+    }
+
     // Default tab
     switchTab('baker');
 }
