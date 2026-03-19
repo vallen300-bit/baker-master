@@ -412,13 +412,12 @@ const TAB_VIEW_MAP = {
     'ask-specialist': 'viewAskSpecialist',
     'travel': 'viewTravel',
     'media': 'viewMedia',
-    'commitments': 'viewCommitments',
     'documents': 'viewDocuments',
     'browser': 'viewBrowser',
     'baker-data': 'viewBakerData',
 };
 
-const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'tags', 'search', 'ask-baker', 'ask-specialist', 'travel', 'media', 'commitments', 'documents', 'browser', 'baker-data']);
+const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'tags', 'search', 'ask-baker', 'ask-specialist', 'travel', 'media', 'documents', 'browser', 'baker-data']);
 
 function switchTab(tabName) {
     document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
@@ -451,7 +450,6 @@ function switchTab(tabName) {
     else if (tabName === 'ask-specialist') loadSpecialistTab();
     else if (tabName === 'travel') loadTravelTab();
     else if (tabName === 'media') loadMediaTab();
-    else if (tabName === 'commitments') loadCommitmentsTab();
     else if (tabName === 'documents') loadDocumentsTab();
     else if (tabName === 'browser') loadBrowserTab();
     else if (tabName === 'baker-data') loadBakerData();
@@ -3236,32 +3234,14 @@ async function loadDeadlinesTab() {
     showLoading(container, 'Loading deadlines');
 
     try {
-        // Fetch both deadlines and commitments, merge into one list
-        var [dlResp, cmResp] = await Promise.all([
-            bakerFetch('/api/deadlines?limit=100'),
-            bakerFetch('/api/commitments?status=active&limit=200'),
-        ]);
+        // Fetch deadlines (commitments migrated to deadlines in OBLIGATIONS-UNIFY-1)
+        var dlResp = await bakerFetch('/api/deadlines?limit=100');
         var allItems = [];
 
         if (dlResp.ok) {
             var dlData = await dlResp.json();
             (dlData.deadlines || []).forEach(function(d) {
                 allItems.push({ type: 'deadline', id: d.id, description: d.description, due_date: d.due_date, source: d.source_type || 'deadline', matter: d.matter_slug, priority: d.priority, status: d.status, severity: d.severity, obligation_type: d.obligation_type, assigned_to: d.assigned_to });
-            });
-        }
-        if (cmResp.ok) {
-            var cmData = await cmResp.json();
-            (cmData.commitments || []).forEach(function(c) {
-                allItems.push({ type: 'commitment', id: c.id, description: c.description, due_date: c.due_date, source: c.source_type || c.source || 'commitment', matter: c.matter_slug, assigned_to: c.assigned_to, status: c.status });
-            });
-        }
-
-        // Also fetch overdue commitments
-        var ovResp = await bakerFetch('/api/commitments?status=overdue&limit=200');
-        if (ovResp.ok) {
-            var ovData = await ovResp.json();
-            (ovData.commitments || []).forEach(function(c) {
-                allItems.push({ type: 'commitment', id: c.id, description: c.description, due_date: c.due_date, source: c.source_type || c.source || 'commitment', matter: c.matter_slug, assigned_to: c.assigned_to, status: c.status });
             });
         }
 
@@ -3282,7 +3262,7 @@ async function loadDeadlinesTab() {
         });
 
         if (allItems.length === 0) {
-            container.textContent = 'No active deadlines or commitments.';
+            container.textContent = 'No active obligations.';
             container.style.cssText = 'color:var(--text3);font-size:13px;';
             return;
         }
@@ -3373,19 +3353,13 @@ async function loadDeadlinesTab() {
                 }
 
                 actionsDiv.appendChild(makeBtn('Dismiss', 'var(--text3)', function() {
-                    var endpoint = item.type === 'deadline'
-                        ? '/api/deadlines/' + item.id + '/dismiss'
-                        : '/api/commitments/' + item.id + '/dismiss';
-                    bakerFetch(endpoint, { method: 'POST' }).then(function() { loadDeadlinesTab(); });
+                    bakerFetch('/api/deadlines/' + item.id + '/dismiss', { method: 'POST' }).then(function() { loadDeadlinesTab(); });
                 }));
 
                 actionsDiv.appendChild(makeBtn('+1 Week', 'var(--amber)', function() {
                     var newDate = new Date(item.due_date || new Date());
                     newDate.setDate(newDate.getDate() + 7);
-                    var endpoint = item.type === 'deadline'
-                        ? '/api/deadlines/' + item.id + '/reschedule'
-                        : '/api/commitments/' + item.id + '/reschedule';
-                    bakerFetch(endpoint, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({due_date: newDate.toISOString()}) }).then(function() { loadDeadlinesTab(); });
+                    bakerFetch('/api/deadlines/' + item.id + '/reschedule', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({due_date: newDate.toISOString()}) }).then(function() { loadDeadlinesTab(); });
                 }));
 
                 actionsDiv.appendChild(makeBtn('Ask Baker', 'var(--blue)', function() {
@@ -4147,10 +4121,6 @@ function _injectDataLayerCSS() {
     var s = document.createElement('style');
     s.id = 'data-layer-css';
     s.textContent = [
-        '.commitment-card{background:white;border:1px solid #e8e8e8;border-radius:8px;padding:12px 16px;margin-bottom:8px}',
-        '.commitment-card.overdue{border-left:3px solid #f44336}',
-        '.commitment-desc{font-size:14px;font-weight:500;margin-bottom:4px}',
-        '.commitment-meta{font-size:12px;color:#888}',
         '.overdue-badge{background:#f44336;color:white;font-size:11px;padding:1px 6px;border-radius:3px;font-weight:600}',
         '.filter-tabs{display:flex;gap:4px;margin:12px 0}',
         '.filter-tab{border:1px solid #ddd;background:white;border-radius:4px;padding:4px 12px;font-size:13px;cursor:pointer}',
@@ -4389,100 +4359,6 @@ function _createDocCard(doc) {
     });
 
     return card;
-}
-
-// --- Commitments Tab ---
-
-var _commitmentsFilter = 'active';
-var _commitmentsRequestId = 0;
-
-async function loadCommitmentsTab(filter) {
-    if (filter !== undefined) _commitmentsFilter = filter;
-    var currentFilter = _commitmentsFilter;
-    var requestId = ++_commitmentsRequestId;
-    _injectDataLayerCSS();
-    var container = document.getElementById('commitmentsContent');
-    if (!container) return;
-    showLoading(container, 'Loading commitments');
-
-    try {
-        var url = '/api/commitments';
-        if (currentFilter) url += '?status=' + encodeURIComponent(currentFilter);
-        var data = await bakerFetch(url).then(function(r) { return r.json(); });
-
-        // Discard stale response if a newer request was fired
-        if (requestId !== _commitmentsRequestId) return;
-
-        var items = data.commitments || [];
-        var overdue = data.overdue_count || 0;
-        var total = data.total || items.length;
-
-        var wrapper = document.createElement('div');
-
-        // Header
-        var header = document.createElement('div');
-        header.className = 'tab-header';
-        var count = document.createElement('span');
-        count.className = 'tab-count';
-        count.textContent = overdue + ' overdue / ' + total + ' total';
-        header.appendChild(count);
-        wrapper.appendChild(header);
-
-        // Filter tabs
-        var filters = document.createElement('div');
-        filters.className = 'filter-tabs';
-        ['active', 'overdue', 'completed', ''].forEach(function(f) {
-            var label = f || 'all';
-            var btn = document.createElement('button');
-            btn.className = currentFilter === f ? 'filter-tab active' : 'filter-tab';
-            btn.textContent = label.charAt(0).toUpperCase() + label.slice(1);
-            btn.addEventListener('click', function() { loadCommitmentsTab(f); });
-            filters.appendChild(btn);
-        });
-        wrapper.appendChild(filters);
-
-        // Cards
-        if (items.length === 0) {
-            var empty = document.createElement('div');
-            empty.className = 'empty-state';
-            empty.textContent = 'No commitments with status \u201c' + (currentFilter || 'all') + '\u201d';
-            wrapper.appendChild(empty);
-        } else {
-            items.forEach(function(c) {
-                var isOverdue = c.status === 'overdue' || (c.due_date && new Date(c.due_date) < new Date() && c.status === 'open');
-                var card = document.createElement('div');
-                card.className = isOverdue ? 'commitment-card overdue' : 'commitment-card';
-
-                var desc = document.createElement('div');
-                desc.className = 'commitment-desc';
-                if (isOverdue) {
-                    var badge = document.createElement('span');
-                    badge.className = 'overdue-badge';
-                    badge.textContent = 'OVERDUE';
-                    desc.appendChild(badge);
-                    desc.appendChild(document.createTextNode(' '));
-                }
-                desc.appendChild(document.createTextNode(c.description || ''));
-                card.appendChild(desc);
-
-                var meta = document.createElement('div');
-                meta.className = 'commitment-meta';
-                var dueStr = c.due_date ? new Date(c.due_date).toLocaleDateString('en-GB', {month: 'short', day: 'numeric'}) : 'No date';
-                var metaText = 'Due: ' + dueStr + ' \u00B7 Source: ' + (c.source || '?');
-                if (c.assigned_to) metaText += ' \u00B7 Assigned: ' + c.assigned_to;
-                meta.textContent = metaText;
-                card.appendChild(meta);
-
-                wrapper.appendChild(card);
-            });
-        }
-
-        container.textContent = '';
-        container.appendChild(wrapper);
-    } catch (e) {
-        container.textContent = 'Failed to load commitments.';
-        console.warn('Commitments load failed:', e);
-    }
 }
 
 // --- Browser Monitor Tab ---
