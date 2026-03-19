@@ -281,6 +281,16 @@ class DecisionEngineConfig:
 
 
 @dataclass
+class ChainConfig:
+    """AUTONOMOUS-CHAINS-1: Plan-execute-verify configuration."""
+    enabled: bool = os.getenv("BAKER_CHAINS_ENABLED", "false").lower() == "true"
+    max_steps: int = 7
+    timeout_seconds: float = float(os.getenv("BAKER_CHAIN_TIMEOUT", "60"))
+    notify_mode: str = "write_actions_only"  # "always" | "write_actions_only" | "t1_only"
+    max_chains_per_hour: int = 10  # prevent runaway loops
+
+
+@dataclass
 class SentinelConfig:
     qdrant: QdrantConfig = field(default_factory=QdrantConfig)
     voyage: VoyageConfig = field(default_factory=VoyageConfig)
@@ -299,6 +309,7 @@ class SentinelConfig:
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
     outputs: OutputConfig = field(default_factory=OutputConfig)
     decision_engine: DecisionEngineConfig = field(default_factory=DecisionEngineConfig)
+    chains: ChainConfig = field(default_factory=ChainConfig)
     # Baker personality
     baker_persona: str = "chief_of_staff"
     debug: bool = os.getenv("SENTINEL_DEBUG", "false").lower() == "true"

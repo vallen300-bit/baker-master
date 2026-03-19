@@ -498,6 +498,21 @@ class SentinelPipeline:
                                 self.store.update_alert_structured_actions(alert_id, sa)
                         except Exception as sa_err:
                             logger.warning(f"Structured actions generation failed for alert #{alert_id} (non-fatal): {sa_err}")
+                    # AUTONOMOUS-CHAINS-1: Run autonomous action chain for T1/T2 with matched matter
+                    if alert_id and tier <= 2 and matter_slug:
+                        try:
+                            from orchestrator.chain_runner import maybe_run_chain
+                            maybe_run_chain(
+                                trigger_type=trigger.type,
+                                trigger_content=trigger.content,
+                                alert_id=alert_id,
+                                alert_title=alert_title,
+                                alert_body=alert_body,
+                                alert_tier=tier,
+                                matter_slug=matter_slug,
+                            )
+                        except Exception as chain_err:
+                            logger.warning(f"Chain runner failed for alert #{alert_id} (non-fatal): {chain_err}")
         except Exception as e:
             logger.warning(f"Store-back: alerts failed (non-fatal): {e}")
 
