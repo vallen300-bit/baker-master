@@ -320,6 +320,26 @@ def should_skip_poll(source: str) -> bool:
             return True
 
         if failures >= _CIRCUIT_BREAKER_THRESHOLD:
+            # G5: Auto-recovery — if circuit breaker open >1 hour, reset and try once
+            from datetime import datetime, timezone, timedelta
+            cur2 = conn.cursor()
+            cur2.execute(
+                "SELECT last_error_at FROM sentinel_health WHERE source = %s",
+                (source,),
+            )
+            err_row = cur2.fetchone()
+            cur2.close()
+            if err_row and err_row[0]:
+                age = datetime.now(timezone.utc) - err_row[0].replace(tzinfo=timezone.utc) if err_row[0].tzinfo is None else datetime.now(timezone.utc) - err_row[0]
+                if age > timedelta(hours=1):
+                    # Auto-reset: the underlying issue likely resolved
+                    logger.info(
+                        f"Sentinel {source}: circuit breaker auto-recovery — "
+                        f"open for {age.total_seconds()/3600:.1f}h, resetting to allow retry"
+                    )
+                    reset_sentinel(source)
+                    return False  # allow this poll to proceed
+
             logger.warning(
                 f"Sentinel {source}: circuit breaker OPEN ({failures} consecutive failures) — skipping poll"
             )
@@ -504,5 +524,76 @@ def reset_sentinel(source: str) -> bool:
             pass
         logger.warning(f"reset_sentinel({source}) failed: {e}")
         return False
+    finally:
+        _put_conn(store, conn)
+
+
+# ─────────────────────────────────────────────
+# G5: WhatsApp Health Watchdog (Session 27)
+# ─────────────────────────────────────────────
+
+def run_health_watchdog():
+    """G5: Check sentinel health and alert Director via WhatsApp if any source
+    has been down for >2 hours. Runs every 2 hours via scheduler.
+
+    This is the "Baker watching itself" safety net — if the circuit breaker
+    auto-recovery doesn't fix things, the Director gets a WhatsApp message.
+    """
+    conn, store = _get_conn()
+    if not conn:
+        return
+
+    try:
+        import psycopg2.extras
+        _ensure_table(conn)
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT source, status, consecutive_failures, last_error_at, last_error_msg
+            FROM sentinel_health
+            WHERE status = 'down'
+              AND last_error_at < NOW() - INTERVAL '2 hours'
+        """)
+        stuck = [dict(r) for r in cur.fetchall()]
+        cur.close()
+
+        if not stuck:
+            logger.info("Health watchdog: all sentinels healthy or recovering")
+            return
+
+        # Build WhatsApp alert message
+        lines = [f"Baker Health Alert — {len(stuck)} sentinel(s) stuck down:\n"]
+        for s in stuck:
+            src = s["source"]
+            failures = s.get("consecutive_failures", 0)
+            err = (s.get("last_error_msg") or "")[:100]
+            lines.append(f"- {src}: {failures} failures. {err}")
+        lines.append(f"\nReset via: POST /api/sentinel-health/SOURCE/reset")
+        message = "\n".join(lines)
+
+        # Send via WAHA
+        try:
+            from triggers.waha_client import send_message
+            from config.settings import config
+            director_wa = getattr(config, "director_whatsapp_id", None) or "41799605092@c.us"
+            send_message(director_wa, message)
+            logger.warning(f"Health watchdog: WhatsApp alert sent — {len(stuck)} stuck sentinels")
+        except Exception as wa_err:
+            logger.error(f"Health watchdog: WhatsApp send failed: {wa_err}")
+            # Fallback: create a T1 alert in the dashboard
+            try:
+                from memory.store_back import SentinelStoreBack
+                st = SentinelStoreBack._get_global_instance()
+                st.create_alert(
+                    tier=1,
+                    title=f"SENTINEL WATCHDOG: {len(stuck)} source(s) stuck down >2h",
+                    body=message,
+                    source="sentinel_health",
+                    source_id=f"watchdog-{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H')}",
+                )
+            except Exception:
+                pass
+
+    except Exception as e:
+        logger.error(f"Health watchdog failed: {e}")
     finally:
         _put_conn(store, conn)

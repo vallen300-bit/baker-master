@@ -4600,7 +4600,99 @@ async def get_contact(name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# --- Semantic Search ---
+# --- D6: Unified Knowledge Base Search ---
+
+@app.get("/api/search/unified", tags=["search"], dependencies=[Depends(verify_api_key)])
+async def unified_search(
+    q: str = Query(..., min_length=2, max_length=500),
+    limit: int = Query(20, ge=1, le=50),
+    sources: Optional[str] = Query(None, description="Comma-separated: emails,meetings,whatsapp,documents,conversations"),
+):
+    """D6: Search across all stored content from one endpoint.
+    Returns merged, relevance-ranked results across emails, meetings, docs, WhatsApp, conversations."""
+    from memory.retriever import SentinelRetriever
+
+    retriever = _get_retriever()
+    all_results = []
+
+    # Parse source filter (default: all)
+    allowed = set()
+    if sources:
+        allowed = {s.strip().lower() for s in sources.split(",")}
+
+    def _search_source(fn, source_name, search_limit=5):
+        if allowed and source_name not in allowed:
+            return
+        try:
+            results = fn(q, limit=search_limit)
+            for r in results:
+                all_results.append({
+                    "source": r.source or source_name,
+                    "content": r.content[:500],
+                    "score": round(r.score, 3),
+                    "metadata": r.metadata,
+                    "token_estimate": r.token_estimate,
+                })
+        except Exception as e:
+            logger.warning(f"Unified search: {source_name} failed: {e}")
+
+    # Search all sources in parallel (sync retriever, but fast DB queries)
+    per_source = max(3, limit // 5)
+    _search_source(retriever.get_email_messages, "emails", per_source)
+    _search_source(retriever.get_meeting_transcripts, "meetings", per_source)
+    _search_source(retriever.get_whatsapp_messages, "whatsapp", per_source)
+
+    # Documents: use Qdrant vector search
+    if not allowed or "documents" in allowed:
+        try:
+            docs = retriever.search("baker-documents", q, limit=per_source)
+            for r in docs:
+                all_results.append({
+                    "source": "document",
+                    "content": r.content[:500],
+                    "score": round(r.score, 3),
+                    "metadata": r.metadata,
+                    "token_estimate": r.token_estimate,
+                })
+        except Exception as e:
+            logger.warning(f"Unified search: documents failed: {e}")
+
+    # Conversations: Qdrant baker-conversations
+    if not allowed or "conversations" in allowed:
+        try:
+            convos = retriever.search("baker-conversations", q, limit=per_source)
+            for r in convos:
+                all_results.append({
+                    "source": "conversation",
+                    "content": r.content[:500],
+                    "score": round(r.score, 3),
+                    "metadata": r.metadata,
+                    "token_estimate": r.token_estimate,
+                })
+        except Exception as e:
+            logger.warning(f"Unified search: conversations failed: {e}")
+
+    # Sort by score descending, deduplicate by content prefix
+    all_results.sort(key=lambda x: x["score"], reverse=True)
+
+    # Dedup: skip results with identical first 100 chars of content
+    seen_prefixes = set()
+    deduped = []
+    for r in all_results:
+        prefix = r["content"][:100].lower()
+        if prefix not in seen_prefixes:
+            seen_prefixes.add(prefix)
+            deduped.append(r)
+
+    return {
+        "query": q,
+        "results": deduped[:limit],
+        "total": len(deduped),
+        "sources_searched": list(allowed) if allowed else ["emails", "meetings", "whatsapp", "documents", "conversations"],
+    }
+
+
+# --- Semantic Search (legacy Qdrant-only) ---
 
 @app.get("/api/search", tags=["search"], dependencies=[Depends(verify_api_key)])
 async def search_memory(
@@ -5753,6 +5845,26 @@ def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
                         )
                 except Exception as _e:
                     logger.warning(f"Capability run logging failed (non-fatal): {_e}")
+
+            # A8: Extract actionable tasks from specialist output (background, non-blocking)
+            if ar and ar.answer and len(ar.answer) >= 200 and cap.slug not in ("decomposer", "synthesizer"):
+                try:
+                    from orchestrator.insight_to_task import extract_tasks_from_specialist, create_tasks_from_insights
+                    _a8_tasks = extract_tasks_from_specialist(
+                        question=req.question,
+                        response=ar.answer,
+                        capability_slug=cap.slug,
+                        matter_slug=getattr(req, "matter_slug", None),
+                    )
+                    if _a8_tasks:
+                        create_tasks_from_insights(
+                            tasks=_a8_tasks,
+                            capability_slug=cap.slug,
+                            matter_slug=getattr(req, "matter_slug", None),
+                            baker_task_id=task_id,
+                        )
+                except Exception as _a8_err:
+                    logger.warning(f"A8 insight-to-task failed (non-fatal): {_a8_err}")
 
             # Yield task_id for frontend feedback buttons (LEARNING-LOOP)
             if task_id:

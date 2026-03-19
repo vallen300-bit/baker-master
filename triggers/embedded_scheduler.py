@@ -259,6 +259,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: cadence_tracker (every 6 hours)")
 
+    # G5: Health watchdog — every 2 hours (Session 27)
+    from triggers.sentinel_health import run_health_watchdog
+    scheduler.add_job(
+        run_health_watchdog,
+        IntervalTrigger(hours=2),
+        id="health_watchdog", name="Health watchdog (WA alert if stuck)",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: health_watchdog (every 2 hours)")
+
     # Document pipeline job queue drain — every 2 minutes (PIPELINE-JOBQUEUE-1)
     from tools.document_pipeline import drain_doc_pipeline
     scheduler.add_job(
