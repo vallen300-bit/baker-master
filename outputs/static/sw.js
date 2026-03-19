@@ -1,0 +1,58 @@
+// Baker Push Service Worker (E3)
+var SW_VERSION = '1';
+
+// Install — activate immediately
+self.addEventListener('install', function(event) {
+    self.skipWaiting();
+});
+
+self.addEventListener('activate', function(event) {
+    event.waitUntil(self.clients.claim());
+});
+
+// Push event — fires even when the browser tab is closed
+self.addEventListener('push', function(event) {
+    var data = {};
+    try {
+        data = event.data.json();
+    } catch (e) {
+        data = { title: 'Baker Alert', body: event.data ? event.data.text() : '' };
+    }
+
+    var tier = data.tier || 2;
+    var title = 'Baker T' + tier + ' Alert';
+    var options = {
+        body: (data.title || '').substring(0, 200),
+        icon: '/static/baker-face-green.svg',
+        badge: '/static/baker-face-green.svg',
+        tag: 'baker-alert-' + (data.id || Date.now()),
+        renotify: true,
+        data: {
+            url: data.url || '/mobile',
+            alert_id: data.id,
+        },
+    };
+
+    event.waitUntil(
+        self.registration.showNotification(title, options)
+    );
+});
+
+// Notification click — open Baker
+self.addEventListener('notificationclick', function(event) {
+    event.notification.close();
+    var url = (event.notification.data && event.notification.data.url) || '/mobile';
+
+    event.waitUntil(
+        self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clients) {
+            // Focus existing Baker tab if found
+            for (var i = 0; i < clients.length; i++) {
+                if (clients[i].url.includes('/mobile') || clients[i].url.includes('/static/index')) {
+                    return clients[i].focus();
+                }
+            }
+            // Otherwise open a new tab
+            return self.clients.openWindow(url);
+        })
+    );
+});

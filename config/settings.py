@@ -227,6 +227,13 @@ class BrowserConfig:
 
 
 @dataclass
+class WebPushConfig:
+    vapid_private_key: str = os.getenv("VAPID_PRIVATE_KEY", "")
+    vapid_public_key: str = os.getenv("VAPID_PUBLIC_KEY", "")
+    vapid_contact_email: str = os.getenv("VAPID_CONTACT_EMAIL", "")
+
+
+@dataclass
 class TriggerConfig:
     # Fireflies scanning interval (seconds)
     fireflies_scan_interval: int = 900  # 15 minutes (was 7200; FIREFLIES-FIX-1)
@@ -287,6 +294,7 @@ class SentinelConfig:
     slack: SlackConfig = field(default_factory=SlackConfig)
     waha: WahaConfig = field(default_factory=WahaConfig)
     browser: BrowserConfig = field(default_factory=BrowserConfig)
+    web_push: WebPushConfig = field(default_factory=WebPushConfig)
     postgres: PostgresConfig = field(default_factory=PostgresConfig)
     triggers: TriggerConfig = field(default_factory=TriggerConfig)
     outputs: OutputConfig = field(default_factory=OutputConfig)

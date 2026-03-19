@@ -126,6 +126,9 @@ class SentinelStoreBack:
         # PHASE-4A: Cost monitor + agent observability tables
         self._ensure_cost_and_metrics_tables()
 
+        # E3: Web Push subscriptions
+        self._ensure_push_subscriptions_table()
+
         # TRIP-INTELLIGENCE-1: Trip lifecycle tables
         self._ensure_trips_table()
         self._ensure_trip_contacts_table()
@@ -3294,6 +3297,12 @@ class SentinelStoreBack:
                     send_whatsapp(wa_text)
                 except Exception as e:
                     logger.warning(f"T1 WhatsApp push failed (non-fatal): {e}")
+            # Web Push to all subscribers (T1 + T2)
+            if tier <= 2:
+                try:
+                    self._send_web_push_all(alert_id, tier, title)
+                except Exception as e:
+                    logger.warning(f"Web Push failed (non-fatal): {e}")
             return alert_id
         except Exception as e:
             conn.rollback()
@@ -3958,6 +3967,139 @@ class SentinelStoreBack:
             return []
         finally:
             self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # E3: Web Push subscriptions
+    # -------------------------------------------------------
+
+    def _ensure_push_subscriptions_table(self):
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS push_subscriptions (
+                    id SERIAL PRIMARY KEY,
+                    endpoint TEXT NOT NULL UNIQUE,
+                    p256dh TEXT NOT NULL,
+                    auth TEXT NOT NULL,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    last_used_at TIMESTAMPTZ
+                )
+            """)
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"push_subscriptions table init failed: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def store_push_subscription(self, endpoint: str, p256dh: str, auth: str) -> bool:
+        """Upsert a Web Push subscription."""
+        conn = self._get_conn()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO push_subscriptions (endpoint, p256dh, auth)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (endpoint) DO UPDATE SET
+                    p256dh = EXCLUDED.p256dh,
+                    auth = EXCLUDED.auth,
+                    last_used_at = NOW()
+            """, (endpoint, p256dh, auth))
+            conn.commit()
+            cur.close()
+            return True
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"store_push_subscription failed: {e}")
+            return False
+        finally:
+            self._put_conn(conn)
+
+    def get_all_push_subscriptions(self) -> list:
+        """Return all active push subscriptions."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT endpoint, p256dh, auth FROM push_subscriptions")
+            rows = cur.fetchall()
+            cur.close()
+            return [{"endpoint": r[0], "p256dh": r[1], "auth": r[2]} for r in rows]
+        except Exception as e:
+            logger.error(f"get_all_push_subscriptions failed: {e}")
+            return []
+        finally:
+            self._put_conn(conn)
+
+    def remove_push_subscription(self, endpoint: str):
+        """Remove a stale subscription (410 Gone from push service)."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM push_subscriptions WHERE endpoint = %s", (endpoint,))
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"remove_push_subscription failed: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _send_web_push_all(self, alert_id: int, tier: int, title: str):
+        """Send Web Push notification to all registered subscriptions."""
+        import json as _json
+        try:
+            from pywebpush import webpush, WebPushException
+        except ImportError:
+            logger.debug("pywebpush not installed — skipping Web Push")
+            return
+
+        vapid_private = config.web_push.vapid_private_key
+        vapid_email = config.web_push.vapid_contact_email
+        if not vapid_private or not vapid_email:
+            logger.debug("VAPID keys not configured — skipping Web Push")
+            return
+
+        subs = self.get_all_push_subscriptions()
+        if not subs:
+            return
+
+        payload = _json.dumps({
+            "id": alert_id,
+            "tier": tier,
+            "title": title[:200],
+            "url": "/mobile",
+        })
+
+        for sub in subs:
+            try:
+                webpush(
+                    subscription_info={
+                        "endpoint": sub["endpoint"],
+                        "keys": {"p256dh": sub["p256dh"], "auth": sub["auth"]},
+                    },
+                    data=payload,
+                    vapid_private_key=vapid_private,
+                    vapid_claims={"sub": f"mailto:{vapid_email}"},
+                    timeout=5,
+                )
+            except WebPushException as e:
+                if "410" in str(e) or "404" in str(e):
+                    self.remove_push_subscription(sub["endpoint"])
+                    logger.info(f"Removed expired push subscription: {sub['endpoint'][:60]}...")
+                else:
+                    logger.warning(f"Web Push failed for {sub['endpoint'][:60]}: {e}")
+            except Exception as e:
+                logger.warning(f"Web Push error: {e}")
 
     # -------------------------------------------------------
     # TRIP-INTELLIGENCE-1: Trip lifecycle
