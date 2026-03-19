@@ -2973,114 +2973,270 @@ async function loadPersonDetail(name) {
     loadPeopleTab();
 }
 
-// ═══ SEARCH TAB ═══
+// ═══ SEARCH TAB (D6: Knowledge Base) ═══
 
-var _searchInitialized = false;
+var _kbSearchQuery = '';
+var _kbSourceFilter = '';
+var _kbResults = [];
+var _kbSearchInitialized = false;
+
+var _KB_SOURCES = [
+    { key: '', label: 'All', color: 'var(--blue)' },
+    { key: 'emails', label: 'Emails', color: '#2563eb' },
+    { key: 'meetings', label: 'Meetings', color: '#7c3aed' },
+    { key: 'documents', label: 'Documents', color: '#16a34a' },
+    { key: 'whatsapp', label: 'WhatsApp', color: '#0d9488' },
+    { key: 'conversations', label: 'Conversations', color: 'rgba(0,0,0,0.45)' },
+];
+
+var _KB_BADGE_MAP = {
+    emails: { text: 'EMAIL', cls: 'kb-source-emails' },
+    meetings: { text: 'MEETING', cls: 'kb-source-meetings' },
+    document: { text: 'DOC', cls: 'kb-source-document' },
+    whatsapp: { text: 'WHATSAPP', cls: 'kb-source-whatsapp' },
+    conversation: { text: 'MEMORY', cls: 'kb-source-conversation' },
+};
 
 function loadSearchTab() {
-    if (_searchInitialized) return;
-    _searchInitialized = true;
     var filtersEl = document.getElementById('searchFilters');
     if (!filtersEl) return;
 
-    // Build filter bar using DOM methods
-    filtersEl.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;align-items:center;';
+    if (!_kbSearchInitialized) {
+        _kbSearchInitialized = true;
+        filtersEl.textContent = '';
 
-    var searchInput = document.createElement('input');
-    searchInput.type = 'text';
-    searchInput.placeholder = 'Search alerts...';
-    searchInput.maxLength = 500;
-    searchInput.style.cssText = 'flex:1;min-width:200px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:var(--font);outline:none;';
-    searchInput.id = 'searchQueryInput';
-    filtersEl.appendChild(searchInput);
+        // Search bar row
+        var barRow = document.createElement('div');
+        barRow.style.cssText = 'display:flex;gap:8px;margin-bottom:10px;';
 
-    var matterSelect = document.createElement('select');
-    matterSelect.style.cssText = 'padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:var(--font);';
-    matterSelect.id = 'searchMatterFilter';
-    matterSelect.innerHTML = '<option value="">All matters</option>';
-    filtersEl.appendChild(matterSelect);
-
-    var tagSelect = document.createElement('select');
-    tagSelect.style.cssText = 'padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:var(--font);';
-    tagSelect.id = 'searchTagFilter';
-    tagSelect.innerHTML = '<option value="">All tags</option>';
-    filtersEl.appendChild(tagSelect);
-
-    var statusSelect = document.createElement('select');
-    statusSelect.style.cssText = 'padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:var(--font);';
-    statusSelect.id = 'searchStatusFilter';
-    statusSelect.innerHTML = '<option value="">All status</option><option value="pending">Pending</option><option value="resolved">Resolved</option><option value="dismissed">Dismissed</option>';
-    filtersEl.appendChild(statusSelect);
-
-    var searchBtn = document.createElement('button');
-    searchBtn.className = 'run-btn';
-    searchBtn.textContent = 'Search';
-    searchBtn.addEventListener('click', executeSearch);
-    filtersEl.appendChild(searchBtn);
-
-    // Debounced live search
-    searchInput.addEventListener('input', debounce(function() {
-        if (searchInput.value.trim().length >= 3) executeSearch();
-    }, 300));
-
-    // Populate dropdowns
-    bakerFetch('/api/dashboard/matters-summary').then(function(r) { return r.json(); }).then(function(d) {
-        if (d.matters) d.matters.forEach(function(m) {
-            var opt = document.createElement('option');
-            opt.value = m.matter_slug;
-            opt.textContent = m.matter_slug === '_ungrouped' ? 'Ungrouped' : m.matter_slug;
-            matterSelect.appendChild(opt);
+        var searchInput = document.createElement('input');
+        searchInput.type = 'text';
+        searchInput.id = 'kbSearchInput';
+        searchInput.placeholder = 'Search across all Baker content...';
+        searchInput.maxLength = 500;
+        searchInput.style.cssText = 'flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:var(--font);background:var(--bg);outline:none;';
+        searchInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                _kbSearchQuery = searchInput.value;
+                executeKBSearch();
+            }
         });
-    }).catch(function() {});
-    bakerFetch('/api/tags').then(function(r) { return r.json(); }).then(function(d) {
-        if (d.tags) d.tags.forEach(function(t) {
-            var opt = document.createElement('option');
-            opt.value = t.tag || t.name;
-            opt.textContent = (t.tag || t.name) + ' (' + t.count + ')';
-            tagSelect.appendChild(opt);
+        barRow.appendChild(searchInput);
+
+        var searchBtn = document.createElement('button');
+        searchBtn.className = 'run-btn';
+        searchBtn.textContent = 'Search';
+        searchBtn.addEventListener('click', function() {
+            _kbSearchQuery = searchInput.value;
+            executeKBSearch();
         });
-    }).catch(function() {});
+        barRow.appendChild(searchBtn);
+        filtersEl.appendChild(barRow);
+
+        // Source filter chips
+        var chipRow = document.createElement('div');
+        chipRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;';
+        chipRow.id = 'kbChipRow';
+
+        _KB_SOURCES.forEach(function(src) {
+            var chip = document.createElement('button');
+            chip.className = src.key === _kbSourceFilter ? 'kb-chip active' : 'kb-chip';
+            chip.textContent = src.label;
+            chip.dataset.source = src.key;
+            if (src.key === _kbSourceFilter) {
+                chip.style.background = src.color;
+                chip.style.borderColor = 'transparent';
+            }
+            chip.addEventListener('click', function() {
+                _kbSourceFilter = src.key;
+                _updateKBChips();
+                if (_kbSearchQuery.trim().length >= 2) executeKBSearch();
+            });
+            chipRow.appendChild(chip);
+        });
+        filtersEl.appendChild(chipRow);
+
+        // Show empty state
+        _showKBEmptyState();
+    }
+
+    // Focus input on tab switch
+    var inp = document.getElementById('kbSearchInput');
+    if (inp) setTimeout(function() { inp.focus(); }, 50);
 }
 
-async function executeSearch() {
+function _updateKBChips() {
+    var chips = document.querySelectorAll('#kbChipRow .kb-chip');
+    for (var i = 0; i < chips.length; i++) {
+        var chip = chips[i];
+        var srcKey = chip.dataset.source;
+        var isActive = srcKey === _kbSourceFilter;
+        chip.className = isActive ? 'kb-chip active' : 'kb-chip';
+        if (isActive) {
+            var srcColor = 'var(--blue)';
+            for (var j = 0; j < _KB_SOURCES.length; j++) {
+                if (_KB_SOURCES[j].key === srcKey) { srcColor = _KB_SOURCES[j].color; break; }
+            }
+            chip.style.background = srcColor;
+            chip.style.borderColor = 'transparent';
+        } else {
+            chip.style.background = '';
+            chip.style.borderColor = '';
+        }
+    }
+}
+
+function _showKBEmptyState() {
     var results = document.getElementById('searchResults');
     if (!results) return;
-    results.textContent = 'Searching...';
+    results.textContent = '';
+    var empty = document.createElement('div');
+    empty.style.cssText = 'text-align:center;padding:80px 20px;color:var(--text3);';
+    var icon = document.createElement('div');
+    icon.style.cssText = 'font-size:48px;margin-bottom:16px;opacity:0.4;';
+    icon.textContent = '\uD83D\uDD0D';
+    empty.appendChild(icon);
+    var title = document.createElement('div');
+    title.style.cssText = 'font-size:16px;font-weight:600;color:var(--text2);margin-bottom:8px;';
+    title.textContent = "Search Baker's Knowledge Base";
+    empty.appendChild(title);
+    var desc = document.createElement('div');
+    desc.style.cssText = 'font-size:13px;line-height:1.6;';
+    desc.textContent = 'Find anything across emails, meetings, documents, WhatsApp messages, and past conversations.';
+    empty.appendChild(desc);
+    results.appendChild(empty);
+}
 
-    var q = (document.getElementById('searchQueryInput') || {}).value || '';
-    var matter = (document.getElementById('searchMatterFilter') || {}).value || '';
-    var tag = (document.getElementById('searchTagFilter') || {}).value || '';
-    var status = (document.getElementById('searchStatusFilter') || {}).value || '';
+function _kbExtractTitle(r) {
+    var m = r.metadata || {};
+    switch (r.source) {
+        case 'emails': return m.subject || m.label || (r.content || '').split('\n')[0].slice(0, 80) || 'Email';
+        case 'meetings': return m.title || m.label || 'Meeting transcript';
+        case 'document': return m.filename || m.label || 'Document';
+        case 'whatsapp': return m.sender_name || m.chat || 'WhatsApp message';
+        case 'conversation': return m.label || 'Past conversation';
+        default: return m.label || r.source || 'Result';
+    }
+}
+
+function _kbExtractDate(r) {
+    var m = r.metadata || {};
+    var raw = m.date || m.received_at || m.timestamp || m.ingested_at;
+    if (!raw) return '';
+    return _formatRelativeDate(raw);
+}
+
+function _formatRelativeDate(dateStr) {
+    try {
+        var d = new Date(dateStr);
+        if (isNaN(d.getTime())) return dateStr;
+        var diff = Date.now() - d.getTime();
+        var mins = Math.floor(diff / 60000);
+        if (mins < 60) return mins + 'm ago';
+        var hrs = Math.floor(mins / 60);
+        if (hrs < 24) return hrs + 'h ago';
+        var days = Math.floor(hrs / 24);
+        if (days < 7) return days + 'd ago';
+        return d.toLocaleDateString('en-GB', { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch (e) { return dateStr; }
+}
+
+function _kbExtractMeta(r) {
+    var m = r.metadata || {};
+    var parts = [];
+    if (m.sender) parts.push(m.sender);
+    if (m.sender_name && !m.sender) parts.push(m.sender_name);
+    if (m.filename && r.source !== 'document') parts.push(m.filename);
+    if (m.chat) parts.push(m.chat);
+    return parts.join(' \u00B7 ');
+}
+
+async function executeKBSearch() {
+    var q = _kbSearchQuery.trim();
+    if (q.length < 2) return;
+
+    var results = document.getElementById('searchResults');
+    showLoading(results, 'Searching');
 
     var params = new URLSearchParams();
-    if (q) params.set('q', q);
-    if (matter) params.set('matter', matter);
-    if (tag) params.set('tag', tag);
-    if (status) params.set('status', status);
-    params.set('limit', '50');
+    params.set('q', q);
+    params.set('limit', '30');
+    if (_kbSourceFilter) params.set('sources', _kbSourceFilter);
 
     try {
-        var resp = await bakerFetch('/api/alerts/search?' + params.toString());
-        if (!resp.ok) return;
+        var resp = await bakerFetch('/api/search/unified?' + params.toString());
+        if (!resp.ok) throw new Error('API ' + resp.status);
         var data = await resp.json();
-
-        results.textContent = '';
-        var countEl = document.createElement('div');
-        countEl.style.cssText = 'font-size:12px;color:var(--text3);margin-bottom:10px;';
-        countEl.textContent = data.count + ' results';
-        results.appendChild(countEl);
-
-        if (data.items.length === 0) return;
-
-        var cardsDiv = document.createElement('div');
-        setSafeHTML(cardsDiv, data.items.map(function(a) {
-            return renderAlertCard(a, (a.tier || 3) <= 2);
-        }).join(''));
-        results.appendChild(cardsDiv);
-        populateAssignDropdowns();
+        _kbResults = data.results || [];
+        _renderKBResults(data);
     } catch (e) {
-        results.textContent = 'Search failed.';
+        results.textContent = '';
+        var err = document.createElement('div');
+        err.style.cssText = 'color:var(--text3);font-size:13px;padding:20px;';
+        err.textContent = 'Search failed. Try again.';
+        results.appendChild(err);
     }
+}
+
+function _renderKBResults(data) {
+    var results = document.getElementById('searchResults');
+    if (!results) return;
+    results.textContent = '';
+
+    var items = data.results || [];
+
+    // Count header
+    var countEl = document.createElement('div');
+    countEl.style.cssText = 'font-size:12px;color:var(--text3);margin:12px 0 8px;';
+    if (items.length === 0) {
+        countEl.textContent = 'No results found for \u201c' + (data.query || _kbSearchQuery) + '\u201d';
+        results.appendChild(countEl);
+        return;
+    }
+    var srcList = (data.sources_searched || []).join(', ');
+    countEl.textContent = data.total + ' result' + (data.total !== 1 ? 's' : '') + (srcList ? ' across ' + srcList : '');
+    results.appendChild(countEl);
+
+    // Render cards
+    var html = '';
+    for (var i = 0; i < items.length; i++) {
+        var r = items[i];
+        var badge = _KB_BADGE_MAP[r.source] || { text: r.source, cls: 'kb-source-conversation' };
+        var title = _kbExtractTitle(r);
+        var dateStr = _kbExtractDate(r);
+        var score = r.score ? Math.round(r.score * 100) + '%' : '';
+        var preview = (r.content || '').slice(0, 200);
+        var full = r.content || '';
+        var meta = _kbExtractMeta(r);
+
+        html += '<div class="kb-result" data-index="' + i + '">' +
+            '<div class="kb-result-header">' +
+                '<span class="kb-source-badge ' + esc(badge.cls) + '">' + esc(badge.text) + '</span>' +
+                '<span class="kb-result-title">' + esc(title) + '</span>' +
+                (score ? '<span class="kb-result-score">' + esc(score) + '</span>' : '') +
+                (dateStr ? '<span class="kb-result-date">' + esc(dateStr) + '</span>' : '') +
+            '</div>' +
+            '<div class="kb-result-body">' + esc(preview) + '</div>' +
+            '<div class="kb-result-full" style="display:none">' + esc(full) + '</div>' +
+            (meta ? '<div class="kb-result-meta">' + esc(meta) + '</div>' : '') +
+        '</div>';
+    }
+
+    var cardsDiv = document.createElement('div');
+    setSafeHTML(cardsDiv, html);
+    results.appendChild(cardsDiv);
+
+    // Click to expand/collapse
+    cardsDiv.addEventListener('click', function(e) {
+        var card = e.target.closest('.kb-result');
+        if (!card) return;
+        var body = card.querySelector('.kb-result-body');
+        var full = card.querySelector('.kb-result-full');
+        if (!body || !full) return;
+        var expanded = card.classList.toggle('kb-result-expanded');
+        body.style.display = expanded ? 'none' : '';
+        full.style.display = expanded ? '' : 'none';
+    });
 }
 
 // ═══ TAGS TAB ═══
