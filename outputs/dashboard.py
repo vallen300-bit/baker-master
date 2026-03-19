@@ -3643,6 +3643,20 @@ async def get_cost_history(days: int = Query(7, ge=1, le=90)):
     return {"days": days, "history": get_cost_history(days)}
 
 
+@app.get("/api/cost/dashboard", tags=["phase-4a"], dependencies=[Depends(verify_api_key)])
+async def get_cost_dashboard_endpoint(days: int = Query(7, ge=1, le=90)):
+    """G2: Full cost dashboard — today's breakdown, daily history, per-capability costs, weekly summary."""
+    from orchestrator.cost_monitor import get_cost_dashboard
+    return get_cost_dashboard(days)
+
+
+@app.get("/api/cost/capabilities", tags=["phase-4a"], dependencies=[Depends(verify_api_key)])
+async def get_capability_costs_endpoint(days: int = Query(7, ge=1, le=90)):
+    """G2: Per-capability cost breakdown for the last N days."""
+    from orchestrator.cost_monitor import get_capability_costs
+    return {"days": days, "capabilities": get_capability_costs(days)}
+
+
 @app.get("/api/agent-metrics", tags=["phase-4a"], dependencies=[Depends(verify_api_key)])
 async def get_agent_metrics(hours: int = Query(24, ge=1, le=168)):
     """Get tool call metrics for the last N hours."""

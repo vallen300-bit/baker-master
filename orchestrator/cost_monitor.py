@@ -283,6 +283,82 @@ def get_cost_history(days: int = 7) -> list:
 
 
 # ─────────────────────────────────────────────
+# G2: Per-Capability Cost Breakdown (Session 27)
+# ─────────────────────────────────────────────
+
+def get_capability_costs(days: int = 7) -> list:
+    """G2: Cost breakdown per capability slug for the last N days."""
+    try:
+        import psycopg2.extras
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return []
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT capability_id as capability,
+                       COUNT(*) as calls,
+                       ROUND(SUM(cost_eur)::numeric, 4) as total_eur,
+                       SUM(input_tokens) as tokens_in,
+                       SUM(output_tokens) as tokens_out,
+                       ROUND(AVG(cost_eur)::numeric, 4) as avg_cost_eur
+                FROM api_cost_log
+                WHERE logged_at > NOW() - INTERVAL '%s days'
+                  AND capability_id IS NOT NULL
+                GROUP BY capability_id
+                ORDER BY total_eur DESC
+            """, (days,))
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            # Convert Decimal to float for JSON serialization
+            for r in rows:
+                for k in ("total_eur", "avg_cost_eur"):
+                    if r.get(k) is not None:
+                        r[k] = float(r[k])
+                for k in ("tokens_in", "tokens_out", "calls"):
+                    if r.get(k) is not None:
+                        r[k] = int(r[k])
+            return rows
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not get capability costs: {e}")
+            return []
+        finally:
+            store._put_conn(conn)
+    except Exception:
+        return []
+
+
+def get_cost_dashboard(days: int = 7) -> dict:
+    """G2: Combined cost dashboard — daily history + source breakdown + capability breakdown."""
+    history = get_cost_history(days)
+    today = get_daily_breakdown()
+    capabilities = get_capability_costs(days)
+
+    # Compute week total
+    week_total = sum(d.get("total_eur", 0) for d in history)
+    avg_daily = week_total / max(len(history), 1)
+
+    return {
+        "today": today,
+        "history": history,
+        "capabilities": capabilities,
+        "summary": {
+            "week_total_eur": round(week_total, 2),
+            "avg_daily_eur": round(avg_daily, 2),
+            "days_tracked": len(history),
+            "alert_threshold_eur": COST_ALERT_EUR,
+            "hard_stop_eur": COST_HARD_STOP_EUR,
+        },
+    }
+
+
+# ─────────────────────────────────────────────
 # Circuit Breaker
 # ─────────────────────────────────────────────
 
