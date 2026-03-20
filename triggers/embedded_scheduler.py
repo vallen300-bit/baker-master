@@ -316,6 +316,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: memory_consolidation (Sundays 04:00 UTC)")
 
+    # F6: Trend detection — monthly (1st of month, 05:00 UTC)
+    from orchestrator.trend_detector import run_trend_detection
+    scheduler.add_job(
+        run_trend_detection,
+        CronTrigger(day=1, hour=5, minute=0),
+        id="trend_detection", name="Monthly trend detection",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: trend_detection (1st of month 05:00 UTC)")
+
 
 def start_scheduler():
     """Create and start the BackgroundScheduler. Idempotent — safe to call twice."""
