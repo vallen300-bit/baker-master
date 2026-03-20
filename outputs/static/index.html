@@ -185,6 +185,20 @@
             <div id="deadlinesContent"></div>
         </div>
 
+        <!-- D3: Triage overlay -->
+        <div id="triageOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:1000;background:var(--bg);flex-direction:column;">
+            <div id="triageHeader" style="display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0;">
+                <button id="triageCloseBtn" style="background:none;border:none;color:var(--blue);font-size:14px;font-weight:600;cursor:pointer;">&larr; Back</button>
+                <span style="font-size:16px;font-weight:700;color:var(--text1);flex:1;">Triage Obligations</span>
+                <span id="triageCounter" style="font-size:13px;color:var(--text3);"></span>
+            </div>
+            <div id="triageCardArea" style="flex:1;display:flex;align-items:center;justify-content:center;padding:20px;overflow:hidden;"></div>
+            <div id="triageActions" style="display:flex;gap:10px;justify-content:center;padding:16px 20px;border-top:1px solid var(--border);flex-shrink:0;flex-wrap:wrap;"></div>
+            <div id="triageUndo" style="text-align:center;padding:0 0 16px;display:none;">
+                <button id="triageUndoBtn" style="background:none;border:1px solid var(--border);color:var(--blue);padding:6px 16px;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">Undo last action</button>
+            </div>
+        </div>
+
         <!-- VIEW: Networking -->
         <div class="view" id="viewPeople">
             <div class="section-label">Networking</div>
@@ -292,6 +306,6 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=44"></script>
+<script src="/static/app.js?v=45"></script>
 </body>
 </html>

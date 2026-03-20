@@ -2653,6 +2653,7 @@ async function loadMattersTab() {
 // ═══ NETWORKING TAB (NETWORKING-PHASE-1) ═══
 
 var _networkingFilter = 'all';
+var _networkingSort = 'tier'; // 'tier' or 'health'
 
 async function loadPeopleTab() {
     var container = document.getElementById('peopleContent');
@@ -2664,14 +2665,109 @@ async function loadPeopleTab() {
             bakerFetch('/api/networking/contacts' + (_networkingFilter !== 'all' ? '?contact_type=' + _networkingFilter : '')).then(function(r) { return r.json(); }),
             bakerFetch('/api/networking/alerts').then(function(r) { return r.json(); }),
             bakerFetch('/api/networking/events').then(function(r) { return r.json(); }),
+            bakerFetch('/api/contacts/cadence').then(function(r) { return r.json(); }).catch(function() { return {contacts: []}; }),
         ]);
         var contactsData = results[0];
         var alertsData = results[1];
         var eventsData = results[2];
+        var cadenceData = results[3];
+
+        // Build cadence map by lowercase name
+        var cadenceMap = {};
+        var cadenceContacts = cadenceData.contacts || [];
+        for (var ci = 0; ci < cadenceContacts.length; ci++) {
+            var cc = cadenceContacts[ci];
+            cadenceMap[(cc.name || '').toLowerCase()] = cc;
+        }
+
+        // Merge cadence data into contacts
+        var contacts = contactsData.contacts || [];
+
+        // If networking contacts empty but cadence has data, use cadence contacts directly
+        if (contacts.length === 0 && cadenceContacts.length > 0) {
+            contacts = cadenceContacts.map(function(cc) {
+                return {
+                    name: cc.name, tier: cc.tier, health: 'grey',
+                    avg_inbound_gap_days: cc.avg_inbound_gap_days,
+                    days_silent: cc.days_silent,
+                    deviation: cc.deviation,
+                    last_inbound_at: cc.last_inbound_at,
+                    _hasCadence: true
+                };
+            });
+        } else {
+            for (var mi = 0; mi < contacts.length; mi++) {
+                var cName = (contacts[mi].name || '').toLowerCase();
+                if (cadenceMap[cName]) {
+                    contacts[mi].avg_inbound_gap_days = cadenceMap[cName].avg_inbound_gap_days;
+                    contacts[mi].days_silent = cadenceMap[cName].days_silent;
+                    contacts[mi].deviation = cadenceMap[cName].deviation;
+                    contacts[mi].last_inbound_at = cadenceMap[cName].last_inbound_at;
+                    contacts[mi]._hasCadence = true;
+                }
+            }
+        }
+
+        // Compute cadence-relative health for each contact
+        var healthCounts = {healthy: 0, cooling: 0, cold: 0, unknown: 0};
+        for (var hi = 0; hi < contacts.length; hi++) {
+            var co = contacts[hi];
+            if (co._hasCadence && co.deviation !== undefined) {
+                var dev = parseFloat(co.deviation);
+                if (dev <= 1.0) { co._healthStatus = 'healthy'; healthCounts.healthy++; }
+                else if (dev <= 2.0) { co._healthStatus = 'cooling'; healthCounts.cooling++; }
+                else { co._healthStatus = 'cold'; healthCounts.cold++; }
+            } else {
+                co._healthStatus = 'unknown';
+                healthCounts.unknown++;
+            }
+        }
+
+        // Sort
+        if (_networkingSort === 'health') {
+            var healthOrder = {cold: 0, cooling: 1, healthy: 2, unknown: 3};
+            contacts.sort(function(a, b) {
+                var ha = healthOrder[a._healthStatus] || 3;
+                var hb = healthOrder[b._healthStatus] || 3;
+                if (ha !== hb) return ha - hb;
+                return (parseFloat(b.deviation) || 0) - (parseFloat(a.deviation) || 0);
+            });
+        }
 
         container.textContent = '';
 
-        // A. Alert Strip
+        // A. Health Summary Bar (C2)
+        var tracked = healthCounts.healthy + healthCounts.cooling + healthCounts.cold;
+        if (tracked > 0) {
+            var healthBar = document.createElement('div');
+            healthBar.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--bg2);border-radius:8px;margin-bottom:12px;font-size:12px;';
+
+            var trackLabel = document.createElement('span');
+            trackLabel.style.cssText = 'font-weight:600;color:var(--text1);';
+            trackLabel.textContent = tracked + ' tracked:';
+            healthBar.appendChild(trackLabel);
+
+            function _addHealthBadge(parent, count, color, label) {
+                if (count === 0) return;
+                var badge = document.createElement('span');
+                badge.style.cssText = 'display:flex;align-items:center;gap:4px;';
+                var dot = document.createElement('span');
+                dot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:' + color + ';flex-shrink:0;';
+                badge.appendChild(dot);
+                var text = document.createElement('span');
+                text.style.color = 'var(--text2)';
+                text.textContent = count + ' ' + label;
+                badge.appendChild(text);
+                parent.appendChild(badge);
+            }
+            _addHealthBadge(healthBar, healthCounts.healthy, 'var(--green)', 'healthy');
+            _addHealthBadge(healthBar, healthCounts.cooling, 'var(--amber)', 'cooling');
+            _addHealthBadge(healthBar, healthCounts.cold, 'var(--red)', 'at risk');
+
+            container.appendChild(healthBar);
+        }
+
+        // B. Alert Strip
         var strip = document.createElement('div');
         strip.style.cssText = 'display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;';
 
@@ -2693,17 +2789,17 @@ async function loadPeopleTab() {
             badge3.textContent = alertsData.upcoming_events_count + ' upcoming events';
             strip.appendChild(badge3);
         }
-        if (strip.children.length === 0) {
+        if (strip.children.length === 0 && tracked === 0) {
             var allGood = document.createElement('span');
             allGood.style.cssText = 'color:var(--green);font-size:12px;font-weight:600;';
             allGood.textContent = 'All contacts healthy';
             strip.appendChild(allGood);
         }
-        container.appendChild(strip);
+        if (strip.children.length > 0) container.appendChild(strip);
 
-        // B. Filter Buttons
+        // C. Filter + Sort Bar
         var filters = document.createElement('div');
-        filters.style.cssText = 'display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;';
+        filters.style.cssText = 'display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap;align-items:center;';
         var types = ['all', 'principal', 'introducer', 'operator', 'institutional', 'connector'];
         types.forEach(function(t) {
             var btn = document.createElement('button');
@@ -2712,10 +2808,23 @@ async function loadPeopleTab() {
             btn.addEventListener('click', function() { _networkingFilter = t; loadPeopleTab(); });
             filters.appendChild(btn);
         });
+
+        // Sort separator + sort buttons
+        var sep = document.createElement('span');
+        sep.style.cssText = 'width:1px;height:16px;background:var(--border);margin:0 4px;';
+        filters.appendChild(sep);
+        var sorts = [{key:'tier', label:'By Tier'}, {key:'health', label:'By Health'}];
+        sorts.forEach(function(s) {
+            var btn = document.createElement('button');
+            btn.className = _networkingSort === s.key ? 'filter-tab active' : 'filter-tab';
+            btn.textContent = s.label;
+            btn.addEventListener('click', function() { _networkingSort = s.key; loadPeopleTab(); });
+            filters.appendChild(btn);
+        });
+
         container.appendChild(filters);
 
-        // C. Contact List
-        var contacts = contactsData.contacts || [];
+        // D. Contact List
         if (contacts.length === 0) {
             var empty = document.createElement('div');
             empty.textContent = 'No contacts found.';
@@ -2741,11 +2850,21 @@ async function loadPeopleTab() {
                     hdr.appendChild(tierBadge);
                 }
 
-                // Health dot
+                // Health dot (C2: cadence-relative)
                 var healthDot = document.createElement('span');
-                healthDot.className = 'nav-dot';
-                var hColors = {red: 'var(--red)', amber: 'var(--amber)', green: 'var(--green)', grey: 'var(--lgray)'};
-                healthDot.style.cssText = 'width:8px;height:8px;border-radius:50;background:' + (hColors[c.health] || 'var(--lgray)') + ';flex-shrink:0;';
+                var healthColors = {healthy: 'var(--green)', cooling: 'var(--amber)', cold: 'var(--red)', unknown: 'var(--lgray, #ccc)'};
+                healthDot.style.cssText = 'width:8px;height:8px;border-radius:50%;background:' + (healthColors[c._healthStatus] || 'var(--lgray, #ccc)') + ';flex-shrink:0;cursor:help;';
+
+                // C2: Hover tooltip with cadence detail
+                if (c._hasCadence) {
+                    var gapStr = parseFloat(c.avg_inbound_gap_days).toFixed(1);
+                    var silentStr = Math.round(parseFloat(c.days_silent));
+                    var devStr = parseFloat(c.deviation).toFixed(1);
+                    var statusLabel = c._healthStatus === 'healthy' ? 'Healthy' : c._healthStatus === 'cooling' ? 'Cooling (' + devStr + 'x normal gap)' : 'At Risk (' + devStr + 'x normal gap)';
+                    healthDot.title = 'Avg contact every ' + gapStr + ' days\nLast heard: ' + silentStr + ' days ago\nStatus: ' + statusLabel;
+                } else {
+                    healthDot.title = 'No cadence data (insufficient interactions)';
+                }
                 hdr.appendChild(healthDot);
 
                 // Name + type
@@ -2764,11 +2883,17 @@ async function loadPeopleTab() {
                 nameWrap.appendChild(sub);
                 hdr.appendChild(nameWrap);
 
-                // Last contact
-                if (c.last_contact_date) {
+                // Last contact / days silent
+                var lastLabel = '';
+                if (c._hasCadence && c.days_silent) {
+                    lastLabel = Math.round(parseFloat(c.days_silent)) + 'd ago';
+                } else if (c.last_contact_date) {
+                    lastLabel = fmtRelativeTime(c.last_contact_date);
+                }
+                if (lastLabel) {
                     var lastC = document.createElement('span');
                     lastC.style.cssText = 'font-size:11px;color:var(--text3);white-space:nowrap;';
-                    lastC.textContent = fmtRelativeTime(c.last_contact_date);
+                    lastC.textContent = lastLabel;
                     hdr.appendChild(lastC);
                 }
 
@@ -2807,7 +2932,7 @@ async function loadPeopleTab() {
             })(contacts[i]);
         }
 
-        // D. Events Section
+        // E. Events Section
         var events = eventsData.events || [];
         if (events.length > 0) {
             var evLabel = document.createElement('div');
@@ -3536,11 +3661,277 @@ async function loadDeadlinesTab() {
         renderTimeGroup('This Week', thisWeek, false);
         renderTimeGroup('Later', later, false);
 
+        // D3: Triage button
+        if (allItems.length > 0) {
+            var triageBtnWrap = document.createElement('div');
+            triageBtnWrap.style.cssText = 'margin:16px 0 0;text-align:center;';
+            var triageBtn = document.createElement('button');
+            triageBtn.style.cssText = 'padding:8px 20px;border:1px solid var(--blue);color:var(--blue);background:transparent;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--font);';
+            triageBtn.textContent = 'Triage (' + allItems.length + ' pending)';
+            triageBtn.addEventListener('click', function() { _openTriageDeck(allItems); });
+            triageBtnWrap.appendChild(triageBtn);
+            container.appendChild(triageBtnWrap);
+        }
+
     } catch (e) {
         container.textContent = 'Failed to load deadlines.';
         container.style.color = 'var(--red)';
         console.warn('Deadlines tab failed:', e);
     }
+}
+
+// ═══ D3: TRIAGE CARD DECK ═══
+var _triageItems = [];
+var _triageIndex = 0;
+var _triageUndo = null; // {index, item, previousState}
+
+function _openTriageDeck(items) {
+    _triageItems = items.slice(); // copy
+    _triageIndex = 0;
+    _triageUndo = null;
+
+    var overlay = document.getElementById('triageOverlay');
+    overlay.style.display = 'flex';
+
+    document.getElementById('triageCloseBtn').onclick = function() { _closeTriageDeck(); };
+    document.getElementById('triageUndoBtn').onclick = function() { _undoTriageAction(); };
+
+    _buildTriageActions();
+    _renderTriageCard();
+}
+
+function _closeTriageDeck() {
+    document.getElementById('triageOverlay').style.display = 'none';
+    loadDeadlinesTab(); // Refresh
+}
+
+function _renderTriageCard() {
+    var area = document.getElementById('triageCardArea');
+    var counter = document.getElementById('triageCounter');
+    area.textContent = '';
+
+    counter.textContent = (_triageIndex + 1) + ' of ' + _triageItems.length;
+
+    if (_triageIndex >= _triageItems.length) {
+        var done = document.createElement('div');
+        done.style.cssText = 'text-align:center;';
+        var doneIcon = document.createElement('div');
+        doneIcon.style.cssText = 'font-size:48px;margin-bottom:16px;';
+        doneIcon.textContent = '\u2705';
+        done.appendChild(doneIcon);
+        var doneText = document.createElement('div');
+        doneText.style.cssText = 'font-size:18px;font-weight:600;color:var(--text1);margin-bottom:8px;';
+        doneText.textContent = 'All reviewed!';
+        done.appendChild(doneText);
+        var doneBtn = document.createElement('button');
+        doneBtn.style.cssText = 'padding:10px 24px;background:var(--blue);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;margin-top:12px;';
+        doneBtn.textContent = 'Back to Obligations';
+        doneBtn.addEventListener('click', function() { _closeTriageDeck(); });
+        done.appendChild(doneBtn);
+        area.appendChild(done);
+        counter.textContent = 'Done';
+        document.getElementById('triageActions').style.display = 'none';
+        return;
+    }
+
+    document.getElementById('triageActions').style.display = 'flex';
+    var item = _triageItems[_triageIndex];
+
+    var card = document.createElement('div');
+    card.style.cssText = 'width:100%;max-width:500px;padding:24px;background:var(--bg2);border-radius:12px;border:1px solid var(--border);transition:transform 0.3s,opacity 0.3s;';
+
+    // Priority strip
+    var prioColors = {critical: 'var(--red)', high: 'var(--amber)', normal: 'var(--blue)', low: 'var(--text3)'};
+    var prioColor = prioColors[item.priority] || 'var(--text3)';
+    card.style.borderLeftWidth = '4px';
+    card.style.borderLeftColor = prioColor;
+
+    // Priority + severity badges
+    var badges = document.createElement('div');
+    badges.style.cssText = 'display:flex;gap:6px;margin-bottom:12px;';
+    if (item.priority) {
+        var prioBadge = document.createElement('span');
+        prioBadge.style.cssText = 'font-size:10px;font-weight:700;color:' + prioColor + ';border:1px solid ' + prioColor + ';padding:2px 8px;border-radius:4px;text-transform:uppercase;';
+        prioBadge.textContent = item.priority;
+        badges.appendChild(prioBadge);
+    }
+    if (item.severity) {
+        var sevColors = {hard: 'var(--red)', firm: 'var(--amber)', soft: 'var(--blue)'};
+        var sevCol = sevColors[item.severity] || 'var(--text3)';
+        var sevBadge = document.createElement('span');
+        sevBadge.style.cssText = 'font-size:10px;font-weight:700;color:' + sevCol + ';border:1px solid ' + sevCol + ';padding:2px 8px;border-radius:4px;text-transform:uppercase;';
+        sevBadge.textContent = item.severity;
+        badges.appendChild(sevBadge);
+    }
+    card.appendChild(badges);
+
+    // Description
+    var desc = document.createElement('div');
+    desc.style.cssText = 'font-size:15px;line-height:1.6;color:var(--text1);margin-bottom:16px;';
+    desc.textContent = item.description || 'No description';
+    card.appendChild(desc);
+
+    // Due date
+    if (item.due_date) {
+        var dueDiv = document.createElement('div');
+        dueDiv.style.cssText = 'font-size:12px;color:var(--text3);margin-bottom:4px;';
+        var dueDate = new Date(item.due_date);
+        dueDiv.textContent = 'Due: ' + dueDate.toLocaleDateString('en-GB', {day: 'numeric', month: 'short', year: 'numeric'});
+        var daysText = fmtDeadlineDays(item.due_date);
+        if (daysText) dueDiv.textContent += ' (' + daysText + ')';
+        card.appendChild(dueDiv);
+    }
+
+    // Source + matter
+    var meta = document.createElement('div');
+    meta.style.cssText = 'font-size:11px;color:var(--text3);';
+    var metaParts = [];
+    if (item.source) metaParts.push(item.source);
+    if (item.matter) metaParts.push(item.matter.replace(/_/g, ' '));
+    if (item.assigned_to) metaParts.push('\u2192 ' + item.assigned_to);
+    meta.textContent = metaParts.join(' \u00B7 ');
+    card.appendChild(meta);
+
+    // Touch swipe support
+    _setupTriageSwipe(card);
+
+    area.appendChild(card);
+}
+
+function _setupTriageSwipe(card) {
+    var startX = 0, startY = 0, currentX = 0, currentY = 0, swiping = false;
+
+    card.addEventListener('touchstart', function(e) {
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        swiping = true;
+    }, {passive: true});
+
+    card.addEventListener('touchmove', function(e) {
+        if (!swiping) return;
+        currentX = e.touches[0].clientX - startX;
+        currentY = e.touches[0].clientY - startY;
+        // Horizontal swipe dominates
+        if (Math.abs(currentX) > Math.abs(currentY)) {
+            card.style.transform = 'translateX(' + currentX + 'px) rotate(' + (currentX * 0.05) + 'deg)';
+            card.style.opacity = Math.max(1 - Math.abs(currentX) / 300, 0.3);
+        } else if (currentY < -30) {
+            card.style.transform = 'translateY(' + currentY + 'px)';
+            card.style.opacity = Math.max(1 - Math.abs(currentY) / 300, 0.3);
+        }
+    }, {passive: true});
+
+    card.addEventListener('touchend', function() {
+        if (!swiping) return;
+        swiping = false;
+        if (currentX > 100) {
+            // Swipe right = Keep
+            card.style.transform = 'translateX(120%)';
+            card.style.opacity = '0';
+            setTimeout(function() { _triageAction('keep'); }, 200);
+        } else if (currentX < -100) {
+            // Swipe left = Dismiss
+            card.style.transform = 'translateX(-120%)';
+            card.style.opacity = '0';
+            setTimeout(function() { _triageAction('dismiss'); }, 200);
+        } else if (currentY < -80) {
+            // Swipe up = Escalate
+            card.style.transform = 'translateY(-120%)';
+            card.style.opacity = '0';
+            setTimeout(function() { _triageAction('escalate'); }, 200);
+        } else {
+            card.style.transform = '';
+            card.style.opacity = '';
+        }
+        currentX = 0;
+        currentY = 0;
+    });
+}
+
+function _buildTriageActions() {
+    var actionsDiv = document.getElementById('triageActions');
+    actionsDiv.textContent = '';
+
+    function _makeTriageBtn(label, color, bgColor, action) {
+        var btn = document.createElement('button');
+        btn.style.cssText = 'padding:10px 20px;border:2px solid ' + color + ';color:' + color + ';background:' + (bgColor || 'transparent') + ';border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;min-width:80px;';
+        btn.textContent = label;
+        btn.addEventListener('click', function() { _triageAction(action); });
+        return btn;
+    }
+
+    actionsDiv.appendChild(_makeTriageBtn('Dismiss', 'var(--text3)', '', 'dismiss'));
+    actionsDiv.appendChild(_makeTriageBtn('Keep', 'var(--green)', '', 'keep'));
+    actionsDiv.appendChild(_makeTriageBtn('Escalate', 'var(--amber)', '', 'escalate'));
+    actionsDiv.appendChild(_makeTriageBtn('Done', 'var(--blue)', 'var(--blue)', 'done'));
+    // Make Done button white text
+    actionsDiv.lastChild.style.color = '#fff';
+}
+
+function _triageAction(action) {
+    if (_triageIndex >= _triageItems.length) return;
+    var item = _triageItems[_triageIndex];
+    var previousState = {priority: item.priority, status: item.status};
+
+    // Save undo state
+    _triageUndo = {index: _triageIndex, item: item, previousState: previousState, action: action};
+    document.getElementById('triageUndo').style.display = '';
+
+    // API call based on action
+    if (action === 'dismiss') {
+        bakerFetch('/api/deadlines/' + item.id, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({status: 'dismissed'})
+        }).catch(function(e) { console.error('Triage dismiss failed:', e); });
+    } else if (action === 'escalate') {
+        bakerFetch('/api/deadlines/' + item.id, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({priority: 'high'})
+        }).catch(function(e) { console.error('Triage escalate failed:', e); });
+    } else if (action === 'done') {
+        bakerFetch('/api/deadlines/' + item.id, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({status: 'completed'})
+        }).catch(function(e) { console.error('Triage complete failed:', e); });
+    }
+    // 'keep' = no API call, just advance
+
+    _triageIndex++;
+    _renderTriageCard();
+}
+
+function _undoTriageAction() {
+    if (!_triageUndo) return;
+    var undo = _triageUndo;
+
+    // Revert API change
+    if (undo.action === 'dismiss') {
+        bakerFetch('/api/deadlines/' + undo.item.id, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({status: 'active'})
+        }).catch(function(e) { console.error('Triage undo dismiss failed:', e); });
+    } else if (undo.action === 'escalate') {
+        bakerFetch('/api/deadlines/' + undo.item.id, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({priority: undo.previousState.priority || 'normal'})
+        }).catch(function(e) { console.error('Triage undo escalate failed:', e); });
+    } else if (undo.action === 'done') {
+        bakerFetch('/api/deadlines/' + undo.item.id, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({status: 'active'})
+        }).catch(function(e) { console.error('Triage undo complete failed:', e); });
+    }
+
+    _triageIndex = undo.index;
+    _triageUndo = null;
+    document.getElementById('triageUndo').style.display = 'none';
+    _renderTriageCard();
 }
 
 // ═══ TRAVEL TAB ═══
