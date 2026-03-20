@@ -113,6 +113,23 @@
                 <div class="brief-narrative" id="briefNarrative">Baker is loading your morning summary...</div>
             </div>
 
+            <!-- Weekly Priorities Widget -->
+            <div id="prioritiesWidget" class="priorities-widget" hidden>
+                <div class="priorities-header">
+                    <span class="section-label" style="margin:0">This Week's Priorities</span>
+                    <button class="priorities-add-btn" id="prioritiesAddBtn" title="Add priority">+</button>
+                </div>
+                <div id="prioritiesList" class="priorities-list"></div>
+                <div id="prioritiesForm" class="priorities-form" hidden>
+                    <input type="text" id="priorityInput" class="priorities-input" placeholder="e.g. Close Kempinski LOI" maxlength="200" />
+                    <input type="text" id="priorityMatterInput" class="priorities-input priorities-matter" placeholder="Matter (optional)" maxlength="100" />
+                    <div class="priorities-form-actions">
+                        <button class="priorities-save-btn" id="prioritySaveBtn">Save</button>
+                        <button class="priorities-cancel-btn" id="priorityCancelBtn">Cancel</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="landing-grid">
                 <div class="grid-cell">
                     <div class="grid-cell-header">

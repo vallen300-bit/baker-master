@@ -247,6 +247,74 @@ body {
 .proposal-btn:disabled { opacity: 0.7; cursor: default; }
 .proposal-btn.is-done { background: var(--green) !important; cursor: default; }
 
+/* Weekly Priorities Widget */
+.priorities-widget {
+  margin: 16px 0 4px; padding: 14px 16px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); border-left: 3px solid var(--blue);
+}
+.priorities-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 8px;
+}
+.priorities-add-btn {
+  width: 26px; height: 26px; border: 1px solid var(--border);
+  border-radius: var(--radius-pill); background: var(--bg2);
+  color: var(--text2); font-size: 16px; font-weight: 600;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+.priorities-add-btn:hover { background: var(--blue); color: #fff; border-color: var(--blue); }
+.priorities-list { display: flex; flex-direction: column; gap: 4px; }
+.priority-item {
+  display: flex; align-items: center; gap: 8px; padding: 6px 4px;
+  border-radius: 4px; transition: background 0.1s;
+}
+.priority-item:hover { background: var(--bg2); }
+.priority-rank {
+  font-family: var(--mono); font-size: 11px; font-weight: 700;
+  color: var(--text3); width: 18px; text-align: right; flex-shrink: 0;
+}
+.priority-text { flex: 1; font-size: 13px; color: var(--text); line-height: 1.4; }
+.priority-matter {
+  font-size: 11px; color: var(--text3); font-family: var(--mono);
+  background: var(--bg2); padding: 1px 6px; border-radius: var(--radius-pill);
+  white-space: nowrap; flex-shrink: 0;
+}
+.priority-done-btn {
+  width: 20px; height: 20px; border: 1.5px solid var(--border);
+  border-radius: 50%; background: transparent; cursor: pointer;
+  flex-shrink: 0; transition: all 0.15s; display: flex;
+  align-items: center; justify-content: center; font-size: 11px;
+  color: transparent;
+}
+.priority-done-btn:hover { border-color: var(--green); color: var(--green); }
+.priorities-empty {
+  font-size: 12px; color: var(--text3); padding: 4px 0;
+  font-style: italic;
+}
+.priorities-form { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.priorities-input {
+  font-family: var(--sans); font-size: 13px; padding: 7px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg); color: var(--text); outline: none;
+}
+.priorities-input:focus { border-color: var(--blue); }
+.priorities-input.priorities-matter { font-size: 12px; padding: 5px 10px; }
+.priorities-form-actions { display: flex; gap: 6px; }
+.priorities-save-btn {
+  padding: 5px 14px; border: none; border-radius: var(--radius-pill);
+  background: var(--blue); color: #fff; font-family: var(--mono);
+  font-size: 11px; font-weight: 600; cursor: pointer;
+}
+.priorities-save-btn:hover { background: var(--blue-hover); }
+.priorities-cancel-btn {
+  padding: 5px 14px; border: 1px solid var(--border); border-radius: var(--radius-pill);
+  background: var(--bg2); color: var(--text2); font-family: var(--mono);
+  font-size: 11px; cursor: pointer;
+}
+.priorities-cancel-btn:hover { background: var(--border); }
+
 /* Unanswered badge (inline in greeting) */
 .unanswered-badge {
   font-size: 12px; font-weight: 500; color: var(--text3);

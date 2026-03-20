@@ -1765,6 +1765,18 @@ async def get_morning_brief():
         except Exception as e:
             logger.warning(f"Morning brief: travel alerts query failed: {e}")
 
+        # Weekly priorities for dashboard widget
+        weekly_priorities = []
+        try:
+            from orchestrator.priority_manager import get_current_priorities
+            weekly_priorities = get_current_priorities()
+            for p in weekly_priorities:
+                for key in ("week_start", "created_at"):
+                    if p.get(key) and hasattr(p[key], "isoformat"):
+                        p[key] = p[key].isoformat()
+        except Exception:
+            pass
+
         return {
             "unanswered_count": unanswered_count,
             "fire_count": fire_count,
@@ -1784,6 +1796,7 @@ async def get_morning_brief():
             "silent_contacts": silent_contacts,
             "travel_alerts": travel_alerts,
             "trips": [_serialize(t) for t in active_trips],
+            "weekly_priorities": weekly_priorities,
         }
     except HTTPException:
         raise

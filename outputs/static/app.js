@@ -455,6 +455,136 @@ function switchTab(tabName) {
     else if (tabName === 'baker-data') loadBakerData();
 }
 
+// ═══ WEEKLY PRIORITIES WIDGET ═══
+
+function _renderPrioritiesWidget(priorities) {
+    var widget = document.getElementById('prioritiesWidget');
+    var list = document.getElementById('prioritiesList');
+    if (!widget || !list) return;
+
+    // Always show the widget (empty state has "No priorities set" + add button)
+    widget.hidden = false;
+    list.textContent = '';
+
+    if (!priorities || priorities.length === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'priorities-empty';
+        empty.textContent = 'No priorities set this week. Click + to add.';
+        list.appendChild(empty);
+        return;
+    }
+
+    priorities.forEach(function(p) {
+        var item = document.createElement('div');
+        item.className = 'priority-item';
+        item.dataset.id = p.id;
+
+        var rank = document.createElement('span');
+        rank.className = 'priority-rank';
+        rank.textContent = p.rank + '.';
+        item.appendChild(rank);
+
+        var text = document.createElement('span');
+        text.className = 'priority-text';
+        text.textContent = p.priority_text;
+        item.appendChild(text);
+
+        if (p.matter_slug) {
+            var matter = document.createElement('span');
+            matter.className = 'priority-matter';
+            matter.textContent = p.matter_slug;
+            item.appendChild(matter);
+        }
+
+        var doneBtn = document.createElement('button');
+        doneBtn.className = 'priority-done-btn';
+        doneBtn.title = 'Mark completed';
+        doneBtn.textContent = '\u2713';
+        doneBtn.addEventListener('click', function() { _completePriority(p.id, item); });
+        item.appendChild(doneBtn);
+
+        list.appendChild(item);
+    });
+}
+
+function _completePriority(id, itemEl) {
+    bakerFetch('/api/priorities/' + id, { method: 'DELETE' }).then(function(resp) {
+        if (resp.ok) {
+            itemEl.style.opacity = '0.4';
+            itemEl.style.textDecoration = 'line-through';
+            setTimeout(function() { itemEl.remove(); }, 600);
+        }
+    });
+}
+
+(function _initPrioritiesForm() {
+    document.addEventListener('DOMContentLoaded', function() {
+        var addBtn = document.getElementById('prioritiesAddBtn');
+        var form = document.getElementById('prioritiesForm');
+        var input = document.getElementById('priorityInput');
+        var matterInput = document.getElementById('priorityMatterInput');
+        var saveBtn = document.getElementById('prioritySaveBtn');
+        var cancelBtn = document.getElementById('priorityCancelBtn');
+
+        if (!addBtn || !form) return;
+
+        addBtn.addEventListener('click', function() {
+            form.hidden = !form.hidden;
+            if (!form.hidden && input) input.focus();
+        });
+
+        if (cancelBtn) cancelBtn.addEventListener('click', function() {
+            form.hidden = true;
+            if (input) input.value = '';
+            if (matterInput) matterInput.value = '';
+        });
+
+        if (saveBtn) saveBtn.addEventListener('click', _savePriority);
+        if (input) input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') _savePriority();
+        });
+
+        function _savePriority() {
+            var text = (input ? input.value.trim() : '');
+            if (!text) return;
+            var matter = matterInput ? matterInput.value.trim() : '';
+
+            saveBtn.disabled = true;
+            saveBtn.textContent = '...';
+
+            // Fetch current priorities, append new one, re-set all
+            bakerFetch('/api/priorities').then(function(r) { return r.json(); }).then(function(d) {
+                var existing = (d.priorities || []).map(function(p) {
+                    return { text: p.priority_text, matter: p.matter_slug };
+                });
+                existing.push({ text: text, matter: matter || null });
+
+                return bakerFetch('/api/priorities', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ priorities: existing }),
+                });
+            }).then(function(resp) {
+                if (resp.ok) {
+                    form.hidden = true;
+                    if (input) input.value = '';
+                    if (matterInput) matterInput.value = '';
+                    // Reload the widget
+                    return resp.json().then(function(d) {
+                        _renderPrioritiesWidget(d.priorities || []);
+                    });
+                }
+            }).catch(function(err) {
+                console.error('Save priority failed:', err);
+            }).finally(function() {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save';
+            });
+        }
+    });
+})();
+
+
 // ═══ MORNING BRIEF ═══
 
 function _inferProposalType(label, instruction) {
@@ -613,6 +743,9 @@ async function loadMorningBrief() {
                 strip.appendChild(card);
             });
         }
+
+        // Weekly Priorities Widget
+        _renderPrioritiesWidget(data.weekly_priorities || []);
 
         // Fires badge
         const firesBadge = document.getElementById('firesBadge');
