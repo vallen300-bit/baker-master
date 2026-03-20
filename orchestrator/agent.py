@@ -513,6 +513,39 @@ TOOL_DEFINITIONS = [
             "required": ["title", "start"],
         },
     },
+    # C1: LinkedIn enrichment tool (Session 28)
+    {
+        "name": "enrich_linkedin",
+        "description": (
+            "Look up a person's professional profile via LinkedIn enrichment API. "
+            "Returns current title, company, work history, education, skills, "
+            "location, and profile photo.\n\n"
+            "Use for:\n"
+            "- Pre-meeting research: 'Who is Peter Storer from NVIDIA?'\n"
+            "- Contact enrichment: 'What does Thomas Hagenauer do?'\n"
+            "- Background checks: 'What's Marco's career history?'\n\n"
+            "Requires LINKEDIN_API_KEY to be configured. "
+            "Combine with web_search for a comprehensive dossier."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Person's full name (e.g. 'Peter Storer')",
+                },
+                "company": {
+                    "type": "string",
+                    "description": "Current or recent company (helps disambiguate common names). Optional.",
+                },
+                "linkedin_url": {
+                    "type": "string",
+                    "description": "Direct LinkedIn profile URL if known. Optional.",
+                },
+            },
+            "required": ["name"],
+        },
+    },
 ]
 
 # Agent loop tools — exclude clickup_create (Director prefers results in artifact panel,
@@ -572,6 +605,8 @@ class ToolExecutor:
                 return self._create_calendar_event(tool_input)
             elif tool_name == "draft_email":
                 return self._draft_email(tool_input)
+            elif tool_name == "enrich_linkedin":
+                return self._enrich_linkedin(tool_input)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -1220,6 +1255,49 @@ class ToolExecutor:
         except Exception as e:
             logger.error(f"create_calendar_event failed: {e}")
             return json.dumps({"error": f"Calendar event creation failed: {str(e)}"})
+
+    def _enrich_linkedin(self, inp: dict) -> str:
+        """C1: Look up a person's LinkedIn profile via enrichment API."""
+        name = inp.get("name", "")
+        company = inp.get("company", "")
+        linkedin_url = inp.get("linkedin_url", "")
+
+        if not name and not linkedin_url:
+            return "[Either name or linkedin_url is required]"
+
+        try:
+            from tools.linkedin_client import get_enricher
+            enricher = get_enricher()
+            if not enricher.is_available():
+                return json.dumps({"error": "LinkedIn enrichment not configured (LINKEDIN_API_KEY missing)"})
+
+            profile = enricher.enrich_person(
+                name=name, company=company, linkedin_url=linkedin_url,
+            )
+            if not profile:
+                return f"[No LinkedIn profile found for '{name}'" + (f" at {company}]" if company else "]")
+
+            # Also update Baker's contacts with enriched data
+            try:
+                from memory.store_back import SentinelStoreBack
+                store = SentinelStoreBack._get_global_instance()
+                updates = {}
+                if profile.title:
+                    updates["role"] = f"{profile.title} at {profile.company}" if profile.company else profile.title
+                if profile.location:
+                    updates["location"] = profile.location
+                if profile.linkedin_url:
+                    updates["linkedin_url"] = profile.linkedin_url
+                if updates:
+                    store.upsert_contact(profile.name or name, updates)
+                    logger.info(f"Contact updated with LinkedIn data: {profile.name or name}")
+            except Exception as e:
+                logger.debug(f"Contact update from LinkedIn failed (non-fatal): {e}")
+
+            return f"--- LINKEDIN PROFILE ---\n{profile.to_text()}"
+        except Exception as e:
+            logger.error(f"enrich_linkedin failed: {e}")
+            return json.dumps({"error": f"LinkedIn enrichment failed: {str(e)}"})
 
     @staticmethod
     def _format_contexts(contexts, label: str) -> str:

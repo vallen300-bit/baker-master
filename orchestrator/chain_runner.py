@@ -359,7 +359,7 @@ def _execute_plan(plan: dict, timeout: float) -> ChainResult:
             "get_contact", "get_deadlines", "get_clickup_tasks", "search_deals_insights",
             "get_matter_context", "search_documents", "query_baker_data",
             "draft_email", "create_deadline", "create_calendar_event", "clickup_create",
-            "web_search", "read_document",
+            "web_search", "read_document", "enrich_linkedin",
         }
         if tool not in valid_tools:
             step.skipped = True
