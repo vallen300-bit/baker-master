@@ -521,6 +521,20 @@ def _process_email_threads(new_threads: list):
     if batch_for_briefing:
         trigger_state.add_to_briefing_queue(batch_for_briefing)
 
+    # ART-1: Check all processed emails for research-worthy intelligence
+    # Content-driven — regex pre-filter + Haiku classification
+    for thread in new_threads:
+        try:
+            _text = thread.get("text", "")
+            _meta = thread.get("metadata", {})
+            _sender = _meta.get("primary_sender", "")
+            _tid = _meta.get("thread_id", "")
+            if _text and len(_text) > 200:
+                from orchestrator.research_trigger import check_research_trigger
+                check_research_trigger(_text, _sender, f"email-{_tid}")
+        except Exception:
+            pass  # Non-fatal
+
     # F4: Advance watermark to the newest received_date seen this cycle
     # (covers both processed and deduped threads — prevents re-fetching old batches)
     if latest_seen_dt:

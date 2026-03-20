@@ -1685,14 +1685,19 @@ var _proposedActions = [];
 
 async function refreshActionBadge() {
     try {
-        var r = await bakerFetch('/api/proposed-actions/count');
-        if (!r.ok) return;
-        var data = await r.json();
-        var count = data.proposed || 0;
+        var results = await Promise.all([
+            bakerFetch('/api/proposed-actions/count'),
+            bakerFetch('/api/research-proposals?status=proposed'),
+        ]);
+        var actionCount = 0;
+        var researchCount = 0;
+        if (results[0].ok) { var d = await results[0].json(); actionCount = d.proposed || 0; }
+        if (results[1].ok) { var r = await results[1].json(); researchCount = (r.proposals || []).length; }
+        var total = actionCount + researchCount;
         var badge = document.getElementById('tabActionCount');
         if (!badge) return;
-        if (count > 0) {
-            badge.textContent = count;
+        if (total > 0) {
+            badge.textContent = total;
             badge.hidden = false;
         } else {
             badge.hidden = true;
