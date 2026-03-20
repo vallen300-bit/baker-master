@@ -7296,6 +7296,49 @@ async def admin_run_convergence(background_tasks: BackgroundTasks):
 
 
 # ============================================================
+# OBLIGATION-GENERATOR: Proposed Actions API
+# ============================================================
+
+@app.get("/api/proposed-actions", tags=["actions"], dependencies=[Depends(verify_api_key)])
+async def api_get_proposed_actions(status: str = "proposed", days: int = 7):
+    """Get proposed actions for triage."""
+    from orchestrator.obligation_generator import get_proposed_actions
+    actions = get_proposed_actions(status=status, days=days)
+    return {"actions": actions, "count": len(actions)}
+
+
+@app.get("/api/proposed-actions/count", tags=["actions"], dependencies=[Depends(verify_api_key)])
+async def api_get_proposed_actions_count():
+    """Get count of untriaged proposed actions."""
+    from orchestrator.obligation_generator import get_proposed_actions_count
+    count = get_proposed_actions_count()
+    return {"proposed": count}
+
+
+@app.post("/api/proposed-actions/{action_id}/respond", tags=["actions"], dependencies=[Depends(verify_api_key)])
+async def api_respond_to_action(action_id: int, request: Request):
+    """Record Director's response to a proposed action."""
+    from orchestrator.obligation_generator import respond_to_action
+    body = await request.json()
+    response = body.get("response", "")
+    escalate_to = body.get("escalate_to")
+    if response not in ("approved", "dismissed", "done", "escalated"):
+        raise HTTPException(status_code=400, detail="response must be approved|dismissed|done|escalated")
+    ok = respond_to_action(action_id, response, escalate_to=escalate_to)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to record response")
+    return {"status": "ok", "action_id": action_id, "response": response}
+
+
+@app.post("/api/admin/run-obligation-generator", tags=["admin"], dependencies=[Depends(verify_api_key)])
+async def admin_run_obligation_generator(background_tasks: BackgroundTasks):
+    """Manually trigger the obligation generator."""
+    from orchestrator.obligation_generator import run_obligation_generator
+    background_tasks.add_task(run_obligation_generator)
+    return {"status": "triggered", "note": "Obligation generator running in background"}
+
+
+# ============================================================
 # CLI runner
 # ============================================================
 

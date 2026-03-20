@@ -231,6 +231,11 @@ class WebPushConfig:
     vapid_private_key: str = os.getenv("VAPID_PRIVATE_KEY", "")
     vapid_public_key: str = os.getenv("VAPID_PUBLIC_KEY", "")
     vapid_contact_email: str = os.getenv("VAPID_CONTACT_EMAIL", "")
+    # Notification throttling
+    quiet_start_utc: int = int(os.getenv("PUSH_QUIET_START_UTC", "21"))   # 22:00 CET
+    quiet_end_utc: int = int(os.getenv("PUSH_QUIET_END_UTC", "6"))       # 07:00 CET
+    daily_cap: int = int(os.getenv("PUSH_DAILY_CAP", "8"))
+    cooldown_minutes: int = int(os.getenv("PUSH_COOLDOWN_MINUTES", "15"))
 
 
 @dataclass

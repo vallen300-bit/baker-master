@@ -326,6 +326,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: trend_detection (1st of month 05:00 UTC)")
 
+    # OBLIGATION-GENERATOR: Morning triage actions — 06:50 UTC (08:50 CET)
+    from orchestrator.obligation_generator import run_obligation_generator
+    scheduler.add_job(
+        run_obligation_generator,
+        CronTrigger(hour=6, minute=50),
+        id="obligation_generator", name="Obligation generator + morning push",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: obligation_generator (daily 06:50 UTC)")
+
     # PROACTIVE-INITIATIVE-1: Daily initiative engine — 07:00 UTC (09:00 CET)
     from orchestrator.initiative_engine import run_initiative_engine
     scheduler.add_job(

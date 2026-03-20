@@ -207,6 +207,8 @@ function switchTab(tab) {
     });
     if (tab === 'alerts') {
         loadMobileAlerts();
+    } else if (tab === 'actions') {
+        loadProposedActions();
     } else {
         var inputId = tab === 'baker' ? 'bakerInput' : 'specialistInput';
         var input = document.getElementById(inputId);
@@ -724,8 +726,18 @@ async function init() {
         });
     }
 
-    // Default tab
-    switchTab('baker');
+    // Action badge — load now + refresh every 5 min
+    refreshActionBadge();
+    setInterval(refreshActionBadge, 5 * 60 * 1000);
+
+    // Default tab — check for deep link ?tab=actions
+    var urlParams = new URLSearchParams(window.location.search);
+    var deepTab = urlParams.get('tab');
+    if (deepTab && ['baker', 'specialist', 'alerts', 'actions'].indexOf(deepTab) !== -1) {
+        switchTab(deepTab);
+    } else {
+        switchTab('baker');
+    }
 }
 
 // ═══ MOBILE ALERTS VIEW ═══
@@ -1666,6 +1678,281 @@ async function _doUpload() {
         result.textContent = 'Upload failed: ' + e.message;
         sendBtn.disabled = false;
     }
+}
+
+// ═══ TRIAGE CARD DECK (Proposed Actions) ═══
+var _proposedActions = [];
+
+async function refreshActionBadge() {
+    try {
+        var r = await bakerFetch('/api/proposed-actions/count');
+        if (!r.ok) return;
+        var data = await r.json();
+        var count = data.proposed || 0;
+        var badge = document.getElementById('tabActionCount');
+        if (!badge) return;
+        if (count > 0) {
+            badge.textContent = count;
+            badge.hidden = false;
+        } else {
+            badge.hidden = true;
+        }
+    } catch (e) { /* silent */ }
+}
+
+async function loadProposedActions() {
+    var deck = document.getElementById('triageDeck');
+    if (!deck) return;
+    deck.textContent = '';
+    var loadDiv = document.createElement('div');
+    loadDiv.className = 'empty-state';
+    loadDiv.textContent = 'Loading actions...';
+    deck.appendChild(loadDiv);
+
+    try {
+        var r = await bakerFetch('/api/proposed-actions?status=proposed');
+        if (!r.ok) throw new Error('API ' + r.status);
+        var data = await r.json();
+        _proposedActions = data.actions || [];
+        _renderTriageDeck();
+    } catch (e) {
+        deck.textContent = '';
+        var err = document.createElement('div');
+        err.className = 'empty-state';
+        err.textContent = 'Failed to load actions.';
+        deck.appendChild(err);
+    }
+}
+
+function _renderTriageDeck() {
+    var deck = document.getElementById('triageDeck');
+    var countEl = document.getElementById('triageCount');
+    var doneBtn = document.getElementById('triageDoneBtn');
+    if (!deck) return;
+    deck.textContent = '';
+
+    if (countEl) countEl.textContent = _proposedActions.length + ' action' + (_proposedActions.length !== 1 ? 's' : '');
+
+    if (_proposedActions.length === 0) {
+        var empty = document.createElement('div');
+        empty.className = 'empty-state';
+        var icon = document.createElement('div');
+        icon.className = 'icon';
+        icon.textContent = '\u2705';
+        empty.appendChild(icon);
+        empty.appendChild(document.createTextNode('No proposed actions. You\'re all set.'));
+        deck.appendChild(empty);
+        if (doneBtn) doneBtn.hidden = true;
+        return;
+    }
+
+    if (doneBtn) doneBtn.hidden = true;
+
+    for (var i = 0; i < _proposedActions.length; i++) {
+        deck.appendChild(_createTriageCard(_proposedActions[i]));
+    }
+}
+
+function _createTriageCard(action) {
+    var card = document.createElement('div');
+    card.className = 'triage-card';
+    card.dataset.actionId = action.id;
+
+    // Priority indicator
+    var prio = action.priority_rank || 2;
+    if (prio === 1) card.classList.add('urgent');
+
+    // Header: source badge + title
+    var header = document.createElement('div');
+    header.className = 'triage-card-header';
+
+    var sourceBadge = document.createElement('span');
+    sourceBadge.className = 'source-badge ' + (action.source_type || 'unknown');
+    sourceBadge.textContent = (action.source_type || 'task').replace(/_/g, ' ');
+    header.appendChild(sourceBadge);
+
+    if (action.due_date) {
+        var dueEl = document.createElement('span');
+        dueEl.className = 'triage-due';
+        var dueDate = new Date(action.due_date + 'T00:00:00');
+        var today = new Date();
+        today.setHours(0,0,0,0);
+        if (dueDate < today) dueEl.classList.add('overdue');
+        dueEl.textContent = action.due_date;
+        header.appendChild(dueEl);
+    }
+
+    card.appendChild(header);
+
+    // Title
+    var title = document.createElement('div');
+    title.className = 'triage-card-title';
+    title.textContent = action.title || 'Untitled';
+    card.appendChild(title);
+
+    // Description
+    if (action.description) {
+        var desc = document.createElement('div');
+        desc.className = 'triage-card-desc';
+        desc.textContent = action.description;
+        card.appendChild(desc);
+    }
+
+    // Suggested action
+    if (action.suggested_action) {
+        var suggestion = document.createElement('div');
+        suggestion.className = 'triage-suggested';
+        suggestion.textContent = action.suggested_action;
+        card.appendChild(suggestion);
+    }
+
+    // Action buttons row
+    var buttons = document.createElement('div');
+    buttons.className = 'triage-buttons';
+
+    var approveBtn = document.createElement('button');
+    approveBtn.className = 'triage-btn approve';
+    approveBtn.textContent = 'Approve';
+    approveBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        _respondToProposedAction(action.id, 'approved', card);
+    });
+    buttons.appendChild(approveBtn);
+
+    var doneActionBtn = document.createElement('button');
+    doneActionBtn.className = 'triage-btn done';
+    doneActionBtn.textContent = 'Done';
+    doneActionBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        _respondToProposedAction(action.id, 'done', card);
+    });
+    buttons.appendChild(doneActionBtn);
+
+    var dismissBtn = document.createElement('button');
+    dismissBtn.className = 'triage-btn dismiss';
+    dismissBtn.textContent = 'Skip';
+    dismissBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        _respondToProposedAction(action.id, 'dismissed', card);
+    });
+    buttons.appendChild(dismissBtn);
+
+    card.appendChild(buttons);
+
+    // Swipe: right=approve, left=dismiss
+    _setupTriageSwipe(card, action.id);
+
+    return card;
+}
+
+function _setupTriageSwipe(card, actionId) {
+    var startX = 0;
+    var currentX = 0;
+    var swiping = false;
+
+    card.addEventListener('touchstart', function(e) {
+        startX = e.touches[0].clientX;
+        swiping = true;
+    }, { passive: true });
+
+    card.addEventListener('touchmove', function(e) {
+        if (!swiping) return;
+        currentX = e.touches[0].clientX - startX;
+        // Right swipe = approve (green tint), left = dismiss (red tint)
+        if (Math.abs(currentX) > 10) {
+            card.style.transform = 'translateX(' + Math.max(Math.min(currentX, 150), -150) + 'px)';
+            card.style.opacity = Math.max(1 - Math.abs(currentX) / 200, 0.3);
+            if (currentX > 40) {
+                card.classList.add('swiping-right');
+                card.classList.remove('swiping-left');
+            } else if (currentX < -40) {
+                card.classList.add('swiping-left');
+                card.classList.remove('swiping-right');
+            } else {
+                card.classList.remove('swiping-right', 'swiping-left');
+            }
+        }
+    }, { passive: true });
+
+    card.addEventListener('touchend', function() {
+        if (!swiping) return;
+        swiping = false;
+        card.classList.remove('swiping-right', 'swiping-left');
+
+        if (currentX > 80) {
+            // Swipe right → approve
+            card.style.transform = 'translateX(100%)';
+            card.style.opacity = '0';
+            setTimeout(function() { card.remove(); }, 200);
+            _respondToProposedAction(actionId, 'approved', null);
+        } else if (currentX < -80) {
+            // Swipe left → dismiss
+            card.style.transform = 'translateX(-100%)';
+            card.style.opacity = '0';
+            setTimeout(function() { card.remove(); }, 200);
+            _respondToProposedAction(actionId, 'dismissed', null);
+        } else {
+            card.style.transform = '';
+            card.style.opacity = '';
+        }
+        currentX = 0;
+    });
+}
+
+function _respondToProposedAction(actionId, response, cardEl) {
+    // Remove from local cache
+    _proposedActions = _proposedActions.filter(function(a) { return a.id !== actionId; });
+
+    // Remove card with animation if not already handled by swipe
+    if (cardEl) {
+        cardEl.style.transition = 'opacity 0.2s, transform 0.2s';
+        cardEl.style.opacity = '0';
+        cardEl.style.transform = response === 'dismissed' ? 'translateX(-100%)' : 'translateX(100%)';
+        setTimeout(function() { cardEl.remove(); }, 200);
+    }
+
+    // Update counter
+    var countEl = document.getElementById('triageCount');
+    if (countEl) countEl.textContent = _proposedActions.length + ' action' + (_proposedActions.length !== 1 ? 's' : '');
+
+    // Show empty state if deck is empty
+    if (_proposedActions.length === 0) {
+        setTimeout(function() { _renderTriageDeck(); }, 250);
+    }
+
+    // API call
+    bakerFetch('/api/proposed-actions/' + actionId + '/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ response: response }),
+    }).then(function() {
+        refreshActionBadge();
+    }).catch(function(e) {
+        console.error('Action response failed:', e);
+    });
+
+    // Show undo toast
+    _showActionUndoToast(actionId, response);
+}
+
+function _showActionUndoToast(actionId, response) {
+    var label = response === 'approved' ? 'Action approved' :
+                response === 'done' ? 'Marked as done' :
+                response === 'dismissed' ? 'Action skipped' : 'Updated';
+
+    var toast = document.createElement('div');
+    toast.className = 'undo-toast';
+    var text = document.createElement('span');
+    text.textContent = label;
+    toast.appendChild(text);
+    document.body.appendChild(toast);
+
+    // Auto-remove after 2s (no undo for now — keeps it simple)
+    setTimeout(function() {
+        toast.style.transition = 'opacity 0.3s';
+        toast.style.opacity = '0';
+        setTimeout(function() { toast.remove(); }, 300);
+    }, 2000);
 }
 
 document.addEventListener('DOMContentLoaded', init);

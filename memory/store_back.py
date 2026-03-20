@@ -4062,9 +4062,63 @@ class SentinelStoreBack:
         finally:
             self._put_conn(conn)
 
+    def _should_throttle_push(self, tier: int) -> bool:
+        """Check quiet hours, daily cap, cooldown. T1 bypasses all throttles."""
+        if tier <= 1:
+            return False  # T1 always breaks through
+
+        now = datetime.now(timezone.utc)
+        hour_utc = now.hour
+
+        # Quiet hours: 21:00-06:00 UTC (22:00-07:00 CET)
+        quiet_start = getattr(config.web_push, 'quiet_start_utc', 21)
+        quiet_end = getattr(config.web_push, 'quiet_end_utc', 6)
+        if quiet_start <= hour_utc or hour_utc < quiet_end:
+            return True
+
+        conn = self._get_conn()
+        if conn:
+            try:
+                cur = conn.cursor()
+                # Daily cap: max 8 pushes (count T1/T2 alerts created today)
+                daily_cap = getattr(config.web_push, 'daily_cap', 8)
+                cur.execute("""
+                    SELECT COUNT(*) FROM alerts
+                    WHERE tier <= 2 AND created_at > CURRENT_DATE
+                """)
+                today_count = cur.fetchone()[0]
+                if today_count >= daily_cap:
+                    cur.close()
+                    return True
+
+                # Cooldown: 15 min between pushes
+                cooldown_min = getattr(config.web_push, 'cooldown_minutes', 15)
+                cur.execute("""
+                    SELECT MAX(created_at) FROM alerts
+                    WHERE tier <= 2 AND created_at > NOW() - INTERVAL '1 hour'
+                """)
+                last_push = cur.fetchone()[0]
+                cur.close()
+                if last_push:
+                    elapsed = (now - last_push).total_seconds() / 60.0
+                    if elapsed < cooldown_min:
+                        return True
+            except Exception as e:
+                logger.debug(f"Throttle check failed (non-fatal): {e}")
+            finally:
+                self._put_conn(conn)
+
+        return False
+
     def _send_web_push_all(self, alert_id: int, tier: int, title: str):
         """Send Web Push notification to all registered subscriptions."""
         import json as _json
+
+        # Throttle check — T1 always breaks through
+        if self._should_throttle_push(tier):
+            logger.debug(f"Push throttled for alert {alert_id} (tier={tier})")
+            return
+
         try:
             from pywebpush import webpush, WebPushException
         except ImportError:

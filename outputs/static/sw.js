@@ -33,6 +33,14 @@ self.addEventListener('push', function(event) {
         },
     };
 
+    // Morning triage — override title/tag/url
+    if (data.type === 'morning_triage') {
+        title = 'Baker Morning Triage';
+        options.body = data.title;
+        options.tag = 'baker-morning-' + new Date().toISOString().slice(0, 10);
+        options.data.url = '/mobile?tab=actions';
+    }
+
     event.waitUntil(
         self.registration.showNotification(title, options)
     );
@@ -48,6 +56,7 @@ self.addEventListener('notificationclick', function(event) {
             // Focus existing Baker tab if found
             for (var i = 0; i < clients.length; i++) {
                 if (clients[i].url.includes('/mobile') || clients[i].url.includes('/static/index')) {
+                    clients[i].navigate(url);
                     return clients[i].focus();
                 }
             }
