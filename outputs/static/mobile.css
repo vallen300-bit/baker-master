@@ -807,6 +807,12 @@ html, body {
   padding: 4px 0;
 }
 
+/* Fix: ensure [hidden] is respected even with display:flex rules */
+.upload-overlay[hidden],
+.trip-overlay[hidden] {
+  display: none !important;
+}
+
 /* ═══ UPLOAD OVERLAY ═══ */
 .upload-overlay {
   position: fixed;
