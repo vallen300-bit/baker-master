@@ -7263,6 +7263,25 @@ async def admin_run_sentiment_backfill(background_tasks: BackgroundTasks):
 
 
 # ============================================================
+# CROSS-MATTER-CONVERGENCE-1: Convergence API
+# ============================================================
+
+@app.get("/api/convergence", tags=["convergence"], dependencies=[Depends(verify_api_key)])
+async def get_convergence_report():
+    """Run on-demand cross-matter convergence detection."""
+    from orchestrator.convergence_detector import get_convergence_report
+    return get_convergence_report()
+
+
+@app.post("/api/admin/run-convergence", tags=["admin"], dependencies=[Depends(verify_api_key)])
+async def admin_run_convergence(background_tasks: BackgroundTasks):
+    """Manually trigger weekly convergence detection."""
+    from orchestrator.convergence_detector import run_convergence_detection
+    background_tasks.add_task(run_convergence_detection)
+    return {"status": "triggered", "note": "Convergence detection running in background"}
+
+
+# ============================================================
 # CLI runner
 # ============================================================
 

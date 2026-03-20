@@ -346,6 +346,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: sentiment_backfill (every 6 hours)")
 
+    # CROSS-MATTER-CONVERGENCE-1: Weekly convergence detection — Wednesdays 06:00 UTC
+    from orchestrator.convergence_detector import run_convergence_detection
+    scheduler.add_job(
+        run_convergence_detection,
+        CronTrigger(day_of_week="wed", hour=6, minute=0),
+        id="convergence_detection", name="Cross-matter convergence detection",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: convergence_detection (Wednesdays 06:00 UTC)")
+
 
 def start_scheduler():
     """Create and start the BackgroundScheduler. Idempotent — safe to call twice."""

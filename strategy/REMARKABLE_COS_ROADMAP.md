@@ -76,7 +76,7 @@ Goes beyond cadence tracking (which only measures frequency). Sentiment trajecto
 
 ---
 
-### 5. Cross-Matter Convergence Detection — TO BUILD
+### 5. Cross-Matter Convergence Detection — SHIPPED (Session 29)
 **Baker connects dots across domains that humans miss.**
 
 - Weekly job: extract key entities (people, companies, amounts, dates) from recent alerts + emails + documents across ALL matters
@@ -100,9 +100,9 @@ Example convergences:
 | **Done** | Weekly priorities + Tactical briefs | Session 28 | Baker focuses + prepares |
 | **Done** | Proactive initiative engine | Session 29 | Baker proposes actions |
 | **Done** | Relationship sentiment | Session 29 | Baker reads between lines |
-| **Session 30** | Cross-matter convergence | Next session | Baker connects dots |
+| **Done** | Cross-matter convergence | Session 29 | Baker connects dots |
 
-After all 5: Baker is no longer a tool you use. Baker is an advisor who *thinks for you*.
+**All 5 shipped in Session 28-29.** Baker is no longer a tool you use. Baker is an advisor who *thinks for you*.
 
 ---
 

@@ -214,6 +214,9 @@ def run_sentiment_backfill():
 
         logger.info(f"Sentiment backfill complete: {scored} interactions scored")
 
+        # After scoring, update sentiment trends on vip_contacts
+        _update_vip_sentiment_trends(cur, conn)
+
     except Exception as e:
         logger.error(f"Sentiment backfill failed: {e}")
     finally:
@@ -221,7 +224,52 @@ def run_sentiment_backfill():
 
 
 # ─────────────────────────────────────────────────
-# Sentiment trend computation
+# Update vip_contacts.sentiment_trend
+# ─────────────────────────────────────────────────
+
+def _update_vip_sentiment_trends(cur, conn):
+    """Update sentiment_trend on vip_contacts for all contacts with 5+ scored interactions."""
+    try:
+        cur.execute("""
+            WITH scored AS (
+                SELECT
+                    ci.contact_id,
+                    CAST(ci.sentiment AS INTEGER) as score,
+                    CASE WHEN ci.timestamp > NOW() - INTERVAL '30 days' THEN TRUE ELSE FALSE END as is_recent
+                FROM contact_interactions ci
+                WHERE ci.direction = 'inbound'
+                  AND ci.sentiment IS NOT NULL
+                  AND ci.sentiment ~ '^[1-5]$'
+            ),
+            trends AS (
+                SELECT
+                    contact_id,
+                    AVG(score) as avg_all,
+                    AVG(CASE WHEN is_recent THEN score END) as avg_recent,
+                    COUNT(*) as total
+                FROM scored
+                GROUP BY contact_id
+                HAVING COUNT(*) >= 5
+            )
+            UPDATE vip_contacts vc
+            SET sentiment_trend = CASE
+                WHEN t.avg_recent IS NULL THEN 'insufficient_data'
+                WHEN t.avg_recent - t.avg_all >= 0.5 THEN 'warming'
+                WHEN t.avg_all - t.avg_recent >= 0.5 THEN 'cooling'
+                ELSE 'stable'
+            END
+            FROM trends t
+            WHERE vc.id = t.contact_id
+        """)
+        updated = cur.rowcount
+        conn.commit()
+        logger.info(f"Updated sentiment_trend for {updated} contacts")
+    except Exception as e:
+        logger.warning(f"VIP sentiment trend update failed (non-fatal): {e}")
+
+
+# ─────────────────────────────────────────────────
+# Sentiment trend computation (API)
 # ─────────────────────────────────────────────────
 
 def compute_sentiment_trends() -> list:
