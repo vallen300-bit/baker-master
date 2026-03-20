@@ -285,7 +285,7 @@ class ChainConfig:
     """AUTONOMOUS-CHAINS-1: Plan-execute-verify configuration."""
     enabled: bool = os.getenv("BAKER_CHAINS_ENABLED", "false").lower() == "true"
     max_steps: int = 7
-    timeout_seconds: float = float(os.getenv("BAKER_CHAIN_TIMEOUT", "60"))
+    timeout_seconds: float = float(os.getenv("BAKER_CHAIN_TIMEOUT", "120"))
     notify_mode: str = "write_actions_only"  # "always" | "write_actions_only" | "t1_only"
     max_chains_per_hour: int = 10  # prevent runaway loops
 
