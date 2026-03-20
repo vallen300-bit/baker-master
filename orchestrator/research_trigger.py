@@ -246,24 +246,97 @@ def _notify_research_proposal(proposal_id: int, subject_name: str, context: str,
 
 
 # ─────────────────────────────────────────────────
+# Content pre-filter (cheap regex gate before Haiku)
+# ─────────────────────────────────────────────────
+
+import re as _re
+
+# Patterns that suggest forwarded intelligence (not casual chat)
+_INTELLIGENCE_PATTERNS = _re.compile(
+    r'(?:'
+    r'forwarded|weitergeleitet|'       # forwarded message markers
+    r'FW:|Fwd:|WG:|'                   # email forward prefixes
+    r'lawsuit|litigation|Klage|Rechtsstreit|'  # legal
+    r'acquisition|Akquisition|Übernahme|'      # deals
+    r'due\s*diligence|term\s*sheet|LOI|'       # deal terms
+    r'article|Artikel|press|Presse|media|'     # media coverage
+    r'court|Gericht|arbitration|Schiedsgericht|'  # courts
+    r'claim|Forderung|dispute|Streit|'         # disputes
+    r'competitor|Wettbewerber|'                # competitive intel
+    r'investigation|Ermittlung|'               # investigations
+    r'bankrupt|Insolvenz|insolvent|'           # financial distress
+    r'fraud|Betrug|'                           # fraud
+    r'regulatory|Regulierung|compliance|'      # regulatory
+    r'counterparty|Gegenpartei|'               # counterparties
+    r'subcontractor|Subunternehmer|Nachunternehmer|'  # construction
+    r'ImmoFokus|Immobilien|Gewerbe|'           # real estate media
+    r'GmbH|AG|Ltd|LLC|Corp|S\.A\.|'           # company suffixes
+    r'Dr\.|Mag\.|RA\s|Rechtsanwalt'           # professional titles
+    r')',
+    _re.IGNORECASE
+)
+
+# Patterns that suggest casual/non-research content
+_CASUAL_PATTERNS = _re.compile(
+    r'(?:'
+    r'good\s*morning|guten\s*morgen|'
+    r'happy\s*birthday|alles\s*gute|'
+    r'restaurant|dinner|lunch|breakfast|'
+    r'thank\s*you|danke|merci|'
+    r'see\s*you|bis\s*bald|'
+    r'flight\s*landed|arrived|angekommen'
+    r')',
+    _re.IGNORECASE
+)
+
+
+def _passes_content_prefilter(message_body: str) -> bool:
+    """
+    Cheap regex pre-filter: does the message look like it might contain
+    forwarded intelligence? This runs before the Haiku classification
+    to keep costs near zero on casual messages.
+    """
+    if not message_body or len(message_body) < 200:
+        return False
+
+    # Must have at least one intelligence-related pattern
+    if not _INTELLIGENCE_PATTERNS.search(message_body):
+        return False
+
+    # If it's overwhelmingly casual, skip
+    casual_matches = len(_CASUAL_PATTERNS.findall(message_body))
+    intel_matches = len(_INTELLIGENCE_PATTERNS.findall(message_body))
+    if casual_matches > intel_matches and casual_matches >= 3:
+        return False
+
+    return True
+
+
+# ─────────────────────────────────────────────────
 # Main hook — called from waha_webhook.py
 # ─────────────────────────────────────────────────
 
 def check_research_trigger(message_body: str, sender_name: str, msg_id: str, tier: int = 3):
     """
-    Check if a VIP WhatsApp message is a research trigger.
-    Called from waha_webhook.py after pipeline processing.
-    Only runs on tier <= 2 messages with >200 chars.
+    Check if a WhatsApp message contains forwarded intelligence worthy
+    of a multi-specialist research dossier.
+
+    Content-driven (not sender-driven): any message >200 chars that passes
+    the regex pre-filter gets classified by Haiku. The pre-filter costs
+    nothing; the Haiku call costs ~EUR 0.01 and only fires when the
+    content looks like intelligence.
     """
-    if tier > 2:
-        return
     if not message_body or len(message_body) < 200:
+        return
+
+    # Cheap regex pre-filter — skip casual messages
+    if not _passes_content_prefilter(message_body):
         return
 
     try:
         classification = classify_research_trigger(message_body, sender_name)
         if not classification.get("is_trigger"):
-            logger.debug(f"WhatsApp from {sender_name}: not a research trigger")
+            logger.debug(f"WhatsApp from {sender_name}: not a research trigger (Haiku rejected)")
             return
 
         logger.info(f"Research trigger detected from {sender_name}: {classification.get('subject_name')}")

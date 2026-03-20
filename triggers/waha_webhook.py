@@ -808,14 +808,6 @@ async def waha_webhook(
             pipeline.run(trigger)
         except Exception as e:
             logger.error(f"WhatsApp webhook: pipeline failed for {sender_name}: {e}")
-
-        # ART-1: Check if this VIP message is a research trigger
-        try:
-            from orchestrator.research_trigger import check_research_trigger
-            _tier = _scored.get("tier", 3) if _scored else 3
-            check_research_trigger(combined_body, sender_name, msg_id, tier=_tier)
-        except Exception as _rt_e:
-            logger.debug(f"Research trigger check failed (non-fatal): {_rt_e}")
     else:
         from triggers.state import trigger_state
         trigger_state.add_to_briefing_queue([{
@@ -826,5 +818,13 @@ async def waha_webhook(
             "message_count": 1,
             "priority": trigger.priority,
         }])
+
+    # ART-1: Check if this message contains research-worthy intelligence
+    # Content-driven (not tier-driven) — regex pre-filter + Haiku classification
+    try:
+        from orchestrator.research_trigger import check_research_trigger
+        check_research_trigger(combined_body, sender_name, msg_id)
+    except Exception as _rt_e:
+        logger.debug(f"Research trigger check failed (non-fatal): {_rt_e}")
 
     return {"status": "processed", "sender": sender_name}
