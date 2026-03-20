@@ -7229,32 +7229,6 @@ async def admin_run_initiatives(background_tasks: BackgroundTasks):
     return {"status": "triggered", "note": "Initiative engine running in background"}
 
 
-@app.get("/api/admin/debug-initiatives", tags=["admin"], dependencies=[Depends(verify_api_key)])
-async def debug_initiatives():
-    """Debug: gather initiative context synchronously and return it."""
-    from orchestrator.initiative_engine import _gather_context, _format_context, _ensure_table
-    _ensure_table()
-    ctx = _gather_context()
-    signal_count = (
-        len(ctx.get("approaching_deadlines", []))
-        + len(ctx.get("overdue_deadlines", []))
-        + len(ctx.get("cadence_anomalies", []))
-        + len(ctx.get("unanswered_emails", []))
-        + len(ctx.get("pending_alerts", []))
-    )
-    return {
-        "signal_count": signal_count,
-        "priorities": len(ctx.get("priorities", [])),
-        "approaching_deadlines": len(ctx.get("approaching_deadlines", [])),
-        "overdue_deadlines": len(ctx.get("overdue_deadlines", [])),
-        "cadence_anomalies": len(ctx.get("cadence_anomalies", [])),
-        "unanswered_emails": len(ctx.get("unanswered_emails", [])),
-        "pending_alerts": len(ctx.get("pending_alerts", [])),
-        "calendar_next_48h": len(ctx.get("calendar_next_48h", [])),
-        "recent_chains": len(ctx.get("recent_chains", [])),
-        "context_preview": _format_context(ctx)[:2000],
-    }
-
 
 # ============================================================
 # SENTIMENT-TRAJECTORY-1: Sentiment API
