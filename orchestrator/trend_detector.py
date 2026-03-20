@@ -305,7 +305,9 @@ def run_trend_detection():
         store = SentinelStoreBack._get_global_instance()
         now = datetime.now(timezone.utc)
         month_name = now.strftime("%B %Y")
-        store.store_deep_analysis(
+        import uuid
+        store.log_deep_analysis(
+            analysis_id=str(uuid.uuid4()),
             topic=f"Monthly Trend Report — {month_name}",
             analysis_text=report,
             prompt="Automated monthly trend detection (F6)",
