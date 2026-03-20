@@ -613,9 +613,12 @@ async function init() {
     await loadConfig();
     await loadCapabilities();
 
-    // Camera, New Chat
+    // Camera, New Chat, Upload, Trip
     setupCamera();
+    _setupUpload();
+    loadActiveTrip();
     document.getElementById('newChatBtn').addEventListener('click', function() { stopSpeaking(); newChat(); });
+    document.getElementById('tripBackBtn').addEventListener('click', function() { _closeTripOverlay(); });
 
     // Pre-load voices for Play button (iOS requires this)
     if (window.speechSynthesis) {
@@ -1095,6 +1098,453 @@ function _connectMobileAlertStream() {
         es.close();
         setTimeout(_connectMobileAlertStream, 30000);
     };
+}
+
+// ═══ E4: TRIP BANNER + CARDS ═══
+var _activeTrip = null;
+var _tripCardsData = null;
+
+async function loadActiveTrip() {
+    try {
+        var r = await bakerFetch('/api/trips');
+        if (!r.ok) return;
+        var data = await r.json();
+        var trips = data.trips || [];
+        if (trips.length === 0) return;
+
+        // Find active trip: prefer one that covers today, else nearest upcoming
+        var today = new Date().toISOString().slice(0, 10);
+        var active = null;
+        for (var i = 0; i < trips.length; i++) {
+            var t = trips[i];
+            if (t.status === 'discarded') continue;
+            var endDate = t.end_date || t.start_date;
+            if (t.start_date <= today && endDate >= today) { active = t; break; }
+        }
+        if (!active) {
+            // Find nearest upcoming
+            var upcoming = trips.filter(function(t) {
+                return t.status !== 'discarded' && t.start_date >= today;
+            }).sort(function(a, b) { return a.start_date.localeCompare(b.start_date); });
+            if (upcoming.length > 0) active = upcoming[0];
+        }
+        // Fallback: most recent past trip within 3 days
+        if (!active) {
+            var recent = trips.filter(function(t) {
+                if (t.status === 'discarded') return false;
+                var ed = t.end_date || t.start_date;
+                if (!ed) return false;
+                var diffDays = (new Date(today) - new Date(ed)) / 86400000;
+                return diffDays >= 0 && diffDays <= 3;
+            }).sort(function(a, b) { return (b.end_date || b.start_date).localeCompare(a.end_date || a.start_date); });
+            if (recent.length > 0) active = recent[0];
+        }
+
+        if (!active) return;
+        _activeTrip = active;
+        _renderTripBanner(active);
+    } catch (e) {
+        console.error('loadActiveTrip failed:', e);
+    }
+}
+
+function _renderTripBanner(trip) {
+    var banner = document.getElementById('tripBanner');
+    var content = document.getElementById('tripBannerContent');
+    if (!banner || !content) return;
+
+    var dateStr = trip.start_date || '';
+    if (trip.end_date && trip.end_date !== trip.start_date) dateStr += ' \u2014 ' + trip.end_date;
+    var meta = dateStr;
+    if (trip.event_name) meta = trip.event_name + ' \u00B7 ' + dateStr;
+
+    content.textContent = '';
+    var dest = document.createElement('div');
+    dest.className = 'trip-banner-dest';
+    dest.textContent = (trip.origin ? trip.origin + ' \u2192 ' : '') + (trip.destination || 'Trip');
+    content.appendChild(dest);
+
+    var metaEl = document.createElement('div');
+    metaEl.className = 'trip-banner-meta';
+    metaEl.textContent = meta;
+    content.appendChild(metaEl);
+
+    banner.hidden = false;
+    banner.addEventListener('click', function() { _openTripOverlay(trip); });
+}
+
+async function _openTripOverlay(trip) {
+    var overlay = document.getElementById('tripOverlay');
+    var title = document.getElementById('tripOverlayTitle');
+    var container = document.getElementById('tripCardsContainer');
+    if (!overlay) return;
+
+    title.textContent = trip.destination || 'Trip';
+    container.textContent = '';
+    var loading = document.createElement('div');
+    loading.className = 'empty-state';
+    loading.textContent = 'Loading trip cards...';
+    container.appendChild(loading);
+    overlay.hidden = false;
+
+    try {
+        var resp = await bakerFetch('/api/trips/' + trip.id + '/cards');
+        if (!resp.ok) throw new Error('API ' + resp.status);
+        _tripCardsData = await resp.json();
+        _renderTripCards(trip, _tripCardsData, container);
+    } catch (e) {
+        container.textContent = '';
+        var err = document.createElement('div');
+        err.className = 'empty-state';
+        err.textContent = 'Failed to load trip cards.';
+        container.appendChild(err);
+    }
+}
+
+function _closeTripOverlay() {
+    var overlay = document.getElementById('tripOverlay');
+    if (overlay) overlay.hidden = true;
+}
+
+function _renderTripCards(trip, cards, container) {
+    container.textContent = '';
+
+    // Objective card (from trip data)
+    if (trip.strategic_objective) {
+        container.appendChild(_makeTripCard('Objective', '\uD83C\uDFAF', null, function(body) {
+            var obj = document.createElement('div');
+            obj.className = 'trip-objective';
+            obj.textContent = trip.strategic_objective;
+            body.appendChild(obj);
+        }, true));
+    }
+
+    // Timezone card
+    var tz = (cards.logistics || {}).timezone || (cards.timezone || {}).timezone || {};
+    if (tz.diff) {
+        container.appendChild(_makeTripCard('Timezone', '\uD83C\uDF0D', null, function(body) {
+            var strip = document.createElement('div');
+            strip.className = 'trip-tz-strip';
+            var d = document.createElement('span');
+            d.textContent = 'Destination: ';
+            var dStrong = document.createElement('strong');
+            dStrong.textContent = tz.local_now || '?';
+            d.appendChild(dStrong);
+            strip.appendChild(d);
+            var h = document.createElement('span');
+            h.textContent = 'Zurich: ' + (tz.home_now || '?');
+            strip.appendChild(h);
+            var diff = document.createElement('span');
+            diff.textContent = tz.diff;
+            var diffStrong = document.createElement('strong');
+            diffStrong.textContent = tz.diff;
+            diff.textContent = '';
+            diff.appendChild(diffStrong);
+            strip.appendChild(diff);
+            body.appendChild(strip);
+        }, true));
+    }
+
+    // Agenda card
+    var agenda = cards.agenda || {};
+    var days = agenda.days || [];
+    var eventCount = 0;
+    for (var di = 0; di < days.length; di++) eventCount += (days[di].events || []).length;
+    container.appendChild(_makeTripCard('Agenda', '\uD83D\uDCC5', eventCount || null, function(body) {
+        if (days.length === 0) {
+            _addEmpty(body, 'No calendar events for this trip.');
+            return;
+        }
+        for (var i = 0; i < days.length; i++) {
+            var dayLabel = document.createElement('div');
+            dayLabel.style.cssText = 'font-size:11px;font-weight:600;color:var(--text3);text-transform:uppercase;margin:8px 0 4px;';
+            dayLabel.textContent = days[i].date;
+            body.appendChild(dayLabel);
+            var evts = days[i].events || [];
+            for (var j = 0; j < evts.length; j++) {
+                var ev = evts[j];
+                var item = document.createElement('div');
+                item.className = 'trip-card-item';
+                var startTime = '';
+                try { startTime = new Date(ev.start).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}); } catch(e) {}
+                var titleDiv = document.createElement('div');
+                titleDiv.className = 'trip-card-item-title';
+                titleDiv.textContent = (startTime ? startTime + '  ' : '') + (ev.title || '');
+                item.appendChild(titleDiv);
+                if (ev.location) {
+                    var loc = document.createElement('div');
+                    loc.className = 'trip-card-item-sub';
+                    loc.textContent = ev.location;
+                    item.appendChild(loc);
+                }
+                body.appendChild(item);
+            }
+        }
+    }));
+
+    // Logistics card
+    var logistics = cards.logistics || {};
+    var emails = logistics.emails || [];
+    var wa = logistics.whatsapp || [];
+    var logCount = emails.length + wa.length;
+    container.appendChild(_makeTripCard('Logistics', '\uD83D\uDCE7', logCount || null, function(body) {
+        if (emails.length === 0 && wa.length === 0) {
+            _addEmpty(body, 'No logistics messages found.');
+            return;
+        }
+        if (emails.length > 0) {
+            var emailLabel = document.createElement('div');
+            emailLabel.style.cssText = 'font-size:10px;color:var(--text3);text-transform:uppercase;margin-bottom:4px;';
+            emailLabel.textContent = 'Emails (' + emails.length + ')';
+            body.appendChild(emailLabel);
+            for (var i = 0; i < Math.min(emails.length, 5); i++) {
+                var em = emails[i];
+                var item = document.createElement('div');
+                item.className = 'trip-card-item';
+                var t = document.createElement('div');
+                t.className = 'trip-card-item-title';
+                t.textContent = em.subject || 'No subject';
+                item.appendChild(t);
+                var sub = document.createElement('div');
+                sub.className = 'trip-card-item-sub';
+                sub.textContent = (em.sender_name || '') + (em.received_date ? ' \u00B7 ' + new Date(em.received_date).toLocaleDateString() : '');
+                item.appendChild(sub);
+                body.appendChild(item);
+            }
+        }
+        if (wa.length > 0) {
+            var waLabel = document.createElement('div');
+            waLabel.style.cssText = 'font-size:10px;color:var(--text3);text-transform:uppercase;margin:8px 0 4px;';
+            waLabel.textContent = 'WhatsApp (' + wa.length + ')';
+            body.appendChild(waLabel);
+            for (var i = 0; i < Math.min(wa.length, 5); i++) {
+                var m = wa[i];
+                var item = document.createElement('div');
+                item.className = 'trip-card-item';
+                var t = document.createElement('div');
+                t.className = 'trip-card-item-title';
+                t.textContent = m.sender_name || '';
+                item.appendChild(t);
+                var snip = document.createElement('div');
+                snip.className = 'trip-card-item-sub';
+                snip.textContent = (m.snippet || '').substring(0, 120);
+                item.appendChild(snip);
+                body.appendChild(item);
+            }
+        }
+    }));
+
+    // Reading card
+    var reading = cards.reading || {};
+    var docs = reading.documents || [];
+    container.appendChild(_makeTripCard('Reading', '\uD83D\uDCD6', docs.length || null, function(body) {
+        if (docs.length === 0) {
+            _addEmpty(body, 'No priority documents found.');
+            return;
+        }
+        for (var i = 0; i < docs.length; i++) {
+            var d = docs[i];
+            var item = document.createElement('div');
+            item.className = 'trip-card-item';
+            var t = document.createElement('div');
+            t.className = 'trip-card-item-title';
+            t.textContent = d.filename || 'Document';
+            item.appendChild(t);
+            if (d.document_type) {
+                var sub = document.createElement('div');
+                sub.className = 'trip-card-item-sub';
+                sub.textContent = d.document_type.replace(/_/g, ' ');
+                item.appendChild(sub);
+            }
+            body.appendChild(item);
+        }
+    }));
+
+    // Radar card
+    var radar = cards.radar || {};
+    var dormant = radar.dormant_contacts || [];
+    container.appendChild(_makeTripCard('Radar', '\uD83D\uDCE1', dormant.length || null, function(body) {
+        if (dormant.length === 0) {
+            _addEmpty(body, 'No dormant contacts at this destination.');
+            return;
+        }
+        for (var i = 0; i < dormant.length; i++) {
+            var c = dormant[i];
+            var item = document.createElement('div');
+            item.className = 'trip-card-item';
+            item.style.display = 'flex';
+            item.style.justifyContent = 'space-between';
+            item.style.alignItems = 'center';
+            var left = document.createElement('div');
+            var name = document.createElement('span');
+            name.className = 'trip-card-item-title';
+            name.textContent = c.name || '';
+            left.appendChild(name);
+            if (c.role) {
+                var role = document.createElement('div');
+                role.className = 'trip-card-item-sub';
+                role.textContent = c.role;
+                left.appendChild(role);
+            }
+            item.appendChild(left);
+            var ago = document.createElement('span');
+            ago.style.cssText = 'font-size:11px;color:var(--text3);flex-shrink:0;';
+            ago.textContent = c.days_since_contact ? c.days_since_contact + 'd ago' : 'Never';
+            item.appendChild(ago);
+            body.appendChild(item);
+        }
+    }));
+}
+
+function _makeTripCard(title, icon, count, renderFn, startExpanded) {
+    var card = document.createElement('div');
+    card.className = 'trip-card' + (startExpanded ? ' expanded' : '');
+
+    var header = document.createElement('div');
+    header.className = 'trip-card-header';
+
+    var iconEl = document.createElement('span');
+    iconEl.className = 'trip-card-icon';
+    iconEl.textContent = icon;
+    header.appendChild(iconEl);
+
+    var titleEl = document.createElement('span');
+    titleEl.className = 'trip-card-title';
+    titleEl.textContent = title;
+    header.appendChild(titleEl);
+
+    if (count !== null && count !== undefined) {
+        var countEl = document.createElement('span');
+        countEl.className = 'trip-card-count';
+        countEl.textContent = count;
+        header.appendChild(countEl);
+    }
+
+    var toggle = document.createElement('span');
+    toggle.className = 'trip-card-toggle';
+    toggle.textContent = '\u25BE';
+    header.appendChild(toggle);
+
+    header.addEventListener('click', function() { card.classList.toggle('expanded'); });
+    card.appendChild(header);
+
+    var body = document.createElement('div');
+    body.className = 'trip-card-body';
+    renderFn(body);
+    card.appendChild(body);
+
+    return card;
+}
+
+function _addEmpty(container, text) {
+    var el = document.createElement('div');
+    el.className = 'trip-card-empty';
+    el.textContent = text;
+    container.appendChild(el);
+}
+
+// ═══ E8: FILE UPLOAD ═══
+var _uploadFile = null;
+
+function _setupUpload() {
+    var btn = document.getElementById('uploadBtn');
+    var overlay = document.getElementById('uploadOverlay');
+    var closeBtn = document.getElementById('uploadCloseBtn');
+    var dropzone = document.getElementById('uploadDropzone');
+    var fileInput = document.getElementById('uploadFileInput');
+    var sendBtn = document.getElementById('uploadSendBtn');
+
+    btn.addEventListener('click', function() { _openUploadSheet(); });
+    closeBtn.addEventListener('click', function() { _closeUploadSheet(); });
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) _closeUploadSheet();
+    });
+    dropzone.addEventListener('click', function() { fileInput.click(); });
+    fileInput.addEventListener('change', function() {
+        if (fileInput.files[0]) _previewUploadFile(fileInput.files[0]);
+    });
+    sendBtn.addEventListener('click', function() { _doUpload(); });
+}
+
+function _openUploadSheet() {
+    _uploadFile = null;
+    var overlay = document.getElementById('uploadOverlay');
+    var dropzone = document.getElementById('uploadDropzone');
+    var preview = document.getElementById('uploadPreview');
+    var progress = document.getElementById('uploadProgress');
+    var result = document.getElementById('uploadResult');
+    var fileInput = document.getElementById('uploadFileInput');
+
+    dropzone.hidden = false;
+    preview.hidden = true;
+    progress.hidden = true;
+    result.hidden = true;
+    result.className = 'upload-result';
+    fileInput.value = '';
+    overlay.hidden = false;
+}
+
+function _closeUploadSheet() {
+    document.getElementById('uploadOverlay').hidden = true;
+    _uploadFile = null;
+}
+
+function _previewUploadFile(file) {
+    _uploadFile = file;
+    var dropzone = document.getElementById('uploadDropzone');
+    var preview = document.getElementById('uploadPreview');
+    var info = document.getElementById('uploadFileInfo');
+    var warn = document.getElementById('uploadSizeWarn');
+
+    dropzone.hidden = true;
+    preview.hidden = false;
+
+    var sizeMB = (file.size / 1048576).toFixed(1);
+    info.textContent = file.name + ' (' + sizeMB + ' MB)';
+    warn.hidden = file.size <= 5242880;
+}
+
+async function _doUpload() {
+    if (!_uploadFile) return;
+    var preview = document.getElementById('uploadPreview');
+    var progress = document.getElementById('uploadProgress');
+    var result = document.getElementById('uploadResult');
+    var sendBtn = document.getElementById('uploadSendBtn');
+
+    sendBtn.disabled = true;
+    preview.hidden = true;
+    progress.hidden = false;
+
+    try {
+        var formData = new FormData();
+        formData.append('file', _uploadFile);
+
+        var resp = await fetch('/api/documents/upload', {
+            method: 'POST',
+            headers: { 'X-Baker-Key': BAKER.apiKey },
+            body: formData,
+        });
+
+        progress.hidden = true;
+        result.hidden = false;
+
+        if (!resp.ok) {
+            var errText = '';
+            try { errText = (await resp.json()).detail || resp.status; } catch(e) { errText = resp.status; }
+            throw new Error(errText);
+        }
+
+        var data = await resp.json();
+        result.className = 'upload-result success';
+        result.textContent = 'Document uploaded \u2014 Baker will analyze it shortly.';
+
+        // Auto-close after 2s
+        setTimeout(function() { _closeUploadSheet(); }, 2000);
+    } catch (e) {
+        result.className = 'upload-result error';
+        result.textContent = 'Upload failed: ' + e.message;
+        sendBtn.disabled = false;
+    }
 }
 
 document.addEventListener('DOMContentLoaded', init);

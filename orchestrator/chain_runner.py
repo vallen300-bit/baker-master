@@ -368,15 +368,24 @@ def _execute_plan(plan: dict, timeout: float) -> ChainResult:
             logger.warning(f"Chain step {i + 1} skipped: unknown tool '{tool}'")
             continue
 
-        # Execute
+        # Execute with per-tool timeout (30s max per tool)
         step_t0 = time.time()
         tool_ok = True
         tool_err = None
         try:
-            step.result = executor.execute(tool, tool_input)
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(executor.execute, tool, tool_input)
+                step.result = future.result(timeout=30)
             step.success = True
             if tool in _WRITE_TOOLS:
                 result.write_actions += 1
+        except concurrent.futures.TimeoutError:
+            tool_ok = False
+            tool_err = f"Tool {tool} timed out after 30s"
+            step.result = f"Error: {tool_err}"
+            step.success = False
+            logger.warning(f"Chain step {i + 1} ({tool}) timed out after 30s")
         except Exception as e:
             tool_ok = False
             tool_err = str(e)[:500]

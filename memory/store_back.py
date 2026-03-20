@@ -1390,6 +1390,13 @@ class SentinelStoreBack:
             # F3: Communication cadence tracking
             cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS avg_inbound_gap_days FLOAT")
             cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS last_inbound_at TIMESTAMPTZ")
+            # C1: LinkedIn enrichment data
+            cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS linkedin_url TEXT")
+            cur.execute("ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS location VARCHAR(200)")
+            # Performance: GIN index for pg_trgm similarity() on name lookups
+            cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_vip_contacts_name_trgm ON vip_contacts USING gin (name gin_trgm_ops)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_vip_contacts_name_lower ON vip_contacts (LOWER(name))")
             conn.commit()
             cur.close()
             logger.info("vip_contacts profile + networking columns verified")

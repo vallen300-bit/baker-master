@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/mobile.css?v=10">
+    <link rel="stylesheet" href="/static/mobile.css?v=11">
 </head>
 <body>
 <div class="app">
@@ -23,8 +23,26 @@
     <div class="header">
         <img src="/static/baker-face-green.svg" alt="Baker">
         <div class="brand">Baker<span class="brand-sub">AI Chief of Staff</span><span class="alert-badge" id="alertBadge" hidden></span></div>
+        <button class="header-btn" id="uploadBtn" title="Upload document">&#x1F4CE;</button>
         <button class="header-btn" id="muteBtnMobile" title="Mute sounds" onclick="_mobileMuted=!_mobileMuted;this.textContent=_mobileMuted?'&#x1F515;':'&#x1F514;'">&#x1F514;</button>
         <button class="header-btn" id="newChatBtn" title="New conversation">New</button>
+    </div>
+
+    <!-- Trip banner (shown when active/upcoming trip) -->
+    <div class="trip-banner" id="tripBanner" hidden>
+        <div class="trip-banner-content" id="tripBannerContent"></div>
+        <span class="trip-banner-arrow" id="tripBannerArrow">&#9662;</span>
+    </div>
+
+    <!-- Trip cards overlay (expanded view) -->
+    <div class="trip-overlay" id="tripOverlay" hidden>
+        <div class="trip-overlay-header">
+            <button class="trip-back-btn" id="tripBackBtn">&larr; Back</button>
+            <span class="trip-overlay-title" id="tripOverlayTitle"></span>
+        </div>
+        <div class="trip-cards-container" id="tripCardsContainer">
+            <div class="empty-state">Loading trip cards...</div>
+        </div>
     </div>
 
     <!-- Tab bar -->
@@ -86,8 +104,36 @@
         <div class="alerts-footer" id="alertsFooter" hidden></div>
     </div>
 
+    <!-- Upload overlay -->
+    <div class="upload-overlay" id="uploadOverlay" hidden>
+        <div class="upload-sheet">
+            <div class="upload-sheet-header">
+                <span>Upload Document</span>
+                <button class="upload-close-btn" id="uploadCloseBtn">&times;</button>
+            </div>
+            <div class="upload-body">
+                <input type="file" id="uploadFileInput" accept=".pdf,.docx,.xlsx,.csv,.txt" hidden>
+                <div class="upload-dropzone" id="uploadDropzone">
+                    <div class="upload-icon">&#x1F4C4;</div>
+                    <div>Tap to select a file</div>
+                    <div class="upload-hint">PDF, DOCX, XLSX, CSV, TXT</div>
+                </div>
+                <div class="upload-preview" id="uploadPreview" hidden>
+                    <div class="upload-file-info" id="uploadFileInfo"></div>
+                    <div class="upload-size-warn" id="uploadSizeWarn" hidden>Large file (>5 MB) — upload may take a moment</div>
+                    <button class="upload-send-btn" id="uploadSendBtn">Upload</button>
+                </div>
+                <div class="upload-progress" id="uploadProgress" hidden>
+                    <div class="upload-spinner"></div>
+                    <span>Uploading...</span>
+                </div>
+                <div class="upload-result" id="uploadResult" hidden></div>
+            </div>
+        </div>
+    </div>
+
 </div>
 
-<script src="/static/mobile.js?v=12"></script>
+<script src="/static/mobile.js?v=13"></script>
 </body>
 </html>
