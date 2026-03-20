@@ -1219,6 +1219,49 @@ async def dismiss_alert(alert_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.patch("/api/alerts/{alert_id}", tags=["alerts"], dependencies=[Depends(verify_api_key)])
+async def update_alert(alert_id: int, request: Request):
+    """D5: Inline alert editing — update title, matter_slug, tags, tier, board_status."""
+    try:
+        body = await request.json()
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor()
+            allowed = {"title", "matter_slug", "tier", "board_status", "exit_reason"}
+            updates = []
+            params = []
+            for key, value in body.items():
+                if key in allowed:
+                    updates.append(f"{key} = %s")
+                    params.append(value)
+                elif key == "tags" and isinstance(value, list):
+                    updates.append("tags = %s::jsonb")
+                    params.append(json.dumps(value))
+            if not updates:
+                raise HTTPException(status_code=400, detail="No valid fields to update")
+            params.append(alert_id)
+            cur.execute(
+                f"UPDATE alerts SET {', '.join(updates)} WHERE id = %s RETURNING id",
+                params,
+            )
+            row = cur.fetchone()
+            conn.commit()
+            cur.close()
+            if not row:
+                raise HTTPException(status_code=404, detail="Alert not found")
+            return {"status": "updated", "id": alert_id, "fields": list(body.keys())}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"PATCH /api/alerts/{alert_id} failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/alerts/bulk-dismiss", tags=["alerts"], dependencies=[Depends(verify_api_key)])
 async def bulk_dismiss_alerts(req: dict = Body(...)):
     """Bulk dismiss alerts by IDs or by tier+age filter."""

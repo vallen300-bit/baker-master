@@ -122,14 +122,31 @@ WRITE tools:
 - clickup_create: Create a ClickUp task in BAKER space (auto_execute: true)
 
 Rules:
-- Max 7 steps. Be efficient — don't search if you already have the info.
+- Max 5 steps. Be ruthlessly efficient — don't search if context already has the info.
+- Start with get_matter_context (it returns people, keywords, recent emails/WA in one call).
 - Read tools are always auto_execute: true.
 - draft_email is always auto_execute: false (Director approves before sending).
 - create_deadline, create_calendar_event, clickup_create are auto_execute: true.
 - Do NOT include steps that duplicate info already provided in the context.
-- Every plan must end with information gathering — only add write steps if truly needed.
-- Prefer fewer write actions. Don't create deadlines for things already tracked.
+- Only add write steps if there's a clear, specific action to take. Don't create deadlines for things already tracked.
+- Prefer 3-4 focused steps over 6-7 broad ones.
 - director_summary: 2-3 lines for WhatsApp. Bottom-line first.
+- Each step can reference results from previous steps — they execute sequentially.
+
+Example chain (good):
+1. get_matter_context → pulls people, recent emails, WA for the matter
+2. search_emails → find the specific email that triggered this alert
+3. draft_email → draft a follow-up based on what was found
+Total: 3 steps, focused, fast.
+
+Example chain (bad):
+1. search_memory → too broad
+2. search_emails → overlaps with matter context
+3. search_whatsapp → overlaps with matter context
+4. get_contact → already in matter context
+5. get_deadlines → unnecessary unless deadline-related
+6. draft_email → finally does something useful
+Total: 6 steps, 4 are redundant.
 
 Return ONLY valid JSON:
 {
@@ -318,8 +335,69 @@ def _generate_plan(
 # Execution — run each step via ToolExecutor
 # ─────────────────────────────────────────────────
 
+def _adapt_write_steps(plan: dict, read_results: list) -> dict:
+    """After read steps complete, adapt write step inputs using gathered context.
+    Uses Haiku for fast, cheap adaptation (~EUR 0.002)."""
+    write_steps = [s for s in plan.get("steps", []) if s.get("tool") in _WRITE_TOOLS]
+    if not write_steps or not read_results:
+        return plan
+
+    # Build context from read results
+    context_parts = []
+    for step_result in read_results:
+        if step_result.get("success") and step_result.get("result"):
+            context_parts.append(f"[{step_result['tool']}]: {step_result['result'][:1000]}")
+
+    if not context_parts:
+        return plan
+
+    context = "\n\n".join(context_parts)
+
+    try:
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        adapt_prompt = (
+            "Based on the information gathered below, refine the write action inputs. "
+            "Return ONLY a JSON array of updated write steps with the same structure.\n\n"
+            f"Original assessment: {plan.get('assessment', '')}\n\n"
+            f"Gathered context:\n{context[:3000]}\n\n"
+            f"Write steps to refine:\n{json.dumps(write_steps, indent=2)}"
+        )
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1024,
+            messages=[{"role": "user", "content": adapt_prompt}],
+        )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens,
+                         resp.usage.output_tokens, source="chain_adapt")
+        except Exception:
+            pass
+
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
+            if raw.endswith("```"):
+                raw = raw[:-3]
+            raw = raw.strip()
+        adapted = json.loads(raw)
+        if isinstance(adapted, list):
+            # Replace write steps in the plan
+            write_idx = 0
+            for i, step in enumerate(plan["steps"]):
+                if step.get("tool") in _WRITE_TOOLS and write_idx < len(adapted):
+                    plan["steps"][i]["input"] = adapted[write_idx].get("input", step["input"])
+                    write_idx += 1
+            logger.info(f"Chain write steps adapted based on {len(read_results)} read results")
+    except Exception as e:
+        logger.debug(f"Chain adaptation failed (using original plan): {e}")
+
+    return plan
+
+
 def _execute_plan(plan: dict, timeout: float) -> ChainResult:
-    """Execute a chain plan step by step."""
+    """Execute a chain plan step by step with context forwarding."""
     from orchestrator.agent import ToolExecutor
     from orchestrator.agent_metrics import log_tool_call
 
@@ -331,6 +409,20 @@ def _execute_plan(plan: dict, timeout: float) -> ChainResult:
         director_summary=plan.get("director_summary", ""),
         total_steps=len(plan.get("steps", [])),
     )
+
+    # Phase 1: Execute read steps
+    read_results = []
+    write_step_indices = []
+    for i, step_def in enumerate(plan.get("steps", [])):
+        if step_def.get("tool") in _WRITE_TOOLS:
+            write_step_indices.append(i)
+        else:
+            read_results.append({"index": i, **step_def})
+
+    # Phase 2: Adapt write steps based on read results (after all reads complete)
+    # This happens inline during execution — read steps run first, then adaptation, then writes
+
+    read_completed = []
 
     for i, step_def in enumerate(plan.get("steps", [])):
         # Timeout check
@@ -352,6 +444,17 @@ def _execute_plan(plan: dict, timeout: float) -> ChainResult:
             purpose=purpose,
             auto_execute=auto_execute,
         )
+
+        # Adapt write steps when transitioning from reads to writes
+        if tool in _WRITE_TOOLS and read_completed and not getattr(result, '_adapted', False):
+            result._adapted = True
+            try:
+                plan = _adapt_write_steps(plan, read_completed)
+                # Refresh this step's input from adapted plan
+                tool_input = plan["steps"][i].get("input", tool_input)
+                logger.info("Chain: write steps adapted from read context")
+            except Exception as e:
+                logger.debug(f"Chain adaptation skipped: {e}")
 
         # Validate tool exists
         valid_tools = {
@@ -396,6 +499,14 @@ def _execute_plan(plan: dict, timeout: float) -> ChainResult:
         step.elapsed_ms = int((time.time() - step_t0) * 1000)
         result.steps.append(step)
         result.completed_steps += 1
+
+        # Track read results for write step adaptation
+        if step.success and tool not in _WRITE_TOOLS:
+            read_completed.append({
+                "tool": tool,
+                "success": True,
+                "result": step.result[:2000],
+            })
 
         # Log tool call metrics
         try:
