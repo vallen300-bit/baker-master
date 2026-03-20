@@ -58,6 +58,8 @@ Switch hats as needed. When coding, code. When scoping, think.
 | `orchestrator/chain_runner.py` | **AUTONOMOUS-CHAINS-1:** Plan-execute-verify engine. T1/T2 triggers → Claude plans → ToolExecutor runs → verify → WA notify Director |
 | `orchestrator/memory_consolidator.py` | **B4:** Weekly compression of old interactions (>30d) into per-matter Haiku summaries |
 | `orchestrator/trend_detector.py` | **F6:** Monthly pattern analysis — alerts, contacts, costs, matters, deadlines |
+| `orchestrator/initiative_engine.py` | **PROACTIVE-INITIATIVE-1:** Daily initiative proposals (priorities + calendar + deadlines + cadence → 2-3 actions) |
+| `orchestrator/sentiment_scorer.py` | **SENTIMENT-TRAJECTORY-1:** Haiku tone scoring (1-5 scale), batch backfill, sentiment trend computation |
 | `tools/linkedin_client.py` | **C1:** Provider-agnostic LinkedIn enrichment (Netrows first, swap to PDL if needed) |
 
 ### API & Dashboard
@@ -216,7 +218,8 @@ baker-projects, sentinel-interactions, sentinel-email, sentinel-meetings, sentin
 `capability_runs` (AGENT-FRAMEWORK-1), `decomposition_log` (AGENT-FRAMEWORK-1),
 `documents` (SPECIALIST-UPGRADE-1A), `document_extractions` (SPECIALIST-UPGRADE-1B),
 `baker_insights` (SPECIALIST-UPGRADE-1B),
-`trips` (TRIP-INTELLIGENCE-1), `trip_contacts` (TRIP-INTELLIGENCE-1)
+`trips` (TRIP-INTELLIGENCE-1), `trip_contacts` (TRIP-INTELLIGENCE-1),
+`proactive_initiatives` (PROACTIVE-INITIATIVE-1)
 
 ## Architecture: Role Division (Baker vs Cowork)
 
@@ -453,6 +456,7 @@ Sessions 1-16 archived in `SESSION_LOG.md`. One-liner summaries:
 | 26 | Mar 18 | **35 commits, record session.** Operational: DEDUP-3, 198→95 alerts, 391→77 obligations, killed Whoop/commitment_checker/VIP gap. Intelligence: B1 conversation Qdrant, B2 recency decay, B3 decision injection, F1 compounding risk (6 signals), F2 news-counterparty, F5 weekly digest, F7 meeting gap detection, C2 contact silence. Agent: 13→17 tools (query_baker_data, create_deadline, draft_email, create_calendar_event). APIs: G6 data freshness, morning brief silent contacts. Strategy: Backlog v1 (48 items). Code Brisen: alert triage, mobile polish, pipeline dedup, iOS Shortcuts, push alerts (SSE), mobile alerts view, document browser. |
 | 27 | Mar 19 | **9 features shipped.** B1 backfill (89 conversations). ALERT-BATCH-1 (90→1 alert/batch, 142→37 pending). A6 mobile feedback buttons. F3 cadence tracker (36 contacts, cadence-relative silence). D7 morning brief v2 merged (Code Brisen — action cards). G5 health watchdog (circuit breaker auto-recovery + WA alert). A8 insight-to-task (specialist→ClickUp). D6 unified search API. F4 financial signal detector. C6 location backfill (12→27 contacts). Backlog v2 created (27/48 shipped). Proxycurl dead → evaluating Netrows. 4 briefs for Code Brisen (E3, D8, D7, C1). |
 | 28 | Mar 19-20 | **10 features, 8 commits.** AUTONOMOUS-CHAINS-1 Batch 0 (first chain fired — EVOK M365). C1 LinkedIn enrichment (enrich_linkedin tool #18 + Netrows client). B4 memory consolidation (weekly Haiku compression). F6 trend detection (monthly analysis). Contact query fix (GIN trgm index + 30s per-tool timeout). OpenClaw/NemoClaw eval (NO-GO). VAPID keys generated. COST-OPT-1 verified. Code Brisen: E4 trip cards mobile, E8 mobile file upload. Backlog: 42/48 (88%). 22 scheduled jobs. |
+| 29 | Mar 20 | **Remarkable CoS Items 3+4.** PROACTIVE-INITIATIVE-1: daily initiative engine (priorities + calendar + deadlines + cadence → 2-3 proposed actions, WA + dashboard delivery, Director response tracking). SENTIMENT-TRAJECTORY-1: Haiku tone scoring (1-5 scale), batch backfill every 6h, sentiment trend computation (warming/cooling/stable), per-contact sentiment profiles. 7 new API endpoints. 2 new scheduler jobs (24→26 total). |
 
 ## Key Documents (Dropbox)
 

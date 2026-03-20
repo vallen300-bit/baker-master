@@ -1483,7 +1483,8 @@ class SentinelStoreBack:
 
     def record_interaction(self, contact_id: int, channel: str, direction: str,
                            timestamp, subject: str = None,
-                           source_ref: str = None) -> bool:
+                           source_ref: str = None,
+                           sentiment: str = None) -> bool:
         """Insert a contact interaction and update last_contact_date. Idempotent by source_ref."""
         conn = self._get_conn()
         if not conn:
@@ -1493,11 +1494,11 @@ class SentinelStoreBack:
             # Insert interaction (skip if source_ref already exists)
             cur.execute(
                 """INSERT INTO contact_interactions
-                   (contact_id, channel, direction, timestamp, subject, source_ref)
-                   VALUES (%s, %s, %s, %s, %s, %s)
+                   (contact_id, channel, direction, timestamp, subject, source_ref, sentiment)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s)
                    ON CONFLICT DO NOTHING""",
                 (contact_id, channel, direction, timestamp,
-                 (subject[:200] if subject else None), source_ref),
+                 (subject[:200] if subject else None), source_ref, sentiment),
             )
             # Update last_contact_date if this is more recent
             if cur.rowcount > 0:

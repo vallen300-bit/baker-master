@@ -39,7 +39,7 @@ A remarkable Chief of Staff **anticipates, connects dots, prepares you to win, u
 
 ---
 
-### 3. Proactive Initiative Engine — TO BUILD
+### 3. Proactive Initiative Engine — SHIPPED (Session 29)
 **Baker proposes actions, not just reports.**
 
 Daily job combines:
@@ -61,7 +61,7 @@ Example initiatives:
 
 ---
 
-### 4. Relationship Sentiment Trajectory — TO BUILD
+### 4. Relationship Sentiment Trajectory — SHIPPED (Session 29)
 **Baker understands HOW relationships are evolving, not just WHEN.**
 
 - Haiku scores the tone of each inbound email/WA message (1-5 scale: hostile → warm)
@@ -98,9 +98,9 @@ Example convergences:
 | Phase | What | When | Impact |
 |-------|------|------|--------|
 | **Done** | Weekly priorities + Tactical briefs | Session 28 | Baker focuses + prepares |
-| **Session 29** | Proactive initiative engine | Next session | Baker proposes actions |
-| **Session 29** | Relationship sentiment | Next session | Baker reads between lines |
-| **Session 30** | Cross-matter convergence | Following session | Baker connects dots |
+| **Done** | Proactive initiative engine | Session 29 | Baker proposes actions |
+| **Done** | Relationship sentiment | Session 29 | Baker reads between lines |
+| **Session 30** | Cross-matter convergence | Next session | Baker connects dots |
 
 After all 5: Baker is no longer a tool you use. Baker is an advisor who *thinks for you*.
 

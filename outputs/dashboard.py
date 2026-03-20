@@ -7192,6 +7192,77 @@ async def get_memory_summaries(matter: str = None, limit: int = 20):
 
 
 # ============================================================
+# PROACTIVE-INITIATIVE-1: Initiatives API
+# ============================================================
+
+@app.get("/api/initiatives", tags=["initiatives"], dependencies=[Depends(verify_api_key)])
+async def get_initiatives(days: int = 7):
+    """Get recent proactive initiatives."""
+    from orchestrator.initiative_engine import get_initiatives
+    initiatives = get_initiatives(days=days)
+    for init in initiatives:
+        for key in ("created_at",):
+            if init.get(key) and hasattr(init[key], "isoformat"):
+                init[key] = init[key].isoformat()
+        if init.get("run_date") and hasattr(init["run_date"], "isoformat"):
+            init["run_date"] = init["run_date"].isoformat()
+    return {"initiatives": initiatives, "count": len(initiatives)}
+
+
+@app.post("/api/initiatives/{initiative_id}/respond", tags=["initiatives"], dependencies=[Depends(verify_api_key)])
+async def respond_to_initiative(initiative_id: int, request: Request):
+    """Record Director's response to an initiative (approved/dismissed/deferred)."""
+    from orchestrator.initiative_engine import respond_to_initiative
+    body = await request.json()
+    response = body.get("response", "acknowledged")
+    ok = respond_to_initiative(initiative_id, response)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to record response")
+    return {"status": "ok", "initiative_id": initiative_id, "response": response}
+
+
+@app.post("/api/admin/run-initiatives", tags=["admin"], dependencies=[Depends(verify_api_key)])
+async def admin_run_initiatives(background_tasks: BackgroundTasks):
+    """Manually trigger the initiative engine."""
+    from orchestrator.initiative_engine import run_initiative_engine
+    background_tasks.add_task(run_initiative_engine)
+    return {"status": "triggered", "note": "Initiative engine running in background"}
+
+
+# ============================================================
+# SENTIMENT-TRAJECTORY-1: Sentiment API
+# ============================================================
+
+@app.get("/api/sentiment/trends", tags=["sentiment"], dependencies=[Depends(verify_api_key)])
+async def get_sentiment_trends():
+    """Get sentiment trends for all contacts with 5+ scored interactions."""
+    from orchestrator.sentiment_scorer import compute_sentiment_trends
+    trends = compute_sentiment_trends()
+    return {"trends": trends, "count": len(trends)}
+
+
+@app.get("/api/sentiment/contact/{contact_name}", tags=["sentiment"], dependencies=[Depends(verify_api_key)])
+async def get_contact_sentiment(contact_name: str):
+    """Get sentiment profile for a specific contact."""
+    from orchestrator.sentiment_scorer import get_contact_sentiment
+    profile = get_contact_sentiment(contact_name)
+    # Serialize datetimes
+    if profile.get("recent_messages"):
+        for msg in profile["recent_messages"]:
+            if msg.get("date") and hasattr(msg["date"], "isoformat"):
+                msg["date"] = msg["date"].isoformat()
+    return profile
+
+
+@app.post("/api/admin/run-sentiment-backfill", tags=["admin"], dependencies=[Depends(verify_api_key)])
+async def admin_run_sentiment_backfill(background_tasks: BackgroundTasks):
+    """Manually trigger sentiment backfill."""
+    from orchestrator.sentiment_scorer import run_sentiment_backfill
+    background_tasks.add_task(run_sentiment_backfill)
+    return {"status": "triggered", "note": "Sentiment backfill running in background"}
+
+
+# ============================================================
 # CLI runner
 # ============================================================
 

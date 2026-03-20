@@ -326,6 +326,26 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: trend_detection (1st of month 05:00 UTC)")
 
+    # PROACTIVE-INITIATIVE-1: Daily initiative engine — 07:00 UTC (09:00 CET)
+    from orchestrator.initiative_engine import run_initiative_engine
+    scheduler.add_job(
+        run_initiative_engine,
+        CronTrigger(hour=7, minute=0),
+        id="initiative_engine", name="Proactive initiative engine",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: initiative_engine (daily 07:00 UTC)")
+
+    # SENTIMENT-TRAJECTORY-1: Sentiment backfill — every 6 hours
+    from orchestrator.sentiment_scorer import run_sentiment_backfill
+    scheduler.add_job(
+        run_sentiment_backfill,
+        IntervalTrigger(hours=6),
+        id="sentiment_backfill", name="Sentiment scoring backfill",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: sentiment_backfill (every 6 hours)")
+
 
 def start_scheduler():
     """Create and start the BackgroundScheduler. Idempotent — safe to call twice."""
