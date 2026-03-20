@@ -585,6 +585,147 @@ function _completePriority(id, itemEl) {
 })();
 
 
+// ═══ PROPOSED ACTIONS WIDGET ═══
+
+var _sourceColors = {
+    email: '#0a6fdb', whatsapp: '#25d366', meeting: '#8b5cf6',
+    calendar: '#f59e0b', deadline: '#ef4444', cadence: '#06b6d4'
+};
+
+function _renderActionsWidget(actions) {
+    var widget = document.getElementById('actionsWidget');
+    var list = document.getElementById('desktopActionsList');
+    var countEl = document.getElementById('desktopActionCount');
+    if (!widget || !list) return;
+
+    if (!actions || actions.length === 0) {
+        widget.hidden = true;
+        return;
+    }
+
+    widget.hidden = false;
+    list.textContent = '';
+    if (countEl) countEl.textContent = actions.length;
+
+    actions.forEach(function(action) {
+        var card = document.createElement('div');
+        card.className = 'action-card';
+        var prio = action.priority_rank || 2;
+        if (prio === 1) card.classList.add('urgent');
+
+        var srcColor = _sourceColors[action.source_type] || '#888';
+        card.style.borderLeftColor = srcColor;
+
+        // Header: source badge + due date
+        var header = document.createElement('div');
+        header.className = 'action-card-header';
+
+        var badge = document.createElement('span');
+        badge.className = 'action-source-badge';
+        badge.style.background = srcColor;
+        badge.textContent = (action.source_type || 'task').replace(/_/g, ' ');
+        header.appendChild(badge);
+
+        if (action.due_date) {
+            var due = document.createElement('span');
+            due.className = 'action-due';
+            var dueDate = new Date(action.due_date + 'T00:00:00');
+            var today = new Date(); today.setHours(0,0,0,0);
+            if (dueDate < today) due.classList.add('overdue');
+            due.textContent = action.due_date;
+            header.appendChild(due);
+        }
+
+        card.appendChild(header);
+
+        // Title
+        var title = document.createElement('div');
+        title.className = 'action-card-title';
+        title.textContent = action.title || '';
+        card.appendChild(title);
+
+        // Description (truncated)
+        if (action.description) {
+            var desc = document.createElement('div');
+            desc.className = 'action-card-desc';
+            desc.textContent = action.description.length > 120
+                ? action.description.substring(0, 120) + '...'
+                : action.description;
+            card.appendChild(desc);
+        }
+
+        // Suggested action
+        if (action.suggested_action) {
+            var suggest = document.createElement('div');
+            suggest.className = 'action-card-suggest';
+            suggest.textContent = action.suggested_action;
+            card.appendChild(suggest);
+        }
+
+        // Buttons
+        var btns = document.createElement('div');
+        btns.className = 'action-card-btns';
+
+        var approveBtn = document.createElement('button');
+        approveBtn.className = 'action-btn approve';
+        approveBtn.textContent = 'Approve';
+        approveBtn.addEventListener('click', function() { _respondDesktopAction(action.id, 'approved', card); });
+        btns.appendChild(approveBtn);
+
+        var doneBtn = document.createElement('button');
+        doneBtn.className = 'action-btn done';
+        doneBtn.textContent = 'Done';
+        doneBtn.addEventListener('click', function() { _respondDesktopAction(action.id, 'done', card); });
+        btns.appendChild(doneBtn);
+
+        var skipBtn = document.createElement('button');
+        skipBtn.className = 'action-btn skip';
+        skipBtn.textContent = 'Skip';
+        skipBtn.addEventListener('click', function() { _respondDesktopAction(action.id, 'dismissed', card); });
+        btns.appendChild(skipBtn);
+
+        card.appendChild(btns);
+        list.appendChild(card);
+    });
+}
+
+function _respondDesktopAction(actionId, response, cardEl) {
+    if (cardEl) {
+        cardEl.style.opacity = '0.4';
+        cardEl.style.pointerEvents = 'none';
+    }
+    bakerFetch('/api/proposed-actions/' + actionId + '/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ response: response }),
+    }).then(function(r) {
+        if (!r.ok) throw new Error('API ' + r.status);
+        if (cardEl) {
+            cardEl.style.transition = 'opacity 0.3s, max-height 0.3s';
+            cardEl.style.opacity = '0';
+            cardEl.style.maxHeight = '0';
+            cardEl.style.overflow = 'hidden';
+            cardEl.style.margin = '0';
+            cardEl.style.padding = '0';
+            setTimeout(function() { cardEl.remove(); }, 300);
+        }
+        // Update count
+        var countEl = document.getElementById('desktopActionCount');
+        if (countEl) {
+            var remaining = document.querySelectorAll('.action-card').length - 1;
+            if (remaining <= 0) {
+                document.getElementById('actionsWidget').hidden = true;
+            } else {
+                countEl.textContent = remaining;
+            }
+        }
+    }).catch(function(e) {
+        console.error('Action respond failed:', e);
+        if (cardEl) { cardEl.style.opacity = '1'; cardEl.style.pointerEvents = ''; }
+    });
+}
+
+
 // ═══ MORNING BRIEF ═══
 
 function _inferProposalType(label, instruction) {
@@ -746,6 +887,9 @@ async function loadMorningBrief() {
 
         // Weekly Priorities Widget
         _renderPrioritiesWidget(data.weekly_priorities || []);
+
+        // Proposed Actions Widget
+        _renderActionsWidget(data.proposed_actions || []);
 
         // Fires badge
         const firesBadge = document.getElementById('firesBadge');

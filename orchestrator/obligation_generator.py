@@ -335,11 +335,19 @@ _OBLIGATION_PROMPT = """You are Baker, AI Chief of Staff. Extract SPECIFIC, ACTI
 Rules:
 - ONE task per detected commitment, follow-up, or deadline — not summaries.
 - Each task MUST include: who it involves, what happened (source), what's needed.
-- Include completion_signals: what observable event means this task is done.
 - source_type must be one of: email, whatsapp, meeting, calendar, deadline, cadence.
+- source_ref MUST be the contact name or deadline description (never empty).
+- due_date: ALWAYS inherit from the source deadline when available (YYYY-MM-DD format or null).
 - Do NOT include vague tasks ("review inbox", "check priorities").
 - Do NOT re-propose tasks that were proposed yesterday and not yet dismissed.
 - Max 15 tasks. Quality over quantity.
+
+completion_signals MUST use these exact patterns (Baker auto-detects these):
+  - "email_to:person@domain.com" — Baker checks sent emails for this recipient
+  - "email_from:person@domain.com" — Baker checks inbox for email from this sender
+  - "meeting_with:Contact Name" — Baker checks calendar for meeting with this person
+Do NOT use vague signals like "document_created" or "stakeholder_feedback_received".
+Every action MUST have at least one email_to: or email_from: signal.
 
 Return ONLY valid JSON:
 {
@@ -348,7 +356,7 @@ Return ONLY valid JSON:
       "title": "Follow up with Robin on Kempinski timeline",
       "description": "Robin hasn't responded to your March 15 email about the Kempinski acquisition timeline. 18 days silent (normally responds every 5 days).",
       "source_type": "cadence",
-      "source_ref": "Robin",
+      "source_ref": "Robin Schmidt",
       "suggested_action": "Send one-line check-in asking about Kempinski timeline",
       "completion_signals": ["email_to:robin@example.com"],
       "priority_rank": 2,

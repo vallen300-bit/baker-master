@@ -326,6 +326,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: trend_detection (1st of month 05:00 UTC)")
 
+    # ACTION-COMPLETION-DETECTOR: Auto-mark approved actions as done — every 6h
+    from orchestrator.action_completion_detector import run_action_completion_detector
+    scheduler.add_job(
+        run_action_completion_detector,
+        IntervalTrigger(hours=6),
+        id="action_completion_detector", name="Action completion detector",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: action_completion_detector (every 6 hours)")
+
     # OBLIGATION-GENERATOR: Morning triage actions — 06:50 UTC (08:50 CET)
     from orchestrator.obligation_generator import run_obligation_generator
     scheduler.add_job(

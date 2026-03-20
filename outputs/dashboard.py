@@ -1447,6 +1447,15 @@ def invalidate_morning_narrative():
     _morning_narrative_cache = {"text": None, "generated_at": 0}
 
 
+def _get_proposed_actions_for_brief() -> list:
+    """Get proposed actions for morning brief (lightweight, no extra API call)."""
+    try:
+        from orchestrator.obligation_generator import get_proposed_actions
+        return get_proposed_actions(status="proposed", days=2)
+    except Exception:
+        return []
+
+
 @app.get("/api/dashboard/morning-brief", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
 async def get_morning_brief():
     """
@@ -1797,6 +1806,7 @@ async def get_morning_brief():
             "travel_alerts": travel_alerts,
             "trips": [_serialize(t) for t in active_trips],
             "weekly_priorities": weekly_priorities,
+            "proposed_actions": _get_proposed_actions_for_brief(),
         }
     except HTTPException:
         raise
