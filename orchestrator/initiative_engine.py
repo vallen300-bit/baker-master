@@ -111,7 +111,11 @@ def _gather_context() -> dict:
             """)
             ctx["priorities"] = [dict(r) for r in cur.fetchall()]
         except Exception:
-            pass  # Table may not exist yet
+            # Table may not exist — rollback to reset transaction state
+            try:
+                conn.rollback()
+            except Exception:
+                pass
 
         # 2. Approaching deadlines (next 7 days)
         cur.execute("""
@@ -182,7 +186,10 @@ def _gather_context() -> dict:
                 for r in cur.fetchall()
             ]
         except Exception:
-            pass
+            try:
+                conn.rollback()
+            except Exception:
+                pass
 
         # 6. Pending T1/T2 alerts
         cur.execute("""
@@ -212,7 +219,10 @@ def _gather_context() -> dict:
                 for r in cur.fetchall()
             ]
         except Exception:
-            pass
+            try:
+                conn.rollback()
+            except Exception:
+                pass
 
         cur.close()
     except Exception as e:
@@ -562,6 +572,9 @@ def run_initiative_engine():
     5. Deliver via WhatsApp + dashboard alert
     """
     from triggers.sentinel_health import report_success, report_failure
+
+    # Ensure table exists before any queries
+    _ensure_table()
 
     try:
         # Advisory lock — prevent double-run
