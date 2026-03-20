@@ -735,6 +735,25 @@ class ToolExecutor:
         except Exception as e:
             logger.debug(f"Decision lookup for contact failed: {e}")
 
+        # 4. Sentiment trajectory (SENTIMENT-TRAJECTORY-1)
+        try:
+            from orchestrator.sentiment_scorer import get_contact_sentiment
+            sentiment = get_contact_sentiment(name)
+            if sentiment and sentiment.get("total_scored", 0) > 0:
+                trend = sentiment.get("trend", "unknown")
+                avg = sentiment.get("avg_sentiment", 0)
+                recent = sentiment.get("recent_avg", avg)
+                parts.append(
+                    f"[SENTIMENT] Trend: {trend} | Avg: {avg}/5 | Recent: {recent}/5 "
+                    f"| Scored: {sentiment.get('total_scored', 0)} messages"
+                )
+                if trend == "cooling":
+                    parts.append("⚠ SENTIMENT COOLING — tone in recent messages is more negative than historical average")
+                elif trend == "warming":
+                    parts.append("✓ SENTIMENT WARMING — tone in recent messages is more positive than historical average")
+        except Exception as e:
+            logger.debug(f"Sentiment lookup for contact failed: {e}")
+
         if parts:
             return "\n\n".join(parts)
         return json.dumps({"result": f"No contact found matching '{name}'"})

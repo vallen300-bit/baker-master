@@ -122,31 +122,31 @@ WRITE tools:
 - clickup_create: Create a ClickUp task in BAKER space (auto_execute: true)
 
 Rules:
-- Max 5 steps. Be ruthlessly efficient — don't search if context already has the info.
+- Max 4 steps. Be ruthlessly efficient — don't search if context already has the info.
 - Start with get_matter_context (it returns people, keywords, recent emails/WA in one call).
 - Read tools are always auto_execute: true.
 - draft_email is always auto_execute: false (Director approves before sending).
 - create_deadline, create_calendar_event, clickup_create are auto_execute: true.
 - Do NOT include steps that duplicate info already provided in the context.
+- NEVER use get_contact if you already have matter context — matter context includes connected people.
 - Only add write steps if there's a clear, specific action to take. Don't create deadlines for things already tracked.
-- Prefer 3-4 focused steps over 6-7 broad ones.
+- Prefer 2-3 focused steps over 4+ broad ones. Each step costs 30 seconds.
 - director_summary: 2-3 lines for WhatsApp. Bottom-line first.
 - Each step can reference results from previous steps — they execute sequentially.
 
-Example chain (good):
+Example chain (good — 3 steps):
 1. get_matter_context → pulls people, recent emails, WA for the matter
 2. search_emails → find the specific email that triggered this alert
 3. draft_email → draft a follow-up based on what was found
-Total: 3 steps, focused, fast.
 
-Example chain (bad):
+Example chain (BAD — 6 steps, 4 redundant):
 1. search_memory → too broad
 2. search_emails → overlaps with matter context
 3. search_whatsapp → overlaps with matter context
 4. get_contact → already in matter context
 5. get_deadlines → unnecessary unless deadline-related
 6. draft_email → finally does something useful
-Total: 6 steps, 4 are redundant.
+NEVER do this. Matter context already includes emails, WA, contacts, and deadlines.
 
 Return ONLY valid JSON:
 {
@@ -481,14 +481,19 @@ def _execute_plan(plan: dict, timeout: float) -> ChainResult:
             continue
 
         # Execute with per-tool timeout (30s max per tool)
+        # NOTE: Don't use `with` on ThreadPoolExecutor — it blocks until thread completes,
+        # defeating the timeout. Use shutdown(wait=False) so we don't block on slow tools.
         step_t0 = time.time()
         tool_ok = True
         tool_err = None
         try:
             import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(executor.execute, tool, tool_input)
+            pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            future = pool.submit(executor.execute, tool, tool_input)
+            try:
                 step.result = future.result(timeout=30)
+            finally:
+                pool.shutdown(wait=False)
             step.success = True
             if tool in _WRITE_TOOLS:
                 result.write_actions += 1
