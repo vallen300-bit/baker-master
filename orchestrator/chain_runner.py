@@ -253,7 +253,16 @@ def _build_planning_context(
     except Exception as e:
         logger.debug(f"Deadline fetch for chain context failed: {e}")
 
-    # Director preferences (top strategic priorities)
+    # Weekly priorities (most important — shapes the chain's focus)
+    try:
+        from orchestrator.priority_manager import format_priorities_for_prompt
+        priority_text = format_priorities_for_prompt()
+        if priority_text:
+            parts.append(f"\n{priority_text}")
+    except Exception:
+        pass
+
+    # Director preferences (long-term strategic context)
     try:
         from memory.store_back import SentinelStoreBack
         store = SentinelStoreBack._get_global_instance()

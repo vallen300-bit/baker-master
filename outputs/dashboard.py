@@ -7064,6 +7064,44 @@ async def get_capability_quality():
 # Admin: Manual job triggers + Chain visibility (Session 28)
 # ============================================================
 
+@app.get("/api/priorities", tags=["priorities"], dependencies=[Depends(verify_api_key)])
+async def get_priorities():
+    """Get current weekly priorities."""
+    from orchestrator.priority_manager import get_current_priorities
+    priorities = get_current_priorities()
+    for p in priorities:
+        for key in ("week_start", "created_at"):
+            if p.get(key) and hasattr(p[key], "isoformat"):
+                p[key] = p[key].isoformat()
+    return {"priorities": priorities, "count": len(priorities)}
+
+
+@app.post("/api/priorities", tags=["priorities"], dependencies=[Depends(verify_api_key)])
+async def set_priorities(request: Request):
+    """Set this week's priorities. Body: {"priorities": [{"text": "...", "matter": "..."}]}"""
+    from orchestrator.priority_manager import set_priorities
+    body = await request.json()
+    items = body.get("priorities", [])
+    if not items:
+        raise HTTPException(status_code=400, detail="Provide at least one priority")
+    created = set_priorities(items)
+    for p in created:
+        for key in ("week_start", "created_at"):
+            if p.get(key) and hasattr(p[key], "isoformat"):
+                p[key] = p[key].isoformat()
+    return {"status": "set", "priorities": created}
+
+
+@app.delete("/api/priorities/{priority_id}", tags=["priorities"], dependencies=[Depends(verify_api_key)])
+async def complete_priority(priority_id: int):
+    """Mark a priority as completed."""
+    from orchestrator.priority_manager import complete_priority as _complete
+    ok = _complete(priority_id)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to complete priority")
+    return {"status": "completed", "id": priority_id}
+
+
 @app.post("/api/admin/consolidate", tags=["admin"], dependencies=[Depends(verify_api_key)])
 async def trigger_memory_consolidation(background_tasks: BackgroundTasks):
     """Manually trigger memory consolidation (normally runs weekly)."""

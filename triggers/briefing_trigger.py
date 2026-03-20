@@ -33,6 +33,20 @@ def gather_briefing_context() -> str:
     """
     sections = []
 
+    # 0. Weekly priorities (shapes the entire briefing)
+    try:
+        from orchestrator.priority_manager import get_current_priorities
+        priorities = get_current_priorities()
+        if priorities:
+            prio_lines = ["DIRECTOR'S PRIORITIES THIS WEEK:"]
+            for p in priorities:
+                matter = f" [{p['matter_slug']}]" if p.get("matter_slug") else ""
+                prio_lines.append(f"  {p['rank']}. {p['priority_text']}{matter}")
+            prio_lines.append("Lead the briefing with updates on these priorities.")
+            sections.append("\n".join(prio_lines))
+    except Exception:
+        pass
+
     # 1. Queued overnight items
     queue = trigger_state.get_briefing_queue()
     if queue:

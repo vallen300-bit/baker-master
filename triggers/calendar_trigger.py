@@ -432,6 +432,102 @@ def _assemble_meeting_context(meeting: dict, store) -> str:
 
 
 # ============================================================
+# Travel Event Detection
+# ============================================================
+
+_TRAVEL_KEYWORDS = {"flight", "depart", "arrive", "airport", "train", "taxi", "uber", "transfer", "check-in", "check-out"}
+
+def _is_travel_event(meeting: dict) -> bool:
+    """Check if a calendar event is travel (not a real meeting)."""
+    title = (meeting.get("title") or "").lower()
+    return any(kw in title for kw in _TRAVEL_KEYWORDS)
+
+
+# ============================================================
+# Tactical Meeting Brief (Opus — for counterparty meetings)
+# ============================================================
+
+_TACTICAL_PROMPT = """You are Baker, AI Chief of Staff. Generate a TACTICAL BRIEF for this meeting.
+
+This is NOT a summary — it's a negotiation/strategy guide. Include:
+
+1. **YOUR POSITION**: What the Director wants from this meeting. Specific outcomes.
+2. **THEIR POSITION**: What the counterparty likely wants. What they'll push for.
+3. **OPENING**: How to start the conversation. First 2 minutes matter.
+4. **CONCESSIONS**: Things you can offer that cost little but they'll value.
+5. **RED LINES**: What to absolutely NOT agree to, and why.
+6. **LEVERAGE**: Information or timing advantages you have.
+7. **TALKING POINTS**: 3-5 specific points to raise, in order.
+
+Base everything on REAL data from the context — past communications, documents, decisions.
+If you don't have enough context for tactical guidance, say so briefly rather than fabricating.
+Keep it to 1 page. Bottom-line first."""
+
+
+def _generate_tactical_brief(meeting: dict, context: str, matter_slug: str, store) -> Optional[str]:
+    """Generate tactical negotiation guidance using Opus. Returns markdown text."""
+    # Enrich context with Director's past decisions on this matter
+    enriched = context
+    try:
+        import psycopg2.extras
+        conn = store._get_conn()
+        if conn:
+            try:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                # Past decisions for this matter
+                cur.execute("""
+                    SELECT decision, reasoning, created_at
+                    FROM decisions
+                    WHERE project = %s OR decision ILIKE %s
+                    ORDER BY created_at DESC LIMIT 5
+                """, (matter_slug, f"%{matter_slug}%"))
+                decisions = [dict(r) for r in cur.fetchall()]
+                cur.close()
+                if decisions:
+                    enriched += "\n\n## PAST DECISIONS ON THIS MATTER\n"
+                    for d in decisions:
+                        date = d["created_at"].strftime("%Y-%m-%d") if d.get("created_at") else "?"
+                        enriched += f"- [{date}] {d['decision']}: {d.get('reasoning', '')}\n"
+            finally:
+                store._put_conn(conn)
+    except Exception:
+        pass
+
+    # Add weekly priorities for context
+    try:
+        from orchestrator.priority_manager import format_priorities_for_prompt
+        prio_text = format_priorities_for_prompt()
+        if prio_text:
+            enriched += f"\n\n{prio_text}"
+    except Exception:
+        pass
+
+    try:
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        resp = client.messages.create(
+            model=config.claude.model,  # Opus for tactical quality
+            max_tokens=2048,
+            system=_TACTICAL_PROMPT,
+            messages=[{
+                "role": "user",
+                "content": f"Generate a tactical brief for this meeting.\n\n{enriched[:6000]}",
+            }],
+        )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost(config.claude.model, resp.usage.input_tokens,
+                         resp.usage.output_tokens, source="tactical_brief")
+        except Exception:
+            pass
+        brief = resp.content[0].text.strip()
+        logger.info(f"Tactical brief generated for '{meeting['title']}' ({len(brief)} chars)")
+        return brief
+    except Exception as e:
+        logger.error(f"Tactical brief generation failed: {e}")
+        return None
+
+
+# ============================================================
 # Briefing Generation (direct Haiku call — NOT /api/scan)
 # ============================================================
 
@@ -554,6 +650,29 @@ def check_calendar_and_prep():
                 trigger_state.set_watermark(watermark_key, datetime.now(timezone.utc))
                 prepped_count += 1
                 logger.info(f"Meeting prep alert #{alert_id} created: {meeting['title']}")
+
+                # Tactical brief: generate negotiation guidance for meetings with known counterparties
+                if matter_slug and meeting.get('attendees') and not _is_travel_event(meeting):
+                    try:
+                        tactical = _generate_tactical_brief(meeting, context, matter_slug, store)
+                        if tactical:
+                            # Append tactical section to the alert body
+                            updated_body = alert_body + f"\n\n---\n\n**TACTICAL BRIEF**\n{tactical}"
+                            conn_upd = store._get_conn()
+                            if conn_upd:
+                                try:
+                                    cur_upd = conn_upd.cursor()
+                                    cur_upd.execute(
+                                        "UPDATE alerts SET body = %s WHERE id = %s",
+                                        (updated_body[:8000], alert_id),
+                                    )
+                                    conn_upd.commit()
+                                    cur_upd.close()
+                                    logger.info(f"Tactical brief appended to alert #{alert_id}")
+                                finally:
+                                    store._put_conn(conn_upd)
+                    except Exception as tac_err:
+                        logger.warning(f"Tactical brief failed for {meeting['title']} (non-fatal): {tac_err}")
 
                 # Phase 3C: Block 15 min prep time on calendar
                 _block_prep_time(meeting)
