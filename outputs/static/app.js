@@ -1380,10 +1380,25 @@ function renderAlertCard(alert, expanded) {
     // Header
     html += '<div class="card-header">';
     html += '<span class="tier-badge t' + tier + '">' + esc(tierLabel) + '</span>';
-    html += '<span class="card-title">' + esc(alert.title) + '</span>';
+    html += '<span class="card-title" id="alert-title-' + aid + '">' + esc(alert.title) + '</span>';
     if (isNew) html += '<span class="card-new-badge">new</span>';
     html += '<span class="card-time">' + esc(fmtRelativeTime(alert.created_at)) + '</span>';
+    html += '<button class="alert-edit-btn" data-alert-id="' + aid + '" onclick="event.stopPropagation();toggleAlertEdit(' + alert.id + ')" title="Edit">&#9998;</button>';
     html += '</div>';
+
+    // D5: Inline edit panel (hidden by default)
+    html += '<div class="alert-edit-panel" id="alert-edit-' + aid + '" style="display:none;">';
+    html += '<div style="display:flex;flex-direction:column;gap:8px;padding:8px 0;">';
+    html += '<input class="alert-edit-input" id="alert-edit-title-' + aid + '" value="' + esc(alert.title || '') + '" placeholder="Title" />';
+    html += '<div style="display:flex;gap:8px;align-items:center;">';
+    html += '<select class="alert-edit-select" id="alert-edit-matter-' + aid + '"><option value="">No matter</option></select>';
+    html += '<select class="alert-edit-select" id="alert-edit-tier-' + aid + '"><option value="1"' + (tier===1?' selected':'') + '>T1</option><option value="2"' + (tier===2?' selected':'') + '>T2</option><option value="3"' + (tier===3?' selected':'') + '>T3</option></select>';
+    html += '</div>';
+    html += '<div style="display:flex;gap:8px;">';
+    html += '<button class="alert-edit-save" onclick="saveAlertEdit(' + alert.id + ')">Save</button>';
+    html += '<button class="alert-edit-cancel" onclick="cancelAlertEdit(' + alert.id + ')">Cancel</button>';
+    html += '</div>';
+    html += '</div></div>';
 
     // Tag badges
     var alertTags = alert.tags || [];
@@ -3507,6 +3522,80 @@ async function populateAssignDropdowns() {
     }
 }
 
+// ═══ D5: INLINE ALERT EDITING ═══
+
+function toggleAlertEdit(alertId) {
+    var panel = document.getElementById('alert-edit-' + alertId);
+    if (!panel) return;
+    var isHidden = panel.style.display === 'none';
+    panel.style.display = isHidden ? '' : 'none';
+    if (isHidden) _populateAlertEditMatters(alertId);
+}
+
+function cancelAlertEdit(alertId) {
+    var panel = document.getElementById('alert-edit-' + alertId);
+    if (panel) panel.style.display = 'none';
+}
+
+async function _populateAlertEditMatters(alertId) {
+    var sel = document.getElementById('alert-edit-matter-' + alertId);
+    if (!sel || sel.options.length > 1) return;
+    try {
+        var resp = await bakerFetch('/api/matters?status=active');
+        if (!resp.ok) return;
+        var data = await resp.json();
+        if (data.matters) {
+            for (var i = 0; i < data.matters.length; i++) {
+                var m = data.matters[i];
+                var opt = document.createElement('option');
+                opt.value = m.matter_name || m.slug;
+                opt.textContent = m.matter_name || m.slug;
+                sel.appendChild(opt);
+            }
+        }
+        // Pre-select current matter
+        var card = sel.closest('[data-matter]');
+        if (card) sel.value = card.dataset.matter || '';
+    } catch (e) { /* silent */ }
+}
+
+async function saveAlertEdit(alertId) {
+    var titleInput = document.getElementById('alert-edit-title-' + alertId);
+    var matterSel = document.getElementById('alert-edit-matter-' + alertId);
+    var tierSel = document.getElementById('alert-edit-tier-' + alertId);
+    if (!titleInput) return;
+
+    var body = {};
+    var newTitle = titleInput.value.trim();
+    if (newTitle) body.title = newTitle;
+    if (matterSel) body.matter_slug = matterSel.value || null;
+    if (tierSel) body.tier = parseInt(tierSel.value);
+
+    // Optimistic update
+    var titleEl = document.getElementById('alert-title-' + alertId);
+    var origTitle = titleEl ? titleEl.textContent : '';
+    if (titleEl && newTitle) titleEl.textContent = newTitle;
+    cancelAlertEdit(alertId);
+
+    try {
+        var resp = await bakerFetch('/api/alerts/' + alertId, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body),
+        });
+        if (!resp.ok) throw new Error('API ' + resp.status);
+        // Refresh to show matter/tier changes
+        if (body.matter_slug !== undefined || body.tier) {
+            if (typeof loadFires === 'function') loadFires();
+        }
+    } catch (e) {
+        console.error('saveAlertEdit failed:', e);
+        // Revert on error
+        if (titleEl) titleEl.textContent = origTitle;
+        alert('Failed to save: ' + e.message);
+    }
+}
+
 // ═══ ENHANCED DEADLINES TAB ═══
 
 async function loadDeadlinesTab() {
@@ -4485,6 +4574,10 @@ async function init() {
         greetEl.innerHTML = '<span>' + esc(greet + ', Dimitry') + '</span><span style="font-size:14px;color:var(--text3);font-weight:400;">' + esc(dateStr + ' \u00B7 ' + timeStr) + '</span>';
     }
 
+    // D4: Apply saved tab order, then setup drag-drop
+    _applyTabOrder();
+    _setupTabDragDrop();
+
     // Sidebar navigation (static items)
     document.querySelectorAll('.nav-item[data-tab]').forEach(function(item) {
         item.addEventListener('click', function() {
@@ -4687,6 +4780,271 @@ function toggleMute(btn) {
     _alertsMuted = !_alertsMuted;
     if (btn) btn.textContent = _alertsMuted ? '\uD83D\uDD15' : '\uD83D\uDD14';
     if (btn) btn.title = _alertsMuted ? 'Unmute alert sounds' : 'Mute alert sounds';
+}
+
+// ═══ D4: TAB CUSTOMIZATION (drag-to-reorder, pin/hide, localStorage) ═══
+var _tabConfig = null; // {order: [...], pinned: [...], hidden: [...]}
+var _TAB_CONFIG_KEY = 'baker_tab_order';
+
+function _loadTabConfig() {
+    try {
+        var stored = localStorage.getItem(_TAB_CONFIG_KEY);
+        if (stored) _tabConfig = JSON.parse(stored);
+    } catch(e) {}
+    if (!_tabConfig) _tabConfig = {order: [], pinned: [], hidden: []};
+}
+
+function _saveTabConfig() {
+    try { localStorage.setItem(_TAB_CONFIG_KEY, JSON.stringify(_tabConfig)); } catch(e) {}
+}
+
+function _applyTabOrder() {
+    _loadTabConfig();
+    var nav = document.querySelector('.sidebar-nav');
+    if (!nav) return;
+
+    var items = Array.from(nav.querySelectorAll('.nav-item[data-tab]'));
+    if (items.length === 0) return;
+
+    // Get all non-tab elements (dividers, sub-lists) to preserve
+    var dividers = Array.from(nav.querySelectorAll('.nav-divider, .nav-sub'));
+
+    // Sort tabs by stored order (pinned first, then ordered, then rest)
+    if (_tabConfig.order.length > 0) {
+        var orderMap = {};
+        for (var oi = 0; oi < _tabConfig.order.length; oi++) {
+            orderMap[_tabConfig.order[oi]] = oi;
+        }
+        items.sort(function(a, b) {
+            var aPin = _tabConfig.pinned.indexOf(a.dataset.tab) >= 0 ? 0 : 1;
+            var bPin = _tabConfig.pinned.indexOf(b.dataset.tab) >= 0 ? 0 : 1;
+            if (aPin !== bPin) return aPin - bPin;
+            var aOrd = orderMap[a.dataset.tab] !== undefined ? orderMap[a.dataset.tab] : 999;
+            var bOrd = orderMap[b.dataset.tab] !== undefined ? orderMap[b.dataset.tab] : 999;
+            return aOrd - bOrd;
+        });
+    }
+
+    // Hide/show based on config
+    items.forEach(function(item) {
+        var isHidden = _tabConfig.hidden.indexOf(item.dataset.tab) >= 0;
+        item.style.display = isHidden ? 'none' : '';
+        item.draggable = true;
+        if (_tabConfig.pinned.indexOf(item.dataset.tab) >= 0) {
+            item.classList.add('pinned');
+        }
+    });
+
+    // Re-insert items in order (before first divider or at end)
+    var firstDivider = nav.querySelector('.nav-divider');
+    items.forEach(function(item) {
+        nav.insertBefore(item, firstDivider);
+    });
+    // Re-insert dividers after tabs
+    dividers.forEach(function(d) { nav.appendChild(d); });
+
+    // Add overflow button if tabs are hidden
+    _updateTabOverflow(nav, items);
+}
+
+function _updateTabOverflow(nav, items) {
+    var existing = nav.querySelector('.nav-overflow');
+    if (existing) existing.remove();
+
+    var hiddenTabs = _tabConfig.hidden || [];
+    if (hiddenTabs.length === 0) return;
+
+    var overflowBtn = document.createElement('button');
+    overflowBtn.className = 'nav-overflow';
+    overflowBtn.textContent = '\u2026';
+    overflowBtn.title = hiddenTabs.length + ' hidden tab(s)';
+    overflowBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        _showTabOverflowMenu(overflowBtn, hiddenTabs);
+    });
+    nav.appendChild(overflowBtn);
+}
+
+function _showTabOverflowMenu(anchor, hiddenTabs) {
+    _closeTabCtxMenu();
+    var menu = document.createElement('div');
+    menu.className = 'tab-ctx-menu';
+    menu.id = 'tabOverflowMenu';
+
+    hiddenTabs.forEach(function(tabName) {
+        var item = document.createElement('button');
+        item.className = 'tab-ctx-item';
+        item.textContent = 'Show: ' + tabName.replace(/-/g, ' ');
+        item.addEventListener('click', function() {
+            _tabConfig.hidden = _tabConfig.hidden.filter(function(t) { return t !== tabName; });
+            _saveTabConfig();
+            _applyTabOrder();
+            _closeTabCtxMenu();
+        });
+        menu.appendChild(item);
+    });
+
+    // Reset option
+    var sep = document.createElement('div');
+    sep.className = 'tab-ctx-sep';
+    menu.appendChild(sep);
+    var reset = document.createElement('button');
+    reset.className = 'tab-ctx-item';
+    reset.textContent = 'Reset layout';
+    reset.style.color = 'var(--red)';
+    reset.addEventListener('click', function() {
+        localStorage.removeItem(_TAB_CONFIG_KEY);
+        _tabConfig = {order: [], pinned: [], hidden: []};
+        _applyTabOrder();
+        _closeTabCtxMenu();
+        location.reload();
+    });
+    menu.appendChild(reset);
+
+    var rect = anchor.getBoundingClientRect();
+    menu.style.left = rect.left + 'px';
+    menu.style.top = (rect.bottom + 4) + 'px';
+    document.body.appendChild(menu);
+
+    setTimeout(function() {
+        document.addEventListener('click', _closeTabCtxMenu, {once: true});
+    }, 10);
+}
+
+function _setupTabDragDrop() {
+    var nav = document.querySelector('.sidebar-nav');
+    if (!nav) return;
+
+    var dragItem = null;
+
+    nav.addEventListener('dragstart', function(e) {
+        var item = e.target.closest('.nav-item[data-tab]');
+        if (!item) return;
+        dragItem = item;
+        item.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', item.dataset.tab);
+    });
+
+    nav.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        var target = e.target.closest('.nav-item[data-tab]');
+        nav.querySelectorAll('.nav-item').forEach(function(i) { i.classList.remove('drag-over'); });
+        if (target && target !== dragItem) target.classList.add('drag-over');
+    });
+
+    nav.addEventListener('drop', function(e) {
+        e.preventDefault();
+        var target = e.target.closest('.nav-item[data-tab]');
+        nav.querySelectorAll('.nav-item').forEach(function(i) { i.classList.remove('drag-over'); });
+        if (!target || !dragItem || target === dragItem) return;
+
+        // Reorder in DOM
+        var items = Array.from(nav.querySelectorAll('.nav-item[data-tab]'));
+        var dragIdx = items.indexOf(dragItem);
+        var targetIdx = items.indexOf(target);
+        if (dragIdx < targetIdx) {
+            target.parentNode.insertBefore(dragItem, target.nextSibling);
+        } else {
+            target.parentNode.insertBefore(dragItem, target);
+        }
+
+        // Save new order
+        var newItems = Array.from(nav.querySelectorAll('.nav-item[data-tab]'));
+        _tabConfig.order = newItems.map(function(i) { return i.dataset.tab; });
+        _saveTabConfig();
+    });
+
+    nav.addEventListener('dragend', function() {
+        if (dragItem) dragItem.classList.remove('dragging');
+        dragItem = null;
+        nav.querySelectorAll('.nav-item').forEach(function(i) { i.classList.remove('drag-over'); });
+    });
+
+    // Context menu on right-click
+    nav.addEventListener('contextmenu', function(e) {
+        var item = e.target.closest('.nav-item[data-tab]');
+        if (!item) return;
+        e.preventDefault();
+        _showTabCtxMenu(e.clientX, e.clientY, item.dataset.tab);
+    });
+}
+
+function _showTabCtxMenu(x, y, tabName) {
+    _closeTabCtxMenu();
+    var menu = document.createElement('div');
+    menu.className = 'tab-ctx-menu';
+    menu.id = 'tabCtxMenu';
+
+    var isPinned = _tabConfig.pinned.indexOf(tabName) >= 0;
+
+    // Pin/Unpin
+    var pinItem = document.createElement('button');
+    pinItem.className = 'tab-ctx-item';
+    pinItem.textContent = isPinned ? 'Unpin' : 'Pin to top';
+    pinItem.addEventListener('click', function() {
+        if (isPinned) {
+            _tabConfig.pinned = _tabConfig.pinned.filter(function(t) { return t !== tabName; });
+        } else {
+            _tabConfig.pinned.push(tabName);
+        }
+        _saveTabConfig();
+        _applyTabOrder();
+        _closeTabCtxMenu();
+    });
+    menu.appendChild(pinItem);
+
+    // Hide (don't allow hiding Dashboard)
+    if (tabName !== 'morning-brief') {
+        var hideItem = document.createElement('button');
+        hideItem.className = 'tab-ctx-item';
+        hideItem.textContent = 'Hide tab';
+        hideItem.addEventListener('click', function() {
+            if (_tabConfig.hidden.indexOf(tabName) < 0) _tabConfig.hidden.push(tabName);
+            _saveTabConfig();
+            _applyTabOrder();
+            _closeTabCtxMenu();
+        });
+        menu.appendChild(hideItem);
+    }
+
+    // Reset
+    var sep = document.createElement('div');
+    sep.className = 'tab-ctx-sep';
+    menu.appendChild(sep);
+    var resetItem = document.createElement('button');
+    resetItem.className = 'tab-ctx-item';
+    resetItem.textContent = 'Reset layout';
+    resetItem.style.color = 'var(--red)';
+    resetItem.addEventListener('click', function() {
+        localStorage.removeItem(_TAB_CONFIG_KEY);
+        _tabConfig = {order: [], pinned: [], hidden: []};
+        _applyTabOrder();
+        _closeTabCtxMenu();
+        location.reload();
+    });
+    menu.appendChild(resetItem);
+
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+    document.body.appendChild(menu);
+
+    // Ensure menu stays within viewport
+    var rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
+    if (rect.bottom > window.innerHeight) menu.style.top = (window.innerHeight - rect.height - 8) + 'px';
+
+    setTimeout(function() {
+        document.addEventListener('click', _closeTabCtxMenu, {once: true});
+    }, 10);
+}
+
+function _closeTabCtxMenu() {
+    var m = document.getElementById('tabCtxMenu');
+    if (m) m.remove();
+    var m2 = document.getElementById('tabOverflowMenu');
+    if (m2) m2.remove();
 }
 
 document.addEventListener('DOMContentLoaded', init);

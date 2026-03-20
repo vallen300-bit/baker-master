@@ -613,9 +613,10 @@ async function init() {
     await loadConfig();
     await loadCapabilities();
 
-    // Camera, New Chat, Upload, Trip
+    // Camera, New Chat, Upload, Trip, Voice
     setupCamera();
     _setupUpload();
+    _setupVoiceInput();
     loadActiveTrip();
     document.getElementById('newChatBtn').addEventListener('click', function() { stopSpeaking(); newChat(); });
     document.getElementById('tripBackBtn').addEventListener('click', function() { _closeTripOverlay(); });
@@ -1441,6 +1442,126 @@ function _addEmpty(container, text) {
     el.className = 'trip-card-empty';
     el.textContent = text;
     container.appendChild(el);
+}
+
+// ═══ E5: VOICE INPUT (Web Speech API) ═══
+var _recognition = null;
+var _isRecording = false;
+var _interimTranscript = '';
+var _finalTranscript = '';
+
+function _setupVoiceInput() {
+    var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) return; // API not available — mic stays hidden
+
+    var micBtn = document.getElementById('micBtn');
+    micBtn.hidden = false;
+
+    _recognition = new SpeechRecognition();
+    _recognition.continuous = true;
+    _recognition.interimResults = true;
+    _recognition.lang = 'en-US';
+    _recognition.maxAlternatives = 1;
+
+    _recognition.onresult = function(event) {
+        _interimTranscript = '';
+        _finalTranscript = '';
+        for (var i = 0; i < event.results.length; i++) {
+            if (event.results[i].isFinal) {
+                _finalTranscript += event.results[i][0].transcript;
+            } else {
+                _interimTranscript += event.results[i][0].transcript;
+            }
+        }
+        var input = document.getElementById('bakerInput');
+        if (input) {
+            input.value = _finalTranscript + _interimTranscript;
+            input.style.height = 'auto';
+            input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+        }
+    };
+
+    _recognition.onerror = function(event) {
+        console.warn('Speech recognition error:', event.error);
+        if (event.error === 'not-allowed') {
+            var label = document.getElementById('micLabel');
+            if (label) label.textContent = 'Microphone blocked';
+        }
+        _stopRecording();
+    };
+
+    _recognition.onend = function() {
+        if (_isRecording) {
+            // Auto-restart if user hasn't explicitly stopped
+            try { _recognition.start(); } catch(e) { _stopRecording(); }
+        }
+    };
+
+    micBtn.addEventListener('click', function() {
+        if (_isRecording) {
+            _stopRecording();
+        } else {
+            _startRecording();
+        }
+    });
+
+    // Language selector
+    var langSel = document.getElementById('micLang');
+    if (langSel) {
+        langSel.addEventListener('change', function() {
+            _recognition.lang = langSel.value;
+            if (_isRecording) {
+                _recognition.stop();
+                setTimeout(function() { try { _recognition.start(); } catch(e) {} }, 100);
+            }
+        });
+    }
+}
+
+function _startRecording() {
+    if (!_recognition) return;
+    _isRecording = true;
+    _finalTranscript = '';
+    _interimTranscript = '';
+
+    var micBtn = document.getElementById('micBtn');
+    var micStatus = document.getElementById('micStatus');
+    var micLabel = document.getElementById('micLabel');
+    var langSel = document.getElementById('micLang');
+
+    if (micBtn) micBtn.classList.add('recording');
+    if (micStatus) micStatus.hidden = false;
+    if (micLabel) micLabel.textContent = 'Listening...';
+    if (langSel) _recognition.lang = langSel.value;
+
+    try {
+        _recognition.start();
+    } catch(e) {
+        console.warn('Recognition start failed:', e);
+        _stopRecording();
+    }
+
+    // Auto-stop after 60s
+    setTimeout(function() {
+        if (_isRecording) _stopRecording();
+    }, 60000);
+}
+
+function _stopRecording() {
+    _isRecording = false;
+    var micBtn = document.getElementById('micBtn');
+    var micStatus = document.getElementById('micStatus');
+
+    if (micBtn) micBtn.classList.remove('recording');
+    if (micStatus) micStatus.hidden = true;
+
+    if (_recognition) {
+        try { _recognition.stop(); } catch(e) {}
+    }
+
+    // Focus input for editing
+    var input = document.getElementById('bakerInput');
+    if (input) input.focus();
 }
 
 // ═══ E8: FILE UPLOAD ═══

@@ -819,3 +819,70 @@ body {
 .kb-result-meta {
   font-size: 11px; color: var(--text3); margin-top: 4px;
 }
+
+/* ═══ D5: INLINE ALERT EDITING ═══ */
+.alert-edit-btn {
+  background: none; border: none; color: var(--text3); font-size: 14px;
+  cursor: pointer; padding: 2px 6px; margin-left: auto; flex-shrink: 0;
+  opacity: 0; transition: opacity 0.15s;
+}
+.card:hover .alert-edit-btn { opacity: 1; }
+.alert-edit-panel { padding: 0 16px 8px; }
+.alert-edit-input {
+  width: 100%; padding: 6px 10px; border: 1px solid var(--border);
+  border-radius: 6px; font-size: 13px; font-family: var(--font);
+  color: var(--text); background: var(--bg-subtle); outline: none;
+}
+.alert-edit-input:focus { border-color: var(--blue); }
+.alert-edit-select {
+  flex: 1; padding: 6px 10px; border: 1px solid var(--border);
+  border-radius: 6px; font-size: 12px; font-family: var(--font);
+  color: var(--text); background: var(--bg-subtle);
+}
+.alert-edit-save {
+  padding: 6px 16px; background: var(--blue); color: #fff;
+  border: none; border-radius: 6px; font-size: 12px; font-weight: 600;
+  cursor: pointer; font-family: var(--font);
+}
+.alert-edit-cancel {
+  padding: 6px 16px; background: transparent; color: var(--text3);
+  border: 1px solid var(--border); border-radius: 6px; font-size: 12px;
+  cursor: pointer; font-family: var(--font);
+}
+
+/* ═══ D4: TAB CUSTOMIZATION ═══ */
+.nav-item[draggable="true"] { cursor: grab; }
+.nav-item.dragging { opacity: 0.4; }
+.nav-item.drag-over { border-top: 2px solid var(--blue); }
+.nav-item.pinned::after {
+  content: '\u2022'; color: var(--blue); font-size: 8px;
+  position: absolute; right: 6px; top: 6px;
+}
+.nav-item { position: relative; }
+
+/* Tab context menu */
+.tab-ctx-menu {
+  position: fixed; z-index: 999; background: var(--card);
+  border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12); min-width: 140px;
+  padding: 4px 0; font-size: 13px;
+}
+.tab-ctx-item {
+  display: block; width: 100%; padding: 8px 14px; border: none;
+  background: none; color: var(--text); text-align: left;
+  cursor: pointer; font-family: var(--font); font-size: 13px;
+}
+.tab-ctx-item:hover { background: var(--bg-subtle); }
+.tab-ctx-sep { height: 1px; background: var(--border); margin: 4px 0; }
+
+/* Tab overflow button */
+.nav-overflow {
+  padding: 10px 12px; color: var(--text3); font-size: 16px;
+  cursor: pointer; border: none; background: none; font-weight: 700;
+}
+.nav-overflow-menu {
+  position: absolute; bottom: 0; right: 0; z-index: 998;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+  min-width: 160px; padding: 4px 0;
+}

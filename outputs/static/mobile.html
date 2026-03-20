@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/mobile.css?v=11">
+    <link rel="stylesheet" href="/static/mobile.css?v=12">
 </head>
 <body>
 <div class="app">
@@ -58,9 +58,19 @@
             <form id="bakerForm" class="input-row">
                 <input type="file" id="bakerCamera" accept="image/*" hidden>
                 <button type="button" class="cam-btn" id="bakerCamBtn" aria-label="Camera" title="Take photo or choose image">&#x1F4F7;</button>
+                <button type="button" class="mic-btn" id="micBtn" aria-label="Voice input" title="Tap to speak" hidden>&#x1F3A4;</button>
                 <textarea class="chat-input" id="bakerInput" placeholder="Ask Baker anything..." rows="1" maxlength="4000" enterkeyhint="send"></textarea>
                 <button type="submit" class="send-btn" id="bakerSendBtn" aria-label="Send">&#x2191;</button>
             </form>
+            <div class="mic-status" id="micStatus" hidden>
+                <span class="mic-dot"></span>
+                <span class="mic-label" id="micLabel">Listening...</span>
+                <select class="mic-lang" id="micLang">
+                    <option value="en-US">EN</option>
+                    <option value="de-DE">DE</option>
+                    <option value="fr-FR">FR</option>
+                </select>
+            </div>
             <div class="img-preview" id="bakerImgPreview" hidden></div>
         </div>
         <div class="messages" id="bakerMessages">
@@ -134,6 +144,6 @@
 
 </div>
 
-<script src="/static/mobile.js?v=13"></script>
+<script src="/static/mobile.js?v=14"></script>
 </body>
 </html>
