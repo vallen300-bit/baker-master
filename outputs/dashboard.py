@@ -4524,6 +4524,47 @@ async def reschedule_deadline_api(deadline_id: int, body: dict = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.patch("/api/deadlines/{deadline_id}", tags=["deadlines"], dependencies=[Depends(verify_api_key)])
+async def update_deadline(deadline_id: int, request: Request):
+    """D3: General deadline update — status, priority, description. Used by triage UI."""
+    try:
+        body = await request.json()
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor()
+            # Whitelist allowed fields
+            allowed = {"status", "priority", "description", "confidence", "severity"}
+            updates = []
+            params = []
+            for key, value in body.items():
+                if key in allowed:
+                    updates.append(f"{key} = %s")
+                    params.append(value)
+            if not updates:
+                raise HTTPException(status_code=400, detail="No valid fields to update")
+            params.append(deadline_id)
+            cur.execute(
+                f"UPDATE deadlines SET {', '.join(updates)} WHERE id = %s RETURNING id",
+                params,
+            )
+            row = cur.fetchone()
+            conn.commit()
+            cur.close()
+            if not row:
+                raise HTTPException(status_code=404, detail="Deadline not found")
+            return {"status": "updated", "id": deadline_id, "fields": list(body.keys())}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"PATCH /api/deadlines/{deadline_id} failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/commitments/{commitment_id}/dismiss", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
 async def dismiss_commitment(commitment_id: int):
     """Dismiss a commitment."""
@@ -6972,6 +7013,99 @@ async def get_capability_quality():
         return {"capabilities": caps}
     except Exception as e:
         return {"capabilities": [], "error": str(e)}
+    finally:
+        store._put_conn(conn)
+
+
+# ============================================================
+# Admin: Manual job triggers + Chain visibility (Session 28)
+# ============================================================
+
+@app.post("/api/admin/consolidate", tags=["admin"], dependencies=[Depends(verify_api_key)])
+async def trigger_memory_consolidation(background_tasks: BackgroundTasks):
+    """Manually trigger memory consolidation (normally runs weekly)."""
+    from orchestrator.memory_consolidator import run_memory_consolidation
+    background_tasks.add_task(run_memory_consolidation)
+    return {"status": "running", "message": "Memory consolidation started in background"}
+
+
+@app.post("/api/admin/trends", tags=["admin"], dependencies=[Depends(verify_api_key)])
+async def trigger_trend_detection(background_tasks: BackgroundTasks):
+    """Manually trigger trend detection (normally runs monthly)."""
+    from orchestrator.trend_detector import run_trend_detection
+    background_tasks.add_task(run_trend_detection)
+    return {"status": "running", "message": "Trend detection started in background"}
+
+
+@app.get("/api/chains", tags=["chains"], dependencies=[Depends(verify_api_key)])
+async def get_chains(limit: int = 20):
+    """Get chain execution history from baker_tasks."""
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT id, title, domain as matter, description as director_summary,
+                   deliverable, agent_iterations as total_steps,
+                   agent_tool_calls as completed_steps,
+                   agent_elapsed_ms as elapsed_ms,
+                   director_feedback, feedback_comment,
+                   created_at
+            FROM baker_tasks
+            WHERE task_type = 'chain'
+            ORDER BY created_at DESC
+            LIMIT %s
+        """, (min(limit, 100),))
+        chains = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        for c in chains:
+            if c.get("created_at"):
+                c["created_at"] = c["created_at"].isoformat()
+            if c.get("elapsed_ms"):
+                c["elapsed_ms"] = int(c["elapsed_ms"])
+        return {"chains": chains, "count": len(chains)}
+    finally:
+        store._put_conn(conn)
+
+
+@app.get("/api/memory-summaries", tags=["memory"], dependencies=[Depends(verify_api_key)])
+async def get_memory_summaries(matter: str = None, limit: int = 20):
+    """Get memory consolidation summaries."""
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        if matter:
+            cur.execute("""
+                SELECT * FROM memory_summaries
+                WHERE matter_slug ILIKE %s
+                ORDER BY interaction_count DESC
+                LIMIT %s
+            """, (f"%{matter}%", min(limit, 50)))
+        else:
+            cur.execute("""
+                SELECT * FROM memory_summaries
+                ORDER BY updated_at DESC
+                LIMIT %s
+            """, (min(limit, 50),))
+        summaries = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        for s in summaries:
+            for key in ("created_at", "updated_at", "period_start", "period_end"):
+                if s.get(key) and hasattr(s[key], "isoformat"):
+                    s[key] = s[key].isoformat()
+        return {"summaries": summaries, "count": len(summaries)}
+    except Exception as e:
+        # Table may not exist yet
+        if "does not exist" in str(e):
+            return {"summaries": [], "count": 0, "note": "No summaries yet — first consolidation pending"}
+        raise
     finally:
         store._put_conn(conn)
 
