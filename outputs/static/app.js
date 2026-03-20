@@ -592,20 +592,81 @@ var _sourceColors = {
     calendar: '#f59e0b', deadline: '#ef4444', cadence: '#06b6d4'
 };
 
-function _renderActionsWidget(actions) {
+function _renderActionsWidget(actions, researchProposals) {
     var widget = document.getElementById('actionsWidget');
     var list = document.getElementById('desktopActionsList');
     var countEl = document.getElementById('desktopActionCount');
     if (!widget || !list) return;
 
-    if (!actions || actions.length === 0) {
+    var proposals = researchProposals || [];
+    var totalCount = (actions ? actions.length : 0) + proposals.length;
+
+    if (totalCount === 0) {
         widget.hidden = true;
         return;
     }
 
     widget.hidden = false;
     list.textContent = '';
-    if (countEl) countEl.textContent = actions.length;
+    if (countEl) countEl.textContent = totalCount;
+
+    // Research proposals first
+    proposals.forEach(function(proposal) {
+        var card = document.createElement('div');
+        card.className = 'action-card';
+        card.style.borderLeftColor = '#8b5cf6';
+
+        var header = document.createElement('div');
+        header.className = 'action-card-header';
+        var badge = document.createElement('span');
+        badge.className = 'action-source-badge';
+        badge.style.background = '#8b5cf6';
+        badge.textContent = 'RESEARCH';
+        header.appendChild(badge);
+        var typeLabel = document.createElement('span');
+        typeLabel.className = 'action-due';
+        typeLabel.textContent = (proposal.subject_type || 'person').replace(/_/g, ' ');
+        header.appendChild(typeLabel);
+        card.appendChild(header);
+
+        var title = document.createElement('div');
+        title.className = 'action-card-title';
+        title.textContent = 'Run dossier: ' + (proposal.subject_name || 'Unknown');
+        card.appendChild(title);
+
+        if (proposal.context) {
+            var desc = document.createElement('div');
+            desc.className = 'action-card-desc';
+            desc.textContent = proposal.context;
+            card.appendChild(desc);
+        }
+
+        var specialists = proposal.specialists || [];
+        if (typeof specialists === 'string') { try { specialists = JSON.parse(specialists); } catch(e) { specialists = []; } }
+        if (specialists.length > 0) {
+            var specNames = { research: 'Research', legal: 'Legal', profiling: 'People Intel', pr_branding: 'PR & Branding' };
+            var suggest = document.createElement('div');
+            suggest.className = 'action-card-suggest';
+            suggest.textContent = 'Specialists: ' + specialists.map(function(s) { return specNames[s] || s; }).join(', ');
+            card.appendChild(suggest);
+        }
+
+        var btns = document.createElement('div');
+        btns.className = 'action-card-btns';
+        var runBtn = document.createElement('button');
+        runBtn.className = 'action-btn approve';
+        runBtn.textContent = 'Run Dossier';
+        runBtn.addEventListener('click', function() { _respondDesktopResearch(proposal.id, 'approved', card); });
+        btns.appendChild(runBtn);
+        var skipBtn = document.createElement('button');
+        skipBtn.className = 'action-btn skip';
+        skipBtn.textContent = 'Skip';
+        skipBtn.addEventListener('click', function() { _respondDesktopResearch(proposal.id, 'skipped', card); });
+        btns.appendChild(skipBtn);
+        card.appendChild(btns);
+
+        list.appendChild(card);
+    });
 
     actions.forEach(function(action) {
         var card = document.createElement('div');
@@ -686,6 +747,29 @@ function _renderActionsWidget(actions) {
 
         card.appendChild(btns);
         list.appendChild(card);
+    });
+}
+
+function _respondDesktopResearch(proposalId, response, cardEl) {
+    if (cardEl) { cardEl.style.opacity = '0.4'; cardEl.style.pointerEvents = 'none'; }
+    bakerFetch('/api/research-proposals/' + proposalId + '/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ response: response }),
+    }).then(function(r) {
+        if (!r.ok) throw new Error('API ' + r.status);
+        if (cardEl) {
+            cardEl.style.transition = 'opacity 0.3s, max-height 0.3s';
+            cardEl.style.opacity = '0';
+            cardEl.style.maxHeight = '0';
+            cardEl.style.overflow = 'hidden';
+            cardEl.style.margin = '0';
+            cardEl.style.padding = '0';
+            setTimeout(function() { cardEl.remove(); }, 300);
+        }
+    }).catch(function(e) {
+        console.error('Research respond failed:', e);
+        if (cardEl) { cardEl.style.opacity = '1'; cardEl.style.pointerEvents = ''; }
     });
 }
 
@@ -889,7 +973,7 @@ async function loadMorningBrief() {
         _renderPrioritiesWidget(data.weekly_priorities || []);
 
         // Proposed Actions Widget
-        _renderActionsWidget(data.proposed_actions || []);
+        _renderActionsWidget(data.proposed_actions || [], data.research_proposals || []);
 
         // Fires badge
         const firesBadge = document.getElementById('firesBadge');

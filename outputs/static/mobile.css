@@ -1128,6 +1128,12 @@ html, body {
 .source-badge.calendar { background: #f59e0b; }
 .source-badge.deadline { background: var(--red); }
 .source-badge.cadence { background: #06b6d4; }
+.source-badge.research { background: #8b5cf6; }
+
+.triage-card.research {
+  border-left-color: #8b5cf6;
+  background: linear-gradient(135deg, var(--bg2), rgba(139, 92, 246, 0.04));
+}
 
 .triage-due {
   font-size: 11px;

@@ -1447,6 +1447,15 @@ def invalidate_morning_narrative():
     _morning_narrative_cache = {"text": None, "generated_at": 0}
 
 
+def _get_research_proposals_for_brief() -> list:
+    """Get pending research proposals for morning brief."""
+    try:
+        from orchestrator.research_trigger import get_research_proposals
+        return get_research_proposals(status="proposed", days=7)
+    except Exception:
+        return []
+
+
 def _get_proposed_actions_for_brief() -> list:
     """Get proposed actions for morning brief (lightweight, no extra API call)."""
     try:
@@ -1807,6 +1816,7 @@ async def get_morning_brief():
             "trips": [_serialize(t) for t in active_trips],
             "weekly_priorities": weekly_priorities,
             "proposed_actions": _get_proposed_actions_for_brief(),
+            "research_proposals": _get_research_proposals_for_brief(),
         }
     except HTTPException:
         raise
@@ -7346,6 +7356,32 @@ async def admin_run_obligation_generator(background_tasks: BackgroundTasks):
     from orchestrator.obligation_generator import run_obligation_generator
     background_tasks.add_task(run_obligation_generator)
     return {"status": "triggered", "note": "Obligation generator running in background"}
+
+
+# ============================================================
+# ART-1: Research Proposals API
+# ============================================================
+
+@app.get("/api/research-proposals", tags=["research"], dependencies=[Depends(verify_api_key)])
+async def api_get_research_proposals(status: str = None, days: int = 14):
+    """Get research proposals."""
+    from orchestrator.research_trigger import get_research_proposals
+    proposals = get_research_proposals(status=status, days=days)
+    return {"proposals": proposals, "count": len(proposals)}
+
+
+@app.post("/api/research-proposals/{proposal_id}/respond", tags=["research"], dependencies=[Depends(verify_api_key)])
+async def api_respond_to_research_proposal(proposal_id: int, request: Request):
+    """Approve or skip a research proposal."""
+    from orchestrator.research_trigger import respond_to_research_proposal
+    body = await request.json()
+    response = body.get("response", "")
+    if response not in ("approved", "skipped"):
+        raise HTTPException(status_code=400, detail="response must be approved|skipped")
+    ok = respond_to_research_proposal(proposal_id, response)
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to record response")
+    return {"status": "ok", "proposal_id": proposal_id, "response": response}
 
 
 # ============================================================

@@ -1700,6 +1700,8 @@ async function refreshActionBadge() {
     } catch (e) { /* silent */ }
 }
 
+var _researchProposals = [];
+
 async function loadProposedActions() {
     var deck = document.getElementById('triageDeck');
     if (!deck) return;
@@ -1710,10 +1712,15 @@ async function loadProposedActions() {
     deck.appendChild(loadDiv);
 
     try {
-        var r = await bakerFetch('/api/proposed-actions?status=proposed');
-        if (!r.ok) throw new Error('API ' + r.status);
-        var data = await r.json();
-        _proposedActions = data.actions || [];
+        // Fetch both in parallel
+        var results = await Promise.all([
+            bakerFetch('/api/proposed-actions?status=proposed'),
+            bakerFetch('/api/research-proposals?status=proposed'),
+        ]);
+        var actionsData = results[0].ok ? await results[0].json() : { actions: [] };
+        var researchData = results[1].ok ? await results[1].json() : { proposals: [] };
+        _proposedActions = actionsData.actions || [];
+        _researchProposals = researchData.proposals || [];
         _renderTriageDeck();
     } catch (e) {
         deck.textContent = '';
@@ -1731,9 +1738,10 @@ function _renderTriageDeck() {
     if (!deck) return;
     deck.textContent = '';
 
-    if (countEl) countEl.textContent = _proposedActions.length + ' action' + (_proposedActions.length !== 1 ? 's' : '');
+    var totalCount = _proposedActions.length + _researchProposals.length;
+    if (countEl) countEl.textContent = totalCount + ' item' + (totalCount !== 1 ? 's' : '');
 
-    if (_proposedActions.length === 0) {
+    if (totalCount === 0) {
         var empty = document.createElement('div');
         empty.className = 'empty-state';
         var icon = document.createElement('div');
@@ -1748,6 +1756,12 @@ function _renderTriageDeck() {
 
     if (doneBtn) doneBtn.hidden = true;
 
+    // Research proposals first (higher priority)
+    for (var r = 0; r < _researchProposals.length; r++) {
+        deck.appendChild(_createResearchCard(_researchProposals[r]));
+    }
+
+    // Then regular actions
     for (var i = 0; i < _proposedActions.length; i++) {
         deck.appendChild(_createTriageCard(_proposedActions[i]));
     }
@@ -1843,6 +1857,115 @@ function _createTriageCard(action) {
     _setupTriageSwipe(card, action.id);
 
     return card;
+}
+
+function _createResearchCard(proposal) {
+    var card = document.createElement('div');
+    card.className = 'triage-card research';
+    card.dataset.proposalId = proposal.id;
+
+    // Header
+    var header = document.createElement('div');
+    header.className = 'triage-card-header';
+
+    var badge = document.createElement('span');
+    badge.className = 'source-badge research';
+    badge.textContent = 'RESEARCH';
+    header.appendChild(badge);
+
+    var typeLabel = document.createElement('span');
+    typeLabel.className = 'triage-due';
+    typeLabel.textContent = (proposal.subject_type || 'person').replace(/_/g, ' ');
+    header.appendChild(typeLabel);
+
+    card.appendChild(header);
+
+    // Title
+    var title = document.createElement('div');
+    title.className = 'triage-card-title';
+    title.textContent = 'Run dossier: ' + (proposal.subject_name || 'Unknown');
+    card.appendChild(title);
+
+    // Context
+    if (proposal.context) {
+        var desc = document.createElement('div');
+        desc.className = 'triage-card-desc';
+        desc.textContent = proposal.context;
+        card.appendChild(desc);
+    }
+
+    // Specialists
+    var specialists = proposal.specialists || [];
+    if (typeof specialists === 'string') { try { specialists = JSON.parse(specialists); } catch(e) { specialists = []; } }
+    if (specialists.length > 0) {
+        var specNames = { research: 'Research', legal: 'Legal', profiling: 'People Intel', pr_branding: 'PR & Branding' };
+        var specDiv = document.createElement('div');
+        specDiv.className = 'triage-suggested';
+        specDiv.textContent = 'Specialists: ' + specialists.map(function(s) { return specNames[s] || s; }).join(', ');
+        card.appendChild(specDiv);
+    }
+
+    // Buttons
+    var buttons = document.createElement('div');
+    buttons.className = 'triage-buttons';
+
+    var runBtn = document.createElement('button');
+    runBtn.className = 'triage-btn approve';
+    runBtn.textContent = 'Run Dossier';
+    runBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        _respondToResearchProposal(proposal.id, 'approved', card);
+    });
+    buttons.appendChild(runBtn);
+
+    var skipBtn = document.createElement('button');
+    skipBtn.className = 'triage-btn dismiss';
+    skipBtn.textContent = 'Skip';
+    skipBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        _respondToResearchProposal(proposal.id, 'skipped', card);
+    });
+    buttons.appendChild(skipBtn);
+
+    card.appendChild(buttons);
+    return card;
+}
+
+function _respondToResearchProposal(proposalId, response, cardEl) {
+    _researchProposals = _researchProposals.filter(function(p) { return p.id !== proposalId; });
+
+    if (cardEl) {
+        cardEl.style.transition = 'opacity 0.2s, transform 0.2s';
+        cardEl.style.opacity = '0';
+        cardEl.style.transform = response === 'skipped' ? 'translateX(-100%)' : 'translateX(100%)';
+        setTimeout(function() { cardEl.remove(); }, 200);
+    }
+
+    var countEl = document.getElementById('triageCount');
+    var totalCount = _proposedActions.length + _researchProposals.length;
+    if (countEl) countEl.textContent = totalCount + ' item' + (totalCount !== 1 ? 's' : '');
+    if (totalCount === 0) setTimeout(function() { _renderTriageDeck(); }, 250);
+
+    bakerFetch('/api/research-proposals/' + proposalId + '/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ response: response }),
+    }).then(function() {
+        refreshActionBadge();
+    }).catch(function(e) { console.error('Research response failed:', e); });
+
+    var label = response === 'approved' ? 'Dossier running...' : 'Research skipped';
+    var toast = document.createElement('div');
+    toast.className = 'undo-toast';
+    var text = document.createElement('span');
+    text.textContent = label;
+    toast.appendChild(text);
+    document.body.appendChild(toast);
+    setTimeout(function() {
+        toast.style.transition = 'opacity 0.3s';
+        toast.style.opacity = '0';
+        setTimeout(function() { toast.remove(); }, 300);
+    }, 2000);
 }
 
 function _setupTriageSwipe(card, actionId) {
