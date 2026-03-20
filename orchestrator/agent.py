@@ -835,6 +835,32 @@ class ToolExecutor:
             if not email_results and not wa_results:
                 parts.append("\n[No recent emails or WhatsApp from connected people found]")
 
+        # B4: Inject memory summaries if available
+        try:
+            import psycopg2.extras as _pge
+            conn = self._retriever._get_pg_conn()
+            cur = conn.cursor(cursor_factory=_pge.RealDictCursor)
+            cur.execute("""
+                SELECT contact_name, summary, interaction_count, period_start, period_end
+                FROM memory_summaries
+                WHERE matter_slug = %s
+                ORDER BY interaction_count DESC
+                LIMIT 3
+            """, (matter.get("matter_name", ""),))
+            summaries = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            if summaries:
+                parts.append(f"\n--- HISTORICAL SUMMARIES ({len(summaries)}) ---")
+                for s in summaries:
+                    ps = s["period_start"].strftime("%Y-%m-%d") if s.get("period_start") else "?"
+                    pe = s["period_end"].strftime("%Y-%m-%d") if s.get("period_end") else "?"
+                    parts.append(
+                        f"[{s.get('contact_name', 'general')}] ({ps} to {pe}, "
+                        f"{s.get('interaction_count', 0)} interactions):\n{s['summary'][:1500]}"
+                    )
+        except Exception:
+            pass  # Table may not exist yet — that's fine
+
         return "\n".join(parts)
 
     # -- PLUGINS-1: Web search --

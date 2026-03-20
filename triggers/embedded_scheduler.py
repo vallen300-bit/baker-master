@@ -306,6 +306,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: sync_contact_dates (daily at 05:00 UTC)")
 
+    # B4: Memory consolidation — weekly (Sundays 04:00 UTC)
+    from orchestrator.memory_consolidator import run_memory_consolidation
+    scheduler.add_job(
+        run_memory_consolidation,
+        CronTrigger(day_of_week="sun", hour=4, minute=0),
+        id="memory_consolidation", name="Weekly memory consolidation",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: memory_consolidation (Sundays 04:00 UTC)")
+
 
 def start_scheduler():
     """Create and start the BackgroundScheduler. Idempotent — safe to call twice."""
