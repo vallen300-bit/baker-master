@@ -62,6 +62,8 @@ Switch hats as needed. When coding, code. When scoping, think.
 | `orchestrator/sentiment_scorer.py` | **SENTIMENT-TRAJECTORY-1:** Haiku tone scoring (1-5 scale), batch backfill, sentiment trend computation |
 | `orchestrator/convergence_detector.py` | **CROSS-MATTER-CONVERGENCE-1:** Weekly cross-matter entity detection (people, companies, amounts across matters) |
 | `orchestrator/obligation_generator.py` | **OBLIGATION-GENERATOR:** Daily 06:50 UTC. Haiku extracts 5-15 per-item task proposals from signals → proposed_actions table → morning push |
+| `orchestrator/action_completion_detector.py` | **ACTION-COMPLETION:** Every 6h. Checks approved actions' email_to/email_from signals against sent_emails/email_messages. Auto-marks done. |
+| `orchestrator/research_trigger.py` | **ART-1:** Haiku classifies VIP WhatsApp for forwarded intelligence → research_proposals table → "Run Dossier?" card |
 | `tools/linkedin_client.py` | **C1:** Provider-agnostic LinkedIn enrichment (Netrows first, swap to PDL if needed) |
 
 ### API & Dashboard
@@ -222,7 +224,8 @@ baker-projects, sentinel-interactions, sentinel-email, sentinel-meetings, sentin
 `baker_insights` (SPECIALIST-UPGRADE-1B),
 `trips` (TRIP-INTELLIGENCE-1), `trip_contacts` (TRIP-INTELLIGENCE-1),
 `proactive_initiatives` (PROACTIVE-INITIATIVE-1),
-`proposed_actions` (OBLIGATION-GENERATOR)
+`proposed_actions` (OBLIGATION-GENERATOR),
+`research_proposals` (ART-1)
 
 ## Architecture: Role Division (Baker vs Cowork)
 
@@ -232,7 +235,7 @@ Cowork (+ Claude Code) is the **Thinker & Creator** — deep analysis, brainstor
 | Actor | Role | Context | Connected via |
 |-------|------|---------|---------------|
 | **Baker (Sentinel)** | Chief of Staff — monitors, remembers, acts | Always-on (Render) | Triggers, pipeline |
-| **Cowork (Claude Desktop)** | Thinker — quick PM/PL coordination | 200K tokens | Baker MCP (21 tools) |
+| **Cowork (Claude Desktop)** | Thinker — PM/PL coordination, deep analysis | **1M tokens** (Max plan) | Baker MCP (21 tools) |
 | **Claude Code CLI** | Thinker — deep analysis, heavy thinking, coding | **1M tokens** | Baker MCP (21 tools) |
 | **Director (Dimitry)** | Final authority | Human | All of the above |
 
@@ -460,7 +463,7 @@ Sessions 1-16 archived in `SESSION_LOG.md`. One-liner summaries:
 | 27 | Mar 19 | **9 features shipped.** B1 backfill (89 conversations). ALERT-BATCH-1 (90→1 alert/batch, 142→37 pending). A6 mobile feedback buttons. F3 cadence tracker (36 contacts, cadence-relative silence). D7 morning brief v2 merged (Code Brisen — action cards). G5 health watchdog (circuit breaker auto-recovery + WA alert). A8 insight-to-task (specialist→ClickUp). D6 unified search API. F4 financial signal detector. C6 location backfill (12→27 contacts). Backlog v2 created (27/48 shipped). Proxycurl dead → evaluating Netrows. 4 briefs for Code Brisen (E3, D8, D7, C1). |
 | 28 | Mar 19-20 | **10 features, 8 commits.** AUTONOMOUS-CHAINS-1 Batch 0 (first chain fired — EVOK M365). C1 LinkedIn enrichment (enrich_linkedin tool #18 + Netrows client). B4 memory consolidation (weekly Haiku compression). F6 trend detection (monthly analysis). Contact query fix (GIN trgm index + 30s per-tool timeout). OpenClaw/NemoClaw eval (NO-GO). VAPID keys generated. COST-OPT-1 verified. Code Brisen: E4 trip cards mobile, E8 mobile file upload. Backlog: 42/48 (88%). 22 scheduled jobs. |
 | 29 | Mar 20 | **All 5 Remarkable CoS Items shipped.** PROACTIVE-INITIATIVE-1: daily initiative engine (priorities + calendar + deadlines + cadence + unanswered emails → 2-3 proposed actions, WA + dashboard, approve/dismiss/defer). SENTIMENT-TRAJECTORY-1: Haiku tone scoring (1-5 batch), sentiment trend written to vip_contacts, injected into get_contact tool. CROSS-MATTER-CONVERGENCE-1: weekly entity extraction + convergence detection across matters (people, companies, amounts in 2+ matters). Chain timeout fix (shutdown(wait=False)), planning prompt tightened (max 4 steps). 9 new API endpoints. 3 new scheduler jobs (24→27 total, 28 after Session 30). 3 new files. |
-| 30 | Mar 20 | **Notification & Task Redesign.** OBLIGATION-GENERATOR: daily Haiku extraction of 5-15 per-item task proposals from signals → proposed_actions table → single morning push. Mobile: 4th "Actions" tab with swipeable triage card deck (approve/dismiss/done, source badges, suggested action, deep link). Push throttling (quiet hours, daily cap 8, 15min cooldown, T1 bypass). sw.js morning_triage handler. 4 new API endpoints. 28th scheduler job. 9 files changed. |
+| 30 | Mar 20-21 | **Notification & Task Redesign + ART-1.** OBLIGATION-GENERATOR: daily Haiku extraction of 5-15 per-item task proposals → proposed_actions → morning push → mobile triage deck (swipe approve/dismiss). Push throttling (quiet hours, cap 8, cooldown 15m). ACTION-COMPLETION-DETECTOR: auto-marks approved actions done via email_to/email_from signal matching (6h). Desktop Actions widget on CEO Cockpit. Prompt tuning (email_to/email_from signals, source_ref, due_date). **ART-1:** auto-research trigger — Haiku classifies VIP WhatsApp for forwarded intelligence → research_proposals table → "Run Dossier?" card on mobile+desktop. 6 new API endpoints. 29 scheduler jobs. 4 new files. |
 
 ## Key Documents (Dropbox)
 
