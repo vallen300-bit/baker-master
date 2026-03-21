@@ -238,3 +238,56 @@ class DropboxClient:
                     f.write(chunk)
 
         return dest_path
+
+    def upload_file(self, local_path: str, dropbox_path: str) -> dict:
+        """Upload a local file to Dropbox.
+
+        POST https://content.dropboxapi.com/2/files/upload
+
+        Args:
+            local_path: path to the local file
+            dropbox_path: destination path in Dropbox (e.g., /Baker-Feed/research-dossiers/file.docx)
+
+        Returns:
+            Dropbox file metadata dict (name, path_display, size, etc.)
+        """
+        import json as json_mod
+
+        self._check_rate_limit()
+        self._ensure_token()
+
+        with open(local_path, "rb") as f:
+            file_data = f.read()
+
+        headers = {
+            "Authorization": f"Bearer {self._access_token}",
+            "Dropbox-API-Arg": json_mod.dumps({
+                "path": dropbox_path,
+                "mode": "overwrite",
+                "autorename": True,
+                "mute": False,
+            }),
+            "Content-Type": "application/octet-stream",
+        }
+
+        resp = self._client.post(
+            "https://content.dropboxapi.com/2/files/upload",
+            headers=headers,
+            content=file_data,
+        )
+
+        # Auto-refresh on 401
+        if resp.status_code == 401:
+            self._refresh_access_token()
+            headers["Authorization"] = f"Bearer {self._access_token}"
+            self._check_rate_limit()
+            resp = self._client.post(
+                "https://content.dropboxapi.com/2/files/upload",
+                headers=headers,
+                content=file_data,
+            )
+
+        resp.raise_for_status()
+        result = resp.json()
+        logger.info(f"Uploaded to Dropbox: {result.get('path_display', dropbox_path)} ({result.get('size', 0)} bytes)")
+        return result

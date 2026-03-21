@@ -13,17 +13,15 @@ Time: ~60-120 seconds (parallel execution).
 """
 import json
 import logging
-import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from pathlib import Path
 
 from config.settings import config
 
 logger = logging.getLogger("baker.research_executor")
 
-# Dropbox sync path (local filesystem — Dropbox client syncs automatically)
-DROPBOX_DOSSIER_PATH = Path("/Users/dimitry/Vallen Dropbox/Dimitry vallen/Baker-Feed/research-dossiers")
+# Dropbox destination folder (Dropbox API path, not local filesystem)
+DROPBOX_DOSSIER_FOLDER = "/Baker-Feed/research-dossiers"
 
 # Specialist display names
 SPECIALIST_NAMES = {
@@ -218,7 +216,7 @@ def _format_dossier_markdown(subject_name: str, subject_type: str,
 
 
 def _generate_and_save_docx(subject_name: str, dossier_md: str) -> tuple:
-    """Generate .docx and save to Dropbox. Returns (filename, local_path) or (None, None)."""
+    """Generate .docx and upload to Dropbox via API. Returns (filename, dropbox_path) or (None, None)."""
     try:
         from document_generator import generate_document, get_file
 
@@ -235,32 +233,49 @@ def _generate_and_save_docx(subject_name: str, dossier_md: str) -> tuple:
         file_info = get_file(file_id)
         src_path = file_info["filepath"]
 
-        # Save to Dropbox
-        month_folder = DROPBOX_DOSSIER_PATH / datetime.now().strftime("%Y-%m")
-        month_folder.mkdir(parents=True, exist_ok=True)
-        dst_path = month_folder / filename
+        # Upload to Dropbox via API
+        month = datetime.now().strftime("%Y-%m")
+        dropbox_path = f"{DROPBOX_DOSSIER_FOLDER}/{month}/{filename}"
 
-        shutil.copy2(src_path, dst_path)
-        logger.info(f"Dossier saved to Dropbox: {dst_path} ({size_bytes} bytes)")
-
-        return filename, str(dst_path)
+        try:
+            from triggers.dropbox_client import DropboxClient
+            client = DropboxClient._get_global_instance()
+            result = client.upload_file(src_path, dropbox_path)
+            actual_path = result.get("path_display", dropbox_path)
+            logger.info(f"Dossier uploaded to Dropbox: {actual_path} ({size_bytes} bytes)")
+            return filename, actual_path
+        except Exception as upload_err:
+            logger.error(f"Dropbox upload failed: {upload_err}")
+            # File still exists locally in temp — return temp path as fallback
+            return filename, src_path
 
     except Exception as e:
-        logger.error(f"Document generation/save failed: {e}")
-        # Fallback: save raw markdown
+        logger.error(f"Document generation failed: {e}")
+        # Fallback: upload raw markdown
         try:
             import re
+            import tempfile
             safe_name = re.sub(r'[^\w\s-]', '', subject_name).strip().replace(' ', '_')
             date_str = datetime.now().strftime('%Y-%m-%d')
             md_filename = f"Dossier_{safe_name}_{date_str}.md"
 
-            month_folder = DROPBOX_DOSSIER_PATH / datetime.now().strftime("%Y-%m")
-            month_folder.mkdir(parents=True, exist_ok=True)
-            md_path = month_folder / md_filename
+            # Write to temp file
+            import os
+            md_path = os.path.join(tempfile.gettempdir(), md_filename)
+            with open(md_path, "w", encoding="utf-8") as f:
+                f.write(dossier_md)
 
-            md_path.write_text(dossier_md, encoding="utf-8")
-            logger.info(f"Dossier saved as markdown fallback: {md_path}")
-            return md_filename, str(md_path)
+            # Upload markdown to Dropbox
+            month = datetime.now().strftime("%Y-%m")
+            dropbox_path = f"{DROPBOX_DOSSIER_FOLDER}/{month}/{md_filename}"
+            try:
+                from triggers.dropbox_client import DropboxClient
+                client = DropboxClient._get_global_instance()
+                client.upload_file(md_path, dropbox_path)
+                logger.info(f"Dossier (markdown fallback) uploaded: {dropbox_path}")
+                return md_filename, dropbox_path
+            except Exception:
+                return md_filename, md_path
         except Exception as e2:
             logger.error(f"Markdown fallback also failed: {e2}")
             return None, None
