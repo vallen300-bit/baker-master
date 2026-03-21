@@ -1937,19 +1937,46 @@ function _createResearchCard(proposal) {
 }
 
 function _respondToResearchProposal(proposalId, response, cardEl) {
-    _researchProposals = _researchProposals.filter(function(p) { return p.id !== proposalId; });
-
-    if (cardEl) {
-        cardEl.style.transition = 'opacity 0.2s, transform 0.2s';
-        cardEl.style.opacity = '0';
-        cardEl.style.transform = response === 'skipped' ? 'translateX(-100%)' : 'translateX(100%)';
-        setTimeout(function() { cardEl.remove(); }, 200);
+    if (response === 'approved' && cardEl) {
+        // Show running state on the card instead of removing it
+        var btns = cardEl.querySelector('.triage-buttons');
+        if (btns) {
+            btns.textContent = '';
+            var status = document.createElement('div');
+            status.className = 'triage-running-status';
+            status.textContent = 'Dossier approved — Baker will run specialists and notify you when ready.';
+            btns.appendChild(status);
+        }
+        cardEl.style.opacity = '0.7';
+        // Remove after 4s
+        setTimeout(function() {
+            _researchProposals = _researchProposals.filter(function(p) { return p.id !== proposalId; });
+            cardEl.style.transition = 'opacity 0.3s, max-height 0.3s';
+            cardEl.style.opacity = '0';
+            cardEl.style.maxHeight = '0';
+            cardEl.style.overflow = 'hidden';
+            setTimeout(function() {
+                cardEl.remove();
+                var countEl = document.getElementById('triageCount');
+                var totalCount = _proposedActions.length + _researchProposals.length;
+                if (countEl) countEl.textContent = totalCount + ' item' + (totalCount !== 1 ? 's' : '');
+                if (totalCount === 0) _renderTriageDeck();
+            }, 300);
+        }, 4000);
+    } else {
+        // Skip — remove immediately
+        _researchProposals = _researchProposals.filter(function(p) { return p.id !== proposalId; });
+        if (cardEl) {
+            cardEl.style.transition = 'opacity 0.2s, transform 0.2s';
+            cardEl.style.opacity = '0';
+            cardEl.style.transform = 'translateX(-100%)';
+            setTimeout(function() { cardEl.remove(); }, 200);
+        }
+        var countEl = document.getElementById('triageCount');
+        var totalCount = _proposedActions.length + _researchProposals.length;
+        if (countEl) countEl.textContent = totalCount + ' item' + (totalCount !== 1 ? 's' : '');
+        if (totalCount === 0) setTimeout(function() { _renderTriageDeck(); }, 250);
     }
-
-    var countEl = document.getElementById('triageCount');
-    var totalCount = _proposedActions.length + _researchProposals.length;
-    if (countEl) countEl.textContent = totalCount + ' item' + (totalCount !== 1 ? 's' : '');
-    if (totalCount === 0) setTimeout(function() { _renderTriageDeck(); }, 250);
 
     bakerFetch('/api/research-proposals/' + proposalId + '/respond', {
         method: 'POST',
@@ -1958,19 +1985,6 @@ function _respondToResearchProposal(proposalId, response, cardEl) {
     }).then(function() {
         refreshActionBadge();
     }).catch(function(e) { console.error('Research response failed:', e); });
-
-    var label = response === 'approved' ? 'Dossier running...' : 'Research skipped';
-    var toast = document.createElement('div');
-    toast.className = 'undo-toast';
-    var text = document.createElement('span');
-    text.textContent = label;
-    toast.appendChild(text);
-    document.body.appendChild(toast);
-    setTimeout(function() {
-        toast.style.transition = 'opacity 0.3s';
-        toast.style.opacity = '0';
-        setTimeout(function() { toast.remove(); }, 300);
-    }, 2000);
 }
 
 function _setupTriageSwipe(card, actionId) {
