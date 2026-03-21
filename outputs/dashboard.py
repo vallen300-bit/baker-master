@@ -7371,8 +7371,8 @@ async def api_get_research_proposals(status: str = None, days: int = 14):
 
 
 @app.post("/api/research-proposals/{proposal_id}/respond", tags=["research"], dependencies=[Depends(verify_api_key)])
-async def api_respond_to_research_proposal(proposal_id: int, request: Request):
-    """Approve or skip a research proposal."""
+async def api_respond_to_research_proposal(proposal_id: int, request: Request, background_tasks: BackgroundTasks):
+    """Approve or skip a research proposal. Approval triggers dossier execution."""
     from orchestrator.research_trigger import respond_to_research_proposal
     body = await request.json()
     response = body.get("response", "")
@@ -7381,6 +7381,14 @@ async def api_respond_to_research_proposal(proposal_id: int, request: Request):
     ok = respond_to_research_proposal(proposal_id, response)
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to record response")
+
+    # On approval, trigger dossier execution in background
+    if response == "approved":
+        from orchestrator.research_executor import execute_research_dossier
+        background_tasks.add_task(execute_research_dossier, proposal_id)
+        return {"status": "ok", "proposal_id": proposal_id, "response": response,
+                "execution": "started"}
+
     return {"status": "ok", "proposal_id": proposal_id, "response": response}
 
 
