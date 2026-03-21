@@ -7423,7 +7423,7 @@ async def api_research_proposal_status(proposal_id: int):
 @app.get("/api/research-proposals/{proposal_id}/download", tags=["research"])
 async def api_download_research_dossier(proposal_id: int, key: str = ""):
     """Download the completed dossier as .docx (generated on-the-fly from stored markdown)."""
-    if key != config.api.baker_api_key:
+    if key != _BAKER_API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
     import psycopg2.extras
     store = _get_store()
