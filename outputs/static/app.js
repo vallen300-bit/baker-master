@@ -751,14 +751,29 @@ function _renderActionsWidget(actions, researchProposals) {
 }
 
 function _respondDesktopResearch(proposalId, response, cardEl) {
-    if (cardEl) { cardEl.style.opacity = '0.4'; cardEl.style.pointerEvents = 'none'; }
+    if (response === 'approved' && cardEl) {
+        // Show running state
+        var btns = cardEl.querySelector('.action-card-btns');
+        if (btns) {
+            btns.textContent = '';
+            var status = document.createElement('div');
+            status.style.cssText = 'font-size:12px;color:#22c55e;font-weight:500;padding:4px 0;';
+            status.textContent = 'Dossier running — Baker will notify you when ready (1-2 min)...';
+            btns.appendChild(status);
+        }
+        cardEl.style.opacity = '0.7';
+        cardEl.style.pointerEvents = 'none';
+    } else if (cardEl) {
+        cardEl.style.opacity = '0.4';
+        cardEl.style.pointerEvents = 'none';
+    }
     bakerFetch('/api/research-proposals/' + proposalId + '/respond', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ response: response }),
     }).then(function(r) {
         if (!r.ok) throw new Error('API ' + r.status);
-        if (cardEl) {
+        if (response !== 'approved' && cardEl) {
             cardEl.style.transition = 'opacity 0.3s, max-height 0.3s';
             cardEl.style.opacity = '0';
             cardEl.style.maxHeight = '0';
