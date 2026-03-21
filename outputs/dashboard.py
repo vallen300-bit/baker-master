@@ -7392,6 +7392,80 @@ async def api_respond_to_research_proposal(proposal_id: int, request: Request, b
     return {"status": "ok", "proposal_id": proposal_id, "response": response}
 
 
+@app.get("/api/research-proposals/{proposal_id}/status", tags=["research"], dependencies=[Depends(verify_api_key)])
+async def api_research_proposal_status(proposal_id: int):
+    """Get current status of a research proposal (for polling during execution)."""
+    from orchestrator.research_trigger import get_research_proposals
+    import psycopg2.extras
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=500, detail="DB unavailable")
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT id, status, deliverable_path, completed_at, subject_name
+            FROM research_proposals WHERE id = %s
+        """, (proposal_id,))
+        row = cur.fetchone()
+        cur.close()
+        if not row:
+            raise HTTPException(status_code=404, detail="Proposal not found")
+        result = dict(row)
+        for k in ("completed_at",):
+            if result.get(k) and hasattr(result[k], "isoformat"):
+                result[k] = result[k].isoformat()
+        return result
+    finally:
+        store._put_conn(conn)
+
+
+@app.get("/api/research-proposals/{proposal_id}/download", tags=["research"])
+async def api_download_research_dossier(proposal_id: int, key: str = ""):
+    """Download the completed dossier as .docx (generated on-the-fly from stored markdown)."""
+    if key != config.api.baker_api_key:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    import psycopg2.extras
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=500, detail="DB unavailable")
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT subject_name, deliverable_summary, status
+            FROM research_proposals WHERE id = %s
+        """, (proposal_id,))
+        row = cur.fetchone()
+        cur.close()
+        if not row:
+            raise HTTPException(status_code=404, detail="Proposal not found")
+        if row["status"] != "completed":
+            raise HTTPException(status_code=400, detail="Dossier not yet completed")
+        if not row.get("deliverable_summary"):
+            raise HTTPException(status_code=404, detail="No dossier content stored")
+    finally:
+        store._put_conn(conn)
+
+    # Generate .docx on-the-fly
+    from document_generator import generate_document, get_file
+    file_id, filename, _ = generate_document(
+        content=row["deliverable_summary"],
+        fmt="docx",
+        title=f"Dossier_{row['subject_name']}",
+        metadata={"generated_by": "Baker Research Engine (ART-1)"}
+    )
+    file_info = get_file(file_id)
+    filepath = file_info["filepath"]
+
+    from starlette.responses import FileResponse
+    return FileResponse(
+        filepath,
+        filename=filename,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
 # ============================================================
 # CLI runner
 # ============================================================

@@ -374,6 +374,17 @@ body {
 .action-btn.done { border-color: var(--blue); color: var(--blue); }
 .action-btn.done:hover { background: var(--blue); color: #fff; }
 .action-btn.skip:hover { background: var(--bg2); }
+.dossier-progress {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; color: #22c55e; font-weight: 500; padding: 4px 0;
+}
+.dossier-spinner {
+  width: 14px; height: 14px; border: 2px solid var(--border);
+  border-top-color: #22c55e; border-radius: 50%;
+  animation: dossier-spin 0.8s linear infinite; flex-shrink: 0;
+}
+@keyframes dossier-spin { to { transform: rotate(360deg); } }
+.action-card.running { border-left-color: #22c55e; }
 .priorities-cancel-btn:hover { background: var(--border); }
 
 /* Unanswered badge (inline in greeting) */

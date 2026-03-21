@@ -374,12 +374,11 @@ def execute_research_dossier(proposal_id: int):
         # 6. Generate .docx and save to Dropbox
         filename, local_path = _generate_and_save_docx(subject_name, dossier_md)
 
-        # 7. Update proposal as completed
-        summary = dossier_md[:500] if dossier_md else ""
+        # 7. Update proposal as completed (store full dossier for on-demand download)
         _update_proposal_status(
             proposal_id, "completed",
             deliverable_path=local_path,
-            deliverable_summary=summary,
+            deliverable_summary=dossier_md,
         )
 
         # 8. Notify Director

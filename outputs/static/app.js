@@ -752,28 +752,38 @@ function _renderActionsWidget(actions, researchProposals) {
 
 function _respondDesktopResearch(proposalId, response, cardEl) {
     if (response === 'approved' && cardEl) {
-        // Show running state
+        // Show running state with spinner
         var btns = cardEl.querySelector('.action-card-btns');
         if (btns) {
             btns.textContent = '';
-            var status = document.createElement('div');
-            status.style.cssText = 'font-size:12px;color:#22c55e;font-weight:500;padding:4px 0;';
-            status.textContent = 'Dossier running — Baker will notify you when ready (1-2 min)...';
-            btns.appendChild(status);
+            var spinner = document.createElement('div');
+            spinner.className = 'dossier-progress';
+            var spinEl = document.createElement('span');
+            spinEl.className = 'dossier-spinner';
+            spinner.appendChild(spinEl);
+            var textSpan = document.createElement('span');
+            textSpan.className = 'dossier-progress-text';
+            textSpan.textContent = ' Running specialists...';
+            spinner.appendChild(textSpan);
+            btns.appendChild(spinner);
         }
-        cardEl.style.opacity = '0.7';
+        cardEl.style.opacity = '0.85';
         cardEl.style.pointerEvents = 'none';
+        cardEl.classList.add('running');
     } else if (cardEl) {
         cardEl.style.opacity = '0.4';
         cardEl.style.pointerEvents = 'none';
     }
+
     bakerFetch('/api/research-proposals/' + proposalId + '/respond', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ response: response }),
     }).then(function(r) {
         if (!r.ok) throw new Error('API ' + r.status);
-        if (response !== 'approved' && cardEl) {
+        if (response === 'approved') {
+            _pollDossierStatus(proposalId, cardEl);
+        } else if (cardEl) {
             cardEl.style.transition = 'opacity 0.3s, max-height 0.3s';
             cardEl.style.opacity = '0';
             cardEl.style.maxHeight = '0';
@@ -786,6 +796,65 @@ function _respondDesktopResearch(proposalId, response, cardEl) {
         console.error('Research respond failed:', e);
         if (cardEl) { cardEl.style.opacity = '1'; cardEl.style.pointerEvents = ''; }
     });
+}
+
+function _pollDossierStatus(proposalId, cardEl) {
+    var pollCount = 0;
+    var maxPolls = 60;
+    var labels = ['Running specialists...', 'Analyzing...', 'Combining results...', 'Generating document...'];
+
+    var interval = setInterval(function() {
+        pollCount++;
+        var textEl = cardEl ? cardEl.querySelector('.dossier-progress-text') : null;
+        if (textEl) {
+            var labelIdx = Math.min(Math.floor(pollCount / 5), labels.length - 1);
+            textEl.textContent = ' ' + labels[labelIdx];
+        }
+        if (pollCount >= maxPolls) {
+            clearInterval(interval);
+            if (textEl) textEl.textContent = ' Taking longer than expected — check back shortly.';
+            return;
+        }
+        bakerFetch('/api/research-proposals/' + proposalId + '/status').then(function(r) {
+            if (!r.ok) return;
+            return r.json();
+        }).then(function(data) {
+            if (!data) return;
+            if (data.status === 'completed') {
+                clearInterval(interval);
+                _showDossierComplete(proposalId, data.subject_name, cardEl);
+            }
+        }).catch(function() {});
+    }, 5000);
+}
+
+function _showDossierComplete(proposalId, subjectName, cardEl) {
+    if (!cardEl) return;
+    cardEl.style.opacity = '1';
+    cardEl.classList.remove('running');
+    cardEl.style.borderLeftColor = '#22c55e';
+
+    var title = cardEl.querySelector('.action-card-title');
+    if (title) title.textContent = 'Dossier ready: ' + (subjectName || 'Research');
+
+    var desc = cardEl.querySelector('.action-card-desc');
+    if (desc) desc.textContent = 'Research dossier completed. Download or check Dropbox.';
+
+    var suggest = cardEl.querySelector('.action-card-suggest');
+    if (suggest) suggest.remove();
+
+    var progress = cardEl.querySelector('.dossier-progress');
+    if (progress) {
+        progress.textContent = '';
+        var dlBtn = document.createElement('a');
+        dlBtn.href = '/api/research-proposals/' + proposalId + '/download?key=' + encodeURIComponent(BAKER.apiKey);
+        dlBtn.className = 'action-btn approve';
+        dlBtn.style.cssText = 'text-decoration:none;display:inline-block;text-align:center;';
+        dlBtn.textContent = 'Download .docx';
+        dlBtn.target = '_blank';
+        progress.appendChild(dlBtn);
+    }
+    cardEl.style.pointerEvents = '';
 }
 
 function _respondDesktopAction(actionId, response, cardEl) {

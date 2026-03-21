@@ -1136,12 +1136,29 @@ html, body {
 }
 
 .triage-running-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 12px;
   color: var(--green);
   font-weight: 500;
   padding: 8px 0;
   line-height: 1.4;
 }
+
+.triage-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--green);
+  border-radius: 50%;
+  animation: triage-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes triage-spin { to { transform: rotate(360deg); } }
+
+.triage-card.running { border-left-color: var(--green); opacity: 0.85; }
 
 .triage-due {
   font-size: 11px;

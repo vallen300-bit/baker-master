@@ -1938,31 +1938,23 @@ function _createResearchCard(proposal) {
 
 function _respondToResearchProposal(proposalId, response, cardEl) {
     if (response === 'approved' && cardEl) {
-        // Show running state on the card instead of removing it
+        // Show running state with spinner
         var btns = cardEl.querySelector('.triage-buttons');
         if (btns) {
             btns.textContent = '';
-            var status = document.createElement('div');
-            status.className = 'triage-running-status';
-            status.textContent = 'Dossier approved — Baker will run specialists and notify you when ready.';
-            btns.appendChild(status);
+            var spinner = document.createElement('div');
+            spinner.className = 'triage-running-status';
+            var dot = document.createElement('span');
+            dot.className = 'triage-spinner';
+            spinner.appendChild(dot);
+            var textSpan = document.createElement('span');
+            textSpan.className = 'triage-progress-text';
+            textSpan.textContent = ' Running specialists...';
+            spinner.appendChild(textSpan);
+            btns.appendChild(spinner);
         }
-        cardEl.style.opacity = '0.7';
-        // Remove after 4s
-        setTimeout(function() {
-            _researchProposals = _researchProposals.filter(function(p) { return p.id !== proposalId; });
-            cardEl.style.transition = 'opacity 0.3s, max-height 0.3s';
-            cardEl.style.opacity = '0';
-            cardEl.style.maxHeight = '0';
-            cardEl.style.overflow = 'hidden';
-            setTimeout(function() {
-                cardEl.remove();
-                var countEl = document.getElementById('triageCount');
-                var totalCount = _proposedActions.length + _researchProposals.length;
-                if (countEl) countEl.textContent = totalCount + ' item' + (totalCount !== 1 ? 's' : '');
-                if (totalCount === 0) _renderTriageDeck();
-            }, 300);
-        }, 4000);
+        cardEl.style.opacity = '0.85';
+        cardEl.classList.add('running');
     } else {
         // Skip — remove immediately
         _researchProposals = _researchProposals.filter(function(p) { return p.id !== proposalId; });
@@ -1984,7 +1976,56 @@ function _respondToResearchProposal(proposalId, response, cardEl) {
         body: JSON.stringify({ response: response }),
     }).then(function() {
         refreshActionBadge();
+        if (response === 'approved') {
+            _pollMobileDossier(proposalId, cardEl);
+        }
     }).catch(function(e) { console.error('Research response failed:', e); });
+}
+
+function _pollMobileDossier(proposalId, cardEl) {
+    var pollCount = 0;
+    var labels = ['Running specialists...', 'Analyzing...', 'Combining results...', 'Generating document...'];
+
+    var interval = setInterval(function() {
+        pollCount++;
+        var textEl = cardEl ? cardEl.querySelector('.triage-progress-text') : null;
+        if (textEl) {
+            var idx = Math.min(Math.floor(pollCount / 5), labels.length - 1);
+            textEl.textContent = ' ' + labels[idx];
+        }
+        if (pollCount >= 60) {
+            clearInterval(interval);
+            if (textEl) textEl.textContent = ' Taking longer than expected...';
+            return;
+        }
+        bakerFetch('/api/research-proposals/' + proposalId + '/status').then(function(r) {
+            return r.ok ? r.json() : null;
+        }).then(function(data) {
+            if (!data || data.status !== 'completed') return;
+            clearInterval(interval);
+            // Show completed state
+            if (!cardEl) return;
+            cardEl.style.opacity = '1';
+            cardEl.classList.remove('running');
+            cardEl.style.borderLeftColor = '#22c55e';
+            var title = cardEl.querySelector('.triage-card-title');
+            if (title) title.textContent = 'Dossier ready: ' + (data.subject_name || 'Research');
+            var desc = cardEl.querySelector('.triage-card-desc');
+            if (desc) desc.textContent = 'Completed. Download or check Dropbox.';
+            var status = cardEl.querySelector('.triage-running-status');
+            if (status) {
+                status.textContent = '';
+                status.className = 'triage-buttons';
+                var dlBtn = document.createElement('a');
+                dlBtn.href = '/api/research-proposals/' + proposalId + '/download?key=' + encodeURIComponent(BAKER.apiKey);
+                dlBtn.className = 'triage-btn approve';
+                dlBtn.style.cssText = 'text-decoration:none;text-align:center;display:block;';
+                dlBtn.textContent = 'Download .docx';
+                dlBtn.target = '_blank';
+                status.appendChild(dlBtn);
+            }
+        }).catch(function() {});
+    }, 5000);
 }
 
 function _setupTriageSwipe(card, actionId) {
