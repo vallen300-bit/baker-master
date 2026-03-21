@@ -74,22 +74,34 @@ def _ensure_research_proposals_table():
 # Haiku classification
 # ─────────────────────────────────────────────────
 
-_CLASSIFY_PROMPT = """You are Baker, AI Chief of Staff. Analyze this WhatsApp message and determine if it contains forwarded or copy-pasted intelligence about a person, company, or legal matter that would benefit from a multi-specialist research dossier.
+_CLASSIFY_PROMPT = """You are Baker, AI Chief of Staff for the Chairman of Brisen Group (luxury real estate, hotel development).
 
-Criteria for YES:
-- Contains forwarded/copy-pasted content (not casual conversation)
-- About an identifiable person OR company OR legal matter
-- Contains claims, legal actions, media coverage, business intelligence, or counterparty information
-- Would benefit from deep research (profiling, legal analysis, PR/media scan, background check)
+Analyze this message and determine if Baker should proactively research any people, companies, or matters mentioned. There are TWO trigger types:
+
+TYPE 1 — FORWARDED INTELLIGENCE:
+Message contains forwarded/copy-pasted content about a person, company, or legal matter (articles, legal letters, competitor info, media coverage). Always trigger.
+
+TYPE 2 — NEW COUNTERPARTY / MEETING PREP:
+Message mentions specific people with company affiliations who the Director will meet, negotiate with, or needs to understand. This includes: investor representatives, counterparties, developers, lawyers, brokers, or anyone the Director hasn't dealt with before. These people need profiling BEFORE the meeting.
+
+Criteria for YES (either type):
+- Names specific people with company/role context
+- People are counterparties, investors, developers, lawyers, or new business contacts
+- An upcoming meeting, visit, or negotiation is mentioned or implied
+- The context involves deals, disputes, acquisitions, litigation, or investment
+- Contains forwarded articles, legal documents, media coverage, or business intelligence
 
 Criteria for NO:
-- Casual conversation, greetings, scheduling
-- Simple status updates or questions
-- Already-processed information (meeting notes, task updates)
-- Short messages (<3 sentences of substance)
+- Only mentions people the Director works with daily (internal team)
+- Pure logistics (restaurant, flight, hotel booking) with no counterparty context
+- Casual greetings, birthday wishes, personal chat
+- Message is only about scheduling without naming new external parties
 
 If YES, return:
-{"is_trigger": true, "subject_name": "Full Name or Company", "subject_type": "person|company|legal_matter", "context": "One sentence explaining what was forwarded and why it matters", "suggested_specialists": ["research", "legal", "profiling", "pr_branding"]}
+{"is_trigger": true, "trigger_type": "intelligence|meeting_prep", "subject_name": "Full Name or Company", "subject_type": "person|company|legal_matter", "context": "One sentence: who they are, why they matter, what's the business context", "suggested_specialists": ["research", "profiling", "legal", "pr_branding"]}
+
+For meeting_prep triggers, always include "profiling" in suggested_specialists.
+If multiple people need profiling, use the most senior person as subject_name and mention others in context.
 
 If NO, return:
 {"is_trigger": false}
@@ -97,17 +109,60 @@ If NO, return:
 Return ONLY valid JSON, nothing else."""
 
 
+def _get_matter_context_for_classification() -> str:
+    """Get a brief summary of active matters to help Haiku understand business context."""
+    try:
+        from memory.store_back import SentinelStoreBack
+        import psycopg2.extras
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return ""
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT matter_name, description, keywords
+                FROM matter_registry
+                WHERE status = 'active'
+                ORDER BY matter_name
+                LIMIT 20
+            """)
+            matters = cur.fetchall()
+            cur.close()
+            if not matters:
+                return ""
+            lines = ["\n\nACTIVE BUSINESS MATTERS (use this context to assess importance):"]
+            for m in matters:
+                keywords = m.get("keywords") or []
+                if isinstance(keywords, str):
+                    try:
+                        keywords = json.loads(keywords)
+                    except Exception:
+                        keywords = []
+                kw = ", ".join(keywords[:5]) if keywords else ""
+                desc = m.get("description", "")[:100]
+                lines.append(f"- {m['matter_name']}: {desc}" + (f" [{kw}]" if kw else ""))
+            return "\n".join(lines)
+        finally:
+            store._put_conn(conn)
+    except Exception:
+        return ""
+
+
 def classify_research_trigger(message_body: str, sender_name: str) -> dict:
-    """Classify if a WhatsApp message is a research trigger. Returns classification dict."""
+    """Classify if a message is a research trigger. Returns classification dict."""
     if not message_body or len(message_body) < 200:
         return {"is_trigger": False}
 
     try:
+        # Inject active matters for business context
+        matter_context = _get_matter_context_for_classification()
+
         client = anthropic.Anthropic(api_key=config.claude.api_key)
         resp = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=300,
-            system=_CLASSIFY_PROMPT,
+            max_tokens=400,
+            system=_CLASSIFY_PROMPT + matter_context,
             messages=[{"role": "user", "content": f"From: {sender_name}\n\n{message_body[:3000]}"}],
         )
 
@@ -251,7 +306,7 @@ def _notify_research_proposal(proposal_id: int, subject_name: str, context: str,
 
 import re as _re
 
-# Patterns that suggest forwarded intelligence (not casual chat)
+# Patterns that suggest intelligence or counterparty profiling need
 _INTELLIGENCE_PATTERNS = _re.compile(
     r'(?:'
     r'forwarded|weitergeleitet|'       # forwarded message markers
@@ -271,7 +326,14 @@ _INTELLIGENCE_PATTERNS = _re.compile(
     r'subcontractor|Subunternehmer|Nachunternehmer|'  # construction
     r'ImmoFokus|Immobilien|Gewerbe|'           # real estate media
     r'GmbH|AG|Ltd|LLC|Corp|S\.A\.|'           # company suffixes
-    r'Dr\.|Mag\.|RA\s|Rechtsanwalt'           # professional titles
+    r'Dr\.|Mag\.|RA\s|Rechtsanwalt|'          # professional titles
+    r'managing\s*director|Geschäftsführer|'    # executive titles
+    r'CEO|CFO|COO|CTO|partner|director|'       # C-suite
+    r'investor|Investor|representatives|'       # investor context
+    r'visit|Besuch|meeting\s*with|treffen|'    # upcoming meetings
+    r'negotiate|Verhandlung|'                  # negotiations
+    r'developer|Entwickler|Bauträger|'         # developers
+    r'project\s+[A-Z]|Projekt\s+[A-Z]'        # named projects
     r')',
     _re.IGNORECASE
 )
