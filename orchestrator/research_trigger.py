@@ -217,6 +217,22 @@ def create_research_proposal(
     specialists = classification.get("suggested_specialists", ["research", "legal", "profiling"])
 
     # Dedup: don't re-propose same subject within 7 days
+    # Fuzzy: extract primary name (first word or name before "/" or "(") and match
+    def _extract_primary_name(name: str) -> str:
+        """Extract the core subject name for dedup matching."""
+        # "Patrick Piras / Core Service SA / Brisengroup" → "Patrick Piras"
+        # "Bernhard Steinkopf (Campus Schlüterstrasse)" → "Bernhard Steinkopf"
+        # "Hagenauer" → "Hagenauer"
+        n = name.strip()
+        for sep in ("/", "(", " - ", " — ", " and ", " & "):
+            if sep in n:
+                n = n.split(sep)[0].strip()
+        # Remove trailing punctuation
+        n = n.rstrip(" ,;:")
+        return n
+
+    primary_name = _extract_primary_name(subject_name)
+
     try:
         from memory.store_back import SentinelStoreBack
         store = SentinelStoreBack._get_global_instance()
@@ -225,16 +241,17 @@ def create_research_proposal(
             return None
         try:
             cur = conn.cursor()
+            # Fuzzy dedup: check if any proposal contains this primary name
             cur.execute("""
-                SELECT id FROM research_proposals
-                WHERE LOWER(subject_name) = LOWER(%s)
+                SELECT id, subject_name FROM research_proposals
+                WHERE (LOWER(subject_name) LIKE %s OR LOWER(%s) LIKE '%%' || LOWER(subject_name) || '%%')
                   AND status NOT IN ('skipped')
                   AND created_at > NOW() - INTERVAL '7 days'
                 LIMIT 1
-            """, (subject_name,))
+            """, (f"%{primary_name.lower()}%", primary_name.lower()))
             existing = cur.fetchone()
             if existing:
-                logger.info(f"Research proposal for '{subject_name}' already exists (id={existing[0]}) — skipping")
+                logger.info(f"Research proposal for '{subject_name}' matches existing '{existing[1]}' (id={existing[0]}) — skipping")
                 cur.close()
                 return None
 
