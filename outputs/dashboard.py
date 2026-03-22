@@ -145,6 +145,7 @@ class ScanRequest(BaseModel):
     history: list = Field(default_factory=list)  # [{role, content}, ...]
     project: Optional[str] = None   # scope search to project (e.g. "rg7")
     role: Optional[str] = None      # scope search to role (e.g. "chairman")
+    owner: Optional[str] = None     # "dimitry" or "edita" — for memory separation
 
 
 class CreateTaskRequest(BaseModel):
@@ -5950,6 +5951,7 @@ def _scan_store_back(req, full_response: str, start: float,
             answer_length=len(full_response),
             project=req.project or "general",
             chunk_count=chunk_count,
+            owner=req.owner or "dimitry",
         )
         logger.info("Conversation stored in Baker's memory (CONV-MEM-1)")
     except Exception as e:

@@ -3864,15 +3864,20 @@ class SentinelStoreBack:
                 ALTER TABLE conversation_memory
                 ADD COLUMN IF NOT EXISTS answer TEXT
             """)
+            # RUSSO-MEMORY-1: Owner column for memory separation (dimitry/edita)
+            cur.execute("""
+                ALTER TABLE conversation_memory
+                ADD COLUMN IF NOT EXISTS owner VARCHAR(20) DEFAULT 'dimitry'
+            """)
             conn.commit()
             cur.close()
-            logger.info("conversation_memory table verified")
+            logger.info("conversation_memory table verified (with owner column)")
         except Exception as e:
             logger.warning(f"Could not ensure conversation_memory table: {e}")
         finally:
             self._put_conn(conn)
 
-    def log_conversation(self, question, answer="", answer_length=0, project="general", chunk_count=1):
+    def log_conversation(self, question, answer="", answer_length=0, project="general", chunk_count=1, owner="dimitry"):
         """Catalogue a scan conversation in PostgreSQL + embed to Qdrant (B1)."""
         conn = self._get_conn()
         if not conn:
@@ -3882,9 +3887,9 @@ class SentinelStoreBack:
             cur = conn.cursor()
             cur.execute("""
                 INSERT INTO conversation_memory
-                    (question, answer, answer_length, project, chunk_count)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (question, answer, answer_length, project, chunk_count))
+                    (question, answer, answer_length, project, chunk_count, owner)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (question, answer, answer_length, project, chunk_count, owner or "dimitry"))
             conn.commit()
             cur.close()
         except Exception as e:

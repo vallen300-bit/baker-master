@@ -610,13 +610,20 @@ class CapabilityRunner:
 
     def _maybe_store_insight(self, capability, question: str, answer: str,
                               baker_task_id: int = None):
-        """Auto-extract key findings from specialist response. Entirely non-fatal."""
+        """Auto-extract key findings from specialist response. Entirely non-fatal.
+        RUSSO-MEMORY-1: Also auto-save Russo AI outputs as documents for Edita.
+        """
         try:
             # Guards
             if len(answer) < 200:
                 return
             if capability.slug in ("decomposer", "synthesizer"):
                 return
+
+            # RUSSO-MEMORY-1: Save Russo AI outputs as documents
+            if capability.slug.startswith("russo_"):
+                self._store_russo_document(capability, question, answer)
+
             allowed, _ = self._check_circuit_breaker()
             if not allowed:
                 return
@@ -689,6 +696,36 @@ class CapabilityRunner:
 
         except Exception as e:
             logger.debug(f"Auto-insight extraction failed (non-fatal): {e}")
+
+    def _store_russo_document(self, capability, question: str, answer: str):
+        """RUSSO-MEMORY-1: Save Russo AI specialist output as a document for Edita."""
+        try:
+            from memory.store_back import SentinelStoreBack
+            from datetime import datetime, timezone
+            store = SentinelStoreBack._get_global_instance()
+            conn = store._get_conn()
+            if not conn:
+                return
+            try:
+                cur = conn.cursor()
+                title = f"Russo AI ({capability.name}): {question[:100]}"
+                content = f"## Question\n{question}\n\n## Analysis\n{answer}"
+                cur.execute("""
+                    INSERT INTO documents
+                        (title, content, doc_type, source, owner, created_at)
+                    VALUES (%s, %s, 'russo_ai_analysis', %s, 'edita', NOW())
+                """, (
+                    title[:300],
+                    content,
+                    f"capability:{capability.slug}",
+                ))
+                conn.commit()
+                cur.close()
+                logger.info(f"Russo AI document stored: {title[:60]}")
+            finally:
+                store._put_conn(conn)
+        except Exception as e:
+            logger.debug(f"Russo document store failed (non-fatal): {e}")
 
     def _get_shared_insights(self, slug: str, domain: str = None, limit: int = 5) -> str:
         """Fetch active shared insights relevant to all specialists (SPECIALIST-UPGRADE-1B)."""
