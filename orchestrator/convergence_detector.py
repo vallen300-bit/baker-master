@@ -315,6 +315,37 @@ def _gather_matter_texts() -> dict:
             if texts:
                 matter_texts[matter] = texts
 
+        # Baker 3.0: Also gather from signal_extractions (pre-extracted entities)
+        try:
+            cur.execute("""
+                SELECT extracted_items FROM signal_extractions
+                WHERE processed_at > NOW() - INTERVAL '14 days'
+                ORDER BY processed_at DESC LIMIT 100
+            """)
+            for row in cur.fetchall():
+                items = row.get("extracted_items") or row[0] if not isinstance(row, dict) else row.get("extracted_items", [])
+                if isinstance(items, str):
+                    import json
+                    items = json.loads(items)
+                for item in (items or []):
+                    matter_ref = item.get("related_matter")
+                    if matter_ref and matter_ref in matter_texts:
+                        matter_texts[matter_ref].append(
+                            f"[Extraction] {item.get('type', '?')}: {item.get('text', '')[:200]}"
+                        )
+                    # Also check related_contacts for cross-matter entity detection
+                    for contact in (item.get("related_contacts") or []):
+                        for m_name, m_texts in matter_texts.items():
+                            if contact.lower() in " ".join(m_texts).lower():
+                                m_texts.append(
+                                    f"[Cross-ref] {contact} mentioned in {item.get('_source_channel', '?')}: {item.get('text', '')[:150]}"
+                                )
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+
         cur.close()
     except Exception as e:
         logger.error(f"Matter text gathering failed: {e}")

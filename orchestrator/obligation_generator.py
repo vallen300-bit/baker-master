@@ -262,6 +262,39 @@ def _gather_signals() -> dict:
     except Exception as e:
         logger.debug(f"Calendar fetch for obligations failed (non-fatal): {e}")
 
+    # 10. Baker 3.0: Pre-extracted items from signal_extractions (Item 0b)
+    ctx["extracted_items"] = []
+    try:
+        conn2 = store._get_conn()
+        if conn2:
+            try:
+                cur2 = conn2.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur2.execute("""
+                    SELECT source_channel, source_id, extracted_items
+                    FROM signal_extractions
+                    WHERE processed_at > NOW() - INTERVAL '24 hours'
+                    ORDER BY processed_at DESC LIMIT 50
+                """)
+                for row in cur2.fetchall():
+                    items = row.get("extracted_items") or []
+                    if isinstance(items, str):
+                        items = json.loads(items)
+                    for item in items:
+                        if item.get("type") in ("commitment", "action_item", "deadline", "follow_up"):
+                            item["_source_channel"] = row["source_channel"]
+                            item["_source_id"] = row["source_id"]
+                            ctx["extracted_items"].append(item)
+                cur2.close()
+            except Exception:
+                try:
+                    conn2.rollback()
+                except Exception:
+                    pass
+            finally:
+                store._put_conn(conn2)
+    except Exception as e:
+        logger.debug(f"Signal extractions fetch failed (non-fatal): {e}")
+
     return ctx
 
 
@@ -322,6 +355,17 @@ def _format_signals(ctx: dict) -> str:
         parts.append(f"\n## YESTERDAY'S PROPOSED ACTIONS (still open — do NOT re-propose)")
         for p in ctx["yesterday_proposed"]:
             parts.append(f"  - [{p.get('status', '?')}] {p['title'][:80]}")
+
+    # Baker 3.0: Pre-extracted items from signal_extractions
+    if ctx.get("extracted_items"):
+        parts.append(f"\n## PRE-EXTRACTED ACTION ITEMS (from Baker extraction engine, last 24h) — {len(ctx['extracted_items'])}")
+        parts.append("These are already structured. Prioritize and format them as proposed actions.")
+        for item in ctx["extracted_items"][:20]:
+            owner = item.get("who", "?")
+            when = f" (by {item['when']})" if item.get("when") else ""
+            channel = item.get("_source_channel", "?")
+            conf = item.get("confidence", "?")
+            parts.append(f"  - [{channel}/{conf}] {owner}: {item.get('text', '')[:120]}{when}")
 
     return "\n".join(parts)
 

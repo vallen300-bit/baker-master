@@ -246,6 +246,42 @@ def _gather_context() -> dict:
     except Exception as e:
         logger.debug(f"Calendar fetch for initiatives failed (non-fatal): {e}")
 
+    # 9. Baker 3.0: High-confidence extractions from last 48h (Item 0b)
+    ctx["extracted_highlights"] = []
+    try:
+        conn3 = store._get_conn()
+        if conn3:
+            try:
+                cur3 = conn3.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+                cur3.execute("""
+                    SELECT source_channel, extracted_items
+                    FROM signal_extractions
+                    WHERE processed_at > NOW() - INTERVAL '48 hours'
+                      AND extraction_tier IN ('T1', 'T2')
+                    ORDER BY processed_at DESC LIMIT 30
+                """)
+                for row in cur3.fetchall():
+                    items = row.get("extracted_items") or []
+                    if isinstance(items, str):
+                        import json
+                        items = json.loads(items)
+                    for item in items:
+                        if item.get("confidence") == "high" and item.get("type") in (
+                            "commitment", "action_item", "decision", "deadline"
+                        ):
+                            item["_channel"] = row["source_channel"]
+                            ctx["extracted_highlights"].append(item)
+                cur3.close()
+            except Exception:
+                try:
+                    conn3.rollback()
+                except Exception:
+                    pass
+            finally:
+                store._put_conn(conn3)
+    except Exception:
+        pass
+
     return ctx
 
 
@@ -313,6 +349,14 @@ def _format_context(ctx: dict) -> str:
         parts.append(f"\n## RECENTLY HANDLED BY CHAINS — do NOT re-propose these")
         for c in ctx["recent_chains"]:
             parts.append(f"  - {c['title'][:80]}")
+
+    # Baker 3.0: High-confidence extracted items
+    if ctx.get("extracted_highlights"):
+        parts.append(f"\n## REAL-TIME INTELLIGENCE (last 48h, high-confidence)")
+        for item in ctx["extracted_highlights"][:10]:
+            channel = item.get("_channel", "?")
+            when = f" — due {item['when']}" if item.get("when") else ""
+            parts.append(f"  - [{channel}] {item.get('type', '?')}: {item.get('text', '')[:120]}{when}")
 
     return "\n".join(parts)
 

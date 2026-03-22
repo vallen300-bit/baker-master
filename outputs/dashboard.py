@@ -1465,6 +1465,53 @@ def _get_proposed_actions_for_brief() -> list:
         return []
 
 
+def _get_extraction_summary() -> dict:
+    """Baker 3.0: Get extraction summary for morning brief (last 24h)."""
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            return {"total": 0, "by_channel": {}, "by_type": {}}
+        try:
+            import psycopg2.extras
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            # Count by channel
+            cur.execute("""
+                SELECT source_channel, COUNT(*) as cnt
+                FROM signal_extractions
+                WHERE processed_at > NOW() - INTERVAL '24 hours'
+                GROUP BY source_channel
+            """)
+            by_channel = {r["source_channel"]: r["cnt"] for r in cur.fetchall()}
+
+            # Count by item type (aggregate across all extractions)
+            cur.execute("""
+                SELECT
+                    item->>'type' as item_type,
+                    COUNT(*) as cnt
+                FROM signal_extractions,
+                     jsonb_array_elements(extracted_items) as item
+                WHERE processed_at > NOW() - INTERVAL '24 hours'
+                GROUP BY item->>'type'
+                ORDER BY cnt DESC
+            """)
+            by_type = {r["item_type"]: r["cnt"] for r in cur.fetchall()}
+
+            total = sum(by_channel.values())
+            cur.close()
+            return {"total": total, "by_channel": by_channel, "by_type": by_type}
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            return {"total": 0, "by_channel": {}, "by_type": {}}
+        finally:
+            store._put_conn(conn)
+    except Exception:
+        return {"total": 0, "by_channel": {}, "by_type": {}}
+
+
 @app.get("/api/dashboard/morning-brief", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
 async def get_morning_brief():
     """
@@ -1817,6 +1864,7 @@ async def get_morning_brief():
             "weekly_priorities": weekly_priorities,
             "proposed_actions": _get_proposed_actions_for_brief(),
             "research_proposals": _get_research_proposals_for_brief(),
+            "extraction_summary": _get_extraction_summary(),
         }
     except HTTPException:
         raise
