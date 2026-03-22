@@ -192,12 +192,15 @@ def run_dropbox_poll():
                         full_text = extract(local_path)
                         file_hash = compute_file_hash(local_path)
                         store = _get_store()
+                        # Determine owner from path (WEALTH-MANAGER)
+                        _owner = "edita" if "/edita-feed" in entry_path.lower() else "dimitry"
                         doc_id = store.store_document_full(
                             source_path=entry_path,
                             filename=entry_name,
                             file_hash=file_hash,
                             full_text=full_text,
                             token_count=len(full_text) // 4 if full_text else 0,
+                            owner=_owner,
                         )
                         if doc_id:
                             logger.info(f"Full text stored: {entry_name} → documents.id={doc_id} ({len(full_text):,} chars)")
@@ -348,6 +351,105 @@ def _feed_to_pipeline(entry: dict, classification: str):
         pipeline.run(trigger)
     except Exception as e:
         logger.warning(f"Pipeline feed failed for {entry.get('name', '?')}: {e}")
+
+
+def run_edita_dropbox_poll():
+    """WEALTH-MANAGER: Poll /Edita-Feed/ for Edita's documents.
+
+    Reuses the same Dropbox client and ingestion pipeline.
+    Uses a separate cursor key ('dropbox_edita') so it tracks independently.
+    Documents are stored with owner='edita'.
+    """
+    from triggers.sentinel_health import report_success, report_failure, should_skip_poll
+
+    if should_skip_poll("dropbox_edita"):
+        return
+
+    edita_path = "/Edita-Feed"
+    logger.info(f"Edita Dropbox trigger: polling {edita_path}...")
+
+    try:
+        client = _get_client()
+        supported_extensions = _get_supported_extensions()
+
+        cursor = trigger_state.get_cursor("dropbox_edita")
+        had_cursor = cursor is not None
+
+        try:
+            entries, new_cursor = client.list_folder(edita_path, cursor=cursor)
+        except Exception as e:
+            if "409" in str(e) or "path/not_found" in str(e):
+                logger.info(f"Edita folder {edita_path} not found — create it to start polling")
+                report_success("dropbox_edita")
+                return
+            report_failure("dropbox_edita", str(e))
+            return
+
+        file_entries = []
+        for entry in entries:
+            if entry.get(".tag") != "file":
+                continue
+            name = entry.get("name", "")
+            ext = Path(name).suffix.lower()
+            size = entry.get("size", 0)
+            if ext not in supported_extensions or size > _MAX_FILE_SIZE:
+                continue
+            file_entries.append(entry)
+
+        if not file_entries:
+            if new_cursor:
+                trigger_state.set_cursor("dropbox_edita", new_cursor)
+            report_success("dropbox_edita")
+            logger.info(f"Edita Dropbox poll: 0 files to process")
+            return
+
+        temp_dir = tempfile.mkdtemp(prefix="baker_edita_")
+        processed = 0
+        try:
+            for entry in file_entries:
+                entry_name = entry.get("name", "?")
+                entry_path = entry.get("path_display") or entry.get("path_lower", "")
+                try:
+                    local_path = client.download_file(entry_path, Path(temp_dir))
+                    from tools.ingest.extractors import extract
+                    from tools.ingest.dedup import compute_file_hash
+                    full_text = extract(local_path)
+                    file_hash = compute_file_hash(local_path)
+                    store = _get_store()
+                    doc_id = store.store_document_full(
+                        source_path=entry_path,
+                        filename=entry_name,
+                        file_hash=file_hash,
+                        full_text=full_text,
+                        token_count=len(full_text) // 4 if full_text else 0,
+                        owner="edita",
+                    )
+                    if doc_id:
+                        logger.info(f"Edita doc stored: {entry_name} → id={doc_id}")
+                        try:
+                            from tools.document_pipeline import queue_extraction
+                            queue_extraction(doc_id)
+                        except Exception:
+                            pass
+                    processed += 1
+                except Exception as e:
+                    logger.warning(f"Edita file failed: {entry_name}: {e}")
+                finally:
+                    try:
+                        (Path(temp_dir) / entry_name).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+        if new_cursor:
+            trigger_state.set_cursor("dropbox_edita", new_cursor)
+        report_success("dropbox_edita")
+        logger.info(f"Edita Dropbox poll: {processed} processed out of {len(file_entries)} files")
+
+    except Exception as e:
+        report_failure("dropbox_edita", str(e))
+        logger.error(f"Edita Dropbox poll failed: {e}")
 
 
 if __name__ == "__main__":

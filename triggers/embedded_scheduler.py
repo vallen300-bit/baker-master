@@ -84,6 +84,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info(f"Registered: dropbox_poll (every {config.triggers.dropbox_check_interval}s)")
 
+    # WEALTH-MANAGER: Edita's Dropbox feed — every 30 minutes
+    from triggers.dropbox_trigger import run_edita_dropbox_poll
+    scheduler.add_job(
+        run_edita_dropbox_poll,
+        IntervalTrigger(seconds=config.triggers.dropbox_check_interval),
+        id="dropbox_edita_poll", name="Edita Dropbox folder polling",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: dropbox_edita_poll (Edita-Feed)")
+
     # Todoist polling — every 30 minutes
     from triggers.todoist_trigger import run_todoist_poll
     scheduler.add_job(

@@ -134,6 +134,9 @@ class SentinelStoreBack:
         self._ensure_trip_contacts_table()
         self._seed_location_preferences()
 
+        # WEALTH-MANAGER: Wealth tracking tables
+        self._ensure_wealth_tables()
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -223,6 +226,9 @@ class SentinelStoreBack:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source_path)")
             # TAGGING-OVERHAUL-1: content_class for pre-Haiku triage
             cur.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_class VARCHAR(20) DEFAULT 'document'")
+            # WEALTH-MANAGER: owner column for access control (dimitry/edita/shared)
+            cur.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS owner VARCHAR(20) DEFAULT 'shared'")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_owner ON documents(owner)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_content_class ON documents(content_class)")
             # FTS: tsvector column + GIN index for full-text search
             cur.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS search_vector tsvector")
@@ -258,7 +264,7 @@ class SentinelStoreBack:
 
     def store_document_full(self, source_path: str, filename: str,
                             file_hash: str, full_text: str,
-                            token_count: int = 0):
+                            token_count: int = 0, owner: str = "shared"):
         """Store full document text in PostgreSQL. Returns document ID or None."""
         conn = self._get_conn()
         if not conn:
@@ -266,16 +272,17 @@ class SentinelStoreBack:
         try:
             cur = conn.cursor()
             cur.execute("""
-                INSERT INTO documents (source_path, filename, file_hash, full_text, token_count, search_vector)
-                VALUES (%s, %s, %s, %s, %s, to_tsvector('simple', COALESCE(%s, '')))
+                INSERT INTO documents (source_path, filename, file_hash, full_text, token_count, search_vector, owner)
+                VALUES (%s, %s, %s, %s, %s, to_tsvector('simple', COALESCE(%s, '')), %s)
                 ON CONFLICT (file_hash) DO UPDATE SET
                     source_path = EXCLUDED.source_path,
                     full_text = EXCLUDED.full_text,
                     token_count = EXCLUDED.token_count,
                     search_vector = EXCLUDED.search_vector,
+                    owner = COALESCE(EXCLUDED.owner, documents.owner),
                     ingested_at = NOW()
                 RETURNING id
-            """, (source_path, filename, file_hash, full_text, token_count, full_text))
+            """, (source_path, filename, file_hash, full_text, token_count, full_text, owner))
             row = cur.fetchone()
             conn.commit()
             cur.close()
@@ -4014,6 +4021,53 @@ class SentinelStoreBack:
         except Exception as e:
             conn.rollback()
             logger.warning(f"push_subscriptions table init failed: {e}")
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # WEALTH-MANAGER: Wealth tracking tables
+    # -------------------------------------------------------
+
+    def _ensure_wealth_tables(self):
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS wealth_positions (
+                    id SERIAL PRIMARY KEY,
+                    owner VARCHAR(20) DEFAULT 'shared',
+                    category VARCHAR(30),
+                    name TEXT NOT NULL,
+                    current_value NUMERIC(15,2),
+                    currency VARCHAR(3) DEFAULT 'EUR',
+                    valuation_date DATE,
+                    valuation_source TEXT,
+                    notes TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS wealth_tax_calendar (
+                    id SERIAL PRIMARY KEY,
+                    owner VARCHAR(20) DEFAULT 'shared',
+                    jurisdiction VARCHAR(30),
+                    obligation TEXT NOT NULL,
+                    due_date DATE NOT NULL,
+                    status VARCHAR(20) DEFAULT 'upcoming',
+                    advisor TEXT,
+                    notes TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("Wealth tables verified (wealth_positions, wealth_tax_calendar)")
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"Wealth tables init failed: {e}")
         finally:
             self._put_conn(conn)
 
