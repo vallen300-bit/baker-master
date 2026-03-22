@@ -2,11 +2,10 @@
 LinkedIn Enrichment Client — Provider-Agnostic
 
 Wraps LinkedIn profile/company enrichment APIs behind a common interface.
-Currently supports Netrows. Designed to swap to People Data Labs or
-LinkdAPI with zero changes to calling code.
+Supports Apollo.io (recommended) and Netrows (legacy).
 
-Config: LINKEDIN_API_KEY env var (Netrows API key).
-        LINKEDIN_PROVIDER env var (default: "netrows").
+Config: LINKEDIN_API_KEY env var (Apollo API key).
+        LINKEDIN_PROVIDER env var (default: "apollo").
 
 Usage:
     from tools.linkedin_client import LinkedInEnricher
@@ -264,6 +263,173 @@ def _netrows_enrich_company(
 
 
 # ─────────────────────────────────────────────────
+# Apollo.io Provider
+# ─────────────────────────────────────────────────
+
+_APOLLO_BASE = "https://api.apollo.io/api/v1"
+
+
+def _apollo_enrich_person(
+    api_key: str,
+    name: str = "",
+    linkedin_url: str = "",
+    company: str = "",
+    email: str = "",
+) -> Optional[PersonProfile]:
+    """Call Apollo People Match endpoint."""
+    headers = {
+        "x-api-key": api_key,
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+    }
+
+    # Build match parameters
+    params = {}
+    if linkedin_url:
+        params["linkedin_url"] = linkedin_url
+    elif email:
+        params["email"] = email
+    elif name:
+        # Split name into first/last
+        parts = name.strip().split(None, 1)
+        params["first_name"] = parts[0]
+        if len(parts) > 1:
+            params["last_name"] = parts[1]
+        if company:
+            params["organization_name"] = company
+
+    if not params:
+        return None
+
+    try:
+        resp = httpx.post(
+            f"{_APOLLO_BASE}/people/match",
+            headers=headers,
+            json=params,
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        person = data.get("person")
+        if not person:
+            logger.info(f"Apollo: no match for {name or linkedin_url or email}")
+            return None
+
+        org = person.get("organization") or {}
+
+        profile = PersonProfile(
+            name=person.get("name", name),
+            headline=person.get("headline", ""),
+            title=person.get("title", ""),
+            company=org.get("name", person.get("organization_name", "")),
+            location=f"{person.get('city', '')}, {person.get('state', '')}, {person.get('country', '')}".strip(", "),
+            photo_url=person.get("photo_url", ""),
+            linkedin_url=person.get("linkedin_url", linkedin_url),
+            summary=person.get("headline", ""),
+            connection_count=0,
+            enriched_at=datetime.now(timezone.utc).isoformat(),
+            provider="apollo",
+            raw_url=person.get("linkedin_url", ""),
+        )
+
+        # Work history from employment_history
+        for exp in person.get("employment_history", []):
+            profile.work_history.append({
+                "title": exp.get("title", ""),
+                "company": exp.get("organization_name", ""),
+                "start": exp.get("start_date", ""),
+                "end": exp.get("end_date", ""),
+            })
+
+        # Education
+        for edu in person.get("education", []):
+            profile.education.append({
+                "school": edu.get("school_name", edu.get("organization_name", "")),
+                "degree": edu.get("degree", ""),
+                "field": edu.get("field_of_study", ""),
+                "start": edu.get("start_date", ""),
+                "end": edu.get("end_date", ""),
+            })
+
+        # Seniority and departments as pseudo-skills
+        seniority = person.get("seniority", "")
+        departments = person.get("departments", [])
+        if seniority:
+            profile.skills.append(f"Seniority: {seniority}")
+        if departments:
+            profile.skills.extend(departments)
+
+        logger.info(f"Apollo: enriched {profile.name} ({profile.title} at {profile.company})")
+        return profile
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Apollo person lookup failed (HTTP {e.response.status_code}): {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Apollo person lookup failed: {e}")
+        return None
+
+
+def _apollo_enrich_company(
+    api_key: str,
+    name: str = "",
+    linkedin_url: str = "",
+) -> Optional[CompanyProfile]:
+    """Call Apollo Organization Enrich endpoint."""
+    headers = {
+        "x-api-key": api_key,
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+    }
+
+    params = {}
+    if linkedin_url:
+        params["organization_linkedin_url"] = linkedin_url
+    elif name:
+        params["organization_name"] = name
+
+    if not params:
+        return None
+
+    try:
+        resp = httpx.post(
+            f"{_APOLLO_BASE}/organizations/enrich",
+            headers=headers,
+            json=params,
+            timeout=15.0,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        org = data.get("organization")
+        if not org:
+            logger.info(f"Apollo: no company match for {name or linkedin_url}")
+            return None
+
+        return CompanyProfile(
+            name=org.get("name", name),
+            description=org.get("short_description", org.get("description", "")),
+            industry=org.get("industry", ""),
+            website=org.get("website_url", ""),
+            linkedin_url=org.get("linkedin_url", linkedin_url),
+            employee_count=org.get("estimated_num_employees", 0),
+            headquarters=f"{org.get('city', '')}, {org.get('country', '')}".strip(", "),
+            founded=str(org.get("founded_year", "")),
+            specialties=org.get("keywords", []),
+            enriched_at=datetime.now(timezone.utc).isoformat(),
+            provider="apollo",
+        )
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f"Apollo company lookup failed (HTTP {e.response.status_code}): {e}")
+        return None
+    except Exception as e:
+        logger.error(f"Apollo company lookup failed: {e}")
+        return None
+
+
+# ─────────────────────────────────────────────────
 # Main Enricher (provider-agnostic facade)
 # ─────────────────────────────────────────────────
 
@@ -272,7 +438,7 @@ class LinkedInEnricher:
 
     def __init__(self):
         self.api_key = os.getenv("LINKEDIN_API_KEY", "")
-        self.provider = os.getenv("LINKEDIN_PROVIDER", "netrows").lower()
+        self.provider = os.getenv("LINKEDIN_PROVIDER", "apollo").lower()
         if not self.api_key:
             logger.warning("LINKEDIN_API_KEY not set — enrichment will be unavailable")
 
@@ -291,7 +457,12 @@ class LinkedInEnricher:
         if not self.api_key:
             return None
 
-        if self.provider == "netrows":
+        if self.provider == "apollo":
+            return _apollo_enrich_person(
+                self.api_key, name=name, linkedin_url=linkedin_url,
+                company=company, email=email,
+            )
+        elif self.provider == "netrows":
             return _netrows_enrich_person(
                 self.api_key, name=name, linkedin_url=linkedin_url,
                 company=company, email=email,
@@ -309,7 +480,11 @@ class LinkedInEnricher:
         if not self.api_key:
             return None
 
-        if self.provider == "netrows":
+        if self.provider == "apollo":
+            return _apollo_enrich_company(
+                self.api_key, name=name, linkedin_url=linkedin_url,
+            )
+        elif self.provider == "netrows":
             return _netrows_enrich_company(
                 self.api_key, name=name, linkedin_url=linkedin_url,
             )
