@@ -221,6 +221,9 @@ class SentinelStoreBack:
             cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_type ON documents(document_type)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_hash ON documents(file_hash)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_source ON documents(source_path)")
+            # TAGGING-OVERHAUL-1: content_class for pre-Haiku triage
+            cur.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_class VARCHAR(20) DEFAULT 'document'")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_content_class ON documents(content_class)")
             # FTS: tsvector column + GIN index for full-text search
             cur.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS search_vector tsvector")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_fts ON documents USING GIN(search_vector)")

@@ -1,12 +1,13 @@
 """
-DOC-RECLASSIFY-1: Re-classify documents that are currently 'other' or have no tags.
+DOC-RECLASSIFY-1 + TAGGING-OVERHAUL-1: Re-classify documents.
 
-Uses the expanded 16-type taxonomy + controlled 40-tag vocabulary.
-Runs as a background job. Respects circuit breaker.
+Phase A: Deterministic triage (free) — tag media_asset/corrupted/empty.
+Phase B: Re-classify surviving "other" docs with expanded taxonomy (Haiku).
 
 Usage:
-  python3 scripts/reclassify_docs.py              # Full run
-  python3 scripts/reclassify_docs.py --limit 5     # Test on 5 docs first
+  python3 scripts/reclassify_docs.py                    # Phase A only (free)
+  python3 scripts/reclassify_docs.py --phase b          # Phase A + B
+  python3 scripts/reclassify_docs.py --phase b --limit 5  # Test on 5 docs
 """
 import argparse
 import logging
@@ -22,8 +23,61 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("reclassify")
 
 
+def run_triage():
+    """Phase A: Deterministic content triage (no Haiku cost)."""
+    from memory.store_back import SentinelStoreBack
+    from tools.document_pipeline import triage_document
+
+    store = SentinelStoreBack._get_global_instance()
+    conn = store._get_conn()
+    if not conn:
+        print("No DB connection")
+        return
+
+    try:
+        cur = conn.cursor()
+        # Ensure column exists
+        cur.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_class VARCHAR(20) DEFAULT 'document'")
+        conn.commit()
+
+        cur.execute("SELECT id, filename, full_text, source_path FROM documents")
+        docs = cur.fetchall()
+        cur.close()
+    finally:
+        store._put_conn(conn)
+
+    counts = {'document': 0, 'media_asset': 0, 'corrupted': 0, 'empty': 0}
+    print(f"Phase A: Triaging {len(docs)} documents...")
+
+    conn2 = store._get_conn()
+    if not conn2:
+        print("Lost DB connection")
+        return
+    try:
+        cur = conn2.cursor()
+        for i, (doc_id, filename, full_text, source_path) in enumerate(docs):
+            cc = triage_document(filename or "", full_text, source_path or "")
+            counts[cc] = counts.get(cc, 0) + 1
+            cur.execute("UPDATE documents SET content_class = %s WHERE id = %s", (cc, doc_id))
+            if (i + 1) % 500 == 0:
+                conn2.commit()
+                print(f"  Progress: {i+1}/{len(docs)}")
+        conn2.commit()
+        cur.close()
+    finally:
+        store._put_conn(conn2)
+
+    print(f"\n{'='*60}")
+    print(f"  PHASE A — TRIAGE COMPLETE")
+    print(f"{'='*60}")
+    for k, v in sorted(counts.items()):
+        print(f"  {k:15s}: {v:5d}")
+    print(f"  {'total':15s}: {sum(counts.values()):5d}")
+    print(f"{'='*60}\n")
+
+
 def run_reclassify(limit: int = None, sleep_between: float = 2.0):
-    """Re-classify 'other' docs with the expanded taxonomy."""
+    """Phase B: Re-classify 'other' docs with expanded taxonomy (Haiku)."""
     from memory.store_back import SentinelStoreBack
     from tools.document_pipeline import classify_document, extract_document, _EXTRACTION_SCHEMAS
     from orchestrator.cost_monitor import check_circuit_breaker
@@ -36,10 +90,10 @@ def run_reclassify(limit: int = None, sleep_between: float = 2.0):
 
     try:
         cur = conn.cursor()
-        # Phase A: Re-classify "other" docs that have actual text content
         cur.execute("""
             SELECT id, full_text FROM documents
             WHERE document_type = 'other'
+              AND COALESCE(content_class, 'document') = 'document'
               AND full_text IS NOT NULL
               AND LENGTH(full_text) > 100
             ORDER BY ingested_at DESC
@@ -52,7 +106,7 @@ def run_reclassify(limit: int = None, sleep_between: float = 2.0):
     total = len(targets)
     if limit:
         targets = targets[:limit]
-    print(f"Found {total} 'other' docs, processing {len(targets)}")
+    print(f"Phase B: Found {total} 'other' docs (post-triage), processing {len(targets)}")
 
     reclassified = 0
     extracted = 0
@@ -72,7 +126,6 @@ def run_reclassify(limit: int = None, sleep_between: float = 2.0):
                 if new_type != "other":
                     reclassified += 1
                     logger.info(f"  [{i+1}/{len(targets)}] doc {doc_id} → {new_type}")
-                    # Run extraction if schema exists
                     if new_type in _EXTRACTION_SCHEMAS:
                         time.sleep(sleep_between)
                         ext = extract_document(doc_id, full_text, new_type)
@@ -94,7 +147,7 @@ def run_reclassify(limit: int = None, sleep_between: float = 2.0):
                   f"errors={errors}, still_other={remained_other})")
 
     print(f"\n{'='*60}")
-    print(f"  RE-CLASSIFICATION COMPLETE")
+    print(f"  PHASE B — RE-CLASSIFICATION COMPLETE")
     print(f"{'='*60}")
     print(f"  Processed:      {len(targets)}")
     print(f"  Reclassified:   {reclassified}")
@@ -105,7 +158,13 @@ def run_reclassify(limit: int = None, sleep_between: float = 2.0):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Re-classify 'other' documents with expanded taxonomy")
-    parser.add_argument("--limit", type=int, default=None, help="Max docs to process")
+    parser = argparse.ArgumentParser(description="Re-classify documents with triage + expanded taxonomy")
+    parser.add_argument("--phase", choices=["a", "b", "ab"], default="a",
+                        help="Phase to run: a=triage only, b=triage+reclassify, ab=both")
+    parser.add_argument("--limit", type=int, default=None, help="Max docs to process (Phase B only)")
     args = parser.parse_args()
-    run_reclassify(limit=args.limit)
+
+    if args.phase in ("a", "ab"):
+        run_triage()
+    if args.phase in ("b", "ab"):
+        run_reclassify(limit=args.limit)

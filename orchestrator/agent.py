@@ -1012,7 +1012,7 @@ class ToolExecutor:
                 return json.dumps({"error": "Database unavailable"})
             try:
                 cur = conn.cursor()
-                conditions = ["full_text IS NOT NULL"]
+                conditions = ["full_text IS NOT NULL", "COALESCE(content_class, 'document') = 'document'"]
                 params = []
 
                 if doc_type:

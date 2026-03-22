@@ -36,6 +36,89 @@ _RATE_LIMIT_DELAY = 2  # seconds between API calls
 
 
 # ─────────────────────────────────────────────
+# Content Triage (TAGGING-OVERHAUL-1)
+# ─────────────────────────────────────────────
+
+# Deterministic pre-filter: skip non-documents before Haiku classification
+_MEDIA_EXTENSIONS = frozenset({
+    'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'svg',
+})
+
+_NON_DOCUMENT_PHRASES = [
+    'not a business card', 'not a document', 'no text to transcribe',
+    'no whiteboard', 'there is no whiteboard', 'does not contain',
+    'no text content', 'image does not', 'cannot transcribe',
+]
+
+
+def triage_document(filename: str, full_text: str, source_path: str = "") -> str:
+    """Classify content quality before Haiku. Returns content_class:
+    'document', 'media_asset', 'corrupted', or 'empty'."""
+    ext = (filename.rsplit('.', 1)[-1].lower()) if '.' in filename else ''
+
+    # Rule 1: Image files with no meaningful text → media_asset
+    if ext in _MEDIA_EXTENSIONS:
+        text_lower = (full_text or '').lower()
+        if not full_text or len(full_text) < 100:
+            return 'media_asset'
+        if any(phrase in text_lower for phrase in _NON_DOCUMENT_PHRASES):
+            return 'media_asset'
+
+    # Rule 2: No text or tiny text → empty
+    if not full_text or len(full_text.strip()) < 30:
+        return 'empty'
+
+    # Rule 3: Corrupted OCR detection (high ratio of single-char words)
+    words = full_text[:2000].split()
+    if len(words) > 10:
+        single_char_ratio = sum(1 for w in words if len(w) <= 1) / len(words)
+        if single_char_ratio > 0.35:
+            return 'corrupted'
+
+    return 'document'
+
+
+# Path-to-matter mapping for classification hints
+PATH_MATTER_HINTS = {
+    '14_HAGENAUER': 'Hagenauer',
+    '13_CUPIAL': 'Cupial',
+    'Baden-Baden': 'Baden-Baden Projects',
+    'Baden_Baden': 'Baden-Baden Projects',
+    'Lilienmatt': 'Baden-Baden Projects',
+    'Mandarin': 'Mandarin Oriental Sales',
+    'MOVIE': 'Mandarin Oriental Sales',
+    'MO_': 'Mandarin Oriental Sales',
+    'Cap Ferrat': 'Cap Ferrat Villa',
+    'Cap_Ferrat': 'Cap Ferrat Villa',
+    'Kitzb': 'Kitzbühel',
+    'Kempinski': 'Kempinski Kitzbühel Acquisition',
+    'Oskolkov': 'Oskolkov-RG7',
+    'Marketing': 'Mandarin Oriental Sales',
+    'Finance': 'Financing Vienna & Baden-Baden',
+    'Annaberg': 'Annaberg',
+    'Stadtvillen': 'Baden-Baden Projects',
+    'Riemergasse': 'Riemergasse 7',
+    'RG7': 'Riemergasse 7',
+    'MRCI': 'MRCI',
+    'Brisen': 'Brisen Group Operations',
+    'Insurance': 'Insurance',
+    'Davos': 'Davos-AlpenGold',
+    'AlpenGold': 'Davos-AlpenGold',
+}
+
+
+def get_path_matter_hint(source_path: str) -> str:
+    """Return a matter hint based on file path, or empty string."""
+    if not source_path:
+        return ""
+    sp_lower = source_path.lower()
+    for pattern, matter in PATH_MATTER_HINTS.items():
+        if pattern.lower() in sp_lower:
+            return f"\nHINT: This file comes from a folder related to '{matter}'. Use this to help determine the matter_slug."
+    return ""
+
+
+# ─────────────────────────────────────────────
 # Classification
 # ─────────────────────────────────────────────
 
@@ -107,6 +190,7 @@ def classify_document(doc_id: int, full_text: str) -> Optional[dict]:
                 cur.close()
                 if row and row[0]:
                     source_hint = f"\nFile path (use as context hint): {row[0]}\nFilename: {row[1] or ''}\n"
+                    source_hint += get_path_matter_hint(row[0])
             finally:
                 store._put_conn(conn)
     except Exception:
@@ -258,10 +342,18 @@ def extract_document(doc_id: int, full_text: str, document_type: str) -> Optiona
 # ─────────────────────────────────────────────
 
 def run_pipeline(doc_id: int):
-    """Run classify → extract → cross-link for a single document."""
+    """Run triage → classify → extract → cross-link for a single document."""
     full_text = _get_document_text(doc_id)
     if not full_text:
         logger.warning(f"No text for doc {doc_id}, skipping pipeline")
+        return
+
+    # Stage 0: Content triage (TAGGING-OVERHAUL-1, no Haiku cost)
+    filename, source_path = _get_document_meta(doc_id)
+    content_class = triage_document(filename or "", full_text, source_path or "")
+    _set_content_class(doc_id, content_class)
+    if content_class != 'document':
+        logger.info(f"Doc {doc_id} triaged as '{content_class}', skipping Haiku classification")
         return
 
     # Stage 1: Classify
@@ -453,6 +545,43 @@ def get_pipeline_status() -> dict:
 def _get_store():
     from memory.store_back import SentinelStoreBack
     return SentinelStoreBack._get_global_instance()
+
+
+def _get_document_meta(doc_id: int) -> tuple:
+    """Fetch filename and source_path for a document."""
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            return ("", "")
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT filename, source_path FROM documents WHERE id = %s", (doc_id,))
+            row = cur.fetchone()
+            cur.close()
+            return (row[0] or "", row[1] or "") if row else ("", "")
+        finally:
+            store._put_conn(conn)
+    except Exception:
+        return ("", "")
+
+
+def _set_content_class(doc_id: int, content_class: str):
+    """Set content_class on a document (TAGGING-OVERHAUL-1)."""
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("UPDATE documents SET content_class = %s WHERE id = %s", (content_class, doc_id))
+            conn.commit()
+            cur.close()
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.warning(f"Failed to set content_class for doc {doc_id}: {e}")
 
 
 def _get_active_matters() -> str:
