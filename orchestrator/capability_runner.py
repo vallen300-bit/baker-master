@@ -512,8 +512,10 @@ class CapabilityRunner:
             f"Rules:\n"
             f"- Cite after EACH specific fact (dates, amounts, decisions, quotes)\n"
             f"- Use the exact source label from the tool results\n"
-            f"- Never fabricate citations — if no source, state the fact without a citation\n"
-            f"- A response with zero citations is unacceptable if you retrieved any sources"
+            f"- If you cannot cite a source for a claim, mark it [unverified]\n"
+            f"- Never fabricate citations — only cite sources you actually retrieved\n"
+            f"- A response with zero citations is unacceptable if you retrieved any sources\n"
+            f"- End your response with a ## Sources section listing all cited sources"
         )
         enriched = base + role_injection
 
@@ -547,6 +549,9 @@ class CapabilityRunner:
         # SPECIALIST-DEEP-1: Inject pre-fetched context (emails, WA, meetings, etc.)
         if entity_context:
             enriched += f"\n\n{entity_context}"
+
+        # CITATION-CONFIDENCE-1: Trailing reminder (stays fresh in context window)
+        enriched += "\n\nREMINDER: Cite every factual claim with [Source: label]. Mark uncitable claims [unverified]. End with ## Sources."
 
         # Apply DB preferences + domain/mode extensions
         return build_mode_aware_prompt(enriched, domain=domain, mode=mode)
