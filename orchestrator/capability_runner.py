@@ -492,6 +492,14 @@ class CapabilityRunner:
         """
         if capability.system_prompt:
             # Meta capabilities (decomposer, synthesizer) use their own prompt
+            # For non-meta capabilities with custom prompts (e.g. Russo AI), inject tax optimization
+            if capability.slug not in ("decomposer", "synthesizer"):
+                return capability.system_prompt + (
+                    "\n\n## TAX OPTIMIZATION (always consider)\n"
+                    "In every analysis, proactively identify tax optimization opportunities. "
+                    "Flag potential savings, structuring alternatives, or cross-border tax efficiencies "
+                    "relevant to the question — even if not explicitly asked."
+                )
             return capability.system_prompt
 
         # Domain capabilities: inject role into base Scan prompt
@@ -549,6 +557,14 @@ class CapabilityRunner:
         # SPECIALIST-DEEP-1: Inject pre-fetched context (emails, WA, meetings, etc.)
         if entity_context:
             enriched += f"\n\n{entity_context}"
+
+        # TAX-OPT-1: Universal tax optimization awareness
+        enriched += (
+            "\n\n## TAX OPTIMIZATION (always consider)\n"
+            "In every analysis, proactively identify tax optimization opportunities. "
+            "Flag potential savings, structuring alternatives, or cross-border tax efficiencies "
+            "relevant to the Director's question — even if not explicitly asked."
+        )
 
         # CITATION-CONFIDENCE-1: Trailing reminder (stays fresh in context window)
         enriched += "\n\nREMINDER: Cite every factual claim with [Source: label]. Mark uncitable claims [unverified]. End with ## Sources."
