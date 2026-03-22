@@ -209,6 +209,8 @@ function switchTab(tab) {
         loadMobileAlerts();
     } else if (tab === 'actions') {
         loadProposedActions();
+    } else if (tab === 'digest') {
+        loadDigestTab();
     } else {
         var inputId = tab === 'baker' ? 'bakerInput' : 'specialistInput';
         var input = document.getElementById(inputId);
@@ -733,7 +735,7 @@ async function init() {
     // Default tab — check for deep link ?tab=actions
     var urlParams = new URLSearchParams(window.location.search);
     var deepTab = urlParams.get('tab');
-    if (deepTab && ['baker', 'specialist', 'alerts', 'actions'].indexOf(deepTab) !== -1) {
+    if (deepTab && ['baker', 'specialist', 'alerts', 'actions', 'digest'].indexOf(deepTab) !== -1) {
         switchTab(deepTab);
     } else {
         switchTab('baker');
@@ -2137,5 +2139,120 @@ function _showActionUndoToast(actionId, response) {
         setTimeout(function() { toast.remove(); }, 300);
     }, 2000);
 }
+
+// ═══ Baker 3.0: DIGEST TAB ═══
+
+var _digestType = 'morning';
+
+function loadDigestTab(type) {
+    _digestType = type || _digestType || 'morning';
+    var list = document.getElementById('digestList');
+    if (!list) return;
+    list.innerHTML = '<div class="empty-state"><div class="icon">&#x23F3;</div>Loading digest...</div>';
+
+    // Update toggle buttons
+    document.querySelectorAll('.digest-toggle-btn').forEach(function(btn) {
+        btn.classList.toggle('active', btn.dataset.dtype === _digestType);
+    });
+    var titleEl = document.getElementById('digestTitle');
+    if (titleEl) titleEl.textContent = _digestType === 'morning' ? 'Morning Digest' : 'Evening Digest';
+
+    bakerFetch('/api/digest/' + _digestType)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            var items = data.items || [];
+            var badge = document.getElementById('tabDigestCount');
+            if (badge) {
+                badge.textContent = items.length;
+                badge.hidden = items.length === 0;
+            }
+            renderDigestItems(list, items);
+        })
+        .catch(function(e) {
+            list.innerHTML = '<div class="empty-state"><div class="icon">&#x26A0;</div>Failed to load digest.</div>';
+        });
+}
+
+function renderDigestItems(container, items) {
+    if (items.length === 0) {
+        container.innerHTML = '<div class="empty-state"><div class="icon">&#x2705;</div>No items. You\'re all clear.</div>';
+        return;
+    }
+    container.innerHTML = '';
+    items.forEach(function(item, idx) {
+        var card = document.createElement('div');
+        card.className = 'digest-card';
+
+        // Type badge
+        var typeBadge = {
+            'alert': '&#x1F6A8;', 'action': '&#x2699;', 'deadline': '&#x23F0;',
+            'unanswered': '&#x1F4AC;', 'completed': '&#x2705;'
+        }[item.type] || '&#x2022;';
+        var sourceLabel = item.source || item.type || '';
+
+        var header = document.createElement('div');
+        header.className = 'digest-card-header';
+        header.innerHTML = '<span class="digest-type-badge">' + typeBadge + '</span>'
+            + '<span class="digest-card-title">' + esc(item.title || '') + '</span>'
+            + '<span class="digest-source">' + esc(sourceLabel) + '</span>';
+        card.appendChild(header);
+
+        if (item.description) {
+            var desc = document.createElement('div');
+            desc.className = 'digest-card-desc';
+            desc.textContent = item.description;
+            card.appendChild(desc);
+        }
+
+        // Action buttons
+        var actions = document.createElement('div');
+        actions.className = 'digest-card-actions';
+        if (item.positive_action) {
+            var posBtn = document.createElement('button');
+            posBtn.className = 'digest-btn digest-btn-pos';
+            posBtn.textContent = item.positive_action.label || 'Open';
+            posBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (item.positive_action.tab) {
+                    switchTab(item.positive_action.tab);
+                } else if (item.positive_action.endpoint) {
+                    bakerFetch(item.positive_action.endpoint, { method: item.positive_action.method || 'POST' })
+                        .then(function() { card.style.opacity = '0.4'; posBtn.textContent = 'Done'; });
+                }
+            });
+            actions.appendChild(posBtn);
+        }
+        if (item.negative_action) {
+            var negBtn = document.createElement('button');
+            negBtn.className = 'digest-btn digest-btn-neg';
+            negBtn.textContent = item.negative_action.label || 'Skip';
+            negBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                if (item.negative_action.endpoint) {
+                    bakerFetch(item.negative_action.endpoint, { method: item.negative_action.method || 'POST' })
+                        .then(function() { card.style.opacity = '0.3'; negBtn.textContent = 'Dismissed'; });
+                }
+            });
+            actions.appendChild(negBtn);
+        }
+        if (actions.childNodes.length > 0) card.appendChild(actions);
+
+        container.appendChild(card);
+    });
+}
+
+// Wire digest toggle buttons
+document.addEventListener('click', function(e) {
+    if (e.target.classList.contains('digest-toggle-btn')) {
+        loadDigestTab(e.target.dataset.dtype);
+    }
+});
+
+// Check for ?type= param to set digest type on deep link
+(function() {
+    var params = new URLSearchParams(window.location.search);
+    var dtype = params.get('type');
+    if (dtype === 'morning' || dtype === 'evening') _digestType = dtype;
+})();
 
 document.addEventListener('DOMContentLoaded', init);

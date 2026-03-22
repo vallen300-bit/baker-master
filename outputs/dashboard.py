@@ -3991,6 +3991,24 @@ async def push_subscribe(request: Request):
     return {"status": "ok" if ok else "error"}
 
 
+# ═══ Baker 3.0: Digest Endpoints ═══
+
+@app.get("/api/digest/morning", tags=["push"], dependencies=[Depends(verify_api_key)])
+async def morning_digest():
+    """Gather items for morning digest."""
+    from outputs.push_sender import gather_morning_items
+    items = gather_morning_items()
+    return {"items": items, "count": len(items), "type": "morning"}
+
+
+@app.get("/api/digest/evening", tags=["push"], dependencies=[Depends(verify_api_key)])
+async def evening_digest():
+    """Gather items for evening digest."""
+    from outputs.push_sender import gather_evening_items
+    items = gather_evening_items()
+    return {"items": items, "count": len(items), "type": "evening"}
+
+
 @app.get("/api/alerts/by-tag/{tag}", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
 async def get_alerts_by_tag(tag: str):
     """Get pending alerts filtered by tag."""

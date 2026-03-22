@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/mobile.css?v=17">
+    <link rel="stylesheet" href="/static/mobile.css?v=18">
 </head>
 <body>
 <div class="app">
@@ -51,6 +51,7 @@
         <button class="tab-btn" data-tab="specialist">Specialist</button>
         <button class="tab-btn" data-tab="alerts">Alerts <span class="tab-alert-count" id="tabAlertCount" hidden></span></button>
         <button class="tab-btn" data-tab="actions">Actions <span class="tab-action-count" id="tabActionCount" hidden></span></button>
+        <button class="tab-btn" data-tab="digest">Digest <span class="tab-digest-count" id="tabDigestCount" hidden></span></button>
     </div>
 
     <!-- Baker panel -->
@@ -129,6 +130,23 @@
         </div>
     </div>
 
+    <!-- Digest panel (Baker 3.0) -->
+    <div class="chat-panel" id="panel-digest">
+        <div class="digest-header" id="digestHeader">
+            <span class="digest-title" id="digestTitle">Morning Digest</span>
+            <div class="digest-toggle">
+                <button class="digest-toggle-btn active" data-dtype="morning">AM</button>
+                <button class="digest-toggle-btn" data-dtype="evening">PM</button>
+            </div>
+        </div>
+        <div class="digest-list" id="digestList">
+            <div class="empty-state">
+                <div class="icon">&#x2600;</div>
+                Loading digest...
+            </div>
+        </div>
+    </div>
+
     <!-- Upload overlay -->
     <div class="upload-overlay" id="uploadOverlay" hidden>
         <div class="upload-sheet">
@@ -159,6 +177,6 @@
 
 </div>
 
-<script src="/static/mobile.js?v=18"></script>
+<script src="/static/mobile.js?v=19"></script>
 </body>
 </html>

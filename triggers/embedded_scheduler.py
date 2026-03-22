@@ -376,6 +376,28 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: convergence_detection (Wednesdays 06:00 UTC)")
 
+    # Baker 3.0: Morning push digest — 07:00 UTC daily
+    from outputs.push_sender import send_morning_digest
+    scheduler.add_job(
+        send_morning_digest,
+        CronTrigger(hour=7, minute=0),
+        id="morning_push_digest", name="Morning push digest",
+        coalesce=True, max_instances=1, replace_existing=True,
+        misfire_grace_time=300,
+    )
+    logger.info("Registered: morning_push_digest (daily 07:00 UTC)")
+
+    # Baker 3.0: Evening push digest — 18:00 UTC daily
+    from outputs.push_sender import send_evening_digest
+    scheduler.add_job(
+        send_evening_digest,
+        CronTrigger(hour=18, minute=0),
+        id="evening_push_digest", name="Evening push digest",
+        coalesce=True, max_instances=1, replace_existing=True,
+        misfire_grace_time=300,
+    )
+    logger.info("Registered: evening_push_digest (daily 18:00 UTC)")
+
 
 def start_scheduler():
     """Create and start the BackgroundScheduler. Idempotent — safe to call twice."""
