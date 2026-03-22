@@ -3758,9 +3758,19 @@ class SentinelStoreBack:
 
     def store_document(self, content, metadata, collection="baker-documents"):
         """Embed and store a document in Qdrant.
-        Short content → single vector. Long content → chunked into multiple vectors."""
+        Short content → single vector. Long content → chunked into multiple vectors.
+        Capped at 20 chunks max — full text lives in PostgreSQL, Qdrant is just for search."""
         try:
             chunk_pairs = self._embed_chunked(content)
+            # Cap chunks to prevent disk bloat (QDRANT-CLEANUP-1).
+            # Full text is in PostgreSQL; Qdrant only needs enough chunks to find the doc.
+            MAX_CHUNKS = 20
+            if len(chunk_pairs) > MAX_CHUNKS:
+                logger.info(
+                    f"Capping {len(chunk_pairs)} chunks to {MAX_CHUNKS} for {collection} "
+                    f"(content: {len(content):,} chars)"
+                )
+                chunk_pairs = chunk_pairs[:MAX_CHUNKS]
             points = []
 
             for i, (chunk, vector) in enumerate(chunk_pairs):
