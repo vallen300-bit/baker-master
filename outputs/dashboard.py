@@ -7363,8 +7363,8 @@ async def admin_run_obligation_generator(background_tasks: BackgroundTasks):
 # ============================================================
 
 @app.get("/api/research-proposals", tags=["research"], dependencies=[Depends(verify_api_key)])
-async def api_get_research_proposals(status: str = None, days: int = 14):
-    """Get research proposals."""
+async def api_get_research_proposals(status: str = None, days: int = 90):
+    """Get research proposals. Default 90 days for Dossier Library."""
     from orchestrator.research_trigger import get_research_proposals
     proposals = get_research_proposals(status=status, days=days)
     return {"proposals": proposals, "count": len(proposals)}
@@ -7395,7 +7395,6 @@ async def api_respond_to_research_proposal(proposal_id: int, request: Request, b
 @app.get("/api/research-proposals/{proposal_id}/status", tags=["research"], dependencies=[Depends(verify_api_key)])
 async def api_research_proposal_status(proposal_id: int):
     """Get current status of a research proposal (for polling during execution)."""
-    from orchestrator.research_trigger import get_research_proposals
     import psycopg2.extras
     store = _get_store()
     conn = store._get_conn()
@@ -7404,7 +7403,7 @@ async def api_research_proposal_status(proposal_id: int):
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("""
-            SELECT id, status, deliverable_path, completed_at, subject_name
+            SELECT id, status, deliverable_path, completed_at, subject_name, error_message
             FROM research_proposals WHERE id = %s
         """, (proposal_id,))
         row = cur.fetchone()
@@ -7420,9 +7419,41 @@ async def api_research_proposal_status(proposal_id: int):
         store._put_conn(conn)
 
 
+@app.post("/api/research-proposals/{proposal_id}/retry", tags=["research"], dependencies=[Depends(verify_api_key)])
+async def api_retry_research_proposal(proposal_id: int, background_tasks: BackgroundTasks):
+    """Retry a failed research proposal — resets to approved and re-executes."""
+    import psycopg2.extras
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=500, detail="DB unavailable")
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT id, status FROM research_proposals WHERE id = %s", (proposal_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Proposal not found")
+        if row["status"] not in ("failed", "completed"):
+            raise HTTPException(status_code=400, detail=f"Can only retry failed/completed proposals (current: {row['status']})")
+        cur.execute("""
+            UPDATE research_proposals
+            SET status = 'approved', error_message = NULL, deliverable_summary = NULL,
+                deliverable_path = NULL, completed_at = NULL, approved_at = NOW()
+            WHERE id = %s
+        """, (proposal_id,))
+        conn.commit()
+        cur.close()
+    finally:
+        store._put_conn(conn)
+
+    from orchestrator.research_executor import execute_research_dossier
+    background_tasks.add_task(execute_research_dossier, proposal_id)
+    return {"status": "ok", "proposal_id": proposal_id, "execution": "started"}
+
+
 @app.get("/api/research-proposals/{proposal_id}/download", tags=["research"])
 async def api_download_research_dossier(proposal_id: int, key: str = ""):
-    """Download the completed dossier as .docx (generated on-the-fly from stored markdown)."""
+    """Download the completed dossier as professional .docx (generated on-the-fly)."""
     if key != _BAKER_API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
     import psycopg2.extras
@@ -7433,7 +7464,7 @@ async def api_download_research_dossier(proposal_id: int, key: str = ""):
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         cur.execute("""
-            SELECT subject_name, deliverable_summary, status
+            SELECT subject_name, subject_type, specialists, deliverable_summary, status
             FROM research_proposals WHERE id = %s
         """, (proposal_id,))
         row = cur.fetchone()
@@ -7447,16 +7478,30 @@ async def api_download_research_dossier(proposal_id: int, key: str = ""):
     finally:
         store._put_conn(conn)
 
-    # Generate .docx on-the-fly
-    from document_generator import generate_document, get_file
-    file_id, filename, _ = generate_document(
-        content=row["deliverable_summary"],
-        fmt="docx",
-        title=f"Dossier_{row['subject_name']}",
-        metadata={"generated_by": "Baker Research Engine (ART-1)"}
+    # Generate professional .docx on-the-fly
+    import re as _re
+    from document_generator import generate_dossier_docx
+    from orchestrator.research_executor import SPECIALIST_NAMES
+
+    subject_name = row["subject_name"]
+    subject_type = row.get("subject_type") or "person"
+    specialists = row.get("specialists") or ["research"]
+    if isinstance(specialists, str):
+        import json as _json
+        specialists = _json.loads(specialists)
+    specialists_text = ", ".join(SPECIALIST_NAMES.get(s, s) for s in specialists)
+
+    safe_name = _re.sub(r'[^\w\s-]', '', subject_name).strip().replace(' ', '_')
+    filename = f"Dossier_{safe_name}.docx"
+
+    filepath = os.path.join(tempfile.gettempdir(), f"baker_dl_{safe_name}.docx")
+    generate_dossier_docx(
+        dossier_md=row["deliverable_summary"],
+        subject_name=subject_name,
+        subject_type=subject_type,
+        specialists_text=specialists_text,
+        filepath=filepath,
     )
-    file_info = get_file(file_id)
-    filepath = file_info["filepath"]
 
     from starlette.responses import FileResponse
     return FileResponse(

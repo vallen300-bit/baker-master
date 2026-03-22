@@ -413,11 +413,12 @@ const TAB_VIEW_MAP = {
     'travel': 'viewTravel',
     'media': 'viewMedia',
     'documents': 'viewDocuments',
+    'dossiers': 'viewDossiers',
     'browser': 'viewBrowser',
     'baker-data': 'viewBakerData',
 };
 
-const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'tags', 'search', 'ask-baker', 'ask-specialist', 'travel', 'media', 'documents', 'browser', 'baker-data']);
+const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'tags', 'search', 'ask-baker', 'ask-specialist', 'travel', 'media', 'documents', 'dossiers', 'browser', 'baker-data']);
 
 function switchTab(tabName) {
     document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
@@ -451,6 +452,7 @@ function switchTab(tabName) {
     else if (tabName === 'travel') loadTravelTab();
     else if (tabName === 'media') loadMediaTab();
     else if (tabName === 'documents') loadDocumentsTab();
+    else if (tabName === 'dossiers') loadDossiersTab();
     else if (tabName === 'browser') loadBrowserTab();
     else if (tabName === 'baker-data') loadBakerData();
 }
@@ -823,9 +825,27 @@ function _pollDossierStatus(proposalId, cardEl) {
             if (data.status === 'completed') {
                 clearInterval(interval);
                 _showDossierComplete(proposalId, data.subject_name, cardEl);
+            } else if (data.status === 'failed') {
+                clearInterval(interval);
+                _showDossierFailed(data.error_message || 'Dossier generation failed', cardEl);
             }
         }).catch(function() {});
     }, 5000);
+}
+
+function _showDossierFailed(errorMsg, cardEl) {
+    if (!cardEl) return;
+    cardEl.style.opacity = '1';
+    cardEl.classList.remove('running');
+    cardEl.style.borderLeftColor = 'var(--red)';
+    var btns = cardEl.querySelector('.action-card-btns');
+    if (btns) {
+        btns.textContent = '';
+        var errDiv = document.createElement('div');
+        errDiv.style.cssText = 'font-size:11px;color:var(--red);padding:4px 0;';
+        errDiv.textContent = errorMsg;
+        btns.appendChild(errDiv);
+    }
 }
 
 function _showDossierComplete(proposalId, subjectName, cardEl) {
@@ -5751,6 +5771,238 @@ function _timeAgo(date) {
     var hours = Math.floor(minutes / 60);
     if (hours < 24) return hours + 'h ago';
     return Math.floor(hours / 24) + 'd ago';
+}
+
+// ═══ DOSSIERS TAB ═══
+
+async function loadDossiersTab() {
+    var container = document.getElementById('dossiersContent');
+    if (!container) return;
+    showLoading(container, 'Loading dossiers');
+
+    try {
+        var data = await bakerFetch('/api/research-proposals?days=90').then(function(r) { return r.json(); });
+        var proposals = data.proposals || [];
+
+        // Update badge
+        var completedCount = proposals.filter(function(p) { return p.status === 'completed'; }).length;
+        var badge = document.getElementById('dossiersCount');
+        if (badge) badge.textContent = completedCount || '';
+
+        if (proposals.length === 0) {
+            container.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text3);">No research dossiers yet. Baker auto-proposes dossiers when VIPs forward intelligence.</div>';
+            return;
+        }
+
+        var wrapper = document.createElement('div');
+        wrapper.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
+
+        for (var i = 0; i < proposals.length; i++) {
+            var p = proposals[i];
+            wrapper.appendChild(_renderDossierCard(p));
+        }
+
+        container.textContent = '';
+        container.appendChild(wrapper);
+
+    } catch (err) {
+        container.innerHTML = '<div style="padding:20px;color:var(--red);">Failed to load dossiers: ' + esc(err.message) + '</div>';
+    }
+}
+
+function _renderDossierCard(p) {
+    var card = document.createElement('div');
+    card.className = 'dossier-card';
+
+    var statusColors = {
+        completed: 'var(--green)',
+        failed: 'var(--red)',
+        running: 'var(--amber)',
+        approved: 'var(--amber)',
+        proposed: 'var(--blue)',
+        skipped: 'var(--text3)'
+    };
+    var statusLabels = {
+        completed: 'Completed',
+        failed: 'Failed',
+        running: 'Running...',
+        approved: 'Approved',
+        proposed: 'Proposed',
+        skipped: 'Skipped'
+    };
+
+    var color = statusColors[p.status] || 'var(--text3)';
+    var label = statusLabels[p.status] || p.status;
+
+    // Header row: subject + status badge
+    var header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;';
+
+    var title = document.createElement('div');
+    title.style.cssText = 'font-weight:600;font-size:14px;color:var(--text);';
+    title.textContent = p.subject_name || 'Unknown';
+    header.appendChild(title);
+
+    var badge = document.createElement('span');
+    badge.style.cssText = 'font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px;white-space:nowrap;color:#fff;background:' + color + ';';
+    badge.textContent = label;
+    header.appendChild(badge);
+
+    card.appendChild(header);
+
+    // Meta row: type, date, specialists
+    var meta = document.createElement('div');
+    meta.style.cssText = 'font-size:12px;color:var(--text2);margin-top:4px;display:flex;gap:16px;flex-wrap:wrap;';
+
+    if (p.subject_type) {
+        var typeSpan = document.createElement('span');
+        typeSpan.textContent = p.subject_type;
+        meta.appendChild(typeSpan);
+    }
+
+    var dateStr = p.completed_at || p.approved_at || p.created_at || '';
+    if (dateStr) {
+        var dateSpan = document.createElement('span');
+        dateSpan.textContent = dateStr.substring(0, 10);
+        meta.appendChild(dateSpan);
+    }
+
+    if (p.specialists) {
+        var specs = typeof p.specialists === 'string' ? JSON.parse(p.specialists) : p.specialists;
+        if (specs && specs.length) {
+            var specSpan = document.createElement('span');
+            specSpan.style.color = 'var(--text3)';
+            specSpan.textContent = specs.join(', ');
+            meta.appendChild(specSpan);
+        }
+    }
+
+    card.appendChild(meta);
+
+    // Error message for failed
+    if (p.status === 'failed' && p.error_message) {
+        var errDiv = document.createElement('div');
+        errDiv.style.cssText = 'font-size:11px;color:var(--red);margin-top:6px;padding:6px 10px;background:rgba(220,49,48,0.06);border-radius:6px;';
+        errDiv.textContent = p.error_message;
+        card.appendChild(errDiv);
+    }
+
+    // Action buttons
+    var actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
+
+    if (p.status === 'completed') {
+        var dlBtn = document.createElement('button');
+        dlBtn.className = 'dossier-btn dossier-btn-primary';
+        dlBtn.textContent = 'Download .docx';
+        dlBtn.onclick = function() {
+            window.open('/api/research-proposals/' + p.id + '/download?key=' + encodeURIComponent(BAKER_CONFIG.apiKey), '_blank');
+        };
+        actions.appendChild(dlBtn);
+    }
+
+    if (p.status === 'failed' || p.status === 'completed') {
+        var retryBtn = document.createElement('button');
+        retryBtn.className = 'dossier-btn';
+        retryBtn.textContent = p.status === 'failed' ? 'Retry' : 'Regenerate';
+        retryBtn.onclick = function() {
+            _retryDossier(p.id, retryBtn);
+        };
+        actions.appendChild(retryBtn);
+    }
+
+    if (p.status === 'proposed') {
+        var runBtn = document.createElement('button');
+        runBtn.className = 'dossier-btn dossier-btn-primary';
+        runBtn.textContent = 'Run Dossier';
+        runBtn.onclick = function() {
+            _respondDossier(p.id, 'approved', runBtn);
+        };
+        actions.appendChild(runBtn);
+
+        var skipBtn = document.createElement('button');
+        skipBtn.className = 'dossier-btn';
+        skipBtn.textContent = 'Skip';
+        skipBtn.onclick = function() {
+            _respondDossier(p.id, 'skipped', skipBtn);
+        };
+        actions.appendChild(skipBtn);
+    }
+
+    if (p.status === 'running') {
+        var spinDiv = document.createElement('div');
+        spinDiv.style.cssText = 'font-size:12px;color:var(--amber);';
+        spinDiv.textContent = 'Generating dossier...';
+        actions.appendChild(spinDiv);
+        // Auto-poll for completion
+        _pollDossierTabStatus(p.id);
+    }
+
+    card.appendChild(actions);
+    return card;
+}
+
+async function _retryDossier(proposalId, btn) {
+    btn.disabled = true;
+    btn.textContent = 'Retrying...';
+    try {
+        var resp = await bakerFetch('/api/research-proposals/' + proposalId + '/retry', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        });
+        if (resp.ok) {
+            setTimeout(function() { loadDossiersTab(); }, 1000);
+        } else {
+            var err = await resp.json();
+            alert('Retry failed: ' + (err.detail || 'Unknown error'));
+            btn.disabled = false;
+            btn.textContent = 'Retry';
+        }
+    } catch (e) {
+        alert('Retry failed: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = 'Retry';
+    }
+}
+
+async function _respondDossier(proposalId, response, btn) {
+    btn.disabled = true;
+    btn.textContent = response === 'approved' ? 'Starting...' : 'Skipping...';
+    try {
+        var resp = await bakerFetch('/api/research-proposals/' + proposalId + '/respond', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ response: response }),
+        });
+        if (resp.ok) {
+            setTimeout(function() { loadDossiersTab(); }, 1000);
+        } else {
+            var err = await resp.json();
+            alert('Action failed: ' + (err.detail || 'Unknown error'));
+            btn.disabled = false;
+        }
+    } catch (e) {
+        alert('Action failed: ' + e.message);
+        btn.disabled = false;
+    }
+}
+
+function _pollDossierTabStatus(proposalId) {
+    var interval = setInterval(async function() {
+        try {
+            var resp = await bakerFetch('/api/research-proposals/' + proposalId + '/status');
+            if (!resp.ok) { clearInterval(interval); return; }
+            var data = await resp.json();
+            if (data.status === 'completed' || data.status === 'failed') {
+                clearInterval(interval);
+                loadDossiersTab();
+            }
+        } catch (e) {
+            clearInterval(interval);
+        }
+    }, 5000);
+    // Stop polling after 5 minutes
+    setTimeout(function() { clearInterval(interval); }, 300000);
 }
 
 async function loadBrowserTab() {

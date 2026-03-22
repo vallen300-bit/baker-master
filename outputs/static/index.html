@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=38">
+    <link rel="stylesheet" href="/static/style.css?v=39">
 </head>
 <body>
 
@@ -61,6 +61,10 @@
         <div class="nav-item" data-tab="documents">
             <span class="nav-label">Documents</span>
             <span class="nav-count" id="docsCount"></span>
+        </div>
+        <div class="nav-item" data-tab="dossiers">
+            <span class="nav-label">Dossiers</span>
+            <span class="nav-count" id="dossiersCount"></span>
         </div>
         <div class="nav-item" data-tab="browser">
             <span class="nav-label">Browser</span>
@@ -299,6 +303,12 @@
             <div id="docsContent"></div>
         </div>
 
+        <!-- VIEW: Dossiers -->
+        <div class="view" id="viewDossiers">
+            <div class="section-label">Research Dossiers</div>
+            <div id="dossiersContent"></div>
+        </div>
+
         <!-- VIEW: Browser Monitor -->
         <div class="view" id="viewBrowser">
             <div class="section-label">Browser Monitor</div>
@@ -332,6 +342,6 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=45"></script>
+<script src="/static/app.js?v=46"></script>
 </body>
 </html>

@@ -69,7 +69,8 @@ def _get_proposal(proposal_id: int) -> dict:
 
 def _update_proposal_status(proposal_id: int, status: str,
                             deliverable_path: str = None,
-                            deliverable_summary: str = None):
+                            deliverable_summary: str = None,
+                            error_message: str = None):
     """Update proposal status in database."""
     try:
         from memory.store_back import SentinelStoreBack
@@ -85,9 +86,18 @@ def _update_proposal_status(proposal_id: int, status: str,
                     SET status = 'completed',
                         deliverable_path = %s,
                         deliverable_summary = %s,
-                        completed_at = NOW()
+                        completed_at = NOW(),
+                        error_message = NULL
                     WHERE id = %s
                 """, (deliverable_path, deliverable_summary, proposal_id))
+            elif status == "failed":
+                cur.execute("""
+                    UPDATE research_proposals
+                    SET status = 'failed',
+                        error_message = %s,
+                        completed_at = NOW()
+                    WHERE id = %s
+                """, (error_message or "Unknown error", proposal_id))
             else:
                 cur.execute("""
                     UPDATE research_proposals SET status = %s WHERE id = %s
@@ -215,23 +225,35 @@ def _format_dossier_markdown(subject_name: str, subject_type: str,
     return "\n".join(sections)
 
 
-def _generate_and_save_docx(subject_name: str, dossier_md: str) -> tuple:
-    """Generate .docx and upload to Dropbox via API. Returns (filename, dropbox_path) or (None, None)."""
-    try:
-        from document_generator import generate_document, get_file
+def _generate_and_save_docx(subject_name: str, subject_type: str,
+                            specialists: list, dossier_md: str) -> tuple:
+    """Generate professional .docx and upload to Dropbox. Returns (filename, dropbox_path)."""
+    import os
+    import re
+    import tempfile
 
-        file_id, filename, size_bytes = generate_document(
-            content=dossier_md,
-            fmt="docx",
-            title=f"Dossier_{subject_name}",
-            metadata={
-                "generated_by": "Baker Research Engine (ART-1)",
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            }
+    try:
+        from document_generator import generate_dossier_docx
+
+        safe_name = re.sub(r'[^\w\s-]', '', subject_name).strip().replace(' ', '_')
+        date_str = datetime.now().strftime('%Y-%m-%d')
+        filename = f"Dossier_{safe_name}_{date_str}.docx"
+
+        tmp_dir = tempfile.gettempdir()
+        filepath = os.path.join(tmp_dir, f"baker_dossier_{safe_name}.docx")
+
+        specialists_text = ", ".join(SPECIALIST_NAMES.get(s, s) for s in specialists)
+
+        generate_dossier_docx(
+            dossier_md=dossier_md,
+            subject_name=subject_name,
+            subject_type=subject_type,
+            specialists_text=specialists_text,
+            filepath=filepath,
         )
 
-        file_info = get_file(file_id)
-        src_path = file_info["filepath"]
+        size_bytes = os.path.getsize(filepath)
+        logger.info(f"Professional DOCX generated: {filename} ({size_bytes} bytes)")
 
         # Upload to Dropbox via API
         month = datetime.now().strftime("%Y-%m")
@@ -239,46 +261,33 @@ def _generate_and_save_docx(subject_name: str, dossier_md: str) -> tuple:
 
         try:
             from triggers.dropbox_client import DropboxClient
+
+            # Check if client is available
             client = DropboxClient._get_global_instance()
-            result = client.upload_file(src_path, dropbox_path)
+            if client is None:
+                logger.error("Dropbox upload skipped: DropboxClient._get_global_instance() returned None "
+                             "(DROPBOX_ACCESS_TOKEN / DROPBOX_REFRESH_TOKEN may not be set)")
+                return filename, filepath
+
+            # Check token
+            if not getattr(client, '_access_token', None) and not getattr(client, '_refresh_token', None):
+                logger.error("Dropbox upload skipped: no access_token or refresh_token on DropboxClient")
+                return filename, filepath
+
+            logger.info(f"Uploading dossier to Dropbox: {dropbox_path} ({size_bytes} bytes)")
+            result = client.upload_file(filepath, dropbox_path)
             actual_path = result.get("path_display", dropbox_path)
-            logger.info(f"Dossier uploaded to Dropbox: {actual_path} ({size_bytes} bytes)")
+            logger.info(f"Dossier uploaded to Dropbox successfully: {actual_path}")
             return filename, actual_path
+
         except Exception as upload_err:
-            logger.error(f"Dropbox upload failed: {upload_err}")
-            # File still exists locally in temp — return temp path as fallback
-            return filename, src_path
+            logger.error(f"Dropbox upload failed for '{filename}': {type(upload_err).__name__}: {upload_err}",
+                         exc_info=True)
+            return filename, filepath
 
     except Exception as e:
-        logger.error(f"Document generation failed: {e}")
-        # Fallback: upload raw markdown
-        try:
-            import re
-            import tempfile
-            safe_name = re.sub(r'[^\w\s-]', '', subject_name).strip().replace(' ', '_')
-            date_str = datetime.now().strftime('%Y-%m-%d')
-            md_filename = f"Dossier_{safe_name}_{date_str}.md"
-
-            # Write to temp file
-            import os
-            md_path = os.path.join(tempfile.gettempdir(), md_filename)
-            with open(md_path, "w", encoding="utf-8") as f:
-                f.write(dossier_md)
-
-            # Upload markdown to Dropbox
-            month = datetime.now().strftime("%Y-%m")
-            dropbox_path = f"{DROPBOX_DOSSIER_FOLDER}/{month}/{md_filename}"
-            try:
-                from triggers.dropbox_client import DropboxClient
-                client = DropboxClient._get_global_instance()
-                client.upload_file(md_path, dropbox_path)
-                logger.info(f"Dossier (markdown fallback) uploaded: {dropbox_path}")
-                return md_filename, dropbox_path
-            except Exception:
-                return md_filename, md_path
-        except Exception as e2:
-            logger.error(f"Markdown fallback also failed: {e2}")
-            return None, None
+        logger.error(f"DOCX generation failed: {type(e).__name__}: {e}", exc_info=True)
+        return None, None
 
 
 def _notify_completion(proposal_id: int, subject_name: str, filename: str,
@@ -362,34 +371,52 @@ def execute_research_dossier(proposal_id: int):
         )
 
         if not specialist_results:
-            logger.error("No specialist results — aborting")
-            _update_proposal_status(proposal_id, "approved")  # Reset to approved
+            error_msg = "No specialist results returned — all specialists failed or timed out"
+            logger.error(error_msg)
+            _update_proposal_status(proposal_id, "failed", error_message=error_msg)
             return
 
-        # 5. Combine into dossier markdown
+        # 5. Quality gate — check total content length
+        total_content = sum(len(v) for v in specialist_results.values())
+        logger.info(f"Quality gate: {total_content} chars from {len(specialist_results)} specialists")
+
+        if total_content < 2000:
+            error_msg = (
+                f"Specialists returned insufficient content ({total_content} chars, "
+                f"minimum 2,000). This usually means Baker has no data on '{subject_name}'. "
+                f"Try adding context or checking Baker's memory first."
+            )
+            logger.warning(f"Quality gate FAILED for proposal {proposal_id}: {error_msg}")
+            _update_proposal_status(proposal_id, "failed", error_message=error_msg)
+            return
+
+        # 6. Combine into dossier markdown
         dossier_md = _format_dossier_markdown(
             subject_name, subject_type, specialist_results, specialists
         )
 
-        # 6. Generate .docx and save to Dropbox
-        filename, local_path = _generate_and_save_docx(subject_name, dossier_md)
+        # 7. Generate professional .docx and save to Dropbox
+        filename, local_path = _generate_and_save_docx(
+            subject_name, subject_type, specialists, dossier_md
+        )
 
-        # 7. Update proposal as completed (store full dossier for on-demand download)
+        # 8. Update proposal as completed (store full dossier for on-demand download)
         _update_proposal_status(
             proposal_id, "completed",
             deliverable_path=local_path,
             deliverable_summary=dossier_md,
         )
 
-        # 8. Notify Director
+        # 9. Notify Director
         if filename:
             _notify_completion(proposal_id, subject_name, filename, specialists)
 
         logger.info(
             f"Research dossier complete: proposal_id={proposal_id}, "
-            f"subject='{subject_name}', file='{filename}'"
+            f"subject='{subject_name}', file='{filename}', content={total_content} chars"
         )
 
     except Exception as e:
-        logger.error(f"Research dossier execution failed: {e}")
-        _update_proposal_status(proposal_id, "approved")  # Reset so Director can retry
+        error_msg = f"Execution error: {type(e).__name__}: {e}"
+        logger.error(f"Research dossier execution failed: {error_msg}", exc_info=True)
+        _update_proposal_status(proposal_id, "failed", error_message=error_msg)

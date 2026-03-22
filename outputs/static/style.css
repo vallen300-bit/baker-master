@@ -1026,3 +1026,33 @@ body {
   border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.12);
   min-width: 160px; padding: 4px 0;
 }
+
+/* ── Dossier Library ── */
+.dossier-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px 18px;
+  transition: border-color 0.15s;
+}
+.dossier-card:hover { border-color: var(--blue); }
+.dossier-btn {
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.dossier-btn:hover { border-color: var(--blue); color: var(--blue); }
+.dossier-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.dossier-btn-primary {
+  background: var(--blue);
+  color: #fff;
+  border-color: var(--blue);
+}
+.dossier-btn-primary:hover { background: var(--blue-hover); border-color: var(--blue-hover); color: #fff; }

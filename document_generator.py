@@ -12,8 +12,10 @@ from datetime import datetime
 
 # Format-specific imports
 from docx import Document
-from docx.shared import Pt, RGBColor
+from docx.shared import Pt, Inches, RGBColor, Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml.ns import qn
+from docx.oxml import OxmlElement
 import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill
 from reportlab.lib.pagesizes import A4
@@ -377,3 +379,345 @@ def _parse_markdown_slides(text):
         slides.append(current_slide)
 
     return slides
+
+
+# ============================================================
+# Professional Dossier DOCX Generator (ART-1)
+# ============================================================
+
+# Colors
+_NAVY = RGBColor(0x1a, 0x1a, 0x2e)
+_DARK_BLUE = RGBColor(0x2C, 0x3E, 0x50)
+_BLUE_ACCENT = RGBColor(0x0a, 0x6f, 0xdb)
+_GRAY = RGBColor(0x80, 0x80, 0x80)
+_LIGHT_GRAY = RGBColor(0xCC, 0xCC, 0xCC)
+_WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+
+
+def _add_thin_border(paragraph, color="1a1a2e"):
+    """Add a thin bottom border to a paragraph (used as horizontal rule)."""
+    pPr = paragraph._p.get_or_add_pPr()
+    pBdr = OxmlElement('w:pBdr')
+    bottom = OxmlElement('w:bottom')
+    bottom.set(qn('w:val'), 'single')
+    bottom.set(qn('w:sz'), '4')
+    bottom.set(qn('w:space'), '4')
+    bottom.set(qn('w:color'), color)
+    pBdr.append(bottom)
+    pPr.append(pBdr)
+
+
+def _set_cell_shading(cell, color_hex):
+    """Set background shading on a table cell."""
+    shading = OxmlElement('w:shd')
+    shading.set(qn('w:fill'), color_hex)
+    shading.set(qn('w:val'), 'clear')
+    cell._tc.get_or_add_tcPr().append(shading)
+
+
+def _add_header_footer(doc, title_text="Baker Research Dossier"):
+    """Add header and footer to the document."""
+    for section in doc.sections:
+        # Header
+        header = section.header
+        header.is_linked_to_previous = False
+        hp = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
+        hp.text = ""
+        run = hp.add_run(title_text)
+        run.font.size = Pt(8)
+        run.font.color.rgb = _GRAY
+        hp.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        _add_thin_border(hp, "CCCCCC")
+
+        # Footer with page number
+        footer = section.footer
+        footer.is_linked_to_previous = False
+        fp = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+        fp.text = ""
+        fp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = fp.add_run("Page ")
+        run.font.size = Pt(8)
+        run.font.color.rgb = _GRAY
+        # Page number field
+        fld_char1 = OxmlElement('w:fldChar')
+        fld_char1.set(qn('w:fldCharType'), 'begin')
+        run._r.append(fld_char1)
+        instr = OxmlElement('w:instrText')
+        instr.set(qn('xml:space'), 'preserve')
+        instr.text = ' PAGE '
+        run._r.append(instr)
+        fld_char2 = OxmlElement('w:fldChar')
+        fld_char2.set(qn('w:fldCharType'), 'end')
+        run._r.append(fld_char2)
+
+
+def _add_cover_page(doc, subject_name, subject_type, specialists_text, date_str):
+    """Add a professional cover page."""
+    # Top spacer
+    for _ in range(6):
+        doc.add_paragraph()
+
+    # Title
+    title_para = doc.add_paragraph()
+    title_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = title_para.add_run("RESEARCH DOSSIER")
+    run.font.size = Pt(28)
+    run.font.color.rgb = _NAVY
+    run.bold = True
+    run.font.name = "Calibri"
+
+    doc.add_paragraph()
+
+    # Subject name
+    subj_para = doc.add_paragraph()
+    subj_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = subj_para.add_run(subject_name)
+    run.font.size = Pt(22)
+    run.font.color.rgb = _DARK_BLUE
+    run.font.name = "Calibri"
+
+    # Subject type
+    type_para = doc.add_paragraph()
+    type_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = type_para.add_run(subject_type.upper())
+    run.font.size = Pt(11)
+    run.font.color.rgb = _GRAY
+    run.font.name = "Calibri"
+
+    # Spacer
+    for _ in range(4):
+        doc.add_paragraph()
+
+    # Thin rule
+    rule = doc.add_paragraph()
+    rule.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _add_thin_border(rule, "CCCCCC")
+
+    # Metadata block
+    meta_table = doc.add_table(rows=4, cols=2)
+    meta_table.autofit = True
+    meta_table.columns[0].width = Inches(2)
+    meta_table.columns[1].width = Inches(4)
+
+    labels = ["Date", "Classification", "Specialists", "Prepared by"]
+    values = [date_str, "CONFIDENTIAL", specialists_text,
+              "Baker Research Engine"]
+
+    for i, (label, value) in enumerate(zip(labels, values)):
+        left = meta_table.cell(i, 0)
+        right = meta_table.cell(i, 1)
+        lp = left.paragraphs[0]
+        rp = right.paragraphs[0]
+        lr = lp.add_run(label)
+        lr.font.size = Pt(10)
+        lr.font.color.rgb = _GRAY
+        lr.font.name = "Calibri"
+        rr = rp.add_run(value)
+        rr.font.size = Pt(10)
+        rr.font.color.rgb = _NAVY
+        rr.font.name = "Calibri"
+        if label == "Classification":
+            rr.bold = True
+
+    # Remove table borders
+    for row in meta_table.rows:
+        for cell in row.cells:
+            tc = cell._tc
+            tcPr = tc.get_or_add_tcPr()
+            tcBorders = OxmlElement('w:tcBorders')
+            for edge in ('top', 'left', 'bottom', 'right'):
+                element = OxmlElement(f'w:{edge}')
+                element.set(qn('w:val'), 'none')
+                element.set(qn('w:sz'), '0')
+                element.set(qn('w:space'), '0')
+                element.set(qn('w:color'), 'auto')
+                tcBorders.append(element)
+            tcPr.append(tcBorders)
+
+    # Page break after cover
+    doc.add_page_break()
+
+
+def _render_markdown_section(doc, content):
+    """Render markdown content into Word document elements with professional formatting."""
+    lines = content.split('\n')
+    for line in lines:
+        stripped = line.strip()
+
+        if not stripped:
+            doc.add_paragraph()
+            continue
+
+        # Horizontal rule → thin border paragraph
+        if stripped in ('---', '***', '___'):
+            rule = doc.add_paragraph()
+            _add_thin_border(rule, "CCCCCC")
+            continue
+
+        # Headings
+        if stripped.startswith('#### '):
+            h = doc.add_heading(stripped[5:], level=4)
+            for run in h.runs:
+                run.font.name = "Calibri"
+                run.font.size = Pt(11)
+                run.font.color.rgb = _DARK_BLUE
+            continue
+        if stripped.startswith('### '):
+            h = doc.add_heading(stripped[4:], level=3)
+            for run in h.runs:
+                run.font.name = "Calibri"
+                run.font.size = Pt(12)
+                run.font.color.rgb = _DARK_BLUE
+            continue
+        if stripped.startswith('## '):
+            # This is a specialist section header — handled by caller
+            h = doc.add_heading(stripped[3:], level=2)
+            for run in h.runs:
+                run.font.name = "Calibri"
+                run.font.size = Pt(14)
+                run.font.color.rgb = _NAVY
+                run.bold = True
+            continue
+        if stripped.startswith('# '):
+            h = doc.add_heading(stripped[2:], level=1)
+            for run in h.runs:
+                run.font.name = "Calibri"
+                run.font.size = Pt(16)
+                run.font.color.rgb = _NAVY
+            continue
+
+        # Bullet points
+        if stripped.startswith('- ') or stripped.startswith('* '):
+            p = doc.add_paragraph(style='List Bullet')
+            _add_inline_formatting(p, stripped[2:])
+            for run in p.runs:
+                run.font.name = "Calibri"
+                run.font.size = Pt(11)
+            continue
+
+        # Sub-bullets
+        if stripped.startswith('  - ') or stripped.startswith('  * '):
+            p = doc.add_paragraph(style='List Bullet 2')
+            _add_inline_formatting(p, stripped[4:])
+            for run in p.runs:
+                run.font.name = "Calibri"
+                run.font.size = Pt(10)
+            continue
+
+        # Numbered items
+        if re.match(r'^\d+\.\s', stripped):
+            text = re.sub(r'^\d+\.\s', '', stripped)
+            p = doc.add_paragraph(style='List Number')
+            _add_inline_formatting(p, text)
+            for run in p.runs:
+                run.font.name = "Calibri"
+                run.font.size = Pt(11)
+            continue
+
+        # Regular paragraph
+        para = doc.add_paragraph()
+        _add_inline_formatting(para, stripped)
+        for run in para.runs:
+            run.font.name = "Calibri"
+            run.font.size = Pt(11)
+
+
+def _add_inline_formatting(paragraph, text):
+    """Parse **bold** and *italic* inline markdown and add runs to paragraph."""
+    parts = re.split(r'(\*\*.*?\*\*|\*.*?\*)', text)
+    for part in parts:
+        if part.startswith('**') and part.endswith('**'):
+            run = paragraph.add_run(part[2:-2])
+            run.bold = True
+        elif part.startswith('*') and part.endswith('*'):
+            run = paragraph.add_run(part[1:-1])
+            run.italic = True
+        else:
+            paragraph.add_run(part)
+
+
+def generate_dossier_docx(dossier_md, subject_name, subject_type,
+                          specialists_text, filepath):
+    """
+    Generate a professional McKinsey-style research dossier .docx.
+
+    This splits the markdown by ## sections (specialist headers) and adds:
+    - Cover page with metadata
+    - Page breaks between specialist sections
+    - Professional fonts (Calibri) and consistent styling
+    - Header/footer with page numbers
+    - Horizontal rules as thin borders
+
+    Args:
+        dossier_md: Full dossier markdown content
+        subject_name: Name of the research subject
+        subject_type: Type (person, company, etc.)
+        specialists_text: Comma-separated specialist names
+        filepath: Output .docx file path
+    """
+    doc = Document()
+
+    # Set default font
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = "Calibri"
+    font.size = Pt(11)
+    font.color.rgb = RGBColor(0x33, 0x33, 0x33)
+
+    # Set narrow margins
+    for section in doc.sections:
+        section.top_margin = Cm(2.5)
+        section.bottom_margin = Cm(2.0)
+        section.left_margin = Cm(2.5)
+        section.right_margin = Cm(2.5)
+
+    date_str = datetime.utcnow().strftime("%d %B %Y")
+
+    # 1. Cover page
+    _add_cover_page(doc, subject_name, subject_type, specialists_text, date_str)
+
+    # 2. Header/footer (applied to all sections)
+    _add_header_footer(doc)
+
+    # 3. Split content by ## sections and render with page breaks
+    # Skip the cover-page markdown (# title, metadata lines, first ---)
+    sections = re.split(r'\n(?=## )', dossier_md)
+    is_first_section = True
+
+    for section_md in sections:
+        section_md = section_md.strip()
+        if not section_md:
+            continue
+
+        # Skip the top-level header block (# Research Dossier: ...)
+        if section_md.startswith('# ') and not section_md.startswith('## '):
+            # This is the metadata header — skip (cover page handles it)
+            continue
+
+        # Page break between specialist sections (not before the first)
+        if section_md.startswith('## ') and not is_first_section:
+            doc.add_page_break()
+
+        if section_md.startswith('## '):
+            is_first_section = False
+
+        # Skip the footer line
+        if section_md.startswith('*Generated by Baker'):
+            continue
+
+        _render_markdown_section(doc, section_md)
+
+    # Final footer note
+    doc.add_paragraph()
+    rule = doc.add_paragraph()
+    _add_thin_border(rule, "CCCCCC")
+    footer_para = doc.add_paragraph()
+    footer_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = footer_para.add_run(
+        f"Generated by Baker Research Engine  |  {date_str}  |  CONFIDENTIAL"
+    )
+    run.font.size = Pt(8)
+    run.font.color.rgb = _GRAY
+    run.font.name = "Calibri"
+
+    doc.save(filepath)

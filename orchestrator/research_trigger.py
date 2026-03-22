@@ -52,6 +52,7 @@ def _ensure_research_proposals_table():
                     director_customization JSONB,
                     deliverable_path TEXT,
                     deliverable_summary TEXT,
+                    error_message TEXT,
                     send_to JSONB,
                     created_at TIMESTAMPTZ DEFAULT NOW(),
                     approved_at TIMESTAMPTZ,
@@ -61,6 +62,10 @@ def _ensure_research_proposals_table():
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_rp_status
                 ON research_proposals(status) WHERE status IN ('proposed', 'running')
+            """)
+            # Migration: add error_message column if table already exists without it
+            cur.execute("""
+                ALTER TABLE research_proposals ADD COLUMN IF NOT EXISTS error_message TEXT
             """)
             conn.commit()
             cur.close()
@@ -460,13 +465,13 @@ def get_research_proposals(status: str = None, days: int = 14) -> list:
                     SELECT * FROM research_proposals
                     WHERE status = %s
                       AND created_at > NOW() - INTERVAL '{int(days)} days'
-                    ORDER BY created_at DESC LIMIT 20
+                    ORDER BY created_at DESC LIMIT 50
                 """, (status,))
             else:
                 cur.execute(f"""
                     SELECT * FROM research_proposals
                     WHERE created_at > NOW() - INTERVAL '{int(days)} days'
-                    ORDER BY created_at DESC LIMIT 20
+                    ORDER BY created_at DESC LIMIT 50
                 """)
             results = []
             for r in cur.fetchall():
