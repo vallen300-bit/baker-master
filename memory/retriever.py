@@ -1175,80 +1175,103 @@ class SentinelRetriever:
         contact_name: Optional[str] = None,
         project: Optional[str] = None,
         role: Optional[str] = None,
+        context_plan: dict = None,
     ) -> list[RetrievedContext]:
         """
         Full retrieval pipeline for a trigger event.
         Combines semantic search + structured data.
+
+        Baker 3.0: If context_plan is provided (from context_selector),
+        only queries sources that are not 'skip' and respects per-source limits.
+        If context_plan is None, queries everything (backward compatible).
         """
+        from orchestrator.context_selector import should_skip_source, get_source_limit
+
         contexts = []
 
         # 1. Semantic search across all vector collections
-        semantic_results = self.search_all_collections(
-            query=trigger_text,
-            limit_per_collection=10,
-            score_threshold=0.3,
-            project=project,
-            role=role,
-        )
-        contexts.extend(semantic_results)
+        if not should_skip_source(context_plan, "semantic"):
+            sem_limit = get_source_limit(context_plan, "semantic", default=10)
+            semantic_results = self.search_all_collections(
+                query=trigger_text,
+                limit_per_collection=sem_limit,
+                score_threshold=0.3,
+                project=project,
+                role=role,
+            )
+            contexts.extend(semantic_results)
 
         # 2. Contact profile if we know who this is about
-        if contact_name:
-            profile = self.get_contact_profile(contact_name)
-            if profile:
-                contexts.insert(0, profile)
+        if not should_skip_source(context_plan, "contacts"):
+            plan_contact = (context_plan or {}).get("contact") if context_plan else None
+            lookup_name = contact_name or plan_contact
+            if lookup_name:
+                profile = self.get_contact_profile(lookup_name)
+                if profile:
+                    contexts.insert(0, profile)
 
         # 3. Meeting transcripts (ARCH-3 — keyword match + recent)
-        transcripts = self.get_meeting_transcripts(trigger_text, limit=3)
-        contexts.extend(transcripts)
-        recent = self.get_recent_meeting_transcripts(limit=3)
-        # Avoid duplicates
-        existing_ids = {c.metadata.get("meeting_id") for c in transcripts}
-        for r in recent:
-            if r.metadata.get("meeting_id") not in existing_ids:
-                contexts.append(r)
+        if not should_skip_source(context_plan, "meetings"):
+            mtg_limit = get_source_limit(context_plan, "meetings", default=3)
+            transcripts = self.get_meeting_transcripts(trigger_text, limit=mtg_limit)
+            contexts.extend(transcripts)
+            recent = self.get_recent_meeting_transcripts(limit=min(mtg_limit, 3))
+            existing_ids = {c.metadata.get("meeting_id") for c in transcripts}
+            for r in recent:
+                if r.metadata.get("meeting_id") not in existing_ids:
+                    contexts.append(r)
 
         # 4. Email messages (ARCH-6 — keyword match + recent)
-        emails = self.get_email_messages(trigger_text, limit=3)
-        contexts.extend(emails)
-        recent_emails = self.get_recent_emails(limit=3)
-        existing_email_ids = {c.metadata.get("message_id") for c in emails}
-        for r in recent_emails:
-            if r.metadata.get("message_id") not in existing_email_ids:
-                contexts.append(r)
+        if not should_skip_source(context_plan, "emails"):
+            email_limit = get_source_limit(context_plan, "emails", default=3)
+            emails = self.get_email_messages(trigger_text, limit=email_limit)
+            contexts.extend(emails)
+            recent_emails = self.get_recent_emails(limit=min(email_limit, 3))
+            existing_email_ids = {c.metadata.get("message_id") for c in emails}
+            for r in recent_emails:
+                if r.metadata.get("message_id") not in existing_email_ids:
+                    contexts.append(r)
 
         # 5. WhatsApp messages (ARCH-7 — keyword match + recent)
-        wa_msgs = self.get_whatsapp_messages(trigger_text, limit=3)
-        contexts.extend(wa_msgs)
-        recent_wa = self.get_recent_whatsapp(limit=3)
-        existing_wa_ids = {c.metadata.get("msg_id") for c in wa_msgs}
-        for r in recent_wa:
-            if r.metadata.get("msg_id") not in existing_wa_ids:
-                contexts.append(r)
+        if not should_skip_source(context_plan, "whatsapp"):
+            wa_limit = get_source_limit(context_plan, "whatsapp", default=3)
+            wa_msgs = self.get_whatsapp_messages(trigger_text, limit=wa_limit)
+            contexts.extend(wa_msgs)
+            recent_wa = self.get_recent_whatsapp(limit=min(wa_limit, 3))
+            existing_wa_ids = {c.metadata.get("msg_id") for c in wa_msgs}
+            for r in recent_wa:
+                if r.metadata.get("msg_id") not in existing_wa_ids:
+                    contexts.append(r)
 
         # 6. Strategic insights (INSIGHT-1 — keyword match)
-        insights = self.get_insights(trigger_text, limit=3)
-        contexts.extend(insights)
+        if not should_skip_source(context_plan, "insights"):
+            insights = self.get_insights(trigger_text, limit=3)
+            contexts.extend(insights)
 
-        # 7. Active deals (always included for CEO context)
-        deals = self.get_active_deals()
-        contexts.extend(deals)
+        # 7. Active deals
+        if not should_skip_source(context_plan, "deals"):
+            deals = self.get_active_deals()
+            contexts.extend(deals)
 
-        # 4. CEO preferences
-        prefs = self.get_ceo_preferences()
-        if prefs:
-            contexts.append(prefs)
+        # 8. CEO preferences
+        if not should_skip_source(context_plan, "preferences"):
+            prefs = self.get_ceo_preferences()
+            if prefs:
+                contexts.append(prefs)
 
-        # 5. Pending alerts (situational awareness)
-        alerts = self.get_pending_alerts()
-        contexts.extend(alerts)
+        # 9. Pending alerts (situational awareness)
+        if not should_skip_source(context_plan, "alerts"):
+            alerts = self.get_pending_alerts()
+            contexts.extend(alerts)
 
-        # 6. Recent decisions (continuity)
-        decisions = self.get_recent_decisions(limit=5)
-        contexts.extend(decisions)
+        # 10. Recent decisions (continuity)
+        if not should_skip_source(context_plan, "decisions"):
+            decisions = self.get_recent_decisions(limit=5)
+            contexts.extend(decisions)
 
         logger.info(
             f"Total retrieved: {len(contexts)} contexts, "
             f"≈{sum(c.token_estimate for c in contexts)} tokens"
+            f"{' (context selector active)' if context_plan else ''}"
         )
         return contexts

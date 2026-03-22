@@ -335,11 +335,26 @@ class SentinelPipeline:
     # -------------------------------------------------------
 
     def retrieve_context(self, trigger: TriggerEvent):
-        """Retrieve all relevant context for this trigger."""
+        """Retrieve all relevant context for this trigger.
+        Baker 3.0: uses context_selector for smart source filtering."""
+        # Build context plan (Baker 3.0 Item 2)
+        context_plan = None
+        try:
+            from orchestrator.context_selector import select_context
+            context_plan = select_context(
+                query=trigger.content or "",
+                matter=getattr(trigger, "matter", None),
+                contact=trigger.contact_name,
+                channel_of_origin=trigger.type or "dashboard",
+            )
+        except Exception as _sel_err:
+            logger.warning(f"Context selector failed (falling back to full retrieval): {_sel_err}")
+
         return self.retriever.retrieve_for_trigger(
             trigger_text=trigger.content,
             trigger_type=trigger.type,
             contact_name=trigger.contact_name,
+            context_plan=context_plan,
         )
 
     # -------------------------------------------------------
