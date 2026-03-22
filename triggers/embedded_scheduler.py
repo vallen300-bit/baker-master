@@ -208,11 +208,11 @@ def _register_jobs(scheduler: BackgroundScheduler):
     from orchestrator.pipeline import run_alert_expiry_check
     scheduler.add_job(
         run_alert_expiry_check,
-        IntervalTrigger(hours=6),
-        id="alert_expiry", name="Alert auto-expiry (T2-T4, 3-day rule)",
+        IntervalTrigger(hours=1),
+        id="alert_expiry", name="Alert expiry + snooze reactivation (hourly)",
         coalesce=True, max_instances=1, replace_existing=True,
     )
-    logger.info("Registered: alert_expiry (every 6 hours)")
+    logger.info("Registered: alert_expiry (every 1 hour — includes snooze reactivation)")
 
     # Proactive signal scanner — every 30 minutes (PROACTIVE-FLAG-AO)
     from triggers.proactive_scanner import run_proactive_scan

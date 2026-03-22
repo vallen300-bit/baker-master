@@ -224,13 +224,14 @@ def _gather_signals() -> dict:
             except Exception:
                 pass
 
-        # 8. Yesterday's proposed actions (to avoid re-proposing)
+        # 8. Yesterday's obligation alerts (to avoid re-proposing)
         try:
             cur.execute("""
                 SELECT title, status
-                FROM proposed_actions
-                WHERE run_date >= CURRENT_DATE - 1
-                  AND status NOT IN ('dismissed')
+                FROM alerts
+                WHERE source = 'obligation'
+                  AND created_at >= CURRENT_DATE - 1
+                  AND status != 'dismissed'
                 ORDER BY created_at DESC LIMIT 20
             """)
             ctx["yesterday_proposed"] = [dict(r) for r in cur.fetchall()]
@@ -457,54 +458,57 @@ def _generate_proposed_actions(context_str: str) -> list:
 # Storage
 # ─────────────────────────────────────────────────
 
-def _store_proposed_actions(actions: list) -> list:
-    """Store proposed actions in DB. Returns list of IDs."""
+def _store_obligation_alerts(actions: list) -> list:
+    """Create alerts for each obligation. Returns list of alert IDs."""
     if not actions:
         return []
 
     try:
         from memory.store_back import SentinelStoreBack
         store = SentinelStoreBack._get_global_instance()
-        conn = store._get_conn()
-        if not conn:
-            return []
-        try:
-            cur = conn.cursor()
-            ids = []
-            for action in actions:
-                due_date = action.get("due_date")
-                if due_date:
-                    try:
-                        # Validate date format
-                        datetime.strptime(due_date, "%Y-%m-%d")
-                    except (ValueError, TypeError):
-                        due_date = None
+        ids = []
+        for action in actions:
+            due_date = action.get("due_date")
+            if due_date:
+                try:
+                    datetime.strptime(due_date, "%Y-%m-%d")
+                except (ValueError, TypeError):
+                    due_date = None
 
-                cur.execute("""
-                    INSERT INTO proposed_actions
-                        (title, description, source_type, source_ref,
-                         suggested_action, completion_signals, priority_rank, due_date)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                    RETURNING id
-                """, (
-                    action.get("title", "")[:200],
-                    action.get("description", ""),
-                    action.get("source_type", "")[:20],
-                    action.get("source_ref", ""),
-                    action.get("suggested_action", ""),
-                    json.dumps(action.get("completion_signals", [])),
-                    action.get("priority_rank", 2),
-                    due_date,
-                ))
-                ids.append(cur.fetchone()[0])
-            conn.commit()
-            cur.close()
-            logger.info(f"Stored {len(ids)} proposed actions: {ids}")
-            return ids
-        finally:
-            store._put_conn(conn)
+            # Map priority_rank → tier: 1→T1, 2→T2, 3+→T3
+            prio = action.get("priority_rank", 2)
+            tier = min(prio, 3)
+
+            source_type = action.get("source_type", "")
+            tags = ["obligation"]
+            if source_type:
+                tags.append(source_type)
+
+            structured = {
+                "suggested_action": action.get("suggested_action", ""),
+                "completion_signals": action.get("completion_signals", []),
+                "source_ref": action.get("source_ref", ""),
+                "due_date": due_date,
+                "source_type": source_type,
+            }
+
+            alert_id = store.create_alert(
+                tier=tier,
+                title=action.get("title", "")[:200],
+                body=action.get("description", ""),
+                action_required=True,
+                tags=tags,
+                source="obligation",
+                source_id=f"obligation-{date.today().isoformat()}-{action.get('title', '')[:50]}",
+                structured_actions=structured,
+            )
+            if alert_id:
+                ids.append(alert_id)
+
+        logger.info(f"Stored {len(ids)} obligation alerts: {ids}")
+        return ids
     except Exception as e:
-        logger.error(f"Proposed action storage failed: {e}")
+        logger.error(f"Obligation alert storage failed: {e}")
         return []
 
 
@@ -539,7 +543,7 @@ def _send_morning_push(count: int):
         "type": "morning_triage",
         "title": f"Baker has {count} proposed actions for today",
         "tier": 2,
-        "url": "/mobile?tab=actions",
+        "url": "/mobile?tab=feed",
     })
 
     sent = 0
@@ -740,8 +744,9 @@ def run_obligation_generator():
 
             # Check if already ran today
             cur.execute("""
-                SELECT COUNT(*) FROM proposed_actions
-                WHERE run_date = CURRENT_DATE
+                SELECT COUNT(*) FROM alerts
+                WHERE source = 'obligation'
+                  AND created_at >= CURRENT_DATE
             """)
             try:
                 count = cur.fetchone()[0]
@@ -781,8 +786,8 @@ def run_obligation_generator():
             logger.info("Obligation generator: no actions generated")
             return
 
-        # Store
-        ids = _store_proposed_actions(actions)
+        # Store as alerts
+        ids = _store_obligation_alerts(actions)
 
         # Morning push
         _send_morning_push(len(ids))

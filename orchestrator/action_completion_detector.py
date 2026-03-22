@@ -19,10 +19,11 @@ logger = logging.getLogger("baker.action_completion_detector")
 
 
 def _get_approved_actions() -> list:
-    """Get all approved actions that haven't been completed yet."""
+    """Get resolved obligation alerts that may need auto-completion detection."""
     try:
         from memory.store_back import SentinelStoreBack
         import psycopg2.extras
+        import json as _json
         store = SentinelStoreBack._get_global_instance()
         conn = store._get_conn()
         if not conn:
@@ -30,15 +31,27 @@ def _get_approved_actions() -> list:
         try:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cur.execute("""
-                SELECT id, title, completion_signals, source_ref, triaged_at
-                FROM proposed_actions
-                WHERE status = 'approved'
-                  AND completed_at IS NULL
-                  AND triaged_at > NOW() - INTERVAL '14 days'
-                ORDER BY triaged_at ASC
+                SELECT id, title, structured_actions, resolved_at
+                FROM alerts
+                WHERE source = 'obligation'
+                  AND status = 'resolved'
+                  AND structured_actions IS NOT NULL
+                  AND exit_reason IS DISTINCT FROM 'auto_completed'
+                  AND resolved_at > NOW() - INTERVAL '14 days'
+                ORDER BY resolved_at ASC
                 LIMIT 50
             """)
-            results = [dict(r) for r in cur.fetchall()]
+            results = []
+            for r in cur.fetchall():
+                row = dict(r)
+                sa = row.get("structured_actions") or {}
+                if isinstance(sa, str):
+                    sa = _json.loads(sa)
+                # Map structured_actions fields to what _check_completion_signals expects
+                row["completion_signals"] = sa.get("completion_signals")
+                row["source_ref"] = sa.get("source_ref", "")
+                row["triaged_at"] = row.get("resolved_at")
+                results.append(row)
             cur.close()
             return results
         finally:
@@ -169,7 +182,7 @@ def _check_completion_signals(action: dict) -> str:
 
 
 def _mark_auto_completed(action_id: int, evidence: str):
-    """Mark action as auto_completed with evidence."""
+    """Mark alert as auto_completed by updating exit_reason."""
     try:
         from memory.store_back import SentinelStoreBack
         store = SentinelStoreBack._get_global_instance()
@@ -178,14 +191,11 @@ def _mark_auto_completed(action_id: int, evidence: str):
             return
         try:
             cur = conn.cursor()
-            now = datetime.now(timezone.utc)
             cur.execute("""
-                UPDATE proposed_actions
-                SET status = 'auto_completed',
-                    completed_at = %s,
-                    completion_evidence = %s
-                WHERE id = %s AND completed_at IS NULL
-            """, (now, evidence, action_id))
+                UPDATE alerts
+                SET exit_reason = 'auto_completed'
+                WHERE id = %s
+            """, (action_id,))
             conn.commit()
             cur.close()
         finally:

@@ -205,10 +205,8 @@ function switchTab(tab) {
     document.querySelectorAll('.chat-panel').forEach(function(p) {
         p.classList.toggle('active', p.id === 'panel-' + tab);
     });
-    if (tab === 'alerts') {
+    if (tab === 'feed') {
         loadMobileAlerts();
-    } else if (tab === 'actions') {
-        loadProposedActions();
     } else if (tab === 'digest') {
         loadDigestTab();
     } else {
@@ -642,7 +640,7 @@ async function init() {
         alertBadge.style.cursor = 'pointer';
         alertBadge.addEventListener('click', function(e) {
             e.stopPropagation();
-            switchTab('alerts');
+            switchTab('feed');
         });
     }
 
@@ -728,17 +726,13 @@ async function init() {
         });
     }
 
-    // Action badge — load now + refresh every 5 min
-    refreshActionBadge();
-    setInterval(refreshActionBadge, 5 * 60 * 1000);
-
-    // Default tab — check for deep link ?tab=actions
+    // Default tab — check for deep link
     var urlParams = new URLSearchParams(window.location.search);
     var deepTab = urlParams.get('tab');
-    if (deepTab && ['baker', 'specialist', 'alerts', 'actions', 'digest'].indexOf(deepTab) !== -1) {
+    if (deepTab && ['feed', 'baker', 'specialist', 'digest'].indexOf(deepTab) !== -1) {
         switchTab(deepTab);
     } else {
-        switchTab('baker');
+        switchTab('feed');
     }
 }
 
@@ -921,9 +915,80 @@ function _createAlertCard(alert) {
         card.appendChild(body);
     }
 
+    // Action buttons
+    var sa = alert.structured_actions || {};
+    var btnRow = document.createElement('div');
+    btnRow.className = 'alert-action-buttons triage-buttons';
+    btnRow.style.marginTop = '8px';
+
+    if (alert.source === 'research' && sa.research_proposal_id) {
+        // Research alert: Run Dossier + Skip
+        var runBtn = document.createElement('button');
+        runBtn.className = 'triage-btn approve';
+        runBtn.textContent = 'Run Dossier';
+        runBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            _runDossierFromAlert(sa.research_proposal_id, alert.id, card);
+        });
+        btnRow.appendChild(runBtn);
+
+        var skipBtn = document.createElement('button');
+        skipBtn.className = 'triage-btn dismiss';
+        skipBtn.textContent = 'Skip';
+        skipBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            _dismissAlertCard(alert.id, card);
+        });
+        btnRow.appendChild(skipBtn);
+    } else {
+        // Standard alert: Done + Dismiss
+        var doneBtn = document.createElement('button');
+        doneBtn.className = 'triage-btn done';
+        doneBtn.textContent = 'Done';
+        doneBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            _resolveAlertCard(alert.id, card);
+        });
+        btnRow.appendChild(doneBtn);
+
+        var dismissBtn = document.createElement('button');
+        dismissBtn.className = 'triage-btn dismiss';
+        dismissBtn.textContent = 'Dismiss';
+        dismissBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            _dismissAlertCard(alert.id, card);
+        });
+        btnRow.appendChild(dismissBtn);
+    }
+
+    card.appendChild(btnRow);
+
+    // Long-press → context menu
+    var _lpTimer = null;
+    var _lpStartX = 0, _lpStartY = 0;
+    card.addEventListener('touchstart', function(e) {
+        _lpStartX = e.touches[0].clientX;
+        _lpStartY = e.touches[0].clientY;
+        _lpTimer = setTimeout(function() {
+            _lpTimer = null;
+            if (navigator.vibrate) navigator.vibrate(50);
+            _showContextMenu(alert);
+        }, 500);
+    }, { passive: true });
+    card.addEventListener('touchmove', function(e) {
+        if (!_lpTimer) return;
+        if (Math.abs(e.touches[0].clientX - _lpStartX) > 10 || Math.abs(e.touches[0].clientY - _lpStartY) > 10) {
+            clearTimeout(_lpTimer);
+            _lpTimer = null;
+        }
+    }, { passive: true });
+    card.addEventListener('touchend', function() {
+        if (_lpTimer) { clearTimeout(_lpTimer); _lpTimer = null; }
+    });
+
     // Tap to expand/collapse
     card.addEventListener('click', function(e) {
-        if (e.target.tagName === 'BUTTON') return;
+        if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A') return;
         card.classList.toggle('expanded');
     });
 
@@ -1070,7 +1135,7 @@ function _showMobileToast(alert) {
     text.textContent = 'T' + alert.tier + '  ' + (alert.title || '').substring(0, 60);
     toast.appendChild(text);
 
-    toast.addEventListener('click', function() { toast.remove(); switchTab('alerts'); });
+    toast.addEventListener('click', function() { toast.remove(); switchTab('feed'); });
     document.body.appendChild(toast);
 
     setTimeout(function() {
@@ -1682,315 +1747,257 @@ async function _doUpload() {
     }
 }
 
-// ═══ TRIAGE CARD DECK (Proposed Actions) ═══
-var _proposedActions = [];
+// ═══ CONTEXT MENU (Long-Press) ═══
 
-async function refreshActionBadge() {
-    try {
-        var results = await Promise.all([
-            bakerFetch('/api/proposed-actions/count'),
-            bakerFetch('/api/research-proposals?status=proposed'),
-        ]);
-        var actionCount = 0;
-        var researchCount = 0;
-        if (results[0].ok) { var d = await results[0].json(); actionCount = d.proposed || 0; }
-        if (results[1].ok) { var r = await results[1].json(); researchCount = (r.proposals || []).length; }
-        var total = actionCount + researchCount;
-        var badge = document.getElementById('tabActionCount');
-        if (!badge) return;
-        if (total > 0) {
-            badge.textContent = total;
-            badge.hidden = false;
-        } else {
-            badge.hidden = true;
-        }
-    } catch (e) { /* silent */ }
-}
+function _showContextMenu(alert) {
+    var old = document.getElementById('contextMenuOverlay');
+    if (old) old.remove();
 
-var _researchProposals = [];
+    var overlay = document.createElement('div');
+    overlay.id = 'contextMenuOverlay';
+    overlay.className = 'context-menu-overlay';
 
-async function loadProposedActions() {
-    var deck = document.getElementById('triageDeck');
-    if (!deck) return;
-    deck.textContent = '';
-    var loadDiv = document.createElement('div');
-    loadDiv.className = 'empty-state';
-    loadDiv.textContent = 'Loading actions...';
-    deck.appendChild(loadDiv);
-
-    try {
-        // Fetch both in parallel
-        var results = await Promise.all([
-            bakerFetch('/api/proposed-actions?status=proposed'),
-            bakerFetch('/api/research-proposals?status=proposed'),
-        ]);
-        var actionsData = results[0].ok ? await results[0].json() : { actions: [] };
-        var researchData = results[1].ok ? await results[1].json() : { proposals: [] };
-        _proposedActions = actionsData.actions || [];
-        _researchProposals = researchData.proposals || [];
-        _renderTriageDeck();
-    } catch (e) {
-        deck.textContent = '';
-        var err = document.createElement('div');
-        err.className = 'empty-state';
-        err.textContent = 'Failed to load actions.';
-        deck.appendChild(err);
-    }
-}
-
-function _renderTriageDeck() {
-    var deck = document.getElementById('triageDeck');
-    var countEl = document.getElementById('triageCount');
-    var doneBtn = document.getElementById('triageDoneBtn');
-    if (!deck) return;
-    deck.textContent = '';
-
-    var totalCount = _proposedActions.length + _researchProposals.length;
-    if (countEl) countEl.textContent = totalCount + ' item' + (totalCount !== 1 ? 's' : '');
-
-    if (totalCount === 0) {
-        var empty = document.createElement('div');
-        empty.className = 'empty-state';
-        var icon = document.createElement('div');
-        icon.className = 'icon';
-        icon.textContent = '\u2705';
-        empty.appendChild(icon);
-        empty.appendChild(document.createTextNode('No proposed actions. You\'re all set.'));
-        deck.appendChild(empty);
-        if (doneBtn) doneBtn.hidden = true;
-        return;
-    }
-
-    if (doneBtn) doneBtn.hidden = true;
-
-    // Research proposals first (higher priority)
-    for (var r = 0; r < _researchProposals.length; r++) {
-        deck.appendChild(_createResearchCard(_researchProposals[r]));
-    }
-
-    // Then regular actions
-    for (var i = 0; i < _proposedActions.length; i++) {
-        deck.appendChild(_createTriageCard(_proposedActions[i]));
-    }
-}
-
-function _createTriageCard(action) {
-    var card = document.createElement('div');
-    card.className = 'triage-card';
-    card.dataset.actionId = action.id;
-
-    // Priority indicator
-    var prio = action.priority_rank || 2;
-    if (prio === 1) card.classList.add('urgent');
-
-    // Header: source badge + title
-    var header = document.createElement('div');
-    header.className = 'triage-card-header';
-
-    var sourceBadge = document.createElement('span');
-    sourceBadge.className = 'source-badge ' + (action.source_type || 'unknown');
-    sourceBadge.textContent = (action.source_type || 'task').replace(/_/g, ' ');
-    header.appendChild(sourceBadge);
-
-    if (action.due_date) {
-        var dueEl = document.createElement('span');
-        dueEl.className = 'triage-due';
-        var dueDate = new Date(action.due_date + 'T00:00:00');
-        var today = new Date();
-        today.setHours(0,0,0,0);
-        if (dueDate < today) dueEl.classList.add('overdue');
-        dueEl.textContent = action.due_date;
-        header.appendChild(dueEl);
-    }
-
-    card.appendChild(header);
-
-    // Title
-    var title = document.createElement('div');
-    title.className = 'triage-card-title';
-    title.textContent = action.title || 'Untitled';
-    card.appendChild(title);
-
-    // Description
-    if (action.description) {
-        var desc = document.createElement('div');
-        desc.className = 'triage-card-desc';
-        desc.textContent = action.description;
-        card.appendChild(desc);
-    }
-
-    // Suggested action
-    if (action.suggested_action) {
-        var suggestion = document.createElement('div');
-        suggestion.className = 'triage-suggested';
-        suggestion.textContent = action.suggested_action;
-        card.appendChild(suggestion);
-    }
-
-    // Action buttons row
-    var buttons = document.createElement('div');
-    buttons.className = 'triage-buttons';
-
-    var approveBtn = document.createElement('button');
-    approveBtn.className = 'triage-btn approve';
-    approveBtn.textContent = 'Approve';
-    approveBtn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        _respondToProposedAction(action.id, 'approved', card);
-    });
-    buttons.appendChild(approveBtn);
-
-    var doneActionBtn = document.createElement('button');
-    doneActionBtn.className = 'triage-btn done';
-    doneActionBtn.textContent = 'Done';
-    doneActionBtn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        _respondToProposedAction(action.id, 'done', card);
-    });
-    buttons.appendChild(doneActionBtn);
-
-    var dismissBtn = document.createElement('button');
-    dismissBtn.className = 'triage-btn dismiss';
-    dismissBtn.textContent = 'Skip';
-    dismissBtn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        _respondToProposedAction(action.id, 'dismissed', card);
-    });
-    buttons.appendChild(dismissBtn);
-
-    card.appendChild(buttons);
-
-    // Swipe: right=approve, left=dismiss
-    _setupTriageSwipe(card, action.id);
-
-    return card;
-}
-
-function _createResearchCard(proposal) {
-    var card = document.createElement('div');
-    card.className = 'triage-card research';
-    card.dataset.proposalId = proposal.id;
+    var sheet = document.createElement('div');
+    sheet.className = 'context-menu-sheet';
 
     // Header
     var header = document.createElement('div');
-    header.className = 'triage-card-header';
+    header.className = 'context-menu-header';
+    var headerTitle = document.createElement('div');
+    headerTitle.className = 'context-menu-title';
+    headerTitle.textContent = (alert.title || 'Alert').substring(0, 60);
+    header.appendChild(headerTitle);
+    var headerMeta = document.createElement('div');
+    headerMeta.className = 'context-menu-meta';
+    headerMeta.textContent = 'T' + (alert.tier || 3) + ' \u00B7 ' + (alert.source || '').replace(/_/g, ' ');
+    header.appendChild(headerMeta);
+    sheet.appendChild(header);
 
-    var badge = document.createElement('span');
-    badge.className = 'source-badge research';
-    badge.textContent = 'RESEARCH';
-    header.appendChild(badge);
+    // Actions
+    var actions = [
+        { icon: '\u270F\uFE0F', label: 'Draft a reply', id: 'draft', soon: true },
+        { icon: '\uD83D\uDCAC', label: 'Ask Baker about this', id: 'ask' },
+        { icon: '\u23F0', label: 'Snooze', id: 'snooze' },
+        { icon: '\u27A1\uFE0F', label: 'Delegate', id: 'delegate', soon: true },
+    ];
 
-    var typeLabel = document.createElement('span');
-    typeLabel.className = 'triage-due';
-    typeLabel.textContent = (proposal.subject_type || 'person').replace(/_/g, ' ');
-    header.appendChild(typeLabel);
+    actions.forEach(function(action) {
+        var btn = document.createElement('button');
+        btn.className = 'context-menu-action';
+        if (action.soon) btn.classList.add('coming-soon');
 
-    card.appendChild(header);
+        var iconSpan = document.createElement('span');
+        iconSpan.className = 'context-menu-action-icon';
+        iconSpan.textContent = action.icon;
+        btn.appendChild(iconSpan);
 
-    // Title
-    var title = document.createElement('div');
-    title.className = 'triage-card-title';
-    title.textContent = 'Run dossier: ' + (proposal.subject_name || 'Unknown');
-    card.appendChild(title);
+        var labelSpan = document.createElement('span');
+        labelSpan.textContent = action.label;
+        btn.appendChild(labelSpan);
 
-    // Context
-    if (proposal.context) {
-        var desc = document.createElement('div');
-        desc.className = 'triage-card-desc';
-        desc.textContent = proposal.context;
-        card.appendChild(desc);
-    }
+        if (action.soon) {
+            var badge = document.createElement('span');
+            badge.className = 'context-menu-soon-badge';
+            badge.textContent = 'Soon';
+            btn.appendChild(badge);
+        }
 
-    // Specialists
-    var specialists = proposal.specialists || [];
-    if (typeof specialists === 'string') { try { specialists = JSON.parse(specialists); } catch(e) { specialists = []; } }
-    if (specialists.length > 0) {
-        var specNames = { research: 'Research', legal: 'Legal', profiling: 'People Intel', pr_branding: 'PR & Branding' };
-        var specDiv = document.createElement('div');
-        specDiv.className = 'triage-suggested';
-        specDiv.textContent = 'Specialists: ' + specialists.map(function(s) { return specNames[s] || s; }).join(', ');
-        card.appendChild(specDiv);
-    }
+        btn.addEventListener('click', function() {
+            _closeContextMenu();
+            if (action.id === 'ask') _askBakerAbout(alert);
+            else if (action.id === 'snooze') _showSnoozeOptions(alert);
+        });
 
-    // Buttons
-    var buttons = document.createElement('div');
-    buttons.className = 'triage-buttons';
-
-    var runBtn = document.createElement('button');
-    runBtn.className = 'triage-btn approve';
-    runBtn.textContent = 'Run Dossier';
-    runBtn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        _respondToResearchProposal(proposal.id, 'approved', card);
+        sheet.appendChild(btn);
     });
-    buttons.appendChild(runBtn);
 
-    var skipBtn = document.createElement('button');
-    skipBtn.className = 'triage-btn dismiss';
-    skipBtn.textContent = 'Skip';
-    skipBtn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        _respondToResearchProposal(proposal.id, 'skipped', card);
+    // Cancel
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'context-menu-cancel';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', _closeContextMenu);
+    sheet.appendChild(cancelBtn);
+
+    overlay.appendChild(sheet);
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) _closeContextMenu();
     });
-    buttons.appendChild(skipBtn);
+    document.body.appendChild(overlay);
 
-    card.appendChild(buttons);
-    return card;
+    requestAnimationFrame(function() {
+        overlay.classList.add('visible');
+    });
 }
 
-function _respondToResearchProposal(proposalId, response, cardEl) {
-    if (response === 'approved' && cardEl) {
-        // Show running state with spinner
-        var btns = cardEl.querySelector('.triage-buttons');
-        if (btns) {
-            btns.textContent = '';
-            var spinner = document.createElement('div');
-            spinner.className = 'triage-running-status';
-            var dot = document.createElement('span');
-            dot.className = 'triage-spinner';
-            spinner.appendChild(dot);
-            var textSpan = document.createElement('span');
-            textSpan.className = 'triage-progress-text';
-            textSpan.textContent = ' Running specialists...';
-            spinner.appendChild(textSpan);
-            btns.appendChild(spinner);
-        }
-        cardEl.style.opacity = '0.85';
-        cardEl.classList.add('running');
-    } else {
-        // Skip — remove immediately
-        _researchProposals = _researchProposals.filter(function(p) { return p.id !== proposalId; });
-        if (cardEl) {
-            cardEl.style.transition = 'opacity 0.2s, transform 0.2s';
-            cardEl.style.opacity = '0';
-            cardEl.style.transform = 'translateX(-100%)';
-            setTimeout(function() { cardEl.remove(); }, 200);
-        }
-        var countEl = document.getElementById('triageCount');
-        var totalCount = _proposedActions.length + _researchProposals.length;
-        if (countEl) countEl.textContent = totalCount + ' item' + (totalCount !== 1 ? 's' : '');
-        if (totalCount === 0) setTimeout(function() { _renderTriageDeck(); }, 250);
+function _closeContextMenu() {
+    var overlay = document.getElementById('contextMenuOverlay');
+    if (overlay) {
+        overlay.classList.remove('visible');
+        setTimeout(function() { overlay.remove(); }, 200);
     }
+}
+
+// ═══ ASK BAKER ABOUT ALERT ═══
+
+function _askBakerAbout(alert) {
+    var sa = alert.structured_actions || {};
+    var context = sa.suggested_action || (alert.body || '').substring(0, 200) || alert.title || '';
+    var prefix = 'About: "' + (alert.title || '').substring(0, 80) + '"';
+    if (alert.source) prefix += ' (' + alert.source.replace(/_/g, ' ') + ')';
+    prefix += '\n\n' + context;
+
+    switchTab('baker');
+    var input = document.getElementById('bakerInput');
+    if (input) {
+        input.value = prefix;
+        input.style.height = 'auto';
+        input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+        setTimeout(function() { input.focus(); }, 150);
+    }
+}
+
+// ═══ SNOOZE ═══
+
+function _showSnoozeOptions(alert) {
+    var old = document.getElementById('contextMenuOverlay');
+    if (old) old.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'contextMenuOverlay';
+    overlay.className = 'context-menu-overlay';
+
+    var sheet = document.createElement('div');
+    sheet.className = 'context-menu-sheet';
+
+    var header = document.createElement('div');
+    header.className = 'context-menu-header';
+    var title = document.createElement('div');
+    title.className = 'context-menu-title';
+    title.textContent = 'Snooze: ' + (alert.title || 'Alert').substring(0, 50);
+    header.appendChild(title);
+    sheet.appendChild(header);
+
+    var options = [
+        { label: '4 hours', value: '4h' },
+        { label: 'Tomorrow morning', value: 'tomorrow' },
+        { label: 'Next week', value: 'next_week' },
+    ];
+
+    options.forEach(function(opt) {
+        var btn = document.createElement('button');
+        btn.className = 'context-menu-action';
+        var iconSpan = document.createElement('span');
+        iconSpan.className = 'context-menu-action-icon';
+        iconSpan.textContent = '\u23F0';
+        btn.appendChild(iconSpan);
+        var labelSpan = document.createElement('span');
+        labelSpan.textContent = opt.label;
+        btn.appendChild(labelSpan);
+        btn.addEventListener('click', function() {
+            _closeContextMenu();
+            _snoozeAlert(alert.id, opt.value, opt.label);
+        });
+        sheet.appendChild(btn);
+    });
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'context-menu-cancel';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', _closeContextMenu);
+    sheet.appendChild(cancelBtn);
+
+    overlay.appendChild(sheet);
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) _closeContextMenu();
+    });
+    document.body.appendChild(overlay);
+    requestAnimationFrame(function() { overlay.classList.add('visible'); });
+}
+
+function _snoozeAlert(alertId, duration, label) {
+    // Optimistic UI: remove card
+    var card = document.querySelector('.alert-card[data-alert-id="' + alertId + '"]');
+    if (card) {
+        card.style.transition = 'opacity 0.3s, transform 0.3s';
+        card.style.opacity = '0';
+        card.style.transform = 'scale(0.95)';
+        setTimeout(function() { card.remove(); }, 300);
+    }
+    _mobileAlerts = _mobileAlerts.filter(function(a) { return a.id !== alertId; });
+
+    // Toast
+    var toast = document.createElement('div');
+    toast.className = 'undo-toast';
+    var text = document.createElement('span');
+    text.textContent = 'Snoozed until ' + label;
+    toast.appendChild(text);
+    document.body.appendChild(toast);
+    setTimeout(function() {
+        toast.style.transition = 'opacity 0.3s';
+        toast.style.opacity = '0';
+        setTimeout(function() { toast.remove(); }, 300);
+    }, 3000);
+
+    // API call
+    bakerFetch('/api/alerts/' + alertId + '/snooze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ duration: duration }),
+    }).then(function() {
+        refreshAlertBadge();
+    }).catch(function(e) {
+        console.error('Snooze failed:', e);
+    });
+}
+
+// ═══ ALERT ACTION HELPERS ═══
+
+function _resolveAlertCard(alertId, card) {
+    card.style.transition = 'opacity 0.3s, transform 0.3s';
+    card.style.opacity = '0';
+    card.style.transform = 'translateX(100%)';
+    setTimeout(function() { card.remove(); }, 300);
+    _mobileAlerts = _mobileAlerts.filter(function(a) { return a.id !== alertId; });
+    bakerFetch('/api/alerts/' + alertId + '/resolve', { method: 'POST' })
+        .then(function() { refreshAlertBadge(); })
+        .catch(function() {});
+}
+
+function _dismissAlertCard(alertId, card) {
+    card.style.transition = 'opacity 0.3s, transform 0.3s';
+    card.style.opacity = '0';
+    card.style.transform = 'translateX(-100%)';
+    setTimeout(function() { card.remove(); }, 300);
+    _mobileAlerts = _mobileAlerts.filter(function(a) { return a.id !== alertId; });
+    bakerFetch('/api/alerts/' + alertId + '/dismiss', { method: 'POST' })
+        .then(function() { refreshAlertBadge(); })
+        .catch(function() {});
+}
+
+function _runDossierFromAlert(proposalId, alertId, card) {
+    // Show running state
+    var btns = card.querySelector('.alert-action-buttons');
+    if (btns) {
+        btns.innerHTML = '<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--green);font-weight:500;">' +
+            '<span class="triage-spinner"></span><span class="dossier-progress-text"> Running specialists...</span></div>';
+    }
+    card.style.opacity = '0.85';
 
     bakerFetch('/api/research-proposals/' + proposalId + '/respond', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ response: response }),
+        body: JSON.stringify({ response: 'approved' }),
     }).then(function() {
-        refreshActionBadge();
-        if (response === 'approved') {
-            _pollMobileDossier(proposalId, cardEl);
-        }
-    }).catch(function(e) { console.error('Research response failed:', e); });
+        _pollDossierFromAlert(proposalId, alertId, card);
+    }).catch(function(e) { console.error('Dossier launch failed:', e); });
 }
 
-function _pollMobileDossier(proposalId, cardEl) {
+function _pollDossierFromAlert(proposalId, alertId, card) {
     var pollCount = 0;
     var labels = ['Running specialists...', 'Analyzing...', 'Combining results...', 'Generating document...'];
-
     var interval = setInterval(function() {
         pollCount++;
-        var textEl = cardEl ? cardEl.querySelector('.triage-progress-text') : null;
+        var textEl = card ? card.querySelector('.dossier-progress-text') : null;
         if (textEl) {
             var idx = Math.min(Math.floor(pollCount / 5), labels.length - 1);
             textEl.textContent = ' ' + labels[idx];
@@ -2005,139 +2012,27 @@ function _pollMobileDossier(proposalId, cardEl) {
         }).then(function(data) {
             if (!data || data.status !== 'completed') return;
             clearInterval(interval);
-            // Show completed state
-            if (!cardEl) return;
-            cardEl.style.opacity = '1';
-            cardEl.classList.remove('running');
-            cardEl.style.borderLeftColor = '#22c55e';
-            var title = cardEl.querySelector('.triage-card-title');
+            if (!card) return;
+            card.style.opacity = '1';
+            card.style.borderLeftColor = '#22c55e';
+            var title = card.querySelector('.alert-title');
             if (title) title.textContent = 'Dossier ready: ' + (data.subject_name || 'Research');
-            var desc = cardEl.querySelector('.triage-card-desc');
-            if (desc) desc.textContent = 'Completed. Download or check Dropbox.';
-            var status = cardEl.querySelector('.triage-running-status');
-            if (status) {
-                status.textContent = '';
-                status.className = 'triage-buttons';
+            var btns = card.querySelector('.alert-action-buttons');
+            if (btns) {
+                btns.innerHTML = '';
                 var dlBtn = document.createElement('a');
                 dlBtn.href = '/api/research-proposals/' + proposalId + '/download?key=' + encodeURIComponent(BAKER.apiKey);
                 dlBtn.className = 'triage-btn approve';
-                dlBtn.style.cssText = 'text-decoration:none;text-align:center;display:block;';
+                dlBtn.style.cssText = 'text-decoration:none;text-align:center;display:block;flex:1;';
                 dlBtn.textContent = 'Download .docx';
                 dlBtn.target = '_blank';
-                status.appendChild(dlBtn);
+                btns.appendChild(dlBtn);
             }
+            // Resolve the alert
+            _mobileAlerts = _mobileAlerts.filter(function(a) { return a.id !== alertId; });
+            bakerFetch('/api/alerts/' + alertId + '/resolve', { method: 'POST' }).catch(function() {});
         }).catch(function() {});
     }, 5000);
-}
-
-function _setupTriageSwipe(card, actionId) {
-    var startX = 0;
-    var currentX = 0;
-    var swiping = false;
-
-    card.addEventListener('touchstart', function(e) {
-        startX = e.touches[0].clientX;
-        swiping = true;
-    }, { passive: true });
-
-    card.addEventListener('touchmove', function(e) {
-        if (!swiping) return;
-        currentX = e.touches[0].clientX - startX;
-        // Right swipe = approve (green tint), left = dismiss (red tint)
-        if (Math.abs(currentX) > 10) {
-            card.style.transform = 'translateX(' + Math.max(Math.min(currentX, 150), -150) + 'px)';
-            card.style.opacity = Math.max(1 - Math.abs(currentX) / 200, 0.3);
-            if (currentX > 40) {
-                card.classList.add('swiping-right');
-                card.classList.remove('swiping-left');
-            } else if (currentX < -40) {
-                card.classList.add('swiping-left');
-                card.classList.remove('swiping-right');
-            } else {
-                card.classList.remove('swiping-right', 'swiping-left');
-            }
-        }
-    }, { passive: true });
-
-    card.addEventListener('touchend', function() {
-        if (!swiping) return;
-        swiping = false;
-        card.classList.remove('swiping-right', 'swiping-left');
-
-        if (currentX > 80) {
-            // Swipe right → approve
-            card.style.transform = 'translateX(100%)';
-            card.style.opacity = '0';
-            setTimeout(function() { card.remove(); }, 200);
-            _respondToProposedAction(actionId, 'approved', null);
-        } else if (currentX < -80) {
-            // Swipe left → dismiss
-            card.style.transform = 'translateX(-100%)';
-            card.style.opacity = '0';
-            setTimeout(function() { card.remove(); }, 200);
-            _respondToProposedAction(actionId, 'dismissed', null);
-        } else {
-            card.style.transform = '';
-            card.style.opacity = '';
-        }
-        currentX = 0;
-    });
-}
-
-function _respondToProposedAction(actionId, response, cardEl) {
-    // Remove from local cache
-    _proposedActions = _proposedActions.filter(function(a) { return a.id !== actionId; });
-
-    // Remove card with animation if not already handled by swipe
-    if (cardEl) {
-        cardEl.style.transition = 'opacity 0.2s, transform 0.2s';
-        cardEl.style.opacity = '0';
-        cardEl.style.transform = response === 'dismissed' ? 'translateX(-100%)' : 'translateX(100%)';
-        setTimeout(function() { cardEl.remove(); }, 200);
-    }
-
-    // Update counter
-    var countEl = document.getElementById('triageCount');
-    if (countEl) countEl.textContent = _proposedActions.length + ' action' + (_proposedActions.length !== 1 ? 's' : '');
-
-    // Show empty state if deck is empty
-    if (_proposedActions.length === 0) {
-        setTimeout(function() { _renderTriageDeck(); }, 250);
-    }
-
-    // API call
-    bakerFetch('/api/proposed-actions/' + actionId + '/respond', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ response: response }),
-    }).then(function() {
-        refreshActionBadge();
-    }).catch(function(e) {
-        console.error('Action response failed:', e);
-    });
-
-    // Show undo toast
-    _showActionUndoToast(actionId, response);
-}
-
-function _showActionUndoToast(actionId, response) {
-    var label = response === 'approved' ? 'Action approved' :
-                response === 'done' ? 'Marked as done' :
-                response === 'dismissed' ? 'Action skipped' : 'Updated';
-
-    var toast = document.createElement('div');
-    toast.className = 'undo-toast';
-    var text = document.createElement('span');
-    text.textContent = label;
-    toast.appendChild(text);
-    document.body.appendChild(toast);
-
-    // Auto-remove after 2s (no undo for now — keeps it simple)
-    setTimeout(function() {
-        toast.style.transition = 'opacity 0.3s';
-        toast.style.opacity = '0';
-        setTimeout(function() { toast.remove(); }, 300);
-    }, 2000);
 }
 
 // ═══ Baker 3.0: DIGEST TAB ═══

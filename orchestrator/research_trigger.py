@@ -288,7 +288,7 @@ def create_research_proposal(
 
 
 def _notify_research_proposal(proposal_id: int, subject_name: str, context: str, specialists: list):
-    """Create dashboard alert + push notification for research proposal."""
+    """Create dashboard alert with structured_actions for research proposal."""
     try:
         from memory.store_back import SentinelStoreBack
         store = SentinelStoreBack._get_global_instance()
@@ -304,18 +304,24 @@ def _notify_research_proposal(proposal_id: int, subject_name: str, context: str,
         alert_body = (
             f"**Intelligence detected about {subject_name}.**\n\n"
             f"{context}\n\n"
-            f"**Proposed specialists:** {spec_list}\n\n"
-            f"Open the Actions tab to approve or skip this research."
+            f"**Proposed specialists:** {spec_list}"
         )
+
+        structured = {
+            "research_proposal_id": proposal_id,
+            "subject_name": subject_name,
+            "specialists": specialists,
+        }
 
         store.create_alert(
             tier=2,
-            title=f"Research trigger: {subject_name} — run dossier?",
+            title=f"Research dossier: {subject_name}",
             body=alert_body,
             action_required=True,
-            tags=["research_trigger", "dossier"],
-            source="research_trigger",
+            tags=["research"],
+            source="research",
             source_id=f"research-proposal-{proposal_id}",
+            structured_actions=structured,
         )
         logger.info(f"Research proposal alert created for '{subject_name}'")
     except Exception as e:

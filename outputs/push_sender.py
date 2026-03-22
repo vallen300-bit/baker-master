@@ -107,25 +107,7 @@ def gather_morning_items() -> list:
                     "negative_action": {"label": "Dismiss", "endpoint": f"/api/alerts/{r['id']}/dismiss", "method": "POST"},
                 })
 
-            # 2. Proposed actions (pending)
-            cur.execute("""
-                SELECT id, title, source_label, matter_slug
-                FROM proposed_actions
-                WHERE status = 'pending'
-                ORDER BY created_at DESC LIMIT 8
-            """)
-            for r in cur.fetchall():
-                items.append({
-                    "type": "action",
-                    "title": r["title"] or "",
-                    "description": r.get("source_label", ""),
-                    "source": "obligation",
-                    "id": r["id"],
-                    "positive_action": {"label": "Approve", "endpoint": f"/api/actions/{r['id']}/approve", "method": "POST"},
-                    "negative_action": {"label": "Dismiss", "endpoint": f"/api/actions/{r['id']}/dismiss", "method": "POST"},
-                })
-
-            # 3. Deadlines approaching (next 3 days)
+            # 2. Deadlines approaching (next 3 days)
             cur.execute("""
                 SELECT id, description, due_date, severity
                 FROM deadlines
@@ -233,24 +215,6 @@ def gather_evening_items() -> list:
                     "negative_action": {"label": "Dismiss", "endpoint": f"/api/alerts/{r['id']}/dismiss", "method": "POST"},
                 })
 
-            # 3. Actions completed today (confirmation)
-            cur.execute("""
-                SELECT id, title, source_label
-                FROM proposed_actions
-                WHERE status = 'done'
-                  AND updated_at >= CURRENT_DATE
-                ORDER BY updated_at DESC LIMIT 5
-            """)
-            for r in cur.fetchall():
-                items.append({
-                    "type": "completed",
-                    "title": r["title"] or "",
-                    "description": "Completed today",
-                    "source": "action",
-                    "positive_action": None,
-                    "negative_action": None,
-                })
-
             cur.close()
         finally:
             store._put_conn(conn)
@@ -330,7 +294,7 @@ def send_crisis_push(title: str, body: str):
     send_push(
         title=f"URGENT: {title}",
         body=body[:200],
-        url="/mobile?tab=alerts",
+        url="/mobile?tab=feed",
         tag="baker-crisis",
     )
     logger.info(f"Crisis push sent: {title[:60]}")

@@ -873,10 +873,12 @@ if __name__ == "__main__":
 # ============================================================
 
 def run_alert_expiry_check():
-    """Auto-expire stale alerts. Called every 6 hours by scheduler.
+    """Auto-expire stale alerts + reactivate snoozed alerts. Called every hour by scheduler.
     Rules:
-    - T2/T3/T4 alerts older than 3 days → expired
-    - T1 alerts NEVER auto-expire
+    - Snoozed alerts past snoozed_until → reactivated to 'pending'
+    - T3/T4 alerts older than 48 hours → expired
+    - T2 alerts older than 48 hours → expired
+    - T1 alerts older than 7 days → expired
     - Travel-tagged alerts NEVER auto-expire (handled by travel_date)
     """
     try:
@@ -888,13 +890,28 @@ def run_alert_expiry_check():
             return
         try:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            # Find stale T2/T3/T4 alerts older than 3 days
+
+            # Reactivate snoozed alerts whose snooze time has passed
+            cur.execute("""
+                UPDATE alerts
+                SET status = 'pending', snoozed_until = NULL
+                WHERE status = 'snoozed'
+                  AND snoozed_until IS NOT NULL
+                  AND snoozed_until <= NOW()
+            """)
+            reactivated = cur.rowcount
+            if reactivated > 0:
+                conn.commit()
+                logger.info(f"Snooze reactivation: {reactivated} alerts woke up")
+            # Find stale T2/T3/T4 alerts older than 48h + T1 older than 7 days
             cur.execute("""
                 SELECT id, tier, tags FROM alerts
                 WHERE status = 'pending'
                   AND exit_reason IS NULL
-                  AND tier >= 2
-                  AND created_at < NOW() - INTERVAL '3 days'
+                  AND (
+                    (tier >= 2 AND created_at < NOW() - INTERVAL '48 hours')
+                    OR (tier = 1 AND created_at < NOW() - INTERVAL '7 days')
+                  )
             """)
             candidates = cur.fetchall()
 

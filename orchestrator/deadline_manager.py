@@ -486,7 +486,7 @@ def run_expiry_check() -> int:
 
 
 def _auto_dismiss_overdue_deadlines() -> int:
-    """Auto-dismiss active deadlines that are overdue by 7+ days.
+    """Auto-dismiss active deadlines that are overdue by 3+ days.
     Prevents stale overdue deadlines from accumulating indefinitely.
     """
     from models.deadlines import get_conn, put_conn
@@ -494,12 +494,12 @@ def _auto_dismiss_overdue_deadlines() -> int:
     if not conn:
         return 0
     try:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=3)
         cur = conn.cursor()
         cur.execute("""
             UPDATE deadlines
             SET status = 'dismissed',
-                dismissed_reason = 'auto-dismissed (overdue by 7+ days)',
+                dismissed_reason = 'auto-dismissed (overdue by 3+ days)',
                 updated_at = NOW()
             WHERE status = 'active'
               AND due_date < %s
@@ -508,7 +508,7 @@ def _auto_dismiss_overdue_deadlines() -> int:
         conn.commit()
         cur.close()
         if dismissed > 0:
-            logger.info(f"Auto-dismissed {dismissed} deadlines overdue by 7+ days")
+            logger.info(f"Auto-dismissed {dismissed} deadlines overdue by 3+ days")
         return dismissed
     except Exception as e:
         logger.error(f"Auto-dismiss overdue deadlines failed: {e}")
@@ -518,17 +518,17 @@ def _auto_dismiss_overdue_deadlines() -> int:
 
 
 def _auto_dismiss_soft_deadlines() -> int:
-    """Auto-dismiss pending_confirm deadlines with no response after 7 days."""
+    """Auto-dismiss pending_confirm deadlines with no response after 3 days."""
     from models.deadlines import get_conn, put_conn
     conn = get_conn()
     if not conn:
         return 0
     try:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=3)
         cur = conn.cursor()
         cur.execute("""
             UPDATE deadlines
-            SET status = 'dismissed', dismissed_reason = 'auto-dismissed (no confirmation after 7 days)',
+            SET status = 'dismissed', dismissed_reason = 'auto-dismissed (no confirmation after 3 days)',
                 updated_at = NOW()
             WHERE status = 'pending_confirm'
               AND created_at < %s
@@ -545,7 +545,7 @@ def _auto_dismiss_soft_deadlines() -> int:
 
 
 def _auto_dismiss_undated_soft() -> int:
-    """Auto-dismiss soft obligations with no due_date after 14 days.
+    """Auto-dismiss soft obligations with no due_date after 7 days.
     These are extracted action items with no specific deadline — they accumulate
     indefinitely without this cleanup.
     """
@@ -554,12 +554,12 @@ def _auto_dismiss_undated_soft() -> int:
     if not conn:
         return 0
     try:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=7)
         cur = conn.cursor()
         cur.execute("""
             UPDATE deadlines
             SET status = 'dismissed',
-                dismissed_reason = 'auto-dismissed (undated soft obligation, 14+ days old)',
+                dismissed_reason = 'auto-dismissed (undated soft obligation, 7+ days old)',
                 updated_at = NOW()
             WHERE status = 'active'
               AND severity = 'soft'
@@ -570,7 +570,7 @@ def _auto_dismiss_undated_soft() -> int:
         conn.commit()
         cur.close()
         if dismissed > 0:
-            logger.info(f"Auto-dismissed {dismissed} undated soft obligations (14+ days old)")
+            logger.info(f"Auto-dismissed {dismissed} undated soft obligations (7+ days old)")
         return dismissed
     except Exception as e:
         logger.error(f"Auto-dismiss undated soft failed: {e}")

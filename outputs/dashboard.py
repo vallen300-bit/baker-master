@@ -239,9 +239,10 @@ async def startup():
             try:
                 cur = conn.cursor()
                 cur.execute("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS structured_actions JSONB")
+                cur.execute("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS snoozed_until TIMESTAMPTZ")
                 conn.commit()
                 cur.close()
-                logger.info("COCKPIT-ALERT-UI: structured_actions column ensured")
+                logger.info("COCKPIT-ALERT-UI: structured_actions + snoozed_until columns ensured")
             except Exception as me:
                 conn.rollback()
                 logger.warning(f"COCKPIT-ALERT-UI migration (non-fatal): {me}")
@@ -1216,6 +1217,51 @@ async def dismiss_alert(alert_id: int):
         return {"status": "dismissed", "id": alert_id}
     except Exception as e:
         logger.error(f"/api/alerts/{alert_id}/dismiss failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/alerts/{alert_id}/snooze", tags=["alerts"], dependencies=[Depends(verify_api_key)])
+async def snooze_alert(alert_id: int, request: Request):
+    """Snooze an alert. Sets status='snoozed' with a snoozed_until timestamp.
+    Duration: '4h', 'tomorrow', 'next_week'."""
+    from datetime import timedelta
+    try:
+        body = await request.json()
+        duration = body.get("duration", "4h")
+        now = datetime.now(timezone.utc)
+        if duration == "4h":
+            wake_at = now + timedelta(hours=4)
+        elif duration == "tomorrow":
+            wake_at = (now + timedelta(days=1)).replace(hour=7, minute=0, second=0, microsecond=0)
+        elif duration == "next_week":
+            days_until_monday = (7 - now.weekday()) % 7 or 7
+            wake_at = (now + timedelta(days=days_until_monday)).replace(hour=7, minute=0, second=0, microsecond=0)
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid duration: {duration}")
+
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE alerts SET status = 'snoozed', snoozed_until = %s WHERE id = %s RETURNING id",
+                (wake_at, alert_id),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            cur.close()
+            if not row:
+                raise HTTPException(status_code=404, detail="Alert not found")
+            logger.info(f"Alert #{alert_id} snoozed until {wake_at.isoformat()}")
+            return {"status": "snoozed", "id": alert_id, "snoozed_until": wake_at.isoformat()}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"/api/alerts/{alert_id}/snooze failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

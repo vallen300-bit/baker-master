@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/mobile.css?v=18">
+    <link rel="stylesheet" href="/static/mobile.css?v=20">
 </head>
 <body>
 <div class="app">
@@ -47,15 +47,14 @@
 
     <!-- Tab bar -->
     <div class="tab-bar">
-        <button class="tab-btn active" data-tab="baker">Baker</button>
+        <button class="tab-btn active" data-tab="feed">Feed <span class="tab-alert-count" id="tabAlertCount" hidden></span></button>
+        <button class="tab-btn" data-tab="baker">Baker</button>
         <button class="tab-btn" data-tab="specialist">Specialist</button>
-        <button class="tab-btn" data-tab="alerts">Alerts <span class="tab-alert-count" id="tabAlertCount" hidden></span></button>
-        <button class="tab-btn" data-tab="actions">Actions <span class="tab-action-count" id="tabActionCount" hidden></span></button>
         <button class="tab-btn" data-tab="digest">Digest <span class="tab-digest-count" id="tabDigestCount" hidden></span></button>
     </div>
 
     <!-- Baker panel -->
-    <div class="chat-panel active" id="panel-baker">
+    <div class="chat-panel" id="panel-baker">
         <div class="input-area">
             <form id="bakerForm" class="input-row">
                 <input type="file" id="bakerCamera" accept="image/*" hidden>
@@ -104,8 +103,8 @@
         </div>
     </div>
 
-    <!-- Alerts panel -->
-    <div class="chat-panel" id="panel-alerts">
+    <!-- Feed panel (alerts) -->
+    <div class="chat-panel active" id="panel-feed">
         <div class="alerts-toolbar" id="alertsToolbar"></div>
         <div class="alerts-list" id="alertsList">
             <div class="empty-state">
@@ -114,20 +113,6 @@
             </div>
         </div>
         <div class="alerts-footer" id="alertsFooter" hidden></div>
-    </div>
-
-    <!-- Actions panel (triage card deck) -->
-    <div class="chat-panel" id="panel-actions">
-        <div class="triage-header" id="triageHeader">
-            <span class="triage-count" id="triageCount">0 actions</span>
-            <button class="triage-done-btn" id="triageDoneBtn" hidden>All done</button>
-        </div>
-        <div class="triage-deck" id="triageDeck">
-            <div class="empty-state">
-                <div class="icon">&#x2705;</div>
-                No proposed actions. You're all set.
-            </div>
-        </div>
     </div>
 
     <!-- Digest panel (Baker 3.0) -->
@@ -177,6 +162,6 @@
 
 </div>
 
-<script src="/static/mobile.js?v=19"></script>
+<script src="/static/mobile.js?v=21"></script>
 </body>
 </html>
