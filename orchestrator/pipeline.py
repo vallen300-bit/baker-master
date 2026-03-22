@@ -774,6 +774,19 @@ class SentinelPipeline:
         self.store_back(trigger, response)
         logger.info(f"Step 5 complete: stored back")
 
+        # Step 5b: Baker 3.0 — real-time extraction (non-blocking background)
+        if trigger.type in ("email", "whatsapp", "slack", "calendar"):
+            try:
+                from orchestrator.extraction_engine import extract_signal
+                extract_signal(
+                    source_channel=trigger.type,
+                    source_id=trigger.source_id or "",
+                    content=trigger.content or "",
+                    tier=getattr(trigger, "tier", 3),
+                )
+            except Exception as _ext_err:
+                logger.warning(f"Extraction engine hook failed (non-fatal): {_ext_err}")
+
         # Step 6: ClickUp write actions (M3)
         self._execute_clickup_actions(trigger, response)
         logger.info(f"Step 6 complete: ClickUp actions processed")

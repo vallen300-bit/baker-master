@@ -411,6 +411,17 @@ def execute_research_dossier(proposal_id: int):
         if filename:
             _notify_completion(proposal_id, subject_name, filename, specialists)
 
+        # 10. Baker 3.0 — extract structured data from dossier output
+        try:
+            from orchestrator.extraction_engine import extract_specialist_output
+            extract_specialist_output(
+                task_id=proposal_id,
+                specialist_slug="research_dossier",
+                output_text=dossier_md,
+            )
+        except Exception as _ext_err:
+            logger.warning(f"Dossier extraction hook failed (non-fatal): {_ext_err}")
+
         logger.info(
             f"Research dossier complete: proposal_id={proposal_id}, "
             f"subject='{subject_name}', file='{filename}', content={total_content} chars"
