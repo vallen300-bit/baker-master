@@ -280,6 +280,19 @@ def check_new_transcripts():
             except Exception as e:
                 logger.error(f"Fireflies trigger: pipeline failed for transcript {source_id}: {e}")
 
+            # Baker 3.0 Item 3: Post-meeting auto-pipeline (non-blocking)
+            try:
+                from orchestrator.meeting_pipeline import process_meeting_async
+                process_meeting_async(
+                    transcript_id=source_id,
+                    title=metadata.get("meeting_title", "Untitled"),
+                    participants=metadata.get("participants", ""),
+                    meeting_date=metadata.get("date", ""),
+                    full_transcript=transcript["text"],
+                )
+            except Exception as _mp_err:
+                logger.warning(f"Meeting pipeline hook failed (non-fatal): {_mp_err}")
+
         # Update watermark
         trigger_state.set_watermark("fireflies")
 
