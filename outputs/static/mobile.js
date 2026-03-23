@@ -837,6 +837,11 @@ function _renderMobileAlerts() {
     if (!list) return;
     list.textContent = '';
 
+    // Pin travel card at top of Feed if active trip exists
+    if (_activeTrip && !_alertTierFilter && !_alertSourceFilter) {
+        list.appendChild(_createTravelFeedCard(_activeTrip));
+    }
+
     var filtered = _mobileAlerts.filter(function(a) {
         if (_alertTierFilter) {
             var tf = parseInt(_alertTierFilter);
@@ -858,7 +863,7 @@ function _renderMobileAlerts() {
         }
     }
 
-    if (filtered.length === 0) {
+    if (filtered.length === 0 && !_activeTrip) {
         var empty = document.createElement('div');
         empty.className = 'empty-state';
         empty.textContent = _mobileAlerts.length > 0 ? 'No alerts matching filter.' : 'No pending alerts.';
@@ -869,6 +874,73 @@ function _renderMobileAlerts() {
     for (var i = 0; i < filtered.length; i++) {
         list.appendChild(_createAlertCard(filtered[i]));
     }
+}
+
+function _createTravelFeedCard(trip) {
+    var card = document.createElement('div');
+    card.className = 'travel-feed-card';
+
+    // Route: Origin → Destination
+    var route = document.createElement('div');
+    route.className = 'travel-feed-route';
+    var routeText = '';
+    if (trip.origin) routeText += trip.origin + ' ';
+    var arrow = document.createElement('span');
+    arrow.className = 'travel-feed-route-arrow';
+    arrow.textContent = '\u2708\uFE0F';
+    var destText = trip.destination || 'Trip';
+    route.textContent = '';
+    if (trip.origin) {
+        route.appendChild(document.createTextNode(trip.origin + ' '));
+        route.appendChild(arrow);
+        route.appendChild(document.createTextNode(' ' + destText));
+    } else {
+        route.appendChild(arrow);
+        route.appendChild(document.createTextNode(' ' + destText));
+    }
+    card.appendChild(route);
+
+    // Event + dates
+    var event = document.createElement('div');
+    event.className = 'travel-feed-event';
+    var dateStr = trip.start_date || '';
+    if (trip.end_date && trip.end_date !== trip.start_date) dateStr += ' \u2014 ' + trip.end_date;
+    event.textContent = (trip.event_name ? trip.event_name + ' \u00B7 ' : '') + dateStr;
+    card.appendChild(event);
+
+    // Status indicator
+    var today = new Date().toISOString().slice(0, 10);
+    var endDate = trip.end_date || trip.start_date;
+    var isActive = trip.start_date <= today && endDate >= today;
+    var daysUntil = Math.ceil((new Date(trip.start_date) - new Date(today)) / 86400000);
+
+    var detail = document.createElement('div');
+    detail.className = 'travel-feed-detail';
+    if (isActive) {
+        detail.innerHTML = '<span class="travel-feed-detail-icon">\uD83D\uDFE2</span> Trip in progress';
+    } else if (daysUntil === 0) {
+        detail.innerHTML = '<span class="travel-feed-detail-icon">\uD83D\uDFE2</span> Departing today';
+    } else if (daysUntil === 1) {
+        detail.innerHTML = '<span class="travel-feed-detail-icon">\uD83D\uDFE1</span> Departing tomorrow';
+    } else if (daysUntil > 0 && daysUntil <= 7) {
+        detail.innerHTML = '<span class="travel-feed-detail-icon">\uD83D\uDD35</span> In ' + daysUntil + ' days';
+    } else if (daysUntil > 7) {
+        detail.innerHTML = '<span class="travel-feed-detail-icon">\uD83D\uDD35</span> ' + trip.start_date;
+    } else {
+        detail.innerHTML = '<span class="travel-feed-detail-icon">\u2705</span> Completed';
+    }
+    card.appendChild(detail);
+
+    // Tap hint
+    var hint = document.createElement('div');
+    hint.className = 'travel-feed-tap-hint';
+    hint.textContent = 'Tap for trip cards \u203A';
+    card.appendChild(hint);
+
+    // Click → open trip overlay
+    card.addEventListener('click', function() { _openTripOverlay(trip); });
+
+    return card;
 }
 
 function _createAlertCard(alert) {
@@ -1223,6 +1295,10 @@ async function loadActiveTrip() {
         if (!active) return;
         _activeTrip = active;
         _renderTripBanner(active);
+        // Re-render feed to inject travel card if alerts already loaded
+        if (_mobileAlerts.length > 0 || document.getElementById('alertsList')) {
+            _renderMobileAlerts();
+        }
     } catch (e) {
         console.error('loadActiveTrip failed:', e);
     }
@@ -1775,16 +1851,15 @@ function _showContextMenu(alert) {
 
     // Actions
     var actions = [
-        { icon: '\u270F\uFE0F', label: 'Draft a reply', id: 'draft', soon: true },
+        { icon: '\u270F\uFE0F', label: 'Draft a reply', id: 'draft' },
         { icon: '\uD83D\uDCAC', label: 'Ask Baker about this', id: 'ask' },
         { icon: '\u23F0', label: 'Snooze', id: 'snooze' },
-        { icon: '\u27A1\uFE0F', label: 'Delegate', id: 'delegate', soon: true },
+        { icon: '\u27A1\uFE0F', label: 'Delegate', id: 'delegate' },
     ];
 
     actions.forEach(function(action) {
         var btn = document.createElement('button');
         btn.className = 'context-menu-action';
-        if (action.soon) btn.classList.add('coming-soon');
 
         var iconSpan = document.createElement('span');
         iconSpan.className = 'context-menu-action-icon';
@@ -1795,17 +1870,12 @@ function _showContextMenu(alert) {
         labelSpan.textContent = action.label;
         btn.appendChild(labelSpan);
 
-        if (action.soon) {
-            var badge = document.createElement('span');
-            badge.className = 'context-menu-soon-badge';
-            badge.textContent = 'Soon';
-            btn.appendChild(badge);
-        }
-
         btn.addEventListener('click', function() {
             _closeContextMenu();
             if (action.id === 'ask') _askBakerAbout(alert);
             else if (action.id === 'snooze') _showSnoozeOptions(alert);
+            else if (action.id === 'draft') _draftReply(alert);
+            else if (action.id === 'delegate') _delegateAlert(alert);
         });
 
         sheet.appendChild(btn);
@@ -1948,6 +2018,301 @@ function _snoozeAlert(alertId, duration, label) {
     }).catch(function(e) {
         console.error('Snooze failed:', e);
     });
+}
+
+// ═══ DRAFT A REPLY ═══
+
+function _draftReply(alert) {
+    // Create full-screen draft overlay
+    var old = document.getElementById('draftOverlay');
+    if (old) old.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'draftOverlay';
+    overlay.className = 'draft-overlay';
+
+    // Header
+    var header = document.createElement('div');
+    header.className = 'draft-header';
+    var backBtn = document.createElement('button');
+    backBtn.className = 'draft-back-btn';
+    backBtn.textContent = '\u2190 Back';
+    backBtn.addEventListener('click', function() { overlay.remove(); });
+    header.appendChild(backBtn);
+    var titleEl = document.createElement('span');
+    titleEl.className = 'draft-title';
+    titleEl.textContent = 'Draft Reply';
+    header.appendChild(titleEl);
+    overlay.appendChild(header);
+
+    // Body
+    var body = document.createElement('div');
+    body.className = 'draft-body';
+
+    // Alert context
+    var ctx = document.createElement('div');
+    ctx.style.cssText = 'font-size:12px;color:var(--text3);margin-bottom:12px;padding:8px;background:var(--bg2);border-radius:8px;';
+    ctx.textContent = 'Re: ' + (alert.title || 'Alert').substring(0, 100);
+    body.appendChild(ctx);
+
+    // Loading state
+    var loading = document.createElement('div');
+    loading.className = 'draft-loading';
+    loading.innerHTML = '<div class="spinner"></div><div style="margin-top:8px">Generating draft...</div>';
+    body.appendChild(loading);
+
+    overlay.appendChild(body);
+
+    // Actions bar (hidden until draft loads)
+    var actions = document.createElement('div');
+    actions.className = 'draft-actions';
+    actions.style.display = 'none';
+
+    var copyBtn = document.createElement('button');
+    copyBtn.className = 'draft-edit-btn';
+    copyBtn.textContent = 'Copy';
+    actions.appendChild(copyBtn);
+
+    var askBtn = document.createElement('button');
+    askBtn.className = 'draft-send-btn';
+    askBtn.textContent = 'Send to Baker';
+    actions.appendChild(askBtn);
+
+    var discardBtn = document.createElement('button');
+    discardBtn.className = 'draft-discard-btn';
+    discardBtn.textContent = 'Discard';
+    discardBtn.addEventListener('click', function() { overlay.remove(); });
+    actions.appendChild(discardBtn);
+
+    overlay.appendChild(actions);
+    document.body.appendChild(overlay);
+
+    // Fetch draft
+    bakerFetch('/api/alerts/' + alert.id + '/draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+    }).then(function(r) {
+        if (!r.ok) throw new Error('API ' + r.status);
+        return r.json();
+    }).then(function(data) {
+        loading.remove();
+        var draftText = data.draft || 'Could not generate draft.';
+
+        // Editable textarea
+        var ta = document.createElement('textarea');
+        ta.style.cssText = 'width:100%;min-height:200px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text);font-family:inherit;font-size:14px;line-height:1.6;resize:vertical;';
+        ta.value = draftText;
+        body.appendChild(ta);
+
+        actions.style.display = 'flex';
+
+        // Copy to clipboard
+        copyBtn.addEventListener('click', function() {
+            navigator.clipboard.writeText(ta.value).then(function() {
+                copyBtn.textContent = 'Copied!';
+                setTimeout(function() { copyBtn.textContent = 'Copy'; }, 1500);
+            });
+        });
+
+        // Send to Baker for refinement
+        askBtn.addEventListener('click', function() {
+            overlay.remove();
+            switchTab('baker');
+            var input = document.getElementById('bakerInput');
+            if (input) {
+                input.value = 'Refine this draft reply for "' + (alert.title || '').substring(0, 60) + '":\n\n' + ta.value;
+                input.style.height = 'auto';
+                input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+                setTimeout(function() { input.focus(); }, 150);
+            }
+        });
+    }).catch(function(e) {
+        loading.remove();
+        var err = document.createElement('div');
+        err.style.cssText = 'text-align:center;color:var(--red);padding:24px;';
+        err.textContent = 'Failed to generate draft. Try again.';
+        body.appendChild(err);
+        actions.style.display = 'flex';
+    });
+}
+
+// ═══ DELEGATE ═══
+
+var _delegateContacts = null;
+
+function _delegateAlert(alert) {
+    _closeContextMenu();
+
+    // Show contact picker as context menu sheet
+    var old = document.getElementById('contextMenuOverlay');
+    if (old) old.remove();
+
+    var overlay = document.createElement('div');
+    overlay.id = 'contextMenuOverlay';
+    overlay.className = 'context-menu-overlay';
+
+    var sheet = document.createElement('div');
+    sheet.className = 'context-menu-sheet';
+    sheet.style.maxHeight = '70vh';
+    sheet.style.display = 'flex';
+    sheet.style.flexDirection = 'column';
+
+    // Header
+    var header = document.createElement('div');
+    header.className = 'context-menu-header';
+    var headerTitle = document.createElement('div');
+    headerTitle.className = 'context-menu-title';
+    headerTitle.textContent = 'Delegate to...';
+    header.appendChild(headerTitle);
+    sheet.appendChild(header);
+
+    // Search
+    var search = document.createElement('input');
+    search.className = 'delegate-search';
+    search.placeholder = 'Search contacts...';
+    search.type = 'text';
+    sheet.appendChild(search);
+
+    // Contact list container
+    var contactsList = document.createElement('div');
+    contactsList.className = 'delegate-contacts-list';
+    var loadingEl = document.createElement('div');
+    loadingEl.style.cssText = 'text-align:center;padding:20px;color:var(--text3);font-size:13px;';
+    loadingEl.textContent = 'Loading contacts...';
+    contactsList.appendChild(loadingEl);
+    sheet.appendChild(contactsList);
+
+    // Cancel
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'context-menu-cancel';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', _closeContextMenu);
+    sheet.appendChild(cancelBtn);
+
+    overlay.appendChild(sheet);
+    overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) _closeContextMenu();
+    });
+    document.body.appendChild(overlay);
+    requestAnimationFrame(function() { overlay.classList.add('visible'); });
+
+    // Fetch contacts
+    var renderContacts = function(filter) {
+        contactsList.textContent = '';
+        var contacts = _delegateContacts || [];
+        if (filter) {
+            var lf = filter.toLowerCase();
+            contacts = contacts.filter(function(c) {
+                return (c.name || '').toLowerCase().indexOf(lf) >= 0 ||
+                       (c.role || '').toLowerCase().indexOf(lf) >= 0;
+            });
+        }
+        if (contacts.length === 0) {
+            var empty = document.createElement('div');
+            empty.style.cssText = 'text-align:center;padding:20px;color:var(--text3);font-size:13px;';
+            empty.textContent = filter ? 'No matching contacts.' : 'No contacts found.';
+            contactsList.appendChild(empty);
+            return;
+        }
+        for (var i = 0; i < contacts.length; i++) {
+            contactsList.appendChild(_createDelegateContactItem(contacts[i], alert));
+        }
+    };
+
+    search.addEventListener('input', function() { renderContacts(search.value); });
+
+    if (_delegateContacts) {
+        renderContacts('');
+    } else {
+        bakerFetch('/api/contacts/vips').then(function(r) {
+            if (!r.ok) throw new Error('API ' + r.status);
+            return r.json();
+        }).then(function(data) {
+            _delegateContacts = (data.contacts || []).sort(function(a, b) {
+                return (a.tier || 99) - (b.tier || 99);
+            });
+            renderContacts('');
+        }).catch(function() {
+            contactsList.textContent = '';
+            var err = document.createElement('div');
+            err.style.cssText = 'text-align:center;padding:20px;color:var(--red);font-size:13px;';
+            err.textContent = 'Failed to load contacts.';
+            contactsList.appendChild(err);
+        });
+    }
+}
+
+function _createDelegateContactItem(contact, alert) {
+    var item = document.createElement('div');
+    item.className = 'delegate-contact-item';
+
+    // Avatar (initials)
+    var avatar = document.createElement('div');
+    avatar.className = 'delegate-contact-avatar';
+    var initials = (contact.name || '?').split(' ').map(function(w) { return w[0]; }).join('').substring(0, 2).toUpperCase();
+    avatar.textContent = initials;
+    item.appendChild(avatar);
+
+    // Info
+    var info = document.createElement('div');
+    info.className = 'delegate-contact-info';
+    var name = document.createElement('div');
+    name.className = 'delegate-contact-name';
+    name.textContent = contact.name || 'Unknown';
+    info.appendChild(name);
+    if (contact.role) {
+        var role = document.createElement('div');
+        role.className = 'delegate-contact-role';
+        role.textContent = contact.role;
+        info.appendChild(role);
+    }
+    item.appendChild(info);
+
+    // Tier badge
+    if (contact.tier) {
+        var tier = document.createElement('span');
+        tier.className = 'delegate-contact-tier t' + contact.tier;
+        tier.textContent = 'T' + contact.tier;
+        item.appendChild(tier);
+    }
+
+    // Click → delegate
+    item.addEventListener('click', function() {
+        _closeContextMenu();
+        _executeDelegation(alert, contact);
+    });
+
+    return item;
+}
+
+function _executeDelegation(alert, contact) {
+    // Send to Baker: "Forward this alert to [contact] — draft a message"
+    switchTab('baker');
+    var input = document.getElementById('bakerInput');
+    if (input) {
+        var msg = 'Delegate to ' + contact.name;
+        if (contact.email) msg += ' (' + contact.email + ')';
+        msg += ':\n\nAlert: "' + (alert.title || '').substring(0, 80) + '"';
+        if (alert.body) msg += '\nDetails: ' + (alert.body || '').substring(0, 200);
+        msg += '\n\nPlease draft a forwarding message for this person.';
+
+        input.value = msg;
+        input.style.height = 'auto';
+        input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+        setTimeout(function() { input.focus(); }, 150);
+    }
+
+    // Toast
+    var toast = document.createElement('div');
+    toast.className = 'undo-toast';
+    toast.textContent = 'Delegating to ' + contact.name + '...';
+    document.body.appendChild(toast);
+    setTimeout(function() {
+        toast.style.transition = 'opacity 0.3s';
+        toast.style.opacity = '0';
+        setTimeout(function() { toast.remove(); }, 300);
+    }, 2000);
 }
 
 // ═══ ALERT ACTION HELPERS ═══

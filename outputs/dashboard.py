@@ -4854,6 +4854,75 @@ async def contact_cadence():
         store._put_conn(conn)
 
 
+@app.get("/api/contacts/vips", tags=["contacts"], dependencies=[Depends(verify_api_key)])
+async def list_vip_contacts():
+    """Return all VIP contacts for delegate picker."""
+    try:
+        from models.deadlines import get_vip_contacts
+        vips = get_vip_contacts()
+        return {"contacts": [_serialize(v) for v in vips]}
+    except Exception as e:
+        logger.error(f"/api/contacts/vips failed: {e}")
+        return {"contacts": [], "error": str(e)}
+
+
+@app.post("/api/alerts/{alert_id}/draft", tags=["alerts"], dependencies=[Depends(verify_api_key)])
+async def draft_reply_for_alert(alert_id: int, request: Request):
+    """Generate a draft reply for an alert using Haiku. Returns draft text."""
+    try:
+        import anthropic
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            import psycopg2.extras
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT * FROM alerts WHERE id = %s", (alert_id,))
+            alert = cur.fetchone()
+            cur.close()
+            if not alert:
+                raise HTTPException(status_code=404, detail="Alert not found")
+            alert = dict(alert)
+        finally:
+            store._put_conn(conn)
+
+        title = alert.get("title", "")
+        body = alert.get("body", "")
+        source = alert.get("source", "")
+        sa = alert.get("structured_actions") or {}
+        suggestion = sa.get("suggested_action", "")
+
+        prompt = f"""You are Baker, an AI Chief of Staff. Draft a concise, professional reply for the following alert.
+
+Alert: {title}
+Source: {source}
+Details: {body[:2000]}
+{f"Suggested action: {suggestion}" if suggestion else ""}
+
+Write a draft reply that is:
+- Professional but warm
+- Concise (2-4 sentences for email, 1-2 for WhatsApp)
+- Ready to send with minimal editing
+- In the appropriate language (match the source language)
+
+Output ONLY the draft text, nothing else."""
+
+        client = anthropic.Anthropic()
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=500,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        draft = resp.content[0].text.strip()
+        return {"draft": draft, "alert_id": alert_id, "source": source}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"/api/alerts/{alert_id}/draft failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/contacts/{name}", tags=["contacts"], dependencies=[Depends(verify_api_key)])
 async def get_contact(name: str):
     """Look up a contact by name (fuzzy match)."""

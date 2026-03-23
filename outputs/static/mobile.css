@@ -1504,3 +1504,254 @@ html, body {
 .context-menu-cancel:active {
   background: var(--bg2);
 }
+
+/* ═══ TRAVEL CARD (pinned on Feed) ═══ */
+.travel-feed-card {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--blue-bg), var(--bg2));
+  border: 1px solid var(--blue);
+  border-left: 3px solid var(--blue);
+  font-size: 13px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.travel-feed-route {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.travel-feed-route-arrow {
+  color: var(--blue);
+  font-size: 12px;
+}
+
+.travel-feed-event {
+  font-size: 11px;
+  color: var(--text2);
+  margin-top: 3px;
+}
+
+.travel-feed-detail {
+  font-size: 12px;
+  color: var(--text2);
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.travel-feed-detail-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.travel-feed-tap-hint {
+  font-size: 10px;
+  color: var(--text3);
+  margin-top: 6px;
+  text-align: right;
+}
+
+/* ═══ DRAFT REPLY SHEET ═══ */
+.draft-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 120;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.draft-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.draft-back-btn {
+  background: none;
+  border: none;
+  color: var(--blue);
+  font-size: 14px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.draft-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.draft-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.draft-loading {
+  text-align: center;
+  color: var(--text3);
+  padding: 24px;
+}
+
+.draft-loading .spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border);
+  border-top-color: var(--blue);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+.draft-content {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.draft-content textarea {
+  width: 100%;
+  min-height: 200px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.draft-actions {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg);
+}
+
+.draft-actions button {
+  flex: 1;
+  padding: 12px;
+  border-radius: 8px;
+  border: none;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.draft-send-btn {
+  background: var(--blue);
+  color: #fff;
+}
+
+.draft-edit-btn {
+  background: var(--bg2);
+  color: var(--text);
+  border: 1px solid var(--border) !important;
+}
+
+.draft-discard-btn {
+  background: none;
+  color: var(--red);
+}
+
+/* ═══ DELEGATE CONTACT PICKER ═══ */
+.delegate-contact-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.delegate-contact-item:active {
+  background: var(--bg2);
+}
+
+.delegate-contact-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--blue-bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--blue);
+  flex-shrink: 0;
+}
+
+.delegate-contact-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.delegate-contact-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.delegate-contact-role {
+  font-size: 11px;
+  color: var(--text3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.delegate-contact-tier {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #fff;
+  background: var(--blue);
+  flex-shrink: 0;
+}
+
+.delegate-contact-tier.t1 { background: var(--red); }
+.delegate-contact-tier.t2 { background: var(--blue); }
+
+.delegate-search {
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+}
+
+.delegate-contacts-list {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
