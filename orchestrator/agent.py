@@ -1732,10 +1732,10 @@ def run_agent_loop(
             tool_results = []
             for tu in tool_uses:
                 # BROWSER-AGENT-1 Phase 3: Auto-upgrade timeout when browser tools are used
-                if tu.name in ("browse_website", "browser_action") and timeout < 120:
-                    timeout = 120.0
-                    max_iterations = max(max_iterations, 10)
-                    logger.info(f"Browser tool detected — extended timeout to {timeout}s, max_iter={max_iterations}")
+                if tu.name in ("browse_website", "browser_action") and timeout < 300:
+                    timeout = 300.0
+                    max_iterations = max(max_iterations, 20)
+                    logger.info(f"Browser tool detected — extended to {timeout}s timeout, {max_iterations} iterations")
                 tool_t0 = time.time()
                 tool_ok = True
                 tool_err = None
@@ -1949,12 +1949,12 @@ def run_agent_loop_streaming(
             tool_results = []
             for tu in tool_uses:
                 # BROWSER-AGENT-1 Phase 3: Auto-upgrade timeout when browser tools are used
-                if tu.name in ("browse_website", "browser_action") and timeout < 120:
-                    timeout = 120.0
-                    max_iterations = max(max_iterations, 10)
+                if tu.name in ("browse_website", "browser_action") and timeout < 300:
+                    timeout = 300.0
+                    max_iterations = max(max_iterations, 20)
                     if tool_limit:
-                        tool_limit = max(tool_limit, 8)
-                    logger.info(f"Browser tool detected — extended timeout to {timeout}s, max_iter={max_iterations}")
+                        tool_limit = max(tool_limit, 15)
+                    logger.info(f"Browser tool detected — extended to {timeout}s timeout, {max_iterations} iterations")
                 tool_t0 = time.time()
                 tool_ok = True
                 tool_err = None
