@@ -185,10 +185,10 @@ Instructions:
             future = executor.submit(runner.run_single, cap, prompt)
             futures[future] = slug
 
-        for future in as_completed(futures, timeout=180):
+        for future in as_completed(futures, timeout=420):
             slug = futures[future]
             try:
-                result = future.result(timeout=120)
+                result = future.result(timeout=420)
                 results[slug] = result.answer
                 logger.info(
                     f"Specialist '{slug}' completed: {result.iterations} iterations, "
