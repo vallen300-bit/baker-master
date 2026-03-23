@@ -207,8 +207,6 @@ function switchTab(tab) {
     });
     if (tab === 'feed') {
         loadMobileAlerts();
-    } else if (tab === 'digest') {
-        loadDigestTab();
     } else {
         var inputId = tab === 'baker' ? 'bakerInput' : 'specialistInput';
         var input = document.getElementById(inputId);
@@ -734,7 +732,7 @@ async function init() {
     // Default tab — check for deep link
     var urlParams = new URLSearchParams(window.location.search);
     var deepTab = urlParams.get('tab');
-    if (deepTab && ['feed', 'baker', 'specialist', 'digest'].indexOf(deepTab) !== -1) {
+    if (deepTab && ['feed', 'baker', 'specialist'].indexOf(deepTab) !== -1) {
         switchTab(deepTab);
     } else {
         switchTab('feed');
@@ -837,14 +835,31 @@ function _buildAlertToolbar() {
     }
 }
 
+function _classifyAlertSection(a) {
+    // Needs Your Decision
+    if (a.action_required === true) return 'decision';
+    if (a.source === 'browser_transaction' || a.source === 'pending_draft') return 'decision';
+    if (a.tier <= 1) return 'decision';
+    // Baker Recommends
+    var recommendSources = ['research', 'obligation', 'initiative', 'convergence'];
+    if (recommendSources.indexOf(a.source) >= 0) return 'recommends';
+    if (a.tier === 2 && a.structured_actions && Object.keys(a.structured_actions).length > 0) return 'recommends';
+    // For Your Info
+    return 'fyi';
+}
+
 function _renderMobileAlerts() {
     var list = document.getElementById('alertsList');
     if (!list) return;
     list.textContent = '';
 
-    // Pin travel card at top of Feed if active trip exists
+    // Pin travel card at top of Actions only on travel day (start_date === today)
     if (_activeTrip && !_alertTierFilter && !_alertSourceFilter) {
-        list.appendChild(_createTravelFeedCard(_activeTrip));
+        var _today = new Date().toISOString().slice(0, 10);
+        var _tripEnd = _activeTrip.end_date || _activeTrip.start_date;
+        if (_activeTrip.start_date <= _today && _tripEnd >= _today) {
+            list.appendChild(_createTravelFeedCard(_activeTrip));
+        }
     }
 
     var filtered = _mobileAlerts.filter(function(a) {
@@ -876,8 +891,44 @@ function _renderMobileAlerts() {
         return;
     }
 
+    // Group into sections
+    var decisions = [];
+    var recommends = [];
+    var fyi = [];
     for (var i = 0; i < filtered.length; i++) {
-        list.appendChild(_createAlertCard(filtered[i]));
+        var section = _classifyAlertSection(filtered[i]);
+        if (section === 'decision') decisions.push(filtered[i]);
+        else if (section === 'recommends') recommends.push(filtered[i]);
+        else fyi.push(filtered[i]);
+    }
+
+    // Render sections with sticky headers
+    if (decisions.length > 0) {
+        var hdr = document.createElement('div');
+        hdr.className = 'actions-section-header needs-decision';
+        hdr.textContent = 'NEEDS YOUR DECISION (' + decisions.length + ')';
+        list.appendChild(hdr);
+        for (var di = 0; di < decisions.length; di++) {
+            list.appendChild(_createAlertCard(decisions[di]));
+        }
+    }
+    if (recommends.length > 0) {
+        var hdr = document.createElement('div');
+        hdr.className = 'actions-section-header recommends';
+        hdr.textContent = 'BAKER RECOMMENDS (' + recommends.length + ')';
+        list.appendChild(hdr);
+        for (var ri = 0; ri < recommends.length; ri++) {
+            list.appendChild(_createAlertCard(recommends[ri]));
+        }
+    }
+    if (fyi.length > 0) {
+        var hdr = document.createElement('div');
+        hdr.className = 'actions-section-header fyi';
+        hdr.textContent = 'FOR YOUR INFO (' + fyi.length + ')';
+        list.appendChild(hdr);
+        for (var fi = 0; fi < fyi.length; fi++) {
+            list.appendChild(_createAlertCard(fyi[fi]));
+        }
     }
 }
 
@@ -992,82 +1043,61 @@ function _createAlertCard(alert) {
         card.appendChild(body);
     }
 
-    // Action buttons
+    // Unified action buttons: View / Dismiss / Run
     var sa = alert.structured_actions || {};
     var btnRow = document.createElement('div');
     btnRow.className = 'alert-action-buttons triage-buttons';
     btnRow.style.marginTop = '8px';
 
-    if (alert.source === 'browser_transaction' && sa.action_id) {
-        // Browser action: screenshot preview + Confirm / Cancel
-        if (sa.action_id) {
-            var previewBtn = document.createElement('button');
-            previewBtn.className = 'triage-btn';
-            previewBtn.textContent = 'Preview';
-            previewBtn.style.background = '#444';
-            previewBtn.style.color = '#fff';
-            previewBtn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                _showBrowserActionPreview(sa.action_id);
-            });
-            btnRow.appendChild(previewBtn);
-        }
+    // View button (always shown) — toggles card expansion
+    var viewBtn = document.createElement('button');
+    viewBtn.className = 'triage-btn done';
+    viewBtn.textContent = 'View';
+    viewBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        card.classList.toggle('card-expanded');
+        viewBtn.textContent = card.classList.contains('card-expanded') ? 'Collapse' : 'View';
+    });
+    btnRow.appendChild(viewBtn);
 
-        var confirmBtn = document.createElement('button');
-        confirmBtn.className = 'triage-btn approve';
-        confirmBtn.textContent = 'Confirm';
-        confirmBtn.addEventListener('click', function(e) {
+    // Dismiss button (always shown)
+    var dismissBtn = document.createElement('button');
+    dismissBtn.className = 'triage-btn dismiss';
+    dismissBtn.textContent = 'Dismiss';
+    dismissBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        _dismissAlertCard(alert.id, card);
+    });
+    btnRow.appendChild(dismissBtn);
+
+    // Run button — only when there's an actionable structured_action
+    if (alert.source === 'browser_transaction' && sa.action_id) {
+        var runBtn = document.createElement('button');
+        runBtn.className = 'triage-btn approve';
+        runBtn.textContent = 'Run';
+        runBtn.addEventListener('click', function(e) {
             e.stopPropagation();
             _confirmBrowserAction(sa.action_id, alert.id, card);
         });
-        btnRow.appendChild(confirmBtn);
-
-        var cancelBtn = document.createElement('button');
-        cancelBtn.className = 'triage-btn dismiss';
-        cancelBtn.textContent = 'Cancel';
-        cancelBtn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            _cancelBrowserAction(sa.action_id, alert.id, card);
-        });
-        btnRow.appendChild(cancelBtn);
+        btnRow.appendChild(runBtn);
     } else if (alert.source === 'research' && sa.research_proposal_id) {
-        // Research alert: Run Dossier + Skip
         var runBtn = document.createElement('button');
         runBtn.className = 'triage-btn approve';
-        runBtn.textContent = 'Run Dossier';
+        runBtn.textContent = 'Run';
         runBtn.addEventListener('click', function(e) {
             e.stopPropagation();
             _runDossierFromAlert(sa.research_proposal_id, alert.id, card);
         });
         btnRow.appendChild(runBtn);
-
-        var skipBtn = document.createElement('button');
-        skipBtn.className = 'triage-btn dismiss';
-        skipBtn.textContent = 'Skip';
-        skipBtn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            _dismissAlertCard(alert.id, card);
-        });
-        btnRow.appendChild(skipBtn);
-    } else {
-        // Standard alert: Done + Dismiss
-        var doneBtn = document.createElement('button');
-        doneBtn.className = 'triage-btn done';
-        doneBtn.textContent = 'Done';
-        doneBtn.addEventListener('click', function(e) {
+    } else if (alert.source === 'obligation' && sa.action_id) {
+        var runBtn = document.createElement('button');
+        runBtn.className = 'triage-btn approve';
+        runBtn.textContent = 'Run';
+        runBtn.addEventListener('click', function(e) {
             e.stopPropagation();
             _resolveAlertCard(alert.id, card);
         });
-        btnRow.appendChild(doneBtn);
-
-        var dismissBtn = document.createElement('button');
-        dismissBtn.className = 'triage-btn dismiss';
-        dismissBtn.textContent = 'Dismiss';
-        dismissBtn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            _dismissAlertCard(alert.id, card);
-        });
-        btnRow.appendChild(dismissBtn);
+        btnRow.appendChild(runBtn);
     }
 
     card.appendChild(btnRow);
@@ -2548,120 +2578,5 @@ function _esc(str) {
     div.textContent = str;
     return div.innerHTML;
 }
-
-// ═══ Baker 3.0: DIGEST TAB ═══
-
-var _digestType = 'morning';
-
-function loadDigestTab(type) {
-    _digestType = type || _digestType || 'morning';
-    var list = document.getElementById('digestList');
-    if (!list) return;
-    list.innerHTML = '<div class="empty-state"><div class="icon">&#x23F3;</div>Loading digest...</div>';
-
-    // Update toggle buttons
-    document.querySelectorAll('.digest-toggle-btn').forEach(function(btn) {
-        btn.classList.toggle('active', btn.dataset.dtype === _digestType);
-    });
-    var titleEl = document.getElementById('digestTitle');
-    if (titleEl) titleEl.textContent = _digestType === 'morning' ? 'Morning Digest' : 'Evening Digest';
-
-    bakerFetch('/api/digest/' + _digestType)
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-            var items = data.items || [];
-            var badge = document.getElementById('tabDigestCount');
-            if (badge) {
-                badge.textContent = items.length;
-                badge.hidden = items.length === 0;
-            }
-            renderDigestItems(list, items);
-        })
-        .catch(function(e) {
-            list.innerHTML = '<div class="empty-state"><div class="icon">&#x26A0;</div>Failed to load digest.</div>';
-        });
-}
-
-function renderDigestItems(container, items) {
-    if (items.length === 0) {
-        container.innerHTML = '<div class="empty-state"><div class="icon">&#x2705;</div>No items. You\'re all clear.</div>';
-        return;
-    }
-    container.innerHTML = '';
-    items.forEach(function(item, idx) {
-        var card = document.createElement('div');
-        card.className = 'digest-card';
-
-        // Type badge
-        var typeBadge = {
-            'alert': '&#x1F6A8;', 'action': '&#x2699;', 'deadline': '&#x23F0;',
-            'unanswered': '&#x1F4AC;', 'completed': '&#x2705;'
-        }[item.type] || '&#x2022;';
-        var sourceLabel = item.source || item.type || '';
-
-        var header = document.createElement('div');
-        header.className = 'digest-card-header';
-        header.innerHTML = '<span class="digest-type-badge">' + typeBadge + '</span>'
-            + '<span class="digest-card-title">' + esc(item.title || '') + '</span>'
-            + '<span class="digest-source">' + esc(sourceLabel) + '</span>';
-        card.appendChild(header);
-
-        if (item.description) {
-            var desc = document.createElement('div');
-            desc.className = 'digest-card-desc';
-            desc.textContent = item.description;
-            card.appendChild(desc);
-        }
-
-        // Action buttons
-        var actions = document.createElement('div');
-        actions.className = 'digest-card-actions';
-        if (item.positive_action) {
-            var posBtn = document.createElement('button');
-            posBtn.className = 'digest-btn digest-btn-pos';
-            posBtn.textContent = item.positive_action.label || 'Open';
-            posBtn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                if (item.positive_action.tab) {
-                    switchTab(item.positive_action.tab);
-                } else if (item.positive_action.endpoint) {
-                    bakerFetch(item.positive_action.endpoint, { method: item.positive_action.method || 'POST' })
-                        .then(function() { card.style.opacity = '0.4'; posBtn.textContent = 'Done'; });
-                }
-            });
-            actions.appendChild(posBtn);
-        }
-        if (item.negative_action) {
-            var negBtn = document.createElement('button');
-            negBtn.className = 'digest-btn digest-btn-neg';
-            negBtn.textContent = item.negative_action.label || 'Skip';
-            negBtn.addEventListener('click', function(e) {
-                e.stopPropagation();
-                if (item.negative_action.endpoint) {
-                    bakerFetch(item.negative_action.endpoint, { method: item.negative_action.method || 'POST' })
-                        .then(function() { card.style.opacity = '0.3'; negBtn.textContent = 'Dismissed'; });
-                }
-            });
-            actions.appendChild(negBtn);
-        }
-        if (actions.childNodes.length > 0) card.appendChild(actions);
-
-        container.appendChild(card);
-    });
-}
-
-// Wire digest toggle buttons
-document.addEventListener('click', function(e) {
-    if (e.target.classList.contains('digest-toggle-btn')) {
-        loadDigestTab(e.target.dataset.dtype);
-    }
-});
-
-// Check for ?type= param to set digest type on deep link
-(function() {
-    var params = new URLSearchParams(window.location.search);
-    var dtype = params.get('type');
-    if (dtype === 'morning' || dtype === 'evening') _digestType = dtype;
-})();
 
 document.addEventListener('DOMContentLoaded', init);
