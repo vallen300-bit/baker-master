@@ -8039,6 +8039,79 @@ async def api_download_research_dossier(proposal_id: int, key: str = ""):
     )
 
 
+@app.get("/api/research-proposals/{proposal_id}/view", tags=["research"])
+async def api_view_research_dossier(proposal_id: int, key: str = ""):
+    """View a completed dossier as a mobile-friendly HTML page."""
+    if key != _BAKER_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    import psycopg2.extras
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=500, detail="DB unavailable")
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT subject_name, deliverable_summary, status, completed_at
+            FROM research_proposals WHERE id = %s
+        """, (proposal_id,))
+        row = cur.fetchone()
+        cur.close()
+        if not row:
+            raise HTTPException(status_code=404, detail="Proposal not found")
+        if row["status"] != "completed" or not row.get("deliverable_summary"):
+            raise HTTPException(status_code=400, detail="Dossier not yet completed")
+    finally:
+        store._put_conn(conn)
+
+    import re as _re
+    # Convert markdown to simple HTML
+    md = row["deliverable_summary"]
+    # Headers
+    html_body = _re.sub(r'^### (.+)$', r'<h3>\1</h3>', md, flags=_re.MULTILINE)
+    html_body = _re.sub(r'^## (.+)$', r'<h2>\1</h2>', html_body, flags=_re.MULTILINE)
+    html_body = _re.sub(r'^# (.+)$', r'<h1>\1</h1>', html_body, flags=_re.MULTILINE)
+    # Bold
+    html_body = _re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', html_body)
+    # Line breaks
+    html_body = html_body.replace('\n\n', '</p><p>').replace('\n', '<br>')
+    html_body = f'<p>{html_body}</p>'
+    # Lists
+    html_body = _re.sub(r'<br>- ', r'<br>• ', html_body)
+
+    title = row["subject_name"]
+    completed = row["completed_at"].strftime("%d %b %Y %H:%M") if row.get("completed_at") else ""
+
+    page = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dossier: {title}</title>
+<style>
+  body {{ font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 16px;
+         background: #111; color: #e0e0e0; line-height: 1.6; }}
+  h1 {{ font-size: 20px; margin: 0 0 4px; }}
+  h2 {{ font-size: 17px; color: #60a5fa; margin: 24px 0 8px; border-bottom: 1px solid #333; padding-bottom: 4px; }}
+  h3 {{ font-size: 15px; color: #a78bfa; margin: 16px 0 6px; }}
+  strong {{ color: #fff; }}
+  p {{ margin: 0 0 12px; }}
+  .meta {{ font-size: 12px; color: #888; margin-bottom: 16px; }}
+  .dl-link {{ display: inline-block; margin-top: 16px; padding: 10px 20px; background: #22c55e;
+              color: #000; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; }}
+</style>
+</head>
+<body>
+<h1>{title}</h1>
+<div class="meta">Completed {completed}</div>
+{html_body}
+<a class="dl-link" href="/api/research-proposals/{proposal_id}/download?key={key}">Download .docx</a>
+</body>
+</html>"""
+    from starlette.responses import HTMLResponse
+    return HTMLResponse(page)
+
+
 # ============================================================
 # CLI runner
 # ============================================================

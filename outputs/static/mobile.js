@@ -2460,13 +2460,13 @@ function _pollDossierFromAlert(proposalId, alertId, card) {
             var btns = card.querySelector('.alert-action-buttons');
             if (btns) {
                 btns.innerHTML = '';
-                var dlBtn = document.createElement('a');
-                dlBtn.href = '/api/research-proposals/' + proposalId + '/download?key=' + encodeURIComponent(BAKER.apiKey);
-                dlBtn.className = 'triage-btn approve';
-                dlBtn.style.cssText = 'text-decoration:none;text-align:center;display:block;flex:1;';
-                dlBtn.textContent = 'Download .docx';
-                dlBtn.target = '_blank';
-                btns.appendChild(dlBtn);
+                var viewBtn = document.createElement('a');
+                viewBtn.href = '/api/research-proposals/' + proposalId + '/view?key=' + encodeURIComponent(BAKER.apiKey);
+                viewBtn.className = 'triage-btn approve';
+                viewBtn.style.cssText = 'text-decoration:none;text-align:center;display:block;flex:1;';
+                viewBtn.textContent = 'View Dossier';
+                viewBtn.target = '_blank';
+                btns.appendChild(viewBtn);
             }
             // Resolve the alert
             _mobileAlerts = _mobileAlerts.filter(function(a) { return a.id !== alertId; });
