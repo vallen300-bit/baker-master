@@ -2422,8 +2422,8 @@ function _runDossierFromAlert(proposalId, alertId, card) {
         return r.ok ? r.json() : null;
     }).then(function(data) {
         if (data && data.status === 'completed') {
-            // Already done — open view page
-            window.open('/api/research-proposals/' + proposalId + '/view?key=' + encodeURIComponent(BAKER.apiKey), '_blank');
+            // Already done — navigate to view page (window.open blocked on iOS)
+            window.location.href = '/api/research-proposals/' + proposalId + '/view?key=' + encodeURIComponent(BAKER.apiKey);
             return;
         }
         // Not completed — run it
