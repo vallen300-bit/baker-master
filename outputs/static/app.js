@@ -898,15 +898,12 @@ async function loadMorningBrief() {
                         draftBtn.textContent = channel === 'whatsapp' ? 'Draft WA' : 'Draft';
                         draftBtn.title = channel === 'whatsapp' ? 'Draft a WhatsApp message' : 'Draft an email';
                         draftBtn.addEventListener('click', function() {
+                            var prompt = channel === 'whatsapp'
+                                ? 'Draft a WhatsApp message to ' + sc.name + ' — casual check-in, keep it short'
+                                : 'Draft an email to ' + sc.name;
                             switchTab('ask-baker');
-                            var input = document.getElementById('scanInput') || document.getElementById('cmdInput');
-                            if (input) {
-                                var prompt = channel === 'whatsapp'
-                                    ? 'Draft a WhatsApp message to ' + sc.name + ' — casual check-in, keep it short'
-                                    : 'Draft an email to ' + sc.name;
-                                input.value = prompt;
-                                input.focus();
-                            }
+                            // Auto-submit after tab switch so user sees fresh response, not stale
+                            setTimeout(function() { sendScanMessage(prompt); }, 150);
                         });
                         row.appendChild(draftBtn);
 
