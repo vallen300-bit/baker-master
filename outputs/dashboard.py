@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import tempfile
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -125,6 +126,41 @@ def _get_retriever():
         from memory.retriever import SentinelRetriever
         _retriever = SentinelRetriever()
     return _retriever
+
+
+def _extract_correction_safe(task: dict):
+    """CORRECTION-MEMORY-1: Fire-and-forget wrapper for correction extraction."""
+    try:
+        from orchestrator.capability_runner import extract_correction_from_feedback
+        extract_correction_from_feedback(task)
+    except Exception as e:
+        logger.debug(f"Correction extraction failed (non-fatal): {e}")
+
+
+def _embed_positive_example_safe(task: dict):
+    """CORRECTION-MEMORY-1 Phase 2: Embed accepted task as positive example for episodic retrieval."""
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        title = task.get("title", "")
+        deliverable = task.get("deliverable", "")
+        cap_slug = task.get("capability_slug", "general")
+        # Only embed tasks with substantial deliverables
+        if len(deliverable) < 200:
+            return
+        # Combine title + truncated deliverable for embedding
+        content = f"Question: {title}\n\nAccepted response:\n{deliverable[:3000]}"
+        metadata = {
+            "task_id": task.get("id"),
+            "capability_slug": cap_slug,
+            "domain": task.get("domain", ""),
+            "feedback": "accepted",
+            "source": "baker_task_positive",
+        }
+        store.store_document(content, metadata, collection="baker-task-examples")
+        logger.info(f"Embedded positive example from task #{task.get('id')} ({cap_slug})")
+    except Exception as e:
+        logger.debug(f"Positive example embedding failed (non-fatal): {e}")
 
 
 def _get_clickup_client():
@@ -6888,6 +6924,21 @@ async def task_feedback_endpoint(task_id: int, body: TaskFeedbackRequest):
     )
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to update task")
+
+    # CORRECTION-MEMORY-1: Extract learned rule from negative feedback with comment
+    if body.feedback in ("rejected", "revised") and body.comment:
+        task["director_feedback"] = body.feedback
+        task["feedback_comment"] = body.comment
+        threading.Thread(
+            target=_extract_correction_safe, args=(task,), daemon=True
+        ).start()
+
+    # CORRECTION-MEMORY-1 Phase 2: Embed accepted tasks as positive examples
+    if body.feedback == "accepted" and task.get("deliverable"):
+        threading.Thread(
+            target=_embed_positive_example_safe, args=(task,), daemon=True
+        ).start()
+
     return {"status": "updated", "task_id": task_id, "feedback": body.feedback}
 
 

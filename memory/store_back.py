@@ -94,6 +94,9 @@ class SentinelStoreBack:
         # Ensure baker-browser Qdrant collection exists (BROWSER-1)
         self._ensure_collection("baker-browser", size=1024)
 
+        # CORRECTION-MEMORY-1 Phase 2: Positive task examples for episodic retrieval
+        self._ensure_collection("baker-task-examples", size=1024)
+
         # STEP1C: Ensure baker_tasks table exists
         self._ensure_baker_tasks_table()
 
@@ -122,6 +125,9 @@ class SentinelStoreBack:
         self._ensure_document_extractions_table()
         self._ensure_doc_pipeline_jobs_table()
         self._ensure_baker_insights_table()
+
+        # CORRECTION-MEMORY-1: Learned corrections from Director feedback
+        self._ensure_baker_corrections_table()
 
         # PHASE-4A: Cost monitor + agent observability tables
         self._ensure_cost_and_metrics_tables()
@@ -415,6 +421,164 @@ class SentinelStoreBack:
             except Exception:
                 pass
             logger.warning(f"Could not ensure baker_insights table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_baker_corrections_table(self):
+        """CORRECTION-MEMORY-1: Learned corrections from Director feedback.
+        Anti-bloat: max 5 per capability, 90-day expiry, retrieval tracking."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS baker_corrections (
+                    id SERIAL PRIMARY KEY,
+                    baker_task_id INTEGER NOT NULL,
+                    capability_slug VARCHAR(50),
+                    applies_to VARCHAR(50) NOT NULL DEFAULT 'capability',
+                    correction_type VARCHAR(20) NOT NULL,
+                    director_comment TEXT,
+                    learned_rule TEXT NOT NULL,
+                    matter_slug VARCHAR(200),
+                    retrieval_count INTEGER DEFAULT 0,
+                    last_retrieved_at TIMESTAMPTZ,
+                    active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    expires_at TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '90 days')
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_baker_corrections_slug ON baker_corrections(capability_slug)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_baker_corrections_active ON baker_corrections(active) WHERE active = TRUE")
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure baker_corrections table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def store_correction(self, baker_task_id: int, capability_slug: str,
+                         correction_type: str, director_comment: str,
+                         learned_rule: str, matter_slug: str = None,
+                         applies_to: str = "capability") -> bool:
+        """Store a learned correction. Enforces max 5 active per capability."""
+        conn = self._get_conn()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            # Anti-bloat: cap at 5 active corrections per capability.
+            # Archive least-used when exceeded.
+            cur.execute("""
+                SELECT id FROM baker_corrections
+                WHERE capability_slug = %s AND active = TRUE
+                ORDER BY retrieval_count ASC, created_at ASC
+            """, (capability_slug,))
+            existing = cur.fetchall()
+            if len(existing) >= 5:
+                archive_id = existing[0][0]
+                cur.execute(
+                    "UPDATE baker_corrections SET active = FALSE WHERE id = %s",
+                    (archive_id,),
+                )
+                logger.info(f"Archived correction #{archive_id} (cap 5 per capability)")
+
+            cur.execute("""
+                INSERT INTO baker_corrections
+                    (baker_task_id, capability_slug, applies_to, correction_type,
+                     director_comment, learned_rule, matter_slug)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (baker_task_id, capability_slug, applies_to, correction_type,
+                  director_comment, learned_rule, matter_slug))
+            conn.commit()
+            cur.close()
+            logger.info(
+                f"Stored correction for {capability_slug} from task #{baker_task_id}: "
+                f"{learned_rule[:80]}"
+            )
+            return True
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"store_correction failed: {e}")
+            return False
+        finally:
+            self._put_conn(conn)
+
+    def get_relevant_corrections(self, capability_slug: str, limit: int = 3) -> list:
+        """Retrieve active corrections for a capability (+ global ones).
+        Updates retrieval stats for decay tracking."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, learned_rule, matter_slug, correction_type, applies_to
+                FROM baker_corrections
+                WHERE active = TRUE
+                  AND (expires_at IS NULL OR expires_at > NOW())
+                  AND (capability_slug = %s OR applies_to = 'all')
+                ORDER BY
+                    CASE WHEN applies_to = 'all' THEN 0 ELSE 1 END,
+                    retrieval_count DESC,
+                    created_at DESC
+                LIMIT %s
+            """, (capability_slug, limit))
+            rows = cur.fetchall()
+
+            # Update retrieval stats — frequently used corrections survive longer
+            if rows:
+                ids = [r[0] for r in rows]
+                cur.execute("""
+                    UPDATE baker_corrections
+                    SET retrieval_count = retrieval_count + 1,
+                        last_retrieved_at = NOW()
+                    WHERE id = ANY(%s)
+                """, (ids,))
+                conn.commit()
+
+            cur.close()
+            return [
+                {"id": r[0], "learned_rule": r[1], "matter_slug": r[2],
+                 "correction_type": r[3], "applies_to": r[4]}
+                for r in rows
+            ]
+        except Exception as e:
+            logger.error(f"get_relevant_corrections failed: {e}")
+            return []
+        finally:
+            self._put_conn(conn)
+
+    def expire_stale_corrections(self) -> int:
+        """Archive corrections not retrieved in 90 days. Called by consolidation job."""
+        conn = self._get_conn()
+        if not conn:
+            return 0
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE baker_corrections
+                SET active = FALSE
+                WHERE active = TRUE
+                  AND expires_at IS NOT NULL
+                  AND expires_at < NOW()
+                RETURNING id
+            """)
+            expired = cur.fetchall()
+            conn.commit()
+            cur.close()
+            if expired:
+                logger.info(f"Expired {len(expired)} stale corrections")
+            return len(expired)
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"expire_stale_corrections failed: {e}")
+            return 0
         finally:
             self._put_conn(conn)
 

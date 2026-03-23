@@ -32,6 +32,101 @@ logger = logging.getLogger("baker.capability_runner")
 # Max sub-tasks in delegate path (safety bound)
 MAX_SUB_TASKS = 4
 
+# CORRECTION-MEMORY-1: Max corrections injected per prompt (anti-bloat)
+MAX_CORRECTIONS_PER_PROMPT = 3
+
+
+def extract_correction_from_feedback(task: dict):
+    """CORRECTION-MEMORY-1: Extract a learned rule from Director feedback.
+    Called async (fire-and-forget) when Director rejects/revises a task with a comment.
+    Uses Haiku for extraction — cheap, fast, non-fatal."""
+    try:
+        import json as _json
+        from orchestrator.cost_monitor import log_api_cost, check_circuit_breaker
+
+        allowed, _ = check_circuit_breaker()
+        if not allowed:
+            logger.debug("Circuit breaker blocked correction extraction")
+            return
+
+        task_id = task.get("id")
+        feedback = task.get("director_feedback", "")
+        comment = task.get("feedback_comment", "")
+        title = task.get("title", "")
+        deliverable = task.get("deliverable", "")
+        cap_slug = task.get("capability_slug", "")
+
+        # Guard: need a comment to extract a meaningful rule
+        if not comment or not comment.strip():
+            logger.debug(f"No comment on task #{task_id} — skipping correction extraction")
+            return
+
+        _HAIKU = "claude-haiku-4-5-20251001"
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+
+        prompt = (
+            "A Director gave feedback on an AI specialist's response. "
+            "Extract ONE concise, reusable correction rule that the specialist should "
+            "follow in ALL future similar situations.\n\n"
+            "Rules for extraction:\n"
+            "- The rule must be actionable and specific (not vague like 'do better')\n"
+            "- If the correction is about a specific person/contact, include their name\n"
+            "- If the correction applies to ALL specialists (not just this one), set applies_to='all'\n"
+            "- If no useful rule can be extracted, return null\n\n"
+            f"Specialist: {cap_slug}\n"
+            f"Task: {title[:200]}\n"
+            f"Response excerpt: {(deliverable or '')[:1500]}\n"
+            f"Feedback: {feedback}\n"
+            f"Director comment: {comment}\n\n"
+            'Return JSON: {"learned_rule": "...", "matter_slug": "..."|null, '
+            '"applies_to": "capability"|"all"} or null if no useful rule.'
+        )
+
+        resp = client.messages.create(
+            model=_HAIKU,
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        log_api_cost(
+            _HAIKU, resp.usage.input_tokens, resp.usage.output_tokens,
+            source="correction_extraction", capability_id=cap_slug or "unknown",
+        )
+
+        raw = resp.content[0].text.strip()
+        # Strip markdown fences
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
+            if raw.endswith("```"):
+                raw = raw[:-3]
+            raw = raw.strip()
+
+        if raw.lower() in ("null", "none", "{}"):
+            logger.debug(f"No useful correction from task #{task_id}")
+            return
+
+        result = _json.loads(raw)
+        if not isinstance(result, dict) or not result.get("learned_rule"):
+            return
+
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        store.store_correction(
+            baker_task_id=task_id,
+            capability_slug=cap_slug or "general",
+            correction_type=feedback,
+            director_comment=comment,
+            learned_rule=result["learned_rule"],
+            matter_slug=result.get("matter_slug"),
+            applies_to=result.get("applies_to", "capability"),
+        )
+        logger.info(
+            f"CORRECTION-MEMORY-1: Extracted rule from task #{task_id}: "
+            f"{result['learned_rule'][:80]}"
+        )
+
+    except Exception as e:
+        logger.debug(f"Correction extraction failed (non-fatal): {e}")
+
 
 class CapabilityRunner:
     def __init__(self):
@@ -527,7 +622,12 @@ class CapabilityRunner:
         )
         enriched = base + role_injection
 
-        # LEARNING-LOOP: Inject past feedback for this capability
+        # CORRECTION-MEMORY-1: Inject learned corrections (high-signal, rule-based)
+        corrections_context = self._get_learned_corrections(capability.slug)
+        if corrections_context:
+            enriched += f"\n\n## LEARNED CORRECTIONS (MANDATORY)\n{corrections_context}\n"
+
+        # LEARNING-LOOP: Inject raw past feedback as fallback context
         feedback_context = self._get_capability_feedback(capability.slug)
         if feedback_context:
             enriched += f"\n\n## PAST FEEDBACK ON YOUR RESPONSES\n{feedback_context}\n"
@@ -536,6 +636,12 @@ class CapabilityRunner:
         insights = self._get_shared_insights(capability.slug, domain)
         if insights:
             enriched += f"\n\n## BAKER TEAM INSIGHTS\n{insights}\n"
+
+        # CORRECTION-MEMORY-1 Phase 2: Inject similar positive examples (episodic retrieval)
+        if question:
+            examples_ctx = self._get_positive_examples(capability.slug, question)
+            if examples_ctx:
+                enriched += f"\n\n## APPROVED EXAMPLES (quality reference)\n{examples_ctx}\n"
 
         # B3: Inject relevant past decisions when question references a known matter
         if question:
@@ -605,6 +711,74 @@ class CapabilityRunner:
                 return "\n".join(parts)
             finally:
                 store._put_conn(conn)
+        except Exception:
+            return ""
+
+    def _get_learned_corrections(self, slug: str) -> str:
+        """CORRECTION-MEMORY-1: Retrieve learned corrections for this capability.
+        Returns formatted string for prompt injection.
+        Updates retrieval stats so frequently-used corrections survive decay."""
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            corrections = store.get_relevant_corrections(
+                slug, limit=MAX_CORRECTIONS_PER_PROMPT
+            )
+            if not corrections:
+                return ""
+            parts = [
+                "The Director has corrected past responses. "
+                "You MUST follow these rules — they override your defaults:"
+            ]
+            for c in corrections:
+                scope = "[ALL SPECIALISTS] " if c["applies_to"] == "all" else ""
+                matter = f"[{c['matter_slug']}] " if c.get("matter_slug") else ""
+                parts.append(f"- {scope}{matter}{c['learned_rule']}")
+            return "\n".join(parts)
+        except Exception:
+            return ""
+
+    def _get_positive_examples(self, slug: str, question: str, limit: int = 2) -> str:
+        """CORRECTION-MEMORY-1 Phase 2: Retrieve similar past tasks that Director accepted.
+        Uses Qdrant semantic search on baker-task-examples collection."""
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            if not store.qdrant:
+                return ""
+            # Embed current question for similarity search
+            q_vector = store._embed(question[:500])
+            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            results = store.qdrant.search(
+                collection_name="baker-task-examples",
+                query_vector=q_vector,
+                query_filter=Filter(must=[
+                    FieldCondition(key="capability_slug", match=MatchValue(value=slug)),
+                ]),
+                limit=limit,
+                score_threshold=0.5,
+            )
+            if not results:
+                # Fallback: search without capability filter
+                results = store.qdrant.search(
+                    collection_name="baker-task-examples",
+                    query_vector=q_vector,
+                    limit=limit,
+                    score_threshold=0.6,
+                )
+            if not results:
+                return ""
+            parts = [
+                "Here are similar past tasks where the Director approved the response. "
+                "Use these as quality examples:"
+            ]
+            for r in results:
+                content = r.payload.get("content", "")
+                # Truncate to avoid prompt bloat
+                if len(content) > 800:
+                    content = content[:800] + "..."
+                parts.append(f"\n---\n{content}")
+            return "\n".join(parts)
         except Exception:
             return ""
 
