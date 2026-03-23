@@ -299,7 +299,7 @@ class ChainConfig:
 @dataclass
 class ComplexityConfig:
     """COMPLEXITY-ROUTER-1: Fast/deep routing configuration."""
-    shadow_mode: bool = os.getenv("COMPLEXITY_SHADOW_MODE", "true").lower() == "true"
+    shadow_mode: bool = os.getenv("COMPLEXITY_SHADOW_MODE", "false").lower() == "true"
     fast_model: str = "claude-haiku-4-5-20251001"
     deep_model: str = "claude-opus-4-6"
     fast_max_tokens: int = 1024

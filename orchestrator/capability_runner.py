@@ -139,6 +139,24 @@ class CapabilityRunner:
         self._check_circuit_breaker = check_circuit_breaker
         self._log_tool_call = log_tool_call
 
+    def _get_model_config(self, complexity: str = None) -> dict:
+        """COMPLEXITY-ROUTER-1: Return model config based on complexity classification.
+        In shadow mode, always returns deep config (current behavior)."""
+        cc = config.complexity
+        if cc.shadow_mode or complexity != "fast":
+            return {
+                "model": config.claude.model,
+                "max_tokens": 4096,
+                "tool_limit": None,
+                "timeout": cc.deep_timeout,
+            }
+        return {
+            "model": cc.fast_model,
+            "max_tokens": cc.fast_max_tokens,
+            "tool_limit": cc.fast_tool_limit,
+            "timeout": cc.fast_timeout,
+        }
+
     # ─────────────────────────────────────────────
     # Fast Path: Single Capability (blocking)
     # ─────────────────────────────────────────────
@@ -146,7 +164,8 @@ class CapabilityRunner:
     def run_single(self, capability: CapabilityDef, question: str,
                    history: list = None, domain: str = None,
                    mode: str = None,
-                   entity_context: str = "") -> AgentResult:
+                   entity_context: str = "",
+                   complexity: str = None) -> AgentResult:
         """
         Fast path — one capability, one question.
         Builds system prompt from capability definition.
@@ -154,7 +173,12 @@ class CapabilityRunner:
         Same agent loop structure as run_agent_loop() in agent.py.
         """
         t0 = time.time()
-        timeout = capability.timeout_seconds
+        # COMPLEXITY-ROUTER-1: Model config based on complexity
+        mc = self._get_model_config(complexity)
+        _model = mc["model"]
+        _max_tokens = mc["max_tokens"]
+        _tool_limit = mc["tool_limit"]
+        timeout = mc["timeout"] if complexity else capability.timeout_seconds
         max_iter = capability.max_iterations
         system = self._build_system_prompt(capability, domain, mode, question=question, entity_context=entity_context)
         tools = self._get_filtered_tools(capability)
@@ -192,15 +216,24 @@ class CapabilityRunner:
                     elapsed_ms=int((time.time() - t0) * 1000),
                 )
 
+            # COMPLEXITY-ROUTER-1: Enforce tool limit on fast path
+            if _tool_limit and len(tool_log) >= _tool_limit:
+                logger.info(f"Capability {capability.slug} hit tool limit ({_tool_limit}) on fast path")
+                return AgentResult(
+                    answer="", tool_calls=tool_log, iterations=iteration,
+                    total_input_tokens=total_in, total_output_tokens=total_out,
+                    elapsed_ms=int((time.time() - t0) * 1000),
+                )
+
             # Build API params — SPECIALIST-THINKING-1: add extended thinking
             api_params = {
-                "model": config.claude.model,
-                "max_tokens": 4096,
+                "model": _model,
+                "max_tokens": _max_tokens,
                 "system": system,
                 "messages": messages,
                 "tools": tools,
             }
-            if capability.use_thinking:
+            if capability.use_thinking and complexity != "fast":
                 api_params["thinking"] = {"type": "enabled", "budget_tokens": 10000}
                 api_params["max_tokens"] = max(api_params["max_tokens"], 16000)
 
@@ -209,7 +242,7 @@ class CapabilityRunner:
             total_out += response.usage.output_tokens
 
             # PHASE-4A: Log API cost (includes thinking tokens if present)
-            self._log_api_cost(config.claude.model, response.usage.input_tokens,
+            self._log_api_cost(_model, response.usage.input_tokens,
                                response.usage.output_tokens,
                                source="capability_runner",
                                capability_id=capability.slug)
@@ -219,8 +252,8 @@ class CapabilityRunner:
                 answer = "".join(text_parts)
                 elapsed_ms = int((time.time() - t0) * 1000)
                 logger.info(
-                    f"Capability {capability.slug} done: {iteration + 1} iter, "
-                    f"{len(tool_log)} tools, {elapsed_ms}ms"
+                    f"Capability {capability.slug} done ({complexity or 'deep'}): "
+                    f"{iteration + 1} iter, {len(tool_log)} tools, {elapsed_ms}ms, model={_model}"
                 )
                 # Auto-insight extraction (fire-and-forget)
                 import threading
@@ -304,13 +337,19 @@ class CapabilityRunner:
     def run_streaming(self, capability: CapabilityDef, question: str,
                       history: list = None, domain: str = None,
                       mode: str = None,
-                      entity_context: str = "") -> Generator[dict, None, None]:
+                      entity_context: str = "",
+                      complexity: str = None) -> Generator[dict, None, None]:
         """
         SSE streaming variant for Scan dashboard.
         Yields {"token": text}, {"tool_call": name}, {"_agent_result": AgentResult}.
         """
         t0 = time.time()
-        timeout = capability.timeout_seconds
+        # COMPLEXITY-ROUTER-1: Model config based on complexity
+        mc = self._get_model_config(complexity)
+        _model = mc["model"]
+        _max_tokens = mc["max_tokens"]
+        _tool_limit = mc["tool_limit"]
+        timeout = mc["timeout"] if complexity else capability.timeout_seconds
         max_iter = capability.max_iterations
         system = self._build_system_prompt(capability, domain, mode, question=question, entity_context=entity_context)
         tools = self._get_filtered_tools(capability)
@@ -353,15 +392,26 @@ class CapabilityRunner:
                 yield {"_agent_result": result}
                 return
 
+            # COMPLEXITY-ROUTER-1: Enforce tool limit on fast path
+            if _tool_limit and len(tool_log) >= _tool_limit:
+                logger.info(f"Capability {capability.slug} hit tool limit ({_tool_limit}) on fast path")
+                result = AgentResult(
+                    answer=full_answer, tool_calls=tool_log, iterations=iteration,
+                    total_input_tokens=total_in, total_output_tokens=total_out,
+                    elapsed_ms=int((time.time() - t0) * 1000),
+                )
+                yield {"_agent_result": result}
+                return
+
             # Build API params — SPECIALIST-THINKING-1: add extended thinking
             api_params = {
-                "model": config.claude.model,
-                "max_tokens": 4096,
+                "model": _model,
+                "max_tokens": _max_tokens,
                 "system": system,
                 "messages": messages,
                 "tools": tools,
             }
-            if capability.use_thinking:
+            if capability.use_thinking and complexity != "fast":
                 api_params["thinking"] = {"type": "enabled", "budget_tokens": 10000}
                 api_params["max_tokens"] = max(api_params["max_tokens"], 16000)
 
@@ -370,7 +420,7 @@ class CapabilityRunner:
             total_out += response.usage.output_tokens
 
             # PHASE-4A: Log API cost (includes thinking tokens if present)
-            self._log_api_cost(config.claude.model, response.usage.input_tokens,
+            self._log_api_cost(_model, response.usage.input_tokens,
                                response.usage.output_tokens,
                                source="capability_runner_streaming",
                                capability_id=capability.slug)

@@ -5654,7 +5654,8 @@ async def scan_chat(req: ScanRequest):
             )
         elif intent.get("type") == "capability_task":
             # AGENT-FRAMEWORK-1: Explicit capability invocation
-            return _scan_chat_capability(req, start, intent)
+            return _scan_chat_capability(req, start, intent,
+                                          complexity=intent.get("complexity"))
     # draft_action == "dismiss" or regular question → fall through to RAG pipeline
 
     # DEEP-MODE-1: All Ask Baker questions go straight to deep agentic path.
@@ -5682,15 +5683,17 @@ async def scan_chat(req: ScanRequest):
     except Exception as _te:
         logger.warning(f"baker_task creation failed (non-fatal): {_te}")
 
-    return _scan_chat_deep(req, start, task_id=_task_id)
+    return _scan_chat_deep(req, start, task_id=_task_id,
+                           complexity=intent.get("complexity") if intent else None)
 
 
-def _scan_chat_deep(req, start: float, task_id: int = None):
+def _scan_chat_deep(req, start: float, task_id: int = None, complexity: str = None):
     """DEEP-MODE-1: Deep agentic path for all Ask Baker questions.
 
     Pre-stuffs recent emails, WhatsApp, meetings, decisions, and analyses
     into the system prompt, PLUS gives the agent all tools for deeper search.
     90s timeout, 15 iterations, full session history. No capability routing.
+    COMPLEXITY-ROUTER-1: Fast-classified questions use Haiku with fewer iterations.
     """
     from orchestrator.agent import run_agent_loop_streaming
     from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT, build_mode_aware_prompt
@@ -5874,12 +5877,18 @@ def _scan_chat_deep(req, start: float, task_id: int = None):
 
         def _run_agent():
             try:
+                # COMPLEXITY-ROUTER-1: Fast path uses Haiku, fewer iterations
+                _cc = config.complexity
+                _is_fast = (complexity == "fast" and not _cc.shadow_mode)
                 gen = run_agent_loop_streaming(
                     question=req.question,
                     system_prompt=system_prompt,
                     history=history,
-                    max_iterations=15,
-                    timeout_override=90.0,
+                    max_iterations=5 if _is_fast else 15,
+                    timeout_override=float(_cc.fast_timeout) if _is_fast else 90.0,
+                    model_override=_cc.fast_model if _is_fast else None,
+                    max_tokens_override=_cc.fast_max_tokens if _is_fast else None,
+                    tool_limit=_cc.fast_tool_limit if _is_fast else None,
                 )
                 for item in gen:
                     item_queue.put(item)
@@ -5943,7 +5952,8 @@ def _scan_chat_deep(req, start: float, task_id: int = None):
                 f"{agent_result.total_input_tokens}+{agent_result.total_output_tokens} tokens, "
                 f"{agent_result.elapsed_ms}ms"
             )
-        _scan_store_back(req, full_response, start, extra_meta, task_id=task_id)
+        _scan_store_back(req, full_response, start, extra_meta, task_id=task_id,
+                         complexity=complexity)
 
     return StreamingResponse(
         event_stream(),
@@ -5997,8 +6007,10 @@ def _build_scan_system_prompt(deadline_only: bool = False, contexts=None,
 
 
 def _scan_store_back(req, full_response: str, start: float,
-                     extra_meta: Optional[dict] = None, task_id: int = None):
-    """Store-back logic shared by both agentic and legacy paths."""
+                     extra_meta: Optional[dict] = None, task_id: int = None,
+                     complexity: str = None):
+    """Store-back logic shared by both agentic and legacy paths.
+    COMPLEXITY-ROUTER-1: Fast path skips Qdrant embedding (simple lookups not worth remembering)."""
     elapsed_ms = int((time.time() - start) * 1000)
     try:
         store = _get_store()
@@ -6013,6 +6025,8 @@ def _scan_store_back(req, full_response: str, start: float,
         logger.warning(f"Scan store-back failed (non-fatal): {e}")
 
     # Store full Q+A in Qdrant for conversation memory (CONV-MEM-1)
+    # COMPLEXITY-ROUTER-1: Skip Qdrant embedding on fast path (simple lookups not worth storing)
+    _skip_qdrant = (complexity == "fast" and not config.complexity.shadow_mode)
     try:
         store = _get_store()
         conversation_content = (
@@ -6036,7 +6050,10 @@ def _scan_store_back(req, full_response: str, start: float,
             # payload only.  Phase 2 observability should add a dedicated PostgreSQL
             # table (agent_tool_calls) for queryable analytics.
 
-        if len(conversation_content) <= 8000:
+        if _skip_qdrant:
+            chunk_count = 0
+            logger.info("COMPLEXITY-ROUTER-1: Skipping Qdrant embedding (fast path)")
+        elif len(conversation_content) <= 8000:
             store.store_document(
                 content=conversation_content,
                 metadata=conv_metadata,
@@ -6100,7 +6117,7 @@ def _scan_store_back(req, full_response: str, start: float,
 
 def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
                           task_id: int = None, domain: str = None, mode: str = None,
-                          entity_context: str = ""):
+                          entity_context: str = "", complexity: str = None):
     """AGENT-FRAMEWORK-1: Route through capability framework.
     Handles both explicit ('have the finance agent...') and implicit (router match) paths.
     SPECIALIST-DEEP-1: entity_context forwarded to capability runner for pre-stuffed context."""
@@ -6154,7 +6171,8 @@ def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
                     for chunk in runner.run_streaming(cap, req.question,
                                                       history=req.history,
                                                       domain=domain, mode=mode,
-                                                      entity_context=entity_context):
+                                                      entity_context=entity_context,
+                                                      complexity=complexity):
                         if "_agent_result" in chunk:
                             _agent_result[0] = chunk["_agent_result"]
                         elif "token" in chunk:

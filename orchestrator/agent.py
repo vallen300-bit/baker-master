@@ -1796,6 +1796,9 @@ def run_agent_loop_streaming(
     history: Optional[list] = None,
     max_iterations: int = 5,
     timeout_override: float = None,
+    model_override: str = None,
+    max_tokens_override: int = None,
+    tool_limit: int = None,
 ) -> Generator[dict, None, AgentResult]:
     """
     Streaming agent loop for Scan SSE.
@@ -1860,11 +1863,24 @@ def run_agent_loop_streaming(
             yield {"_agent_result": result}
             return
 
+        # COMPLEXITY-ROUTER-1: Enforce tool limit on fast path
+        if tool_limit and len(tool_log) >= tool_limit:
+            logger.info(f"Agent streaming hit tool limit ({tool_limit})")
+            result = AgentResult(
+                answer=full_answer, tool_calls=tool_log, iterations=iteration,
+                total_input_tokens=total_in, total_output_tokens=total_out,
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+            yield {"_agent_result": result}
+            return
+
         # Use non-streaming API to get tool_use blocks reliably
         # (streaming with tools is tricky — partial tool_use blocks)
+        _model = model_override or config.claude.model
+        _max_tok = max_tokens_override or 4096
         response = claude.messages.create(
-            model=config.claude.model,
-            max_tokens=4096,
+            model=_model,
+            max_tokens=_max_tok,
             system=system_prompt,
             messages=messages,
             tools=AGENT_TOOLS,
@@ -1874,7 +1890,7 @@ def run_agent_loop_streaming(
         total_out += response.usage.output_tokens
 
         # PHASE-4A: Log API cost
-        log_api_cost(config.claude.model, response.usage.input_tokens,
+        log_api_cost(_model, response.usage.input_tokens,
                      response.usage.output_tokens, source="agent_loop_streaming")
 
         if response.stop_reason == "end_turn":

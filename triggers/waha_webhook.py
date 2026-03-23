@@ -175,9 +175,11 @@ def _handle_director_question(question: str, msg_id: str, scored: dict = None,
             cap_slugs = [c.slug for c in _cap_plan.capabilities]
             logger.info(f"WA capability routing: mode={_cap_plan.mode}, caps={cap_slugs}")
             runner = CapabilityRunner()
+            _complexity = intent.get("complexity") if intent else None
             if _cap_plan.mode == "fast":
                 result = runner.run_single(_cap_plan.capabilities[0], question,
-                                           domain=_domain, mode=_mode)
+                                           domain=_domain, mode=_mode,
+                                           complexity=_complexity)
             else:
                 result = runner.run_multi(_cap_plan, question,
                                           domain=_domain, mode=_mode)
