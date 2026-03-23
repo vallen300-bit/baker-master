@@ -693,6 +693,14 @@ async function init() {
     refreshAlertBadge();
     setInterval(refreshAlertBadge, 5 * 60 * 1000);
 
+    // Auto-refresh Actions tab every 30s when visible
+    setInterval(function() {
+        var feedPanel = document.getElementById('panel-feed');
+        if (feedPanel && feedPanel.classList.contains('active')) {
+            loadMobileAlerts();
+        }
+    }, 30000);
+
     // REALTIME-PUSH-1: Request notification permission + connect live stream
     if (window.Notification && Notification.permission === 'default') {
         Notification.requestPermission();
@@ -2424,15 +2432,25 @@ function _pollDossierFromAlert(proposalId, alertId, card) {
             var idx = Math.min(Math.floor(pollCount / 5), labels.length - 1);
             textEl.textContent = ' ' + labels[idx];
         }
-        if (pollCount >= 60) {
+        if (pollCount >= 90) {
             clearInterval(interval);
-            if (textEl) textEl.textContent = ' Taking longer than expected...';
+            if (textEl) textEl.textContent = ' Timed out — check back later';
+            card.style.opacity = '1';
             return;
         }
         bakerFetch('/api/research-proposals/' + proposalId + '/status').then(function(r) {
             return r.ok ? r.json() : null;
         }).then(function(data) {
-            if (!data || data.status !== 'completed') return;
+            if (!data) return;
+            if (data.status === 'failed') {
+                clearInterval(interval);
+                card.style.opacity = '1';
+                card.style.borderLeftColor = '#ef4444';
+                var btns2 = card.querySelector('.alert-action-buttons');
+                if (btns2) btns2.innerHTML = '<div style="font-size:12px;color:#ef4444;">Failed — tap to retry</div>';
+                return;
+            }
+            if (data.status !== 'completed') return;
             clearInterval(interval);
             if (!card) return;
             card.style.opacity = '1';
