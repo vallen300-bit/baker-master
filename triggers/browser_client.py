@@ -220,6 +220,112 @@ class BrowserClient:
         }
 
     # -------------------------------------------------------
+    # Chrome CDP mode: via Tailscale Funnel to Mac Mini
+    # -------------------------------------------------------
+
+    def fetch_chrome(self, url: str, wait_seconds: int = 3) -> dict:
+        """Navigate Chrome to a URL via CDP and extract page content.
+
+        Uses the Chrome DevTools Protocol through Tailscale Funnel.
+        Chrome runs on Mac Mini with authenticated sessions (WhatsApp, Gmail, etc.)
+
+        Args:
+            url: URL to navigate to.
+            wait_seconds: Seconds to wait after navigation for page to load.
+
+        Returns:
+            {content: str, title: str, content_hash: str, error: str|None}
+        """
+        cdp_url = config.browser.chrome_cdp_url
+        if not cdp_url:
+            return {"content": "", "title": "", "content_hash": "", "error": "CHROME_CDP_URL not configured"}
+
+        cdp_base = cdp_url.rstrip("/")
+        self._rate_limit()
+
+        try:
+            # 1. Get list of tabs, find or create a worker tab
+            resp = self._httpx_client.get(f"{cdp_base}/json/list", timeout=10)
+            resp.raise_for_status()
+            tabs = resp.json()
+            page_tabs = [t for t in tabs if t.get("type") == "page"]
+
+            # Use existing tab or create new one
+            if page_tabs:
+                tab_ws = page_tabs[0].get("webSocketDebuggerUrl", "")
+                tab_id = page_tabs[0].get("id", "")
+            else:
+                return {"content": "", "title": "", "content_hash": "", "error": "No Chrome tabs available"}
+
+            # 2. Connect via WebSocket and navigate
+            import websocket as ws_lib
+            import json as _json
+
+            # Build WebSocket URL through the Funnel proxy
+            ws_url = f"{cdp_base.replace('https://', 'wss://').replace('http://', 'ws://')}/devtools/page/{tab_id}"
+
+            conn = ws_lib.create_connection(ws_url, timeout=15)
+
+            # Navigate
+            conn.send(_json.dumps({
+                "id": 1, "method": "Page.navigate",
+                "params": {"url": url}
+            }))
+            conn.recv()  # navigation response
+
+            # Wait for page load
+            time.sleep(wait_seconds)
+
+            # 3. Extract page content via DOM
+            conn.send(_json.dumps({
+                "id": 2, "method": "Runtime.evaluate",
+                "params": {"expression": "document.title"}
+            }))
+            title_resp = _json.loads(conn.recv())
+            title = title_resp.get("result", {}).get("result", {}).get("value", "")
+
+            conn.send(_json.dumps({
+                "id": 3, "method": "Runtime.evaluate",
+                "params": {"expression": "document.body.innerText"}
+            }))
+            body_resp = _json.loads(conn.recv())
+            content = body_resp.get("result", {}).get("result", {}).get("value", "")
+            content = content[:10000] if content else ""  # Cap at 10K
+
+            conn.close()
+
+            return {
+                "content": content,
+                "title": title,
+                "content_hash": self.content_hash(content),
+                "error": None,
+            }
+        except Exception as e:
+            logger.error(f"Chrome CDP fetch failed for {url}: {e}")
+            return {"content": "", "title": "", "content_hash": "", "error": str(e)}
+
+    def list_chrome_tabs(self) -> list:
+        """List open Chrome tabs via CDP.
+
+        Returns:
+            List of {id, title, url} dicts for page-type tabs.
+        """
+        cdp_url = config.browser.chrome_cdp_url
+        if not cdp_url:
+            return []
+        try:
+            resp = self._httpx_client.get(f"{cdp_url.rstrip('/')}/json/list", timeout=10)
+            resp.raise_for_status()
+            return [
+                {"id": t["id"], "title": t.get("title", ""), "url": t.get("url", "")}
+                for t in resp.json()
+                if t.get("type") == "page"
+            ]
+        except Exception as e:
+            logger.warning(f"Chrome tab list failed: {e}")
+            return []
+
+    # -------------------------------------------------------
     # Helpers
     # -------------------------------------------------------
 

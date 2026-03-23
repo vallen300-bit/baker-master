@@ -220,6 +220,7 @@ class RssConfig:
 class BrowserConfig:
     cloud_api_key: str = os.getenv("BROWSER_USE_API_KEY", "")
     cloud_base_url: str = "https://api.browser-use.com/api/v1"
+    chrome_cdp_url: str = os.getenv("CHROME_CDP_URL", "")  # Tailscale Funnel URL to Chrome DevTools
     simple_timeout: int = 30  # seconds for httpx fetch
     browser_timeout: int = 120  # seconds for browser-use cloud task
     max_retries: int = 2
