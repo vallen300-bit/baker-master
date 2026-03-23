@@ -845,6 +845,19 @@ async def health_check():
     except Exception:
         pass
 
+    # Tailscale diagnostic
+    ts_info = {}
+    try:
+        import subprocess
+        ts_bin = Path("./tailscaled").exists()
+        ts_info["binary_exists"] = ts_bin
+        if ts_bin:
+            r = subprocess.run(["./tailscale", "--socket=/tmp/tailscale/tailscaled.sock", "ip", "-4"],
+                               capture_output=True, text=True, timeout=5)
+            ts_info["ip"] = r.stdout.strip() if r.returncode == 0 else f"error:{r.stderr.strip()[:80]}"
+    except Exception as e:
+        ts_info["error"] = str(e)[:80]
+
     status = "healthy"
     if not db_ok or not scheduler_ok or sentinels_down > 0:
         status = "degraded"
@@ -856,6 +869,7 @@ async def health_check():
         "sentinels_healthy": sentinels_healthy,
         "sentinels_down": sentinels_down,
         "sentinels_down_list": sentinels_down_list,
+        "tailscale": ts_info,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
