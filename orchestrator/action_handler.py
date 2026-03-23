@@ -278,6 +278,8 @@ DEEP means:
 - Comparison, timeline reconstruction, or dispute analysis
 - Expected answer > 500 tokens
 - Director explicitly says "think about this", "analyze", "what should I do"
+- Browsing a website, purchasing, adding to cart, or any web interaction
+- "buy", "order", "purchase", "go to [website]", "check [website]", "find [product] on [site]"
 
 When uncertain, classify as DEEP. False-deep is expensive but safe. False-fast is dangerous.
 
