@@ -1300,6 +1300,20 @@ def handle_whatsapp_action(intent: dict, retriever, channel: str = "scan",
         )
     body = _generate_whatsapp_body(enhanced_request, retriever, resolved[0][0])
 
+    # SAFETY: Check if Director said "draft" — show preview instead of auto-sending
+    import re as _re
+    _original_q = (intent.get("original_question") or content_request or "").lower()
+    _is_draft = bool(_re.search(r'\bdraft\b|\bwrite me\b|\bcompose\b|\bprepare\b|\bjust.*text\b|\bdo not send\b', _original_q))
+
+    if _is_draft:
+        _log_action("handle_whatsapp_action:DRAFT_MODE", f"draft detected, NOT sending")
+        recipient_names = ", ".join(name for name, _ in resolved)
+        return (
+            f"Here's a draft WhatsApp message for **{recipient_names}**:\n\n"
+            f"---\n{body}\n---\n\n"
+            f"To send it, say: **Send this WhatsApp to {resolved[0][0]}**"
+        )
+
     results = []
     from outputs.whatsapp_sender import send_whatsapp
 

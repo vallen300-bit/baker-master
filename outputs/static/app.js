@@ -898,8 +898,9 @@ async function loadMorningBrief() {
                         draftBtn.textContent = channel === 'whatsapp' ? 'Draft WA' : 'Draft';
                         draftBtn.title = channel === 'whatsapp' ? 'Draft a WhatsApp message' : 'Draft an email';
                         draftBtn.addEventListener('click', function() {
+                            // Use "write me" phrasing so Baker treats as question (drafts), not action (auto-sends)
                             var prompt = channel === 'whatsapp'
-                                ? 'Draft a WhatsApp message to ' + sc.name + ' — casual check-in, keep it short'
+                                ? 'Write me a short casual WhatsApp check-in message for ' + sc.name + '. Just give me the text, do not send it.'
                                 : 'Draft an email to ' + sc.name;
                             switchTab('ask-baker');
                             // Auto-submit after tab switch so user sees fresh response, not stale
