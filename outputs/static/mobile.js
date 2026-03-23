@@ -796,6 +796,14 @@ function _buildAlertToolbar() {
     if (!toolbar) return;
     toolbar.textContent = '';
 
+    // Dossier Library link
+    var dossierLink = document.createElement('a');
+    dossierLink.href = '/dossiers?key=' + encodeURIComponent(BAKER.apiKey);
+    dossierLink.className = 'filter-chip';
+    dossierLink.style.cssText = 'text-decoration:none;background:#1e3a5f;color:#60a5fa;';
+    dossierLink.textContent = 'Dossiers';
+    toolbar.appendChild(dossierLink);
+
     // Tier filter chips
     var tiers = [
         { value: '', label: 'All' },

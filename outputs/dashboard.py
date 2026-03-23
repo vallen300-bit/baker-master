@@ -8197,6 +8197,68 @@ async def api_view_research_dossier(proposal_id: int, key: str = ""):
     return HTMLResponse(page)
 
 
+@app.get("/dossiers", tags=["research"])
+async def dossier_library_page(key: str = ""):
+    """Mobile-friendly dossier library — lists all completed dossiers."""
+    if key != _BAKER_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    import psycopg2.extras
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=500, detail="DB unavailable")
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT id, subject_name, status, completed_at
+            FROM research_proposals
+            WHERE status = 'completed' AND deliverable_summary IS NOT NULL
+            ORDER BY completed_at DESC
+            LIMIT 50
+        """)
+        rows = cur.fetchall()
+        cur.close()
+    finally:
+        store._put_conn(conn)
+
+    cards_html = ""
+    for r in rows:
+        completed = r["completed_at"].strftime("%d %b %H:%M") if r.get("completed_at") else ""
+        cards_html += f"""
+        <a class="dossier-card" href="/api/research-proposals/{r['id']}/view?key={key}">
+            <div class="dossier-name">{r['subject_name']}</div>
+            <div class="dossier-date">{completed}</div>
+        </a>"""
+
+    page = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dossier Library — Baker</title>
+<style>
+  body {{ font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 0;
+         background: #111; color: #e0e0e0; }}
+  .header {{ padding: 16px; font-size: 20px; font-weight: 700; border-bottom: 1px solid #333;
+             position: sticky; top: 0; background: #111; z-index: 10; }}
+  .header a {{ color: #60a5fa; text-decoration: none; font-size: 14px; float: right; margin-top: 4px; }}
+  .dossier-card {{ display: block; padding: 14px 16px; border-bottom: 1px solid #222;
+                   text-decoration: none; color: inherit; }}
+  .dossier-card:active {{ background: #1a1a1a; }}
+  .dossier-name {{ font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 4px; }}
+  .dossier-date {{ font-size: 12px; color: #888; }}
+  .empty {{ padding: 40px 16px; text-align: center; color: #666; }}
+</style>
+</head>
+<body>
+<div class="header">Dossier Library <a href="/mobile">Back to Baker</a></div>
+{cards_html if cards_html else '<div class="empty">No completed dossiers yet</div>'}
+</body>
+</html>"""
+    from starlette.responses import HTMLResponse
+    return HTMLResponse(page)
+
+
 # ============================================================
 # CLI runner
 # ============================================================
