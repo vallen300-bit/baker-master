@@ -852,9 +852,23 @@ async def health_check():
         ts_bin = Path("./tailscaled").exists()
         ts_info["binary_exists"] = ts_bin
         if ts_bin:
+            # Check if tailscaled process is running
+            r_ps = subprocess.run(["pgrep", "-f", "tailscaled"], capture_output=True, text=True, timeout=5)
+            ts_info["daemon_running"] = r_ps.returncode == 0
+            ts_info["daemon_pid"] = r_ps.stdout.strip()[:20] if r_ps.returncode == 0 else None
+            # Check IP
             r = subprocess.run(["./tailscale", "--socket=/tmp/tailscale/tailscaled.sock", "ip", "-4"],
                                capture_output=True, text=True, timeout=5)
             ts_info["ip"] = r.stdout.strip() if r.returncode == 0 else f"error:{r.stderr.strip()[:80]}"
+            # Check status
+            r_st = subprocess.run(["./tailscale", "--socket=/tmp/tailscale/tailscaled.sock", "status", "--json"],
+                                  capture_output=True, text=True, timeout=5)
+            if r_st.returncode == 0:
+                import json as _json
+                st = _json.loads(r_st.stdout)
+                ts_info["backend_state"] = st.get("BackendState", "?")
+            else:
+                ts_info["status_error"] = r_st.stderr.strip()[:80]
     except Exception as e:
         ts_info["error"] = str(e)[:80]
 
