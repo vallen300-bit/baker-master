@@ -272,3 +272,20 @@ Fixes shipped:
 - **Whoop sentinel** — `report_failure()` on client init error (was invisible to sentinel_health)
 
 **Blocked:** Dropbox + Whoop need valid OAuth credentials from Director.
+
+## Sessions 17-28 — One-liner Summaries (archived from CLAUDE.md)
+
+| # | Date | Key deliverables |
+|---|------|-----------------|
+| 17 | Mar 10 | SPECIALIST-UPGRADE-1A+1B: full document storage, Haiku classify+extract pipeline, email attachments, shared baker_insights, search_documents tool #12 |
+| 18 | Mar 10 | Backfill completion (1,354 docs), PM-OOM-1, Dropbox trigger fix, handoff cleanup |
+| 19 | Mar 11 | **Dashboard UX overhaul (19 commits)**: ClaimsMax banking design, Cowork-style chat, per-matter scoping, WhatsApp send/body/intent fixes, contact disambiguation, auto-contacts from WA, action memory logging |
+| 20 | Mar 11 | **20 deliverables**: DEEP-MODE-1+2 (dashboard=max intelligence + cross-session memory), SPECIALIST-DEEP-1, INTELLIGENCE-GAP-1, CHANNEL-TRUST-1, DOC-TRIAGE+RECLASSIFY (42%→0.9% "other"), EMAIL-ATTACH-FIX-1, artifact panel, follow-up suggestions, DASHBOARD-STATS-1, Baker Data tab |
+| 21 | Mar 13 | **10/10 sentinels HEALTHY**: missing `import re`, datetime hoist, circuit breaker reset, auto-matter assignment, last_contact_date backfill, cost tracking verified (EUR 8.98/day) |
+| 22 | Mar 14 | Calendar cascade fix, doc pipeline re-queuing fix, briefing data bugs, DB cleanup (9,636 junk alerts). GCal cleanup (988 Baker Prep events). |
+| 23 | Mar 14 | **EXTRACTION-VALIDATION-1**: 14 Pydantic models, validate_extraction(), amount coercion. **TRAVEL-FIX-1+2**: route card renderer. **TRIP-INTELLIGENCE-1 brief** designed with Director. |
+| 24 | Mar 14-16 | **Massive session (12 commits).** TRIP-INTELLIGENCE-1 Batch 0+1+2. INTERACTION-PIPELINE-1 (2,936+ interactions). WAHA contact sync (512 contacts). Python 3.12 regex fix. |
+| 25 | Mar 17-18 | **11 commits.** MOBILE-WEB-1 (/mobile, PWA, dark mode, camera+Vision). ALERT-DEDUP-2. CONTACT-ENRICH-1. Alert cleanup (297→113). Obligation triage (503→409). |
+| 26 | Mar 18 | **35 commits, record session.** DEDUP-3, B1-B3, F1-F2+F5+F7, C2, 13→17 agent tools, G6 data freshness, Backlog v1 (48 items). |
+| 27 | Mar 19 | **9 features.** B1 backfill, ALERT-BATCH-1, A6 feedback, F3 cadence tracker, G5 health watchdog, A8 insight-to-task, D6 unified search, F4 financial signals, C6 location backfill. |
+| 28 | Mar 19-20 | **10 features.** AUTONOMOUS-CHAINS-1 Batch 0, C1 LinkedIn enrichment (Netrows), B4 memory consolidation, F6 trend detection, VAPID keys, COST-OPT-1 verified. Backlog: 42/48 (88%). |

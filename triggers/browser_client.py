@@ -1,14 +1,18 @@
 """
-Sentinel AI — Browser Client (BROWSER-1)
-Dual-mode web content fetcher:
+Sentinel AI — Browser Client (BROWSER-1 + Phase 3)
+Dual-mode web content fetcher + interactive browser actions:
   - Simple mode: httpx + BeautifulSoup for static pages (free, fast)
   - Browser mode: Browser-Use Cloud API for JS-rendered / interactive pages
+  - Chrome CDP mode: read + interact via Tailscale Funnel to Director's machine
 
 Singleton pattern matching rss_client.py / todoist_client.py.
 """
+import base64
 import hashlib
+import json as _json
 import logging
 import time
+from contextlib import contextmanager
 from typing import Optional
 
 import httpx
@@ -223,6 +227,67 @@ class BrowserClient:
     # Chrome CDP mode: via Tailscale Funnel to Mac Mini
     # -------------------------------------------------------
 
+    def _get_cdp_base(self) -> Optional[str]:
+        """Return the CDP base URL or None if not configured."""
+        cdp_url = config.browser.chrome_cdp_url
+        return cdp_url.rstrip("/") if cdp_url else None
+
+    def _get_first_tab_id(self, cdp_base: str) -> Optional[str]:
+        """Get the ID of the first page-type tab."""
+        resp = self._httpx_client.get(f"{cdp_base}/json/list", timeout=10)
+        resp.raise_for_status()
+        tabs = resp.json()
+        page_tabs = [t for t in tabs if t.get("type") == "page"]
+        return page_tabs[0]["id"] if page_tabs else None
+
+    @contextmanager
+    def _cdp_connection(self, tab_id: str = None):
+        """Context manager for a CDP WebSocket connection.
+
+        Yields (conn, msg_id_counter) where conn is the WebSocket and
+        msg_id_counter is a mutable list [next_id] for tracking CDP message IDs.
+        """
+        import websocket as ws_lib
+
+        cdp_base = self._get_cdp_base()
+        if not cdp_base:
+            raise RuntimeError("CHROME_CDP_URL not configured")
+
+        if not tab_id:
+            tab_id = self._get_first_tab_id(cdp_base)
+        if not tab_id:
+            raise RuntimeError("No Chrome tabs available")
+
+        ws_url = f"{cdp_base.replace('https://', 'wss://').replace('http://', 'ws://')}/devtools/page/{tab_id}"
+        conn = ws_lib.create_connection(ws_url, timeout=15)
+        msg_id = [1]  # mutable counter
+
+        try:
+            yield conn, msg_id
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def _cdp_send(self, conn, msg_id: list, method: str, params: dict = None) -> dict:
+        """Send a CDP command and return the response."""
+        cmd = {"id": msg_id[0], "method": method}
+        if params:
+            cmd["params"] = params
+        msg_id[0] += 1
+        conn.send(_json.dumps(cmd))
+        return _json.loads(conn.recv())
+
+    def _cdp_evaluate(self, conn, msg_id: list, expression: str) -> dict:
+        """Evaluate JS expression via CDP and return the full result object."""
+        resp = self._cdp_send(conn, msg_id, "Runtime.evaluate", {
+            "expression": expression,
+            "returnByValue": True,
+            "awaitPromise": True,
+        })
+        return resp.get("result", {}).get("result", {})
+
     def fetch_chrome(self, url: str, wait_seconds: int = 3) -> dict:
         """Navigate Chrome to a URL via CDP and extract page content.
 
@@ -236,63 +301,25 @@ class BrowserClient:
         Returns:
             {content: str, title: str, content_hash: str, error: str|None}
         """
-        cdp_url = config.browser.chrome_cdp_url
-        if not cdp_url:
+        cdp_base = self._get_cdp_base()
+        if not cdp_base:
             return {"content": "", "title": "", "content_hash": "", "error": "CHROME_CDP_URL not configured"}
 
-        cdp_base = cdp_url.rstrip("/")
         self._rate_limit()
 
         try:
-            # 1. Get list of tabs, find or create a worker tab
-            resp = self._httpx_client.get(f"{cdp_base}/json/list", timeout=10)
-            resp.raise_for_status()
-            tabs = resp.json()
-            page_tabs = [t for t in tabs if t.get("type") == "page"]
+            with self._cdp_connection() as (conn, msg_id):
+                # Navigate
+                self._cdp_send(conn, msg_id, "Page.navigate", {"url": url})
+                time.sleep(wait_seconds)
 
-            # Use existing tab or create new one
-            if page_tabs:
-                tab_ws = page_tabs[0].get("webSocketDebuggerUrl", "")
-                tab_id = page_tabs[0].get("id", "")
-            else:
-                return {"content": "", "title": "", "content_hash": "", "error": "No Chrome tabs available"}
+                # Extract page content
+                title_result = self._cdp_evaluate(conn, msg_id, "document.title")
+                title = title_result.get("value", "")
 
-            # 2. Connect via WebSocket and navigate
-            import websocket as ws_lib
-            import json as _json
-
-            # Build WebSocket URL through the Funnel proxy
-            ws_url = f"{cdp_base.replace('https://', 'wss://').replace('http://', 'ws://')}/devtools/page/{tab_id}"
-
-            conn = ws_lib.create_connection(ws_url, timeout=15)
-
-            # Navigate
-            conn.send(_json.dumps({
-                "id": 1, "method": "Page.navigate",
-                "params": {"url": url}
-            }))
-            conn.recv()  # navigation response
-
-            # Wait for page load
-            time.sleep(wait_seconds)
-
-            # 3. Extract page content via DOM
-            conn.send(_json.dumps({
-                "id": 2, "method": "Runtime.evaluate",
-                "params": {"expression": "document.title"}
-            }))
-            title_resp = _json.loads(conn.recv())
-            title = title_resp.get("result", {}).get("result", {}).get("value", "")
-
-            conn.send(_json.dumps({
-                "id": 3, "method": "Runtime.evaluate",
-                "params": {"expression": "document.body.innerText"}
-            }))
-            body_resp = _json.loads(conn.recv())
-            content = body_resp.get("result", {}).get("result", {}).get("value", "")
-            content = content[:10000] if content else ""  # Cap at 10K
-
-            conn.close()
+                body_result = self._cdp_evaluate(conn, msg_id, "document.body.innerText")
+                content = body_result.get("value", "")
+                content = content[:10000] if content else ""
 
             return {
                 "content": content,
@@ -310,11 +337,11 @@ class BrowserClient:
         Returns:
             List of {id, title, url} dicts for page-type tabs.
         """
-        cdp_url = config.browser.chrome_cdp_url
-        if not cdp_url:
+        cdp_base = self._get_cdp_base()
+        if not cdp_base:
             return []
         try:
-            resp = self._httpx_client.get(f"{cdp_url.rstrip('/')}/json/list", timeout=10)
+            resp = self._httpx_client.get(f"{cdp_base}/json/list", timeout=10)
             resp.raise_for_status()
             return [
                 {"id": t["id"], "title": t.get("title", ""), "url": t.get("url", "")}
@@ -324,6 +351,222 @@ class BrowserClient:
         except Exception as e:
             logger.warning(f"Chrome tab list failed: {e}")
             return []
+
+    # -------------------------------------------------------
+    # Chrome CDP: Interactive actions (Phase 3)
+    # -------------------------------------------------------
+
+    def take_screenshot(self, format: str = "png", quality: int = 80) -> dict:
+        """Capture a screenshot of the current Chrome page.
+
+        Args:
+            format: 'png' or 'jpeg'
+            quality: JPEG quality (1-100), ignored for PNG
+
+        Returns:
+            {data_b64: str, format: str, error: str|None}
+        """
+        try:
+            with self._cdp_connection() as (conn, msg_id):
+                params = {"format": format}
+                if format == "jpeg":
+                    params["quality"] = quality
+                resp = self._cdp_send(conn, msg_id, "Page.captureScreenshot", params)
+                data = resp.get("result", {}).get("data", "")
+                if not data:
+                    return {"data_b64": "", "format": format, "error": "No screenshot data returned"}
+                return {"data_b64": data, "format": format, "error": None}
+        except Exception as e:
+            logger.error(f"take_screenshot failed: {e}")
+            return {"data_b64": "", "format": format, "error": str(e)}
+
+    def click_element(self, selector: str) -> dict:
+        """Click an element on the current page by CSS selector.
+
+        Uses JS-based click (element.click()) which works for most elements.
+
+        Args:
+            selector: CSS selector (e.g. 'button.add-to-cart', '#submit-btn')
+
+        Returns:
+            {success: bool, element_text: str, error: str|None}
+        """
+        self._rate_limit()
+        try:
+            with self._cdp_connection() as (conn, msg_id):
+                js = f"""
+                (() => {{
+                    const el = document.querySelector({_json.dumps(selector)});
+                    if (!el) return {{success: false, error: 'Element not found', text: ''}};
+                    const text = el.innerText || el.textContent || el.value || '';
+                    el.click();
+                    return {{success: true, error: null, text: text.substring(0, 200)}};
+                }})()
+                """
+                result = self._cdp_evaluate(conn, msg_id, js)
+                val = result.get("value", {})
+                if isinstance(val, dict):
+                    return {
+                        "success": val.get("success", False),
+                        "element_text": val.get("text", ""),
+                        "error": val.get("error"),
+                    }
+                return {"success": False, "element_text": "", "error": "Unexpected response"}
+        except Exception as e:
+            logger.error(f"click_element failed: {e}")
+            return {"success": False, "element_text": "", "error": str(e)}
+
+    def click_by_text(self, text: str, tag: str = None) -> dict:
+        """Click an element by its visible text content.
+
+        Searches all clickable elements (a, button, input[type=submit], [role=button])
+        for text match. Optional tag filter.
+
+        Args:
+            text: Visible text to match (case-insensitive substring)
+            tag: Optional HTML tag to restrict search (e.g. 'button', 'a')
+
+        Returns:
+            {success: bool, element_text: str, selector: str, error: str|None}
+        """
+        self._rate_limit()
+        try:
+            with self._cdp_connection() as (conn, msg_id):
+                js = f"""
+                (() => {{
+                    const searchText = {_json.dumps(text)}.toLowerCase();
+                    const tagFilter = {_json.dumps(tag or '')}.toLowerCase();
+                    const candidates = document.querySelectorAll(
+                        'a, button, input[type="submit"], input[type="button"], [role="button"], [onclick]'
+                    );
+                    for (const el of candidates) {{
+                        if (tagFilter && el.tagName.toLowerCase() !== tagFilter) continue;
+                        const elText = (el.innerText || el.textContent || el.value || '').trim();
+                        if (elText.toLowerCase().includes(searchText)) {{
+                            el.click();
+                            return {{
+                                success: true, error: null,
+                                text: elText.substring(0, 200),
+                                selector: el.tagName.toLowerCase() + (el.id ? '#' + el.id : '') + (el.className ? '.' + el.className.split(' ')[0] : '')
+                            }};
+                        }}
+                    }}
+                    return {{success: false, error: 'No clickable element found with text: ' + searchText, text: '', selector: ''}};
+                }})()
+                """
+                result = self._cdp_evaluate(conn, msg_id, js)
+                val = result.get("value", {})
+                if isinstance(val, dict):
+                    return {
+                        "success": val.get("success", False),
+                        "element_text": val.get("text", ""),
+                        "selector": val.get("selector", ""),
+                        "error": val.get("error"),
+                    }
+                return {"success": False, "element_text": "", "selector": "", "error": "Unexpected response"}
+        except Exception as e:
+            logger.error(f"click_by_text failed: {e}")
+            return {"success": False, "element_text": "", "selector": "", "error": str(e)}
+
+    def fill_field(self, selector: str, value: str) -> dict:
+        """Fill a form field on the current page.
+
+        Sets value and dispatches input/change events for reactivity.
+
+        Args:
+            selector: CSS selector for the input/textarea element
+            value: Text value to set
+
+        Returns:
+            {success: bool, previous_value: str, error: str|None}
+        """
+        self._rate_limit()
+        try:
+            with self._cdp_connection() as (conn, msg_id):
+                js = f"""
+                (() => {{
+                    const el = document.querySelector({_json.dumps(selector)});
+                    if (!el) return {{success: false, prev: '', error: 'Element not found'}};
+                    const prev = el.value || '';
+                    // Use native input setter to trigger React/Vue reactivity
+                    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                        window.HTMLInputElement.prototype, 'value'
+                    )?.set || Object.getOwnPropertyDescriptor(
+                        window.HTMLTextAreaElement.prototype, 'value'
+                    )?.set;
+                    if (nativeInputValueSetter) {{
+                        nativeInputValueSetter.call(el, {_json.dumps(value)});
+                    }} else {{
+                        el.value = {_json.dumps(value)};
+                    }}
+                    el.dispatchEvent(new Event('input', {{bubbles: true}}));
+                    el.dispatchEvent(new Event('change', {{bubbles: true}}));
+                    return {{success: true, prev: prev.substring(0, 200), error: null}};
+                }})()
+                """
+                result = self._cdp_evaluate(conn, msg_id, js)
+                val = result.get("value", {})
+                if isinstance(val, dict):
+                    return {
+                        "success": val.get("success", False),
+                        "previous_value": val.get("prev", ""),
+                        "error": val.get("error"),
+                    }
+                return {"success": False, "previous_value": "", "error": "Unexpected response"}
+        except Exception as e:
+            logger.error(f"fill_field failed: {e}")
+            return {"success": False, "previous_value": "", "error": str(e)}
+
+    def get_page_info(self) -> dict:
+        """Get current page URL, title, and form elements summary.
+
+        Returns:
+            {url: str, title: str, forms: list, clickable: list, error: str|None}
+        """
+        try:
+            with self._cdp_connection() as (conn, msg_id):
+                js = """
+                (() => {
+                    const forms = [];
+                    document.querySelectorAll('input, textarea, select').forEach(el => {
+                        if (el.type === 'hidden') return;
+                        forms.push({
+                            tag: el.tagName.toLowerCase(),
+                            type: el.type || '',
+                            name: el.name || '',
+                            id: el.id || '',
+                            placeholder: el.placeholder || '',
+                            value: (el.value || '').substring(0, 50)
+                        });
+                    });
+                    const clickable = [];
+                    document.querySelectorAll('a, button, input[type="submit"], [role="button"]').forEach(el => {
+                        const text = (el.innerText || el.textContent || el.value || '').trim();
+                        if (!text || text.length > 100) return;
+                        clickable.push({
+                            tag: el.tagName.toLowerCase(),
+                            text: text.substring(0, 100),
+                            href: el.href || '',
+                            id: el.id || ''
+                        });
+                    });
+                    return {
+                        url: window.location.href,
+                        title: document.title,
+                        forms: forms.slice(0, 30),
+                        clickable: clickable.slice(0, 50)
+                    };
+                })()
+                """
+                result = self._cdp_evaluate(conn, msg_id, js)
+                val = result.get("value", {})
+                if isinstance(val, dict):
+                    val["error"] = None
+                    return val
+                return {"url": "", "title": "", "forms": [], "clickable": [], "error": "Unexpected response"}
+        except Exception as e:
+            logger.error(f"get_page_info failed: {e}")
+            return {"url": "", "title": "", "forms": [], "clickable": [], "error": str(e)}
 
     # -------------------------------------------------------
     # Helpers

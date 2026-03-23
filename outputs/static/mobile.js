@@ -993,7 +993,39 @@ function _createAlertCard(alert) {
     btnRow.className = 'alert-action-buttons triage-buttons';
     btnRow.style.marginTop = '8px';
 
-    if (alert.source === 'research' && sa.research_proposal_id) {
+    if (alert.source === 'browser_transaction' && sa.action_id) {
+        // Browser action: screenshot preview + Confirm / Cancel
+        if (sa.action_id) {
+            var previewBtn = document.createElement('button');
+            previewBtn.className = 'triage-btn';
+            previewBtn.textContent = 'Preview';
+            previewBtn.style.background = '#444';
+            previewBtn.style.color = '#fff';
+            previewBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                _showBrowserActionPreview(sa.action_id);
+            });
+            btnRow.appendChild(previewBtn);
+        }
+
+        var confirmBtn = document.createElement('button');
+        confirmBtn.className = 'triage-btn approve';
+        confirmBtn.textContent = 'Confirm';
+        confirmBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            _confirmBrowserAction(sa.action_id, alert.id, card);
+        });
+        btnRow.appendChild(confirmBtn);
+
+        var cancelBtn = document.createElement('button');
+        cancelBtn.className = 'triage-btn dismiss';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            _cancelBrowserAction(sa.action_id, alert.id, card);
+        });
+        btnRow.appendChild(cancelBtn);
+    } else if (alert.source === 'research' && sa.research_proposal_id) {
         // Research alert: Run Dossier + Skip
         var runBtn = document.createElement('button');
         runBtn.className = 'triage-btn approve';
@@ -2398,6 +2430,147 @@ function _pollDossierFromAlert(proposalId, alertId, card) {
             bakerFetch('/api/alerts/' + alertId + '/resolve', { method: 'POST' }).catch(function() {});
         }).catch(function() {});
     }, 5000);
+}
+
+// ═══ BROWSER ACTION HELPERS (BROWSER-AGENT-1 Phase 3) ═══
+
+function _confirmBrowserAction(actionId, alertId, card) {
+    var btns = card.querySelector('.alert-action-buttons');
+    if (btns) {
+        btns.innerHTML = '<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--green);font-weight:500;">' +
+            '<span class="triage-spinner"></span> Executing action...</div>';
+    }
+    card.style.opacity = '0.85';
+
+    bakerFetch('/api/browser/confirm/' + actionId, {
+        method: 'POST',
+    }).then(function(r) {
+        if (!r.ok) throw new Error('Confirm failed');
+        return r.json();
+    }).then(function(data) {
+        card.style.opacity = '1';
+        card.style.borderLeftColor = '#22c55e';
+        if (btns) btns.innerHTML = '<div style="font-size:12px;color:var(--green);">Action executed</div>';
+        _mobileAlerts = _mobileAlerts.filter(function(a) { return a.id !== alertId; });
+        bakerFetch('/api/alerts/' + alertId + '/resolve', { method: 'POST' }).catch(function() {});
+        setTimeout(function() {
+            card.style.transition = 'opacity 0.3s';
+            card.style.opacity = '0';
+            setTimeout(function() { card.remove(); }, 300);
+        }, 2000);
+        refreshAlertBadge();
+    }).catch(function(e) {
+        console.error('Browser action confirm failed:', e);
+        if (btns) btns.innerHTML = '<div style="font-size:12px;color:var(--red);">Confirm failed — may have expired</div>';
+    });
+}
+
+function _cancelBrowserAction(actionId, alertId, card) {
+    card.style.transition = 'opacity 0.3s, transform 0.3s';
+    card.style.opacity = '0';
+    card.style.transform = 'translateX(-100%)';
+    setTimeout(function() { card.remove(); }, 300);
+    _mobileAlerts = _mobileAlerts.filter(function(a) { return a.id !== alertId; });
+
+    bakerFetch('/api/browser/cancel/' + actionId, {
+        method: 'POST',
+    }).then(function() {
+        refreshAlertBadge();
+    }).catch(function() {});
+}
+
+function _showBrowserActionPreview(actionId) {
+    // Fetch the action with screenshot and show in a modal overlay
+    bakerFetch('/api/browser/actions/' + actionId).then(function(r) {
+        return r.ok ? r.json() : null;
+    }).then(function(data) {
+        if (!data || !data.action) return;
+        var action = data.action;
+
+        // Create overlay
+        var overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px;';
+
+        // Close on tap outside
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) overlay.remove();
+        });
+
+        var content = document.createElement('div');
+        content.style.cssText = 'max-width:400px;width:100%;background:var(--card-bg,#1a1a1a);border-radius:12px;overflow:hidden;';
+
+        // Header
+        var header = document.createElement('div');
+        header.style.cssText = 'padding:12px 16px;font-weight:600;font-size:14px;border-bottom:1px solid rgba(255,255,255,0.1);';
+        header.textContent = 'Browser Action Preview';
+        content.appendChild(header);
+
+        // Screenshot
+        if (action.screenshot_b64) {
+            var img = document.createElement('img');
+            img.src = 'data:image/jpeg;base64,' + action.screenshot_b64;
+            img.style.cssText = 'width:100%;max-height:300px;object-fit:contain;';
+            content.appendChild(img);
+        }
+
+        // Action info
+        var info = document.createElement('div');
+        info.style.cssText = 'padding:12px 16px;font-size:13px;line-height:1.5;';
+        info.innerHTML = '<div><strong>Action:</strong> ' + _esc(action.action_type || '') + '</div>' +
+            '<div><strong>Page:</strong> ' + _esc((action.url || '').substring(0, 60)) + '</div>' +
+            (action.target_selector ? '<div><strong>Target:</strong> ' + _esc(action.target_selector) + '</div>' : '') +
+            (action.target_text ? '<div><strong>Target text:</strong> ' + _esc(action.target_text) + '</div>' : '') +
+            (action.fill_value ? '<div><strong>Value:</strong> ' + _esc(action.fill_value) + '</div>' : '') +
+            '<div style="margin-top:8px;color:rgba(255,255,255,0.6);font-size:12px;">' + _esc(action.description || '') + '</div>';
+        content.appendChild(info);
+
+        // Close button
+        var closeBtn = document.createElement('button');
+        closeBtn.textContent = 'Close';
+        closeBtn.style.cssText = 'width:calc(100% - 32px);margin:0 16px 16px;padding:10px;border:none;border-radius:8px;background:rgba(255,255,255,0.1);color:white;font-size:14px;cursor:pointer;';
+        closeBtn.addEventListener('click', function() { overlay.remove(); });
+        content.appendChild(closeBtn);
+
+        overlay.appendChild(content);
+        document.body.appendChild(overlay);
+    }).catch(function(e) {
+        console.error('Preview load failed:', e);
+    });
+}
+
+function _confirmBrowserAction(actionId, alertId, card) {
+    var btn = card.querySelector('.triage-btn.approve');
+    if (btn) { btn.disabled = true; btn.textContent = 'Executing...'; }
+
+    bakerFetch('/api/browser/confirm/' + actionId, { method: 'POST' })
+        .then(function(r) { return r.ok ? r.json() : Promise.reject(r.statusText); })
+        .then(function(data) {
+            if (btn) btn.textContent = 'Done';
+            card.style.opacity = '0.5';
+            setTimeout(function() { card.remove(); }, 1500);
+        })
+        .catch(function(e) {
+            console.error('Confirm browser action failed:', e);
+            if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; }
+        });
+}
+
+function _cancelBrowserAction(actionId, alertId, card) {
+    bakerFetch('/api/browser/cancel/' + actionId, { method: 'POST' })
+        .then(function(r) { return r.ok ? r.json() : Promise.reject(r.statusText); })
+        .then(function() {
+            card.style.opacity = '0';
+            setTimeout(function() { card.remove(); }, 300);
+        })
+        .catch(function(e) {
+            console.error('Cancel browser action failed:', e);
+        });
+}
+
+function _esc(str) {
+    var div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
 }
 
 // ═══ Baker 3.0: DIGEST TAB ═══

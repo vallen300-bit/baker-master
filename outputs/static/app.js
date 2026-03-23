@@ -1617,9 +1617,17 @@ function renderAlertCard(alert, expanded) {
 
     // Footer
     html += '<div class="card-footer">';
-    html += '<button class="footer-btn primary" onclick="openMatterScan(\'' + esc(alert.matter_slug || '') + '\')">Open in Scan</button>';
-    html += '<button class="footer-resolve" data-alert="' + aid + '" onclick="resolveAlert(' + alert.id + ',this)">Resolve</button>';
-    html += '<button class="footer-dismiss" data-alert="' + aid + '" onclick="dismissAlert(' + alert.id + ',this)">Dismiss</button>';
+    var _sa2 = alert.structured_actions || {};
+    if (typeof _sa2 === 'string') { try { _sa2 = JSON.parse(_sa2); } catch(e) { _sa2 = {}; } }
+    if (alert.source === 'browser_transaction' && _sa2.action_id) {
+        html += '<button class="footer-btn" style="background:#334155;color:#94a3b8;" onclick="previewBrowserAction(' + _sa2.action_id + ')">Preview</button>';
+        html += '<button class="footer-btn primary" style="background:#22c55e;color:#fff;" onclick="confirmBrowserAction(' + _sa2.action_id + ',' + alert.id + ',this)">Confirm</button>';
+        html += '<button class="footer-dismiss" data-alert="' + aid + '" onclick="cancelBrowserAction(' + _sa2.action_id + ',' + alert.id + ',this)">Cancel</button>';
+    } else {
+        html += '<button class="footer-btn primary" onclick="openMatterScan(\'' + esc(alert.matter_slug || '') + '\')">Open in Scan</button>';
+        html += '<button class="footer-resolve" data-alert="' + aid + '" onclick="resolveAlert(' + alert.id + ',this)">Resolve</button>';
+        html += '<button class="footer-dismiss" data-alert="' + aid + '" onclick="dismissAlert(' + alert.id + ',this)">Dismiss</button>';
+    }
     html += '</div></div>';
 
     return html;
@@ -1854,6 +1862,82 @@ async function dismissAlert(alertId, btnEl) {
         var card = btnEl.closest('.card');
         if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
     } catch (e) { console.error('dismissAlert failed:', e); }
+}
+
+// BROWSER-AGENT-1 Phase 3: Browser action confirmation
+async function confirmBrowserAction(actionId, alertId, btnEl) {
+    var card = btnEl.closest('.card');
+    if (card) {
+        var footer = card.querySelector('.card-footer');
+        if (footer) footer.innerHTML = '<span style="color:#22c55e;font-size:12px;">Executing action...</span>';
+    }
+    try {
+        await bakerFetch('/api/browser/confirm/' + actionId, { method: 'POST' });
+        if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 2000); }
+    } catch (e) {
+        console.error('confirmBrowserAction failed:', e);
+        if (card) {
+            var footer = card.querySelector('.card-footer');
+            if (footer) footer.innerHTML = '<span style="color:#ef4444;font-size:12px;">Failed — may have expired</span>';
+        }
+    }
+}
+
+async function cancelBrowserAction(actionId, alertId, btnEl) {
+    try {
+        await bakerFetch('/api/browser/cancel/' + actionId, { method: 'POST' });
+        var card = btnEl.closest('.card');
+        if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
+    } catch (e) { console.error('cancelBrowserAction failed:', e); }
+}
+
+async function previewBrowserAction(actionId) {
+    try {
+        var resp = await bakerFetch('/api/browser/actions/' + actionId);
+        if (!resp.ok) return;
+        var data = await resp.json();
+        var action = data.action;
+        if (!action) return;
+
+        // Simple modal overlay
+        var overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+        overlay.onclick = function(e) { if (e.target === overlay) overlay.remove(); };
+
+        var modal = document.createElement('div');
+        modal.style.cssText = 'background:#1e293b;border-radius:12px;max-width:600px;width:90%;max-height:80vh;overflow:auto;padding:20px;';
+
+        var title = document.createElement('h3');
+        title.textContent = 'Browser Action Preview';
+        title.style.cssText = 'margin:0 0 12px;font-size:16px;';
+        modal.appendChild(title);
+
+        if (action.screenshot_b64) {
+            var img = document.createElement('img');
+            img.src = 'data:image/jpeg;base64,' + action.screenshot_b64;
+            img.style.cssText = 'width:100%;border-radius:8px;margin-bottom:12px;';
+            modal.appendChild(img);
+        }
+
+        var info = document.createElement('div');
+        info.style.cssText = 'font-size:13px;line-height:1.6;';
+        info.innerHTML = '<div><strong>Action:</strong> ' + esc(action.action_type || '') + '</div>' +
+            '<div><strong>Page:</strong> ' + esc((action.url || '').substring(0, 80)) + '</div>' +
+            (action.target_selector ? '<div><strong>Selector:</strong> ' + esc(action.target_selector) + '</div>' : '') +
+            (action.target_text ? '<div><strong>Target:</strong> ' + esc(action.target_text) + '</div>' : '') +
+            (action.fill_value ? '<div><strong>Value:</strong> ' + esc(action.fill_value) + '</div>' : '') +
+            '<div style="margin-top:8px;opacity:0.7;">' + esc(action.description || '') + '</div>';
+        modal.appendChild(info);
+
+        var closeBtn = document.createElement('button');
+        closeBtn.textContent = 'Close';
+        closeBtn.style.cssText = 'margin-top:16px;padding:8px 24px;border:none;border-radius:6px;background:#334155;color:#fff;cursor:pointer;font-size:13px;';
+        closeBtn.onclick = function() { overlay.remove(); };
+        modal.appendChild(closeBtn);
+
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+    } catch (e) { console.error('previewBrowserAction failed:', e); }
 }
 
 /**

@@ -7593,6 +7593,197 @@ async def admin_run_obligation_generator(background_tasks: BackgroundTasks):
 
 
 # ============================================================
+# BROWSER-AGENT-1 Phase 3: Browser Action Confirmation API
+# ============================================================
+
+@app.get("/api/browser/actions", tags=["browser"], dependencies=[Depends(verify_api_key)])
+async def api_get_browser_actions():
+    """Get pending browser actions awaiting Director confirmation."""
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    actions = store.get_pending_browser_actions()
+    # Strip screenshot_b64 from list view (it's large)
+    for a in actions:
+        a.pop("screenshot_b64", None)
+        # Serialize datetimes
+        for k in ("created_at", "expires_at", "confirmed_at", "completed_at"):
+            if k in a and a[k]:
+                a[k] = a[k].isoformat() if hasattr(a[k], "isoformat") else str(a[k])
+    return {"actions": actions, "count": len(actions)}
+
+
+@app.get("/api/browser/actions/{action_id}", tags=["browser"], dependencies=[Depends(verify_api_key)])
+async def api_get_browser_action(action_id: int):
+    """Get a browser action by ID (includes screenshot)."""
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    action = store.get_browser_action(action_id)
+    if not action:
+        raise HTTPException(status_code=404, detail="Browser action not found")
+    # Serialize datetimes
+    for k in ("created_at", "expires_at", "confirmed_at", "completed_at"):
+        if k in action and action[k]:
+            action[k] = action[k].isoformat() if hasattr(action[k], "isoformat") else str(action[k])
+    return {"action": action}
+
+
+@app.post("/api/browser/confirm/{action_id}", tags=["browser"], dependencies=[Depends(verify_api_key)])
+async def api_confirm_browser_action(action_id: int, background_tasks: BackgroundTasks):
+    """Confirm and execute a browser action. Runs the CDP command in background."""
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    action = store.get_browser_action(action_id)
+
+    if not action:
+        raise HTTPException(status_code=404, detail="Browser action not found")
+    if action["status"] != "pending_confirmation":
+        raise HTTPException(status_code=400, detail=f"Action is {action['status']}, not pending")
+
+    # Check expiry
+    from datetime import datetime, timezone
+    if action.get("expires_at") and action["expires_at"] < datetime.now(timezone.utc):
+        store.update_browser_action(action_id, status="expired")
+        raise HTTPException(status_code=410, detail="Action has expired")
+
+    # Mark confirmed
+    store.update_browser_action(action_id, status="confirmed")
+
+    # Execute in background
+    background_tasks.add_task(_execute_browser_action, action_id, action)
+
+    return {"status": "confirmed", "action_id": action_id, "message": "Action confirmed — executing now"}
+
+
+@app.post("/api/browser/cancel/{action_id}", tags=["browser"], dependencies=[Depends(verify_api_key)])
+async def api_cancel_browser_action(action_id: int):
+    """Cancel a pending browser action."""
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    action = store.get_browser_action(action_id)
+
+    if not action:
+        raise HTTPException(status_code=404, detail="Browser action not found")
+    if action["status"] != "pending_confirmation":
+        raise HTTPException(status_code=400, detail=f"Action is {action['status']}, not pending")
+
+    store.update_browser_action(action_id, status="cancelled")
+
+    # Also resolve the linked alert
+    if action.get("alert_id"):
+        try:
+            store = SentinelStoreBack._get_global_instance()
+            conn = store._get_conn()
+            if conn:
+                try:
+                    cur = conn.cursor()
+                    cur.execute("UPDATE alerts SET status = 'resolved' WHERE id = %s", (action["alert_id"],))
+                    conn.commit()
+                    cur.close()
+                finally:
+                    store._put_conn(conn)
+        except Exception:
+            pass
+
+    return {"status": "cancelled", "action_id": action_id}
+
+
+def _execute_browser_action(action_id: int, action: dict):
+    """Background task: execute a confirmed browser action via CDP."""
+    from triggers.browser_client import BrowserClient
+    from memory.store_back import SentinelStoreBack
+
+    store = SentinelStoreBack._get_global_instance()
+    client = BrowserClient._get_global_instance()
+
+    action_type = action.get("action_type", "")
+    selector = action.get("target_selector", "")
+    target_text = action.get("target_text", "")
+    value = action.get("fill_value", "")
+
+    store.update_browser_action(action_id, status="executing")
+
+    try:
+        result_parts = []
+
+        if action_type == "click":
+            if selector:
+                res = client.click_element(selector)
+            elif target_text:
+                res = client.click_by_text(target_text)
+            else:
+                store.update_browser_action(action_id, status="failed", error="No selector or target_text")
+                return
+            if res.get("success"):
+                result_parts.append(f"Clicked: {res.get('element_text', '')}")
+            else:
+                store.update_browser_action(action_id, status="failed", error=res.get("error", "Click failed"))
+                return
+
+        elif action_type == "fill":
+            if not selector:
+                store.update_browser_action(action_id, status="failed", error="Fill requires a CSS selector")
+                return
+            res = client.fill_field(selector, value)
+            if res.get("success"):
+                result_parts.append(f"Filled {selector} (was: {res.get('previous_value', '')})")
+            else:
+                store.update_browser_action(action_id, status="failed", error=res.get("error", "Fill failed"))
+                return
+
+        elif action_type == "click_and_fill":
+            # Fill first, then click
+            if not selector and not target_text:
+                store.update_browser_action(action_id, status="failed", error="Need selector for fill target")
+                return
+            fill_selector = selector
+            if fill_selector:
+                fill_res = client.fill_field(fill_selector, value)
+                if fill_res.get("success"):
+                    result_parts.append(f"Filled {fill_selector}")
+                else:
+                    store.update_browser_action(action_id, status="failed", error=fill_res.get("error", "Fill failed"))
+                    return
+            # Click the submit/search button (look for common patterns)
+            if target_text:
+                click_res = client.click_by_text(target_text)
+            else:
+                # Try common submit patterns
+                click_res = client.click_element('button[type="submit"], input[type="submit"], button.submit')
+            if click_res.get("success"):
+                result_parts.append(f"Clicked: {click_res.get('element_text', '')}")
+            else:
+                result_parts.append(f"Fill succeeded but click failed: {click_res.get('error', '')}")
+
+        else:
+            store.update_browser_action(action_id, status="failed", error=f"Unknown action type: {action_type}")
+            return
+
+        result_text = " | ".join(result_parts)
+        store.update_browser_action(action_id, status="completed", result=result_text)
+
+        # Resolve the linked alert
+        if action.get("alert_id"):
+            try:
+                conn = store._get_conn()
+                if conn:
+                    try:
+                        cur = conn.cursor()
+                        cur.execute("UPDATE alerts SET status = 'resolved' WHERE id = %s", (action["alert_id"],))
+                        conn.commit()
+                        cur.close()
+                    finally:
+                        store._put_conn(conn)
+            except Exception:
+                pass
+
+        logger.info(f"Browser action #{action_id} completed: {result_text}")
+
+    except Exception as e:
+        logger.error(f"Browser action #{action_id} execution failed: {e}")
+        store.update_browser_action(action_id, status="failed", error=str(e))
+
+
+# ============================================================
 # ART-1: Research Proposals API
 # ============================================================
 

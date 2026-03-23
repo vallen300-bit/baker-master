@@ -4861,6 +4861,187 @@ class SentinelStoreBack:
             self._put_conn(conn)
 
     # -------------------------------------------------------
+    # Browser Actions (BROWSER-AGENT-1 Phase 3)
+    # -------------------------------------------------------
+
+    def _ensure_browser_actions_table(self):
+        """Create browser_actions table if not exists."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS browser_actions (
+                    id SERIAL PRIMARY KEY,
+                    action_type VARCHAR(20) NOT NULL,
+                    url TEXT,
+                    target_selector TEXT,
+                    target_text TEXT,
+                    fill_value TEXT,
+                    description TEXT NOT NULL,
+                    screenshot_b64 TEXT,
+                    status VARCHAR(30) DEFAULT 'pending_confirmation',
+                    alert_id INTEGER,
+                    baker_task_id INTEGER,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    confirmed_at TIMESTAMPTZ,
+                    completed_at TIMESTAMPTZ,
+                    expires_at TIMESTAMPTZ,
+                    result TEXT,
+                    error TEXT
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_ba_status
+                ON browser_actions(status) WHERE status = 'pending_confirmation'
+            """)
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure browser_actions table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def create_browser_action(self, action_type: str, description: str,
+                              url: str = None, target_selector: str = None,
+                              target_text: str = None, fill_value: str = None,
+                              screenshot_b64: str = None,
+                              baker_task_id: int = None) -> Optional[int]:
+        """Queue a browser action for Director confirmation.
+
+        Returns the action ID, or None on failure.
+        """
+        self._ensure_browser_actions_table()
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO browser_actions
+                    (action_type, url, target_selector, target_text,
+                     fill_value, description, screenshot_b64, status,
+                     baker_task_id, created_at, expires_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'pending_confirmation', %s, NOW(), NOW() + INTERVAL '10 minutes')
+                RETURNING id
+                """,
+                (action_type, url, target_selector, target_text,
+                 fill_value, description, screenshot_b64, baker_task_id),
+            )
+            action_id = cur.fetchone()[0]
+            conn.commit()
+            cur.close()
+            logger.info(f"Created browser_action #{action_id}: {action_type} — {description[:60]}")
+            return action_id
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"create_browser_action failed: {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
+    def get_browser_action(self, action_id: int) -> Optional[dict]:
+        """Get a browser action by ID."""
+        self._ensure_browser_actions_table()
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            import psycopg2.extras
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT * FROM browser_actions WHERE id = %s", (action_id,))
+            row = cur.fetchone()
+            cur.close()
+            return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"get_browser_action failed: {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
+    def get_pending_browser_actions(self) -> list:
+        """Get all pending browser actions (not expired)."""
+        self._ensure_browser_actions_table()
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            import psycopg2.extras
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            # Auto-expire old actions
+            cur.execute("""
+                UPDATE browser_actions SET status = 'expired'
+                WHERE status = 'pending_confirmation' AND expires_at < NOW()
+            """)
+            conn.commit()
+            cur.execute("""
+                SELECT id, action_type, url, target_selector, target_text,
+                       fill_value, description, status, alert_id,
+                       created_at, expires_at
+                FROM browser_actions
+                WHERE status = 'pending_confirmation'
+                ORDER BY created_at DESC
+                LIMIT 20
+            """)
+            rows = cur.fetchall()
+            cur.close()
+            return [dict(r) for r in rows]
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"get_pending_browser_actions failed: {e}")
+            return []
+        finally:
+            self._put_conn(conn)
+
+    def update_browser_action(self, action_id: int, status: str,
+                              result: str = None, error: str = None) -> bool:
+        """Update a browser action's status."""
+        self._ensure_browser_actions_table()
+        conn = self._get_conn()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            ts_field = ""
+            if status == "confirmed":
+                ts_field = ", confirmed_at = NOW()"
+            elif status in ("completed", "failed", "cancelled", "expired"):
+                ts_field = ", completed_at = NOW()"
+            cur.execute(
+                f"""
+                UPDATE browser_actions
+                SET status = %s, result = COALESCE(%s, result),
+                    error = COALESCE(%s, error) {ts_field}
+                WHERE id = %s
+                """,
+                (status, result, error, action_id),
+            )
+            conn.commit()
+            cur.close()
+            return True
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.error(f"update_browser_action failed: {e}")
+            return False
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
     # Cleanup
     # -------------------------------------------------------
 

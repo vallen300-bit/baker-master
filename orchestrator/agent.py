@@ -556,8 +556,8 @@ TOOL_DEFINITIONS = [
             "- Check order status, account info, prices\n"
             "- Extract content from JS-rendered pages\n\n"
             "Returns the page title and text content. "
-            "NOTE: This tool can only READ pages. It cannot click buttons or fill forms. "
-            "For purchases or form submissions, return the information and let the Director act."
+            "This is a READ-ONLY tool. To interact with the page (click, fill, submit), "
+            "use the browser_action tool instead."
         ),
         "input_schema": {
             "type": "object",
@@ -572,6 +572,52 @@ TOOL_DEFINITIONS = [
                 },
             },
             "required": ["url"],
+        },
+    },
+    {
+        "name": "browser_action",
+        "description": (
+            "Perform an interactive action on the current Chrome page (click, fill form, submit). "
+            "Use AFTER browse_website has loaded the target page.\n\n"
+            "ALL browser actions require Director confirmation before executing. "
+            "The action is queued with a screenshot and the Director confirms or cancels "
+            "via the Dashboard/Feed. Actions expire after 10 minutes.\n\n"
+            "Supported action types:\n"
+            "- click: Click an element by CSS selector or visible text\n"
+            "- fill: Fill a form field with a value\n"
+            "- click_and_fill: Fill a field then click a button (e.g. search)\n\n"
+            "After calling this tool, tell the Director that the action is queued "
+            "for their confirmation on the Dashboard."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action_type": {
+                    "type": "string",
+                    "enum": ["click", "fill", "click_and_fill"],
+                    "description": "Type of interaction to perform.",
+                },
+                "selector": {
+                    "type": "string",
+                    "description": "CSS selector for the target element (e.g. 'button.add-to-cart', '#email-input'). "
+                                   "Use this OR target_text, not both.",
+                },
+                "target_text": {
+                    "type": "string",
+                    "description": "Visible text of the element to click (e.g. 'Add to Cart', 'Submit Order'). "
+                                   "Used when CSS selector is unknown.",
+                },
+                "value": {
+                    "type": "string",
+                    "description": "Value to fill into the field (for 'fill' and 'click_and_fill' actions).",
+                },
+                "description": {
+                    "type": "string",
+                    "description": "Human-readable description of what this action does (shown to Director for confirmation). "
+                                   "E.g. 'Click Add to Cart for WHOOP 4.0 Band ($49)'",
+                },
+            },
+            "required": ["action_type", "description"],
         },
     },
 ]
@@ -637,6 +683,8 @@ class ToolExecutor:
                 return self._enrich_linkedin(tool_input)
             elif tool_name == "browse_website":
                 return self._browse_website(tool_input)
+            elif tool_name == "browser_action":
+                return self._browser_action(tool_input)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -1395,6 +1443,108 @@ class ToolExecutor:
         except Exception as e:
             logger.error(f"browse_website failed: {e}")
             return json.dumps({"error": f"Browse failed: {str(e)}"})
+
+    def _browser_action(self, inp: dict) -> str:
+        """BROWSER-AGENT-1 Phase 3: Queue an interactive browser action for Director confirmation."""
+        action_type = inp.get("action_type", "")
+        selector = inp.get("selector", "")
+        target_text = inp.get("target_text", "")
+        value = inp.get("value", "")
+        description = inp.get("description", "")
+
+        if not action_type:
+            return "[action_type is required (click, fill, or click_and_fill)]"
+        if not description:
+            return "[description is required — explain what this action does]"
+        if action_type in ("fill", "click_and_fill") and not value:
+            return "[value is required for fill/click_and_fill actions]"
+        if not selector and not target_text:
+            return "[Either selector or target_text is required to identify the target element]"
+
+        try:
+            from triggers.browser_client import BrowserClient
+            from memory.store_back import SentinelStoreBack
+
+            client = BrowserClient._get_global_instance()
+            store = SentinelStoreBack._get_global_instance()
+
+            # Take screenshot of current page state (before action)
+            screenshot = client.take_screenshot(format="jpeg", quality=60)
+            screenshot_b64 = screenshot.get("data_b64", "")
+
+            # Get current page URL for context
+            page_info = client.get_page_info()
+            current_url = page_info.get("url", "unknown")
+
+            # Queue the action for Director confirmation
+            action_id = store.create_browser_action(
+                action_type=action_type,
+                description=description,
+                url=current_url,
+                target_selector=selector or None,
+                target_text=target_text or None,
+                fill_value=value or None,
+                screenshot_b64=screenshot_b64 if screenshot_b64 else None,
+            )
+
+            if not action_id:
+                return json.dumps({"error": "Failed to queue browser action — database error"})
+
+            # Create an alert so it appears on Feed/Dashboard
+            alert_id = store.create_alert(
+                tier=2,
+                title=f"Browser Action: {description[:80]}",
+                body=(
+                    f"Baker wants to perform a browser action:\n\n"
+                    f"Action: {action_type}\n"
+                    f"Page: {current_url}\n"
+                    f"Target: {selector or target_text}\n"
+                    f"{'Value: ' + value + chr(10) if value else ''}"
+                    f"Description: {description}\n\n"
+                    f"Confirm or cancel on the Dashboard. Expires in 10 minutes."
+                ),
+                action_required=True,
+                source="browser_transaction",
+                source_id=f"ba_{action_id}",
+                structured_actions={
+                    "type": "browser_action_confirmation",
+                    "action_id": action_id,
+                    "action_type": action_type,
+                    "confirm_url": f"/api/browser/confirm/{action_id}",
+                    "cancel_url": f"/api/browser/cancel/{action_id}",
+                },
+            )
+
+            # Link the alert back to the browser action
+            if alert_id:
+                store.update_browser_action(action_id, status="pending_confirmation")
+                # Update alert_id on the browser action
+                conn = store._get_conn()
+                if conn:
+                    try:
+                        cur = conn.cursor()
+                        cur.execute("UPDATE browser_actions SET alert_id = %s WHERE id = %s", (alert_id, action_id))
+                        conn.commit()
+                        cur.close()
+                    except Exception:
+                        try:
+                            conn.rollback()
+                        except Exception:
+                            pass
+                    finally:
+                        store._put_conn(conn)
+
+            return (
+                f"[Browser action #{action_id} queued for Director confirmation]\n"
+                f"Action: {action_type} — {description}\n"
+                f"Page: {current_url}\n"
+                f"The Director will see a confirmation card on the Dashboard/Feed with a screenshot. "
+                f"The action expires in 10 minutes if not confirmed."
+            )
+
+        except Exception as e:
+            logger.error(f"browser_action failed: {e}")
+            return json.dumps({"error": f"Browser action failed: {str(e)}"})
 
     @staticmethod
     def _format_contexts(contexts, label: str) -> str:

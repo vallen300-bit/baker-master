@@ -1755,3 +1755,23 @@ html, body {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
+
+/* Browser Action Confirmation Cards */
+.browser-screenshot-preview {
+  width: 100%;
+  max-height: 200px;
+  object-fit: contain;
+  border-radius: 8px;
+  margin: 8px 0;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+.browser-amount-badge {
+  display: inline-block;
+  background: rgba(255,193,7,0.15);
+  color: #ffc107;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 14px;
+  margin: 4px 0 8px;
+}

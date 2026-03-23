@@ -226,7 +226,8 @@ baker-projects, baker-task-examples, sentinel-interactions, sentinel-email, sent
 `proactive_initiatives` (PROACTIVE-INITIATIVE-1),
 `proposed_actions` (OBLIGATION-GENERATOR),
 `research_proposals` (ART-1),
-`baker_corrections` (CORRECTION-MEMORY-1)
+`baker_corrections` (CORRECTION-MEMORY-1),
+`browser_actions` (BROWSER-AGENT-1 Phase 3)
 
 ## Architecture: Role Division (Baker vs Cowork)
 
@@ -266,20 +267,7 @@ Communication between roles: ClickUp **Handoff Notes** list (901521426367).
 ## Roadmap
 
 ### Phase 1 — Foundation (DONE)
-All shipped in sessions 1-8. Baker is a reactive Chief of Staff with memory, scoring, and matter-aware retrieval.
-
-| What | Status |
-|------|--------|
-| Full-text storage (ARCH-1 through ARCH-7) | DONE — no truncation, all data sources |
-| ClickUp integration (B1-B4 + CLICKUP-V2) | DONE — read all 6 workspaces, write BAKER space, 3 intents |
-| WhatsApp input + output + send | DONE — backfill, media OCR, Director Q&A, send to VIPs |
-| Agentic RAG (9 tools, agent loop, tier routing) | DONE — search memory/meetings/emails/WA/contacts/deadlines/ClickUp/deals/matters |
-| Decision Engine (domain/urgency/tier/mode) | DONE — 4-step classifier, 3-component scorer, VIP SLA monitoring |
-| Task Ledger + Delegation (STEP1C) | DONE — baker_tasks table, mode-aware routing, Director feedback |
-| Matter Registry (RETRIEVAL-FIX-1) | DONE — 13 matters, auto-fetch from connected people |
-| Director Onboarding (Step 3) | DONE — 14 preferences, 13 matters, VIP profiles, DB-driven prompts |
-| Alert Dedup (ALERT-DEDUP-1) | DONE — ~1,100/day → ~20/day |
-| MCP Bridge | DONE — 23 tools (15 read + 8 write), Cowork + Claude Code connected |
+Sessions 1-8. Full-text storage, ClickUp integration, WhatsApp I/O, Agentic RAG, Decision Engine, Task Ledger, Matter Registry, Director Onboarding, Alert Dedup, MCP Bridge.
 
 ### Phase 2 — Multi-Agent Orchestration (NOW)
 Baker becomes an orchestrator that assembles **capability sets** dynamically per task.
@@ -309,121 +297,28 @@ Baker becomes an orchestrator that assembles **capability sets** dynamically per
 | M1 | `decomposer` | meta | auto_execute | Breaks complex tasks into sub-issues |
 | M2 | `synthesizer` | meta | auto_execute | Combines multi-capability results |
 
-**Status:** All 11 domain capabilities fully specified (PM Session D, Mar 8, 2026). `ib` (Investment Banking) retired, replaced by `pr_branding`. Slugs renamed: `asset_mgmt` → `asset_management`, `comms` → `communications`. New autonomy level: `proactive_flag` (Baker detects and flags, distinct from `recommend_wait`).
+All 11 domain capabilities fully specified. Also shipped: COCKPIT-ALERT-UI (structured command cards), PLUGINS-WEB-SEARCH-DOC-READER (tools #10-11), SPECIALIST-UPGRADE-1A+1B (full document storage + Haiku classify/extract pipeline + shared baker_insights).
 
-**COCKPIT-ALERT-UI** — SHIPPED. Structured command cards with 4 action types (Plan/Analyze/Draft/Specialist), per-part controls (select/skip/something else), sequential execution via /api/scan with SSE streaming. `structured_actions` JSONB column on alerts table. Haiku generates actions for T1/T2 alerts.
+### Phase 3 — Proactive Baker (SHIPPED)
+All 7 standing orders live: meeting prep, deadline tracking, VIP 24h SLA, morning briefing, commitment tracking, proactive intelligence, calendar protection.
 
-**PLUGINS-WEB-SEARCH-DOC-READER** — SHIPPED. 2 new agent tools: `web_search` (Tavily, tool #10) + `read_document` (email attachments + file paths, tool #11). 8 capabilities get web_search, 5 get read_document. Meta-agents have no tools by design.
+### Phase 4 — Scale & Optimize (MOSTLY SHIPPED)
 
-**SPECIALIST-UPGRADE-1A** — SHIPPED (Session 17). Full document storage in PostgreSQL `documents` table. Dropbox trigger stores complete text before chunking. Retriever swaps Qdrant chunks with full PostgreSQL text (same pattern as meetings/emails). Budget-aware truncation: 12K chars for enriched results (6x over 2K cap). Zero API cost.
-
-**SPECIALIST-UPGRADE-1B** — SHIPPED (Session 17). Document intelligence pipeline: Haiku classify + extract → `document_extractions` table (structured JSON). Email attachments stored as standalone documents + extraction pipeline. `search_documents` tool (#12) on 5 capabilities (legal, finance, asset_management, sales, research). Shared `baker_insights` table injected into all specialist prompts. **Remaining:** file upload UI, backfill scripts (~$130), auto-insight extraction after specialist runs.
-
-**Director decisions (Q2/Q9/Q12):** Quality bar 85-90% default. Director-only visibility at launch. Success = proactive answers before asked, 10-20% editing only.
-
-### Phase 3 — Proactive Baker (SHIPPED, Session 11 + fixes Session 12)
-Baker executes the 7 standing orders autonomously. Code complete, deployed.
-
-**Session 12 fixes (Code 300):**
-- VIP SLA check: `received_at` → `timestamp` column name fix (query crashed every 5 min)
-- VIP SLA check: dual-lookup by name AND WhatsApp ID (backfilled msgs have phone numbers as sender_name)
-- All Phase 3 jobs: always-on completion logging (previously silent when no data to process)
-- Alert source tracking: `source` column added to alerts table, all alert creation calls tagged
-- WhatsApp backfill: stores individual messages to `whatsapp_messages` table (was Qdrant-only)
-- WhatsApp backfill: async endpoint (BackgroundTasks) — no longer times out on long backfills
-
-| Standing Order | Status | Notes |
-|---|---|---|
-| #1 No surprises in meetings | Working | Calendar OAuth verified (Session 13) |
-| #2 No deadline missed | Working | 112 active deadlines tracked |
-| #3 VIP 24h response | Working | Column name + WA ID matching fixed (Session 12) |
-| #4 Morning briefing | Working | Runs daily 06:00 UTC |
-| #5 Track commitments | **Working** | 50+ commitments seeded (Session 13 — was 0) |
-| #6 Proactive intelligence | Working | 1 insight produced |
-| #7 Protect calendar | Working | Calendar OAuth verified (Session 13) |
-
-### Phase 4 — Scale & Optimize (SCOPING — Session 13)
-See `BRIEF_PHASE_4_SCOPE.md` for full scope document.
-
-**4A — Operational Hardening (cost, observability, reliability)**
-- Cost monitor: API cost tracking per tool/capability, circuit breaker at €5/day
-- Agent observability: PostgreSQL agent_tool_calls table, per-agent metrics, latency tracking
-- Parallel execution: asyncio.gather for multi-tool calls, result caching (5-min TTL)
-- Email watermark resilience: advance watermark even when no substantive emails found
-
-**4B — Integration Expansion**
-- ~~Slack~~ DONE (Session 13 — polling live, Events API webhook ready)
-- ~~Calendar~~ DONE (Session 13 — OAuth verified, prep job running)
-- Browser Sentinel: SHIPPED (Session 13 — BROWSER-1 merged, 10th data source)
+**Remaining:**
 - M365/Outlook: blocked (tenant not migrated)
-
-**4C — Intelligence & Learning**
-- Learning loop: Director feedback → tune Decision Engine weights + agent routing
-- ~~Capability spec completion: 8 remaining (PM-paced)~~ ALL 11 DONE (Session 14)
-- ~~Full document storage + retrieval~~ DONE (Session 17 — SPECIALIST-UPGRADE-1A)
-- ~~Document intelligence pipeline (classify + extract)~~ DONE (Session 17 — SPECIALIST-UPGRADE-1B)
-- ~~Email attachments as standalone documents~~ DONE (Session 17 — SPECIALIST-UPGRADE-1B)
-- ~~Shared specialist memory (baker_insights)~~ DONE (Session 17 — SPECIALIST-UPGRADE-1B)
 - Dashboard data layer: CEO Cockpit frontend enhancements
 
 ### Open Items (operational)
-- ~~**WhatsApp historical backfill:**~~ DONE (Session 12)
-- ~~**Email backfill re-run:**~~ DONE (Session 12)
-- ~~**Slack bot integration:**~~ DONE (Session 13) — polling live, Events API webhook deployed
-- ~~**Commitment seeding:**~~ DONE (Session 13) — 50+ commitments extracted from meetings + emails
-- ~~**Calendar OAuth:**~~ DONE (Session 13) — verified working
 - **ClaimsMax / Philip emails:** Draft emails ready, need Philip's email address
 - **Wertheimer term sheet:** Financial decisions needed before Cowork can draft
-- **Document backfill:** ~3,188 Dropbox docs + ~2,000 email attachments need full-text storage + extraction (~$130 Haiku cost)
-- **File upload UI:** Dashboard upload endpoint + drag-and-drop (SPECIALIST-UPGRADE-1B Item 4)
-- **Auto-insight extraction:** Haiku call after specialist runs to store findings to baker_insights (deferred — needs testing)
-- ~~**Extraction validation:**~~ DONE (Session 23) — 14 Pydantic models, validated column, amount coercion
-- ~~**Travel card bug (flights vanishing):**~~ DONE (Session 23) — poll_todays_meetings(), dedicated travel_alerts query
-- ~~**Travel/Meeting grid split:**~~ DONE (Session 23) — route card renderer, Travel | Fires | Deadlines | Meetings layout
-- ~~**TRIP-INTELLIGENCE-1 Batch 0+1:**~~ DONE (Session 24) — trips+trip_contacts tables, city extraction, auto-detection, 5 API endpoints, full-screen trip view, route card enhancements
-- ~~**TRIP-INTELLIGENCE-1 Batch 2:**~~ DONE (Session 24) — 6 trip cards with real data (Logistics, Agenda, Reading, Radar, Timezone, Objective). Zero LLM cost.
-- ~~**INTERACTION-PIPELINE-1:**~~ DONE (Session 24) — contact_interactions populated (2,936+ rows), trigger hooks, daily sync, WAHA contact sync (512 contacts)
-- ~~**Stats bar cleanup:**~~ DONE (Session 24) — removed separate stats bar, counts inline in grid headers, unanswered badge
-- ~~**Python 3.12 regex fix:**~~ DONE (Session 24) — inline (?i) flags → re.IGNORECASE
-- ~~**Email sender metadata:**~~ DONE (Session 24) — format_thread() populates primary_sender, upsert COALESCE
-- **TRIP-INTELLIGENCE-1 Batch 3:** People intelligence, Proxycurl LinkedIn, conference attendees. Next major feature.
-- **TRIP-INTELLIGENCE-1 Batch 4:** Trip outcomes + Networking bridge.
-- ~~**OBLIGATIONS-UNIFY-1:**~~ DONE (Session 24+25) — migrated to deadlines, triaged 503→408 active. Old commitments table marked 'migrated' to stop false alerts.
-- ~~**Commitment checker bug:**~~ FIXED (Session 25) — was querying old commitments table, generating ~13 false alerts every 6h.
-- ~~**Email noise filter:**~~ FIXED (Session 25) — removed x-mailer, loosened list-unsubscribe filter. Backfill re-running.
-- ~~**Alert bulk cleanup:**~~ DONE (Session 25) — 297→113 pending alerts. Duplicates, stale, commitment-based alerts dismissed.
-- **Proxycurl LinkedIn integration:** ~EUR 40/month, needed for Batch 3. Account setup required.
-- ~~**Contact enrichment:**~~ DONE (Session 25) — 55 contacts classified by Haiku (15 T1, 32 T2, 8 T3). Remaining 427 have <2 interactions. POST /api/contacts/enrich endpoint for re-runs.
-- ~~**Mobile web:**~~ DONE (Session 25) — /mobile page with Ask Baker + Ask Specialist, PWA, dark mode.
-- ~~**Alert dedup fix:**~~ DONE (Session 25+26) — ALERT-DEDUP-2 (pipeline.py) + ALERT-DEDUP-3 (universal in create_alert(), case-insensitive, prefix-normalized, 6h window).
-- ~~**Email 365-day backfill:**~~ RUN (Session 25) — 267 emails (ceiling with current noise filters). No new historical emails found beyond existing ~30-day window.
-- ~~**Commitment checker disabled:**~~ DONE (Session 26) — all 625 commitments migrated to deadlines. Scheduler job removed. deadline_cadence covers all reminders.
-- ~~**Soft obligation triage:**~~ DONE (Session 26) — 391→77 soft obligations. Auto-dismiss for undated soft items after 14 days added to cadence check.
-- ~~**Alert bulk cleanup (round 2):**~~ DONE (Session 26) — 198→95 pending alerts. Duplicates, stale deadlines, cross-source near-duplicates dismissed.
-- ~~**Email intelligence dedup:**~~ FIXED (Session 26) — source_id now passed from email trigger, prevents same thread generating duplicate intelligence alerts.
-- ~~**Desktop alert triage UI:**~~ DONE (Session 26, Code Brisen) — desktop alert badge, bulk dismiss, source filter, matter grouping.
-- ~~**Mobile polish:**~~ DONE (Session 26, Code Brisen) — capability loading state, scroll fix, cache bump.
-- ~~**B1 conversation embeddings backfill:**~~ DONE (Session 27) — 89/89 embedded into Qdrant baker-conversations.
-- ~~**ALERT-BATCH-1:**~~ DONE (Session 27) — pipeline alerts suppressed for Dropbox ingestion, replaced with batch summary. 142→37 pending alerts.
-- ~~**A6 Learning loop:**~~ DONE (Session 27) — mobile feedback buttons, task_id in main scan SSE, desktop+mobile thumbs-up/down.
-- ~~**F3 Cadence tracker:**~~ DONE (Session 27) — per-contact avg_inbound_gap_days, cadence-relative silence detection (replaces fixed 30d), /api/contacts/cadence endpoint, 6h scheduled job, morning brief upgraded.
-- ~~**Advisory lock fix:**~~ DONE (Session 27) — risk detector + cadence tracker use pg_try_advisory_xact_lock (auto-release).
-- **Proxycurl LinkedIn integration:** ~EUR 40/month, needed for Batch 3. Account setup required.
-- ~~**AUTONOMOUS-CHAINS-1 Batch 0:**~~ DONE (Session 28) — first chain fired (EVOK M365, 3/6 steps). GIN index + 30s per-tool timeout deployed.
-- ~~**OpenClaw/NemoClaw evaluation:**~~ DONE (Session 28) — NO-GO.
-- ~~**E3 VAPID keys:**~~ LIVE (Session 28+33) — generated Session 28, deployed to Render, verified Session 33. Push notifications active.
-- ~~**COST-OPT-1 verification:**~~ CONFIRMED (Session 28) — EUR 15-20/day projected.
-- ~~**C1 LinkedIn enrichment:**~~ DONE (Session 28) — enrich_linkedin tool #18, Netrows client, profiling capability updated. Activates with LINKEDIN_API_KEY env var. Netrows free trial submitted.
-- ~~**B4 Memory consolidation:**~~ DONE (Session 28) — weekly Haiku compression (Sun 04:00 UTC). memory_summaries table. Agent injects into get_matter_context.
-- ~~**F6 Trend detection:**~~ DONE (Session 28) — monthly analysis (1st 05:00 UTC). Alerts, contacts, costs, matters, deadlines.
-- ~~**E4 Trip cards mobile:**~~ DONE (Session 28, Code Brisen) — 6 collapsible cards, dark mode, tap-to-expand.
-- ~~**E8 Mobile file upload:**~~ DONE (Session 28, Code Brisen) — paperclip button, native file picker, share_target.
-- ~~**MOBILE-REACTIVE-1 Batch 2:**~~ DONE (Session 33) — Draft a Reply (Haiku draft generation, editable overlay, copy/refine/discard) + Delegate (VIP contact picker, 509 contacts, searchable, tier badges). 2 new API endpoints.
-- ~~**Travel Feed Card:**~~ DONE (Session 33) — pinned travel card at top of mobile Feed (route, event, status, tap→trip overlay). Blue gradient styling.
-- **AUTONOMOUS-CHAINS-1 Batch 1:** Standing order upgrade — pending Batch 0 evaluation (3-5 days).
+- **Document backfill:** ~3,188 Dropbox docs + ~2,000 email attachments (~$130 Haiku cost)
+- **File upload UI:** Dashboard upload endpoint + drag-and-drop
+- **Auto-insight extraction:** Haiku call after specialist runs → baker_insights (deferred)
+- **TRIP-INTELLIGENCE-1 Batch 3:** People intelligence, LinkedIn, conference attendees
+- **TRIP-INTELLIGENCE-1 Batch 4:** Trip outcomes + Networking bridge
+- **AUTONOMOUS-CHAINS-1 Batch 1:** Standing order upgrade — pending Batch 0 evaluation
 - **Netrows API key:** Pending — check dvallen@brisengroup.com. Add as LINKEDIN_API_KEY on Render.
-- **Tailscale MacBook:** Installed, connected (100.83.39.16). Mac Mini brief ready for BROWSER-AGENT-1 Phase 2.
-- **CORRECTION-MEMORY-1 Phase 3:** Nightly consolidation job — merge redundant corrections into durable rules. Build ~2026-04-06 after correction data accumulates.
+- **CORRECTION-MEMORY-1 Phase 3:** Nightly consolidation job — build ~2026-04-06 after data accumulates
 
 ## End-of-Session Checklist
 
@@ -441,54 +336,26 @@ The goal: the next session reads this file and knows exactly what's current — 
 
 ## Session Log
 
-Sessions 1-16 archived in `SESSION_LOG.md`. One-liner summaries:
+Sessions 1-28 archived in `SESSION_LOG.md`.
 
 | # | Date | Key deliverables |
 |---|------|-----------------|
-| 7 | Mar 5 | STEP1C + matter_registry + mode-aware routing |
-| 8 | Mar 5 | Step 3 Onboarding, MCP 23 tools, 14 preferences, 13 matters |
-| 9 | Mar 6-7 | AGENT-FRAMEWORK-1: 13 capabilities, decomposer/synthesizer, COCKPIT-ALERT-UI |
-| 10 | Mar 7 | COCKPIT-V3 complete (all 11 tabs), Phase 3A-C (all 7 standing orders live) |
-| 11 | Mar 7 | (merged into Session 10 log) |
-| 12 | Mar 8 | Phase 3 production fixes, WA 365-day backfill (1,490 msgs) |
-| 13 | Mar 8 | Slack live, commitment seeding (50+), Browser Sentinel merged |
-| 14 | Mar 8 | Phase 4A (cost monitor, observability), all 11 capability specs, learning loop |
-| 15 | Mar 9 | Sentinel Health Monitor, OOM fix, email watermark resilience |
-| 16 | Mar 9 | Email 429 backoff, Networking tab, specialist thinking + citations, 11 Claude Code agents |
-| 17 | Mar 10 | SPECIALIST-UPGRADE-1A+1B: full document storage, Haiku classify+extract pipeline, email attachments, shared baker_insights, search_documents tool #12 |
-| 18 | Mar 10 | Backfill completion (1,354 docs), PM-OOM-1, Dropbox trigger fix, handoff cleanup |
-| 19 | Mar 11 | **Dashboard UX overhaul (19 commits)**: ClaimsMax banking design, Cowork-style chat, per-matter scoping, WhatsApp send/body/intent fixes, contact disambiguation, auto-contacts from WA, action memory logging |
-| 20 | Mar 11 | **20 deliverables**: DEEP-MODE-1+2 (dashboard=max intelligence + cross-session memory), SPECIALIST-DEEP-1, INTELLIGENCE-GAP-1 (richer context, Haiku routing, retrieval reranking), CHANNEL-TRUST-1, DOC-TRIAGE+RECLASSIFY (42%→0.9% "other"), EMAIL-ATTACH-FIX-1, artifact panel, follow-up suggestions, DASHBOARD-STATS-1, Baker Data tab, VIP→Contacts, clickup_create removal |
-| 21 | Mar 13 | **10/10 sentinels HEALTHY**: missing `import re` (pipeline.py), datetime hoist (dropbox), circuit breaker reset endpoint, auto-matter assignment on all alerts, last_contact_date backfill (9/11 VIPs), cost tracking verified (EUR 8.98/day) |
-| 22 | Mar 14 | Calendar cascade fix, doc pipeline re-queuing fix, briefing data bugs, DB cleanup (9,636 junk alerts). GCal cleanup (988 Baker Prep events). |
-| 23 | Mar 14 | **EXTRACTION-VALIDATION-1**: 14 Pydantic models (13 types + travel_booking), validate_extraction(), amount coercion (European format). **TRAVEL-FIX-1+2**: flights visible all day (poll_todays_meetings), travel/meeting grid split, route card renderer (origin→dest, time-based dots). **TRIP-INTELLIGENCE-1 brief**: full travel ROI engine designed with Director. |
-| 24 | Mar 14-16 | **Massive session (12 commits, 9 deploys).** TRIP-INTELLIGENCE-1 Batch 0+1 (trip lifecycle) + Batch 2 (6 trip cards with real data). INTERACTION-PIPELINE-1 (2,936+ interactions from email/WA/meetings). WAHA contact sync (11→512 contacts). Stats bar → inline grid counts. Python 3.12 regex fix, VARCHAR(20) fix, email sender metadata extraction. |
-| 25 | Mar 17-18 | **11 commits, parallel with Code Brisen.** MOBILE-WEB-1: /mobile page (Ask Baker + Specialist, PWA, dark mode, New Chat, camera with Haiku Vision, Play-to-hear, auto-resize). /api/scan/image endpoint. ALERT-DEDUP-2 (title fuzzy dedup). CONTACT-ENRICH-1 (55 contacts classified). Alert cleanup (297→113). Obligation triage (503→409). Commitment checker bug fix. Email noise filter fix. Interaction backfill (+650 to 3,608). 7 missing contacts added. Code Brisen: SENTINEL-SAFETY-1. |
-| 26 | Mar 18 | **35 commits, record session.** Operational: DEDUP-3, 198→95 alerts, 391→77 obligations, killed Whoop/commitment_checker/VIP gap. Intelligence: B1 conversation Qdrant, B2 recency decay, B3 decision injection, F1 compounding risk (6 signals), F2 news-counterparty, F5 weekly digest, F7 meeting gap detection, C2 contact silence. Agent: 13→17 tools (query_baker_data, create_deadline, draft_email, create_calendar_event). APIs: G6 data freshness, morning brief silent contacts. Strategy: Backlog v1 (48 items). Code Brisen: alert triage, mobile polish, pipeline dedup, iOS Shortcuts, push alerts (SSE), mobile alerts view, document browser. |
-| 27 | Mar 19 | **9 features shipped.** B1 backfill (89 conversations). ALERT-BATCH-1 (90→1 alert/batch, 142→37 pending). A6 mobile feedback buttons. F3 cadence tracker (36 contacts, cadence-relative silence). D7 morning brief v2 merged (Code Brisen — action cards). G5 health watchdog (circuit breaker auto-recovery + WA alert). A8 insight-to-task (specialist→ClickUp). D6 unified search API. F4 financial signal detector. C6 location backfill (12→27 contacts). Backlog v2 created (27/48 shipped). Proxycurl dead → evaluating Netrows. 4 briefs for Code Brisen (E3, D8, D7, C1). |
-| 28 | Mar 19-20 | **10 features, 8 commits.** AUTONOMOUS-CHAINS-1 Batch 0 (first chain fired — EVOK M365). C1 LinkedIn enrichment (enrich_linkedin tool #18 + Netrows client). B4 memory consolidation (weekly Haiku compression). F6 trend detection (monthly analysis). Contact query fix (GIN trgm index + 30s per-tool timeout). OpenClaw/NemoClaw eval (NO-GO). VAPID keys generated. COST-OPT-1 verified. Code Brisen: E4 trip cards mobile, E8 mobile file upload. Backlog: 42/48 (88%). 22 scheduled jobs. |
-| 29 | Mar 20 | **All 5 Remarkable CoS Items shipped.** PROACTIVE-INITIATIVE-1: daily initiative engine (priorities + calendar + deadlines + cadence + unanswered emails → 2-3 proposed actions, WA + dashboard, approve/dismiss/defer). SENTIMENT-TRAJECTORY-1: Haiku tone scoring (1-5 batch), sentiment trend written to vip_contacts, injected into get_contact tool. CROSS-MATTER-CONVERGENCE-1: weekly entity extraction + convergence detection across matters (people, companies, amounts in 2+ matters). Chain timeout fix (shutdown(wait=False)), planning prompt tightened (max 4 steps). 9 new API endpoints. 3 new scheduler jobs (24→27 total, 28 after Session 30). 3 new files. |
-| 30 | Mar 20-21 | **Notification & Task Redesign + ART-1.** OBLIGATION-GENERATOR: daily Haiku extraction of 5-15 per-item task proposals → proposed_actions → morning push → mobile triage deck (swipe approve/dismiss). Push throttling (quiet hours, cap 8, cooldown 15m). ACTION-COMPLETION-DETECTOR: auto-marks approved actions done via email_to/email_from signal matching (6h). Desktop Actions widget on CEO Cockpit. Prompt tuning (email_to/email_from signals, source_ref, due_date). **ART-1:** auto-research trigger — Haiku classifies VIP WhatsApp for forwarded intelligence → research_proposals table → "Run Dossier?" card on mobile+desktop. 6 new API endpoints. 29 scheduler jobs. 4 new files. |
-| 31 | Mar 22 | **Baker 3.0 shipped (all 6 items in one session).** Item 0a: extraction engine (signal_extractions, tiered, rate-limited). Item 0b: 4 consumer migrations. Item 1: push notifications (2 daily digests, T1 crisis). Item 2: context selector (7 signals). Item 3: post-meeting pipeline. Item W: wealth manager (Edita's Russo AI). DOSSIER-FIX-1. QDRANT-CLEANUP-1 (540K→64K). Apollo.io LinkedIn. B6 extraction backfill. **Backlog: 48/48 = 100%.** |
-| 32 | Mar 22 | **5 features.** ACTIONS-MERGE-1 (unified alerts). MOBILE-REACTIVE-1 Batch 1 (feed-first, long-press, snooze). TAX-OPT-1 (21 capabilities). RUSSO-MEMORY-1 (owner column, auto-save). BROWSER-AGENT-1 Phase 1 (Chrome DevTools MCP). |
-| 33 | Mar 23 | **MOBILE-REACTIVE-1 Batch 2 + BROWSER-AGENT-1 Phase 2.** Travel feed card. Draft a Reply (Haiku). Delegate (VIP picker). BROWSER-AGENT-1: Tailscale Funnel bridge working (Render→Funnel→MacBook→Chrome). `browse_website` tool #19 (read-only). `CHROME_BROWSER_URL` on Render. Transaction gate decision (alert cards, not WA). CORRECTION-MEMORY-1 by Code Brisen (Session 34). 19 agent tools. |
-| 34 | Mar 23 | **CORRECTION-MEMORY-1: Baker's reinforcement learning.** Phase 1: correction memory (Haiku extracts learned_rule from thumbs-down + comment → baker_corrections table → injected as MANDATORY rules in specialist prompts). Phase 2: episodic retrieval (thumbs-up → Qdrant baker-task-examples → similar approved tasks as few-shot context). Anti-bloat: max 5/capability, max 3/prompt, 90-day expiry, retrieval count decay. Phase 3 (consolidation job) deferred ~2026-04-06. |
+| 29 | Mar 20 | **All 5 Remarkable CoS Items.** PROACTIVE-INITIATIVE-1, SENTIMENT-TRAJECTORY-1, CROSS-MATTER-CONVERGENCE-1. 9 new API endpoints. 27 scheduler jobs. |
+| 30 | Mar 20-21 | **Notification & Task Redesign + ART-1.** OBLIGATION-GENERATOR, ACTION-COMPLETION-DETECTOR, push throttling, auto-research trigger. 29 scheduler jobs. |
+| 31 | Mar 22 | **Baker 3.0 shipped.** Extraction engine, push notifications, context selector, post-meeting pipeline, wealth manager (Russo AI). QDRANT-CLEANUP-1 (540K→64K). **Backlog: 48/48 = 100%.** |
+| 32 | Mar 22 | ACTIONS-MERGE-1, MOBILE-REACTIVE-1 Batch 1, TAX-OPT-1 (21 capabilities), RUSSO-MEMORY-1, BROWSER-AGENT-1 Phase 1. |
+| 33 | Mar 23 | MOBILE-REACTIVE-1 Batch 2 (Draft a Reply + Delegate). BROWSER-AGENT-1 Phase 2 (Tailscale Funnel bridge). Travel feed card. `browse_website` tool #19. 19 agent tools. |
+| 34 | Mar 23 | **CORRECTION-MEMORY-1:** correction memory + episodic retrieval. Anti-bloat: max 5/capability, 90-day expiry. Phase 3 deferred ~2026-04-06. |
+| 35 | Mar 23 | **BROWSER-AGENT-1 Phase 3:** Interactive browser actions + transaction gate. `browser_action` tool #20. CDP click/fill/screenshot. Confirmation cards (mobile+desktop). 20 agent tools. |
 
 ## Key Documents (Dropbox)
 
 | Document | Path | Purpose |
 |----------|------|---------|
-| Master Implementation Plan | `Baker-Project/Baker_Master_Implementation_Plan_1.docx` | Chat's original 16-step plan (stale snapshot) |
-| Agentic RAG Transition Plan | `Baker-Project/Baker_Agentic_RAG_Transition_Plan.docx` | PM's revised plan — 15 steps, 3 horizons (current) |
-| Decision Engine Brief | `Baker-Project/pm/briefs/BRIEF_DECISION_ENGINE_v1.md` | Step 1A specification (PM approved) |
-| Agentic RAG Brief | `Baker-Project/pm/briefs/BRIEF_AGENTIC_RAG_v1.md` | AGENTIC-RAG-1 specification (built, not pushed) |
 | Architecture v5.1 | `vallen300-bit.github.io/brisen-dashboards/Baker_Architecture_v5.html` | Three actors, three jobs, one memory |
 | Operating Model v2.0 | `Baker-Project/pm/BAKER_OPERATING_MODEL_v2.md` | PM + Code + Director workflow |
 | PM Onboard | `Baker-Project/pm/PM_ONBOARD.md` | Cowork PM session startup |
-| Agent Framework Architecture | `Baker-Project/agent-framework-architecture.html` | PM's visual architecture (reviewed, partially adopted) |
-| Specialist Upgrade 1A Brief | `briefs/BRIEF_SPECIALIST_UPGRADE_1A.md` | Full document storage + retrieval (SHIPPED) |
-| Specialist Upgrade 1B Brief | `briefs/BRIEF_SPECIALIST_UPGRADE_1B.md` | Document intelligence pipeline + shared memory (SHIPPED, backfill TODO) |
-| Trip Intelligence Brief | `briefs/BRIEF_TRIP_INTELLIGENCE_1.md` | Travel ROI engine — trip cards, conference intelligence, LinkedIn, outcomes (APPROVED) |
+| Trip Intelligence Brief | `briefs/BRIEF_TRIP_INTELLIGENCE_1.md` | Travel ROI engine (Batches 3-4 pending) |
 
 ## Director Preferences
 

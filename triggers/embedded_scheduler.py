@@ -408,6 +408,51 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: evening_push_digest (daily 18:00 UTC)")
 
+    # BROWSER-AGENT-1 Phase 3: Expire stale browser actions — every 5 minutes
+    scheduler.add_job(
+        _expire_browser_actions,
+        IntervalTrigger(minutes=5),
+        id="expire_browser_actions", name="Expire browser actions",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: expire_browser_actions (every 5 min)")
+
+
+def _expire_browser_actions():
+    """Cancel browser actions that hit the 10-minute timeout. Dismiss linked alerts."""
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    conn = store._get_conn()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        # Find and expire pending actions past their deadline
+        cur.execute("""
+            UPDATE browser_actions SET status = 'expired', completed_at = NOW()
+            WHERE status = 'pending_confirmation' AND expires_at < NOW()
+            RETURNING id, alert_id
+        """)
+        expired = cur.fetchall()
+        # Dismiss linked alerts
+        for row in expired:
+            action_id, alert_id = row
+            if alert_id:
+                cur.execute("UPDATE alerts SET status = 'dismissed' WHERE id = %s", (alert_id,))
+            logger.info(f"Expired browser action #{action_id}")
+        conn.commit()
+        cur.close()
+        if expired:
+            logger.info(f"Expired {len(expired)} browser action(s)")
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(f"expire_browser_actions failed: {e}")
+    finally:
+        store._put_conn(conn)
+
 
 def start_scheduler():
     """Create and start the BackgroundScheduler. Idempotent — safe to call twice."""
