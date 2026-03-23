@@ -209,7 +209,7 @@ Backfill: scripts/extract_whatsapp.py
 
 baker-whatsapp, baker-emails, baker-contacts, baker-clickup, baker-todoist,
 baker-documents, baker-conversations, baker-health, baker-people, baker-deals,
-baker-projects, sentinel-interactions, sentinel-email, sentinel-meetings, sentinel-documents
+baker-projects, baker-task-examples, sentinel-interactions, sentinel-email, sentinel-meetings, sentinel-documents
 
 ## PostgreSQL Key Tables
 
@@ -225,7 +225,8 @@ baker-projects, sentinel-interactions, sentinel-email, sentinel-meetings, sentin
 `trips` (TRIP-INTELLIGENCE-1), `trip_contacts` (TRIP-INTELLIGENCE-1),
 `proactive_initiatives` (PROACTIVE-INITIATIVE-1),
 `proposed_actions` (OBLIGATION-GENERATOR),
-`research_proposals` (ART-1)
+`research_proposals` (ART-1),
+`baker_corrections` (CORRECTION-MEMORY-1)
 
 ## Architecture: Role Division (Baker vs Cowork)
 
@@ -422,6 +423,7 @@ See `BRIEF_PHASE_4_SCOPE.md` for full scope document.
 - **AUTONOMOUS-CHAINS-1 Batch 1:** Standing order upgrade — pending Batch 0 evaluation (3-5 days).
 - **Netrows API key:** Pending — check dvallen@brisengroup.com. Add as LINKEDIN_API_KEY on Render.
 - **Tailscale MacBook:** Installed, connected (100.83.39.16). Mac Mini brief ready for BROWSER-AGENT-1 Phase 2.
+- **CORRECTION-MEMORY-1 Phase 3:** Nightly consolidation job — merge redundant corrections into durable rules. Build ~2026-04-06 after correction data accumulates.
 
 ## End-of-Session Checklist
 
@@ -470,6 +472,7 @@ Sessions 1-16 archived in `SESSION_LOG.md`. One-liner summaries:
 | 31 | Mar 22 | **Baker 3.0 shipped (all 6 items in one session).** Item 0a: extraction engine (signal_extractions, tiered, rate-limited). Item 0b: 4 consumer migrations. Item 1: push notifications (2 daily digests, T1 crisis). Item 2: context selector (7 signals). Item 3: post-meeting pipeline. Item W: wealth manager (Edita's Russo AI). DOSSIER-FIX-1. QDRANT-CLEANUP-1 (540K→64K). Apollo.io LinkedIn. B6 extraction backfill. **Backlog: 48/48 = 100%.** |
 | 32 | Mar 22 | **5 features.** ACTIONS-MERGE-1 (unified alerts). MOBILE-REACTIVE-1 Batch 1 (feed-first, long-press, snooze). TAX-OPT-1 (21 capabilities). RUSSO-MEMORY-1 (owner column, auto-save). BROWSER-AGENT-1 Phase 1 (Chrome DevTools MCP). |
 | 33 | Mar 23 | **MOBILE-REACTIVE-1 Batch 2 + Travel Feed.** VAPID keys verified live on Render. Travel feed card (pinned at top of Feed, route+status+tap). Draft a Reply (Haiku draft, editable overlay, copy/refine). Delegate (VIP picker, 509 contacts, searchable). Chrome DevTools MCP verified (navigated Render). Tailscale installed (100.83.39.16). Mac Mini browser agent brief. 2 new API endpoints. |
+| 34 | Mar 23 | **CORRECTION-MEMORY-1: Baker's reinforcement learning.** Phase 1: correction memory (Haiku extracts learned_rule from thumbs-down + comment → baker_corrections table → injected as MANDATORY rules in specialist prompts). Phase 2: episodic retrieval (thumbs-up → Qdrant baker-task-examples → similar approved tasks as few-shot context). Anti-bloat: max 5/capability, max 3/prompt, 90-day expiry, retrieval count decay. Phase 3 (consolidation job) deferred ~2026-04-06. |
 
 ## Key Documents (Dropbox)
 
