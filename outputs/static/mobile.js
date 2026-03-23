@@ -1336,28 +1336,18 @@ async function loadActiveTrip() {
         var active = null;
         for (var i = 0; i < trips.length; i++) {
             var t = trips[i];
-            if (t.status === 'discarded') continue;
+            if (t.status === 'discarded' || t.status === 'completed') continue;
             var endDate = t.end_date || t.start_date;
             if (t.start_date <= today && endDate >= today) { active = t; break; }
         }
         if (!active) {
             // Find nearest upcoming
             var upcoming = trips.filter(function(t) {
-                return t.status !== 'discarded' && t.start_date >= today;
+                return t.status !== 'discarded' && t.status !== 'completed' && t.start_date >= today;
             }).sort(function(a, b) { return a.start_date.localeCompare(b.start_date); });
             if (upcoming.length > 0) active = upcoming[0];
         }
-        // Fallback: most recent past trip within 3 days
-        if (!active) {
-            var recent = trips.filter(function(t) {
-                if (t.status === 'discarded') return false;
-                var ed = t.end_date || t.start_date;
-                if (!ed) return false;
-                var diffDays = (new Date(today) - new Date(ed)) / 86400000;
-                return diffDays >= 0 && diffDays <= 3;
-            }).sort(function(a, b) { return (b.end_date || b.start_date).localeCompare(a.end_date || a.start_date); });
-            if (recent.length > 0) active = recent[0];
-        }
+        // No fallback to past trips — only show today's or upcoming
 
         if (!active) return;
         _activeTrip = active;
