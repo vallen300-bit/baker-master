@@ -869,6 +869,17 @@ async def health_check():
                 ts_info["backend_state"] = st.get("BackendState", "?")
             else:
                 ts_info["status_error"] = r_st.stderr.strip()[:80]
+            # Check authkey env var (existence only, not value)
+            authkey = os.environ.get("TAILSCALE_AUTHKEY", "")
+            ts_info["authkey_set"] = bool(authkey)
+            ts_info["authkey_prefix"] = authkey[:12] + "..." if authkey else "empty"
+            # Try login now if NeedsLogin
+            if ts_info.get("backend_state") == "NeedsLogin" and authkey:
+                r_up = subprocess.run(
+                    ["./tailscale", "--socket=/tmp/tailscale/tailscaled.sock", "up",
+                     "--authkey=" + authkey, "--hostname=baker-render"],
+                    capture_output=True, text=True, timeout=15)
+                ts_info["login_attempt"] = "ok" if r_up.returncode == 0 else f"rc={r_up.returncode}:{r_up.stderr.strip()[:100]}"
     except Exception as e:
         ts_info["error"] = str(e)[:80]
 
