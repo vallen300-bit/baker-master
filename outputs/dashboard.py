@@ -1718,6 +1718,7 @@ async def get_morning_brief():
             silent_contacts = []
             try:
                 # F3: Cadence-relative silence detection (replaces fixed 30-day threshold)
+                # Includes channel info + excludes snoozed/stopped contacts
                 cur.execute("""
                     SELECT name, last_inbound_at as last_contact_date,
                            EXTRACT(DAY FROM NOW() - last_inbound_at)::int as days_silent,
@@ -1725,21 +1726,28 @@ async def get_morning_brief():
                            CASE WHEN avg_inbound_gap_days > 0
                                 THEN ROUND((EXTRACT(EPOCH FROM NOW() - last_inbound_at)/86400.0
                                       / avg_inbound_gap_days)::numeric, 1)
-                                ELSE 0 END as deviation
+                                ELSE 0 END as deviation,
+                           COALESCE(communication_pref, 'email') as channel,
+                           email, whatsapp_id
                     FROM vip_contacts
                     WHERE avg_inbound_gap_days IS NOT NULL
                       AND last_inbound_at IS NOT NULL
                       AND last_inbound_at < NOW() - INTERVAL '7 days'
                       AND (EXTRACT(EPOCH FROM NOW() - last_inbound_at)/86400.0
                            / NULLIF(avg_inbound_gap_days, 0)) >= 3.0
+                      AND COALESCE(cadence_snoozed_until, '1970-01-01'::timestamptz) < NOW()
+                      AND COALESCE(cadence_tracking, true) = true
                     ORDER BY (EXTRACT(EPOCH FROM NOW() - last_inbound_at)/86400.0
                               / NULLIF(avg_inbound_gap_days, 0)) DESC
                     LIMIT 5
                 """)
                 silent_contacts = [_serialize(dict(r)) for r in cur.fetchall()]
             except Exception:
-                # Fallback to old fixed-threshold query if cadence columns don't exist yet
+                # Fallback: rollback aborted txn (new columns may not exist), use old query
                 try:
+                    conn.rollback()
+                    import psycopg2.extras as _pe
+                    cur = conn.cursor(cursor_factory=_pe.RealDictCursor)
                     cur.execute("""
                         SELECT name, last_contact_date,
                                EXTRACT(DAY FROM NOW() - last_contact_date)::int as days_silent
@@ -7884,6 +7892,83 @@ def _execute_browser_action(action_id: int, action: dict):
     except Exception as e:
         logger.error(f"Browser action #{action_id} execution failed: {e}")
         store.update_browser_action(action_id, status="failed", error=str(e))
+
+
+# ============================================================
+# Relationship Cooling: Dismiss/Snooze/Stop API
+# ============================================================
+
+@app.post("/api/contacts/cooling/dismiss", tags=["contacts"], dependencies=[Depends(verify_api_key)])
+async def dismiss_cooling_contact(request: Request):
+    """Dismiss a cooling contact from the morning brief.
+
+    Actions:
+      - reached_out: Reset last_inbound_at to now (contact won't show as cooling)
+      - snooze: Hide for 1 week (cadence_snoozed_until)
+      - stop_tracking: Permanently stop cadence tracking for this contact
+    """
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    action = body.get("action", "")
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    if action not in ("reached_out", "snooze", "stop_tracking"):
+        raise HTTPException(status_code=400, detail="action must be reached_out|snooze|stop_tracking")
+
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        cur = conn.cursor()
+
+        # Ensure columns exist
+        for col, default in [("cadence_snoozed_until", "TIMESTAMPTZ"), ("cadence_tracking", "BOOLEAN DEFAULT true")]:
+            try:
+                cur.execute(f"ALTER TABLE vip_contacts ADD COLUMN IF NOT EXISTS {col} {default}")
+                conn.commit()
+            except Exception:
+                conn.rollback()
+
+        if action == "reached_out":
+            # Reset the silence counter — mark as heard from now
+            cur.execute(
+                "UPDATE vip_contacts SET last_inbound_at = NOW() WHERE LOWER(name) = LOWER(%s) RETURNING id",
+                (name,),
+            )
+        elif action == "snooze":
+            cur.execute(
+                "UPDATE vip_contacts SET cadence_snoozed_until = NOW() + INTERVAL '7 days' "
+                "WHERE LOWER(name) = LOWER(%s) RETURNING id",
+                (name,),
+            )
+        elif action == "stop_tracking":
+            cur.execute(
+                "UPDATE vip_contacts SET cadence_tracking = false "
+                "WHERE LOWER(name) = LOWER(%s) RETURNING id",
+                (name,),
+            )
+
+        row = cur.fetchone()
+        conn.commit()
+        cur.close()
+
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Contact '{name}' not found")
+
+        logger.info(f"Cooling contact dismiss: {name} — action={action}")
+        return {"status": "ok", "name": name, "action": action}
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"dismiss_cooling_contact failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        store._put_conn(conn)
 
 
 # ============================================================

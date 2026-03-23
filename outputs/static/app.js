@@ -854,7 +854,7 @@ async function loadMorningBrief() {
             setText('statMeetings', totalEvents || 0);
         }
 
-        // SILENT-CONTACTS-CARD-1: Render relationship cooling warnings
+        // SILENT-CONTACTS-CARD-1: Render relationship cooling warnings (redesigned)
         var silentCard = document.getElementById('silentContactsCard');
         if (silentCard) {
             var silentContacts = data.silent_contacts || [];
@@ -869,37 +869,60 @@ async function loadMorningBrief() {
                 silentCard.appendChild(scLabel);
 
                 for (var sci = 0; sci < silentContacts.length; sci++) {
-                    var sc = silentContacts[sci];
-                    var row = document.createElement('div');
-                    row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border-light);';
+                    (function(sc) {
+                        var row = document.createElement('div');
+                        row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border-light);';
 
-                    var nameSpan = document.createElement('span');
-                    nameSpan.style.cssText = 'flex:1;font-size:13px;font-weight:500;color:var(--text);';
-                    nameSpan.textContent = sc.name || '';
-                    row.appendChild(nameSpan);
+                        // Name
+                        var nameSpan = document.createElement('span');
+                        nameSpan.style.cssText = 'font-size:13px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px;';
+                        nameSpan.textContent = sc.name || '';
+                        row.appendChild(nameSpan);
 
-                    var daysSpan = document.createElement('span');
-                    daysSpan.style.cssText = 'font-size:11px;color:var(--amber);font-weight:600;flex-shrink:0;';
-                    daysSpan.textContent = (sc.days_silent || 0) + 'd silent';
-                    row.appendChild(daysSpan);
+                        // Cadence context: "45d (every 12d)"
+                        var cadenceSpan = document.createElement('span');
+                        cadenceSpan.style.cssText = 'font-size:11px;color:var(--amber);flex-shrink:0;white-space:nowrap;';
+                        var gapText = sc.avg_inbound_gap_days ? Math.round(sc.avg_inbound_gap_days) + 'd' : '?';
+                        cadenceSpan.textContent = (sc.days_silent || 0) + 'd silent (every ' + gapText + ')';
+                        row.appendChild(cadenceSpan);
 
-                    var reachBtn = document.createElement('button');
-                    reachBtn.className = 'run-btn';
-                    reachBtn.style.cssText = 'font-size:11px;padding:3px 10px;';
-                    reachBtn.textContent = 'Reach out';
-                    reachBtn.dataset.name = sc.name || '';
-                    reachBtn.addEventListener('click', function() {
-                        var name = this.dataset.name;
-                        switchTab('ask-baker');
-                        var input = document.getElementById('scanInput') || document.getElementById('cmdInput');
-                        if (input) {
-                            input.value = 'Draft an email to ' + name;
-                            input.focus();
-                        }
-                    });
-                    row.appendChild(reachBtn);
+                        var spacer = document.createElement('span');
+                        spacer.style.flex = '1';
+                        row.appendChild(spacer);
 
-                    silentCard.appendChild(row);
+                        // Draft button — channel-aware
+                        var channel = (sc.channel || 'email').toLowerCase();
+                        var draftBtn = document.createElement('button');
+                        draftBtn.className = 'run-btn';
+                        draftBtn.style.cssText = 'font-size:11px;padding:3px 8px;flex-shrink:0;';
+                        draftBtn.textContent = channel === 'whatsapp' ? 'Draft WA' : 'Draft';
+                        draftBtn.title = channel === 'whatsapp' ? 'Draft a WhatsApp message' : 'Draft an email';
+                        draftBtn.addEventListener('click', function() {
+                            switchTab('ask-baker');
+                            var input = document.getElementById('scanInput') || document.getElementById('cmdInput');
+                            if (input) {
+                                var prompt = channel === 'whatsapp'
+                                    ? 'Draft a WhatsApp message to ' + sc.name + ' — casual check-in, keep it short'
+                                    : 'Draft an email to ' + sc.name;
+                                input.value = prompt;
+                                input.focus();
+                            }
+                        });
+                        row.appendChild(draftBtn);
+
+                        // Dismiss button (x) with dropdown
+                        var dismissBtn = document.createElement('button');
+                        dismissBtn.style.cssText = 'font-size:13px;padding:2px 6px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--text2);cursor:pointer;flex-shrink:0;line-height:1;';
+                        dismissBtn.textContent = '\u00d7';
+                        dismissBtn.title = 'Dismiss';
+                        dismissBtn.addEventListener('click', function(e) {
+                            e.stopPropagation();
+                            _showCoolingDismissMenu(sc.name, row, e);
+                        });
+                        row.appendChild(dismissBtn);
+
+                        silentCard.appendChild(row);
+                    })(silentContacts[sci]);
                 }
             } else {
                 silentCard.hidden = true;
@@ -1862,6 +1885,72 @@ async function dismissAlert(alertId, btnEl) {
         var card = btnEl.closest('.card');
         if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
     } catch (e) { console.error('dismissAlert failed:', e); }
+}
+
+// Cooling contacts dismiss menu
+function _showCoolingDismissMenu(name, row, event) {
+    // Remove any existing menu
+    var old = document.getElementById('coolingDismissMenu');
+    if (old) old.remove();
+
+    var menu = document.createElement('div');
+    menu.id = 'coolingDismissMenu';
+    menu.style.cssText = 'position:fixed;z-index:9999;background:var(--card,#1e293b);border:1px solid var(--border);border-radius:8px;padding:4px 0;min-width:180px;box-shadow:0 4px 16px rgba(0,0,0,0.3);';
+
+    var rect = event.target.getBoundingClientRect();
+    menu.style.top = (rect.bottom + 4) + 'px';
+    menu.style.right = (window.innerWidth - rect.right) + 'px';
+
+    var options = [
+        { label: 'Reached out already', action: 'reached_out', icon: '\u2713' },
+        { label: 'Snooze 1 week', action: 'snooze', icon: '\u23F0' },
+        { label: 'Stop tracking', action: 'stop_tracking', icon: '\u2716' },
+    ];
+
+    for (var i = 0; i < options.length; i++) {
+        (function(opt) {
+            var item = document.createElement('div');
+            item.style.cssText = 'padding:8px 14px;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:8px;color:var(--text);';
+            item.addEventListener('mouseenter', function() { this.style.background = 'var(--bg2,rgba(255,255,255,0.05))'; });
+            item.addEventListener('mouseleave', function() { this.style.background = 'none'; });
+            item.innerHTML = '<span>' + opt.icon + '</span><span>' + esc(opt.label) + '</span>';
+            item.addEventListener('click', function() {
+                menu.remove();
+                _dismissCoolingContact(name, opt.action, row);
+            });
+            menu.appendChild(item);
+        })(options[i]);
+    }
+
+    document.body.appendChild(menu);
+
+    // Close on click outside
+    setTimeout(function() {
+        document.addEventListener('click', function closer() {
+            menu.remove();
+            document.removeEventListener('click', closer);
+        }, { once: true });
+    }, 10);
+}
+
+async function _dismissCoolingContact(name, action, row) {
+    try {
+        var resp = await bakerFetch('/api/contacts/cooling/dismiss', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name, action: action }),
+        });
+        if (!resp.ok) throw new Error('Dismiss failed');
+        // Animate row out
+        row.style.transition = 'opacity 0.3s, max-height 0.3s';
+        row.style.opacity = '0';
+        row.style.maxHeight = '0';
+        row.style.overflow = 'hidden';
+        row.style.padding = '0';
+        setTimeout(function() { row.remove(); }, 300);
+    } catch (e) {
+        console.error('Dismiss cooling contact failed:', e);
+    }
 }
 
 // BROWSER-AGENT-1 Phase 3: Browser action confirmation
