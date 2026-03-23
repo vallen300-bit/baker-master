@@ -410,15 +410,18 @@ See `BRIEF_PHASE_4_SCOPE.md` for full scope document.
 - **Proxycurl LinkedIn integration:** ~EUR 40/month, needed for Batch 3. Account setup required.
 - ~~**AUTONOMOUS-CHAINS-1 Batch 0:**~~ DONE (Session 28) — first chain fired (EVOK M365, 3/6 steps). GIN index + 30s per-tool timeout deployed.
 - ~~**OpenClaw/NemoClaw evaluation:**~~ DONE (Session 28) — NO-GO.
-- ~~**E3 VAPID keys:**~~ GENERATED (Session 28) — Cowork adding to Render.
+- ~~**E3 VAPID keys:**~~ LIVE (Session 28+33) — generated Session 28, deployed to Render, verified Session 33. Push notifications active.
 - ~~**COST-OPT-1 verification:**~~ CONFIRMED (Session 28) — EUR 15-20/day projected.
 - ~~**C1 LinkedIn enrichment:**~~ DONE (Session 28) — enrich_linkedin tool #18, Netrows client, profiling capability updated. Activates with LINKEDIN_API_KEY env var. Netrows free trial submitted.
 - ~~**B4 Memory consolidation:**~~ DONE (Session 28) — weekly Haiku compression (Sun 04:00 UTC). memory_summaries table. Agent injects into get_matter_context.
 - ~~**F6 Trend detection:**~~ DONE (Session 28) — monthly analysis (1st 05:00 UTC). Alerts, contacts, costs, matters, deadlines.
 - ~~**E4 Trip cards mobile:**~~ DONE (Session 28, Code Brisen) — 6 collapsible cards, dark mode, tap-to-expand.
 - ~~**E8 Mobile file upload:**~~ DONE (Session 28, Code Brisen) — paperclip button, native file picker, share_target.
+- ~~**MOBILE-REACTIVE-1 Batch 2:**~~ DONE (Session 33) — Draft a Reply (Haiku draft generation, editable overlay, copy/refine/discard) + Delegate (VIP contact picker, 509 contacts, searchable, tier badges). 2 new API endpoints.
+- ~~**Travel Feed Card:**~~ DONE (Session 33) — pinned travel card at top of mobile Feed (route, event, status, tap→trip overlay). Blue gradient styling.
 - **AUTONOMOUS-CHAINS-1 Batch 1:** Standing order upgrade — pending Batch 0 evaluation (3-5 days).
 - **Netrows API key:** Pending — check dvallen@brisengroup.com. Add as LINKEDIN_API_KEY on Render.
+- **Tailscale MacBook:** Installed, connected (100.83.39.16). Mac Mini brief ready for BROWSER-AGENT-1 Phase 2.
 
 ## End-of-Session Checklist
 
@@ -464,6 +467,9 @@ Sessions 1-16 archived in `SESSION_LOG.md`. One-liner summaries:
 | 28 | Mar 19-20 | **10 features, 8 commits.** AUTONOMOUS-CHAINS-1 Batch 0 (first chain fired — EVOK M365). C1 LinkedIn enrichment (enrich_linkedin tool #18 + Netrows client). B4 memory consolidation (weekly Haiku compression). F6 trend detection (monthly analysis). Contact query fix (GIN trgm index + 30s per-tool timeout). OpenClaw/NemoClaw eval (NO-GO). VAPID keys generated. COST-OPT-1 verified. Code Brisen: E4 trip cards mobile, E8 mobile file upload. Backlog: 42/48 (88%). 22 scheduled jobs. |
 | 29 | Mar 20 | **All 5 Remarkable CoS Items shipped.** PROACTIVE-INITIATIVE-1: daily initiative engine (priorities + calendar + deadlines + cadence + unanswered emails → 2-3 proposed actions, WA + dashboard, approve/dismiss/defer). SENTIMENT-TRAJECTORY-1: Haiku tone scoring (1-5 batch), sentiment trend written to vip_contacts, injected into get_contact tool. CROSS-MATTER-CONVERGENCE-1: weekly entity extraction + convergence detection across matters (people, companies, amounts in 2+ matters). Chain timeout fix (shutdown(wait=False)), planning prompt tightened (max 4 steps). 9 new API endpoints. 3 new scheduler jobs (24→27 total, 28 after Session 30). 3 new files. |
 | 30 | Mar 20-21 | **Notification & Task Redesign + ART-1.** OBLIGATION-GENERATOR: daily Haiku extraction of 5-15 per-item task proposals → proposed_actions → morning push → mobile triage deck (swipe approve/dismiss). Push throttling (quiet hours, cap 8, cooldown 15m). ACTION-COMPLETION-DETECTOR: auto-marks approved actions done via email_to/email_from signal matching (6h). Desktop Actions widget on CEO Cockpit. Prompt tuning (email_to/email_from signals, source_ref, due_date). **ART-1:** auto-research trigger — Haiku classifies VIP WhatsApp for forwarded intelligence → research_proposals table → "Run Dossier?" card on mobile+desktop. 6 new API endpoints. 29 scheduler jobs. 4 new files. |
+| 31 | Mar 22 | **Baker 3.0 shipped (all 6 items in one session).** Item 0a: extraction engine (signal_extractions, tiered, rate-limited). Item 0b: 4 consumer migrations. Item 1: push notifications (2 daily digests, T1 crisis). Item 2: context selector (7 signals). Item 3: post-meeting pipeline. Item W: wealth manager (Edita's Russo AI). DOSSIER-FIX-1. QDRANT-CLEANUP-1 (540K→64K). Apollo.io LinkedIn. B6 extraction backfill. **Backlog: 48/48 = 100%.** |
+| 32 | Mar 22 | **5 features.** ACTIONS-MERGE-1 (unified alerts). MOBILE-REACTIVE-1 Batch 1 (feed-first, long-press, snooze). TAX-OPT-1 (21 capabilities). RUSSO-MEMORY-1 (owner column, auto-save). BROWSER-AGENT-1 Phase 1 (Chrome DevTools MCP). |
+| 33 | Mar 23 | **MOBILE-REACTIVE-1 Batch 2 + Travel Feed.** VAPID keys verified live on Render. Travel feed card (pinned at top of Feed, route+status+tap). Draft a Reply (Haiku draft, editable overlay, copy/refine). Delegate (VIP picker, 509 contacts, searchable). Chrome DevTools MCP verified (navigated Render). Tailscale installed (100.83.39.16). Mac Mini browser agent brief. 2 new API endpoints. |
 
 ## Key Documents (Dropbox)
 
