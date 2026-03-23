@@ -1765,6 +1765,15 @@ html, body {
   margin: 8px 0;
   border: 1px solid rgba(255,255,255,0.1);
 }
+/* Inline screenshots in chat (browse_website) */
+.md-content img[src^="data:image"] {
+  width: 100%;
+  max-height: 300px;
+  object-fit: contain;
+  border-radius: 8px;
+  margin: 8px 0;
+  border: 1px solid rgba(255,255,255,0.1);
+}
 .browser-amount-badge {
   display: inline-block;
   background: rgba(255,193,7,0.15);

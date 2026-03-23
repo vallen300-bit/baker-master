@@ -1422,8 +1422,9 @@ class ToolExecutor:
             logger.error(f"enrich_linkedin failed: {e}")
             return json.dumps({"error": f"LinkedIn enrichment failed: {str(e)}"})
 
-    def _browse_website(self, inp: dict) -> str:
-        """BROWSER-AGENT-1: Browse a website via Chrome on Director's machine."""
+    def _browse_website(self, inp: dict):
+        """BROWSER-AGENT-1: Browse a website via Chrome on Director's machine.
+        Returns a list of content blocks (text + screenshot) for Claude to see."""
         url = inp.get("url", "")
         wait_seconds = inp.get("wait_seconds", 3)
         if not url:
@@ -1437,9 +1438,29 @@ class ToolExecutor:
                 return json.dumps({"error": result["error"], "hint": "Chrome bridge may be offline (requires MacBook to be on with Tailscale Funnel running)"})
             title = result.get("title", "")
             content = result.get("content", "")
-            if not content:
-                return f"[Page loaded but no text content extracted. Title: {title}]"
-            return f"--- WEB PAGE: {title} ---\nURL: {url}\n\n{content}"
+
+            # Build content blocks: text + screenshot
+            blocks = []
+            text_part = f"--- WEB PAGE: {title} ---\nURL: {url}\n\n{content}" if content else f"[Page loaded but no text content extracted. Title: {title}]"
+            blocks.append({"type": "text", "text": text_part})
+
+            # Take screenshot so Claude can see the page layout
+            try:
+                screenshot = client.take_screenshot(format="jpeg", quality=50)
+                if screenshot.get("data_b64"):
+                    blocks.append({
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": screenshot["data_b64"],
+                        },
+                    })
+                    logger.info(f"browse_website: screenshot attached ({len(screenshot['data_b64'])//1024}KB)")
+            except Exception as ss_err:
+                logger.warning(f"browse_website: screenshot failed: {ss_err}")
+
+            return blocks
         except Exception as e:
             logger.error(f"browse_website failed: {e}")
             return json.dumps({"error": f"Browse failed: {str(e)}"})
@@ -1983,6 +2004,11 @@ def run_agent_loop_streaming(
                     "tool_use_id": tu.id,
                     "content": result_text,
                 })
+                # Stream screenshot to mobile if browse_website returned one
+                if tu.name == "browse_website" and isinstance(result_text, list):
+                    for block in result_text:
+                        if isinstance(block, dict) and block.get("type") == "image":
+                            yield {"screenshot": block["source"]["data"]}
 
             messages.append({"role": "user", "content": tool_results})
             continue

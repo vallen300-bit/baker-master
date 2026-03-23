@@ -332,6 +332,11 @@ async function streamChat(url, body, containerId, history) {
                         var msgContainer = document.getElementById(containerId);
                         if (msgContainer) msgContainer.scrollTop = 0;
                     }
+                    if (data.screenshot) {
+                        // BROWSER-AGENT-1: Show page screenshot inline
+                        full += '\n\n![Page screenshot](data:image/jpeg;base64,' + data.screenshot + ')\n\n';
+                        if (replyEl) setSafeHTML(replyEl, '<div class="md-content">' + md(full) + '</div>');
+                    }
                     if (data.task_id) {
                         capturedTaskId = data.task_id;
                     }

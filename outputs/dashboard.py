@@ -5880,6 +5880,16 @@ def _scan_chat_deep(req, start: float, task_id: int = None, complexity: str = No
                 # COMPLEXITY-ROUTER-1: Fast path uses Haiku, fewer iterations
                 _cc = config.complexity
                 _is_fast = (complexity == "fast" and not _cc.shadow_mode)
+                # BROWSER-AGENT-1: Force Opus for any browser/purchase task
+                import re as _re
+                if _is_fast and _re.search(
+                    r'(buy|purchase|order|shop|add.to.cart|checkout|browse|go.to.*\.com|go.to.*\.ch|'
+                    r'open.*website|check.*website|find.*on.*shop|https?://|\.com\b|\.ch\b|\.de\b|'
+                    r'amazon|whoop|rode|microphone|product)',
+                    req.question, _re.IGNORECASE
+                ):
+                    _is_fast = False
+                    logger.info("Browser intent detected — forcing Opus (deep path)")
                 gen = run_agent_loop_streaming(
                     question=req.question,
                     system_prompt=system_prompt,
@@ -5923,6 +5933,8 @@ def _scan_chat_deep(req, start: float, task_id: int = None, complexity: str = No
                     yield f"data: {payload}\n\n"
                 elif "tool_call" in item:
                     yield f"data: {json.dumps({'tool_call': item['tool_call']})}\n\n"
+                elif "screenshot" in item:
+                    yield f"data: {json.dumps({'screenshot': item['screenshot']})}\n\n"
                 elif "error" in item:
                     logger.error(f"Deep scan error: {item['error']}")
                     yield f"data: {json.dumps({'error': item['error']})}\n\n"
@@ -6208,6 +6220,8 @@ def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
                     kind, value = item
                     if kind == "tool_call":
                         yield f"data: {_json.dumps({'tool_call': value})}\n\n"
+                    elif kind == "screenshot":
+                        yield f"data: {_json.dumps({'screenshot': value})}\n\n"
                     else:
                         yield f"data: {_json.dumps({'token': value})}\n\n"
                 else:
@@ -6408,8 +6422,9 @@ def _scan_chat_agentic(req, start: float, domain_context: str = "",
                     payload = json.dumps({"token": item["token"]})
                     yield f"data: {payload}\n\n"
                 elif "tool_call" in item:
-                    # Send tool name as SSE data (acts as keepalive + UI hint)
                     yield f"data: {json.dumps({'tool_call': item['tool_call']})}\n\n"
+                elif "screenshot" in item:
+                    yield f"data: {json.dumps({'screenshot': item['screenshot']})}\n\n"
                 elif "error" in item:
                     logger.error(f"Agentic scan error: {item['error']}")
                     yield f"data: {json.dumps({'error': item['error']})}\n\n"
