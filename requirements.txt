@@ -54,6 +54,7 @@ tavily-python>=0.5.0         # Tavily AI search API
 
 # Browser Sentinel (BROWSER-1)
 beautifulsoup4>=4.12.0       # HTML parsing for simple mode
+websocket-client>=1.7.0      # Chrome CDP WebSocket (Phase 2+3)
 
 # Web Push (E3)
 pywebpush>=2.0.0             # Web Push notifications via VAPID
