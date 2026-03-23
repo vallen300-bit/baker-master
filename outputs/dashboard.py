@@ -845,44 +845,6 @@ async def health_check():
     except Exception:
         pass
 
-    # Tailscale diagnostic
-    ts_info = {}
-    try:
-        import subprocess
-        ts_bin = Path("./tailscaled").exists()
-        ts_info["binary_exists"] = ts_bin
-        if ts_bin:
-            # Check if tailscaled process is running
-            r_ps = subprocess.run(["pgrep", "-f", "tailscaled"], capture_output=True, text=True, timeout=5)
-            ts_info["daemon_running"] = r_ps.returncode == 0
-            ts_info["daemon_pid"] = r_ps.stdout.strip()[:20] if r_ps.returncode == 0 else None
-            # Check IP
-            r = subprocess.run(["./tailscale", "--socket=/tmp/tailscale/tailscaled.sock", "ip", "-4"],
-                               capture_output=True, text=True, timeout=5)
-            ts_info["ip"] = r.stdout.strip() if r.returncode == 0 else f"error:{r.stderr.strip()[:80]}"
-            # Check status
-            r_st = subprocess.run(["./tailscale", "--socket=/tmp/tailscale/tailscaled.sock", "status", "--json"],
-                                  capture_output=True, text=True, timeout=5)
-            if r_st.returncode == 0:
-                import json as _json
-                st = _json.loads(r_st.stdout)
-                ts_info["backend_state"] = st.get("BackendState", "?")
-            else:
-                ts_info["status_error"] = r_st.stderr.strip()[:80]
-            # Check authkey env var (existence only, not value)
-            authkey = os.environ.get("TAILSCALE_AUTHKEY", "")
-            ts_info["authkey_set"] = bool(authkey)
-            ts_info["authkey_prefix"] = authkey[:12] + "..." if authkey else "empty"
-            # Try login now if NeedsLogin
-            if ts_info.get("backend_state") == "NeedsLogin" and authkey:
-                r_up = subprocess.run(
-                    ["./tailscale", "--socket=/tmp/tailscale/tailscaled.sock", "up",
-                     "--authkey=" + authkey, "--hostname=baker-render"],
-                    capture_output=True, text=True, timeout=15)
-                ts_info["login_attempt"] = "ok" if r_up.returncode == 0 else f"rc={r_up.returncode}:{r_up.stderr.strip()[:100]}"
-    except Exception as e:
-        ts_info["error"] = str(e)[:80]
-
     status = "healthy"
     if not db_ok or not scheduler_ok or sentinels_down > 0:
         status = "degraded"
@@ -894,7 +856,6 @@ async def health_check():
         "sentinels_healthy": sentinels_healthy,
         "sentinels_down": sentinels_down,
         "sentinels_down_list": sentinels_down_list,
-        "tailscale": ts_info,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
