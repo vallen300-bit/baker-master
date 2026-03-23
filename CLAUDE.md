@@ -347,6 +347,7 @@ Sessions 1-28 archived in `SESSION_LOG.md`.
 | 33 | Mar 23 | MOBILE-REACTIVE-1 Batch 2 (Draft a Reply + Delegate). BROWSER-AGENT-1 Phase 2 (Tailscale Funnel bridge). Travel feed card. `browse_website` tool #19. 19 agent tools. |
 | 34 | Mar 23 | **CORRECTION-MEMORY-1:** correction memory + episodic retrieval. Anti-bloat: max 5/capability, 90-day expiry. Phase 3 deferred ~2026-04-06. |
 | 35 | Mar 23 | **BROWSER-AGENT-1 Phase 3:** Interactive browser actions + transaction gate. `browser_action` tool #20. CDP click/fill/screenshot. Confirmation cards (mobile+desktop). 20 agent tools. |
+| 36 | Mar 23 | **CORRECTION-MEMORY-1 + COMPLEXITY-ROUTER-1 Phase 1.** Reinforcement learning: Haiku extracts learned_rules from thumbs-down, episodic retrieval from thumbs-up. Complexity router: merged fast/deep classification into intent classifier (zero extra API cost), shadow mode, 4 new baker_tasks columns, /api/tasks/complexity-stats endpoint. ComplexityConfig in settings.py. |
 
 ## Key Documents (Dropbox)
 
