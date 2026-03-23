@@ -83,9 +83,11 @@ class GmailConfig:
         "https://www.googleapis.com/auth/calendar",
     ])
     # Default query to exclude noise categories
+    # NOTE: -category:updates REMOVED — it was filtering travel bookings,
+    # receipts, and other operational emails. Noise senders list handles junk.
     default_query: str = (
         "-category:promotions -category:social "
-        "-category:updates -category:forums"
+        "-category:forums"
     )
     # Newsletter / noise sender patterns (regex-matched against From header)
     noise_senders: List[str] = field(default_factory=lambda: [
