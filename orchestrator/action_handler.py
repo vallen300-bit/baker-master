@@ -234,6 +234,9 @@ _INTENT_SYSTEM = """You are Baker's intent classifier. Given a Director's messag
 Return exactly this JSON structure (no other text, no markdown):
 {
   "type": "email_action" | "whatsapp_action" | "deadline_action" | "contact_action" | "fireflies_fetch" | "clickup_action" | "clickup_fetch" | "clickup_plan" | "question",
+  "complexity": "fast" | "deep",
+  "complexity_confidence": <float 0.0-1.0>,
+  "complexity_reasoning": "<one sentence why fast or deep>",
   "recipient": "<email address OR name of recipient(s). For multiple recipients, return comma-separated (e.g. 'Edita Vallen, Philip Vallen, dvallen@brisengroup.com'). 'myself' or 'me' means dvallen@brisengroup.com. Return null only if no recipient at all.>",
   "subject": "<inferred subject line or null>",
   "content_request": "<what Baker should include in the email body, or null>",
@@ -255,6 +258,28 @@ Return exactly this JSON structure (no other text, no markdown):
   "clickup_project_name": "<project name for planning, or null>",
   "clickup_status_filter": "<'overdue', 'open', etc., or null>"
 }
+
+Complexity classification rules:
+
+FAST means:
+- Single fact lookup (date, name, status, amount)
+- Yes/no question with a known answer
+- Simple status check ("what's the deadline for Y?", "is X done?")
+- Forwarding or relaying information
+- Reading a single data source
+- Actions like send/dismiss/confirm with clear targets
+- Expected answer < 200 tokens
+
+DEEP means:
+- Multi-source analysis (needs data from 2+ systems)
+- Judgment call (legal posture, financial recommendation, strategic advice)
+- Draft that will be sent externally (email to VIP, WhatsApp to investor)
+- Anything involving money, legal risk, or reputation
+- Comparison, timeline reconstruction, or dispute analysis
+- Expected answer > 500 tokens
+- Director explicitly says "think about this", "analyze", "what should I do"
+
+When uncertain, classify as DEEP. False-deep is expensive but safe. False-fast is dangerous.
 
 Email action patterns (classify as email_action even if recipient is a NAME, not an email address):
 - "Send [something] to [name/email]"
@@ -331,7 +356,11 @@ def _quick_capability_detect(question: str) -> Optional[dict]:
     )
     match = pattern.search(question)
     if match:
-        return {"type": "capability_task", "capability_hint": match.group(1).lower()}
+        return {
+            "type": "capability_task", "capability_hint": match.group(1).lower(),
+            "complexity": "deep", "complexity_confidence": 0.9,
+            "complexity_reasoning": "Explicit specialist invocation implies analysis",
+        }
     return None
 
 
@@ -365,6 +394,8 @@ def _quick_email_detect(question: str) -> dict:
             "recipient": ", ".join(emails),
             "subject": None,
             "content_request": question,
+            "complexity": "deep", "complexity_confidence": 0.8,
+            "complexity_reasoning": "Email drafting requires generation",
         }
 
     return None
@@ -606,7 +637,7 @@ def classify_intent(question: str, conversation_history: str = "") -> dict:
             user_content = f"Recent conversation:\n{conversation_history}\n\nCurrent message to classify:\n{question}"
         resp = claude.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=300,
+            max_tokens=400,
             system=_INTENT_SYSTEM,
             messages=[{"role": "user", "content": user_content}],
         )
@@ -621,12 +652,23 @@ def classify_intent(question: str, conversation_history: str = "") -> dict:
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
         result = json.loads(raw)
-        _log_action("classify_intent:haiku_result", f"type={result.get('type')}, raw={raw[:200]}")
+
+        # COMPLEXITY-ROUTER-1: Ensure complexity fields have safe defaults
+        result.setdefault("complexity", "deep")
+        result.setdefault("complexity_confidence", 0.5)
+        result.setdefault("complexity_reasoning", "default — no classification returned")
+
+        _log_action(
+            "classify_intent:haiku_result",
+            f"type={result.get('type')}, complexity={result.get('complexity')}, "
+            f"confidence={result.get('complexity_confidence')}, raw={raw[:200]}",
+        )
         return result
     except Exception as e:
         _log_action("classify_intent:haiku_failed", str(e))
         logger.warning(f"Intent classification failed ({e}) — defaulting to question")
-        return {"type": "question"}
+        return {"type": "question", "complexity": "deep", "complexity_confidence": 0.0,
+                "complexity_reasoning": "classification failed — defaulting to deep"}
 
 
 # ---------------------------------------------------------------------------

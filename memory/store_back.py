@@ -115,6 +115,7 @@ class SentinelStoreBack:
         self._ensure_capability_runs_table()
         self._ensure_decomposition_log_table()
         self._ensure_baker_tasks_capability_columns()
+        self._ensure_baker_tasks_complexity_columns()
         self._ensure_alerts_v3_columns()
         self._ensure_alert_threads_table()
         self._ensure_alert_artifacts_table()
@@ -1342,6 +1343,8 @@ class SentinelStoreBack:
         "agent_input_tokens", "agent_output_tokens", "agent_elapsed_ms",
         "director_feedback", "feedback_comment",
         "capability_slugs", "decomposition", "capability_slug",
+        "complexity", "complexity_confidence", "complexity_override",
+        "complexity_reasoning",
     }
 
     def update_baker_task(self, task_id: int, **kwargs) -> bool:
@@ -2331,6 +2334,29 @@ class SentinelStoreBack:
             except Exception:
                 pass
             logger.warning(f"Could not ensure baker_tasks capability columns: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_baker_tasks_complexity_columns(self):
+        """COMPLEXITY-ROUTER-1: Add complexity classification columns. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("ALTER TABLE baker_tasks ADD COLUMN IF NOT EXISTS complexity VARCHAR(10)")
+            cur.execute("ALTER TABLE baker_tasks ADD COLUMN IF NOT EXISTS complexity_confidence FLOAT")
+            cur.execute("ALTER TABLE baker_tasks ADD COLUMN IF NOT EXISTS complexity_override VARCHAR(50)")
+            cur.execute("ALTER TABLE baker_tasks ADD COLUMN IF NOT EXISTS complexity_reasoning TEXT")
+            conn.commit()
+            cur.close()
+            logger.info("baker_tasks complexity columns verified")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure baker_tasks complexity columns: {e}")
         finally:
             self._put_conn(conn)
 

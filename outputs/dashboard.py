@@ -5671,6 +5671,14 @@ async def scan_chat(req: ScanRequest):
             sender="director", source="scan", channel="scan",
             status="in_progress",
         )
+        # COMPLEXITY-ROUTER-1: Store complexity classification (shadow mode — log only)
+        if _task_id and intent:
+            store.update_baker_task(
+                _task_id,
+                complexity=intent.get("complexity", "deep"),
+                complexity_confidence=intent.get("complexity_confidence"),
+                complexity_reasoning=intent.get("complexity_reasoning"),
+            )
     except Exception as _te:
         logger.warning(f"baker_task creation failed (non-fatal): {_te}")
 
@@ -6940,6 +6948,79 @@ async def task_feedback_endpoint(task_id: int, body: TaskFeedbackRequest):
         ).start()
 
     return {"status": "updated", "task_id": task_id, "feedback": body.feedback}
+
+
+# ============================================================
+# COMPLEXITY-ROUTER-1: Complexity Stats
+# ============================================================
+
+@app.get("/api/tasks/complexity-stats", tags=["tasks"], dependencies=[Depends(verify_api_key)])
+async def complexity_stats_endpoint(days: int = Query(7, ge=1, le=90)):
+    """PM monitoring: complexity classification distribution and accuracy."""
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # Overall distribution
+        cur.execute("""
+            SELECT
+                complexity,
+                COUNT(*) as count,
+                AVG(complexity_confidence) as avg_confidence,
+                COUNT(CASE WHEN director_feedback = 'rejected' THEN 1 END) as rejected,
+                COUNT(CASE WHEN director_feedback = 'accepted' THEN 1 END) as accepted,
+                COUNT(CASE WHEN complexity_override IS NOT NULL THEN 1 END) as overrides
+            FROM baker_tasks
+            WHERE created_at > NOW() - INTERVAL '%s days'
+              AND complexity IS NOT NULL
+            GROUP BY complexity
+            ORDER BY complexity
+        """ % days)
+        distribution = [dict(r) for r in cur.fetchall()]
+
+        # By domain breakdown
+        cur.execute("""
+            SELECT
+                COALESCE(domain, 'unknown') as domain,
+                complexity,
+                COUNT(*) as count,
+                AVG(complexity_confidence) as avg_confidence
+            FROM baker_tasks
+            WHERE created_at > NOW() - INTERVAL '%s days'
+              AND complexity IS NOT NULL
+            GROUP BY domain, complexity
+            ORDER BY domain, complexity
+        """ % days)
+        by_domain = [dict(r) for r in cur.fetchall()]
+
+        # Potential misclassifications: fast tasks that got rejected
+        cur.execute("""
+            SELECT id, title, complexity, complexity_confidence,
+                   complexity_reasoning, director_feedback, feedback_comment
+            FROM baker_tasks
+            WHERE created_at > NOW() - INTERVAL '%s days'
+              AND complexity = 'fast'
+              AND director_feedback = 'rejected'
+            ORDER BY created_at DESC
+            LIMIT 10
+        """ % days)
+        misclassified = [dict(r) for r in cur.fetchall()]
+
+        cur.close()
+        return {
+            "days": days,
+            "distribution": distribution,
+            "by_domain": by_domain,
+            "misclassified_fast": misclassified,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        store._put_conn(conn)
 
 
 # ============================================================

@@ -125,7 +125,8 @@ def _format_wa_context(contexts) -> str:
     return "\n".join(blocks)
 
 
-def _handle_director_question(question: str, msg_id: str, scored: dict = None):
+def _handle_director_question(question: str, msg_id: str, scored: dict = None,
+                               intent: dict = None):
     """
     WA-QUESTION-1 + STEP1C: Answer a Director question using Scan-style RAG.
 
@@ -153,6 +154,14 @@ def _handle_director_question(question: str, msg_id: str, scored: dict = None):
             sender="director", source="whatsapp", channel="whatsapp",
             status="in_progress",
         )
+        # COMPLEXITY-ROUTER-1: Store complexity classification (shadow mode)
+        if _task_id and intent:
+            store.update_baker_task(
+                _task_id,
+                complexity=intent.get("complexity", "deep"),
+                complexity_confidence=intent.get("complexity_confidence"),
+                complexity_reasoning=intent.get("complexity_reasoning"),
+            )
     except Exception:
         pass
 
@@ -595,8 +604,9 @@ def _handle_director_message(message_body: str, msg_id: str, sender_name: str) -
         logger.info(f"WhatsApp action: ClickUp plan processed")
         return True
 
-    # 3. Not an action — fall through to normal pipeline
-    return False
+    # 3. Not an action — fall through to normal pipeline.
+    # COMPLEXITY-ROUTER-1: Return intent dict so complexity can be stored on baker_task.
+    return intent
 
 
 @router.post("/api/webhook/whatsapp")
@@ -752,11 +762,15 @@ async def waha_webhook(
         logger.warning(f"Decision Engine scoring failed (non-fatal): {_e}")
 
     # WHATSAPP-ACTION-1: Director messages → action detection first
+    _wa_intent = None
     if sender == DIRECTOR_WHATSAPP and combined_body:
         try:
             handled = _handle_director_message(combined_body, msg_id, sender_name)
-            if handled:
+            if handled is True:
                 return {"status": "action_processed", "sender": sender_name}
+            # COMPLEXITY-ROUTER-1: handled is the intent dict (question type)
+            if isinstance(handled, dict):
+                _wa_intent = handled
         except Exception as e:
             logger.error(f"WhatsApp action routing failed (falling through to question handler): {e}")
 
@@ -775,7 +789,8 @@ async def waha_webhook(
 
         # WA-QUESTION-1: Director question — conversational reply via Scan-style RAG
         try:
-            _handle_director_question(combined_body, msg_id, scored=_scored)
+            _handle_director_question(combined_body, msg_id, scored=_scored,
+                                       intent=_wa_intent)
             return {"status": "question_answered", "sender": sender_name}
         except Exception as e:
             logger.error(f"WA question handler failed: {e}")

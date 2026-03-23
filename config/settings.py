@@ -297,6 +297,19 @@ class ChainConfig:
 
 
 @dataclass
+class ComplexityConfig:
+    """COMPLEXITY-ROUTER-1: Fast/deep routing configuration."""
+    shadow_mode: bool = os.getenv("COMPLEXITY_SHADOW_MODE", "true").lower() == "true"
+    fast_model: str = "claude-haiku-4-5-20251001"
+    deep_model: str = "claude-opus-4-6"
+    fast_max_tokens: int = 1024
+    deep_max_tokens: int = 4096
+    fast_tool_limit: int = 3
+    fast_timeout: int = 10
+    deep_timeout: int = 120
+
+
+@dataclass
 class SentinelConfig:
     qdrant: QdrantConfig = field(default_factory=QdrantConfig)
     voyage: VoyageConfig = field(default_factory=VoyageConfig)
@@ -316,6 +329,7 @@ class SentinelConfig:
     outputs: OutputConfig = field(default_factory=OutputConfig)
     decision_engine: DecisionEngineConfig = field(default_factory=DecisionEngineConfig)
     chains: ChainConfig = field(default_factory=ChainConfig)
+    complexity: ComplexityConfig = field(default_factory=ComplexityConfig)
     # Baker personality
     baker_persona: str = "chief_of_staff"
     debug: bool = os.getenv("SENTINEL_DEBUG", "false").lower() == "true"
