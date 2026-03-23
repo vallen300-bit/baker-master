@@ -849,7 +849,7 @@ function _classifyAlertSection(a) {
     if (a.source === 'browser_transaction' || a.source === 'pending_draft') return 'decision';
     if (a.tier <= 1) return 'decision';
     // Baker Recommends
-    var recommendSources = ['research', 'obligation', 'initiative', 'convergence'];
+    var recommendSources = ['research', 'research_executor', 'obligation', 'initiative', 'convergence'];
     if (recommendSources.indexOf(a.source) >= 0) return 'recommends';
     if (a.tier === 2 && a.structured_actions && Object.keys(a.structured_actions).length > 0) return 'recommends';
     // For Your Info
@@ -1088,7 +1088,7 @@ function _createAlertCard(alert) {
             _confirmBrowserAction(sa.action_id, alert.id, card);
         });
         btnRow.appendChild(runBtn);
-    } else if (alert.source === 'research' && sa.research_proposal_id) {
+    } else if (sa.research_proposal_id) {
         // Check if dossier is already completed — show View link directly
         if (sa.status === 'completed') {
             var viewLink = document.createElement('a');
