@@ -5654,8 +5654,9 @@ async def scan_chat(req: ScanRequest):
             )
         elif intent.get("type") == "capability_task":
             # AGENT-FRAMEWORK-1: Explicit capability invocation
+            from orchestrator.complexity_router import classify_complexity as _cc_cap
             return _scan_chat_capability(req, start, intent,
-                                          complexity=intent.get("complexity"))
+                                          complexity=_cc_cap(req.question))
     # draft_action == "dismiss" or regular question → fall through to RAG pipeline
 
     # DEEP-MODE-1: All Ask Baker questions go straight to deep agentic path.
@@ -5672,19 +5673,17 @@ async def scan_chat(req: ScanRequest):
             sender="director", source="scan", channel="scan",
             status="in_progress",
         )
-        # COMPLEXITY-ROUTER-1: Store complexity classification (shadow mode — log only)
-        if _task_id and intent:
-            store.update_baker_task(
-                _task_id,
-                complexity=intent.get("complexity", "deep"),
-                complexity_confidence=intent.get("complexity_confidence"),
-                complexity_reasoning=intent.get("complexity_reasoning"),
-            )
+        # COMPLEXITY-ROUTER-REFACTOR: Rule-based classification (no LLM)
+        from orchestrator.complexity_router import classify_complexity
+        _complexity = classify_complexity(req.question)
+        if _task_id:
+            store.update_baker_task(_task_id, complexity=_complexity)
+        logger.info(f"Complexity router: {_complexity} for '{req.question[:60]}'")
     except Exception as _te:
         logger.warning(f"baker_task creation failed (non-fatal): {_te}")
+        _complexity = "deep"
 
-    return _scan_chat_deep(req, start, task_id=_task_id,
-                           complexity=intent.get("complexity") if intent else None)
+    return _scan_chat_deep(req, start, task_id=_task_id, complexity=_complexity)
 
 
 def _scan_chat_deep(req, start: float, task_id: int = None, complexity: str = None):
@@ -5877,19 +5876,9 @@ def _scan_chat_deep(req, start: float, task_id: int = None, complexity: str = No
 
         def _run_agent():
             try:
-                # COMPLEXITY-ROUTER-1: Fast path uses Haiku, fewer iterations
+                # COMPLEXITY-ROUTER-REFACTOR: Rule-based (no LLM, no regex hacks)
                 _cc = config.complexity
                 _is_fast = (complexity == "fast" and not _cc.shadow_mode)
-                # BROWSER-AGENT-1: Force Opus for any browser/purchase task
-                import re as _re
-                if _is_fast and _re.search(
-                    r'(buy|purchase|order|shop|add.to.cart|checkout|browse|go.to.*\.com|go.to.*\.ch|'
-                    r'open.*website|check.*website|find.*on.*shop|https?://|\.com\b|\.ch\b|\.de\b|'
-                    r'amazon|whoop|rode|microphone|product)',
-                    req.question, _re.IGNORECASE
-                ):
-                    _is_fast = False
-                    logger.info("Browser intent detected — forcing Opus (deep path)")
                 gen = run_agent_loop_streaming(
                     question=req.question,
                     system_prompt=system_prompt,

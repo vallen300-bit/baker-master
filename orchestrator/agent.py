@@ -1969,16 +1969,13 @@ def run_agent_loop_streaming(
             # Execute tools
             tool_results = []
             for tu in tool_uses:
-                # BROWSER-AGENT-1 Phase 3: Auto-upgrade when browser tools are used
+                # BROWSER-AGENT-1: Extend timeout for browser tools (page loads are slow)
                 if tu.name in ("browse_website", "browser_action") and timeout < 300:
                     timeout = 300.0
                     max_iterations = max(max_iterations, 20)
                     if tool_limit:
                         tool_limit = max(tool_limit, 15)
-                    # Upgrade to Opus — Haiku can't navigate websites effectively
-                    _model = config.claude.model
-                    _max_tok = 4096
-                    logger.info(f"Browser tool → upgraded to {_model}, {timeout}s timeout, {max_iterations} iterations")
+                    logger.info(f"Browser tool — extended to {timeout}s timeout, {max_iterations} iterations")
                 tool_t0 = time.time()
                 tool_ok = True
                 tool_err = None

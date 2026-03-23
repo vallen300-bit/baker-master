@@ -234,9 +234,6 @@ _INTENT_SYSTEM = """You are Baker's intent classifier. Given a Director's messag
 Return exactly this JSON structure (no other text, no markdown):
 {
   "type": "email_action" | "whatsapp_action" | "deadline_action" | "contact_action" | "fireflies_fetch" | "clickup_action" | "clickup_fetch" | "clickup_plan" | "question",
-  "complexity": "fast" | "deep",
-  "complexity_confidence": <float 0.0-1.0>,
-  "complexity_reasoning": "<one sentence why fast or deep>",
   "recipient": "<email address OR name of recipient(s). For multiple recipients, return comma-separated (e.g. 'Edita Vallen, Philip Vallen, dvallen@brisengroup.com'). 'myself' or 'me' means dvallen@brisengroup.com. Return null only if no recipient at all.>",
   "subject": "<inferred subject line or null>",
   "content_request": "<what Baker should include in the email body, or null>",
@@ -259,29 +256,7 @@ Return exactly this JSON structure (no other text, no markdown):
   "clickup_status_filter": "<'overdue', 'open', etc., or null>"
 }
 
-Complexity classification rules:
-
-FAST means:
-- Single fact lookup (date, name, status, amount)
-- Yes/no question with a known answer
-- Simple status check ("what's the deadline for Y?", "is X done?")
-- Forwarding or relaying information
-- Reading a single data source
-- Actions like send/dismiss/confirm with clear targets
-- Expected answer < 200 tokens
-
-DEEP means:
-- Multi-source analysis (needs data from 2+ systems)
-- Judgment call (legal posture, financial recommendation, strategic advice)
-- Draft that will be sent externally (email to VIP, WhatsApp to investor)
-- Anything involving money, legal risk, or reputation
-- Comparison, timeline reconstruction, or dispute analysis
-- Expected answer > 500 tokens
-- Director explicitly says "think about this", "analyze", "what should I do"
-- Browsing a website, purchasing, adding to cart, or any web interaction
-- "buy", "order", "purchase", "go to [website]", "check [website]", "find [product] on [site]"
-
-When uncertain, classify as DEEP. False-deep is expensive but safe. False-fast is dangerous.
+Your job is ONLY to classify the intent type. Do NOT judge complexity — that is handled separately.
 
 Email action patterns (classify as email_action even if recipient is a NAME, not an email address):
 - "Send [something] to [name/email]"
@@ -655,22 +630,15 @@ def classify_intent(question: str, conversation_history: str = "") -> dict:
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
         result = json.loads(raw)
 
-        # COMPLEXITY-ROUTER-1: Ensure complexity fields have safe defaults
-        result.setdefault("complexity", "deep")
-        result.setdefault("complexity_confidence", 0.5)
-        result.setdefault("complexity_reasoning", "default — no classification returned")
-
         _log_action(
             "classify_intent:haiku_result",
-            f"type={result.get('type')}, complexity={result.get('complexity')}, "
-            f"confidence={result.get('complexity_confidence')}, raw={raw[:200]}",
+            f"type={result.get('type')}, raw={raw[:200]}",
         )
         return result
     except Exception as e:
         _log_action("classify_intent:haiku_failed", str(e))
         logger.warning(f"Intent classification failed ({e}) — defaulting to question")
-        return {"type": "question", "complexity": "deep", "complexity_confidence": 0.0,
-                "complexity_reasoning": "classification failed — defaulting to deep"}
+        return {"type": "question"}
 
 
 # ---------------------------------------------------------------------------
