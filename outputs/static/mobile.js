@@ -2538,35 +2538,6 @@ function _showBrowserActionPreview(actionId) {
     });
 }
 
-function _confirmBrowserAction(actionId, alertId, card) {
-    var btn = card.querySelector('.triage-btn.approve');
-    if (btn) { btn.disabled = true; btn.textContent = 'Executing...'; }
-
-    bakerFetch('/api/browser/confirm/' + actionId, { method: 'POST' })
-        .then(function(r) { return r.ok ? r.json() : Promise.reject(r.statusText); })
-        .then(function(data) {
-            if (btn) btn.textContent = 'Done';
-            card.style.opacity = '0.5';
-            setTimeout(function() { card.remove(); }, 1500);
-        })
-        .catch(function(e) {
-            console.error('Confirm browser action failed:', e);
-            if (btn) { btn.disabled = false; btn.textContent = 'Confirm'; }
-        });
-}
-
-function _cancelBrowserAction(actionId, alertId, card) {
-    bakerFetch('/api/browser/cancel/' + actionId, { method: 'POST' })
-        .then(function(r) { return r.ok ? r.json() : Promise.reject(r.statusText); })
-        .then(function() {
-            card.style.opacity = '0';
-            setTimeout(function() { card.remove(); }, 300);
-        })
-        .catch(function(e) {
-            console.error('Cancel browser action failed:', e);
-        });
-}
-
 function _esc(str) {
     var div = document.createElement('div');
     div.textContent = str;
