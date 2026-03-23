@@ -1089,14 +1089,26 @@ function _createAlertCard(alert) {
         });
         btnRow.appendChild(runBtn);
     } else if (alert.source === 'research' && sa.research_proposal_id) {
-        var runBtn = document.createElement('button');
-        runBtn.className = 'triage-btn approve';
-        runBtn.textContent = 'Run';
-        runBtn.addEventListener('click', function(e) {
-            e.stopPropagation();
-            _runDossierFromAlert(sa.research_proposal_id, alert.id, card);
-        });
-        btnRow.appendChild(runBtn);
+        // Check if dossier is already completed — show View link directly
+        if (sa.status === 'completed') {
+            var viewLink = document.createElement('a');
+            viewLink.href = '/api/research-proposals/' + sa.research_proposal_id + '/view?key=' + encodeURIComponent(BAKER.apiKey);
+            viewLink.className = 'triage-btn approve';
+            viewLink.style.cssText = 'text-decoration:none;text-align:center;';
+            viewLink.textContent = 'View Dossier';
+            viewLink.target = '_blank';
+            viewLink.addEventListener('click', function(e) { e.stopPropagation(); });
+            btnRow.appendChild(viewLink);
+        } else {
+            var runBtn = document.createElement('button');
+            runBtn.className = 'triage-btn approve';
+            runBtn.textContent = 'Run';
+            runBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                _runDossierFromAlert(sa.research_proposal_id, alert.id, card);
+            });
+            btnRow.appendChild(runBtn);
+        }
     } else if (alert.source === 'obligation' && sa.action_id) {
         var runBtn = document.createElement('button');
         runBtn.className = 'triage-btn approve';
@@ -2405,21 +2417,46 @@ function _dismissAlertCard(alertId, card) {
 }
 
 function _runDossierFromAlert(proposalId, alertId, card) {
-    // Show running state
-    var btns = card.querySelector('.alert-action-buttons');
-    if (btns) {
-        btns.innerHTML = '<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--green);font-weight:500;">' +
-            '<span class="triage-spinner"></span><span class="dossier-progress-text"> Running specialists...</span></div>';
-    }
-    card.style.opacity = '0.85';
+    // First check if already completed — go straight to view
+    bakerFetch('/api/research-proposals/' + proposalId + '/status').then(function(r) {
+        return r.ok ? r.json() : null;
+    }).then(function(data) {
+        if (data && data.status === 'completed') {
+            // Already done — open view page
+            window.open('/api/research-proposals/' + proposalId + '/view?key=' + encodeURIComponent(BAKER.apiKey), '_blank');
+            return;
+        }
+        // Not completed — run it
+        var btns = card.querySelector('.alert-action-buttons');
+        if (btns) {
+            btns.innerHTML = '<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--green);font-weight:500;">' +
+                '<span class="triage-spinner"></span><span class="dossier-progress-text"> Running specialists...</span></div>';
+        }
+        card.style.opacity = '0.85';
 
-    bakerFetch('/api/research-proposals/' + proposalId + '/respond', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ response: 'approved' }),
-    }).then(function() {
-        _pollDossierFromAlert(proposalId, alertId, card);
-    }).catch(function(e) { console.error('Dossier launch failed:', e); });
+        bakerFetch('/api/research-proposals/' + proposalId + '/respond', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ response: 'approved' }),
+        }).then(function() {
+            _pollDossierFromAlert(proposalId, alertId, card);
+        }).catch(function(e) { console.error('Dossier launch failed:', e); });
+    }).catch(function() {
+        // Status check failed — try running anyway
+        var btns = card.querySelector('.alert-action-buttons');
+        if (btns) {
+            btns.innerHTML = '<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--green);font-weight:500;">' +
+                '<span class="triage-spinner"></span><span class="dossier-progress-text"> Running specialists...</span></div>';
+        }
+        card.style.opacity = '0.85';
+        bakerFetch('/api/research-proposals/' + proposalId + '/respond', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ response: 'approved' }),
+        }).then(function() {
+            _pollDossierFromAlert(proposalId, alertId, card);
+        }).catch(function(e) { console.error('Dossier launch failed:', e); });
+    });
 }
 
 function _pollDossierFromAlert(proposalId, alertId, card) {
