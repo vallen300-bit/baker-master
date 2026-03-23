@@ -546,6 +546,34 @@ TOOL_DEFINITIONS = [
             "required": ["name"],
         },
     },
+    {
+        "name": "browse_website",
+        "description": (
+            "Browse a website using Chrome on the Director's machine. "
+            "Chrome has authenticated sessions (logged into WhatsApp, Gmail, Dropbox, WHOOP, etc.). "
+            "Use this to:\n"
+            "- Read authenticated pages the Director is logged into\n"
+            "- Check order status, account info, prices\n"
+            "- Extract content from JS-rendered pages\n\n"
+            "Returns the page title and text content. "
+            "NOTE: This tool can only READ pages. It cannot click buttons or fill forms. "
+            "For purchases or form submissions, return the information and let the Director act."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "Full URL to navigate to (e.g. 'https://shop.whoop.com/us/en/products/')",
+                },
+                "wait_seconds": {
+                    "type": "integer",
+                    "description": "Seconds to wait for page to load (default 3, use 5-8 for heavy JS pages)",
+                },
+            },
+            "required": ["url"],
+        },
+    },
 ]
 
 # Agent loop tools — exclude clickup_create (Director prefers results in artifact panel,
@@ -607,6 +635,8 @@ class ToolExecutor:
                 return self._draft_email(tool_input)
             elif tool_name == "enrich_linkedin":
                 return self._enrich_linkedin(tool_input)
+            elif tool_name == "browse_website":
+                return self._browse_website(tool_input)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -1343,6 +1373,28 @@ class ToolExecutor:
         except Exception as e:
             logger.error(f"enrich_linkedin failed: {e}")
             return json.dumps({"error": f"LinkedIn enrichment failed: {str(e)}"})
+
+    def _browse_website(self, inp: dict) -> str:
+        """BROWSER-AGENT-1: Browse a website via Chrome on Director's machine."""
+        url = inp.get("url", "")
+        wait_seconds = inp.get("wait_seconds", 3)
+        if not url:
+            return "[url is required]"
+
+        try:
+            from triggers.browser_client import BrowserClient
+            client = BrowserClient._get_global_instance()
+            result = client.fetch_chrome(url, wait_seconds=wait_seconds)
+            if result.get("error"):
+                return json.dumps({"error": result["error"], "hint": "Chrome bridge may be offline (requires MacBook to be on with Tailscale Funnel running)"})
+            title = result.get("title", "")
+            content = result.get("content", "")
+            if not content:
+                return f"[Page loaded but no text content extracted. Title: {title}]"
+            return f"--- WEB PAGE: {title} ---\nURL: {url}\n\n{content}"
+        except Exception as e:
+            logger.error(f"browse_website failed: {e}")
+            return json.dumps({"error": f"Browse failed: {str(e)}"})
 
     @staticmethod
     def _format_contexts(contexts, label: str) -> str:
