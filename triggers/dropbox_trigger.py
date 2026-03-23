@@ -193,7 +193,8 @@ def run_dropbox_poll():
                         file_hash = compute_file_hash(local_path)
                         store = _get_store()
                         # Determine owner from path (WEALTH-MANAGER)
-                        _owner = "edita" if "/edita-feed" in entry_path.lower() else "dimitry"
+                        _path_lower = entry_path.lower()
+                        _owner = "edita" if ("/edita-feed" in _path_lower or "/baker-feed/edita/" in _path_lower) else "dimitry"
                         doc_id = store.store_document_full(
                             source_path=entry_path,
                             filename=entry_name,
