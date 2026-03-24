@@ -313,6 +313,12 @@ def _notify_completion(proposal_id: int, subject_name: str, filename: str,
             tags=["dossier", "research_complete"],
             source="research_executor",
             source_id=f"dossier-complete-{proposal_id}",
+            structured_actions={
+                "research_proposal_id": proposal_id,
+                "subject_name": subject_name,
+                "status": "completed",
+                "specialists": specialists,
+            },
         )
     except Exception as e:
         logger.warning(f"Dossier alert creation failed: {e}")
