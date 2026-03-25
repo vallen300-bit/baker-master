@@ -33,6 +33,68 @@ _WA_FEEDBACK_REVISE = re.compile(
 
 DIRECTOR_WHATSAPP = "41799605092@c.us"
 
+# MEETINGS-DETECT-3: Fast regex pre-filter for meeting WhatsApp messages
+_MEETING_WA_RE = re.compile(
+    r'(?:meeting|call|zoom|teams|lunch|dinner|coffee|breakfast|'
+    r'catch-up|sync|sit-down|appointment|conference|'
+    r"let'?s meet|see you at|confirmed for|'ll meet|"
+    r'looking forward to|propose a meeting|schedule a call|'
+    r'book a time|set up a meeting|'
+    r'tomorrow at \d|today at \d|\d{1,2}:\d{2}\s*(?:am|pm)?)',
+    re.IGNORECASE
+)
+
+
+def _is_meeting_whatsapp(body: str) -> bool:
+    """MEETINGS-DETECT-3: Fast regex check — no API cost."""
+    return bool(_MEETING_WA_RE.search((body or "")[:1000]))
+
+
+def _extract_meeting_from_whatsapp(body: str, sender_name: str, chat_name: str):
+    """MEETINGS-DETECT-3: One Haiku call to extract meeting details from WhatsApp."""
+    import json
+    import anthropic
+    from config.settings import config
+    try:
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        today = datetime.now().strftime('%Y-%m-%d')
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{"role": "user", "content": f"""Extract meeting details from this WhatsApp message. If NOT about a specific meeting, return {{"is_meeting": false}}.
+
+From: {sender_name} (chat: {chat_name})
+Message: {body[:1500]}
+
+Today's date is {today}.
+
+Return JSON only (no markdown):
+{{
+  "is_meeting": true,
+  "title": "short meeting title",
+  "participants": ["Name1", "Name2"],
+  "date": "YYYY-MM-DD or null",
+  "time": "HH:MM or descriptive or null",
+  "location": "place or null",
+  "status": "confirmed or proposed"
+}}
+
+Status: "confirmed" if definite ("see you", "confirmed", "booked"). "proposed" if suggesting."""}],
+        )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="meeting_wa_detect")
+        except Exception:
+            pass
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
+        return json.loads(raw)
+    except Exception as e:
+        logger.debug(f"MEETINGS-DETECT-3: Haiku extraction failed: {e}")
+        return None
+
 
 def _wa_reply(text: str):
     """Send a reply to the Director on WhatsApp. Non-fatal on error."""
@@ -756,6 +818,35 @@ async def waha_webhook(
                     _store._put_conn(_conn)
         except Exception as _ce:
             logger.debug(f"Auto-contact creation failed (non-fatal): {_ce}")
+
+    # MEETINGS-DETECT-3: Check ALL WhatsApp messages for meeting content
+    # Runs for Director AND non-Director. Dedup in insert_detected_meeting() prevents doubles.
+    try:
+        if combined_body and _is_meeting_whatsapp(combined_body):
+            _wa_meeting = _extract_meeting_from_whatsapp(combined_body, sender_name, sender_name)
+            if _wa_meeting and _wa_meeting.get("is_meeting") and _wa_meeting.get("date"):
+                from memory.store_back import SentinelStoreBack
+                _mstore = SentinelStoreBack._get_global_instance()
+                _parsed_mdate = None
+                try:
+                    _parsed_mdate = datetime.strptime(_wa_meeting["date"], "%Y-%m-%d").date()
+                except (ValueError, TypeError):
+                    pass
+                if _parsed_mdate:
+                    _mstore.insert_detected_meeting(
+                        title=_wa_meeting.get("title", "Meeting"),
+                        participant_names=_wa_meeting.get("participants", []),
+                        meeting_date=_parsed_mdate,
+                        meeting_time=_wa_meeting.get("time"),
+                        location=_wa_meeting.get("location"),
+                        status=_wa_meeting.get("status", "proposed"),
+                        source="whatsapp",
+                        source_ref=f"wa:{msg_id}",
+                        raw_text=f"From: {sender_name}\n{combined_body[:500]}",
+                    )
+                    logger.info(f"MEETINGS-DETECT-3: meeting from WhatsApp: {_wa_meeting.get('title', '')[:60]}")
+    except Exception as _me:
+        logger.warning(f"MEETINGS-DETECT-3: WhatsApp meeting detection failed (non-fatal): {_me}")
 
     # DECISION-ENGINE-1A: Score trigger (no LLM fallback for webhook latency)
     _scored = None
