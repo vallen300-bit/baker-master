@@ -156,6 +156,97 @@ def _extract_commitments_from_meeting(transcript_text: str, meeting_title: str,
         logger.info(f"Extracted {inserted} commitments from meeting '{meeting_title}'")
 
 
+def _extract_director_commitments_as_deadlines(transcript_text: str, meeting_title: str,
+                                                participants: str, source_id: str,
+                                                meeting_date: str = ""):
+    """OBLIGATIONS-DETECT-1: Extract Director's personal commitments from meeting and store as deadlines."""
+    import json
+    import anthropic
+
+    if not transcript_text or len(transcript_text.strip()) < 100:
+        return
+
+    try:
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=500,
+            messages=[{"role": "user", "content": f"""Review this meeting transcript and extract action items that Dimitry Vallen personally committed to.
+
+Meeting: {meeting_title}
+Date: {meeting_date or today}
+Participants: {participants}
+
+Transcript (excerpt):
+{transcript_text[:3000]}
+
+Return JSON only (no markdown):
+{{
+  "commitments": [
+    {{
+      "description": "what Dimitry committed to do",
+      "to_whom": "who he promised it to",
+      "due_date": "YYYY-MM-DD or null",
+      "urgency": "high" | "normal" | "low"
+    }}
+  ]
+}}
+
+Rules:
+- Only include things Dimitry personally agreed to do ("I will", "I'll", "let me", "my action")
+- NOT tasks assigned to others
+- Return {{"commitments": []}} if none found"""}],
+        )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="commitment_meeting_detect")
+        except Exception:
+            pass
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
+        parsed = json.loads(raw)
+    except Exception as e:
+        logger.warning(f"OBLIGATIONS-DETECT-1: meeting commitment extraction failed: {e}")
+        return
+
+    commitments = parsed.get("commitments", [])
+    if not commitments:
+        return
+
+    from models.deadlines import insert_deadline
+    inserted = 0
+    for c in commitments:
+        desc = (c.get("description") or "").strip()
+        to_whom = (c.get("to_whom") or "").strip()
+        if not desc:
+            continue
+        due_date = c.get("due_date")
+        if not due_date or due_date == "null":
+            due_date = (datetime.now(timezone.utc) + timedelta(days=3)).strftime("%Y-%m-%d")
+        try:
+            _dd = datetime.strptime(due_date, "%Y-%m-%d")
+        except (ValueError, TypeError):
+            _dd = datetime.now(timezone.utc) + timedelta(days=3)
+        priority = "high" if c.get("urgency") == "high" else "normal"
+        did = insert_deadline(
+            description=f"[Commitment to {to_whom}] {desc}" if to_whom else f"[Meeting commitment] {desc}",
+            due_date=_dd,
+            source_type="meeting",
+            source_id=f"commitment-meeting:{source_id}",
+            confidence="medium",
+            priority=priority,
+            source_snippet=f"Meeting: {meeting_title}\nParticipants: {participants}",
+        )
+        if did:
+            inserted += 1
+
+    if inserted:
+        logger.info(f"OBLIGATIONS-DETECT-1: {inserted} Director commitments from meeting '{meeting_title}'")
+
+
 def check_new_transcripts():
     """
     Main entry point — called by scheduler every 2 hours.
@@ -273,6 +364,18 @@ def check_new_transcripts():
                 )
             except Exception as _e:
                 logger.debug(f"Commitment extraction failed for transcript {source_id}: {_e}")
+
+            # OBLIGATIONS-DETECT-1: Extract Director's personal commitments as deadlines
+            try:
+                _extract_director_commitments_as_deadlines(
+                    transcript_text=transcript["text"],
+                    meeting_title=metadata.get("meeting_title", "Untitled"),
+                    participants=metadata.get("participants", ""),
+                    source_id=source_id,
+                    meeting_date=metadata.get("date", ""),
+                )
+            except Exception as _e:
+                logger.debug(f"Director commitment extraction failed for transcript {source_id}: {_e}")
 
             try:
                 pipeline.run(trigger)

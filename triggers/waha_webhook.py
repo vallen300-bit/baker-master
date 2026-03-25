@@ -96,6 +96,62 @@ Status: "confirmed" if definite ("see you", "confirmed", "booked"). "proposed" i
         return None
 
 
+# OBLIGATIONS-DETECT-1: Regex pre-filter for Director's personal commitments
+_COMMITMENT_WA_RE = re.compile(
+    r"(?:I'?ll |I will |let me |I need to |I should |"
+    r"I promised |will do |I'?ll send |I'?ll call |I'?ll check |"
+    r"I'?ll follow.?up |I'?ll get back |I'?ll revert |I'?ll arrange |"
+    r"I'?ll prepare |I'?ll review |I'?ll confirm |I'?ll forward |"
+    r"I'?ll share |I'?ll set up |I'?ll look into |"
+    r"remind me to |don'?t let me forget |action on me)",
+    re.IGNORECASE
+)
+
+
+def _extract_commitment_from_whatsapp(body: str, chat_name: str):
+    """OBLIGATIONS-DETECT-1: Haiku extraction of Director's commitment from WhatsApp."""
+    import json
+    import anthropic
+    from config.settings import config
+    try:
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        today = datetime.now().strftime('%Y-%m-%d')
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{"role": "user", "content": f"""Extract the Director's personal commitment from this WhatsApp message. If no personal commitment, return {{"is_commitment": false}}.
+
+From: Dimitry Vallen (chat: {chat_name})
+Message: {body[:1500]}
+
+Today's date is {today}.
+
+Return JSON only (no markdown):
+{{
+  "is_commitment": true,
+  "description": "what was promised",
+  "to_whom": "recipient name",
+  "due_date": "YYYY-MM-DD or null",
+  "urgency": "high" | "normal" | "low"
+}}
+
+Rules: Only "I will/I'll/let me" = Director's commitment. NOT tasks for others."""}],
+        )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="commitment_wa_detect")
+        except Exception:
+            pass
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
+        return json.loads(raw)
+    except Exception as e:
+        logger.debug(f"OBLIGATIONS-DETECT-1: Haiku extraction failed: {e}")
+        return None
+
+
 def _wa_reply(text: str):
     """Send a reply to the Director on WhatsApp. Non-fatal on error."""
     try:
@@ -885,6 +941,32 @@ async def waha_webhook(
             )
         except Exception as _e:
             logger.debug(f"Deadline extraction failed for WA {msg_id}: {_e}")
+
+        # OBLIGATIONS-DETECT-1: Check Director's WhatsApp for personal commitments
+        try:
+            if combined_body and _COMMITMENT_WA_RE.search(combined_body):
+                _ob_wa = _extract_commitment_from_whatsapp(combined_body, sender_name)
+                if _ob_wa and _ob_wa.get("is_commitment"):
+                    from models.deadlines import insert_deadline
+                    from datetime import timedelta
+                    _ob_to = _ob_wa.get("to_whom", "")
+                    _ob_desc = _ob_wa.get("description", "")
+                    _ob_due = _ob_wa.get("due_date")
+                    if not _ob_due:
+                        _ob_due = (datetime.now(timezone.utc) + timedelta(days=3)).strftime("%Y-%m-%d")
+                    _ob_prio = "high" if _ob_wa.get("urgency") == "high" else "normal"
+                    insert_deadline(
+                        description=f"[Commitment to {_ob_to}] {_ob_desc}",
+                        due_date=datetime.strptime(_ob_due, "%Y-%m-%d"),
+                        source_type="whatsapp",
+                        source_id=f"commitment-wa:{msg_id}",
+                        confidence="medium",
+                        priority=_ob_prio,
+                        source_snippet=f"WhatsApp to {sender_name}\n{combined_body[:300]}",
+                    )
+                    logger.info(f"OBLIGATIONS-DETECT-1: commitment from WhatsApp: {_ob_desc[:60]}")
+        except Exception as _obe:
+            logger.warning(f"OBLIGATIONS-DETECT-1: WhatsApp commitment detection failed (non-fatal): {_obe}")
 
         # WA-QUESTION-1: Director question — conversational reply via Scan-style RAG
         try:

@@ -100,6 +100,74 @@ Status: "confirmed" if definite language. "proposed" if asking/suggesting."""}],
         return None
 
 
+# OBLIGATIONS-DETECT-1: Regex pre-filter for Director's personal commitments
+_COMMITMENT_RE = _re.compile(
+    r"(?:I'?ll |I will |let me |I need to |I should |"
+    r"I promised |I committed |will do |"
+    r"I'?ll send |I'?ll call |I'?ll check |I'?ll follow.?up |"
+    r"I'?ll get back |I'?ll revert |I'?ll arrange |I'?ll prepare |"
+    r"I'?ll review |I'?ll confirm |I'?ll forward |I'?ll share |"
+    r"I'?ll set up |I'?ll organize |I'?ll look into |"
+    r"remind me to |don'?t let me forget |"
+    r"my action |action on me |I take that)",
+    _re.IGNORECASE
+)
+
+
+def _extract_commitment_from_email(subject: str, body: str, recipient: str, received_date: str):
+    """OBLIGATIONS-DETECT-1: One Haiku call to extract Director's commitment from outbound email."""
+    import anthropic
+    import json
+    try:
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        today = datetime.now().strftime('%Y-%m-%d')
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{"role": "user", "content": f"""Extract the Director's personal commitment from this outbound email. If no personal commitment was made, return {{"is_commitment": false}}.
+
+From: Dimitry Vallen <dvallen@brisengroup.com>
+To: {recipient}
+Subject: {subject}
+Date: {received_date}
+
+Body:
+{body[:2000]}
+
+Today's date is {today}.
+
+Return JSON only (no markdown):
+{{
+  "is_commitment": true,
+  "description": "short description of what was promised",
+  "to_whom": "recipient name",
+  "due_date": "YYYY-MM-DD or null",
+  "due_hint": "by Friday / ASAP / null",
+  "urgency": "high" | "normal" | "low"
+}}
+
+Rules:
+- Only extract commitments the Director made personally ("I will", "I'll", "let me")
+- NOT tasks assigned to others ("Please send", "Could you check")
+- NOT facts ("The deadline is Friday")
+- If multiple commitments, return the most important one
+- Infer due_date: "by Friday" = next Friday, "tomorrow" = tomorrow"""}],
+        )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="commitment_email_detect")
+        except Exception:
+            pass
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
+        return json.loads(raw)
+    except Exception as e:
+        logger.debug(f"OBLIGATIONS-DETECT-1: Haiku extraction failed: {e}")
+        return None
+
+
 def _get_gmail_service():
     """Authenticate and return Gmail API service object."""
     from scripts.extract_gmail import authenticate
@@ -525,6 +593,37 @@ def _process_email_threads(new_threads: list):
             )
         except Exception:
             pass
+
+        # OBLIGATIONS-DETECT-1: Check outbound emails for Director's personal commitments
+        try:
+            _ob_sender_email = metadata.get("primary_sender_email", "")
+            _ob_is_outbound = _ob_sender_email and "@brisengroup.com" in _ob_sender_email.lower()
+            if _ob_is_outbound and _COMMITMENT_RE.search(thread["text"]):
+                _ob_data = _extract_commitment_from_email(
+                    metadata.get("subject", ""), thread["text"],
+                    metadata.get("to", metadata.get("primary_sender", "")),
+                    metadata.get("received_date", ""),
+                )
+                if _ob_data and _ob_data.get("is_commitment"):
+                    from models.deadlines import insert_deadline
+                    _ob_to = _ob_data.get("to_whom", "")
+                    _ob_desc = _ob_data.get("description", "")
+                    _ob_due = _ob_data.get("due_date")
+                    if not _ob_due:
+                        _ob_due = (datetime.now(timezone.utc) + __import__('datetime').timedelta(days=3)).strftime("%Y-%m-%d")
+                    _ob_priority = "high" if _ob_data.get("urgency") == "high" else "normal"
+                    insert_deadline(
+                        description=f"[Commitment to {_ob_to}] {_ob_desc}",
+                        due_date=datetime.strptime(_ob_due, "%Y-%m-%d"),
+                        source_type="email",
+                        source_id=f"commitment-email:{message_id}",
+                        confidence="medium",
+                        priority=_ob_priority,
+                        source_snippet=f"Email to {_ob_to}\nSubject: {metadata.get('subject', '')}\n{thread['text'][:300]}",
+                    )
+                    logger.info(f"OBLIGATIONS-DETECT-1: commitment from email: {_ob_desc[:60]}")
+        except Exception as _oe:
+            logger.warning(f"OBLIGATIONS-DETECT-1: email commitment detection failed (non-fatal): {_oe}")
 
         trigger = TriggerEvent(
             type="email",

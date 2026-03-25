@@ -4005,7 +4005,7 @@ async function loadDeadlinesTab() {
         });
 
         if (allItems.length === 0) {
-            container.textContent = 'No active obligations.';
+            container.textContent = 'No active items.';
             container.style.cssText = 'color:var(--text3);font-size:13px;';
             return;
         }
@@ -4025,7 +4025,7 @@ async function loadDeadlinesTab() {
 
         var header = document.createElement('div');
         header.className = 'section-label';
-        header.textContent = 'Obligations (' + allItems.length + ')';
+        header.textContent = 'Promised To Do (' + allItems.length + ')';
         container.appendChild(header);
 
         function renderTimeGroup(label, items, isUrgent) {
@@ -4187,7 +4187,7 @@ function _renderTriageCard() {
         done.appendChild(doneText);
         var doneBtn = document.createElement('button');
         doneBtn.style.cssText = 'padding:10px 24px;background:var(--blue);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;margin-top:12px;';
-        doneBtn.textContent = 'Back to Obligations';
+        doneBtn.textContent = 'Back to Promised To Do';
         doneBtn.addEventListener('click', function() { _closeTriageDeck(); });
         done.appendChild(doneBtn);
         area.appendChild(done);

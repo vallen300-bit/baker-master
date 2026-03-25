@@ -431,11 +431,27 @@ body {
 }
 .grid-cell-header {
   display: flex;
-  justify-content: space-between;
+  justify-content: center;
   align-items: center;
   padding: 12px 16px 8px;
   border-bottom: 1px solid var(--border);
+  border-radius: 8px 8px 0 0;
   flex-shrink: 0;
+  position: relative;
+}
+.grid-cell-header .grid-cell-count {
+  position: absolute;
+  right: 16px;
+}
+.grid-header-travel { background: #E3F2FD; }
+.grid-header-fires { background: #FFEBEE; }
+.grid-header-promised { background: #FFF8E1; }
+.grid-header-meetings { background: #E8F5E9; }
+@media (prefers-color-scheme: dark) {
+  .grid-header-travel { background: rgba(33, 150, 243, 0.12); }
+  .grid-header-fires { background: rgba(244, 67, 54, 0.12); }
+  .grid-header-promised { background: rgba(255, 193, 7, 0.12); }
+  .grid-header-meetings { background: rgba(76, 175, 80, 0.12); }
 }
 .grid-cell-header .section-label {
   font-size: 13px;

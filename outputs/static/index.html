@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=39">
+    <link rel="stylesheet" href="/static/style.css?v=40">
 </head>
 <body>
 
@@ -37,7 +37,7 @@
             <span class="nav-label">Networking</span>
         </div>
         <div class="nav-item" data-tab="deadlines">
-            <span class="nav-label">Obligations</span>
+            <span class="nav-label">Promised To Do</span>
             <span class="nav-count" id="deadlinesCount"></span>
         </div>
         <div class="nav-item" data-tab="tags">
@@ -136,7 +136,7 @@
 
             <div class="landing-grid">
                 <div class="grid-cell">
-                    <div class="grid-cell-header">
+                    <div class="grid-cell-header grid-header-travel">
                         <span class="section-label" style="margin:0">Travel</span>
                         <span class="grid-cell-count" id="gridTravelCount"></span>
                     </div>
@@ -145,7 +145,7 @@
                     </div>
                 </div>
                 <div class="grid-cell">
-                    <div class="grid-cell-header">
+                    <div class="grid-cell-header grid-header-fires">
                         <span class="section-label" style="margin:0">Fires</span>
                         <span class="grid-cell-count" id="gridFiresCount"></span>
                     </div>
@@ -154,8 +154,8 @@
                     </div>
                 </div>
                 <div class="grid-cell">
-                    <div class="grid-cell-header">
-                        <span class="section-label" style="margin:0">Obligations</span>
+                    <div class="grid-cell-header grid-header-promised">
+                        <span class="section-label" style="margin:0">Promised To Do</span>
                         <span class="grid-cell-count" id="gridDeadlinesCount"></span>
                     </div>
                     <div class="grid-cell-body" id="gridDeadlines">
@@ -163,7 +163,7 @@
                     </div>
                 </div>
                 <div class="grid-cell">
-                    <div class="grid-cell-header">
+                    <div class="grid-cell-header grid-header-meetings">
                         <span class="section-label" style="margin:0">Meetings</span>
                         <span class="grid-cell-count" id="gridMeetingsCount"></span>
                     </div>
@@ -200,9 +200,9 @@
             <div id="mattersContent"></div>
         </div>
 
-        <!-- VIEW: Obligations (was Deadlines) -->
+        <!-- VIEW: Promised To Do (was Obligations/Deadlines) -->
         <div class="view" id="viewDeadlines">
-            <div class="section-label">Obligations</div>
+            <div class="section-label">Promised To Do</div>
             <div id="deadlinesContent"></div>
         </div>
 
@@ -210,7 +210,7 @@
         <div id="triageOverlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:1000;background:var(--bg);flex-direction:column;">
             <div id="triageHeader" style="display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0;">
                 <button id="triageCloseBtn" style="background:none;border:none;color:var(--blue);font-size:14px;font-weight:600;cursor:pointer;">&larr; Back</button>
-                <span style="font-size:16px;font-weight:700;color:var(--text1);flex:1;">Triage Obligations</span>
+                <span style="font-size:16px;font-weight:700;color:var(--text1);flex:1;">Triage Promised To Do</span>
                 <span id="triageCounter" style="font-size:13px;color:var(--text3);"></span>
             </div>
             <div id="triageCardArea" style="flex:1;display:flex;align-items:center;justify-content:center;padding:20px;overflow:hidden;"></div>
@@ -333,6 +333,6 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=52"></script>
+<script src="/static/app.js?v=53"></script>
 </body>
 </html>
