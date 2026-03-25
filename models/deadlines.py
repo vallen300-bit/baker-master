@@ -227,6 +227,38 @@ def get_deadline_by_id(deadline_id: int) -> Optional[dict]:
         put_conn(conn)
 
 
+def _deadline_dedup_check(cur, description: str, due_date) -> Optional[int]:
+    """DEADLINE-DEDUP-1: Check for similar active deadline on same date.
+    Returns existing deadline ID if duplicate found, None otherwise."""
+    if not due_date or not description:
+        return None
+    import re
+    # Extract key words: capitalized words + long words, minus common verbs
+    _stopwords = {'should', 'could', 'would', 'provide', 'complete', 'confirm',
+                  'arrange', 'ensure', 'follow', 'check', 'review', 'prepare',
+                  'execute', 'submit', 'today', 'tomorrow', 'deadline'}
+    key_words = [w for w in re.findall(r'[A-Z][a-z]+|[a-z]{5,}', description)
+                 if w.lower() not in _stopwords]
+    if not key_words:
+        return None
+    try:
+        cur.execute("""
+            SELECT id, description FROM deadlines
+            WHERE status = 'active'
+              AND due_date = %s
+            ORDER BY created_at ASC
+        """, (due_date,))
+        for row in cur.fetchall():
+            existing_desc = (row[1] or "").lower()
+            matches = sum(1 for kw in key_words if kw.lower() in existing_desc)
+            if matches >= 2:
+                logger.info(f"Deadline dedup: '{description[:60]}' matches existing #{row[0]} ({matches} keyword overlaps) — skipping")
+                return row[0]
+    except Exception as e:
+        logger.debug(f"Deadline dedup check failed (non-fatal): {e}")
+    return None
+
+
 def insert_deadline(
     description: str,
     due_date: datetime,
@@ -237,7 +269,8 @@ def insert_deadline(
     source_snippet: str = None,
     status: str = None,
 ) -> Optional[int]:
-    """Insert a new deadline. Returns the new ID or None on error."""
+    """Insert a new deadline. Returns the new ID or None on error.
+    DEADLINE-DEDUP-1: Checks for similar active deadline on same date before inserting."""
     if status is None:
         status = "pending_confirm" if confidence == "soft" else "active"
     conn = get_conn()
@@ -245,6 +278,11 @@ def insert_deadline(
         return None
     try:
         cur = conn.cursor()
+        # DEADLINE-DEDUP-1: Check for existing similar deadline on same date
+        existing_id = _deadline_dedup_check(cur, description, due_date)
+        if existing_id:
+            cur.close()
+            return existing_id
         cur.execute("""
             INSERT INTO deadlines
                 (description, due_date, source_type, source_id, source_snippet,
@@ -258,6 +296,7 @@ def insert_deadline(
         cur.close()
         return row[0] if row else None
     except Exception as e:
+        conn.rollback()
         logger.error(f"insert_deadline failed: {e}")
         return None
     finally:

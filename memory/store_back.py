@@ -4717,7 +4717,8 @@ class SentinelStoreBack:
             self._put_conn(conn)
 
     def get_active_trips(self) -> list:
-        """All trips with status planned/confirmed, plus recently completed (last 7 days)."""
+        """All trips with status planned/confirmed, plus completed trips still in progress.
+        Completed trips disappear the day after end_date (same logic as travel alert midnight-CET expiry)."""
         conn = self._get_conn()
         if not conn:
             return []
@@ -4726,7 +4727,7 @@ class SentinelStoreBack:
             cur.execute("""
                 SELECT * FROM trips
                 WHERE status IN ('planned', 'confirmed')
-                   OR (status = 'completed' AND updated_at > NOW() - INTERVAL '7 days')
+                   OR (status = 'completed' AND COALESCE(end_date, start_date) >= CURRENT_DATE)
                 ORDER BY start_date ASC NULLS LAST
                 LIMIT 50
             """)
