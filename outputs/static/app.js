@@ -695,11 +695,15 @@ async function loadMorningBrief() {
             }
         }
 
+        // DASHBOARD-SIMPLIFY-1: Narrative hidden (kept for future use)
         var narEl = document.getElementById('briefNarrative');
-        if (narEl && data.narrative) setSafeHTML(narEl, md(data.narrative));
+        if (narEl) narEl.style.display = 'none';
+        // if (narEl && data.narrative) setSafeHTML(narEl, md(data.narrative));
 
-        // Render actionable proposal cards (D7 Morning Brief v2)
+        // DASHBOARD-SIMPLIFY-1: Recommended Actions hidden (kept for future use)
         var proposalsEl = document.getElementById('briefProposals');
+        if (proposalsEl) proposalsEl.style.display = 'none';
+        /* --- Recommended Actions (hidden) ---
         if (!proposalsEl) {
             proposalsEl = document.createElement('div');
             proposalsEl.id = 'briefProposals';
@@ -707,56 +711,14 @@ async function loadMorningBrief() {
         }
         proposalsEl.textContent = '';
         if (data.proposals && data.proposals.length > 0) {
-            var pLabel = document.createElement('div');
-            pLabel.style.cssText = 'font-size:11px;font-weight:700;color:var(--text2);font-family:var(--mono);letter-spacing:0.3px;margin-bottom:6px;';
-            pLabel.textContent = 'RECOMMENDED ACTIONS';
-            proposalsEl.appendChild(pLabel);
-
-            var strip = document.createElement('div');
-            strip.className = 'proposal-strip';
-            proposalsEl.appendChild(strip);
-
-            data.proposals.slice(0, 5).forEach(function(p) {
-                var instruction = p.instruction || (p.params && p.params.question) || p.label;
-                var actionType = p.action || _inferProposalType(p.label, instruction);
-                var meta = _proposalMeta(actionType);
-
-                var card = document.createElement('div');
-                card.className = 'proposal-card type-' + actionType;
-
-                var body = document.createElement('div');
-                body.className = 'proposal-body';
-
-                var icon = document.createElement('span');
-                icon.className = 'proposal-icon';
-                icon.textContent = meta.icon;
-                body.appendChild(icon);
-
-                var text = document.createElement('div');
-                text.className = 'proposal-text';
-                var lbl = document.createElement('div');
-                lbl.className = 'proposal-label';
-                lbl.textContent = p.label;
-                text.appendChild(lbl);
-                var sub = document.createElement('div');
-                sub.className = 'proposal-sub';
-                sub.textContent = instruction.length > 80 ? instruction.slice(0, 77) + '...' : instruction;
-                text.appendChild(sub);
-                body.appendChild(text);
-
-                var btn = document.createElement('button');
-                btn.className = 'proposal-btn color-' + meta.color;
-                btn.textContent = meta.btnLabel;
-                btn.addEventListener('click', _makeProposalHandler(actionType, instruction, p, btn, card));
-                body.appendChild(btn);
-
-                card.appendChild(body);
-                strip.appendChild(card);
-            });
+            // ... proposal cards rendering ...
         }
+        --- end hidden --- */
 
-        // Weekly Priorities Widget
-        _renderPrioritiesWidget(data.weekly_priorities || []);
+        // DASHBOARD-SIMPLIFY-1: Weekly Priorities hidden (kept for future use)
+        // _renderPrioritiesWidget(data.weekly_priorities || []);
+        var _priWidget = document.getElementById('prioritiesWidget');
+        if (_priWidget) _priWidget.style.display = 'none';
 
         // Fires badge
         const firesBadge = document.getElementById('firesBadge');
@@ -913,78 +875,9 @@ async function loadMorningBrief() {
             setText('statMeetings', totalEvents || 0);
         }
 
-        // SILENT-CONTACTS-CARD-1: Render relationship cooling warnings (redesigned)
+        // DASHBOARD-SIMPLIFY-1: Relationships Cooling hidden (kept for future use)
         var silentCard = document.getElementById('silentContactsCard');
-        if (silentCard) {
-            var silentContacts = data.silent_contacts || [];
-            if (silentContacts.length > 0) {
-                silentCard.hidden = false;
-                silentCard.textContent = '';
-                silentCard.style.cssText = 'margin-top:16px;border:1px solid var(--border);border-left:3px solid var(--amber);border-radius:var(--radius-sm);padding:12px 16px;background:var(--card);';
-
-                var scLabel = document.createElement('div');
-                scLabel.style.cssText = 'font-size:11px;font-weight:700;color:var(--amber);font-family:var(--mono);letter-spacing:0.3px;margin-bottom:8px;';
-                scLabel.textContent = 'RELATIONSHIPS COOLING';
-                silentCard.appendChild(scLabel);
-
-                for (var sci = 0; sci < silentContacts.length; sci++) {
-                    (function(sc) {
-                        var row = document.createElement('div');
-                        row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border-light);';
-
-                        // Name
-                        var nameSpan = document.createElement('span');
-                        nameSpan.style.cssText = 'font-size:13px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px;';
-                        nameSpan.textContent = sc.name || '';
-                        row.appendChild(nameSpan);
-
-                        // Cadence context: "45d (every 12d)"
-                        var cadenceSpan = document.createElement('span');
-                        cadenceSpan.style.cssText = 'font-size:11px;color:var(--amber);flex-shrink:0;white-space:nowrap;';
-                        var gapText = sc.avg_inbound_gap_days ? Math.round(sc.avg_inbound_gap_days) + 'd' : '?';
-                        cadenceSpan.textContent = (sc.days_silent || 0) + 'd silent (every ' + gapText + ')';
-                        row.appendChild(cadenceSpan);
-
-                        var spacer = document.createElement('span');
-                        spacer.style.flex = '1';
-                        row.appendChild(spacer);
-
-                        // Draft button — channel-aware
-                        var channel = (sc.channel || 'email').toLowerCase();
-                        var draftBtn = document.createElement('button');
-                        draftBtn.className = 'run-btn';
-                        draftBtn.style.cssText = 'font-size:11px;padding:3px 8px;flex-shrink:0;';
-                        draftBtn.textContent = channel === 'whatsapp' ? 'Draft WA' : 'Draft';
-                        draftBtn.title = channel === 'whatsapp' ? 'Draft a WhatsApp message' : 'Draft an email';
-                        draftBtn.addEventListener('click', function() {
-                            // Use "write me" phrasing so Baker treats as question (drafts), not action (auto-sends)
-                            var prompt = channel === 'whatsapp'
-                                ? 'Write me a short casual WhatsApp check-in message for ' + sc.name + '. Just give me the text, do not send it.'
-                                : 'Draft an email to ' + sc.name;
-                            switchTab('ask-baker');
-                            // Auto-submit after tab switch so user sees fresh response, not stale
-                            setTimeout(function() { sendScanMessage(prompt); }, 150);
-                        });
-                        row.appendChild(draftBtn);
-
-                        // Dismiss button (x) with dropdown
-                        var dismissBtn = document.createElement('button');
-                        dismissBtn.style.cssText = 'font-size:13px;padding:2px 6px;background:none;border:1px solid var(--border);border-radius:4px;color:var(--text2);cursor:pointer;flex-shrink:0;line-height:1;';
-                        dismissBtn.textContent = '\u00d7';
-                        dismissBtn.title = 'Dismiss';
-                        dismissBtn.addEventListener('click', function(e) {
-                            e.stopPropagation();
-                            _showCoolingDismissMenu(sc.name, row, e);
-                        });
-                        row.appendChild(dismissBtn);
-
-                        silentCard.appendChild(row);
-                    })(silentContacts[sci]);
-                }
-            } else {
-                silentCard.hidden = true;
-            }
-        }
+        if (silentCard) silentCard.style.display = 'none';
 
         loadMattersSummary();
 
