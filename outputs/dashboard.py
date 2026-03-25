@@ -1947,7 +1947,7 @@ async def get_morning_brief():
         # MEETINGS-DETECT-1: Detected meetings from Director messages
         detected_meetings = []
         try:
-            detected_meetings = [_serialize(m) for m in store.get_detected_meetings(days_ahead=3)]
+            detected_meetings = [_serialize(m) for m in store.get_detected_meetings(days_ahead=14)]
         except Exception as e:
             logger.warning(f"Morning brief: detected meetings query failed: {e}")
 
