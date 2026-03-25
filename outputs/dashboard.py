@@ -5343,6 +5343,33 @@ async def get_clickup_tasks(
         return {"tasks": [], "count": 0, "error": str(e)}
 
 
+@app.post("/api/clickup/create-from-alert", tags=["clickup"], dependencies=[Depends(verify_api_key)])
+async def create_clickup_from_alert(request: Request):
+    """TRIAGE-CARDS-1: Create a ClickUp task from an alert. Uses Handoff Notes list by default."""
+    try:
+        body = await request.json()
+        name = body.get("name", "Untitled task")
+        description = body.get("description", "")
+        alert_id = body.get("alert_id")
+
+        from clickup_client import ClickUpClient
+        client = ClickUpClient()
+        result = client.create_task(
+            list_id="901521426367",  # Handoff Notes
+            name=name[:200],
+            description=description[:2000] if description else f"Created from alert #{alert_id}",
+            priority=3,
+            tags=["from-baker"],
+        )
+        task_id = result.get("id")
+        task_url = result.get("url")
+        logger.info(f"TRIAGE-CARDS-1: ClickUp task created from alert #{alert_id}: {task_id}")
+        return {"task_id": task_id, "url": task_url}
+    except Exception as e:
+        logger.error(f"POST /api/clickup/create-from-alert failed: {e}")
+        return {"error": str(e)}
+
+
 @app.get("/api/clickup/tasks/{task_id}", tags=["clickup"], dependencies=[Depends(verify_api_key)])
 async def get_clickup_task(task_id: str):
     """Get a single ClickUp task detail + comments."""

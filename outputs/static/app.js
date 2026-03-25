@@ -1448,7 +1448,7 @@ function _renderFiresFiltered() {
         container.appendChild(sectionLabel);
 
         for (var ai = 0; ai < alerts.length; ai++) {
-            var cardHtml = renderAlertCard(alerts[ai], true);
+            var cardHtml = renderTriageCard(alerts[ai]);
             // Wrap with checkbox
             var wrapper = document.createElement('div');
             wrapper.style.cssText = 'display:flex;align-items:flex-start;gap:6px;';
@@ -1939,6 +1939,221 @@ function renderFireCompact(alert) {
         '<span class="card-title">' + esc(alert.title || '') + chevron + '</span>' +
         '<span class="card-time">' + esc(fmtRelativeTime(alert.created_at)) + '</span>' +
         '</div>' + detailHtml + '</div>';
+}
+
+// ═══ TRIAGE-CARDS-1: Unified triage card for all project/operations/inbox views ═══
+
+function renderTriageCard(alert) {
+    var aid = String(alert.id);
+    var tier = alert.tier || 3;
+    var dotClass = tier === 1 ? 'red' : tier === 2 ? 'amber' : 'lgray';
+    var body = (alert.body || '').trim();
+    var truncBody = body.length > 300 ? body.substring(0, 300) + '...' : body;
+    var title = alert.title || '';
+    var timeLabel = fmtRelativeTime(alert.created_at);
+    var hasBody = body.length > 0 || true; // always expandable for triage buttons
+
+    var html = '<div class="card card-compact triage-card" data-alert-id="' + esc(aid) + '"'
+        + ' onclick="_toggleTriageCard(this)" style="cursor:pointer;">';
+    // Header
+    html += '<div class="card-header">';
+    html += '<span class="nav-dot ' + dotClass + '" style="margin-top:5px;"></span>';
+    html += '<span class="card-title">' + esc(title) + ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span></span>';
+    html += '<span class="card-time">' + esc(timeLabel) + '</span>';
+    html += '</div>';
+    // Expandable detail + triage buttons
+    html += '<div class="triage-detail" style="display:none;">';
+    if (truncBody) {
+        html += '<div style="font-size:12px;color:var(--text2);padding:8px 16px;line-height:1.5;white-space:pre-wrap;border-top:1px solid var(--border-light);">' + esc(truncBody) + '</div>';
+    }
+    // 9 triage action buttons
+    html += '<div class="triage-actions" style="display:flex;flex-wrap:wrap;gap:6px;padding:8px 16px 12px;">';
+    html += _triageBtn('Draft Email', 'email', aid, title, body);
+    html += _triageBtn('Draft WA', 'whatsapp', aid, title, body);
+    html += _triageBtn('Analyze', 'analyze', aid, title, body);
+    html += _triageBtn('Summarize', 'summarize', aid, title, body);
+    html += _triageBtn('Dossier', 'dossier', aid, title, body);
+    html += _triageBtn('ClickUp', 'clickup', aid, title, body);
+    html += _triageBtn('Delegate', 'delegate', aid, title, body);
+    html += _triageBtn('Dismiss', 'dismiss', aid, title, body);
+    html += _triageBtn('Ask Baker', 'ask', aid, title, body);
+    html += '</div>';
+    // Delegate input (hidden by default)
+    html += '<div class="triage-delegate-row" id="triage-delegate-' + esc(aid) + '" style="display:none;padding:0 16px 10px;gap:8px;display:none;">';
+    html += '<input class="triage-delegate-input" placeholder="Delegate to..." style="flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:var(--font);" />';
+    html += '<button class="triage-pill" onclick="event.stopPropagation();_triageDelegateSend(' + esc(aid) + ',this)" style="background:var(--blue);color:#fff;border-color:var(--blue);">Send</button>';
+    html += '</div>';
+    // Dossier modal (hidden by default)
+    html += '<div class="triage-dossier-modal" id="triage-dossier-' + esc(aid) + '" style="display:none;padding:0 16px 10px;">';
+    html += '</div>';
+    html += '</div>'; // end triage-detail
+    html += '</div>'; // end card
+    return html;
+}
+
+var _triageIcons = { email: '\u2709', whatsapp: '\uD83D\uDCAC', analyze: '\uD83D\uDD0D', summarize: '\uD83D\uDCCB', dossier: '\uD83D\uDDC2', clickup: '\u2197', delegate: '\uD83D\uDC64', dismiss: '\u2715', ask: '\uD83D\uDCAC' };
+
+function _triageBtn(label, action, aid, title, body) {
+    var icon = _triageIcons[action] || '';
+    return '<button class="triage-pill" data-action="' + action + '" data-aid="' + esc(aid) + '"'
+        + ' onclick="event.stopPropagation();_handleTriageAction(\'' + action + '\',' + esc(aid) + ')">'
+        + icon + ' ' + label + '</button>';
+}
+
+function _toggleTriageCard(el) {
+    var detail = el.querySelector('.triage-detail');
+    if (detail) detail.style.display = detail.style.display === 'none' ? '' : 'none';
+}
+
+function _handleTriageAction(action, alertId) {
+    // Find the alert data from DOM
+    var card = document.querySelector('.triage-card[data-alert-id="' + alertId + '"]');
+    var title = card ? (card.querySelector('.card-title') || {}).textContent || '' : '';
+    // Clean chevron from title
+    title = title.replace(/\s*\u25BE\s*$/, '').trim();
+    var bodyEl = card ? card.querySelector('.triage-detail > div:first-child') : null;
+    var body = bodyEl ? bodyEl.textContent.trim() : '';
+    var ctx = body.substring(0, 200);
+
+    if (action === 'email') {
+        _triageOpenBaker('Draft an email regarding: "' + title + '". Context: ' + ctx);
+    } else if (action === 'whatsapp') {
+        _triageOpenBaker('Draft a WhatsApp message regarding: "' + title + '". Context: ' + ctx);
+    } else if (action === 'analyze') {
+        _triageOpenBaker('Analyze this situation in depth: "' + title + '". Context: ' + ctx);
+    } else if (action === 'summarize') {
+        _triageOpenBaker('Give me a 3-line summary of: "' + title + '". Context: ' + ctx);
+    } else if (action === 'ask') {
+        _triageOpenBaker('Regarding: "' + title + '". ' + ctx + '. What should I know about this?');
+    } else if (action === 'dismiss') {
+        _triageDismiss(alertId, card);
+    } else if (action === 'delegate') {
+        var row = document.getElementById('triage-delegate-' + alertId);
+        if (row) row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+    } else if (action === 'dossier') {
+        _triageShowDossier(alertId, title, body);
+    } else if (action === 'clickup') {
+        _triageCreateClickUp(alertId, title, body);
+    }
+}
+
+function _triageOpenBaker(prompt) {
+    // Clear history and pre-fill Ask Baker
+    if (typeof _scanHistories !== 'undefined') {
+        _scanCurrentContext = 'global';
+        _scanHistories['global'] = [];
+    }
+    switchTab('ask-baker');
+    setTimeout(function() {
+        var input = document.getElementById('scanInput');
+        if (input) {
+            input.value = prompt;
+            input.focus();
+        }
+    }, 100);
+}
+
+function _triageDismiss(alertId, card) {
+    bakerFetch('/api/alerts/' + alertId + '/dismiss', { method: 'POST' }).then(function() {
+        if (card) card.style.opacity = '0.3';
+        setTimeout(function() { if (card) card.remove(); }, 500);
+    });
+}
+
+function _triageDelegateSend(alertId, btn) {
+    var row = document.getElementById('triage-delegate-' + alertId);
+    if (!row) return;
+    var input = row.querySelector('input');
+    var name = input ? input.value.trim() : '';
+    if (!name) return;
+    var card = document.querySelector('.triage-card[data-alert-id="' + alertId + '"]');
+    var title = card ? card.querySelector('.card-title').textContent.replace(/\s*\u25BE\s*$/, '').trim() : '';
+    var bodyEl = card ? card.querySelector('.triage-detail > div:first-child') : null;
+    var ctx = bodyEl ? bodyEl.textContent.trim().substring(0, 200) : '';
+    _triageOpenBaker('Draft an email to ' + name + ' delegating this task: "' + title + '". Context: ' + ctx);
+}
+
+function _triageCreateClickUp(alertId, title, body) {
+    bakerFetch('/api/clickup/create-from-alert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alert_id: alertId, name: title, description: body }),
+    }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.task_id) {
+            _showToast('Task created in ClickUp \u2713');
+        } else {
+            _showToast('ClickUp create failed: ' + (d.error || 'unknown'));
+        }
+    }).catch(function(e) {
+        _showToast('ClickUp error: ' + e);
+    });
+}
+
+function _showToast(msg) {
+    var t = document.createElement('div');
+    t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--text);color:#fff;padding:8px 20px;border-radius:8px;font-size:13px;z-index:9999;';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(function() { t.remove(); }, 3000);
+}
+
+function _extractEntities(text) {
+    var people = (text || '').match(/(?:Mr\.?\s?|Mrs\.?\s?|Dr\.?\s?|Prof\.?\s?)?[A-Z][a-z]+\s[A-Z][a-z]+(?:\s[A-Z][a-z]+)?/g) || [];
+    var companies = (text || '').match(/[A-Z][\w\s&]+(?:GmbH|AG|Ltd|Inc|SA|SE|LP|LLP|Capital|Group|Partners)/g) || [];
+    people = people.filter(function(v, i, a) { return a.indexOf(v) === i; }).slice(0, 5);
+    companies = companies.filter(function(v, i, a) { return a.indexOf(v) === i; }).slice(0, 5);
+    return { people: people, companies: companies };
+}
+
+function _triageShowDossier(alertId, title, body) {
+    var modal = document.getElementById('triage-dossier-' + alertId);
+    if (!modal) return;
+    if (modal.style.display !== 'none') { modal.style.display = 'none'; return; }
+    var entities = _extractEntities(title + ' ' + body);
+    var html = '<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:6px;">Run Dossier on:</div>';
+    if (entities.people.length > 0) {
+        html += '<div style="font-size:10px;color:var(--text3);margin:4px 0 2px;">People</div>';
+        for (var i = 0; i < entities.people.length; i++) {
+            html += '<label style="display:block;font-size:12px;padding:2px 0;cursor:pointer;"><input type="checkbox" class="dossier-check" value="' + esc(entities.people[i]) + '" checked /> ' + esc(entities.people[i]) + '</label>';
+        }
+    }
+    if (entities.companies.length > 0) {
+        html += '<div style="font-size:10px;color:var(--text3);margin:4px 0 2px;">Companies</div>';
+        for (var j = 0; j < entities.companies.length; j++) {
+            html += '<label style="display:block;font-size:12px;padding:2px 0;cursor:pointer;"><input type="checkbox" class="dossier-check" value="' + esc(entities.companies[j]) + '" checked /> ' + esc(entities.companies[j]) + '</label>';
+        }
+    }
+    if (entities.people.length === 0 && entities.companies.length === 0) {
+        html += '<div style="font-size:12px;color:var(--text3);padding:4px 0;">No entities detected. Type a name below:</div>';
+        html += '<input class="dossier-manual" placeholder="Enter name..." style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;margin:4px 0;" />';
+    }
+    html += '<div style="display:flex;gap:8px;margin-top:8px;">';
+    html += '<button class="triage-pill" style="background:var(--blue);color:#fff;border-color:var(--blue);" onclick="event.stopPropagation();_triageRunDossier(' + alertId + ')">Run</button>';
+    html += '<button class="triage-pill" onclick="event.stopPropagation();document.getElementById(\'triage-dossier-' + alertId + '\').style.display=\'none\'">Cancel</button>';
+    html += '</div>';
+    modal.innerHTML = html;
+    modal.style.display = '';
+}
+
+function _triageRunDossier(alertId) {
+    var modal = document.getElementById('triage-dossier-' + alertId);
+    if (!modal) return;
+    var checked = modal.querySelectorAll('.dossier-check:checked');
+    var names = [];
+    for (var i = 0; i < checked.length; i++) names.push(checked[i].value);
+    var manual = modal.querySelector('.dossier-manual');
+    if (manual && manual.value.trim()) names.push(manual.value.trim());
+    if (names.length === 0) return;
+    modal.style.display = 'none';
+    // Run each as a separate dossier request
+    for (var j = 0; j < names.length; j++) {
+        _triageOpenBaker('Run a comprehensive dossier on ' + names[j]);
+        if (j < names.length - 1) {
+            // For multiple, only the last one opens Baker (others would overwrite)
+            // Alternative: just run the first one
+            break;
+        }
+    }
 }
 
 function renderActivityRow(item) {
@@ -2489,7 +2704,7 @@ function renderMatterView(container, slug, items) {
 
     if (_matterViewMode === 'list') {
         var cardsDiv = document.createElement('div');
-        var cardsHtml = items.map(function(a) { return renderAlertCard(a, (a.tier || 3) <= 2); }).join('');
+        var cardsHtml = items.map(function(a) { return renderTriageCard(a); }).join('');
         setSafeHTML(cardsDiv, cardsHtml);
         container.appendChild(cardsDiv);
         populateAssignDropdowns();
@@ -3874,7 +4089,7 @@ async function loadTagItems(tag) {
 
         var cardsDiv = document.createElement('div');
         setSafeHTML(cardsDiv, data.items.map(function(a) {
-            return renderAlertCard(a, (a.tier || 3) <= 2);
+            return renderTriageCard(a);
         }).join(''));
         container.appendChild(cardsDiv);
         populateAssignDropdowns();

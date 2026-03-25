@@ -119,6 +119,15 @@ body {
 .nav-section-label { flex: 1; }
 .nav-section-header .nav-count { font-size: 10px; color: var(--text4); }
 
+/* TRIAGE-CARDS-1: Triage pill buttons */
+.triage-pill {
+  font-size: 11px; padding: 4px 10px; border: 1px solid var(--border);
+  border-radius: 12px; background: var(--bg1); cursor: pointer;
+  white-space: nowrap; font-family: var(--font); color: var(--text2);
+  transition: background 0.15s, border-color 0.15s;
+}
+.triage-pill:hover { background: var(--bg2); border-color: var(--text3); }
+
 /* Matters sub-list */
 .nav-sub { padding-left: 4px; }
 .nav-sub .nav-item { padding: 6px 8px 6px 18px; font-size: 12px; gap: 6px; }
