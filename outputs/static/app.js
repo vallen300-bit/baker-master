@@ -776,13 +776,23 @@ async function loadMorningBrief() {
                 var catLabel = _tripCategoryLabels[trip.category] || '';
                 var dateStr = trip.start_date || '';
                 if (trip.end_date && trip.end_date !== trip.start_date) dateStr += ' \u2014 ' + trip.end_date;
+                // Add relative day label
+                var _today = new Date().toISOString().slice(0, 10);
+                var _dayLabel = '';
+                if (trip.start_date === _today) { _dayLabel = 'Today'; }
+                else if (trip.start_date) {
+                    var _diffDays = Math.round((new Date(trip.start_date) - new Date(_today)) / 86400000);
+                    if (_diffDays === 1) _dayLabel = 'Tomorrow';
+                    else if (_diffDays > 1 && _diffDays <= 7) _dayLabel = 'In ' + _diffDays + ' days';
+                }
+                var dateDisplay = (_dayLabel ? _dayLabel + ' \u00B7 ' : '') + dateStr;
                 allTravel.push(
                     '<div class="card card-compact" onclick="showTripView(' + trip.id + ')" style="cursor:pointer;"><div class="card-header">' +
                     '<span class="nav-dot" style="margin-top:5px;background:' + statusColor + ';"></span>' +
                     '<span class="card-title">' + esc(trip.event_name || trip.destination || 'Trip') +
                     (catLabel ? ' <span style="font-size:9px;font-weight:600;color:var(--text3);background:var(--bg2);padding:1px 4px;border-radius:3px;margin-left:6px;">' + esc(catLabel) + '</span>' : '') +
                     ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9656;</span></span>' +
-                    '<span class="card-time">' + esc(dateStr) + '</span>' +
+                    '<span class="card-time">' + esc(dateDisplay) + '</span>' +
                     '</div></div>'
                 );
             }
