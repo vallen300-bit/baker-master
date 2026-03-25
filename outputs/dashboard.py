@@ -1667,11 +1667,15 @@ async def get_morning_brief():
                 pass
 
             # Top fires (T1 alerts, most recent per matter, limit 5)
+            # Exclude travel/flight alerts — they belong in Travel section
             cur.execute("""
                 SELECT * FROM (
                     SELECT DISTINCT ON (COALESCE(matter_slug, id::text)) *
                     FROM alerts
                     WHERE status = 'pending' AND tier = 1
+                      AND title NOT ILIKE '%%flight%%'
+                      AND title NOT ILIKE '%%departure%%'
+                      AND title NOT ILIKE '%%arrival%%'
                     ORDER BY COALESCE(matter_slug, id::text), created_at DESC
                 ) deduped
                 ORDER BY created_at DESC
