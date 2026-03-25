@@ -73,6 +73,7 @@ MCP_SERVER=""
 DROPBOX_PATHS=(
     "$USER_HOME/Dropbox (Vallen)/Baker-Project/baker-mcp/baker_mcp_server.py"
     "$USER_HOME/Vallen Dropbox/Dimitry vallen/Baker-Project/baker-mcp/baker_mcp_server.py"
+    "$USER_HOME/Dropbox-Vallen/Dimitry vallen/Baker-Project/baker-mcp/baker_mcp_server.py"
     "$USER_HOME/Dropbox/Baker-Project/baker-mcp/baker_mcp_server.py"
 )
 for p in "${DROPBOX_PATHS[@]}"; do
