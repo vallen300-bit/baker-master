@@ -5492,7 +5492,7 @@ function toggleMute(btn) {
 
 // ═══ D4: TAB CUSTOMIZATION (drag-to-reorder, pin/hide, localStorage) ═══
 var _tabConfig = null; // {order: [...], pinned: [...], hidden: [...]}
-var _TAB_CONFIG_KEY = 'baker_tab_order';
+var _TAB_CONFIG_KEY = 'baker_tab_order_v2'; // SIDEBAR-RESTRUCTURE-1: bumped to clear stale drag order
 
 function _loadTabConfig() {
     try {
@@ -5508,51 +5508,15 @@ function _saveTabConfig() {
 
 function _applyTabOrder() {
     _loadTabConfig();
+    // SIDEBAR-RESTRUCTURE-1: Don't reorder DOM — the HTML defines the correct structure.
+    // Only apply hide/show from config. Section headers + sub-lists must stay in place.
     var nav = document.querySelector('.sidebar-nav');
     if (!nav) return;
-
     var items = Array.from(nav.querySelectorAll('.nav-item[data-tab]'));
-    if (items.length === 0) return;
-
-    // Get all non-tab elements (dividers, sub-lists) to preserve
-    var dividers = Array.from(nav.querySelectorAll('.nav-divider, .nav-sub'));
-
-    // Sort tabs by stored order (pinned first, then ordered, then rest)
-    if (_tabConfig.order.length > 0) {
-        var orderMap = {};
-        for (var oi = 0; oi < _tabConfig.order.length; oi++) {
-            orderMap[_tabConfig.order[oi]] = oi;
-        }
-        items.sort(function(a, b) {
-            var aPin = _tabConfig.pinned.indexOf(a.dataset.tab) >= 0 ? 0 : 1;
-            var bPin = _tabConfig.pinned.indexOf(b.dataset.tab) >= 0 ? 0 : 1;
-            if (aPin !== bPin) return aPin - bPin;
-            var aOrd = orderMap[a.dataset.tab] !== undefined ? orderMap[a.dataset.tab] : 999;
-            var bOrd = orderMap[b.dataset.tab] !== undefined ? orderMap[b.dataset.tab] : 999;
-            return aOrd - bOrd;
-        });
-    }
-
-    // Hide/show based on config
     items.forEach(function(item) {
-        var isHidden = _tabConfig.hidden.indexOf(item.dataset.tab) >= 0;
+        var isHidden = _tabConfig.hidden && _tabConfig.hidden.indexOf(item.dataset.tab) >= 0;
         item.style.display = isHidden ? 'none' : '';
-        item.draggable = true;
-        if (_tabConfig.pinned.indexOf(item.dataset.tab) >= 0) {
-            item.classList.add('pinned');
-        }
     });
-
-    // Re-insert items in order (before first divider or at end)
-    var firstDivider = nav.querySelector('.nav-divider');
-    items.forEach(function(item) {
-        nav.insertBefore(item, firstDivider);
-    });
-    // Re-insert dividers after tabs
-    dividers.forEach(function(d) { nav.appendChild(d); });
-
-    // Add overflow button if tabs are hidden
-    _updateTabOverflow(nav, items);
 }
 
 function _updateTabOverflow(nav, items) {
