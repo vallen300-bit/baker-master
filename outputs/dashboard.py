@@ -7783,19 +7783,11 @@ async def api_cancel_browser_action(action_id: int):
 
     store.update_browser_action(action_id, status="cancelled")
 
-    # Also resolve the linked alert
+    # Also resolve the linked alert (uses resolve_alert which triggers ALERT-DEDUP-2 auto-dismiss)
     if action.get("alert_id"):
         try:
             store = SentinelStoreBack._get_global_instance()
-            conn = store._get_conn()
-            if conn:
-                try:
-                    cur = conn.cursor()
-                    cur.execute("UPDATE alerts SET status = 'resolved' WHERE id = %s", (action["alert_id"],))
-                    conn.commit()
-                    cur.close()
-                finally:
-                    store._put_conn(conn)
+            store.resolve_alert(action["alert_id"])
         except Exception:
             pass
 
@@ -7876,18 +7868,10 @@ def _execute_browser_action(action_id: int, action: dict):
         result_text = " | ".join(result_parts)
         store.update_browser_action(action_id, status="completed", result=result_text)
 
-        # Resolve the linked alert
+        # Resolve the linked alert (uses resolve_alert which triggers ALERT-DEDUP-2 auto-dismiss)
         if action.get("alert_id"):
             try:
-                conn = store._get_conn()
-                if conn:
-                    try:
-                        cur = conn.cursor()
-                        cur.execute("UPDATE alerts SET status = 'resolved' WHERE id = %s", (action["alert_id"],))
-                        conn.commit()
-                        cur.close()
-                    finally:
-                        store._put_conn(conn)
+                store.resolve_alert(action["alert_id"])
             except Exception:
                 pass
 

@@ -25,6 +25,17 @@ from config.settings import config
 logger = logging.getLogger("sentinel.store_back")
 
 
+def _titles_similar(t1: str, t2: str, threshold: int = 3) -> bool:
+    """ALERT-DEDUP-2: Check if two alert titles are about the same topic.
+    Returns True if they share >= threshold significant words (len > 3, not stopwords)."""
+    _stopwords = {'the', 'this', 'that', 'from', 'with', 'about', 'your', 'baker',
+                  'alert', 'action', 'required', 'update', 'status', 'new', 'follow'}
+    words1 = set(w.lower() for w in (t1 or '').split() if len(w) > 3 and w.lower() not in _stopwords)
+    words2 = set(w.lower() for w in (t2 or '').split() if len(w) > 3 and w.lower() not in _stopwords)
+    overlap = len(words1 & words2)
+    return overlap >= threshold
+
+
 class SentinelStoreBack:
     """Write layer for PostgreSQL structured memory + Qdrant vectors."""
 
@@ -3446,6 +3457,27 @@ class SentinelStoreBack:
                     cur.close()
                     logger.info(f"Alert dedup: skipped duplicate source={source} source_id={source_id}")
                     return None
+            # ALERT-DEDUP-2: Matter-slug + title similarity dedup (7-day window)
+            # If same matter has a pending alert with similar title, update it instead of creating new
+            if matter_slug:
+                cur.execute(
+                    """SELECT id, title, body FROM alerts
+                       WHERE matter_slug = %s AND status = 'pending'
+                         AND created_at > NOW() - INTERVAL '7 days'
+                       ORDER BY created_at DESC LIMIT 1""",
+                    (matter_slug,),
+                )
+                _existing = cur.fetchone()
+                if _existing and _titles_similar(_existing[1], title):
+                    _existing_id = _existing[0]
+                    cur.execute(
+                        "UPDATE alerts SET body = %s, updated_at = NOW(), tier = LEAST(tier, %s) WHERE id = %s",
+                        (body, tier, _existing_id),
+                    )
+                    conn.commit()
+                    cur.close()
+                    logger.info(f"Alert dedup (matter+title): updated existing #{_existing_id} instead of creating new — matter={matter_slug}")
+                    return _existing_id
             # ALERT-DEDUP-3: Universal title-based dedup (all sources)
             # Normalize title: strip common prefixes for better matching
             import re as _re
@@ -3633,6 +3665,8 @@ class SentinelStoreBack:
             logger.error(f"acknowledge_alert failed for #{alert_id}: {e}")
         finally:
             self._put_conn(conn)
+        # ALERT-DEDUP-2: auto-dismiss related alerts
+        self.dismiss_related_alerts(alert_id)
 
     def resolve_alert(self, alert_id: int):
         """Mark alert as resolved (real issue, handled)."""
@@ -3652,6 +3686,8 @@ class SentinelStoreBack:
             logger.error(f"resolve_alert failed for #{alert_id}: {e}")
         finally:
             self._put_conn(conn)
+        # ALERT-DEDUP-2: auto-dismiss related alerts
+        self.dismiss_related_alerts(alert_id)
 
     def dismiss_alert(self, alert_id: int):
         """Mark alert as dismissed (noise, not relevant)."""
@@ -3669,6 +3705,62 @@ class SentinelStoreBack:
         except Exception as e:
             conn.rollback()
             logger.error(f"dismiss_alert failed for #{alert_id}: {e}")
+        finally:
+            self._put_conn(conn)
+        # ALERT-DEDUP-2: auto-dismiss related alerts
+        self.dismiss_related_alerts(alert_id)
+
+    def dismiss_related_alerts(self, alert_id: int):
+        """ALERT-DEDUP-2: After acting on an alert, dismiss other pending alerts about the same topic.
+        Excludes browser_transaction alerts (need explicit confirmation)."""
+        conn = self._get_conn()
+        if not conn:
+            return 0
+        try:
+            import psycopg2.extras
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+            # Get the acted-on alert
+            cur.execute("SELECT matter_slug, title, source FROM alerts WHERE id = %s", (alert_id,))
+            alert = cur.fetchone()
+            if not alert:
+                cur.close()
+                return 0
+
+            dismissed_total = 0
+
+            # Strategy 1: Same matter_slug → dismiss all older pending (except browser_transaction)
+            if alert['matter_slug']:
+                cur.execute("""
+                    UPDATE alerts SET status = 'dismissed', exit_reason = 'auto-dismiss-related', resolved_at = NOW()
+                    WHERE matter_slug = %s AND status = 'pending' AND id != %s
+                      AND (source IS NULL OR source != 'browser_transaction')
+                    """, (alert['matter_slug'], alert_id))
+                dismissed_total += cur.rowcount
+
+            # Strategy 2: Similar title (3+ significant words overlap) → dismiss
+            title_words = [w.lower() for w in (alert['title'] or '').split()
+                           if len(w) > 3 and w.lower() not in ('the', 'this', 'that', 'from', 'with', 'about', 'your', 'baker', 'alert')]
+            if len(title_words) >= 3:
+                # Use first 3 keywords in a LIKE pattern
+                pattern = '%' + '%'.join(title_words[:3]) + '%'
+                cur.execute("""
+                    UPDATE alerts SET status = 'dismissed', exit_reason = 'auto-dismiss-similar', resolved_at = NOW()
+                    WHERE status = 'pending' AND id != %s
+                      AND LOWER(title) LIKE %s
+                      AND (source IS NULL OR source != 'browser_transaction')
+                    """, (alert_id, pattern))
+                dismissed_total += cur.rowcount
+
+            conn.commit()
+            cur.close()
+            if dismissed_total > 0:
+                logger.info(f"ALERT-DEDUP-2: auto-dismissed {dismissed_total} related alerts after acting on #{alert_id}")
+            return dismissed_total
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"dismiss_related_alerts failed for #{alert_id}: {e}")
+            return 0
         finally:
             self._put_conn(conn)
 
