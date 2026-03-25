@@ -23,7 +23,7 @@ _MAX_WRITES_PER_CYCLE = 10
 
 
 class ClickUpClient:
-    """ClickUp API wrapper with read-all / write-BAKER-only safety."""
+    """ClickUp API wrapper with read-all / write-all (Director authorized 2026-03-25)."""
 
     _instance = None
 
@@ -123,16 +123,12 @@ class ClickUpClient:
         """
         Enforce write safety rules. Raises on violation.
         1. Kill switch env var
-        2. BAKER space only
+        2. All spaces writable (Director authorized 2026-03-25)
         3. Max writes per cycle
         """
         # Kill switch
         if os.getenv("BAKER_CLICKUP_READONLY", "").lower() == "true":
             raise RuntimeError("ClickUp writes disabled by kill switch")
-
-        # BAKER space only
-        if str(space_id) != _BAKER_SPACE_ID:
-            raise ValueError("Write attempted outside BAKER space")
 
         # Max writes per cycle
         if self._cycle_write_count >= _MAX_WRITES_PER_CYCLE:
