@@ -382,6 +382,84 @@ def _generate_deadline_proposal(deadline: dict, stage: str, hours_remaining: flo
         return None
 
 
+def _is_travel_deadline(description: str) -> bool:
+    """TRAVEL-HYGIENE-1: Check if deadline is travel-related."""
+    travel_keywords = ['flight', 'departure', 'airport', 'check-in', 'travel', 'train']
+    desc_lower = (description or "").lower()
+    return any(kw in desc_lower for kw in travel_keywords)
+
+
+def _update_travel_alert_for_deadline(deadline: dict, stage: str):
+    """TRAVEL-HYGIENE-1: Find existing travel alert and update its title/body for new stage.
+    Uses Europe/Zurich timezone for day labels. Never creates a second alert."""
+    from memory.store_back import SentinelStoreBack
+    from zoneinfo import ZoneInfo
+    store = SentinelStoreBack._get_global_instance()
+    conn = store._get_conn()
+    if not conn:
+        return
+    try:
+        import psycopg2.extras
+        description = deadline.get("description", "Untitled")
+        due_date = deadline.get("due_date")
+
+        # Build stage-appropriate title with Europe/Zurich timezone
+        director_tz = ZoneInfo("Europe/Zurich")
+        now_local = datetime.now(director_tz).date()
+        if due_date and hasattr(due_date, 'astimezone'):
+            due_local = due_date.astimezone(director_tz).date()
+        elif due_date and hasattr(due_date, 'date'):
+            due_local = due_date.date()
+        else:
+            due_local = now_local
+        days_until = (due_local - now_local).days
+
+        if days_until <= 0:
+            title = f"TODAY: {description}"
+        elif days_until == 1:
+            title = f"Tomorrow: {description}"
+        else:
+            title = f"In {days_until}d: {description}"
+
+        priority = deadline.get("priority", "normal")
+        body = f"{description} (due {due_local.strftime('%B %-d')}, {priority.upper()})"
+
+        # Find existing travel alert and UPDATE it
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT id FROM alerts
+            WHERE status = 'pending'
+              AND (tags ? 'travel' OR title ILIKE '%%flight%%' OR title ILIKE '%%departure%%')
+              AND (title ILIKE %s OR body ILIKE %s)
+            ORDER BY created_at DESC LIMIT 1
+        """, (f"%{description[:30]}%", f"%{description[:30]}%"))
+        existing = cur.fetchone()
+
+        if existing:
+            cur.execute(
+                "UPDATE alerts SET title = %s, body = %s, updated_at = NOW() WHERE id = %s",
+                (title, body, existing['id']),
+            )
+            conn.commit()
+            logger.info(f"TRAVEL-HYGIENE-1: updated travel alert #{existing['id']} to '{title}'")
+        else:
+            # No existing alert — create one with travel tag
+            conn.commit()  # close any pending txn
+            store.create_alert(
+                tier=2, title=title, body=body,
+                action_required=False, tags=["travel", "deadline"],
+                source="deadline_cadence",
+                source_id=f"travel-deadline:{deadline.get('id')}",
+            )
+            logger.info(f"TRAVEL-HYGIENE-1: created new travel alert — {title}")
+        cur.close()
+    except Exception as e:
+        conn.rollback()
+        logger.warning(f"_update_travel_alert_for_deadline failed: {e}")
+    finally:
+        store._put_conn(conn)
+
+
 def _fire_reminder(deadline: dict, stage: str, hours_remaining: float):
     """Send a reminder via the appropriate channel based on stage.
     Creates a DB alert for urgent stages and attaches Haiku proposals (Phase 3B).
@@ -395,12 +473,64 @@ def _fire_reminder(deadline: dict, stage: str, hours_remaining: float):
                       "high": "HIGH \u2014 VIP request",
                       "normal": "NORMAL"}.get(priority, priority)
 
+    # TRAVEL-HYGIENE-1: Travel deadlines update existing alert, never create new
+    if _is_travel_deadline(description) and stage in ("48h", "day_of", "overdue"):
+        _update_travel_alert_for_deadline(deadline, stage)
+        # Still push to digest buffer
+        try:
+            from orchestrator.digest_manager import add_alert
+            from zoneinfo import ZoneInfo
+            director_tz = ZoneInfo("Europe/Zurich")
+            now_local = datetime.now(director_tz).date()
+            _due = due_date
+            if _due and hasattr(_due, 'astimezone'):
+                _due_local = _due.astimezone(director_tz).date()
+            elif _due and hasattr(_due, 'date'):
+                _due_local = _due.date()
+            else:
+                _due_local = now_local
+            _days = (_due_local - now_local).days
+            if _days <= 0:
+                _label = f"TODAY: {description}"
+            elif _days == 1:
+                _label = f"Tomorrow: {description}"
+            else:
+                _label = f"In {_days}d: {description}"
+            add_alert(
+                title=_label,
+                source_type="Deadline",
+                timestamp=datetime.now(timezone.utc).strftime("%H:%M UTC"),
+                tier=2,
+                source_id=f"deadline:{deadline.get('id')}",
+                content=f"{description} (due {due_str})",
+                is_critical=False,
+            )
+        except Exception:
+            pass
+        return
+
     # Stages 48h, day_of, overdue → push to digest buffer + create DB alert
     if stage in ("48h", "day_of", "overdue"):
+        # TRAVEL-HYGIENE-1 Fix 6: Timezone-aware labels
+        from zoneinfo import ZoneInfo
+        director_tz = ZoneInfo("Europe/Zurich")
+        now_local = datetime.now(director_tz).date()
+
         if stage == "overdue":
             title = f"OVERDUE: {description}"
         elif stage == "day_of":
-            title = f"DUE TODAY: {description}"
+            if due_date and hasattr(due_date, 'astimezone'):
+                due_local = due_date.astimezone(director_tz).date()
+            elif due_date and hasattr(due_date, 'date'):
+                due_local = due_date.date()
+            else:
+                due_local = now_local
+            if now_local == due_local:
+                title = f"DUE TODAY: {description}"
+            elif (due_local - now_local).days == 1:
+                title = f"Due tomorrow: {description}"
+            else:
+                title = f"Due {due_str}: {description}"
         else:
             title = f"Due in 48h: {description}"
 

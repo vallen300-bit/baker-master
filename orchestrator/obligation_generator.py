@@ -458,6 +458,35 @@ def _generate_proposed_actions(context_str: str) -> list:
 # Storage
 # ─────────────────────────────────────────────────
 
+def _is_travel_related(title: str) -> bool:
+    """TRAVEL-HYGIENE-1: Check if proposed obligation is travel-related."""
+    travel_kw = ['flight', 'departure', 'airport', 'check-in', 'travel', 'train', 'boarding']
+    t = (title or "").lower()
+    return any(kw in t for kw in travel_kw)
+
+
+def _existing_travel_alert_exists(store) -> bool:
+    """TRAVEL-HYGIENE-1: Check if any pending travel alert already exists."""
+    conn = store._get_conn()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT 1 FROM alerts
+            WHERE status = 'pending'
+              AND (tags ? 'travel' OR title ILIKE '%%flight%%' OR title ILIKE '%%departure%%')
+            LIMIT 1
+        """)
+        exists = cur.fetchone() is not None
+        cur.close()
+        return exists
+    except Exception:
+        return False
+    finally:
+        store._put_conn(conn)
+
+
 def _store_obligation_alerts(actions: list) -> list:
     """Create alerts for each obligation. Returns list of alert IDs."""
     if not actions:
@@ -468,6 +497,13 @@ def _store_obligation_alerts(actions: list) -> list:
         store = SentinelStoreBack._get_global_instance()
         ids = []
         for action in actions:
+            # TRAVEL-HYGIENE-1: Skip travel obligations if a travel alert already exists
+            action_title = action.get("title", "")
+            if _is_travel_related(action_title):
+                if _existing_travel_alert_exists(store):
+                    logger.info(f"TRAVEL-HYGIENE-1: skipped travel obligation — alert already exists: {action_title[:60]}")
+                    continue
+
             due_date = action.get("due_date")
             if due_date:
                 try:

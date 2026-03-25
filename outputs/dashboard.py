@@ -1926,6 +1926,24 @@ async def get_morning_brief():
         except Exception as e:
             logger.warning(f"Morning brief: travel alerts query failed: {e}")
 
+        # TRAVEL-HYGIENE-1: Travel-related deadlines (next 3 days) for grid
+        travel_deadlines = []
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT id, description, due_date, priority
+                FROM deadlines
+                WHERE status = 'active'
+                  AND due_date BETWEEN NOW() AND NOW() + INTERVAL '3 days'
+                  AND (description ILIKE '%%flight%%' OR description ILIKE '%%departure%%'
+                       OR description ILIKE '%%travel%%' OR description ILIKE '%%airport%%')
+                ORDER BY due_date ASC LIMIT 5
+            """)
+            travel_deadlines = [_serialize(dict(r)) for r in cur.fetchall()]
+            cur.close()
+        except Exception as e:
+            logger.warning(f"Morning brief: travel deadlines query failed: {e}")
+
         # Weekly priorities for dashboard widget
         weekly_priorities = []
         try:
@@ -1956,6 +1974,7 @@ async def get_morning_brief():
             "overdue_commitments": overdue_commitments,
             "silent_contacts": silent_contacts,
             "travel_alerts": travel_alerts,
+            "travel_deadlines": travel_deadlines,
             "trips": [_serialize(t) for t in active_trips],
             "weekly_priorities": weekly_priorities,
             "proposed_actions": _get_proposed_actions_for_brief(),
@@ -1974,7 +1993,7 @@ async def get_morning_brief():
             "meetings_today": [], "meeting_count": 0,
             "travel_today": [],
             "overdue_commitments": [], "silent_contacts": [],
-            "travel_alerts": [], "trips": [],
+            "travel_alerts": [], "travel_deadlines": [], "trips": [],
         }
 
 

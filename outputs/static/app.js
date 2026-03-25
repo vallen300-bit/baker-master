@@ -817,6 +817,34 @@ async function loadMorningBrief() {
                 if (!covered) allTravel.push(renderTravelCard(ev));
             }
 
+            // 3. TRAVEL-HYGIENE-1: Travel deadlines (next 3 days)
+            var travelDeadlines = data.travel_deadlines || [];
+            for (var tdi = 0; tdi < travelDeadlines.length; tdi++) {
+                var td = travelDeadlines[tdi];
+                // Skip if already covered by trip or calendar event
+                var tdDesc = (td.description || '').toLowerCase();
+                var tdCovered = tripDests.some(function(d) { return d && tdDesc.indexOf(d) >= 0; });
+                if (tdCovered) continue;
+                var dueLabel = '';
+                if (td.due_date) {
+                    var _tdToday = new Date().toISOString().slice(0, 10);
+                    var _tdDue = td.due_date.slice(0, 10);
+                    if (_tdDue === _tdToday) { dueLabel = 'Today'; }
+                    else {
+                        var _tdDiff = Math.round((new Date(_tdDue) - new Date(_tdToday)) / 86400000);
+                        if (_tdDiff === 1) dueLabel = 'Tomorrow';
+                        else if (_tdDiff > 1) dueLabel = 'In ' + _tdDiff + ' days';
+                    }
+                }
+                allTravel.push(
+                    '<div class="card card-compact"><div class="card-header">' +
+                    '<span class="nav-dot amber" style="margin-top:5px;"></span>' +
+                    '<span class="card-title">' + esc(td.description) + '</span>' +
+                    '<span class="card-time" style="font-weight:600;">' + esc(dueLabel) + '</span>' +
+                    '</div></div>'
+                );
+            }
+
             if (allTravel.length > 0) {
                 setSafeHTML(gridTravel, allTravel.join(''));
             } else {

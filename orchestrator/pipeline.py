@@ -131,6 +131,91 @@ def _auto_tag(title: str, body: str) -> list:
     return matched[:5]
 
 
+def _travel_source_id(title: str, body: str) -> str:
+    """TRAVEL-HYGIENE-1: Generate deterministic source_id for travel alerts from route + date."""
+    import re as _re
+    text = ((title or "") + " " + (body or "")).lower()
+    # Extract date (YYYY-MM-DD or "march 26" style)
+    date_match = _re.search(r'(\d{4}-\d{2}-\d{2})', text)
+    if not date_match:
+        # Try "month day" pattern
+        months = {"january": "01", "february": "02", "march": "03", "april": "04",
+                  "may": "05", "june": "06", "july": "07", "august": "08",
+                  "september": "09", "october": "10", "november": "11", "december": "12"}
+        for mname, mnum in months.items():
+            m = _re.search(mname + r'\s+(\d{1,2})', text)
+            if m:
+                date_match = f"2026-{mnum}-{int(m.group(1)):02d}"
+                break
+        if not date_match:
+            date_match = ""
+    else:
+        date_match = date_match.group(1)
+    # Extract destination (city after → or "to")
+    dest_match = _re.search(r'(?:→|to)\s+([a-z]+)', text)
+    dest = dest_match.group(1) if dest_match else "unknown"
+    if date_match:
+        return f"travel:{dest}:{date_match}"
+    return ""
+
+
+def _find_existing_travel_alert(store, source_id: str, title: str):
+    """TRAVEL-HYGIENE-1: Find existing pending travel alert by source_id or similar title."""
+    conn = store._get_conn()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor()
+        # Check by source_id first (exact match)
+        if source_id:
+            cur.execute(
+                "SELECT id FROM alerts WHERE source_id = %s AND status = 'pending' LIMIT 1",
+                (source_id,),
+            )
+            row = cur.fetchone()
+            if row:
+                cur.close()
+                return row[0]
+        # Fallback: check by travel tag + similar title
+        cur.execute("""
+            SELECT id FROM alerts
+            WHERE status = 'pending'
+              AND (tags ? 'travel' OR title ILIKE '%%flight%%')
+              AND created_at > NOW() - INTERVAL '7 days'
+            ORDER BY created_at DESC LIMIT 5
+        """)
+        from memory.store_back import _titles_similar
+        for row in cur.fetchall():
+            # We only have id here, need to check title similarity
+            pass
+        cur.close()
+        return None
+    except Exception:
+        return None
+    finally:
+        store._put_conn(conn)
+
+
+def _update_existing_travel_alert(store, alert_id: int, title: str, body: str, tier: int):
+    """TRAVEL-HYGIENE-1: Update existing travel alert title/body/tier."""
+    conn = store._get_conn()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE alerts SET title = %s, body = %s, tier = LEAST(tier, %s), updated_at = NOW() WHERE id = %s",
+            (title, body, tier, alert_id),
+        )
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        conn.rollback()
+        logger.warning(f"_update_existing_travel_alert failed: {e}")
+    finally:
+        store._put_conn(conn)
+
+
 def _baker_already_commented(task_id: str, hours: int = 24) -> bool:
     """Check if Baker has posted a comment on this ClickUp task within the last N hours.
     Prevents duplicate comments caused by Baker's own comment bumping date_updated.
@@ -490,6 +575,18 @@ class SentinelPipeline:
                         logger.info(f"Auto-assigned alert to matter '{matter_slug}'")
                     # COCKPIT-V3 B1: Auto-tag by keyword matching
                     tags = _auto_tag(alert_title, alert_body)
+
+                    # TRAVEL-HYGIENE-1: For travel alerts, use deterministic source_id and upsert
+                    _source_id = None
+                    if "travel" in tags:
+                        _source_id = _travel_source_id(alert_title, alert_body)
+                        if _source_id:
+                            _existing = _find_existing_travel_alert(self.store, _source_id, alert_title)
+                            if _existing:
+                                _update_existing_travel_alert(self.store, _existing, alert_title, alert_body, tier)
+                                logger.info(f"TRAVEL-HYGIENE-1: updated existing travel alert #{_existing} instead of creating new")
+                                continue
+
                     alert_id = self.store.create_alert(
                         tier=tier,
                         title=alert_title,
@@ -499,6 +596,7 @@ class SentinelPipeline:
                         matter_slug=matter_slug,
                         tags=tags,
                         source="pipeline",
+                        source_id=_source_id,
                     )
                     # COCKPIT-ALERT-UI: generate structured actions for T1/T2/T3 alerts
                     if alert_id and tier <= 3:
@@ -834,6 +932,84 @@ def ask_baker(question: str, contact: str = None) -> SentinelResponse:
         contact_name=contact,
     )
     return pipeline.run(trigger)
+
+
+def auto_dismiss_past_travel():
+    """TRAVEL-HYGIENE-1: Dismiss travel alerts where departure day has passed.
+    Director override: expire at midnight AFTER departure day in Europe/Zurich timezone.
+    Runs every hour via scheduler."""
+    from zoneinfo import ZoneInfo
+    import re as _re
+    try:
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return
+        try:
+            import psycopg2.extras
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            director_tz = ZoneInfo("Europe/Zurich")
+            today_local = datetime.now(director_tz).date()
+
+            # Find all pending travel alerts
+            cur.execute("""
+                SELECT id, title, body, created_at FROM alerts
+                WHERE status = 'pending'
+                  AND (tags ? 'travel' OR title ILIKE '%%flight%%' OR title ILIKE '%%departure%%')
+            """)
+            rows = cur.fetchall()
+            dismissed = 0
+            for row in rows:
+                text = ((row.get("title") or "") + " " + (row.get("body") or "")).lower()
+                # Try to extract travel date from text
+                travel_date = None
+                # Pattern 1: YYYY-MM-DD
+                dm = _re.search(r'(\d{4}-\d{2}-\d{2})', text)
+                if dm:
+                    try:
+                        travel_date = datetime.strptime(dm.group(1), "%Y-%m-%d").date()
+                    except ValueError:
+                        pass
+                # Pattern 2: "month day" (e.g., "march 26")
+                if not travel_date:
+                    months = {"january": 1, "february": 2, "march": 3, "april": 4,
+                              "may": 5, "june": 6, "july": 7, "august": 8,
+                              "september": 9, "october": 10, "november": 11, "december": 12}
+                    for mname, mnum in months.items():
+                        m = _re.search(mname + r'\s+(\d{1,2})', text)
+                        if m:
+                            try:
+                                travel_date = datetime(2026, mnum, int(m.group(1))).date()
+                            except ValueError:
+                                pass
+                            break
+                # Pattern 3: "day month" (e.g., "26 March")
+                if not travel_date:
+                    for mname, mnum in months.items():
+                        m = _re.search(r'(\d{1,2})\s+' + mname, text)
+                        if m:
+                            try:
+                                travel_date = datetime(2026, mnum, int(m.group(1))).date()
+                            except ValueError:
+                                pass
+                            break
+
+                # Dismiss if travel date is before today (midnight CET has passed)
+                if travel_date and travel_date < today_local:
+                    cur.execute(
+                        "UPDATE alerts SET status = 'dismissed', exit_reason = 'travel-expired', resolved_at = NOW() WHERE id = %s",
+                        (row['id'],),
+                    )
+                    dismissed += 1
+
+            conn.commit()
+            cur.close()
+            if dismissed:
+                logger.info(f"TRAVEL-HYGIENE-1: auto-dismissed {dismissed} past travel alerts (midnight CET)")
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.warning(f"auto_dismiss_past_travel failed: {e}")
 
 
 if __name__ == "__main__":

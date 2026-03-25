@@ -205,7 +205,7 @@ def _register_jobs(scheduler: BackgroundScheduler):
     logger.info("Registered: calendar_prep (every 15 minutes)")
 
     # Alert auto-expiry — every 6 hours (COCKPIT-V3 Phase C)
-    from orchestrator.pipeline import run_alert_expiry_check
+    from orchestrator.pipeline import run_alert_expiry_check, auto_dismiss_past_travel
     scheduler.add_job(
         run_alert_expiry_check,
         IntervalTrigger(hours=1),
@@ -213,6 +213,15 @@ def _register_jobs(scheduler: BackgroundScheduler):
         coalesce=True, max_instances=1, replace_existing=True,
     )
     logger.info("Registered: alert_expiry (every 1 hour — includes snooze reactivation)")
+
+    # TRAVEL-HYGIENE-1: Auto-dismiss travel alerts after midnight CET on departure day
+    scheduler.add_job(
+        auto_dismiss_past_travel,
+        IntervalTrigger(hours=1),
+        id="dismiss_past_travel", name="Dismiss past travel alerts (hourly, midnight CET)",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: dismiss_past_travel (every 1 hour — midnight CET expiry)")
 
     # Proactive signal scanner — every 30 minutes (PROACTIVE-FLAG-AO)
     from triggers.proactive_scanner import run_proactive_scan
