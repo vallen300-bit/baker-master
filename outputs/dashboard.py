@@ -8184,9 +8184,12 @@ async def api_view_research_dossier(proposal_id: int, key: str = ""):
   .meta {{ font-size: 12px; color: #888; margin-bottom: 16px; }}
   .dl-link {{ display: inline-block; margin-top: 16px; padding: 10px 20px; background: #22c55e;
               color: #000; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; }}
+  .back {{ display: inline-block; margin-bottom: 12px; color: #60a5fa; text-decoration: none; font-size: 14px; }}
+  .back:hover {{ text-decoration: underline; }}
 </style>
 </head>
 <body>
+<a class="back" href="/dossiers?key={key}">&larr; Back to Dossiers</a>
 <h1>{title}</h1>
 <div class="meta">Completed {completed}</div>
 {html_body}

@@ -1396,8 +1396,18 @@ function _renderTripBanner(trip) {
 
     var dateStr = trip.start_date || '';
     if (trip.end_date && trip.end_date !== trip.start_date) dateStr += ' \u2014 ' + trip.end_date;
-    var meta = dateStr;
-    if (trip.event_name) meta = trip.event_name + ' \u00B7 ' + dateStr;
+    // Add relative day label so user knows when the trip is
+    var today = new Date().toISOString().slice(0, 10);
+    var dayLabel = '';
+    if (trip.start_date === today) { dayLabel = 'Today'; }
+    else if (trip.start_date) {
+        var diffMs = new Date(trip.start_date) - new Date(today);
+        var diffDays = Math.round(diffMs / 86400000);
+        if (diffDays === 1) dayLabel = 'Tomorrow';
+        else if (diffDays > 1 && diffDays <= 7) dayLabel = 'In ' + diffDays + ' days';
+    }
+    var meta = (dayLabel ? dayLabel + ' \u00B7 ' : '') + dateStr;
+    if (trip.event_name) meta = (dayLabel ? dayLabel + ' \u00B7 ' : '') + trip.event_name + ' \u00B7 ' + dateStr;
 
     content.textContent = '';
     var dest = document.createElement('div');
