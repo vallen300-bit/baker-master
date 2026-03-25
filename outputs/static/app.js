@@ -232,11 +232,20 @@ function getScanHistory() {
     return _scanHistories[_scanCurrentContext];
 }
 
-function openMatterScan(matterSlug) {
+function openMatterScan(matterSlug, alertTitle, alertBody) {
     if (matterSlug) {
         _scanCurrentContext = 'matter:' + matterSlug;
     } else {
         _scanCurrentContext = 'global';
+    }
+    // SCAN-CONTEXT-1: Clear old history for this context to prevent bleed
+    _scanHistories[_scanCurrentContext] = [];
+    // SCAN-CONTEXT-1: Inject alert context as first system message if available
+    if (alertTitle) {
+        var contextMsg = '[Context from alert: "' + alertTitle + '"';
+        if (alertBody) contextMsg += '\n' + alertBody.substring(0, 500);
+        contextMsg += ']';
+        _scanHistories[_scanCurrentContext].push({ role: 'system', content: contextMsg });
     }
     renderScanHistory();
     switchTab('ask-baker');
@@ -1655,7 +1664,7 @@ function renderAlertCard(alert, expanded) {
         html += '<button class="footer-btn primary" style="background:#22c55e;color:#fff;" onclick="confirmBrowserAction(' + _sa2.action_id + ',' + alert.id + ',this)">Confirm</button>';
         html += '<button class="footer-dismiss" data-alert="' + aid + '" onclick="cancelBrowserAction(' + _sa2.action_id + ',' + alert.id + ',this)">Cancel</button>';
     } else {
-        html += '<button class="footer-btn primary" onclick="openMatterScan(\'' + esc(alert.matter_slug || '') + '\')">Open in Scan</button>';
+        html += '<button class="footer-btn primary" data-matter="' + esc(alert.matter_slug || '') + '" data-title="' + esc(alert.title || '') + '" data-body="' + esc((alert.body || '').substring(0, 500)) + '" onclick="openMatterScan(this.dataset.matter, this.dataset.title, this.dataset.body)">Open in Scan</button>';
         html += '<button class="footer-resolve" data-alert="' + aid + '" onclick="resolveAlert(' + alert.id + ',this)">Resolve</button>';
         html += '<button class="footer-dismiss" data-alert="' + aid + '" onclick="dismissAlert(' + alert.id + ',this)">Dismiss</button>';
     }

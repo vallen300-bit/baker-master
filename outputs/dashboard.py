@@ -182,6 +182,7 @@ class ScanRequest(BaseModel):
     project: Optional[str] = None   # scope search to project (e.g. "rg7")
     role: Optional[str] = None      # scope search to role (e.g. "chairman")
     owner: Optional[str] = None     # "dimitry" or "edita" — for memory separation
+    alert_context: Optional[str] = None  # SCAN-CONTEXT-1: injected when opening from alert card
 
 
 class CreateTaskRequest(BaseModel):
@@ -5609,10 +5610,46 @@ async def scan_chat(req: ScanRequest):
         except Exception as e:
             logger.debug(f"Conversation history fetch failed (non-fatal): {e}")
 
-        intent = _ah.classify_intent(req.question, conversation_history=_conv_history)
+        # SCAN-CONTEXT-1: Prepend alert context to question for intent classification
+        # Also check client-side history for system context messages
+        _alert_ctx = req.alert_context or ""
+        if not _alert_ctx and req.history:
+            for h in req.history:
+                if h.get("role") == "system" and h.get("content", "").startswith("[Context from alert:"):
+                    _alert_ctx = h["content"]
+                    break
+        _classify_question = req.question
+        if _alert_ctx:
+            _classify_question = f"{_alert_ctx}\n\nDirector's request: {req.question}"
+            logger.info(f"SCAN-CONTEXT-1: alert context injected ({len(_alert_ctx)} chars)")
+
+        intent = _ah.classify_intent(_classify_question, conversation_history=_conv_history)
         logger.info(f"SCAN_DEBUG: intent_type={intent.get('type')}, recipient={intent.get('recipient')}")
+
+        # CONV-SAFETY-1: Build limited history (2 turns) for outbound actions (email, WhatsApp)
+        # This prevents old conversation topics from bleeding into new emails/messages
+        _limited_history = ""
+        if intent.get("type") in ("email_action", "whatsapp_action"):
+            try:
+                _ltd_turns = store.get_recent_conversations(limit=2) if store else []
+                if _ltd_turns:
+                    _ltd_lines = []
+                    for turn in reversed(_ltd_turns):
+                        _ltd_lines.append(f"Director: {(turn.get('question') or '')[:200]}")
+                        a = (turn.get("answer") or "")[:300]
+                        if a:
+                            _ltd_lines.append(f"Baker: {a}")
+                    _limited_history = "\n".join(_ltd_lines)
+            except Exception:
+                pass
+
         if intent.get("type") == "email_action":
-            logger.info("SCAN_DEBUG: routing to handle_email_action")
+            # If alert context present, prepend it to the content_request so email body uses correct topic
+            if _alert_ctx and intent.get("content_request"):
+                intent["content_request"] = f"{_alert_ctx}\n\n{intent['content_request']}"
+            elif _alert_ctx:
+                intent["content_request"] = _alert_ctx + "\n\n" + (intent.get("subject") or req.question)
+            logger.info("SCAN_DEBUG: routing to handle_email_action (history limited to 2 turns)")
             return _action_stream_response(
                 _ah.handle_email_action(intent, _get_retriever(), req.project, req.role),
                 req.question,
@@ -5620,10 +5657,11 @@ async def scan_chat(req: ScanRequest):
         elif intent.get("type") == "whatsapp_action":
             logger.info("SCAN_DEBUG: routing to handle_whatsapp_action")
             intent["original_question"] = req.question  # pass full text for phone extraction
+            # CONV-SAFETY-1: Use limited history to prevent topic bleed
             return _action_stream_response(
                 _ah.handle_whatsapp_action(
                     intent, _get_retriever(), channel="scan",
-                    conversation_history=_conv_history,
+                    conversation_history=_limited_history,
                 ),
                 req.question,
             )

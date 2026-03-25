@@ -2005,6 +2005,17 @@ function _closeContextMenu() {
 // ═══ ASK BAKER ABOUT ALERT ═══
 
 function _askBakerAbout(alert) {
+    // SCAN-CONTEXT-1: Clear old history to prevent context bleed
+    bakerHistory = [];
+    var container = document.getElementById('bakerMessages');
+    if (container) container.textContent = '';
+
+    // Inject alert context as system message so Baker knows the topic
+    var alertContext = '[Context from alert: "' + (alert.title || '') + '"';
+    if (alert.body) alertContext += '\n' + (alert.body || '').substring(0, 500);
+    alertContext += ']';
+    bakerHistory.push({ role: 'system', content: alertContext });
+
     var sa = alert.structured_actions || {};
     var context = sa.suggested_action || (alert.body || '').substring(0, 200) || alert.title || '';
     var prefix = 'About: "' + (alert.title || '').substring(0, 80) + '"';
