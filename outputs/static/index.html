@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=40">
+    <link rel="stylesheet" href="/static/style.css?v=41">
 </head>
 <body>
 
@@ -26,34 +26,39 @@
         <div class="nav-item active" data-tab="morning-brief">
             <span class="nav-label">Dashboard</span>
         </div>
-        <div class="nav-item" data-tab="fires">
-            <span class="nav-label">Upcoming</span>
-            <span class="nav-fire-count" id="firesBadge" hidden>0</span>
-        </div>
-        <!-- Matters sub-list (populated by JS) -->
-        <div class="nav-sub" id="mattersSubList"></div>
 
-        <div class="nav-item" data-tab="people">
-            <span class="nav-label">Networking</span>
+        <!-- SIDEBAR-RESTRUCTURE-1: Projects section (expandable) -->
+        <div class="nav-section-header" id="navProjectsHeader" data-section="projects">
+            <span class="nav-section-arrow">&#9662;</span>
+            <span class="nav-section-label">Projects</span>
+            <span class="nav-count" id="projectsCount"></span>
         </div>
-        <div class="nav-item" data-tab="deadlines">
-            <span class="nav-label">Promised To Do</span>
-            <span class="nav-count" id="deadlinesCount"></span>
+        <div class="nav-sub" id="projectsSubList"></div>
+
+        <!-- SIDEBAR-RESTRUCTURE-1: Operations section (expandable) -->
+        <div class="nav-section-header" id="navOpsHeader" data-section="operations">
+            <span class="nav-section-arrow">&#9656;</span>
+            <span class="nav-section-label">Operations</span>
+            <span class="nav-count" id="operationsCount"></span>
         </div>
-        <div class="nav-item" data-tab="tags">
-            <span class="nav-label">Tags</span>
+        <div class="nav-sub" id="operationsSubList" style="display:none;"></div>
+
+        <!-- SIDEBAR-RESTRUCTURE-1: Inbox -->
+        <div class="nav-item" data-tab="fires" data-matter="_ungrouped" id="navInbox">
+            <span class="nav-label">Inbox</span>
+            <span class="nav-count" id="inboxCount"></span>
         </div>
 
         <div class="nav-divider"></div>
 
-        <div class="nav-item" data-tab="search">
-            <span class="nav-label">Search</span>
-        </div>
         <div class="nav-item" data-tab="ask-baker">
             <span class="nav-label">Ask Baker</span>
         </div>
         <div class="nav-item" data-tab="ask-specialist">
             <span class="nav-label">Ask Specialist</span>
+        </div>
+        <div class="nav-item" data-tab="search">
+            <span class="nav-label">Search</span>
         </div>
 
         <div class="nav-divider"></div>
@@ -65,9 +70,6 @@
         <div class="nav-item" data-tab="dossiers">
             <span class="nav-label">Dossiers</span>
             <span class="nav-count" id="dossiersCount"></span>
-        </div>
-        <div class="nav-item" data-tab="browser">
-            <span class="nav-label">Browser</span>
         </div>
 
         <div class="nav-divider"></div>
@@ -333,6 +335,6 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=53"></script>
+<script src="/static/app.js?v=54"></script>
 </body>
 </html>

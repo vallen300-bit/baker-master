@@ -2847,21 +2847,36 @@ async def get_matters_summary():
             raise HTTPException(status_code=503, detail="Database unavailable")
         try:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            # Get matters with their alert stats
+            # SIDEBAR-RESTRUCTURE-1: Get matters with alert stats + category from matter_registry
             cur.execute("""
                 SELECT
                     COALESCE(a.matter_slug, '_ungrouped') AS matter_slug,
                     COUNT(*) AS item_count,
                     MIN(a.tier) AS worst_tier,
-                    COUNT(*) FILTER (WHERE a.created_at >= NOW() - INTERVAL '24 hours') AS new_count
+                    COUNT(*) FILTER (WHERE a.created_at >= NOW() - INTERVAL '24 hours') AS new_count,
+                    COALESCE(mr.category, 'inbox') AS category
                 FROM alerts a
+                LEFT JOIN matter_registry mr ON LOWER(REPLACE(mr.matter_name, ' ', '-')) = LOWER(a.matter_slug)
+                    OR LOWER(mr.matter_name) = LOWER(REPLACE(a.matter_slug, '-', ' '))
                 WHERE a.status = 'pending'
-                GROUP BY COALESCE(a.matter_slug, '_ungrouped')
-                ORDER BY MIN(a.tier), COALESCE(a.matter_slug, '_ungrouped')
+                GROUP BY COALESCE(a.matter_slug, '_ungrouped'), COALESCE(mr.category, 'inbox')
+                ORDER BY item_count DESC
             """)
-            matters = [dict(r) for r in cur.fetchall()]
+            all_matters = [dict(r) for r in cur.fetchall()]
+            # Inbox count = alerts with no matter_slug
+            inbox_count = sum(m['item_count'] for m in all_matters if m['matter_slug'] == '_ungrouped')
+            projects = [m for m in all_matters if m.get('category') == 'project']
+            operations = [m for m in all_matters if m.get('category') == 'operations']
+            inbox_items = [m for m in all_matters if m.get('category') == 'inbox' or m['matter_slug'] == '_ungrouped']
             cur.close()
-            return {"matters": matters, "count": len(matters)}
+            return {
+                "matters": all_matters,
+                "projects": projects,
+                "operations": operations,
+                "inbox": inbox_items,
+                "inbox_count": inbox_count,
+                "count": len(all_matters),
+            }
         finally:
             store._put_conn(conn)
     except HTTPException:

@@ -1188,51 +1188,85 @@ async function loadMattersSummary() {
         if (!resp.ok) return;
         const data = await resp.json();
 
-        const subList = document.getElementById('mattersSubList');
-        setText('mattersCount', data.count || '');
+        // SIDEBAR-RESTRUCTURE-1: Render 3-tier sidebar
+        _renderMatterSection('projectsSubList', data.projects || [], 'projectsCount');
+        _renderMatterSection('operationsSubList', data.operations || [], 'operationsCount');
+        // Inbox count
+        var inboxTotal = 0;
+        (data.inbox || []).forEach(function(m) { inboxTotal += m.item_count || 0; });
+        setText('inboxCount', inboxTotal || '');
 
-        if (subList && data.matters) {
-            // Build sub-items using safe DOM methods
-            subList.textContent = '';
-            for (const m of data.matters) {
-                const slug = m.matter_slug || '_ungrouped';
-                const label = slug === '_ungrouped' ? 'Ungrouped' : slug.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
-                const dotClass = (m.worst_tier && m.worst_tier <= 2) ? 'red' : 'slate';
-
-                const item = document.createElement('div');
-                item.className = 'nav-item';
-                item.dataset.tab = 'matters';
-                item.dataset.matter = slug;
-
-                const dot = document.createElement('span');
-                dot.className = 'nav-dot ' + dotClass;
-                item.appendChild(dot);
-
-                const lbl = document.createElement('span');
-                lbl.className = 'nav-label';
-                lbl.textContent = label;
-                item.title = label + ' (' + m.item_count + ')';
-                item.appendChild(lbl);
-
-                const cnt = document.createElement('span');
-                cnt.className = 'nav-count';
-                cnt.textContent = m.item_count;
-                item.appendChild(cnt);
-
-                if (m.new_count > 0) {
-                    const newBadge = document.createElement('span');
-                    newBadge.className = 'nav-new';
-                    newBadge.textContent = m.new_count + ' new';
-                    item.appendChild(newBadge);
-                }
-
-                // Click handled by delegated handler on mattersSubList (line ~2742)
-                subList.appendChild(item);
-            }
-        }
+        // Section expand/collapse with localStorage persistence
+        _initSectionToggle('navProjectsHeader', 'projectsSubList', 'projects', true);
+        _initSectionToggle('navOpsHeader', 'operationsSubList', 'operations', false);
     } catch (e) {
         console.error('loadMattersSummary failed:', e);
     }
+}
+
+function _renderMatterSection(containerId, matters, countId) {
+    var container = document.getElementById(containerId);
+    if (!container) return;
+    container.textContent = '';
+    var totalCount = 0;
+    for (var i = 0; i < matters.length; i++) {
+        var m = matters[i];
+        var slug = m.matter_slug || '_ungrouped';
+        if (slug === '_ungrouped') continue;
+        var label = slug.replace(/_/g, ' ').replace(/[-]/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+        var dotClass = (m.worst_tier && m.worst_tier <= 2) ? 'red' : 'slate';
+        totalCount += m.item_count || 0;
+
+        var item = document.createElement('div');
+        item.className = 'nav-item';
+        item.dataset.tab = 'matters';
+        item.dataset.matter = slug;
+
+        var dot = document.createElement('span');
+        dot.className = 'nav-dot ' + dotClass;
+        item.appendChild(dot);
+
+        var lbl = document.createElement('span');
+        lbl.className = 'nav-label';
+        lbl.textContent = label;
+        item.title = label + ' (' + m.item_count + ')';
+        item.appendChild(lbl);
+
+        var cnt = document.createElement('span');
+        cnt.className = 'nav-count';
+        cnt.textContent = m.item_count;
+        item.appendChild(cnt);
+
+        if (m.new_count > 0) {
+            var newBadge = document.createElement('span');
+            newBadge.className = 'nav-new';
+            newBadge.textContent = m.new_count + ' new';
+            item.appendChild(newBadge);
+        }
+        container.appendChild(item);
+    }
+    setText(countId, totalCount || '');
+}
+
+function _initSectionToggle(headerId, listId, key, defaultExpanded) {
+    var header = document.getElementById(headerId);
+    var list = document.getElementById(listId);
+    if (!header || !list) return;
+    // Restore from localStorage
+    var stored = localStorage.getItem('sidebar_' + key);
+    var expanded = stored !== null ? stored === 'true' : defaultExpanded;
+    list.style.display = expanded ? '' : 'none';
+    var arrow = header.querySelector('.nav-section-arrow');
+    if (arrow) arrow.innerHTML = expanded ? '&#9662;' : '&#9656;';
+    // Already bound? Skip
+    if (header.dataset.bound) return;
+    header.dataset.bound = '1';
+    header.addEventListener('click', function() {
+        var isOpen = list.style.display !== 'none';
+        list.style.display = isOpen ? 'none' : '';
+        if (arrow) arrow.innerHTML = isOpen ? '&#9656;' : '&#9662;';
+        localStorage.setItem('sidebar_' + key, !isOpen);
+    });
 }
 
 // ═══ QUICK ADD (Upcoming tab) ═══
@@ -4962,17 +4996,19 @@ async function init() {
         });
     });
 
-    // Matters sub-list (delegated — items added dynamically by loadMattersSummary)
-    var mattersSubList = document.getElementById('mattersSubList');
-    if (mattersSubList) {
-        mattersSubList.addEventListener('click', function(e) {
-            var item = e.target.closest('.nav-item');
-            if (item && item.dataset.matter) {
-                _currentMatterSlug = item.dataset.matter;
-                switchTab('matters');
-            }
-        });
-    }
+    // SIDEBAR-RESTRUCTURE-1: Delegated click handlers for Projects + Operations sub-lists
+    ['projectsSubList', 'operationsSubList'].forEach(function(listId) {
+        var subList = document.getElementById(listId);
+        if (subList) {
+            subList.addEventListener('click', function(e) {
+                var item = e.target.closest('.nav-item');
+                if (item && item.dataset.matter) {
+                    _currentMatterSlug = item.dataset.matter;
+                    switchTab('matters');
+                }
+            });
+        }
+    });
 
     // Scan form
     var scanForm = document.getElementById('scanForm');

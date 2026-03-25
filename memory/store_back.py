@@ -2578,6 +2578,8 @@ class SentinelStoreBack:
                     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
+            # SIDEBAR-RESTRUCTURE-1: Add category column
+            cur.execute("ALTER TABLE matter_registry ADD COLUMN IF NOT EXISTS category TEXT DEFAULT 'inbox'")
             cur.execute(
                 "CREATE INDEX IF NOT EXISTS idx_matter_registry_name "
                 "ON matter_registry(matter_name)"
@@ -2586,6 +2588,34 @@ class SentinelStoreBack:
                 "CREATE INDEX IF NOT EXISTS idx_matter_registry_status "
                 "ON matter_registry(status)"
             )
+            # SIDEBAR-RESTRUCTURE-1: Seed categories (idempotent — only updates where category='inbox')
+            _project_matters = (
+                "Mandarin Oriental Asset Management", "Mandarin Oriental Sales",
+                "Mandarin Oriental Dispute", "Mandarin Oriental Hotel Dispute",
+                "Hagenauer", "Kempinski Kitzbühel Acquisition", "Kempinski KitzbüHel Acquisition",
+                "Cap Ferrat Villa", "Oskolkov-RG7", "FX Mayr",
+                "Financing Vienna & Baden-Baden", "Wertheimer LP",
+                "Lanas", "ClaimsMax", "Alric", "Cupial",
+                "NVIDIA-GTC-2026", "Annaberg Restructuring",
+                "Mandarin Oriental", "AlpenGold Davos",
+            )
+            _ops_matters = (
+                "Austrian Tax & Corporate", "Swiss Tax & Banking",
+                "German Property Tax", "Cyprus Holding Structure",
+                "Family Wealth Overview", "Microsoft 365 Migration",
+                "Baker", "Brisen-AI", "Owner's Lens",
+            )
+            for _pm in _project_matters:
+                cur.execute(
+                    "UPDATE matter_registry SET category = 'project' WHERE matter_name = %s AND category = 'inbox'",
+                    (_pm,),
+                )
+            for _om in _ops_matters:
+                cur.execute(
+                    "UPDATE matter_registry SET category = 'operations' WHERE matter_name = %s AND category = 'inbox'",
+                    (_om,),
+                )
+            conn.commit()
 
             # Seed data — only if table is empty (first deploy)
             cur.execute("SELECT COUNT(*) FROM matter_registry")
