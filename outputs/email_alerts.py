@@ -527,7 +527,7 @@ def send_composed_email(to: str, subject: str, body: str) -> Optional[dict]:
         full_body = (
             f"{body}\n\n"
             f"---\n"
-            f"Sent via Baker CEO Cockpit on behalf of Dimitry Vallen"
+            f"🟢 Baker AI · On behalf of Dimitry Vallen"
         )
         return _send_raw_full(to, subject, full_body)
     except Exception as e:
