@@ -29,6 +29,76 @@ _gmail_backoff_seconds: float = 0.0  # exponential backoff tracker
 # Sentinel health monitoring
 from triggers.sentinel_health import report_success as _health_success, report_failure as _health_failure
 
+# MEETINGS-DETECT-2: Fast regex pre-filter for meeting emails (zero API cost)
+import re as _re
+_MEETING_EMAIL_RE = _re.compile(
+    r'(?:meeting|call|zoom|teams|lunch|dinner|coffee|breakfast|'
+    r'catch-up|sync|sit-down|appointment|conference|'
+    r"let'?s meet|see you at|confirmed for|invitation to|"
+    r'calendar invite|join us|rsvp|webex|google meet|'
+    r'looking forward to meeting|propose a meeting|'
+    r'schedule a call|book a time|set up a meeting|'
+    r'meeting request|accept this invitation)',
+    _re.IGNORECASE
+)
+
+
+def _is_meeting_email(subject: str, body: str) -> bool:
+    """MEETINGS-DETECT-2: Fast regex check — no API cost."""
+    text = f"{subject} {body[:1000]}"
+    return bool(_MEETING_EMAIL_RE.search(text))
+
+
+def _extract_meeting_from_email(subject: str, body: str, sender_name: str,
+                                 sender_email: str, received_date: str):
+    """MEETINGS-DETECT-2: One Haiku call to extract meeting details from email.
+    Returns dict with meeting data or None."""
+    import anthropic
+    import json
+    try:
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        today = datetime.now().strftime('%Y-%m-%d')
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            messages=[{"role": "user", "content": f"""Extract meeting details from this email. If this is NOT about a specific scheduled meeting, return {{"is_meeting": false}}.
+
+From: {sender_name} <{sender_email}>
+Date: {received_date}
+Subject: {subject}
+
+Body:
+{body[:2000]}
+
+Today's date is {today}.
+
+Return JSON only (no markdown):
+{{
+  "is_meeting": true,
+  "title": "short meeting title",
+  "participants": ["Name1", "Name2"],
+  "date": "YYYY-MM-DD or null if no specific date mentioned",
+  "time": "HH:MM or descriptive like 'afternoon' or null",
+  "location": "place or 'Zoom/Teams' or null",
+  "status": "confirmed or proposed"
+}}
+
+Status: "confirmed" if definite language. "proposed" if asking/suggesting."""}],
+        )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="meeting_email_detect")
+        except Exception:
+            pass
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
+        return json.loads(raw)
+    except Exception as e:
+        logger.debug(f"MEETINGS-DETECT-2: Haiku extraction failed: {e}")
+        return None
+
 
 def _get_gmail_service():
     """Authenticate and return Gmail API service object."""
@@ -476,6 +546,41 @@ def _process_email_threads(new_threads: list):
             )
         except Exception as _e:
             logger.debug(f"Deadline extraction failed for email {message_id}: {_e}")
+
+        # MEETINGS-DETECT-2: Check for meeting content in email
+        try:
+            _email_subject = metadata.get("subject", "")
+            _email_body = thread["text"]
+            if _is_meeting_email(_email_subject, _email_body):
+                _meeting_data = _extract_meeting_from_email(
+                    _email_subject, _email_body,
+                    metadata.get("primary_sender", ""),
+                    metadata.get("primary_sender_email", ""),
+                    metadata.get("received_date", ""),
+                )
+                if _meeting_data and _meeting_data.get("is_meeting") and _meeting_data.get("date"):
+                    from memory.store_back import SentinelStoreBack
+                    _mstore = SentinelStoreBack._get_global_instance()
+                    _parsed_date = None
+                    try:
+                        _parsed_date = datetime.strptime(_meeting_data["date"], "%Y-%m-%d").date()
+                    except (ValueError, TypeError):
+                        pass
+                    if _parsed_date:
+                        _mstore.insert_detected_meeting(
+                            title=_meeting_data.get("title", _email_subject),
+                            participant_names=_meeting_data.get("participants", []),
+                            meeting_date=_parsed_date,
+                            meeting_time=_meeting_data.get("time"),
+                            location=_meeting_data.get("location"),
+                            status=_meeting_data.get("status", "proposed"),
+                            source="email",
+                            source_ref=f"email:{thread_id}",
+                            raw_text=f"From: {metadata.get('primary_sender', '')}\nSubject: {_email_subject}\n{_email_body[:500]}",
+                        )
+                        logger.info(f"MEETINGS-DETECT-2: detected meeting from email: {_meeting_data.get('title', '')[:60]}")
+        except Exception as _e:
+            logger.warning(f"MEETINGS-DETECT-2: email meeting detection failed (non-fatal): {_e}")
 
         if trigger.priority in ("high", "medium"):
             try:

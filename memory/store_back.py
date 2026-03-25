@@ -4361,6 +4361,13 @@ class SentinelStoreBack:
             return None
         try:
             cur = conn.cursor()
+            # MEETINGS-DETECT-2: Source ref dedup — don't process same email twice
+            if source_ref:
+                cur.execute("SELECT id FROM detected_meetings WHERE source_ref = %s LIMIT 1", (source_ref,))
+                if cur.fetchone():
+                    cur.close()
+                    logger.info(f"Meeting dedup: source_ref {source_ref} already exists — skipping")
+                    return None
             # Dedup: check for existing meeting with same date + similar title
             if meeting_date and title:
                 cur.execute("""
