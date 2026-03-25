@@ -1019,65 +1019,31 @@ def handle_email_action(intent: dict, retriever, project=None, role=None,
     # Note: send_composed_email() adds its own footer — don't double-add here
     full_body = body
 
-    # Separate internal vs external recipients
-    internal = [r for r in recipients if r.split("@")[-1].lower() == INTERNAL_DOMAIN]
-    external = [r for r in recipients if r.split("@")[-1].lower() != INTERNAL_DOMAIN]
-
+    # SAFETY: ALL emails require Director approval — no auto-send (Director order 2026-03-25)
+    # Internal and external both go through draft flow
+    all_recipients = recipients
     results = []
 
-    _log_action("handle_email_action:routing", f"internal={internal}, external={external}")
+    _log_action("handle_email_action:routing", f"all_draft={all_recipients}")
 
-    # Auto-send to all internal recipients
-    for recipient in internal:
-        _log_action("handle_email_action:SENDING_INTERNAL", f"to={recipient}")
-        try:
-            from outputs.email_alerts import send_composed_email
-            result = send_composed_email(recipient, subject, full_body)
-            _log_action("handle_email_action:send_result", f"to={recipient}, result={result}")
-            if result:
-                message_id = result.get("message_id")
-                thread_id = result.get("thread_id")
-                _log_sent_email(recipient, subject, full_body, message_id, thread_id, channel)
-                results.append(f"\u2705 Sent to {recipient}")
-                logger.info(f"Action: internal email sent to {recipient} via {channel} (id={message_id})")
-            else:
-                results.append(f"\u274c Failed: {recipient} (send returned None)")
-                _log_action("handle_email_action:send_returned_none", f"to={recipient}")
-        except Exception as e:
-            logger.error(f"Internal email send failed for {recipient}: {e}")
-            _log_action("handle_email_action:send_exception", f"to={recipient}, error={e}")
-            results.append(f"\u274c Failed: {recipient}: {e}")
+    # Draft for ALL recipients — Director must confirm before any email sends
+    if all_recipients:
+        _log_action("handle_email_action:DRAFTING_ALL", f"recipients={all_recipients}")
+        first_recipient = all_recipients[0]
+        all_recipients_str = ", ".join(all_recipients)
+        _save_draft(first_recipient, subject, full_body, content_request, channel=channel)
+        logger.info(f"Action: draft saved for {first_recipient} via {channel} (all emails require approval)")
 
-    # Draft for external recipients (first one gets the draft, rest queued)
-    if external:
-        _log_action("handle_email_action:DRAFTING_EXTERNAL", f"recipients={external}")
-        first_external = external[0]
-        all_external = ", ".join(external)
-        _save_draft(first_external, subject, full_body, content_request, channel=channel)
-        logger.info(f"Action: external draft saved for {first_external} via {channel}")
-
-        if len(external) > 1:
-            # Store additional recipients in content_req for confirmation handler
-            _save_draft(all_external, subject, full_body, content_request, channel=channel)
+        if len(all_recipients) > 1:
+            _save_draft(all_recipients_str, subject, full_body, content_request, channel=channel)
 
         results.append(
-            f'\U0001f4e7 Draft ready for {all_external} \u2014 reply "send" to confirm, '
+            f'\U0001f4e7 Draft ready for {all_recipients_str} \u2014 reply "send" to confirm, '
             f'or "edit: [changes]" to modify.'
         )
 
-    # Build final response
-    if not external:
-        # All internal — already sent
-        _delete_draft()
-        preview = full_body[:200].replace("\n", " ")
-        return "\n".join(results) + f"\nSubject: {subject}\n\n{preview}\u2026"
-    elif not internal:
-        # All external — show draft
-        return "\n".join(results) + f"\n\nTo: {', '.join(external)}\nSubject: {subject}\n\n---\n\n{full_body}"
-    else:
-        # Mixed — internal sent, external drafted
-        preview = full_body[:200].replace("\n", " ")
-        return "\n".join(results) + f"\n\nSubject: {subject}\n\n---\n\n{full_body}"
+    # Build final response — always show draft for approval
+    return "\n".join(results) + f"\n\nTo: {all_recipients_str}\nSubject: {subject}\n\n---\n\n{full_body}"
 
 
 def _parse_recipients(raw: str) -> list:
