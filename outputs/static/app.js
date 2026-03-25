@@ -836,12 +836,24 @@ async function loadMorningBrief() {
                         else if (_tdDiff > 1) dueLabel = 'In ' + _tdDiff + ' days';
                     }
                 }
+                // EXPANDABLE-CARDS-1: Expandable travel deadline with flight details
+                var snippet = td.source_snippet || '';
+                var flightInfo = parseFlightInfo(snippet);
+                var hasDetail = flightInfo !== '';
+                var tdClickAttr = hasDetail
+                    ? ' onclick="var n=this.querySelector(\'.fire-detail\');n.style.display=n.style.display===\'none\'?\'block\':\'none\'" style="cursor:pointer;"'
+                    : '';
+                var tdChevron = hasDetail ? ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span>' : '';
+                var tdDetailHtml = hasDetail
+                    ? '<div class="fire-detail" style="display:none;font-size:12px;color:var(--text2);padding:8px 18px 10px;border-top:1px solid var(--border-light);line-height:1.6;white-space:pre-wrap;">' +
+                      esc(flightInfo) + '</div>'
+                    : '';
                 allTravel.push(
-                    '<div class="card card-compact"><div class="card-header">' +
+                    '<div class="card card-compact"' + tdClickAttr + '><div class="card-header">' +
                     '<span class="nav-dot amber" style="margin-top:5px;"></span>' +
-                    '<span class="card-title">' + esc(td.description) + '</span>' +
+                    '<span class="card-title">' + esc(td.description) + tdChevron + '</span>' +
                     '<span class="card-time" style="font-weight:600;">' + esc(dueLabel) + '</span>' +
-                    '</div></div>'
+                    '</div>' + tdDetailHtml + '</div>'
                 );
             }
 
@@ -1814,6 +1826,55 @@ function renderTravelCard(t) {
         '</div>';
 }
 
+// EXPANDABLE-CARDS-1: Parse flight details from deadline source_snippet
+function parseFlightInfo(snippet) {
+    if (!snippet) return '';
+    var lines = [];
+
+    // Flight number (OS 155, LX 1234, etc.)
+    var flightMatch = snippet.match(/\b([A-Z]{2}\s?\d{2,4})\b/);
+    if (flightMatch) lines.push('Flight: ' + flightMatch[1]);
+
+    // Departure: time + airport/city
+    var depMatch = snippet.match(/(\d{2}:\d{2})\s+([\w\s,()]+?)\s+(?:Terminal|T\d)/i);
+    if (depMatch) lines.push('Departure: ' + depMatch[1] + ' ' + depMatch[2].trim());
+
+    // Arrival: second time pattern
+    var allTimes = snippet.match(/\d{2}:\d{2}/g);
+    if (allTimes && allTimes.length >= 2) {
+        lines.push('Arrival: ' + allTimes[allTimes.length > 2 ? 2 : 1]);
+    }
+
+    // Terminal info
+    var terminals = snippet.match(/(?:Terminal\s*:?\s*|T)(\d\w?)/gi);
+    if (terminals && terminals.length >= 2) {
+        lines.push('Terminals: ' + terminals.join(' → ').replace(/Terminal\s*:?\s*/gi, 'T'));
+    }
+
+    // Class
+    var classMatch = snippet.match(/Class\s*:?\s*(\w+(?:\s*\(\w\))?)/i);
+    if (classMatch) lines.push('Class: ' + classMatch[1]);
+
+    // Seat
+    var seatMatch = snippet.match(/Seat\s*:?\s*(\w+)/i);
+    if (seatMatch) lines.push('Seat: ' + seatMatch[1]);
+
+    // Booking ref
+    var refMatch = snippet.match(/(?:Booking\s*ref|reference|Booking)\s*:?\s*(\w{5,})/i);
+    if (refMatch) lines.push('Booking: ' + refMatch[1]);
+
+    // Duration
+    var durMatch = snippet.match(/(\d+h\s*\d+m)/);
+    if (durMatch) lines.push('Duration: ' + durMatch[1]);
+
+    // Fallback: show raw snippet if parsing failed
+    if (lines.length === 0 && snippet.length > 20) {
+        return snippet.substring(0, 200).replace(/\s+/g, ' ').trim();
+    }
+
+    return lines.join('\n');
+}
+
 function renderMeetingCard(m) {
     var startTime = '';
     try {
@@ -1824,11 +1885,19 @@ function renderMeetingCard(m) {
     if ((m.attendees || []).length > 3) attendeeStr += ' +' + ((m.attendees || []).length - 3);
     var dotClass = m.prepped ? 'green' : 'amber';
     var statusText = m.prepped ? 'Prepped' : 'Pending';
-    var hasNotes = m.prep_notes && m.prep_notes.trim().length > 0;
-    var clickAttr = hasNotes ? ' onclick="var n=this.querySelector(\'.prep-notes\');n.style.display=n.style.display===\'none\'?\'block\':\'none\'" style="cursor:pointer;"' : '';
-    var chevron = hasNotes ? ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span>' : '';
-    var notesHtml = hasNotes
-        ? '<div class="prep-notes" style="display:none;font-size:12px;color:var(--text2);padding:8px 18px 12px 18px;line-height:1.5;white-space:pre-wrap;border-top:1px solid var(--border-light);margin-top:4px;">' + esc(m.prep_notes).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') + '</div>'
+
+    // EXPANDABLE-CARDS-1: Build expandable detail from all available meeting info
+    var detailLines = [];
+    if (m.location && m.location.trim()) detailLines.push('Location: ' + m.location.trim());
+    if ((m.attendees || []).length > 0) detailLines.push('Attendees: ' + (m.attendees || []).join(', '));
+    if (m.prep_notes && m.prep_notes.trim()) detailLines.push('\n' + m.prep_notes.trim());
+    var detailContent = detailLines.join('\n');
+    var hasDetail = detailContent.length > 0;
+
+    var clickAttr = hasDetail ? ' onclick="var n=this.querySelector(\'.prep-notes\');n.style.display=n.style.display===\'none\'?\'block\':\'none\'" style="cursor:pointer;"' : '';
+    var chevron = hasDetail ? ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span>' : '';
+    var notesHtml = hasDetail
+        ? '<div class="prep-notes" style="display:none;font-size:12px;color:var(--text2);padding:8px 18px 12px 18px;line-height:1.5;white-space:pre-wrap;border-top:1px solid var(--border-light);margin-top:4px;">' + esc(detailContent).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') + '</div>'
         : '';
     return '<div class="card card-compact"' + clickAttr + '><div class="card-header">' +
         '<span class="nav-dot ' + dotClass + '" style="margin-top:5px;"></span>' +

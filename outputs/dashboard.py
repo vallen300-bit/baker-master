@@ -1931,7 +1931,7 @@ async def get_morning_brief():
         try:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cur.execute("""
-                SELECT id, description, due_date, priority
+                SELECT id, description, due_date, priority, source_snippet
                 FROM deadlines
                 WHERE status = 'active'
                   AND due_date BETWEEN NOW() AND NOW() + INTERVAL '3 days'
