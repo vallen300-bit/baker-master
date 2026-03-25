@@ -1944,6 +1944,13 @@ async def get_morning_brief():
         except Exception as e:
             logger.warning(f"Morning brief: travel deadlines query failed: {e}")
 
+        # MEETINGS-DETECT-1: Detected meetings from Director messages
+        detected_meetings = []
+        try:
+            detected_meetings = [_serialize(m) for m in store.get_detected_meetings(days_ahead=3)]
+        except Exception as e:
+            logger.warning(f"Morning brief: detected meetings query failed: {e}")
+
         # Weekly priorities for dashboard widget
         weekly_priorities = []
         try:
@@ -1969,7 +1976,8 @@ async def get_morning_brief():
             "deadlines": deadlines,
             "activity": activity,
             "meetings_today": meetings_today,
-            "meeting_count": len(meetings_today),
+            "detected_meetings": detected_meetings,
+            "meeting_count": len(meetings_today) + len(detected_meetings),
             "travel_today": travel_today,
             "overdue_commitments": overdue_commitments,
             "silent_contacts": silent_contacts,
@@ -1990,7 +1998,7 @@ async def get_morning_brief():
             "actions_completed": 0, "narrative": "Baker is loading...",
             "proposals": [],
             "top_fires": [], "deadlines": [], "activity": [],
-            "meetings_today": [], "meeting_count": 0,
+            "meetings_today": [], "detected_meetings": [], "meeting_count": 0,
             "travel_today": [],
             "overdue_commitments": [], "silent_contacts": [],
             "travel_alerts": [], "travel_deadlines": [], "trips": [],
@@ -5692,6 +5700,12 @@ async def scan_chat(req: ScanRequest):
         elif intent.get("type") in ("vip_action", "contact_action"):
             return _action_stream_response(
                 _ah.handle_vip_action(intent),
+                req.question,
+            )
+        elif intent.get("type") == "meeting_declaration":
+            logger.info("SCAN_DEBUG: routing to handle_meeting_declaration")
+            return _action_stream_response(
+                _ah.handle_meeting_declaration(req.question, channel="ask_baker"),
                 req.question,
             )
         elif intent.get("type") == "fireflies_fetch":

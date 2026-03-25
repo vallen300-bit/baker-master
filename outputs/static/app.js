@@ -860,6 +860,13 @@ async function loadMorningBrief() {
             var meetingItems = (data.meetings_today || []).filter(function(m) {
                 return !(m.title || '').startsWith('[Baker Prep]');
             }).map(renderMeetingCard);
+
+            // MEETINGS-DETECT-1: Add detected meetings from Director messages
+            var detectedMeetings = data.detected_meetings || [];
+            for (var dmi = 0; dmi < detectedMeetings.length; dmi++) {
+                meetingItems.push(renderDetectedMeetingCard(detectedMeetings[dmi]));
+            }
+
             if (meetingItems.length > 0) {
                 setSafeHTML(gridMeetings, meetingItems.join(''));
             } else {
@@ -1803,6 +1810,57 @@ function renderMeetingCard(m) {
         '</div>' +
         notesHtml +
         '</div>';
+}
+
+// MEETINGS-DETECT-1: Render detected meetings from Director messages
+function renderDetectedMeetingCard(dm) {
+    var status = dm.status || 'pending';
+    var dotClass = status === 'confirmed' ? 'green' : status === 'proposed' ? 'amber' : 'lgray';
+    var statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
+    var timeStr = dm.meeting_time || '';
+    var dateStr = '';
+    if (dm.meeting_date) {
+        var _today = new Date().toISOString().slice(0, 10);
+        var _mDate = (dm.meeting_date || '').slice(0, 10);
+        if (_mDate === _today) dateStr = 'Today';
+        else {
+            var _diff = Math.round((new Date(_mDate) - new Date(_today)) / 86400000);
+            if (_diff === 1) dateStr = 'Tomorrow';
+            else if (_diff > 1 && _diff <= 7) dateStr = 'In ' + _diff + ' days';
+            else dateStr = _mDate;
+        }
+    }
+    var timeDisplay = (timeStr ? timeStr : '') + (dateStr ? (timeStr ? ' · ' : '') + dateStr : '');
+    var participants = dm.participant_names || [];
+    var participantStr = participants.join(', ');
+    var location = dm.location || '';
+
+    // Build expandable detail
+    var detailLines = [];
+    if (participants.length > 0) detailLines.push('With: ' + participantStr);
+    if (location) detailLines.push('Location: ' + location);
+    if (dm.raw_text) detailLines.push('\nSource: ' + (dm.raw_text || '').substring(0, 150));
+    var detailContent = detailLines.join('\n');
+    var hasDetail = detailContent.length > 0;
+
+    var clickAttr = hasDetail
+        ? ' onclick="var n=this.querySelector(\'.fire-detail\');n.style.display=n.style.display===\'none\'?\'block\':\'none\'" style="cursor:pointer;"'
+        : '';
+    var chevron = hasDetail ? ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span>' : '';
+    var detailHtml = hasDetail
+        ? '<div class="fire-detail" style="display:none;font-size:12px;color:var(--text2);padding:6px 18px 10px;line-height:1.5;border-top:1px solid var(--border-light);white-space:pre-wrap;">' +
+          esc(detailContent) + '</div>'
+        : '';
+
+    return '<div class="card card-compact"' + clickAttr + '><div class="card-header">' +
+        '<span class="nav-dot ' + dotClass + '" style="margin-top:5px;"></span>' +
+        '<span class="card-title">' + esc(dm.title || '') + chevron + '</span>' +
+        '<span class="card-time">' + esc(timeDisplay) + '</span>' +
+        '</div>' +
+        '<div class="card-body" style="font-size:11px;color:var(--text3);padding:2px 0 4px 18px;">' +
+        (participantStr ? esc(participantStr) + ' &middot; ' : '') +
+        '<span style="color:var(--' + dotClass.replace('lgray', 'text3') + ');">' + esc(statusLabel) + '</span>' +
+        '</div>' + detailHtml + '</div>';
 }
 
 function renderDeadlineCompact(dl) {

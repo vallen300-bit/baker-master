@@ -233,7 +233,7 @@ _INTENT_SYSTEM = """You are Baker's intent classifier. Given a Director's messag
 
 Return exactly this JSON structure (no other text, no markdown):
 {
-  "type": "email_action" | "whatsapp_action" | "deadline_action" | "contact_action" | "fireflies_fetch" | "clickup_action" | "clickup_fetch" | "clickup_plan" | "question",
+  "type": "email_action" | "whatsapp_action" | "deadline_action" | "contact_action" | "fireflies_fetch" | "clickup_action" | "clickup_fetch" | "clickup_plan" | "meeting_declaration" | "question",
   "recipient": "<email address OR name of recipient(s). For multiple recipients, return comma-separated (e.g. 'Edita Vallen, Philip Vallen, dvallen@brisengroup.com'). 'myself' or 'me' means dvallen@brisengroup.com. Return null only if no recipient at all.>",
   "subject": "<inferred subject line or null>",
   "content_request": "<what Baker should include in the email body, or null>",
@@ -316,6 +316,16 @@ ClickUp plan patterns (classify as clickup_plan):
 - "Plan a project for [description]" → clickup_project_name: "[description]"
 - "Break [project] into stages" → clickup_project_name: "[project]"
 - "Create a project plan for migrating email" → clickup_project_name: "email migration"
+
+Meeting declaration patterns (classify as meeting_declaration — Director is TELLING Baker about a meeting, NOT asking about meetings):
+- "I have a meeting with [name] tomorrow at 10am" → type: "meeting_declaration"
+- "Set up a call with [name] Wednesday afternoon" → type: "meeting_declaration"
+- "Meeting with Rolf at the Mandarin, March 27 at 2pm" → type: "meeting_declaration"
+- "Confirmed lunch with [name] on Friday" → type: "meeting_declaration"
+- "Let's meet [name] at 3pm tomorrow" → type: "meeting_declaration"
+- "I've got a call with [name] at 14:00" → type: "meeting_declaration"
+- "Arrange a meeting with [name] next week" → type: "meeting_declaration"
+Do NOT classify questions about existing meetings as meeting_declaration. "What meetings do I have?" is type: "question".
 
 If the message is a question, information request, or anything else → type: "question".
 Only return the JSON object."""
@@ -1185,6 +1195,105 @@ def handle_vip_action(intent: dict) -> str:
     except Exception as e:
         logger.error(f"VIP action failed: {e}")
         return f"Failed to process VIP action: {e}"
+
+
+# ---------------------------------------------------------------------------
+# MEETINGS-DETECT-1: Meeting declaration handler
+# ---------------------------------------------------------------------------
+
+def handle_meeting_declaration(question: str, channel: str = "ask_baker") -> str:
+    """
+    MEETINGS-DETECT-1: Director declared a meeting. Extract details via Haiku and store.
+    Returns confirmation text.
+    """
+    _log_action("handle_meeting_declaration:ENTERED", f"q={question[:200]}, channel={channel}")
+    try:
+        from datetime import date
+        claude = anthropic.Anthropic(api_key=config.claude.api_key)
+        today = date.today().isoformat()
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=300,
+            system="You extract meeting details from messages. Return ONLY valid JSON, no markdown.",
+            messages=[{"role": "user", "content": f"""Extract meeting details from this message:
+"{question}"
+
+Today's date is {today}.
+
+Return JSON:
+{{
+  "title": "short meeting title",
+  "participants": ["Name1", "Name2"],
+  "date": "YYYY-MM-DD or null",
+  "time": "HH:MM or descriptive like 'afternoon' or null",
+  "location": "place or 'Zoom/Teams' or null",
+  "status": "confirmed" | "proposed" | "pending"
+}}
+
+Status rules:
+- "confirmed": message says "confirmed", "set", "booked", "see you at", or is clearly definite
+- "proposed": message says "let's try", "how about", "would X work"
+- "pending": needs to be arranged"""}],
+        )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="meeting_detect")
+        except Exception:
+            pass
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
+        data = json.loads(raw)
+
+        title = data.get("title") or "Meeting"
+        participants = data.get("participants") or []
+        meeting_date = data.get("date")
+        meeting_time = data.get("time")
+        location = data.get("location")
+        status = data.get("status") or "pending"
+
+        # Parse date
+        parsed_date = None
+        if meeting_date:
+            try:
+                from datetime import datetime as _dt
+                parsed_date = _dt.strptime(meeting_date, "%Y-%m-%d").date()
+            except (ValueError, TypeError):
+                pass
+
+        # Store
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        mid = store.insert_detected_meeting(
+            title=title,
+            participant_names=participants,
+            meeting_date=parsed_date,
+            meeting_time=meeting_time,
+            location=location,
+            status=status,
+            source=channel,
+            raw_text=question[:500],
+        )
+
+        # Build confirmation
+        parts = [f"Got it. Meeting recorded: **{title}**"]
+        if participants:
+            parts.append(f"With: {', '.join(participants)}")
+        if meeting_date:
+            parts.append(f"Date: {meeting_date}")
+        if meeting_time:
+            parts.append(f"Time: {meeting_time}")
+        if location:
+            parts.append(f"Location: {location}")
+        parts.append(f"Status: {status}")
+        result = "\n".join(parts)
+        _log_action("handle_meeting_declaration:SUCCESS", f"id={mid}, title={title}")
+        return result
+
+    except Exception as e:
+        logger.error(f"handle_meeting_declaration failed: {e}")
+        return f"I understood you're telling me about a meeting, but I couldn't extract the details. Error: {e}"
 
 
 # ---------------------------------------------------------------------------

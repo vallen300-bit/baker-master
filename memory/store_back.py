@@ -152,6 +152,9 @@ class SentinelStoreBack:
         self._ensure_trip_contacts_table()
         self._seed_location_preferences()
 
+        # MEETINGS-DETECT-1: Detected meetings from Director messages
+        self._ensure_detected_meetings_table()
+
         # WEALTH-MANAGER: Wealth tracking tables
         self._ensure_wealth_tables()
 
@@ -4312,6 +4315,119 @@ class SentinelStoreBack:
             self._put_conn(conn)
 
     # -------------------------------------------------------
+    # MEETINGS-DETECT-1: Detected meetings from Director messages
+    # -------------------------------------------------------
+
+    def _ensure_detected_meetings_table(self):
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS detected_meetings (
+                    id SERIAL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    participant_names TEXT[],
+                    meeting_date DATE,
+                    meeting_time TEXT,
+                    location TEXT,
+                    status TEXT DEFAULT 'pending',
+                    source TEXT NOT NULL,
+                    source_ref TEXT,
+                    raw_text TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW(),
+                    dismissed BOOLEAN DEFAULT FALSE
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_detected_meetings_date ON detected_meetings(meeting_date)")
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"_ensure_detected_meetings_table failed: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def insert_detected_meeting(self, title: str, participant_names: list = None,
+                                meeting_date=None, meeting_time: str = None,
+                                location: str = None, status: str = "pending",
+                                source: str = "ask_baker", source_ref: str = None,
+                                raw_text: str = None) -> int:
+        """MEETINGS-DETECT-1: Store a detected meeting. Returns meeting ID."""
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor()
+            # Dedup: check for existing meeting with same date + similar title
+            if meeting_date and title:
+                cur.execute("""
+                    SELECT id FROM detected_meetings
+                    WHERE meeting_date = %s AND dismissed = FALSE
+                      AND LOWER(title) = LOWER(%s)
+                    LIMIT 1
+                """, (meeting_date, title))
+                existing = cur.fetchone()
+                if existing:
+                    # Update existing instead of creating duplicate
+                    cur.execute("""
+                        UPDATE detected_meetings
+                        SET meeting_time = COALESCE(%s, meeting_time),
+                            location = COALESCE(%s, location),
+                            status = %s, updated_at = NOW()
+                        WHERE id = %s
+                    """, (meeting_time, location, status, existing[0]))
+                    conn.commit()
+                    cur.close()
+                    logger.info(f"MEETINGS-DETECT-1: updated existing detected meeting #{existing[0]}")
+                    return existing[0]
+            cur.execute("""
+                INSERT INTO detected_meetings
+                    (title, participant_names, meeting_date, meeting_time, location,
+                     status, source, source_ref, raw_text)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (title, participant_names, meeting_date, meeting_time, location,
+                  status, source, source_ref, raw_text))
+            row = cur.fetchone()
+            conn.commit()
+            cur.close()
+            mid = row[0] if row else None
+            logger.info(f"MEETINGS-DETECT-1: created detected meeting #{mid}: {title}")
+            return mid
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"insert_detected_meeting failed: {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
+    def get_detected_meetings(self, days_ahead: int = 3) -> list:
+        """MEETINGS-DETECT-1: Get upcoming detected meetings."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            import psycopg2.extras
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT * FROM detected_meetings
+                WHERE dismissed = FALSE
+                  AND meeting_date BETWEEN CURRENT_DATE AND CURRENT_DATE + make_interval(days => %s)
+                ORDER BY meeting_date ASC, meeting_time ASC NULLS LAST
+                LIMIT 10
+            """, (days_ahead,))
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            return rows
+        except Exception as e:
+            logger.error(f"get_detected_meetings failed: {e}")
+            return []
+        finally:
+            self._put_conn(conn)
+
     # WEALTH-MANAGER: Wealth tracking tables
     # -------------------------------------------------------
 
