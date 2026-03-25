@@ -233,7 +233,7 @@ _INTENT_SYSTEM = """You are Baker's intent classifier. Given a Director's messag
 
 Return exactly this JSON structure (no other text, no markdown):
 {
-  "type": "email_action" | "whatsapp_action" | "deadline_action" | "contact_action" | "fireflies_fetch" | "clickup_action" | "clickup_fetch" | "clickup_plan" | "meeting_declaration" | "question",
+  "type": "email_action" | "whatsapp_action" | "deadline_action" | "contact_action" | "fireflies_fetch" | "clickup_action" | "clickup_fetch" | "clickup_plan" | "meeting_declaration" | "critical_declaration" | "question",
   "recipient": "<email address OR name of recipient(s). For multiple recipients, return comma-separated (e.g. 'Edita Vallen, Philip Vallen, dvallen@brisengroup.com'). 'myself' or 'me' means dvallen@brisengroup.com. Return null only if no recipient at all.>",
   "subject": "<inferred subject line or null>",
   "content_request": "<what Baker should include in the email body, or null>",
@@ -326,6 +326,16 @@ Meeting declaration patterns (classify as meeting_declaration — Director is TE
 - "I've got a call with [name] at 14:00" → type: "meeting_declaration"
 - "Arrange a meeting with [name] next week" → type: "meeting_declaration"
 Do NOT classify questions about existing meetings as meeting_declaration. "What meetings do I have?" is type: "question".
+
+Critical item patterns (classify as critical_declaration — Director is marking something as urgent/must-do-today):
+- "This is critical: call Rolf today" → type: "critical_declaration"
+- "Priority 1: sign the Bellboy decision" → type: "critical_declaration"
+- "Don't forget: send the data room request to MRG" → type: "critical_declaration"
+- "Mark as critical: Minor Hotels meeting confirmation" → type: "critical_declaration"
+- "Most important today: review Alric's torpedo draft" → type: "critical_declaration"
+- "Top priority: finalize term sheet" → type: "critical_declaration"
+- "Urgent: call Philip about tax" → type: "critical_declaration"
+Do NOT classify general urgency in questions as critical_declaration. "What's the most urgent thing?" is type: "question".
 
 If the message is a question, information request, or anything else → type: "question".
 Only return the JSON object."""
@@ -1294,6 +1304,91 @@ Status rules:
     except Exception as e:
         logger.error(f"handle_meeting_declaration failed: {e}")
         return f"I understood you're telling me about a meeting, but I couldn't extract the details. Error: {e}"
+
+
+# ---------------------------------------------------------------------------
+# CRITICAL-CARD-1: Critical item declaration handler
+# ---------------------------------------------------------------------------
+
+def handle_critical_declaration(question: str, channel: str = "ask_baker") -> str:
+    """CRITICAL-CARD-1: Director flagged something as critical/must-do-today."""
+    _log_action("handle_critical_declaration:ENTERED", f"q={question[:200]}, channel={channel}")
+    try:
+        from datetime import date
+        from models.deadlines import get_critical_count, insert_deadline, get_critical_items
+
+        # Max 5 rule
+        current_count = get_critical_count()
+        if current_count >= 5:
+            items = get_critical_items(5)
+            listing = "\n".join(f"  {i+1}. {it['description'][:80]}" for i, it in enumerate(items))
+            return f"You already have 5 critical items. Which one should I remove?\n\n{listing}\n\nSay \"remove #N\" to clear one first."
+
+        # Haiku extraction
+        claude = anthropic.Anthropic(api_key=config.claude.api_key)
+        today = date.today().isoformat()
+        resp = claude.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=200,
+            system="Extract the critical task. Return ONLY valid JSON, no markdown.",
+            messages=[{"role": "user", "content": f"""Extract the critical item from this message:
+"{question}"
+
+Today's date is {today}.
+
+Return JSON:
+{{
+  "description": "what needs to be done",
+  "context": "why it is critical (1 line) or null",
+  "due_hint": "today / by 3pm / ASAP / null"
+}}"""}],
+        )
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="critical_detect")
+        except Exception:
+            pass
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
+        data = json.loads(raw)
+
+        description = data.get("description") or question[:200]
+        context = data.get("context") or ""
+        due_hint = data.get("due_hint") or "today"
+
+        from datetime import datetime as _dt, timedelta
+        due_date = _dt.now()
+        if "tomorrow" in (due_hint or "").lower():
+            due_date = _dt.now() + timedelta(days=1)
+
+        # Create deadline with is_critical flag
+        did = insert_deadline(
+            description=description,
+            due_date=due_date,
+            source_type=channel,
+            source_id=f"critical-{channel}:{_dt.now().strftime('%Y%m%d%H%M%S')}",
+            confidence="high",
+            priority="critical",
+            source_snippet=context or question[:300],
+        )
+
+        # Set critical flag
+        if did:
+            from models.deadlines import set_critical
+            set_critical(did, True)
+
+        result = f"Critical item added: **{description}**"
+        if context:
+            result += f"\nContext: {context}"
+        result += f"\nDue: {due_hint}"
+        _log_action("handle_critical_declaration:SUCCESS", f"id={did}, desc={description[:60]}")
+        return result
+
+    except Exception as e:
+        logger.error(f"handle_critical_declaration failed: {e}")
+        return f"I understood this is critical, but couldn't process it. Error: {e}"
 
 
 # ---------------------------------------------------------------------------

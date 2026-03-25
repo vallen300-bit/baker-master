@@ -704,6 +704,12 @@ def _handle_director_message(message_body: str, msg_id: str, sender_name: str) -
         logger.info(f"WhatsApp action: meeting declaration processed")
         return True
 
+    elif intent_type == "critical_declaration":
+        result = ah.handle_critical_declaration(message_body, channel="whatsapp")
+        _wa_reply(result)
+        logger.info(f"WhatsApp action: critical declaration processed")
+        return True
+
     elif intent_type == "fireflies_fetch":
         result = ah.handle_fireflies_fetch(
             message_body, _get_retriever(), channel="whatsapp",

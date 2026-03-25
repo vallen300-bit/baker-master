@@ -1951,6 +1951,14 @@ async def get_morning_brief():
         except Exception as e:
             logger.warning(f"Morning brief: detected meetings query failed: {e}")
 
+        # CRITICAL-CARD-1: Director's critical/must-do-today items
+        critical_items = []
+        try:
+            from models.deadlines import get_critical_items
+            critical_items = [_serialize(ci) for ci in get_critical_items(5)]
+        except Exception as e:
+            logger.warning(f"Morning brief: critical items query failed: {e}")
+
         # Weekly priorities for dashboard widget
         weekly_priorities = []
         try:
@@ -1973,6 +1981,7 @@ async def get_morning_brief():
             "narrative": narrative,
             "proposals": proposals,
             "top_fires": top_fires,
+            "critical_items": critical_items,
             "deadlines": deadlines,
             "activity": activity,
             "meetings_today": meetings_today,
@@ -4784,6 +4793,88 @@ async def complete_deadline_api(deadline_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/critical/{deadline_id}/done", tags=["critical"], dependencies=[Depends(verify_api_key)])
+async def complete_critical_api(deadline_id: int):
+    """CRITICAL-CARD-1: Mark critical item as done."""
+    try:
+        from models.deadlines import complete_critical
+        complete_critical(deadline_id)
+        return {"status": "completed", "id": deadline_id}
+    except Exception as e:
+        logger.error(f"/api/critical/{deadline_id}/done failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/critical/{alert_id}/promote", tags=["critical"], dependencies=[Depends(verify_api_key)])
+async def promote_to_critical_api(alert_id: int):
+    """CRITICAL-CARD-1: Promote an alert to critical (creates/flags deadline)."""
+    try:
+        from models.deadlines import insert_deadline, set_critical, get_critical_count
+        if get_critical_count() >= 5:
+            return {"error": "Max 5 critical items. Complete one first."}
+        # Get alert details
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT title, body FROM alerts WHERE id = %s", (alert_id,))
+            alert = cur.fetchone()
+            cur.close()
+        finally:
+            store._put_conn(conn)
+        if not alert:
+            raise HTTPException(status_code=404, detail="Alert not found")
+        from datetime import datetime
+        did = insert_deadline(
+            description=alert['title'],
+            due_date=datetime.now(),
+            source_type="critical_promote",
+            source_id=f"critical-promote:{alert_id}",
+            confidence="high",
+            priority="critical",
+            source_snippet=(alert.get('body') or '')[:300],
+        )
+        if did:
+            set_critical(did, True)
+        return {"status": "promoted", "deadline_id": did, "alert_id": alert_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"/api/critical/{alert_id}/promote failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/critical/add", tags=["critical"], dependencies=[Depends(verify_api_key)])
+async def add_critical_quick(request: Request):
+    """CRITICAL-CARD-1: Quick-add critical item from dashboard."""
+    try:
+        body = await request.json()
+        description = body.get("description", "").strip()
+        if not description:
+            return {"error": "Description required"}
+        from models.deadlines import insert_deadline, set_critical, get_critical_count
+        if get_critical_count() >= 5:
+            return {"error": "Max 5 critical items. Complete one first."}
+        from datetime import datetime
+        did = insert_deadline(
+            description=description,
+            due_date=datetime.now(),
+            source_type="dashboard",
+            source_id=f"critical-quick:{datetime.now().strftime('%Y%m%d%H%M%S')}",
+            confidence="high",
+            priority="critical",
+        )
+        if did:
+            set_critical(did, True)
+        return {"status": "added", "id": did}
+    except Exception as e:
+        logger.error(f"POST /api/critical/add failed: {e}")
+        return {"error": str(e)}
+
+
 @app.post("/api/deadlines/{deadline_id}/reschedule", tags=["deadlines"], dependencies=[Depends(verify_api_key)])
 async def reschedule_deadline_api(deadline_id: int, body: dict = None):
     """Reschedule a deadline to a new due_date."""
@@ -5748,6 +5839,12 @@ async def scan_chat(req: ScanRequest):
             logger.info("SCAN_DEBUG: routing to handle_meeting_declaration")
             return _action_stream_response(
                 _ah.handle_meeting_declaration(req.question, channel="ask_baker"),
+                req.question,
+            )
+        elif intent.get("type") == "critical_declaration":
+            logger.info("SCAN_DEBUG: routing to handle_critical_declaration")
+            return _action_stream_response(
+                _ah.handle_critical_declaration(req.question, channel="ask_baker"),
                 req.question,
             )
         elif intent.get("type") == "fireflies_fetch":

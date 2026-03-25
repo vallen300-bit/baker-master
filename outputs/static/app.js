@@ -827,18 +827,17 @@ async function loadMorningBrief() {
             if (gridTravelCount) gridTravelCount.textContent = allTravel.length > 0 ? allTravel.length : '';
         }
 
-        // Grid: Fires (top-right)
-        var gridFires = document.getElementById('gridFires');
-        var gridFiresCount = document.getElementById('gridFiresCount');
-        if (gridFires) {
-            // TRAVEL-FIX-1: travel alerts now served separately, no need to filter from fires
-            var fireItems = (data.top_fires || []);
-            if (fireItems.length > 0) {
-                setSafeHTML(gridFires, fireItems.map(function(a) { return renderFireCompact(a); }).join(''));
+        // CRITICAL-CARD-1: Critical items (top-right, was Fires)
+        var gridCritical = document.getElementById('gridCritical');
+        var gridCriticalCount = document.getElementById('gridCriticalCount');
+        if (gridCritical) {
+            var criticalItems = data.critical_items || [];
+            if (criticalItems.length > 0) {
+                setSafeHTML(gridCritical, criticalItems.map(function(ci) { return _renderCriticalItem(ci); }).join(''));
             } else {
-                gridFires.innerHTML = '<div class="grid-empty">No active fires. All clear.</div>';
+                gridCritical.innerHTML = '<div class="grid-empty">No critical items. All clear.</div>';
             }
-            if (gridFiresCount) gridFiresCount.textContent = fireItems.length > 0 ? fireItems.length : '';
+            if (gridCriticalCount) gridCriticalCount.textContent = criticalItems.length > 0 ? criticalItems.length : '';
         }
 
         // Grid: Deadlines (bottom-left)
@@ -1977,6 +1976,7 @@ function renderTriageCard(alert) {
     html += _triageBtn('Delegate', 'delegate', aid, title, body);
     html += _triageBtn('Dismiss', 'dismiss', aid, title, body);
     html += _triageBtn('Ask Baker', 'ask', aid, title, body);
+    html += _triageBtn('Critical', 'critical', aid, title, body);
     html += '</div>';
     // Delegate input (hidden by default)
     html += '<div class="triage-delegate-row" id="triage-delegate-' + esc(aid) + '" style="display:none;padding:0 16px 10px;gap:8px;display:none;">';
@@ -1991,7 +1991,7 @@ function renderTriageCard(alert) {
     return html;
 }
 
-var _triageIcons = { email: '\u2709', whatsapp: '\uD83D\uDCAC', analyze: '\uD83D\uDD0D', summarize: '\uD83D\uDCCB', dossier: '\uD83D\uDDC2', clickup: '\u2197', delegate: '\uD83D\uDC64', dismiss: '\u2715', ask: '\uD83D\uDCAC' };
+var _triageIcons = { email: '\u2709', whatsapp: '\uD83D\uDCAC', analyze: '\uD83D\uDD0D', summarize: '\uD83D\uDCCB', dossier: '\uD83D\uDDC2', clickup: '\u2197', delegate: '\uD83D\uDC64', dismiss: '\u2715', ask: '\uD83D\uDCAC', critical: '\u26A1' };
 
 function _triageBtn(label, action, aid, title, body) {
     var icon = _triageIcons[action] || '';
@@ -2034,6 +2034,8 @@ function _handleTriageAction(action, alertId) {
         _triageShowDossier(alertId, title, body);
     } else if (action === 'clickup') {
         _triageCreateClickUp(alertId, title, body);
+    } else if (action === 'critical') {
+        _triagePromoteCritical(alertId);
     }
 }
 
@@ -2089,12 +2091,94 @@ function _triageCreateClickUp(alertId, title, body) {
     });
 }
 
+function _triagePromoteCritical(alertId) {
+    bakerFetch('/api/critical/' + alertId + '/promote', {
+        method: 'POST',
+    }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.error) {
+            _showToast(d.error);
+        } else {
+            _showToast('\u26A1 Marked as critical');
+            loadMorningBrief();  // refresh to show in Critical card
+        }
+    }).catch(function(e) {
+        _showToast('Critical promote error: ' + e);
+    });
+}
+
 function _showToast(msg) {
     var t = document.createElement('div');
     t.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--text);color:#fff;padding:8px 20px;border-radius:8px;font-size:13px;z-index:9999;';
     t.textContent = msg;
     document.body.appendChild(t);
     setTimeout(function() { t.remove(); }, 3000);
+}
+
+// ═══ CRITICAL-CARD-1: Critical item rendering ═══
+
+function _renderCriticalItem(ci) {
+    var desc = ci.description || '';
+    var truncDesc = desc.length > 80 ? desc.substring(0, 77) + '...' : desc;
+    var timeLabel = ci.critical_flagged_at ? fmtRelativeTime(ci.critical_flagged_at) : '';
+    var snippet = (ci.source_snippet || '').trim();
+    var hasDetail = snippet.length > 0;
+    var clickAttr = hasDetail
+        ? ' onclick="var n=this.querySelector(\'.fire-detail\');n.style.display=n.style.display===\'none\'?\'block\':\'none\'"'
+        : '';
+    var chevron = hasDetail ? ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span>' : '';
+    var detailHtml = hasDetail
+        ? '<div class="fire-detail" style="display:none;font-size:12px;color:var(--text2);padding:6px 16px 10px;line-height:1.5;border-top:1px solid var(--border-light);white-space:pre-wrap;">' + esc(snippet.substring(0, 300)) + '</div>'
+        : '';
+
+    return '<div class="card card-compact" style="cursor:pointer;"' + clickAttr + '><div class="card-header">' +
+        '<span style="margin-right:4px;">\u26A1</span>' +
+        '<span class="card-title" style="flex:1;">' + esc(truncDesc) + chevron + '</span>' +
+        '<button class="triage-pill" style="font-size:10px;padding:2px 8px;margin-left:4px;background:var(--green);color:#fff;border-color:var(--green);" onclick="event.stopPropagation();_criticalDone(' + ci.id + ',this)">Done</button>' +
+        '<span class="card-time" style="min-width:40px;text-align:right;">' + esc(timeLabel) + '</span>' +
+        '</div>' + detailHtml + '</div>';
+}
+
+function _criticalDone(deadlineId, btn) {
+    bakerFetch('/api/critical/' + deadlineId + '/done', { method: 'POST' }).then(function() {
+        var card = btn.closest('.card');
+        if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
+        _showToast('Critical item completed \u2713');
+    });
+}
+
+function _criticalQuickAdd() {
+    var grid = document.getElementById('gridCritical');
+    if (!grid) return;
+    // Check if input already visible
+    if (document.getElementById('criticalQuickInput')) return;
+    var row = document.createElement('div');
+    row.id = 'criticalQuickInput';
+    row.style.cssText = 'display:flex;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border-light);';
+    var input = document.createElement('input');
+    input.style.cssText = 'flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:var(--font);';
+    input.placeholder = 'What must be done today?';
+    var addBtn = document.createElement('button');
+    addBtn.className = 'triage-pill';
+    addBtn.style.cssText = 'background:var(--red);color:#fff;border-color:var(--red);';
+    addBtn.textContent = 'Add';
+    addBtn.addEventListener('click', function() {
+        var desc = input.value.trim();
+        if (!desc) return;
+        bakerFetch('/api/critical/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ description: desc }),
+        }).then(function(r) { return r.json(); }).then(function(d) {
+            if (d.error) { _showToast(d.error); }
+            else { _showToast('\u26A1 Added: ' + desc.substring(0, 40)); loadMorningBrief(); }
+            row.remove();
+        });
+    });
+    input.addEventListener('keydown', function(e) { if (e.key === 'Enter') addBtn.click(); if (e.key === 'Escape') row.remove(); });
+    row.appendChild(input);
+    row.appendChild(addBtn);
+    grid.insertBefore(row, grid.firstChild);
+    input.focus();
 }
 
 function _extractEntities(text) {

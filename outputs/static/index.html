@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=42">
+    <link rel="stylesheet" href="/static/style.css?v=43">
 </head>
 <body>
 
@@ -148,11 +148,12 @@
                 </div>
                 <div class="grid-cell">
                     <div class="grid-cell-header grid-header-fires">
-                        <span class="section-label" style="margin:0">Fires</span>
-                        <span class="grid-cell-count" id="gridFiresCount"></span>
+                        <span class="section-label" style="margin:0">Critical</span>
+                        <span class="grid-cell-count" id="gridCriticalCount"></span>
+                        <button id="criticalAddBtn" onclick="_criticalQuickAdd()" style="background:none;border:1px solid var(--border);border-radius:50%;width:22px;height:22px;font-size:14px;cursor:pointer;color:var(--text3);line-height:1;padding:0;margin-left:6px;" title="Add critical item">+</button>
                     </div>
-                    <div class="grid-cell-body" id="gridFires">
-                        <div class="grid-empty">No active fires. All clear.</div>
+                    <div class="grid-cell-body" id="gridCritical">
+                        <div class="grid-empty">No critical items. All clear.</div>
                     </div>
                 </div>
                 <div class="grid-cell">
@@ -335,6 +336,6 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=55"></script>
+<script src="/static/app.js?v=56"></script>
 </body>
 </html>

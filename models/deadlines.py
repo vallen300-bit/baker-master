@@ -101,6 +101,9 @@ def ensure_tables():
         # Make due_date nullable for soft commitments (no specific date)
         cur.execute("ALTER TABLE deadlines ALTER COLUMN due_date DROP NOT NULL")
         cur.execute("ALTER TABLE deadlines ALTER COLUMN confidence DROP NOT NULL")
+        # CRITICAL-CARD-1: Critical flag for Director's must-do-today items
+        cur.execute("ALTER TABLE deadlines ADD COLUMN IF NOT EXISTS is_critical BOOLEAN DEFAULT FALSE")
+        cur.execute("ALTER TABLE deadlines ADD COLUMN IF NOT EXISTS critical_flagged_at TIMESTAMPTZ")
 
         cur.execute("""
             CREATE TABLE IF NOT EXISTS vip_contacts (
@@ -299,6 +302,98 @@ def insert_deadline(
         conn.rollback()
         logger.error(f"insert_deadline failed: {e}")
         return None
+    finally:
+        put_conn(conn)
+
+
+def get_critical_items(limit: int = 5) -> list:
+    """CRITICAL-CARD-1: Get active critical items for dashboard."""
+    conn = get_conn()
+    if not conn:
+        return []
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT id, description, due_date, priority, source_snippet, critical_flagged_at
+            FROM deadlines
+            WHERE is_critical = TRUE AND status = 'active'
+            ORDER BY critical_flagged_at DESC
+            LIMIT %s
+        """, (limit,))
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        return rows
+    except Exception as e:
+        logger.error(f"get_critical_items failed: {e}")
+        return []
+    finally:
+        put_conn(conn)
+
+
+def get_critical_count() -> int:
+    """CRITICAL-CARD-1: Count active critical items."""
+    conn = get_conn()
+    if not conn:
+        return 0
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM deadlines WHERE is_critical = TRUE AND status = 'active'")
+        count = cur.fetchone()[0]
+        cur.close()
+        return count
+    except Exception:
+        return 0
+    finally:
+        put_conn(conn)
+
+
+def set_critical(deadline_id: int, is_critical: bool = True) -> bool:
+    """CRITICAL-CARD-1: Flag/unflag a deadline as critical."""
+    conn = get_conn()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        if is_critical:
+            cur.execute(
+                "UPDATE deadlines SET is_critical = TRUE, critical_flagged_at = NOW() WHERE id = %s",
+                (deadline_id,),
+            )
+        else:
+            cur.execute(
+                "UPDATE deadlines SET is_critical = FALSE, critical_flagged_at = NULL WHERE id = %s",
+                (deadline_id,),
+            )
+        conn.commit()
+        cur.close()
+        return True
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"set_critical failed: {e}")
+        return False
+    finally:
+        put_conn(conn)
+
+
+def complete_critical(deadline_id: int) -> bool:
+    """CRITICAL-CARD-1: Mark critical item as done."""
+    conn = get_conn()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE deadlines SET is_critical = FALSE, status = 'completed', updated_at = NOW() WHERE id = %s",
+            (deadline_id,),
+        )
+        conn.commit()
+        cur.close()
+        return True
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"complete_critical failed: {e}")
+        return False
     finally:
         put_conn(conn)
 
