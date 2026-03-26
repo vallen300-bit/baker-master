@@ -6099,8 +6099,16 @@ function _renderDossierCard(p) {
     actions.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
 
     if (p.status === 'completed') {
+        var viewBtn = document.createElement('button');
+        viewBtn.className = 'dossier-btn dossier-btn-primary';
+        viewBtn.textContent = 'View';
+        viewBtn.onclick = function() {
+            window.open('/api/research-proposals/' + p.id + '/view?key=' + encodeURIComponent(BAKER_CONFIG.apiKey), '_blank');
+        };
+        actions.appendChild(viewBtn);
+
         var dlBtn = document.createElement('button');
-        dlBtn.className = 'dossier-btn dossier-btn-primary';
+        dlBtn.className = 'dossier-btn';
         dlBtn.textContent = 'Download .docx';
         dlBtn.onclick = function() {
             window.open('/api/research-proposals/' + p.id + '/download?key=' + encodeURIComponent(BAKER_CONFIG.apiKey), '_blank');
