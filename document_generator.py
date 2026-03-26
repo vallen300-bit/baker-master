@@ -545,7 +545,7 @@ def _render_markdown_section(doc, content):
         stripped = line.strip()
 
         if not stripped:
-            doc.add_paragraph()
+            # Skip blank lines — paragraph spacing handles visual gaps
             continue
 
         # Horizontal rule → thin border paragraph
@@ -657,12 +657,35 @@ def generate_dossier_docx(dossier_md, subject_name, subject_type,
     """
     doc = Document()
 
-    # Set default font
+    # Set default font + paragraph spacing for readability
     style = doc.styles['Normal']
     font = style.font
     font.name = "Calibri"
     font.size = Pt(11)
     font.color.rgb = RGBColor(0x33, 0x33, 0x33)
+    # Line spacing 1.15 + 6pt after paragraph — much more readable
+    style.paragraph_format.line_spacing = 1.15
+    style.paragraph_format.space_after = Pt(6)
+    style.paragraph_format.space_before = Pt(0)
+
+    # Heading styles — add spacing above for visual separation
+    for lvl in (1, 2, 3, 4):
+        try:
+            hstyle = doc.styles[f'Heading {lvl}']
+            hstyle.paragraph_format.space_before = Pt(18 if lvl <= 2 else 12)
+            hstyle.paragraph_format.space_after = Pt(6)
+        except Exception:
+            pass
+
+    # List styles — tighter spacing
+    for lst in ('List Bullet', 'List Bullet 2', 'List Number'):
+        try:
+            lstyle = doc.styles[lst]
+            lstyle.paragraph_format.space_after = Pt(3)
+            lstyle.paragraph_format.space_before = Pt(1)
+            lstyle.paragraph_format.line_spacing = 1.15
+        except Exception:
+            pass
 
     # Set narrow margins
     for section in doc.sections:
