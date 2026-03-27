@@ -8473,34 +8473,67 @@ async def api_view_research_dossier(proposal_id: int, key: str = ""):
 
 @app.get("/dossiers", tags=["research"])
 async def dossier_library_page(key: str = ""):
-    """Mobile-friendly dossier library — lists all completed dossiers."""
+    """Mobile-friendly dossier library — lists all completed dossiers from all sources."""
     if key != _BAKER_API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API key")
     import psycopg2.extras
+    import html as _html
     store = _get_store()
     conn = store._get_conn()
     if not conn:
         raise HTTPException(status_code=500, detail="DB unavailable")
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        entries = []
+
+        # Source 1: Completed research proposals
         cur.execute("""
-            SELECT id, subject_name, status, completed_at
+            SELECT id, subject_name, completed_at
             FROM research_proposals
             WHERE status = 'completed' AND deliverable_summary IS NOT NULL
-            ORDER BY completed_at DESC
-            LIMIT 50
+            ORDER BY completed_at DESC LIMIT 50
         """)
-        rows = cur.fetchall()
+        for r in cur.fetchall():
+            entries.append({
+                "name": r["subject_name"],
+                "date": r["completed_at"],
+                "source": "Baker",
+                "view_url": f"/api/research-proposals/{r['id']}/view?key={key}",
+            })
+
+        # Source 2: Deep analyses (Cowork/Claude Code)
+        cur.execute("""
+            SELECT analysis_id, topic, created_at
+            FROM deep_analyses
+            WHERE (topic ILIKE '%%Profile%%' OR topic ILIKE '%%Dossier%%')
+              AND analysis_text IS NOT NULL AND LENGTH(analysis_text) > 200
+              AND analysis_id NOT LIKE 'research_%%'
+            ORDER BY created_at DESC LIMIT 50
+        """)
+        for r in cur.fetchall():
+            topic = r["topic"] or ""
+            name = topic.split("—")[0].split("–")[0].split("-")[0].strip() or topic
+            entries.append({
+                "name": name,
+                "date": r["created_at"],
+                "source": "Cowork",
+                "view_url": f"/api/dossiers/{r['analysis_id']}/view?key={key}",
+            })
+
         cur.close()
     finally:
         store._put_conn(conn)
 
+    # Sort by date
+    entries.sort(key=lambda e: e.get("date") or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+
     cards_html = ""
-    for r in rows:
-        completed = r["completed_at"].strftime("%d %b %H:%M") if r.get("completed_at") else ""
+    for e in entries:
+        completed = e["date"].strftime("%d %b %H:%M") if e.get("date") else ""
+        source_tag = f'<span style="font-size:10px;color:#60a5fa;margin-left:8px;">{_html.escape(e["source"])}</span>'
         cards_html += f"""
-        <a class="dossier-card" href="/api/research-proposals/{r['id']}/view?key={key}">
-            <div class="dossier-name">{r['subject_name']}</div>
+        <a class="dossier-card" href="{_html.escape(e['view_url'])}">
+            <div class="dossier-name">{_html.escape(e['name'])}{source_tag}</div>
             <div class="dossier-date">{completed}</div>
         </a>"""
 
@@ -8531,6 +8564,212 @@ async def dossier_library_page(key: str = ""):
 </html>"""
     from starlette.responses import HTMLResponse
     return HTMLResponse(page)
+
+
+# ============================================================
+# DOSSIER-PIPELINE-1: Unified Dossiers API
+# ============================================================
+
+@app.get("/api/dossiers", tags=["research"], dependencies=[Depends(verify_api_key)])
+async def api_get_unified_dossiers(days: int = 180):
+    """Unified dossier list pulling from research_proposals + deep_analyses."""
+    import psycopg2.extras
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=500, detail="DB unavailable")
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        dossiers = []
+
+        # Source 1: Completed research proposals
+        cur.execute(f"""
+            SELECT id, subject_name, subject_type, specialists, status,
+                   matter_slug, created_at, completed_at
+            FROM research_proposals
+            WHERE status = 'completed' AND deliverable_summary IS NOT NULL
+              AND created_at > NOW() - INTERVAL '{int(days)} days'
+            ORDER BY completed_at DESC NULLS LAST
+            LIMIT 50
+        """)
+        for r in cur.fetchall():
+            row = dict(r)
+            for k in ("created_at", "completed_at"):
+                if row.get(k) and hasattr(row[k], "isoformat"):
+                    row[k] = row[k].isoformat()
+            specialists = row.get("specialists") or []
+            if isinstance(specialists, str):
+                import json as _json
+                specialists = _json.loads(specialists)
+            dossiers.append({
+                "id": f"rp_{row['id']}",
+                "source_id": row["id"],
+                "name": row["subject_name"],
+                "type": row.get("subject_type") or "person",
+                "source": "Baker",
+                "specialists": specialists,
+                "matter_slug": row.get("matter_slug"),
+                "date": row.get("completed_at") or row.get("created_at") or "",
+                "view_url": f"/api/research-proposals/{row['id']}/view",
+                "download_url": f"/api/research-proposals/{row['id']}/download",
+            })
+
+        # Source 2: Deep analyses (Cowork/Claude Code dossiers)
+        cur.execute(f"""
+            SELECT analysis_id, topic, analysis_text, created_at
+            FROM deep_analyses
+            WHERE (topic ILIKE '%%Profile%%' OR topic ILIKE '%%Dossier%%')
+              AND analysis_text IS NOT NULL AND LENGTH(analysis_text) > 200
+              AND created_at > NOW() - INTERVAL '{int(days)} days'
+            ORDER BY created_at DESC
+            LIMIT 50
+        """)
+        for r in cur.fetchall():
+            row = dict(r)
+            date_str = row["created_at"].isoformat() if row.get("created_at") and hasattr(row["created_at"], "isoformat") else ""
+            # Extract name from topic (e.g. "John Doe — Profile Dossier" → "John Doe")
+            topic = row.get("topic") or ""
+            name = topic.split("—")[0].split("–")[0].split("-")[0].strip() if topic else topic
+            # Skip entries already cross-stored from research_proposals
+            if row["analysis_id"] and row["analysis_id"].startswith("research_"):
+                continue
+            dossiers.append({
+                "id": f"da_{row['analysis_id']}",
+                "source_id": row["analysis_id"],
+                "name": name or topic,
+                "type": "analysis",
+                "source": "Cowork" if "cowork" in (row.get("analysis_id") or "").lower() else "Claude Code",
+                "specialists": [],
+                "matter_slug": None,
+                "date": date_str,
+                "view_url": f"/api/dossiers/{row['analysis_id']}/view",
+                "download_url": f"/api/dossiers/{row['analysis_id']}/download",
+            })
+
+        # Sort combined by date descending
+        dossiers.sort(key=lambda d: d.get("date") or "", reverse=True)
+
+        cur.close()
+        return {"dossiers": dossiers, "count": len(dossiers)}
+    finally:
+        store._put_conn(conn)
+
+
+@app.get("/api/dossiers/{analysis_id}/view", tags=["research"])
+async def api_view_deep_analysis_dossier(analysis_id: str, key: str = ""):
+    """View a deep_analyses dossier as HTML."""
+    if key != _BAKER_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    import psycopg2.extras
+    import re as _re
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=500, detail="DB unavailable")
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT topic, analysis_text, created_at FROM deep_analyses WHERE analysis_id = %s", (analysis_id,))
+        row = cur.fetchone()
+        cur.close()
+        if not row or not row.get("analysis_text"):
+            raise HTTPException(status_code=404, detail="Dossier not found")
+    finally:
+        store._put_conn(conn)
+
+    topic = row["topic"] or "Analysis"
+    text = row["analysis_text"]
+    date_str = row["created_at"].strftime("%d %b %Y %H:%M") if row.get("created_at") else ""
+
+    # Convert markdown to basic HTML
+    import html as _html
+    lines = text.split("\n")
+    html_parts = []
+    for line in lines:
+        s = line.strip()
+        if not s:
+            html_parts.append("<br>")
+        elif s.startswith("### "):
+            html_parts.append(f"<h3>{_html.escape(s[4:])}</h3>")
+        elif s.startswith("## "):
+            html_parts.append(f"<h2>{_html.escape(s[3:])}</h2>")
+        elif s.startswith("# "):
+            html_parts.append(f"<h1>{_html.escape(s[2:])}</h1>")
+        elif s.startswith("- ") or s.startswith("* "):
+            html_parts.append(f"<li>{_html.escape(s[2:])}</li>")
+        else:
+            escaped = _html.escape(s)
+            escaped = _re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', escaped)
+            escaped = _re.sub(r'\*(.*?)\*', r'<em>\1</em>', escaped)
+            html_parts.append(f"<p>{escaped}</p>")
+
+    body_html = "\n".join(html_parts)
+    page = f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{_html.escape(topic)}</title>
+<style>
+body {{ font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 16px; background: #111; color: #e0e0e0; max-width: 800px; margin: 0 auto; line-height: 1.6; }}
+h1 {{ color: #fff; font-size: 22px; margin-top: 24px; }}
+h2 {{ color: #60a5fa; font-size: 18px; margin-top: 20px; border-bottom: 1px solid #333; padding-bottom: 6px; }}
+h3 {{ color: #93c5fd; font-size: 15px; margin-top: 16px; }}
+p {{ margin: 6px 0; font-size: 14px; }}
+li {{ margin: 4px 0; font-size: 14px; }}
+strong {{ color: #fff; }}
+.meta {{ color: #888; font-size: 12px; margin-bottom: 16px; }}
+a.back {{ color: #60a5fa; text-decoration: none; font-size: 14px; }}
+</style></head><body>
+<a class="back" href="javascript:history.back()">&larr; Back</a>
+<h1>{_html.escape(topic)}</h1>
+<div class="meta">{date_str}</div>
+{body_html}
+</body></html>"""
+    from starlette.responses import HTMLResponse
+    return HTMLResponse(page)
+
+
+@app.get("/api/dossiers/{analysis_id}/download", tags=["research"])
+async def api_download_deep_analysis_dossier(analysis_id: str, key: str = ""):
+    """Download a deep_analyses dossier as .docx."""
+    if key != _BAKER_API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+    import psycopg2.extras
+    import re as _re
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=500, detail="DB unavailable")
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("SELECT topic, analysis_text FROM deep_analyses WHERE analysis_id = %s", (analysis_id,))
+        row = cur.fetchone()
+        cur.close()
+        if not row or not row.get("analysis_text"):
+            raise HTTPException(status_code=404, detail="Dossier not found")
+    finally:
+        store._put_conn(conn)
+
+    topic = row["topic"] or "Analysis"
+    # Extract name from topic
+    name = topic.split("—")[0].split("–")[0].split("-")[0].strip()
+
+    from document_generator import generate_dossier_docx
+    safe_name = _re.sub(r'[^\w\s-]', '', name).strip().replace(' ', '_')
+    filename = f"Dossier_{safe_name}.docx"
+    filepath = os.path.join(tempfile.gettempdir(), f"baker_da_{safe_name}.docx")
+
+    generate_dossier_docx(
+        dossier_md=row["analysis_text"],
+        subject_name=name,
+        subject_type="analysis",
+        specialists_text="Cowork / Claude Code",
+        filepath=filepath,
+    )
+
+    from starlette.responses import FileResponse
+    return FileResponse(
+        filepath,
+        filename=filename,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
 
 
 # ============================================================

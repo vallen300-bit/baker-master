@@ -6049,33 +6049,141 @@ async function loadDossiersTab() {
     showLoading(container, 'Loading dossiers');
 
     try {
-        var data = await bakerFetch('/api/research-proposals?days=90').then(function(r) { return r.json(); });
-        var proposals = data.proposals || [];
+        // DOSSIER-PIPELINE-1: Fetch from both unified + proposals endpoints
+        var results = await Promise.all([
+            bakerFetch('/api/dossiers?days=180').then(function(r) { return r.json(); }).catch(function() { return { dossiers: [] }; }),
+            bakerFetch('/api/research-proposals?days=90').then(function(r) { return r.json(); })
+        ]);
+        var unified = results[0].dossiers || [];
+        var proposals = results[1].proposals || [];
 
-        // Update badge
-        var completedCount = proposals.filter(function(p) { return p.status === 'completed'; }).length;
+        // Proposals that are NOT completed (proposed, running, failed) — show as action cards
+        var pendingProposals = proposals.filter(function(p) { return p.status !== 'completed'; });
+
+        // Update badge: completed dossiers from unified + pending proposals
         var badge = document.getElementById('dossiersCount');
-        if (badge) badge.textContent = completedCount || '';
+        if (badge) badge.textContent = (unified.length + pendingProposals.length) || '';
 
-        if (proposals.length === 0) {
-            container.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text3);">No research dossiers yet. Baker auto-proposes dossiers when VIPs forward intelligence.</div>';
+        if (unified.length === 0 && pendingProposals.length === 0) {
+            container.textContent = '';
+            var emptyDiv = document.createElement('div');
+            emptyDiv.style.cssText = 'padding:40px;text-align:center;color:var(--text3);';
+            emptyDiv.textContent = 'No dossiers yet. Baker auto-proposes dossiers when VIPs forward intelligence.';
+            container.appendChild(emptyDiv);
             return;
         }
 
         var wrapper = document.createElement('div');
         wrapper.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
 
-        for (var i = 0; i < proposals.length; i++) {
-            var p = proposals[i];
-            wrapper.appendChild(_renderDossierCard(p));
+        // Pending proposals first (action needed)
+        for (var i = 0; i < pendingProposals.length; i++) {
+            wrapper.appendChild(_renderDossierCard(pendingProposals[i]));
+        }
+
+        // Completed dossiers from all sources
+        for (var j = 0; j < unified.length; j++) {
+            wrapper.appendChild(_renderUnifiedDossierCard(unified[j]));
         }
 
         container.textContent = '';
         container.appendChild(wrapper);
 
     } catch (err) {
-        container.innerHTML = '<div style="padding:20px;color:var(--red);">Failed to load dossiers: ' + esc(err.message) + '</div>';
+        container.textContent = '';
+        var errDiv = document.createElement('div');
+        errDiv.style.cssText = 'padding:20px;color:var(--red);';
+        errDiv.textContent = 'Failed to load dossiers: ' + err.message;
+        container.appendChild(errDiv);
     }
+}
+
+function _renderUnifiedDossierCard(d) {
+    var card = document.createElement('div');
+    card.className = 'dossier-card';
+
+    // Header row: name + source badge
+    var header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:12px;';
+
+    var title = document.createElement('div');
+    title.style.cssText = 'font-weight:600;font-size:14px;color:var(--text);';
+    title.textContent = d.name || 'Unknown';
+    header.appendChild(title);
+
+    var badge = document.createElement('span');
+    var badgeColor = d.source === 'Baker' ? 'var(--green)' : 'var(--blue)';
+    badge.style.cssText = 'font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px;white-space:nowrap;color:#fff;background:' + badgeColor + ';';
+    badge.textContent = d.source;
+    header.appendChild(badge);
+
+    card.appendChild(header);
+
+    // Meta row: type, date, matter, specialists
+    var meta = document.createElement('div');
+    meta.style.cssText = 'font-size:12px;color:var(--text2);margin-top:4px;display:flex;gap:16px;flex-wrap:wrap;';
+
+    if (d.type) {
+        var typeSpan = document.createElement('span');
+        typeSpan.textContent = d.type;
+        meta.appendChild(typeSpan);
+    }
+
+    if (d.date) {
+        var dateSpan = document.createElement('span');
+        dateSpan.textContent = d.date.substring(0, 10);
+        meta.appendChild(dateSpan);
+    }
+
+    if (d.matter_slug) {
+        var matterSpan = document.createElement('span');
+        matterSpan.style.color = 'var(--amber)';
+        matterSpan.textContent = d.matter_slug;
+        meta.appendChild(matterSpan);
+    }
+
+    if (d.specialists && d.specialists.length) {
+        var specSpan = document.createElement('span');
+        specSpan.style.color = 'var(--text3)';
+        specSpan.textContent = d.specialists.join(', ');
+        meta.appendChild(specSpan);
+    }
+
+    card.appendChild(meta);
+
+    // Action buttons
+    var actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
+
+    var viewBtn = document.createElement('button');
+    viewBtn.className = 'dossier-btn dossier-btn-primary';
+    viewBtn.textContent = 'View';
+    viewBtn.onclick = function() {
+        window.open(d.view_url + '?key=' + encodeURIComponent(BAKER_CONFIG.apiKey), '_blank');
+    };
+    actions.appendChild(viewBtn);
+
+    var dlBtn = document.createElement('button');
+    dlBtn.className = 'dossier-btn';
+    dlBtn.textContent = 'Download .docx';
+    dlBtn.onclick = function() {
+        window.open(d.download_url + '?key=' + encodeURIComponent(BAKER_CONFIG.apiKey), '_blank');
+    };
+    actions.appendChild(dlBtn);
+
+    // Regenerate button for Baker research proposals
+    if (d.source === 'Baker' && d.source_id) {
+        var regenBtn = document.createElement('button');
+        regenBtn.className = 'dossier-btn';
+        regenBtn.textContent = 'Regenerate';
+        regenBtn.onclick = function() {
+            _retryDossier(d.source_id, regenBtn);
+        };
+        actions.appendChild(regenBtn);
+    }
+
+    card.appendChild(actions);
+    return card;
 }
 
 function _renderDossierCard(p) {

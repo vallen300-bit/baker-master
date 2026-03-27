@@ -161,6 +161,9 @@ class SentinelStoreBack:
         # WEALTH-MANAGER: Wealth tracking tables
         self._ensure_wealth_tables()
 
+        # DOSSIER-PIPELINE-1: Dossier binary file storage
+        self._ensure_dossier_files_table()
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -751,6 +754,64 @@ class SentinelStoreBack:
             logger.info("deep_analyses table verified")
         except Exception as e:
             logger.warning(f"Could not ensure deep_analyses table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # Dossier File Storage (DOSSIER-PIPELINE-1)
+    # -------------------------------------------------------
+
+    def _ensure_dossier_files_table(self):
+        """Create dossier_files table for binary .docx storage."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS dossier_files (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    source TEXT NOT NULL DEFAULT 'research_proposal',
+                    source_id TEXT,
+                    file_bytes BYTEA NOT NULL,
+                    file_size INTEGER DEFAULT 0,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("dossier_files table verified")
+        except Exception as e:
+            logger.warning(f"Could not ensure dossier_files table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def store_dossier_file(self, name: str, file_bytes: bytes,
+                           source: str = "research_proposal",
+                           source_id: str = None) -> Optional[int]:
+        """Store a dossier .docx binary in the database. Returns file ID or None."""
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — skipping store_dossier_file")
+            return None
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO dossier_files (name, source, source_id, file_bytes, file_size)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id
+            """, (name, source, source_id,
+                  psycopg2.Binary(file_bytes), len(file_bytes)))
+            row = cur.fetchone()
+            conn.commit()
+            cur.close()
+            file_id = row[0] if row else None
+            logger.info(f"Stored dossier file: {name} ({len(file_bytes)} bytes, id={file_id})")
+            return file_id
+        except Exception as e:
+            logger.error(f"Failed to store dossier file: {e}")
+            return None
         finally:
             self._put_conn(conn)
 

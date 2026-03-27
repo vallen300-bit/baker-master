@@ -417,7 +417,38 @@ def execute_research_dossier(proposal_id: int):
         if filename:
             _notify_completion(proposal_id, subject_name, filename, specialists)
 
-        # 10. Baker 3.0 — extract structured data from dossier output
+        # 10. DOSSIER-PIPELINE-1: Cross-store to deep_analyses for unified search
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            store.log_deep_analysis(
+                analysis_id=f"research_{proposal_id}",
+                topic=f"{subject_name} — Profile Dossier",
+                source_documents=["research_proposal"],
+                analysis_text=dossier_md,
+            )
+            logger.info(f"Cross-stored dossier to deep_analyses: research_{proposal_id}")
+        except Exception as _da_err:
+            logger.warning(f"deep_analyses cross-store failed (non-fatal): {_da_err}")
+
+        # 11. DOSSIER-PIPELINE-1: Store .docx binary for download
+        try:
+            import os as _os
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            if local_path and _os.path.exists(local_path):
+                with open(local_path, "rb") as f:
+                    file_bytes = f.read()
+                store.store_dossier_file(
+                    name=filename or f"Dossier_{subject_name}.docx",
+                    file_bytes=file_bytes,
+                    source="research_proposal",
+                    source_id=str(proposal_id),
+                )
+        except Exception as _df_err:
+            logger.warning(f"Dossier file storage failed (non-fatal): {_df_err}")
+
+        # 12. Baker 3.0 — extract structured data from dossier output
         try:
             from orchestrator.extraction_engine import extract_specialist_output
             extract_specialist_output(
