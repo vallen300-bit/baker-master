@@ -4462,14 +4462,17 @@ class SentinelStoreBack:
                     cur.close()
                     logger.info(f"Meeting dedup: source_ref {source_ref} already exists — skipping")
                     return None
-            # Dedup: check for existing meeting with same date + similar title
+            # LANDING-FIXES-1: Status simplification — only confirmed or proposed
+            if status not in ('confirmed', 'proposed'):
+                status = 'proposed'
+            # Dedup: check for existing meeting with same date + similar title (exact OR fuzzy 30-char prefix)
             if meeting_date and title:
                 cur.execute("""
                     SELECT id FROM detected_meetings
-                    WHERE meeting_date = %s AND dismissed = FALSE
-                      AND LOWER(title) = LOWER(%s)
+                    WHERE meeting_date = %s AND dismissed = FALSE AND status != 'cancelled'
+                      AND (LOWER(title) = LOWER(%s) OR LOWER(LEFT(title, 30)) = LOWER(LEFT(%s, 30)))
                     LIMIT 1
-                """, (meeting_date, title))
+                """, (meeting_date, title, title))
                 existing = cur.fetchone()
                 if existing:
                     # Update existing instead of creating duplicate
@@ -4484,6 +4487,32 @@ class SentinelStoreBack:
                     cur.close()
                     logger.info(f"MEETINGS-DETECT-1: updated existing detected meeting #{existing[0]}")
                     return existing[0]
+            # LANDING-FIXES-1: Participant-based dedup — same date + overlapping participants
+            if meeting_date and participant_names:
+                import psycopg2.extras as _pxe
+                cur2 = conn.cursor(cursor_factory=_pxe.RealDictCursor)
+                cur2.execute("""
+                    SELECT id, participant_names FROM detected_meetings
+                    WHERE meeting_date = %s AND dismissed = FALSE AND status != 'cancelled'
+                """, (meeting_date,))
+                for _row in cur2.fetchall():
+                    _existing_parts = set(p.lower() for p in (_row.get("participant_names") or []))
+                    _new_parts = set(p.lower() for p in (participant_names or []))
+                    if _existing_parts and _new_parts and _existing_parts & _new_parts:
+                        cur2.close()
+                        cur.execute("""
+                            UPDATE detected_meetings SET
+                                meeting_time = COALESCE(%s, meeting_time),
+                                location = COALESCE(%s, location),
+                                status = %s, updated_at = NOW()
+                            WHERE id = %s
+                        """, (meeting_time, location, status, _row["id"]))
+                        conn.commit()
+                        cur.close()
+                        logger.info(f"LANDING-FIXES-1: deduped meeting by participants → #{_row['id']}")
+                        return _row["id"]
+                cur2.close()
+
             cur.execute("""
                 INSERT INTO detected_meetings
                     (title, participant_names, meeting_date, meeting_time, location,
@@ -4505,8 +4534,9 @@ class SentinelStoreBack:
         finally:
             self._put_conn(conn)
 
-    def get_detected_meetings(self, days_ahead: int = 3) -> list:
-        """MEETINGS-DETECT-1: Get upcoming detected meetings."""
+    def get_detected_meetings(self, days_ahead: int = 14) -> list:
+        """MEETINGS-DETECT-1: Get upcoming detected meetings. No limit — all within window.
+        LANDING-FIXES-1: Status simplified to confirmed/proposed only. Deduped by date+title."""
         conn = self._get_conn()
         if not conn:
             return []
@@ -4516,13 +4546,28 @@ class SentinelStoreBack:
             cur.execute("""
                 SELECT * FROM detected_meetings
                 WHERE dismissed = FALSE
+                  AND status != 'cancelled'
                   AND meeting_date BETWEEN CURRENT_DATE AND CURRENT_DATE + make_interval(days => %s)
                 ORDER BY meeting_date ASC, meeting_time ASC NULLS LAST
-                LIMIT 10
             """, (days_ahead,))
-            rows = [dict(r) for r in cur.fetchall()]
+            raw = [dict(r) for r in cur.fetchall()]
             cur.close()
-            return rows
+            # LANDING-FIXES-1: Deduplicate by date + first 30 chars of title
+            seen = {}
+            deduped = []
+            for m in raw:
+                key = str(m.get("meeting_date", "")) + "|" + (m.get("title") or "")[:30].lower().strip()
+                if key in seen:
+                    # Keep the one with more detail
+                    existing = seen[key]
+                    if (m.get("meeting_time") and not existing.get("meeting_time")) or \
+                       (m.get("location") and not existing.get("location")):
+                        deduped = [m if x is existing else x for x in deduped]
+                        seen[key] = m
+                    continue
+                seen[key] = m
+                deduped.append(m)
+            return deduped
         except Exception as e:
             logger.error(f"get_detected_meetings failed: {e}")
             return []

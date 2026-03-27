@@ -1848,7 +1848,8 @@ function renderMeetingCard(m) {
 // MEETINGS-DETECT-1: Render detected meetings from Director messages
 function renderDetectedMeetingCard(dm) {
     var status = dm.status || 'pending';
-    var dotClass = status === 'confirmed' ? 'green' : status === 'proposed' ? 'amber' : 'lgray';
+    // LANDING-FIXES-1: Only confirmed (green) or proposed (amber). No gray/pending.
+    var dotClass = status === 'confirmed' ? 'green' : 'amber';
     var statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
     var timeStr = dm.meeting_time || '';
     var dateStr = '';
@@ -6138,15 +6139,17 @@ async function loadDossiersTab() {
         var unified = results[0].dossiers || [];
         var proposals = results[1].proposals || [];
 
-        // Pending = proposed/running/failed (not completed, not skipped)
-        var proposed = proposals.filter(function(p) { return p.status === 'proposed'; });
+        // LANDING-FIXES-1: Filter out non-person/company proposals
+        var proposed = proposals.filter(function(p) {
+            return p.status === 'proposed' && (!p.subject_type || p.subject_type === 'person' || p.subject_type === 'company');
+        });
         var running = proposals.filter(function(p) { return p.status === 'running' || p.status === 'approved'; });
         var failed = proposals.filter(function(p) { return p.status === 'failed'; });
         var pending = proposed.concat(running).concat(failed);
 
-        // Update badge
+        // Update badge — only completed count matters
         var badge = document.getElementById('dossiersCount');
-        if (badge) badge.textContent = (unified.length + pending.length) || '';
+        if (badge) badge.textContent = unified.length || '';
 
         container.textContent = '';
         var wrapper = document.createElement('div');
@@ -6161,26 +6164,46 @@ async function loadDossiersTab() {
         runNewRow.appendChild(runNewBtn);
         wrapper.appendChild(runNewRow);
 
-        // ── Section: Proposed by Baker ──
+        // ── Section: Proposed by Baker (COLLAPSED by default) ──
         if (pending.length > 0) {
-            var secHeader = document.createElement('div');
-            secHeader.style.cssText = 'padding:8px 16px;font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);';
-            secHeader.textContent = 'Proposed by Baker (' + pending.length + ')';
-            wrapper.appendChild(secHeader);
+            var propSection = document.createElement('div');
+            var propHeader = document.createElement('div');
+            propHeader.style.cssText = 'padding:10px 16px;font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;gap:6px;';
+            propHeader.innerHTML = '<span class="dossier-section-arrow" style="font-size:10px;">&#9656;</span> Proposed by Baker (' + pending.length + ')';
+            var propList = document.createElement('div');
+            propList.style.display = 'none';
+            propHeader.addEventListener('click', function() {
+                var isOpen = propList.style.display !== 'none';
+                propList.style.display = isOpen ? 'none' : '';
+                propHeader.querySelector('.dossier-section-arrow').innerHTML = isOpen ? '&#9656;' : '&#9662;';
+            });
+            propSection.appendChild(propHeader);
             for (var i = 0; i < pending.length; i++) {
-                wrapper.appendChild(_renderDossierCard(pending[i]));
+                propList.appendChild(_renderDossierCard(pending[i]));
             }
+            propSection.appendChild(propList);
+            wrapper.appendChild(propSection);
         }
 
-        // ── Section: Completed ──
+        // ── Section: Completed (EXPANDED by default) ──
         if (unified.length > 0) {
+            var compSection = document.createElement('div');
+            compSection.style.marginTop = '8px';
             var compHeader = document.createElement('div');
-            compHeader.style.cssText = 'padding:8px 16px;font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);margin-top:8px;';
-            compHeader.textContent = 'Completed (' + unified.length + ')';
-            wrapper.appendChild(compHeader);
+            compHeader.style.cssText = 'padding:10px 16px;font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;gap:6px;';
+            compHeader.innerHTML = '<span class="dossier-section-arrow" style="font-size:10px;">&#9662;</span> Completed (' + unified.length + ')';
+            var compList = document.createElement('div');
+            compHeader.addEventListener('click', function() {
+                var isOpen = compList.style.display !== 'none';
+                compList.style.display = isOpen ? 'none' : '';
+                compHeader.querySelector('.dossier-section-arrow').innerHTML = isOpen ? '&#9656;' : '&#9662;';
+            });
+            compSection.appendChild(compHeader);
             for (var j = 0; j < unified.length; j++) {
-                wrapper.appendChild(_renderUnifiedDossierCard(unified[j]));
+                compList.appendChild(_renderUnifiedDossierCard(unified[j]));
             }
+            compSection.appendChild(compList);
+            wrapper.appendChild(compSection);
         }
 
         if (pending.length === 0 && unified.length === 0) {
