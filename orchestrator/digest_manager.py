@@ -84,6 +84,12 @@ def flush_digest() -> bool:
 
     logger.info(f"Flushing digest: {len(items)} alerts")
 
+    # Check if email alerts are disabled (Director preference: WA + Slack only)
+    import os
+    if os.getenv("BAKER_EMAIL_ALERTS_DISABLED", "false").lower() in ("true", "1", "yes"):
+        logger.debug(f"Digest email skipped ({len(items)} items) — BAKER_EMAIL_ALERTS_DISABLED=true")
+        return False
+
     try:
         subject = f"\U0001f534 Baker Alert Digest \u2014 {len(items)} items (last 30 min)"
         body = _compose_digest_body(items)

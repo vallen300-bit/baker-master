@@ -33,6 +33,10 @@ DIRECTOR_EMAIL = "dvallen@brisengroup.com"
 DASHBOARD_URL = "baker-master.onrender.com"
 _BAKER_EMAIL = os.getenv("BAKER_EMAIL_ADDRESS", "bakerai200@gmail.com")
 
+# Director preference: disable all proactive Baker emails (alerts, digests, daily briefing).
+# WhatsApp + Slack remain active. Director-composed emails (Type 5) still work.
+_EMAIL_ALERTS_DISABLED = os.getenv("BAKER_EMAIL_ALERTS_DISABLED", "false").lower() in ("true", "1", "yes")
+
 
 # ---------------------------------------------------------------------------
 # Gmail send primitive (no FastAPI dependency — safe to import from pipeline)
@@ -395,6 +399,9 @@ def send_alert_email(trigger) -> bool:
 
     Called by pipeline.py after classify_trigger() returns priority='high'.
     """
+    if _EMAIL_ALERTS_DISABLED:
+        logger.debug("send_alert_email skipped — BAKER_EMAIL_ALERTS_DISABLED=true")
+        return False
     try:
         source_id = getattr(trigger, "source_id", "") or ""
         source_type = (getattr(trigger, "type", "unknown") or "unknown").title()
@@ -453,6 +460,9 @@ def send_scan_result_email(question: str, answer: str) -> bool:
     Email the Director the full Q&A from Baker Scan.
     Only called when has_email_intent(question) returns True.
     """
+    if _EMAIL_ALERTS_DISABLED:
+        logger.debug("send_scan_result_email skipped — BAKER_EMAIL_ALERTS_DISABLED=true")
+        return False
     try:
         subject = f"Baker Scan \u2014 {question[:60]}"
         body = (
@@ -479,6 +489,9 @@ def send_daily_summary_email(briefing_text: str = "") -> bool:
     briefing_text should contain Claude-synthesized DECISIONS NEEDED and
     KEY DEVELOPMENTS sections from the briefing pipeline.
     """
+    if _EMAIL_ALERTS_DISABLED:
+        logger.debug("send_daily_summary_email skipped — BAKER_EMAIL_ALERTS_DISABLED=true")
+        return False
     try:
         now = datetime.now(timezone.utc)
         day_name = now.strftime("%A")
