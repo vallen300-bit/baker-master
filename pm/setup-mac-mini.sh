@@ -525,33 +525,37 @@ else
 fi
 echo ""
 
-# --- Step 9: Create project memory directory ---
-PROJECT_MEMORY="$CLAUDE_DIR/projects/-Users-$(whoami)-Desktop-baker-code/memory"
-mkdir -p "$PROJECT_MEMORY"
-if [ ! -f "$PROJECT_MEMORY/MEMORY.md" ]; then
-    cat > "$PROJECT_MEMORY/MEMORY.md" << 'MEM_EOF'
-# Baker — Code Brisen Memory (Mac Mini)
+# --- Step 9: Shared memory via Dropbox symlink ---
+# Both MacBook (AI Head) and Mac Mini (Code Brisen) share the same MEMORY.md
+# via Dropbox sync. This ensures both machines always have identical context.
+PROJECT_MEMORY_DIR="$CLAUDE_DIR/projects/-Users-$(whoami)-Desktop-baker-code/memory"
+DROPBOX_MEMORY_MACBOOK="/Users/dimitry/Vallen Dropbox/Dimitry vallen/Baker-Project/claude-memory"
+DROPBOX_MEMORY_MACMINI="/Users/dimitry/Dropbox-Vallen/Dimitry vallen/Baker-Project/claude-memory"
 
-## My Role: Code Brisen
-- I implement briefs from AI Head. I focus on frontend/UX and coding tasks.
-- **AI Head** = the MacBook Claude Code instance. Plans, analyzes, writes briefs.
-- **Director (Dimitry)** = final authority.
-- I have full access to Baker's memory via MCP tools.
-
-## Key Facts
-- Baker runs on Render (Pro: 2 CPU / 4 GB) — auto-deploys from main
-- BAKER_API_KEY: `bakerbhavanga`
-- Render service ID: `srv-d6dgsbctgctc73f55730` (baker-master)
-
-## Coding Rules
-- Syntax check all modified files before committing
-- Never force push to main (Render auto-deploys)
-- Always `git pull` before starting work
-- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
-MEM_EOF
-    log "Created project memory with starter MEMORY.md"
+# Detect which Dropbox path exists
+if [ -d "$DROPBOX_MEMORY_MACMINI" ]; then
+    DROPBOX_MEMORY="$DROPBOX_MEMORY_MACMINI"
+elif [ -d "$DROPBOX_MEMORY_MACBOOK" ]; then
+    DROPBOX_MEMORY="$DROPBOX_MEMORY_MACBOOK"
 else
-    log "Project memory already exists"
+    # Create the directory (Mac Mini path)
+    mkdir -p "$DROPBOX_MEMORY_MACMINI"
+    DROPBOX_MEMORY="$DROPBOX_MEMORY_MACMINI"
+    warn "Created Dropbox memory dir — will sync from MacBook"
+fi
+
+# Replace local memory with symlink to shared Dropbox
+if [ -L "$PROJECT_MEMORY_DIR" ]; then
+    log "Memory symlink already exists → $(readlink "$PROJECT_MEMORY_DIR")"
+elif [ -d "$PROJECT_MEMORY_DIR" ]; then
+    # Local dir exists — back it up and replace with symlink
+    mv "$PROJECT_MEMORY_DIR" "${PROJECT_MEMORY_DIR}.bak.$(date +%s)"
+    ln -s "$DROPBOX_MEMORY" "$PROJECT_MEMORY_DIR"
+    log "Replaced local memory with Dropbox symlink"
+else
+    mkdir -p "$(dirname "$PROJECT_MEMORY_DIR")"
+    ln -s "$DROPBOX_MEMORY" "$PROJECT_MEMORY_DIR"
+    log "Created memory symlink → $DROPBOX_MEMORY"
 fi
 echo ""
 
