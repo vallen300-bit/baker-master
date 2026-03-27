@@ -806,17 +806,17 @@ async function loadMorningBrief() {
                     ? ' onclick="var n=this.querySelector(\'.fire-detail\');n.style.display=n.style.display===\'none\'?\'block\':\'none\'" style="cursor:pointer;"'
                     : '';
                 var tdChevron = hasDetail ? ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span>' : '';
-                var tdDetailHtml = hasDetail
-                    ? '<div class="fire-detail" style="display:none;font-size:12px;color:var(--text2);padding:8px 18px 10px;border-top:1px solid var(--border-light);line-height:1.6;white-space:pre-wrap;">' +
-                      esc(flightInfo) + '</div>'
-                    : '';
-                allTravel.push(
-                    '<div class="card card-compact"' + tdClickAttr + '><div class="card-header">' +
+                // Build expandable detail with flight info + travel triage buttons
+                var _travelHtml = '<div class="card card-compact" style="cursor:pointer;" onclick="_toggleTriageCard(this)"><div class="card-header">' +
                     '<span class="nav-dot amber" style="margin-top:5px;"></span>' +
-                    '<span class="card-title">' + esc(td.description) + tdChevron + '</span>' +
+                    '<span class="card-title">' + esc(td.description) + ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span></span>' +
                     '<span class="card-time" style="font-weight:600;">' + esc(dueLabel) + '</span>' +
-                    '</div>' + tdDetailHtml + '</div>'
-                );
+                    '</div>';
+                _travelHtml += '<div class="triage-detail" style="display:none;">';
+                if (flightInfo) _travelHtml += '<div style="font-size:12px;color:var(--text2);padding:8px 18px 10px;border-top:1px solid var(--border-light);line-height:1.6;white-space:pre-wrap;">' + esc(flightInfo) + '</div>';
+                _travelHtml += _landingTriageBar(String(td.id), td.description, flightInfo, 'travel', td.id);
+                _travelHtml += '</div></div>';
+                allTravel.push(_travelHtml);
             }
 
             if (allTravel.length > 0) {
@@ -1852,6 +1852,7 @@ function renderDetectedMeetingCard(dm) {
     var statusLabel = status.charAt(0).toUpperCase() + status.slice(1);
     var timeStr = dm.meeting_time || '';
     var dateStr = '';
+    var fullDateStr = '';
     if (dm.meeting_date) {
         var _today = new Date().toISOString().slice(0, 10);
         var _mDate = (dm.meeting_date || '').slice(0, 10);
@@ -1862,38 +1863,38 @@ function renderDetectedMeetingCard(dm) {
             else if (_diff > 1 && _diff <= 7) dateStr = 'In ' + _diff + ' days';
             else dateStr = _mDate;
         }
+        try { fullDateStr = new Date(_mDate + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); } catch(e) { fullDateStr = _mDate; }
     }
-    var timeDisplay = (timeStr ? timeStr : '') + (dateStr ? (timeStr ? ' · ' : '') + dateStr : '');
+    var timeDisplay = (timeStr ? timeStr : '') + (dateStr ? (timeStr ? ' \u00B7 ' : '') + dateStr : '');
     var participants = dm.participant_names || [];
     var participantStr = participants.join(', ');
     var location = dm.location || '';
+    var aid = String(dm.id);
 
-    // Build expandable detail
-    var detailLines = [];
-    if (participants.length > 0) detailLines.push('With: ' + participantStr);
-    if (location) detailLines.push('Location: ' + location);
-    if (dm.raw_text) detailLines.push('\nSource: ' + (dm.raw_text || '').substring(0, 150));
-    var detailContent = detailLines.join('\n');
-    var hasDetail = detailContent.length > 0;
+    // Expanded detail: full meeting info + triage
+    var detailRows = [];
+    if (fullDateStr) detailRows.push('\uD83D\uDCC5  ' + fullDateStr);
+    if (timeStr) detailRows.push('\uD83D\uDD50  ' + timeStr);
+    if (location) detailRows.push('\uD83D\uDCCD  ' + location);
+    if (participantStr) detailRows.push('\uD83D\uDC65  ' + participantStr);
 
-    var clickAttr = hasDetail
-        ? ' onclick="var n=this.querySelector(\'.fire-detail\');n.style.display=n.style.display===\'none\'?\'block\':\'none\'" style="cursor:pointer;"'
-        : '';
-    var chevron = hasDetail ? ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span>' : '';
-    var detailHtml = hasDetail
-        ? '<div class="fire-detail" style="display:none;font-size:12px;color:var(--text2);padding:6px 18px 10px;line-height:1.5;border-top:1px solid var(--border-light);white-space:pre-wrap;">' +
-          esc(detailContent) + '</div>'
-        : '';
-
-    return '<div class="card card-compact"' + clickAttr + '><div class="card-header">' +
+    var html = '<div class="card card-compact" style="cursor:pointer;" onclick="_toggleTriageCard(this)"><div class="card-header">' +
         '<span class="nav-dot ' + dotClass + '" style="margin-top:5px;"></span>' +
-        '<span class="card-title">' + esc(dm.title || '') + chevron + '</span>' +
+        '<span class="card-title">' + esc(dm.title || '') + ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span></span>' +
         '<span class="card-time">' + esc(timeDisplay) + '</span>' +
         '</div>' +
         '<div class="card-body" style="font-size:11px;color:var(--text3);padding:2px 0 4px 18px;">' +
         (participantStr ? esc(participantStr) + ' &middot; ' : '') +
         '<span style="color:var(--' + dotClass.replace('lgray', 'text3') + ');">' + esc(statusLabel) + '</span>' +
-        '</div>' + detailHtml + '</div>';
+        '</div>';
+    // Expandable detail
+    html += '<div class="triage-detail" style="display:none;">';
+    if (detailRows.length > 0) {
+        html += '<div style="font-size:12px;color:var(--text2);padding:8px 18px;line-height:1.8;border-top:1px solid var(--border-light);">' + detailRows.map(esc).join('<br>') + '</div>';
+    }
+    html += _landingTriageBar(aid, dm.title || '', participantStr, 'meeting', dm.id);
+    html += '</div></div>';
+    return html;
 }
 
 function renderDeadlineCompact(dl) {
@@ -1905,18 +1906,20 @@ function renderDeadlineCompact(dl) {
     else if (priority === 'high' || daysText === 'Tomorrow') { dotClass = 'amber'; }
     else if (daysText.includes('overdue')) { dotClass = 'red'; timeStyle = 'color:var(--red);font-weight:600;'; }
 
-    var hasSnippet = dl.source_snippet && dl.source_snippet.trim().length > 0;
-    var clickAttr = hasSnippet ? ' onclick="var n=this.querySelector(\'.dl-detail\');n.style.display=n.style.display===\'none\'?\'block\':\'none\'" style="cursor:pointer;"' : '';
-    var chevron = hasSnippet ? ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span>' : '';
-    var detailHtml = hasSnippet
-        ? '<div class="dl-detail" style="display:none;font-size:12px;color:var(--text2);padding:6px 18px 10px 18px;line-height:1.5;border-top:1px solid var(--border-light);white-space:pre-wrap;">' + esc(dl.source_snippet) + '</div>'
-        : '';
+    var snippetText = (dl.source_snippet || '').trim();
+    var aid = String(dl.id);
 
-    return '<div class="card card-compact"' + clickAttr + '><div class="card-header">' +
+    var html = '<div class="card card-compact" style="cursor:pointer;" onclick="_toggleTriageCard(this)"><div class="card-header">' +
         '<span class="nav-dot ' + dotClass + '" style="margin-top:5px;"></span>' +
-        '<span class="card-title">' + esc(dl.description || '') + chevron + '</span>' +
+        '<span class="card-title">' + esc(dl.description || '') + ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span></span>' +
         '<span class="card-time" style="' + timeStyle + '">' + esc(daysText) + '</span>' +
-        '</div>' + detailHtml + '</div>';
+        '</div>';
+    // Expandable detail + triage
+    html += '<div class="triage-detail" style="display:none;">';
+    if (snippetText) html += '<div style="font-size:12px;color:var(--text2);padding:6px 18px 10px;line-height:1.5;border-top:1px solid var(--border-light);white-space:pre-wrap;">' + esc(snippetText) + '</div>';
+    html += _landingTriageBar(aid, dl.description || '', snippetText, 'deadline', dl.id);
+    html += '</div></div>';
+    return html;
 }
 
 function renderFireCompact(alert) {
@@ -2116,26 +2119,104 @@ function _showToast(msg) {
 
 // ═══ CRITICAL-CARD-1: Critical item rendering ═══
 
+// ═══ LANDING-TRIAGE-1: Triage buttons for landing page cards ═══
+
+function _landingTriageBar(aid, title, body, cardType, itemId) {
+    // cardType: 'critical', 'deadline', 'meeting', 'travel'
+    var ctx = (body || '').substring(0, 200);
+    var html = '<div class="triage-actions" style="display:flex;flex-wrap:wrap;gap:6px;padding:8px 16px 12px;">';
+
+    if (cardType === 'travel') {
+        // Reduced set for travel
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Regarding my travel: ' + esc(title).replace(/'/g, "\\'") + '. What should I know?\')">💬 Ask Baker</button>';
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Confirm my booking: ' + esc(title).replace(/'/g, "\\'") + '\')">✅ Confirm Booking</button>';
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Find a hotel near my destination for ' + esc(title).replace(/'/g, "\\'") + '\')">🏨 Book Accommodation</button>';
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_landingDismiss(\'' + cardType + '\',' + itemId + ',this)">✕ Dismiss</button>';
+    } else {
+        // Full 10 actions for critical, deadline, meeting
+        var _t = esc(title).replace(/'/g, "\\'");
+        var _c = esc(ctx).replace(/'/g, "\\'");
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Draft an email regarding: \\x22' + _t + '\\x22. Context: ' + _c + '\')">✉ Draft Email</button>';
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Draft a WhatsApp message regarding: \\x22' + _t + '\\x22. Context: ' + _c + '\')">💬 Draft WA</button>';
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Analyze this situation in depth: \\x22' + _t + '\\x22. Context: ' + _c + '\')">🔍 Analyze</button>';
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Give me a 3-line summary of: \\x22' + _t + '\\x22. Context: ' + _c + '\')">📋 Summarize</button>';
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Run a comprehensive dossier on the key people in: \\x22' + _t + '\\x22\')">🗂 Dossier</button>';
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageCreateClickUp(' + aid + ',\'' + _t + '\',\'' + _c + '\')">↗ ClickUp</button>';
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Draft an email delegating this task: \\x22' + _t + '\\x22\')">👤 Delegate</button>';
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_landingDismiss(\'' + cardType + '\',' + itemId + ',this)">✕ Dismiss</button>';
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Regarding: \\x22' + _t + '\\x22. ' + _c + '. What should I know?\')">💬 Ask Baker</button>';
+
+        // Last button varies by card type
+        if (cardType === 'critical') {
+            html += '<button class="triage-pill" onclick="event.stopPropagation();_landingMarkNotCritical(' + itemId + ',this)">⚡ Not Critical</button>';
+        } else if (cardType === 'deadline') {
+            html += '<button class="triage-pill" style="background:var(--green);color:#fff;border-color:var(--green);" onclick="event.stopPropagation();_landingMarkDone(' + itemId + ',this)">✓ Mark Done</button>';
+        } else if (cardType === 'meeting') {
+            html += '<button class="triage-pill" style="background:var(--red);color:#fff;border-color:var(--red);" onclick="event.stopPropagation();_landingCancelMeeting(' + itemId + ',this)">✕ Cancel Meeting</button>';
+        }
+    }
+    html += '</div>';
+    return html;
+}
+
+function _landingDismiss(cardType, itemId, btn) {
+    var card = btn.closest('.card');
+    var endpoint = '';
+    if (cardType === 'critical') endpoint = '/api/critical/' + itemId + '/done';
+    else if (cardType === 'deadline') endpoint = '/api/deadlines/' + itemId + '/dismiss';
+    else if (cardType === 'meeting') endpoint = '/api/alerts/' + itemId + '/dismiss';
+    else endpoint = '/api/alerts/' + itemId + '/dismiss';
+    if (!endpoint) return;
+    bakerFetch(endpoint, { method: 'POST' }).then(function() {
+        if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
+        _showToast('Dismissed');
+    });
+}
+
+function _landingMarkNotCritical(deadlineId, btn) {
+    var card = btn.closest('.card');
+    bakerFetch('/api/critical/' + deadlineId + '/done', { method: 'POST' }).then(function() {
+        if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
+        _showToast('Removed from Critical');
+    });
+}
+
+function _landingMarkDone(deadlineId, btn) {
+    var card = btn.closest('.card');
+    bakerFetch('/api/deadlines/' + deadlineId + '/complete', { method: 'POST' }).then(function() {
+        if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
+        _showToast('Marked as done \u2713');
+    });
+}
+
+function _landingCancelMeeting(meetingId, btn) {
+    var card = btn.closest('.card');
+    bakerFetch('/api/detected-meetings/' + meetingId + '/cancel', { method: 'POST' }).then(function() {
+        if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
+        _showToast('Meeting cancelled');
+    });
+}
+
 function _renderCriticalItem(ci) {
     var desc = ci.description || '';
     var truncDesc = desc.length > 80 ? desc.substring(0, 77) + '...' : desc;
     var timeLabel = ci.critical_flagged_at ? fmtRelativeTime(ci.critical_flagged_at) : '';
     var snippet = (ci.source_snippet || '').trim();
-    var hasDetail = snippet.length > 0;
-    var clickAttr = hasDetail
-        ? ' onclick="var n=this.querySelector(\'.fire-detail\');n.style.display=n.style.display===\'none\'?\'block\':\'none\'"'
-        : '';
-    var chevron = hasDetail ? ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span>' : '';
-    var detailHtml = hasDetail
-        ? '<div class="fire-detail" style="display:none;font-size:12px;color:var(--text2);padding:6px 16px 10px;line-height:1.5;border-top:1px solid var(--border-light);white-space:pre-wrap;">' + esc(snippet.substring(0, 300)) + '</div>'
-        : '';
+    var body = snippet.substring(0, 300);
+    var aid = String(ci.id);
 
-    return '<div class="card card-compact" style="cursor:pointer;"' + clickAttr + '><div class="card-header">' +
+    var html = '<div class="card card-compact" style="cursor:pointer;" onclick="_toggleTriageCard(this)"><div class="card-header">' +
         '<span style="margin-right:4px;">\u26A1</span>' +
-        '<span class="card-title" style="flex:1;">' + esc(truncDesc) + chevron + '</span>' +
+        '<span class="card-title" style="flex:1;">' + esc(truncDesc) + ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span></span>' +
         '<button class="triage-pill" style="font-size:10px;padding:2px 8px;margin-left:4px;background:var(--green);color:#fff;border-color:var(--green);" onclick="event.stopPropagation();_criticalDone(' + ci.id + ',this)">Done</button>' +
         '<span class="card-time" style="min-width:40px;text-align:right;">' + esc(timeLabel) + '</span>' +
-        '</div>' + detailHtml + '</div>';
+        '</div>';
+    // Expandable detail + triage
+    html += '<div class="triage-detail" style="display:none;">';
+    if (body) html += '<div style="font-size:12px;color:var(--text2);padding:8px 16px;line-height:1.5;white-space:pre-wrap;border-top:1px solid var(--border-light);">' + esc(body) + '</div>';
+    html += _landingTriageBar(aid, desc, body, 'critical', ci.id);
+    html += '</div></div>';
+    return html;
 }
 
 function _criticalDone(deadlineId, btn) {

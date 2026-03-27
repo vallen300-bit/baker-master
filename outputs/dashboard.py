@@ -4875,6 +4875,27 @@ async def add_critical_quick(request: Request):
         return {"error": str(e)}
 
 
+@app.post("/api/detected-meetings/{meeting_id}/cancel", tags=["meetings"], dependencies=[Depends(verify_api_key)])
+async def cancel_detected_meeting(meeting_id: int):
+    """LANDING-TRIAGE-1: Cancel a detected meeting."""
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor()
+            cur.execute("UPDATE detected_meetings SET status = 'cancelled', dismissed = TRUE WHERE id = %s", (meeting_id,))
+            conn.commit()
+            cur.close()
+        finally:
+            store._put_conn(conn)
+        return {"status": "cancelled", "id": meeting_id}
+    except Exception as e:
+        logger.error(f"/api/detected-meetings/{meeting_id}/cancel failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/deadlines/{deadline_id}/reschedule", tags=["deadlines"], dependencies=[Depends(verify_api_key)])
 async def reschedule_deadline_api(deadline_id: int, body: dict = None):
     """Reschedule a deadline to a new due_date."""
