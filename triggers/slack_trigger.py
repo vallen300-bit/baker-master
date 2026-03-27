@@ -152,6 +152,21 @@ def run_slack_poll():
                 # 1. Silent ingest — embed every human message to Qdrant baker-slack
                 _embed_message(store, channel_id, user_name, text, ts, config.slack.collection)
 
+                # SLACK-STRUCTURED-1: Store to PostgreSQL for structured queries + Tier 2 enrichment
+                try:
+                    msg_dt = datetime.fromtimestamp(float(ts), tz=timezone.utc)
+                    store.store_slack_message(
+                        msg_id=source_id,
+                        channel_id=channel_id,
+                        user_id=user_id,
+                        user_name=user_name,
+                        full_text=text,
+                        thread_ts=msg.get("thread_ts"),
+                        received_at=msg_dt,
+                    )
+                except Exception as _se:
+                    logger.debug(f"Slack PostgreSQL store failed (non-fatal): {_se}")
+
                 # 2. @Baker mention — run full pipeline (S3 posts thread reply)
                 baker_uid = config.slack.baker_bot_user_id
                 is_mention = bool(baker_uid and f"<@{baker_uid}>" in text)

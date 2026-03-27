@@ -306,6 +306,14 @@ def _enrich_interactions(interactions: list, matter_name: str) -> list:
                     row = cur.fetchone()
                     if row:
                         content = f"Meeting: {row.get('title', '')}: {row.get('body', '')}"
+                elif channel == "slack" and source_ref:
+                    cur.execute("""
+                        SELECT LEFT(full_text, 800) as body, user_name
+                        FROM slack_messages WHERE id = %s
+                    """, (source_ref,))
+                    row = cur.fetchone()
+                    if row and row.get("body"):
+                        content = f"Slack ({row.get('user_name', '?')}): {row['body']}"
 
                 enriched.append({
                     **ix,

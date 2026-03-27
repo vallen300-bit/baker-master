@@ -93,6 +93,9 @@ class SentinelStoreBack:
         # Ensure whatsapp_messages table exists (ARCH-7)
         self._ensure_whatsapp_messages_table()
 
+        # SLACK-STRUCTURED-1: Ensure slack_messages table exists
+        self._ensure_slack_messages_table()
+
         # Ensure insights table exists (INSIGHT-1)
         self._ensure_insights_table()
 
@@ -937,6 +940,67 @@ class SentinelStoreBack:
             return True
         except Exception as e:
             logger.error(f"store_whatsapp_message failed: {e}")
+            return False
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # Slack Messages (SLACK-STRUCTURED-1)
+    # -------------------------------------------------------
+
+    def _ensure_slack_messages_table(self):
+        """Create slack_messages table for structured Slack storage."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS slack_messages (
+                    id TEXT PRIMARY KEY,
+                    channel_id TEXT NOT NULL,
+                    channel_name TEXT,
+                    user_id TEXT,
+                    user_name TEXT,
+                    full_text TEXT,
+                    thread_ts TEXT,
+                    received_at TIMESTAMPTZ,
+                    ingested_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_slack_messages_channel ON slack_messages(channel_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_slack_messages_received ON slack_messages(received_at)")
+            conn.commit()
+            cur.close()
+            logger.info("slack_messages table verified")
+        except Exception as e:
+            logger.warning(f"Could not ensure slack_messages table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def store_slack_message(self, msg_id: str, channel_id: str, channel_name: str = None,
+                            user_id: str = None, user_name: str = None,
+                            full_text: str = None, thread_ts: str = None,
+                            received_at=None) -> bool:
+        """SLACK-STRUCTURED-1: Upsert a Slack message. Returns True on success."""
+        conn = self._get_conn()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO slack_messages (id, channel_id, channel_name, user_id, user_name,
+                    full_text, thread_ts, received_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO NOTHING
+            """, (msg_id, channel_id, channel_name, user_id, user_name,
+                  full_text, thread_ts, received_at))
+            conn.commit()
+            cur.close()
+            return True
+        except Exception as e:
+            conn.rollback()
+            logger.debug(f"store_slack_message failed: {e}")
             return False
         finally:
             self._put_conn(conn)
