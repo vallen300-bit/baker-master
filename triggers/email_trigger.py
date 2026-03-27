@@ -271,8 +271,9 @@ def _process_baker_labeled_threads(service):
 
         # Skip if already processed this label application
         dedup_key = f"baker-label-{thread_id}"
-        if trigger_state.is_processed("email", dedup_key):
-            # Still remove the label so it doesn't pile up
+        existing_wm = trigger_state.get_watermark(dedup_key)
+        if existing_wm and existing_wm.year > 2001:
+            # Already processed — still try to remove the label
             _remove_baker_label(service, thread_id)
             continue
 
@@ -375,14 +376,14 @@ def _process_baker_labeled_threads(service):
             except Exception as _we:
                 logger.warning(f"BAKER-LABEL-1: WhatsApp push failed: {_we}")
 
-            # Mark as processed
-            trigger_state.mark_processed("email", dedup_key)
+            # Mark as processed via watermark (trigger_log has no direct insert)
+            trigger_state.set_watermark(dedup_key, datetime.now(timezone.utc))
             logger.info(f"BAKER-LABEL-1: analysis complete for '{subject[:60]}'")
 
         except Exception as e:
             logger.error(f"BAKER-LABEL-1: failed to process thread {thread_id}: {e}")
         finally:
-            # Always remove the label
+            # Try to remove the label (requires gmail.modify scope — may fail gracefully)
             _remove_baker_label(service, thread_id)
 
 
