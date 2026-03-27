@@ -156,6 +156,15 @@ class SentinelRetriever:
                 logger.warning(f"Failed to search {coll}: {e}")
                 continue
 
+        # THREE-TIER-MEMORY: Add Tier 2 + Tier 3 results from PostgreSQL
+        # Only if Qdrant results are sparse (< 8 results above threshold)
+        strong_results = [c for c in all_contexts if c.score >= 0.5]
+        if len(strong_results) < 8:
+            tier_contexts = self._search_memory_tiers(query, project)
+            all_contexts.extend(tier_contexts)
+            if tier_contexts:
+                logger.info(f"THREE-TIER-MEMORY: added {len(tier_contexts)} results from Tier 2/3")
+
         # RETRIEVAL-RERANK-1: Boost scores by term match, name match, recency
         all_contexts = self._rerank_results(all_contexts, query)
 
@@ -242,6 +251,106 @@ class SentinelRetriever:
                 ctx.score = min(ctx.score + boost, 1.0)
 
         return contexts
+
+    def _search_memory_tiers(self, query: str, project: Optional[str] = None) -> list["RetrievedContext"]:
+        """THREE-TIER-MEMORY: Search Tier 2 summaries + Tier 3 institutional from PostgreSQL.
+        Results get reduced scores (0.7x for Tier 2, 0.5x for Tier 3) so active data is preferred."""
+        results = []
+        try:
+            from memory.store_back import SentinelStoreBack
+            import psycopg2.extras
+            store = SentinelStoreBack._get_global_instance()
+            conn = store._get_conn()
+            if not conn:
+                return results
+            try:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+                # Build search terms for text matching
+                import re
+                _stop = {"the", "and", "for", "are", "but", "not", "you", "all", "can",
+                         "has", "how", "its", "what", "where", "when", "which", "with",
+                         "about", "baker", "tell", "show", "give", "know", "status"}
+                terms = [w for w in re.findall(r'\b\w{3,}\b', query.lower()) if w not in _stop]
+                if not terms:
+                    cur.close()
+                    return results
+
+                # Build ILIKE conditions for top 3 query terms
+                like_conditions = " OR ".join(
+                    [f"summary ILIKE %s" for _ in terms[:3]]
+                )
+                like_params = [f"%{t}%" for t in terms[:3]]
+
+                # Tier 2: memory_summaries (recent compressed, 0.7x weight)
+                matter_filter = ""
+                matter_params = []
+                if project:
+                    matter_filter = " AND matter_slug ILIKE %s"
+                    matter_params = [f"%{project}%"]
+
+                cur.execute(f"""
+                    SELECT matter_slug, contact_name, summary, period_start, period_end,
+                           interaction_count, 2 as tier
+                    FROM memory_summaries
+                    WHERE ({like_conditions}){matter_filter}
+                    ORDER BY updated_at DESC
+                    LIMIT 5
+                """, like_params + matter_params)
+
+                for row in cur.fetchall():
+                    summary_text = row.get("summary", "")
+                    # Score based on how many terms match (max ~0.7)
+                    match_count = sum(1 for t in terms if t in summary_text.lower())
+                    score = min(0.7, 0.3 + (match_count * 0.1))
+                    results.append(RetrievedContext(
+                        content=summary_text[:2000],
+                        source="tier2_summary",
+                        score=score,
+                        metadata={
+                            "collection": "memory_summaries",
+                            "matter_slug": row.get("matter_slug", ""),
+                            "contact_name": row.get("contact_name", ""),
+                            "tier": 2,
+                            "period": f"{row.get('period_start', '')} to {row.get('period_end', '')}",
+                            "label": f"[Tier 2] {row.get('matter_slug', '')}",
+                        },
+                        token_estimate=self._estimate_tokens(summary_text[:2000]),
+                    ))
+
+                # Tier 3: memory_institutional (permanent knowledge, 0.5x weight)
+                cur.execute(f"""
+                    SELECT matter_slug, brief, period_start, period_end, 3 as tier
+                    FROM memory_institutional
+                    WHERE ({like_conditions}){matter_filter}
+                    ORDER BY updated_at DESC
+                    LIMIT 3
+                """, like_params + matter_params)
+
+                for row in cur.fetchall():
+                    brief_text = row.get("brief", "")
+                    match_count = sum(1 for t in terms if t in brief_text.lower())
+                    score = min(0.5, 0.2 + (match_count * 0.1))
+                    results.append(RetrievedContext(
+                        content=brief_text[:1500],
+                        source="tier3_institutional",
+                        score=score,
+                        metadata={
+                            "collection": "memory_institutional",
+                            "matter_slug": row.get("matter_slug", ""),
+                            "tier": 3,
+                            "period": f"{row.get('period_start', '')} to {row.get('period_end', '')}",
+                            "label": f"[Tier 3] {row.get('matter_slug', '')}",
+                        },
+                        token_estimate=self._estimate_tokens(brief_text[:1500]),
+                    ))
+
+                cur.close()
+            finally:
+                store._put_conn(conn)
+        except Exception as e:
+            logger.debug(f"THREE-TIER-MEMORY: tier search failed (non-fatal): {e}")
+        return results
 
     def _enrich_with_full_text(self, contexts: list["RetrievedContext"]) -> list["RetrievedContext"]:
         """

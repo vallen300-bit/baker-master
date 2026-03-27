@@ -7783,6 +7783,79 @@ async def get_memory_summaries(matter: str = None, limit: int = 20):
         store._put_conn(conn)
 
 
+@app.post("/api/memory/compress", tags=["memory"], dependencies=[Depends(verify_api_key)])
+async def trigger_memory_compression(tier: int = Query(2, ge=2, le=3)):
+    """THREE-TIER-MEMORY: Manually trigger compression for testing.
+    tier=2: Opus weekly compression. tier=3: Sonnet institutional."""
+    import threading
+    try:
+        if tier == 2:
+            from orchestrator.memory_consolidator import run_memory_consolidation
+            t = threading.Thread(target=run_memory_consolidation, daemon=True)
+            t.start()
+            return {"status": "started", "tier": 2, "model": "Opus", "note": "Running in background"}
+        else:
+            from orchestrator.memory_consolidator import run_institutional_consolidation
+            t = threading.Thread(target=run_institutional_consolidation, daemon=True)
+            t.start()
+            return {"status": "started", "tier": 3, "model": "Sonnet", "note": "Running in background"}
+    except Exception as e:
+        logger.error(f"POST /api/memory/compress failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/memory/health", tags=["memory"], dependencies=[Depends(verify_api_key)])
+async def get_memory_health():
+    """THREE-TIER-MEMORY: Memory tier health stats for dashboard."""
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        stats = {}
+        # Tier 1: active records (last 90 days)
+        cur.execute("""
+            SELECT
+                (SELECT COUNT(*) FROM email_messages WHERE received_date > NOW() - INTERVAL '90 days') as emails,
+                (SELECT COUNT(*) FROM whatsapp_messages WHERE received_at > NOW() - INTERVAL '90 days') as whatsapp,
+                (SELECT COUNT(*) FROM alerts WHERE created_at > NOW() - INTERVAL '90 days') as alerts,
+                (SELECT COUNT(*) FROM conversation_memory WHERE created_at > NOW() - INTERVAL '90 days') as conversations
+        """)
+        tier1 = cur.fetchone()
+        stats["tier1"] = {"label": "Active (0-90d)", "total": sum(v or 0 for v in tier1.values()), "breakdown": dict(tier1)}
+        # Tier 2
+        try:
+            cur.execute("SELECT COUNT(*) as count, MAX(updated_at) as last_run FROM memory_summaries")
+            t2 = cur.fetchone()
+            stats["tier2"] = {"label": "Compressed (Opus)", "count": t2["count"] or 0,
+                              "last_compression": t2["last_run"].isoformat() if t2.get("last_run") else None}
+        except Exception:
+            stats["tier2"] = {"label": "Compressed", "count": 0, "last_compression": None}
+        # Tier 3
+        try:
+            cur.execute("SELECT COUNT(*) as count, MAX(updated_at) as last_run FROM memory_institutional")
+            t3 = cur.fetchone()
+            stats["tier3"] = {"label": "Institutional (Sonnet)", "count": t3["count"] or 0,
+                              "last_compression": t3["last_run"].isoformat() if t3.get("last_run") else None}
+        except Exception:
+            stats["tier3"] = {"label": "Institutional", "count": 0, "last_compression": None}
+        # Archive
+        try:
+            cur.execute("SELECT COUNT(*) as count FROM memory_archive_log")
+            stats["archive"] = {"count": cur.fetchone()["count"] or 0}
+        except Exception:
+            stats["archive"] = {"count": 0}
+        cur.close()
+        return stats
+    except Exception as e:
+        logger.error(f"GET /api/memory/health failed: {e}")
+        return {"error": str(e)}
+    finally:
+        store._put_conn(conn)
+
+
 # ============================================================
 # PROACTIVE-INITIATIVE-1: Initiatives API
 # ============================================================

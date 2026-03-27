@@ -461,6 +461,48 @@ def _log_archived_interactions(interactions: list, summary_id: int):
         logger.debug(f"Archive log failed (non-fatal): {e}")
 
 
+def _cleanup_old_vectors(interactions: list, matter_slug: str):
+    """Remove old individual interaction vectors from Qdrant after compression.
+    Only removes vectors that match the compressed interactions by source_ref."""
+    if not interactions:
+        return
+    try:
+        from memory.store_back import SentinelStoreBack
+        from qdrant_client.models import Filter, FieldCondition, MatchAny
+        store = SentinelStoreBack._get_global_instance()
+
+        # Collect source_refs that were compressed
+        source_refs = []
+        for ix in interactions:
+            ref = ix.get("source_ref", "")
+            if ref:
+                source_refs.append(ref)
+
+        if not source_refs:
+            return
+
+        # Delete from sentinel-interactions by source_ref match
+        # Do in batches of 50 to avoid oversized requests
+        removed = 0
+        for i in range(0, len(source_refs), 50):
+            batch = source_refs[i:i+50]
+            try:
+                store.qdrant.delete(
+                    collection_name="sentinel-interactions",
+                    points_selector=Filter(
+                        must=[FieldCondition(key="source_ref", match=MatchAny(any=batch))]
+                    ),
+                )
+                removed += len(batch)
+            except Exception as _e:
+                logger.debug(f"Qdrant batch delete failed for {matter_slug}: {_e}")
+
+        if removed:
+            logger.info(f"THREE-TIER-MEMORY: removed ~{removed} old vectors for {matter_slug}")
+    except Exception as e:
+        logger.warning(f"Qdrant cleanup failed for {matter_slug} (non-fatal): {e}")
+
+
 def _embed_summary_to_qdrant(matter_slug: str, summary: str, summary_id: int):
     """Create a Qdrant vector for the compressed summary (replaces individual interaction vectors)."""
     try:
@@ -663,6 +705,7 @@ def run_memory_consolidation():
                 if sid:
                     _log_archived_interactions(interactions, sid)
                     _embed_summary_to_qdrant(matter_name, summary, sid)
+                    _cleanup_old_vectors(interactions, matter_name)
                 summaries_created += 1
         else:
             for contact_name, contact_ixs in by_contact.items():
@@ -680,6 +723,7 @@ def run_memory_consolidation():
                     if sid:
                         _log_archived_interactions(contact_ixs, sid)
                         _embed_summary_to_qdrant(matter_name, summary, sid)
+                        _cleanup_old_vectors(contact_ixs, matter_name)
                     summaries_created += 1
 
     elapsed_ms = int((time.time() - t0) * 1000)
