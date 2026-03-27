@@ -176,6 +176,216 @@ def _get_gmail_service():
     return build("gmail", "v1", credentials=creds)
 
 
+# -------------------------------------------------------
+# BAKER-LABEL-1: "Baker" Gmail label — Director flags emails for deep analysis
+# -------------------------------------------------------
+
+_BAKER_LABEL_NAME = "Baker"
+_baker_label_id: str = ""  # cached after first lookup
+
+
+def _get_baker_label_id(service) -> str:
+    """Find or create the 'Baker' label in Gmail. Cached after first call."""
+    global _baker_label_id
+    if _baker_label_id:
+        return _baker_label_id
+
+    try:
+        results = service.users().labels().list(userId="me").execute()
+        for label in results.get("labels", []):
+            if label["name"] == _BAKER_LABEL_NAME:
+                _baker_label_id = label["id"]
+                logger.info(f"BAKER-LABEL-1: found label '{_BAKER_LABEL_NAME}' (id={_baker_label_id})")
+                return _baker_label_id
+
+        # Label doesn't exist — create it
+        body = {
+            "name": _BAKER_LABEL_NAME,
+            "labelListVisibility": "labelShow",
+            "messageListVisibility": "show",
+        }
+        created = service.users().labels().create(userId="me", body=body).execute()
+        _baker_label_id = created["id"]
+        logger.info(f"BAKER-LABEL-1: created label '{_BAKER_LABEL_NAME}' (id={_baker_label_id})")
+        return _baker_label_id
+    except Exception as e:
+        logger.warning(f"BAKER-LABEL-1: failed to get/create label: {e}")
+        return ""
+
+
+def _poll_baker_labeled_emails(service) -> list:
+    """Poll Gmail for threads with the 'Baker' label. Returns thread IDs."""
+    label_id = _get_baker_label_id(service)
+    if not label_id:
+        return []
+
+    try:
+        results = service.users().threads().list(
+            userId="me", labelIds=[label_id], maxResults=10
+        ).execute()
+        threads = results.get("threads", [])
+        if threads:
+            logger.info(f"BAKER-LABEL-1: found {len(threads)} Baker-labeled threads")
+        return threads
+    except Exception as e:
+        logger.warning(f"BAKER-LABEL-1: label poll failed: {e}")
+        return []
+
+
+def _remove_baker_label(service, thread_id: str):
+    """Remove the 'Baker' label from a thread after processing."""
+    label_id = _get_baker_label_id(service)
+    if not label_id:
+        return
+
+    try:
+        # Get all message IDs in the thread
+        thread = service.users().threads().get(userId="me", id=thread_id, format="minimal").execute()
+        for msg in thread.get("messages", []):
+            service.users().messages().modify(
+                userId="me", id=msg["id"],
+                body={"removeLabelIds": [label_id]}
+            ).execute()
+        logger.info(f"BAKER-LABEL-1: removed label from thread {thread_id}")
+    except Exception as e:
+        logger.warning(f"BAKER-LABEL-1: failed to remove label from {thread_id}: {e}")
+
+
+def _process_baker_labeled_threads(service):
+    """
+    BAKER-LABEL-1: Process emails the Director flagged with 'Baker' label.
+    Runs deep analysis via Scan pipeline and pushes result to WhatsApp + dashboard.
+    """
+    labeled = _poll_baker_labeled_emails(service)
+    if not labeled:
+        return
+
+    from scripts import extract_gmail
+    from memory.store_back import SentinelStoreBack
+
+    extract_gmail._gmail_service = service
+    store = SentinelStoreBack._get_global_instance()
+
+    for item in labeled:
+        thread_id = item["id"]
+
+        # Skip if already processed this label application
+        dedup_key = f"baker-label-{thread_id}"
+        if trigger_state.is_processed("email", dedup_key):
+            # Still remove the label so it doesn't pile up
+            _remove_baker_label(service, thread_id)
+            continue
+
+        try:
+            # Fetch full thread
+            thread_detail = extract_gmail.fetch_thread_detail(service, thread_id)
+            if not thread_detail:
+                _remove_baker_label(service, thread_id)
+                continue
+
+            messages = thread_detail.get("messages", [])
+            if len(messages) > config.gmail.max_messages_per_thread:
+                messages = messages[-config.gmail.max_messages_per_thread:]
+
+            formatted = extract_gmail.format_thread(thread_detail, messages)
+            if not formatted:
+                _remove_baker_label(service, thread_id)
+                continue
+
+            metadata = formatted.get("metadata", {})
+            subject = metadata.get("subject", "(no subject)")
+            sender = metadata.get("primary_sender", "unknown")
+            email_text = formatted["text"]
+
+            logger.info(f"BAKER-LABEL-1: deep analyzing '{subject}' from {sender}")
+
+            # Store email if not already stored
+            try:
+                store.store_email_message(
+                    message_id=thread_id,
+                    thread_id=thread_id,
+                    sender_name=sender,
+                    sender_email=metadata.get("primary_sender_email"),
+                    subject=subject,
+                    full_body=email_text,
+                    received_date=metadata.get("received_date"),
+                    priority="high",
+                )
+            except Exception:
+                pass
+
+            # Run deep analysis via Baker's agentic pipeline
+            import anthropic
+            client = anthropic.Anthropic(api_key=config.claude.api_key)
+
+            analysis_prompt = f"""The Director has flagged this email for your deep analysis. Analyze it thoroughly and provide:
+
+1. **Summary** — What is this about? Key facts.
+2. **Who** — People involved, their roles, any VIP connections.
+3. **Action required** — What does the Director need to do, if anything?
+4. **Deadlines** — Any dates or time-sensitive elements.
+5. **Risks & Opportunities** — What should the Director be aware of?
+6. **Recommended response** — If a reply is needed, suggest the approach.
+7. **Connected matters** — Link to any known Baker matters or ongoing issues.
+
+---
+
+**From:** {sender} ({metadata.get('primary_sender_email', '')})
+**Subject:** {subject}
+**Date:** {metadata.get('received_date', '')}
+
+**Full email:**
+{email_text[:8000]}"""
+
+            resp = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=2000,
+                messages=[{"role": "user", "content": analysis_prompt}],
+            )
+
+            try:
+                from orchestrator.cost_monitor import log_api_cost
+                log_api_cost("claude-sonnet-4-20250514", resp.usage.input_tokens, resp.usage.output_tokens, source="baker_label_analysis")
+            except Exception:
+                pass
+
+            analysis = resp.content[0].text
+
+            # Create alert on dashboard
+            store.create_alert(
+                tier=1,
+                title=f"Email Analysis: {subject[:80]}",
+                body=f"**From:** {sender}\n**Subject:** {subject}\n\n{analysis}",
+                action_required=True,
+                tags=["baker-label", "email-analysis"],
+                source="baker_label",
+                source_id=dedup_key,
+            )
+
+            # Push to WhatsApp
+            try:
+                from outputs.whatsapp_sender import send_whatsapp
+                wa_text = (
+                    f"📧 *Email Analysis* (you flagged this)\n\n"
+                    f"*From:* {sender}\n"
+                    f"*Subject:* {subject}\n\n"
+                    f"{analysis[:3000]}"
+                )
+                send_whatsapp(wa_text)
+            except Exception as _we:
+                logger.warning(f"BAKER-LABEL-1: WhatsApp push failed: {_we}")
+
+            # Mark as processed
+            trigger_state.mark_processed("email", dedup_key)
+            logger.info(f"BAKER-LABEL-1: analysis complete for '{subject[:60]}'")
+
+        except Exception as e:
+            logger.error(f"BAKER-LABEL-1: failed to process thread {thread_id}: {e}")
+        finally:
+            # Always remove the label
+            _remove_baker_label(service, thread_id)
+
+
 def poll_gmail() -> list:
     """
     Poll Gmail for new threads since last watermark.
@@ -394,6 +604,13 @@ def check_new_emails():
         return
 
     logger.info("Email trigger: checking for new threads...")
+
+    # BAKER-LABEL-1: Check for Director-flagged emails first (separate from regular poll)
+    try:
+        _bl_service = _get_gmail_service()
+        _process_baker_labeled_threads(_bl_service)
+    except Exception as _ble:
+        logger.warning(f"BAKER-LABEL-1: label check failed (non-fatal): {_ble}")
 
     try:
         new_threads = poll_gmail()
