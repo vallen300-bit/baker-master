@@ -8517,7 +8517,7 @@ async def dossier_library_page(key: str = ""):
                 "name": name,
                 "date": r["created_at"],
                 "source": "Cowork",
-                "view_url": f"/api/dossiers/{r['analysis_id']}/view?key={key}",
+                "view_url": f"/api/dossiers/analysis/{r['analysis_id']}/view?key={key}",
             })
 
         cur.close()
@@ -8570,6 +8570,46 @@ async def dossier_library_page(key: str = ""):
 # DOSSIER-PIPELINE-1: Unified Dossiers API
 # ============================================================
 
+@app.post("/api/research/request", tags=["research"], dependencies=[Depends(verify_api_key)])
+async def api_request_dossier(request: Request, background_tasks: BackgroundTasks):
+    """Director manually requests a dossier on a person/company."""
+    body = await request.json()
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+
+    import psycopg2.extras
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=500, detail="DB unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO research_proposals
+                (trigger_source, trigger_ref, subject_name, subject_type,
+                 context, specialists, status, approved_at)
+            VALUES ('manual_request', NULL, %s, 'person',
+                    %s, %s, 'approved', NOW())
+            RETURNING id
+        """, (
+            name[:200],
+            f"Director requested dossier on {name}",
+            json.dumps(["research", "legal", "profiling"]),
+        ))
+        proposal_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+    finally:
+        store._put_conn(conn)
+
+    # Trigger research executor in background
+    from orchestrator.research_executor import execute_research_dossier
+    background_tasks.add_task(execute_research_dossier, proposal_id)
+
+    return {"proposal_id": proposal_id, "status": "running"}
+
+
 @app.get("/api/dossiers", tags=["research"], dependencies=[Depends(verify_api_key)])
 async def api_get_unified_dossiers(days: int = 180):
     """Unified dossier list pulling from research_proposals + deep_analyses."""
@@ -8585,7 +8625,7 @@ async def api_get_unified_dossiers(days: int = 180):
         # Source 1: Completed research proposals
         cur.execute(f"""
             SELECT id, subject_name, subject_type, specialists, status,
-                   matter_slug, created_at, completed_at
+                   deliverable_path, created_at, completed_at
             FROM research_proposals
             WHERE status = 'completed' AND deliverable_summary IS NOT NULL
               AND created_at > NOW() - INTERVAL '{int(days)} days'
@@ -8608,8 +8648,8 @@ async def api_get_unified_dossiers(days: int = 180):
                 "type": row.get("subject_type") or "person",
                 "source": "Baker",
                 "specialists": specialists,
-                "matter_slug": row.get("matter_slug"),
                 "date": row.get("completed_at") or row.get("created_at") or "",
+                "dropbox_path": row.get("deliverable_path") or "",
                 "view_url": f"/api/research-proposals/{row['id']}/view",
                 "download_url": f"/api/research-proposals/{row['id']}/download",
             })
@@ -8627,9 +8667,8 @@ async def api_get_unified_dossiers(days: int = 180):
         for r in cur.fetchall():
             row = dict(r)
             date_str = row["created_at"].isoformat() if row.get("created_at") and hasattr(row["created_at"], "isoformat") else ""
-            # Extract name from topic (e.g. "John Doe — Profile Dossier" → "John Doe")
             topic = row.get("topic") or ""
-            name = topic.split("—")[0].split("–")[0].split("-")[0].strip() if topic else topic
+            name = topic.split("\u2014")[0].split("\u2013")[0].split("-")[0].strip() if topic else topic
             # Skip entries already cross-stored from research_proposals
             if row["analysis_id"] and row["analysis_id"].startswith("research_"):
                 continue
@@ -8638,12 +8677,12 @@ async def api_get_unified_dossiers(days: int = 180):
                 "source_id": row["analysis_id"],
                 "name": name or topic,
                 "type": "analysis",
-                "source": "Cowork" if "cowork" in (row.get("analysis_id") or "").lower() else "Claude Code",
+                "source": "Cowork",
                 "specialists": [],
-                "matter_slug": None,
                 "date": date_str,
-                "view_url": f"/api/dossiers/{row['analysis_id']}/view",
-                "download_url": f"/api/dossiers/{row['analysis_id']}/download",
+                "dropbox_path": "",
+                "view_url": f"/api/dossiers/analysis/{row['analysis_id']}/view",
+                "download_url": f"/api/dossiers/analysis/{row['analysis_id']}/download",
             })
 
         # Sort combined by date descending
@@ -8655,7 +8694,7 @@ async def api_get_unified_dossiers(days: int = 180):
         store._put_conn(conn)
 
 
-@app.get("/api/dossiers/{analysis_id}/view", tags=["research"])
+@app.get("/api/dossiers/analysis/{analysis_id}/view", tags=["research"])
 async def api_view_deep_analysis_dossier(analysis_id: str, key: str = ""):
     """View a deep_analyses dossier as HTML."""
     if key != _BAKER_API_KEY:
@@ -8680,7 +8719,6 @@ async def api_view_deep_analysis_dossier(analysis_id: str, key: str = ""):
     text = row["analysis_text"]
     date_str = row["created_at"].strftime("%d %b %Y %H:%M") if row.get("created_at") else ""
 
-    # Convert markdown to basic HTML
     import html as _html
     lines = text.split("\n")
     html_parts = []
@@ -8726,7 +8764,7 @@ a.back {{ color: #60a5fa; text-decoration: none; font-size: 14px; }}
     return HTMLResponse(page)
 
 
-@app.get("/api/dossiers/{analysis_id}/download", tags=["research"])
+@app.get("/api/dossiers/analysis/{analysis_id}/download", tags=["research"])
 async def api_download_deep_analysis_dossier(analysis_id: str, key: str = ""):
     """Download a deep_analyses dossier as .docx."""
     if key != _BAKER_API_KEY:
@@ -8748,8 +8786,7 @@ async def api_download_deep_analysis_dossier(analysis_id: str, key: str = ""):
         store._put_conn(conn)
 
     topic = row["topic"] or "Analysis"
-    # Extract name from topic
-    name = topic.split("—")[0].split("–")[0].split("-")[0].strip()
+    name = topic.split("\u2014")[0].split("\u2013")[0].split("-")[0].strip()
 
     from document_generator import generate_dossier_docx
     safe_name = _re.sub(r'[^\w\s-]', '', name).strip().replace(' ', '_')

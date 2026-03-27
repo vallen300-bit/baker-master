@@ -67,10 +67,6 @@ def _ensure_research_proposals_table():
             cur.execute("""
                 ALTER TABLE research_proposals ADD COLUMN IF NOT EXISTS error_message TEXT
             """)
-            # DOSSIER-PIPELINE-1: Add matter_slug column for matter linking
-            cur.execute("""
-                ALTER TABLE research_proposals ADD COLUMN IF NOT EXISTS matter_slug TEXT
-            """)
             conn.commit()
             cur.close()
         finally:

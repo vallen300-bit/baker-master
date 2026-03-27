@@ -6049,7 +6049,7 @@ async function loadDossiersTab() {
     showLoading(container, 'Loading dossiers');
 
     try {
-        // DOSSIER-PIPELINE-1: Fetch from both unified + proposals endpoints
+        // DOSSIER-PIPELINE-1: Fetch from unified + proposals endpoints in parallel
         var results = await Promise.all([
             bakerFetch('/api/dossiers?days=180').then(function(r) { return r.json(); }).catch(function() { return { dossiers: [] }; }),
             bakerFetch('/api/research-proposals?days=90').then(function(r) { return r.json(); })
@@ -6057,36 +6057,58 @@ async function loadDossiersTab() {
         var unified = results[0].dossiers || [];
         var proposals = results[1].proposals || [];
 
-        // Proposals that are NOT completed (proposed, running, failed) — show as action cards
-        var pendingProposals = proposals.filter(function(p) { return p.status !== 'completed'; });
+        // Pending = proposed/running/failed (not completed, not skipped)
+        var proposed = proposals.filter(function(p) { return p.status === 'proposed'; });
+        var running = proposals.filter(function(p) { return p.status === 'running' || p.status === 'approved'; });
+        var failed = proposals.filter(function(p) { return p.status === 'failed'; });
+        var pending = proposed.concat(running).concat(failed);
 
-        // Update badge: completed dossiers from unified + pending proposals
+        // Update badge
         var badge = document.getElementById('dossiersCount');
-        if (badge) badge.textContent = (unified.length + pendingProposals.length) || '';
-
-        if (unified.length === 0 && pendingProposals.length === 0) {
-            container.textContent = '';
-            var emptyDiv = document.createElement('div');
-            emptyDiv.style.cssText = 'padding:40px;text-align:center;color:var(--text3);';
-            emptyDiv.textContent = 'No dossiers yet. Baker auto-proposes dossiers when VIPs forward intelligence.';
-            container.appendChild(emptyDiv);
-            return;
-        }
-
-        var wrapper = document.createElement('div');
-        wrapper.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
-
-        // Pending proposals first (action needed)
-        for (var i = 0; i < pendingProposals.length; i++) {
-            wrapper.appendChild(_renderDossierCard(pendingProposals[i]));
-        }
-
-        // Completed dossiers from all sources
-        for (var j = 0; j < unified.length; j++) {
-            wrapper.appendChild(_renderUnifiedDossierCard(unified[j]));
-        }
+        if (badge) badge.textContent = (unified.length + pending.length) || '';
 
         container.textContent = '';
+        var wrapper = document.createElement('div');
+
+        // ── "+ Run New Dossier" button ──
+        var runNewRow = document.createElement('div');
+        runNewRow.style.cssText = 'padding:12px 16px;display:flex;gap:8px;align-items:center;';
+        var runNewBtn = document.createElement('button');
+        runNewBtn.className = 'dossier-btn dossier-btn-primary';
+        runNewBtn.textContent = '+ Run New Dossier';
+        runNewBtn.onclick = function() { _showRunNewDossierInput(runNewRow); };
+        runNewRow.appendChild(runNewBtn);
+        wrapper.appendChild(runNewRow);
+
+        // ── Section: Proposed by Baker ──
+        if (pending.length > 0) {
+            var secHeader = document.createElement('div');
+            secHeader.style.cssText = 'padding:8px 16px;font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);';
+            secHeader.textContent = 'Proposed by Baker (' + pending.length + ')';
+            wrapper.appendChild(secHeader);
+            for (var i = 0; i < pending.length; i++) {
+                wrapper.appendChild(_renderDossierCard(pending[i]));
+            }
+        }
+
+        // ── Section: Completed ──
+        if (unified.length > 0) {
+            var compHeader = document.createElement('div');
+            compHeader.style.cssText = 'padding:8px 16px;font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);margin-top:8px;';
+            compHeader.textContent = 'Completed (' + unified.length + ')';
+            wrapper.appendChild(compHeader);
+            for (var j = 0; j < unified.length; j++) {
+                wrapper.appendChild(_renderUnifiedDossierCard(unified[j]));
+            }
+        }
+
+        if (pending.length === 0 && unified.length === 0) {
+            var emptyDiv = document.createElement('div');
+            emptyDiv.style.cssText = 'padding:40px;text-align:center;color:var(--text3);';
+            emptyDiv.textContent = 'No dossiers yet. Use the button above or Baker auto-proposes dossiers from VIP intelligence.';
+            wrapper.appendChild(emptyDiv);
+        }
+
         container.appendChild(wrapper);
 
     } catch (err) {
@@ -6096,6 +6118,64 @@ async function loadDossiersTab() {
         errDiv.textContent = 'Failed to load dossiers: ' + err.message;
         container.appendChild(errDiv);
     }
+}
+
+function _showRunNewDossierInput(parentRow) {
+    // Replace button with input + submit
+    parentRow.textContent = '';
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'Who would you like to research?';
+    input.style.cssText = 'flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg2);color:var(--text);font-size:13px;';
+    parentRow.appendChild(input);
+
+    var goBtn = document.createElement('button');
+    goBtn.className = 'dossier-btn dossier-btn-primary';
+    goBtn.textContent = 'Run';
+    goBtn.onclick = async function() {
+        var name = input.value.trim();
+        if (!name) return;
+        goBtn.disabled = true;
+        goBtn.textContent = 'Starting...';
+        try {
+            var resp = await bakerFetch('/api/research/request', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name }),
+            });
+            if (resp.ok) {
+                setTimeout(function() { loadDossiersTab(); }, 1000);
+            } else {
+                var err = await resp.json();
+                alert('Failed: ' + (err.detail || 'Unknown error'));
+                goBtn.disabled = false;
+                goBtn.textContent = 'Run';
+            }
+        } catch (e) {
+            alert('Failed: ' + e.message);
+            goBtn.disabled = false;
+            goBtn.textContent = 'Run';
+        }
+    };
+    parentRow.appendChild(goBtn);
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.className = 'dossier-btn';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.onclick = function() {
+        parentRow.textContent = '';
+        var btn = document.createElement('button');
+        btn.className = 'dossier-btn dossier-btn-primary';
+        btn.textContent = '+ Run New Dossier';
+        btn.onclick = function() { _showRunNewDossierInput(parentRow); };
+        parentRow.appendChild(btn);
+    };
+    parentRow.appendChild(cancelBtn);
+
+    input.focus();
+    input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') goBtn.click();
+    });
 }
 
 function _renderUnifiedDossierCard(d) {
@@ -6112,34 +6192,21 @@ function _renderUnifiedDossierCard(d) {
     header.appendChild(title);
 
     var badge = document.createElement('span');
-    var badgeColor = d.source === 'Baker' ? 'var(--green)' : 'var(--blue)';
+    var badgeColor = d.source === 'Baker' ? 'var(--blue)' : '#8b5cf6';
     badge.style.cssText = 'font-size:11px;font-weight:600;padding:3px 10px;border-radius:12px;white-space:nowrap;color:#fff;background:' + badgeColor + ';';
     badge.textContent = d.source;
     header.appendChild(badge);
 
     card.appendChild(header);
 
-    // Meta row: type, date, matter, specialists
+    // Meta row: type, date, specialists
     var meta = document.createElement('div');
     meta.style.cssText = 'font-size:12px;color:var(--text2);margin-top:4px;display:flex;gap:16px;flex-wrap:wrap;';
-
-    if (d.type) {
-        var typeSpan = document.createElement('span');
-        typeSpan.textContent = d.type;
-        meta.appendChild(typeSpan);
-    }
 
     if (d.date) {
         var dateSpan = document.createElement('span');
         dateSpan.textContent = d.date.substring(0, 10);
         meta.appendChild(dateSpan);
-    }
-
-    if (d.matter_slug) {
-        var matterSpan = document.createElement('span');
-        matterSpan.style.color = 'var(--amber)';
-        matterSpan.textContent = d.matter_slug;
-        meta.appendChild(matterSpan);
     }
 
     if (d.specialists && d.specialists.length) {
@@ -6151,7 +6218,7 @@ function _renderUnifiedDossierCard(d) {
 
     card.appendChild(meta);
 
-    // Action buttons
+    // Action buttons: View, Download, Share
     var actions = document.createElement('div');
     actions.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
 
@@ -6165,21 +6232,25 @@ function _renderUnifiedDossierCard(d) {
 
     var dlBtn = document.createElement('button');
     dlBtn.className = 'dossier-btn';
-    dlBtn.textContent = 'Download .docx';
+    dlBtn.textContent = 'Download';
     dlBtn.onclick = function() {
         window.open(d.download_url + '?key=' + encodeURIComponent(BAKER_CONFIG.apiKey), '_blank');
     };
     actions.appendChild(dlBtn);
 
-    // Regenerate button for Baker research proposals
-    if (d.source === 'Baker' && d.source_id) {
-        var regenBtn = document.createElement('button');
-        regenBtn.className = 'dossier-btn';
-        regenBtn.textContent = 'Regenerate';
-        regenBtn.onclick = function() {
-            _retryDossier(d.source_id, regenBtn);
+    // Share button — copy Dropbox URL to clipboard
+    if (d.dropbox_path) {
+        var shareBtn = document.createElement('button');
+        shareBtn.className = 'dossier-btn';
+        shareBtn.textContent = 'Share';
+        shareBtn.onclick = function() {
+            var dbxUrl = 'https://www.dropbox.com/home' + d.dropbox_path;
+            navigator.clipboard.writeText(dbxUrl).then(function() {
+                shareBtn.textContent = 'Copied!';
+                setTimeout(function() { shareBtn.textContent = 'Share'; }, 2000);
+            });
         };
-        actions.appendChild(regenBtn);
+        actions.appendChild(shareBtn);
     }
 
     card.appendChild(actions);
