@@ -3200,6 +3200,67 @@ async function loadBakerData() {
 
         container.textContent = '';
 
+        // THREE-TIER-MEMORY: Memory Health widget
+        try {
+            var memResp = await bakerFetch('/api/memory/health', { timeout: 10000 });
+            if (memResp.ok) {
+                var mem = await memResp.json();
+                var memSection = document.createElement('div');
+                memSection.style.cssText = 'margin-bottom:20px;';
+
+                var memLabel = document.createElement('div');
+                memLabel.style.cssText = 'font-size:11px;font-weight:700;color:var(--text3);font-family:var(--mono);letter-spacing:0.3px;margin-bottom:8px;';
+                memLabel.textContent = 'MEMORY HEALTH';
+                memSection.appendChild(memLabel);
+
+                var memGrid = document.createElement('div');
+                memGrid.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;';
+
+                var tiers = [
+                    { key: 'tier1', color: '#34d399', label: 'Tier 1: Active', val: (mem.tier1 || {}).total || 0, sub: '0-90 days' },
+                    { key: 'tier2', color: '#f59e42', label: 'Tier 2: Compressed', val: (mem.tier2 || {}).count || 0, sub: 'Opus summaries' },
+                    { key: 'tier3', color: '#4f8cff', label: 'Tier 3: Institutional', val: (mem.tier3 || {}).count || 0, sub: 'Sonnet briefs' },
+                ];
+                for (var ti = 0; ti < tiers.length; ti++) {
+                    var t = tiers[ti];
+                    var box = document.createElement('div');
+                    box.style.cssText = 'background:var(--card);border:1px solid var(--border);border-left:3px solid ' + t.color + ';border-radius:var(--radius-sm);padding:10px 12px;';
+                    var num = document.createElement('div');
+                    num.style.cssText = 'font-size:18px;font-weight:700;color:var(--text);';
+                    num.textContent = t.val.toLocaleString();
+                    box.appendChild(num);
+                    var lbl = document.createElement('div');
+                    lbl.style.cssText = 'font-size:10px;color:var(--text3);margin-top:2px;';
+                    lbl.textContent = t.label;
+                    box.appendChild(lbl);
+                    var sub = document.createElement('div');
+                    sub.style.cssText = 'font-size:9px;color:var(--text4);';
+                    sub.textContent = t.sub;
+                    box.appendChild(sub);
+                    memGrid.appendChild(box);
+                }
+                memSection.appendChild(memGrid);
+
+                // Last compression + archive count
+                var metaRow = document.createElement('div');
+                metaRow.style.cssText = 'font-size:11px;color:var(--text3);display:flex;gap:16px;';
+                var t2Last = (mem.tier2 || {}).last_compression;
+                if (t2Last) {
+                    var span = document.createElement('span');
+                    span.textContent = 'Last Tier 2: ' + new Date(t2Last).toLocaleDateString();
+                    metaRow.appendChild(span);
+                }
+                var archiveCount = (mem.archive || {}).count || 0;
+                if (archiveCount) {
+                    var aSpan = document.createElement('span');
+                    aSpan.textContent = 'Archived: ' + archiveCount.toLocaleString() + ' records';
+                    metaRow.appendChild(aSpan);
+                }
+                memSection.appendChild(metaRow);
+                container.appendChild(memSection);
+            }
+        } catch(e) { /* non-fatal */ }
+
         // Activity Today
         var actLabel = document.createElement('div');
         actLabel.style.cssText = 'font-size:11px;font-weight:700;color:var(--text3);font-family:var(--mono);letter-spacing:0.3px;margin-bottom:8px;';
