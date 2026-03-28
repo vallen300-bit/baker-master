@@ -1909,7 +1909,8 @@ function renderDeadlineCompact(dl) {
     var snippetText = (dl.source_snippet || '').trim();
     var aid = String(dl.id);
 
-    var html = '<div class="card card-compact" style="cursor:pointer;" onclick="_toggleTriageCard(this)"><div class="card-header">' +
+    var html = '<div class="card card-compact drag-card" draggable="true" data-item-id="' + dl.id + '" data-item-type="deadline" data-source-cell="promised" style="cursor:pointer;" onclick="_toggleTriageCard(this)"><div class="card-header">' +
+        '<span class="drag-grip" title="Drag to move">&#x2807;</span>' +
         '<span class="nav-dot ' + dotClass + '" style="margin-top:5px;"></span>' +
         '<span class="card-title">' + esc(dl.description || '') + ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span></span>' +
         '<span class="card-time" style="' + timeStyle + '">' + esc(daysText) + '</span>' +
@@ -2205,7 +2206,8 @@ function _renderCriticalItem(ci) {
     var body = snippet.substring(0, 300);
     var aid = String(ci.id);
 
-    var html = '<div class="card card-compact" style="cursor:pointer;" onclick="_toggleTriageCard(this)"><div class="card-header">' +
+    var html = '<div class="card card-compact drag-card" draggable="true" data-item-id="' + ci.id + '" data-item-type="deadline" data-source-cell="critical" style="cursor:pointer;" onclick="_toggleTriageCard(this)"><div class="card-header">' +
+        '<span class="drag-grip" title="Drag to move">&#x2807;</span>' +
         '<span style="margin-right:4px;">\u26A1</span>' +
         '<span class="card-title" style="flex:1;">' + esc(truncDesc) + ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span></span>' +
         '<button class="triage-pill" style="font-size:10px;padding:2px 8px;margin-left:4px;background:var(--green);color:#fff;border-color:var(--green);" onclick="event.stopPropagation();_criticalDone(' + ci.id + ',this)">Done</button>' +
@@ -7337,3 +7339,201 @@ async function showAddTripPerson() {
         console.error('showAddTripPerson failed:', e);
     }
 }
+
+// ═══ DRAG-DROP-1: Todoist-style drag between landing grid sections ═══
+
+(function() {
+    var _dragData = null; // { itemId, itemType, sourceCell, cardEl }
+
+    // Map grid body IDs to section names
+    var _cellMap = {
+        gridTravel: 'travel',
+        gridCritical: 'critical',
+        gridDeadlines: 'promised',
+        gridMeetings: 'meetings'
+    };
+    var _validDropTargets = new Set(['critical', 'promised']); // grid cells that accept drops
+
+    function _getActionBar() {
+        var bar = document.getElementById('dragActionBar');
+        if (!bar) {
+            bar = document.createElement('div');
+            bar.id = 'dragActionBar';
+            bar.className = 'drag-action-bar';
+            bar.innerHTML =
+                '<span class="drag-action-label">Drop here:</span>' +
+                '<div class="drag-action-pill" data-drop-target="critical">&#x26A1; Critical</div>' +
+                '<div class="drag-action-pill" data-drop-target="promised">&#x1F4CB; Promised</div>' +
+                '<div class="drag-action-pill drag-action-dismiss" data-drop-target="dismiss">&#x2715; Dismiss</div>' +
+                '<div class="drag-action-pill drag-action-ask" data-drop-target="ask">&#x1F4AC; Ask Baker</div>';
+            // Insert after command bar / priorities area, before landing grid
+            var grid = document.querySelector('.landing-grid');
+            if (grid) grid.parentNode.insertBefore(bar, grid);
+        }
+        return bar;
+    }
+
+    // Attach drag listeners to the landing grid via event delegation
+    document.addEventListener('dragstart', function(e) {
+        var card = e.target.closest('.drag-card');
+        if (!card) return;
+        var itemId = card.getAttribute('data-item-id');
+        var itemType = card.getAttribute('data-item-type');
+        var sourceCell = card.getAttribute('data-source-cell');
+        if (!itemId || !itemType) return;
+
+        _dragData = { itemId: itemId, itemType: itemType, sourceCell: sourceCell, cardEl: card };
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', itemId);
+
+        // Visual: gold glow + slight opacity
+        requestAnimationFrame(function() {
+            card.classList.add('drag-active');
+        });
+
+        // Show action bar
+        var bar = _getActionBar();
+        bar.classList.add('drag-action-bar-visible');
+
+        // Highlight valid grid drop zones
+        var cells = document.querySelectorAll('.grid-cell');
+        cells.forEach(function(cell) {
+            var bodyEl = cell.querySelector('.grid-cell-body');
+            if (!bodyEl) return;
+            var section = _cellMap[bodyEl.id] || '';
+            if (_validDropTargets.has(section) && section !== sourceCell) {
+                cell.classList.add('drag-zone-valid');
+            } else {
+                cell.classList.add('drag-zone-invalid');
+            }
+        });
+    });
+
+    document.addEventListener('dragover', function(e) {
+        if (!_dragData) return;
+        // Allow drop on valid grid cells
+        var cell = e.target.closest('.grid-cell');
+        if (cell && cell.classList.contains('drag-zone-valid')) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            cell.classList.add('drag-over');
+        }
+        // Allow drop on action bar pills
+        var pill = e.target.closest('.drag-action-pill');
+        if (pill) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            pill.classList.add('drag-action-pill-hover');
+        }
+    });
+
+    document.addEventListener('dragleave', function(e) {
+        if (!_dragData) return;
+        var cell = e.target.closest('.grid-cell');
+        if (cell) cell.classList.remove('drag-over');
+        var pill = e.target.closest('.drag-action-pill');
+        if (pill) pill.classList.remove('drag-action-pill-hover');
+    });
+
+    document.addEventListener('drop', function(e) {
+        if (!_dragData) return;
+        e.preventDefault();
+
+        var target = null;
+
+        // Check if dropped on action bar pill
+        var pill = e.target.closest('.drag-action-pill');
+        if (pill) {
+            target = pill.getAttribute('data-drop-target');
+        } else {
+            // Check if dropped on a valid grid cell
+            var cell = e.target.closest('.grid-cell');
+            if (cell && cell.classList.contains('drag-zone-valid')) {
+                var bodyEl = cell.querySelector('.grid-cell-body');
+                target = bodyEl ? (_cellMap[bodyEl.id] || null) : null;
+            }
+        }
+
+        if (target) {
+            _executeDrop(_dragData.itemId, _dragData.sourceCell, target, _dragData.cardEl);
+        }
+        _cleanupDrag();
+    });
+
+    document.addEventListener('dragend', function(e) {
+        _cleanupDrag();
+    });
+
+    function _cleanupDrag() {
+        if (_dragData && _dragData.cardEl) {
+            _dragData.cardEl.classList.remove('drag-active');
+        }
+        _dragData = null;
+        // Hide action bar
+        var bar = document.getElementById('dragActionBar');
+        if (bar) bar.classList.remove('drag-action-bar-visible');
+        // Remove all zone highlights
+        document.querySelectorAll('.drag-zone-valid, .drag-zone-invalid, .drag-over').forEach(function(el) {
+            el.classList.remove('drag-zone-valid', 'drag-zone-invalid', 'drag-over');
+        });
+        document.querySelectorAll('.drag-action-pill-hover').forEach(function(el) {
+            el.classList.remove('drag-action-pill-hover');
+        });
+    }
+
+    function _executeDrop(itemId, sourceCell, target, cardEl) {
+        if (target === 'ask') {
+            // Switch to Ask Baker with context pre-filled
+            var title = '';
+            var titleEl = cardEl ? cardEl.querySelector('.card-title') : null;
+            if (titleEl) title = titleEl.textContent.replace(/\s*\u25BE\s*$/, '').trim();
+            _triageOpenBaker('Regarding: "' + title + '". What should I know and what actions should I take?');
+            return;
+        }
+
+        // Animate card out
+        if (cardEl) {
+            cardEl.style.transition = 'opacity 0.3s, transform 0.3s';
+            cardEl.style.opacity = '0';
+            cardEl.style.transform = 'scale(0.95)';
+        }
+
+        // API call
+        bakerFetch('/api/landing/move', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ item_id: parseInt(itemId), target_section: target }),
+        }).then(function(resp) {
+            return resp.json();
+        }).then(function(data) {
+            if (data.error) {
+                _showToast('Move failed: ' + data.error);
+                if (cardEl) { cardEl.style.opacity = '1'; cardEl.style.transform = ''; }
+                return;
+            }
+            var labels = { critical: 'Critical', promised: 'Promised To Do', dismiss: 'Dismissed' };
+            _showToast('Moved to ' + (labels[target] || target));
+            // Remove card and refresh counts
+            if (cardEl) setTimeout(function() { cardEl.remove(); _updateGridCounts(); }, 300);
+        }).catch(function(err) {
+            _showToast('Move failed');
+            if (cardEl) { cardEl.style.opacity = '1'; cardEl.style.transform = ''; }
+        });
+    }
+
+    function _updateGridCounts() {
+        ['gridCritical', 'gridDeadlines', 'gridTravel', 'gridMeetings'].forEach(function(id) {
+            var body = document.getElementById(id);
+            if (!body) return;
+            var countId = id + 'Count';
+            var countEl = document.getElementById(countId.replace('gridDeadlines', 'gridDeadlinesCount').replace('gridCritical', 'gridCriticalCount').replace('gridTravel', 'gridTravelCount').replace('gridMeetings', 'gridMeetingsCount'));
+            // Simpler: find sibling count element
+            var header = body.previousElementSibling;
+            if (!header) return;
+            var cEl = header.querySelector('.grid-cell-count');
+            if (!cEl) return;
+            var cards = body.querySelectorAll('.card');
+            cEl.textContent = cards.length > 0 ? cards.length : '';
+        });
+    }
+})();

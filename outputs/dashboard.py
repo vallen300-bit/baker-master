@@ -4875,6 +4875,39 @@ async def add_critical_quick(request: Request):
         return {"error": str(e)}
 
 
+@app.post("/api/landing/move", tags=["landing"], dependencies=[Depends(verify_api_key)])
+async def landing_move_item(request: Request):
+    """DRAG-DROP-1: Move a deadline item between landing grid sections."""
+    try:
+        body = await request.json()
+        item_id = body.get("item_id")
+        target = body.get("target_section", "").strip().lower()
+        if not item_id or not target:
+            raise HTTPException(status_code=400, detail="item_id and target_section required")
+
+        from models.deadlines import set_critical, update_deadline
+
+        if target == "critical":
+            set_critical(int(item_id), True)
+            update_deadline(int(item_id), priority="critical")
+            return {"status": "moved", "target": "critical", "id": item_id}
+        elif target == "promised":
+            set_critical(int(item_id), False)
+            update_deadline(int(item_id), priority="normal")
+            return {"status": "moved", "target": "promised", "id": item_id}
+        elif target == "dismiss":
+            update_deadline(int(item_id), status="dismissed")
+            set_critical(int(item_id), False)
+            return {"status": "dismissed", "id": item_id}
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid target_section: {target}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"POST /api/landing/move failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/detected-meetings/{meeting_id}/cancel", tags=["meetings"], dependencies=[Depends(verify_api_key)])
 async def cancel_detected_meeting(meeting_id: int):
     """LANDING-TRIAGE-1: Cancel a detected meeting."""
