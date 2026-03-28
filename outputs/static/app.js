@@ -1237,10 +1237,9 @@ function _renderMatterSection(containerId, matters, countId) {
         item.appendChild(cnt);
 
         if (m.new_count > 0) {
-            var newBadge = document.createElement('span');
-            newBadge.className = 'nav-new';
-            newBadge.textContent = m.new_count + ' new';
-            item.appendChild(newBadge);
+            var newDot = document.createElement('span');
+            newDot.className = 'nav-dot red';
+            item.appendChild(newDot);
         }
         container.appendChild(item);
     }
@@ -3497,10 +3496,10 @@ async function loadMattersTab() {
             hdr.appendChild(count);
 
             if (m.new_count > 0) {
-                var newBadge = document.createElement('span');
-                newBadge.className = 'card-new-badge';
-                newBadge.textContent = m.new_count + ' new';
-                hdr.appendChild(newBadge);
+                var newDot = document.createElement('span');
+                newDot.className = 'nav-dot red';
+                newDot.style.marginLeft = '6px';
+                hdr.appendChild(newDot);
             }
 
             card.appendChild(hdr);
