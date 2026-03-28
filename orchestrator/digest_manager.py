@@ -45,6 +45,12 @@ def add_alert(
 
     Returns True if alert was added/sent, False on error.
     """
+    # Director preference: all proactive emails disabled (WA + Slack only)
+    import os
+    if os.getenv("BAKER_EMAIL_ALERTS_DISABLED", "false").lower() in ("true", "1", "yes"):
+        logger.debug(f"add_alert skipped — BAKER_EMAIL_ALERTS_DISABLED=true: {title}")
+        return False
+
     now_str = timestamp or datetime.now(timezone.utc).strftime("%H:%M UTC")
 
     alert_entry = {
@@ -169,6 +175,10 @@ def _compose_digest_body(items: list) -> str:
 
 def _send_critical_alert(alert: dict) -> bool:
     """Send a single critical alert immediately, bypassing the digest."""
+    import os
+    if os.getenv("BAKER_EMAIL_ALERTS_DISABLED", "false").lower() in ("true", "1", "yes"):
+        logger.debug(f"_send_critical_alert skipped — BAKER_EMAIL_ALERTS_DISABLED=true")
+        return False
     try:
         title = alert.get("title", "CRITICAL ALERT")
         source = alert.get("source_type", "System")
