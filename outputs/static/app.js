@@ -2289,9 +2289,9 @@ function _triageShowDossier(alertId, title, body) {
         }
     }
     if (entities.people.length === 0 && entities.companies.length === 0) {
-        html += '<div style="font-size:12px;color:var(--text3);padding:4px 0;">No entities detected. Type a name below:</div>';
-        html += '<input class="dossier-manual" placeholder="Enter name..." style="width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;margin:4px 0;" />';
+        html += '<div style="font-size:12px;color:var(--text3);padding:4px 0;">No entities detected. Type a name below.</div>';
     }
+    html += '<input class="dossier-manual" placeholder="Or type a name..." style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin:6px 0;background:var(--bg-subtle,#141820);color:var(--text,#E8E4DC);outline:none;font-family:inherit;" />';
     html += '<div style="display:flex;gap:8px;margin-top:8px;">';
     html += '<button class="triage-pill" style="background:var(--blue);color:#fff;border-color:var(--blue);" onclick="event.stopPropagation();_triageRunDossier(' + alertId + ')">Run</button>';
     html += '<button class="triage-pill" onclick="event.stopPropagation();document.getElementById(\'triage-dossier-' + alertId + '\').style.display=\'none\'">Cancel</button>';
