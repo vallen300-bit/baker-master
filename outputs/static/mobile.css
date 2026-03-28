@@ -1,51 +1,31 @@
-/* Baker Mobile — mobile-first CSS with dark mode */
+/* Baker Mobile v5 — Luxury Concierge dark theme */
 
 :root {
-  --bg: #ffffff;
-  --bg2: #f5f6f8;
-  --bg3: #ebedf0;
-  --text: #1a1a1a;
-  --text2: #555;
-  --text3: #888;
-  --border: #e0e0e0;
-  --blue: #0a6fdb;
-  --blue-bg: #e8f1fc;
-  --green: #22c55e;
-  --amber: #f59e0b;
-  --red: #ef4444;
-  --user-bg: #0a6fdb;
-  --user-text: #fff;
-  --baker-bg: #f5f6f8;
-  --baker-text: #1a1a1a;
-  --tab-active: #0a6fdb;
-  --tab-inactive: #888;
+  --bg: #0D0F14;
+  --bg2: #141820;
+  --bg3: #1A1F28;
+  --text: #E8E4DC;
+  --text2: #9B958B;
+  --text3: #6B6560;
+  --border: rgba(201,169,110,0.12);
+  --blue: #C9A96E;
+  --blue-bg: rgba(201,169,110,0.10);
+  --green: #5B9A6F;
+  --amber: #D4A535;
+  --red: #C75050;
+  --user-bg: rgba(201,169,110,0.15);
+  --user-text: #E8E4DC;
+  --baker-bg: #141820;
+  --baker-text: #E8E4DC;
+  --tab-active: #C9A96E;
+  --tab-inactive: #6B6560;
   --radius: 16px;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0a0e14;
-    --bg2: #131820;
-    --bg3: #1a2030;
-    --text: #e8eaed;
-    --text2: #9aa0a8;
-    --text3: #6b7280;
-    --border: #2a3040;
-    --blue: #3b8eed;
-    --blue-bg: #142438;
-    --user-bg: #1a3a5c;
-    --user-text: #e8eaed;
-    --baker-bg: #131820;
-    --baker-text: #e8eaed;
-    --tab-active: #3b8eed;
-    --tab-inactive: #6b7280;
-  }
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', 'Inter', system-ui, sans-serif;
+  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'SF Pro', system-ui, sans-serif;
   background: var(--bg);
   color: var(--text);
   height: 100dvh;
@@ -251,6 +231,7 @@ html, body {
   align-self: flex-end;
   background: var(--user-bg);
   color: var(--user-text);
+  border: 1px solid rgba(201,169,110,0.25);
   border-bottom-right-radius: 4px;
 }
 
@@ -366,7 +347,10 @@ html, body {
 .header .brand {
   font-size: 18px;
   font-weight: 700;
-  color: var(--text);
+  color: var(--blue);
+  font-family: 'EB Garamond', 'Georgia', serif;
+  letter-spacing: 2px;
+  text-transform: uppercase;
 }
 
 .header .brand-sub {
@@ -564,7 +548,7 @@ html, body {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: rgba(255,255,255,0.5);
+  color: var(--text3);
   position: sticky;
   top: 0;
   background: var(--bg);
@@ -634,8 +618,8 @@ html, body {
   align-items: center;
   gap: 8px;
   padding: 10px 16px;
-  background: linear-gradient(135deg, var(--blue-bg), var(--bg2));
-  border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, rgba(201,169,110,0.08), var(--bg2));
+  border-bottom: 1px solid rgba(201,169,110,0.15);
   cursor: pointer;
   flex-shrink: 0;
   -webkit-tap-highlight-color: transparent;
@@ -1146,13 +1130,13 @@ html, body {
   background: var(--text3);
 }
 
-.source-badge.email { background: var(--blue); }
-.source-badge.whatsapp { background: #25d366; }
-.source-badge.meeting { background: #8b5cf6; }
-.source-badge.calendar { background: #f59e0b; }
+.source-badge.email { background: #3B6EAE; }
+.source-badge.whatsapp { background: #2B8A6A; }
+.source-badge.meeting { background: #7c5cbf; }
+.source-badge.calendar { background: var(--amber); }
 .source-badge.deadline { background: var(--red); }
-.source-badge.cadence { background: #06b6d4; }
-.source-badge.research { background: #8b5cf6; }
+.source-badge.cadence { background: #2B8A8A; }
+.source-badge.research { background: #7c5cbf; }
 
 .triage-card.research {
   border-left-color: #8b5cf6;
@@ -1416,8 +1400,8 @@ html, body {
 .travel-feed-card {
   padding: 12px 14px;
   border-radius: 12px;
-  background: linear-gradient(135deg, var(--blue-bg), var(--bg2));
-  border: 1px solid var(--blue);
+  background: linear-gradient(135deg, rgba(201,169,110,0.08), var(--bg2));
+  border: 1px solid rgba(201,169,110,0.20);
   border-left: 3px solid var(--blue);
   font-size: 13px;
   cursor: pointer;

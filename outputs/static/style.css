@@ -1,47 +1,50 @@
 /* ============================================================
-   Baker Cockpit v4 — style.css
-   ClaimsMax banking-grade design: clean, minimal, blue accent only
+   Baker Cockpit v5 — style.css
+   Luxury Concierge: dark charcoal, champagne gold, serif headlines
    ============================================================ */
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
-  /* Core palette — ClaimsMax banking style */
-  --bg: #ffffff;
-  --bg-subtle: #f7f7f8;
-  --card: #ffffff;
-  --card-muted: #fafafa;
-  --border: rgba(0,0,0,0.10);
-  --border-light: rgba(0,0,0,0.06);
+  /* Core palette — Luxury Concierge dark */
+  --bg: #0D0F14;
+  --bg-subtle: #141820;
+  --bg2: #1A1F28;
+  --card: #1A1F28;
+  --card-muted: #151A22;
+  --border: rgba(201,169,110,0.12);
+  --border-light: rgba(201,169,110,0.06);
 
-  /* Text hierarchy */
-  --text: #1a1a1a;
-  --text2: rgba(0,0,0,0.55);
-  --text3: rgba(0,0,0,0.35);
-  --text4: rgba(0,0,0,0.20);
+  /* Text hierarchy — cream tones */
+  --text: #E8E4DC;
+  --text1: #E8E4DC;
+  --text2: #9B958B;
+  --text3: #6B6560;
+  --text4: rgba(232,228,220,0.20);
 
-  /* Accent — blue only in UI chrome */
-  --blue: #0a6fdb;
-  --blue-hover: #0858b1;
-  --blue-bg: rgba(10,111,219,0.08);
-  --blue-bg-strong: rgba(10,111,219,0.12);
+  /* Accent — champagne gold */
+  --blue: #C9A96E;
+  --blue-hover: #B89A5C;
+  --blue-bg: rgba(201,169,110,0.10);
+  --blue-bg-strong: rgba(201,169,110,0.15);
 
-  /* Semantic — data labels only, never in UI chrome */
-  --red: #dc3130;
-  --amber: #d48100;
-  --green: #22a84d;
-  --slate: rgba(0,0,0,0.35);
-  --lgray: rgba(0,0,0,0.20);
+  /* Semantic — muted, sophisticated tones */
+  --red: #C75050;
+  --amber: #D4A535;
+  --green: #5B9A6F;
+  --slate: rgba(232,228,220,0.30);
+  --lgray: rgba(232,228,220,0.15);
 
   /* Surfaces */
-  --shadow: 0 18px 36px rgba(22,30,58,0.04);
-  --shadow-sm: 0 2px 8px rgba(22,30,58,0.04);
+  --shadow: 0 18px 36px rgba(0,0,0,0.20);
+  --shadow-sm: 0 2px 8px rgba(0,0,0,0.15);
   --radius: 14px;
   --radius-sm: 10px;
   --radius-pill: 22px;
 
   /* Fonts */
-  --font: 'Inter', -apple-system, 'system-ui', 'SF Pro Display', sans-serif;
+  --font: 'DM Sans', -apple-system, 'system-ui', 'SF Pro Display', sans-serif;
+  --font-heading: 'EB Garamond', 'Georgia', serif;
   --mono: 'SF Mono', 'Fira Code', 'Consolas', monospace;
   --sidebar-w: 240px;
 }
@@ -74,7 +77,8 @@ body {
 }
 .sidebar-logo {
   padding: 20px 20px 16px; font-weight: 700; font-size: 18px;
-  letter-spacing: -0.3px; color: var(--text);
+  letter-spacing: 2px; color: var(--blue);
+  font-family: var(--font-heading); text-transform: uppercase;
 }
 .sidebar-nav { padding: 8px 10px; flex: 1; }
 
@@ -84,7 +88,7 @@ body {
   transition: background 0.15s; margin-bottom: 1px; font-size: 13px; font-weight: 400;
   color: var(--text3); overflow: hidden; flex-wrap: nowrap;
 }
-.nav-item:hover { background: rgba(0,0,0,0.04); color: var(--text2); }
+.nav-item:hover { background: rgba(201,169,110,0.06); color: var(--text2); }
 .nav-item.active {
   background: var(--blue-bg); color: var(--blue); font-weight: 500;
   border-left: 3px solid var(--blue); padding-left: 9px;
@@ -187,7 +191,7 @@ body {
 .mute-toggle:hover { opacity: 1; }
 .baker-avatar {
   width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
-  background: #0d1117; padding: 4px;
+  background: #0D0F14; padding: 4px;
 }
 
 .cmd-quick-btns { display: flex; gap: 8px; margin-left: auto; }
@@ -207,7 +211,7 @@ body {
 .brief-header { margin-bottom: 24px; }
 .brief-greeting {
   font-size: 30px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 10px;
-  color: var(--text);
+  color: var(--text); font-family: var(--font-heading);
 }
 .brief-narrative {
   font-size: 15px; color: var(--text2); line-height: 1.7; max-width: 720px;
@@ -464,16 +468,10 @@ body {
   position: absolute;
   right: 16px;
 }
-.grid-header-travel { background: #E3F2FD; }
-.grid-header-fires { background: #FFEBEE; }
-.grid-header-promised { background: #FFF8E1; }
-.grid-header-meetings { background: #E8F5E9; }
-@media (prefers-color-scheme: dark) {
-  .grid-header-travel { background: rgba(33, 150, 243, 0.12); }
-  .grid-header-fires { background: rgba(244, 67, 54, 0.12); }
-  .grid-header-promised { background: rgba(255, 193, 7, 0.12); }
-  .grid-header-meetings { background: rgba(76, 175, 80, 0.12); }
-}
+.grid-header-travel { background: rgba(201,169,110,0.08); }
+.grid-header-fires { background: rgba(199,80,80,0.08); }
+.grid-header-promised { background: rgba(212,165,53,0.08); }
+.grid-header-meetings { background: rgba(91,154,111,0.08); }
 .grid-cell-header .section-label {
   font-size: 13px;
   font-weight: 700;
@@ -742,7 +740,7 @@ body {
 
 /* === SCAN / ASK BAKER VIEW === */
 .scan-view-header { margin-bottom: 14px; display: flex; align-items: center; }
-.scan-view-title { font-size: 24px; font-weight: 700; letter-spacing: -0.3px; }
+.scan-view-title { font-size: 24px; font-weight: 700; letter-spacing: -0.3px; font-family: var(--font-heading); }
 .scan-view-body { display: flex; flex-direction: column; height: calc(100vh - 190px); }
 
 /* Input-at-top layout (Cowork style) */
@@ -761,7 +759,8 @@ body {
   font-size: 14px; line-height: 1.7;
 }
 .scan-msg.user {
-  align-self: flex-end; background: var(--blue); color: #fff;
+  align-self: flex-end; background: rgba(201,169,110,0.15); color: var(--text);
+  border: 1px solid rgba(201,169,110,0.25);
   border-radius: var(--radius) var(--radius) 4px var(--radius);
 }
 .scan-msg.baker {
@@ -905,14 +904,14 @@ body {
 /* === SCROLLBARS === */
 .sidebar::-webkit-scrollbar, .content::-webkit-scrollbar, .scan-messages::-webkit-scrollbar, .artifact-items::-webkit-scrollbar { width: 4px; }
 .sidebar::-webkit-scrollbar-thumb, .content::-webkit-scrollbar-thumb, .scan-messages::-webkit-scrollbar-thumb, .artifact-items::-webkit-scrollbar-thumb {
-  background: rgba(0,0,0,0.12); border-radius: 4px;
+  background: rgba(201,169,110,0.15); border-radius: 4px;
 }
 .sidebar::-webkit-scrollbar-thumb:hover, .content::-webkit-scrollbar-thumb:hover, .scan-messages::-webkit-scrollbar-thumb:hover, .artifact-items::-webkit-scrollbar-thumb:hover {
-  background: rgba(0,0,0,0.22);
+  background: rgba(201,169,110,0.30);
 }
 
 /* === MARKDOWN RENDERING (Baker output) === */
-.md-content h3 { font-size: 14px; font-weight: 600; margin: 10px 0 6px; }
+.md-content h3 { font-size: 15px; font-weight: 600; margin: 10px 0 6px; font-family: var(--font-heading); }
 .md-content h3:first-child { margin-top: 0; }
 .md-content ul, .md-content ol { margin: 4px 0 4px 18px; }
 .md-content li { margin-bottom: 3px; font-size: 13px; line-height: 1.7; }
@@ -967,11 +966,11 @@ body {
   padding: 2px 8px; border-radius: 4px; color: #fff;
   text-transform: uppercase; letter-spacing: 0.5px; flex-shrink: 0;
 }
-.kb-source-emails { background: #2563eb; }
-.kb-source-meetings { background: #7c3aed; }
-.kb-source-document { background: #16a34a; }
-.kb-source-whatsapp { background: #0d9488; }
-.kb-source-conversation { background: rgba(0,0,0,0.45); }
+.kb-source-emails { background: #3B6EAE; }
+.kb-source-meetings { background: #7c5cbf; }
+.kb-source-document { background: #3E8A55; }
+.kb-source-whatsapp { background: #2B8A7A; }
+.kb-source-conversation { background: rgba(201,169,110,0.30); }
 
 .kb-result-title {
   font-weight: 600; font-size: 13px; flex: 1;
