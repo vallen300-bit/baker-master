@@ -278,9 +278,27 @@ async def startup():
                 cur = conn.cursor()
                 cur.execute("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS structured_actions JSONB")
                 cur.execute("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS snoozed_until TIMESTAMPTZ")
+                # PEOPLE-SECTION-1: Create people_issues table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS people_issues (
+                        id SERIAL PRIMARY KEY,
+                        person_name TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        detail TEXT,
+                        status TEXT DEFAULT 'open',
+                        due_date DATE,
+                        source TEXT,
+                        matter TEXT,
+                        is_critical BOOLEAN DEFAULT FALSE,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_people_issues_person ON people_issues(person_name)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_people_issues_status ON people_issues(status)")
                 conn.commit()
                 cur.close()
-                logger.info("COCKPIT-ALERT-UI: structured_actions + snoozed_until columns ensured")
+                logger.info("COCKPIT-ALERT-UI: structured_actions + snoozed_until + people_issues ensured")
             except Exception as me:
                 conn.rollback()
                 logger.warning(f"COCKPIT-ALERT-UI migration (non-fatal): {me}")
@@ -8837,6 +8855,155 @@ async def api_save_to_dossiers(request: Request):
         except Exception:
             pass
         logger.error(f"Save to dossiers failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        store._put_conn(conn)
+
+
+# ─────────────────────────────────────────────────
+# PEOPLE-SECTION-1: People + Issues endpoints
+# ─────────────────────────────────────────────────
+
+@app.get("/api/people", tags=["people"], dependencies=[Depends(verify_api_key)])
+async def api_list_people():
+    """List people with open issue counts."""
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=500, detail="DB unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT person_name,
+                   COUNT(*) AS total,
+                   COUNT(*) FILTER (WHERE status = 'overdue') AS overdue_count,
+                   MAX(updated_at) AS last_updated
+            FROM people_issues
+            WHERE status NOT IN ('done', 'dismissed')
+            GROUP BY person_name
+            ORDER BY overdue_count DESC, total DESC
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        return [{"name": r[0], "total": r[1], "overdue": r[2],
+                 "last_updated": r[3].isoformat() if r[3] else None} for r in rows]
+    finally:
+        store._put_conn(conn)
+
+
+@app.get("/api/people/{name}/issues", tags=["people"], dependencies=[Depends(verify_api_key)])
+async def api_get_person_issues(name: str):
+    """Get issues for a specific person."""
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=500, detail="DB unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, title, detail, status, due_date, source, matter, is_critical, created_at
+            FROM people_issues
+            WHERE LOWER(person_name) = LOWER(%s)
+              AND status NOT IN ('dismissed')
+            ORDER BY
+              CASE WHEN status = 'overdue' THEN 0
+                   WHEN due_date IS NOT NULL THEN 1
+                   ELSE 2 END,
+              due_date ASC NULLS LAST,
+              created_at DESC
+        """, (name,))
+        rows = cur.fetchall()
+        cur.close()
+        return [{"id": r[0], "title": r[1], "detail": r[2], "status": r[3],
+                 "due_date": str(r[4]) if r[4] else None, "source": r[5],
+                 "matter": r[6], "is_critical": r[7],
+                 "created_at": r[8].isoformat() if r[8] else None} for r in rows]
+    finally:
+        store._put_conn(conn)
+
+
+@app.post("/api/people/issues", tags=["people"], dependencies=[Depends(verify_api_key)])
+async def api_save_people_issues(request: Request):
+    """Save issue(s) to a person. Deduplicates by person + title."""
+    body = await request.json()
+    person = body.get("person_name")
+    issues = body.get("issues", [])
+    if not person or not issues:
+        return JSONResponse({"error": "person_name and issues required"}, status_code=400)
+
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=500, detail="DB unavailable")
+    saved = 0
+    try:
+        cur = conn.cursor()
+        for issue in issues:
+            cur.execute("""
+                SELECT id FROM people_issues
+                WHERE LOWER(person_name) = LOWER(%s)
+                  AND LOWER(title) = LOWER(%s)
+                  AND status NOT IN ('dismissed', 'done')
+                LIMIT 1
+            """, (person, issue.get("title", "")))
+            if cur.fetchone():
+                continue
+            cur.execute("""
+                INSERT INTO people_issues (person_name, title, detail, status, due_date, source, matter)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (person, issue.get("title", "Untitled"), issue.get("detail"),
+                  issue.get("status", "open"), issue.get("due_date"),
+                  issue.get("source", "ask_baker"), issue.get("matter")))
+            saved += 1
+        conn.commit()
+        cur.close()
+        return {"saved": saved, "person": person}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"Save people issues failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        store._put_conn(conn)
+
+
+@app.patch("/api/people/issues/{issue_id}", tags=["people"], dependencies=[Depends(verify_api_key)])
+async def api_triage_people_issue(issue_id: int, request: Request):
+    """Triage an issue: update status or is_critical."""
+    body = await request.json()
+    updates = []
+    params = []
+    if "status" in body:
+        updates.append("status = %s")
+        params.append(body["status"])
+    if "is_critical" in body:
+        updates.append("is_critical = %s")
+        params.append(body["is_critical"])
+    if not updates:
+        return JSONResponse({"error": "Nothing to update"}, status_code=400)
+    updates.append("updated_at = NOW()")
+    params.append(issue_id)
+
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=500, detail="DB unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute(f"UPDATE people_issues SET {', '.join(updates)} WHERE id = %s RETURNING id", params)
+        row = cur.fetchone()
+        conn.commit()
+        cur.close()
+        if not row:
+            return JSONResponse({"error": "Issue not found"}, status_code=404)
+        return {"updated": issue_id}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         store._put_conn(conn)

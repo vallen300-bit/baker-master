@@ -177,6 +177,47 @@ function _renderMobileTriage(replyEl, question, answer) {
     replyEl.appendChild(bar);
 }
 
+// ═══ PEOPLE-SECTION-1: Mobile issue cards ═══
+function _renderMobileIssueCards(replyEl, person, issues) {
+    var container = document.createElement('div');
+    container.style.cssText = 'margin-top:12px;border-top:1px solid rgba(255,255,255,0.08);padding-top:10px;';
+
+    var header = document.createElement('div');
+    header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:13px;color:#999;';
+    header.innerHTML = '<span>' + issues.length + ' issue' + (issues.length !== 1 ? 's' : '') + ' for <strong>' + esc(person) + '</strong></span>';
+    var saveAllBtn = document.createElement('button');
+    saveAllBtn.style.cssText = 'padding:6px 14px;border-radius:6px;border:1px solid rgba(201,169,110,0.3);background:rgba(255,255,255,0.04);color:#c9a96e;cursor:pointer;font-size:12px;min-height:44px;';
+    saveAllBtn.textContent = 'Save All';
+    saveAllBtn.addEventListener('click', function() {
+        saveAllBtn.textContent = 'Saving...';
+        saveAllBtn.disabled = true;
+        bakerFetch('/api/people/issues', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ person_name: person, issues: issues }),
+        }).then(function(r) {
+            if (r.ok) { saveAllBtn.textContent = '\u2713 Saved'; saveAllBtn.style.color = '#4ecdc4'; }
+            else { saveAllBtn.textContent = 'Failed'; saveAllBtn.disabled = false; }
+        }).catch(function() { saveAllBtn.textContent = 'Failed'; saveAllBtn.disabled = false; });
+    });
+    header.appendChild(saveAllBtn);
+    container.appendChild(header);
+
+    for (var i = 0; i < issues.length; i++) {
+        var issue = issues[i];
+        var card = document.createElement('div');
+        card.style.cssText = 'background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:12px;margin-bottom:8px;' +
+            (issue.status === 'overdue' ? 'border-left:3px solid #e74c3c;' : issue.due_date ? 'border-left:3px solid #d4af37;' : 'border-left:3px solid #4ecdc4;');
+        var badge = issue.status === 'overdue' ? '<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;background:rgba(231,76,60,0.2);color:#e74c3c;text-transform:uppercase;">OVERDUE</span>'
+            : issue.due_date ? '<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;background:rgba(212,175,55,0.2);color:#d4af37;text-transform:uppercase;">DUE ' + esc(issue.due_date) + '</span>'
+            : '<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;background:rgba(78,205,196,0.2);color:#4ecdc4;text-transform:uppercase;">OPEN</span>';
+        card.innerHTML = badge + '<div style="font-size:14px;font-weight:500;color:#e0e0e0;margin:6px 0 4px;">' + esc(issue.title) + '</div>' +
+            (issue.detail ? '<div style="font-size:12px;color:#999;line-height:1.4;">' + esc(issue.detail) + '</div>' : '');
+        container.appendChild(card);
+    }
+    replyEl.appendChild(container);
+}
+
 // ═══ HTML SAFETY ═══
 function esc(s) {
     if (!s) return '';
@@ -390,8 +431,18 @@ async function streamChat(url, body, containerId, history) {
         addResponseToolbar(replyEl, full, capturedTaskId);
     }
 
-    // CHAT-TRIAGE-1: Triage bar for substantive answers (300+ chars)
-    if (full && full.length > 300 && !full.startsWith('Connection error') && replyEl) {
+    // PEOPLE-SECTION-1: Parse baker-issues + render cards, or show general triage
+    var _issueData = null;
+    var _issueMatch = full.match(/```baker-issues\s*([\s\S]*?)```/);
+    if (_issueMatch) {
+        try { _issueData = JSON.parse(_issueMatch[1]); } catch(e) {}
+    }
+    if (_issueData && _issueData.person && _issueData.issues && _issueData.issues.length && replyEl) {
+        var _clean = full.replace(/```baker-issues[\s\S]*?```/, '').trim();
+        if (_clean) setSafeHTML(replyEl, '<div class="md-content">' + md(_clean) + '</div>');
+        _renderMobileIssueCards(replyEl, _issueData.person, _issueData.issues);
+    } else if (full && full.length > 300 && !full.startsWith('Connection error') && replyEl) {
+        // CHAT-TRIAGE-1: General triage bar
         _renderMobileTriage(replyEl, question, full);
     }
 

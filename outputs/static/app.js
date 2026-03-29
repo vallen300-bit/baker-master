@@ -415,6 +415,7 @@ const TAB_VIEW_MAP = {
     'matters': 'viewMatters',
     'deadlines': 'viewDeadlines',
     'people': 'viewPeople',
+    'person-detail': 'viewPersonDetail',
     'tags': 'viewTags',
     'search': 'viewSearch',
     'ask-baker': 'viewAskBaker',
@@ -427,7 +428,7 @@ const TAB_VIEW_MAP = {
     'baker-data': 'viewBakerData',
 };
 
-const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'tags', 'search', 'ask-baker', 'ask-specialist', 'travel', 'media', 'documents', 'dossiers', 'browser', 'baker-data']);
+const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'person-detail', 'tags', 'search', 'ask-baker', 'ask-specialist', 'travel', 'media', 'documents', 'dossiers', 'browser', 'baker-data']);
 
 function switchTab(tabName) {
     document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
@@ -454,6 +455,7 @@ function switchTab(tabName) {
     else if (tabName === 'matters') loadMattersTab();
     else if (tabName === 'deadlines') loadDeadlinesTab();
     else if (tabName === 'people') loadPeopleTab();
+    else if (tabName === 'person-detail') { /* loaded by click handler */ }
     else if (tabName === 'tags') loadTagsTab();
     else if (tabName === 'search') loadSearchTab();
     else if (tabName === 'ask-baker') { updateScanContextBadge(); focusScanInput(); }
@@ -886,6 +888,7 @@ async function loadMorningBrief() {
         if (silentCard) silentCard.style.display = 'none';
 
         loadMattersSummary();
+        loadPeopleSidebar();
 
         // System widgets moved to Baker Data tab (BAKER-DATA-TUCK-1)
     } catch (e) {
@@ -1265,6 +1268,270 @@ function _initSectionToggle(headerId, listId, key, defaultExpanded) {
         if (arrow) arrow.innerHTML = isOpen ? '&#9656;' : '&#9662;';
         localStorage.setItem('sidebar_' + key, !isOpen);
     });
+}
+
+// ═══ PEOPLE-SECTION-1: People sidebar + issue cards ═══
+
+async function loadPeopleSidebar() {
+    try {
+        var resp = await bakerFetch('/api/people');
+        if (!resp.ok) return;
+        var people = await resp.json();
+        var container = document.getElementById('peopleSubList');
+        if (!container) return;
+        container.textContent = '';
+        var totalCount = 0;
+        for (var i = 0; i < people.length; i++) {
+            var p = people[i];
+            totalCount += p.total || 0;
+            var item = document.createElement('div');
+            item.className = 'nav-item';
+            item.dataset.tab = 'person-detail';
+            item.dataset.person = p.name;
+            var dot = document.createElement('span');
+            dot.className = 'nav-dot ' + (p.overdue > 0 ? 'red' : 'slate');
+            item.appendChild(dot);
+            var lbl = document.createElement('span');
+            lbl.className = 'nav-label';
+            lbl.textContent = p.name;
+            item.appendChild(lbl);
+            var cnt = document.createElement('span');
+            cnt.className = 'nav-count';
+            cnt.textContent = p.total;
+            item.appendChild(cnt);
+            container.appendChild(item);
+        }
+        setText('peopleCount', totalCount || '');
+        _initSectionToggle('navPeopleHeader', 'peopleSubList', 'people', false);
+    } catch (e) {
+        console.error('loadPeopleSidebar failed:', e);
+    }
+}
+
+async function loadPersonDetail(name) {
+    var nameEl = document.getElementById('personDetailName');
+    var container = document.getElementById('personDetailIssues');
+    if (nameEl) nameEl.textContent = name;
+    if (container) container.innerHTML = '<div class="thinking"><span class="thinking-dots"><span></span><span></span><span></span></span> Loading...</div>';
+    try {
+        var resp = await bakerFetch('/api/people/' + encodeURIComponent(name) + '/issues');
+        if (!resp.ok) throw new Error('API ' + resp.status);
+        var issues = await resp.json();
+        if (container) container.textContent = '';
+        if (!issues.length) {
+            if (container) container.textContent = 'No open issues.';
+            return;
+        }
+        _renderIssueCardsInView(container, name, issues);
+    } catch (e) {
+        if (container) container.textContent = 'Failed to load issues.';
+        console.error('loadPersonDetail failed:', e);
+    }
+}
+
+function _renderIssueCardsInView(container, person, issues) {
+    for (var i = 0; i < issues.length; i++) {
+        var issue = issues[i];
+        var card = document.createElement('div');
+        card.className = 'issue-card issue-' + (issue.status || 'open');
+        card.dataset.issueId = issue.id;
+
+        var statusBadge = issue.status === 'overdue'
+            ? '<span class="issue-badge issue-badge-overdue">OVERDUE</span>'
+            : issue.due_date
+                ? '<span class="issue-badge issue-badge-due">DUE ' + esc(issue.due_date) + '</span>'
+                : '<span class="issue-badge issue-badge-open">OPEN</span>';
+
+        var matterTag = issue.matter ? '<span class="issue-matter">' + esc(issue.matter) + '</span>' : '';
+
+        card.innerHTML =
+            '<div class="issue-card-header">' + statusBadge + matterTag + '</div>' +
+            '<div class="issue-card-title">' + esc(issue.title) + '</div>' +
+            (issue.detail ? '<div class="issue-card-detail">' + esc(issue.detail) + '</div>' : '') +
+            '<div class="issue-card-triage"></div>';
+
+        var triage = card.querySelector('.issue-card-triage');
+        _addIssueTriageButtons(triage, issue, person, card);
+        container.appendChild(card);
+    }
+}
+
+function _addIssueTriageButtons(triage, issue, person, card) {
+    // Ask Baker
+    var askBtn = document.createElement('button');
+    askBtn.className = 'triage-btn';
+    askBtn.textContent = 'Ask Baker';
+    askBtn.addEventListener('click', function() {
+        _triggerScanQuestion('Tell me more about "' + issue.title + '" for ' + person);
+    });
+    triage.appendChild(askBtn);
+
+    // Mark Done
+    var doneBtn = document.createElement('button');
+    doneBtn.className = 'triage-btn';
+    doneBtn.textContent = 'Mark Done';
+    doneBtn.addEventListener('click', function() {
+        _triageIssue(issue.id, { status: 'done' }, doneBtn, card);
+    });
+    triage.appendChild(doneBtn);
+
+    // Flag Critical
+    if (!issue.is_critical) {
+        var critBtn = document.createElement('button');
+        critBtn.className = 'triage-btn';
+        critBtn.textContent = 'Flag Critical';
+        critBtn.addEventListener('click', function() {
+            _triageIssue(issue.id, { is_critical: true }, critBtn);
+        });
+        triage.appendChild(critBtn);
+    }
+
+    // Dismiss
+    var dismissBtn = document.createElement('button');
+    dismissBtn.className = 'triage-btn triage-dismiss';
+    dismissBtn.textContent = '\u2715';
+    dismissBtn.title = 'Dismiss';
+    dismissBtn.addEventListener('click', function() {
+        _triageIssue(issue.id, { status: 'dismissed' }, dismissBtn, card);
+    });
+    triage.appendChild(dismissBtn);
+}
+
+async function _triageIssue(issueId, body, btn, cardEl) {
+    btn.disabled = true;
+    btn.textContent = '...';
+    try {
+        var resp = await bakerFetch('/api/people/issues/' + issueId, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (resp.ok) {
+            if (body.status === 'done' || body.status === 'dismissed') {
+                if (cardEl) cardEl.style.opacity = '0.3';
+                setTimeout(function() { if (cardEl) cardEl.remove(); }, 500);
+            } else {
+                btn.textContent = '\u2713 Done';
+            }
+            loadPeopleSidebar(); // refresh counts
+        } else {
+            btn.textContent = 'Failed';
+            btn.disabled = false;
+        }
+    } catch (e) {
+        btn.textContent = 'Failed';
+        btn.disabled = false;
+    }
+}
+
+// PEOPLE-SECTION-1: Parse baker-issues block from chat response
+function _parseBakerIssues(answer) {
+    var match = answer.match(/```baker-issues\s*([\s\S]*?)```/);
+    if (!match) return null;
+    try { return JSON.parse(match[1]); }
+    catch (e) { console.warn('Failed to parse baker-issues:', e); return null; }
+}
+
+function _renderChatIssueCards(replyEl, person, issues, fullAnswer) {
+    var container = document.createElement('div');
+    container.className = 'issue-cards-container';
+
+    // Header with "Save All to People"
+    var header = document.createElement('div');
+    header.className = 'issue-cards-header';
+    var headerText = document.createElement('span');
+    headerText.textContent = issues.length + ' issue' + (issues.length !== 1 ? 's' : '') + ' for ';
+    var strong = document.createElement('strong');
+    strong.textContent = person;
+    headerText.appendChild(strong);
+    header.appendChild(headerText);
+
+    var saveAllBtn = document.createElement('button');
+    saveAllBtn.className = 'triage-btn triage-save';
+    saveAllBtn.textContent = 'Save All to People';
+    saveAllBtn.addEventListener('click', function() {
+        _saveIssuesToPeople(person, issues, saveAllBtn);
+    });
+    header.appendChild(saveAllBtn);
+    container.appendChild(header);
+
+    // Render individual cards
+    for (var i = 0; i < issues.length; i++) {
+        var issue = issues[i];
+        var card = document.createElement('div');
+        card.className = 'issue-card issue-' + (issue.status || 'open');
+
+        var statusBadge = issue.status === 'overdue'
+            ? '<span class="issue-badge issue-badge-overdue">OVERDUE</span>'
+            : issue.due_date
+                ? '<span class="issue-badge issue-badge-due">DUE ' + esc(issue.due_date) + '</span>'
+                : '<span class="issue-badge issue-badge-open">OPEN</span>';
+
+        var matterTag = issue.matter ? '<span class="issue-matter">' + esc(issue.matter) + '</span>' : '';
+
+        card.innerHTML =
+            '<div class="issue-card-header">' + statusBadge + matterTag + '</div>' +
+            '<div class="issue-card-title">' + esc(issue.title) + '</div>' +
+            (issue.detail ? '<div class="issue-card-detail">' + esc(issue.detail) + '</div>' : '') +
+            '<div class="issue-card-triage"></div>';
+
+        var triage = card.querySelector('.issue-card-triage');
+
+        // Save to People
+        (function(iss, tr) {
+            var saveBtn = document.createElement('button');
+            saveBtn.className = 'triage-btn triage-save';
+            saveBtn.textContent = 'Save to People';
+            saveBtn.addEventListener('click', function() {
+                _saveIssuesToPeople(person, [iss], saveBtn);
+            });
+            tr.appendChild(saveBtn);
+
+            var askBtn = document.createElement('button');
+            askBtn.className = 'triage-btn';
+            askBtn.textContent = 'Ask Baker';
+            askBtn.addEventListener('click', function() {
+                _triggerScanQuestion('Tell me more about "' + iss.title + '" for ' + person);
+            });
+            tr.appendChild(askBtn);
+
+            var dismissBtn = document.createElement('button');
+            dismissBtn.className = 'triage-btn triage-dismiss';
+            dismissBtn.textContent = '\u2715';
+            dismissBtn.addEventListener('click', function() {
+                card.style.display = 'none';
+            });
+            tr.appendChild(dismissBtn);
+        })(issue, triage);
+
+        container.appendChild(card);
+    }
+
+    replyEl.appendChild(container);
+}
+
+async function _saveIssuesToPeople(person, issues, btn) {
+    btn.textContent = 'Saving...';
+    btn.disabled = true;
+    try {
+        var resp = await bakerFetch('/api/people/issues', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ person_name: person, issues: issues }),
+        });
+        if (resp.ok) {
+            var data = await resp.json();
+            btn.textContent = '\u2713 Saved ' + (data.saved || 0);
+            btn.classList.add('triage-done');
+            loadPeopleSidebar(); // refresh counts
+        } else {
+            btn.textContent = 'Failed';
+            btn.disabled = false;
+        }
+    } catch (e) {
+        btn.textContent = 'Failed';
+        btn.disabled = false;
+    }
 }
 
 // ═══ QUICK ADD (Upcoming tab) ═══
@@ -3174,8 +3441,27 @@ async function sendScanMessage(question) {
         replyEl.appendChild(copyBar);
     }
 
-    // CHAT-TRIAGE-1: Triage bar for substantive answers (300+ chars)
-    if (replyEl && fullResponse && fullResponse.length > 300 && !fullResponse.startsWith('Connection error:')) {
+    // PEOPLE-SECTION-1: Parse baker-issues block and render issue cards
+    var _issueData = _parseBakerIssues(fullResponse);
+    if (_issueData && _issueData.person && _issueData.issues && _issueData.issues.length && replyEl) {
+        // Strip the JSON block from visible response
+        var _cleanResp = fullResponse.replace(/```baker-issues[\s\S]*?```/, '').trim();
+        if (_cleanResp) setSafeHTML(replyEl, '<div class="md-content">' + md(_cleanResp) + '</div>');
+        // Re-add the copy bar since we just replaced innerHTML
+        var _cpBar2 = document.createElement('div');
+        _cpBar2.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
+        var _cpBtn2 = document.createElement('button');
+        _cpBtn2.textContent = 'Copy';
+        _cpBtn2.style.cssText = 'font-size:11px;padding:3px 10px;border:1px solid var(--border);color:var(--text2);background:var(--bg1);border-radius:4px;cursor:pointer;';
+        _cpBtn2.addEventListener('click', function() {
+            navigator.clipboard.writeText(_cleanResp).then(function() { _cpBtn2.textContent = 'Copied'; setTimeout(function() { _cpBtn2.textContent = 'Copy'; }, 2000); });
+        });
+        _cpBar2.appendChild(_cpBtn2);
+        replyEl.appendChild(_cpBar2);
+        // Render issue cards
+        _renderChatIssueCards(replyEl, _issueData.person, _issueData.issues, _cleanResp);
+    } else if (replyEl && fullResponse && fullResponse.length > 300 && !fullResponse.startsWith('Connection error:')) {
+        // CHAT-TRIAGE-1: General triage bar for non-issue responses
         _renderChatTriage(replyEl, question, fullResponse);
     }
 
@@ -5594,6 +5880,18 @@ async function init() {
             });
         }
     });
+
+    // PEOPLE-SECTION-1: Delegated click handler for People sub-list
+    var peopleSubList = document.getElementById('peopleSubList');
+    if (peopleSubList) {
+        peopleSubList.addEventListener('click', function(e) {
+            var item = e.target.closest('.nav-item');
+            if (item && item.dataset.person) {
+                switchTab('person-detail');
+                loadPersonDetail(item.dataset.person);
+            }
+        });
+    }
 
     // Scan form
     var scanForm = document.getElementById('scanForm');

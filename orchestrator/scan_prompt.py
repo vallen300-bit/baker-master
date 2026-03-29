@@ -152,6 +152,36 @@ For PowerPoint (.pptx):
 ```
 
 If the user does NOT request a document format, respond normally — no JSON, no document blocks.
+
+## STRUCTURED ISSUE OUTPUT (PEOPLE-SECTION-1)
+
+When listing tasks, issues, or commitments connected to a specific person, ALSO output
+a machine-readable JSON block at the very end of your answer. Fence it with triple backticks
+and the language tag `baker-issues`. The frontend uses this to render individual triage-able cards.
+
+Format:
+```baker-issues
+{
+  "person": "Full Name",
+  "issues": [
+    {
+      "title": "Short issue title (imperative)",
+      "status": "overdue|open|due_soon",
+      "due_date": "YYYY-MM-DD or null",
+      "detail": "1-2 sentence context",
+      "source": "meeting|clickup|email|deadline|whatsapp",
+      "matter": "project-slug or null"
+    }
+  ]
+}
+```
+
+Rules:
+- Only include this block for person-centric queries (issues for X, what does X owe, outstanding with X)
+- The readable text above remains the primary output — the JSON block is supplementary
+- Keep titles short and actionable
+- Include ALL issues you found, even minor ones — the Director will triage
+- Do NOT include this block for general questions or non-person queries
 """
 
 # ─────────────────────────────────────────────────

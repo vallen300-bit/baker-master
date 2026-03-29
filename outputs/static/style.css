@@ -126,7 +126,8 @@ body {
 /* SIDEBAR-HIERARCHY-1: Accent colors for section headers — all teal */
 #navProjectsHeader .nav-section-label,
 #navOpsHeader .nav-section-label,
-#navInboxHeader .nav-section-label { color: #0d9488; }
+#navInboxHeader .nav-section-label,
+#navPeopleHeader .nav-section-label { color: #0d9488; }
 /* SIDEBAR-HIERARCHY-1: Logo icon (Brisen lens) */
 .sidebar-logo-icon { width: 24px; height: 24px; border-radius: 50%; vertical-align: middle; margin-left: 6px; }
 
@@ -139,6 +140,25 @@ body {
 .chat-triage .triage-done { color: #4ecdc4; border-color: rgba(78,205,196,0.3); cursor: default; }
 .chat-triage .triage-dismiss { margin-left: auto; border: none; color: #555; font-size: 14px; padding: 4px 8px; }
 .chat-triage .triage-dismiss:hover { color: #999; }
+
+/* PEOPLE-SECTION-1: Issue cards in chat */
+.issue-cards-container { margin-top: 16px; border-top: 1px solid rgba(255,255,255,0.08); padding-top: 12px; }
+.issue-cards-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 13px; color: #999; }
+.issue-card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; }
+.issue-card.issue-overdue { border-left: 3px solid #e74c3c; }
+.issue-card.issue-due_soon { border-left: 3px solid #d4af37; }
+.issue-card.issue-open { border-left: 3px solid #4ecdc4; }
+.issue-card-header { display: flex; gap: 8px; margin-bottom: 6px; align-items: center; }
+.issue-badge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 4px; text-transform: uppercase; }
+.issue-badge-overdue { background: rgba(231,76,60,0.2); color: #e74c3c; }
+.issue-badge-due { background: rgba(212,175,55,0.2); color: #d4af37; }
+.issue-badge-open { background: rgba(78,205,196,0.2); color: #4ecdc4; }
+.issue-matter { font-size: 11px; color: #666; }
+.issue-card-title { font-size: 14px; font-weight: 500; color: #e0e0e0; margin-bottom: 4px; }
+.issue-card-detail { font-size: 12px; color: #999; margin-bottom: 10px; line-height: 1.4; }
+.issue-card-triage { display: flex; gap: 6px; flex-wrap: wrap; }
+/* People detail view */
+.people-detail-header { font-size: 18px; font-weight: 600; color: var(--text1); margin-bottom: 16px; font-family: var(--font-heading); }
 
 /* TRIAGE-CARDS-1: Triage pill buttons */
 .triage-pill {

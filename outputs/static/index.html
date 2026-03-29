@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=50">
+    <link rel="stylesheet" href="/static/style.css?v=51">
 </head>
 <body>
 
@@ -47,6 +47,14 @@
             <span class="nav-count" id="inboxCount"></span>
         </div>
         <div class="nav-sub" id="inboxSubList" style="display:none;"></div>
+
+        <!-- PEOPLE-SECTION-1: People section (expandable) -->
+        <div class="nav-section-header" id="navPeopleHeader" data-section="people">
+            <span class="nav-section-arrow">&#9656;</span>
+            <span class="nav-section-label">People</span>
+            <span class="nav-count" id="peopleCount"></span>
+        </div>
+        <div class="nav-sub" id="peopleSubList" style="display:none;"></div>
 
         <div class="nav-divider"></div>
 
@@ -224,8 +232,12 @@
 
         <!-- VIEW: Networking -->
         <div class="view" id="viewPeople">
-            <div class="section-label">Networking</div>
+            <div class="section-label">People &amp; Issues</div>
             <div id="peopleContent"></div>
+        </div>
+        <div class="view" id="viewPersonDetail">
+            <div class="people-detail-header" id="personDetailName"></div>
+            <div id="personDetailIssues"></div>
         </div>
 
         <!-- VIEW: Search (D6 Knowledge Base) -->
@@ -335,6 +347,6 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=71"></script>
+<script src="/static/app.js?v=72"></script>
 </body>
 </html>
