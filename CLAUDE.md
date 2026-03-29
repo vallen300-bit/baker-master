@@ -28,6 +28,12 @@ It provides the context needed to work on this codebase from any machine.
 
 Switch hats as needed. When coding, code. When scoping, think.
 
+## Plan Mode Default
+
+- **Enter plan mode** for any non-trivial task (3+ steps or architectural decisions). Write detailed specs upfront to reduce ambiguity.
+- **If something goes wrong, STOP and re-plan immediately** — don't keep pushing down a failing path. Step back, consider alternatives, then proceed.
+- **Use plan mode for verification steps too** — not just building. Plan how you'll prove it works before you start coding.
+
 ## How to Orient at Session Start
 
 1. `git pull && git log --oneline -10` — see what shipped recently
@@ -178,8 +184,52 @@ Backfill: scripts/extract_whatsapp.py
 6. **API auth:** All /api/* routes require `X-Baker-Key` header (BAKER_API_KEY env var).
 7. **CORS:** Restricted to ALLOWED_ORIGINS env var.
 
+## Demand Elegance
+
+- **For non-trivial changes**, pause and ask: "Is there a simpler, more elegant solution?" The best fix is often less infrastructure, not more.
+- **If a fix feels hacky**, stop and reconsider: "Knowing everything I know now, what's the elegant solution?" Then implement that instead.
+- **Skip this for simple fixes** — don't over-engineer a one-liner. This rule is for architectural choices and workflow design.
+- **Challenge your own work before presenting it.** Play devil's advocate on your own approach before showing it to the Director.
+
+## Subagent Strategy
+
+- **Use subagents frequently** to keep the main context window clean. Don't pollute it with long research or exploration output.
+- **Offload** research, file exploration, and parallel analysis to subagents. Launch multiple in parallel when tasks are independent.
+- **For complex problems**, throw more compute — spin up subagents rather than doing everything sequentially in the main thread.
+- **One task per subagent** for focused execution. A subagent searching for a pattern should not also be editing files.
+
+## Autonomous Bug Fixing
+
+- **When given a bug report: just fix it.** Don't ask clarifying questions unless truly ambiguous. Read logs, check console errors, inspect the code, and fix.
+- **Diagnose from evidence** — browser console, server logs, failing tests, curl responses. Don't guess.
+- **Require zero context switching from the user.** The Director reports the symptom, you handle everything else — diagnosis, fix, test, deploy.
+- **Anticipate conflicts.** Before shipping, think: what else touches this code? Will `onclick` conflict with `draggable`? Will a new CSS class override an existing one? Catch these before the Director does.
+
+## Self-Improvement Loop
+
+After any correction from the Director, update `tasks/lessons.md` with the pattern:
+1. **What went wrong** — the mistake or inefficiency
+2. **Why** — root cause
+3. **Rule** — concrete rule to prevent repeating it
+
+Review `tasks/lessons.md` at the start of each session. Ruthlessly iterate on these lessons until the mistake rate drops. If a lesson no longer applies, remove it.
+
+## Task Management
+
+1. **Plan First** — Write the plan in `tasks/todo.md` with checkable items before coding
+2. **Verify Plan** — Confirm the plan with the Director before implementation
+3. **Track Progress** — Mark items complete as you go
+4. **Explain Changes** — Provide a high-level summary at each step
+5. **Document Results** — Add a review section to `tasks/todo.md` when done
+6. **Capture Lessons** — Update `tasks/lessons.md` after any correction
+
+**Core Principles:**
+- **Simplicity First** — Make every change as simple as possible. Minimize code impact. Don't build infrastructure when a simple solution exists.
+- **No Laziness** — Find root causes. Avoid temporary fixes. Maintain senior-level engineering standards.
+
 ## Coding Rules
 
+- **Verify before done.** Never mark a task complete without proving it works. Test the actual user flow — load the page, try the interaction, call the endpoint. Ask: "Would a staff engineer approve this?"
 - **Syntax check** all modified files before committing: `python3 -c "import py_compile; py_compile.compile('file.py', doraise=True)"`
 - **Never force push** to main. Render auto-deploys — broken code goes live immediately.
 - **Never store secrets** in code. All credentials via env vars or Render Secret Files.
