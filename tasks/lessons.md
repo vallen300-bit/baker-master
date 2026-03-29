@@ -6,9 +6,10 @@ Review at session start. Add new lessons after any correction. Remove stale ones
 
 ## Frontend
 
-### 1. draggable + onclick conflict
-**Mistake:** Added `draggable="true"` and `onclick` on the same element. Click handler fired during drag, breaking the drag flow.
-**Rule:** When adding HTML5 Drag API to a clickable element, always add an `_isDragging` flag. Suppress click handlers during drag. Clear flag in `dragend` with a short setTimeout.
+### 1. Don't use HTML5 Drag API in scrollable containers
+**Mistake:** Used HTML5 Drag API (`draggable="true"`, `dragstart/dragover/drop`) for cards inside `.grid-cell-body` with `overflow-y: auto`. The browser cancelled the drag immediately — `dragstart` fired then `dragend` with zero `dragover` events.
+**Root cause:** Browsers interpret mouse movement in scrollable containers as scroll intent, killing the drag.
+**Rule:** Never use HTML5 Drag API inside scrollable containers. Use pointer events (mousedown/mousemove/mouseup) instead. Start drag from a grip handle, use a threshold (8px) before activating, create a floating ghost clone with `position: fixed`. This is how Todoist and other production apps do it.
 
 ### 2. CSS cache busting
 **Rule:** Always bump `?v=N` on both CSS and JS in index.html when modifying either file.
