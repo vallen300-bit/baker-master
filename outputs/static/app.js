@@ -4025,7 +4025,7 @@ function loadSearchTab() {
         searchInput.id = 'kbSearchInput';
         searchInput.placeholder = 'Search across all Baker content...';
         searchInput.maxLength = 500;
-        searchInput.style.cssText = 'flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:var(--font);background:var(--bg);outline:none;';
+        searchInput.style.cssText = 'flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:var(--font);background:var(--bg);color:var(--text);outline:none;';
         searchInput.addEventListener('keydown', function(e) {
             if (e.key === 'Enter') {
                 _kbSearchQuery = searchInput.value;
