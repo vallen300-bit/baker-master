@@ -1980,7 +1980,8 @@ function renderTriageCard(alert) {
     html += _triageBtn('Delegate', 'delegate', aid, title, body);
     html += _triageBtn('Dismiss', 'dismiss', aid, title, body);
     html += _triageBtn('Ask Baker', 'ask', aid, title, body);
-    html += _triageBtn('Critical', 'critical', aid, title, body);
+    html += _triageBtn('Add to Critical', 'critical', aid, title, body);
+    html += _triageBtn('Add to Promised', 'promised', aid, title, body);
     html += '</div>';
     // Delegate input (hidden by default)
     html += '<div class="triage-delegate-row" id="triage-delegate-' + esc(aid) + '" style="display:none;padding:0 16px 10px;gap:8px;display:none;">';
@@ -1995,7 +1996,7 @@ function renderTriageCard(alert) {
     return html;
 }
 
-var _triageIcons = { email: '\u2709', whatsapp: '\uD83D\uDCAC', analyze: '\uD83D\uDD0D', summarize: '\uD83D\uDCCB', dossier: '\uD83D\uDDC2', clickup: '\u2197', delegate: '\uD83D\uDC64', dismiss: '\u2715', ask: '\uD83D\uDCAC', critical: '\u26A1' };
+var _triageIcons = { email: '\u2709', whatsapp: '\uD83D\uDCAC', analyze: '\uD83D\uDD0D', summarize: '\uD83D\uDCCB', dossier: '\uD83D\uDDC2', clickup: '\u2197', delegate: '\uD83D\uDC64', dismiss: '\u2715', ask: '\uD83D\uDCAC', critical: '\u26A1', promised: '\uD83D\uDCCB' };
 
 function _triageBtn(label, action, aid, title, body) {
     var icon = _triageIcons[action] || '';
@@ -2041,6 +2042,8 @@ function _handleTriageAction(action, alertId) {
         _triageCreateClickUp(alertId, title, body);
     } else if (action === 'critical') {
         _triagePromoteCritical(alertId);
+    } else if (action === 'promised') {
+        _triageAddToPromised(alertId);
     }
 }
 
@@ -2108,6 +2111,23 @@ function _triagePromoteCritical(alertId) {
         }
     }).catch(function(e) {
         _showToast('Critical promote error: ' + e);
+    });
+}
+
+function _triageAddToPromised(alertId) {
+    bakerFetch('/api/deadlines/from-alert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ alert_id: alertId }),
+    }).then(function(r) { return r.json(); }).then(function(d) {
+        if (d.error) {
+            _showToast(d.error);
+        } else {
+            _showToast('\uD83D\uDCCB Added to Promised To Do');
+            loadMorningBrief();
+        }
+    }).catch(function(e) {
+        _showToast('Add to promised error: ' + e);
     });
 }
 

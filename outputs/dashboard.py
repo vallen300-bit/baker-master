@@ -4875,6 +4875,49 @@ async def add_critical_quick(request: Request):
         return {"error": str(e)}
 
 
+@app.post("/api/deadlines/from-alert", tags=["deadlines"], dependencies=[Depends(verify_api_key)])
+async def create_deadline_from_alert(request: Request):
+    """Create a non-critical deadline (Promised To Do) from an alert."""
+    try:
+        body = await request.json()
+        alert_id = body.get("alert_id")
+        if not alert_id:
+            raise HTTPException(status_code=400, detail="alert_id required")
+
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("SELECT title, body FROM alerts WHERE id = %s", (alert_id,))
+            alert = cur.fetchone()
+            cur.close()
+        finally:
+            store._put_conn(conn)
+        if not alert:
+            raise HTTPException(status_code=404, detail="Alert not found")
+
+        from models.deadlines import insert_deadline
+        from datetime import datetime
+        did = insert_deadline(
+            description=alert['title'],
+            due_date=datetime.now(),
+            source_type="alert_to_promised",
+            source_id=f"promised:{alert_id}",
+            confidence="high",
+            priority="normal",
+            source_snippet=(alert.get('body') or '')[:300],
+        )
+        return {"status": "added", "deadline_id": did, "alert_id": alert_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"POST /api/deadlines/from-alert failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/landing/move", tags=["landing"], dependencies=[Depends(verify_api_key)])
 async def landing_move_item(request: Request):
     """DRAG-DROP-1: Move a deadline item between landing grid sections."""
