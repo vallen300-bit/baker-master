@@ -1190,14 +1190,13 @@ async function loadMattersSummary() {
         // SIDEBAR-RESTRUCTURE-1: Render 3-tier sidebar
         _renderMatterSection('projectsSubList', data.projects || [], 'projectsCount');
         _renderMatterSection('operationsSubList', data.operations || [], 'operationsCount');
-        // Inbox count
-        var inboxTotal = 0;
-        (data.inbox || []).forEach(function(m) { inboxTotal += m.item_count || 0; });
-        setText('inboxCount', inboxTotal || '');
+        // SIDEBAR-HIERARCHY-1: Render inbox sub-items
+        _renderMatterSection('inboxSubList', data.inbox || [], 'inboxCount');
 
         // Section expand/collapse with localStorage persistence
         _initSectionToggle('navProjectsHeader', 'projectsSubList', 'projects', true);
         _initSectionToggle('navOpsHeader', 'operationsSubList', 'operations', false);
+        _initSectionToggle('navInboxHeader', 'inboxSubList', 'inbox', false);
     } catch (e) {
         console.error('loadMattersSummary failed:', e);
     }
@@ -1211,8 +1210,9 @@ function _renderMatterSection(containerId, matters, countId) {
     for (var i = 0; i < matters.length; i++) {
         var m = matters[i];
         var slug = m.matter_slug || '_ungrouped';
-        if (slug === '_ungrouped') continue;
-        var label = slug.replace(/_/g, ' ').replace(/[-]/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+        if (slug === '_ungrouped' && containerId !== 'inboxSubList') continue;
+        var label = slug === '_ungrouped' ? 'General'
+            : slug.replace(/_/g, ' ').replace(/[-]/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
         var dotClass = (m.worst_tier && m.worst_tier <= 2) ? 'red' : 'slate';
         totalCount += m.item_count || 0;
 

@@ -123,12 +123,12 @@ body {
 .nav-section-label { flex: 1; }
 .nav-section-header .nav-count { font-size: 10px; color: var(--text4); }
 
-/* SIDEBAR-HIERARCHY-1: Inbox as peer section header */
-#navInbox { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; padding: 8px 14px; }
 /* SIDEBAR-HIERARCHY-1: Accent colors for section headers */
 #navProjectsHeader .nav-section-label { color: var(--blue); }
 #navOpsHeader .nav-section-label { color: #0d9488; }
-#navInbox .nav-label { color: #d4a535; }
+#navInboxHeader .nav-section-label { color: #d4a535; }
+/* SIDEBAR-HIERARCHY-1: Logo icon (Brisen lens) */
+.sidebar-logo-icon { width: 24px; height: 24px; border-radius: 50%; vertical-align: middle; margin-left: 6px; }
 
 /* TRIAGE-CARDS-1: Triage pill buttons */
 .triage-pill {

@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=47">
+    <link rel="stylesheet" href="/static/style.css?v=48">
 </head>
 <body>
 
@@ -21,7 +21,7 @@
 
 <!-- SIDEBAR -->
 <div class="sidebar">
-    <div class="sidebar-logo" onclick="switchTab('morning-brief')" style="cursor:pointer;">BAKER</div>
+    <div class="sidebar-logo" onclick="switchTab('morning-brief')" style="cursor:pointer;">BAKER <img src="/static/baker-face-green.svg" alt="Baker" class="sidebar-logo-icon" /></div>
     <nav class="sidebar-nav">
 
         <!-- SIDEBAR-RESTRUCTURE-1: Projects section (expandable) -->
@@ -40,11 +40,13 @@
         </div>
         <div class="nav-sub" id="operationsSubList" style="display:none;"></div>
 
-        <!-- SIDEBAR-RESTRUCTURE-1: Inbox -->
-        <div class="nav-item" data-tab="fires" data-matter="_ungrouped" id="navInbox">
-            <span class="nav-label">Inbox</span>
+        <!-- SIDEBAR-HIERARCHY-1: Inbox section (expandable, like Projects/Operations) -->
+        <div class="nav-section-header" id="navInboxHeader" data-section="inbox">
+            <span class="nav-section-arrow">&#9656;</span>
+            <span class="nav-section-label">Inbox</span>
             <span class="nav-count" id="inboxCount"></span>
         </div>
+        <div class="nav-sub" id="inboxSubList" style="display:none;"></div>
 
         <div class="nav-divider"></div>
 
@@ -103,7 +105,7 @@
             <button class="cmd-quick" data-action="research">Research</button>
         </div>
         <button class="mute-toggle" id="muteToggle" title="Mute alert sounds" onclick="toggleMute(this)">&#x1F514;</button>
-        <img src="/static/baker-face-green.svg" alt="Baker" class="baker-avatar" title="Baker AI" />
+        <!-- Baker avatar moved to sidebar -->
     </div>
 
     <!-- Content area (views swap here) -->
@@ -333,6 +335,6 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=69"></script>
+<script src="/static/app.js?v=70"></script>
 </body>
 </html>
