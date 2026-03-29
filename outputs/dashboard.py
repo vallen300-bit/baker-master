@@ -1442,6 +1442,16 @@ async def root():
     return {"message": "Baker Dashboard — no frontend deployed yet"}
 
 
+@app.get("/sw.js", include_in_schema=False)
+async def service_worker():
+    """PWA-DESKTOP-1: Serve service worker from root scope for full app control."""
+    sw_path = _static_dir / "sw.js"
+    if sw_path.exists():
+        return FileResponse(str(sw_path), media_type="application/javascript",
+                           headers={"Service-Worker-Allowed": "/"})
+    return FileResponse(str(sw_path))
+
+
 @app.get("/mobile", include_in_schema=False)
 async def mobile():
     """Serve the mobile-optimized frontend (Ask Baker + Ask Specialist)."""

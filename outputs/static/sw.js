@@ -1,5 +1,5 @@
-// Baker Push Service Worker (E3 + Baker 3.0 Digest)
-var SW_VERSION = '2';
+// Baker Push + PWA Service Worker (E3 + Baker 3.0 Digest + PWA-DESKTOP-1)
+var SW_VERSION = '3';
 
 // Install — activate immediately
 self.addEventListener('install', function(event) {
@@ -57,6 +57,24 @@ self.addEventListener('push', function(event) {
 
     event.waitUntil(
         self.registration.showNotification(title, options)
+    );
+});
+
+// PWA-DESKTOP-1: Fetch handler — network-first (required for PWA installability)
+self.addEventListener('fetch', function(event) {
+    // Network-first: always fetch from server, no offline caching
+    // Baker is a live dashboard — stale data is worse than no data
+    event.respondWith(
+        fetch(event.request).catch(function() {
+            // Offline fallback — only for navigation requests
+            if (event.request.mode === 'navigate') {
+                return new Response(
+                    '<html><body style="background:#0D0F14;color:#ccc;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;">' +
+                    '<div style="text-align:center;"><h1 style="color:#c9a96e;">Baker</h1><p>You are offline. Baker needs a network connection.</p></div></div></body></html>',
+                    { headers: { 'Content-Type': 'text/html' } }
+                );
+            }
+        })
     );
 });
 

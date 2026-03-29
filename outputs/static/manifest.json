@@ -1,19 +1,32 @@
 {
-  "name": "Baker AI",
+  "name": "Baker — CEO Cockpit",
   "short_name": "Baker",
-  "description": "Baker AI Chief of Staff — Mobile",
-  "start_url": "/mobile",
+  "description": "Dimitry Vallen's AI Chief of Staff",
+  "start_url": "/",
   "display": "standalone",
-  "background_color": "#0a0e14",
-  "theme_color": "#0a6fdb",
+  "background_color": "#0D0F14",
+  "theme_color": "#0D0F14",
+  "orientation": "any",
   "icons": [
+    {
+      "src": "/static/baker-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/baker-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
     {
       "src": "/static/baker-face-green.svg",
       "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any maskable"
+      "type": "image/svg+xml"
     }
   ],
+  "categories": ["business", "productivity"],
   "share_target": {
     "action": "/mobile",
     "method": "POST",

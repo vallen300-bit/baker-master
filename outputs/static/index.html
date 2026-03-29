@@ -4,6 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Baker Cockpit</title>
+    <!-- PWA-DESKTOP-1: Installable as desktop app -->
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0D0F14">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="apple-touch-icon" href="/static/baker-icon-192.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -385,5 +391,13 @@
 </div><!-- /app-wrap -->
 
 <script src="/static/app.js?v=76"></script>
+<script>
+// PWA-DESKTOP-1: Register service worker for installability
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(function(e) {
+        console.debug('SW registration skipped:', e);
+    });
+}
+</script>
 </body>
 </html>
