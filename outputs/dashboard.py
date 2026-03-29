@@ -1684,13 +1684,14 @@ async def get_morning_brief():
             """)
             top_fires = [_serialize(dict(r)) for r in cur.fetchall()]
 
-            # Deadlines this week (truncate source_snippet to 500 chars for expandable cards)
+            # Deadlines this week — exclude critical items (shown in Critical section)
             cur.execute("""
                 SELECT id, description, due_date, source_type, confidence,
                        priority, status, created_at,
                        LEFT(source_snippet, 500) AS source_snippet
                 FROM deadlines
                 WHERE status = 'active'
+                  AND (is_critical IS NOT TRUE)
                   AND due_date >= CURRENT_DATE
                   AND due_date <= CURRENT_DATE + INTERVAL '7 days'
                 ORDER BY due_date ASC LIMIT 10
