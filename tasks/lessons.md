@@ -11,7 +11,11 @@ Review at session start. Add new lessons after any correction. Remove stale ones
 **Root cause:** Browsers interpret mouse movement in scrollable containers as scroll intent, killing the drag.
 **Rule:** Never use HTML5 Drag API inside scrollable containers. Use pointer events (mousedown/mousemove/mouseup) instead. Start drag from a grip handle, use a threshold (8px) before activating, create a floating ghost clone with `position: fixed`. This is how Todoist and other production apps do it.
 
-### 2. CSS cache busting
+### 2. Always verify DB schema matches code
+**Mistake:** `set_critical()` and `get_critical_items()` referenced `is_critical` and `critical_flagged_at` columns that didn't exist in the deadlines table. Functions silently failed (try/except swallowed errors). The Critical section showed empty for weeks.
+**Rule:** When code references a DB column, verify it exists before shipping. Run `SELECT column_name FROM information_schema.columns WHERE table_name = 'X'` to confirm. Never trust that a migration ran — check.
+
+### 3. CSS cache busting
 **Rule:** Always bump `?v=N` on both CSS and JS in index.html when modifying either file.
 
 ---
