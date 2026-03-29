@@ -239,6 +239,7 @@ Return exactly this JSON structure (no other text, no markdown):
   "content_request": "<what Baker should include in the email body, or null>",
   "whatsapp_recipient": "<name of WhatsApp recipient, or null>",
   "whatsapp_message": "<message content to send via WhatsApp, or null>",
+  "whatsapp_phone": "<phone number if explicitly provided in the message, e.g. '+41 78 871 57 64'. Set to null if no phone number.>",
   "deadline_action": "<dismiss | complete | confirm | null>",
   "deadline_search": "<text identifying which deadline, or null>",
   "deadline_date": "<YYYY-MM-DD date for confirm action, or null>",
@@ -905,6 +906,40 @@ def _resolve_names_to_whatsapp_ids(raw: str) -> list:
     except Exception as e:
         logger.warning(f"VIP WhatsApp resolution failed: {e}")
 
+    # WHATSAPP-INLINE-SEND-1: Fallback to general contacts table
+    if not resolved:
+        try:
+            from config.settings import get_pg_connection
+            import re as _re
+            conn = get_pg_connection()
+            cur = conn.cursor()
+            name_parts = re.split(r'[,;]\s*|\s+and\s+', raw)
+            for part in name_parts:
+                part_clean = part.strip()
+                if not part_clean or part_clean.lower() in ("myself", "me", "dimitry"):
+                    continue
+                cur.execute("""
+                    SELECT name, phone
+                    FROM contacts
+                    WHERE (LOWER(name) LIKE %s OR LOWER(name) LIKE %s)
+                      AND phone IS NOT NULL
+                    LIMIT 1
+                """, (f"%{part_clean.lower()}%", f"{part_clean.lower()}%"))
+                row = cur.fetchone()
+                if row:
+                    c_name, c_phone = row
+                    wa_id = _re.sub(r'[\s\-()]', '', c_phone).lstrip('+') + '@c.us'
+                    resolved.append((c_name, wa_id))
+                    break
+            cur.close()
+            conn.close()
+        except Exception as e:
+            logger.warning(f"Contacts table WhatsApp lookup failed: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+
     return resolved
 
 
@@ -1453,6 +1488,30 @@ def handle_whatsapp_action(intent: dict, retriever, channel: str = "scan",
         except Exception as _e:
             logger.warning(f"Auto-VIP add failed (non-fatal): {_e}")
         resolved = [(_clean_name, _inline_phone)]
+
+    # WHATSAPP-INLINE-SEND-1: Fallback — scan conversation history for phone numbers
+    if not resolved and not _inline_phone and conversation_history:
+        _hist_phone_match = _re.search(r'\+?[\d\s\-()]{10,}', conversation_history)
+        if _hist_phone_match:
+            _hist_phone = _re.sub(r'[\s\-()]', '', _hist_phone_match.group().strip())
+            if not _hist_phone.endswith('@c.us'):
+                _hist_phone = _hist_phone.lstrip('+') + '@c.us'
+            _clean_name = _re.sub(r'\+?[\d\s\-()]+', '', raw_recipient).strip()
+            if not _clean_name:
+                _clean_name = raw_recipient
+            resolved = [(_clean_name, _hist_phone)]
+            _log_action("handle_whatsapp_action:phone_from_history", f"extracted={_hist_phone} for {_clean_name}")
+
+    # WHATSAPP-INLINE-SEND-1: Also check intent-extracted phone number
+    if not resolved:
+        _intent_phone = intent.get("whatsapp_phone")
+        if _intent_phone:
+            _intent_phone_clean = _re.sub(r'[\s\-()]', '', _intent_phone).lstrip('+')
+            if not _intent_phone_clean.endswith('@c.us'):
+                _intent_phone_clean += '@c.us'
+            _clean_name = _re.sub(r'\+?[\d\s\-()]+', '', raw_recipient).strip() or raw_recipient
+            resolved = [(_clean_name, _intent_phone_clean)]
+            _log_action("handle_whatsapp_action:phone_from_intent", f"extracted={_intent_phone_clean}")
 
     if not resolved:
         return (
