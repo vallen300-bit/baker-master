@@ -15,7 +15,11 @@ Review at session start. Add new lessons after any correction. Remove stale ones
 **Mistake:** `set_critical()` and `get_critical_items()` referenced `is_critical` and `critical_flagged_at` columns that didn't exist in the deadlines table. Functions silently failed (try/except swallowed errors). The Critical section showed empty for weeks.
 **Rule:** When code references a DB column, verify it exists before shipping. Run `SELECT column_name FROM information_schema.columns WHERE table_name = 'X'` to confirm. Never trust that a migration ran — check.
 
-### 3. CSS cache busting
+### 3. Column name mismatches are silent killers
+**Mistake:** `doc_type` referenced in code but actual column is `document_type`. Same pattern as `is_critical`. Both caused features to silently fail — try/except swallowed the errors, user saw "Failed to load" or empty sections.
+**Rule:** When writing SQL in Python, always verify column names first: `SELECT column_name FROM information_schema.columns WHERE table_name = 'X'`. Don't assume — check.
+
+### 4. CSS cache busting
 **Rule:** Always bump `?v=N` on both CSS and JS in index.html when modifying either file.
 
 ---
