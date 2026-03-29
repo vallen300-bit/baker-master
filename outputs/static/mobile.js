@@ -145,6 +145,38 @@ function _submitMobileFeedback(taskId, feedback, toolbarEl) {
     });
 }
 
+// ═══ CHAT-TRIAGE-1: Mobile triage bar ═══
+function _renderMobileTriage(replyEl, question, answer) {
+    var bar = document.createElement('div');
+    bar.className = 'chat-triage';
+    bar.style.cssText = 'display:flex;gap:8px;padding:8px 0;margin-top:8px;border-top:1px solid rgba(255,255,255,0.08);flex-wrap:wrap;align-items:center;';
+
+    var saveBtn = document.createElement('button');
+    saveBtn.style.cssText = 'padding:6px 14px;border-radius:6px;border:1px solid rgba(201,169,110,0.3);background:rgba(255,255,255,0.04);color:#c9a96e;cursor:pointer;font-size:12px;min-height:44px;';
+    saveBtn.textContent = 'Save to Dossiers';
+    saveBtn.addEventListener('click', function() {
+        saveBtn.textContent = 'Saving...';
+        saveBtn.disabled = true;
+        bakerFetch('/api/dossiers/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question: question, answer: answer }),
+        }).then(function(r) {
+            if (r.ok) { saveBtn.textContent = '\u2713 Saved'; saveBtn.style.color = '#4ecdc4'; }
+            else { saveBtn.textContent = 'Failed'; saveBtn.disabled = false; }
+        }).catch(function() { saveBtn.textContent = 'Failed'; saveBtn.disabled = false; });
+    });
+    bar.appendChild(saveBtn);
+
+    var dismissBtn = document.createElement('button');
+    dismissBtn.style.cssText = 'margin-left:auto;border:none;background:none;color:#555;font-size:16px;padding:6px 10px;cursor:pointer;min-height:44px;';
+    dismissBtn.textContent = '\u2715';
+    dismissBtn.addEventListener('click', function() { bar.style.display = 'none'; });
+    bar.appendChild(dismissBtn);
+
+    replyEl.appendChild(bar);
+}
+
 // ═══ HTML SAFETY ═══
 function esc(s) {
     if (!s) return '';
@@ -356,6 +388,11 @@ async function streamChat(url, body, containerId, history) {
     // Toolbar: Copy + Play + Feedback (tap to hear)
     if (full && !full.startsWith('Connection error')) {
         addResponseToolbar(replyEl, full, capturedTaskId);
+    }
+
+    // CHAT-TRIAGE-1: Triage bar for substantive answers (300+ chars)
+    if (full && full.length > 300 && !full.startsWith('Connection error') && replyEl) {
+        _renderMobileTriage(replyEl, question, full);
     }
 
     streaming = false;

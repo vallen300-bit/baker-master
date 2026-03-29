@@ -3174,6 +3174,11 @@ async function sendScanMessage(question) {
         replyEl.appendChild(copyBar);
     }
 
+    // CHAT-TRIAGE-1: Triage bar for substantive answers (300+ chars)
+    if (replyEl && fullResponse && fullResponse.length > 300 && !fullResponse.startsWith('Connection error:')) {
+        _renderChatTriage(replyEl, question, fullResponse);
+    }
+
     // LEARNING-LOOP: Render feedback buttons if we got a task_id
     if (window._lastScanTaskId && replyEl) {
         renderFeedbackButtons(window._lastScanTaskId, replyEl);
@@ -3191,6 +3196,122 @@ async function sendScanMessage(question) {
 
     const container = document.getElementById('scanMessages');
     if (container) container.scrollTop = 0;
+}
+
+// ═══ CHAT-TRIAGE-1: Triage bar under chat answers ═══
+
+function _renderChatTriage(replyEl, question, answer) {
+    var bar = document.createElement('div');
+    bar.className = 'chat-triage';
+
+    // Save to Dossiers button
+    var saveBtn = document.createElement('button');
+    saveBtn.className = 'triage-btn triage-save';
+    saveBtn.textContent = 'Save to Dossiers';
+    saveBtn.addEventListener('click', function() {
+        _saveToDossiers(saveBtn, question, answer);
+    });
+    bar.appendChild(saveBtn);
+
+    // Dynamic suggestions (keyword-based, zero API cost)
+    var suggestions = _getTriageSuggestions(question, answer);
+    for (var si = 0; si < suggestions.length; si++) {
+        var s = suggestions[si];
+        var sBtn = document.createElement('button');
+        sBtn.className = 'triage-btn';
+        sBtn.textContent = s.label;
+        sBtn.addEventListener('click', (function(action) {
+            return function() { action(); };
+        })(s.action));
+        bar.appendChild(sBtn);
+    }
+
+    // Dismiss button
+    var dismissBtn = document.createElement('button');
+    dismissBtn.className = 'triage-btn triage-dismiss';
+    dismissBtn.textContent = '\u2715';
+    dismissBtn.title = 'Dismiss';
+    dismissBtn.addEventListener('click', function() {
+        bar.style.display = 'none';
+    });
+    bar.appendChild(dismissBtn);
+
+    replyEl.appendChild(bar);
+}
+
+async function _saveToDossiers(btn, question, answer) {
+    btn.textContent = 'Saving...';
+    btn.disabled = true;
+    try {
+        var resp = await bakerFetch('/api/dossiers/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question: question, answer: answer }),
+        });
+        if (resp.ok) {
+            var data = await resp.json();
+            btn.textContent = (data.status === 'already_saved') ? 'Already saved' : '\u2713 Saved';
+            btn.classList.add('triage-done');
+        } else {
+            btn.textContent = 'Failed \u2014 retry?';
+            btn.disabled = false;
+        }
+    } catch (e) {
+        btn.textContent = 'Failed \u2014 retry?';
+        btn.disabled = false;
+    }
+}
+
+function _getTriageSuggestions(question, answer) {
+    var text = (answer + ' ' + question).toLowerCase();
+    var suggestions = [];
+
+    // Person mentioned → Run Full Dossier
+    if (/(connected|issues|role|profile|background|dossier|counterpart)/i.test(text)) {
+        var nameMatch = question.match(/(?:about|on|for|with)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/);
+        if (nameMatch) {
+            suggestions.push({
+                label: 'Run Dossier on ' + nameMatch[1],
+                action: function() { _triggerScanQuestion('Run a full dossier on ' + nameMatch[1]); }
+            });
+        }
+    }
+    // Deadlines mentioned
+    if (/(deadline|due date|overdue|expir|frist|ablauf)/i.test(text)) {
+        suggestions.push({
+            label: 'Add Deadline',
+            action: function() { _triggerScanQuestion('Add a deadline for the items mentioned above'); }
+        });
+    }
+    // Risk / urgent
+    if (/(risk|critical|fire|urgent|escalat|gefahr|dringend)/i.test(text)) {
+        suggestions.push({
+            label: 'Flag as Critical',
+            action: function() { _triggerScanQuestion('Flag the most urgent item above as critical'); }
+        });
+    }
+    // Default fallback
+    if (suggestions.length === 0) {
+        suggestions.push({
+            label: 'Ask Follow-up',
+            action: function() {
+                var inp = document.getElementById('scanInput');
+                if (inp) { inp.focus(); inp.placeholder = 'Ask a follow-up question...'; }
+            }
+        });
+    }
+    return suggestions.slice(0, 2);
+}
+
+function _triggerScanQuestion(q) {
+    var inp = document.getElementById('scanInput');
+    if (inp) {
+        inp.value = q;
+        inp.dispatchEvent(new Event('input'));
+        // Auto-submit
+        var sendBtn = document.getElementById('scanSendBtn');
+        if (sendBtn && !sendBtn.disabled) sendBtn.click();
+    }
 }
 
 // ═══ FOLLOW-UP SUGGESTIONS ═══

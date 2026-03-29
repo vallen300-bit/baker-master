@@ -130,6 +130,16 @@ body {
 /* SIDEBAR-HIERARCHY-1: Logo icon (Brisen lens) */
 .sidebar-logo-icon { width: 24px; height: 24px; border-radius: 50%; vertical-align: middle; margin-left: 6px; }
 
+/* CHAT-TRIAGE-1: Triage bar under chat answers */
+.chat-triage { display: flex; gap: 8px; padding: 8px 0; margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.08); flex-wrap: wrap; align-items: center; }
+.chat-triage .triage-btn { padding: 5px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.12); background: rgba(255,255,255,0.04); color: #aaa; cursor: pointer; font-size: 12px; transition: all 0.15s; white-space: nowrap; }
+.chat-triage .triage-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.chat-triage .triage-save { border-color: rgba(201,169,110,0.3); color: var(--blue); }
+.chat-triage .triage-save:hover { background: rgba(201,169,110,0.12); }
+.chat-triage .triage-done { color: #4ecdc4; border-color: rgba(78,205,196,0.3); cursor: default; }
+.chat-triage .triage-dismiss { margin-left: auto; border: none; color: #555; font-size: 14px; padding: 4px 8px; }
+.chat-triage .triage-dismiss:hover { color: #999; }
+
 /* TRIAGE-CARDS-1: Triage pill buttons */
 .triage-pill {
   font-size: 11px; padding: 4px 10px; border: 1px solid var(--border);

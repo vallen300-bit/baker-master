@@ -8793,6 +8793,55 @@ async def api_get_unified_dossiers(days: int = 180):
         store._put_conn(conn)
 
 
+@app.post("/api/dossiers/save", tags=["research"], dependencies=[Depends(verify_api_key)])
+async def api_save_to_dossiers(request: Request):
+    """CHAT-TRIAGE-1: Save a Baker chat answer to deep_analyses (Dossiers section)."""
+    body = await request.json()
+    question = body.get("question", "Baker Analysis")
+    answer = body.get("answer", "")
+
+    if not answer or len(answer) < 100:
+        return JSONResponse({"error": "Answer too short to save"}, status_code=400)
+
+    import re as _re
+    import secrets
+    topic = _re.sub(r'https?://\S+', '', question).strip()[:120] or "Baker Analysis"
+    analysis_id = "chat_" + secrets.token_hex(6)
+
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=500, detail="DB unavailable")
+    try:
+        cur = conn.cursor()
+        # Dedup: skip if same topic saved in last 1 hour
+        cur.execute("""
+            SELECT analysis_id FROM deep_analyses
+            WHERE topic = %s AND created_at > NOW() - INTERVAL '1 hour'
+            LIMIT 1
+        """, (topic,))
+        if cur.fetchone():
+            cur.close()
+            return JSONResponse({"status": "already_saved", "message": "Already in Dossiers"})
+
+        cur.execute("""
+            INSERT INTO deep_analyses (analysis_id, topic, analysis_text, prompt, source_documents, created_at)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+        """, (analysis_id, topic, answer, question, json.dumps("ask_baker")))
+        conn.commit()
+        cur.close()
+        return JSONResponse({"status": "saved", "id": analysis_id})
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"Save to dossiers failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        store._put_conn(conn)
+
+
 @app.get("/api/dossiers/analysis/{analysis_id}/view", tags=["research"])
 async def api_view_deep_analysis_dossier(analysis_id: str, key: str = ""):
     """View a deep_analyses dossier as HTML."""
