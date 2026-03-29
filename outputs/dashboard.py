@@ -1081,7 +1081,7 @@ async def get_documents(
                 conditions.append("(filename ILIKE %s OR full_text ILIKE %s)")
                 params.extend([f"%{search.strip()}%", f"%{search.strip()}%"])
             if doc_type.strip():
-                conditions.append("doc_type = %s")
+                conditions.append("document_type = %s")
                 params.append(doc_type.strip())
             if matter_slug.strip():
                 conditions.append("matter_slug = %s")
@@ -1095,7 +1095,7 @@ async def get_documents(
 
             # Fetch page
             cur.execute(
-                f"SELECT id, filename, doc_type, matter_slug, source_path, ingested_at, "
+                f"SELECT id, filename, document_type AS doc_type, matter_slug, source_path, ingested_at, "
                 f"LEFT(full_text, 200) AS text_preview "
                 f"FROM documents {where} ORDER BY ingested_at DESC LIMIT %s OFFSET %s",
                 params + [limit, offset],
@@ -1112,8 +1112,8 @@ async def get_documents(
                 cur2 = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
                 cur2.execute("""
                     SELECT COUNT(*) AS total_docs,
-                           COUNT(DISTINCT doc_type) AS type_count,
-                           (SELECT doc_type FROM documents GROUP BY doc_type ORDER BY COUNT(*) DESC LIMIT 1) AS top_type,
+                           COUNT(DISTINCT document_type) AS type_count,
+                           (SELECT document_type FROM documents GROUP BY document_type ORDER BY COUNT(*) DESC LIMIT 1) AS top_type,
                            (SELECT matter_slug FROM documents WHERE matter_slug IS NOT NULL GROUP BY matter_slug ORDER BY COUNT(*) DESC LIMIT 1) AS top_matter
                     FROM documents
                 """)
