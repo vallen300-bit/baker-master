@@ -123,10 +123,10 @@ body {
 .nav-section-label { flex: 1; }
 .nav-section-header .nav-count { font-size: 10px; color: var(--text4); }
 
-/* SIDEBAR-HIERARCHY-1: Accent colors for section headers */
-#navProjectsHeader .nav-section-label { color: var(--blue); }
-#navOpsHeader .nav-section-label { color: #0d9488; }
-#navInboxHeader .nav-section-label { color: #d4a535; }
+/* SIDEBAR-HIERARCHY-1: Accent colors for section headers — all teal */
+#navProjectsHeader .nav-section-label,
+#navOpsHeader .nav-section-label,
+#navInboxHeader .nav-section-label { color: #0d9488; }
 /* SIDEBAR-HIERARCHY-1: Logo icon (Brisen lens) */
 .sidebar-logo-icon { width: 24px; height: 24px; border-radius: 50%; vertical-align: middle; margin-left: 6px; }
 
