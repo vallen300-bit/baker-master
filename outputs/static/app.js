@@ -2501,7 +2501,6 @@ function _renderCriticalItem(ci) {
         '<span class="drag-grip" title="Drag to move">&#x2807;</span>' +
         '<span style="margin-right:4px;">\u26A1</span>' +
         '<span class="card-title" style="flex:1;">' + esc(truncDesc) + ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span></span>' +
-        '<button class="triage-pill" style="font-size:10px;padding:2px 8px;margin-left:4px;background:var(--green);color:#fff;border-color:var(--green);" onclick="event.stopPropagation();_criticalDone(' + ci.id + ',this)">Done</button>' +
         '<span class="card-time" style="min-width:40px;text-align:right;">' + esc(timeLabel) + '</span>' +
         '</div>';
     // Expandable detail + triage
