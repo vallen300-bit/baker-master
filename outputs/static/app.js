@@ -1303,6 +1303,14 @@ async function loadPeopleSidebar() {
         }
         setText('peopleCount', totalCount || '');
         _initSectionToggle('navPeopleHeader', 'peopleSubList', 'people', false);
+        // PEOPLE-SECTION-1: Auto-expand if there are people to show
+        if (totalCount > 0) {
+            var list = document.getElementById('peopleSubList');
+            var arrow = document.querySelector('#navPeopleHeader .nav-section-arrow');
+            if (list) list.style.display = '';
+            if (arrow) arrow.innerHTML = '&#9662;';
+            localStorage.setItem('sidebar_people', 'true');
+        }
     } catch (e) {
         console.error('loadPeopleSidebar failed:', e);
     }
