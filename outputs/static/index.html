@@ -13,13 +13,18 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=52">
+    <link rel="stylesheet" href="/static/style.css?v=53">
 </head>
 <body>
 
 <!-- Mobile fallback -->
 <div class="mobile-fallback">
     Baker Cockpit is designed for laptop and tablet. Open on a larger screen for the full experience.
+</div>
+
+<!-- SCHEDULER-WATCHDOG-1: Red banner when scheduler is dead -->
+<div id="schedulerBanner" class="scheduler-banner" style="display:none;">
+    Baker's background jobs stopped. Auto-restarting...
 </div>
 
 <!-- Main app (hidden on mobile) -->
@@ -390,7 +395,7 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=76"></script>
+<script src="/static/app.js?v=77"></script>
 <script>
 // PWA-DESKTOP-1: Register service worker for installability
 if ('serviceWorker' in navigator) {

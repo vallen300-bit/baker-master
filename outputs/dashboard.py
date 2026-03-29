@@ -100,6 +100,51 @@ app.add_middleware(
 )
 
 # ============================================================
+# SCHEDULER-WATCHDOG-1: Request-time heartbeat check
+# ============================================================
+_watchdog_last_check = 0
+_watchdog_cooldown = 300  # Don't re-alert within 5 min of a restart
+
+@app.middleware("http")
+async def scheduler_watchdog_middleware(request, call_next):
+    global _watchdog_last_check
+    now = time.time()
+    # Only check once per 60 seconds to avoid DB spam
+    if now - _watchdog_last_check > 60:
+        _watchdog_last_check = now
+        try:
+            _check_scheduler_heartbeat()
+        except Exception:
+            pass
+    return await call_next(request)
+
+
+def _check_scheduler_heartbeat():
+    """If heartbeat stale >12 min, restart scheduler + WhatsApp alert."""
+    global _watchdog_cooldown
+    try:
+        from triggers.state import trigger_state
+        hb = trigger_state.get_watermark("scheduler_heartbeat")
+        age_seconds = (datetime.now(timezone.utc) - hb).total_seconds()
+        if age_seconds > 720:  # 12 minutes = missed 2 heartbeat cycles
+            logger.error(f"SCHEDULER-WATCHDOG-1: Heartbeat stale ({age_seconds:.0f}s). Restarting...")
+            from triggers.embedded_scheduler import restart_scheduler
+            restart_scheduler()
+            # Alert Director (throttled — don't spam on repeated checks)
+            if age_seconds > _watchdog_cooldown:
+                try:
+                    from outputs.whatsapp_sender import send_whatsapp
+                    send_whatsapp(
+                        f"Baker scheduler was dead for {int(age_seconds/60)} minutes. "
+                        f"Auto-restarted. Check dashboard for missed items."
+                    )
+                except Exception as wa_e:
+                    logger.warning(f"Watchdog WhatsApp alert failed: {wa_e}")
+    except Exception as e:
+        logger.debug(f"Scheduler watchdog check failed (non-fatal): {e}")
+
+
+# ============================================================
 # Singletons (initialized on startup)
 # ============================================================
 
@@ -857,6 +902,24 @@ async def get_decompositions_endpoint(
 async def scheduler_status():
     """Return scheduler health and registered jobs."""
     return get_scheduler_status()
+
+
+@app.get("/api/health/scheduler", tags=["health"], include_in_schema=False)
+async def scheduler_heartbeat_health():
+    """SCHEDULER-WATCHDOG-1: Public endpoint for frontend heartbeat polling."""
+    try:
+        from triggers.state import trigger_state
+        hb = trigger_state.get_watermark("scheduler_heartbeat")
+        age = (datetime.now(timezone.utc) - hb).total_seconds()
+        status = get_scheduler_status()
+        return {
+            "alive": age < 720,
+            "heartbeat_age_seconds": int(age),
+            "scheduler_running": status.get("running", False),
+            "job_count": status.get("job_count", 0),
+        }
+    except Exception as e:
+        return {"alive": False, "error": str(e)}
 
 
 # ============================================================

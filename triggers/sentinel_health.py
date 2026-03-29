@@ -572,10 +572,8 @@ def run_health_watchdog():
 
         # Send via WAHA
         try:
-            from triggers.waha_client import send_message
-            from config.settings import config
-            director_wa = getattr(config, "director_whatsapp_id", None) or "41799605092@c.us"
-            send_message(director_wa, message)
+            from outputs.whatsapp_sender import send_whatsapp
+            send_whatsapp(message)
             logger.warning(f"Health watchdog: WhatsApp alert sent — {len(stuck)} stuck sentinels")
         except Exception as wa_err:
             logger.error(f"Health watchdog: WhatsApp send failed: {wa_err}")

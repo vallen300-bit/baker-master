@@ -435,6 +435,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: expire_browser_actions (every 5 min)")
 
+    # SCHEDULER-WATCHDOG-1: Heartbeat — proof of life every 5 min
+    scheduler.add_job(
+        _scheduler_heartbeat,
+        IntervalTrigger(minutes=5),
+        id="scheduler_heartbeat", name="Scheduler heartbeat",
+        coalesce=True, max_instances=1, replace_existing=True,
+        next_run_time=datetime.now(timezone.utc),  # Run immediately on startup
+    )
+    logger.info("Registered: scheduler_heartbeat (every 5 min)")
+
 
 def _expire_browser_actions():
     """Cancel browser actions that hit the 10-minute timeout. Dismiss linked alerts."""
@@ -470,6 +480,29 @@ def _expire_browser_actions():
         logger.warning(f"expire_browser_actions failed: {e}")
     finally:
         store._put_conn(conn)
+
+
+def _scheduler_heartbeat():
+    """SCHEDULER-WATCHDOG-1: Write proof-of-life timestamp to DB every 5 min."""
+    try:
+        from triggers.state import trigger_state
+        trigger_state.set_watermark("scheduler_heartbeat", datetime.now(timezone.utc))
+    except Exception as e:
+        logger.error(f"Scheduler heartbeat write failed: {e}")
+
+
+def restart_scheduler():
+    """SCHEDULER-WATCHDOG-1: Force restart the scheduler. Called by request-time watchdog."""
+    global _scheduler
+    logger.warning("SCHEDULER-WATCHDOG-1: Force-restarting scheduler...")
+    try:
+        if _scheduler is not None:
+            _scheduler.shutdown(wait=False)
+    except Exception:
+        pass
+    _scheduler = None
+    start_scheduler()
+    logger.warning("SCHEDULER-WATCHDOG-1: Scheduler force-restarted successfully")
 
 
 def start_scheduler():

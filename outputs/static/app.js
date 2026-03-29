@@ -6307,6 +6307,14 @@ function _closeTabCtxMenu() {
 
 document.addEventListener('DOMContentLoaded', init);
 
+// SCHEDULER-WATCHDOG-1: Poll scheduler health every 60s, show banner if dead
+setInterval(function() {
+    fetch('/api/health/scheduler').then(function(r) { return r.json(); }).then(function(data) {
+        var banner = document.getElementById('schedulerBanner');
+        if (banner) banner.style.display = data.alive ? 'none' : 'block';
+    }).catch(function() {});
+}, 60000);
+
 // ═══ DASHBOARD-DATA-LAYER: COMMITMENTS + BROWSER TABS ═══
 
 function _injectDataLayerCSS() {
