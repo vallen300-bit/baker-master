@@ -7561,7 +7561,7 @@ async function showAddTripPerson() {
             }
             var labels = { critical: 'Critical', promised: 'Promised To Do', dismiss: 'Dismissed' };
             _showToast('Moved to ' + (labels[target] || target));
-            if (cardEl) setTimeout(function() { cardEl.remove(); _updateGridCounts(); }, 300);
+            setTimeout(function() { loadMorningBrief(); }, 300);
         }).catch(function(err) {
             _showToast('Move failed');
             if (cardEl) { cardEl.style.opacity = '1'; cardEl.style.transform = ''; }
