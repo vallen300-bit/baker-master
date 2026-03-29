@@ -2005,6 +2005,7 @@ function _triageBtn(label, action, aid, title, body) {
 }
 
 function _toggleTriageCard(el) {
+    if (window._isDragging) return; // DRAG-DROP-1: suppress click during drag
     var detail = el.querySelector('.triage-detail');
     if (detail) detail.style.display = detail.style.display === 'none' ? '' : 'none';
 }
@@ -7344,6 +7345,8 @@ async function showAddTripPerson() {
 
 (function() {
     var _dragData = null; // { itemId, itemType, sourceCell, cardEl }
+    var _isDragging = false;
+    window._isDragging = false; // expose for click suppression
 
     // Map grid body IDs to section names
     var _cellMap = {
@@ -7383,6 +7386,8 @@ async function showAddTripPerson() {
         if (!itemId || !itemType) return;
 
         _dragData = { itemId: itemId, itemType: itemType, sourceCell: sourceCell, cardEl: card };
+        _isDragging = true;
+        window._isDragging = true;
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', itemId);
 
@@ -7469,6 +7474,7 @@ async function showAddTripPerson() {
             _dragData.cardEl.classList.remove('drag-active');
         }
         _dragData = null;
+        setTimeout(function() { _isDragging = false; window._isDragging = false; }, 100);
         // Hide action bar
         var bar = document.getElementById('dragActionBar');
         if (bar) bar.classList.remove('drag-action-bar-visible');
