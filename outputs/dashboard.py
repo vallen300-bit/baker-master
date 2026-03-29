@@ -1148,6 +1148,243 @@ async def get_documents(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── DOCUMENTS-REDESIGN-1: Facets + Search endpoints ───────────────────────
+
+@app.get("/api/documents/facets", tags=["documents"], dependencies=[Depends(verify_api_key)])
+async def get_document_facets():
+    """Return filter counts for documents sidebar: matters, types, sources, total."""
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            import psycopg2.extras
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+            # Matter counts
+            cur.execute("""
+                SELECT matter_slug AS name, COUNT(*) AS count
+                FROM documents WHERE matter_slug IS NOT NULL AND matter_slug != ''
+                GROUP BY matter_slug ORDER BY count DESC LIMIT 30
+            """)
+            matters = [dict(r) for r in cur.fetchall()]
+
+            # Type counts
+            cur.execute("""
+                SELECT COALESCE(document_type, 'unknown') AS name, COUNT(*) AS count
+                FROM documents GROUP BY COALESCE(document_type, 'unknown') ORDER BY count DESC
+            """)
+            types = [dict(r) for r in cur.fetchall()]
+
+            # Source counts (derived from source_path)
+            cur.execute("""
+                SELECT
+                    CASE
+                        WHEN source_path ILIKE '%%email%%' OR source_path ILIKE '%%gmail%%' THEN 'email'
+                        WHEN source_path ILIKE '%%whatsapp%%' THEN 'whatsapp'
+                        WHEN source_path ILIKE '%%clickup%%' THEN 'clickup'
+                        WHEN source_path ILIKE '%%fireflies%%' THEN 'fireflies'
+                        ELSE 'dropbox'
+                    END AS name,
+                    COUNT(*) AS count
+                FROM documents GROUP BY name ORDER BY count DESC
+            """)
+            sources = [dict(r) for r in cur.fetchall()]
+
+            # Total
+            cur.execute("SELECT COUNT(*) AS total FROM documents")
+            total = cur.fetchone()["total"]
+
+            cur.close()
+            return {"matters": matters, "types": types, "sources": sources, "total": total}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"GET /api/documents/facets failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/documents/search", tags=["documents"], dependencies=[Depends(verify_api_key)])
+async def search_documents_endpoint(
+    q: str = Query("", max_length=500),
+    matter: str = Query("", max_length=500, description="Comma-separated matter slugs"),
+    doc_type: str = Query("", max_length=500, description="Comma-separated document types"),
+    source: str = Query("", max_length=200, description="Comma-separated sources"),
+    sort: str = Query("relevance", max_length=20),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+):
+    """
+    DOCUMENTS-REDESIGN-1: Search documents with filters.
+    - If q provided: Qdrant semantic search, then enrich from PostgreSQL
+    - If only filters: PostgreSQL query with WHERE clauses
+    """
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            import psycopg2.extras
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+            # Parse comma-separated filters
+            matter_list = [m.strip() for m in matter.split(",") if m.strip()] if matter.strip() else []
+            type_list = [t.strip() for t in doc_type.split(",") if t.strip()] if doc_type.strip() else []
+            source_list = [s.strip() for s in source.split(",") if s.strip()] if source.strip() else []
+
+            results = []
+            total = 0
+
+            if q.strip():
+                # ── Qdrant semantic search ──
+                try:
+                    from memory.retriever import Retriever
+                    retriever = Retriever()
+                    qdrant_limit = min(offset + limit + 50, 200)  # fetch extra for filtering
+                    hits = retriever.search("baker-documents", q.strip(), limit=qdrant_limit)
+
+                    # Filter by metadata
+                    filtered = []
+                    for h in hits:
+                        meta = h.get("metadata", {}) or {}
+                        h_matter = meta.get("matter_slug", "") or ""
+                        h_type = meta.get("document_type", "") or ""
+                        h_source_path = meta.get("source_path", "") or ""
+
+                        if matter_list and h_matter not in matter_list:
+                            continue
+                        if type_list and h_type not in type_list:
+                            continue
+                        if source_list:
+                            h_src = "email" if "email" in h_source_path.lower() or "gmail" in h_source_path.lower() else \
+                                    "whatsapp" if "whatsapp" in h_source_path.lower() else \
+                                    "clickup" if "clickup" in h_source_path.lower() else \
+                                    "fireflies" if "fireflies" in h_source_path.lower() else "dropbox"
+                            if h_src not in source_list:
+                                continue
+                        filtered.append(h)
+
+                    total = len(filtered)
+                    page = filtered[offset:offset + limit]
+
+                    for h in page:
+                        meta = h.get("metadata", {}) or {}
+                        text_snippet = (h.get("text", "") or "")[:200]
+                        results.append({
+                            "id": meta.get("doc_id") or h.get("id"),
+                            "title": meta.get("filename", "Untitled"),
+                            "document_type": meta.get("document_type", "document"),
+                            "matter": meta.get("matter_slug", ""),
+                            "source": _derive_source(meta.get("source_path", "")),
+                            "date": (meta.get("ingested_at", "") or "")[:10],
+                            "summary": text_snippet,
+                            "score": round(h.get("score", 0), 3),
+                        })
+                except Exception as vec_err:
+                    logger.warning(f"Qdrant search failed, falling back to PostgreSQL: {vec_err}")
+                    # Fall through to PostgreSQL below
+                    results = []
+                    total = 0
+
+            if not results and not q.strip() or (q.strip() and not results):
+                # ── PostgreSQL fallback / filter-only ──
+                conditions = []
+                params = []
+
+                if q.strip():
+                    conditions.append("(filename ILIKE %s OR full_text ILIKE %s)")
+                    params.extend([f"%{q.strip()}%", f"%{q.strip()}%"])
+                if matter_list:
+                    placeholders = ",".join(["%s"] * len(matter_list))
+                    conditions.append(f"matter_slug IN ({placeholders})")
+                    params.extend(matter_list)
+                if type_list:
+                    placeholders = ",".join(["%s"] * len(type_list))
+                    conditions.append(f"COALESCE(document_type, 'unknown') IN ({placeholders})")
+                    params.extend(type_list)
+                if source_list:
+                    source_conds = []
+                    for src in source_list:
+                        if src == "email":
+                            source_conds.append("(source_path ILIKE '%%email%%' OR source_path ILIKE '%%gmail%%')")
+                        elif src == "whatsapp":
+                            source_conds.append("source_path ILIKE '%%whatsapp%%'")
+                        elif src == "clickup":
+                            source_conds.append("source_path ILIKE '%%clickup%%'")
+                        elif src == "fireflies":
+                            source_conds.append("source_path ILIKE '%%fireflies%%'")
+                        else:
+                            source_conds.append(
+                                "(source_path NOT ILIKE '%%email%%' AND source_path NOT ILIKE '%%gmail%%' "
+                                "AND source_path NOT ILIKE '%%whatsapp%%' AND source_path NOT ILIKE '%%clickup%%' "
+                                "AND source_path NOT ILIKE '%%fireflies%%')"
+                            )
+                    if source_conds:
+                        conditions.append("(" + " OR ".join(source_conds) + ")")
+
+                where = "WHERE " + " AND ".join(conditions) if conditions else ""
+
+                # Count
+                cur.execute(f"SELECT COUNT(*) AS total FROM documents {where}", params)
+                total = cur.fetchone()["total"]
+
+                # Sort
+                order_by = "ingested_at DESC"
+                if sort == "date_asc":
+                    order_by = "ingested_at ASC"
+                elif sort == "date_desc":
+                    order_by = "ingested_at DESC"
+
+                # Fetch
+                cur.execute(
+                    f"SELECT id, filename, document_type, matter_slug, source_path, ingested_at, "
+                    f"LEFT(full_text, 200) AS text_preview "
+                    f"FROM documents {where} ORDER BY {order_by} LIMIT %s OFFSET %s",
+                    params + [limit, offset],
+                )
+                rows = cur.fetchall()
+                for r in rows:
+                    r = dict(r)
+                    results.append({
+                        "id": r["id"],
+                        "title": r.get("filename") or "Untitled",
+                        "document_type": r.get("document_type") or "document",
+                        "matter": r.get("matter_slug") or "",
+                        "source": _derive_source(r.get("source_path") or ""),
+                        "date": r["ingested_at"].strftime("%Y-%m-%d") if r.get("ingested_at") else "",
+                        "summary": r.get("text_preview") or "",
+                        "score": None,
+                    })
+
+            cur.close()
+            return {"results": results, "total": total, "offset": offset}
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"GET /api/documents/search failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _derive_source(source_path: str) -> str:
+    """Derive source label from source_path."""
+    sp = (source_path or "").lower()
+    if "email" in sp or "gmail" in sp:
+        return "email"
+    if "whatsapp" in sp:
+        return "whatsapp"
+    if "clickup" in sp:
+        return "clickup"
+    if "fireflies" in sp:
+        return "fireflies"
+    return "dropbox"
+
+
 @app.get("/api/doc-pipeline/status", tags=["system"], dependencies=[Depends(verify_api_key)])
 async def doc_pipeline_status():
     """Document pipeline job queue status — counts by state + active jobs."""
