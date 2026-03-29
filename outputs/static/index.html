@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=46">
+    <link rel="stylesheet" href="/static/style.css?v=47">
 </head>
 <body>
 
@@ -21,11 +21,8 @@
 
 <!-- SIDEBAR -->
 <div class="sidebar">
-    <div class="sidebar-logo">BAKER</div>
+    <div class="sidebar-logo" onclick="switchTab('morning-brief')" style="cursor:pointer;">BAKER</div>
     <nav class="sidebar-nav">
-        <div class="nav-item active" data-tab="morning-brief">
-            <span class="nav-label">Dashboard</span>
-        </div>
 
         <!-- SIDEBAR-RESTRUCTURE-1: Projects section (expandable) -->
         <div class="nav-section-header" id="navProjectsHeader" data-section="projects">
