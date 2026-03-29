@@ -8864,9 +8864,9 @@ async def api_save_to_dossiers(request: Request):
 # PEOPLE-SECTION-1: People + Issues endpoints
 # ─────────────────────────────────────────────────
 
-@app.get("/api/people", tags=["people"], dependencies=[Depends(verify_api_key)])
-async def api_list_people():
-    """List people with open issue counts."""
+@app.get("/api/people/issues-summary", tags=["people"], dependencies=[Depends(verify_api_key)])
+async def api_list_people_issues():
+    """List people with open issue counts (for sidebar)."""
     store = _get_store()
     conn = store._get_conn()
     if not conn:

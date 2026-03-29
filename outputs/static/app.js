@@ -1239,11 +1239,6 @@ function _renderMatterSection(containerId, matters, countId) {
         cnt.textContent = m.item_count;
         item.appendChild(cnt);
 
-        if (m.new_count > 0) {
-            var newDot = document.createElement('span');
-            newDot.className = 'nav-dot red';
-            item.appendChild(newDot);
-        }
         container.appendChild(item);
     }
     setText(countId, totalCount || '');
@@ -1274,7 +1269,7 @@ function _initSectionToggle(headerId, listId, key, defaultExpanded) {
 
 async function loadPeopleSidebar() {
     try {
-        var resp = await bakerFetch('/api/people');
+        var resp = await bakerFetch('/api/people/issues-summary');
         if (!resp.ok) return;
         var people = await resp.json();
         var container = document.getElementById('peopleSubList');
