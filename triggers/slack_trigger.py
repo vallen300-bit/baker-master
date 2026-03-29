@@ -179,13 +179,23 @@ def run_slack_poll():
                         trigger_state.mark_processed("slack", source_id)
                         continue
 
-                    _feed_to_pipeline(
-                        channel_id=channel_id,
-                        ts=ts,
-                        user_name=user_name,
-                        text=text,
-                        source_id=source_id,
-                    )
+                    # SLACK-INTERACTIVE-1: Route Director messages through interactive scan_chat flow
+                    if _is_director_user(user_name):
+                        _handle_director_slack_message(
+                            text=clean_text,
+                            channel_id=channel_id,
+                            thread_ts=ts,
+                            user_name=user_name,
+                            client=client,
+                        )
+                    else:
+                        _feed_to_pipeline(
+                            channel_id=channel_id,
+                            ts=ts,
+                            user_name=user_name,
+                            text=text,
+                            source_id=source_id,
+                        )
                     mentions_pipelined += 1
 
                 messages_ingested += 1
@@ -280,6 +290,242 @@ def _feed_to_pipeline(channel_id: str, ts: str, user_name: str, text: str, sourc
         pipeline.run(trigger)
     except Exception as e:
         logger.warning(f"Slack: pipeline feed failed for message ts={ts}: {e}")
+
+
+# -------------------------------------------------------
+# SLACK-INTERACTIVE-1: Director identification
+# -------------------------------------------------------
+
+def _is_director_user(user_name: str) -> bool:
+    """Check if the Slack user is the Director (Dimitry)."""
+    name_lower = (user_name or "").lower()
+    return "dimitry" in name_lower or "vallen" in name_lower
+
+
+# -------------------------------------------------------
+# SLACK-INTERACTIVE-1: Director interactive flow
+# -------------------------------------------------------
+
+def _handle_director_slack_message(text: str, channel_id: str, thread_ts: str,
+                                    user_name: str, client):
+    """
+    Handle Director @Baker messages using the same interactive flow
+    as WhatsApp and Dashboard (classify_intent → action handlers).
+    """
+    from orchestrator.action_handler import (
+        classify_intent, check_pending_draft, check_pending_plan,
+        handle_email_action, handle_whatsapp_action,
+    )
+    from memory.retriever import SentinelRetriever
+
+    retriever = SentinelRetriever()
+
+    # Step 1: Build conversation history from recent Slack messages
+    conversation_history = ""
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if conn:
+            try:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT user_name, full_text FROM slack_messages
+                    WHERE channel_id = %s
+                    ORDER BY received_at DESC LIMIT 4
+                """, (channel_id,))
+                rows = cur.fetchall()
+                cur.close()
+                lines = []
+                for uname, ftxt in reversed(rows):
+                    role = "Director" if _is_director_user(uname) else "Baker"
+                    lines.append(f"{role}: {ftxt}")
+                conversation_history = "\n".join(lines) if lines else ""
+            finally:
+                store._put_conn(conn)
+    except Exception:
+        pass
+
+    # Step 2: Check pending draft/plan (same as WhatsApp/Dashboard)
+    draft_response = check_pending_draft(text)
+    if draft_response:
+        _post_and_store_reply(client, channel_id, thread_ts, draft_response)
+        return
+
+    plan_response = check_pending_plan(text)
+    if plan_response:
+        _post_and_store_reply(client, channel_id, thread_ts, plan_response)
+        return
+
+    # Step 3: Enrich with alert context if this looks like a reply
+    enriched_text = _enrich_with_alert_context(text, channel_id, thread_ts)
+
+    # Step 4: Classify intent (same as scan_chat)
+    intent = classify_intent(enriched_text, conversation_history=conversation_history)
+    intent["original_question"] = enriched_text
+
+    # Step 5: Route to appropriate handler
+    intent_type = intent.get("type", "question")
+    result = None
+
+    try:
+        if intent_type == "email_action":
+            result = handle_email_action(intent, retriever, channel="slack",
+                                         conversation_history=conversation_history)
+        elif intent_type == "whatsapp_action":
+            result = handle_whatsapp_action(intent, retriever, channel="slack",
+                                             conversation_history=conversation_history)
+        elif intent_type == "question" or intent_type == "capability_task":
+            # General question or specialist — use agent loop (blocking)
+            result = _run_scan_for_slack(enriched_text, retriever, conversation_history)
+        else:
+            # Other action types — feed through pipeline as fallback
+            _feed_to_pipeline(
+                channel_id=channel_id, ts=thread_ts,
+                user_name=user_name, text=text,
+                source_id=f"slack:{channel_id}:{thread_ts}",
+            )
+            return
+    except Exception as e:
+        logger.error(f"Slack interactive handler failed: {e}")
+        result = f"Sorry, I encountered an error: {e}"
+
+    if result:
+        _post_and_store_reply(client, channel_id, thread_ts, result)
+
+    # Store to conversation_memory
+    try:
+        store = _get_store()
+        store.log_conversation(
+            question=enriched_text,
+            answer=result or "",
+            answer_length=len(result or ""),
+            project="general",
+            owner="dimitry",
+        )
+    except Exception:
+        pass
+
+
+def _run_scan_for_slack(question: str, retriever, conversation_history: str) -> str:
+    """Run a blocking agent loop for Slack (like WhatsApp's _handle_director_question)."""
+    try:
+        from orchestrator.agent import run_agent_loop
+        from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT, build_mode_aware_prompt
+
+        system_prompt = build_mode_aware_prompt(SCAN_SYSTEM_PROMPT, domain=None, mode="delegate")
+        history = []
+        if conversation_history:
+            history.append({"role": "user", "content": conversation_history})
+
+        result = run_agent_loop(
+            question=question,
+            system_prompt=system_prompt,
+            history=history,
+            max_iterations=5,
+            timeout_override=30.0,
+        )
+        return result.answer or "I searched but couldn't find a clear answer."
+    except Exception as e:
+        logger.error(f"Slack agent loop failed: {e}")
+        return f"Sorry, I encountered an error while researching: {e}"
+
+
+# -------------------------------------------------------
+# SLACK-INTERACTIVE-1: Alert context enrichment
+# -------------------------------------------------------
+
+def _enrich_with_alert_context(text: str, channel_id: str, thread_ts: str) -> str:
+    """
+    If the Director's message is short and looks like a reply to a Baker alert
+    (e.g. "Please draft", "Run it", "Yes"), find the most recent Baker alert
+    and prepend it as context.
+    """
+    if len(text) > 200:
+        return text  # Long enough to be self-contained
+
+    import re
+    _reply_patterns = [
+        r'(?i)^(please\s+)?(draft|run|do it|yes|go ahead|send|proceed|approve|execute)',
+        r'(?i)^(ok|okay|sure|confirmed?|agreed)',
+    ]
+    is_reply = any(re.match(p, text.strip()) for p in _reply_patterns)
+    if not is_reply:
+        return text
+
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            return text
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, title, body, structured_actions
+                FROM alerts
+                WHERE created_at > NOW() - INTERVAL '24 hours'
+                  AND status != 'dismissed'
+                ORDER BY created_at DESC
+                LIMIT 5
+            """)
+            recent_alerts = cur.fetchall()
+            cur.close()
+
+            if not recent_alerts:
+                return text
+
+            # Prefer alerts with draft/run actions
+            best_alert = None
+            for alert_id, title, body, actions in recent_alerts:
+                if actions and ('draft' in str(actions).lower() or 'run' in str(actions).lower()):
+                    best_alert = (alert_id, title, body)
+                    break
+            if not best_alert:
+                best_alert = (recent_alerts[0][0], recent_alerts[0][1], recent_alerts[0][2])
+
+            alert_id, alert_title, alert_body = best_alert
+            enriched = (
+                f"CONTEXT — This is a reply to Baker alert #{alert_id}: \"{alert_title}\"\n"
+                f"Alert details: {(alert_body or '')[:500]}\n\n"
+                f"Director's instruction: {text}"
+            )
+            logger.info(f"Enriched Slack reply with alert #{alert_id}: {(alert_title or '')[:60]}")
+            return enriched
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.warning(f"Alert context enrichment failed: {e}")
+        return text
+
+
+# -------------------------------------------------------
+# SLACK-INTERACTIVE-1: Post + store Baker's replies
+# -------------------------------------------------------
+
+def _post_and_store_reply(client, channel_id: str, thread_ts: str, text: str):
+    """Post a thread reply to Slack AND store it in slack_messages for history."""
+    import time as _time
+    # Post to Slack
+    try:
+        client.chat_postMessage(channel=channel_id, text=text, thread_ts=thread_ts)
+    except Exception as e:
+        logger.error(f"Slack reply post failed: {e}")
+        return
+
+    # Store Baker's reply in slack_messages for conversation history
+    try:
+        store = _get_store()
+        store.store_slack_message(
+            msg_id=f"slack:{channel_id}:baker_{int(_time.time())}",
+            channel_id=channel_id,
+            channel_name="",
+            user_id="baker",
+            user_name="Baker",
+            full_text=text[:5000],
+            thread_ts=thread_ts,
+            received_at=datetime.now(timezone.utc),
+        )
+    except Exception as e:
+        logger.warning(f"Failed to store Baker Slack reply: {e}")
 
 
 # -------------------------------------------------------
