@@ -6717,8 +6717,9 @@ def _scan_chat_agentic(req, start: float, domain_context: str = "",
 
                 if "_agent_result" in item:
                     agent_result = item["_agent_result"]
-                    if agent_result.timed_out:
-                        logger.warning("Agent timed out — falling back to single-pass")
+                    # AGENTIC-LOOP-FIX: Only fall back to legacy if no synthesis was produced
+                    if agent_result.timed_out and not agent_result.answer:
+                        logger.warning("Agent timed out with no answer — falling back to single-pass")
                         yield f"data: {json.dumps({'token': '[Searching further...] '})}\n\n"
                         async for sse in _scan_chat_legacy_stream(
                             req, start, domain_context,

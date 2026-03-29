@@ -1635,6 +1635,46 @@ class AgentResult:
     timed_out: bool = False
 
 
+def _force_synthesis(claude_client, model: str, system_prompt: str,
+                     messages: list, max_tokens: int = 4096,
+                     reason: str = "timeout") -> tuple:
+    """
+    AGENTIC-LOOP-FIX: Force a final synthesis when the agent loop ends
+    without producing an answer (timeout, tool_limit, max_iterations).
+
+    Calls Claude WITHOUT tools so it must produce a text response.
+    Returns (synthesis_text, input_tokens, output_tokens).
+    """
+    # Add a nudge message so Claude knows it must synthesize now
+    synth_messages = messages + [{
+        "role": "user",
+        "content": (
+            "You have gathered all available information. Now provide your "
+            "complete, well-structured answer based on everything above. "
+            "Do not attempt any more searches — synthesize what you have."
+        ),
+    }]
+    try:
+        response = claude_client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            system=system_prompt,
+            messages=synth_messages,
+            # NO tools — forces text-only response
+        )
+        synthesis = ""
+        for block in response.content:
+            if block.type == "text" and block.text:
+                synthesis += block.text
+        logger.info(f"AGENTIC-LOOP-FIX: Forced synthesis after {reason} — "
+                    f"{len(synthesis)} chars, "
+                    f"{response.usage.input_tokens}+{response.usage.output_tokens} tokens")
+        return synthesis, response.usage.input_tokens, response.usage.output_tokens
+    except Exception as e:
+        logger.error(f"AGENTIC-LOOP-FIX: Synthesis call failed: {e}")
+        return "", 0, 0
+
+
 # ─────────────────────────────────────────────────
 # Agent Loop — Blocking (WhatsApp)
 # ─────────────────────────────────────────────────
@@ -1675,14 +1715,23 @@ def run_agent_loop(
         elapsed = time.time() - t0
         if elapsed > timeout:
             logger.warning(f"Agent loop timed out after {elapsed:.1f}s, {iteration} iterations")
+            # AGENTIC-LOOP-FIX: Force synthesis if we gathered research
+            answer = ""
+            if tool_log:
+                synth, s_in, s_out = _force_synthesis(
+                    claude, config.claude.model, system_prompt, messages,
+                    max_tokens=2048, reason="timeout")
+                total_in += s_in
+                total_out += s_out
+                answer = synth
             return AgentResult(
-                answer="",
+                answer=answer,
                 tool_calls=tool_log,
                 iterations=iteration,
                 total_input_tokens=total_in,
                 total_output_tokens=total_out,
-                elapsed_ms=int(elapsed * 1000),
-                timed_out=True,
+                elapsed_ms=int((time.time() - t0) * 1000),
+                timed_out=bool(not answer),
             )
 
         # PHASE-4A: Circuit breaker check
@@ -1799,11 +1848,22 @@ def run_agent_loop(
             elapsed_ms=elapsed_ms,
         )
 
-    # Exhausted max_iterations without end_turn — return whatever we have
+    # Exhausted max_iterations without end_turn
+    # AGENTIC-LOOP-FIX: Force synthesis if we gathered research
+    answer = ""
+    if tool_log:
+        synth, s_in, s_out = _force_synthesis(
+            claude, config.claude.model, system_prompt, messages,
+            max_tokens=2048, reason="max_iterations")
+        total_in += s_in
+        total_out += s_out
+        answer = synth
+    if not answer:
+        answer = "I searched multiple sources but couldn't fully resolve your question. Here's what I found so far."
     elapsed_ms = int((time.time() - t0) * 1000)
     logger.warning(f"Agent loop hit max_iterations ({max_iterations})")
     return AgentResult(
-        answer="I searched multiple sources but couldn't fully resolve your question. Here's what I found so far.",
+        answer=answer,
         tool_calls=tool_log,
         iterations=max_iterations,
         total_input_tokens=total_in,
@@ -1864,14 +1924,27 @@ def run_agent_loop_streaming(
         elapsed = time.time() - t0
         if elapsed > timeout:
             logger.warning(f"Agent streaming timed out after {elapsed:.1f}s")
+            # AGENTIC-LOOP-FIX: If we gathered research, force a final synthesis
+            if tool_log:
+                _model = model_override or config.claude.model
+                _max_tok = max_tokens_override or 4096
+                synth, s_in, s_out = _force_synthesis(
+                    claude, _model, system_prompt, messages,
+                    max_tokens=_max_tok, reason="timeout")
+                total_in += s_in
+                total_out += s_out
+                if synth:
+                    yield {"token": "\n\n"}
+                    yield {"token": synth}
+                    full_answer = synth  # Deliverable = synthesis, not thinking text
             result = AgentResult(
                 answer=full_answer,
                 tool_calls=tool_log,
                 iterations=iteration,
                 total_input_tokens=total_in,
                 total_output_tokens=total_out,
-                elapsed_ms=int(elapsed * 1000),
-                timed_out=True,
+                elapsed_ms=int((time.time() - t0) * 1000),
+                timed_out=bool(not tool_log),  # Not "timed out" if we synthesized
             )
             yield {"_agent_result": result}
             return
@@ -1892,6 +1965,18 @@ def run_agent_loop_streaming(
         # COMPLEXITY-ROUTER-1: Enforce tool limit on fast path
         if tool_limit and len(tool_log) >= tool_limit:
             logger.info(f"Agent streaming hit tool limit ({tool_limit})")
+            # AGENTIC-LOOP-FIX: Force synthesis with gathered research
+            _model = model_override or config.claude.model
+            _max_tok = max_tokens_override or 4096
+            synth, s_in, s_out = _force_synthesis(
+                claude, _model, system_prompt, messages,
+                max_tokens=_max_tok, reason="tool_limit")
+            total_in += s_in
+            total_out += s_out
+            if synth:
+                yield {"token": "\n\n"}
+                yield {"token": synth}
+                full_answer = synth
             result = AgentResult(
                 answer=full_answer, tool_calls=tool_log, iterations=iteration,
                 total_input_tokens=total_in, total_output_tokens=total_out,
@@ -2016,6 +2101,20 @@ def run_agent_loop_streaming(
                 full_answer += block.text
                 yield {"token": block.text}
         break
+
+    # AGENTIC-LOOP-FIX: Max iterations exhausted — force synthesis if we have research
+    if tool_log:
+        _model = model_override or config.claude.model
+        _max_tok = max_tokens_override or 4096
+        synth, s_in, s_out = _force_synthesis(
+            claude, _model, system_prompt, messages,
+            max_tokens=_max_tok, reason="max_iterations")
+        total_in += s_in
+        total_out += s_out
+        if synth:
+            yield {"token": "\n\n"}
+            yield {"token": synth}
+            full_answer = synth
 
     elapsed_ms = int((time.time() - t0) * 1000)
     result = AgentResult(

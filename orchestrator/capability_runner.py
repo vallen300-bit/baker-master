@@ -22,6 +22,7 @@ from orchestrator.agent import (
     TOOL_DEFINITIONS,
     AgentResult,
     ToolExecutor,
+    _force_synthesis,
 )
 from orchestrator.capability_registry import CapabilityDef
 from orchestrator.capability_router import RoutingPlan
@@ -199,10 +200,20 @@ class CapabilityRunner:
             elapsed = time.time() - t0
             if elapsed > timeout:
                 logger.warning(f"Capability {capability.slug} timed out after {elapsed:.1f}s")
+                # AGENTIC-LOOP-FIX: Force synthesis if we gathered research
+                answer = ""
+                if tool_log:
+                    synth, s_in, s_out = _force_synthesis(
+                        self.claude, _model, system, messages,
+                        max_tokens=_max_tokens, reason="timeout")
+                    total_in += s_in
+                    total_out += s_out
+                    answer = synth
                 return AgentResult(
-                    answer="", tool_calls=tool_log, iterations=iteration,
+                    answer=answer, tool_calls=tool_log, iterations=iteration,
                     total_input_tokens=total_in, total_output_tokens=total_out,
-                    elapsed_ms=int(elapsed * 1000), timed_out=True,
+                    elapsed_ms=int((time.time() - t0) * 1000),
+                    timed_out=bool(not answer),
                 )
 
             # PHASE-4A: Circuit breaker check
@@ -219,8 +230,17 @@ class CapabilityRunner:
             # COMPLEXITY-ROUTER-1: Enforce tool limit on fast path
             if _tool_limit and len(tool_log) >= _tool_limit:
                 logger.info(f"Capability {capability.slug} hit tool limit ({_tool_limit}) on fast path")
+                # AGENTIC-LOOP-FIX: Force synthesis with gathered research
+                answer = ""
+                if tool_log:
+                    synth, s_in, s_out = _force_synthesis(
+                        self.claude, _model, system, messages,
+                        max_tokens=_max_tokens, reason="tool_limit")
+                    total_in += s_in
+                    total_out += s_out
+                    answer = synth
                 return AgentResult(
-                    answer="", tool_calls=tool_log, iterations=iteration,
+                    answer=answer, tool_calls=tool_log, iterations=iteration,
                     total_input_tokens=total_in, total_output_tokens=total_out,
                     elapsed_ms=int((time.time() - t0) * 1000),
                 )
@@ -323,9 +343,17 @@ class CapabilityRunner:
                 elapsed_ms=int((time.time() - t0) * 1000),
             )
 
-        # Exhausted iterations
+        # AGENTIC-LOOP-FIX: Exhausted iterations — force synthesis
+        answer = ""
+        if tool_log:
+            synth, s_in, s_out = _force_synthesis(
+                self.claude, _model, system, messages,
+                max_tokens=_max_tokens, reason="max_iterations")
+            total_in += s_in
+            total_out += s_out
+            answer = synth
         return AgentResult(
-            answer="", tool_calls=tool_log, iterations=max_iter,
+            answer=answer, tool_calls=tool_log, iterations=max_iter,
             total_input_tokens=total_in, total_output_tokens=total_out,
             elapsed_ms=int((time.time() - t0) * 1000),
         )
@@ -370,11 +398,23 @@ class CapabilityRunner:
         for iteration in range(max_iter):
             elapsed = time.time() - t0
             if elapsed > timeout:
+                # AGENTIC-LOOP-FIX: Force synthesis if we gathered research
+                if tool_log:
+                    synth, s_in, s_out = _force_synthesis(
+                        self.claude, _model, system, messages,
+                        max_tokens=_max_tokens, reason="timeout")
+                    total_in += s_in
+                    total_out += s_out
+                    if synth:
+                        yield {"token": "\n\n"}
+                        yield {"token": synth}
+                        full_answer = synth
                 result = AgentResult(
                     answer=full_answer, tool_calls=tool_log,
                     iterations=iteration,
                     total_input_tokens=total_in, total_output_tokens=total_out,
-                    elapsed_ms=int(elapsed * 1000), timed_out=True,
+                    elapsed_ms=int((time.time() - t0) * 1000),
+                    timed_out=bool(not tool_log),
                 )
                 yield {"_agent_result": result}
                 return
@@ -395,6 +435,16 @@ class CapabilityRunner:
             # COMPLEXITY-ROUTER-1: Enforce tool limit on fast path
             if _tool_limit and len(tool_log) >= _tool_limit:
                 logger.info(f"Capability {capability.slug} hit tool limit ({_tool_limit}) on fast path")
+                # AGENTIC-LOOP-FIX: Force synthesis with gathered research
+                synth, s_in, s_out = _force_synthesis(
+                    self.claude, _model, system, messages,
+                    max_tokens=_max_tokens, reason="tool_limit")
+                total_in += s_in
+                total_out += s_out
+                if synth:
+                    yield {"token": "\n\n"}
+                    yield {"token": synth}
+                    full_answer = synth
                 result = AgentResult(
                     answer=full_answer, tool_calls=tool_log, iterations=iteration,
                     total_input_tokens=total_in, total_output_tokens=total_out,
@@ -504,6 +554,18 @@ class CapabilityRunner:
                     full_answer += block.text
                     yield {"token": block.text}
             break
+
+        # AGENTIC-LOOP-FIX: Max iterations exhausted — force synthesis
+        if tool_log:
+            synth, s_in, s_out = _force_synthesis(
+                self.claude, _model, system, messages,
+                max_tokens=_max_tokens, reason="max_iterations")
+            total_in += s_in
+            total_out += s_out
+            if synth:
+                yield {"token": "\n\n"}
+                yield {"token": synth}
+                full_answer = synth
 
         result = AgentResult(
             answer=full_answer, tool_calls=tool_log, iterations=max_iter,
