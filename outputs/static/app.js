@@ -6527,6 +6527,7 @@ function _renderDocResults(container, results) {
         // Action buttons
         var actions = row.querySelector('.doc-actions');
         _addDocActionBtn(actions, 'View', doc);
+        if (doc.source_path) _addDocActionBtn(actions, 'Open in Dropbox', doc);
         _addDocActionBtn(actions, 'Ask Baker', doc);
 
         container.appendChild(row);
@@ -6591,6 +6592,14 @@ function _addDocActionBtn(container, label, doc) {
             e.stopPropagation();
             var rowEl = btn.closest('.doc-row');
             if (rowEl) _toggleDocExpand(rowEl, doc);
+        });
+    } else if (label === 'Open in Dropbox') {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            // Build Dropbox web URL from source_path
+            var path = (doc.source_path || '').replace(/^\//, '');
+            var url = 'https://www.dropbox.com/home/' + encodeURIComponent(path).replace(/%2F/g, '/');
+            window.open(url, '_blank');
         });
     } else if (label === 'Ask Baker') {
         btn.addEventListener('click', function(e) {
