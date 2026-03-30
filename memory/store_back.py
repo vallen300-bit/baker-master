@@ -254,6 +254,9 @@ class SentinelStoreBack:
             cur.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS owner VARCHAR(20) DEFAULT 'shared'")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_owner ON documents(owner)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_content_class ON documents(content_class)")
+            # DOCUMENT-DEDUP-1: content_hash for text-based dedup
+            cur.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_content_hash ON documents(content_hash)")
             # FTS: tsvector column + GIN index for full-text search
             cur.execute("ALTER TABLE documents ADD COLUMN IF NOT EXISTS search_vector tsvector")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_fts ON documents USING GIN(search_vector)")
@@ -289,24 +292,43 @@ class SentinelStoreBack:
     def store_document_full(self, source_path: str, filename: str,
                             file_hash: str, full_text: str,
                             token_count: int = 0, owner: str = "shared"):
-        """Store full document text in PostgreSQL. Returns document ID or None."""
+        """Store full document text in PostgreSQL. Returns document ID or None.
+        DOCUMENT-DEDUP-1: Content-hash dedup on extracted text (SHA-256 of first 10K chars).
+        """
         conn = self._get_conn()
         if not conn:
             return None
         try:
+            # Compute content hash for dedup
+            import hashlib
+            content_hash = None
+            if full_text and len(full_text.strip()) > 30:
+                normalized = full_text[:10000].strip().lower()
+                content_hash = hashlib.sha256(normalized.encode()).hexdigest()
+
+                # Check for existing document with same content (different file_hash but same text)
+                cur = conn.cursor()
+                cur.execute("SELECT id FROM documents WHERE content_hash = %s LIMIT 1", (content_hash,))
+                existing = cur.fetchone()
+                cur.close()
+                if existing:
+                    logger.info(f"Document dedup: skipping duplicate content (hash={content_hash[:16]}, existing id={existing[0]}, file={filename})")
+                    return existing[0]
+
             cur = conn.cursor()
             cur.execute("""
-                INSERT INTO documents (source_path, filename, file_hash, full_text, token_count, search_vector, owner)
-                VALUES (%s, %s, %s, %s, %s, to_tsvector('simple', COALESCE(%s, '')), %s)
+                INSERT INTO documents (source_path, filename, file_hash, full_text, token_count, search_vector, owner, content_hash)
+                VALUES (%s, %s, %s, %s, %s, to_tsvector('simple', COALESCE(%s, '')), %s, %s)
                 ON CONFLICT (file_hash) DO UPDATE SET
                     source_path = EXCLUDED.source_path,
                     full_text = EXCLUDED.full_text,
                     token_count = EXCLUDED.token_count,
                     search_vector = EXCLUDED.search_vector,
                     owner = COALESCE(EXCLUDED.owner, documents.owner),
+                    content_hash = EXCLUDED.content_hash,
                     ingested_at = NOW()
                 RETURNING id
-            """, (source_path, filename, file_hash, full_text, token_count, full_text, owner))
+            """, (source_path, filename, file_hash, full_text, token_count, full_text, owner, content_hash))
             row = cur.fetchone()
             conn.commit()
             cur.close()

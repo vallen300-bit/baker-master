@@ -16,6 +16,7 @@ Job queue: DB-backed `doc_pipeline_jobs` table replaces daemon threads.
 
 All Claude calls go through Phase 4A cost tracking + circuit breaker.
 """
+import hashlib
 import json
 import logging
 import time
@@ -28,6 +29,26 @@ from config.settings import config
 logger = logging.getLogger("baker.document_pipeline")
 
 _HAIKU_MODEL = "claude-haiku-4-5-20251001"
+_OPUS_MODEL = "claude-opus-4-6"
+
+# High-value types that use Opus for extraction (better accuracy on legal/financial)
+_OPUS_EXTRACTION_TYPES = frozenset({
+    'contract', 'legal_opinion', 'financial_model', 'invoice',
+    'correspondence', 'report', 'proposal', 'nachtrag', 'schlussrechnung',
+})
+
+
+def _content_hash(text: str) -> str:
+    """SHA-256 hash of first 10K chars of extracted text for dedup."""
+    normalized = (text or "")[:10000].strip().lower()
+    return hashlib.sha256(normalized.encode()).hexdigest()
+
+
+def _get_extraction_model(document_type: str) -> str:
+    """Return Opus for high-value document types, Haiku for the rest."""
+    if document_type in _OPUS_EXTRACTION_TYPES:
+        return _OPUS_MODEL
+    return _HAIKU_MODEL
 
 # Job queue settings
 _MAX_PER_BATCH = 10
@@ -296,15 +317,17 @@ def extract_document(doc_id: int, full_text: str, document_type: str) -> Optiona
         text=full_text[:12000],
     )
 
+    extraction_model = _get_extraction_model(document_type)
+
     try:
         client = anthropic.Anthropic(api_key=config.claude.api_key)
         resp = client.messages.create(
-            model=_HAIKU_MODEL,
+            model=extraction_model,
             max_tokens=2000,
             messages=[{"role": "user", "content": prompt}],
         )
         log_api_cost(
-            _HAIKU_MODEL, resp.usage.input_tokens, resp.usage.output_tokens,
+            extraction_model, resp.usage.input_tokens, resp.usage.output_tokens,
             source="document_pipeline", capability_id="doc_extract",
         )
 
@@ -317,7 +340,7 @@ def extract_document(doc_id: int, full_text: str, document_type: str) -> Optiona
 
         structured = json.loads(raw)
 
-        # Pull confidence from Haiku's response, default to "medium"
+        # Pull confidence from response, default to "medium"
         confidence = structured.pop("_confidence", "medium")
         if confidence not in ("high", "medium", "low"):
             confidence = "medium"
@@ -327,9 +350,9 @@ def extract_document(doc_id: int, full_text: str, document_type: str) -> Optiona
         validated_data, is_validated = validate_extraction(document_type, structured)
 
         # Store extraction
-        _store_extraction(doc_id, document_type, validated_data, confidence=confidence, validated=is_validated)
+        _store_extraction(doc_id, document_type, validated_data, confidence=confidence, validated=is_validated, model=extraction_model)
         extra_count = len(validated_data.get("_extra", {})) if isinstance(validated_data.get("_extra"), dict) else 0
-        logger.info(f"Extracted doc {doc_id}: type={document_type}, confidence={confidence}, validated={is_validated}, fields={len(validated_data)}, extras={extra_count}")
+        logger.info(f"Extracted doc {doc_id}: type={document_type}, model={extraction_model}, confidence={confidence}, validated={is_validated}, fields={len(validated_data)}, extras={extra_count}")
         return validated_data
 
     except Exception as e:
@@ -656,7 +679,7 @@ def _update_document_classification(doc_id: int, classification: dict):
         logger.warning(f"Failed to update classification for doc {doc_id}: {e}")
 
 
-def _store_extraction(doc_id: int, doc_type: str, structured: dict, confidence: str = "medium", validated: bool = False):
+def _store_extraction(doc_id: int, doc_type: str, structured: dict, confidence: str = "medium", validated: bool = False, model: str = None):
     """Store extraction results in document_extractions table."""
     extraction_type = {
         "contract": "contract_terms",
@@ -692,7 +715,7 @@ def _store_extraction(doc_id: int, doc_type: str, structured: dict, confidence: 
                     extracted_by = EXCLUDED.extracted_by,
                     validated = EXCLUDED.validated,
                     created_at = NOW()
-            """, (doc_id, extraction_type, json.dumps(structured), confidence, _HAIKU_MODEL, validated))
+            """, (doc_id, extraction_type, json.dumps(structured), confidence, model or _HAIKU_MODEL, validated))
             conn.commit()
             cur.close()
 
