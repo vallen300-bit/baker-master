@@ -490,6 +490,27 @@ async def email_backfill_endpoint(
     return {"status": "ok", "message": f"Email backfill ({days} days) started in background", "days": days}
 
 
+@app.post("/api/emails/backfill-attachments", tags=["emails"], dependencies=[Depends(verify_api_key)])
+async def email_attachments_backfill_endpoint(
+    days: int = Query(365, ge=1, le=730),
+    background_tasks: BackgroundTasks = None,
+):
+    """EMAIL-ATTACH-FIX-1: Find emails with attachments in Gmail that don't have
+    corresponding docs in Baker, then download and store them.
+    Runs in background — returns immediately.
+    """
+    def _run_attachment_backfill():
+        try:
+            from scripts.backfill_missed_attachments import run
+            run(days=days, dry_run=False)
+            logger.info(f"Email attachment backfill ({days} days) completed in background")
+        except Exception as e:
+            logger.error(f"Email attachment backfill ({days} days) failed in background: {e}")
+
+    background_tasks.add_task(_run_attachment_backfill)
+    return {"status": "ok", "message": f"Email attachment backfill ({days} days) started in background", "days": days}
+
+
 @app.post("/api/whatsapp/backfill", tags=["whatsapp"], dependencies=[Depends(verify_api_key)])
 async def whatsapp_backfill_endpoint(
     days: int = Query(90, ge=1, le=365),
