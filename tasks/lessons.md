@@ -71,3 +71,15 @@ Review at session start. Add new lessons after any correction. Remove stale ones
 
 ### 10. Git history rewrite for sensitive data
 **Rule:** Use `git filter-branch --force --index-filter 'git rm --cached --ignore-unmatch file1 file2' --prune-empty -- --all` then `git push --force`. Always verify with `git log --oneline --name-only | grep filename` returns 0 matches before force-pushing.
+
+### 11. Check for duplicate API endpoints before adding new ones
+**Mistake:** Added `GET /api/people` at line 8867 but an existing endpoint at line 3037 shadowed it. FastAPI registers the first match. People sidebar showed empty because it was hitting the old endpoint returning contacts, not issues.
+**Rule:** Before adding a new endpoint, `grep -n "the/path" dashboard.py` to check for existing routes at the same path.
+
+### 12. Push before declaring done
+**Mistake:** Made local code changes and told the Director "it's done" — but changes weren't pushed to GitHub, so Render never deployed them. Director reloaded and saw no changes.
+**Rule:** Local edits mean nothing until `git push`. Don't tell the user changes are live until Render has deployed.
+
+### 13. Auto-expand sidebar sections with content
+**Mistake:** People section was `defaultExpanded=false`. After saving issues, the count updated but the section stayed collapsed — user couldn't see their saved items.
+**Rule:** After loading data into a collapsible sidebar section, auto-expand it if items exist. Don't rely on the user knowing to click the arrow.
