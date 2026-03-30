@@ -219,6 +219,13 @@ class ClickUpClient:
         """GET /task/{task_id} — returns full task detail."""
         return self._request("GET", f"/task/{task_id}")
 
+    def get_task_attachments(self, task_id: str) -> list:
+        """CLICKUP-DOCS-CALENDAR-3: Fetch attachments for a task via task detail."""
+        detail = self.get_task_detail(task_id)
+        if detail and "attachments" in detail:
+            return detail["attachments"]
+        return []
+
     def search_tasks(self, workspace_id: str, query: str) -> list:
         """GET /team/{workspace_id}/task — search tasks by name."""
         params = {"name": query, "include_closed": "true"}

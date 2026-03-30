@@ -349,6 +349,30 @@ def _poll_workspace(client, store, workspace_id: str) -> int:
                     except Exception as _e:
                         logger.debug(f"Deadline extraction failed for task {task.get('id')}: {_e}")
 
+                    # CLICKUP-DOCS-CALENDAR-3: Ingest attachments (only for recently updated tasks)
+                    try:
+                        du = task_data.get("date_updated")
+                        if du and isinstance(du, datetime) and (datetime.now(timezone.utc) - du).total_seconds() < 86400:
+                            _process_task_attachments(client, task.get("id", ""), task.get("name", ""), space_name)
+                    except Exception as _ae:
+                        logger.debug(f"ClickUp attachment processing failed for {task.get('id')}: {_ae}")
+
+                    # CLICKUP-DOCS-CALENDAR-3: Sync due dates to Baker deadlines
+                    try:
+                        if task.get("due_date"):
+                            due_ms = int(task["due_date"])
+                            due_dt = datetime.fromtimestamp(due_ms / 1000, tz=timezone.utc)
+                            _sync_clickup_deadline(
+                                task_id=task.get("id", ""),
+                                task_name=task.get("name", "Untitled"),
+                                due_date=due_dt,
+                                list_name=list_name,
+                                space_name=space_name,
+                                task_status=task.get("status", {}).get("status", "") if isinstance(task.get("status"), dict) else str(task.get("status", "")),
+                            )
+                    except Exception as _de:
+                        logger.debug(f"ClickUp deadline sync failed for {task.get('id')}: {_de}")
+
                     # Classify and feed to pipeline
                     classification = _classify_task_change(task_data, is_new)
                     _feed_to_pipeline(task_data, classification)
@@ -405,4 +429,130 @@ def run_clickup_poll():
     except Exception as e:
         report_failure("clickup", str(e))
         logger.error(f"clickup poll failed: {e}")
+
+
+# ── CLICKUP-DOCS-CALENDAR-3: Attachment ingestion + deadline sync ─────────
+
+def _process_task_attachments(client, task_id: str, task_name: str, space_name: str):
+    """Download and ingest ClickUp task attachments through document pipeline."""
+    attachments = client.get_task_attachments(task_id)
+    if not attachments:
+        return
+
+    import hashlib
+    import tempfile
+    import httpx
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+
+    for att in attachments:
+        url = att.get("url")
+        title = att.get("title") or att.get("name") or "untitled"
+        att_id = att.get("id") or title
+        source_path = f"clickup:{task_id}:{att_id}"
+
+        if not url:
+            continue
+
+        # Dedup: skip if already ingested
+        conn = store._get_conn()
+        if not conn:
+            continue
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM documents WHERE source_path = %s LIMIT 1", (source_path,))
+            if cur.fetchone():
+                cur.close()
+                continue
+            cur.close()
+        finally:
+            store._put_conn(conn)
+
+        # Download attachment
+        try:
+            resp = httpx.get(url, timeout=30, follow_redirects=True)
+            if resp.status_code != 200:
+                continue
+        except Exception:
+            continue
+
+        # Save to temp file and extract text
+        try:
+            ext = title.rsplit(".", 1)[-1].lower() if "." in title else "bin"
+            with tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False) as tmp:
+                tmp.write(resp.content)
+                tmp_path = tmp.name
+
+            from tools.ingest.extractors import extract
+            full_text = extract(tmp_path)
+
+            import os
+            os.unlink(tmp_path)
+
+            if not full_text or len(full_text.strip()) < 20:
+                continue
+
+            # Store document
+            file_hash = hashlib.sha256(resp.content).hexdigest()
+            doc_id = store.store_document_full(
+                source_path=source_path,
+                filename=title,
+                file_hash=file_hash,
+                full_text=full_text,
+                token_count=len(full_text) // 4,
+            )
+            if doc_id:
+                logger.info(f"ClickUp attachment stored: {title} from task {task_name} → doc {doc_id}")
+                try:
+                    from tools.document_pipeline import queue_extraction
+                    queue_extraction(doc_id)
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug(f"ClickUp attachment extraction failed for {title}: {e}")
+
+
+def _sync_clickup_deadline(task_id, task_name, due_date, list_name, space_name, task_status):
+    """Upsert a Baker deadline from a ClickUp task due date."""
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    conn = store._get_conn()
+    if not conn:
+        return
+    source_tag = f"clickup_deadline:{task_id}"
+    try:
+        cur = conn.cursor()
+
+        is_done = task_status.lower() in ('complete', 'closed', 'done', 'resolved')
+
+        # Check if deadline already exists
+        cur.execute("SELECT id, status FROM deadlines WHERE source_snippet = %s LIMIT 1", (source_tag,))
+        existing = cur.fetchone()
+
+        if existing:
+            deadline_id, current_status = existing
+            if is_done and current_status == 'active':
+                cur.execute("UPDATE deadlines SET status = 'completed', updated_at = NOW() WHERE id = %s", (deadline_id,))
+                logger.info(f"ClickUp deadline completed: {task_name}")
+            elif not is_done:
+                cur.execute("UPDATE deadlines SET due_date = %s, updated_at = NOW() WHERE id = %s AND due_date != %s",
+                           (due_date, deadline_id, due_date))
+        elif not is_done:
+            description = f"[{space_name}/{list_name}] {task_name}"
+            cur.execute("""
+                INSERT INTO deadlines (description, due_date, priority, source_snippet, source_type, source_id, status, confidence)
+                VALUES (%s, %s, %s, %s, %s, %s, 'active', 'high')
+            """, (description, due_date, 'normal', source_tag, 'clickup', f"clickup:{task_id}"))
+            logger.info(f"ClickUp deadline synced: {task_name} due {due_date}")
+
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.debug(f"ClickUp deadline sync DB error: {e}")
+    finally:
+        store._put_conn(conn)
 
