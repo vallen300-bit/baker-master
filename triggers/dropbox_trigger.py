@@ -51,19 +51,8 @@ def _get_supported_extensions():
 
 def run_dropbox_poll():
     """Main entry point — called by scheduler every 30 minutes.
-
-    Algorithm:
-    1. Get DropboxClient singleton
-    2. Get stored cursor (opaque string or None for first poll)
-    3. Call list_folder with cursor to get changed entries
-    4. Filter: only files, supported extensions, ≤100 MB
-    5. For each valid file:
-       a. Download to temp directory
-       b. Run through ingest_file() → baker-documents collection
-       c. If not skipped → feed to Sentinel pipeline
-       d. Clean up temp file
-    6. Store new cursor
-    7. Log summary
+    DROPBOX-EXPANSION-5: Polls multiple watch paths (comma-separated).
+    Each path gets its own cursor and watermark.
     """
     from triggers.sentinel_health import report_success, report_failure, should_skip_poll
 
@@ -76,7 +65,40 @@ def run_dropbox_poll():
 
     try:
         client = _get_client()
-        watch_path = config.dropbox.watch_path
+        raw_watch_path = config.dropbox.watch_path
+        # DROPBOX-EXPANSION-5: Support comma-separated paths
+        watch_paths = [p.strip() for p in raw_watch_path.split(",") if p.strip()]
+        if not watch_paths:
+            watch_paths = ["/Baker-Feed"]
+
+        total_processed = 0
+        total_skipped = 0
+        total_errored = 0
+
+        for watch_path in watch_paths:
+            try:
+                p, s, e = _poll_single_path(client, watch_path)
+                total_processed += p
+                total_skipped += s
+                total_errored += e
+            except Exception as path_err:
+                logger.error(f"Dropbox poll failed for path {watch_path}: {path_err}")
+
+        report_success("dropbox")
+        logger.info(f"Dropbox poll complete: {total_processed} processed, {total_skipped} skipped, {total_errored} errors across {len(watch_paths)} path(s)")
+
+    except Exception as e:
+        report_failure("dropbox", str(e))
+        logger.error(f"dropbox poll failed: {e}")
+
+
+def _poll_single_path(client, watch_path: str) -> tuple:
+    """Poll a single Dropbox path. Returns (processed, skipped, errored).
+    DROPBOX-EXPANSION-5: Extracted from run_dropbox_poll() for multi-path support.
+    """
+    from triggers.sentinel_health import report_success, report_failure
+
+    try:
         supported_extensions = _get_supported_extensions()
 
         files_processed = 0
@@ -85,36 +107,50 @@ def run_dropbox_poll():
         processed_file_names = []  # ALERT-BATCH-1: collect for summary alert
         request_count_start = client._request_count
 
+        # DROPBOX-EXPANSION-5: Per-path cursor and watermark keys
+        _cursor_key = f"dropbox:{watch_path}"
+        _watermark_key = f"dropbox:{watch_path}"
+
+        # Migrate legacy "dropbox" key to path-specific key (one-time)
+        if watch_path == "/Baker-Feed":
+            _legacy_cursor = trigger_state.get_cursor("dropbox")
+            _legacy_wm = trigger_state.get_watermark("dropbox")
+            _new_cursor = trigger_state.get_cursor(_cursor_key)
+            if _legacy_cursor and not _new_cursor:
+                trigger_state.set_cursor(_cursor_key, _legacy_cursor)
+                logger.info(f"Dropbox: migrated legacy cursor to {_cursor_key}")
+            if _legacy_wm and not trigger_state.get_watermark(_watermark_key):
+                trigger_state.set_watermark(_watermark_key, _legacy_wm)
+                logger.info(f"Dropbox: migrated legacy watermark to {_watermark_key}")
+
         # -------------------------------------------------------
         # Step 1-3: Get cursor and list changes
         # -------------------------------------------------------
-        cursor = trigger_state.get_cursor("dropbox")
+        cursor = trigger_state.get_cursor(_cursor_key)
         had_cursor = cursor is not None
 
         # PM-OOM-1 H4: Stale watermark safeguard. If last poll was >24h ago,
         # don't batch-process the backlog (OOM risk). Get a fresh cursor only.
-        last_poll = trigger_state.get_watermark("dropbox")
+        last_poll = trigger_state.get_watermark(_watermark_key)
         stale = (datetime.now(timezone.utc) - last_poll) > timedelta(hours=24) if last_poll else True
         if stale and had_cursor:
             logger.warning(
-                f"Dropbox: watermark stale (last poll: {last_poll}) — "
+                f"Dropbox: watermark stale for {watch_path} (last poll: {last_poll}) — "
                 "resetting cursor to skip backlog"
             )
             # Get fresh cursor without processing files
             try:
                 _entries, new_cursor = client.list_folder(watch_path, cursor=cursor)
                 if new_cursor:
-                    trigger_state.set_cursor("dropbox", new_cursor)
-                trigger_state.set_watermark("dropbox", datetime.now(timezone.utc))
-                report_success("dropbox")
+                    trigger_state.set_cursor(_cursor_key, new_cursor)
+                trigger_state.set_watermark(_watermark_key, datetime.now(timezone.utc))
                 logger.info(
-                    f"Dropbox: cursor reset complete ({len(_entries)} backlog entries skipped). "
+                    f"Dropbox: cursor reset complete for {watch_path} ({len(_entries)} backlog entries skipped). "
                     "Next poll will process only new changes."
                 )
             except Exception as e:
-                report_failure("dropbox", f"Cursor reset failed: {e}")
-                logger.error(f"Dropbox cursor reset failed: {e}")
-            return
+                logger.error(f"Dropbox cursor reset failed for {watch_path}: {e}")
+            return (0, 0, 0)
 
         try:
             entries, new_cursor = client.list_folder(watch_path, cursor=cursor)
@@ -159,14 +195,12 @@ def run_dropbox_poll():
         if not file_entries:
             # Still update cursor even if no files to process
             if new_cursor:
-                trigger_state.set_cursor("dropbox", new_cursor)
-            requests_used = client._request_count - request_count_start
-            report_success("dropbox")
+                trigger_state.set_cursor(_cursor_key, new_cursor)
+            trigger_state.set_watermark(_watermark_key, datetime.now(timezone.utc))
             logger.info(
-                f"Dropbox poll complete: 0 processed, {files_skipped} skipped, 0 errors "
-                f"({requests_used} API requests)"
+                f"Dropbox poll {watch_path}: 0 processed, {files_skipped} skipped"
             )
-            return
+            return (0, files_skipped, 0)
 
         # -------------------------------------------------------
         # Step 5: Download and ingest each file
@@ -267,21 +301,22 @@ def run_dropbox_poll():
         # Step 6: Store new cursor
         # -------------------------------------------------------
         if new_cursor:
-            trigger_state.set_cursor("dropbox", new_cursor)
+            trigger_state.set_cursor(_cursor_key, new_cursor)
+
+        trigger_state.set_watermark(_watermark_key, datetime.now(timezone.utc))
 
         # -------------------------------------------------------
         # Step 7: Log summary
         # -------------------------------------------------------
-        requests_used = client._request_count - request_count_start
-        report_success("dropbox")
         logger.info(
-            f"Dropbox poll complete: {files_processed} processed, {files_skipped} skipped, "
-            f"{files_errored} errors ({requests_used} API requests)"
+            f"Dropbox poll {watch_path}: {files_processed} processed, {files_skipped} skipped, "
+            f"{files_errored} errors"
         )
+        return (files_processed, files_skipped, files_errored)
 
     except Exception as e:
-        report_failure("dropbox", str(e))
-        logger.error(f"dropbox poll failed: {e}")
+        logger.error(f"Dropbox poll failed for {watch_path}: {e}")
+        return (0, 0, 1)
 
 
 
