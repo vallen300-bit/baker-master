@@ -6022,6 +6022,95 @@ async def create_clickup_from_alert(request: Request):
         return {"error": str(e)}
 
 
+# ── CLICKUP-DROPDOWN-2: Structure + create-in-list endpoints ──────────────
+
+@app.get("/api/clickup/structure", tags=["clickup"], dependencies=[Depends(verify_api_key)])
+async def get_clickup_structure():
+    """Return workspaces → spaces → lists for task creation dropdown."""
+    from clickup_client import ClickUpClient
+    client = ClickUpClient._get_global_instance()
+
+    # All 5 active workspace IDs (from clickup_trigger.py)
+    workspace_ids = ["2652545", "24368967", "24382372", "24382764", "24385290"]
+    structure = []
+
+    for ws_id in workspace_ids:
+        try:
+            spaces = client.get_spaces(ws_id)
+            for space in spaces:
+                space_name = space.get("name", "Unknown")
+                space_id = space.get("id")
+                try:
+                    lists = client.get_lists(space_id)
+                    for lst in lists:
+                        # Folder info if available
+                        folder_name = lst.get("folder", {}).get("name", "")
+                        full_path = f"{space_name} / {folder_name} / {lst['name']}" if folder_name else f"{space_name} / {lst['name']}"
+                        structure.append({
+                            "workspace_id": ws_id,
+                            "space_id": space_id,
+                            "space_name": space_name,
+                            "list_id": lst["id"],
+                            "list_name": lst["name"],
+                            "folder_name": folder_name,
+                            "full_path": full_path,
+                        })
+                except Exception:
+                    continue
+        except Exception:
+            continue
+
+    return {"lists": structure}
+
+
+@app.post("/api/clickup/create-task", tags=["clickup"], dependencies=[Depends(verify_api_key)])
+async def create_clickup_task_in_list(request: Request):
+    """CLICKUP-DROPDOWN-2: Create a ClickUp task in a specific list."""
+    body = await request.json()
+    list_id = body.get("list_id")
+    name = body.get("name", "Untitled task")
+    description = body.get("description", "")
+    priority = body.get("priority")
+    due_date = body.get("due_date")
+
+    if not list_id:
+        return JSONResponse({"error": "list_id required"}, status_code=400)
+
+    try:
+        from clickup_client import ClickUpClient
+        client = ClickUpClient._get_global_instance()
+
+        # Convert ISO date to unix ms if provided
+        due_ms = None
+        if due_date:
+            try:
+                from datetime import datetime
+                dt = datetime.fromisoformat(due_date.replace("Z", "+00:00"))
+                due_ms = int(dt.timestamp() * 1000)
+            except Exception:
+                pass
+
+        result = client.create_task(
+            list_id=list_id,
+            name=name[:200],
+            description=description[:2000] if description else "",
+            priority=priority,
+            due_date=due_ms,
+            tags=["from-baker"],
+        )
+
+        if not result:
+            return JSONResponse({"error": "ClickUp API returned no result"}, status_code=500)
+
+        task_id = result.get("id")
+        task_url = result.get("url")
+        logger.info(f"CLICKUP-DROPDOWN-2: Task created in list {list_id}: {task_id}")
+        return {"status": "created", "task_id": task_id, "url": task_url}
+    except Exception as e:
+        logger.error(f"POST /api/clickup/create-task failed: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.get("/api/clickup/tasks/{task_id}", tags=["clickup"], dependencies=[Depends(verify_api_key)])
 async def get_clickup_task(task_id: str):
     """Get a single ClickUp task detail + comments."""

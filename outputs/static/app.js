@@ -2356,20 +2356,97 @@ function _triageDelegateSend(alertId, btn) {
     _triageOpenBaker('Draft an email to ' + name + ' delegating this task: "' + title + '". Context: ' + ctx);
 }
 
-function _triageCreateClickUp(alertId, title, body) {
-    bakerFetch('/api/clickup/create-from-alert', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ alert_id: alertId, name: title, description: body }),
-    }).then(function(r) { return r.json(); }).then(function(d) {
-        if (d.task_id) {
-            _showToast('Task created in ClickUp \u2713');
-        } else {
-            _showToast('ClickUp create failed: ' + (d.error || 'unknown'));
+// CLICKUP-DROPDOWN-2: Cached structure + dropdown picker
+var _clickUpListsCache = null;
+
+async function _getClickUpLists() {
+    if (_clickUpListsCache) return _clickUpListsCache;
+    try {
+        var resp = await bakerFetch('/api/clickup/structure');
+        if (resp.ok) {
+            var data = await resp.json();
+            _clickUpListsCache = data.lists || [];
+            return _clickUpListsCache;
         }
-    }).catch(function(e) {
-        _showToast('ClickUp error: ' + e);
-    });
+    } catch (e) {}
+    return [];
+}
+
+async function _triageCreateClickUp(alertId, title, body) {
+    var lists = await _getClickUpLists();
+    if (!lists.length) {
+        _showToast('Could not load ClickUp lists');
+        return;
+    }
+
+    var overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+
+    var modal = document.createElement('div');
+    modal.style.cssText = 'background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;min-width:400px;max-width:600px;max-height:70vh;overflow-y:auto;';
+    modal.innerHTML = '<div style="font-size:16px;font-weight:600;margin-bottom:12px;color:var(--text);">Create ClickUp Task</div>' +
+        '<div style="font-size:13px;color:var(--text3);margin-bottom:16px;max-height:60px;overflow:hidden;">' + esc(title || '') + '</div>' +
+        '<div style="font-size:12px;font-weight:600;color:var(--text3);margin-bottom:8px;text-transform:uppercase;">Select list:</div>';
+
+    // Group by space
+    var spaces = {};
+    for (var i = 0; i < lists.length; i++) {
+        var l = lists[i];
+        if (!spaces[l.space_name]) spaces[l.space_name] = [];
+        spaces[l.space_name].push(l);
+    }
+
+    for (var spaceName in spaces) {
+        var spaceDiv = document.createElement('div');
+        spaceDiv.style.cssText = 'margin-bottom:8px;';
+        var spaceLabel = document.createElement('div');
+        spaceLabel.style.cssText = 'font-size:11px;font-weight:700;color:var(--text4);text-transform:uppercase;padding:4px 0;';
+        spaceLabel.textContent = spaceName;
+        spaceDiv.appendChild(spaceLabel);
+
+        var spaceLists = spaces[spaceName];
+        for (var j = 0; j < spaceLists.length; j++) {
+            (function(lst) {
+                var btn = document.createElement('button');
+                btn.style.cssText = 'display:block;width:100%;text-align:left;padding:8px 12px;margin:2px 0;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text2);cursor:pointer;font-size:13px;font-family:var(--font);';
+                btn.textContent = lst.folder_name ? lst.folder_name + ' / ' + lst.list_name : lst.list_name;
+                btn.addEventListener('mouseenter', function() { btn.style.borderColor = 'var(--blue)'; btn.style.color = 'var(--text)'; });
+                btn.addEventListener('mouseleave', function() { btn.style.borderColor = 'var(--border)'; btn.style.color = 'var(--text2)'; });
+                btn.addEventListener('click', function() {
+                    btn.textContent = 'Creating...';
+                    btn.disabled = true;
+                    bakerFetch('/api/clickup/create-task', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ list_id: lst.list_id, name: title, description: body }),
+                    }).then(function(r) { return r.json(); }).then(function(d) {
+                        if (d.task_id || d.status === 'created') {
+                            _showToast('Task created in ' + lst.full_path + ' \u2713');
+                            overlay.remove();
+                        } else {
+                            btn.textContent = 'Failed \u2014 try again';
+                            btn.disabled = false;
+                        }
+                    }).catch(function() {
+                        btn.textContent = 'Failed \u2014 try again';
+                        btn.disabled = false;
+                    });
+                });
+                spaceDiv.appendChild(btn);
+            })(spaceLists[j]);
+        }
+        modal.appendChild(spaceDiv);
+    }
+
+    var cancelBtn = document.createElement('button');
+    cancelBtn.style.cssText = 'margin-top:12px;padding:8px 16px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text3);cursor:pointer;font-size:13px;font-family:var(--font);';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', function() { overlay.remove(); });
+    modal.appendChild(cancelBtn);
+
+    overlay.appendChild(modal);
+    overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
 }
 
 function _triagePromoteCritical(alertId) {
