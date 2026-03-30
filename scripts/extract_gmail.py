@@ -96,15 +96,31 @@ def authenticate() -> Credentials:
 
     creds = None
 
+    # GOOGLE-CALENDAR-4: Try env var first (set via Render env vars)
+    _token_env = os.environ.get("GMAIL_TOKEN_JSON", "")
+    if _token_env:
+        try:
+            import json as _json
+            _token_data = _json.loads(_token_env)
+            # Write to writable path so refresh logic works
+            _WRITABLE_DIR.mkdir(parents=True, exist_ok=True)
+            with open(_WRITABLE_TOKEN_PATH, "w") as _f:
+                _f.write(_token_env)
+            creds = Credentials.from_authorized_user_info(_token_data, scopes)
+            print(f"Gmail: Loaded token from GMAIL_TOKEN_JSON env var")
+        except Exception as e:
+            print(f"  Warning: Could not load token from env var ({e})")
+
     # Try writable copy first (refreshed token), then original (from secrets)
-    for tp in [_WRITABLE_TOKEN_PATH, token_path]:
-        if tp.exists():
-            try:
-                creds = Credentials.from_authorized_user_file(str(tp), scopes)
-                print(f"Gmail: Loaded token from {tp}")
-                break
-            except Exception as e:
-                print(f"  Warning: Could not load token from {tp} ({e})")
+    if not creds:
+        for tp in [_WRITABLE_TOKEN_PATH, token_path]:
+            if tp.exists():
+                try:
+                    creds = Credentials.from_authorized_user_file(str(tp), scopes)
+                    print(f"Gmail: Loaded token from {tp}")
+                    break
+                except Exception as e:
+                    print(f"  Warning: Could not load token from {tp} ({e})")
 
     # Refresh or run new flow
     if creds and creds.valid:
