@@ -426,9 +426,10 @@ const TAB_VIEW_MAP = {
     'dossiers': 'viewDossiers',
     'browser': 'viewBrowser',
     'baker-data': 'viewBakerData',
+    'ideas': 'viewIdeas',
 };
 
-const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'person-detail', 'tags', 'search', 'ask-baker', 'ask-specialist', 'travel', 'media', 'documents', 'dossiers', 'browser', 'baker-data']);
+const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'person-detail', 'tags', 'search', 'ask-baker', 'ask-specialist', 'travel', 'media', 'documents', 'dossiers', 'browser', 'baker-data', 'ideas']);
 
 function switchTab(tabName) {
     document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
@@ -466,6 +467,7 @@ function switchTab(tabName) {
     else if (tabName === 'dossiers') loadDossiersTab();
     else if (tabName === 'browser') loadBrowserTab();
     else if (tabName === 'baker-data') loadBakerData();
+    else if (tabName === 'ideas') loadIdeasTab();
 }
 
 // ═══ WEEKLY PRIORITIES WIDGET ═══
@@ -889,6 +891,7 @@ async function loadMorningBrief() {
 
         loadMattersSummary();
         loadPeopleSidebar();
+        loadIdeasSidebar();
 
         // System widgets moved to Baker Data tab (BAKER-DATA-TUCK-1)
     } catch (e) {
@@ -6342,6 +6345,112 @@ function _injectDataLayerCSS() {
         '.run-btn:disabled{opacity:0.5;cursor:not-allowed}',
     ].join('\n');
     document.head.appendChild(s);
+}
+
+// ═══ IDEAS TAB — IDEAS-CAPTURE-1 ═══
+
+async function loadIdeasSidebar() {
+    try {
+        var resp = await bakerFetch('/api/ideas');
+        if (!resp.ok) return;
+        var ideas = await resp.json();
+        var container = document.getElementById('ideasSubList');
+        if (!container) return;
+        container.textContent = '';
+        for (var i = 0; i < Math.min(ideas.length, 10); i++) {
+            var idea = ideas[i];
+            var item = document.createElement('div');
+            item.className = 'nav-item';
+            item.dataset.tab = 'ideas';
+            var lbl = document.createElement('span');
+            lbl.className = 'nav-label';
+            lbl.textContent = idea.content.substring(0, 40) + (idea.content.length > 40 ? '...' : '');
+            item.appendChild(lbl);
+            item.addEventListener('click', function() { switchTab('ideas'); });
+            container.appendChild(item);
+        }
+        setText('ideasCount', ideas.length || '');
+        _initSectionToggle('navIdeasHeader', 'ideasSubList', 'ideas', false);
+        if (ideas.length > 0) {
+            var list = document.getElementById('ideasSubList');
+            var arrow = document.querySelector('#navIdeasHeader .nav-section-arrow');
+            if (list) list.style.display = '';
+            if (arrow) arrow.innerHTML = '&#9662;';
+            localStorage.setItem('sidebar_ideas', 'true');
+        }
+    } catch (e) {
+        console.error('loadIdeasSidebar failed:', e);
+    }
+}
+
+async function loadIdeasTab() {
+    var container = document.getElementById('ideasContent');
+    if (!container) return;
+    container.innerHTML = '<div class="thinking"><span class="thinking-dots"><span></span><span></span><span></span></span> Loading...</div>';
+    try {
+        var resp = await bakerFetch('/api/ideas');
+        if (!resp.ok) throw new Error('API ' + resp.status);
+        var ideas = await resp.json();
+        container.textContent = '';
+        if (!ideas.length) {
+            container.innerHTML = '<div style="color:var(--text3);padding:20px 0;font-size:13px;">No ideas yet. Send "Idea: ..." via Slack, WhatsApp, or Ask Baker.</div>';
+            return;
+        }
+        for (var i = 0; i < ideas.length; i++) {
+            var idea = ideas[i];
+            var card = document.createElement('div');
+            card.className = 'issue-card issue-open';
+            card.dataset.ideaId = idea.id;
+
+            var sourceTag = '<span class="doc-type-badge">' + esc(idea.source) + '</span>';
+            var dateTag = idea.created_at ? '<span class="doc-date">' + esc(idea.created_at.substring(0, 10)) + '</span>' : '';
+            var statusTag = idea.status !== 'new' ? '<span class="doc-matter-tag">' + esc(idea.status) + '</span>' : '';
+
+            card.innerHTML =
+                '<div class="doc-row-header">' + sourceTag + statusTag + dateTag + '</div>' +
+                '<div class="doc-title" style="white-space:normal;">' + esc(idea.content) + '</div>' +
+                '<div class="doc-actions" style="margin-top:8px;"></div>';
+
+            var triage = card.querySelector('.doc-actions');
+            _addIdeaTriageButtons(triage, idea, card);
+            container.appendChild(card);
+        }
+    } catch (e) {
+        container.textContent = 'Failed to load ideas.';
+    }
+}
+
+function _addIdeaTriageButtons(triage, idea, card) {
+    var devBtn = document.createElement('button');
+    devBtn.textContent = 'Develop';
+    devBtn.addEventListener('click', function() {
+        _triggerScanQuestion('Develop this idea further and suggest concrete next steps: "' + idea.content + '"');
+    });
+    triage.appendChild(devBtn);
+
+    var cuBtn = document.createElement('button');
+    cuBtn.textContent = 'ClickUp Task';
+    cuBtn.addEventListener('click', function() {
+        _triggerScanQuestion('Create a ClickUp task for this idea: "' + idea.content + '"');
+    });
+    triage.appendChild(cuBtn);
+
+    var dismissBtn = document.createElement('button');
+    dismissBtn.textContent = '\u2715';
+    dismissBtn.title = 'Dismiss';
+    dismissBtn.style.cssText = 'margin-left:auto;border:none;color:var(--text4);';
+    dismissBtn.addEventListener('click', function() {
+        bakerFetch('/api/ideas/' + idea.id, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'dismissed' }),
+        }).then(function() {
+            card.style.opacity = '0.3';
+            setTimeout(function() { card.remove(); }, 500);
+            loadIdeasSidebar();
+        });
+    });
+    triage.appendChild(dismissBtn);
 }
 
 // ═══ DOCUMENTS TAB — REDESIGN-1 (search-first) ═══

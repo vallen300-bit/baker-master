@@ -665,6 +665,26 @@ def _handle_director_message(message_body: str, msg_id: str, sender_name: str) -
     except Exception:
         pass
 
+    # IDEAS-CAPTURE-1: Detect idea prefix before intent classification
+    if message_body.lower().startswith('idea:') or message_body.lower().startswith('idea -'):
+        import re as _idea_re
+        _idea_content = _idea_re.sub(r'^idea[:\-\s]+', '', message_body, flags=_idea_re.IGNORECASE).strip()
+        if _idea_content:
+            try:
+                _idea_conn = store._get_conn()
+                if _idea_conn:
+                    try:
+                        _idea_cur = _idea_conn.cursor()
+                        _idea_cur.execute("INSERT INTO ideas (content, source) VALUES (%s, %s)", (_idea_content, 'whatsapp'))
+                        _idea_conn.commit()
+                        _idea_cur.close()
+                    finally:
+                        store._put_conn(_idea_conn)
+            except Exception:
+                pass
+        _wa_reply("Idea captured. You'll find it in the Ideas section on the dashboard.")
+        return
+
     intent = ah.classify_intent(message_body, conversation_history=_conv_history)
     intent_type = intent.get("type", "question")
 

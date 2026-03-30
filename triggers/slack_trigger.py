@@ -45,6 +45,28 @@ def _get_store():
     return SentinelStoreBack._get_global_instance()
 
 
+def _store_idea(text: str, source: str = 'slack'):
+    """IDEAS-CAPTURE-1: Store a Director idea. Strip the 'Idea:' prefix."""
+    import re as _re
+    content = _re.sub(r'^idea[:\-\s]+', '', text, flags=_re.IGNORECASE).strip()
+    if not content:
+        return
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("INSERT INTO ideas (content, source) VALUES (%s, %s)", (content, source))
+            conn.commit()
+            cur.close()
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.warning(f"Idea store failed: {e}")
+
+
 def _resolve_user_name(client, user_id: str) -> str:
     """Resolve Slack user ID to display name. In-process cache to limit API calls."""
     if user_id in _user_name_cache:
@@ -354,6 +376,12 @@ def _handle_director_slack_message(text: str, channel_id: str, thread_ts: str,
     plan_response = check_pending_plan(text)
     if plan_response:
         _post_and_store_reply(client, channel_id, thread_ts, plan_response)
+        return
+
+    # IDEAS-CAPTURE-1: Detect idea prefix before intent classification
+    if text.lower().startswith('idea:') or text.lower().startswith('idea -'):
+        _store_idea(text, source='slack')
+        _post_and_store_reply(client, channel_id, thread_ts, "Idea captured. You'll find it in the Ideas section on the dashboard.")
         return
 
     # Step 3: Enrich with alert context if this looks like a reply

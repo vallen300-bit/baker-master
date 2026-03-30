@@ -13,7 +13,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=54">
+    <link rel="stylesheet" href="/static/style.css?v=55">
 </head>
 <body>
 
@@ -66,6 +66,14 @@
             <span class="nav-count" id="peopleCount"></span>
         </div>
         <div class="nav-sub" id="peopleSubList" style="display:none;"></div>
+
+        <!-- IDEAS-CAPTURE-1: Ideas section -->
+        <div class="nav-section-header" id="navIdeasHeader" data-section="ideas">
+            <span class="nav-section-arrow">&#9656;</span>
+            <span class="nav-section-label">Ideas</span>
+            <span class="nav-count" id="ideasCount"></span>
+        </div>
+        <div class="nav-sub" id="ideasSubList" style="display:none;"></div>
 
         <div class="nav-divider"></div>
 
@@ -251,6 +259,12 @@
             <div id="personDetailIssues"></div>
         </div>
 
+        <!-- VIEW: Ideas (IDEAS-CAPTURE-1) -->
+        <div class="view" id="viewIdeas">
+            <div class="section-label">Ideas</div>
+            <div id="ideasContent"></div>
+        </div>
+
         <!-- VIEW: Search (D6 Knowledge Base) -->
         <div class="view" id="viewSearch">
             <div class="section-label">Knowledge Base</div>
@@ -395,7 +409,7 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=79"></script>
+<script src="/static/app.js?v=80"></script>
 <script>
 // PWA-DESKTOP-1: Register service worker for installability
 if ('serviceWorker' in navigator) {

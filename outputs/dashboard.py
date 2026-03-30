@@ -341,6 +341,19 @@ async def startup():
                 """)
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_people_issues_person ON people_issues(person_name)")
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_people_issues_status ON people_issues(status)")
+                # IDEAS-CAPTURE-1: Ideas table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS ideas (
+                        id SERIAL PRIMARY KEY,
+                        content TEXT NOT NULL,
+                        source TEXT DEFAULT 'slack',
+                        status TEXT DEFAULT 'new',
+                        matter TEXT,
+                        created_at TIMESTAMPTZ DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_ideas_status ON ideas(status)")
                 conn.commit()
                 cur.close()
                 logger.info("COCKPIT-ALERT-UI: structured_actions + snoozed_until + people_issues ensured")
@@ -1489,6 +1502,71 @@ async def get_document_text(doc_id: int):
     except Exception as e:
         logger.error(f"GET /api/documents/{doc_id}/text failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── IDEAS-CAPTURE-1: Ideas endpoints ──────────────────────────────────────
+
+@app.get("/api/ideas", tags=["ideas"], dependencies=[Depends(verify_api_key)])
+async def list_ideas(status: str = Query(None)):
+    """List ideas, newest first."""
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="DB unavailable")
+    try:
+        cur = conn.cursor()
+        if status:
+            cur.execute("""
+                SELECT id, content, source, status, matter, created_at
+                FROM ideas WHERE status = %s
+                ORDER BY created_at DESC LIMIT 50
+            """, (status,))
+        else:
+            cur.execute("""
+                SELECT id, content, source, status, matter, created_at
+                FROM ideas WHERE status != 'dismissed'
+                ORDER BY created_at DESC LIMIT 50
+            """)
+        rows = cur.fetchall()
+        cur.close()
+        return [{"id": r[0], "content": r[1], "source": r[2], "status": r[3],
+                 "matter": r[4], "created_at": r[5].isoformat() if r[5] else None} for r in rows]
+    except Exception as e:
+        logger.error(f"GET /api/ideas failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        store._put_conn(conn)
+
+
+@app.patch("/api/ideas/{idea_id}", tags=["ideas"], dependencies=[Depends(verify_api_key)])
+async def triage_idea(idea_id: int, request: Request):
+    """Triage an idea: update status."""
+    body = await request.json()
+    new_status = body.get("status")
+    if new_status not in ('new', 'developing', 'actioned', 'dismissed'):
+        return JSONResponse({"error": "Invalid status"}, status_code=400)
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="DB unavailable")
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE ideas SET status = %s, updated_at = NOW() WHERE id = %s RETURNING id",
+                   (new_status, idea_id))
+        row = cur.fetchone()
+        conn.commit()
+        cur.close()
+        if not row:
+            return JSONResponse({"error": "Idea not found"}, status_code=404)
+        return {"updated": idea_id}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        store._put_conn(conn)
 
 
 def _derive_source(source_path: str) -> str:
@@ -6261,6 +6339,31 @@ async def scan_chat(req: ScanRequest):
                 if h.get("role") == "system" and h.get("content", "").startswith("[Context from alert:"):
                     _alert_ctx = h["content"]
                     break
+        # IDEAS-CAPTURE-1: Detect idea prefix before intent classification
+        if req.question.lower().startswith('idea:') or req.question.lower().startswith('idea -'):
+            import re as _idea_re
+            _idea_content = _idea_re.sub(r'^idea[:\-\s]+', '', req.question, flags=_idea_re.IGNORECASE).strip()
+            if _idea_content:
+                try:
+                    _idea_store = _get_store()
+                    _idea_conn = _idea_store._get_conn()
+                    if _idea_conn:
+                        try:
+                            _idea_cur = _idea_conn.cursor()
+                            _idea_cur.execute("INSERT INTO ideas (content, source) VALUES (%s, %s)", (_idea_content, 'scan'))
+                            _idea_conn.commit()
+                            _idea_cur.close()
+                        finally:
+                            _idea_store._put_conn(_idea_conn)
+                except Exception:
+                    pass
+
+            async def _idea_stream():
+                yield f"data: {json.dumps({'token': 'Idea captured. You can find it in the Ideas section on the sidebar.'})}\n\n"
+                yield "data: [DONE]\n\n"
+            return StreamingResponse(_idea_stream(), media_type="text/event-stream",
+                                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
         _classify_question = req.question
         if _alert_ctx:
             _classify_question = f"{_alert_ctx}\n\nDirector's request: {req.question}"
