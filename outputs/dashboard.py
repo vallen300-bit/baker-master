@@ -1343,6 +1343,7 @@ async def search_documents_endpoint(
                             "document_type": meta.get("document_type", "document"),
                             "matter": meta.get("matter_slug", ""),
                             "source": _derive_source(meta.get("source_path", "")),
+                            "source_path": meta.get("source_path", ""),
                             "date": (meta.get("ingested_at", "") or "")[:10],
                             "summary": text_snippet,
                             "score": round(h.get("score", 0), 3),
@@ -1418,6 +1419,7 @@ async def search_documents_endpoint(
                         "document_type": r.get("document_type") or "document",
                         "matter": r.get("matter_slug") or "",
                         "source": _derive_source(r.get("source_path") or ""),
+                        "source_path": r.get("source_path") or "",
                         "date": r["ingested_at"].strftime("%Y-%m-%d") if r.get("ingested_at") else "",
                         "summary": r.get("text_preview") or "",
                         "score": None,
@@ -1431,6 +1433,40 @@ async def search_documents_endpoint(
         raise
     except Exception as e:
         logger.error(f"GET /api/documents/search failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/documents/{doc_id}/text", tags=["documents"], dependencies=[Depends(verify_api_key)])
+async def get_document_text(doc_id: int):
+    """Return full text of a document for expandable preview."""
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            import psycopg2.extras
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT id, filename, document_type, matter_slug, source_path, "
+                "LEFT(full_text, 5000) AS full_text, page_count, ingested_at "
+                "FROM documents WHERE id = %s",
+                (doc_id,),
+            )
+            row = cur.fetchone()
+            cur.close()
+            if not row:
+                raise HTTPException(status_code=404, detail="Document not found")
+            r = dict(row)
+            if r.get("ingested_at"):
+                r["ingested_at"] = r["ingested_at"].isoformat()
+            return r
+        finally:
+            store._put_conn(conn)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"GET /api/documents/{doc_id}/text failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

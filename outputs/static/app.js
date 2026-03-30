@@ -6492,34 +6492,109 @@ function _renderDocResults(container, results) {
         var doc = results[i];
         var row = document.createElement('div');
         row.className = 'doc-row';
+        row.dataset.docId = doc.id || '';
 
         var docType = (doc.document_type || 'document').replace(/_/g, ' ');
         var docTypeClass = (doc.document_type || 'document').replace(/\s/g, '_');
         var matterHtml = doc.matter ? '<span class="doc-matter-tag">' + esc(doc.matter.replace(/_/g, ' ')) + '</span>' : '';
         var dateHtml = doc.date ? '<span class="doc-date">' + esc(doc.date) + '</span>' : '';
 
+        // Source path (show shortened)
+        var sourcePath = doc.source_path || '';
+        var shortPath = sourcePath.replace(/^\/Baker-Feed\//, '').replace(/^\//, '');
+        var sourceHtml = shortPath ? '<div class="doc-source-path">' + esc(shortPath) + '</div>' : '';
+
         row.innerHTML =
             '<div class="doc-row-header">'
             + '<span class="doc-type-badge ' + esc(docTypeClass) + '">' + esc(docType) + '</span>'
             + matterHtml + dateHtml
             + '</div>'
-            + '<div class="doc-title">' + esc(doc.title || 'Untitled') + '</div>'
+            + '<div class="doc-title" style="cursor:pointer;">' + esc(doc.title || 'Untitled') + '</div>'
             + (doc.summary ? '<div class="doc-summary">' + esc(doc.summary) + '</div>' : '')
+            + sourceHtml
+            + '<div class="doc-expand" style="display:none;"></div>'
             + '<div class="doc-actions"></div>';
+
+        // Click title to expand/collapse full text
+        (function(rowEl, docData) {
+            var titleEl = rowEl.querySelector('.doc-title');
+            titleEl.addEventListener('click', function(e) {
+                e.stopPropagation();
+                _toggleDocExpand(rowEl, docData);
+            });
+        })(row, doc);
 
         // Action buttons
         var actions = row.querySelector('.doc-actions');
+        _addDocActionBtn(actions, 'View', doc);
         _addDocActionBtn(actions, 'Ask Baker', doc);
 
         container.appendChild(row);
     }
 }
 
+async function _toggleDocExpand(rowEl, doc) {
+    var expandEl = rowEl.querySelector('.doc-expand');
+    if (!expandEl) return;
+
+    // Toggle off
+    if (expandEl.style.display !== 'none') {
+        expandEl.style.display = 'none';
+        return;
+    }
+
+    // Already loaded?
+    if (expandEl.dataset.loaded) {
+        expandEl.style.display = 'block';
+        return;
+    }
+
+    // Fetch full text
+    var docId = doc.id;
+    if (!docId) { expandEl.textContent = 'No document ID'; expandEl.style.display = 'block'; return; }
+
+    expandEl.textContent = 'Loading...';
+    expandEl.style.display = 'block';
+
+    try {
+        var resp = await bakerFetch('/api/documents/' + docId + '/text');
+        if (!resp.ok) throw new Error('API ' + resp.status);
+        var data = await resp.json();
+        var text = data.full_text || 'No text available.';
+        expandEl.textContent = '';
+        expandEl.dataset.loaded = '1';
+
+        // Info bar
+        var info = document.createElement('div');
+        info.className = 'doc-expand-info';
+        var parts = [];
+        if (data.page_count) parts.push(data.page_count + ' pages');
+        if (data.source_path) parts.push(data.source_path.replace(/^\/Baker-Feed\//, ''));
+        info.textContent = parts.join(' · ');
+        expandEl.appendChild(info);
+
+        // Text content
+        var textEl = document.createElement('div');
+        textEl.className = 'doc-expand-text';
+        textEl.textContent = text;
+        expandEl.appendChild(textEl);
+    } catch (e) {
+        expandEl.textContent = 'Failed to load: ' + e.message;
+    }
+}
+
 function _addDocActionBtn(container, label, doc) {
     var btn = document.createElement('button');
     btn.textContent = label;
-    if (label === 'Ask Baker') {
-        btn.addEventListener('click', function() {
+    if (label === 'View') {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var rowEl = btn.closest('.doc-row');
+            if (rowEl) _toggleDocExpand(rowEl, doc);
+        });
+    } else if (label === 'Ask Baker') {
+        btn.addEventListener('click', function(e) {
+            e.stopPropagation();
             var prompt = 'Analyze this document: "' + (doc.title || 'Untitled') + '"';
             if (doc.summary) prompt += '. Summary: ' + doc.summary.substring(0, 100);
             switchTab('ask-baker');
