@@ -206,9 +206,8 @@ def _classify_domain(content: str, sender: str, source: str,
 
 
 def _classify_domain_haiku(content: str) -> tuple:
-    """Use Claude Haiku for domain classification when rule-based is inconclusive."""
-    import anthropic
-    client = anthropic.Anthropic(api_key=config.claude.api_key)
+    """Use Gemini Flash for domain classification when rule-based is inconclusive."""
+    from orchestrator.gemini_client import call_flash
 
     prompt = (
         "Classify this message into exactly one domain. "
@@ -217,20 +216,19 @@ def _classify_domain_haiku(content: str) -> tuple:
         f"Message: {content[:500]}"
     )
 
-    response = client.messages.create(
-        model=config.decision_engine.haiku_model,
-        max_tokens=10,
+    resp = call_flash(
         messages=[{"role": "user", "content": prompt}],
+        max_tokens=10,
     )
     try:
         from orchestrator.cost_monitor import log_api_cost
-        log_api_cost(config.decision_engine.haiku_model, response.usage.input_tokens, response.usage.output_tokens, source="classify_domain")
+        log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="classify_domain")
     except Exception:
         pass
-    domain = response.content[0].text.strip().lower()
+    domain = resp.text.strip().lower()
     if domain in _DOMAIN_PATTERNS:
-        return (domain, "medium", "haiku_llm")
-    return ("projects", "low", "haiku_fallback")
+        return (domain, "medium", "flash_llm")
+    return ("projects", "low", "flash_fallback")
 
 
 # ============================================================

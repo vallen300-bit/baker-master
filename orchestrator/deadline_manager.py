@@ -69,23 +69,22 @@ def extract_deadlines(
         return 0
 
     try:
-        claude = anthropic.Anthropic(api_key=config.claude.api_key)
+        from orchestrator.gemini_client import call_flash
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        resp = claude.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1000,
-            system=_EXTRACTION_SYSTEM,
+        resp = call_flash(
             messages=[{
                 "role": "user",
                 "content": f"Today's date: {today}\n\nContent to analyze:\n{content[:4000]}",
             }],
+            max_tokens=1000,
+            system=_EXTRACTION_SYSTEM,
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="extract_deadlines")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="extract_deadlines")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         # Strip markdown code fences
         if raw.startswith("```"):
             lines = raw.split("\n")

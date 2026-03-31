@@ -61,6 +61,15 @@ class ClaudeConfig:
 
 
 @dataclass
+class GeminiConfig:
+    """GEMINI-MIGRATION-1: Gemini API configuration."""
+    api_key: str = os.getenv("GEMINI_API_KEY", "")
+    flash_model: str = "gemini-2.5-flash"
+    pro_model: str = "gemini-2.5-pro"
+    enabled: bool = os.getenv("BAKER_USE_GEMINI", "true").lower() == "true"
+
+
+@dataclass
 class GmailConfig:
     # OAuth2 credentials file (downloaded from Google Cloud Console)
     # Render Secret Files live at /etc/secrets/; fall back to config/ for local dev
@@ -316,6 +325,7 @@ class SentinelConfig:
     qdrant: QdrantConfig = field(default_factory=QdrantConfig)
     voyage: VoyageConfig = field(default_factory=VoyageConfig)
     claude: ClaudeConfig = field(default_factory=ClaudeConfig)
+    gemini: GeminiConfig = field(default_factory=GeminiConfig)
     gmail: GmailConfig = field(default_factory=GmailConfig)
     fireflies: FirefliesConfig = field(default_factory=FirefliesConfig)
     todoist: TodoistConfig = field(default_factory=TodoistConfig)

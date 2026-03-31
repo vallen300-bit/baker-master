@@ -47,8 +47,8 @@ MAX_INTERACTIONS_PER_SUMMARY = 100
 MIN_INTERACTIONS_FOR_SUMMARY = 3
 # Model for Tier 2 compression (Opus — lossless critical details)
 TIER2_MODEL = "claude-opus-4-20250514"
-# Model for Tier 3 compression (Sonnet — strategic synthesis)
-TIER3_MODEL = "claude-sonnet-4-20250514"
+# Model for Tier 3 compression (Gemini Pro — strategic synthesis)
+TIER3_MODEL = "gemini-2.5-pro"
 
 # ─────────────────────────────────────────────────
 # Prompts — carefully designed for zero information loss
@@ -583,23 +583,22 @@ def _get_old_summaries_for_tier3() -> list:
 
 
 def _generate_tier3_brief(matter_slug: str, summaries_text: str) -> Optional[str]:
-    """Use Sonnet to distill Tier 2 summaries into institutional knowledge."""
+    """Use Gemini Pro to distill Tier 2 summaries into institutional knowledge."""
     try:
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = client.messages.create(
-            model=TIER3_MODEL,
-            max_tokens=2048,
+        from orchestrator.gemini_client import call_pro
+        resp = call_pro(
             messages=[{"role": "user", "content": _TIER3_PROMPT.format(
                 matter_name=matter_slug,
                 summaries=summaries_text[:15000],
             )}],
+            max_tokens=2048,
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
             log_api_cost(TIER3_MODEL, resp.usage.input_tokens, resp.usage.output_tokens, source="tier3_consolidation")
         except Exception:
             pass
-        return resp.content[0].text.strip()
+        return resp.text.strip()
     except Exception as e:
         logger.error(f"Tier 3 brief generation failed for {matter_slug}: {e}")
         return None

@@ -20,11 +20,16 @@ from typing import Optional, Tuple
 
 logger = logging.getLogger("baker.cost_monitor")
 
-# Model costs (USD per million tokens) — Anthropic pricing 2025
+# Model costs (USD per million tokens) — GEMINI-MIGRATION-1
 MODEL_COSTS = {
+    # Anthropic
     "claude-opus-4-6": {"input": 15.00, "output": 75.00},
     "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
+    "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},
     "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00},
+    # Gemini
+    "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
+    "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
 }
 DEFAULT_COSTS = {"input": 15.00, "output": 75.00}
 

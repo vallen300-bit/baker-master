@@ -62,8 +62,7 @@ def extract_correction_from_feedback(task: dict):
             logger.debug(f"No comment on task #{task_id} — skipping correction extraction")
             return
 
-        _HAIKU = "claude-haiku-4-5-20251001"
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        from orchestrator.gemini_client import call_flash
 
         prompt = (
             "A Director gave feedback on an AI specialist's response. "
@@ -83,17 +82,16 @@ def extract_correction_from_feedback(task: dict):
             '"applies_to": "capability"|"all"} or null if no useful rule.'
         )
 
-        resp = client.messages.create(
-            model=_HAIKU,
-            max_tokens=300,
+        resp = call_flash(
             messages=[{"role": "user", "content": prompt}],
+            max_tokens=300,
         )
         log_api_cost(
-            _HAIKU, resp.usage.input_tokens, resp.usage.output_tokens,
+            "gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens,
             source="correction_extraction", capability_id=cap_slug or "unknown",
         )
 
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         # Strip markdown fences
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]

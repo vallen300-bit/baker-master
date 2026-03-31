@@ -51,16 +51,13 @@ def _is_meeting_whatsapp(body: str) -> bool:
 
 
 def _extract_meeting_from_whatsapp(body: str, sender_name: str, chat_name: str):
-    """MEETINGS-DETECT-3: One Haiku call to extract meeting details from WhatsApp."""
+    """MEETINGS-DETECT-3: One Flash call to extract meeting details from WhatsApp."""
     import json
-    import anthropic
     from config.settings import config
     try:
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        from orchestrator.gemini_client import call_flash
         today = datetime.now().strftime('%Y-%m-%d')
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=300,
+        resp = call_flash(
             messages=[{"role": "user", "content": f"""Extract meeting details from this WhatsApp message. If NOT about a specific meeting, return {{"is_meeting": false}}.
 
 From: {sender_name} (chat: {chat_name})
@@ -83,10 +80,10 @@ Status: "confirmed" if definite ("see you", "confirmed", "booked"). "proposed" i
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="meeting_wa_detect")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="meeting_wa_detect")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
@@ -109,16 +106,13 @@ _COMMITMENT_WA_RE = re.compile(
 
 
 def _extract_commitment_from_whatsapp(body: str, chat_name: str):
-    """OBLIGATIONS-DETECT-1: Haiku extraction of Director's commitment from WhatsApp."""
+    """OBLIGATIONS-DETECT-1: Flash extraction of Director's commitment from WhatsApp."""
     import json
-    import anthropic
     from config.settings import config
     try:
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        from orchestrator.gemini_client import call_flash
         today = datetime.now().strftime('%Y-%m-%d')
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=300,
+        resp = call_flash(
             messages=[{"role": "user", "content": f"""Extract the Director's personal commitment from this WhatsApp message. If no personal commitment, return {{"is_commitment": false}}.
 
 From: Dimitry Vallen (chat: {chat_name})
@@ -139,10 +133,10 @@ Rules: Only "I will/I'll/let me" = Director's commitment. NOT tasks for others."
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="commitment_wa_detect")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="commitment_wa_detect")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
@@ -549,7 +543,7 @@ def _handle_director_question_legacy(question: str, start: float,
             log_api_cost(config.claude.model, response.usage.input_tokens, response.usage.output_tokens, source="wa_question")
         except Exception:
             pass
-        return response.content[0].text
+        return response.text
     except Exception as e:
         logger.error(f"WA question: Claude call failed: {e}")
         _wa_reply("Sorry, I couldn't process that right now. Try again in a moment.")

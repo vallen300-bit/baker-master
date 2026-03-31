@@ -28,7 +28,7 @@ from config.settings import config
 
 logger = logging.getLogger("baker.document_pipeline")
 
-_HAIKU_MODEL = "claude-haiku-4-5-20251001"
+_HAIKU_MODEL = "gemini-2.5-flash"
 _OPUS_MODEL = "claude-opus-4-6"
 
 # High-value types that use Opus for extraction (better accuracy on legal/financial)
@@ -224,18 +224,17 @@ def classify_document(doc_id: int, full_text: str) -> Optional[dict]:
     )
 
     try:
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = client.messages.create(
-            model=_HAIKU_MODEL,
-            max_tokens=500,
+        from orchestrator.gemini_client import call_flash
+        resp = call_flash(
             messages=[{"role": "user", "content": prompt}],
+            max_tokens=500,
         )
         log_api_cost(
-            _HAIKU_MODEL, resp.usage.input_tokens, resp.usage.output_tokens,
+            "gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens,
             source="document_pipeline", capability_id="doc_classify",
         )
 
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         # Strip markdown code fences if present
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
@@ -320,18 +319,29 @@ def extract_document(doc_id: int, full_text: str, document_type: str) -> Optiona
     extraction_model = _get_extraction_model(document_type)
 
     try:
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = client.messages.create(
-            model=extraction_model,
-            max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        from orchestrator.gemini_client import is_gemini_model
+        if is_gemini_model(extraction_model):
+            from orchestrator.gemini_client import call_flash
+            resp = call_flash(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=2000,
+            )
+        else:
+            client = anthropic.Anthropic(api_key=config.claude.api_key)
+            _resp = client.messages.create(
+                model=extraction_model,
+                max_tokens=2000,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            # Wrap Anthropic response to match Gemini shape
+            from orchestrator.gemini_client import GeminiResponse
+            resp = GeminiResponse(_resp.content[0].text, _resp.usage.input_tokens, _resp.usage.output_tokens)
         log_api_cost(
             extraction_model, resp.usage.input_tokens, resp.usage.output_tokens,
             source="document_pipeline", capability_id="doc_extract",
         )
 
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
             if raw.endswith("```"):

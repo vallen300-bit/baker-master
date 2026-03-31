@@ -21,8 +21,6 @@ import json
 import logging
 from datetime import datetime, timezone
 
-import anthropic
-
 from config.settings import config
 
 logger = logging.getLogger("baker.sentiment_scorer")
@@ -55,27 +53,26 @@ def score_message_sentiment(text: str) -> int:
         return 3  # Too short to score
 
     try:
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=5,
+        from orchestrator.gemini_client import call_flash
+        resp = call_flash(
             messages=[{
                 "role": "user",
                 "content": f"{_SENTIMENT_PROMPT}\n\nMessage:\n{text[:500]}",
             }],
+            max_tokens=5,
         )
 
         # Log cost
         try:
             from orchestrator.cost_monitor import log_api_cost
             log_api_cost(
-                "claude-haiku-4-5-20251001", resp.usage.input_tokens,
+                "gemini-2.5-flash", resp.usage.input_tokens,
                 resp.usage.output_tokens, source="sentiment_scorer",
             )
         except Exception:
             pass
 
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         # Extract first digit
         for char in raw:
             if char.isdigit() and char in "12345":
@@ -111,26 +108,25 @@ def _score_batch(messages: list) -> list:
         msg_parts.append(f"{i}. {text}")
 
     try:
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=100,
+        from orchestrator.gemini_client import call_flash
+        resp = call_flash(
             messages=[{
                 "role": "user",
                 "content": f"{_BATCH_PROMPT}\n\nMessages:\n" + "\n".join(msg_parts),
             }],
+            max_tokens=100,
         )
 
         try:
             from orchestrator.cost_monitor import log_api_cost
             log_api_cost(
-                "claude-haiku-4-5-20251001", resp.usage.input_tokens,
+                "gemini-2.5-flash", resp.usage.input_tokens,
                 resp.usage.output_tokens, source="sentiment_batch",
             )
         except Exception:
             pass
 
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         # Parse JSON array
         if raw.startswith("["):
             scores = json.loads(raw)

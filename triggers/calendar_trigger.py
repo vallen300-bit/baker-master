@@ -503,6 +503,7 @@ def _generate_tactical_brief(meeting: dict, context: str, matter_slug: str, stor
         pass
 
     try:
+        import anthropic
         client = anthropic.Anthropic(api_key=config.claude.api_key)
         resp = client.messages.create(
             model=config.claude.model,  # Opus for tactical quality
@@ -519,7 +520,7 @@ def _generate_tactical_brief(meeting: dict, context: str, matter_slug: str, stor
                          resp.usage.output_tokens, source="tactical_brief")
         except Exception:
             pass
-        brief = resp.content[0].text.strip()
+        brief = resp.text.strip()
         logger.info(f"Tactical brief generated for '{meeting['title']}' ({len(brief)} chars)")
         return brief
     except Exception as e:
@@ -534,11 +535,8 @@ def _generate_tactical_brief(meeting: dict, context: str, matter_slug: str, stor
 def _generate_meeting_briefing(meeting: dict, context: str) -> Optional[str]:
     """Generate a meeting prep briefing using Haiku. Returns markdown text."""
     try:
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=2048,
-            system=MEETING_PREP_PROMPT,
+        from orchestrator.gemini_client import call_flash
+        resp = call_flash(
             messages=[{
                 "role": "user",
                 "content": f"Prepare a briefing for this meeting.\n\n{context}",
@@ -546,10 +544,10 @@ def _generate_meeting_briefing(meeting: dict, context: str) -> Optional[str]:
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="meeting_prep")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="meeting_prep")
         except Exception:
             pass
-        briefing = resp.content[0].text.strip()
+        briefing = resp.text.strip()
         logger.info(f"Generated meeting briefing for '{meeting['title']}' ({len(briefing)} chars)")
         return briefing
     except Exception as e:

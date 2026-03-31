@@ -84,21 +84,17 @@ If no clear commitments found, return {"commitments": []}
 
 def _extract_commitments_from_meeting(transcript_text: str, meeting_title: str,
                                        participants: str, source_id: str):
-    """Extract commitments from a meeting transcript using Haiku. Fault-tolerant."""
+    """Extract commitments from a meeting transcript using Flash. Fault-tolerant."""
     import json
-    import anthropic
     from memory.store_back import SentinelStoreBack
 
     if not transcript_text or len(transcript_text.strip()) < 50:
         return
 
     try:
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        from orchestrator.gemini_client import call_flash
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1500,
-            system=_COMMITMENT_EXTRACT_PROMPT,
+        resp = call_flash(
             messages=[{
                 "role": "user",
                 "content": f"Today: {today}\nMeeting: {meeting_title}\nParticipants: {participants}\n\n{transcript_text[:8000]}",
@@ -106,10 +102,10 @@ def _extract_commitments_from_meeting(transcript_text: str, meeting_title: str,
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="commitment_extract")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="commitment_extract")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
@@ -161,17 +157,14 @@ def _extract_director_commitments_as_deadlines(transcript_text: str, meeting_tit
                                                 meeting_date: str = ""):
     """OBLIGATIONS-DETECT-1: Extract Director's personal commitments from meeting and store as deadlines."""
     import json
-    import anthropic
 
     if not transcript_text or len(transcript_text.strip()) < 100:
         return
 
     try:
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        from orchestrator.gemini_client import call_flash
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=500,
+        resp = call_flash(
             messages=[{"role": "user", "content": f"""Review this meeting transcript and extract action items that Dimitry Vallen personally committed to.
 
 Meeting: {meeting_title}
@@ -200,10 +193,10 @@ Rules:
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="commitment_meeting_detect")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="commitment_meeting_detect")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw

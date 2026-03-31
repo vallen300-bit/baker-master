@@ -511,22 +511,21 @@ def _check_article_relevance(article: dict, feed_title: str, store):
         system_prompt += f"\n\nDirector's active matters and contacts:\n{dynamic_context}"
 
     try:
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=300,
-            system=system_prompt,
+        from orchestrator.gemini_client import call_flash
+        resp = call_flash(
             messages=[{
                 "role": "user",
                 "content": f"Feed: {feed_title}\nTitle: {title}\nSummary: {summary[:500]}",
             }],
+            max_tokens=300,
+            system=system_prompt,
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="rss_relevance")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="rss_relevance")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw

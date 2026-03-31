@@ -36,13 +36,7 @@ def extract_tasks_from_specialist(
         return []
 
     try:
-        import anthropic
-        from config.settings import config
-
-        client = anthropic.Anthropic(
-            api_key=config.claude.api_key,
-            timeout=10.0,
-        )
+        from orchestrator.gemini_client import call_flash
 
         prompt = f"""Analyze this specialist response and extract ONLY clearly actionable tasks that the Director should create as follow-up items.
 
@@ -59,17 +53,16 @@ Specialist ({capability_slug}): {response[:3000]}
 Respond with JSON only:
 {{"tasks": [{{"title": "short imperative title", "description": "1 sentence context", "due_days": null}}]}}"""
 
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=300,
+        resp = call_flash(
             messages=[{"role": "user", "content": prompt}],
+            max_tokens=300,
         )
 
         # Log cost
         try:
             from orchestrator.cost_monitor import log_api_cost
             log_api_cost(
-                "claude-haiku-4-5-20251001",
+                "gemini-2.5-flash",
                 resp.usage.input_tokens,
                 resp.usage.output_tokens,
                 source="insight_to_task",
@@ -77,7 +70,7 @@ Respond with JSON only:
         except Exception:
             pass
 
-        text = resp.content[0].text.strip()
+        text = resp.text.strip()
         # Parse JSON from response (handle markdown code blocks)
         if text.startswith("```"):
             text = text.split("```")[1]

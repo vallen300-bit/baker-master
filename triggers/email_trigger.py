@@ -95,16 +95,13 @@ def _is_meeting_email(subject: str, body: str) -> bool:
 
 def _extract_meeting_from_email(subject: str, body: str, sender_name: str,
                                  sender_email: str, received_date: str):
-    """MEETINGS-DETECT-2: One Haiku call to extract meeting details from email.
+    """MEETINGS-DETECT-2: One Flash call to extract meeting details from email.
     Returns dict with meeting data or None."""
-    import anthropic
     import json
     try:
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        from orchestrator.gemini_client import call_flash
         today = datetime.now().strftime('%Y-%m-%d')
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=300,
+        resp = call_flash(
             messages=[{"role": "user", "content": f"""Extract meeting details from this email. If this is NOT about a specific scheduled meeting, return {{"is_meeting": false}}.
 
 From: {sender_name} <{sender_email}>
@@ -131,10 +128,10 @@ Status: "confirmed" if definite language. "proposed" if asking/suggesting."""}],
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="meeting_email_detect")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="meeting_email_detect")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
@@ -159,15 +156,12 @@ _COMMITMENT_RE = _re.compile(
 
 
 def _extract_commitment_from_email(subject: str, body: str, recipient: str, received_date: str):
-    """OBLIGATIONS-DETECT-1: One Haiku call to extract Director's commitment from outbound email."""
-    import anthropic
+    """OBLIGATIONS-DETECT-1: One Flash call to extract Director's commitment from outbound email."""
     import json
     try:
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        from orchestrator.gemini_client import call_flash
         today = datetime.now().strftime('%Y-%m-%d')
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=300,
+        resp = call_flash(
             messages=[{"role": "user", "content": f"""Extract the Director's personal commitment from this outbound email. If no personal commitment was made, return {{"is_commitment": false}}.
 
 From: Dimitry Vallen <dvallen@brisengroup.com>
@@ -199,10 +193,10 @@ Rules:
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="commitment_email_detect")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="commitment_email_detect")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
@@ -359,9 +353,8 @@ def _process_baker_labeled_threads(service):
             except Exception:
                 pass
 
-            # Run deep analysis via Baker's agentic pipeline
-            import anthropic
-            client = anthropic.Anthropic(api_key=config.claude.api_key)
+            # Run deep analysis via Gemini Pro
+            from orchestrator.gemini_client import call_pro
 
             analysis_prompt = f"""The Director has flagged this email for your deep analysis. Analyze it thoroughly and provide:
 
@@ -382,19 +375,18 @@ def _process_baker_labeled_threads(service):
 **Full email:**
 {email_text[:8000]}"""
 
-            resp = client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=2000,
+            resp = call_pro(
                 messages=[{"role": "user", "content": analysis_prompt}],
+                max_tokens=2000,
             )
 
             try:
                 from orchestrator.cost_monitor import log_api_cost
-                log_api_cost("claude-sonnet-4-20250514", resp.usage.input_tokens, resp.usage.output_tokens, source="baker_label_analysis")
+                log_api_cost("gemini-2.5-pro", resp.usage.input_tokens, resp.usage.output_tokens, source="baker_label_analysis")
             except Exception:
                 pass
 
-            analysis = resp.content[0].text
+            analysis = resp.text
 
             # Create alert on dashboard
             store.create_alert(
@@ -466,21 +458,17 @@ If no clear commitments found, return {"commitments": []}
 
 def _extract_commitments_from_email(email_text: str, subject: str,
                                      sender: str, source_id: str):
-    """Extract commitments from an email using Haiku. Fault-tolerant."""
+    """Extract commitments from an email using Flash. Fault-tolerant."""
     import json
-    import anthropic
     from memory.store_back import SentinelStoreBack
 
     if not email_text or len(email_text.strip()) < 30:
         return
 
     try:
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        from orchestrator.gemini_client import call_flash
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1000,
-            system=_EMAIL_COMMITMENT_PROMPT,
+        resp = call_flash(
             messages=[{
                 "role": "user",
                 "content": f"Today: {today}\nSubject: {subject}\nFrom: {sender}\n\n{email_text[:4000]}",
@@ -488,10 +476,10 @@ def _extract_commitments_from_email(email_text: str, subject: str,
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="email_commitments")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="email_commitments")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
@@ -561,18 +549,14 @@ If no clear signal, set signal_detected: false.
 def _check_email_intelligence(email_text: str, subject: str, sender: str, source_id: str = None):
     """Check high-priority email for intelligence signals. Creates alert if found."""
     import json
-    import anthropic
     from memory.store_back import SentinelStoreBack
 
     if not email_text or len(email_text.strip()) < 30:
         return
 
     try:
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=300,
-            system=_EMAIL_INTELLIGENCE_PROMPT,
+        from orchestrator.gemini_client import call_flash
+        resp = call_flash(
             messages=[{
                 "role": "user",
                 "content": f"Subject: {subject}\nFrom: {sender}\n\n{email_text[:3000]}",
@@ -580,10 +564,10 @@ def _check_email_intelligence(email_text: str, subject: str, sender: str, source
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="email_intelligence")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="email_intelligence")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw

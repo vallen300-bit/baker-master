@@ -475,46 +475,58 @@ class SentinelPipeline:
 
     def generate(self, prompt: dict, max_output_tokens: int = 8192,
                  trigger_type: str = None, trigger_tier: int = None) -> str:
-        """Send assembled prompt to Claude and get response.
-        COST-OPT-WAVE2: 3-tier model routing:
-        - Haiku: document ingestion, RSS, task status changes (~EUR 0.03/call)
-        - Sonnet: emails, handoff notes (~EUR 0.20/call)
-        - Opus: meetings, briefings, T1 critical signals (~EUR 1.09/call)
+        """Send assembled prompt to LLM and get response.
+        GEMINI-MIGRATION-1: Multi-provider routing:
+        - Gemini Flash: document ingestion, RSS, task status changes
+        - Gemini Pro: emails, handoff notes (T2/T3)
+        - Opus: meetings, briefings, T1 critical signals
         """
         if trigger_type in self._HAIKU_TRIGGER_TYPES:
-            model = "claude-haiku-4-5-20251001"
+            model = "gemini-2.5-flash"
         elif trigger_type in self._SONNET_TRIGGER_TYPES:
             # T1 emails still get Opus (VIP, legal, financial — they earned it)
             if trigger_tier == 1:
                 model = config.claude.model  # Opus
             else:
-                model = "claude-sonnet-4-20250514"
+                model = "gemini-2.5-pro"
         else:
             model = config.claude.model  # Opus for meetings, scheduled, etc.
 
         logger.info(
-            f"Calling Claude API: model={model}, "
-            f"≈{prompt['metadata']['tokens_estimated']} input tokens"
+            f"Calling LLM: model={model}, "
+            f"~{prompt['metadata']['tokens_estimated']} input tokens"
         )
 
-        response = self.claude.messages.create(
-            model=model,
-            max_tokens=max_output_tokens,
-            system=prompt["system"],
-            messages=prompt["messages"],
-            extra_headers={"anthropic-beta": config.claude.beta_header} if model == config.claude.model else {},
-        )
+        from orchestrator.gemini_client import is_gemini_model
 
-        raw_text = response.content[0].text
-        logger.info(
-            f"Claude responded: {response.usage.input_tokens} in, "
-            f"{response.usage.output_tokens} out"
-        )
-        # PHASE-4A: Log pipeline API cost
+        if is_gemini_model(model):
+            from orchestrator.gemini_client import generate as gemini_generate
+            resp = gemini_generate(
+                model=model,
+                messages=prompt["messages"],
+                max_tokens=max_output_tokens,
+                system=prompt["system"],
+            )
+            raw_text = resp.text
+            input_tokens = resp.usage.input_tokens
+            output_tokens = resp.usage.output_tokens
+        else:
+            response = self.claude.messages.create(
+                model=model,
+                max_tokens=max_output_tokens,
+                system=prompt["system"],
+                messages=prompt["messages"],
+                extra_headers={"anthropic-beta": config.claude.beta_header},
+            )
+            raw_text = response.content[0].text
+            input_tokens = response.usage.input_tokens
+            output_tokens = response.usage.output_tokens
+
+        logger.info(f"LLM responded: {input_tokens} in, {output_tokens} out")
+
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost(model, response.usage.input_tokens,
-                         response.usage.output_tokens, source="pipeline")
+            log_api_cost(model, input_tokens, output_tokens, source="pipeline")
         except Exception:
             pass
         return raw_text

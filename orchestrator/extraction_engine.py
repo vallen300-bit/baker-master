@@ -141,12 +141,11 @@ Content ({source_channel}):
 {content}"""
 
 
-def _extract_haiku(content, source_channel, source_id):
-    """T3: Single Haiku call, literal extraction."""
+def _extract_flash(content, source_channel, source_id):
+    """T3: Single Gemini Flash call, literal extraction. (was _extract_haiku)"""
     start = time.time()
     try:
-        import anthropic
-        client = anthropic.Anthropic()
+        from orchestrator.gemini_client import call_flash
 
         # Truncate very long content for T3
         text = content[:6000] if len(content) > 6000 else content
@@ -156,33 +155,82 @@ def _extract_haiku(content, source_channel, source_id):
             content=text,
         )
 
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=2000,
+        resp = call_flash(
             messages=[{"role": "user", "content": prompt}],
+            max_tokens=2000,
         )
 
-        result_text = response.content[0].text.strip()
+        result_text = resp.text.strip()
         # Parse JSON from response
         items = _parse_json_array(result_text)
 
         elapsed_ms = int((time.time() - start) * 1000)
-        cost = 0.001  # ~$0.001 per Haiku call
+
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="t3_extraction")
+        except Exception:
+            pass
 
         logger.info(
-            f"Haiku extraction: {len(items)} items from {source_channel}:{source_id} "
+            f"Flash extraction: {len(items)} items from {source_channel}:{source_id} "
             f"({elapsed_ms}ms)"
         )
-        return items, elapsed_ms, cost
+        return items, elapsed_ms, 0.0005
 
     except Exception as e:
-        logger.error(f"Haiku extraction failed for {source_channel}:{source_id}: {e}")
+        logger.error(f"Flash extraction failed for {source_channel}:{source_id}: {e}")
         elapsed_ms = int((time.time() - start) * 1000)
         return [], elapsed_ms, 0.0
 
 
 # ─────────────────────────────────────────────────
-# Agentic RAG extraction (T1/T2 — deep, context-aware)
+# T2: Gemini Pro single-pass extraction (GEMINI-MIGRATION-1)
+# ─────────────────────────────────────────────────
+
+def _extract_pro(content, source_channel, source_id):
+    """T2: Gemini Pro single-pass extraction — structured output, no tool calls."""
+    start = time.time()
+    try:
+        from orchestrator.gemini_client import call_pro
+
+        text = content[:12000] if len(content) > 12000 else content
+
+        prompt = _HAIKU_EXTRACTION_PROMPT.format(
+            source_channel=source_channel,
+            content=text,
+        )
+
+        resp = call_pro(
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=3000,
+        )
+
+        result_text = resp.text.strip()
+        items = _parse_json_array(result_text)
+
+        elapsed_ms = int((time.time() - start) * 1000)
+
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("gemini-2.5-pro", resp.usage.input_tokens, resp.usage.output_tokens, source="t2_extraction")
+        except Exception:
+            pass
+
+        logger.info(
+            f"Pro extraction: {len(items)} items from {source_channel}:{source_id} "
+            f"({elapsed_ms}ms)"
+        )
+        return items, elapsed_ms, 0.002
+
+    except Exception as e:
+        logger.error(f"Pro extraction failed for {source_channel}:{source_id}: {e}")
+        elapsed_ms = int((time.time() - start) * 1000)
+        return [], elapsed_ms, 0.0
+
+
+# ─────────────────────────────────────────────────
+# Agentic RAG extraction (T1 only — deep, context-aware)
 # ─────────────────────────────────────────────────
 
 _AGENTIC_EXTRACTION_PROMPT = """You are Baker's extraction engine. Analyze this {source_channel} content and extract ALL structured items.
@@ -326,10 +374,9 @@ def _extract_visual(image_data, source_channel, source_id, tier):
     """Extract structured data from images (whiteboards, screenshots, etc.)."""
     start = time.time()
     try:
-        import anthropic
         import base64
 
-        client = anthropic.Anthropic()
+        from orchestrator.gemini_client import call_flash
 
         # Step 1: Vision — read and classify the image
         vision_prompt = """Analyze this image and:
@@ -363,25 +410,34 @@ Return JSON:
                 "source": {"type": "base64", "media_type": "image/jpeg", "data": encoded},
             }
 
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=2000,
+        resp = call_flash(
             messages=[{
                 "role": "user",
                 "content": [image_content, {"type": "text", "text": vision_prompt}],
             }],
+            max_tokens=2000,
         )
 
-        result_text = response.content[0].text.strip()
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="visual_extraction")
+        except Exception:
+            pass
+
+        result_text = resp.text.strip()
         parsed = _parse_json_object(result_text)
 
         media_type = parsed.get("media_type", "document_photo")
         items = parsed.get("extracted_items", [])
         text_content = parsed.get("text_content", "")
 
-        # Step 2: If T1/T2, enrich with agentic context
-        if tier in (1, 2) and text_content:
+        # Step 2: If T1, enrich with agentic context; T2 uses Pro
+        if tier == 1 and text_content:
             enriched_items, _, extra_cost = _extract_agentic(
+                text_content, source_channel, source_id
+            )
+        elif tier == 2 and text_content:
+            enriched_items, _, extra_cost = _extract_pro(
                 text_content, source_channel, source_id
             )
             if enriched_items:
@@ -444,7 +500,7 @@ def extract_specialist_output(task_id, specialist_slug, output_text):
 
     def _run():
         with _EXTRACTION_SEMAPHORE:
-            items, elapsed_ms, cost = _extract_haiku(
+            items, elapsed_ms, cost = _extract_flash(
                 output_text[:8000], "specialist", f"{specialist_slug}-{task_id}"
             )
             if items:
@@ -575,9 +631,14 @@ def extract_signal(source_channel, source_id, content, tier,
                         processing_ms=elapsed_ms,
                         token_cost=cost,
                     )
-                elif tier in (1, 2):
-                    # Agentic RAG extraction
+                elif tier == 1:
+                    # Agentic RAG extraction (Opus)
                     items, elapsed_ms, cost = _extract_agentic(
+                        content, source_channel, source_id
+                    )
+                elif tier == 2:
+                    # Gemini Pro extraction
+                    items, elapsed_ms, cost = _extract_pro(
                         content, source_channel, source_id
                     )
                     _store_extractions(
@@ -590,7 +651,7 @@ def extract_signal(source_channel, source_id, content, tier,
                     )
                 else:
                     # T3: Haiku extraction
-                    items, elapsed_ms, cost = _extract_haiku(
+                    items, elapsed_ms, cost = _extract_flash(
                         content, source_channel, source_id
                     )
                     _store_extractions(
@@ -623,10 +684,12 @@ def extract_signal_sync(source_channel, source_id, content, tier,
         return []
 
     with _EXTRACTION_SEMAPHORE:
-        if tier in (1, 2):
+        if tier == 1:
             items, elapsed_ms, cost = _extract_agentic(content, source_channel, source_id)
+        elif tier == 2:
+            items, elapsed_ms, cost = _extract_pro(content, source_channel, source_id)
         else:
-            items, elapsed_ms, cost = _extract_haiku(content, source_channel, source_id)
+            items, elapsed_ms, cost = _extract_flash(content, source_channel, source_id)
 
         _store_extractions(
             source_channel=source_channel,

@@ -24,7 +24,23 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from config.settings import config
-from document_generator import generate_document, get_file, cleanup_old_files
+from orchestrator.gemini_client import is_gemini_model, call_flash, GeminiResponse
+from document_generator import generate_document, get_file, cleanup_old_files, list_generated_documents
+
+
+def _llm_call(model: str, messages: list, max_tokens: int = 2000, system: str = None):
+    """GEMINI-MIGRATION-1: Unified LLM call — routes to Gemini or Anthropic."""
+    if is_gemini_model(model):
+        return call_flash(messages=messages, max_tokens=max_tokens, system=system)
+    else:
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        kwargs = dict(model=model, max_tokens=max_tokens, messages=messages)
+        if system:
+            kwargs["system"] = system
+        if model == config.claude.model:
+            kwargs["extra_headers"] = {"anthropic-beta": config.claude.beta_header}
+        resp = client.messages.create(**kwargs)
+        return GeminiResponse(resp.content[0].text, resp.usage.input_tokens, resp.usage.output_tokens)
 from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT
 from orchestrator import action_handler as _ah
 from tools.ingest.pipeline import ingest_file
@@ -354,9 +370,26 @@ async def startup():
                     )
                 """)
                 cur.execute("CREATE INDEX IF NOT EXISTS idx_ideas_status ON ideas(status)")
+                # PERSISTENT-DOCS-PANEL: Generated documents table
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS generated_documents (
+                        id              TEXT PRIMARY KEY,
+                        filename        TEXT NOT NULL,
+                        format          VARCHAR(10) NOT NULL,
+                        size_bytes      INTEGER NOT NULL,
+                        file_data       BYTEA NOT NULL,
+                        title           TEXT,
+                        source          VARCHAR(20) DEFAULT 'scan',
+                        created_at      TIMESTAMPTZ DEFAULT NOW(),
+                        downloaded_at   TIMESTAMPTZ,
+                        expired         BOOLEAN DEFAULT FALSE
+                    )
+                """)
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_gendocs_created ON generated_documents(created_at DESC)")
+                cur.execute("CREATE INDEX IF NOT EXISTS idx_gendocs_expired ON generated_documents(expired) WHERE expired = FALSE")
                 conn.commit()
                 cur.close()
-                logger.info("COCKPIT-ALERT-UI: structured_actions + snoozed_until + people_issues ensured")
+                logger.info("COCKPIT-ALERT-UI: structured_actions + snoozed_until + people_issues + generated_documents ensured")
             except Exception as me:
                 conn.rollback()
                 logger.warning(f"COCKPIT-ALERT-UI migration (non-fatal): {me}")
@@ -637,12 +670,11 @@ async def enrich_contacts_endpoint(
                 count=c.get("interaction_count", 0), subjects=subj_text or "(no data)",
             )
             try:
-                resp = _client.messages.create(
-                    model="claude-haiku-4-5-20251001",
+                resp = _llm_call("gemini-2.5-flash",
                     max_tokens=200,
                     messages=[{"role": "user", "content": prompt}],
                 )
-                text = resp.content[0].text.strip()
+                text = resp.text.strip()
                 data = None
                 if text.startswith("{"):
                     data = _json.loads(text)
@@ -2748,19 +2780,18 @@ def _haiku_filter_reading(candidates: list, trip_context: str) -> list:
             for i, d in enumerate(candidates)
         )
         client = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        resp = _llm_call("gemini-2.5-flash",
             max_tokens=200,
             system="You select documents relevant to a business trip. Return ONLY a JSON array of indices (e.g. [0, 3, 7]) of the most relevant documents. Pick up to 5. If none are relevant, return []. No explanation.",
             messages=[{"role": "user", "content": f"Trip context:\n{trip_context}\n\nDocuments:\n{items_text}"}],
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="trip_reading_filter")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="trip_reading_filter")
         except Exception:
             pass
         import re
-        text = resp.content[0].text.strip()
+        text = resp.text.strip()
         match = re.search(r'\[[\d,\s]*\]', text)
         if match:
             indices = json.loads(match.group())
@@ -2779,19 +2810,18 @@ def _haiku_filter_messages(messages: list, trip_context: str) -> list:
             for i, m in enumerate(messages)
         )
         client = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        resp = _llm_call("gemini-2.5-flash",
             max_tokens=200,
             system="You filter WhatsApp messages for a traveling CEO. Return ONLY a JSON array of indices (e.g. [0, 2, 5]) of messages worth surfacing. INCLUDE: (1) anything about the trip itself, (2) business decisions or strategy discussions, (3) requests that need a response, (4) deal/project updates. EXCLUDE ONLY: single-word replies ('Ok', 'Thanks'), links with no context, purely social pleasantries. When in doubt, INCLUDE. No explanation.",
             messages=[{"role": "user", "content": f"Trip context:\n{trip_context}\n\nMessages:\n{items_text}"}],
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="trip_message_filter")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="trip_message_filter")
         except Exception:
             pass
         import re
-        text = resp.content[0].text.strip()
+        text = resp.text.strip()
         match = re.search(r'\[[\d,\s]*\]', text)
         if match:
             indices = json.loads(match.group())
@@ -3220,17 +3250,16 @@ def _get_morning_narrative(fire_count: int, deadline_count: int,
             api_key=config.claude.api_key,
             timeout=15.0,
         )
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        resp = _llm_call("gemini-2.5-flash",
             max_tokens=200,
             messages=[{"role": "user", "content": prompt}],
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="morning_narrative")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="morning_narrative")
         except Exception:
             pass
-        narrative = resp.content[0].text.strip()
+        narrative = resp.text.strip()
 
         # Phase 3B: Generate per-fire proposals (returned separately as structured data)
         proposals = []
@@ -3282,18 +3311,17 @@ def _generate_morning_proposals(client, top_fires: list, deadlines: list) -> lis
         if deadlines_text:
             context += f"\nUpcoming deadlines:\n{deadlines_text}"
 
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        resp = _llm_call("gemini-2.5-flash",
             max_tokens=300,
             system=_MORNING_PROPOSALS_PROMPT,
             messages=[{"role": "user", "content": context}],
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="morning_proposals")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="morning_proposals")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         proposals = []
         for line in raw.splitlines():
             line = line.strip()
@@ -4601,18 +4629,17 @@ async def quick_add_alert(body: dict):
             try:
                 import anthropic
                 client = anthropic.Anthropic(api_key=config.claude.api_key)
-                resp = client.messages.create(
-                    model="claude-haiku-4-5-20251001",
+                resp = _llm_call("gemini-2.5-flash",
                     max_tokens=800,
                     messages=[{"role": "user", "content": f"The Director flagged this issue: \"{title}\"\n\nGenerate a JSON object with: problem (1 sentence), cause (1 sentence), solution (1 sentence). Return ONLY valid JSON."}],
                 )
                 import json as _json
-                raw = resp.content[0].text.strip()
+                raw = resp.text.strip()
                 if raw.startswith("```"): raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
                 sa = _json.loads(raw)
                 store.update_alert_structured_actions(alert_id, sa)
                 from orchestrator.cost_monitor import log_api_cost
-                log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="quick_add_enrich")
+                log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="quick_add_enrich")
             except Exception as e:
                 logger.warning(f"Quick-add enrichment failed for alert {alert_id}: {e}")
         threading.Thread(target=_enrich, daemon=True).start()
@@ -4843,8 +4870,7 @@ async def scan_image(
     # Call Claude Vision
     try:
         client = anthropic.Anthropic()
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        resp = _llm_call("gemini-2.5-flash",
             max_tokens=2000,
             messages=[{
                 "role": "user",
@@ -4854,12 +4880,12 @@ async def scan_image(
                 ],
             }],
         )
-        answer = resp.content[0].text
+        answer = resp.text
         # Log cost
         from orchestrator.cost_monitor import log_api_cost
-        log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="scan_image")
+        log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="scan_image")
         logger.info(f"Scan image: {file.filename}, {len(image_bytes)} bytes, question='{question[:60]}'")
-        return {"answer": answer, "model": "claude-haiku-4-5-20251001",
+        return {"answer": answer, "model": "gemini-2.5-flash",
                 "tokens": {"input": resp.usage.input_tokens, "output": resp.usage.output_tokens}}
     except Exception as e:
         logger.error(f"POST /api/scan/image failed: {e}")
@@ -4899,20 +4925,19 @@ async def generate_followups(req: FollowupRequest):
             f"Answer: {req.answer[:1000]}"
         )
 
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        resp = _llm_call("gemini-2.5-flash",
             max_tokens=200,
             messages=[{"role": "user", "content": prompt}],
         )
 
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens,
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens,
                          resp.usage.output_tokens, source="followup_suggestions")
         except Exception:
             pass
 
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
             if raw.endswith("```"):
@@ -5652,12 +5677,11 @@ Write a draft reply that is:
 Output ONLY the draft text, nothing else."""
 
         client = anthropic.Anthropic()
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        resp = _llm_call("gemini-2.5-flash",
             max_tokens=500,
             messages=[{"role": "user", "content": prompt}],
         )
-        draft = resp.content[0].text.strip()
+        draft = resp.text.strip()
         return {"draft": draft, "alert_id": alert_id, "source": source}
     except HTTPException:
         raise
@@ -7601,7 +7625,9 @@ async def download_document(file_id: str):
     info = get_file(file_id)
     if not info:
         raise HTTPException(status_code=404, detail="File not found or expired")
-    if not os.path.exists(info["filepath"]):
+
+    filepath = info.get("filepath")
+    if not filepath or not os.path.exists(filepath):
         raise HTTPException(status_code=410, detail="File no longer available")
 
     media_types = {
@@ -7611,10 +7637,17 @@ async def download_document(file_id: str):
         "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
     }
     return FileResponse(
-        path=info["filepath"],
+        path=filepath,
         filename=info["filename"],
         media_type=media_types.get(info["format"], "application/octet-stream"),
     )
+
+
+@app.get("/api/scan/generated-documents", tags=["scan"], dependencies=[Depends(verify_api_key)])
+async def list_generated_docs(limit: int = 20):
+    """List recently generated documents for the right panel."""
+    docs = list_generated_documents(limit=limit)
+    return {"documents": docs}
 
 
 # ============================================================
