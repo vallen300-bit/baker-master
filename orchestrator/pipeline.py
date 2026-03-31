@@ -459,7 +459,8 @@ class SentinelPipeline:
     # -------------------------------------------------------
 
     # Trigger types that should use Haiku instead of Opus (cost optimization)
-    _HAIKU_TRIGGER_TYPES = {"dropbox_file_new", "dropbox_file_modified", "rss_article"}
+    # COST-OPT-WAVE1: rss_article_new (not rss_article) matches actual trigger type from rss_trigger.py
+    _HAIKU_TRIGGER_TYPES = {"dropbox_file_new", "dropbox_file_modified", "rss_article", "rss_article_new"}
 
     def generate(self, prompt: dict, max_output_tokens: int = 8192,
                  trigger_type: str = None) -> str:

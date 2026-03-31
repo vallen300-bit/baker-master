@@ -295,6 +295,10 @@ def check_new_transcripts():
             if trigger_state.is_processed("meeting", source_id):
                 continue
 
+            # COST-OPT-WAVE1: Pre-mark as processed BEFORE expensive pipeline work
+            # to prevent race condition with overlapping poll cycles.
+            trigger_state.mark_processed("meeting", source_id)
+
             trigger = TriggerEvent(
                 type="meeting",
                 content=transcript["text"],

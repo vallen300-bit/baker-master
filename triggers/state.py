@@ -125,6 +125,13 @@ class TriggerState:
                     CREATE INDEX IF NOT EXISTS idx_browser_results_created
                     ON browser_results(created_at DESC)
                 """)
+                # COST-OPT-WAVE1: Index on trigger_log for fast dedup lookups
+                # + partial unique index as DB-level safety net against duplicates
+                cur.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_trigger_log_source_id
+                    ON trigger_log(source_id)
+                    WHERE source_id IS NOT NULL
+                """)
                 conn.commit()
                 cur.close()
                 logger.info("Trigger state tables verified")
@@ -361,6 +368,39 @@ class TriggerState:
         except Exception as e:
             logger.warning(f"Could not check processed status: {e}")
             return False
+
+    def mark_processed(self, source: str, source_id: str):
+        """COST-OPT-WAVE1: Pre-mark a source_id as processed in trigger_log
+        BEFORE expensive pipeline.run(). Prevents race condition where the
+        next poll cycle re-processes the same item because store_back hasn't
+        written the trigger_log entry yet.
+
+        Uses ON CONFLICT to be idempotent — safe to call even if store_back
+        later writes its own row for the same source_id.
+        """
+        try:
+            store = self._get_store()
+            conn = store._get_conn()
+            if not conn:
+                logger.warning(f"No DB connection — could not pre-mark {source}:{source_id}")
+                return
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO trigger_log (type, source_id, content, priority, processed)
+                    VALUES (%s, %s, %s, %s, TRUE)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (source, source_id, f"[pre-marked by {source} trigger]", "pending"),
+                )
+                conn.commit()
+                cur.close()
+                logger.debug(f"Pre-marked as processed: {source}:{source_id}")
+            finally:
+                store._put_conn(conn)
+        except Exception as e:
+            logger.warning(f"Could not pre-mark processed (non-fatal): {e}")
 
 
 # Global instance

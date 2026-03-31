@@ -760,6 +760,13 @@ def _process_email_threads(new_threads: list):
             skipped += 1
             continue
 
+        # COST-OPT-WAVE1: Pre-mark as processed BEFORE pipeline.run() to prevent
+        # race condition where next poll cycle re-processes the same thread.
+        # Safe: email is also stored in email_messages (line below) so nothing is lost
+        # even if pipeline.run() fails. The store_back inside pipeline.run() will
+        # attempt its own INSERT which harmlessly conflicts (ON CONFLICT DO NOTHING).
+        trigger_state.mark_processed("email", thread_id)
+
         # Use thread_id as pipeline source_id (stable across poll cycles)
         message_id = thread_id
 
@@ -945,6 +952,8 @@ def _process_email_threads(new_threads: list):
 
     # ART-1: Check all processed emails for research-worthy intelligence
     # Content-driven — regex pre-filter + Haiku classification
+    # COST-OPT-WAVE1: Only check threads that actually got processed (post-dedup),
+    # not the full new_threads list which includes already-seen threads.
     for thread in new_threads:
         try:
             _text = thread.get("text", "")

@@ -406,6 +406,71 @@ def _passes_content_prefilter(message_body: str) -> bool:
 # Main hook — called from waha_webhook.py
 # ─────────────────────────────────────────────────
 
+def _is_already_classified(msg_id: str) -> bool:
+    """COST-OPT-WAVE1: Check if this message was already classified to avoid
+    redundant Haiku calls during WA backfill re-syncs (40K→5K calls/month)."""
+    if not msg_id:
+        return False
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            # Check both research_proposals (for triggers that created proposals)
+            # and a lightweight dedup key in trigger_watermarks
+            cur.execute(
+                "SELECT 1 FROM research_proposals WHERE trigger_ref = %s LIMIT 1",
+                (f"wa-{msg_id}" if not msg_id.startswith(("wa-", "email-")) else msg_id,),
+            )
+            if cur.fetchone():
+                cur.close()
+                return True
+            # Also check the dedup table for messages classified as non-triggers
+            cur.execute(
+                "SELECT 1 FROM trigger_log WHERE source_id = %s AND type = 'research_classify' LIMIT 1",
+                (msg_id,),
+            )
+            exists = cur.fetchone() is not None
+            cur.close()
+            return exists
+        finally:
+            store._put_conn(conn)
+    except Exception:
+        return False
+
+
+def _mark_research_classified(msg_id: str):
+    """COST-OPT-WAVE1: Record that we classified this message (even if not a trigger)
+    so we don't re-classify it on the next backfill cycle."""
+    if not msg_id:
+        return
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO trigger_log (type, source_id, content, priority, processed)
+                VALUES ('research_classify', %s, '[research trigger classified]', 'low', TRUE)
+                ON CONFLICT DO NOTHING
+                """,
+                (msg_id,),
+            )
+            conn.commit()
+            cur.close()
+        finally:
+            store._put_conn(conn)
+    except Exception:
+        pass
+
+
 def check_research_trigger(message_body: str, sender_name: str, msg_id: str, tier: int = 3):
     """
     Check if a WhatsApp message contains forwarded intelligence worthy
@@ -423,8 +488,15 @@ def check_research_trigger(message_body: str, sender_name: str, msg_id: str, tie
     if not _passes_content_prefilter(message_body):
         return
 
+    # COST-OPT-WAVE1: Skip if already classified (prevents re-classification
+    # during 6-hour WA backfill re-syncs). Saves ~EUR 74/mo.
+    if _is_already_classified(msg_id):
+        return
+
     try:
         classification = classify_research_trigger(message_body, sender_name)
+        # Mark as classified regardless of result
+        _mark_research_classified(msg_id)
         if not classification.get("is_trigger"):
             logger.debug(f"WhatsApp from {sender_name}: not a research trigger (Haiku rejected)")
             return

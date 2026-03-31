@@ -194,11 +194,13 @@ def run_slack_poll():
                 is_mention = bool(baker_uid and f"<@{baker_uid}>" in text)
 
                 if is_mention and not trigger_state.is_processed("slack", source_id):
+                    # COST-OPT-WAVE1: Pre-mark as processed to prevent race condition
+                    trigger_state.mark_processed("slack", source_id)
+
                     # LEARNING-LOOP: Check if this is feedback (short message after @Baker)
                     clean_text = text.replace(f"<@{baker_uid}>", "").strip() if baker_uid else text
                     if _is_slack_feedback(clean_text):
                         _handle_slack_feedback(clean_text, channel_id, ts, client)
-                        trigger_state.mark_processed("slack", source_id)
                         continue
 
                     # SLACK-INTERACTIVE-1: Route Director messages through interactive scan_chat flow
