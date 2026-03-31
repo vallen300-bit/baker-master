@@ -4,11 +4,14 @@ Generates Word, Excel, PDF, and PowerPoint documents from Baker Scan output.
 Called by /api/scan/generate-document endpoint in dashboard.py.
 """
 import json
+import logging
 import os
 import re
 import tempfile
 import uuid
 from datetime import datetime
+
+logger = logging.getLogger("baker.document_generator")
 
 # Format-specific imports
 from docx import Document
@@ -31,18 +34,7 @@ GENERATED_FILES = {}
 
 
 def generate_document(content, fmt, title, metadata=None):
-    """
-    Generate a document in the specified format.
-
-    Args:
-        content: str — markdown text (for docx/pdf) or JSON string (for xlsx/pptx)
-        fmt: str — "docx", "xlsx", "pdf", or "pptx"
-        title: str — document title
-        metadata: dict — optional metadata (generated_by, timestamp)
-
-    Returns:
-        (file_id, filename, size_bytes)
-    """
+    """Generate a document and store persistently in PostgreSQL."""
     generators = {
         "docx": _generate_docx,
         "xlsx": _generate_xlsx,
@@ -58,14 +50,27 @@ def generate_document(content, fmt, title, metadata=None):
     date_str = datetime.utcnow().strftime('%Y-%m-%d')
     filename = f"{safe_title}_{date_str}.{fmt}"
 
-    # Generate into temp directory
+    # Generate into temp file
     tmp_dir = tempfile.gettempdir()
     filepath = os.path.join(tmp_dir, f"baker_{file_id}.{fmt}")
-
     generators[fmt](content, title, filepath, metadata)
 
     size_bytes = os.path.getsize(filepath)
+
+    # Read binary and store in PostgreSQL
+    with open(filepath, "rb") as f:
+        file_data = f.read()
+
+    _store_in_db(file_id, filename, fmt, size_bytes, file_data, title,
+                 source=metadata.get("source", "scan") if metadata else "scan")
+
+    # NOTE: Do NOT delete the temp file here. Keep it for immediate downloads
+    # via the in-memory fast path. The cleanup_old_files() function handles
+    # removing stale temp files after 24h.
+
+    # Keep in-memory cache with filepath (fast path for immediate downloads)
     GENERATED_FILES[file_id] = {
+        "file_id": file_id,
         "filepath": filepath,
         "filename": filename,
         "format": fmt,
@@ -76,25 +81,194 @@ def generate_document(content, fmt, title, metadata=None):
     return file_id, filename, size_bytes
 
 
+def _store_in_db(file_id, filename, fmt, size_bytes, file_data, title, source="scan"):
+    """Persist generated document binary to PostgreSQL."""
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            logger.error("No DB connection — document will only be in memory")
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO generated_documents (id, filename, format, size_bytes, file_data, title, source)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (id) DO NOTHING
+            """, (file_id, filename, fmt, size_bytes, file_data, title, source))
+            conn.commit()
+            cur.close()
+            logger.info(f"Document stored in DB: {filename} ({size_bytes} bytes)")
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Failed to store document in DB: {e}")
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"DB storage failed (non-fatal): {e}")
+
+
 def get_file(file_id):
-    """Retrieve file info by ID. Returns None if not found or expired."""
-    return GENERATED_FILES.get(file_id)
+    """Retrieve file info. Check memory first, then DB."""
+    # Fast path: in-memory (same server session)
+    info = GENERATED_FILES.get(file_id)
+    if info:
+        return info
+
+    # Slow path: load from PostgreSQL
+    return _load_from_db(file_id)
 
 
-def cleanup_old_files(max_age_hours=24):
-    """Remove files older than max_age_hours. Call periodically."""
+def _load_from_db(file_id):
+    """Load a generated document from PostgreSQL."""
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT filename, format, size_bytes, file_data
+                FROM generated_documents
+                WHERE id = %s AND expired = FALSE
+            """, (file_id,))
+            row = cur.fetchone()
+            cur.close()
+            if not row:
+                return None
+
+            # Write binary back to temp file for FileResponse
+            tmp_dir = tempfile.gettempdir()
+            filepath = os.path.join(tmp_dir, f"baker_{file_id}.{row[1]}")
+            with open(filepath, "wb") as f:
+                f.write(row[3])  # file_data (bytes)
+
+            info = {
+                "file_id": file_id,
+                "filepath": filepath,
+                "filename": row[0],
+                "format": row[1],
+                "size_bytes": row[2],
+            }
+
+            # Cache in memory for future requests
+            GENERATED_FILES[file_id] = info
+
+            # Update downloaded_at
+            try:
+                cur2 = conn.cursor()
+                cur2.execute("""
+                    UPDATE generated_documents SET downloaded_at = NOW() WHERE id = %s
+                """, (file_id,))
+                conn.commit()
+                cur2.close()
+            except Exception:
+                conn.rollback()
+
+            return info
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Failed to load document from DB: {e}")
+            return None
+        finally:
+            store._put_conn(conn)
+    except Exception:
+        return None
+
+
+def list_generated_documents(limit=20):
+    """List recent generated documents (for the right panel)."""
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return []
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, filename, format, size_bytes, title, source, created_at
+                FROM generated_documents
+                WHERE expired = FALSE
+                ORDER BY created_at DESC
+                LIMIT %s
+            """, (limit,))
+            rows = cur.fetchall()
+            cur.close()
+            return [
+                {
+                    "file_id": r[0],
+                    "filename": r[1],
+                    "format": r[2],
+                    "size_bytes": r[3],
+                    "title": r[4],
+                    "source": r[5],
+                    "created_at": r[6].isoformat() if r[6] else None,
+                    "download_url": f"/api/scan/download/{r[0]}",
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Failed to list generated documents: {e}")
+            return []
+        finally:
+            store._put_conn(conn)
+    except Exception:
+        return []
+
+
+def cleanup_old_files(max_age_days=30):
+    """Expire documents older than max_age_days in PostgreSQL. Call from scheduler."""
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE generated_documents
+                SET expired = TRUE
+                WHERE created_at < NOW() - make_interval(days => %s)
+                  AND expired = FALSE
+            """, (max_age_days,))
+            count = cur.rowcount
+            conn.commit()
+            cur.close()
+            if count:
+                logger.info(f"Expired {count} old generated documents")
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Document cleanup failed: {e}")
+        finally:
+            store._put_conn(conn)
+    except Exception:
+        pass
+
+    # Also clean in-memory cache (still useful for temp files)
     now = datetime.utcnow()
     expired = []
     for fid, info in GENERATED_FILES.items():
-        created = datetime.fromisoformat(info["created_at"])
-        if (now - created).total_seconds() > max_age_hours * 3600:
-            expired.append(fid)
+        created_str = info.get("created_at")
+        if created_str:
+            try:
+                created = datetime.fromisoformat(created_str)
+                if (now - created).total_seconds() > 86400:  # 24h for in-memory
+                    expired.append(fid)
+            except Exception:
+                pass
     for fid in expired:
-        info = GENERATED_FILES.pop(fid)
-        try:
-            os.remove(info["filepath"])
-        except OSError:
-            pass
+        info = GENERATED_FILES.pop(fid, None)
+        if info and info.get("filepath"):
+            try:
+                os.remove(info["filepath"])
+            except OSError:
+                pass
 
 
 # ============================================================
@@ -744,3 +918,712 @@ def generate_dossier_docx(dossier_md, subject_name, subject_type,
     run.font.name = "Calibri"
 
     doc.save(filepath)
+
+
+# ============================================================
+# Brisen External Document Generator
+# ============================================================
+# For external-facing documents: legal memos, PR strategies,
+# investor materials, dossiers. Matches 007 Brisen house style.
+#
+# Typography: Arial throughout (headings + body)
+# Palette: Brisen dark blue #1B3A5C, body #333333, meta #666666
+# Header: "BRISEN GROUP" + "CONFIDENTIAL — {type}"
+# Footer: "{doc#} — {title}" + "Page X"
+# End block: "Prepared {date} | Brisen Group Strategic Intelligence Unit"
+# NO mention of Baker, AI, or automation anywhere.
+# ============================================================
+
+# Brisen palette (matched from 007 document)
+_BRS_BLUE = RGBColor(0x1B, 0x3A, 0x5C)        # Primary headings + header
+_BRS_BODY = RGBColor(0x33, 0x33, 0x33)         # Body text
+_BRS_META = RGBColor(0x66, 0x66, 0x66)         # Metadata, footer, cover subtitle
+_BRS_WHITE = RGBColor(0xFF, 0xFF, 0xFF)        # Table header text
+_BRS_ORANGE = RGBColor(0xE0, 0x70, 0x20)       # CRITICAL callout title
+_BRS_RED = RGBColor(0xC0, 0x00, 0x00)          # PROHIBITION callout title
+_BRS_TABLE_HDR = "1B3A5C"                       # Table header bg
+_BRS_TABLE_ALT = "F2F2F2"                       # Alternating row bg
+_BRS_EXEC_BG = "EDF2F7"                         # Exec summary box bg
+_BRS_CALLOUT_BG = "F5F5F5"                      # Generic callout bg
+
+
+def generate_mckinsey_docx(
+    content,
+    title,
+    subtitle="",
+    classification="CONFIDENTIAL",
+    filepath=None,
+    prepared_by="Brisen Group — Strategic Intelligence Unit",
+    prepared_for="",
+    date_str=None,
+    exec_summary=None,
+    doc_number="",
+    doc_type="",
+    supersedes="",
+):
+    """
+    Generate a Brisen-style external document (.docx).
+    Matches the 007 house style exactly: all Arial, #1B3A5C palette,
+    BRISEN GROUP header, document-numbered footer, callout boxes.
+
+    Args:
+        content: str — markdown body content
+        title: str — main title on cover (e.g., "HAGENAUER INSOLVENCY")
+        subtitle: str — subtitle line (e.g., "PR & PRESS STRATEGY — PART 2")
+        classification: str — "CONFIDENTIAL", "STRICTLY CONFIDENTIAL", etc.
+        filepath: str — output path. Auto-generated if None.
+        prepared_by: str — attribution line
+        prepared_for: str — recipient (e.g., "Sandra Luger, Gaisberg Consulting")
+        date_str: str — date string. Auto-generated if None.
+        exec_summary: str — optional executive summary (rendered in shaded box)
+        doc_number: str — document number for footer (e.g., "004")
+        doc_type: str — header right text (e.g., "PR STRATEGY")
+        supersedes: str — optional supersedes line (e.g., "v1.0 (16 March 2026)")
+
+    Returns:
+        filepath (str) — path to generated .docx
+    """
+    if filepath is None:
+        safe = re.sub(r'[^\w\s-]', '', title).strip().replace(' ', '_')
+        filepath = os.path.join(
+            tempfile.gettempdir(),
+            f"brisen_{safe}_{datetime.utcnow().strftime('%Y%m%d')}.docx"
+        )
+
+    if date_str is None:
+        date_str = datetime.utcnow().strftime("%d %B %Y")
+
+    doc = Document()
+
+    # -- Global styles --
+    _brs_setup_styles(doc)
+
+    # -- US Letter page, 2.5cm margins --
+    for section in doc.sections:
+        section.page_width = Inches(8.5)
+        section.page_height = Inches(11)
+        section.top_margin = Cm(2.5)
+        section.bottom_margin = Cm(2.5)
+        section.left_margin = Cm(2.5)
+        section.right_margin = Cm(2.5)
+
+    # 1. Cover page
+    _brs_cover_page(doc, title, subtitle, classification, prepared_by,
+                    prepared_for, date_str, supersedes)
+
+    # 2. Header + footer
+    _brs_header_footer(doc, doc_number, title, doc_type, classification)
+
+    # 3. Executive summary box (if provided)
+    if exec_summary:
+        _brs_exec_summary_box(doc, exec_summary)
+
+    # 4. Body content
+    _brs_render_body(doc, content)
+
+    # 5. End-of-document block
+    doc.add_paragraph()
+    ep = doc.add_paragraph()
+    ep.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    er = ep.add_run(f"END OF DOCUMENT{' ' + doc_number if doc_number else ''}")
+    er.font.size = Pt(10)
+    er.font.color.rgb = _BRS_META
+    er.font.name = "Arial"
+    er.bold = True
+
+    pp = doc.add_paragraph()
+    pp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    pr = pp.add_run(f"Prepared {date_str} | {prepared_by}")
+    pr.font.size = Pt(8)
+    pr.font.color.rgb = _BRS_META
+    pr.font.name = "Arial"
+
+    if supersedes:
+        sp = doc.add_paragraph()
+        sp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        sr = sp.add_run(f"Supersedes {supersedes}")
+        sr.font.size = Pt(7)
+        sr.font.color.rgb = _BRS_META
+        sr.font.name = "Arial"
+        sr.italic = True
+
+    doc.save(filepath)
+    return filepath
+
+
+def generate_internal_docx(content, title, filepath=None, date_str=None):
+    """
+    Generate a clean internal Word document (.docx).
+    Simple, readable, no fancy formatting. For Director/team use.
+    """
+    if filepath is None:
+        safe = re.sub(r'[^\w\s-]', '', title).strip().replace(' ', '_')
+        filepath = os.path.join(
+            tempfile.gettempdir(),
+            f"internal_{safe}_{datetime.utcnow().strftime('%Y%m%d')}.docx"
+        )
+
+    if date_str is None:
+        date_str = datetime.utcnow().strftime("%d %B %Y")
+
+    doc = Document()
+
+    style = doc.styles['Normal']
+    style.font.name = "Calibri"
+    style.font.size = Pt(11)
+    style.font.color.rgb = _BRS_BODY
+    style.paragraph_format.line_spacing = 1.15
+    style.paragraph_format.space_after = Pt(6)
+
+    for section in doc.sections:
+        section.top_margin = Cm(2.5)
+        section.bottom_margin = Cm(2.0)
+        section.left_margin = Cm(2.5)
+        section.right_margin = Cm(2.5)
+
+    h = doc.add_heading(title, level=0)
+    h.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    for run in h.runs:
+        run.font.name = "Calibri"
+        run.font.color.rgb = _BRS_BLUE
+
+    dp = doc.add_paragraph()
+    dr = dp.add_run(date_str)
+    dr.font.size = Pt(10)
+    dr.font.color.rgb = _BRS_META
+    dr.font.name = "Calibri"
+    doc.add_paragraph()
+
+    _brs_render_body(doc, content, font_name="Calibri")
+
+    doc.save(filepath)
+    return filepath
+
+
+# --- Brisen house style internals ---
+
+def _brs_setup_styles(doc):
+    """Configure global styles matching 007 Brisen house style."""
+    style = doc.styles['Normal']
+    style.font.name = "Arial"
+    style.font.size = Pt(10)
+    style.font.color.rgb = _BRS_BODY
+    style.paragraph_format.line_spacing = 1.15
+    style.paragraph_format.space_after = Pt(6)
+    style.paragraph_format.space_before = Pt(0)
+
+    # All headings: Arial, #1B3A5C
+    for lvl, (size, bold) in {
+        1: (14, True),
+        2: (12, True),
+        3: (11, True),
+        4: (10, False),
+    }.items():
+        try:
+            hs = doc.styles[f'Heading {lvl}']
+            hs.font.name = "Arial"
+            hs.font.size = Pt(size)
+            hs.font.color.rgb = _BRS_BLUE
+            hs.font.bold = bold
+            hs.paragraph_format.space_before = Pt(18 if lvl <= 2 else 12)
+            hs.paragraph_format.space_after = Pt(6)
+        except Exception:
+            pass
+
+    for lst in ('List Bullet', 'List Bullet 2', 'List Number', 'List Paragraph'):
+        try:
+            ls = doc.styles[lst]
+            ls.font.name = "Arial"
+            ls.font.size = Pt(10)
+            ls.paragraph_format.space_after = Pt(3)
+            ls.paragraph_format.space_before = Pt(1)
+            ls.paragraph_format.line_spacing = 1.15
+        except Exception:
+            pass
+
+
+def _brs_cover_page(doc, title, subtitle, classification, prepared_by,
+                    prepared_for, date_str, supersedes):
+    """Brisen cover page — matches 007 exactly."""
+    # Top spacer
+    for _ in range(3):
+        doc.add_paragraph()
+
+    # BRISEN GROUP
+    bg = doc.add_paragraph()
+    bg.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = bg.add_run("BRISEN GROUP")
+    r.font.name = "Arial"
+    r.font.size = Pt(18)
+    r.font.color.rgb = _BRS_BLUE
+    r.bold = True
+
+    # Classification subtitle
+    cs = doc.add_paragraph()
+    cs.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = cs.add_run(f"Confidential {classification.title().replace('Confidential', '').strip() or 'Communications'}".strip())
+    r.font.name = "Arial"
+    r.font.size = Pt(11)
+    r.font.color.rgb = _BRS_META
+
+    doc.add_paragraph()
+
+    # Main title
+    tp = doc.add_paragraph()
+    tp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = tp.add_run(title.upper())
+    r.font.name = "Arial"
+    r.font.size = Pt(22)
+    r.font.color.rgb = _BRS_BLUE
+    r.bold = True
+
+    # Subtitle
+    if subtitle:
+        sp = doc.add_paragraph()
+        sp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = sp.add_run(subtitle)
+        r.font.name = "Arial"
+        r.font.size = Pt(16)
+        r.font.color.rgb = _BRS_BODY
+        r.bold = True
+
+    # Prepared for
+    if prepared_for:
+        doc.add_paragraph()
+        pf = doc.add_paragraph()
+        pf.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        r = pf.add_run(f"Prepared for {prepared_for}")
+        r.font.name = "Arial"
+        r.font.size = Pt(13)
+        r.font.color.rgb = _BRS_META
+
+    # Spacer
+    for _ in range(4):
+        doc.add_paragraph()
+
+    # Metadata table — borderless
+    n_rows = 3  # Date, Classification, Prepared by
+    if prepared_for:
+        n_rows += 1
+    if supersedes:
+        n_rows += 1
+
+    meta = doc.add_table(rows=n_rows, cols=2)
+    meta.autofit = True
+    meta.columns[0].width = Inches(1.8)
+    meta.columns[1].width = Inches(4.2)
+
+    rows_data = [("Date:", date_str), ("Classification:", classification)]
+    if prepared_for:
+        rows_data.append(("Prepared for:", prepared_for))
+    rows_data.append(("Prepared by:", prepared_by))
+    if supersedes:
+        rows_data.append(("Supersedes:", supersedes))
+
+    for i, (label, value) in enumerate(rows_data):
+        left = meta.cell(i, 0)
+        right = meta.cell(i, 1)
+        lp = left.paragraphs[0]
+        rp = right.paragraphs[0]
+        lr = lp.add_run(label)
+        lr.font.name = "Arial"
+        lr.font.size = Pt(10)
+        lr.font.color.rgb = _BRS_META
+        lr.bold = True
+        rr = rp.add_run(value)
+        rr.font.name = "Arial"
+        rr.font.size = Pt(10)
+        rr.font.color.rgb = _BRS_BODY
+
+    # Remove table borders
+    for row in meta.rows:
+        for cell in row.cells:
+            tc = cell._tc
+            tcPr = tc.get_or_add_tcPr()
+            tcBorders = OxmlElement('w:tcBorders')
+            for edge in ('top', 'left', 'bottom', 'right'):
+                el = OxmlElement(f'w:{edge}')
+                el.set(qn('w:val'), 'none')
+                el.set(qn('w:sz'), '0')
+                el.set(qn('w:space'), '0')
+                el.set(qn('w:color'), 'auto')
+                tcBorders.append(el)
+            tcPr.append(tcBorders)
+
+    doc.add_page_break()
+
+
+def _brs_header_footer(doc, doc_number, title, doc_type, classification):
+    """Header: BRISEN GROUP + CONFIDENTIAL — TYPE. Footer: doc# + title + Page."""
+    for section in doc.sections:
+        # Header: "BRISEN GROUP\tCONFIDENTIAL — TYPE"
+        header = section.header
+        header.is_linked_to_previous = False
+        hp = header.paragraphs[0] if header.paragraphs else header.add_paragraph()
+        hp.text = ""
+
+        r1 = hp.add_run("BRISEN GROUP")
+        r1.font.name = "Arial"
+        r1.font.size = Pt(8)
+        r1.font.color.rgb = _BRS_BLUE
+        r1.bold = True
+
+        hp.add_run("\t")  # tab to right
+
+        right_text = f"{classification} — {doc_type}" if doc_type else classification
+        r2 = hp.add_run(right_text)
+        r2.font.name = "Arial"
+        r2.font.size = Pt(7)
+        r2.font.color.rgb = _BRS_META
+
+        _add_thin_border(hp, "CCCCCC")
+
+        # Footer: "doc# — title\tPage X"
+        footer = section.footer
+        footer.is_linked_to_previous = False
+        fp = footer.paragraphs[0] if footer.paragraphs else footer.add_paragraph()
+        fp.text = ""
+
+        # Build short title for footer
+        footer_title = title[:50]
+        if doc_number:
+            footer_left = f"{doc_number} — {footer_title}"
+        else:
+            footer_left = footer_title
+
+        r1 = fp.add_run(footer_left)
+        r1.font.name = "Arial"
+        r1.font.size = Pt(7)
+        r1.font.color.rgb = _BRS_META
+
+        fp.add_run("\t")
+
+        r2 = fp.add_run("Page ")
+        r2.font.name = "Arial"
+        r2.font.size = Pt(7)
+        r2.font.color.rgb = _BRS_META
+        fld1 = OxmlElement('w:fldChar')
+        fld1.set(qn('w:fldCharType'), 'begin')
+        r2._r.append(fld1)
+        instr = OxmlElement('w:instrText')
+        instr.set(qn('xml:space'), 'preserve')
+        instr.text = ' PAGE '
+        r2._r.append(instr)
+        fld2 = OxmlElement('w:fldChar')
+        fld2.set(qn('w:fldCharType'), 'end')
+        r2._r.append(fld2)
+
+
+def _brs_exec_summary_box(doc, summary_text):
+    """Executive summary in shaded box with Brisen blue border."""
+    h = doc.add_heading("Executive Summary", level=1)
+    for run in h.runs:
+        run.font.name = "Arial"
+        run.font.size = Pt(14)
+        run.font.color.rgb = _BRS_BLUE
+
+    table = doc.add_table(rows=1, cols=1)
+    table.autofit = True
+    cell = table.cell(0, 0)
+    _set_cell_shading(cell, _BRS_EXEC_BG)
+
+    tc = cell._tc
+    tcPr = tc.get_or_add_tcPr()
+    tcMar = OxmlElement('w:tcMar')
+    for edge in ('top', 'bottom', 'start', 'end'):
+        mar = OxmlElement(f'w:{edge}')
+        mar.set(qn('w:w'), '180')
+        mar.set(qn('w:type'), 'dxa')
+        tcMar.append(mar)
+    tcPr.append(tcMar)
+
+    tcBorders = OxmlElement('w:tcBorders')
+    for edge in ('top', 'left', 'bottom', 'right'):
+        el = OxmlElement(f'w:{edge}')
+        el.set(qn('w:val'), 'single')
+        el.set(qn('w:sz'), '4')
+        el.set(qn('w:space'), '0')
+        el.set(qn('w:color'), '1B3A5C')
+        tcBorders.append(el)
+    tcPr.append(tcBorders)
+
+    lines = summary_text.strip().split('\n')
+    first = True
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if first:
+            p = cell.paragraphs[0]
+            first = False
+        else:
+            p = cell.add_paragraph()
+        if stripped.startswith('- ') or stripped.startswith('* '):
+            r = p.add_run(f"\u2022  {stripped[2:]}")
+            r.font.name = "Arial"
+            r.font.size = Pt(10)
+            r.font.color.rgb = _BRS_BODY
+        else:
+            _brs_add_inline(p, stripped)
+            for run in p.runs:
+                run.font.name = "Arial"
+                run.font.size = Pt(10)
+                run.font.color.rgb = _BRS_BODY
+
+    doc.add_paragraph()
+
+
+def _brs_callout_box(doc, title_text, body_text, title_color=None):
+    """
+    Single-cell table callout box with colored title.
+    title_color: 'critical' (#E07020), 'prohibition' (#C00000), or default (#1B3A5C).
+    """
+    if title_color == 'critical':
+        tc_rgb = _BRS_ORANGE
+    elif title_color == 'prohibition':
+        tc_rgb = _BRS_RED
+    else:
+        tc_rgb = _BRS_BLUE
+
+    table = doc.add_table(rows=1, cols=1)
+    table.autofit = True
+    cell = table.cell(0, 0)
+    _set_cell_shading(cell, _BRS_CALLOUT_BG)
+
+    tc = cell._tc
+    tcPr = tc.get_or_add_tcPr()
+    tcMar = OxmlElement('w:tcMar')
+    for edge in ('top', 'bottom', 'start', 'end'):
+        mar = OxmlElement(f'w:{edge}')
+        mar.set(qn('w:w'), '160')
+        mar.set(qn('w:type'), 'dxa')
+        tcMar.append(mar)
+    tcPr.append(tcMar)
+
+    # Title
+    p = cell.paragraphs[0]
+    r = p.add_run(title_text)
+    r.font.name = "Arial"
+    r.font.size = Pt(11)
+    r.font.color.rgb = tc_rgb
+    r.bold = True
+
+    # Body lines
+    for line in body_text.strip().split('\n'):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        bp = cell.add_paragraph()
+        _brs_add_inline(bp, stripped)
+        for run in bp.runs:
+            run.font.name = "Arial"
+            run.font.size = Pt(10)
+            run.font.color.rgb = _BRS_BODY
+
+    doc.add_paragraph()
+
+
+def _brs_render_body(doc, content, font_name="Arial"):
+    """Render markdown content into Brisen house-style Word elements."""
+    lines = content.split('\n')
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        if not stripped:
+            i += 1
+            continue
+
+        # Horizontal rules
+        if stripped in ('---', '***', '___'):
+            rule = doc.add_paragraph()
+            _add_thin_border(rule, "CCCCCC")
+            i += 1
+            continue
+
+        # Markdown table detection
+        if '|' in stripped and i + 1 < len(lines):
+            table_lines = []
+            j = i
+            while j < len(lines) and '|' in lines[j].strip():
+                table_lines.append(lines[j].strip())
+                j += 1
+            if len(table_lines) >= 2:
+                _brs_render_table(doc, table_lines, font_name)
+                i = j
+                continue
+
+        # H1: Arial 14pt bold #1B3A5C
+        if stripped.startswith('# ') and not stripped.startswith('## '):
+            h = doc.add_heading(stripped[2:], level=1)
+            for run in h.runs:
+                run.font.name = font_name
+                run.font.size = Pt(14)
+                run.font.color.rgb = _BRS_BLUE
+                run.bold = True
+            i += 1
+            continue
+
+        # H2: Arial 12pt bold #1B3A5C
+        if stripped.startswith('## ') and not stripped.startswith('### '):
+            h = doc.add_heading(stripped[3:], level=2)
+            for run in h.runs:
+                run.font.name = font_name
+                run.font.size = Pt(12)
+                run.font.color.rgb = _BRS_BLUE
+                run.bold = True
+            i += 1
+            continue
+
+        # H3: Arial 11pt bold #1B3A5C
+        if stripped.startswith('### '):
+            h = doc.add_heading(stripped[4:], level=3)
+            for run in h.runs:
+                run.font.name = font_name
+                run.font.size = Pt(11)
+                run.font.color.rgb = _BRS_BLUE
+                run.bold = True
+            i += 1
+            continue
+
+        # H4
+        if stripped.startswith('#### '):
+            h = doc.add_heading(stripped[5:], level=4)
+            for run in h.runs:
+                run.font.name = font_name
+                run.font.size = Pt(10)
+                run.font.color.rgb = _BRS_BLUE
+            i += 1
+            continue
+
+        # Blockquote → callout box (left border)
+        if stripped.startswith('> '):
+            quote_lines = []
+            while i < len(lines) and lines[i].strip().startswith('> '):
+                quote_lines.append(lines[i].strip()[2:])
+                i += 1
+            _brs_callout_box(doc, "", '\n'.join(quote_lines))
+            continue
+
+        # Bullet
+        if stripped.startswith('- ') or stripped.startswith('* '):
+            p = doc.add_paragraph(style='List Bullet')
+            _brs_add_inline(p, stripped[2:])
+            for run in p.runs:
+                run.font.name = font_name
+                run.font.size = Pt(10)
+            i += 1
+            continue
+
+        # Sub-bullet
+        if line.startswith('  - ') or line.startswith('  * ') or \
+           line.startswith('    - ') or line.startswith('    * '):
+            p = doc.add_paragraph(style='List Bullet 2')
+            text = stripped.lstrip('-* ')
+            _brs_add_inline(p, text)
+            for run in p.runs:
+                run.font.name = font_name
+                run.font.size = Pt(10)
+            i += 1
+            continue
+
+        # Numbered list
+        if re.match(r'^\d+\.\s', stripped):
+            text = re.sub(r'^\d+\.\s', '', stripped)
+            p = doc.add_paragraph(style='List Number')
+            _brs_add_inline(p, text)
+            for run in p.runs:
+                run.font.name = font_name
+                run.font.size = Pt(10)
+            i += 1
+            continue
+
+        # Q&A detection: line starting with Q followed by number
+        if re.match(r'^Q\d+:', stripped):
+            p = doc.add_paragraph()
+            _brs_add_inline(p, stripped)
+            for run in p.runs:
+                run.font.name = font_name
+                run.font.size = Pt(11)
+                run.bold = True
+            i += 1
+            continue
+
+        # Regular paragraph
+        para = doc.add_paragraph()
+        _brs_add_inline(para, stripped)
+        for run in para.runs:
+            run.font.name = font_name
+            run.font.size = Pt(10)
+        i += 1
+
+
+def _brs_add_inline(paragraph, text):
+    """Parse **bold**, *italic*, and `code` inline markdown."""
+    parts = re.split(r'(\*\*.*?\*\*|\*.*?\*|`.*?`)', text)
+    for part in parts:
+        if part.startswith('**') and part.endswith('**'):
+            run = paragraph.add_run(part[2:-2])
+            run.bold = True
+        elif part.startswith('*') and part.endswith('*'):
+            run = paragraph.add_run(part[1:-1])
+            run.italic = True
+        elif part.startswith('`') and part.endswith('`'):
+            run = paragraph.add_run(part[1:-1])
+            run.font.name = "Consolas"
+            run.font.size = Pt(9)
+            run.font.color.rgb = _BRS_BLUE
+        else:
+            paragraph.add_run(part)
+
+
+def _brs_render_table(doc, table_lines, font_name="Arial"):
+    """Render markdown table matching 007 style — dark blue header, white text."""
+    headers = []
+    rows = []
+
+    for line in table_lines:
+        cells = [c.strip() for c in line.split('|') if c.strip()]
+        if all(re.match(r'^[-:]+$', c) for c in cells):
+            continue
+        if not headers:
+            headers = cells
+        else:
+            rows.append(cells)
+
+    if not headers:
+        return
+
+    ncols = len(headers)
+    table = doc.add_table(rows=1 + len(rows), cols=ncols)
+    table.autofit = True
+
+    # Header row: #1B3A5C bg, white bold text
+    for j, h in enumerate(headers):
+        cell = table.cell(0, j)
+        cell.text = ""
+        p = cell.paragraphs[0]
+        r = p.add_run(h)
+        r.font.name = font_name
+        r.font.size = Pt(10)
+        r.font.color.rgb = _BRS_WHITE
+        r.bold = True
+        _set_cell_shading(cell, _BRS_TABLE_HDR)
+
+    # Data rows with alternating shading
+    for i, row_data in enumerate(rows):
+        for j, val in enumerate(row_data):
+            if j >= ncols:
+                break
+            cell = table.cell(i + 1, j)
+            cell.text = ""
+            p = cell.paragraphs[0]
+            r = p.add_run(val)
+            r.font.name = font_name
+            r.font.size = Pt(10)
+            r.font.color.rgb = _BRS_BODY
+            if i % 2 == 1:
+                _set_cell_shading(cell, _BRS_TABLE_ALT)
+
+    doc.add_paragraph()

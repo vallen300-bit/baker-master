@@ -72,10 +72,16 @@ function _artifactItems(itemsId) {
 }
 
 function clearArtifactPanel(panelId, itemsId) {
-    var panel = _artifactPanel(panelId);
     var items = _artifactItems(itemsId);
-    if (items) items.textContent = '';
-    if (panel) panel.classList.remove('open');
+    if (!items) return;
+
+    // Remove everything EXCEPT the persistent content div
+    var children = Array.from(items.children);
+    for (var i = 0; i < children.length; i++) {
+        if (children[i].id && children[i].id.endsWith('PersistentContent')) continue;
+        items.removeChild(children[i]);
+    }
+    // Panel stays open (persistent content always visible)
 }
 
 function openArtifactPanel(panelId) {
@@ -3498,6 +3504,8 @@ async function sendScanMessage(question) {
                 const genData = await genRes.json();
                 replyEl.appendChild(_createDownloadCard(genData));
                 addArtifactDownload(_itemsId, _panelId, genData);
+                // Refresh persistent files list
+                loadGeneratedFiles();
             }
         } catch (e) { console.warn('Document generation failed:', e); }
     }
@@ -6026,8 +6034,161 @@ async function init() {
     // Load morning brief
     loadMorningBrief();
 
+    // PERSISTENT-DOCS-PANEL: Load generated files + init drop zones
+    loadGeneratedFiles();
+    initDropZones();
+
     // Alert badge auto-refresh every 5 min (T1+T2 count on sidebar)
     setInterval(refreshFiresBadge, 5 * 60 * 1000);
+}
+
+// ═══ GENERATED FILES PANEL (PERSISTENT-DOCS-PANEL) ═══
+
+function loadGeneratedFiles() {
+    bakerFetch('/api/scan/generated-documents').then(function(resp) {
+        if (!resp.ok) return;
+        return resp.json();
+    }).then(function(data) {
+        if (!data || !data.documents) return;
+        renderGeneratedFiles('scanGeneratedFiles', data.documents);
+        renderGeneratedFiles('specialistGeneratedFiles', data.documents);
+    }).catch(function(e) {
+        console.warn('Failed to load generated files:', e);
+    });
+}
+
+function renderGeneratedFiles(containerId, docs) {
+    var container = document.getElementById(containerId);
+    if (!container) return;
+
+    if (!docs.length) {
+        container.innerHTML = '<div class="panel-empty-state">No documents yet. Ask Baker to generate one.</div>';
+        return;
+    }
+
+    container.innerHTML = '';
+    var fmtIcons = { docx: '\uD83D\uDCC3', xlsx: '\uD83D\uDCCA', pdf: '\uD83D\uDCC4', pptx: '\uD83D\uDCCA' };
+    var fmtLabels = { docx: 'Word', xlsx: 'Excel', pdf: 'PDF', pptx: 'PowerPoint' };
+
+    for (var i = 0; i < docs.length; i++) {
+        var doc = docs[i];
+        var card = document.createElement('a');
+        card.className = 'gen-file-card';
+        card.href = doc.download_url;
+        card.download = doc.filename;
+
+        var icon = document.createElement('span');
+        icon.className = 'gen-file-icon';
+        icon.textContent = fmtIcons[doc.format] || '\uD83D\uDCC4';
+        card.appendChild(icon);
+
+        var info = document.createElement('div');
+        info.className = 'gen-file-info';
+
+        var title = document.createElement('div');
+        title.className = 'gen-file-title';
+        title.textContent = doc.title || doc.filename;
+        info.appendChild(title);
+
+        var meta = document.createElement('div');
+        meta.className = 'gen-file-meta';
+        var sizeKB = (doc.size_bytes / 1024).toFixed(0);
+        var dateStr = doc.created_at ? new Date(doc.created_at).toLocaleDateString() : '';
+        meta.textContent = (fmtLabels[doc.format] || doc.format) + ' \u00B7 ' + sizeKB + ' KB \u00B7 ' + dateStr;
+        info.appendChild(meta);
+
+        card.appendChild(info);
+
+        var dl = document.createElement('span');
+        dl.className = 'gen-file-dl';
+        dl.textContent = '\u2B07';
+        card.appendChild(dl);
+
+        container.appendChild(card);
+    }
+}
+
+// ═══ DROP ZONE (Upload) ═══
+
+function initDropZones() {
+    _initDropZone('scanDropZone', 'scanDropInput', 'scanDropStatus');
+    _initDropZone('specialistDropZone', 'specialistDropInput', 'specialistDropStatus');
+}
+
+function _initDropZone(zoneId, inputId, statusId) {
+    var zone = document.getElementById(zoneId);
+    var input = document.getElementById(inputId);
+    if (!zone || !input) return;
+
+    // Click to open file picker
+    zone.addEventListener('click', function() { input.click(); });
+
+    // File selected via picker
+    input.addEventListener('change', function() {
+        if (input.files.length) _uploadDroppedFiles(input.files, statusId);
+        input.value = ''; // reset for re-upload
+    });
+
+    // Drag events
+    zone.addEventListener('dragover', function(e) {
+        e.preventDefault();
+        zone.classList.add('drag-over');
+    });
+    zone.addEventListener('dragleave', function() {
+        zone.classList.remove('drag-over');
+    });
+    zone.addEventListener('drop', function(e) {
+        e.preventDefault();
+        zone.classList.remove('drag-over');
+        if (e.dataTransfer.files.length) {
+            _uploadDroppedFiles(e.dataTransfer.files, statusId);
+        }
+    });
+}
+
+async function _uploadDroppedFiles(files, statusId) {
+    var statusEl = document.getElementById(statusId);
+    if (statusEl) {
+        statusEl.hidden = false;
+        statusEl.className = 'drop-status';
+        statusEl.textContent = 'Uploading ' + files.length + ' file(s)...';
+    }
+
+    var successCount = 0;
+    var errors = [];
+
+    for (var i = 0; i < files.length; i++) {
+        var formData = new FormData();
+        formData.append('file', files[i]);
+        try {
+            // Use raw fetch (not bakerFetch) — matches existing upload pattern at app.js:7475
+            var resp = await fetch('/api/documents/upload', {
+                method: 'POST',
+                headers: { 'X-Baker-Key': BAKER_CONFIG.apiKey },
+                body: formData,
+                // Note: don't set Content-Type — browser sets multipart boundary
+            });
+            if (resp.ok) {
+                successCount++;
+            } else {
+                var err = await resp.json().catch(function() { return { detail: 'Upload failed' }; });
+                errors.push(files[i].name + ': ' + (err.detail || 'error'));
+            }
+        } catch (e) {
+            errors.push(files[i].name + ': ' + e.message);
+        }
+    }
+
+    if (statusEl) {
+        if (errors.length) {
+            statusEl.className = 'drop-status error';
+            statusEl.textContent = errors.join('; ');
+        } else {
+            statusEl.className = 'drop-status success';
+            statusEl.textContent = successCount + ' file(s) uploaded successfully.';
+        }
+        setTimeout(function() { statusEl.hidden = true; }, 5000);
+    }
 }
 
 /** Refresh sidebar fires badge independently (T1+T2 pending count). */
