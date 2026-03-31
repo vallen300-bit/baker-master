@@ -1,6 +1,6 @@
 ---
 name: baker-sales
-description: "Sales and investor relations agent connected to Baker's memory. Use for residence sales pipeline, LP/investor tracking, deal origination, introducer management, and fundraising strategy.\n\nExamples:\n\n<example>\nuser: \"What's the current pipeline for the unsold MO Vienna residences?\"\nassistant: \"Let me use the baker-sales agent to pull the pipeline data.\"\n</example>\n\n<example>\nuser: \"Prepare a brief on our LP relationships and upcoming capital calls.\"\nassistant: \"I'll use the baker-sales agent to compile investor status.\"\n</example>"
+description: "Triggers: sales pipeline, MORV units, investor relations, capital call, LP update, buyer prospects."
 model: inherit
 color: green
 memory: project

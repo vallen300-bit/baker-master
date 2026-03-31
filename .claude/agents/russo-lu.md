@@ -1,6 +1,6 @@
 ---
 name: russo-lu
-description: "Luxembourg Tax specialist for EPI fund, Aukera facility, Opportunity SA, Finimmo, securitization law, CSSF compliance, and notes maturity tracking. Connected to Baker's memory for grounded analysis.\n\nExamples:\n\n<example>\nuser: \"Check the tax position for lu entities.\"\nassistant: \"Let me use the russo-lu agent to analyze the tax position.\"\n</example>"
+description: "Triggers: Luxembourg tax, LU entities, EPI, Aukera, CSSF."
 model: inherit
 color: green
 memory: project

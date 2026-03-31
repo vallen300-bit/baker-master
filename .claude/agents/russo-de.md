@@ -1,6 +1,6 @@
 ---
 name: russo-de
-description: "Germany Tax specialist for Lilienmatt, MRC&I, BREC2 in Baden-Baden, Gewerbesteuer, exit tax risk, and Lilienmatt restructuring. Connected to Baker's memory for grounded analysis.\n\nExamples:\n\n<example>\nuser: \"Check the tax position for de entities.\"\nassistant: \"Let me use the russo-de agent to analyze the tax position.\"\n</example>"
+description: "Triggers: German tax, DE entities, Baden-Baden, Gewerbesteuer."
 model: inherit
 color: green
 memory: project

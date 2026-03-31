@@ -1,6 +1,6 @@
 ---
 name: baker-communications
-description: "Communications drafting agent connected to Baker's memory. Use for email drafting, investor updates, proposals, meeting follow-ups, and internal team briefings — pulls recipient context from Baker to calibrate tone.\n\nExamples:\n\n<example>\nuser: \"Draft a follow-up email to Ofenheimer about the Hagenauer timeline.\"\nassistant: \"Let me use the baker-communications agent to pull context and draft the email.\"\n</example>\n\n<example>\nuser: \"Prepare a quarterly update for our LPs.\"\nassistant: \"I'll use the baker-communications agent to draft the update with recent deal data.\"\n</example>"
+description: "Triggers: draft email, write letter, prepare update, follow-up message."
 model: inherit
 color: cyan
 memory: project

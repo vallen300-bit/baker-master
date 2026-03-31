@@ -1,6 +1,6 @@
 ---
 name: baker-legal
-description: "Legal analyst agent connected to Baker's memory. Use for contract analysis, deadline calculations, dispute strategy, regulatory questions, and legal document review — all with full access to Baker's email/meeting/document context.\n\nExamples:\n\n<example>\nContext: User needs legal analysis of a dispute.\nuser: \"Analyze our legal position on the Hagenauer final account dispute.\"\nassistant: \"Let me use the baker-legal agent to pull all relevant correspondence and assess our position.\"\n</example>\n\n<example>\nContext: User needs to understand contract terms or deadlines.\nuser: \"When does the Gewaehrleistungsfrist expire on the Cupial units?\"\nassistant: \"I'll use the baker-legal agent to search contracts and correspondence for the warranty period.\"\n</example>\n\n<example>\nContext: User needs negotiation strategy.\nuser: \"Prepare our negotiation position for the meeting with Hassa next week.\"\nassistant: \"Let me use the baker-legal agent to build a strategy based on all prior communications.\"\n</example>"
+description: "Triggers: legal position, Gewaehrleistung, contract terms, negotiation strategy, court deadlines, insolvency."
 model: inherit
 color: red
 memory: project

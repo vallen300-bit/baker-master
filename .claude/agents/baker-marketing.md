@@ -1,6 +1,6 @@
 ---
 name: baker-marketing
-description: "Marketing strategy agent connected to Baker's memory. Use for campaign planning, residence marketing collateral, UHNW lead generation, event marketing, and Brisen platform positioning.\n\nExamples:\n\n<example>\nuser: \"Draft a marketing brief for the MIPIM presentation.\"\nassistant: \"Let me use the baker-marketing agent to build the brief with deal context.\"\n</example>\n\n<example>\nuser: \"What marketing channels are working for the MO residences?\"\nassistant: \"I'll use the baker-marketing agent to analyze our outreach.\"\n</example>"
+description: "Triggers: marketing brief, campaign, MIPIM, MORV sales collateral, luxury branding, channels."
 model: inherit
 color: orange
 memory: project

@@ -1,6 +1,6 @@
 ---
 name: baker-research
-description: "Deep research agent connected to Baker's memory. Use when the Director needs multi-source research that pulls from Baker's emails, meetings, WhatsApp, documents, contacts, and matters. This agent searches Baker's full context, synthesizes findings, and stores conclusions back to Baker's memory.\n\nExamples:\n\n<example>\nContext: User needs background research on a person or company.\nuser: \"What do we know about Wertheimer? Pull everything.\"\nassistant: \"Let me use the baker-research agent to search across all sources.\"\n</example>\n\n<example>\nContext: User needs to understand the history of a deal or matter.\nuser: \"Give me a complete timeline of the Cupial dispute.\"\nassistant: \"I'll use the baker-research agent to reconstruct the timeline from emails, meetings, and alerts.\"\n</example>\n\n<example>\nContext: User asks a strategic question requiring cross-source synthesis.\nuser: \"Which deals are at risk this quarter and why?\"\nassistant: \"Let me use the baker-research agent to cross-reference deadlines, alerts, and recent communications.\"\n</example>"
+description: "Triggers: pull everything on [topic], build timeline, cross-reference, what do we know about, research."
 model: inherit
 color: blue
 memory: project

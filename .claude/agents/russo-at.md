@@ -1,6 +1,6 @@
 ---
 name: russo-at
-description: "Austria Tax specialist for RG7 entities, Brisen Development, MO Vienna, KÖSt, UStG, Grunderwerbsteuer, and Hagenauer dispute tax implications. Connected to Baker's memory for grounded analysis.\n\nExamples:\n\n<example>\nuser: \"Check the tax position for at entities.\"\nassistant: \"Let me use the russo-at agent to analyze the tax position.\"\n</example>"
+description: "Triggers: Austrian tax, AT entities, Vienna tax position."
 model: inherit
 color: green
 memory: project

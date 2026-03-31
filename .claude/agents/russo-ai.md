@@ -1,6 +1,6 @@
 ---
 name: russo-ai
-description: "Global Wealth Manager for the Vallen family. Use for multi-jurisdiction tax questions, net worth overview, wealth structuring, succession planning, and cross-border optimization. Routes to 6 jurisdiction specialists (CH, AT, CY, DE, FR, LU).\n\nExamples:\n\n<example>\nuser: \"What's our total tax exposure across all jurisdictions?\"\nassistant: \"Let me use the russo-ai agent to assess cross-jurisdiction tax exposure.\"\n</example>\n\n<example>\nuser: \"How should we restructure Lilienmatt?\"\nassistant: \"I'll use the russo-ai agent to analyze restructuring options across DE, CY, and CH.\"\n</example>"
+description: "Triggers: tax exposure, restructure, wealth overview, multi-jurisdiction, succession planning."
 model: inherit
 color: green
 memory: project

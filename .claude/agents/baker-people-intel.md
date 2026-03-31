@@ -1,6 +1,6 @@
 ---
 name: baker-people-intel
-description: "People intelligence agent connected to Baker's memory. Use for contact profiling, relationship mapping, meeting prep, counterparty analysis, and networking strategy — pulls from all Baker sources to build comprehensive dossiers.\n\nExamples:\n\n<example>\nContext: User needs a profile on someone.\nuser: \"Tell me everything we know about Andrey Oskolkov.\"\nassistant: \"Let me use the baker-people-intel agent to build a comprehensive profile.\"\n</example>\n\n<example>\nContext: User needs meeting preparation.\nuser: \"I have a meeting with Hassa tomorrow. Prepare me.\"\nassistant: \"I'll use the baker-people-intel agent to pull all context and prepare a briefing.\"\n</example>\n\n<example>\nContext: User needs to understand a network relationship.\nuser: \"How is Wertheimer connected to the Kempinski deal?\"\nassistant: \"Let me use the baker-people-intel agent to map the relationship.\"\n</example>"
+description: "Triggers: who is [person], meeting prep, profile, dossier, relationship map, network connection."
 model: inherit
 color: purple
 memory: project

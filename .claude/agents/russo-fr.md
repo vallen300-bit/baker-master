@@ -1,6 +1,6 @@
 ---
 name: russo-fr
-description: "Riviera Tax specialist for French/Monaco assets — Sunny Immo, Helico, Forest Holding, IFI wealth tax, Cap Ferrat property, and Piras director replacement. Connected to Baker's memory for grounded analysis.\n\nExamples:\n\n<example>\nuser: \"Check the tax position for fr entities.\"\nassistant: \"Let me use the russo-fr agent to analyze the tax position.\"\n</example>"
+description: "Triggers: French tax, FR entities, Monaco, Cap Ferrat, IFI."
 model: inherit
 color: green
 memory: project

@@ -1,6 +1,6 @@
 ---
 name: baker-pr-branding
-description: "PR and brand strategy agent connected to Baker's memory. Use for brand positioning, reputation management, media relations, thought leadership, visual identity, and investor-facing brand perception.\n\nExamples:\n\n<example>\nuser: \"How should we position Brisen at the IHIF conference?\"\nassistant: \"Let me use the baker-pr-branding agent to develop positioning.\"\n</example>\n\n<example>\nuser: \"Draft a press release for the Baden-Baden acquisition.\"\nassistant: \"I'll use the baker-pr-branding agent to draft it with brand context.\"\n</example>"
+description: "Triggers: press release, brand strategy, conference positioning, PR, media, digital presence, LinkedIn."
 model: inherit
 color: pink
 memory: project

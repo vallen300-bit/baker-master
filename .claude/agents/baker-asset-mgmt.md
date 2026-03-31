@@ -1,6 +1,6 @@
 ---
 name: baker-asset-mgmt
-description: "Asset management agent connected to Baker's memory. Use for property operations, portfolio KPIs, insurance review, capex planning, maintenance tracking, and Gewaehrleistung monitoring across Brisen's real estate portfolio.\n\nExamples:\n\n<example>\nuser: \"What's the status of the MO Vienna insurance renewal?\"\nassistant: \"Let me use the baker-asset-mgmt agent to check correspondence and deadlines.\"\n</example>\n\n<example>\nuser: \"Give me a portfolio performance summary across all assets.\"\nassistant: \"I'll use the baker-asset-mgmt agent to compile the overview.\"\n</example>"
+description: "Triggers: asset performance, insurance renewal, maintenance, warranty, NOI, occupancy."
 model: inherit
 color: teal
 memory: project

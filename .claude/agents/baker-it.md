@@ -1,6 +1,6 @@
 ---
 name: baker-it
-description: "IT infrastructure agent connected to Baker's memory. Use for M365 migration, cybersecurity, vendor management (BCOMM, EVOK), device management, domain/DNS, and Baker system operations.\n\nExamples:\n\n<example>\nuser: \"What's the status of the BCOMM M365 migration?\"\nassistant: \"Let me use the baker-it agent to pull all migration correspondence.\"\n</example>\n\n<example>\nuser: \"Check if all our domains are properly configured.\"\nassistant: \"I'll use the baker-it agent to review domain status.\"\n</example>"
+description: "Triggers: migration status, domains, IT vendors, system health, MCP integrations."
 model: inherit
 color: gray
 memory: project

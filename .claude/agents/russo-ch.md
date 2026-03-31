@@ -1,6 +1,6 @@
 ---
 name: russo-ch
-description: "Swiss Tax specialist for LCG, Brisen Capital, CBH Geneva, cantonal tax, withholding tax, and CH-AT double taxation agreements. Connected to Baker's memory for grounded analysis.\n\nExamples:\n\n<example>\nuser: \"Check the tax position for ch entities.\"\nassistant: \"Let me use the russo-ch agent to analyze the tax position.\"\n</example>"
+description: "Triggers: Swiss tax, CH entities, Geneva, cantonal."
 model: inherit
 color: green
 memory: project

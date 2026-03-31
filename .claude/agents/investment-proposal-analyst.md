@@ -1,6 +1,6 @@
 ---
 name: investment-proposal-analyst
-description: "Use this agent when the user presents investment proposals, pitch decks, term sheets, or deal memos that need rigorous analysis. Produces structured investment assessments with clear ratings.\n\nExamples:\n\n<example>\nContext: User shares an investment opportunity.\nuser: \"Analyze this pitch deck for a co-investment in a Munich hotel.\"\nassistant: \"Let me use the investment-proposal-analyst agent to assess the opportunity.\"\n</example>\n\n<example>\nContext: User needs to compare multiple deals.\nuser: \"Compare these three investment proposals and rank them.\"\nassistant: \"I'll use the investment-proposal-analyst agent to do a structured comparison.\"\n</example>\n\n<example>\nContext: User receives a term sheet.\nuser: \"Review this term sheet — what should I push back on?\"\nassistant: \"Let me use the investment-proposal-analyst agent to identify negotiation points.\"\n</example>"
+description: "Triggers: analyze pitch deck, review term sheet, compare deals, investment proposal, due diligence."
 model: inherit
 color: green
 memory: project

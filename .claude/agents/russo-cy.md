@@ -1,6 +1,6 @@
 ---
 name: russo-cy
-description: "Cyprus Tax specialist for Brisen Group Holding, Brisen Ventures, Aelio/Oskolkov structure, holding exemptions, and substance requirements. Connected to Baker's memory for grounded analysis.\n\nExamples:\n\n<example>\nuser: \"Check the tax position for cy entities.\"\nassistant: \"Let me use the russo-cy agent to analyze the tax position.\"\n</example>"
+description: "Triggers: Cyprus tax, CY entities, Aelio, holding exemption."
 model: inherit
 color: green
 memory: project

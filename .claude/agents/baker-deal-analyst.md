@@ -1,6 +1,6 @@
 ---
 name: baker-deal-analyst
-description: "Financial and deal analysis agent connected to Baker's memory. Use for investment analysis, deal structuring, financial modeling, cashflow review, and portfolio assessment — with full access to Baker's emails, meetings, and financial data.\n\nExamples:\n\n<example>\nContext: User needs financial analysis of a deal.\nuser: \"What's the current status of the Kempinski Kitzbuehel acquisition? Summarize all financials.\"\nassistant: \"Let me use the baker-deal-analyst to pull all deal data and financial communications.\"\n</example>\n\n<example>\nContext: User needs portfolio-level view.\nuser: \"Give me a portfolio overview — which assets need attention?\"\nassistant: \"I'll use the baker-deal-analyst to assess each asset's status and flag issues.\"\n</example>\n\n<example>\nContext: User needs to evaluate a new opportunity.\nuser: \"We got an offer for the Baden-Baden properties. Analyze the terms.\"\nassistant: \"Let me use the baker-deal-analyst to review the offer against our current position.\"\n</example>"
+description: "Triggers: deal status, financials, valuation, IRR, acquisition analysis, portfolio overview."
 model: inherit
 color: green
 memory: project
