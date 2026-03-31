@@ -272,28 +272,33 @@ def _handle_director_question(question: str, msg_id: str, scored: dict = None,
             sender="director", source="whatsapp", channel="whatsapp",
             status="in_progress",
         )
-        # COMPLEXITY-ROUTER-1: Store complexity classification (shadow mode)
-        if _task_id and intent:
+        # COST-OPT-WAVE2: Use rule-based complexity router (not old intent dict)
+        from orchestrator.complexity_router import classify_complexity
+        _complexity = classify_complexity(question)
+        if _task_id:
             store.update_baker_task(
                 _task_id,
-                complexity=intent.get("complexity", "deep"),
-                complexity_confidence=intent.get("complexity_confidence"),
-                complexity_reasoning=intent.get("complexity_reasoning"),
+                complexity=_complexity,
             )
     except Exception:
         pass
 
     # AGENT-FRAMEWORK-1: Try capability routing first
     answer = None
+    _complexity = None
+    try:
+        from orchestrator.complexity_router import classify_complexity as _cc_wa
+        _complexity = _cc_wa(question)
+    except Exception:
+        _complexity = "deep"
     try:
         from orchestrator.capability_router import CapabilityRouter
         from orchestrator.capability_runner import CapabilityRunner
         _cap_plan = CapabilityRouter().route(question, _domain, _mode, scored)
         if _cap_plan and _cap_plan.capabilities:
             cap_slugs = [c.slug for c in _cap_plan.capabilities]
-            logger.info(f"WA capability routing: mode={_cap_plan.mode}, caps={cap_slugs}")
+            logger.info(f"WA capability routing: mode={_cap_plan.mode}, caps={cap_slugs}, complexity={_complexity}")
             runner = CapabilityRunner()
-            _complexity = intent.get("complexity") if intent else None
             if _cap_plan.mode == "fast":
                 result = runner.run_single(_cap_plan.capabilities[0], question,
                                            domain=_domain, mode=_mode,

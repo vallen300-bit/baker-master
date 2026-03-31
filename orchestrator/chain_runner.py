@@ -176,8 +176,13 @@ def should_chain(trigger_type: str, alert_tier: int, matter_slug: str) -> bool:
         return False
     if not matter_slug:
         return False
-    # COST-OPT-WAVE1: added rss_article_new to match actual trigger type
-    if trigger_type in ("dropbox_file_new", "dropbox_file_modified", "rss_article", "rss_article_new"):
+    # COST-OPT-WAVE2: exclude low-value triggers from autonomous chains
+    if trigger_type in (
+        "dropbox_file_new", "dropbox_file_modified", "rss_article", "rss_article_new",
+        "clickup_task_updated", "clickup_task_overdue", "clickup_task_created",
+        "todoist_task_updated", "todoist_task_completed", "todoist_task_overdue",
+        "browser_change",
+    ):
         return False
     if not _check_rate_limit():
         return False

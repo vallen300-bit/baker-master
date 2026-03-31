@@ -458,19 +458,39 @@ class SentinelPipeline:
     # Step 4: Generate (Claude API call)
     # -------------------------------------------------------
 
-    # Trigger types that should use Haiku instead of Opus (cost optimization)
-    # COST-OPT-WAVE1: rss_article_new (not rss_article) matches actual trigger type from rss_trigger.py
-    _HAIKU_TRIGGER_TYPES = {"dropbox_file_new", "dropbox_file_modified", "rss_article", "rss_article_new"}
+    # COST-OPT-WAVE2: 3-tier model routing for pipeline triggers
+    # Haiku: low-value background ingestion (document changes, RSS, task status changes)
+    _HAIKU_TRIGGER_TYPES = {
+        "dropbox_file_new", "dropbox_file_modified",
+        "rss_article", "rss_article_new",
+        "clickup_task_updated", "clickup_task_overdue", "clickup_task_created",
+        "todoist_task_updated", "todoist_task_completed", "todoist_task_overdue",
+        "browser_change",
+    }
+    # Sonnet: medium-value — emails and handoff notes need comprehension but not Opus reasoning
+    _SONNET_TRIGGER_TYPES = {
+        "email",
+        "clickup_handoff_note",
+    }
 
     def generate(self, prompt: dict, max_output_tokens: int = 8192,
-                 trigger_type: str = None) -> str:
+                 trigger_type: str = None, trigger_tier: int = None) -> str:
         """Send assembled prompt to Claude and get response.
-        Uses Haiku for low-value triggers (document ingestion, RSS) to cut costs."""
-        # COST-OPT-1: Route document ingestion to Haiku (~EUR 0.002/call vs EUR 1.31)
+        COST-OPT-WAVE2: 3-tier model routing:
+        - Haiku: document ingestion, RSS, task status changes (~EUR 0.03/call)
+        - Sonnet: emails, handoff notes (~EUR 0.20/call)
+        - Opus: meetings, briefings, T1 critical signals (~EUR 1.09/call)
+        """
         if trigger_type in self._HAIKU_TRIGGER_TYPES:
             model = "claude-haiku-4-5-20251001"
+        elif trigger_type in self._SONNET_TRIGGER_TYPES:
+            # T1 emails still get Opus (VIP, legal, financial — they earned it)
+            if trigger_tier == 1:
+                model = config.claude.model  # Opus
+            else:
+                model = "claude-sonnet-4-20250514"
         else:
-            model = config.claude.model
+            model = config.claude.model  # Opus for meetings, scheduled, etc.
 
         logger.info(
             f"Calling Claude API: model={model}, "
@@ -872,8 +892,9 @@ class SentinelPipeline:
         prompt = self.build_prompt(trigger, contexts)
         logger.info(f"Step 3 complete: prompt assembled ({prompt['metadata']['tokens_estimated']} tokens)")
 
-        # Step 4: Generate (COST-OPT-1: Haiku for document/RSS triggers)
-        raw_response = self.generate(prompt, trigger_type=trigger.type)
+        # Step 4: Generate (COST-OPT-WAVE2: 3-tier model routing)
+        raw_response = self.generate(prompt, trigger_type=trigger.type,
+                                     trigger_tier=getattr(trigger, "tier", None))
         logger.info(f"Step 4 complete: Claude responded")
 
         # Parse response

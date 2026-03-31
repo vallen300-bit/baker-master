@@ -29,6 +29,50 @@ _gmail_backoff_seconds: float = 0.0  # exponential backoff tracker
 # Sentinel health monitoring
 from triggers.sentinel_health import report_success as _health_success, report_failure as _health_failure
 
+# COST-OPT-WAVE2: Automated sender blocklist — skip pipeline.run() entirely.
+# These emails still get stored to PostgreSQL (email_messages) for search,
+# but don't trigger an Opus/Sonnet pipeline call. Saves ~EUR 50-80/mo.
+_SKIP_PIPELINE_SENDERS = {
+    "noreply@", "no-reply@", "no_reply@", "donotreply@",
+    "notifications@", "notification@", "mailer-daemon@",
+    "calendar-notification@google.com",
+    "fred@fireflies.ai",
+    "notify@fireflies.ai",
+    "@crowdcomms.com",
+    "@eventbooking.uk.com",
+    "@todoist.com",
+    "@clickup.com",
+    "@github.com",
+    "@render.com",
+    "@noreply.github.com",
+    "@slack.com",
+    "@dropbox.com",
+    "news@", "newsletter@", "digest@", "updates@", "info@",
+}
+
+# Headers/content that indicate automated email (skip pipeline)
+_SKIP_PIPELINE_HEADERS = {
+    "unsubscribe", "list-unsubscribe", "precedence: bulk",
+    "auto-submitted:", "x-auto-response-suppress:",
+}
+
+
+def _should_skip_pipeline(sender_email: str, body: str) -> bool:
+    """COST-OPT-WAVE2: Check if an email is automated junk that shouldn't hit the pipeline."""
+    if not sender_email:
+        return False
+    sender_lower = sender_email.lower()
+    for pattern in _SKIP_PIPELINE_SENDERS:
+        if pattern in sender_lower:
+            return True
+    # Check first 500 chars for unsubscribe/bulk headers in body
+    body_lower = body[:500].lower() if body else ""
+    for header in _SKIP_PIPELINE_HEADERS:
+        if header in body_lower:
+            return True
+    return False
+
+
 # MEETINGS-DETECT-2: Fast regex pre-filter for meeting emails (zero API cost)
 import re as _re
 _MEETING_EMAIL_RE = _re.compile(
@@ -905,6 +949,13 @@ def _process_email_threads(new_threads: list):
                         logger.info(f"MEETINGS-DETECT-2: detected meeting from email: {_meeting_data.get('title', '')[:60]}")
         except Exception as _e:
             logger.warning(f"MEETINGS-DETECT-2: email meeting detection failed (non-fatal): {_e}")
+
+        # COST-OPT-WAVE2: Skip pipeline for automated/newsletter senders
+        _sender_email = metadata.get("primary_sender_email", "")
+        if _should_skip_pipeline(_sender_email, thread.get("text", "")):
+            logger.info(f"Email trigger: skipping pipeline for automated sender {_sender_email} (thread {thread_id})")
+            skipped += 1
+            continue
 
         if trigger.priority in ("high", "medium"):
             try:
