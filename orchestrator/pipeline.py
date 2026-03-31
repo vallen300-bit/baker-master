@@ -474,12 +474,13 @@ class SentinelPipeline:
     }
 
     def generate(self, prompt: dict, max_output_tokens: int = 8192,
-                 trigger_type: str = None, trigger_tier: int = None) -> str:
+                 trigger_type: str = None, trigger_tier: int = None) -> tuple:
         """Send assembled prompt to Claude and get response.
         COST-OPT-WAVE2: 3-tier model routing:
         - Haiku: document ingestion, RSS, task status changes (~EUR 0.03/call)
         - Sonnet: emails, handoff notes (~EUR 0.20/call)
         - Opus: meetings, briefings, T1 critical signals (~EUR 1.09/call)
+        Returns (raw_text, output_tokens) tuple.
         """
         if trigger_type in self._HAIKU_TRIGGER_TYPES:
             model = "claude-haiku-4-5-20251001"
@@ -517,7 +518,7 @@ class SentinelPipeline:
                          response.usage.output_tokens, source="pipeline")
         except Exception:
             pass
-        return raw_text
+        return raw_text, response.usage.output_tokens
 
     # -------------------------------------------------------
     # Step 5: Store Back (learning loop)
@@ -677,7 +678,7 @@ class SentinelPipeline:
                     response_id=str(trigger_log_id),
                     pipeline_ms=response.metadata.get("pipeline_duration_ms", 0),
                     tokens_in=response.metadata.get("tokens_estimated", 0),
-                    tokens_out=0,
+                    tokens_out=response.metadata.get("tokens_out", 0),
                 )
         except Exception as e:
             logger.warning(f"Store-back: trigger result update failed (non-fatal): {e}")
@@ -893,8 +894,8 @@ class SentinelPipeline:
         logger.info(f"Step 3 complete: prompt assembled ({prompt['metadata']['tokens_estimated']} tokens)")
 
         # Step 4: Generate (COST-OPT-WAVE2: 3-tier model routing)
-        raw_response = self.generate(prompt, trigger_type=trigger.type,
-                                     trigger_tier=getattr(trigger, "tier", None))
+        raw_response, output_tokens = self.generate(prompt, trigger_type=trigger.type,
+                                                    trigger_tier=getattr(trigger, "tier", None))
         logger.info(f"Step 4 complete: Claude responded")
 
         # Parse response
@@ -903,6 +904,7 @@ class SentinelPipeline:
             "pipeline_duration_ms": int((time.time() - start) * 1000),
             "trigger_type": trigger.type,
             "trigger_priority": trigger.priority,
+            "tokens_out": output_tokens,
         })
 
         # Step 5: Store back
