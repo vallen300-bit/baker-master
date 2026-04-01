@@ -1695,7 +1695,12 @@ def run_agent_loop(
     t0 = time.time()
     timeout = timeout_override or AGENT_TIMEOUT_SECONDS
     executor = ToolExecutor()
-    claude = anthropic.Anthropic(api_key=config.claude.api_key)
+    from orchestrator.gemini_client import is_gemini_model, GeminiToolClient
+    _effective_model = config.claude.model
+    if is_gemini_model(_effective_model):
+        claude = GeminiToolClient()
+    else:
+        claude = anthropic.Anthropic(api_key=config.claude.api_key)
 
     messages = []
     for msg in (history or []):
@@ -1718,7 +1723,7 @@ def run_agent_loop(
             answer = ""
             if tool_log:
                 synth, s_in, s_out = _force_synthesis(
-                    claude, config.claude.model, system_prompt, messages,
+                    claude, _effective_model, system_prompt, messages,
                     max_tokens=2048, reason="timeout")
                 total_in += s_in
                 total_out += s_out
@@ -1828,6 +1833,7 @@ def run_agent_loop(
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tu.id,
+                    "name": tu.name,
                     "content": result_text,
                 })
 
@@ -1903,7 +1909,12 @@ def run_agent_loop_streaming(
     t0 = time.time()
     timeout = timeout_override or AGENT_TIMEOUT_SECONDS
     executor = ToolExecutor()
-    claude = anthropic.Anthropic(api_key=config.claude.api_key)
+    from orchestrator.gemini_client import is_gemini_model, GeminiToolClient
+    _effective_model = model_override if model_override else config.claude.model
+    if is_gemini_model(_effective_model):
+        claude = GeminiToolClient()
+    else:
+        claude = anthropic.Anthropic(api_key=config.claude.api_key)
 
     messages = []
     for msg in (history or []):
@@ -2083,6 +2094,7 @@ def run_agent_loop_streaming(
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tu.id,
+                    "name": tu.name,
                     "content": result_text,
                 })
                 # Stream screenshot to mobile if browse_website returned one
