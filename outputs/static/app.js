@@ -4490,10 +4490,8 @@ async function _runNetworkingAction(contactId, actionKey, responseArea) {
     }
 }
 
-// Legacy alias — loadPersonDetail still called from old code paths
-async function loadPersonDetail(name) {
-    loadPeopleTab();
-}
+// Legacy alias removed — loadPersonDetail at line 1336 is the real implementation
+// (Previously shadowed by this stub that called loadPeopleTab() without the name)
 
 // ═══ SEARCH TAB (D6: Knowledge Base) ═══
 
