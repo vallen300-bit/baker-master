@@ -319,11 +319,12 @@ function esc(str) {
 }
 
 /** Escape text for safe embedding in inline onclick="..." HTML attributes.
- *  Handles curly/smart quotes, backslashes, and single quotes that break attribute parsing. */
+ *  Handles newlines, curly/smart quotes, backslashes, and single quotes. */
 function escAttr(str) {
     if (!str) return '';
     return esc(str)
         .replace(/\\/g, '\\\\')
+        .replace(/\n/g, ' ').replace(/\r/g, '')                      // newlines → space
         .replace(/'/g, "\\'")
         .replace(/\u201C/g, '\\x22').replace(/\u201D/g, '\\x22')   // " "
         .replace(/\u2018/g, "\\'").replace(/\u2019/g, "\\'")         // ' '
