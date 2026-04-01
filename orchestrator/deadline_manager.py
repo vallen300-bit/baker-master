@@ -17,7 +17,6 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-import anthropic
 
 from config.settings import config
 
@@ -352,19 +351,18 @@ def _generate_deadline_proposal(deadline: dict, stage: str, hours_remaining: flo
         if source_snippet:
             context += f"Source context: {source_snippet}\n"
 
-        claude = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = claude.messages.create(
-            model="claude-haiku-4-5-20251001",
+        from orchestrator.gemini_client import call_flash
+        resp = call_flash(
+            messages=[{"role": "user", "content": context}],
             max_tokens=1500,
             system=_DEADLINE_PROPOSAL_PROMPT,
-            messages=[{"role": "user", "content": context}],
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="deadline_proposal")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="deadline_proposal")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
             if raw.endswith("```"):

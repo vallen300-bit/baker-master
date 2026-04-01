@@ -369,7 +369,7 @@ def _adapt_write_steps(plan: dict, read_results: list) -> dict:
     context = "\n\n".join(context_parts)
 
     try:
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        from orchestrator.gemini_client import call_flash
         adapt_prompt = (
             "Based on the information gathered below, refine the write action inputs. "
             "Return ONLY a JSON array of updated write steps with the same structure.\n\n"
@@ -377,19 +377,18 @@ def _adapt_write_steps(plan: dict, read_results: list) -> dict:
             f"Gathered context:\n{context[:3000]}\n\n"
             f"Write steps to refine:\n{json.dumps(write_steps, indent=2)}"
         )
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1024,
+        resp = call_flash(
             messages=[{"role": "user", "content": adapt_prompt}],
+            max_tokens=1024,
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens,
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens,
                          resp.usage.output_tokens, source="chain_adapt")
         except Exception:
             pass
 
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
