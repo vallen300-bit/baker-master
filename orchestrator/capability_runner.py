@@ -130,6 +130,7 @@ def extract_correction_from_feedback(task: dict):
 class CapabilityRunner:
     def __init__(self):
         self.executor = ToolExecutor()
+        self.claude = anthropic.Anthropic(api_key=config.claude.api_key)
         # PHASE-4A: lazy imports for cost + metrics
         from orchestrator.cost_monitor import log_api_cost, check_circuit_breaker
         from orchestrator.agent_metrics import log_tool_call
@@ -911,7 +912,7 @@ class CapabilityRunner:
             if not allowed:
                 return
 
-            _HAIKU = "gemini-2.5-flash"
+            _HAIKU = "claude-haiku-4-5-20251001"
             prompt = (
                 "Extract 1-3 key factual findings from this specialist response. "
                 "Only extract concrete facts: amounts, dates, legal positions, decisions, deadlines. "
@@ -932,7 +933,7 @@ class CapabilityRunner:
                 source="auto_insight", capability_id=capability.slug,
             )
 
-            raw = resp.text.strip()
+            raw = resp.content[0].text.strip()
             if raw.startswith("```"):
                 raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
                 if raw.endswith("```"):

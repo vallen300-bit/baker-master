@@ -399,22 +399,25 @@ Return ONLY valid JSON:
 def _generate_initiatives(context_str: str) -> list:
     """Call Haiku to generate 2-3 initiatives based on today's signals."""
     try:
-        from orchestrator.gemini_client import call_flash
-        resp = call_flash(
-                messages=[{"role": "user", "content": context_str}],
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
+            system=_INITIATIVE_PROMPT,
+            messages=[{"role": "user", "content": context_str}],
         )
 
         # Log cost
         try:
             from orchestrator.cost_monitor import log_api_cost
             log_api_cost(
-                "gemini-2.5-flash", resp.usage.input_tokens,
+                "claude-haiku-4-5-20251001", resp.usage.input_tokens,
                 resp.usage.output_tokens, source="initiative_engine",
             )
         except Exception:
             pass
 
-        raw = resp.text.strip()
+        raw = resp.content[0].text.strip()
         # Strip markdown code fences
         if raw.startswith("```"):
             lines = raw.split("\n")

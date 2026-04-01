@@ -294,7 +294,7 @@ class DecisionEngineConfig:
     vip_sla_tier2_minutes: int = 240  # 4 hours
     financial_threshold_high: int = 100_000
     financial_threshold_medium: int = 10_000
-    haiku_model: str = "gemini-2.5-flash"  # GEMINI-MIGRATION-1
+    haiku_model: str = "claude-haiku-4-5-20251001"
 
 
 @dataclass
@@ -311,7 +311,7 @@ class ChainConfig:
 class ComplexityConfig:
     """COMPLEXITY-ROUTER-1: Fast/deep routing configuration."""
     shadow_mode: bool = os.getenv("COMPLEXITY_SHADOW_MODE", "false").lower() == "true"
-    fast_model: str = "gemini-2.5-flash"  # GEMINI-MIGRATION-1
+    fast_model: str = "claude-haiku-4-5-20251001"
     deep_model: str = "claude-opus-4-6"
     fast_max_tokens: int = 1024
     deep_max_tokens: int = 4096

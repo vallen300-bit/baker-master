@@ -867,16 +867,19 @@ def _generate_vip_draft(vip: dict, msg: dict, sender_name: str, wait_minutes: fl
             f"Message: {message_text}\n"
         )
 
-        from orchestrator.gemini_client import call_flash
-        resp = call_flash(
-                messages=[{"role": "user", "content": context}],
+        client = anthropic.Anthropic(api_key=_config.claude.api_key)
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
+            system=_VIP_DRAFT_PROMPT,
+            messages=[{"role": "user", "content": context}],
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="vip_auto_draft")
+            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="vip_auto_draft")
         except Exception:
             pass
-        raw = resp.text.strip()
+        raw = resp.content[0].text.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
             if raw.endswith("```"):

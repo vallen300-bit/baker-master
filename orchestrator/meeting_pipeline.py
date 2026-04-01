@@ -150,6 +150,7 @@ def _generate_followup_draft(summary, title, participants, extracted_items,
 
     try:
         import anthropic
+        client = anthropic.Anthropic()
 
         action_text = "\n".join(
             f"- {a.get('who', 'TBD')}: {a.get('text', '')} "
@@ -173,12 +174,13 @@ Rules:
 - End with "Please let me know if I've missed anything."
 - Do NOT include any information not discussed in the meeting"""
 
-        from orchestrator.gemini_client import call_flash
-        response = call_flash(
-                messages=[{"role": "user", "content": prompt}],
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1000,
+            messages=[{"role": "user", "content": prompt}],
         )
 
-        draft_text = response.text.strip()
+        draft_text = response.content[0].text.strip()
 
         # Store as pending draft (NEVER auto-sent — Cowork pushback #6)
         try:

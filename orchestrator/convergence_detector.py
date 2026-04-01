@@ -60,9 +60,11 @@ def _extract_entities_for_matter(matter_name: str, texts: list) -> dict:
         combined += f"{i}. {t[:300]}\n"
 
     try:
-        from orchestrator.gemini_client import call_flash
-        resp = call_flash(
-                messages=[{
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=800,
+            messages=[{
                 "role": "user",
                 "content": f"{_ENTITY_EXTRACT_PROMPT}\n\nTexts:\n{combined}",
             }],
@@ -71,13 +73,13 @@ def _extract_entities_for_matter(matter_name: str, texts: list) -> dict:
         try:
             from orchestrator.cost_monitor import log_api_cost
             log_api_cost(
-                "gemini-2.5-flash", resp.usage.input_tokens,
+                "claude-haiku-4-5-20251001", resp.usage.input_tokens,
                 resp.usage.output_tokens, source="convergence_extract",
             )
         except Exception:
             pass
 
-        raw = resp.text.strip()
+        raw = resp.content[0].text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
@@ -223,9 +225,11 @@ def _analyze_convergences(convergences: list) -> list:
     conv_text = json.dumps(convergences[:10], indent=2)
 
     try:
-        from orchestrator.gemini_client import call_flash
-        resp = call_flash(
-                messages=[{
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        resp = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
+            messages=[{
                 "role": "user",
                 "content": f"{_ANALYSIS_PROMPT}\n\nConvergences:\n{conv_text}",
             }],
@@ -234,13 +238,13 @@ def _analyze_convergences(convergences: list) -> list:
         try:
             from orchestrator.cost_monitor import log_api_cost
             log_api_cost(
-                "gemini-2.5-flash", resp.usage.input_tokens,
+                "claude-haiku-4-5-20251001", resp.usage.input_tokens,
                 resp.usage.output_tokens, source="convergence_analysis",
             )
         except Exception:
             pass
 
-        raw = resp.text.strip()
+        raw = resp.content[0].text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw

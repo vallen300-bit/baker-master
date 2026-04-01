@@ -1206,7 +1206,7 @@ class ToolExecutor:
         try:
             client = anthropic.Anthropic(api_key=config.claude.api_key)
             resp = client.messages.create(
-                model="gemini-2.5-flash",
+                model="claude-haiku-4-5-20251001",
                 max_tokens=500,
                 system=(
                     "Generate a PostgreSQL SELECT query to answer the user's question about Baker's data. "
@@ -1227,10 +1227,10 @@ class ToolExecutor:
             )
             try:
                 from orchestrator.cost_monitor import log_api_cost
-                log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="query_baker_data")
+                log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="query_baker_data")
             except Exception:
                 pass
-            sql = resp.text.strip()
+            sql = resp.content[0].text.strip()
             # Strip markdown fences
             if sql.startswith("```"):
                 sql = "\n".join(sql.split("\n")[1:-1])
