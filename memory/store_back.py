@@ -4726,63 +4726,79 @@ class SentinelStoreBack:
                                 question: str = "",
                                 mutation_source: str = "auto"):
         """AO-PM-1: Upsert AO project state with audit trail + optimistic locking.
-        Cowork review: snapshot before every mutation, version counter for race protection."""
-        conn = self._get_conn()
-        if not conn:
-            return
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT state_json, version FROM ao_project_state WHERE state_key = 'current'"
-            )
-            row = cur.fetchone()
-            if row:
-                existing = row[0] if isinstance(row[0], dict) else json.loads(row[0] or '{}')
-                current_version = row[1] or 1
-
-                # Audit trail: snapshot before mutation
-                cur.execute("""
-                    INSERT INTO ao_state_history
-                        (version, state_json_before, mutation_source, mutation_summary)
-                    VALUES (%s, %s, %s, %s)
-                """, (current_version, json.dumps(existing, default=str),
-                      mutation_source, summary[:500]))
-
-                # Merge updates
-                for k, v in updates.items():
-                    if isinstance(v, dict) and isinstance(existing.get(k), dict):
-                        existing[k].update(v)
-                    else:
-                        existing[k] = v
-
-                # Optimistic lock: only update if version hasn't changed
-                cur.execute("""
-                    UPDATE ao_project_state
-                    SET state_json = %s, version = %s, last_run_at = NOW(),
-                        run_count = run_count + 1, last_question = %s,
-                        last_answer_summary = %s, updated_at = NOW()
-                    WHERE state_key = 'current' AND version = %s
-                """, (json.dumps(existing, default=str), current_version + 1,
-                      question[:500], summary[:500], current_version))
-
-                if cur.rowcount == 0:
-                    logger.warning("AO state update skipped — version conflict (concurrent write)")
-            else:
-                cur.execute("""
-                    INSERT INTO ao_project_state (state_key, state_json, version,
-                        last_run_at, run_count, last_question, last_answer_summary)
-                    VALUES ('current', %s, 1, NOW(), 1, %s, %s)
-                """, (json.dumps(updates, default=str), question[:500], summary[:500]))
-            conn.commit()
-            cur.close()
-        except Exception as e:
+        Cowork review: snapshot before every mutation, retry-on-conflict (max 2 retries)."""
+        max_retries = 3
+        for attempt in range(max_retries):
+            conn = self._get_conn()
+            if not conn:
+                return
             try:
-                conn.rollback()
-            except Exception:
-                pass
-            logger.warning(f"update_ao_project_state failed: {e}")
-        finally:
-            self._put_conn(conn)
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT state_json, version FROM ao_project_state "
+                    "WHERE state_key = 'current'"
+                )
+                row = cur.fetchone()
+                if row:
+                    existing = row[0] if isinstance(row[0], dict) else json.loads(row[0] or '{}')
+                    current_version = row[1] or 1
+
+                    # Audit trail: snapshot before mutation
+                    cur.execute("""
+                        INSERT INTO ao_state_history
+                            (version, state_json_before, mutation_source, mutation_summary)
+                        VALUES (%s, %s, %s, %s)
+                    """, (current_version, json.dumps(existing, default=str),
+                          mutation_source, summary[:500]))
+
+                    # Merge updates into fresh read
+                    for k, v in updates.items():
+                        if isinstance(v, dict) and isinstance(existing.get(k), dict):
+                            existing[k].update(v)
+                        else:
+                            existing[k] = v
+
+                    # Optimistic lock: only update if version hasn't changed
+                    cur.execute("""
+                        UPDATE ao_project_state
+                        SET state_json = %s, version = %s, last_run_at = NOW(),
+                            run_count = run_count + 1, last_question = %s,
+                            last_answer_summary = %s, updated_at = NOW()
+                        WHERE state_key = 'current' AND version = %s
+                    """, (json.dumps(existing, default=str), current_version + 1,
+                          question[:500], summary[:500], current_version))
+
+                    if cur.rowcount == 0:
+                        # Version conflict — rollback and retry with fresh read
+                        conn.rollback()
+                        cur.close()
+                        self._put_conn(conn)
+                        if attempt < max_retries - 1:
+                            logger.warning(
+                                f"AO state version conflict, retry {attempt + 1}/{max_retries}"
+                            )
+                            continue
+                        else:
+                            logger.error("AO state update failed after max retries — version conflict")
+                            return
+                else:
+                    cur.execute("""
+                        INSERT INTO ao_project_state (state_key, state_json, version,
+                            last_run_at, run_count, last_question, last_answer_summary)
+                        VALUES ('current', %s, 1, NOW(), 1, %s, %s)
+                    """, (json.dumps(updates, default=str), question[:500], summary[:500]))
+                conn.commit()
+                cur.close()
+                return  # success
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                logger.warning(f"update_ao_project_state failed: {e}")
+                return
+            finally:
+                self._put_conn(conn)
 
     def store_push_subscription(self, endpoint: str, p256dh: str, auth: str) -> bool:
         """Upsert a Web Push subscription."""

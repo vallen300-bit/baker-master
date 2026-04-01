@@ -1189,12 +1189,14 @@ class CapabilityRunner:
             return ""
 
     def _auto_update_ao_state(self, question: str, answer: str):
-        """AO-PM-1: Auto-update AO state after each run via Gemini Pro extraction.
-        Cowork review: Flash is too risky for AO's brain — using Pro for reliability."""
+        """AO-PM-1: Auto-update AO state after each run via Anthropic Opus.
+        Cowork review: same model family as reasoning = no interpretation gap."""
         try:
-            from orchestrator.gemini_client import call_pro
             import json
-            resp = call_pro(
+            resp = self.claude.messages.create(
+                model="claude-opus-4-6",
+                max_tokens=500,
+                system="Extract structured state updates from the conversation. Return valid JSON only. No markdown fences.",
                 messages=[{"role": "user", "content": (
                     f"Extract state updates from this AO Project Manager interaction.\n\n"
                     f"Question: {question[:500]}\n\nAnswer: {answer[:3000]}\n\n"
@@ -1203,18 +1205,17 @@ class CapabilityRunner:
                     f"Only include fields with NEW information. Be concise. "
                     f"Return empty object {{\"summary\": \"...\"}} if no state changes."
                 )}],
-                max_tokens=500,
-                system="Extract structured state updates from the conversation. Return valid JSON only.",
             )
-            raw = resp.text.strip()
+            raw = resp.content[0].text.strip()
             if raw.startswith("```"):
                 raw = "\n".join(raw.split("\n")[1:-1])
             updates = json.loads(raw)
             summary = updates.pop("summary", "AO PM interaction")
             from memory.store_back import SentinelStoreBack
             store = SentinelStoreBack._get_global_instance()
-            store.update_ao_project_state(updates, summary, question[:500])
-            logger.info(f"AO state auto-updated: {summary}")
+            store.update_ao_project_state(updates, summary, question[:500],
+                                          mutation_source="opus_auto")
+            logger.info(f"AO state auto-updated (Opus): {summary}")
         except Exception as e:
             logger.debug(f"AO state auto-update failed (non-fatal): {e}")
 
