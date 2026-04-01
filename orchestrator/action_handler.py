@@ -628,23 +628,22 @@ def classify_intent(question: str, conversation_history: str = "") -> dict:
         return quick
 
     try:
-        claude = anthropic.Anthropic(api_key=config.claude.api_key)
+        from orchestrator.gemini_client import call_flash
         # Include conversation history for resolving references like "the same message"
         user_content = question
         if conversation_history:
             user_content = f"Recent conversation:\n{conversation_history}\n\nCurrent message to classify:\n{question}"
-        resp = claude.messages.create(
-            model="claude-haiku-4-5-20251001",
+        resp = call_flash(
+            messages=[{"role": "user", "content": user_content}],
             max_tokens=400,
             system=_INTENT_SYSTEM,
-            messages=[{"role": "user", "content": user_content}],
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="classify_intent")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="classify_intent")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         # Strip markdown code fences if model adds them
         if raw.startswith("```"):
             lines = raw.split("\n")
@@ -1254,12 +1253,9 @@ def handle_meeting_declaration(question: str, channel: str = "ask_baker") -> str
     _log_action("handle_meeting_declaration:ENTERED", f"q={question[:200]}, channel={channel}")
     try:
         from datetime import date
-        claude = anthropic.Anthropic(api_key=config.claude.api_key)
+        from orchestrator.gemini_client import call_flash
         today = date.today().isoformat()
-        resp = claude.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=300,
-            system="You extract meeting details from messages. Return ONLY valid JSON, no markdown.",
+        resp = call_flash(
             messages=[{"role": "user", "content": f"""Extract meeting details from this message:
 "{question}"
 
@@ -1279,13 +1275,15 @@ Status rules:
 - "confirmed": message says "confirmed", "set", "booked", "see you at", or is clearly definite
 - "proposed": message says "let's try", "how about", "would X work"
 - "pending": needs to be arranged"""}],
+            max_tokens=300,
+            system="You extract meeting details from messages. Return ONLY valid JSON, no markdown.",
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="meeting_detect")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="meeting_detect")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
@@ -1359,13 +1357,10 @@ def handle_critical_declaration(question: str, channel: str = "ask_baker") -> st
             listing = "\n".join(f"  {i+1}. {it['description'][:80]}" for i, it in enumerate(items))
             return f"You already have 5 critical items. Which one should I remove?\n\n{listing}\n\nSay \"remove #N\" to clear one first."
 
-        # Haiku extraction
-        claude = anthropic.Anthropic(api_key=config.claude.api_key)
+        # Gemini Flash extraction
+        from orchestrator.gemini_client import call_flash
         today = date.today().isoformat()
-        resp = claude.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=200,
-            system="Extract the critical task. Return ONLY valid JSON, no markdown.",
+        resp = call_flash(
             messages=[{"role": "user", "content": f"""Extract the critical item from this message:
 "{question}"
 
@@ -1377,13 +1372,15 @@ Return JSON:
   "context": "why it is critical (1 line) or null",
   "due_hint": "today / by 3pm / ASAP / null"
 }}"""}],
+            max_tokens=200,
+            system="Extract the critical task. Return ONLY valid JSON, no markdown.",
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="critical_detect")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="critical_detect")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
@@ -1586,22 +1583,21 @@ def _extract_fireflies_params(message: str) -> dict:
     """Use Claude Haiku to extract search parameters from the Director's message."""
     try:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d (%A)")
-        claude = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = claude.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=300,
-            system=_FIREFLIES_PARAM_SYSTEM,
+        from orchestrator.gemini_client import call_flash
+        resp = call_flash(
             messages=[{
                 "role": "user",
                 "content": f"Today is {today}.\n\nMessage: {message}",
             }],
+            max_tokens=300,
+            system=_FIREFLIES_PARAM_SYSTEM,
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="fireflies_params")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="fireflies_params")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
@@ -1953,19 +1949,18 @@ Return JSON with these fields (omit if not mentioned):
 
 Return ONLY valid JSON, no markdown."""
 
-    claude = anthropic.Anthropic(api_key=config.claude.api_key)
-    resp = claude.messages.create(
-        model="claude-haiku-4-5-20251001",
+    from orchestrator.gemini_client import call_flash
+    resp = call_flash(
+        messages=[{"role": "user", "content": message}],
         max_tokens=400,
         system=extraction_prompt,
-        messages=[{"role": "user", "content": message}],
     )
     try:
         from orchestrator.cost_monitor import log_api_cost
-        log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="clickup_params")
+        log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="clickup_params")
     except Exception:
         pass
-    raw = resp.content[0].text.strip()
+    raw = resp.text.strip()
     if raw.startswith("```"):
         lines = raw.split("\n")
         raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
