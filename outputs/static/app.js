@@ -318,6 +318,18 @@ function esc(str) {
     return d.innerHTML;
 }
 
+/** Escape text for safe embedding in inline onclick="..." HTML attributes.
+ *  Handles curly/smart quotes, backslashes, and single quotes that break attribute parsing. */
+function escAttr(str) {
+    if (!str) return '';
+    return esc(str)
+        .replace(/\\/g, '\\\\')
+        .replace(/'/g, "\\'")
+        .replace(/\u201C/g, '\\x22').replace(/\u201D/g, '\\x22')   // " "
+        .replace(/\u2018/g, "\\'").replace(/\u2019/g, "\\'")         // ' '
+        .replace(/\u00AB/g, '\\x22').replace(/\u00BB/g, '\\x22');   // « »
+}
+
 /** Markdown-to-HTML converter. ALWAYS calls esc() first, then applies formatting. Safe for innerHTML. */
 function md(text) {
     if (!text) return '';
@@ -2506,14 +2518,15 @@ function _landingTriageBar(aid, title, body, cardType, itemId) {
 
     if (cardType === 'travel') {
         // Reduced set for travel
-        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Regarding my travel: ' + esc(title).replace(/'/g, "\\'") + '. What should I know?\')">💬 Ask Baker</button>';
-        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Confirm my booking: ' + esc(title).replace(/'/g, "\\'") + '\')">✅ Confirm Booking</button>';
-        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Find a hotel near my destination for ' + esc(title).replace(/'/g, "\\'") + '\')">🏨 Book Accommodation</button>';
+        var _tt = escAttr(title);
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Regarding my travel: ' + _tt + '. What should I know?\')">💬 Ask Baker</button>';
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Confirm my booking: ' + _tt + '\')">✅ Confirm Booking</button>';
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Find a hotel near my destination for ' + _tt + '\')">🏨 Book Accommodation</button>';
         html += '<button class="triage-pill" onclick="event.stopPropagation();_landingDismiss(\'' + cardType + '\',' + itemId + ',this)">✕ Dismiss</button>';
     } else {
         // Full 10 actions for critical, deadline, meeting
-        var _t = esc(title).replace(/'/g, "\\'");
-        var _c = esc(ctx).replace(/'/g, "\\'");
+        var _t = escAttr(title);
+        var _c = escAttr(ctx);
         html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Draft an email regarding: \\x22' + _t + '\\x22. Context: ' + _c + '\')">✉ Draft Email</button>';
         html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Draft a WhatsApp message regarding: \\x22' + _t + '\\x22. Context: ' + _c + '\')">💬 Draft WA</button>';
         html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Analyze this situation in depth: \\x22' + _t + '\\x22. Context: ' + _c + '\')">🔍 Analyze</button>';
