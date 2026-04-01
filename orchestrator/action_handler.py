@@ -628,23 +628,20 @@ def classify_intent(question: str, conversation_history: str = "") -> dict:
         return quick
 
     try:
-        claude = anthropic.Anthropic(api_key=config.claude.api_key)
         # Include conversation history for resolving references like "the same message"
         user_content = question
         if conversation_history:
             user_content = f"Recent conversation:\n{conversation_history}\n\nCurrent message to classify:\n{question}"
-        resp = claude.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=400,
-            system=_INTENT_SYSTEM,
-            messages=[{"role": "user", "content": user_content}],
+        from orchestrator.gemini_client import call_flash
+        resp = call_flash(
+                messages=[{"role": "user", "content": user_content}],
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="classify_intent")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="classify_intent")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         # Strip markdown code fences if model adds them
         if raw.startswith("```"):
             lines = raw.split("\n")
@@ -749,7 +746,7 @@ def generate_email_body(content_request: str, retriever, project=None, role=None
             log_api_cost(config.claude.model, resp.usage.input_tokens, resp.usage.output_tokens, source="email_draft")
         except Exception:
             pass
-        return resp.content[0].text.strip()
+        return resp.text.strip()
     except Exception as e:
         logger.error(f"Email body generation failed: {e}")
         return f"[Error generating email body: {e}]"
@@ -797,7 +794,7 @@ def _generate_whatsapp_body(content_request: str, retriever, recipient_name: str
             log_api_cost(config.claude.model, resp.usage.input_tokens, resp.usage.output_tokens, source="whatsapp_draft")
         except Exception:
             pass
-        return resp.content[0].text.strip()
+        return resp.text.strip()
     except Exception as e:
         logger.error(f"WhatsApp body generation failed: {e}")
         return content_request  # fallback: send the Director's original words
@@ -1257,7 +1254,7 @@ def handle_meeting_declaration(question: str, channel: str = "ask_baker") -> str
         claude = anthropic.Anthropic(api_key=config.claude.api_key)
         today = date.today().isoformat()
         resp = claude.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="gemini-2.5-flash",
             max_tokens=300,
             system="You extract meeting details from messages. Return ONLY valid JSON, no markdown.",
             messages=[{"role": "user", "content": f"""Extract meeting details from this message:
@@ -1282,10 +1279,10 @@ Status rules:
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="meeting_detect")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="meeting_detect")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
@@ -1363,7 +1360,7 @@ def handle_critical_declaration(question: str, channel: str = "ask_baker") -> st
         claude = anthropic.Anthropic(api_key=config.claude.api_key)
         today = date.today().isoformat()
         resp = claude.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model="gemini-2.5-flash",
             max_tokens=200,
             system="Extract the critical task. Return ONLY valid JSON, no markdown.",
             messages=[{"role": "user", "content": f"""Extract the critical item from this message:
@@ -1380,10 +1377,10 @@ Return JSON:
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="critical_detect")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="critical_detect")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
@@ -1586,22 +1583,19 @@ def _extract_fireflies_params(message: str) -> dict:
     """Use Claude Haiku to extract search parameters from the Director's message."""
     try:
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d (%A)")
-        claude = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = claude.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=300,
-            system=_FIREFLIES_PARAM_SYSTEM,
-            messages=[{
+        from orchestrator.gemini_client import call_flash
+        resp = call_flash(
+                messages=[{
                 "role": "user",
                 "content": f"Today is {today}.\n\nMessage: {message}",
             }],
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="fireflies_params")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="fireflies_params")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
@@ -1953,19 +1947,16 @@ Return JSON with these fields (omit if not mentioned):
 
 Return ONLY valid JSON, no markdown."""
 
-    claude = anthropic.Anthropic(api_key=config.claude.api_key)
-    resp = claude.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=400,
-        system=extraction_prompt,
-        messages=[{"role": "user", "content": message}],
+    from orchestrator.gemini_client import call_flash
+    resp = call_flash(
+            messages=[{"role": "user", "content": message}],
     )
     try:
         from orchestrator.cost_monitor import log_api_cost
-        log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="clickup_params")
+        log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="clickup_params")
     except Exception:
         pass
-    raw = resp.content[0].text.strip()
+    raw = resp.text.strip()
     if raw.startswith("```"):
         lines = raw.split("\n")
         raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw
@@ -2281,7 +2272,7 @@ Return ONLY valid JSON, no markdown fences."""
             log_api_cost(config.claude.model, resp.usage.input_tokens, resp.usage.output_tokens, source="clickup_plan")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
@@ -2408,7 +2399,7 @@ Return the REVISED plan as JSON in the same format. Return ONLY valid JSON."""
             log_api_cost(config.claude.model, resp.usage.input_tokens, resp.usage.output_tokens, source="clickup_plan_revise")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)

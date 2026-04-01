@@ -298,11 +298,9 @@ Rules:
 def _generate_structured_actions(claude_client, title: str, body: str, tier: int) -> dict:
     """Generate structured actions JSON for an alert using Haiku (fast + cheap)."""
     try:
-        resp = claude_client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=2048,
-            system=_STRUCTURED_ACTIONS_PROMPT,
-            messages=[{
+        from orchestrator.gemini_client import call_flash
+        resp = call_flash(
+                messages=[{
                 "role": "user",
                 "content": f"Alert (Tier {tier}): {title}\n\n{body}",
             }],
@@ -310,11 +308,11 @@ def _generate_structured_actions(claude_client, title: str, body: str, tier: int
         # PHASE-4A: Log Haiku cost
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens,
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens,
                          resp.usage.output_tokens, source="structured_actions")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         # Strip markdown code fences if present
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
@@ -385,7 +383,6 @@ class SentinelPipeline:
     def __init__(self):
         self.retriever = SentinelRetriever()
         self.prompt_builder = SentinelPromptBuilder()
-        self.claude = anthropic.Anthropic(api_key=config.claude.api_key)
         self.store = SentinelStoreBack()
 
     # -------------------------------------------------------
@@ -518,7 +515,7 @@ class SentinelPipeline:
                 messages=prompt["messages"],
                 extra_headers={"anthropic-beta": config.claude.beta_header},
             )
-            raw_text = response.content[0].text
+            raw_text = response.text
             input_tokens = response.usage.input_tokens
             output_tokens = response.usage.output_tokens
 
