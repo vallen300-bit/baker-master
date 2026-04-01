@@ -1696,6 +1696,7 @@ def run_agent_loop(
     t0 = time.time()
     timeout = timeout_override or AGENT_TIMEOUT_SECONDS
     executor = ToolExecutor()
+    claude = anthropic.Anthropic(api_key=config.claude.api_key)
 
     messages = []
     for msg in (history or []):
@@ -1903,6 +1904,7 @@ def run_agent_loop_streaming(
     t0 = time.time()
     timeout = timeout_override or AGENT_TIMEOUT_SECONDS
     executor = ToolExecutor()
+    claude = anthropic.Anthropic(api_key=config.claude.api_key)
 
     messages = []
     for msg in (history or []):
