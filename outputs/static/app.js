@@ -2581,6 +2581,12 @@ function _landingMarkDone(deadlineId, btn) {
 
 function _landingCancelMeeting(meetingId, btn) {
     var card = btn.closest('.card');
+    // Calendar events have non-numeric IDs (e.g. "cal-Barclays-Bank") — can't cancel via API
+    if (String(meetingId).indexOf('cal-') === 0 || isNaN(Number(meetingId))) {
+        if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
+        _showToast('Meeting dismissed');
+        return;
+    }
     bakerFetch('/api/detected-meetings/' + meetingId + '/cancel', { method: 'POST' }).then(function() {
         if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
         _showToast('Meeting cancelled');
