@@ -439,6 +439,7 @@ const TAB_VIEW_MAP = {
     'search': 'viewSearch',
     'ask-baker': 'viewAskBaker',
     'ask-specialist': 'viewAskSpecialist',
+    'ask-client-pm': 'viewAskClientPM',
     'travel': 'viewTravel',
     'media': 'viewMedia',
     'documents': 'viewDocuments',
@@ -448,7 +449,7 @@ const TAB_VIEW_MAP = {
     'ideas': 'viewIdeas',
 };
 
-const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'person-detail', 'tags', 'search', 'ask-baker', 'ask-specialist', 'travel', 'media', 'documents', 'dossiers', 'browser', 'baker-data', 'ideas']);
+const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'person-detail', 'tags', 'search', 'ask-baker', 'ask-specialist', 'ask-client-pm', 'travel', 'media', 'documents', 'dossiers', 'browser', 'baker-data', 'ideas']);
 
 function switchTab(tabName) {
     document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
@@ -480,6 +481,7 @@ function switchTab(tabName) {
     else if (tabName === 'search') loadSearchTab();
     else if (tabName === 'ask-baker') { updateScanContextBadge(); focusScanInput(); }
     else if (tabName === 'ask-specialist') loadSpecialistTab();
+    else if (tabName === 'ask-client-pm') loadClientPMTab();
     else if (tabName === 'travel') loadTravelTab();
     else if (tabName === 'media') loadMediaTab();
     else if (tabName === 'documents') loadDocumentsTab();
@@ -5878,6 +5880,188 @@ function appendSpecialistBubble(role, content, id) {
     return div;
 }
 
+// ───────────────────────────────────────────────────────────
+// CLIENT-PM-1: Client PM state
+// ───────────────────────────────────────────────────────────
+var _clientPMSlug = null;
+var _clientPMHistories = {};
+var _clientPMStreaming = false;
+var _clientPMContext = 'global';
+
+function _clientPMContextKey() {
+    return (_clientPMContext || 'global') + ':' + (_clientPMSlug || '');
+}
+
+function _getClientPMHistory() {
+    var key = _clientPMContextKey();
+    if (!_clientPMHistories[key]) _clientPMHistories[key] = [];
+    return _clientPMHistories[key];
+}
+
+async function loadClientPMTab() {
+    if (_currentMatterSlug) {
+        _clientPMContext = 'matter:' + _currentMatterSlug;
+    }
+
+    var picker = document.getElementById('clientPMPicker');
+    if (!picker) return;
+    if (picker.dataset.loaded) return;
+
+    try {
+        var resp = await bakerFetch('/api/client-pms');
+        if (!resp.ok) return;
+        var data = await resp.json();
+        if (!data.client_pms) return;
+
+        while (picker.options.length > 1) picker.remove(1);
+
+        for (var i = 0; i < data.client_pms.length; i++) {
+            var pm = data.client_pms[i];
+            var opt = document.createElement('option');
+            opt.value = pm.slug;
+            opt.textContent = pm.name;
+            picker.appendChild(opt);
+        }
+        picker.dataset.loaded = 'true';
+
+        // Auto-select if only one client PM exists
+        if (data.client_pms.length === 1) {
+            picker.value = data.client_pms[0].slug;
+            picker.dispatchEvent(new Event('change'));
+        }
+    } catch (e) {
+        console.error('loadClientPMTab failed:', e);
+    }
+}
+
+function appendClientPMBubble(role, content, id) {
+    var container = document.getElementById('clientPMMessages');
+    if (!container) return;
+    var div = document.createElement('div');
+    div.className = 'scan-msg ' + (role === 'user' ? 'user' : 'baker');
+    if (id) div.id = id;
+    if (role === 'assistant' && !content) {
+        var dots = document.createElement('div');
+        dots.className = 'thinking';
+        var span = document.createElement('span');
+        span.className = 'thinking-dots';
+        for (var i = 0; i < 3; i++) span.appendChild(document.createElement('span'));
+        dots.appendChild(span);
+        dots.appendChild(document.createTextNode(' Client PM is thinking...'));
+        div.appendChild(dots);
+    } else if (role === 'assistant') {
+        var mdDiv = document.createElement('div');
+        mdDiv.className = 'md-content';
+        setSafeHTML(mdDiv, md(content));
+        div.appendChild(mdDiv);
+    } else {
+        div.textContent = content;
+    }
+    container.prepend(div);
+    container.scrollTop = 0;
+}
+
+async function sendClientPMMessage(question) {
+    if (_clientPMStreaming || !question.trim() || !_clientPMSlug) return;
+    _clientPMStreaming = true;
+
+    var _panelId = 'clientPMArtifactPanel';
+    var _itemsId = 'clientPMArtifactItems';
+    clearArtifactPanel(_panelId, _itemsId);
+
+    addArtifactCapability(_itemsId, _panelId, [_clientPMSlug]);
+
+    var sendBtn = document.getElementById('clientPMSendBtn');
+    var input = document.getElementById('clientPMInput');
+    if (sendBtn) sendBtn.disabled = true;
+    if (input) { input.disabled = true; input.value = ''; }
+
+    _getClientPMHistory().push({ role: 'user', content: question });
+    appendClientPMBubble('user', question);
+
+    var replyId = 'clientpm-reply-' + Date.now();
+    appendClientPMBubble('assistant', '', replyId);
+    var replyEl = document.getElementById(replyId);
+    if (replyEl) setSafeHTML(replyEl, '<div class="thinking"><span class="thinking-dots"><span></span><span></span><span></span></span> Client PM is thinking...</div>');
+
+    var fullResponse = '';
+    try {
+        var resp = await bakerFetch('/api/scan/client-pm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            timeout: 180000,
+            body: JSON.stringify({
+                question: question,
+                capability_slug: _clientPMSlug,
+                history: _getClientPMHistory().slice(-30),
+            }),
+        });
+        if (!resp.ok) throw new Error('Client PM API returned ' + resp.status);
+
+        var reader = resp.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+
+        while (true) {
+            var chunk = await reader.read();
+            if (chunk.done) break;
+            buffer += decoder.decode(chunk.value, { stream: true });
+            var lines = buffer.split('\n');
+            buffer = lines.pop();
+            for (var li = 0; li < lines.length; li++) {
+                if (!lines[li].startsWith('data: ')) continue;
+                var payload = lines[li].slice(6).trim();
+                if (payload === '[DONE]') continue;
+                try {
+                    var data = JSON.parse(payload);
+                    if (data.status && !fullResponse && replyEl) {
+                        var _sLabels = {
+                            'retrieving': 'Searching client data...',
+                            'thinking': 'Analyzing context...',
+                            'generating': 'Writing response...'
+                        };
+                        var _sLabel = _sLabels[data.status];
+                        if (_sLabel) {
+                            var _sThink = replyEl.querySelector('.thinking');
+                            if (_sThink) {
+                                var _sNodes = _sThink.childNodes;
+                                for (var _si = _sNodes.length - 1; _si >= 0; _si--) {
+                                    if (_sNodes[_si].nodeType === 3) _sThink.removeChild(_sNodes[_si]);
+                                }
+                                _sThink.appendChild(document.createTextNode(' ' + _sLabel));
+                            }
+                        }
+                    }
+                    if (data.token) {
+                        if (!fullResponse && replyEl) replyEl.textContent = '';
+                        fullResponse += data.token;
+                        if (replyEl) setSafeHTML(replyEl, '<div class="md-content">' + md(fullResponse) + '</div>');
+                    }
+                    if (data.capabilities) {
+                        addArtifactCapability(_itemsId, _panelId, data.capabilities);
+                    }
+                    if (data.tool_call) {
+                        addArtifactToolCall(_itemsId, _panelId, data.tool_call);
+                    }
+                    if (data.task_id) {
+                        addArtifactTaskId(_itemsId, _panelId, data.task_id);
+                    }
+                } catch (pe) { /* skip parse errors */ }
+            }
+        }
+    } catch (err) {
+        if (replyEl) setSafeHTML(replyEl, '<span class="error">[Error: ' + escAttr(err.message) + ']</span>');
+    }
+
+    if (fullResponse) {
+        _getClientPMHistory().push({ role: 'assistant', content: fullResponse });
+    }
+
+    _clientPMStreaming = false;
+    if (sendBtn) sendBtn.disabled = !_clientPMSlug;
+    if (input) { input.disabled = !_clientPMSlug; input.focus(); }
+}
+
 // ═══ DEBOUNCE + COMMAND BAR DETECTION ═══
 
 function debounce(fn, ms) {
@@ -6058,6 +6242,38 @@ async function init() {
             if (_specialistSlug && input) input.focus();
         });
     }
+
+    // Client PM form
+    var clientPMForm = document.getElementById('clientPMForm');
+    if (clientPMForm) {
+        clientPMForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            var input = document.getElementById('clientPMInput');
+            if (input && input.value.trim()) sendClientPMMessage(input.value.trim());
+        });
+    }
+    var clientPMPicker = document.getElementById('clientPMPicker');
+    if (clientPMPicker) {
+        clientPMPicker.addEventListener('change', function() {
+            _clientPMSlug = clientPMPicker.value || null;
+            var input = document.getElementById('clientPMInput');
+            var sendBtn = document.getElementById('clientPMSendBtn');
+            if (input) input.disabled = !_clientPMSlug;
+            if (sendBtn) sendBtn.disabled = !_clientPMSlug;
+            var container = document.getElementById('clientPMMessages');
+            if (container) {
+                container.textContent = '';
+                var existing = _getClientPMHistory();
+                for (var i = 0; i < existing.length; i++) {
+                    appendClientPMBubble(existing[i].role, existing[i].content);
+                }
+            }
+            if (_clientPMSlug && input) input.focus();
+        });
+    }
+
+    // Client PM file upload
+    setupDocumentUpload('clientPMFile', 'clientPMUploadStatus', 'viewAskClientPM');
 
     // Load morning brief
     loadMorningBrief();

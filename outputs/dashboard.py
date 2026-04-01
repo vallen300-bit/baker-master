@@ -4821,6 +4821,28 @@ async def scan_specialist(req: SpecialistScanRequest):
                                   entity_context=entity_context)
 
 
+@app.post("/api/scan/client-pm", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def scan_client_pm(req: SpecialistScanRequest):
+    """
+    CLIENT-PM-1: Force-route to a Client PM capability with deep context.
+    Reuses the specialist pre-fetch pattern — same deep context injection.
+    """
+    return await scan_specialist(req)
+
+
+@app.get("/api/client-pms", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_client_pms():
+    """CLIENT-PM-1: List active client PM capabilities for the sidebar picker."""
+    try:
+        store = _get_store()
+        caps = store.get_capability_sets(active_only=True)
+        pms = [_serialize(c) for c in caps if c.get("capability_type") == "client_pm"]
+        return {"client_pms": pms, "count": len(pms)}
+    except Exception as e:
+        logger.error(f"GET /api/client-pms failed: {e}")
+        return {"client_pms": [], "count": 0, "error": str(e)}
+
+
 @app.post("/api/scan/image", tags=["scan"], dependencies=[Depends(verify_api_key)])
 async def scan_image(
     file: UploadFile = File(...),

@@ -13,7 +13,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=57">
+    <link rel="stylesheet" href="/static/style.css?v=58">
 </head>
 <body>
 
@@ -82,6 +82,9 @@
         </div>
         <div class="nav-item" data-tab="ask-specialist">
             <span class="nav-label">Ask Specialist</span>
+        </div>
+        <div class="nav-item" data-tab="ask-client-pm">
+            <span class="nav-label">Client PM</span>
         </div>
         <div class="nav-item" data-tab="search">
             <span class="nav-label">Search</span>
@@ -358,6 +361,47 @@
             </div>
         </div>
 
+        <!-- VIEW: Client PM -->
+        <div class="view" id="viewAskClientPM">
+            <div class="scan-view-header" style="display:flex;align-items:center;gap:14px;margin-bottom:14px;">
+                <span class="scan-view-title">Client PM</span>
+                <select id="clientPMPicker" class="specialist-picker">
+                    <option value="">Select a client...</option>
+                </select>
+            </div>
+            <div class="scan-layout">
+                <div class="scan-view-body scan-top-input">
+                    <form id="clientPMForm" class="scan-form" autocomplete="off">
+                        <input id="clientPMFile" type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.png,.jpg" hidden />
+                        <button type="button" class="scan-upload-btn" onclick="document.getElementById('clientPMFile').click()" title="Upload document">&#x1F4CE;</button>
+                        <input id="clientPMInput" type="text" class="scan-input" placeholder="Ask the Client PM..." maxlength="4000" required disabled />
+                        <button type="submit" class="scan-send" id="clientPMSendBtn" disabled>Send</button>
+                    </form>
+                    <div id="clientPMUploadStatus" class="upload-status" hidden></div>
+                    <div id="clientPMMessages" class="scan-messages"></div>
+                </div>
+                <div class="artifact-panel open" id="clientPMArtifactPanel">
+                    <div class="artifact-items" id="clientPMArtifactItems">
+                        <div id="clientPMPersistentContent">
+                            <div class="artifact-section-label">Generated Files</div>
+                            <div id="clientPMGeneratedFiles" class="generated-files-list">
+                                <div class="panel-empty-state">No documents yet.</div>
+                            </div>
+                            <div class="panel-divider"></div>
+                            <div class="artifact-section-label">Upload Document</div>
+                            <div class="drop-zone" id="clientPMDropZone">
+                                <input type="file" id="clientPMDropInput" accept=".pdf,.docx,.xlsx,.csv,.txt,.png,.jpg" hidden multiple />
+                                <div class="drop-zone-icon">&#128206;</div>
+                                <div class="drop-zone-text">Drop file or click to upload</div>
+                                <div class="drop-zone-hint">PDF, DOCX, XLSX, CSV, TXT, PNG, JPG</div>
+                            </div>
+                            <div id="clientPMDropStatus" class="drop-status" hidden></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- VIEW: Documents -->
         <div class="view" id="viewDocuments">
             <div class="docs-layout">
@@ -442,7 +486,7 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=85"></script>
+<script src="/static/app.js?v=86"></script>
 <script>
 // PWA-DESKTOP-1: Register service worker for installability
 if ('serviceWorker' in navigator) {
