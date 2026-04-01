@@ -1066,6 +1066,14 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
 }
+/* Inline streaming indicator — stays below content while tools run */
+.streaming-indicator {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--text3); padding: 4px 0; margin-top: 6px;
+}
+.streaming-indicator .thinking-dots span {
+  width: 5px; height: 5px;
+}
 
 /* === CITATIONS (SPECIALIST-THINKING-1) === */
 .citation {

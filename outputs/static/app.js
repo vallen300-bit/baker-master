@@ -3473,13 +3473,19 @@ async function sendScanMessage(question) {
                         if (!fullResponse && replyEl) replyEl.textContent = ''; // clear thinking indicator
                         fullResponse += data.token;
                         // SECURITY: md() calls esc() first to sanitize HTML entities before formatting
-                        if (replyEl) setSafeHTML(replyEl, '<div class="md-content">' + md(fullResponse) + '</div>');
+                        if (replyEl) {
+                            setSafeHTML(replyEl, '<div class="md-content">' + md(fullResponse) + '</div>' +
+                                '<div class="streaming-indicator"><span class="thinking-dots"><span></span><span></span><span></span></span> <span class="si-label">Working...</span></div>');
+                        }
                     }
                     if (data.capabilities) {
                         addArtifactCapability(_itemsId, _panelId, data.capabilities);
                     }
                     if (data.tool_call) {
                         addArtifactSource(_itemsId, _panelId, data.tool_call);
+                        // UX: show which tool is running below content
+                        var _siLabel = replyEl && replyEl.querySelector('.si-label');
+                        if (_siLabel) _siLabel.textContent = esc(data.tool_call) + '...';
                     }
                     if (data.task_id) {
                         window._lastScanTaskId = data.task_id; // LEARNING-LOOP: capture for feedback buttons
@@ -3494,6 +3500,12 @@ async function sendScanMessage(question) {
     } catch (err) {
         fullResponse = 'Connection error: ' + err.message;
         if (replyEl) replyEl.textContent = fullResponse;
+    }
+
+    // Remove streaming indicator now that stream is done
+    if (replyEl) {
+        var _si = replyEl.querySelector('.streaming-indicator');
+        if (_si) _si.remove();
     }
 
     // Document generation
