@@ -1833,7 +1833,6 @@ def run_agent_loop(
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tu.id,
-                    "name": tu.name,
                     "content": result_text,
                 })
 
@@ -2094,7 +2093,6 @@ def run_agent_loop_streaming(
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tu.id,
-                    "name": tu.name,
                     "content": result_text,
                 })
                 # Stream screenshot to mobile if browse_website returned one
