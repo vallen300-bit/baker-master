@@ -2110,30 +2110,35 @@ function renderMeetingCard(m) {
     var dotClass = m.prepped ? 'green' : 'amber';
     var statusText = m.prepped ? 'Prepped' : 'Pending';
 
-    // EXPANDABLE-CARDS-1: Build expandable detail from all available meeting info
+    // Build detail content
     var detailLines = [];
     if (m.location && m.location.trim()) detailLines.push('Location: ' + m.location.trim());
     if ((m.attendees || []).length > 0) detailLines.push('Attendees: ' + (m.attendees || []).join(', '));
     if (m.prep_notes && m.prep_notes.trim()) detailLines.push('\n' + m.prep_notes.trim());
     var detailContent = detailLines.join('\n');
-    var hasDetail = detailContent.length > 0;
 
-    var clickAttr = hasDetail ? ' onclick="var n=this.querySelector(\'.prep-notes\');n.style.display=n.style.display===\'none\'?\'block\':\'none\'" style="cursor:pointer;"' : '';
-    var chevron = hasDetail ? ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span>' : '';
-    var notesHtml = hasDetail
-        ? '<div class="prep-notes" style="display:none;font-size:12px;color:var(--text2);padding:8px 18px 12px 18px;line-height:1.5;white-space:pre-wrap;border-top:1px solid var(--border-light);margin-top:4px;">' + esc(detailContent).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') + '</div>'
-        : '';
-    return '<div class="card card-compact"' + clickAttr + '><div class="card-header">' +
+    // Use event ID or generate one from title
+    var meetingId = m.id || m.event_id || ('cal-' + (m.title || '').replace(/\s+/g, '-').substring(0, 30));
+    var aid = String(meetingId);
+
+    var html = '<div class="card card-compact" data-item-id="' + esc(aid) + '" data-item-type="meeting" style="cursor:pointer;" onclick="_toggleTriageCard(this)"><div class="card-header">' +
         '<span class="nav-dot ' + dotClass + '" style="margin-top:5px;"></span>' +
-        '<span class="card-title">' + esc(m.title || '') + chevron + '</span>' +
+        '<span class="card-title">' + esc(m.title || '') + ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span></span>' +
         '<span class="card-time">' + esc(startTime) + '</span>' +
         '</div>' +
         '<div class="card-body" style="font-size:11px;color:var(--text3);padding:2px 0 4px 18px;">' +
         (attendeeStr ? esc(attendeeStr) + ' &middot; ' : '') +
         '<span style="color:var(--' + (m.prepped ? 'green' : 'amber') + ');">' + esc(statusText) + '</span>' +
-        '</div>' +
-        notesHtml +
         '</div>';
+
+    // Expandable detail + triage
+    html += '<div class="triage-detail" style="display:none;">';
+    if (detailContent) {
+        html += '<div style="font-size:12px;color:var(--text2);padding:8px 18px 12px;line-height:1.5;white-space:pre-wrap;border-top:1px solid var(--border-light);">' + esc(detailContent).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') + '</div>';
+    }
+    html += _landingTriageBar(aid, m.title || '', attendeeStr, 'meeting', meetingId);
+    html += '</div></div>';
+    return html;
 }
 
 // MEETINGS-DETECT-1: Render detected meetings from Director messages
@@ -2517,35 +2522,27 @@ function _landingTriageBar(aid, title, body, cardType, itemId) {
     var ctx = (body || '').substring(0, 200);
     var html = '<div class="triage-actions" style="display:flex;flex-wrap:wrap;gap:6px;padding:8px 16px 12px;">';
 
-    if (cardType === 'travel') {
-        // Reduced set for travel
-        var _tt = escAttr(title);
-        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Regarding my travel: ' + _tt + '. What should I know?\')">💬 Ask Baker</button>';
-        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Confirm my booking: ' + _tt + '\')">✅ Confirm Booking</button>';
-        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Find a hotel near my destination for ' + _tt + '\')">🏨 Book Accommodation</button>';
-        html += '<button class="triage-pill" onclick="event.stopPropagation();_landingDismiss(\'' + cardType + '\',' + itemId + ',this)">✕ Dismiss</button>';
-    } else {
-        // Full 10 actions for critical, deadline, meeting
-        var _t = escAttr(title);
-        var _c = escAttr(ctx);
-        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Draft an email regarding: \\x22' + _t + '\\x22. Context: ' + _c + '\')">✉ Draft Email</button>';
-        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Draft a WhatsApp message regarding: \\x22' + _t + '\\x22. Context: ' + _c + '\')">💬 Draft WA</button>';
-        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Analyze this situation in depth: \\x22' + _t + '\\x22. Context: ' + _c + '\')">🔍 Analyze</button>';
-        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Give me a 3-line summary of: \\x22' + _t + '\\x22. Context: ' + _c + '\')">📋 Summarize</button>';
-        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Run a comprehensive dossier on the key people in: \\x22' + _t + '\\x22\')">🗂 Dossier</button>';
-        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageCreateClickUp(' + aid + ',\'' + _t + '\',\'' + _c + '\')">↗ ClickUp</button>';
-        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Draft an email delegating this task: \\x22' + _t + '\\x22\')">👤 Delegate</button>';
-        html += '<button class="triage-pill" onclick="event.stopPropagation();_landingDismiss(\'' + cardType + '\',' + itemId + ',this)">✕ Dismiss</button>';
-        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Regarding: \\x22' + _t + '\\x22. ' + _c + '. What should I know?\')">💬 Ask Baker</button>';
+    // Full triage actions for ALL card types (unified)
+    var _t = escAttr(title);
+    var _c = escAttr(ctx);
+    html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Draft an email regarding: \\x22' + _t + '\\x22. Context: ' + _c + '\')">✉ Draft Email</button>';
+    html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Draft a WhatsApp message regarding: \\x22' + _t + '\\x22. Context: ' + _c + '\')">💬 Draft WA</button>';
+    html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Analyze this situation in depth: \\x22' + _t + '\\x22. Context: ' + _c + '\')">🔍 Analyze</button>';
+    html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Give me a 3-line summary of: \\x22' + _t + '\\x22. Context: ' + _c + '\')">📋 Summarize</button>';
+    html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Run a comprehensive dossier on the key people in: \\x22' + _t + '\\x22\')">🗂 Dossier</button>';
+    html += '<button class="triage-pill" onclick="event.stopPropagation();_triageCreateClickUp(' + aid + ',\'' + _t + '\',\'' + _c + '\')">↗ ClickUp</button>';
+    html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Draft an email delegating this task: \\x22' + _t + '\\x22\')">👤 Delegate</button>';
+    html += '<button class="triage-pill" onclick="event.stopPropagation();_landingDismiss(\'' + cardType + '\',' + itemId + ',this)">✕ Dismiss</button>';
+    html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Regarding: \\x22' + _t + '\\x22. ' + _c + '. What should I know?\')">💬 Ask Baker</button>';
 
-        // Last button varies by card type
-        if (cardType === 'critical') {
-            html += '<button class="triage-pill" onclick="event.stopPropagation();_landingMarkNotCritical(' + itemId + ',this)">⚡ Not Critical</button>';
-        } else if (cardType === 'deadline') {
-            html += '<button class="triage-pill" style="background:var(--green);color:#fff;border-color:var(--green);" onclick="event.stopPropagation();_landingMarkDone(' + itemId + ',this)">✓ Mark Done</button>';
-        } else if (cardType === 'meeting') {
-            html += '<button class="triage-pill" style="background:var(--red);color:#fff;border-color:var(--red);" onclick="event.stopPropagation();_landingCancelMeeting(' + itemId + ',this)">✕ Cancel Meeting</button>';
-        }
+    // Context-specific final buttons
+    if (cardType === 'critical') {
+        html += '<button class="triage-pill" style="background:var(--green);color:#fff;border-color:var(--green);" onclick="event.stopPropagation();_landingMarkDone(' + itemId + ',this)">✓ Mark Done</button>';
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_landingMarkNotCritical(' + itemId + ',this)">⚡ Not Critical</button>';
+    } else if (cardType === 'deadline') {
+        html += '<button class="triage-pill" style="background:var(--green);color:#fff;border-color:var(--green);" onclick="event.stopPropagation();_landingMarkDone(' + itemId + ',this)">✓ Mark Done</button>';
+    } else if (cardType === 'meeting') {
+        html += '<button class="triage-pill" style="background:var(--red);color:#fff;border-color:var(--red);" onclick="event.stopPropagation();_landingCancelMeeting(' + itemId + ',this)">✕ Cancel Meeting</button>';
     }
     html += '</div>';
     return html;
@@ -2556,6 +2553,7 @@ function _landingDismiss(cardType, itemId, btn) {
     var endpoint = '';
     if (cardType === 'critical') endpoint = '/api/critical/' + itemId + '/done';
     else if (cardType === 'deadline') endpoint = '/api/deadlines/' + itemId + '/dismiss';
+    else if (cardType === 'travel') endpoint = '/api/deadlines/' + itemId + '/dismiss';
     else if (cardType === 'meeting') endpoint = '/api/alerts/' + itemId + '/dismiss';
     else endpoint = '/api/alerts/' + itemId + '/dismiss';
     if (!endpoint) return;

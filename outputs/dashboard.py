@@ -2179,7 +2179,7 @@ async def get_morning_brief():
             """)
             top_fires = [_serialize(dict(r)) for r in cur.fetchall()]
 
-            # Deadlines this week — exclude critical items (shown in Critical section)
+            # Deadlines this week — exclude critical (shown in Critical) and travel (shown in Travel)
             cur.execute("""
                 SELECT id, description, due_date, source_type, confidence,
                        priority, status, created_at,
@@ -2189,7 +2189,10 @@ async def get_morning_brief():
                   AND (is_critical IS NOT TRUE)
                   AND due_date >= CURRENT_DATE
                   AND due_date <= CURRENT_DATE + INTERVAL '7 days'
-                ORDER BY due_date ASC LIMIT 10
+                  AND NOT (description ILIKE '%%flight%%' OR description ILIKE '%%departure%%'
+                           OR description ILIKE '%%travel%%' OR description ILIKE '%%airport%%'
+                           OR description ILIKE '%%boarding%%' OR description ILIKE '%%check-in%%')
+                ORDER BY priority DESC, created_at DESC LIMIT 10
             """)
             deadlines = [_serialize(dict(r)) for r in cur.fetchall()]
 
