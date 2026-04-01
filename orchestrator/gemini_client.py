@@ -12,6 +12,7 @@ Usage:
 """
 import logging
 import os
+import time
 
 from config.settings import config
 
@@ -102,23 +103,33 @@ def generate(
     if system:
         gen_config.system_instruction = system
 
-    try:
-        response = client.models.generate_content(
-            model=model,
-            contents=contents,
-            config=gen_config,
-        )
+    # Retry with exponential backoff for transient errors (503, 429)
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=gen_config,
+            )
 
-        text = response.text or ""
-        usage = getattr(response, "usage_metadata", None)
-        input_tokens = getattr(usage, "prompt_token_count", 0) or 0 if usage else 0
-        output_tokens = getattr(usage, "candidates_token_count", 0) or 0 if usage else 0
+            text = response.text or ""
+            usage = getattr(response, "usage_metadata", None)
+            input_tokens = getattr(usage, "prompt_token_count", 0) or 0 if usage else 0
+            output_tokens = getattr(usage, "candidates_token_count", 0) or 0 if usage else 0
 
-        return GeminiResponse(text, input_tokens, output_tokens)
+            return GeminiResponse(text, input_tokens, output_tokens)
 
-    except Exception as e:
-        logger.error(f"Gemini API error ({model}): {e}")
-        raise
+        except Exception as e:
+            err_str = str(e)
+            is_transient = any(code in err_str for code in ("503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "overloaded"))
+            if is_transient and attempt < max_retries - 1:
+                wait = 2 ** attempt  # 1s, 2s
+                logger.warning(f"Gemini transient error ({model}), retry {attempt+1}/{max_retries} in {wait}s: {e}")
+                time.sleep(wait)
+                continue
+            logger.error(f"Gemini API error ({model}): {e}")
+            raise
 
 
 def call_flash(messages: list, max_tokens: int = 2000, system: str = None) -> GeminiResponse:
@@ -243,12 +254,27 @@ class _GeminiMessages:
                 disable=True,
             )
 
-        # 4. Call Gemini
-        response = client.models.generate_content(
-            model=model,
-            contents=contents,
-            config=gen_config,
-        )
+        # 4. Call Gemini (with retry for transient errors)
+        response = None
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=gen_config,
+                )
+                break
+            except Exception as e:
+                err_str = str(e)
+                is_transient = any(code in err_str for code in ("503", "429", "UNAVAILABLE", "RESOURCE_EXHAUSTED", "overloaded"))
+                if is_transient and attempt < max_retries - 1:
+                    wait = 2 ** attempt
+                    logger.warning(f"GeminiToolClient transient error ({model}), retry {attempt+1}/{max_retries} in {wait}s: {e}")
+                    time.sleep(wait)
+                    continue
+                logger.error(f"GeminiToolClient API error ({model}): {e}")
+                raise
 
         # 5. Convert Gemini response → Anthropic-like response
         usage = getattr(response, "usage_metadata", None)

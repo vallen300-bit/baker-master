@@ -52,6 +52,7 @@ def _ensure_table():
 
 def get_current_priorities() -> list:
     """Get active priorities for this week."""
+    _ensure_table()
     try:
         from memory.store_back import SentinelStoreBack
         import psycopg2.extras

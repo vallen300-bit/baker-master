@@ -96,6 +96,9 @@ class SentinelStoreBack:
         # SLACK-STRUCTURED-1: Ensure slack_messages table exists
         self._ensure_slack_messages_table()
 
+        # Ensure baker-slack Qdrant collection exists
+        self._ensure_collection("baker-slack", size=1024)
+
         # Ensure insights table exists (INSIGHT-1)
         self._ensure_insights_table()
 

@@ -272,6 +272,19 @@ def _convert_heic_to_jpeg(filepath: Path) -> bytes:
     return buf.getvalue()
 
 
+def _detect_mime_from_bytes(data: bytes) -> str | None:
+    """Detect image MIME type from magic bytes (file header)."""
+    if data[:3] == b'\xff\xd8\xff':
+        return "image/jpeg"
+    if data[:4] == b'\x89PNG':
+        return "image/png"
+    if data[:4] == b'RIFF' and data[8:12] == b'WEBP':
+        return "image/webp"
+    if data[:4] == b'GIF8':
+        return "image/gif"
+    return None
+
+
 def _load_image_bytes(filepath: Path) -> tuple[bytes, str]:
     """Load image bytes, converting HEIC if needed. Returns (bytes, mime_type)."""
     ext = filepath.suffix.lower()
@@ -281,7 +294,8 @@ def _load_image_bytes(filepath: Path) -> tuple[bytes, str]:
         mime = "image/jpeg"
     else:
         img_bytes = filepath.read_bytes()
-        mime = _IMAGE_MIME.get(ext, "image/jpeg")
+        # Detect actual MIME from magic bytes — file extension may lie
+        mime = _detect_mime_from_bytes(img_bytes) or _IMAGE_MIME.get(ext, "image/jpeg")
 
     return img_bytes, mime
 

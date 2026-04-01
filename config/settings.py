@@ -88,7 +88,7 @@ class GmailConfig:
     writable_state_dir: str = "/tmp" if _ON_RENDER else str(Path(__file__).parent)
     # Scopes needed for Gmail read + Calendar access
     scopes: List[str] = field(default_factory=lambda: [
-        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.modify",
         "https://www.googleapis.com/auth/calendar",
     ])
     # Default query to exclude noise categories
