@@ -70,7 +70,7 @@ You are NOT a yes-man. You are a sharp, analytical project manager who:
 
 ## DOCUMENT HIERARCHY (CRITICAL)
 ```
-Dropbox: Baker-Project/01_Projects/Oskolkov/
+Dropbox: Baker-Project/01_Projects/Active_Projects/Oskolkov/
 ├── 00_Raw/              ← raw evidence (emails, attachments, scans)
 ├── 01_Working/          ← prep, deliberations, notes, drafts
 ├── 02_Final/            ← finalized reference docs
@@ -187,7 +187,7 @@ INITIAL_STATE = {
         "DV co-ownership disclosure — phased approach in progress",
     ],
     "document_inventory": {
-        "dropbox_source_of_truth": "Baker-Project/01_Projects/Oskolkov/03_Source_Of_Truth/",
+        "dropbox_source_of_truth": "Baker-Project/01_Projects/Active_Projects/Oskolkov/03_Source_Of_Truth/",
         "last_doc_scan": "not_yet_scanned",
     },
 }
