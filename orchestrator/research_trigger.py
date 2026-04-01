@@ -18,8 +18,6 @@ import json
 import logging
 from datetime import datetime, timezone
 
-import anthropic
-
 from config.settings import config
 
 logger = logging.getLogger("baker.research_trigger")
@@ -163,25 +161,24 @@ def classify_research_trigger(message_body: str, sender_name: str) -> dict:
         # Inject active matters for business context
         matter_context = _get_matter_context_for_classification()
 
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        from orchestrator.gemini_client import call_flash
+        resp = call_flash(
+            messages=[{"role": "user", "content": f"From: {sender_name}\n\n{message_body[:3000]}"}],
             max_tokens=400,
             system=_CLASSIFY_PROMPT + matter_context,
-            messages=[{"role": "user", "content": f"From: {sender_name}\n\n{message_body[:3000]}"}],
         )
 
         # Log cost
         try:
             from orchestrator.cost_monitor import log_api_cost
             log_api_cost(
-                "claude-haiku-4-5-20251001", resp.usage.input_tokens,
+                "gemini-2.5-flash", resp.usage.input_tokens,
                 resp.usage.output_tokens, source="research_trigger_classify",
             )
         except Exception:
             pass
 
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
             raw = "\n".join(lines[1:-1]) if len(lines) > 2 else raw

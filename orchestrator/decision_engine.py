@@ -851,8 +851,7 @@ def _generate_vip_draft(vip: dict, msg: dict, sender_name: str, wait_minutes: fl
     """Generate auto-draft proposals for an unanswered VIP message using Haiku."""
     try:
         import json
-        import anthropic
-        from config.settings import config as _config
+        from orchestrator.gemini_client import call_flash
 
         vip_role = vip.get("role") or vip.get("role_context") or ""
         vip_tier = vip.get("tier", 2)
@@ -867,19 +866,17 @@ def _generate_vip_draft(vip: dict, msg: dict, sender_name: str, wait_minutes: fl
             f"Message: {message_text}\n"
         )
 
-        client = anthropic.Anthropic(api_key=_config.claude.api_key)
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        resp = call_flash(
+            messages=[{"role": "user", "content": context}],
             max_tokens=1500,
             system=_VIP_DRAFT_PROMPT,
-            messages=[{"role": "user", "content": context}],
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="vip_auto_draft")
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="vip_auto_draft")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
             if raw.endswith("```"):

@@ -18,8 +18,6 @@ import json
 import logging
 from datetime import datetime, timezone, timedelta, date
 
-import anthropic
-
 from config.settings import config
 
 logger = logging.getLogger("baker.obligation_generator")
@@ -414,25 +412,24 @@ Return ONLY valid JSON:
 def _generate_proposed_actions(context_str: str) -> list:
     """Call Haiku to extract specific task proposals from today's signals."""
     try:
-        client = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        from orchestrator.gemini_client import call_flash
+        resp = call_flash(
+            messages=[{"role": "user", "content": context_str}],
             max_tokens=3000,
             system=_OBLIGATION_PROMPT,
-            messages=[{"role": "user", "content": context_str}],
         )
 
         # Log cost
         try:
             from orchestrator.cost_monitor import log_api_cost
             log_api_cost(
-                "claude-haiku-4-5-20251001", resp.usage.input_tokens,
+                "gemini-2.5-flash", resp.usage.input_tokens,
                 resp.usage.output_tokens, source="obligation_generator",
             )
         except Exception:
             pass
 
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         # Strip markdown code fences
         if raw.startswith("```"):
             lines = raw.split("\n")
