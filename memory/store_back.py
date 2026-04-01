@@ -161,6 +161,9 @@ class SentinelStoreBack:
         # WEALTH-MANAGER: Wealth tracking tables
         self._ensure_wealth_tables()
 
+        # AO-PM-1: Persistent state for AO Project Manager
+        self._ensure_ao_project_state_table()
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -4639,6 +4642,106 @@ class SentinelStoreBack:
         except Exception as e:
             conn.rollback()
             logger.warning(f"Wealth tables init failed: {e}")
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # AO-PM-1: AO Project Manager persistent state
+    # -------------------------------------------------------
+
+    def _ensure_ao_project_state_table(self):
+        """AO-PM-1: Persistent state for AO Project Manager capability."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ao_project_state (
+                    id SERIAL PRIMARY KEY,
+                    state_key TEXT NOT NULL DEFAULT 'current',
+                    state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    last_run_at TIMESTAMPTZ,
+                    last_question TEXT,
+                    last_answer_summary TEXT,
+                    run_count INTEGER DEFAULT 0,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_ao_project_state_key "
+                "ON ao_project_state(state_key)"
+            )
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure ao_project_state table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def get_ao_project_state(self) -> dict:
+        """AO-PM-1: Read the current AO project state."""
+        conn = self._get_conn()
+        if not conn:
+            return {}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute(
+                "SELECT * FROM ao_project_state WHERE state_key = 'current' LIMIT 1"
+            )
+            row = cur.fetchone()
+            cur.close()
+            return dict(row) if row else {}
+        except Exception as e:
+            logger.warning(f"get_ao_project_state failed: {e}")
+            return {}
+        finally:
+            self._put_conn(conn)
+
+    def update_ao_project_state(self, updates: dict, summary: str = "",
+                                question: str = ""):
+        """AO-PM-1: Upsert AO project state (merge updates into existing state_json)."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT state_json FROM ao_project_state WHERE state_key = 'current'"
+            )
+            row = cur.fetchone()
+            if row:
+                existing = row[0] if isinstance(row[0], dict) else json.loads(row[0] or '{}')
+                for k, v in updates.items():
+                    if isinstance(v, dict) and isinstance(existing.get(k), dict):
+                        existing[k].update(v)
+                    else:
+                        existing[k] = v
+                cur.execute("""
+                    UPDATE ao_project_state
+                    SET state_json = %s, last_run_at = NOW(), run_count = run_count + 1,
+                        last_question = %s, last_answer_summary = %s, updated_at = NOW()
+                    WHERE state_key = 'current'
+                """, (json.dumps(existing, default=str), question[:500], summary[:500]))
+            else:
+                cur.execute("""
+                    INSERT INTO ao_project_state (state_key, state_json, last_run_at,
+                        run_count, last_question, last_answer_summary)
+                    VALUES ('current', %s, NOW(), 1, %s, %s)
+                """, (json.dumps(updates, default=str), question[:500], summary[:500]))
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"update_ao_project_state failed: {e}")
         finally:
             self._put_conn(conn)
 

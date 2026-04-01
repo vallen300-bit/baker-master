@@ -620,6 +620,74 @@ TOOL_DEFINITIONS = [
             "required": ["action_type", "description"],
         },
     },
+    # ─────────────────────────────────────────────────
+    # AO-PM-1: AO Project Manager tools
+    # ─────────────────────────────────────────────────
+    {
+        "name": "get_ao_state",
+        "description": (
+            "Load the AO Project Manager's persistent state — current situation, "
+            "sub-matter statuses, open actions, red flags, relationship temperature. "
+            "Call this FIRST in every AO-related interaction."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "update_ao_state",
+        "description": (
+            "Update the AO Project Manager's persistent state after learning new "
+            "information. Call at the END of every AO interaction."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "updates": {
+                    "type": "object",
+                    "description": (
+                        "JSON object with fields to update in the state. Keys: "
+                        "sub_matters, relationship_state, open_actions, red_flags, "
+                        "document_inventory, decisions_log. Only include changed fields."
+                    ),
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "One-sentence summary of what was discussed/learned.",
+                },
+            },
+            "required": ["summary"],
+        },
+    },
+    {
+        "name": "delegate_to_capability",
+        "description": (
+            "Delegate a sub-question to another Baker capability and get the result. "
+            "Use when you need specialist analysis (legal, finance, profiling, etc.)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "capability_slug": {
+                    "type": "string",
+                    "description": (
+                        "Which capability to delegate to: legal, finance, profiling, "
+                        "communications, sales, research, asset_management"
+                    ),
+                },
+                "question": {
+                    "type": "string",
+                    "description": (
+                        "The specific question for the specialist to analyze. "
+                        "Frame it with full AO context."
+                    ),
+                },
+            },
+            "required": ["capability_slug", "question"],
+        },
+    },
 ]
 
 # Agent loop tools — exclude clickup_create (Director prefers results in artifact panel,
@@ -685,6 +753,13 @@ class ToolExecutor:
                 return self._browse_website(tool_input)
             elif tool_name == "browser_action":
                 return self._browser_action(tool_input)
+            # AO-PM-1: AO Project Manager tools
+            elif tool_name == "get_ao_state":
+                return self._get_ao_state(tool_input)
+            elif tool_name == "update_ao_state":
+                return self._update_ao_state(tool_input)
+            elif tool_name == "delegate_to_capability":
+                return self._delegate_to_capability(tool_input)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -1565,6 +1640,51 @@ class ToolExecutor:
         except Exception as e:
             logger.error(f"browser_action failed: {e}")
             return json.dumps({"error": f"Browser action failed: {str(e)}"})
+
+    # ─────────────────────────────────────────────────
+    # AO-PM-1: AO Project Manager tool handlers
+    # ─────────────────────────────────────────────────
+
+    def _get_ao_state(self, inp: dict) -> str:
+        """AO-PM-1: Load persistent AO project state."""
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        state = store.get_ao_project_state()
+        if not state:
+            return json.dumps({"state": "No persistent state found. This is the first run — build state from tools."})
+        # Convert for JSON serialization
+        return json.dumps(state, default=str)
+
+    def _update_ao_state(self, inp: dict) -> str:
+        """AO-PM-1: Update persistent AO project state."""
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        updates = inp.get("updates", {})
+        summary = inp.get("summary", "")
+        store.update_ao_project_state(updates, summary)
+        return "AO project state updated successfully."
+
+    def _delegate_to_capability(self, inp: dict) -> str:
+        """AO-PM-1: Delegate a sub-question to another Baker capability."""
+        slug = inp.get("capability_slug", "")
+        question = inp.get("question", "")
+        if not slug or not question:
+            return json.dumps({"error": "Both capability_slug and question are required"})
+        if slug == "ao_pm":
+            return json.dumps({"error": "Cannot delegate to self (recursion guard)"})
+        try:
+            from orchestrator.capability_registry import CapabilityRegistry
+            from orchestrator.capability_runner import CapabilityRunner
+            cap = CapabilityRegistry.get_instance().get_by_slug(slug)
+            if not cap:
+                return json.dumps({"error": f"Unknown capability: {slug}"})
+            runner = CapabilityRunner()
+            result = runner.run_single(cap, question)
+            answer = result.answer[:4000] if result and result.answer else "(no answer)"
+            return f"--- Delegated to {cap.name} ---\n{answer}"
+        except Exception as e:
+            logger.error(f"delegate_to_capability({slug}) failed: {e}")
+            return json.dumps({"error": f"Delegation to {slug} failed: {str(e)}"})
 
     @staticmethod
     def _format_contexts(contexts, label: str) -> str:

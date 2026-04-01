@@ -699,12 +699,19 @@ class CapabilityRunner:
             # Meta capabilities (decomposer, synthesizer) use their own prompt
             # For non-meta capabilities with custom prompts (e.g. Russo AI), inject tax optimization
             if capability.slug not in ("decomposer", "synthesizer"):
-                return capability.system_prompt + (
+                prompt = capability.system_prompt
+                # AO-PM-1: Inject persistent state into AO PM prompt
+                if capability.slug == "ao_pm":
+                    ao_ctx = self._get_ao_project_state_context()
+                    if ao_ctx:
+                        prompt += f"\n\n## CURRENT AO STATE (from persistent memory)\n{ao_ctx}\n"
+                prompt += (
                     "\n\n## TAX OPTIMIZATION (always consider)\n"
                     "In every analysis, proactively identify tax optimization opportunities. "
                     "Flag potential savings, structuring alternatives, or cross-border tax efficiencies "
                     "relevant to the question — even if not explicitly asked."
                 )
+                return prompt
             return capability.system_prompt
 
         # Domain capabilities: inject role into base Scan prompt
@@ -908,6 +915,10 @@ class CapabilityRunner:
             if capability.slug.startswith("russo_"):
                 self._store_russo_document(capability, question, answer)
 
+            # AO-PM-1: Auto-update AO Project Manager state
+            if capability.slug == "ao_pm":
+                self._auto_update_ao_state(question, answer)
+
             allowed, _ = self._check_circuit_breaker()
             if not allowed:
                 return
@@ -1088,6 +1099,74 @@ class CapabilityRunner:
                 store._put_conn(conn)
         except Exception:
             return ""
+
+    # ─────────────────────────────────────────────────
+    # AO-PM-1: AO Project Manager helpers
+    # ─────────────────────────────────────────────────
+
+    def _get_ao_project_state_context(self) -> str:
+        """AO-PM-1: Format persistent AO state for system prompt injection."""
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            state = store.get_ao_project_state()
+            if not state:
+                return ""
+            sj = state.get("state_json", {})
+            if isinstance(sj, str):
+                import json
+                sj = json.loads(sj)
+            parts = []
+            parts.append(f"Last run: {state.get('last_run_at', 'never')}")
+            parts.append(f"Run count: {state.get('run_count', 0)}")
+            if state.get("last_answer_summary"):
+                parts.append(f"Last interaction: {state['last_answer_summary']}")
+            rs = sj.get("relationship_state", {})
+            if rs:
+                parts.append(f"Communication gap: {rs.get('communication_gap_days', '?')} days")
+                parts.append(f"Recent mood: {rs.get('recent_mood', '?')}")
+            actions = sj.get("open_actions", [])
+            if actions:
+                parts.append(f"Open actions ({len(actions)}):")
+                for a in actions[:5]:
+                    parts.append(f"  - {a}")
+            flags = sj.get("red_flags", [])
+            if flags:
+                parts.append(f"Active red flags ({len(flags)}):")
+                for rf in flags[:5]:
+                    parts.append(f"  - {rf}")
+            return "\n".join(parts)
+        except Exception:
+            return ""
+
+    def _auto_update_ao_state(self, question: str, answer: str):
+        """AO-PM-1: Auto-update AO state after each run via Gemini Flash extraction."""
+        try:
+            from orchestrator.gemini_client import call_flash
+            import json
+            resp = call_flash(
+                messages=[{"role": "user", "content": (
+                    f"Extract state updates from this AO Project Manager interaction.\n\n"
+                    f"Question: {question[:500]}\n\nAnswer: {answer[:3000]}\n\n"
+                    f"Return JSON: {{\"sub_matters\": {{}}, \"open_actions\": [], "
+                    f"\"red_flags\": [], \"relationship_state\": {{}}, \"summary\": \"...\"}}\n"
+                    f"Only include fields with NEW information. Be concise. "
+                    f"Return empty object {{\"summary\": \"...\"}} if no state changes."
+                )}],
+                max_tokens=500,
+                system="Extract structured state updates from the conversation. Return valid JSON only.",
+            )
+            raw = resp.text.strip()
+            if raw.startswith("```"):
+                raw = "\n".join(raw.split("\n")[1:-1])
+            updates = json.loads(raw)
+            summary = updates.pop("summary", "AO PM interaction")
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            store.update_ao_project_state(updates, summary, question[:500])
+            logger.info(f"AO state auto-updated: {summary}")
+        except Exception as e:
+            logger.debug(f"AO state auto-update failed (non-fatal): {e}")
 
     def _get_filtered_tools(self, capability: CapabilityDef) -> list[dict]:
         """
