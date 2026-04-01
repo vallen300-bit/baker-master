@@ -13,8 +13,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-import anthropic
-
 from config.settings import config
 from orchestrator.capability_registry import CapabilityDef, CapabilityRegistry
 
@@ -150,19 +148,18 @@ class CapabilityRouter:
                                      experience or "No past patterns available yet.")
 
         try:
-            claude = anthropic.Anthropic(api_key=config.claude.api_key)
-            resp = claude.messages.create(
-                model=config.claude.model,
+            from orchestrator.gemini_client import call_pro
+            resp = call_pro(
+                messages=[{"role": "user", "content": text}],
                 max_tokens=1024,
                 system=system,
-                messages=[{"role": "user", "content": text}],
             )
             try:
                 from orchestrator.cost_monitor import log_api_cost
-                log_api_cost(config.claude.model, resp.usage.input_tokens, resp.usage.output_tokens, source="decomposer")
+                log_api_cost("gemini-2.5-pro", resp.usage.input_tokens, resp.usage.output_tokens, source="decomposer")
             except Exception:
                 pass
-            raw = resp.content[0].text.strip()
+            raw = resp.text.strip()
             # Strip markdown code fences
             if raw.startswith("```"):
                 lines = raw.split("\n")

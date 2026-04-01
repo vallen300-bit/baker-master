@@ -19,7 +19,6 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-import anthropic
 import psycopg2
 import psycopg2.pool
 
@@ -736,19 +735,18 @@ def generate_email_body(content_request: str, retriever, project=None, role=None
     )
 
     try:
-        claude = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = claude.messages.create(
-            model=config.claude.model,
+        from orchestrator.gemini_client import call_pro
+        resp = call_pro(
+            messages=[{"role": "user", "content": f"Compose this email now: {content_request}"}],
             max_tokens=1500,
             system=system,
-            messages=[{"role": "user", "content": f"Compose this email now: {content_request}"}],
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost(config.claude.model, resp.usage.input_tokens, resp.usage.output_tokens, source="email_draft")
+            log_api_cost("gemini-2.5-pro", resp.usage.input_tokens, resp.usage.output_tokens, source="email_draft")
         except Exception:
             pass
-        return resp.content[0].text.strip()
+        return resp.text.strip()
     except Exception as e:
         logger.error(f"Email body generation failed: {e}")
         return f"[Error generating email body: {e}]"
@@ -785,18 +783,18 @@ def _generate_whatsapp_body(content_request: str, retriever, recipient_name: str
     )
 
     try:
-        claude = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = claude.messages.create(
-            model=config.claude.model, max_tokens=500,
-            system=system,
+        from orchestrator.gemini_client import call_pro
+        resp = call_pro(
             messages=[{"role": "user", "content": f"Write this WhatsApp message now: {content_request}"}],
+            max_tokens=500,
+            system=system,
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost(config.claude.model, resp.usage.input_tokens, resp.usage.output_tokens, source="whatsapp_draft")
+            log_api_cost("gemini-2.5-pro", resp.usage.input_tokens, resp.usage.output_tokens, source="whatsapp_draft")
         except Exception:
             pass
-        return resp.content[0].text.strip()
+        return resp.text.strip()
     except Exception as e:
         logger.error(f"WhatsApp body generation failed: {e}")
         return content_request  # fallback: send the Director's original words
@@ -2265,18 +2263,18 @@ Rules: 3-6 stages, 5-10 working days per stage unless specified,
 Return ONLY valid JSON, no markdown fences."""
 
     try:
-        claude = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = claude.messages.create(
-            model=config.claude.model, max_tokens=4096,
-            system="You are a project planning assistant. Return only JSON.",
+        from orchestrator.gemini_client import call_pro
+        resp = call_pro(
             messages=[{"role": "user", "content": plan_prompt}],
+            max_tokens=4096,
+            system="You are a project planning assistant. Return only JSON.",
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost(config.claude.model, resp.usage.input_tokens, resp.usage.output_tokens, source="clickup_plan")
+            log_api_cost("gemini-2.5-pro", resp.usage.input_tokens, resp.usage.output_tokens, source="clickup_plan")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)
@@ -2392,18 +2390,18 @@ Revision requested: {revision_text}
 Return the REVISED plan as JSON in the same format. Return ONLY valid JSON."""
 
     try:
-        claude = anthropic.Anthropic(api_key=config.claude.api_key)
-        resp = claude.messages.create(
-            model=config.claude.model, max_tokens=4096,
-            system="You are a project planning assistant. Return only JSON.",
+        from orchestrator.gemini_client import call_pro
+        resp = call_pro(
             messages=[{"role": "user", "content": revision_prompt}],
+            max_tokens=4096,
+            system="You are a project planning assistant. Return only JSON.",
         )
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost(config.claude.model, resp.usage.input_tokens, resp.usage.output_tokens, source="clickup_plan_revise")
+            log_api_cost("gemini-2.5-pro", resp.usage.input_tokens, resp.usage.output_tokens, source="clickup_plan_revise")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         if raw.startswith("```"):
             raw = re.sub(r"^```(?:json)?\s*", "", raw)
             raw = re.sub(r"\s*```$", "", raw)

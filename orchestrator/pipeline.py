@@ -467,10 +467,12 @@ class SentinelPipeline:
         "todoist_task_updated", "todoist_task_completed", "todoist_task_overdue",
         "browser_change",
     }
-    # Sonnet: medium-value — emails and handoff notes need comprehension but not Opus reasoning
+    # PRO_TRIGGER_TYPES: T1 → Opus (critical), T2/T3 → Gemini Pro
     _SONNET_TRIGGER_TYPES = {
         "email",
         "clickup_handoff_note",
+        "meeting",
+        "scheduled",
     }
 
     def generate(self, prompt: dict, max_output_tokens: int = 8192,
@@ -479,7 +481,7 @@ class SentinelPipeline:
         GEMINI-MIGRATION-1: Multi-provider routing:
         - Gemini Flash: document ingestion, RSS, task status changes
         - Gemini Pro: emails, handoff notes (T2/T3)
-        - Opus: meetings, briefings, T1 critical signals
+        - Opus: T1 critical signals only
         """
         if trigger_type in self._HAIKU_TRIGGER_TYPES:
             model = "gemini-2.5-flash"
