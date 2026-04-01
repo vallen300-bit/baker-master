@@ -219,6 +219,13 @@ def _poll_single_path(client, watch_path: str) -> tuple:
                     local_path = client.download_file(entry_path, Path(temp_dir))
                     logger.info(f"Downloaded: {entry_name} ({entry_size:,} bytes)")
 
+                    # AO-PM-1: Soul.md sync — Dropbox is master, DB is cache
+                    if entry_name == "Soul.md" and "source_of_truth" in entry_path.lower():
+                        _sync_soul_to_db(local_path, entry_path)
+                        files_processed += 1
+                        processed_file_names.append(f"{entry_name} (soul sync)")
+                        continue
+
                     # 5a2. Store full text in PostgreSQL (SPECIALIST-UPGRADE-1A)
                     try:
                         from tools.ingest.extractors import extract
@@ -318,6 +325,64 @@ def _poll_single_path(client, watch_path: str) -> tuple:
         logger.error(f"Dropbox poll failed for {watch_path}: {e}")
         return (0, 0, 1)
 
+
+
+def _sync_soul_to_db(local_path, entry_path: str):
+    """AO-PM-1: Sync Soul.md from Dropbox (master) to capability_sets.system_prompt (cache).
+    Cowork rule: Soul.md ALWAYS wins. DB is cache. Log warning if DB diverges."""
+    try:
+        import hashlib
+        soul_text = Path(local_path).read_text(encoding="utf-8").strip()
+        if not soul_text or len(soul_text) < 100:
+            logger.warning(f"Soul.md too short ({len(soul_text)} chars) — skipping sync")
+            return
+
+        # Determine which capability this Soul.md belongs to
+        # Currently only ao_pm, but extensible
+        _path_lower = entry_path.lower()
+        if "oskolkov" in _path_lower:
+            cap_slug = "ao_pm"
+        else:
+            logger.info(f"Soul.md found at {entry_path} but no matching capability — skipping")
+            return
+
+        import psycopg2
+        from config.settings import config
+        conn = psycopg2.connect(**config.postgres.dsn_params)
+        cur = conn.cursor()
+
+        cur.execute("SELECT system_prompt FROM capability_sets WHERE slug = %s", (cap_slug,))
+        row = cur.fetchone()
+        if not row:
+            logger.warning(f"Capability {cap_slug} not found in DB — cannot sync Soul.md")
+            conn.close()
+            return
+
+        db_prompt = (row[0] or "").strip()
+        file_hash = hashlib.sha256(soul_text.encode()).hexdigest()[:16]
+        db_hash = hashlib.sha256(db_prompt.encode()).hexdigest()[:16]
+
+        if file_hash == db_hash:
+            logger.info(f"Soul.md sync: {cap_slug} already matches DB (hash={file_hash})")
+        else:
+            # Soul.md wins — overwrite DB
+            if db_prompt and db_prompt != soul_text:
+                logger.warning(
+                    f"Soul.md sync: {cap_slug} DB version DIVERGES from file "
+                    f"(db_hash={db_hash}, file_hash={file_hash}). "
+                    f"Overwriting DB with Soul.md (file is master)."
+                )
+            cur.execute(
+                "UPDATE capability_sets SET system_prompt = %s, updated_at = NOW() WHERE slug = %s",
+                (soul_text, cap_slug),
+            )
+            conn.commit()
+            logger.info(f"Soul.md sync: {cap_slug} system_prompt updated from Dropbox ({len(soul_text)} chars)")
+
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Soul.md sync failed (non-fatal): {e}")
 
 
 def _create_batch_alert(file_names: list):
