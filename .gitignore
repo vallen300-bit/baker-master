@@ -16,3 +16,8 @@ config/gmail_poll_state.json
 # PL working files
 EMAIL-FIX-1_items1-2.patch
 PL-2_HANDOVER.md
+
+# Session outputs (local artifacts, not deployed)
+# NOTE: outputs/ is production code (dashboard.py, static/) — do NOT ignore it
+strategy/
+pm/scheduled-tasks/

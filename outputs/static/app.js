@@ -5969,8 +5969,8 @@ async function init() {
         });
     });
 
-    // SIDEBAR-RESTRUCTURE-1: Delegated click handlers for Projects + Operations sub-lists
-    ['projectsSubList', 'operationsSubList'].forEach(function(listId) {
+    // SIDEBAR-RESTRUCTURE-1: Delegated click handlers for Projects + Operations + Inbox sub-lists
+    ['projectsSubList', 'operationsSubList', 'inboxSubList'].forEach(function(listId) {
         var subList = document.getElementById(listId);
         if (subList) {
             subList.addEventListener('click', function(e) {
