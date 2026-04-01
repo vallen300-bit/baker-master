@@ -1135,16 +1135,66 @@ class CapabilityRunner:
                 parts.append(f"Active red flags ({len(flags)}):")
                 for rf in flags[:5]:
                     parts.append(f"  - {rf}")
+
+            # Cowork review #4: Cross-matter awareness
+            # Hagenauer is the RG7 contractor — insolvency directly affects AO
+            cross_matter = self._get_cross_matter_alerts()
+            if cross_matter:
+                parts.append(f"\n## CROSS-MATTER ALERTS (affect AO)")
+                parts.append(cross_matter)
+
             return "\n".join(parts)
         except Exception:
             return ""
 
-    def _auto_update_ao_state(self, question: str, answer: str):
-        """AO-PM-1: Auto-update AO state after each run via Gemini Flash extraction."""
+    def _get_cross_matter_alerts(self) -> str:
+        """Cowork review #4: Fetch developments from entangled matters (Hagenauer, RG7).
+        AO owns 25% of RG7. Hagenauer is RG7's contractor. These are deeply linked."""
         try:
-            from orchestrator.gemini_client import call_flash
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            conn = store._get_conn()
+            if not conn:
+                return ""
+            try:
+                cur = conn.cursor()
+                # Recent Hagenauer insights (affects RG7 → affects AO)
+                cur.execute("""
+                    SELECT content, created_at FROM baker_insights
+                    WHERE matter_slug IN ('hagenauer', 'rg7')
+                      AND active = TRUE
+                    ORDER BY created_at DESC LIMIT 5
+                """)
+                rows = cur.fetchall()
+                if not rows:
+                    return ""
+                parts = []
+                for content, created_at in rows:
+                    date_str = created_at.strftime("%Y-%m-%d") if created_at else ""
+                    parts.append(f"- [{date_str}] {content[:200]}")
+                # Recent Hagenauer decisions
+                cur.execute("""
+                    SELECT decision, created_at FROM decisions
+                    WHERE project IN ('hagenauer', 'rg7')
+                    ORDER BY created_at DESC LIMIT 3
+                """)
+                dec_rows = cur.fetchall()
+                for decision, created_at in dec_rows:
+                    date_str = created_at.strftime("%Y-%m-%d") if created_at else ""
+                    parts.append(f"- [Decision {date_str}] {decision[:200]}")
+                return "\n".join(parts) if parts else ""
+            finally:
+                store._put_conn(conn)
+        except Exception:
+            return ""
+
+    def _auto_update_ao_state(self, question: str, answer: str):
+        """AO-PM-1: Auto-update AO state after each run via Gemini Pro extraction.
+        Cowork review: Flash is too risky for AO's brain — using Pro for reliability."""
+        try:
+            from orchestrator.gemini_client import call_pro
             import json
-            resp = call_flash(
+            resp = call_pro(
                 messages=[{"role": "user", "content": (
                     f"Extract state updates from this AO Project Manager interaction.\n\n"
                     f"Question: {question[:500]}\n\nAnswer: {answer[:3000]}\n\n"

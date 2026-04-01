@@ -4661,6 +4661,7 @@ class SentinelStoreBack:
                     id SERIAL PRIMARY KEY,
                     state_key TEXT NOT NULL DEFAULT 'current',
                     state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    version INTEGER DEFAULT 1,
                     last_run_at TIMESTAMPTZ,
                     last_question TEXT,
                     last_answer_summary TEXT,
@@ -4673,6 +4674,24 @@ class SentinelStoreBack:
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_ao_project_state_key "
                 "ON ao_project_state(state_key)"
             )
+            # Cowork review #3: Audit trail for state mutations
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ao_state_history (
+                    id SERIAL PRIMARY KEY,
+                    version INTEGER NOT NULL,
+                    state_json_before JSONB NOT NULL,
+                    mutation_source TEXT,
+                    mutation_summary TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            # Add version column if missing (for existing deployments)
+            cur.execute("""
+                DO $$ BEGIN
+                    ALTER TABLE ao_project_state ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1;
+                EXCEPTION WHEN duplicate_column THEN NULL;
+                END $$
+            """)
             conn.commit()
             cur.close()
         except Exception as e:
@@ -4704,35 +4723,55 @@ class SentinelStoreBack:
             self._put_conn(conn)
 
     def update_ao_project_state(self, updates: dict, summary: str = "",
-                                question: str = ""):
-        """AO-PM-1: Upsert AO project state (merge updates into existing state_json)."""
+                                question: str = "",
+                                mutation_source: str = "auto"):
+        """AO-PM-1: Upsert AO project state with audit trail + optimistic locking.
+        Cowork review: snapshot before every mutation, version counter for race protection."""
         conn = self._get_conn()
         if not conn:
             return
         try:
             cur = conn.cursor()
             cur.execute(
-                "SELECT state_json FROM ao_project_state WHERE state_key = 'current'"
+                "SELECT state_json, version FROM ao_project_state WHERE state_key = 'current'"
             )
             row = cur.fetchone()
             if row:
                 existing = row[0] if isinstance(row[0], dict) else json.loads(row[0] or '{}')
+                current_version = row[1] or 1
+
+                # Audit trail: snapshot before mutation
+                cur.execute("""
+                    INSERT INTO ao_state_history
+                        (version, state_json_before, mutation_source, mutation_summary)
+                    VALUES (%s, %s, %s, %s)
+                """, (current_version, json.dumps(existing, default=str),
+                      mutation_source, summary[:500]))
+
+                # Merge updates
                 for k, v in updates.items():
                     if isinstance(v, dict) and isinstance(existing.get(k), dict):
                         existing[k].update(v)
                     else:
                         existing[k] = v
+
+                # Optimistic lock: only update if version hasn't changed
                 cur.execute("""
                     UPDATE ao_project_state
-                    SET state_json = %s, last_run_at = NOW(), run_count = run_count + 1,
-                        last_question = %s, last_answer_summary = %s, updated_at = NOW()
-                    WHERE state_key = 'current'
-                """, (json.dumps(existing, default=str), question[:500], summary[:500]))
+                    SET state_json = %s, version = %s, last_run_at = NOW(),
+                        run_count = run_count + 1, last_question = %s,
+                        last_answer_summary = %s, updated_at = NOW()
+                    WHERE state_key = 'current' AND version = %s
+                """, (json.dumps(existing, default=str), current_version + 1,
+                      question[:500], summary[:500], current_version))
+
+                if cur.rowcount == 0:
+                    logger.warning("AO state update skipped — version conflict (concurrent write)")
             else:
                 cur.execute("""
-                    INSERT INTO ao_project_state (state_key, state_json, last_run_at,
-                        run_count, last_question, last_answer_summary)
-                    VALUES ('current', %s, NOW(), 1, %s, %s)
+                    INSERT INTO ao_project_state (state_key, state_json, version,
+                        last_run_at, run_count, last_question, last_answer_summary)
+                    VALUES ('current', %s, 1, NOW(), 1, %s, %s)
                 """, (json.dumps(updates, default=str), question[:500], summary[:500]))
             conn.commit()
             cur.close()
