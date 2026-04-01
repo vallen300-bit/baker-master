@@ -912,28 +912,28 @@ class CapabilityRunner:
             if not allowed:
                 return
 
-            _HAIKU = "claude-haiku-4-5-20251001"
-            prompt = (
+            from orchestrator.gemini_client import call_flash
+            _insight_system = (
                 "Extract 1-3 key factual findings from this specialist response. "
                 "Only extract concrete facts: amounts, dates, legal positions, decisions, deadlines. "
                 "Skip opinions, hedging, generic statements. "
                 "Return JSON array: [{\"content\": \"...\", \"matter_slug\": \"...\"|null, "
                 "\"confidence\": \"high\"|\"medium\"|\"low\"}]. "
-                "Return empty array [] if no concrete findings.\n\n"
-                f"Question: {question[:500]}\n\nResponse:\n{answer[:4000]}"
+                "Return empty array [] if no concrete findings."
             )
+            _insight_content = f"Question: {question[:500]}\n\nResponse:\n{answer[:4000]}"
 
-            resp = self.claude.messages.create(
-                model=_HAIKU,
+            resp = call_flash(
+                messages=[{"role": "user", "content": _insight_content}],
                 max_tokens=500,
-                messages=[{"role": "user", "content": prompt}],
+                system=_insight_system,
             )
             self._log_api_cost(
-                _HAIKU, resp.usage.input_tokens, resp.usage.output_tokens,
+                "gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens,
                 source="auto_insight", capability_id=capability.slug,
             )
 
-            raw = resp.content[0].text.strip()
+            raw = resp.text.strip()
             if raw.startswith("```"):
                 raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
                 if raw.endswith("```"):

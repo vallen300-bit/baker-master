@@ -296,25 +296,25 @@ Rules:
 
 
 def _generate_structured_actions(claude_client, title: str, body: str, tier: int) -> dict:
-    """Generate structured actions JSON for an alert using Haiku (fast + cheap)."""
+    """Generate structured actions JSON for an alert using Gemini Flash (fast + cheap)."""
     try:
-        resp = claude_client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=2048,
-            system=_STRUCTURED_ACTIONS_PROMPT,
+        from orchestrator.gemini_client import call_flash
+        resp = call_flash(
             messages=[{
                 "role": "user",
                 "content": f"Alert (Tier {tier}): {title}\n\n{body}",
             }],
+            max_tokens=2048,
+            system=_STRUCTURED_ACTIONS_PROMPT,
         )
-        # PHASE-4A: Log Haiku cost
+        # PHASE-4A: Log Flash cost
         try:
             from orchestrator.cost_monitor import log_api_cost
-            log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens,
+            log_api_cost("gemini-2.5-flash", resp.usage.input_tokens,
                          resp.usage.output_tokens, source="structured_actions")
         except Exception:
             pass
-        raw = resp.content[0].text.strip()
+        raw = resp.text.strip()
         # Strip markdown code fences if present
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]

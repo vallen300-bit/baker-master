@@ -1201,36 +1201,35 @@ class ToolExecutor:
         if not question:
             return "[Please provide a question about Baker's data]"
 
-        # Use Haiku to generate a safe SELECT query
-        import anthropic
+        # Use Gemini Flash to generate a safe SELECT query
         try:
-            client = anthropic.Anthropic(api_key=config.claude.api_key)
-            resp = client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=500,
-                system=(
-                    "Generate a PostgreSQL SELECT query to answer the user's question about Baker's data. "
-                    "ONLY SELECT — no mutations. Available tables:\n"
-                    "- alerts (id, tier, title, status, source, matter_slug, created_at)\n"
-                    "- deadlines (id, description, due_date, status, priority, confidence, severity, source_type)\n"
-                    "- vip_contacts (id, name, email, tier, domain, last_contact_date)\n"
-                    "- contact_interactions (id, contact_id, interaction_type, subject, interaction_date)\n"
-                    "- email_messages (id, subject, sender, created_at)\n"
-                    "- whatsapp_messages (id, sender_name, body, timestamp, is_director)\n"
-                    "- matter_registry (matter_name, status, keywords, people)\n"
-                    "- baker_tasks (id, title, capability_slug, status, created_at)\n"
-                    "- documents (id, filename, doc_type, matter_slug, created_at)\n"
-                    "- sent_emails (id, to_address, subject, created_at, replied_at)\n\n"
-                    "Return ONLY the SQL query, nothing else. Always include LIMIT (max 20)."
-                ),
+            from orchestrator.gemini_client import call_flash
+            _sql_system = (
+                "Generate a PostgreSQL SELECT query to answer the user's question about Baker's data. "
+                "ONLY SELECT — no mutations. Available tables:\n"
+                "- alerts (id, tier, title, status, source, matter_slug, created_at)\n"
+                "- deadlines (id, description, due_date, status, priority, confidence, severity, source_type)\n"
+                "- vip_contacts (id, name, email, tier, domain, last_contact_date)\n"
+                "- contact_interactions (id, contact_id, interaction_type, subject, interaction_date)\n"
+                "- email_messages (id, subject, sender, created_at)\n"
+                "- whatsapp_messages (id, sender_name, body, timestamp, is_director)\n"
+                "- matter_registry (matter_name, status, keywords, people)\n"
+                "- baker_tasks (id, title, capability_slug, status, created_at)\n"
+                "- documents (id, filename, doc_type, matter_slug, created_at)\n"
+                "- sent_emails (id, to_address, subject, created_at, replied_at)\n\n"
+                "Return ONLY the SQL query, nothing else. Always include LIMIT (max 20)."
+            )
+            resp = call_flash(
                 messages=[{"role": "user", "content": question}],
+                max_tokens=500,
+                system=_sql_system,
             )
             try:
                 from orchestrator.cost_monitor import log_api_cost
-                log_api_cost("claude-haiku-4-5-20251001", resp.usage.input_tokens, resp.usage.output_tokens, source="query_baker_data")
+                log_api_cost("gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens, source="query_baker_data")
             except Exception:
                 pass
-            sql = resp.content[0].text.strip()
+            sql = resp.text.strip()
             # Strip markdown fences
             if sql.startswith("```"):
                 sql = "\n".join(sql.split("\n")[1:-1])
