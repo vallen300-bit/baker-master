@@ -136,19 +136,6 @@ class SentinelScheduler:
             f"Registered: todoist_poll (every {config.triggers.todoist_check_interval}s)"
         )
 
-        # -------------------------------------------------------
-        # Whoop polling — every 24 hours (daily health data)
-        # -------------------------------------------------------
-        from triggers.whoop_trigger import run_whoop_poll
-        self.scheduler.add_job(
-            run_whoop_poll,
-            IntervalTrigger(seconds=config.triggers.whoop_check_interval),
-            id="whoop_poll",
-            name="Whoop health polling",
-            coalesce=True,
-            max_instances=1,
-            replace_existing=True,
-        )
         logger.info(
             f"Registered: whoop_poll (every {config.triggers.whoop_check_interval}s)"
         )
@@ -243,9 +230,6 @@ def main():
         elif args.run_once == "dropbox":
             from triggers.dropbox_trigger import run_dropbox_poll
             run_dropbox_poll()
-        elif args.run_once == "whoop":
-            from triggers.whoop_trigger import run_whoop_poll
-            run_whoop_poll()
         return
 
     scheduler = SentinelScheduler()

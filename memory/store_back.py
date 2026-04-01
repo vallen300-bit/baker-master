@@ -102,10 +102,7 @@ class SentinelStoreBack:
         # Ensure insights table exists (INSIGHT-1)
         self._ensure_insights_table()
 
-        # Ensure Whoop tables exist
-        self._ensure_whoop_tables()
-
-        # Ensure baker-health Qdrant collection exists
+        # Ensure baker-health Qdrant collection exists (used by health data if re-enabled)
         self._ensure_collection("baker-health", size=1024)
 
         # Ensure baker-browser Qdrant collection exists (BROWSER-1)

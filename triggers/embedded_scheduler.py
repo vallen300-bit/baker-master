@@ -104,14 +104,6 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info(f"Registered: todoist_poll (every {config.triggers.todoist_check_interval}s)")
 
-    # Whoop polling — every 24 hours (daily health data)
-    # Whoop — KILLED (Session 26, Director decision). Unreliable OAuth, 88+ failures.
-    # Can re-enable later if needed by uncommenting below.
-    # from triggers.whoop_trigger import run_whoop_poll
-    # scheduler.add_job(run_whoop_poll, IntervalTrigger(seconds=config.triggers.whoop_check_interval),
-    #     id="whoop_poll", name="Whoop health polling", coalesce=True, max_instances=1, replace_existing=True)
-    logger.info("Skipped: whoop_poll (killed — unreliable OAuth)")
-
     # RSS polling — every 60 minutes (RSS-1)
     from triggers.rss_trigger import run_rss_poll
     scheduler.add_job(
