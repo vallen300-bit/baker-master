@@ -95,9 +95,11 @@ def poll_todays_meetings() -> list:
     Same output format as poll_upcoming_meetings().
     """
     service = _get_calendar_service()
-    now = datetime.now(timezone.utc)
-    # Start of today (UTC midnight)
-    start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    from zoneinfo import ZoneInfo
+    tz_local = ZoneInfo('Europe/Zurich')
+    now_local = datetime.now(tz_local)
+    # Start/end of today in Director's timezone
+    start_of_day = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
     end_of_day = start_of_day + timedelta(hours=24)
 
     events_result = service.events().list(

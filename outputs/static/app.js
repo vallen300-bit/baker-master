@@ -832,8 +832,15 @@ async function loadMorningBrief() {
                     : '';
                 var tdChevron = hasDetail ? ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span>' : '';
                 // Build expandable detail with flight info + travel triage buttons
-                var _travelHtml = '<div class="card card-compact" style="cursor:pointer;" onclick="_toggleTriageCard(this)"><div class="card-header">' +
-                    '<span class="nav-dot amber" style="margin-top:5px;"></span>' +
+                var _tdDone = false;
+                try {
+                    if (td.due_date) {
+                        var _tdDep = new Date(td.due_date);
+                        _tdDone = new Date() > new Date(_tdDep.getTime() + 2 * 3600000);
+                    }
+                } catch(e) {}
+                var _travelHtml = '<div class="card card-compact' + (_tdDone ? ' travel-done' : '') + '" style="cursor:pointer;" onclick="_toggleTriageCard(this)"><div class="card-header">' +
+                    '<span class="nav-dot ' + (_tdDone ? 'green' : 'amber') + '" style="margin-top:5px;"></span>' +
                     '<span class="card-title">' + esc(td.description) + ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span></span>' +
                     '<span class="card-time" style="font-weight:600;">' + esc(dueLabel) + '</span>' +
                     '</div>';
@@ -2002,6 +2009,13 @@ function renderTravelCard(t) {
         } catch(e) {}
     }
 
+    // TRAVEL-LIFECYCLE-1: Card-level "done" state — 2h after departure
+    var _travelDone = false;
+    try {
+        var _depTime = new Date(t.start);
+        if (new Date() > new Date(_depTime.getTime() + 2 * 3600000)) _travelDone = true;
+    } catch(e) {}
+
     // Route display
     var routeStr = '';
     if (origin && destIata && origin !== destIata) {
@@ -2042,7 +2056,7 @@ function renderTravelCard(t) {
         ? '<div class="prep-notes" style="display:none;font-size:12px;color:var(--text2);padding:8px 18px 12px 18px;line-height:1.5;white-space:pre-wrap;border-top:1px solid var(--border-light);margin-top:4px;">' + esc(t.prep_notes).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>') + '</div>'
         : '';
 
-    return '<div class="card card-compact"' + clickAttr + '><div class="card-header">' +
+    return '<div class="card card-compact' + (_travelDone ? ' travel-done' : '') + '"' + clickAttr + '><div class="card-header">' +
         '<span class="nav-dot ' + dotClass + '" style="margin-top:5px;"></span>' +
         '<span class="card-title">' + routeStr + catBadge + chevron + '</span>' +
         '<span class="card-time">' + esc(startTime) + '</span>' +
