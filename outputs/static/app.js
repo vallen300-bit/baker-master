@@ -3365,9 +3365,9 @@ function appendScanBubble(role, content, id) {
     } else {
         div.textContent = content; // User messages: plain text, no HTML
     }
-    // Newest messages at top (Cowork style — input is at top)
-    container.prepend(div);
-    container.scrollTop = 0;
+    // Newest messages at bottom (Claude Desktop style)
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
     return div;
 }
 
@@ -3484,6 +3484,8 @@ async function sendScanMessage(question) {
                         if (replyEl) {
                             setSafeHTML(replyEl, '<div class="md-content">' + md(fullResponse) + '</div>' +
                                 '<div class="streaming-indicator"><span class="thinking-dots"><span></span><span></span><span></span></span> <span class="si-label">Working...</span></div>');
+                            var _scanMsgs = document.getElementById('scanMessages');
+                            if (_scanMsgs) _scanMsgs.scrollTop = _scanMsgs.scrollHeight;
                         }
                     }
                     if (data.capabilities) {
@@ -3603,7 +3605,7 @@ async function sendScanMessage(question) {
     if (input) { input.disabled = false; input.focus(); }
 
     const container = document.getElementById('scanMessages');
-    if (container) container.scrollTop = 0;
+    if (container) container.scrollTop = container.scrollHeight;
 }
 
 // ═══ CHAT-TRIAGE-1: Triage bar under chat answers ═══
@@ -5777,6 +5779,8 @@ async function sendSpecialistMessage(question) {
                         if (!fullResponse && replyEl) replyEl.textContent = '';
                         fullResponse += data.token;
                         if (replyEl) setSafeHTML(replyEl, '<div class="md-content">' + md(fullResponse) + '</div>');
+                        var _specMsgs = document.getElementById('specialistMessages');
+                        if (_specMsgs) _specMsgs.scrollTop = _specMsgs.scrollHeight;
                     }
                     if (data.capabilities) {
                         // capabilities already set from picker — skip
@@ -5849,7 +5853,7 @@ async function sendSpecialistMessage(question) {
     if (input) { input.disabled = false; input.focus(); }
 
     var container = document.getElementById('specialistMessages');
-    if (container) container.scrollTop = 0;
+    if (container) container.scrollTop = container.scrollHeight;
 }
 
 function appendSpecialistBubble(role, content, id) {
@@ -5875,8 +5879,8 @@ function appendSpecialistBubble(role, content, id) {
     } else {
         div.textContent = content;
     }
-    container.prepend(div);
-    container.scrollTop = 0;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
     return div;
 }
 
@@ -5957,8 +5961,8 @@ function appendClientPMBubble(role, content, id) {
     } else {
         div.textContent = content;
     }
-    container.prepend(div);
-    container.scrollTop = 0;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
 }
 
 async function sendClientPMMessage(question) {
@@ -6036,6 +6040,8 @@ async function sendClientPMMessage(question) {
                         if (!fullResponse && replyEl) replyEl.textContent = '';
                         fullResponse += data.token;
                         if (replyEl) setSafeHTML(replyEl, '<div class="md-content">' + md(fullResponse) + '</div>');
+                        var _pmMsgs = document.getElementById('clientPMMessages');
+                        if (_pmMsgs) _pmMsgs.scrollTop = _pmMsgs.scrollHeight;
                     }
                     if (data.capabilities) {
                         addArtifactCapability(_itemsId, _panelId, data.capabilities);
