@@ -13,7 +13,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=59">
+    <link rel="stylesheet" href="/static/style.css?v=60">
 </head>
 <body>
 
@@ -291,7 +291,7 @@
                     <form id="scanForm" class="scan-form" autocomplete="off">
                         <input id="scanFile" type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.png,.jpg" hidden />
                         <button type="button" class="scan-upload-btn" onclick="document.getElementById('scanFile').click()" title="Upload document">&#x1F4CE;</button>
-                        <input id="scanInput" type="text" class="scan-input" placeholder="Ask Baker..." maxlength="4000" required />
+                        <textarea id="scanInput" class="scan-input" placeholder="Ask Baker..." maxlength="4000" required rows="1"></textarea>
                         <button type="submit" class="scan-send" id="scanSendBtn">Ask</button>
                     </form>
                     <div id="scanUploadStatus" class="upload-status" hidden></div>
@@ -333,7 +333,7 @@
                     <form id="specialistForm" class="scan-form" autocomplete="off">
                         <input id="specialistFile" type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.png,.jpg" hidden />
                         <button type="button" class="scan-upload-btn" onclick="document.getElementById('specialistFile').click()" title="Upload document">&#x1F4CE;</button>
-                        <input id="specialistInput" type="text" class="scan-input" placeholder="Ask the specialist..." maxlength="4000" required disabled />
+                        <textarea id="specialistInput" class="scan-input" placeholder="Ask the specialist..." maxlength="4000" required disabled rows="1"></textarea>
                         <button type="submit" class="scan-send" id="specialistSendBtn" disabled>Send</button>
                     </form>
                     <div id="specialistUploadStatus" class="upload-status" hidden></div>
@@ -374,7 +374,7 @@
                     <form id="clientPMForm" class="scan-form" autocomplete="off">
                         <input id="clientPMFile" type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.png,.jpg" hidden />
                         <button type="button" class="scan-upload-btn" onclick="document.getElementById('clientPMFile').click()" title="Upload document">&#x1F4CE;</button>
-                        <input id="clientPMInput" type="text" class="scan-input" placeholder="Ask the Client PM..." maxlength="4000" required disabled />
+                        <textarea id="clientPMInput" class="scan-input" placeholder="Ask the Client PM..." maxlength="4000" required disabled rows="1"></textarea>
                         <button type="submit" class="scan-send" id="clientPMSendBtn" disabled>Send</button>
                     </form>
                     <div id="clientPMUploadStatus" class="upload-status" hidden></div>
@@ -486,7 +486,7 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=87"></script>
+<script src="/static/app.js?v=88"></script>
 <script>
 // PWA-DESKTOP-1: Register service worker for installability
 if ('serviceWorker' in navigator) {

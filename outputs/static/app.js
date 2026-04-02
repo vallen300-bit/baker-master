@@ -3414,7 +3414,7 @@ async function sendScanMessage(question) {
     const sendBtn = document.getElementById('scanSendBtn');
     const input = document.getElementById('scanInput');
     if (sendBtn) sendBtn.disabled = true;
-    if (input) { input.disabled = true; input.value = ''; }
+    if (input) { input.disabled = true; input.value = ''; input.style.height = 'auto'; }
 
     getScanHistory().push({ role: 'user', content: question });
     appendScanBubble('user', question);
@@ -5716,7 +5716,7 @@ async function sendSpecialistMessage(question) {
     var sendBtn = document.getElementById('specialistSendBtn');
     var input = document.getElementById('specialistInput');
     if (sendBtn) sendBtn.disabled = true;
-    if (input) { input.disabled = true; input.value = ''; }
+    if (input) { input.disabled = true; input.value = ''; input.style.height = 'auto'; }
 
     _getSpecialistHistory().push({ role: 'user', content: question });
     appendSpecialistBubble('user', question);
@@ -5978,7 +5978,7 @@ async function sendClientPMMessage(question) {
     var sendBtn = document.getElementById('clientPMSendBtn');
     var input = document.getElementById('clientPMInput');
     if (sendBtn) sendBtn.disabled = true;
-    if (input) { input.disabled = true; input.value = ''; }
+    if (input) { input.disabled = true; input.value = ''; input.style.height = 'auto'; }
 
     _getClientPMHistory().push({ role: 'user', content: question });
     appendClientPMBubble('user', question);
@@ -6201,13 +6201,33 @@ async function init() {
         });
     }
 
+    // Auto-grow textarea + Enter-to-submit (Shift+Enter for newline)
+    function autoGrowTextarea(el) {
+        el.style.height = 'auto';
+        el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+    }
+    ['scanInput', 'specialistInput', 'clientPMInput'].forEach(function(id) {
+        var ta = document.getElementById(id);
+        if (!ta) return;
+        ta.addEventListener('input', function() { autoGrowTextarea(ta); });
+        ta.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                ta.closest('form').requestSubmit();
+            }
+        });
+    });
+
     // Scan form
     var scanForm = document.getElementById('scanForm');
     if (scanForm) {
         scanForm.addEventListener('submit', function(e) {
             e.preventDefault();
             var input = document.getElementById('scanInput');
-            if (input && input.value.trim()) sendScanMessage(input.value.trim());
+            if (input && input.value.trim()) {
+                sendScanMessage(input.value.trim());
+                input.style.height = 'auto';
+            }
         });
     }
 
@@ -6225,7 +6245,10 @@ async function init() {
         specialistForm.addEventListener('submit', function(e) {
             e.preventDefault();
             var input = document.getElementById('specialistInput');
-            if (input && input.value.trim()) sendSpecialistMessage(input.value.trim());
+            if (input && input.value.trim()) {
+                sendSpecialistMessage(input.value.trim());
+                input.style.height = 'auto';
+            }
         });
     }
     var specialistPicker = document.getElementById('specialistPicker');
@@ -6255,7 +6278,10 @@ async function init() {
         clientPMForm.addEventListener('submit', function(e) {
             e.preventDefault();
             var input = document.getElementById('clientPMInput');
-            if (input && input.value.trim()) sendClientPMMessage(input.value.trim());
+            if (input && input.value.trim()) {
+                sendClientPMMessage(input.value.trim());
+                input.style.height = 'auto';
+            }
         });
     }
     var clientPMPicker = document.getElementById('clientPMPicker');
