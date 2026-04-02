@@ -842,8 +842,14 @@ body {
 .activity-time { font-size: 11px; color: var(--text3); margin-top: 2px; }
 
 /* === SCAN / ASK BAKER VIEW === */
-.scan-view-header { margin-bottom: 14px; display: flex; align-items: center; }
-.scan-view-title { font-size: 24px; font-weight: 700; letter-spacing: -0.3px; font-family: var(--font-heading); }
+.scan-view-header { margin-bottom: 8px; display: flex; align-items: center; gap: 10px; }
+.scan-view-label { font-size: 15px; font-weight: 600; color: var(--text2); font-family: var(--font); }
+.scan-back-btn {
+  padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--bg); font-size: 15px; color: var(--text2); cursor: pointer;
+  font-family: var(--font); transition: all 0.15s; line-height: 1; flex-shrink: 0;
+}
+.scan-back-btn:hover { border-color: var(--blue); color: var(--blue); }
 .scan-view-body { display: flex; flex-direction: column; height: calc(100vh - 190px); }
 
 /* Bottom-input layout (Claude Desktop style) */
@@ -858,8 +864,9 @@ body {
   justify-content: flex-end;
 }
 .scan-msg {
-  max-width: 85%; padding: 12px 16px; border-radius: var(--radius);
+  max-width: 95%; padding: 12px 16px; border-radius: var(--radius);
   font-size: 14px; line-height: 1.7;
+  word-break: break-word; overflow-wrap: break-word;
 }
 .scan-msg.user {
   align-self: flex-end; background: rgba(201,169,110,0.15); color: var(--text);
@@ -917,9 +924,9 @@ body {
   background: var(--bg);
 }
 .artifact-panel.open {
-  width: 320px; min-width: 320px; opacity: 1;
+  width: 260px; min-width: 260px; opacity: 1;
   border-left: 1px solid var(--border);
-  padding: 16px;
+  padding: 14px;
 }
 .artifact-items {
   flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 14px;

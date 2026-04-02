@@ -13,7 +13,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=61">
+    <link rel="stylesheet" href="/static/style.css?v=62">
 </head>
 <body>
 
@@ -284,7 +284,8 @@
         <!-- VIEW: Ask Baker (Scan chat) -->
         <div class="view" id="viewAskBaker">
             <div class="scan-view-header">
-                <span class="scan-view-title">Ask Baker</span>
+                <button class="scan-back-btn" onclick="switchTab('morning-brief')" title="Back to Dashboard">&larr;</button>
+                <span class="scan-view-label">Ask Baker</span>
             </div>
             <div class="scan-layout">
                 <div class="scan-view-body scan-top-input">
@@ -322,8 +323,9 @@
 
         <!-- VIEW: Ask Specialist -->
         <div class="view" id="viewAskSpecialist">
-            <div class="scan-view-header" style="display:flex;align-items:center;gap:14px;margin-bottom:14px;">
-                <span class="scan-view-title">Ask Specialist</span>
+            <div class="scan-view-header">
+                <button class="scan-back-btn" onclick="switchTab('morning-brief')" title="Back to Dashboard">&larr;</button>
+                <span class="scan-view-label">Ask Specialist</span>
                 <select id="specialistPicker" class="specialist-picker">
                     <option value="">Select a specialist...</option>
                 </select>
@@ -363,8 +365,9 @@
 
         <!-- VIEW: Client PM -->
         <div class="view" id="viewAskClientPM">
-            <div class="scan-view-header" style="display:flex;align-items:center;gap:14px;margin-bottom:14px;">
-                <span class="scan-view-title">Client PM</span>
+            <div class="scan-view-header">
+                <button class="scan-back-btn" onclick="switchTab('morning-brief')" title="Back to Dashboard">&larr;</button>
+                <span class="scan-view-label">Client PM</span>
                 <select id="clientPMPicker" class="specialist-picker">
                     <option value="">Select a client...</option>
                 </select>
@@ -486,7 +489,7 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=89"></script>
+<script src="/static/app.js?v=90"></script>
 <script>
 // PWA-DESKTOP-1: Register service worker for installability
 if ('serviceWorker' in navigator) {
