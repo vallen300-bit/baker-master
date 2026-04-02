@@ -6204,7 +6204,9 @@ async function init() {
     // Auto-grow textarea + Enter-to-submit (Shift+Enter for newline)
     function autoGrowTextarea(el) {
         el.style.height = 'auto';
-        el.style.height = Math.min(el.scrollHeight, 160) + 'px';
+        var maxH = Math.round(window.innerHeight * 0.4);
+        el.style.height = Math.min(el.scrollHeight, maxH) + 'px';
+        el.style.overflowY = el.scrollHeight > maxH ? 'auto' : 'hidden';
     }
     ['scanInput', 'specialistInput', 'clientPMInput'].forEach(function(id) {
         var ta = document.getElementById(id);
