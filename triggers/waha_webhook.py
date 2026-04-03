@@ -839,6 +839,15 @@ async def waha_webhook(
     except Exception as _e:
         logger.warning(f"Failed to store WhatsApp msg {msg_id} to PostgreSQL (non-fatal): {_e}")
 
+    # AO-PM-VIEW: Detect AO WhatsApp signals (inbound from AO or AO-relevant)
+    if sender != DIRECTOR_WHATSAPP:
+        try:
+            from orchestrator.ao_signal_detector import is_ao_whatsapp_message, flag_ao_signal
+            if is_ao_whatsapp_message(sender_name, combined_body):
+                flag_ao_signal("whatsapp", sender_name or sender, combined_body[:200])
+        except Exception:
+            pass  # Non-fatal
+
     # INTERACTION-PIPELINE-1: Record contact interaction from WhatsApp
     try:
         from memory.store_back import SentinelStoreBack
@@ -940,6 +949,15 @@ async def waha_webhook(
         )
     except Exception as _e:
         logger.warning(f"Decision Engine scoring failed (non-fatal): {_e}")
+
+    # AO-PM-VIEW: Track outbound to AO (for Rule Zero gap monitoring)
+    if sender == DIRECTOR_WHATSAPP and combined_body:
+        if "oskolkov" in combined_body.lower() or "andrey" in combined_body.lower():
+            try:
+                from orchestrator.ao_signal_detector import flag_ao_signal
+                flag_ao_signal("whatsapp_outbound", "DV to AO", combined_body[:200])
+            except Exception:
+                pass
 
     # WHATSAPP-ACTION-1: Director messages → action detection first
     _wa_intent = None

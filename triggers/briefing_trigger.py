@@ -134,10 +134,10 @@ def gather_briefing_context() -> str:
                     WHERE created_at > NOW() - INTERVAL '24 hours'
                       AND status = 'pending'
                       AND (
-                        title ~* '(Mandarin.Oriental|MOHG|MO.Vienna|MORV|branded.residence|luxury.hotel|sovereign.wealth|family.office|joint.venture|co.invest|strategic.partner)'
-                        OR title ~* '(Soulier|Yurkovich|UBM|Wertheimer|Kulibayev|Strothotte|CITIC|Al.Thani)'
-                        OR body ~* '(Mandarin.Oriental|MOHG|MO.Vienna|MORV|branded.residence|luxury.hotel|sovereign.wealth|family.office|joint.venture|co.invest|strategic.partner)'
-                        OR body ~* '(Soulier|Yurkovich|UBM|Wertheimer|Kulibayev|Strothotte|CITIC|Al.Thani)'
+                        title ~* '(Mandarin.Oriental|MOHG|MO.Vienna|MORV|branded.residence|luxury.hotel|sovereign.wealth|family.office|joint.venture|co.invest|strategic.partner|Oskolkov|Aelio|capital.call|Hagenauer)'
+                        OR title ~* '(Soulier|Yurkovich|UBM|Wertheimer|Kulibayev|Strothotte|CITIC|Al.Thani|Oskolkov|Buchwalder|Pohanis)'
+                        OR body ~* '(Mandarin.Oriental|MOHG|MO.Vienna|MORV|branded.residence|luxury.hotel|sovereign.wealth|family.office|joint.venture|co.invest|strategic.partner|Oskolkov|Aelio|capital.call|Hagenauer)'
+                        OR body ~* '(Soulier|Yurkovich|UBM|Wertheimer|Kulibayev|Strothotte|CITIC|Al.Thani|Oskolkov|Buchwalder|Pohanis)'
                       )
                     ORDER BY tier, created_at DESC
                     LIMIT 10
@@ -160,7 +160,99 @@ def gather_briefing_context() -> str:
     except Exception as e:
         logger.warning(f"Owner's lens context failed: {e}")
 
+    # 5. AO PM — Investor relationship health check
+    ao_ctx = _gather_ao_pm_context()
+    if ao_ctx:
+        sections.append(f"AO INVESTOR RELATIONSHIP STATUS:\n{ao_ctx}")
+
     return "\n\n".join(sections)
+
+
+def _gather_ao_pm_context() -> str:
+    """
+    Gather AO-specific context for the daily briefing.
+    Checks: communication gap, pending discussion items, approaching deadlines.
+    This gives Opus the raw material to reason through the AO psychology lens.
+    """
+    parts = []
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return ""
+        try:
+            cur = conn.cursor()
+
+            # 1. Last AO-directed communication (email + WhatsApp)
+            cur.execute("""
+                SELECT 'email' as channel, MAX(created_at) as last_contact
+                FROM sent_emails
+                WHERE to_address ILIKE '%%oskolkov%%' OR to_address ILIKE '%%aelio%%'
+                UNION ALL
+                SELECT 'whatsapp', MAX(timestamp)
+                FROM whatsapp_messages
+                WHERE is_director = true
+                  AND (full_text ILIKE '%%oskolkov%%' OR full_text ILIKE '%%andrey%%')
+                LIMIT 5
+            """)
+            contacts = cur.fetchall()
+            last_contact = None
+            for row in contacts:
+                if row[1] and (last_contact is None or row[1] > last_contact):
+                    last_contact = row[1]
+
+            if last_contact:
+                from datetime import datetime, timezone
+                gap_days = (datetime.now(timezone.utc) - last_contact).days
+                parts.append(f"AO COMMUNICATION GAP: {gap_days} days since last outbound")
+                if gap_days >= 10:
+                    parts.append("  ** WARNING: Approaching Rule Zero threshold (14 days) **")
+                if gap_days >= 14:
+                    parts.append("  ** CRITICAL: Rule Zero violated — silence preceding ask **")
+            else:
+                parts.append("AO COMMUNICATION GAP: Unknown — no outbound records found")
+
+            # 2. Pending discussion items count
+            cur.execute("""
+                SELECT jsonb_array_length(state_json->'pending_discussion_with_ao')
+                FROM ao_project_state
+                WHERE state_key = 'current'
+                LIMIT 1
+            """)
+            row = cur.fetchone()
+            pending_count = row[0] if row and row[0] else 0
+            if pending_count > 0:
+                parts.append(f"AO PENDING ITEMS: {pending_count} items awaiting discussion with AO")
+
+            # 3. AO-related deadlines approaching
+            cur.execute("""
+                SELECT description, due_date
+                FROM deadlines
+                WHERE status = 'active'
+                  AND due_date <= NOW() + INTERVAL '14 days'
+                  AND (description ILIKE '%%oskolkov%%' OR description ILIKE '%%aelio%%'
+                       OR description ILIKE '%%aukera%%' OR description ILIKE '%%rg7%%'
+                       OR description ILIKE '%%capital call%%')
+                ORDER BY due_date
+                LIMIT 5
+            """)
+            deadlines = cur.fetchall()
+            if deadlines:
+                dl_lines = [f"  - {d[0]}: {d[1].strftime('%Y-%m-%d')}" for d in deadlines]
+                parts.append(f"AO DEADLINES (next 14 days):\n" + "\n".join(dl_lines))
+
+            cur.close()
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"AO PM briefing context failed: {e}")
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.warning(f"AO PM briefing context outer error: {e}")
+
+    return "\n".join(parts) if parts else ""
 
 
 def deliver_briefing(briefing_text: str, date_str: str):

@@ -835,6 +835,16 @@ def _process_email_threads(new_threads: list):
         except Exception:
             pass  # Non-fatal — pipeline continues
 
+        # AO-PM-VIEW: Detect AO-orbit emails
+        try:
+            from orchestrator.ao_signal_detector import is_ao_relevant_text, flag_ao_signal
+            _ao_sender = metadata.get("primary_sender", "") + " " + metadata.get("primary_sender_email", "")
+            _ao_text = f"{metadata.get('subject', '')} {thread['text'][:500]}"
+            if is_ao_relevant_text(_ao_sender, _ao_text):
+                flag_ao_signal("email", metadata.get("primary_sender", "unknown"), metadata.get("subject", "")[:200])
+        except Exception:
+            pass  # Non-fatal
+
         # TRIP-INTELLIGENCE-1: Auto-link to active trip if content mentions destination
         try:
             from memory.store_back import SentinelStoreBack

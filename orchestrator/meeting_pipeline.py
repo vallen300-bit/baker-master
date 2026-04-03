@@ -285,6 +285,16 @@ def process_meeting(transcript_id, title, participants, meeting_date,
         meeting_type = _classify_meeting_type(title, participants)
         logger.info(f"Meeting type: {meeting_type}")
 
+        # AO-PM-VIEW: Detect AO-relevant meetings
+        try:
+            from orchestrator.ao_signal_detector import is_ao_relevant_meeting, flag_ao_signal
+            if is_ao_relevant_meeting(title, participants):
+                flag_ao_signal("meeting", f"{title} ({participants[:100]})",
+                               f"Meeting with AO-orbit participants", meeting_date)
+                logger.info(f"AO-relevant meeting detected: {title}")
+        except Exception:
+            pass  # Non-fatal
+
         if meeting_type == "skip":
             logger.info(f"Skipping meeting (type=skip): {title}")
             return

@@ -700,11 +700,16 @@ class CapabilityRunner:
             # For non-meta capabilities with custom prompts (e.g. Russo AI), inject tax optimization
             if capability.slug not in ("decomposer", "synthesizer"):
                 prompt = capability.system_prompt
-                # AO-PM-1: Inject persistent state into AO PM prompt
+                # AO-PM-VIEW: Inject view files + live state into AO PM prompt
                 if capability.slug == "ao_pm":
+                    # View files: stable compiled intelligence (psychology, channels, rules)
+                    view_ctx = self._load_ao_view_files()
+                    if view_ctx:
+                        prompt += f"\n\n# AO PM VIEW (from data/ao_pm/)\n{view_ctx}\n"
+                    # Live state: dynamic data (last contact, actions, flags, pending items)
                     ao_ctx = self._get_ao_project_state_context()
                     if ao_ctx:
-                        prompt += f"\n\n## CURRENT AO STATE (from persistent memory)\n{ao_ctx}\n"
+                        prompt += f"\n\n# LIVE STATE (from PostgreSQL)\n{ao_ctx}\n"
                 prompt += (
                     "\n\n## TAX OPTIMIZATION (always consider)\n"
                     "In every analysis, proactively identify tax optimization opportunities. "
@@ -1103,6 +1108,35 @@ class CapabilityRunner:
     # ─────────────────────────────────────────────────
     # AO-PM-1: AO Project Manager helpers
     # ─────────────────────────────────────────────────
+
+    def _load_ao_view_files(self) -> str:
+        """AO-PM-VIEW: Load AO PM view files from data/ao_pm/ directory."""
+        import os
+        view_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "ao_pm")
+        if not os.path.isdir(view_dir):
+            logger.warning("AO PM view directory not found: %s", view_dir)
+            return ""
+
+        parts = []
+        file_order = [
+            "SCHEMA.md",
+            "psychology.md",
+            "investment_channels.md",
+            "sensitive_issues.md",
+            "communication_rules.md",
+            "agenda.md",
+        ]
+        for fname in file_order:
+            fpath = os.path.join(view_dir, fname)
+            if os.path.isfile(fpath):
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    parts.append(f"## VIEW FILE: {fname}\n{content}")
+                except Exception as e:
+                    logger.warning("Failed to read AO view file %s: %s", fname, e)
+
+        return "\n\n---\n\n".join(parts) if parts else ""
 
     def _get_ao_project_state_context(self) -> str:
         """AO-PM-1: Format persistent AO state for system prompt injection."""
