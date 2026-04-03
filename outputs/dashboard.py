@@ -2180,10 +2180,14 @@ async def get_morning_brief():
             top_fires = [_serialize(dict(r)) for r in cur.fetchall()]
 
             # Deadlines this week — exclude critical (shown in Critical) and travel (shown in Travel)
+            # LANDING-FIX-2: Deduplicate ClickUp-synced deadlines that differ only by prefix
             cur.execute("""
-                SELECT id, description, due_date, source_type, confidence,
-                       priority, status, created_at,
-                       LEFT(source_snippet, 500) AS source_snippet
+                SELECT DISTINCT ON (
+                    REGEXP_REPLACE(LOWER(description), '^\[.*?\]\s*(\[.*?\]\s*)*', '')
+                )
+                    id, description, due_date, source_type, confidence,
+                    priority, status, created_at,
+                    LEFT(source_snippet, 500) AS source_snippet
                 FROM deadlines
                 WHERE status = 'active'
                   AND (is_critical IS NOT TRUE)
@@ -2192,7 +2196,10 @@ async def get_morning_brief():
                   AND NOT (description ILIKE '%%flight%%' OR description ILIKE '%%departure%%'
                            OR description ILIKE '%%travel%%' OR description ILIKE '%%airport%%'
                            OR description ILIKE '%%boarding%%' OR description ILIKE '%%check-in%%')
-                ORDER BY priority DESC, created_at DESC LIMIT 10
+                ORDER BY REGEXP_REPLACE(LOWER(description), '^\[.*?\]\s*(\[.*?\]\s*)*', ''),
+                         LENGTH(COALESCE(source_snippet, '')) DESC,
+                         priority DESC, created_at DESC
+                LIMIT 10
             """)
             deadlines = [_serialize(dict(r)) for r in cur.fetchall()]
 
@@ -2264,6 +2271,42 @@ async def get_morning_brief():
                     silent_contacts = [_serialize(dict(r)) for r in cur.fetchall()]
                 except Exception:
                     pass
+
+            # LANDING-FIX-2: Travel queries moved inside connection block (was using conn after pool return)
+            # Travel alerts (any tier, not just top_fires tier=1)
+            try:
+                cur.execute("""
+                    SELECT * FROM alerts
+                    WHERE status = 'pending'
+                      AND (tags ? 'travel' OR title ILIKE '%%flight%%')
+                      AND NOT (tags ? 'meeting')
+                    ORDER BY created_at DESC
+                    LIMIT 10
+                """)
+                _travel_alerts_rows = [_serialize(dict(r)) for r in cur.fetchall()]
+            except Exception as e:
+                logger.warning(f"Morning brief: travel alerts query failed: {e}")
+                conn.rollback()
+                _travel_alerts_rows = []
+
+            # Travel-related deadlines (next 3 days)
+            try:
+                cur.execute("""
+                    SELECT id, description, due_date, priority, source_snippet
+                    FROM deadlines
+                    WHERE status = 'active'
+                      AND due_date >= CURRENT_DATE
+                      AND due_date < CURRENT_DATE + INTERVAL '4 days'
+                      AND (description ILIKE '%%flight%%' OR description ILIKE '%%departure%%'
+                           OR description ILIKE '%%travel%%' OR description ILIKE '%%airport%%'
+                           OR description ILIKE '%%train%%' OR description ILIKE '%%depart%%')
+                    ORDER BY due_date ASC LIMIT 10
+                """)
+                _travel_deadlines_rows = [_serialize(dict(r)) for r in cur.fetchall()]
+            except Exception as e:
+                logger.warning(f"Morning brief: travel deadlines query failed: {e}")
+                conn.rollback()
+                _travel_deadlines_rows = []
 
             cur.close()
         finally:
@@ -2409,41 +2452,11 @@ async def get_morning_brief():
         except Exception as e:
             logger.warning(f"Morning brief: trip auto-detection failed: {e}")
 
-        # TRAVEL-FIX-1: Dedicated travel alerts (any tier, not just top_fires tier=1)
-        travel_alerts = []
-        try:
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("""
-                SELECT * FROM alerts
-                WHERE status = 'pending'
-                  AND (tags ? 'travel' OR title ILIKE '%%flight%%')
-                ORDER BY created_at DESC
-                LIMIT 10
-            """)
-            travel_alerts = [_serialize(dict(r)) for r in cur.fetchall()]
-            cur.close()
-        except Exception as e:
-            logger.warning(f"Morning brief: travel alerts query failed: {e}")
+        # LANDING-FIX-2: travel_alerts now fetched inside connection block above
+        travel_alerts = _travel_alerts_rows
 
-        # TRAVEL-HYGIENE-1: Travel-related deadlines (next 3 days) for grid
-        travel_deadlines = []
-        try:
-            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            cur.execute("""
-                SELECT id, description, due_date, priority, source_snippet
-                FROM deadlines
-                WHERE status = 'active'
-                  AND due_date >= CURRENT_DATE
-                  AND due_date < CURRENT_DATE + INTERVAL '4 days'
-                  AND (description ILIKE '%%flight%%' OR description ILIKE '%%departure%%'
-                       OR description ILIKE '%%travel%%' OR description ILIKE '%%airport%%'
-                       OR description ILIKE '%%train%%' OR description ILIKE '%%depart%%')
-                ORDER BY due_date ASC LIMIT 10
-            """)
-            travel_deadlines = [_serialize(dict(r)) for r in cur.fetchall()]
-            cur.close()
-        except Exception as e:
-            logger.warning(f"Morning brief: travel deadlines query failed: {e}")
+        # LANDING-FIX-2: travel_deadlines now fetched inside connection block above
+        travel_deadlines = _travel_deadlines_rows
 
         # MEETINGS-DETECT-1: Detected meetings from Director messages
         detected_meetings = []
