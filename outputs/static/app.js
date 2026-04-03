@@ -851,6 +851,39 @@ async function loadMorningBrief() {
                 allTravel.push(_travelHtml);
             }
 
+            // 4. Travel alerts (Baker-generated from email/deadline cadence — most reliable source)
+            var travelAlerts = data.travel_alerts || [];
+            for (var tai = 0; tai < travelAlerts.length; tai++) {
+                var ta = travelAlerts[tai];
+                // Skip if already covered by trips, calendar events, or deadlines
+                var taTitle = (ta.title || '').toLowerCase();
+                var taDup = allTravel.some(function(html) { return html.toLowerCase().indexOf(taTitle.slice(0, 30)) >= 0; });
+                if (taDup) continue;
+                // Render as compact card
+                var taDot = 'blue';
+                var taLabel = ta.title || 'Travel alert';
+                // Strip "TODAY: " or "In 2d: " prefix for cleaner display
+                taLabel = taLabel.replace(/^(TODAY|In \d+d):\s*/i, '');
+                var taTime = '';
+                if (ta.travel_date) {
+                    var _taToday = new Date().toISOString().slice(0, 10);
+                    var _taDate = ta.travel_date.slice(0, 10);
+                    if (_taDate === _taToday) taTime = 'Today';
+                    else {
+                        var _taDiff = Math.round((new Date(_taDate) - new Date(_taToday)) / 86400000);
+                        if (_taDiff === 1) taTime = 'Tomorrow';
+                        else if (_taDiff > 0) taTime = 'In ' + _taDiff + ' days';
+                    }
+                }
+                allTravel.push(
+                    '<div class="card card-compact"><div class="card-header">' +
+                    '<span class="nav-dot ' + taDot + '" style="margin-top:5px;"></span>' +
+                    '<span class="card-title">' + esc(taLabel) + '</span>' +
+                    '<span class="card-time">' + esc(taTime) + '</span>' +
+                    '</div></div>'
+                );
+            }
+
             if (allTravel.length > 0) {
                 setSafeHTML(gridTravel, allTravel.join(''));
             } else {

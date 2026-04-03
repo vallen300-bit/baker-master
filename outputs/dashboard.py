@@ -2344,7 +2344,7 @@ async def get_morning_brief():
                     event_data["event_type"] = "meeting"
                     meetings_today.append(event_data)
         except Exception as e:
-            logger.warning(f"Morning brief: calendar unavailable: {e}")
+            logger.warning(f"Morning brief: calendar unavailable (travel cards use DB fallback): {e}")
 
         # TRIP-INTELLIGENCE-1: Match/create trips for travel events
         active_trips = []
@@ -2433,10 +2433,12 @@ async def get_morning_brief():
                 SELECT id, description, due_date, priority, source_snippet
                 FROM deadlines
                 WHERE status = 'active'
-                  AND due_date BETWEEN NOW() AND NOW() + INTERVAL '3 days'
+                  AND due_date >= CURRENT_DATE
+                  AND due_date < CURRENT_DATE + INTERVAL '4 days'
                   AND (description ILIKE '%%flight%%' OR description ILIKE '%%departure%%'
-                       OR description ILIKE '%%travel%%' OR description ILIKE '%%airport%%')
-                ORDER BY due_date ASC LIMIT 5
+                       OR description ILIKE '%%travel%%' OR description ILIKE '%%airport%%'
+                       OR description ILIKE '%%train%%' OR description ILIKE '%%depart%%')
+                ORDER BY due_date ASC LIMIT 10
             """)
             travel_deadlines = [_serialize(dict(r)) for r in cur.fetchall()]
             cur.close()
@@ -3122,7 +3124,7 @@ _TRAVEL_PATTERNS = _re.compile(
     r'|\b(train|zug|bahn|rail)\b'
     r'|\b(transfer|taxi|uber|car.?rental)\b'
     r'|\b[A-Z]{2}\s?\d{2,4}\b'  # Flight numbers: LH 454, OS 201, BA 123
-    r'|\b(?:VIE|FRA|SFO|JFK|LHR|CDG|ZRH|MUC|LAX|SIN|DXB|FCO|BCN|AMS)\b',  # IATA codes
+    r'|\b(?:VIE|FRA|SFO|JFK|LHR|CDG|ZRH|MUC|LAX|SIN|DXB|FCO|BCN|AMS|NCE|GVA|PMI|BER|TXL)\b',  # IATA codes
     _re.IGNORECASE,
 )
 

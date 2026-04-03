@@ -579,6 +579,11 @@ def check_calendar_and_prep():
             meetings = poll_upcoming_meetings(hours_ahead=24)
         except Exception as e:
             logger.warning(f"Calendar poll failed (API unreachable or token expired): {e}")
+            try:
+                from triggers.state import trigger_state
+                trigger_state.report_failure("calendar", str(e))
+            except Exception:
+                pass
             return  # Graceful failure — don't crash scheduler
 
         if not meetings:
