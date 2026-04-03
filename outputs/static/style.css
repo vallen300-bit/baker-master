@@ -198,6 +198,8 @@ body {
   border-radius: var(--radius-sm); font-size: 14px; font-family: var(--font);
   background: var(--bg-subtle); outline: none; transition: border-color 0.15s;
   color: var(--text);
+  resize: none; overflow-y: hidden; min-height: 44px; max-height: 40vh;
+  line-height: 1.4; word-wrap: break-word; field-sizing: content;
 }
 .cmd-input:focus { border-color: var(--blue); background: var(--bg); }
 .cmd-input::placeholder { color: var(--text3); }
@@ -242,6 +244,13 @@ body {
   color: var(--text2); cursor: pointer; font-family: var(--font); transition: all 0.15s;
 }
 .cmd-quick:hover { border-color: var(--blue); color: var(--blue); background: var(--blue-bg); }
+
+/* Landing page: cmd-bar at bottom */
+.right-area.landing-active .cmd-bar {
+  order: 2; border-bottom: none; border-top: 1px solid var(--border);
+  align-items: flex-end;
+}
+.right-area.landing-active .content { order: 1; }
 
 /* Content area */
 .content { flex: 1; overflow-y: auto; padding: 28px 28px; }

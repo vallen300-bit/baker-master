@@ -471,6 +471,10 @@ function switchTab(tabName) {
     var backBtn = document.getElementById('cmdBack');
     if (backBtn) backBtn.hidden = (tabName === 'morning-brief');
 
+    // Landing page: cmd-bar at bottom
+    var rightArea = document.querySelector('.right-area');
+    if (rightArea) rightArea.classList.toggle('landing-active', tabName === 'morning-brief');
+
     if (tabName === 'morning-brief') loadMorningBrief();
     else if (tabName === 'fires') loadFires();
     else if (tabName === 'matters') loadMattersTab();
@@ -3865,12 +3869,15 @@ function setupCommandBar() {
     const cmdInput = document.getElementById('cmdInput');
     if (cmdInput) {
         cmdInput.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' && cmdInput.value.trim()) {
+            if (e.key === 'Enter' && !e.shiftKey && cmdInput.value.trim()) {
                 e.preventDefault();
                 const q = cmdInput.value.trim();
                 cmdInput.value = '';
+                cmdInput.style.height = 'auto';
                 switchTab('ask-baker');
                 setTimeout(function() { sendScanMessage(q); }, 100);
+            } else if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
             }
         });
     }
@@ -6303,16 +6310,19 @@ async function init() {
         el.style.height = Math.min(el.scrollHeight, maxH) + 'px';
         el.style.overflowY = el.scrollHeight > maxH ? 'auto' : 'hidden';
     }
-    ['scanInput', 'specialistInput', 'clientPMInput'].forEach(function(id) {
+    ['scanInput', 'specialistInput', 'clientPMInput', 'cmdInput'].forEach(function(id) {
         var ta = document.getElementById(id);
         if (!ta) return;
         ta.addEventListener('input', function() { autoGrowTextarea(ta); });
-        ta.addEventListener('keydown', function(e) {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                ta.closest('form').requestSubmit();
-            }
-        });
+        // cmdInput Enter handled by setupCommandBar (no parent form)
+        if (id !== 'cmdInput') {
+            ta.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    ta.closest('form').requestSubmit();
+                }
+            });
+        }
     });
 
     // Scan form
@@ -6335,6 +6345,9 @@ async function init() {
     // Command bar
     setupCommandBar();
     setupDetectionBadge();
+    // Landing page: cmd-bar starts at bottom
+    var rightArea = document.querySelector('.right-area');
+    if (rightArea) rightArea.classList.add('landing-active');
 
     // Specialist form
     var specialistForm = document.getElementById('specialistForm');
