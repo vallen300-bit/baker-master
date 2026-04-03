@@ -2316,6 +2316,8 @@ async def get_morning_brief():
                     WHERE status = 'pending'
                       AND tags ? 'meeting'
                       AND title ILIKE '%%meeting%%'
+                      AND NOT (tags ? 'travel')
+                      AND title NOT ILIKE '%%Critical:%%'
                       AND created_at >= NOW() - INTERVAL '48 hours'
                     ORDER BY created_at DESC
                     LIMIT 5
