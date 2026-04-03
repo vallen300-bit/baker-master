@@ -979,6 +979,7 @@ async function loadMorningBrief() {
 
         loadMattersSummary();
         loadPeopleSidebar();
+        loadMediaSidebar();
         loadIdeasSidebar();
 
         // System widgets moved to Baker Data tab (BAKER-DATA-TUCK-1)
@@ -1354,6 +1355,41 @@ function _initSectionToggle(headerId, listId, key, defaultExpanded) {
         if (arrow) arrow.innerHTML = isOpen ? '&#9656;' : '&#9662;';
         localStorage.setItem('sidebar_' + key, !isOpen);
     });
+}
+
+// ═══ MEDIA-SIDEBAR: Expandable media categories ═══
+
+async function loadMediaSidebar() {
+    try {
+        var resp = await bakerFetch('/api/rss/category-counts');
+        if (!resp.ok) return;
+        var data = await resp.json();
+        var container = document.getElementById('mediaSubList');
+        if (!container) return;
+        container.textContent = '';
+        var totalCount = 0;
+        var cats = data.categories || [];
+        for (var i = 0; i < cats.length; i++) {
+            var cat = cats[i];
+            totalCount += cat.count || 0;
+            var item = document.createElement('div');
+            item.className = 'nav-item';
+            item.dataset.category = cat.name;
+            var lbl = document.createElement('span');
+            lbl.className = 'nav-label';
+            lbl.textContent = cat.name;
+            item.appendChild(lbl);
+            var cnt = document.createElement('span');
+            cnt.className = 'nav-count';
+            cnt.textContent = cat.count;
+            item.appendChild(cnt);
+            container.appendChild(item);
+        }
+        setText('mediaCount', totalCount || '');
+        _initSectionToggle('navMediaHeader', 'mediaSubList', 'media', false);
+    } catch (e) {
+        console.error('loadMediaSidebar failed:', e);
+    }
 }
 
 // ═══ PEOPLE-SECTION-1: People sidebar + issue cards ═══
@@ -5630,13 +5666,20 @@ async function loadMediaTab() {
     var container = document.getElementById('mediaContent');
     if (!container) return;
     showLoading(container, 'Loading media');
+
+    // MEDIA-SIDEBAR: Consume pre-filter from sidebar click
+    var preFilter = window._mediaFilterCategory;
+    window._mediaFilterCategory = undefined;
+
     try {
         // Fetch feeds for filter dropdown
         var feedsResp = await bakerFetch('/api/rss/feeds');
         var feedsData = feedsResp.ok ? await feedsResp.json() : { feeds: [] };
 
-        // Fetch articles
-        var articlesResp = await bakerFetch('/api/rss/articles?limit=50');
+        // Fetch articles (pre-filtered if sidebar category was clicked)
+        var articlesUrl = '/api/rss/articles?limit=50';
+        if (preFilter) articlesUrl += '&category=' + encodeURIComponent(preFilter);
+        var articlesResp = await bakerFetch(articlesUrl);
         if (!articlesResp.ok) return;
         var data = await articlesResp.json();
 
@@ -5659,6 +5702,8 @@ async function loadMediaTab() {
                     catSelect.appendChild(opt);
                 }
             });
+            // MEDIA-SIDEBAR: Pre-select category if set from sidebar
+            if (preFilter) catSelect.value = preFilter;
             catSelect.addEventListener('change', async function() {
                 var url = '/api/rss/articles?limit=50';
                 if (catSelect.value) url += '&category=' + encodeURIComponent(catSelect.value);
@@ -6301,6 +6346,31 @@ async function init() {
                 loadPersonDetail(item.dataset.person);
             }
         });
+    }
+
+    // MEDIA-SIDEBAR: Delegated click handler for Media sub-list
+    var mediaSubList = document.getElementById('mediaSubList');
+    if (mediaSubList) {
+        mediaSubList.addEventListener('click', function(e) {
+            var item = e.target.closest('.nav-item');
+            if (item && item.dataset.category) {
+                window._mediaFilterCategory = item.dataset.category;
+                switchTab('media');
+            }
+        });
+    }
+
+    // MEDIA-SIDEBAR: Header label click opens Media tab (all categories)
+    var mediaHeader = document.getElementById('navMediaHeader');
+    if (mediaHeader) {
+        var mediaLabel = mediaHeader.querySelector('.nav-section-label');
+        if (mediaLabel) {
+            mediaLabel.addEventListener('click', function(e) {
+                e.stopPropagation();
+                window._mediaFilterCategory = '';
+                switchTab('media');
+            });
+        }
     }
 
     // Auto-grow textarea + Enter-to-submit (Shift+Enter for newline)

@@ -3516,6 +3516,33 @@ async def get_rss_articles(
         return {"articles": [], "count": 0}
 
 
+@app.get("/api/rss/category-counts", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_rss_category_counts():
+    """Return article counts by RSS feed category (last 7 days)."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"categories": []}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT f.category AS name, COUNT(a.id) AS count
+                FROM rss_feeds f JOIN rss_articles a ON a.feed_id = f.id
+                WHERE f.is_active = true AND a.published_at > NOW() - INTERVAL '7 days'
+                GROUP BY f.category ORDER BY count DESC
+            """)
+            categories = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            return {"categories": categories}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/rss/category-counts failed: {e}")
+        return {"categories": []}
+
+
 @app.get("/api/rss/feeds", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
 async def get_rss_feeds_list():
     """List active RSS feeds with categories for the filter dropdown."""

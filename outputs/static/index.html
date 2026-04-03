@@ -106,9 +106,12 @@
         <div class="nav-item" data-tab="travel">
             <span class="nav-label">Travel</span>
         </div>
-        <div class="nav-item" data-tab="media">
-            <span class="nav-label">Media</span>
+        <div class="nav-section-header" id="navMediaHeader" data-section="media">
+            <span class="nav-section-arrow">&#9656;</span>
+            <span class="nav-section-label">Media</span>
+            <span class="nav-count" id="mediaCount"></span>
         </div>
+        <div class="nav-sub" id="mediaSubList" style="display:none;"></div>
 
         <div class="nav-divider"></div>
         <div class="nav-item" data-tab="baker-data">
@@ -489,7 +492,7 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=95"></script>
+<script src="/static/app.js?v=96"></script>
 <script>
 // PWA-DESKTOP-1: Register service worker for installability
 if ('serviceWorker' in navigator) {
