@@ -856,7 +856,8 @@ async function loadMorningBrief() {
             for (var tai = 0; tai < travelAlerts.length; tai++) {
                 var ta = travelAlerts[tai];
                 // Skip if already covered by trips, calendar events, or deadlines
-                var taTitle = (ta.title || '').toLowerCase();
+                // Strip "TODAY: " / "In 2d: " prefix BEFORE dedup check (LANDING-FIX-1)
+                var taTitle = (ta.title || '').toLowerCase().replace(/^(today|in \d+d):\s*/i, '');
                 var taDup = allTravel.some(function(html) { return html.toLowerCase().indexOf(taTitle.slice(0, 30)) >= 0; });
                 if (taDup) continue;
                 // Render as compact card
@@ -900,7 +901,7 @@ async function loadMorningBrief() {
             if (criticalItems.length > 0) {
                 setSafeHTML(gridCritical, criticalItems.map(function(ci) { return _renderCriticalItem(ci); }).join(''));
             } else {
-                gridCritical.innerHTML = '<div class="grid-empty">No critical items. All clear.</div>';
+                gridCritical.innerHTML = '<div class="grid-empty">No items flagged critical.</div>';
             }
             if (gridCriticalCount) gridCriticalCount.textContent = criticalItems.length > 0 ? criticalItems.length : '';
         }
@@ -2253,6 +2254,8 @@ function renderDeadlineCompact(dl) {
     else if (daysText.includes('overdue')) { dotClass = 'red'; timeStyle = 'color:var(--red);font-weight:600;'; }
 
     var snippetText = (dl.source_snippet || '').trim();
+    // LANDING-FIX-1: Hide raw internal references (clickup IDs, bare source_type markers)
+    if (/^clickup_deadline:/.test(snippetText) || snippetText.length < 20) snippetText = '';
     var aid = String(dl.id);
 
     var html = '<div class="card card-compact drag-card" data-item-id="' + dl.id + '" data-item-type="deadline" data-source-cell="promised" style="cursor:pointer;" onclick="_toggleTriageCard(this)"><div class="card-header">' +
