@@ -199,6 +199,41 @@ def run_rss_poll():
             f"{feeds_errored} errors"
         )
 
+        # KNOWLEDGE-DIGEST-1: Compile knowledge digests if articles were ingested
+        if articles_ingested > 0:
+            try:
+                conn_cat = store._get_conn()
+                if conn_cat:
+                    cur_cat = conn_cat.cursor()
+                    cur_cat.execute("""
+                        SELECT DISTINCT category FROM rss_feeds
+                        WHERE is_active = true AND category IS NOT NULL
+                    """)
+                    categories = [r[0] for r in cur_cat.fetchall()]
+                    cur_cat.close()
+                    store._put_conn(conn_cat)
+
+                    for cat in categories:
+                        # Only recompile if last digest is >6h old
+                        conn_check = store._get_conn()
+                        if conn_check:
+                            cur_check = conn_check.cursor()
+                            cur_check.execute("""
+                                SELECT last_compiled FROM knowledge_digests
+                                WHERE category = %s
+                                ORDER BY last_compiled DESC LIMIT 1
+                            """, (cat,))
+                            row = cur_check.fetchone()
+                            cur_check.close()
+                            store._put_conn(conn_check)
+
+                            if row and row[0] and (datetime.utcnow() - row[0].replace(tzinfo=None)).total_seconds() < 21600:
+                                continue  # Skip — compiled less than 6h ago
+
+                        compile_knowledge_digest(cat)
+            except Exception as e:
+                logger.error(f"Knowledge digest compilation failed: {e}")
+
     except Exception as e:
         report_failure("rss", str(e))
         logger.error(f"RSS poll failed: {e}")
@@ -463,6 +498,123 @@ Return ONLY valid JSON:
 
 If relevance_score < 5, set relevant: false.
 """
+
+
+def compile_knowledge_digest(category: str, days: int = 7):
+    """Compile recent articles in a category into a structured knowledge digest."""
+    import psycopg2.extras
+    import re
+    from llm.gemini_client import call_flash
+
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        return None
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT a.id, a.title, a.url, a.summary, a.published_at,
+                   f.title AS feed_title
+            FROM rss_articles a JOIN rss_feeds f ON a.feed_id = f.id
+            WHERE f.category = %s AND f.is_active = true
+              AND a.published_at > NOW() - make_interval(days => %s)
+            ORDER BY a.published_at DESC LIMIT 50
+        """, (category, days))
+        articles = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        if not articles:
+            return None
+
+        def strip_html(text):
+            if not text:
+                return ''
+            return re.sub(r'<[^>]+>', '', text)[:2000]
+
+        article_texts = []
+        for a in articles:
+            article_texts.append(
+                f"**{a['title']}** ({a['feed_title']}, {str(a['published_at'])[:10]})\n"
+                f"{strip_html(a['summary'])[:800]}\n"
+                f"URL: {a['url']}"
+            )
+        articles_block = "\n---\n".join(article_texts)
+
+        prompt = f"""You are an intelligence analyst compiling a weekly knowledge digest for a luxury hospitality investor and CEO.
+
+Category: {category}
+Period: Last {days} days
+Articles: {len(articles)}
+
+Compile these articles into a structured intelligence brief using this format:
+
+## Executive Summary
+2-3 sentence overview of what happened this week in this space.
+
+## Key Developments
+Numbered list of the 3-5 most important developments. Each: one bold headline, 2-3 sentences of context, source link.
+
+## Signals & Trends
+What patterns or shifts are emerging? What should the Director watch?
+
+## People & Companies to Watch
+Names mentioned that are relevant — new appointments, acquisitions, strategic moves.
+
+## Relevance to Portfolio
+How does this connect to luxury hospitality, branded residences, or wellness investments?
+
+Rules:
+- Be concise. Total output under 1500 words.
+- Use markdown formatting.
+- Include source URLs as inline links.
+- Focus on signal, not noise. Skip press releases with no strategic value.
+- If fewer than 3 articles have real substance, say so — don't pad.
+
+Articles:
+{articles_block}"""
+
+        digest_md = call_flash(prompt, system="You compile structured intelligence digests. Be concise and analytical.")
+        if not digest_md:
+            return None
+
+        article_ids = [a['id'] for a in articles]
+        now = datetime.utcnow()
+        period_start = now - timedelta(days=days)
+
+        conn2 = store._get_conn()
+        if not conn2:
+            return None
+        try:
+            cur2 = conn2.cursor()
+            cur2.execute("""
+                INSERT INTO knowledge_digests
+                    (category, title, digest_md, source_article_ids,
+                     article_count, period_start, period_end, model_used)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, 'gemini-flash')
+                ON CONFLICT (category, period_start)
+                DO UPDATE SET digest_md = EXCLUDED.digest_md,
+                    source_article_ids = EXCLUDED.source_article_ids,
+                    article_count = EXCLUDED.article_count,
+                    last_compiled = NOW()
+                RETURNING id
+            """, (category, f"{category} — Week of {period_start.strftime('%b %d')}",
+                  digest_md, article_ids, len(articles), period_start, now))
+            conn2.commit()
+            result = cur2.fetchone()
+            cur2.close()
+            logger.info(f"Knowledge digest compiled: {category}, {len(articles)} articles")
+            return result[0] if result else None
+        except Exception as e:
+            conn2.rollback()
+            logger.error(f"Failed to store knowledge digest: {e}")
+            return None
+        finally:
+            store._put_conn(conn2)
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"compile_knowledge_digest failed for {category}: {e}")
+        return None
+    finally:
+        store._put_conn(conn)
 
 
 def _check_article_relevance(article: dict, feed_title: str, store):

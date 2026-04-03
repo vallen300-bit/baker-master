@@ -5672,23 +5672,22 @@ async function loadMediaTab() {
     window._mediaFilterCategory = undefined;
 
     try {
+        // Fetch knowledge digests
+        var digestUrl = '/api/rss/knowledge-digests';
+        if (preFilter) digestUrl += '?category=' + encodeURIComponent(preFilter);
+        var digestResp = await bakerFetch(digestUrl);
+        var digestData = digestResp.ok ? await digestResp.json() : { digests: [] };
+
         // Fetch feeds for filter dropdown
         var feedsResp = await bakerFetch('/api/rss/feeds');
         var feedsData = feedsResp.ok ? await feedsResp.json() : { feeds: [] };
 
-        // Fetch articles (pre-filtered if sidebar category was clicked)
-        var articlesUrl = '/api/rss/articles?limit=50';
-        if (preFilter) articlesUrl += '&category=' + encodeURIComponent(preFilter);
-        var articlesResp = await bakerFetch(articlesUrl);
-        if (!articlesResp.ok) return;
-        var data = await articlesResp.json();
-
         container.textContent = '';
 
-        // Category filter
+        // Category filter dropdown (same as before)
         if (feedsData.feeds && feedsData.feeds.length > 0) {
             var filterRow = document.createElement('div');
-            filterRow.style.cssText = 'margin-bottom:12px;';
+            filterRow.style.cssText = 'margin-bottom:12px;display:flex;align-items:center;gap:12px;';
             var catSelect = document.createElement('select');
             catSelect.style.cssText = 'padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:var(--font);';
             catSelect.innerHTML = '<option value="">All categories</option>';
@@ -5702,33 +5701,129 @@ async function loadMediaTab() {
                     catSelect.appendChild(opt);
                 }
             });
-            // MEDIA-SIDEBAR: Pre-select category if set from sidebar
             if (preFilter) catSelect.value = preFilter;
-            catSelect.addEventListener('change', async function() {
-                var url = '/api/rss/articles?limit=50';
-                if (catSelect.value) url += '&category=' + encodeURIComponent(catSelect.value);
-                var r = await bakerFetch(url);
-                if (r.ok) {
-                    var d = await r.json();
-                    renderArticles(container, d.articles, filterRow);
+
+            // View toggle: Digest / Raw
+            var viewToggle = document.createElement('button');
+            viewToggle.textContent = 'Show Raw Articles';
+            viewToggle.style.cssText = 'padding:4px 10px;border:1px solid var(--border);border-radius:6px;font-size:10px;font-family:var(--mono);cursor:pointer;background:transparent;color:var(--text2);';
+            viewToggle.dataset.mode = 'digest';
+
+            catSelect.addEventListener('change', function() {
+                if (viewToggle.dataset.mode === 'digest') {
+                    _renderDigests(container, filterRow, catSelect.value);
+                } else {
+                    _renderRawArticles(container, filterRow, catSelect.value);
                 }
             });
+
+            viewToggle.addEventListener('click', function() {
+                if (viewToggle.dataset.mode === 'digest') {
+                    viewToggle.dataset.mode = 'raw';
+                    viewToggle.textContent = 'Show Intelligence Digest';
+                    _renderRawArticles(container, filterRow, catSelect.value);
+                } else {
+                    viewToggle.dataset.mode = 'digest';
+                    viewToggle.textContent = 'Show Raw Articles';
+                    _renderDigests(container, filterRow, catSelect.value);
+                }
+            });
+
             filterRow.appendChild(catSelect);
+            filterRow.appendChild(viewToggle);
             container.appendChild(filterRow);
         }
 
-        if (!data.articles || data.articles.length === 0) {
-            var empty = document.createElement('div');
-            empty.textContent = 'No media items yet. RSS feeds are polled every hour.';
-            empty.style.cssText = 'color:var(--text3);font-size:13px;';
-            container.appendChild(empty);
-            return;
+        // Render digests (default view)
+        if (digestData.digests && digestData.digests.length > 0) {
+            _showDigests(container, digestData.digests);
+        } else {
+            // Fallback to raw articles if no digests exist yet
+            _renderRawArticles(container, container.querySelector('div'), preFilter || '');
         }
-
-        var filterRow2 = container.querySelector('div');
-        renderArticles(container, data.articles, filterRow2);
     } catch (e) {
         container.textContent = 'Failed to load media.';
+    }
+}
+
+function _simpleMarkdown(md) {
+    if (!md) return '';
+    var html = md.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    html = html.replace(/^### (.+)$/gm, '<h4 style="margin:12px 0 4px;font-size:12px;color:var(--text2);">$1</h4>');
+    html = html.replace(/^## (.+)$/gm, '<h3 style="margin:16px 0 6px;font-size:13px;font-weight:700;color:var(--text1);">$1</h3>');
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color:var(--accent);">$1</a>');
+    html = html.replace(/^\d+\. (.+)$/gm, '<li style="margin:2px 0;margin-left:16px;">$1</li>');
+    html = html.replace(/^- (.+)$/gm, '<li style="margin:2px 0;margin-left:16px;">$1</li>');
+    html = html.replace(/\n\n/g, '</p><p style="margin:8px 0;">');
+    html = '<p style="margin:8px 0;">' + html + '</p>';
+    return html;
+}
+
+function _showDigests(container, digests) {
+    while (container.children.length > 1) {
+        container.removeChild(container.lastChild);
+    }
+    for (var i = 0; i < digests.length; i++) {
+        var d = digests[i];
+        var card = document.createElement('div');
+        card.style.cssText = 'background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:12px;';
+
+        var header = document.createElement('div');
+        header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;';
+
+        var catLabel = document.createElement('span');
+        catLabel.style.cssText = 'font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--accent);';
+        catLabel.textContent = d.category;
+        header.appendChild(catLabel);
+
+        var meta = document.createElement('span');
+        meta.style.cssText = 'font-size:10px;color:var(--text3);';
+        meta.textContent = (d.article_count || 0) + ' articles \u00b7 compiled ' + _timeAgo(d.last_compiled);
+        header.appendChild(meta);
+
+        card.appendChild(header);
+
+        var body = document.createElement('div');
+        body.style.cssText = 'font-size:13px;line-height:1.6;color:var(--text1);';
+        body.className = 'digest-content';
+        setSafeHTML(body, _simpleMarkdown(d.digest_md || ''));
+        card.appendChild(body);
+
+        container.appendChild(card);
+    }
+}
+
+async function _renderDigests(container, filterRow, category) {
+    while (container.children.length > 1) {
+        container.removeChild(container.lastChild);
+    }
+    var url = '/api/rss/knowledge-digests';
+    if (category) url += '?category=' + encodeURIComponent(category);
+    var resp = await bakerFetch(url);
+    if (resp.ok) {
+        var data = await resp.json();
+        if (data.digests && data.digests.length > 0) {
+            _showDigests(container, data.digests);
+        } else {
+            var empty = document.createElement('div');
+            empty.textContent = 'No digest yet for this category. Digests compile automatically after the next RSS poll.';
+            empty.style.cssText = 'color:var(--text3);font-size:13px;padding:20px 0;';
+            container.appendChild(empty);
+        }
+    }
+}
+
+async function _renderRawArticles(container, filterRow, category) {
+    while (container.children.length > 1) {
+        container.removeChild(container.lastChild);
+    }
+    var url = '/api/rss/articles?limit=50';
+    if (category) url += '&category=' + encodeURIComponent(category);
+    var resp = await bakerFetch(url);
+    if (resp.ok) {
+        var data = await resp.json();
+        renderArticles(container, data.articles || [], filterRow);
     }
 }
 

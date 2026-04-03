@@ -3543,6 +3543,43 @@ async def get_rss_category_counts():
         return {"categories": []}
 
 
+@app.get("/api/rss/knowledge-digests", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def get_knowledge_digests(category: Optional[str] = None):
+    """Get compiled knowledge digests, optionally filtered by category."""
+    try:
+        store = _get_store()
+        import psycopg2.extras
+        conn = store._get_conn()
+        if not conn:
+            return {"digests": []}
+        try:
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            if category:
+                cur.execute("""
+                    SELECT id, category, title, digest_md, article_count,
+                           last_compiled, period_start, period_end
+                    FROM knowledge_digests
+                    WHERE category = %s
+                    ORDER BY last_compiled DESC LIMIT 5
+                """, (category,))
+            else:
+                cur.execute("""
+                    SELECT DISTINCT ON (category)
+                        id, category, title, digest_md, article_count,
+                        last_compiled, period_start, period_end
+                    FROM knowledge_digests
+                    ORDER BY category, last_compiled DESC
+                """)
+            digests = [_serialize(dict(r)) for r in cur.fetchall()]
+            cur.close()
+            return {"digests": digests}
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.error(f"GET /api/rss/knowledge-digests failed: {e}")
+        return {"digests": []}
+
+
 @app.get("/api/rss/feeds", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
 async def get_rss_feeds_list():
     """List active RSS feeds with categories for the filter dropdown."""

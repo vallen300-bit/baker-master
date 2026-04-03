@@ -85,6 +85,27 @@ class TriggerState:
                     ALTER TABLE rss_articles
                     ADD COLUMN IF NOT EXISTS summary TEXT
                 """)
+                # KNOWLEDGE-DIGEST-1: LLM-compiled knowledge digests from RSS articles
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS knowledge_digests (
+                        id SERIAL PRIMARY KEY,
+                        category TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        digest_md TEXT NOT NULL,
+                        source_article_ids INTEGER[] DEFAULT '{}',
+                        article_count INTEGER DEFAULT 0,
+                        last_compiled TIMESTAMPTZ DEFAULT NOW(),
+                        period_start TIMESTAMPTZ,
+                        period_end TIMESTAMPTZ,
+                        model_used TEXT DEFAULT 'gemini-flash',
+                        token_count INTEGER DEFAULT 0,
+                        created_at TIMESTAMPTZ DEFAULT NOW()
+                    )
+                """)
+                cur.execute("""
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_knowledge_digests_cat_period
+                        ON knowledge_digests(category, period_start)
+                """)
                 # Browser Sentinel tables (BROWSER-1)
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS browser_tasks (
