@@ -2183,7 +2183,7 @@ async def get_morning_brief():
             # LANDING-FIX-2: Deduplicate ClickUp-synced deadlines that differ only by prefix
             cur.execute("""
                 SELECT DISTINCT ON (
-                    REGEXP_REPLACE(LOWER(description), '^\[.*?\]\s*(\[.*?\]\s*)*', '')
+                    LEFT(REGEXP_REPLACE(LOWER(description), '^(\[.*?\]\s*)+', ''), 45)
                 )
                     id, description, due_date, source_type, confidence,
                     priority, status, created_at,
@@ -2196,7 +2196,7 @@ async def get_morning_brief():
                   AND NOT (description ILIKE '%%flight%%' OR description ILIKE '%%departure%%'
                            OR description ILIKE '%%travel%%' OR description ILIKE '%%airport%%'
                            OR description ILIKE '%%boarding%%' OR description ILIKE '%%check-in%%')
-                ORDER BY REGEXP_REPLACE(LOWER(description), '^\[.*?\]\s*(\[.*?\]\s*)*', ''),
+                ORDER BY LEFT(REGEXP_REPLACE(LOWER(description), '^(\[.*?\]\s*)+', ''), 45),
                          LENGTH(COALESCE(source_snippet, '')) DESC,
                          priority DESC, created_at DESC
                 LIMIT 10
@@ -2315,6 +2315,7 @@ async def get_morning_brief():
                     FROM alerts
                     WHERE status = 'pending'
                       AND tags ? 'meeting'
+                      AND title ILIKE '%%meeting%%'
                       AND created_at >= NOW() - INTERVAL '48 hours'
                     ORDER BY created_at DESC
                     LIMIT 5
