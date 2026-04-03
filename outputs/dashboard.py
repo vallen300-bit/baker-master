@@ -2308,6 +2308,23 @@ async def get_morning_brief():
                 conn.rollback()
                 _travel_deadlines_rows = []
 
+            # LANDING-FIX-3: Meeting alerts for Meetings card (alerts tagged 'meeting', not calendar)
+            try:
+                cur.execute("""
+                    SELECT id, title, body, tags, created_at
+                    FROM alerts
+                    WHERE status = 'pending'
+                      AND tags ? 'meeting'
+                      AND created_at >= NOW() - INTERVAL '48 hours'
+                    ORDER BY created_at DESC
+                    LIMIT 5
+                """)
+                _meeting_alerts_rows = [_serialize(dict(r)) for r in cur.fetchall()]
+            except Exception as e:
+                logger.warning(f"Morning brief: meeting alerts query failed: {e}")
+                conn.rollback()
+                _meeting_alerts_rows = []
+
             cur.close()
         finally:
             store._put_conn(conn)
@@ -2458,6 +2475,9 @@ async def get_morning_brief():
         # LANDING-FIX-2: travel_deadlines now fetched inside connection block above
         travel_deadlines = _travel_deadlines_rows
 
+        # LANDING-FIX-3: meeting alerts for Meetings card
+        meeting_alerts = _meeting_alerts_rows
+
         # MEETINGS-DETECT-1: Detected meetings from Director messages
         detected_meetings = []
         try:
@@ -2506,6 +2526,7 @@ async def get_morning_brief():
             "silent_contacts": silent_contacts,
             "travel_alerts": travel_alerts,
             "travel_deadlines": travel_deadlines,
+            "meeting_alerts": meeting_alerts,
             "trips": [_serialize(t) for t in active_trips],
             "weekly_priorities": weekly_priorities,
             "proposed_actions": _get_proposed_actions_for_brief(),

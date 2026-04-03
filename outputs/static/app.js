@@ -932,6 +932,28 @@ async function loadMorningBrief() {
                 meetingItems.push(renderDetectedMeetingCard(detectedMeetings[dmi]));
             }
 
+            // LANDING-FIX-3: Meeting alerts (Baker-generated meeting prep, not in calendar)
+            var meetingAlerts = data.meeting_alerts || [];
+            for (var mai = 0; mai < meetingAlerts.length; mai++) {
+                var ma = meetingAlerts[mai];
+                // Skip if title already appears in calendar meetings or detected meetings
+                var maTitle = (ma.title || '').toLowerCase().slice(0, 30);
+                var maDup = meetingItems.some(function(html) { return html.toLowerCase().indexOf(maTitle) >= 0; });
+                if (maDup) continue;
+                // Render as compact meeting-style card
+                var maHtml = '<div class="card card-compact" style="cursor:pointer;" onclick="_toggleTriageCard(this)"><div class="card-header">' +
+                    '<span class="nav-dot blue" style="margin-top:5px;"></span>' +
+                    '<span class="card-title">' + esc(ma.title || '') + ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span></span>' +
+                    '<span class="card-time">' + esc(fmtRelativeTime(ma.created_at)) + '</span>' +
+                    '</div>';
+                maHtml += '<div class="triage-detail" style="display:none;">';
+                var maBody = (ma.body || '').substring(0, 300);
+                if (maBody) maHtml += '<div style="font-size:12px;color:var(--text2);padding:8px 16px;line-height:1.5;white-space:pre-wrap;border-top:1px solid var(--border-light);">' + esc(maBody) + '</div>';
+                maHtml += _landingTriageBar(String(ma.id), ma.title || '', maBody, 'meeting', ma.id);
+                maHtml += '</div></div>';
+                meetingItems.push(maHtml);
+            }
+
             if (meetingItems.length > 0) {
                 setSafeHTML(gridMeetings, meetingItems.join(''));
             } else {
@@ -2100,48 +2122,71 @@ function renderTravelCard(t) {
         '</div>';
 }
 
-// EXPANDABLE-CARDS-1: Parse flight details from deadline source_snippet
+// EXPANDABLE-CARDS-1 + LANDING-FIX-3: Parse flight details from e-ticket snippet
+// First extracts the itinerary block (between flight code and "Ticket details"),
+// then parses structured data within it. Avoids false matches from email headers/URLs.
 function parseFlightInfo(snippet) {
     if (!snippet) return '';
+
+    // Step 1: Try to extract Amadeus itinerary block (most common e-ticket format)
+    // Look for flight code line (e.g. "LX 529\n") up to "Ticket details" or "Other information"
+    var itin = snippet;
+    var flightMatch = snippet.match(/\b([A-Z]{2}\s?\d{2,4})\s*\n/);
+    if (flightMatch) {
+        var startIdx = flightMatch.index;
+        var endMatch = snippet.substring(startIdx).match(/(?:Ticket details|Other information|Travel Checklist)/i);
+        if (endMatch) {
+            itin = snippet.substring(startIdx, startIdx + endMatch.index);
+        } else {
+            itin = snippet.substring(startIdx);
+        }
+    }
+
     var lines = [];
 
-    // Flight number (OS 155, LX 1234, etc.)
-    var flightMatch = snippet.match(/\b([A-Z]{2}\s?\d{2,4})\b/);
-    if (flightMatch) lines.push('Flight: ' + flightMatch[1]);
+    // Flight number
+    var fMatch = itin.match(/\b([A-Z]{2}\s?\d{2,4})\b/);
+    if (fMatch) lines.push('Flight: ' + fMatch[1]);
 
-    // Departure: time + airport/city
-    var depMatch = snippet.match(/(\d{2}:\d{2})\s+([\w\s,()]+?)\s+(?:Terminal|T\d)/i);
-    if (depMatch) lines.push('Departure: ' + depMatch[1] + ' ' + depMatch[2].trim());
-
-    // Arrival: second time pattern
-    var allTimes = snippet.match(/\d{2}:\d{2}/g);
-    if (allTimes && allTimes.length >= 2) {
-        lines.push('Arrival: ' + allTimes[allTimes.length > 2 ? 2 : 1]);
+    // Departure + Arrival: find all "DDMMM, HH:MM" patterns in the itinerary block
+    // Amadeus format: "03APR, 21:00" followed by city on next non-empty line
+    var legPattern = /(\d{2}[A-Z]{3}),?\s*(\d{2}:\d{2})\s*\n+\s*(.+?)(?:\s*\n)/g;
+    var legs = [];
+    var legMatch;
+    while ((legMatch = legPattern.exec(itin)) !== null) {
+        legs.push({ date: legMatch[1], time: legMatch[2], city: legMatch[3].trim() });
+    }
+    if (legs.length >= 1) {
+        lines.push('Departure: ' + legs[0].time + ' ' + legs[0].city);
+    }
+    if (legs.length >= 2) {
+        lines.push('Arrival: ' + legs[1].time + ' ' + legs[1].city);
     }
 
-    // Terminal info
-    var terminals = snippet.match(/(?:Terminal\s*:?\s*|T)(\d\w?)/gi);
-    if (terminals && terminals.length >= 2) {
-        lines.push('Terminals: ' + terminals.join(' → ').replace(/Terminal\s*:?\s*/gi, 'T'));
+    // Terminals: "Terminal : X" or "Terminal : X-TEXT"
+    var termMatches = itin.match(/Terminal\s*:\s*(\S+)/gi);
+    if (termMatches && termMatches.length >= 2) {
+        var terms = termMatches.map(function(t) { return 'T' + t.replace(/Terminal\s*:\s*/i, '').replace(/-.*/, ''); });
+        lines.push('Terminals: ' + terms.join(' → '));
     }
+
+    // Duration
+    var durMatch = itin.match(/(\d+h\s*\d+m)/);
+    if (durMatch) lines.push('Duration: ' + durMatch[1]);
 
     // Class
-    var classMatch = snippet.match(/Class\s*:?\s*(\w+(?:\s*\(\w\))?)/i);
+    var classMatch = itin.match(/Class\s*:\s*(\w+(?:\s*\(\w\))?)/i);
     if (classMatch) lines.push('Class: ' + classMatch[1]);
 
     // Seat
-    var seatMatch = snippet.match(/Seat\s*:?\s*(\w+)/i);
+    var seatMatch = itin.match(/Seat\s*:\s*(\w+)/i);
     if (seatMatch) lines.push('Seat: ' + seatMatch[1]);
 
-    // Booking ref
-    var refMatch = snippet.match(/(?:Booking\s*ref|reference|Booking)\s*:?\s*(\w{5,})/i);
+    // Booking ref — search full snippet (ref appears in header before itinerary)
+    var refMatch = snippet.match(/(?:Booking\s*ref|Booking ref)\s*:\s*(\w{5,})/i);
     if (refMatch) lines.push('Booking: ' + refMatch[1]);
 
-    // Duration
-    var durMatch = snippet.match(/(\d+h\s*\d+m)/);
-    if (durMatch) lines.push('Duration: ' + durMatch[1]);
-
-    // Fallback: show raw snippet if parsing failed
+    // Fallback: show raw snippet if parsing failed entirely
     if (lines.length === 0 && snippet.length > 20) {
         return snippet.substring(0, 200).replace(/\s+/g, ' ').trim();
     }
