@@ -221,7 +221,6 @@ class _GeminiMessages:
                         parts.append(types.Part.from_function_call(
                             name=block["name"],
                             args=block.get("input", {}),
-                            id=block.get("id"),
                         ))
                     elif btype == "tool_result":
                         # User's tool result → Gemini function_response part
@@ -229,7 +228,6 @@ class _GeminiMessages:
                         parts.append(types.Part.from_function_response(
                             name=block.get("name", "unknown"),
                             response={"result": result_content},
-                            id=block.get("tool_use_id"),
                         ))
                     else:
                         parts.append(types.Part.from_text(text=str(block)))
