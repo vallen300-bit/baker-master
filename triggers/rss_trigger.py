@@ -572,7 +572,11 @@ Rules:
 Articles:
 {articles_block}"""
 
-        digest_md = call_flash(prompt, system="You compile structured intelligence digests. Be concise and analytical.")
+        resp = call_flash(
+            messages=[{"role": "user", "content": prompt}],
+            system="You compile structured intelligence digests. Be concise and analytical.",
+        )
+        digest_md = resp.text.strip() if resp and resp.text else None
         if not digest_md:
             return None
 
