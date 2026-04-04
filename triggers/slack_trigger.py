@@ -236,16 +236,171 @@ def run_slack_poll():
             if latest_ts_dt > watermark:
                 trigger_state.set_watermark(watermark_key, latest_ts_dt)
 
+        # SLACK-THREAD-1: Also poll thread replies (Director replies in threads)
+        thread_replies_found = 0
+        for channel_id in config.slack.channel_ids:
+            try:
+                thread_replies_found += _poll_thread_replies(client, store, channel_id)
+            except Exception as _te:
+                logger.warning(f"Slack thread poll failed for {channel_id} (non-fatal): {_te}")
+
         report_success("slack")
         logger.info(
             f"Slack poll complete: {channels_polled} channels polled, "
             f"{messages_ingested} messages ingested, {messages_skipped} skipped, "
-            f"{mentions_pipelined} mentions pipelined"
+            f"{mentions_pipelined} mentions pipelined, "
+            f"{thread_replies_found} thread replies found"
         )
 
     except Exception as e:
         report_failure("slack", str(e))
         logger.error(f"Slack poll failed: {e}")
+
+
+# -------------------------------------------------------
+# SLACK-THREAD-1: Thread reply polling
+# -------------------------------------------------------
+
+def _poll_thread_replies(client, store, channel_id: str) -> int:
+    """Poll thread replies in recent threads.
+    Director often replies in threads to Baker's posts — conversations_history
+    only returns top-level messages, missing these replies entirely."""
+    from config.settings import config
+
+    thread_wm_key = f"slack_threads:{channel_id}"
+    thread_watermark = trigger_state.get_watermark(thread_wm_key)
+
+    # Fetch recent top-level messages to find threads with new replies
+    try:
+        resp = client.conversations_history(channel=channel_id, limit=50)
+    except Exception as e:
+        logger.debug(f"Slack thread poll: history fetch failed: {e}")
+        return 0
+
+    if not resp.get("ok"):
+        return 0
+
+    messages = resp.get("messages", [])
+    replies_found = 0
+    latest_reply_dt = thread_watermark
+
+    for msg in messages:
+        reply_count = msg.get("reply_count", 0)
+        latest_reply = msg.get("latest_reply", "")
+
+        if reply_count == 0 or not latest_reply:
+            continue
+
+        # Check if this thread has replies newer than our watermark
+        try:
+            latest_reply_ts = datetime.fromtimestamp(float(latest_reply), tz=timezone.utc)
+        except (ValueError, OSError):
+            continue
+
+        if latest_reply_ts <= thread_watermark:
+            continue
+
+        # Fetch thread replies newer than watermark
+        parent_ts = msg.get("ts", "")
+        try:
+            thread_resp = client.conversations_replies(
+                channel=channel_id,
+                ts=parent_ts,
+                oldest=f"{thread_watermark.timestamp():.6f}",
+                limit=50,
+            )
+        except Exception as e:
+            logger.debug(f"Slack thread poll: replies fetch failed for {parent_ts}: {e}")
+            continue
+
+        if not thread_resp.get("ok"):
+            continue
+
+        for reply in thread_resp.get("messages", []):
+            # Skip parent message itself
+            if reply.get("ts") == parent_ts:
+                continue
+            # Skip bot/app messages
+            if reply.get("bot_id") or reply.get("subtype"):
+                continue
+
+            user_id = reply.get("user", "")
+            if not user_id:
+                continue
+            text = (reply.get("text") or "").strip()
+            if not text:
+                continue
+
+            reply_ts = reply.get("ts", "")
+            source_id = f"slack:{channel_id}:{reply_ts}"
+
+            # Skip already processed
+            if trigger_state.is_processed("slack", source_id):
+                continue
+
+            user_name = _resolve_user_name(client, user_id)
+
+            # 1. Ingest to Qdrant
+            _embed_message(store, channel_id, user_name, text, reply_ts, config.slack.collection)
+
+            # 2. Store to PostgreSQL
+            try:
+                msg_dt = datetime.fromtimestamp(float(reply_ts), tz=timezone.utc)
+                store.store_slack_message(
+                    msg_id=source_id,
+                    channel_id=channel_id,
+                    user_id=user_id,
+                    user_name=user_name,
+                    full_text=text,
+                    thread_ts=parent_ts,
+                    received_at=msg_dt,
+                )
+            except Exception:
+                pass
+
+            # 3. Route: @Baker mention or Director thread reply
+            baker_uid = config.slack.baker_bot_user_id
+            is_mention = bool(baker_uid and f"<@{baker_uid}>" in text)
+            clean_text = text.replace(f"<@{baker_uid}>", "").strip() if baker_uid and is_mention else text
+
+            trigger_state.mark_processed("slack", source_id)
+
+            if _is_director_user(user_name):
+                # Director thread replies always get handled (even without @Baker)
+                _handle_director_slack_message(
+                    text=clean_text,
+                    channel_id=channel_id,
+                    thread_ts=parent_ts,
+                    user_name=user_name,
+                    client=client,
+                )
+            elif is_mention:
+                _feed_to_pipeline(
+                    channel_id=channel_id,
+                    ts=reply_ts,
+                    user_name=user_name,
+                    text=text,
+                    source_id=source_id,
+                )
+
+            replies_found += 1
+
+            # Track latest
+            try:
+                reply_dt = datetime.fromtimestamp(float(reply_ts), tz=timezone.utc)
+                if reply_dt > latest_reply_dt:
+                    latest_reply_dt = reply_dt
+            except (ValueError, OSError):
+                pass
+
+    # Update thread watermark
+    if latest_reply_dt > thread_watermark:
+        trigger_state.set_watermark(thread_wm_key, latest_reply_dt)
+
+    if replies_found:
+        logger.info(f"SLACK-THREAD-1: found {replies_found} new thread replies in {channel_id}")
+
+    return replies_found
 
 
 # -------------------------------------------------------
