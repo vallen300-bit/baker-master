@@ -198,11 +198,12 @@ class SlackNotifier:
     def post_thread_reply(self, channel_id: str, thread_ts: str, text: str) -> bool:
         """
         Post a reply in a Slack thread (S3 — @Baker mention response).
+        SLACK-MOBILE-FMT: Uses Block Kit for consistent rendering on desktop + iPhone.
 
         Args:
             channel_id: Slack channel ID (e.g. C0AF4FVN3FB).
             thread_ts:  Timestamp of the parent message (Slack thread identifier).
-            text:       Reply text (plain text, max 3000 chars recommended).
+            text:       Reply text (max 3000 chars recommended).
         Returns:
             True if posted successfully, False otherwise.
         """
@@ -211,10 +212,13 @@ class SlackNotifier:
             return False
         try:
             client = _get_webclient()
+            # Build Block Kit blocks for mobile-friendly rendering
+            blocks = self._text_to_blocks(text)
             resp = client.chat_postMessage(
                 channel=channel_id,
                 thread_ts=thread_ts,
-                text=text[:3000],
+                text=text[:3000],  # fallback for push notifications
+                blocks=blocks,
             )
             if resp.get("ok"):
                 return True
@@ -223,6 +227,36 @@ class SlackNotifier:
         except Exception as e:
             logger.warning(f"Slack thread reply failed: {e}")
             return False
+
+    @staticmethod
+    def _text_to_blocks(text: str) -> list:
+        """Convert reply text to Block Kit mrkdwn sections.
+        Renders consistently on desktop AND iPhone."""
+        blocks = []
+        lines = text.split("\n")
+        current_chunk = []
+        current_len = 0
+
+        for line in lines:
+            if current_len + len(line) + 1 > 2800:
+                if current_chunk:
+                    blocks.append({
+                        "type": "section",
+                        "text": {"type": "mrkdwn", "text": "\n".join(current_chunk)},
+                    })
+                current_chunk = [line]
+                current_len = len(line)
+            else:
+                current_chunk.append(line)
+                current_len += len(line) + 1
+
+        if current_chunk:
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": "\n".join(current_chunk)},
+            })
+
+        return blocks[:8]
 
     # -------------------------------------------------------
     # Internal

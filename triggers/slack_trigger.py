@@ -686,12 +686,52 @@ def _enrich_with_alert_context(text: str, channel_id: str, thread_ts: str) -> st
 # SLACK-INTERACTIVE-1: Post + store Baker's replies
 # -------------------------------------------------------
 
+def _format_reply_blocks(text: str) -> list:
+    """SLACK-MOBILE-FMT: Convert Baker reply text to Block Kit blocks.
+    Block Kit renders consistently on desktop AND iPhone.
+    Plain text posts render poorly on mobile (no bold, no structure)."""
+    blocks = []
+    # Split into chunks of 2800 chars (Block Kit limit is 3000)
+    lines = text.split("\n")
+    current_chunk = []
+    current_len = 0
+
+    for line in lines:
+        if current_len + len(line) + 1 > 2800:
+            if current_chunk:
+                blocks.append({
+                    "type": "section",
+                    "text": {"type": "mrkdwn", "text": "\n".join(current_chunk)},
+                })
+            current_chunk = [line]
+            current_len = len(line)
+        else:
+            current_chunk.append(line)
+            current_len += len(line) + 1
+
+    if current_chunk:
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "\n".join(current_chunk)},
+        })
+
+    # Cap at 8 blocks to stay within Slack limits
+    return blocks[:8]
+
+
 def _post_and_store_reply(client, channel_id: str, thread_ts: str, text: str):
-    """Post a thread reply to Slack AND store it in slack_messages for history."""
+    """Post a thread reply to Slack AND store it in slack_messages for history.
+    SLACK-MOBILE-FMT: Uses Block Kit for consistent rendering on desktop + iPhone."""
     import time as _time
-    # Post to Slack
+    # Post to Slack with Block Kit blocks for mobile formatting
     try:
-        client.chat_postMessage(channel=channel_id, text=text, thread_ts=thread_ts)
+        blocks = _format_reply_blocks(text)
+        client.chat_postMessage(
+            channel=channel_id,
+            text=text[:3000],  # fallback for notifications
+            blocks=blocks,
+            thread_ts=thread_ts,
+        )
     except Exception as e:
         logger.error(f"Slack reply post failed: {e}")
         return
