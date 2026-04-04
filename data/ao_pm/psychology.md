@@ -15,6 +15,22 @@ AO feels used as a cash source when contact is transactional. The relationship m
 
 **Rule:** Never let more than 2 weeks pass without AO receiving something — an update, a win, a question asking his opinion, a photo from the hotel. If Baker detects a gap approaching 14 days with no AO-directed communication, flag it to DV immediately.
 
+## Investment Filter
+AO's decision framework for new deals:
+1. **Credible luxury brand required** — originally "no Mandarin = no interest," but refined in Monaco: any major hotel brand (Anantara/Minor Hotels) as equity co-investor can satisfy this
+2. **Brand as equity partner** — not just operator. The brand must take 15-20% equity, reducing AO's capital outlay
+3. **Less money in = more interesting** — the Hunter wants trophies but values leverage. A deal where a brand co-invests is more appealing than going alone
+4. **No brand, no IP = no deal** — FX Mayr failed this filter. Could be revived only if Brisen acquires the brand IP itself
+
+## Ownership Recognition (CRITICAL)
+AO is deeply sensitive about being recognized as co-owner, despite holding 0% registered equity. Tested in Monaco: DV told AO's friends "I am the owner of Mandarin Hotel." AO corrected publicly: "Half of Udmurtia worked to produce finances for this hotel."
+
+- He won't escalate legally — but he WILL publicly assert his contribution if DV overclaims
+- The correction was humorous in tone but firm in substance
+- This happened in front of his social network — more dangerous than a private correction
+- **Rule:** ALWAYS use "we/our project" language in AO's presence. Never claim sole ownership. Not optional — tested and failed.
+- **Udmurtia** = Russian republic where AO's wealth/business originates. "Half of Udmurtia" = his way of saying the scale of his contribution is immense.
+
 ## 11 Return Drivers (Ranked)
 
 1. **Identity/Legacy** — the deepest driver
@@ -25,7 +41,7 @@ AO feels used as a cash source when contact is transactional. The relationship m
 6. **Pleasures** — the lifestyle layer
 7. **Dedication** — what he tests for
 8. **Money** — the scoreboard, not the game
-9. **Security** — Russian UHNW with EUR 67M in Western structures, always running in background
+9. **Security** — Russian UHNW with EUR 66.5M in Western structures, always running in background
 10. **Belonging** — membership in the luxury hospitality owner world
 11. **Sensitive issues** — 3 minefields to dance around (see sensitive_issues.md)
 
