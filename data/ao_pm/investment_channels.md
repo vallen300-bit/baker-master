@@ -50,6 +50,15 @@ EUR 50,448,752 (confirmed Constantinos 03.04.2026)
 ## Why Principal Only
 AO is legally structured as a loan creditor but is de facto a shadow equity participant. Equity participants don't earn interest — their return comes at exit (sale of shares/project). The nominal 1% interest on Channel 2 and the fixed interest on Channel 1 exist only because the legal structure requires loan documentation. They are NOT investment returns and should NOT inflate the investment figure.
 
+## Why the Interest Exists at All (Structural Necessity)
+The interest is NOT economic return — it is the **price of maintaining AO's creditor shield**:
+
+1. **Creditor priority in insolvency:** As a loan creditor, AO ranks AHEAD of equity in any liquidation waterfall. If the instruments had no interest and looked like equity, a court could recharacterize them — AO drops from creditor to equity holder (last in line). The entire structure depends on the instruments being credibly loans.
+2. **Arm's length defensibility:** A zero-interest loan between unrelated parties fails the arm's length test. Tax authorities in Austria, Cyprus, or Switzerland could reclassify it as equity or a deemed gift. The nominal 1% makes it defensible.
+3. **Legal form must match substance enough:** The Participation Agreement, the Aelio structure, the December 2025 restructuring — all work only if the instruments are credibly loans. Interest is the minimum marker that keeps the loan characterization intact.
+
+The 1% is deliberately minimal — just enough to be defensible, not enough to matter economically. NEVER present the interest as AO "earning a return" — it is structural scaffolding, not income.
+
 ## Ownership Structure
 LCG SA (Geneva, DV & Edita) → 100% RG7 (HotelCo + ApartCo). AO has no direct or indirect registered shares. AO holds 0% registered equity — all via loan/creditor structure.
 
