@@ -7056,6 +7056,67 @@ def _build_scan_system_prompt(deadline_only: bool = False, contexts=None,
         )
 
 
+def _maybe_save_to_dossiers(question: str, answer: str, owner: str = "dimitry"):
+    """AUTO-SAVE-DOSSIERS-1: Auto-save substantive Baker answers to deep_analyses.
+    Filters out short replies, action confirmations, and unstructured text.
+    Dossier-worthy = long + structured + not an action confirmation."""
+    import re as _re_dossier
+    # Filter: too short
+    if len(answer) < 800:
+        return
+    # Filter: action confirmations
+    _skip_prefixes = ("\u2705", "\U0001f4e7", "\u274c", "Noted", "Done", "Got it", "I don't have", "I couldn't")
+    if any(answer.lstrip().startswith(p) for p in _skip_prefixes):
+        return
+    # Filter: must have structural markers (formatted analysis)
+    _structure_markers = ("## ", "**", "| ", "---", "1. ", "2. ", "3. ")
+    if not any(m in answer for m in _structure_markers):
+        return
+
+    # Build topic from question (first 120 chars, cleaned)
+    topic = _re_dossier.sub(r'https?://\S+', '', question).strip()[:120]
+    if not topic:
+        topic = "Baker Analysis"
+
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            # Dedup: skip if same topic saved in last 24h
+            cur.execute("""
+                SELECT id FROM deep_analyses
+                WHERE topic = %s AND created_at > NOW() - INTERVAL '24 hours'
+                LIMIT 1
+            """, (f"Ask Baker: {topic}",))
+            if cur.fetchone():
+                cur.close()
+                return
+            cur.close()
+            conn.commit()
+        except Exception:
+            conn.rollback()
+        finally:
+            store._put_conn(conn)
+
+        import uuid as _uuid_dossier
+        store.log_deep_analysis(
+            analysis_id=str(_uuid_dossier.uuid4()),
+            topic=f"Ask Baker: {topic}",
+            source_documents=["conversation_memory"],
+            prompt=question[:500],
+            analysis_text=answer,
+            token_count=len(answer) // 4,
+            chunk_count=1,
+            cost_usd=0.0,
+        )
+        logger.info(f"AUTO-SAVE-DOSSIERS-1: saved dossier: {topic[:60]}")
+    except Exception as e:
+        logger.warning(f"Auto-save to dossiers failed (non-fatal): {e}")
+
+
 def _scan_store_back(req, full_response: str, start: float,
                      extra_meta: Optional[dict] = None, task_id: int = None,
                      complexity: str = None):
@@ -7136,6 +7197,12 @@ def _scan_store_back(req, full_response: str, start: float,
         logger.info("Conversation stored in Baker's memory (CONV-MEM-1)")
     except Exception as e:
         logger.warning(f"Conversation store-back failed (non-fatal): {e}")
+
+    # AUTO-SAVE-DOSSIERS-1: Save substantive answers to Dossiers for persistence
+    try:
+        _maybe_save_to_dossiers(req.question, full_response, owner=req.owner or "dimitry")
+    except Exception as e:
+        logger.warning(f"Dossier auto-save failed (non-fatal): {e}")
 
     # STEP1C: Close baker_task with deliverable + agent metadata
     if task_id:

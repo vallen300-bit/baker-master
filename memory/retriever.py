@@ -17,6 +17,120 @@ from config.settings import config
 
 logger = logging.getLogger("sentinel.retriever")
 
+# COST-OPT-WAVE3 (3a): Per-trigger retrieval profiles
+# Controls how much context gets retrieved for each trigger type.
+# Pipeline triggers get lean profiles; interactive queries use "default".
+RETRIEVAL_PROFILES = {
+    "email_vip": {
+        "default_limit": 10,
+        "collections": None,  # search all
+        "full_text_enrichment": True,
+        "max_enrichments": 5,
+    },
+    "email": {
+        "default_limit": 5,
+        "collections": ["baker-emails", "baker-contacts", "baker-documents"],
+        "full_text_enrichment": True,
+        "max_enrichments": 3,
+    },
+    "clickup_task_updated": {
+        "default_limit": 3,
+        "collections": ["baker-clickup", "baker-contacts"],
+        "full_text_enrichment": False,
+        "max_enrichments": 0,
+    },
+    "clickup_task_overdue": {
+        "default_limit": 3,
+        "collections": ["baker-clickup", "baker-contacts"],
+        "full_text_enrichment": False,
+        "max_enrichments": 0,
+    },
+    "clickup_task_created": {
+        "default_limit": 3,
+        "collections": ["baker-clickup", "baker-contacts"],
+        "full_text_enrichment": False,
+        "max_enrichments": 0,
+    },
+    "clickup_handoff_note": {
+        "default_limit": 5,
+        "collections": ["baker-clickup", "baker-contacts", "baker-emails"],
+        "full_text_enrichment": True,
+        "max_enrichments": 2,
+    },
+    "todoist_task_updated": {
+        "default_limit": 3,
+        "collections": ["baker-todoist"],
+        "full_text_enrichment": False,
+        "max_enrichments": 0,
+    },
+    "todoist_task_completed": {
+        "default_limit": 3,
+        "collections": ["baker-todoist"],
+        "full_text_enrichment": False,
+        "max_enrichments": 0,
+    },
+    "todoist_task_overdue": {
+        "default_limit": 3,
+        "collections": ["baker-todoist"],
+        "full_text_enrichment": False,
+        "max_enrichments": 0,
+    },
+    "meeting": {
+        "default_limit": 3,
+        "collections": ["baker-contacts", "baker-emails"],
+        "full_text_enrichment": False,
+        "max_enrichments": 1,
+    },
+    "whatsapp": {
+        "default_limit": 5,
+        "collections": ["baker-whatsapp", "baker-contacts", "baker-emails", "baker-documents"],
+        "full_text_enrichment": True,
+        "max_enrichments": 3,
+    },
+    "dropbox_file_new": {
+        "default_limit": 5,
+        "collections": ["baker-documents"],
+        "full_text_enrichment": False,
+        "max_enrichments": 1,
+    },
+    "dropbox_file_modified": {
+        "default_limit": 5,
+        "collections": ["baker-documents"],
+        "full_text_enrichment": False,
+        "max_enrichments": 1,
+    },
+    "rss_article": {
+        "default_limit": 3,
+        "collections": None,
+        "full_text_enrichment": False,
+        "max_enrichments": 0,
+    },
+    "rss_article_new": {
+        "default_limit": 3,
+        "collections": None,
+        "full_text_enrichment": False,
+        "max_enrichments": 0,
+    },
+    "browser_change": {
+        "default_limit": 3,
+        "collections": ["baker-browser"],
+        "full_text_enrichment": False,
+        "max_enrichments": 0,
+    },
+    "slack": {
+        "default_limit": 5,
+        "collections": ["baker-slack", "baker-contacts", "baker-emails"],
+        "full_text_enrichment": True,
+        "max_enrichments": 2,
+    },
+    "default": {
+        "default_limit": 10,
+        "collections": None,
+        "full_text_enrichment": True,
+        "max_enrichments": 5,
+    },
+}
+
 
 @dataclass
 class RetrievedContext:
@@ -131,14 +245,26 @@ class SentinelRetriever:
         score_threshold: float = 0.3,
         project: Optional[str] = None,
         role: Optional[str] = None,
+        allowed_collections: Optional[list[str]] = None,
+        max_enrichments: int = 5,
     ) -> list[RetrievedContext]:
-        """Search ALL Qdrant collections and merge results by relevance."""
+        """Search Qdrant collections and merge results by relevance.
+        COST-OPT-WAVE3: allowed_collections filters which collections to search.
+        max_enrichments caps full-text enrichments (0 = skip enrichment entirely)."""
         # Embed once — avoids N Voyage API calls (one per collection)
         query_vector = self._embed_query(query)
         logger.info("Query embedded (1 Voyage call for all collections)")
 
+        # COST-OPT-WAVE3: filter collections if profile specifies a subset
+        collections_to_search = config.qdrant.collections
+        if allowed_collections:
+            collections_to_search = [
+                c for c in config.qdrant.collections if c in allowed_collections
+            ]
+            logger.info(f"COST-OPT-WAVE3: searching {len(collections_to_search)}/{len(config.qdrant.collections)} collections")
+
         all_contexts = []
-        for i, coll in enumerate(config.qdrant.collections):
+        for i, coll in enumerate(collections_to_search):
             try:
                 if i > 0:
                     time.sleep(0.05)  # minimal safety net (Qdrant Cloud needs no rate limit)
@@ -172,7 +298,9 @@ class SentinelRetriever:
         all_contexts.sort(key=lambda c: c.score, reverse=True)
 
         # ARCH-3: Enrich top results with full source text from PostgreSQL
-        all_contexts = self._enrich_with_full_text(all_contexts)
+        # COST-OPT-WAVE3: skip enrichment entirely if max_enrichments=0
+        if max_enrichments > 0:
+            all_contexts = self._enrich_with_full_text(all_contexts, max_enrichments=max_enrichments)
 
         return all_contexts
 
@@ -352,16 +480,18 @@ class SentinelRetriever:
             logger.debug(f"THREE-TIER-MEMORY: tier search failed (non-fatal): {e}")
         return results
 
-    def _enrich_with_full_text(self, contexts: list["RetrievedContext"]) -> list["RetrievedContext"]:
+    def _enrich_with_full_text(self, contexts: list["RetrievedContext"],
+                               max_enrichments: int = 5) -> list["RetrievedContext"]:
         """
         For top-scoring meeting/email/document chunks from Qdrant, replace
         truncated content with full source text from PostgreSQL.
         SPECIALIST-UPGRADE-1A: added document enrichment + increased limits.
+        COST-OPT-WAVE3: max_enrichments configurable per trigger type.
         """
         enriched_ids = set()  # avoid duplicating the same source
 
         for i, ctx in enumerate(contexts[:15]):  # scan top 15 candidates
-            if len(enriched_ids) >= 5:  # max 5 full-text enrichments
+            if len(enriched_ids) >= max_enrichments:
                 break
 
             try:
@@ -1293,20 +1423,41 @@ class SentinelRetriever:
         Baker 3.0: If context_plan is provided (from context_selector),
         only queries sources that are not 'skip' and respects per-source limits.
         If context_plan is None, queries everything (backward compatible).
+
+        COST-OPT-WAVE3: RETRIEVAL_PROFILES apply per-trigger-type limits
+        on top of context_plan. Reduces token usage for low-value triggers.
         """
         from orchestrator.context_selector import should_skip_source, get_source_limit
 
+        # COST-OPT-WAVE3: Look up trigger-type retrieval profile
+        profile = RETRIEVAL_PROFILES.get(trigger_type, RETRIEVAL_PROFILES["default"])
+        profile_limit = profile["default_limit"]
+        profile_collections = profile.get("collections")  # None = all
+        profile_max_enrichments = profile.get("max_enrichments", 5)
+        if trigger_type != "default" and trigger_type in RETRIEVAL_PROFILES:
+            logger.info(
+                f"COST-OPT-WAVE3: trigger={trigger_type} profile: "
+                f"limit={profile_limit}, collections={len(profile_collections) if profile_collections else 'all'}, "
+                f"enrichments={profile_max_enrichments}"
+            )
+
         contexts = []
 
-        # 1. Semantic search across all vector collections
+        # 1. Semantic search across vector collections
         if not should_skip_source(context_plan, "semantic"):
-            sem_limit = get_source_limit(context_plan, "semantic", default=10)
+            # Use the SMALLER of context_plan limit and profile limit
+            sem_limit = min(
+                get_source_limit(context_plan, "semantic", default=10),
+                profile_limit,
+            )
             semantic_results = self.search_all_collections(
                 query=trigger_text,
                 limit_per_collection=sem_limit,
                 score_threshold=0.3,
                 project=project,
                 role=role,
+                allowed_collections=profile_collections,
+                max_enrichments=profile_max_enrichments,
             )
             contexts.extend(semantic_results)
 

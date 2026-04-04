@@ -278,13 +278,121 @@ def deliver_briefing(briefing_text: str, date_str: str):
         logger.warning(f"Could not post briefing to Slack: {e}")
 
 
+def _flash_gather_section(section_name: str, prompt: str, context: str) -> str:
+    """COST-OPT-WAVE3 (3b): Haiku-tier gather pass — summarize one briefing section.
+    Uses Gemini Flash for cheap, fast extraction."""
+    try:
+        from orchestrator.gemini_client import call_flash
+        resp = call_flash(
+            messages=[{"role": "user", "content": f"{prompt}\n\n---\nContext:\n{context}"}],
+            max_tokens=800,
+            system="You are Baker, an AI chief of staff. Extract and summarize only the relevant items. Be concise. If nothing relevant, reply 'None.'",
+        )
+        result = resp.text.strip()
+        logger.info(f"Flash gather [{section_name}]: {len(result)} chars")
+        return result
+    except Exception as e:
+        logger.warning(f"Flash gather [{section_name}] failed: {e}")
+        return ""
+
+
+def _two_pass_briefing(date_str: str, briefing_context: str) -> str:
+    """COST-OPT-WAVE3 (3b): Two-pass briefing architecture.
+    Pass 1: 7 parallel Flash calls to extract/summarize sections (~5K tokens each).
+    Pass 2: 1 Opus call to synthesize summaries into executive briefing (~5K input).
+    Saves ~130K input tokens vs single-pass approach."""
+    import concurrent.futures
+
+    # Define gather tasks: (section_name, extraction_prompt)
+    gather_tasks = [
+        ("strategic_signals", "List any strategic signals from the last 24h: Mandarin Oriental/MOHG activity, luxury hospitality M&A, network contacts (Soulier, Yurkovich, UBM, Wertheimer, Kulibayev, Strothotte, CITIC, Al-Thani, Oskolkov), co-investment opportunities, DACH deal flow. Be specific with names and details."),
+        ("critical_alerts", "List all URGENT and IMPORTANT alerts from the last 24h. Include tier, title, and a one-line summary of each."),
+        ("deadline_changes", "List any deadline changes, upcoming deadlines (next 7 days), and missed deadlines. Include dates and descriptions."),
+        ("vip_communications", "Summarize VIP communications from the last 24h: important emails, WhatsApp messages from key contacts, and any unanswered messages requiring Director attention."),
+        ("task_updates", "List ClickUp and Todoist task updates: completed tasks, newly created tasks, overdue items. Focus on high-priority items."),
+        ("meeting_outcomes", "Summarize any meeting outcomes, scheduled meetings, and meeting prep notes from the last 24h."),
+        ("ao_investor", "Summarize any updates related to AO (Andrey Oskolkov), Aelio, Aukera, or capital calls. Include communication gap status if mentioned."),
+    ]
+
+    # Pass 1: Parallel Flash calls
+    summaries = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=7) as executor:
+        futures = {
+            executor.submit(
+                _flash_gather_section, name, prompt, briefing_context
+            ): name
+            for name, prompt in gather_tasks
+        }
+        for future in concurrent.futures.as_completed(futures):
+            name = futures[future]
+            try:
+                summaries[name] = future.result()
+            except Exception as e:
+                logger.warning(f"Gather task {name} failed: {e}")
+                summaries[name] = ""
+
+    # Filter out empty/none sections
+    summary_parts = []
+    for name, _ in gather_tasks:
+        text = summaries.get(name, "")
+        if text and text.strip().lower() != "none.":
+            summary_parts.append(f"[{name.upper().replace('_', ' ')}]\n{text}")
+
+    combined_summaries = "\n\n".join(summary_parts) if summary_parts else "No significant activity in the last 24 hours."
+    logger.info(f"Pass 1 complete: {len(summary_parts)} sections, {len(combined_summaries)} chars total")
+
+    # Pass 2: Opus synthesize
+    synthesis_prompt = (
+        f"Generate Baker's executive daily briefing for {date_str}.\n\n"
+        f"You are Baker, the CEO's AI chief of staff. Write a 2-minute-read executive summary.\n"
+        f"Be concise, direct, and prioritize by relevance to the Director.\n\n"
+        f"Use EXACTLY this format:\n\n"
+        f"\U0001f3e8 OWNER'S VIEW\n"
+        f"\u2022 [Strategic signals — be specific]\n"
+        f"(If no strategic signals: \"No strategic signals today.\")\n\n"
+        f"\U0001f4cc DECISIONS NEEDED\n"
+        f"\u2022 [Item requiring Director action]\n"
+        f"(If none: \"No pending decisions today.\")\n\n"
+        f"\U0001f4ca OPERATIONS (last 24h)\n"
+        f"\u2022 [Top development — max 5 items]\n\n"
+        f"Rules:\n"
+        f"- OWNER'S VIEW first. Covers: MOHG, luxury hospitality, strategic contacts, co-invest.\n"
+        f"- Synthesize — don't dump raw data. Write like a chief of staff briefing a CEO.\n"
+        f"- Keep each bullet to 1-2 lines max.\n\n"
+        f"---\nHere are the pre-summarized sections:\n\n{combined_summaries}"
+    )
+
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=config.claude.api_key)
+        response = client.messages.create(
+            model=config.claude.model,
+            max_tokens=2048,
+            system="You are Baker, an AI chief of staff. Synthesize the section summaries into a polished executive briefing.",
+            messages=[{"role": "user", "content": synthesis_prompt}],
+        )
+        briefing_text = response.content[0].text
+        input_tokens = response.usage.input_tokens
+        output_tokens = response.usage.output_tokens
+        logger.info(f"Pass 2 complete: {input_tokens} in, {output_tokens} out, {len(briefing_text)} chars")
+
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            log_api_cost(config.claude.model, input_tokens, output_tokens, source="briefing_synthesis")
+        except Exception:
+            pass
+
+        return briefing_text
+    except Exception as e:
+        logger.error(f"Opus synthesis failed: {e}")
+        raise
+
+
 def generate_morning_briefing():
     """
     Main entry point — called by scheduler at 06:00 UTC (08:00 CET).
-    1. Gathers all context
-    2. Runs pipeline with briefing prompt
-    3. Delivers output
-    4. Clears briefing queue
+    COST-OPT-WAVE3: Two-pass architecture (Flash gather → Opus synthesize).
+    Falls back to single-pass pipeline on error.
     """
     date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     logger.info(f"Generating morning briefing for {date_str}...")
@@ -293,63 +401,50 @@ def generate_morning_briefing():
     briefing_context = gather_briefing_context()
     logger.info(f"Briefing context gathered ({len(briefing_context)} chars)")
 
-    # Build briefing trigger — EMAIL-REFORM-1 structured format
-    # The output of this prompt gets embedded directly into the Type 3 daily briefing email.
-    # It must produce exactly these two sections (Claude-synthesized, not raw data):
-    briefing_content = (
-        f"Generate Baker's executive daily briefing for {date_str}.\n\n"
-        f"You are Baker, the CEO's AI chief of staff. Write a 2-minute-read executive summary.\n"
-        f"Be concise, direct, and prioritize by relevance to the Director.\n\n"
-        f"The briefing has TWO parts — Owner's View first, then Operations.\n\n"
-        f"Use EXACTLY this format (these sections are embedded into the daily email):\n\n"
-        f"\U0001f3e8 OWNER'S VIEW\n"
-        f"\u2022 [Strategic signals: MOHG activity, network contacts, luxury hospitality M&A, deal opportunities, co-investment signals]\n"
-        f"\u2022 [Item 2]\n"
-        f"(If no strategic signals: \"No strategic signals today.\" — always show this section.)\n\n"
-        f"\U0001f4cc DECISIONS NEEDED\n"
-        f"\u2022 [Item requiring Director action — be specific about what decision is needed]\n"
-        f"\u2022 [Item 2]\n"
-        f"(If none: \"No pending decisions today.\")\n\n"
-        f"\U0001f4ca OPERATIONS (last 24h)\n"
-        f"\u2022 [Top development — synthesize, don't just list raw data]\n"
-        f"\u2022 [Development 2]\n"
-        f"\u2022 [Development 3]\n"
-        f"(Max 5 items. Prioritize by relevance to Director.)\n\n"
-        f"Rules:\n"
-        f"- OWNER'S VIEW comes first — even if empty, show the section header.\n"
-        f"- Owner's View covers: Mandarin Oriental news, MOHG activity, luxury hospitality deals/M&A, "
-        f"any mention of strategic network contacts (Soulier, Yurkovich, UBM, Wertheimer, Kulibayev, "
-        f"Strothotte, CITIC, Al-Thani), co-investment opportunities, DACH region deal flow.\n"
-        f"- OPERATIONS covers: project updates, deadline status, team communications, routine alerts.\n"
-        f"- Synthesize the information — do NOT just dump raw items.\n"
-        f"- Write like a chief of staff briefing a CEO: what matters, what needs action.\n"
-        f"- Keep each bullet to 1-2 lines max.\n\n"
-        f"---\n"
-        f"Here is the overnight context to summarize:\n\n"
-        f"{briefing_context}"
-    )
-
-    from orchestrator.pipeline import SentinelPipeline, TriggerEvent
-    pipeline = SentinelPipeline()
-    trigger = TriggerEvent(
-        type="scheduled",
-        content=briefing_content,
-        source_id=f"briefing-{date_str}",
-        priority="medium",
-    )
-
+    # COST-OPT-WAVE3: Try two-pass architecture first (saves ~130K input tokens)
     try:
-        response = pipeline.run(trigger)
-        briefing_text = response.analysis or response.raw_response
-        logger.info(f"Briefing generated ({len(briefing_text)} chars)")
+        briefing_text = _two_pass_briefing(date_str, briefing_context)
+        logger.info(f"Two-pass briefing generated ({len(briefing_text)} chars)")
     except Exception as e:
-        logger.error(f"Morning briefing pipeline failed: {e}")
-        # Fallback: use the raw context as a basic briefing
-        briefing_text = (
-            f"BAKER MORNING BRIEFING — {date_str}\n"
-            f"(Auto-generated — pipeline error: {e})\n\n"
-            f"{briefing_context}"
+        logger.warning(f"Two-pass briefing failed, falling back to single-pass: {e}")
+        # Fallback: original single-pass via pipeline.run()
+        briefing_content = (
+            f"Generate Baker's executive daily briefing for {date_str}.\n\n"
+            f"You are Baker, the CEO's AI chief of staff. Write a 2-minute-read executive summary.\n"
+            f"Be concise, direct, and prioritize by relevance to the Director.\n\n"
+            f"The briefing has TWO parts — Owner's View first, then Operations.\n\n"
+            f"Use EXACTLY this format (these sections are embedded into the daily email):\n\n"
+            f"\U0001f3e8 OWNER'S VIEW\n"
+            f"\u2022 [Strategic signals]\n"
+            f"(If no strategic signals: \"No strategic signals today.\")\n\n"
+            f"\U0001f4cc DECISIONS NEEDED\n"
+            f"\u2022 [Item requiring Director action]\n"
+            f"(If none: \"No pending decisions today.\")\n\n"
+            f"\U0001f4ca OPERATIONS (last 24h)\n"
+            f"\u2022 [Top developments — max 5]\n\n"
+            f"---\n{briefing_context}"
         )
+
+        from orchestrator.pipeline import SentinelPipeline, TriggerEvent
+        pipeline = SentinelPipeline()
+        trigger = TriggerEvent(
+            type="scheduled",
+            content=briefing_content,
+            source_id=f"briefing-{date_str}",
+            priority="medium",
+        )
+
+        try:
+            response = pipeline.run(trigger)
+            briefing_text = response.analysis or response.raw_response
+            logger.info(f"Single-pass briefing generated ({len(briefing_text)} chars)")
+        except Exception as e2:
+            logger.error(f"Morning briefing pipeline failed: {e2}")
+            briefing_text = (
+                f"BAKER MORNING BRIEFING — {date_str}\n"
+                f"(Auto-generated — pipeline error: {e2})\n\n"
+                f"{briefing_context}"
+            )
 
     # Deliver
     deliver_briefing(briefing_text, date_str)
