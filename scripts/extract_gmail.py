@@ -165,14 +165,39 @@ def authenticate() -> Credentials:
 # Newsletter / noise detection
 # ---------------------------------------------------------------------------
 
+# VIP sender domains — NEVER filtered as noise, always reach the pipeline.
+# These are financial/legal/operational senders whose emails look like
+# marketing (unsubscribe headers, bulk precedence) but contain actionable info.
+_VIP_SENDER_DOMAINS = {
+    "americanexpress.com",
+    "aexp.com",
+    "ubs.com",
+    "credit-suisse.com",
+    "swissquote.ch",
+    "wise.com",
+    "revolut.com",
+}
+
 # Compiled regex patterns for noise senders
 _NOISE_PATTERNS = [re.compile(p, re.IGNORECASE) for p in config.gmail.noise_senders]
+
+
+def _is_vip_sender(email_addr: str) -> bool:
+    """Check if sender is on the VIP allowlist (financial/legal senders)."""
+    email_lower = email_addr.lower()
+    for domain in _VIP_SENDER_DOMAINS:
+        if email_lower.endswith(f"@{domain}") or email_lower.endswith(f".{domain}"):
+            return True
+    return False
 
 
 def is_noise_sender(from_header: str) -> bool:
     """Check if the sender matches known newsletter/noise patterns."""
     _, email_addr = parseaddr(from_header)
     email_lower = email_addr.lower()
+    # VIP senders are NEVER noise — even if they match noise patterns
+    if _is_vip_sender(email_lower):
+        return False
     for pattern in _NOISE_PATTERNS:
         if pattern.search(email_lower):
             return True
@@ -225,6 +250,7 @@ def is_noise_thread(messages: List[Dict]) -> Tuple[bool, str]:
     """
     Determine if a thread is noise (newsletter, marketing, automated).
     Returns (is_noise, reason).
+    VIP senders (financial/legal) bypass ALL noise filters.
     """
     if not messages:
         return True, "empty thread"
@@ -235,6 +261,11 @@ def is_noise_thread(messages: List[Dict]) -> Tuple[bool, str]:
     header_map = {h["name"].lower(): h["value"] for h in headers}
 
     from_header = header_map.get("from", "")
+
+    # VIP senders bypass ALL noise checks
+    _, email_addr = parseaddr(from_header)
+    if _is_vip_sender(email_addr):
+        return False, ""
 
     # Check sender patterns
     if is_noise_sender(from_header):

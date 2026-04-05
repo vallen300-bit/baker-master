@@ -58,10 +58,15 @@ _SKIP_PIPELINE_HEADERS = {
 
 
 def _should_skip_pipeline(sender_email: str, body: str) -> bool:
-    """COST-OPT-WAVE2: Check if an email is automated junk that shouldn't hit the pipeline."""
+    """COST-OPT-WAVE2: Check if an email is automated junk that shouldn't hit the pipeline.
+    VIP financial senders (Amex, UBS, etc.) are never skipped."""
     if not sender_email:
         return False
     sender_lower = sender_email.lower()
+    # VIP financial senders bypass all skip logic
+    from scripts.extract_gmail import _is_vip_sender
+    if _is_vip_sender(sender_lower):
+        return False
     for pattern in _SKIP_PIPELINE_SENDERS:
         if pattern in sender_lower:
             return True
