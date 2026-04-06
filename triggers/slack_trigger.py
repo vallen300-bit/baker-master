@@ -189,16 +189,26 @@ def run_slack_poll():
                 except Exception as _se:
                     logger.debug(f"Slack PostgreSQL store failed (non-fatal): {_se}")
 
-                # 2. @Baker mention — run full pipeline (S3 posts thread reply)
+                # 2. @Baker mention OR Director saying "baker" — run full pipeline
                 baker_uid = config.slack.baker_bot_user_id
                 is_mention = bool(baker_uid and f"<@{baker_uid}>" in text)
+                # SLACK-FIX: Director typing "Baker, ..." should also trigger processing
+                is_director_text_mention = (
+                    not is_mention
+                    and _is_director_user(user_name)
+                    and "baker" in text.lower()
+                )
+                should_process = is_mention or is_director_text_mention
 
-                if is_mention and not trigger_state.is_processed("slack", source_id):
+                if should_process and not trigger_state.is_processed("slack", source_id):
                     # COST-OPT-WAVE1: Pre-mark as processed to prevent race condition
                     trigger_state.mark_processed("slack", source_id)
 
                     # LEARNING-LOOP: Check if this is feedback (short message after @Baker)
                     clean_text = text.replace(f"<@{baker_uid}>", "").strip() if baker_uid else text
+                    # SLACK-FIX: Also strip natural "Baker," / "Baker " prefix
+                    import re as _re_slack
+                    clean_text = _re_slack.sub(r'^[Bb]aker[,:\s]+', '', clean_text).strip() or clean_text
                     if _is_slack_feedback(clean_text):
                         _handle_slack_feedback(clean_text, channel_id, ts, client)
                         continue
