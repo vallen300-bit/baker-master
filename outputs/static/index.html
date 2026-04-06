@@ -13,7 +13,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=65">
+    <link rel="stylesheet" href="/static/style.css?v=66">
 </head>
 <body>
 
@@ -292,6 +292,9 @@
             </div>
             <div class="scan-layout">
                 <div class="scan-view-body scan-top-input">
+                    <div id="ollamaStatusBadge" class="ollama-badge" style="display:none" onclick="toggleOllama()">
+                        <span class="ollama-dot"></span> <span id="ollamaBadgeText">Local AI</span>
+                    </div>
                     <form id="scanForm" class="scan-form" autocomplete="off">
                         <input id="scanFile" type="file" accept=".pdf,.docx,.xlsx,.csv,.txt,.png,.jpg" hidden />
                         <button type="button" class="scan-upload-btn" onclick="document.getElementById('scanFile').click()" title="Upload document">&#x1F4CE;</button>
@@ -492,7 +495,7 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=97"></script>
+<script src="/static/app.js?v=98"></script>
 <script>
 // PWA-DESKTOP-1: Register service worker for installability
 if ('serviceWorker' in navigator) {

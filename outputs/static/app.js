@@ -40,6 +40,238 @@ var _scanHistories = {};   // keyed by context: 'global', 'matter:oskolkov-rg7',
 var _scanCurrentContext = 'global';
 let scanStreaming = false;
 
+// ═══ LOCAL AI (Ollama) ═══
+var _ollamaAvailable = false;
+var _ollamaModels = [];
+var _ollamaEnabled = true; // user toggle — persists in localStorage
+// Try localhost first (works from http:// pages), then Cloudflare tunnel (works from https://)
+var _OLLAMA_ENDPOINTS = ['http://localhost:11434', 'https://ollama.brisen-infra.com'];
+var _OLLAMA_BASE = '';
+
+// Check if Ollama is reachable from any endpoint
+async function checkOllama() {
+    for (var i = 0; i < _OLLAMA_ENDPOINTS.length; i++) {
+        try {
+            var resp = await fetch(_OLLAMA_ENDPOINTS[i] + '/api/tags', {
+                signal: AbortSignal.timeout(2000)
+            });
+            if (!resp.ok) continue;
+            var data = await resp.json();
+            var models = (data.models || []).map(function(m) { return m.name; });
+            if (models.length > 0) {
+                _OLLAMA_BASE = _OLLAMA_ENDPOINTS[i];
+                _ollamaModels = models;
+                _ollamaAvailable = true;
+                window._ollamaModel = models.find(function(m) { return m.startsWith('gemma4'); }) || models[0] || '';
+                updateOllamaIndicator();
+                return;
+            }
+        } catch (e) { /* try next endpoint */ }
+    }
+    _ollamaAvailable = false;
+    updateOllamaIndicator();
+}
+
+function updateOllamaIndicator() {
+    var badge = document.getElementById('ollamaStatusBadge');
+    if (!badge) return;
+    if (_ollamaAvailable && _ollamaEnabled) {
+        badge.style.display = 'inline-flex';
+        badge.title = 'Local AI active: ' + (window._ollamaModel || 'unknown') + '. Simple queries go to local Gemma (free). Click to toggle.';
+        badge.classList.add('active');
+    } else if (_ollamaAvailable && !_ollamaEnabled) {
+        badge.style.display = 'inline-flex';
+        badge.title = 'Local AI available but disabled. Click to enable.';
+        badge.classList.remove('active');
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+function toggleOllama() {
+    _ollamaEnabled = !_ollamaEnabled;
+    try { localStorage.setItem('baker_ollama_enabled', _ollamaEnabled ? '1' : '0'); } catch(e) {}
+    updateOllamaIndicator();
+}
+
+// Restore toggle state from localStorage
+try {
+    var _stored = localStorage.getItem('baker_ollama_enabled');
+    if (_stored !== null) _ollamaEnabled = _stored === '1';
+} catch(e) {}
+
+// Check on load + every 60s (handles Ollama start/stop)
+checkOllama();
+setInterval(checkOllama, 60000);
+
+// ═══ LOCAL AI ROUTING ═══
+var _BAKER_KEYWORDS = [
+    // People
+    'oskolkov', 'ao', 'balazs', 'edita', 'sandra', 'constantinos', 'francesca',
+    'conrad', 'wertheimer', 'yurkovich', 'balducci', 'neubauer', 'schran',
+    // Projects
+    'hagenauer', 'kitzb', 'lilienmatt', 'morv', 'aukera', 'balgerstrasse',
+    'mandarin', 'fx mayr', 'cap ferrat', 'annaberg', 'alpengold', 'citic',
+    'prague', 'woosley', 'campus', 'schlüter',
+    // Baker features
+    'briefing', 'deadline', 'clickup', 'todoist', 'alert', 'critical',
+    'promised', 'meeting', 'dossier', 'email', 'whatsapp',
+    // Domain terms that imply Baker data needed (conservative)
+    'hotel', 'occupancy', 'adr', 'revpar', 'residence', 'apartment',
+    'insolvency', 'capital call', 'financing', 'restructur', 'loan',
+    'investor', 'investment', 'equity', 'shareholder',
+    'acquisition', 'due diligence', 'term sheet', 'irr',
+    // Actions requiring tools
+    'send', 'draft', 'create', 'schedule', 'arrange', 'prepare',
+    'show me', 'list', 'get me', 'find', 'check', 'update', 'dismiss',
+    'promote', 'reject',
+    // Context references (need conversation history on server)
+    'the same', 'that email', 'his response', 'follow up', 'as discussed',
+    'previous', 'last time'
+];
+
+function isSimpleQuestion(question) {
+    // Hard requirement: Ollama must be running with a model
+    if (!_ollamaAvailable || !window._ollamaModel) return false;
+
+    var q = question.toLowerCase().trim();
+
+    // Explicit prefixes override everything (even toggle)
+    if (q.startsWith('local:') || q.startsWith('gemma:')) return true;
+    if (q.startsWith('baker:')) return false;
+
+    // Respect user toggle
+    if (!_ollamaEnabled) return false;
+
+    // Too short or too long — let Baker handle edge cases
+    if (q.length < 10 || q.length > 2000) return false;
+
+    // Has conversation history — needs server context
+    var history = getScanHistory();
+    if (history.length > 2) return false;
+
+    // Check for Baker-specific keywords
+    for (var i = 0; i < _BAKER_KEYWORDS.length; i++) {
+        if (q.indexOf(_BAKER_KEYWORDS[i]) !== -1) return false;
+    }
+
+    // Default: route locally if no keywords matched
+    return true;
+}
+
+async function sendLocalMessage(question) {
+    // Strip prefix if user typed "local:" or "gemma:"
+    var cleanQ = question.replace(/^(local:|gemma:)\s*/i, '');
+
+    scanStreaming = true;
+    var sendBtn = document.getElementById('scanSendBtn');
+    var input = document.getElementById('scanInput');
+    if (sendBtn) sendBtn.disabled = true;
+    if (input) { input.disabled = true; input.value = ''; input.style.height = 'auto'; }
+
+    getScanHistory().push({ role: 'user', content: cleanQ });
+    appendScanBubble('user', cleanQ);
+
+    var assistantId = 'scan-reply-' + Date.now();
+    appendScanBubble('assistant', '', assistantId);
+    var replyEl = document.getElementById(assistantId);
+    if (replyEl) {
+        replyEl.innerHTML = '<div class="thinking local-thinking"><span class="thinking-dots"><span></span><span></span><span></span></span> Local AI is thinking...</div>';
+        replyEl.classList.add('local-ai');
+    }
+
+    var fullResponse = '';
+    try {
+        var resp = await fetch(_OLLAMA_BASE + '/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                model: window._ollamaModel,
+                messages: [{ role: 'user', content: cleanQ }],
+                stream: true
+            })
+        });
+
+        if (!resp.ok) throw new Error('Ollama returned ' + resp.status);
+
+        var reader = resp.body.getReader();
+        var decoder = new TextDecoder();
+        var buffer = '';
+
+        while (true) {
+            var chunk = await reader.read();
+            if (chunk.done) break;
+
+            buffer += decoder.decode(chunk.value, { stream: true });
+            var lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (var li = 0; li < lines.length; li++) {
+                var line = lines[li].trim();
+                if (!line) continue;
+                try {
+                    var data = JSON.parse(line);
+                    if (data.message && data.message.content) {
+                        if (!fullResponse && replyEl) replyEl.textContent = '';
+                        fullResponse += data.message.content;
+                        if (replyEl) {
+                            setSafeHTML(replyEl, '<div class="local-ai-badge">&#9889; Local AI</div>' +
+                                '<div class="md-content">' + md(fullResponse) + '</div>' +
+                                '<div class="streaming-indicator"><span class="thinking-dots"><span></span><span></span><span></span></span></div>');
+                            var scanMsgs = document.getElementById('scanMessages');
+                            if (scanMsgs) scanMsgs.scrollTop = scanMsgs.scrollHeight;
+                        }
+                    }
+                } catch(e) { /* skip unparseable */ }
+            }
+        }
+    } catch (err) {
+        // Fallback: if Ollama fails, re-send via Baker
+        console.warn('Local AI failed, falling back to Baker:', err.message);
+        if (replyEl) replyEl.remove();
+        getScanHistory().pop(); // remove the user message we added
+        getScanHistory().pop(); // remove the assistant placeholder
+        scanStreaming = false;
+        if (sendBtn) sendBtn.disabled = false;
+        if (input) input.disabled = false;
+        sendScanMessage(question); // re-route to Baker
+        return;
+    }
+
+    // Finalize: remove streaming indicator, add re-ask button
+    if (replyEl) {
+        var si = replyEl.querySelector('.streaming-indicator');
+        if (si) si.remove();
+        if (!replyEl.querySelector('.local-ai-badge')) {
+            var badge = document.createElement('div');
+            badge.className = 'local-ai-badge';
+            badge.textContent = '\u26A1 Local AI';
+            replyEl.prepend(badge);
+        }
+        // Add "Re-ask Baker" button
+        var reaskBtn = document.createElement('button');
+        reaskBtn.className = 'reask-baker-btn';
+        reaskBtn.textContent = 'Re-ask Baker \u2192';
+        reaskBtn.onclick = function() {
+            replyEl.remove();
+            // Remove last assistant + user from history
+            var h = getScanHistory();
+            if (h.length >= 2) { h.pop(); h.pop(); }
+            scanStreaming = false;
+            sendScanMessage(question);
+        };
+        replyEl.appendChild(reaskBtn);
+    }
+
+    // Save to history
+    getScanHistory().push({ role: 'assistant', content: fullResponse });
+
+    scanStreaming = false;
+    if (sendBtn) sendBtn.disabled = false;
+    if (input) input.disabled = false;
+    if (input) input.focus();
+}
+
 // ═══ ARTIFACT PANEL ═══
 var _toolLabels = {
     search_emails: ['Emails', '\u2709\uFE0F'],
@@ -3539,6 +3771,13 @@ function _createDownloadCard(genData) {
 
 async function sendScanMessage(question) {
     if (scanStreaming || !question.trim()) return;
+
+    // LOCAL-OLLAMA-ROUTING: Check if this is a simple question for local AI
+    if (isSimpleQuestion(question)) {
+        sendLocalMessage(question);
+        return;
+    }
+
     scanStreaming = true;
 
     var _panelId = 'scanArtifactPanel';
