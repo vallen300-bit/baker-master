@@ -99,6 +99,12 @@ _SPECIALIST_SOURCE_MAP = {
         "deals": "high", "insights": "high", "decisions": "high",
         "signal_extractions": "high",
     },
+    "movie_am": {
+        "emails": "high", "whatsapp": "high", "meetings": "high",
+        "documents": "high", "contacts": "high", "deadlines": "high",
+        "deals": "medium", "insights": "high", "decisions": "high",
+        "signal_extractions": "high",
+    },
     "asset_management": {
         "documents": "high", "emails": "high", "deadlines": "high",
         "meetings": "medium", "signal_extractions": "medium",

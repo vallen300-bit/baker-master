@@ -75,6 +75,44 @@ PM_REGISTRY = {
             "\"red_flags\": [], \"relationship_state\": {}, \"summary\": \"...\"}"
         ),
     },
+    "movie_am": {
+        "registry_version": 1,
+        "name": "MOVIE Asset Manager",
+        "view_dir": "data/movie_am",
+        "view_file_order": [
+            "SCHEMA.md", "agreements_framework.md", "operator_dynamics.md",
+            "kpi_framework.md", "owner_obligations.md", "agenda.md",
+        ],
+        "state_label": "MOVIE AM",
+        "briefing_priority": 20,
+        "contact_keywords": [
+            "francesco", "robin", "mario habicher", "rolf huebner",
+            "mandarin oriental", "mohg",
+        ],
+        "entangled_matters": [],
+        "briefing_section_title": "MOVIE ASSET STATUS",
+        "briefing_email_patterns": ["mandarin", "mohg", "mario.habicher"],
+        "briefing_whatsapp_patterns": ["henri movie", "victor rodriguez", "rolf"],
+        "briefing_deadline_patterns": [
+            "mandarin", "movie", "hotel", "insurance", "warranty",
+            "operating budget", "ff&e",
+        ],
+        "briefing_state_key": "open_approvals",
+        "soul_md_keywords": ["movie", "mandarin", "riemergasse"],
+        "extraction_view_files": [
+            "agreements_framework.md", "operator_dynamics.md",
+            "kpi_framework.md", "owner_obligations.md", "agenda.md",
+        ],
+        "extraction_system": (
+            "Extract structured state updates AND wiki-worthy insights from "
+            "this MOVIE Asset Manager interaction. Return valid JSON only. No markdown fences."
+        ),
+        "extraction_state_schema": (
+            "State updates: {\"kpi_snapshot\": {}, \"open_approvals\": [], "
+            "\"pending_reports\": [], \"red_flags\": [], \"open_actions\": [], "
+            "\"relationship_state\": {}, \"summary\": \"...\"}"
+        ),
+    },
 }
 
 

@@ -1765,8 +1765,8 @@ class ToolExecutor:
         question = inp.get("question", "")
         if not slug or not question:
             return json.dumps({"error": "Both capability_slug and question are required"})
-        if slug == "ao_pm":
-            return json.dumps({"error": "Cannot delegate to self (recursion guard)"})
+        if slug == "ao_pm" or slug == "movie_am":
+            return json.dumps({"error": f"Cannot delegate to {slug} (PM recursion guard)"})
         try:
             from orchestrator.capability_registry import CapabilityRegistry
             from orchestrator.capability_runner import CapabilityRunner
