@@ -901,7 +901,56 @@ WHERE source = 'financial_watchdog' ORDER BY created_at DESC LIMIT 10;
 
 ---
 
-## Phase 2 (separate brief): Multi-bank + Baseline Learning
+## Future Amendments (must be addressed before or during implementation)
+
+### A. Microsoft 365 Migration — Direct Brisengroup Email Access
+Once Baker migrates to Microsoft 365 (planned), the Gmail forwarding chain is eliminated:
+- **Current:** Amex OTP → `dvallen@brisengroup.com` → forwards to `vallen300@gmail.com` → Baker reads via Gmail API
+- **After M365:** Amex OTP → `dvallen@brisengroup.com` → Baker reads directly via Microsoft Graph API
+- This removes a single point of failure (the Gmail redirect) and simplifies the 2FA flow
+- All email-based financial notifications (not just OTP) become first-class — no noise filter issues
+- **Action:** Update `_fetch_amex_otp_from_gmail()` to use Graph API once M365 is live
+
+### B. "Financial Watchdog" as a Persistent Capability
+This should become a **named Baker capability** (like AO PM), not just a browser task. The capability is called **"Financial Watchdog"** and runs continuously with its own state, memory, and scheduled actions.
+
+**Capability scope — three pillars:**
+
+| Pillar | Function | Cadence |
+|---|---|---|
+| **1. Payment Obligations** | Monitor bank/card portals for balances, due dates, minimum payments. Create deadlines (D-2). Route to Edita. | Every 3 days |
+| **2. Transaction Surveillance** | Detect anomalies: duplicates, large charges, declined, new merchants. Alert Director. | Every 3 days (with portal check) |
+| **3. Revenue Assurance** | Track that all invoices to cash-generating clients are issued monthly. Flag missing invoices before month-end to avoid cash flow gaps. | Monthly cycle (check at day 20, remind at day 25, escalate at day 28) |
+
+**Pillar 3 — Revenue Assurance (new):**
+- Baker maintains a registry of cash-generating clients and their expected monthly invoicing
+- Each month, Baker checks: has an invoice been issued to Client X for this period?
+- Sources: email (sent invoices), documents (PDFs in Dropbox), ClickUp tasks (invoicing tasks)
+- **Day 20:** Check which clients still have no invoice this month → T3 alert (awareness)
+- **Day 25:** Re-check → T2 alert to Edita: "Invoice not yet issued for Client X — month closing in 5 days"
+- **Day 28:** Escalate → T1 alert to Director: "Missing invoice for Client X — cash flow risk"
+- **Client registry** stored in Baker DB (table: `financial_watchdog_clients`):
+  ```sql
+  CREATE TABLE IF NOT EXISTS financial_watchdog_clients (
+      id              SERIAL PRIMARY KEY,
+      client_name     TEXT NOT NULL,
+      expected_amount NUMERIC(12,2),
+      currency        TEXT DEFAULT 'EUR',
+      invoice_frequency TEXT DEFAULT 'monthly',
+      contact_person  TEXT,
+      notes           TEXT,
+      is_active       BOOLEAN DEFAULT TRUE,
+      created_at      TIMESTAMPTZ DEFAULT NOW()
+  );
+  ```
+
+**Capability registration:**
+- Add `financial_watchdog` to Baker's capability registry (like `ao_pm`)
+- Responds to triggers: "check finances", "invoice status", "payment due", "bank balance"
+- Has its own conversation memory context: `project = 'financial_watchdog'`
+- Included in morning briefing: outstanding obligations, missing invoices, upcoming wire dates
+
+### C. Phase 2 — Multi-bank + Baseline Learning (separate brief)
 - Add Swissquote, Revolut, Wise portals
 - Build 90-day transaction baseline per account
 - Anomaly: amount >2 standard deviations from historical average for same merchant
