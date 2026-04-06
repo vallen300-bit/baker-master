@@ -710,6 +710,10 @@ class CapabilityRunner:
                     ao_ctx = self._get_ao_project_state_context()
                     if ao_ctx:
                         prompt += f"\n\n# LIVE STATE (from PostgreSQL)\n{ao_ctx}\n"
+                    # PM-KNOWLEDGE-ARCH-1: Pending insights (discovered but not yet promoted)
+                    pending_ctx = self._get_pending_insights_context("ao_pm")
+                    if pending_ctx:
+                        prompt += f"\n\n# KNOWLEDGE COMPOUNDING\n{pending_ctx}\n"
                 prompt += (
                     "\n\n## TAX OPTIMIZATION (always consider)\n"
                     "In every analysis, proactively identify tax optimization opportunities. "
@@ -1217,6 +1221,53 @@ class CapabilityRunner:
                     date_str = created_at.strftime("%Y-%m-%d") if created_at else ""
                     parts.append(f"- [Decision {date_str}] {decision[:200]}")
                 return "\n".join(parts) if parts else ""
+            finally:
+                store._put_conn(conn)
+        except Exception:
+            return ""
+
+    def _get_pending_insights_context(self, pm_slug: str) -> str:
+        """PM-KNOWLEDGE-ARCH-1: Load pending insights for system prompt injection.
+        Cowork refinement #2: Cap at 5 most recent, show total count."""
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            conn = store._get_conn()
+            if not conn:
+                return ""
+            try:
+                cur = conn.cursor()
+                # Get total count first
+                cur.execute("""
+                    SELECT COUNT(*) FROM pm_pending_insights
+                    WHERE pm_slug = %s AND status = 'pending'
+                """, (pm_slug,))
+                total_count = cur.fetchone()[0] or 0
+                if total_count == 0:
+                    cur.close()
+                    return ""
+
+                # Fetch top 5 most recent (Cowork #2: 10 is noise, 5 is actionable)
+                cur.execute("""
+                    SELECT id, insight, target_file, confidence, created_at
+                    FROM pm_pending_insights
+                    WHERE pm_slug = %s AND status = 'pending'
+                    ORDER BY created_at DESC LIMIT 5
+                """, (pm_slug,))
+                rows = cur.fetchall()
+                cur.close()
+
+                parts = [f"## PENDING INSIGHTS ({total_count} total awaiting Director review)"]
+                parts.append("These are facts YOU discovered that haven't been promoted to view files yet.")
+                parts.append("Do NOT re-discover these. If Director asks to promote/reject, update their status.\n")
+                for row_id, insight, target_file, confidence, created_at in rows:
+                    date_str = created_at.strftime("%Y-%m-%d") if created_at else ""
+                    parts.append(f"- **#{row_id}** [{date_str}] {insight}")
+                    if target_file:
+                        parts.append(f"  → Target: {target_file} (confidence: {confidence})")
+                if total_count > 5:
+                    parts.append(f"\n({total_count - 5} more — say 'show all pending' for full list)")
+                return "\n".join(parts)
             finally:
                 store._put_conn(conn)
         except Exception:
