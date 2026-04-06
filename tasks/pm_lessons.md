@@ -29,3 +29,13 @@ Review at session start when building or maintaining a PM. Add new lessons after
 ### 6. Orbit people matter as much as the entity itself
 **Mistake:** Initially only tracked direct AO communications. Missed signals from Constantinos (advisor), Buchwalder (lawyer), and other orbit contacts.
 **Rule:** During Step 1 (DISCOVER), map the full orbit: advisors, lawyers, counterparties, assistants. Their communications are signals too.
+
+## From MOVIE AM (Hotel Asset — Mandarin Oriental Vienna)
+
+### 7. Dashboard installation is automatic if capability_type = 'client_pm'
+**Context:** Director expected a manual step to "install" MOVIE AM in the dashboard. In fact, the Client PM picker loads from `/api/client-pms` which queries `capability_sets WHERE capability_type = 'client_pm' AND active = TRUE`. Registration script already sets this.
+**Rule:** Every new PM's registration script MUST set `capability_type='client_pm'`. No separate dashboard installation step needed. Verify after registration that the PM appears in the Client PM dropdown. Add this to the PM build checklist (Step 2: STRUCTURE → registration → verify in dashboard picker).
+
+### 8. The PM must own its own debrief state
+**Mistake:** Parked 8 debrief questions in Baker's deadline register (external reminders), but the MOVIE AM PM itself didn't know about them. Director expected the PM to be the persistent personality that tracks outstanding questions.
+**Rule:** Write all open debrief questions into the PM's `agenda.md` view file, not just into Baker deadlines. The PM must be self-contained — when Director asks "what do you need?", it should know. Baker deadlines are just the trigger; the PM owns the intelligence.
