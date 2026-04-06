@@ -4841,6 +4841,71 @@ class SentinelStoreBack:
             finally:
                 self._put_conn(conn)
 
+    def get_pending_insights(self, pm_slug: str, status: str = "pending",
+                             limit: int = 20) -> list:
+        """PM-KNOWLEDGE-ARCH-1: Get pending insights for a PM."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, insight, target_file, target_section, confidence,
+                       source_question, created_at
+                FROM pm_pending_insights
+                WHERE pm_slug = %s AND status = %s
+                ORDER BY created_at DESC LIMIT %s
+            """, (pm_slug, status, limit))
+            rows = cur.fetchall()
+            cur.close()
+            return [
+                {
+                    "id": r[0], "insight": r[1], "target_file": r[2],
+                    "target_section": r[3], "confidence": r[4],
+                    "source_question": r[5],
+                    "created_at": r[6].isoformat() if r[6] else None,
+                }
+                for r in rows
+            ]
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"get_pending_insights failed: {e}")
+            return []
+        finally:
+            self._put_conn(conn)
+
+    def update_pending_insight_status(self, insight_id: int, new_status: str,
+                                      review_note: str = "") -> bool:
+        """PM-KNOWLEDGE-ARCH-1: Approve/reject/promote a pending insight."""
+        if new_status not in ("approved", "rejected", "promoted"):
+            return False
+        conn = self._get_conn()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE pm_pending_insights
+                SET status = %s, reviewed_at = NOW(), review_note = %s
+                WHERE id = %s AND status = 'pending'
+            """, (new_status, review_note[:500] if review_note else "", insight_id))
+            affected = cur.rowcount
+            conn.commit()
+            cur.close()
+            return affected > 0
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"update_pending_insight_status failed: {e}")
+            return False
+        finally:
+            self._put_conn(conn)
+
     def store_push_subscription(self, endpoint: str, p256dh: str, auth: str) -> bool:
         """Upsert a Web Push subscription."""
         conn = self._get_conn()
