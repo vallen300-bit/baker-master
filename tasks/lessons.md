@@ -99,3 +99,31 @@ Review at session start. Add new lessons after any correction. Remove stale ones
 ### 17. Brief code snippets must be verified against actual function signatures
 **Mistake:** BRIEF_KNOWLEDGE_DIGEST_1 included `call_flash(prompt, system=...)` — passing a bare string as the first arg. The actual signature is `call_flash(messages: list, ...)`. Code Brisen implemented the brief exactly as written. Feature silently crashed for days. The bug was in the brief, not the implementation.
 **Rule:** Before putting a code snippet in a brief, **read the actual function signature** (`Grep` for `def function_name`). Never assume you remember the API. This is the brief-writing equivalent of Lesson #2 (verify DB schema): verify call signatures before writing copy-pasteable code. Brief writer owns the bug if the snippet is wrong.
+
+### 18. Verify FastAPI imports — JSONResponse is NOT auto-imported
+**Mistake:** `JSONResponse` was used in 10+ endpoints across `dashboard.py` but never imported from `fastapi.responses`. The "Save to Dossiers" button returned 500 (`name 'JSONResponse' is not defined`) on every click. Other endpoints using it were also silently broken.
+**Rule:** When adding an endpoint that returns `JSONResponse(...)`, check line 22 of `dashboard.py` — verify it's in the import. FastAPI auto-imports `Response` but NOT `JSONResponse`. One-line fix, hours of mystery.
+
+### 19. Cloudflare Access: zero policies ≠ bypass — it means BLOCK
+**Mistake:** Created an Access app for `ollama.brisen-infra.com` with zero policies, expecting it to be open. Cloudflare returned 302 redirect to login page. With no policies, Access defaults to blocking all traffic.
+**Rule:** To make a tunnel hostname publicly accessible, do NOT create an Access app for it at all. An Access app with zero policies = blocked. No Access app = open. If you need selective bypass, add an explicit Bypass policy — don't leave the policy list empty.
+
+### 20. Cloudflare tunnel: set originRequest.httpHostHeader for local services
+**Mistake:** Added `ollama.brisen-infra.com` tunnel route pointing to `http://localhost:11434`. Got 403 — Ollama rejected requests because the `Host` header was `ollama.brisen-infra.com` but Ollama only accepts `localhost`.
+**Rule:** When tunneling to a local service that validates the Host header, add `originRequest.httpHostHeader: localhost` to the ingress rule in `~/.cloudflared/config.yml`.
+
+### 21. Chrome blocks HTTP fetch from HTTPS pages (mixed content)
+**Mistake:** Expected `https://baker-master.onrender.com` to fetch `http://localhost:11434` (Ollama). Chrome hard-blocks this — `ERR_FAILED`, no CORS headers even matter.
+**Rule:** HTTPS pages cannot fetch HTTP localhost. Solutions: (a) proxy through HTTPS tunnel (Cloudflare), (b) serve the page from HTTP localhost, or (c) use a Chrome extension (which runs in a different security context). `targetAddressSpace: "local"` doesn't help yet.
+
+### 22. Slack @mention vs natural language — code must handle both
+**Mistake:** Director typed "Baker, please remember..." in Slack (natural language). Code only checked for `<@U0AFJLAP1BR>` (Slack @mention format). 8 Director messages over 2 weeks were ingested but never processed or replied to. Director thought Baker was ignoring him.
+**Rule:** When building a chat bot trigger, always handle BOTH the platform's mention syntax AND natural language name mentions. Check: `is_mention OR (is_director AND "baker" in text.lower())`. The Director will not always use @mentions — especially on mobile.
+
+### 23. RSS feeds auto-disable after 6 consecutive failures — monitor and re-enable
+**Mistake:** 4 RSS feeds (AI Technology + Longevity) hit 6 consecutive failures (likely temporary site downtime) and auto-disabled. The Media sidebar silently lost entire categories. Director noticed weeks later.
+**Rule:** The auto-disable threshold (6 failures) is a safety feature but needs monitoring. Add to briefing: if any feed transitions from active→inactive, flag it. Also: when re-enabling, test the feed URL first (`curl -s -o /dev/null -w "%{http_code}" URL`) — the URL may have genuinely changed.
+
+### 24. Run periodic health audits — silent failures accumulate
+**Mistake:** Multiple issues accumulated unnoticed: Slack not replying (2 weeks), RSS feeds disabled (days), WhatsApp backlog (35 days), Whoop dead (22 days), JSONResponse broken (unknown duration). Each was non-fatal and silent — no alerts, no errors visible to the Director.
+**Rule:** Run `baker_raw_query` health checks periodically: (a) `SELECT source, status, consecutive_failures FROM sentinel_health WHERE status != 'healthy'`, (b) `SELECT type, COUNT(*) FROM trigger_log WHERE processed = false GROUP BY type`, (c) `SELECT category, COUNT(*) FROM rss_feeds WHERE is_active = true GROUP BY category`. Flag anything anomalous in the briefing.
