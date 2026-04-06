@@ -839,12 +839,12 @@ async def waha_webhook(
     except Exception as _e:
         logger.warning(f"Failed to store WhatsApp msg {msg_id} to PostgreSQL (non-fatal): {_e}")
 
-    # AO-PM-VIEW: Detect AO WhatsApp signals (inbound from AO or AO-relevant)
+    # PM-SIGNAL: Detect PM-relevant WhatsApp signals (generic, PM_REGISTRY-driven)
     if sender != DIRECTOR_WHATSAPP:
         try:
-            from orchestrator.ao_signal_detector import is_ao_whatsapp_message, flag_ao_signal
-            if is_ao_whatsapp_message(sender_name, combined_body):
-                flag_ao_signal("whatsapp", sender_name or sender, combined_body[:200])
+            from orchestrator.pm_signal_detector import detect_relevant_pms_whatsapp, flag_pm_signal
+            for _pm_slug in detect_relevant_pms_whatsapp(sender_name, combined_body):
+                flag_pm_signal(_pm_slug, "whatsapp", sender_name or sender, combined_body[:200])
         except Exception:
             pass  # Non-fatal
 
@@ -950,14 +950,15 @@ async def waha_webhook(
     except Exception as _e:
         logger.warning(f"Decision Engine scoring failed (non-fatal): {_e}")
 
-    # AO-PM-VIEW: Track outbound to AO (for Rule Zero gap monitoring)
+    # PM-SIGNAL: Detect PM-relevant outbound WhatsApp (Director messaging PM contacts)
+    # Outbound uses ORBIT ONLY — avoids false positives on generic terms. Cowork Q3.
     if sender == DIRECTOR_WHATSAPP and combined_body:
-        if "oskolkov" in combined_body.lower() or "andrey" in combined_body.lower():
-            try:
-                from orchestrator.ao_signal_detector import flag_ao_signal
-                flag_ao_signal("whatsapp_outbound", "DV to AO", combined_body[:200])
-            except Exception:
-                pass
+        try:
+            from orchestrator.pm_signal_detector import detect_relevant_pms_outbound, flag_pm_signal
+            for _pm_slug in detect_relevant_pms_outbound(combined_body):
+                flag_pm_signal(_pm_slug, "whatsapp_outbound", "Director outbound", combined_body[:200])
+        except Exception:
+            pass
 
     # WHATSAPP-ACTION-1: Director messages → action detection first
     _wa_intent = None

@@ -840,13 +840,13 @@ def _process_email_threads(new_threads: list):
         except Exception:
             pass  # Non-fatal — pipeline continues
 
-        # AO-PM-VIEW: Detect AO-orbit emails
+        # PM-SIGNAL: Detect PM-relevant emails (generic, PM_REGISTRY-driven)
         try:
-            from orchestrator.ao_signal_detector import is_ao_relevant_text, flag_ao_signal
-            _ao_sender = metadata.get("primary_sender", "") + " " + metadata.get("primary_sender_email", "")
-            _ao_text = f"{metadata.get('subject', '')} {thread['text'][:500]}"
-            if is_ao_relevant_text(_ao_sender, _ao_text):
-                flag_ao_signal("email", metadata.get("primary_sender", "unknown"), metadata.get("subject", "")[:200])
+            from orchestrator.pm_signal_detector import detect_relevant_pms_text, flag_pm_signal
+            _pm_sender = metadata.get("primary_sender", "") + " " + metadata.get("primary_sender_email", "")
+            _pm_text = f"{metadata.get('subject', '')} {thread['text'][:500]}"
+            for _pm_slug in detect_relevant_pms_text(_pm_sender, _pm_text):
+                flag_pm_signal(_pm_slug, "email", metadata.get("primary_sender", "unknown"), metadata.get("subject", "")[:200])
         except Exception:
             pass  # Non-fatal
 
