@@ -242,6 +242,19 @@ def _gather_ao_pm_context() -> str:
                 dl_lines = [f"  - {d[0]}: {d[1].strftime('%Y-%m-%d')}" for d in deadlines]
                 parts.append(f"AO DEADLINES (next 14 days):\n" + "\n".join(dl_lines))
 
+            # PM-KNOWLEDGE-ARCH-1: Pending insights count
+            try:
+                cur.execute("""
+                    SELECT COUNT(*) FROM pm_pending_insights
+                    WHERE pm_slug = 'ao_pm' AND status = 'pending'
+                """)
+                pending_count = cur.fetchone()[0] or 0
+                if pending_count > 0:
+                    parts.append(f"\nKNOWLEDGE COMPOUNDING: {pending_count} pending insight(s) "
+                                 f"awaiting your review. Ask Baker to show/promote/reject them.")
+            except Exception:
+                pass  # Non-fatal — table may not exist yet
+
             cur.close()
             conn.commit()
         except Exception as e:
