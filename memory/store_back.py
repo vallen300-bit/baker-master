@@ -164,6 +164,9 @@ class SentinelStoreBack:
         # AO-PM-1: Persistent state for AO Project Manager
         self._ensure_ao_project_state_table()
 
+        # PM-KNOWLEDGE-ARCH-1: Pending insights for PM knowledge bases
+        self._ensure_pm_pending_insights_table()
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -4700,6 +4703,44 @@ class SentinelStoreBack:
             except Exception:
                 pass
             logger.warning(f"Could not ensure ao_project_state table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_pm_pending_insights_table(self):
+        """PM-KNOWLEDGE-ARCH-1: Queue for insights awaiting review before PM knowledge base update."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS pm_pending_insights (
+                    id              SERIAL PRIMARY KEY,
+                    pm_slug         TEXT NOT NULL,
+                    insight         TEXT NOT NULL,
+                    target_file     TEXT,
+                    target_section  TEXT,
+                    source_question TEXT,
+                    source_summary  TEXT,
+                    confidence      TEXT DEFAULT 'medium',
+                    status          TEXT DEFAULT 'pending',
+                    reviewed_at     TIMESTAMPTZ,
+                    review_note     TEXT,
+                    created_at      TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_pm_pending_slug_status "
+                "ON pm_pending_insights(pm_slug, status)"
+            )
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure pm_pending_insights table: {e}")
         finally:
             self._put_conn(conn)
 
