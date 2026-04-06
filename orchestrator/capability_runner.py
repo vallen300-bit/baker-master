@@ -714,6 +714,24 @@ class CapabilityRunner:
                     pending_ctx = self._get_pending_insights_context("ao_pm")
                     if pending_ctx:
                         prompt += f"\n\n# KNOWLEDGE COMPOUNDING\n{pending_ctx}\n"
+                    # PM-KNOWLEDGE-ARCH-1: Add promotion instructions if pending items exist
+                    if pending_ctx:
+                        prompt += (
+                            "\n\n## KNOWLEDGE COMPOUNDING INSTRUCTIONS\n"
+                            "When Director says 'promote #N' or 'approve #N':\n"
+                            "1. Confirm which insight is being promoted and its target view file\n"
+                            "2. Use the update_pending_insight tool with status='approved'\n"
+                            "3. Tell Director exactly: 'Insight #{N} approved. Queued for Code Brisen "
+                            "to merge into {target_file} → {target_section}. It will appear in your "
+                            "next view file update.'\n\n"
+                            "When Director says 'reject #N':\n"
+                            "1. Use the update_pending_insight tool with status='rejected'\n"
+                            "2. ALWAYS ask for a reason and store it in review_note — this teaches "
+                            "the extraction model what NOT to re-discover\n\n"
+                            "When Director says 'show pending' or 'what insights are waiting':\n"
+                            "1. Use the get_pending_insights tool to fetch full list\n"
+                            "2. Format as numbered list with ID, insight, target file, date\n"
+                        )
                 prompt += (
                     "\n\n## TAX OPTIMIZATION (always consider)\n"
                     "In every analysis, proactively identify tax optimization opportunities. "

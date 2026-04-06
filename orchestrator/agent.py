@@ -688,6 +688,32 @@ TOOL_DEFINITIONS = [
             "required": ["capability_slug", "question"],
         },
     },
+    # PM-KNOWLEDGE-ARCH-1: Pending insight review tools
+    {
+        "name": "get_pending_insights",
+        "description": "Get pending wiki insights for a PM capability. Returns insights awaiting Director review.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pm_slug": {"type": "string", "description": "PM slug, e.g. 'ao_pm'"},
+                "limit": {"type": "integer", "description": "Max results (default 20)", "default": 20},
+            },
+            "required": ["pm_slug"],
+        },
+    },
+    {
+        "name": "update_pending_insight",
+        "description": "Approve or reject a pending wiki insight. Use when Director says 'promote #N' or 'reject #N'.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "insight_id": {"type": "integer", "description": "The insight ID number"},
+                "status": {"type": "string", "enum": ["approved", "rejected"], "description": "New status"},
+                "review_note": {"type": "string", "description": "Optional Director note explaining the decision"},
+            },
+            "required": ["insight_id", "status"],
+        },
+    },
 ]
 
 # Agent loop tools — exclude clickup_create (Director prefers results in artifact panel,
@@ -760,6 +786,22 @@ class ToolExecutor:
                 return self._update_ao_state(tool_input)
             elif tool_name == "delegate_to_capability":
                 return self._delegate_to_capability(tool_input)
+            # PM-KNOWLEDGE-ARCH-1: Pending insight review tools
+            elif tool_name == "get_pending_insights":
+                pm_slug = tool_input.get("pm_slug", "ao_pm")
+                limit = tool_input.get("limit", 20)
+                from memory.store_back import SentinelStoreBack
+                store = SentinelStoreBack._get_global_instance()
+                results = store.get_pending_insights(pm_slug, limit=limit)
+                return json.dumps(results, default=str)
+            elif tool_name == "update_pending_insight":
+                insight_id = tool_input.get("insight_id")
+                status = tool_input.get("status")
+                note = tool_input.get("review_note", "")
+                from memory.store_back import SentinelStoreBack
+                store = SentinelStoreBack._get_global_instance()
+                success = store.update_pending_insight_status(insight_id, status, note)
+                return json.dumps({"success": success, "insight_id": insight_id, "new_status": status})
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
