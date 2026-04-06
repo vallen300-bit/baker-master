@@ -1224,34 +1224,188 @@ class CapabilityRunner:
 
     def _auto_update_ao_state(self, question: str, answer: str):
         """AO-PM-1: Auto-update AO state after each run via Anthropic Opus.
+        PM-KNOWLEDGE-ARCH-1: Also extract wiki-worthy insights for pending review.
         Cowork review: same model family as reasoning = no interpretation gap."""
         try:
             import json
+
+            # Cowork refinement #1/#4: Feed existing pending + rejected insights
+            # into extraction context so Opus can self-dedup and learn from rejections
+            existing_context = self._get_extraction_dedup_context("ao_pm")
+
             resp = self.claude.messages.create(
                 model="claude-opus-4-6",
-                max_tokens=500,
-                system="Extract structured state updates from the conversation. Return valid JSON only. No markdown fences.",
+                max_tokens=700,
+                system=(
+                    "Extract structured state updates AND wiki-worthy insights from the conversation. "
+                    "Return valid JSON only. No markdown fences."
+                ),
                 messages=[{"role": "user", "content": (
                     f"Extract state updates from this AO Project Manager interaction.\n\n"
                     f"Question: {question[:500]}\n\nAnswer: {answer[:3000]}\n\n"
-                    f"Return JSON: {{\"sub_matters\": {{}}, \"open_actions\": [], "
+                    f"Return JSON with TWO sections:\n"
+                    f"1. State updates: {{\"sub_matters\": {{}}, \"open_actions\": [], "
                     f"\"red_flags\": [], \"relationship_state\": {{}}, \"summary\": \"...\"}}\n"
-                    f"Only include fields with NEW information. Be concise. "
-                    f"Return empty object {{\"summary\": \"...\"}} if no state changes."
+                    f"2. Wiki insights — facts or rules discovered that should become PERMANENT "
+                    f"knowledge in the view files. Only include if:\n"
+                    f"   - It's a confirmed fact, not speculation\n"
+                    f"   - It would be useful in future PM invocations\n"
+                    f"   - It's not already obvious from the question context\n"
+                    f"   - It's >50 characters (no trivial observations)\n\n"
+                    f"Confidence levels:\n"
+                    f"   - high = directly stated by Director OR confirmed by document\n"
+                    f"   - medium = inferred from Q&A pattern with supporting evidence\n"
+                    f"   - low = speculative or single-instance observation (will be dropped)\n\n"
+                    f"Available view files: psychology.md, investment_channels.md, "
+                    f"sensitive_issues.md, communication_rules.md, agenda.md\n\n"
+                    f"{existing_context}"
+                    f"Return: {{\"sub_matters\": {{}}, \"open_actions\": [], \"red_flags\": [], "
+                    f"\"relationship_state\": {{}}, \"summary\": \"...\", "
+                    f"\"wiki_insights\": [{{\"insight\": \"...\", \"target_file\": \"...\", "
+                    f"\"target_section\": \"...\", \"confidence\": \"high|medium\"}}]}}\n"
+                    f"Return empty wiki_insights array if nothing wiki-worthy.\n"
+                    f"Only include fields with NEW information. Be concise."
                 )}],
             )
             raw = resp.content[0].text.strip()
             if raw.startswith("```"):
                 raw = "\n".join(raw.split("\n")[1:-1])
             updates = json.loads(raw)
+
+            # CRITICAL: Pop wiki insights BEFORE state update
+            # (state merger doesn't know this field — would corrupt ao_project_state)
+            wiki_insights = updates.pop("wiki_insights", [])
             summary = updates.pop("summary", "AO PM interaction")
+
+            # State update (existing flow — unchanged)
             from memory.store_back import SentinelStoreBack
             store = SentinelStoreBack._get_global_instance()
             store.update_ao_project_state(updates, summary, question[:500],
                                           mutation_source="opus_auto")
             logger.info(f"AO state auto-updated (Opus): {summary}")
+
+            # PM-KNOWLEDGE-ARCH-1: Store wiki insights as pending
+            if wiki_insights and isinstance(wiki_insights, list):
+                self._store_pending_insights("ao_pm", wiki_insights, question, summary)
+
         except Exception as e:
             logger.debug(f"AO state auto-update failed (non-fatal): {e}")
+
+    def _get_extraction_dedup_context(self, pm_slug: str) -> str:
+        """PM-KNOWLEDGE-ARCH-1: Build dedup + rejection context for Opus extraction.
+        Cowork #1: Feed existing pending insights so Opus can self-dedup.
+        Cowork #4: Feed rejected insights so Opus learns what NOT to re-extract."""
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            conn = store._get_conn()
+            if not conn:
+                return ""
+            try:
+                cur = conn.cursor()
+                parts = []
+
+                # Current pending insights (don't re-extract these)
+                cur.execute("""
+                    SELECT insight FROM pm_pending_insights
+                    WHERE pm_slug = %s AND status = 'pending'
+                    ORDER BY created_at DESC LIMIT 10
+                """, (pm_slug,))
+                pending = [r[0] for r in cur.fetchall()]
+                if pending:
+                    items = "; ".join(p[:80] for p in pending)
+                    parts.append(
+                        f"ALREADY PENDING (do NOT re-extract): {items}\n"
+                    )
+
+                # Recently rejected insights (learn from Director's rejections)
+                cur.execute("""
+                    SELECT insight, review_note FROM pm_pending_insights
+                    WHERE pm_slug = %s AND status = 'rejected'
+                    ORDER BY reviewed_at DESC LIMIT 5
+                """, (pm_slug,))
+                rejected = cur.fetchall()
+                if rejected:
+                    items = "; ".join(
+                        f"{r[0][:60]} (reason: {r[1][:40]})" if r[1]
+                        else r[0][:80]
+                        for r in rejected
+                    )
+                    parts.append(
+                        f"REJECTED BY DIRECTOR (do NOT re-extract): {items}\n"
+                    )
+
+                cur.close()
+                return "\n".join(parts) + "\n" if parts else ""
+            finally:
+                store._put_conn(conn)
+        except Exception:
+            return ""
+
+    def _store_pending_insights(self, pm_slug: str, insights: list,
+                                question: str, summary: str):
+        """PM-KNOWLEDGE-ARCH-1: Store wiki-worthy insights in pending queue.
+        Deduplicates via Opus self-dedup context (Cowork #1) + ILIKE fallback.
+        Cowork missed-risk: minimum length filter to prevent trivial observations."""
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            conn = store._get_conn()
+            if not conn:
+                return
+            try:
+                cur = conn.cursor()
+                stored = 0
+                for item in insights[:3]:  # Max 3 insights per interaction
+                    if not isinstance(item, dict) or not item.get("insight"):
+                        continue
+                    insight_text = item["insight"][:1000]
+                    target_file = item.get("target_file", "")[:100]
+                    target_section = item.get("target_section", "")[:200]
+                    confidence = item.get("confidence", "medium")
+
+                    # Guard: skip low-confidence
+                    if confidence not in ("high", "medium"):
+                        continue
+
+                    # Cowork missed-risk: minimum length to prevent trivial insights
+                    if len(insight_text.strip()) < 50:
+                        continue
+
+                    # Dedup fallback: ILIKE check on first 80 chars within 7 days
+                    cur.execute("""
+                        SELECT id FROM pm_pending_insights
+                        WHERE pm_slug = %s
+                          AND status IN ('pending', 'approved')
+                          AND created_at > NOW() - INTERVAL '7 days'
+                          AND insight ILIKE %s
+                        LIMIT 1
+                    """, (pm_slug, f"%{insight_text[:80]}%"))
+                    if cur.fetchone():
+                        continue  # Duplicate — skip
+
+                    cur.execute("""
+                        INSERT INTO pm_pending_insights
+                            (pm_slug, insight, target_file, target_section,
+                             source_question, source_summary, confidence)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    """, (pm_slug, insight_text, target_file, target_section,
+                          question[:500], summary[:500], confidence))
+                    stored += 1
+                conn.commit()
+                cur.close()
+                if stored:
+                    logger.info(f"PM-KNOWLEDGE: Stored {stored} pending insights for {pm_slug}")
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                logger.debug(f"Failed to store pending insights: {e}")
+            finally:
+                store._put_conn(conn)
+        except Exception as e:
+            logger.debug(f"Pending insight storage failed (non-fatal): {e}")
 
     def _get_filtered_tools(self, capability: CapabilityDef) -> list[dict]:
         """
