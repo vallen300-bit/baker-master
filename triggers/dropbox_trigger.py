@@ -337,13 +337,17 @@ def _sync_soul_to_db(local_path, entry_path: str):
             logger.warning(f"Soul.md too short ({len(soul_text)} chars) — skipping sync")
             return
 
-        # Determine which capability this Soul.md belongs to
-        # Currently only ao_pm, but extensible
+        # PM-FACTORY: Determine which PM this Soul.md belongs to
+        from orchestrator.capability_runner import PM_REGISTRY
         _path_lower = entry_path.lower()
-        if "oskolkov" in _path_lower:
-            cap_slug = "ao_pm"
-        else:
-            logger.info(f"Soul.md found at {entry_path} but no matching capability — skipping")
+        cap_slug = None
+        for slug, config in PM_REGISTRY.items():
+            keywords = config.get("soul_md_keywords", [])
+            if any(kw in _path_lower for kw in keywords):
+                cap_slug = slug
+                break
+        if not cap_slug:
+            logger.info(f"Soul.md found at {entry_path} but no matching PM capability — skipping")
             return
 
         import psycopg2

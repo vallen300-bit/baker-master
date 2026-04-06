@@ -661,6 +661,53 @@ TOOL_DEFINITIONS = [
             "required": ["summary"],
         },
     },
+    # PM-FACTORY: Generic PM state tools
+    {
+        "name": "get_pm_state",
+        "description": (
+            "Load a Project Manager's persistent state — current situation, "
+            "sub-matter statuses, open actions, red flags, relationship state. "
+            "Call this FIRST in every PM-related interaction."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pm_slug": {
+                    "type": "string",
+                    "description": "The PM capability slug (e.g. 'ao_pm', 'movie_am')",
+                },
+            },
+            "required": ["pm_slug"],
+        },
+    },
+    {
+        "name": "update_pm_state",
+        "description": (
+            "Update a Project Manager's persistent state after learning new "
+            "information. Call at the END of every PM interaction."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "pm_slug": {
+                    "type": "string",
+                    "description": "The PM capability slug (e.g. 'ao_pm', 'movie_am')",
+                },
+                "updates": {
+                    "type": "object",
+                    "description": (
+                        "JSON object with fields to update in the state. "
+                        "Only include changed fields."
+                    ),
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "One-sentence summary of what was discussed/learned.",
+                },
+            },
+            "required": ["pm_slug", "summary"],
+        },
+    },
     {
         "name": "delegate_to_capability",
         "description": (
@@ -779,11 +826,16 @@ class ToolExecutor:
                 return self._browse_website(tool_input)
             elif tool_name == "browser_action":
                 return self._browser_action(tool_input)
-            # AO-PM-1: AO Project Manager tools
+            # PM-FACTORY: PM state tools (generic + AO aliases)
             elif tool_name == "get_ao_state":
-                return self._get_ao_state(tool_input)
+                return self._get_pm_state({"pm_slug": "ao_pm"})
             elif tool_name == "update_ao_state":
-                return self._update_ao_state(tool_input)
+                tool_input["pm_slug"] = "ao_pm"
+                return self._update_pm_state(tool_input)
+            elif tool_name == "get_pm_state":
+                return self._get_pm_state(tool_input)
+            elif tool_name == "update_pm_state":
+                return self._update_pm_state(tool_input)
             elif tool_name == "delegate_to_capability":
                 return self._delegate_to_capability(tool_input)
             # PM-KNOWLEDGE-ARCH-1: Pending insight review tools
@@ -1687,24 +1739,25 @@ class ToolExecutor:
     # AO-PM-1: AO Project Manager tool handlers
     # ─────────────────────────────────────────────────
 
-    def _get_ao_state(self, inp: dict) -> str:
-        """AO-PM-1: Load persistent AO project state."""
+    def _get_pm_state(self, inp: dict) -> str:
+        """PM-FACTORY: Load persistent PM project state."""
+        pm_slug = inp.get("pm_slug", "ao_pm")
         from memory.store_back import SentinelStoreBack
         store = SentinelStoreBack._get_global_instance()
-        state = store.get_ao_project_state()
+        state = store.get_pm_project_state(pm_slug)
         if not state:
-            return json.dumps({"state": "No persistent state found. This is the first run — build state from tools."})
-        # Convert for JSON serialization
+            return json.dumps({"state": f"No persistent state for {pm_slug}. First run — build state from tools."})
         return json.dumps(state, default=str)
 
-    def _update_ao_state(self, inp: dict) -> str:
-        """AO-PM-1: Update persistent AO project state."""
+    def _update_pm_state(self, inp: dict) -> str:
+        """PM-FACTORY: Update persistent PM project state."""
+        pm_slug = inp.get("pm_slug", "ao_pm")
         from memory.store_back import SentinelStoreBack
         store = SentinelStoreBack._get_global_instance()
         updates = inp.get("updates", {})
         summary = inp.get("summary", "")
-        store.update_ao_project_state(updates, summary)
-        return "AO project state updated successfully."
+        store.update_pm_project_state(pm_slug, updates, summary)
+        return f"{pm_slug} project state updated successfully."
 
     def _delegate_to_capability(self, inp: dict) -> str:
         """AO-PM-1: Delegate a sub-question to another Baker capability."""

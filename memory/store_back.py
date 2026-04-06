@@ -161,8 +161,8 @@ class SentinelStoreBack:
         # WEALTH-MANAGER: Wealth tracking tables
         self._ensure_wealth_tables()
 
-        # AO-PM-1: Persistent state for AO Project Manager
-        self._ensure_ao_project_state_table()
+        # PM-FACTORY: Generic persistent state for all PM capabilities
+        self._ensure_pm_project_state_table()
 
         # PM-KNOWLEDGE-ARCH-1: Pending insights for PM knowledge bases
         self._ensure_pm_pending_insights_table()
@@ -4649,16 +4649,17 @@ class SentinelStoreBack:
             self._put_conn(conn)
 
     # -------------------------------------------------------
-    # AO-PM-1: AO Project Manager persistent state
+    # PM-FACTORY: Generic PM persistent state
     # -------------------------------------------------------
 
-    def _ensure_ao_project_state_table(self):
-        """AO-PM-1: Persistent state for AO Project Manager capability."""
+    def _ensure_pm_project_state_table(self):
+        """PM-FACTORY: Generic persistent state for all PM capabilities."""
         conn = self._get_conn()
         if not conn:
             return
         try:
             cur = conn.cursor()
+            # Keep old AO tables (still referenced by ao_signal_detector)
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS ao_project_state (
                     id SERIAL PRIMARY KEY,
@@ -4677,7 +4678,6 @@ class SentinelStoreBack:
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_ao_project_state_key "
                 "ON ao_project_state(state_key)"
             )
-            # Cowork review #3: Audit trail for state mutations
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS ao_state_history (
                     id SERIAL PRIMARY KEY,
@@ -4688,11 +4688,62 @@ class SentinelStoreBack:
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
-            # Add version column if missing (for existing deployments)
+            # New generic table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS pm_project_state (
+                    id SERIAL PRIMARY KEY,
+                    pm_slug TEXT NOT NULL,
+                    state_key TEXT NOT NULL DEFAULT 'current',
+                    state_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    version INTEGER DEFAULT 1,
+                    last_run_at TIMESTAMPTZ,
+                    last_question TEXT,
+                    last_answer_summary TEXT,
+                    run_count INTEGER DEFAULT 0,
+                    created_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_pm_project_state_slug_key "
+                "ON pm_project_state(pm_slug, state_key)"
+            )
+            # Generic audit trail
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS pm_state_history (
+                    id SERIAL PRIMARY KEY,
+                    pm_slug TEXT NOT NULL,
+                    version INTEGER NOT NULL,
+                    state_json_before JSONB NOT NULL,
+                    mutation_source TEXT,
+                    mutation_summary TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            # MIGRATION: Copy existing AO data if old table exists and new doesn't have it
             cur.execute("""
                 DO $$ BEGIN
-                    ALTER TABLE ao_project_state ADD COLUMN IF NOT EXISTS version INTEGER DEFAULT 1;
-                EXCEPTION WHEN duplicate_column THEN NULL;
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'ao_project_state')
+                       AND NOT EXISTS (SELECT 1 FROM pm_project_state WHERE pm_slug = 'ao_pm' LIMIT 1) THEN
+                        INSERT INTO pm_project_state
+                            (pm_slug, state_key, state_json, version, last_run_at,
+                             last_question, last_answer_summary, run_count, created_at, updated_at)
+                        SELECT 'ao_pm', state_key, state_json, version, last_run_at,
+                               last_question, last_answer_summary, run_count, created_at, updated_at
+                        FROM ao_project_state;
+                    END IF;
+                END $$
+            """)
+            # MIGRATION: Copy audit trail
+            cur.execute("""
+                DO $$ BEGIN
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'ao_state_history')
+                       AND NOT EXISTS (SELECT 1 FROM pm_state_history WHERE pm_slug = 'ao_pm' LIMIT 1) THEN
+                        INSERT INTO pm_state_history
+                            (pm_slug, version, state_json_before, mutation_source, mutation_summary, created_at)
+                        SELECT 'ao_pm', version, state_json_before, mutation_source, mutation_summary, created_at
+                        FROM ao_state_history;
+                    END IF;
                 END $$
             """)
             conn.commit()
@@ -4702,7 +4753,7 @@ class SentinelStoreBack:
                 conn.rollback()
             except Exception:
                 pass
-            logger.warning(f"Could not ensure ao_project_state table: {e}")
+            logger.warning(f"Could not ensure pm_project_state table: {e}")
         finally:
             self._put_conn(conn)
 
@@ -4744,30 +4795,30 @@ class SentinelStoreBack:
         finally:
             self._put_conn(conn)
 
-    def get_ao_project_state(self) -> dict:
-        """AO-PM-1: Read the current AO project state."""
+    def get_pm_project_state(self, pm_slug: str) -> dict:
+        """PM-FACTORY: Read PM project state by slug."""
         conn = self._get_conn()
         if not conn:
             return {}
         try:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
             cur.execute(
-                "SELECT * FROM ao_project_state WHERE state_key = 'current' LIMIT 1"
+                "SELECT * FROM pm_project_state WHERE pm_slug = %s AND state_key = 'current' LIMIT 1",
+                (pm_slug,)
             )
             row = cur.fetchone()
             cur.close()
             return dict(row) if row else {}
         except Exception as e:
-            logger.warning(f"get_ao_project_state failed: {e}")
+            logger.warning(f"get_pm_project_state({pm_slug}) failed: {e}")
             return {}
         finally:
             self._put_conn(conn)
 
-    def update_ao_project_state(self, updates: dict, summary: str = "",
+    def update_pm_project_state(self, pm_slug: str, updates: dict, summary: str = "",
                                 question: str = "",
                                 mutation_source: str = "auto"):
-        """AO-PM-1: Upsert AO project state with audit trail + optimistic locking.
-        Cowork review: snapshot before every mutation, retry-on-conflict (max 2 retries)."""
+        """PM-FACTORY: Upsert PM project state with audit trail + optimistic locking."""
         max_retries = 3
         for attempt in range(max_retries):
             conn = self._get_conn()
@@ -4776,8 +4827,9 @@ class SentinelStoreBack:
             try:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT state_json, version FROM ao_project_state "
-                    "WHERE state_key = 'current'"
+                    "SELECT state_json, version FROM pm_project_state "
+                    "WHERE pm_slug = %s AND state_key = 'current'",
+                    (pm_slug,)
                 )
                 row = cur.fetchone()
                 if row:
@@ -4786,10 +4838,10 @@ class SentinelStoreBack:
 
                     # Audit trail: snapshot before mutation
                     cur.execute("""
-                        INSERT INTO ao_state_history
-                            (version, state_json_before, mutation_source, mutation_summary)
-                        VALUES (%s, %s, %s, %s)
-                    """, (current_version, json.dumps(existing, default=str),
+                        INSERT INTO pm_state_history
+                            (pm_slug, version, state_json_before, mutation_source, mutation_summary)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """, (pm_slug, current_version, json.dumps(existing, default=str),
                           mutation_source, summary[:500]))
 
                     # Merge updates into fresh read
@@ -4799,35 +4851,34 @@ class SentinelStoreBack:
                         else:
                             existing[k] = v
 
-                    # Optimistic lock: only update if version hasn't changed
+                    # Optimistic lock
                     cur.execute("""
-                        UPDATE ao_project_state
+                        UPDATE pm_project_state
                         SET state_json = %s, version = %s, last_run_at = NOW(),
                             run_count = run_count + 1, last_question = %s,
                             last_answer_summary = %s, updated_at = NOW()
-                        WHERE state_key = 'current' AND version = %s
+                        WHERE pm_slug = %s AND state_key = 'current' AND version = %s
                     """, (json.dumps(existing, default=str), current_version + 1,
-                          question[:500], summary[:500], current_version))
+                          question[:500], summary[:500], pm_slug, current_version))
 
                     if cur.rowcount == 0:
-                        # Version conflict — rollback and retry with fresh read
                         conn.rollback()
                         cur.close()
                         self._put_conn(conn)
                         if attempt < max_retries - 1:
                             logger.warning(
-                                f"AO state version conflict, retry {attempt + 1}/{max_retries}"
+                                f"PM state ({pm_slug}) version conflict, retry {attempt + 1}/{max_retries}"
                             )
                             continue
                         else:
-                            logger.error("AO state update failed after max retries — version conflict")
+                            logger.error(f"PM state ({pm_slug}) update failed after max retries")
                             return
                 else:
                     cur.execute("""
-                        INSERT INTO ao_project_state (state_key, state_json, version,
+                        INSERT INTO pm_project_state (pm_slug, state_key, state_json, version,
                             last_run_at, run_count, last_question, last_answer_summary)
-                        VALUES ('current', %s, 1, NOW(), 1, %s, %s)
-                    """, (json.dumps(updates, default=str), question[:500], summary[:500]))
+                        VALUES (%s, 'current', %s, 1, NOW(), 1, %s, %s)
+                    """, (pm_slug, json.dumps(updates, default=str), question[:500], summary[:500]))
                 conn.commit()
                 cur.close()
                 return  # success
@@ -4836,10 +4887,20 @@ class SentinelStoreBack:
                     conn.rollback()
                 except Exception:
                     pass
-                logger.warning(f"update_ao_project_state failed: {e}")
+                logger.warning(f"update_pm_project_state({pm_slug}) failed: {e}")
                 return
             finally:
                 self._put_conn(conn)
+
+    def get_ao_project_state(self) -> dict:
+        """DEPRECATED: Use get_pm_project_state('ao_pm'). Kept for backward compat."""
+        return self.get_pm_project_state("ao_pm")
+
+    def update_ao_project_state(self, updates: dict, summary: str = "",
+                                question: str = "",
+                                mutation_source: str = "auto"):
+        """DEPRECATED: Use update_pm_project_state('ao_pm', ...). Kept for backward compat."""
+        return self.update_pm_project_state("ao_pm", updates, summary, question, mutation_source)
 
     def get_pending_insights(self, pm_slug: str, status: str = "pending",
                              limit: int = 20) -> list:

@@ -36,6 +36,47 @@ MAX_SUB_TASKS = 4
 # CORRECTION-MEMORY-1: Max corrections injected per prompt (anti-bloat)
 MAX_CORRECTIONS_PER_PROMPT = 3
 
+# ─────────────────────────────────────────────────
+# PM Factory — Generic PM Configuration Registry
+# ─────────────────────────────────────────────────
+PM_REGISTRY_VERSION = 1  # Cowork #2: bump when registry schema changes
+
+PM_REGISTRY = {
+    "ao_pm": {
+        "registry_version": 1,
+        "name": "AO Project Manager",
+        "view_dir": "data/ao_pm",
+        "view_file_order": [
+            "SCHEMA.md", "psychology.md", "investment_channels.md",
+            "sensitive_issues.md", "communication_rules.md", "agenda.md",
+        ],
+        "state_label": "AO PM",
+        "briefing_priority": 10,
+        "contact_keywords": ["oskolkov", "andrey", "aelio", "aukera"],
+        "entangled_matters": ["hagenauer", "rg7"],
+        "briefing_section_title": "AO INVESTOR RELATIONSHIP STATUS",
+        "briefing_email_patterns": ["oskolkov", "aelio"],
+        "briefing_whatsapp_patterns": ["oskolkov", "andrey"],
+        "briefing_deadline_patterns": [
+            "oskolkov", "aelio", "aukera", "rg7", "capital call",
+        ],
+        "briefing_state_key": "pending_discussion_with_ao",
+        "soul_md_keywords": ["oskolkov"],
+        "extraction_view_files": [
+            "psychology.md", "investment_channels.md",
+            "sensitive_issues.md", "communication_rules.md", "agenda.md",
+        ],
+        "extraction_system": (
+            "Extract structured state updates AND wiki-worthy insights from "
+            "this AO PM interaction. Return valid JSON only. No markdown fences."
+        ),
+        "extraction_state_schema": (
+            "State updates: {\"sub_matters\": {}, \"open_actions\": [], "
+            "\"red_flags\": [], \"relationship_state\": {}, \"summary\": \"...\"}"
+        ),
+    },
+}
+
 
 def extract_correction_from_feedback(task: dict):
     """CORRECTION-MEMORY-1: Extract a learned rule from Director feedback.
@@ -700,21 +741,24 @@ class CapabilityRunner:
             # For non-meta capabilities with custom prompts (e.g. Russo AI), inject tax optimization
             if capability.slug not in ("decomposer", "synthesizer"):
                 prompt = capability.system_prompt
-                # AO-PM-VIEW: Inject view files + live state into AO PM prompt
-                if capability.slug == "ao_pm":
-                    # View files: stable compiled intelligence (psychology, channels, rules)
-                    view_ctx = self._load_ao_view_files()
+                # PM-FACTORY: Inject view files + live state for any PM
+                if capability.slug in PM_REGISTRY:
+                    pm_slug = capability.slug
+                    pm_config = PM_REGISTRY[pm_slug]
+                    label = pm_config.get("state_label", pm_slug)
+                    # View files: stable compiled intelligence
+                    view_ctx = self._load_pm_view_files(pm_slug)
                     if view_ctx:
-                        prompt += f"\n\n# AO PM VIEW (from data/ao_pm/)\n{view_ctx}\n"
-                    # Live state: dynamic data (last contact, actions, flags, pending items)
-                    ao_ctx = self._get_ao_project_state_context()
-                    if ao_ctx:
-                        prompt += f"\n\n# LIVE STATE (from PostgreSQL)\n{ao_ctx}\n"
-                    # PM-KNOWLEDGE-ARCH-1: Pending insights (discovered but not yet promoted)
-                    pending_ctx = self._get_pending_insights_context("ao_pm")
+                        prompt += f"\n\n# {label} VIEW (from {pm_config['view_dir']}/)\n{view_ctx}\n"
+                    # Live state: dynamic data
+                    state_ctx = self._get_pm_project_state_context(pm_slug)
+                    if state_ctx:
+                        prompt += f"\n\n# LIVE STATE (from PostgreSQL)\n{state_ctx}\n"
+                    # PM-KNOWLEDGE-ARCH-1: Pending insights
+                    pending_ctx = self._get_pending_insights_context(pm_slug)
                     if pending_ctx:
                         prompt += f"\n\n# KNOWLEDGE COMPOUNDING\n{pending_ctx}\n"
-                    # PM-KNOWLEDGE-ARCH-1: Add promotion instructions if pending items exist
+                    # PM-KNOWLEDGE-ARCH-1: Promotion instructions
                     if pending_ctx:
                         prompt += (
                             "\n\n## KNOWLEDGE COMPOUNDING INSTRUCTIONS\n"
@@ -942,9 +986,9 @@ class CapabilityRunner:
             if capability.slug.startswith("russo_"):
                 self._store_russo_document(capability, question, answer)
 
-            # AO-PM-1: Auto-update AO Project Manager state
-            if capability.slug == "ao_pm":
-                self._auto_update_ao_state(question, answer)
+            # PM-FACTORY: Auto-update any PM state
+            if capability.slug in PM_REGISTRY:
+                self._auto_update_pm_state(capability.slug, question, answer)
 
             allowed, _ = self._check_circuit_breaker()
             if not allowed:
@@ -1131,24 +1175,20 @@ class CapabilityRunner:
     # AO-PM-1: AO Project Manager helpers
     # ─────────────────────────────────────────────────
 
-    def _load_ao_view_files(self) -> str:
-        """AO-PM-VIEW: Load AO PM view files from data/ao_pm/ directory."""
+    def _load_pm_view_files(self, pm_slug: str) -> str:
+        """PM-FACTORY: Load view files for any PM from data/{pm_slug}/ directory."""
         import os
-        view_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "ao_pm")
+        config = PM_REGISTRY.get(pm_slug)
+        if not config:
+            logger.warning("PM %s not in PM_REGISTRY — cannot load view files", pm_slug)
+            return ""
+        view_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), config["view_dir"])
         if not os.path.isdir(view_dir):
-            logger.warning("AO PM view directory not found: %s", view_dir)
+            logger.warning("PM %s view directory not found: %s", pm_slug, view_dir)
             return ""
 
         parts = []
-        file_order = [
-            "SCHEMA.md",
-            "psychology.md",
-            "investment_channels.md",
-            "sensitive_issues.md",
-            "communication_rules.md",
-            "agenda.md",
-        ]
-        for fname in file_order:
+        for fname in config["view_file_order"]:
             fpath = os.path.join(view_dir, fname)
             if os.path.isfile(fpath):
                 try:
@@ -1156,16 +1196,16 @@ class CapabilityRunner:
                         content = f.read()
                     parts.append(f"## VIEW FILE: {fname}\n{content}")
                 except Exception as e:
-                    logger.warning("Failed to read AO view file %s: %s", fname, e)
+                    logger.warning("Failed to read PM view file %s/%s: %s", pm_slug, fname, e)
 
         return "\n\n---\n\n".join(parts) if parts else ""
 
-    def _get_ao_project_state_context(self) -> str:
-        """AO-PM-1: Format persistent AO state for system prompt injection."""
+    def _get_pm_project_state_context(self, pm_slug: str) -> str:
+        """PM-FACTORY: Format persistent PM state for system prompt injection."""
         try:
             from memory.store_back import SentinelStoreBack
             store = SentinelStoreBack._get_global_instance()
-            state = store.get_ao_project_state()
+            state = store.get_pm_project_state(pm_slug)
             if not state:
                 return ""
             sj = state.get("state_json", {})
@@ -1177,10 +1217,15 @@ class CapabilityRunner:
             parts.append(f"Run count: {state.get('run_count', 0)}")
             if state.get("last_answer_summary"):
                 parts.append(f"Last interaction: {state['last_answer_summary']}")
+
+            # Relationship state (works for any PM)
             rs = sj.get("relationship_state", {})
             if rs:
-                parts.append(f"Communication gap: {rs.get('communication_gap_days', '?')} days")
-                parts.append(f"Recent mood: {rs.get('recent_mood', '?')}")
+                for key, val in rs.items():
+                    if val and val != "unknown":
+                        label = key.replace("_", " ").title()
+                        parts.append(f"{label}: {val}")
+
             actions = sj.get("open_actions", [])
             if actions:
                 parts.append(f"Open actions ({len(actions)}):")
@@ -1192,20 +1237,24 @@ class CapabilityRunner:
                 for rf in flags[:5]:
                     parts.append(f"  - {rf}")
 
-            # Cowork review #4: Cross-matter awareness
-            # Hagenauer is the RG7 contractor — insolvency directly affects AO
-            cross_matter = self._get_cross_matter_alerts()
-            if cross_matter:
-                parts.append(f"\n## CROSS-MATTER ALERTS (affect AO)")
-                parts.append(cross_matter)
+            # Cross-matter awareness (if PM has entangled matters)
+            config = PM_REGISTRY.get(pm_slug, {})
+            entangled = config.get("entangled_matters", [])
+            if entangled:
+                cross_matter = self._get_cross_matter_alerts(entangled)
+                if cross_matter:
+                    label = config.get("state_label", pm_slug.upper())
+                    parts.append(f"\n## CROSS-MATTER ALERTS (affect {label})")
+                    parts.append(cross_matter)
 
             return "\n".join(parts)
         except Exception:
             return ""
 
-    def _get_cross_matter_alerts(self) -> str:
-        """Cowork review #4: Fetch developments from entangled matters (Hagenauer, RG7).
-        AO owns 25% of RG7. Hagenauer is RG7's contractor. These are deeply linked."""
+    def _get_cross_matter_alerts(self, matters: list) -> str:
+        """PM-FACTORY: Fetch developments from entangled matters."""
+        if not matters:
+            return ""
         try:
             from memory.store_back import SentinelStoreBack
             store = SentinelStoreBack._get_global_instance()
@@ -1214,13 +1263,13 @@ class CapabilityRunner:
                 return ""
             try:
                 cur = conn.cursor()
-                # Recent Hagenauer insights (affects RG7 → affects AO)
-                cur.execute("""
+                placeholders = ", ".join(["%s"] * len(matters))
+                cur.execute(f"""
                     SELECT content, created_at FROM baker_insights
-                    WHERE matter_slug IN ('hagenauer', 'rg7')
+                    WHERE matter_slug IN ({placeholders})
                       AND active = TRUE
                     ORDER BY created_at DESC LIMIT 5
-                """)
+                """, tuple(matters))
                 rows = cur.fetchall()
                 if not rows:
                     return ""
@@ -1228,12 +1277,11 @@ class CapabilityRunner:
                 for content, created_at in rows:
                     date_str = created_at.strftime("%Y-%m-%d") if created_at else ""
                     parts.append(f"- [{date_str}] {content[:200]}")
-                # Recent Hagenauer decisions
-                cur.execute("""
+                cur.execute(f"""
                     SELECT decision, created_at FROM decisions
-                    WHERE project IN ('hagenauer', 'rg7')
+                    WHERE project IN ({placeholders})
                     ORDER BY created_at DESC LIMIT 3
-                """)
+                """, tuple(matters))
                 dec_rows = cur.fetchall()
                 for decision, created_at in dec_rows:
                     date_str = created_at.strftime("%Y-%m-%d") if created_at else ""
@@ -1291,30 +1339,41 @@ class CapabilityRunner:
         except Exception:
             return ""
 
-    def _auto_update_ao_state(self, question: str, answer: str):
-        """AO-PM-1: Auto-update AO state after each run via Anthropic Opus.
-        PM-KNOWLEDGE-ARCH-1: Also extract wiki-worthy insights for pending review.
-        Cowork review: same model family as reasoning = no interpretation gap."""
+    def _auto_update_pm_state(self, pm_slug: str, question: str, answer: str):
+        """PM-FACTORY: Auto-update PM state after each run via Anthropic Opus.
+        PM-KNOWLEDGE-ARCH-1: Also extract wiki-worthy insights for pending review."""
         try:
             import json
+            config = PM_REGISTRY.get(pm_slug)
+            if not config:
+                return
 
-            # Cowork refinement #1/#4: Feed existing pending + rejected insights
-            # into extraction context so Opus can self-dedup and learn from rejections
-            existing_context = self._get_extraction_dedup_context("ao_pm")
+            existing_context = self._get_extraction_dedup_context(pm_slug)
+
+            extraction_files = config.get("extraction_view_files", [])
+            view_file_list = ", ".join(extraction_files) if extraction_files else "view files"
+            label = config.get("state_label", pm_slug)
+
+            extraction_system = config.get(
+                "extraction_system",
+                f"Extract structured state updates AND wiki-worthy insights from "
+                f"this {label} interaction. Return valid JSON only. No markdown fences."
+            )
+            state_schema = config.get(
+                "extraction_state_schema",
+                "State updates: {\"sub_matters\": {}, \"open_actions\": [], "
+                "\"red_flags\": [], \"relationship_state\": {}, \"summary\": \"...\"}"
+            )
 
             resp = self.claude.messages.create(
                 model="claude-opus-4-6",
                 max_tokens=700,
-                system=(
-                    "Extract structured state updates AND wiki-worthy insights from the conversation. "
-                    "Return valid JSON only. No markdown fences."
-                ),
+                system=extraction_system,
                 messages=[{"role": "user", "content": (
-                    f"Extract state updates from this AO Project Manager interaction.\n\n"
+                    f"Extract state updates from this {label} interaction.\n\n"
                     f"Question: {question[:500]}\n\nAnswer: {answer[:3000]}\n\n"
                     f"Return JSON with TWO sections:\n"
-                    f"1. State updates: {{\"sub_matters\": {{}}, \"open_actions\": [], "
-                    f"\"red_flags\": [], \"relationship_state\": {{}}, \"summary\": \"...\"}}\n"
+                    f"1. {state_schema}\n"
                     f"2. Wiki insights — facts or rules discovered that should become PERMANENT "
                     f"knowledge in the view files. Only include if:\n"
                     f"   - It's a confirmed fact, not speculation\n"
@@ -1325,8 +1384,7 @@ class CapabilityRunner:
                     f"   - high = directly stated by Director OR confirmed by document\n"
                     f"   - medium = inferred from Q&A pattern with supporting evidence\n"
                     f"   - low = speculative or single-instance observation (will be dropped)\n\n"
-                    f"Available view files: psychology.md, investment_channels.md, "
-                    f"sensitive_issues.md, communication_rules.md, agenda.md\n\n"
+                    f"Available view files: {view_file_list}\n\n"
                     f"{existing_context}"
                     f"Return: {{\"sub_matters\": {{}}, \"open_actions\": [], \"red_flags\": [], "
                     f"\"relationship_state\": {{}}, \"summary\": \"...\", "
@@ -1342,23 +1400,22 @@ class CapabilityRunner:
             updates = json.loads(raw)
 
             # CRITICAL: Pop wiki insights BEFORE state update
-            # (state merger doesn't know this field — would corrupt ao_project_state)
             wiki_insights = updates.pop("wiki_insights", [])
-            summary = updates.pop("summary", "AO PM interaction")
+            summary = updates.pop("summary", f"{label} interaction")
 
-            # State update (existing flow — unchanged)
+            # State update
             from memory.store_back import SentinelStoreBack
             store = SentinelStoreBack._get_global_instance()
-            store.update_ao_project_state(updates, summary, question[:500],
+            store.update_pm_project_state(pm_slug, updates, summary, question[:500],
                                           mutation_source="opus_auto")
-            logger.info(f"AO state auto-updated (Opus): {summary}")
+            logger.info(f"PM state ({pm_slug}) auto-updated (Opus): {summary}")
 
-            # PM-KNOWLEDGE-ARCH-1: Store wiki insights as pending
+            # Store wiki insights as pending
             if wiki_insights and isinstance(wiki_insights, list):
-                self._store_pending_insights("ao_pm", wiki_insights, question, summary)
+                self._store_pending_insights(pm_slug, wiki_insights, question, summary)
 
         except Exception as e:
-            logger.debug(f"AO state auto-update failed (non-fatal): {e}")
+            logger.debug(f"PM state ({pm_slug}) auto-update failed (non-fatal): {e}")
 
     def _get_extraction_dedup_context(self, pm_slug: str) -> str:
         """PM-KNOWLEDGE-ARCH-1: Build dedup + rejection context for Opus extraction.

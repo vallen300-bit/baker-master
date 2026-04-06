@@ -160,20 +160,25 @@ def gather_briefing_context() -> str:
     except Exception as e:
         logger.warning(f"Owner's lens context failed: {e}")
 
-    # 5. AO PM — Investor relationship health check
-    ao_ctx = _gather_ao_pm_context()
-    if ao_ctx:
-        sections.append(f"AO INVESTOR RELATIONSHIP STATUS:\n{ao_ctx}")
+    # 5. PM briefing sections — loop over all active PMs (priority-sorted)
+    from orchestrator.capability_runner import PM_REGISTRY
+    sorted_pms = sorted(PM_REGISTRY.items(), key=lambda x: x[1].get("briefing_priority", 99))
+    for pm_slug, pm_config in sorted_pms:
+        pm_ctx = _gather_pm_briefing_context(pm_slug)
+        if pm_ctx:
+            title = pm_config.get("briefing_section_title", f"{pm_slug.upper()} STATUS")
+            sections.append(f"{title}:\n{pm_ctx}")
 
     return "\n\n".join(sections)
 
 
-def _gather_ao_pm_context() -> str:
-    """
-    Gather AO-specific context for the daily briefing.
-    Checks: communication gap, pending discussion items, approaching deadlines.
-    This gives Opus the raw material to reason through the AO psychology lens.
-    """
+def _gather_pm_briefing_context(pm_slug: str) -> str:
+    """PM-FACTORY: Gather PM-specific context for the daily briefing."""
+    from orchestrator.capability_runner import PM_REGISTRY
+    config = PM_REGISTRY.get(pm_slug)
+    if not config:
+        return ""
+
     parts = []
     try:
         from memory.store_back import SentinelStoreBack
@@ -183,87 +188,107 @@ def _gather_ao_pm_context() -> str:
             return ""
         try:
             cur = conn.cursor()
+            label = config.get("state_label", pm_slug.upper())
 
-            # 1. Last AO-directed communication (email + WhatsApp)
-            cur.execute("""
-                SELECT 'email' as channel, MAX(created_at) as last_contact
-                FROM sent_emails
-                WHERE to_address ILIKE '%%oskolkov%%' OR to_address ILIKE '%%aelio%%'
-                UNION ALL
-                SELECT 'whatsapp', MAX(timestamp)
-                FROM whatsapp_messages
-                WHERE is_director = true
-                  AND (full_text ILIKE '%%oskolkov%%' OR full_text ILIKE '%%andrey%%')
-                LIMIT 5
-            """)
-            contacts = cur.fetchall()
-            last_contact = None
-            for row in contacts:
-                if row[1] and (last_contact is None or row[1] > last_contact):
-                    last_contact = row[1]
+            # 1. Last outbound communication (email + WhatsApp)
+            email_patterns = config.get("briefing_email_patterns", [])
+            wa_patterns = config.get("briefing_whatsapp_patterns", [])
 
-            if last_contact:
-                from datetime import datetime, timezone
-                gap_days = (datetime.now(timezone.utc) - last_contact).days
-                parts.append(f"AO COMMUNICATION GAP: {gap_days} days since last outbound")
-                if gap_days >= 10:
-                    parts.append("  ** WARNING: Approaching Rule Zero threshold (14 days) **")
-                if gap_days >= 14:
-                    parts.append("  ** CRITICAL: Rule Zero violated — silence preceding ask **")
-            else:
-                parts.append("AO COMMUNICATION GAP: Unknown — no outbound records found")
+            if email_patterns or wa_patterns:
+                union_parts = []
+                params = []
+                if email_patterns:
+                    email_where = " OR ".join(
+                        "to_address ILIKE %s" for _ in email_patterns
+                    )
+                    union_parts.append(
+                        f"SELECT 'email' as channel, MAX(created_at) as last_contact "
+                        f"FROM sent_emails WHERE {email_where}"
+                    )
+                    params.extend(f"%%{p}%%" for p in email_patterns)
+                if wa_patterns:
+                    wa_where = " OR ".join(
+                        "full_text ILIKE %s" for _ in wa_patterns
+                    )
+                    union_parts.append(
+                        f"SELECT 'whatsapp', MAX(timestamp) "
+                        f"FROM whatsapp_messages WHERE is_director = true AND ({wa_where})"
+                    )
+                    params.extend(f"%%{p}%%" for p in wa_patterns)
 
-            # 2. Pending discussion items count
-            cur.execute("""
-                SELECT jsonb_array_length(state_json->'pending_discussion_with_ao')
-                FROM ao_project_state
-                WHERE state_key = 'current'
-                LIMIT 1
-            """)
-            row = cur.fetchone()
-            pending_count = row[0] if row and row[0] else 0
-            if pending_count > 0:
-                parts.append(f"AO PENDING ITEMS: {pending_count} items awaiting discussion with AO")
+                sql = " UNION ALL ".join(union_parts) + " LIMIT 5"
+                cur.execute(sql, tuple(params))
+                contacts = cur.fetchall()
+                last_contact = None
+                for row in contacts:
+                    if row[1] and (last_contact is None or row[1] > last_contact):
+                        last_contact = row[1]
 
-            # 3. AO-related deadlines approaching
-            cur.execute("""
-                SELECT description, due_date
-                FROM deadlines
-                WHERE status = 'active'
-                  AND due_date <= NOW() + INTERVAL '14 days'
-                  AND (description ILIKE '%%oskolkov%%' OR description ILIKE '%%aelio%%'
-                       OR description ILIKE '%%aukera%%' OR description ILIKE '%%rg7%%'
-                       OR description ILIKE '%%capital call%%')
-                ORDER BY due_date
-                LIMIT 5
-            """)
-            deadlines = cur.fetchall()
-            if deadlines:
-                dl_lines = [f"  - {d[0]}: {d[1].strftime('%Y-%m-%d')}" for d in deadlines]
-                parts.append(f"AO DEADLINES (next 14 days):\n" + "\n".join(dl_lines))
+                if last_contact:
+                    from datetime import datetime, timezone
+                    gap_days = (datetime.now(timezone.utc) - last_contact).days
+                    parts.append(f"{label} COMMUNICATION GAP: {gap_days} days since last outbound")
+                    if gap_days >= 10:
+                        parts.append("  ** WARNING: Approaching threshold **")
+                    if gap_days >= 14:
+                        parts.append("  ** CRITICAL: Communication gap exceeded **")
 
-            # PM-KNOWLEDGE-ARCH-1: Pending insights count
+            # 2. Pending discussion items from state
+            state_key = config.get("briefing_state_key")
+            if state_key:
+                cur.execute("""
+                    SELECT jsonb_array_length(state_json->%s)
+                    FROM pm_project_state
+                    WHERE pm_slug = %s AND state_key = 'current'
+                    LIMIT 1
+                """, (state_key, pm_slug))
+                row = cur.fetchone()
+                pending_count = row[0] if row and row[0] else 0
+                if pending_count > 0:
+                    parts.append(f"{label} PENDING ITEMS: {pending_count} items awaiting discussion")
+
+            # 3. Related deadlines approaching
+            deadline_patterns = config.get("briefing_deadline_patterns", [])
+            if deadline_patterns:
+                dl_where = " OR ".join(
+                    "description ILIKE %s" for _ in deadline_patterns
+                )
+                cur.execute(f"""
+                    SELECT description, due_date
+                    FROM deadlines
+                    WHERE status = 'active'
+                      AND due_date <= NOW() + INTERVAL '14 days'
+                      AND ({dl_where})
+                    ORDER BY due_date
+                    LIMIT 5
+                """, tuple(f"%%{p}%%" for p in deadline_patterns))
+                deadlines = cur.fetchall()
+                if deadlines:
+                    dl_lines = [f"  - {d[0]}: {d[1].strftime('%Y-%m-%d')}" for d in deadlines]
+                    parts.append(f"{label} DEADLINES (next 14 days):\n" + "\n".join(dl_lines))
+
+            # 4. Pending insights count (knowledge compounding)
             try:
                 cur.execute("""
                     SELECT COUNT(*) FROM pm_pending_insights
-                    WHERE pm_slug = 'ao_pm' AND status = 'pending'
-                """)
-                pending_count = cur.fetchone()[0] or 0
-                if pending_count > 0:
-                    parts.append(f"\nKNOWLEDGE COMPOUNDING: {pending_count} pending insight(s) "
+                    WHERE pm_slug = %s AND status = 'pending'
+                """, (pm_slug,))
+                insight_count = cur.fetchone()[0] or 0
+                if insight_count > 0:
+                    parts.append(f"\nKNOWLEDGE COMPOUNDING: {insight_count} pending insight(s) "
                                  f"awaiting your review. Ask Baker to show/promote/reject them.")
             except Exception:
-                pass  # Non-fatal — table may not exist yet
+                pass
 
             cur.close()
             conn.commit()
         except Exception as e:
             conn.rollback()
-            logger.warning(f"AO PM briefing context failed: {e}")
+            logger.warning(f"PM ({pm_slug}) briefing context failed: {e}")
         finally:
             store._put_conn(conn)
     except Exception as e:
-        logger.warning(f"AO PM briefing context outer error: {e}")
+        logger.warning(f"PM ({pm_slug}) briefing context outer error: {e}")
 
     return "\n".join(parts) if parts else ""
 
