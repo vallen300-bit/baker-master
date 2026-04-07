@@ -3578,6 +3578,35 @@ async def get_knowledge_digests(category: Optional[str] = None):
         return {"digests": []}
 
 
+@app.post("/api/rss/compile-digests", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
+async def compile_digests_endpoint():
+    """Trigger knowledge digest compilation for all active categories."""
+    import asyncio
+    try:
+        from triggers.rss_trigger import compile_knowledge_digest
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            return {"status": "error", "message": "No DB connection"}
+        cur = conn.cursor()
+        cur.execute("SELECT DISTINCT category FROM rss_feeds WHERE is_active = true AND category IS NOT NULL")
+        categories = [r[0] for r in cur.fetchall()]
+        cur.close()
+        store._put_conn(conn)
+
+        results = {}
+        for cat in categories:
+            try:
+                digest_id = await asyncio.to_thread(compile_knowledge_digest, cat)
+                results[cat] = digest_id
+            except Exception as e:
+                results[cat] = f"error: {e}"
+        return {"status": "ok", "compiled": results}
+    except Exception as e:
+        logger.error(f"compile-digests failed: {e}")
+        return {"status": "error", "message": str(e)}
+
+
 @app.get("/api/rss/feeds", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
 async def get_rss_feeds_list():
     """List active RSS feeds with categories for the filter dropdown."""
