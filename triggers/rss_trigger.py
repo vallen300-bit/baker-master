@@ -504,7 +504,7 @@ def compile_knowledge_digest(category: str, days: int = 7):
     """Compile recent articles in a category into a structured knowledge digest."""
     import psycopg2.extras
     import re
-    from llm.gemini_client import call_flash
+    from orchestrator.gemini_client import call_flash
 
     store = _get_store()
     conn = store._get_conn()
