@@ -17,7 +17,7 @@ logger = logging.getLogger("bluewin_poller")
 # ── Config ──────────────────────────────────────────────────────────────
 BLUEWIN_IMAP_HOST = "imaps.bluewin.ch"
 BLUEWIN_IMAP_PORT = 993
-BLUEWIN_USER = os.getenv("BLUEWIN_USER", "dimitry.vallen")
+BLUEWIN_USER = os.getenv("BLUEWIN_USER", "dvallen@bluewin.ch")
 BLUEWIN_PASS = os.getenv("BLUEWIN_PASS", "")
 BLUEWIN_FOLDER = "INBOX"
 WATERMARK_KEY = "bluewin_poll"
