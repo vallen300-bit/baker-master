@@ -615,6 +615,7 @@ def run_expiry_check() -> int:
 def _auto_dismiss_overdue_deadlines() -> int:
     """Auto-dismiss active deadlines that are overdue by 3+ days.
     Prevents stale overdue deadlines from accumulating indefinitely.
+    Skips items flagged as critical — those persist until Director marks them done.
     """
     from models.deadlines import get_conn, put_conn
     conn = get_conn()
@@ -630,6 +631,7 @@ def _auto_dismiss_overdue_deadlines() -> int:
                 updated_at = NOW()
             WHERE status = 'active'
               AND due_date < %s
+              AND (is_critical IS NOT TRUE)
         """, (cutoff,))
         dismissed = cur.rowcount
         conn.commit()
@@ -659,6 +661,7 @@ def _auto_dismiss_soft_deadlines() -> int:
                 updated_at = NOW()
             WHERE status = 'pending_confirm'
               AND created_at < %s
+              AND (is_critical IS NOT TRUE)
         """, (cutoff,))
         dismissed = cur.rowcount
         conn.commit()
@@ -692,6 +695,7 @@ def _auto_dismiss_undated_soft() -> int:
               AND severity = 'soft'
               AND due_date IS NULL
               AND created_at < %s
+              AND (is_critical IS NOT TRUE)
         """, (cutoff,))
         dismissed = cur.rowcount
         conn.commit()
