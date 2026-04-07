@@ -4,19 +4,55 @@
 
 ### 1. F&B Performance Crisis + Residence Fee Leverage (CRITICAL)
 - **Issue:** F&B concept (MO-designed) failing — EUR 1.57M swing vs budget. Empty restaurant, empty bar. Food cost 40% (budget 27.6%), payroll 99.5% of F&B revenue.
-- **Leverage:** Owner holding ~EUR 1M+ residence branding fees (MLA 6.1) owed to MO.
-- **Strategy:** Tie fee release to F&B resolution. Do NOT pay until sorted.
+- **Leverage:** Owner holding residence branding fees. MO expects ~EUR 5M. Actual amount due today: **EUR 39,323** (see #2 below).
+- **Strategy:** Tie fee release to F&B resolution. Do NOT pay until sorted. Legal position is very strong — only EUR ~39K is contractually due.
 - **Risk:** Hagenauer insolvency press may cause MO to misread delayed payment as financial distress.
 - **Status:** Silent topic — not yet raised with MO. They expect payment soon.
 - **Action needed:** Director to decide when and how to raise this with Francesco/Robin.
 
-### 2. Residence Fee Calculation (PENDING DATA)
-- Base fee (2.25% of EUR 56.4M completed sales): ~EUR 1.27M
-- Brand commitment credit: -EUR 250K
-- Net base fee owed: ~EUR 1.02M
-- Upside fee (15% above EUR 20K/sqm): **BLOCKED — need sqm data per sold unit**
-- No MO-introduced buyers (confirmed) — no 0.5% introduction fee
-- **Action:** Ask Director for sqm data of sold units (Top 1, 2, 4, 5, 6, 18, 19+20, 21+22, 23, 24)
+### 2. Residence Fee Calculation — RESOLVED (7 Apr 2026)
+
+**Governing document:** MLA (EXECUTION VERSION)(469222.12) dated 2023. Replaces 2020 MLA.
+
+**12 units under contract** (Sales Report 31 Dec 2025), total EUR 72,397,177:
+
+| # | Unit | Sqm | Price | Price/sqm | MLF (2.25%) | Incentive (15% >20K) | Unit Fee |
+|---|------|-----|-------|-----------|-------------|---------------------|----------|
+| 1 | Top 4 | 162.4 | 5,378,904 | 33,121 | 121,025 | 319,636 | 440,661 |
+| 2 | Top 5 | 187.0 | 6,252,450 | 33,436 | 140,680 | 376,868 | 517,548 |
+| 3 | Top 6 | 188.7 | 6,308,700 | 33,432 | 141,946 | 380,205 | 522,151 |
+| 4 | Top 18 | 204.9 | 6,638,428 | 32,398 | 149,365 | 381,064 | 530,429 |
+| 5 | **Top 2** | **87.7** | **3,202,145** | **36,512** | **72,048** | **217,275** | **289,323** |
+| 6 | Top 19+20 | 216.9 | 6,895,000 | 31,784 | 155,138 | 383,460 | 538,598 |
+| 7 | Top 23 | 182.0 | 6,173,500 | 33,920 | 138,904 | 380,025 | 518,929 |
+| 8 | Top 21+22 | 280.0 | 8,648,050 | 30,886 | 194,581 | 457,208 | 651,789 |
+| 9 | Top 1 | 76.0 | 2,820,000 | 37,105 | 63,450 | 195,000 | 258,450 |
+| 10 | Top 24 | 116.0 | 4,050,000 | 34,914 | 91,125 | 259,500 | 350,625 |
+| 11 | Top 15 | 255.0 | 9,930,000 | 38,941 | 223,425 | 724,500 | 947,925 |
+| 12 | Top 16 | 159.0 | 6,100,000 | 38,365 | 137,250 | 438,000 | 575,250 |
+| | **TOTAL** | **2,115.6** | **72,397,177** | | **1,628,937** | **4,512,687** | **6,141,623** |
+
+**MLA caps (2023 — no CPI adjustment):**
+- Maximum: EUR 5,545,000 (raw EUR 6.14M exceeds cap)
+- Minimum: EUR 2,000,000 (by 5th anniversary ~Nov 2030)
+- Brand commitment credit: EUR 250,000 (already paid)
+
+**CRITICAL: "Closing" = handover + Grundbuch registration (MLA 1.1)**
+
+**Only 1 unit has Closed: Top 2 (Karl Heinz Moser) — registered in Grundbuch.**
+11 other contracted units: NOT registered. ~13 units: unsold.
+
+| What | Amount |
+|------|--------|
+| Fee on Moser unit (only Closing) | EUR 289,323 |
+| Brand commitment credit | -EUR 250,000 |
+| **NET AMOUNT DUE TODAY** | **EUR 39,323** |
+| MO's expectation | ~EUR 5,000,000 |
+| **Gap** | **EUR 4,960,677** |
+
+**Niko's report errors:** Minimum listed as EUR 2,772,500 (MLA says EUR 2M). No introduction fees owed (confirmed).
+
+**Source:** Baker Decision #11196, Deep Analysis cowork_fecc51cf1351
 
 ### 3. Recovery Lab
 - Edita's project. Shop space next to hotel entrance. Owned by Brisen, NOT under HMA.
@@ -27,7 +63,7 @@
 ### For Director
 | # | Question | Topic | Status |
 |---|----------|-------|--------|
-| 1 | Sqm data for each sold residence unit — needed to calculate MO upside fee | Residence fees | PENDING |
+| 1 | ~~Sqm data for each sold residence unit~~ | Residence fees | **RESOLVED** — Niko sent Sales Report 7 Apr 2026 |
 | 2 | Updated March 2026 P&L figures (from Mandarin or Rolf) | Financial baseline | PENDING |
 
 ### For Rolf Hübner

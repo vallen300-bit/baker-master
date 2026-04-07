@@ -48,17 +48,21 @@
 | Incentive (7.5% + 22.5% of ANOI) | Variable — only after Owner's Priority Return |
 | **Hard cap (all fees)** | **6.0%** |
 
-### Residences Fees (MLA — separate from hotel)
+### Residences Fees (MLA 2023 Execution Version — separate from hotel)
 | Fee | Rate | Clause |
 |-----|------|--------|
 | Base fee on initial sale | 2.25% of Gross Sales Price | MLA 6.1.1 |
-| Upside fee (above EUR 20K/sqm) | 15% of excess | MLA 6.1.2 |
+| Upside fee (above EUR 20K/sqm) | 15% of excess (interior sqm) | MLA 6.1.2 |
 | Lease fee (unsold units) | 4.0% of Gross Rental | MLA 6.1.3 |
 | Introduction fee (MOHG buyer) | 0.5% of Gross Sales Price | MLA 6.8 |
 | Property management fee | 12.5% of annual budget | MLA 7.1 |
 | Minimum (by 5th anniversary) | EUR 2,000,000 | MLA 6.1 |
-| Maximum (aggregate cap) | EUR 4,000,000 | MLA 6.1 |
-| Brand commitment fee (upfront) | EUR 250,000 (credited against fees) | MLA 6.1 |
+| **Maximum (aggregate cap)** | **EUR 5,545,000** | MLA 6.1 (2023) |
+| Brand commitment fee (upfront) | EUR 250,000 (already paid, credited) | MLA 6.1 |
+
+**CRITICAL — "Closing" definition (MLA 1.1):** Handover of Residence to buyer AND registration in the Austrian land register (Grundbuch). BOTH required. Fees due only upon Closing (MLA 6.1).
+
+**NOTE:** The 2020 MLA (Baker DB #83203) had EUR 4M cap. Superseded by 2023 Execution Version (EUR 5.545M cap). No CPI adjustment clause on caps. Niko's report incorrectly lists minimum as EUR 2,772,500 — MLA says EUR 2M.
 
 ### FF&E Reserve (CSA 5.5, modified by FE Letter)
 | Fiscal Year | % of Gross Revenue |
