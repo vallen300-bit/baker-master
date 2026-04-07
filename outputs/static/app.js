@@ -676,12 +676,13 @@ const TAB_VIEW_MAP = {
     'media': 'viewMedia',
     'documents': 'viewDocuments',
     'dossiers': 'viewDossiers',
+    'presentations': 'viewPresentations',
     'browser': 'viewBrowser',
     'baker-data': 'viewBakerData',
     'ideas': 'viewIdeas',
 };
 
-const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'person-detail', 'tags', 'search', 'ask-baker', 'ask-specialist', 'ask-client-pm', 'travel', 'media', 'documents', 'dossiers', 'browser', 'baker-data', 'ideas']);
+const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'person-detail', 'tags', 'search', 'ask-baker', 'ask-specialist', 'ask-client-pm', 'travel', 'media', 'documents', 'dossiers', 'presentations', 'browser', 'baker-data', 'ideas']);
 
 function switchTab(tabName) {
     document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
@@ -722,6 +723,7 @@ function switchTab(tabName) {
     else if (tabName === 'media') loadMediaTab();
     else if (tabName === 'documents') loadDocumentsTab();
     else if (tabName === 'dossiers') loadDossiersTab();
+    else if (tabName === 'presentations') loadPresentationsTab();
     else if (tabName === 'browser') loadBrowserTab();
     else if (tabName === 'baker-data') loadBakerData();
     else if (tabName === 'ideas') loadIdeasTab();
@@ -8214,6 +8216,167 @@ function _pollDossierTabStatus(proposalId) {
     }, 5000);
     // Stop polling after 5 minutes
     setTimeout(function() { clearInterval(interval); }, 300000);
+}
+
+// ═══ HTML PRESENTATIONS TAB (HTML-PRESENTATIONS-TAB-1) ═══
+
+var BRISEN_DOCS_BASE = 'https://brisen-docs.onrender.com';
+
+async function loadPresentationsTab() {
+    var container = document.getElementById('presentationsContent');
+    var viewer = document.getElementById('presentationViewer');
+    if (!container) return;
+
+    // Reset to list mode
+    container.style.display = '';
+    if (viewer) viewer.hidden = true;
+
+    showLoading(container, 'Loading presentations');
+
+    try {
+        var resp = await fetch(BRISEN_DOCS_BASE + '/index.json?_t=' + Date.now());
+        if (!resp.ok) throw new Error('Failed to fetch presentations manifest');
+        var data = await resp.json();
+        var folders = data.folders || [];
+
+        // Count total presentations
+        var total = 0;
+        folders.forEach(function(f) { total += (f.presentations || []).length; });
+
+        // Update badge
+        var badge = document.getElementById('presentationsCount');
+        if (badge) badge.textContent = total || '';
+
+        container.textContent = '';
+        var wrapper = document.createElement('div');
+
+        if (folders.length === 0) {
+            var emptyDiv = document.createElement('div');
+            emptyDiv.style.cssText = 'padding:40px;text-align:center;color:var(--text3);';
+            emptyDiv.textContent = 'No presentations yet. Ask Baker to prepare one.';
+            wrapper.appendChild(emptyDiv);
+        }
+
+        for (var i = 0; i < folders.length; i++) {
+            var folder = folders[i];
+            var section = document.createElement('div');
+            section.style.marginTop = i > 0 ? '8px' : '0';
+
+            // Folder header (expanded by default)
+            var fHeader = document.createElement('div');
+            fHeader.style.cssText = 'padding:10px 16px;font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:0.5px;border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;gap:6px;';
+            var _arrowSpan = document.createElement('span');
+            _arrowSpan.className = 'dossier-section-arrow';
+            _arrowSpan.style.fontSize = '10px';
+            _arrowSpan.innerHTML = '&#9662;';
+            fHeader.appendChild(_arrowSpan);
+            fHeader.appendChild(document.createTextNode(' ' + folder.name + ' (' + (folder.presentations || []).length + ')'));
+            var fList = document.createElement('div');
+            fList.style.cssText = 'display:flex;flex-direction:column;gap:4px;padding:4px 0;';
+
+            (function(hdr, lst) {
+                hdr.addEventListener('click', function() {
+                    var isOpen = lst.style.display !== 'none';
+                    lst.style.display = isOpen ? 'none' : '';
+                    hdr.querySelector('.dossier-section-arrow').innerHTML = isOpen ? '&#9656;' : '&#9662;';
+                });
+            })(fHeader, fList);
+
+            section.appendChild(fHeader);
+
+            var presos = folder.presentations || [];
+            for (var j = 0; j < presos.length; j++) {
+                fList.appendChild(_renderPresentationCard(folder.slug, presos[j]));
+            }
+            section.appendChild(fList);
+            wrapper.appendChild(section);
+        }
+
+        container.appendChild(wrapper);
+
+    } catch (err) {
+        container.textContent = '';
+        var errDiv = document.createElement('div');
+        errDiv.style.cssText = 'padding:20px;color:var(--red);';
+        errDiv.textContent = 'Failed to load presentations: ' + err.message;
+        container.appendChild(errDiv);
+    }
+}
+
+function _renderPresentationCard(folderSlug, p) {
+    var card = document.createElement('div');
+    card.className = 'dossier-card';
+
+    // Title
+    var title = document.createElement('div');
+    title.style.cssText = 'font-weight:600;font-size:14px;color:var(--text);';
+    title.textContent = p.title || p.file;
+    card.appendChild(title);
+
+    // Meta row: date + matter
+    var meta = document.createElement('div');
+    meta.style.cssText = 'font-size:12px;color:var(--text2);margin-top:4px;display:flex;gap:16px;';
+    if (p.created) {
+        var dateSpan = document.createElement('span');
+        dateSpan.textContent = p.created;
+        meta.appendChild(dateSpan);
+    }
+    if (p.matter) {
+        var matterSpan = document.createElement('span');
+        matterSpan.style.color = 'var(--text3)';
+        matterSpan.textContent = p.matter;
+        meta.appendChild(matterSpan);
+    }
+    card.appendChild(meta);
+
+    // Action buttons
+    var actions = document.createElement('div');
+    actions.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
+
+    var viewUrl = BRISEN_DOCS_BASE + '/' + folderSlug + '/' + p.file;
+
+    var viewBtn = document.createElement('button');
+    viewBtn.className = 'dossier-btn dossier-btn-primary';
+    viewBtn.textContent = 'View';
+    viewBtn.onclick = function() {
+        _openPresentationViewer(viewUrl, p.title || p.file);
+    };
+    actions.appendChild(viewBtn);
+
+    var newTabBtn = document.createElement('button');
+    newTabBtn.className = 'dossier-btn';
+    newTabBtn.textContent = 'Open in new tab';
+    newTabBtn.onclick = function() {
+        window.open(viewUrl, '_blank');
+    };
+    actions.appendChild(newTabBtn);
+
+    card.appendChild(actions);
+    return card;
+}
+
+function _openPresentationViewer(url, title) {
+    var container = document.getElementById('presentationsContent');
+    var viewer = document.getElementById('presentationViewer');
+    var frame = document.getElementById('presentationFrame');
+    var backBtn = document.getElementById('presentationBackBtn');
+    var newTabBtn = document.getElementById('presentationNewTabBtn');
+
+    if (!viewer || !frame) { window.open(url, '_blank'); return; }
+
+    // Switch to viewer mode
+    container.style.display = 'none';
+    viewer.hidden = false;
+    frame.src = url;
+    if (newTabBtn) newTabBtn.href = url;
+
+    if (backBtn) {
+        backBtn.onclick = function() {
+            frame.src = '';
+            viewer.hidden = true;
+            container.style.display = '';
+        };
+    }
 }
 
 async function loadBrowserTab() {

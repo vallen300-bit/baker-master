@@ -1298,6 +1298,12 @@ body {
 }
 .dossier-btn-primary:hover { background: var(--blue-hover); border-color: var(--blue-hover); color: #fff; }
 
+/* ── HTML-PRESENTATIONS-TAB-1 ──────────────────────────────────── */
+.presentation-viewer { display: flex; flex-direction: column; height: calc(100vh - 80px); }
+.presentation-viewer-toolbar { display: flex; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); align-items: center; }
+.presentation-viewer-toolbar a { text-decoration: none; }
+.presentation-frame { flex: 1; border: none; border-radius: 0 0 8px 8px; background: #0a0a0f; }
+
 /* ── DOCUMENTS-REDESIGN-1 ─────────────────────────────────────── */
 .docs-layout { display: flex; gap: 0; height: 100%; }
 .docs-filters { width: 220px; flex-shrink: 0; border-right: 1px solid var(--border); padding: 12px 0; overflow-y: auto; }

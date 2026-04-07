@@ -13,7 +13,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=66">
+    <link rel="stylesheet" href="/static/style.css?v=67">
 </head>
 <body>
 
@@ -99,6 +99,10 @@
         <div class="nav-item" data-tab="dossiers">
             <span class="nav-label">Dossiers</span>
             <span class="nav-count" id="dossiersCount"></span>
+        </div>
+        <div class="nav-item" data-tab="presentations">
+            <span class="nav-label">Presentations</span>
+            <span class="nav-count" id="presentationsCount"></span>
         </div>
 
         <div class="nav-divider"></div>
@@ -462,6 +466,19 @@
             <div id="dossiersContent"></div>
         </div>
 
+        <!-- VIEW: Presentations (HTML-PRESENTATIONS-TAB-1) -->
+        <div class="view" id="viewPresentations">
+            <div class="section-label">HTML Presentations</div>
+            <div id="presentationsContent"></div>
+            <div id="presentationViewer" class="presentation-viewer" hidden>
+                <div class="presentation-viewer-toolbar">
+                    <button class="dossier-btn" id="presentationBackBtn">Back to list</button>
+                    <a class="dossier-btn" id="presentationNewTabBtn" target="_blank" rel="noopener">Open in new tab</a>
+                </div>
+                <iframe id="presentationFrame" class="presentation-frame"></iframe>
+            </div>
+        </div>
+
         <!-- VIEW: Browser Monitor -->
         <div class="view" id="viewBrowser">
             <div class="section-label">Browser Monitor</div>
@@ -495,7 +512,7 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=98"></script>
+<script src="/static/app.js?v=99"></script>
 <script>
 // PWA-DESKTOP-1: Register service worker for installability
 if ('serviceWorker' in navigator) {

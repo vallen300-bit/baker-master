@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "updated_at": "2026-04-07",
+  "folders": [
+    {
+      "name": "NVIDIA",
+      "slug": "nvidia",
+      "presentations": [
+        {
+          "title": "Brisen AI x NVIDIA x Corinthia \u2014 Partnership Strategy",
+          "file": "partnership.html",
+          "created": "2026-04-05",
+          "matter": "nvidia"
+        },
+        {
+          "title": "VERTEX \u2014 The First NVIDIA Hotel Concept",
+          "file": "vertex-hotel.html",
+          "created": "2026-04-05",
+          "matter": "nvidia"
+        }
+      ]
+    }
+  ]
+}
