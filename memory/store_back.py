@@ -845,6 +845,7 @@ class SentinelStoreBack:
             logger.info(f"Stored meeting transcript: {title} ({transcript_id})")
             return True
         except Exception as e:
+            conn.rollback()
             logger.error(f"store_meeting_transcript failed: {e}")
             return False
         finally:

@@ -418,6 +418,25 @@ def backfill_fireflies():
         logger.info("Fireflies backfill: FIREFLIES_API_KEY not set, skipping")
         return
 
+    # OOM-FIX: Prevent concurrent backfills across Render deploy overlap
+    from memory.store_back import SentinelStoreBack
+    _lock_store = SentinelStoreBack._get_global_instance()
+    _lock_conn = _lock_store._get_conn()
+    if _lock_conn:
+        try:
+            _lock_cur = _lock_conn.cursor()
+            _lock_cur.execute("SELECT pg_try_advisory_lock(867531)")
+            if not _lock_cur.fetchone()[0]:
+                logger.info("Fireflies backfill: another instance holds the lock, skipping")
+                _lock_cur.close()
+                _lock_store._put_conn(_lock_conn)
+                return
+            _lock_cur.close()
+        except Exception as _e:
+            logger.warning(f"Advisory lock check failed (proceeding anyway): {_e}")
+            _lock_store._put_conn(_lock_conn)
+            _lock_conn = None
+
     _backfill_running = True
     logger.info("Fireflies backfill: starting 30-day catch-up...")
 
@@ -437,8 +456,6 @@ def backfill_fireflies():
             logger.info("Fireflies backfill: no transcripts returned from API")
             return
 
-        from orchestrator.pipeline import SentinelPipeline, TriggerEvent
-        pipeline = SentinelPipeline()
         ingested = 0
         skipped = 0
 
@@ -461,16 +478,9 @@ def backfill_fireflies():
                 skipped += 1
                 continue
 
-            # Format and ingest
+            # Format and store to PostgreSQL
             formatted = format_transcript(t)
             metadata = formatted.get("metadata", {})
-            trigger = TriggerEvent(
-                type="meeting",
-                content=formatted["text"],
-                source_id=source_id,
-                contact_name=metadata.get("organizer"),
-                priority="medium",
-            )
 
             # ARCH-3: Store full transcript in PostgreSQL
             try:
@@ -489,11 +499,11 @@ def backfill_fireflies():
             except Exception as _e:
                 logger.warning(f"Backfill: failed to store transcript {source_id} in PostgreSQL (non-fatal): {_e}")
 
-            try:
-                pipeline.run(trigger)
-                ingested += 1
-            except Exception as e:
-                logger.error(f"Fireflies backfill: pipeline failed for {source_id}: {e}")
+            # OOM-FIX: Skip pipeline.run() for backfill transcripts.
+            # Month-old meetings don't need real-time Claude/Gemini analysis.
+            # New transcripts get full pipeline via 15-min check_new_transcripts() poll.
+            trigger_state.mark_processed("meeting", source_id)
+            ingested += 1
 
             # Deadline extraction
             try:
@@ -527,6 +537,15 @@ def backfill_fireflies():
         logger.error(f"Fireflies backfill failed: {e}")
     finally:
         _backfill_running = False
+        # Release advisory lock
+        if _lock_conn:
+            try:
+                _lc = _lock_conn.cursor()
+                _lc.execute("SELECT pg_advisory_unlock(867531)")
+                _lc.close()
+                _lock_store._put_conn(_lock_conn)
+            except Exception:
+                pass
 
 
 def backfill_transcripts_only():
@@ -575,28 +594,7 @@ def backfill_transcripts_only():
             if success:
                 stored += 1
 
-            if success:
-                # Embed in Qdrant for semantic search (with rate-limit delay)
-                try:
-                    import time as _time
-                    _time.sleep(2)  # Voyage AI rate limit: avoid burst
-                    embed_text = formatted["text"]
-                    embed_metadata = {
-                        "source": "fireflies",
-                        "meeting_title": metadata.get("meeting_title", ""),
-                        "date": metadata.get("date", ""),
-                        "organizer": metadata.get("organizer", ""),
-                        "participants": metadata.get("participants", ""),
-                        "fireflies_id": source_id,
-                        "content_type": "meeting_transcript",
-                        "label": metadata.get("meeting_title", "meeting"),
-                    }
-                    store.store_document(embed_text, embed_metadata, collection="baker-conversations")
-                    logger.info(f"Qdrant embed OK: {source_id} ({metadata.get('meeting_title', '?')})")
-                except Exception as _e:
-                    logger.error(f"Qdrant embed FAILED for {source_id}: {_e}")
-
-        logger.info(f"Transcript backfill complete: {stored} of {len(raw)} transcripts stored to PostgreSQL + Qdrant")
+        logger.info(f"Transcript backfill complete: {stored} of {len(raw)} transcripts stored to PostgreSQL")
 
     except Exception as e:
         logger.error(f"Transcript backfill failed: {e}")
