@@ -8234,7 +8234,7 @@ async function loadPresentationsTab() {
     showLoading(container, 'Loading presentations');
 
     try {
-        var resp = await fetch(BRISEN_DOCS_BASE + '/index.json?_t=' + Date.now());
+        var resp = await fetch('/static/presentations.json?_t=' + Date.now());
         if (!resp.ok) throw new Error('Failed to fetch presentations manifest');
         var data = await resp.json();
         var folders = data.folders || [];
