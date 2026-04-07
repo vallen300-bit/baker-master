@@ -738,6 +738,16 @@ def check_new_emails():
         trigger_state.set_watermark("email_poll_checked", datetime.now(timezone.utc))
         _health_success("email")
 
+    # ── BLUEWIN-IMAP-POLL-1: Poll Bluewin alongside Gmail ──
+    try:
+        from triggers.bluewin_poller import poll_bluewin
+        bluewin_threads = poll_bluewin()
+        if bluewin_threads:
+            logger.info(f"Bluewin: {len(bluewin_threads)} new emails to process")
+            _process_email_threads(bluewin_threads)
+    except Exception as e:
+        logger.warning(f"Bluewin poll failed (non-fatal): {e}")
+
     logger.info("Email trigger: poll cycle complete")
 
 
