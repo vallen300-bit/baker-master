@@ -416,11 +416,9 @@ async def startup():
             backfill_fireflies()
         except Exception as e:
             logger.warning(f"Fireflies backfill failed (non-fatal): {e}")
-        try:
-            from scripts.extract_whatsapp import backfill_whatsapp
-            backfill_whatsapp()
-        except Exception as e:
-            logger.warning(f"WhatsApp backfill failed (non-fatal): {e}")
+        # OOM-FIX-2: WhatsApp backfill removed from startup.
+        # It fetched 500 chats + media + Qdrant embedding → 2-3GB memory spike.
+        # Regular WhatsApp periodic re-sync (scheduler) handles catch-up safely.
 
     threading.Thread(
         target=_delayed_backfills,
