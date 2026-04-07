@@ -1,0 +1,1935 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brisen AI x NVIDIA x Corinthia -- Partnership Strategy</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a28;
+    --accent: #6c63ff;
+    --blue: #0a6fdb;
+    --blue-dim: rgba(10,111,219,0.15);
+    --blue-glow: rgba(10,111,219,0.3);
+    --nvidia: #76B900;
+    --nvidia-dim: rgba(118,185,0,0.15);
+    --nvidia-glow: rgba(118,185,0,0.3);
+    --gold: #d4a853;
+    --accent2: #00d4aa;
+    --accent3: #ff6b9d;
+    --text: #e8e6f0;
+    --text-dim: #8a87a0;
+    --border: rgba(108,99,255,0.15);
+    --border-nv: rgba(118,185,0,0.2);
+    --border-blue: rgba(10,111,219,0.2);
+    --glow: rgba(108,99,255,0.3);
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  /* ====== CONFIDENTIAL BANNER ====== */
+  .conf-banner {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 1000;
+    background: linear-gradient(90deg, rgba(10,111,219,0.95), rgba(118,185,0,0.95));
+    padding: 8px 0;
+    text-align: center;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: #fff;
+    backdrop-filter: blur(20px);
+  }
+
+  body { padding-top: 36px; }
+
+  /* ====== HERO ====== */
+  .hero {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    padding: 2rem;
+  }
+
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(ellipse at 30% 50%, rgba(10,111,219,0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 50%, rgba(118,185,0,0.07) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 20%, rgba(0,212,170,0.04) 0%, transparent 40%);
+    animation: heroGlow 15s ease-in-out infinite alternate;
+  }
+
+  @keyframes heroGlow {
+    0% { transform: translate(0, 0) rotate(0deg); }
+    100% { transform: translate(-5%, 5%) rotate(3deg); }
+  }
+
+  /* Triangle decoration */
+  .hero-triangles {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .hero-triangles .tri {
+    position: absolute;
+    width: 0; height: 0;
+    opacity: 0.04;
+  }
+
+  .tri-1 { border-left: 80px solid transparent; border-right: 80px solid transparent; border-bottom: 140px solid var(--blue); top: 10%; left: 5%; animation: triFloat 20s ease-in-out infinite; }
+  .tri-2 { border-left: 50px solid transparent; border-right: 50px solid transparent; border-bottom: 87px solid var(--nvidia); top: 20%; right: 8%; animation: triFloat 25s ease-in-out infinite reverse; }
+  .tri-3 { border-left: 120px solid transparent; border-right: 120px solid transparent; border-bottom: 208px solid var(--blue); bottom: 5%; left: 15%; animation: triFloat 30s ease-in-out infinite; }
+  .tri-4 { border-left: 40px solid transparent; border-right: 40px solid transparent; border-bottom: 69px solid var(--nvidia); bottom: 20%; right: 12%; animation: triFloat 18s ease-in-out infinite reverse; }
+  .tri-5 { border-left: 65px solid transparent; border-right: 65px solid transparent; border-bottom: 113px solid var(--accent2); top: 60%; left: 70%; animation: triFloat 22s ease-in-out infinite; }
+
+  @keyframes triFloat {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    50% { transform: translateY(-30px) rotate(8deg); }
+  }
+
+  .hero-tag {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 20px;
+    background: linear-gradient(135deg, var(--blue-dim), var(--nvidia-dim));
+    border: 1px solid rgba(10,111,219,0.3);
+    border-radius: 100px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--blue);
+    margin-bottom: 2rem;
+  }
+
+  .hero-name {
+    position: relative;
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(2.2rem, 6vw, 4rem);
+    font-weight: 700;
+    line-height: 1.15;
+    margin-bottom: 0.5rem;
+    background: linear-gradient(135deg, #fff 0%, var(--blue) 50%, var(--nvidia) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .hero-subtitle-main {
+    position: relative;
+    font-family: 'Playfair Display', serif;
+    font-style: italic;
+    font-size: clamp(1rem, 2.5vw, 1.5rem);
+    color: var(--text-dim);
+    margin-bottom: 0.5rem;
+  }
+
+  .hero-subtitle-sub {
+    position: relative;
+    font-size: 0.95rem;
+    color: var(--text-dim);
+    margin-bottom: 1.5rem;
+    opacity: 0.7;
+  }
+
+  .hero-tagline {
+    position: relative;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--nvidia);
+    max-width: 640px;
+    margin-bottom: 3rem;
+    letter-spacing: 0.5px;
+  }
+
+  .hero-stats {
+    position: relative;
+    display: flex;
+    gap: 3rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .hero-stat { text-align: center; }
+
+  .hero-stat .num {
+    font-size: 2.2rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--blue), var(--nvidia));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .hero-stat .label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  .hero-conf {
+    position: relative;
+    margin-top: 3rem;
+    font-size: 0.7rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    opacity: 0.5;
+  }
+
+  /* ====== SECTIONS ====== */
+  section {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 6rem 2rem;
+  }
+
+  .section-header {
+    text-align: center;
+    margin-bottom: 4rem;
+  }
+
+  .section-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, var(--blue), var(--nvidia));
+    color: #fff;
+    font-weight: 800;
+    font-size: 0.85rem;
+    margin-bottom: 1rem;
+    font-family: 'Playfair Display', serif;
+  }
+
+  .section-header h2 {
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(1.8rem, 4vw, 2.8rem);
+    margin-bottom: 0.5rem;
+  }
+
+  .section-header .subtitle {
+    color: var(--text-dim);
+    font-size: 1.05rem;
+  }
+
+  /* ====== DIVIDER ====== */
+  .divider {
+    max-width: 1200px;
+    margin: 0 auto;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border-blue), var(--border-nv), transparent);
+  }
+
+  /* ====== GENERIC CARDS ====== */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2.5rem;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 40px var(--blue-glow);
+  }
+
+  /* ====== CONSORTIUM GRID ====== */
+  .consortium-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+    margin-bottom: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .consortium-grid { grid-template-columns: 1fr; }
+  }
+
+  .consortium-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2.5rem;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .consortium-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 30px var(--nvidia-glow);
+  }
+
+  .consortium-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    border-radius: 20px 20px 0 0;
+  }
+
+  .consortium-card.card-gold::before { background: linear-gradient(90deg, var(--gold), #f0c060); }
+  .consortium-card.card-blue::before { background: linear-gradient(90deg, var(--blue), #3d9bff); }
+  .consortium-card.card-green::before { background: linear-gradient(90deg, var(--nvidia), #a3e635); }
+
+  .consortium-card .card-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 0.75rem;
+    font-weight: 600;
+  }
+
+  .card-gold .card-label { color: var(--gold); }
+  .card-blue .card-label { color: var(--blue); }
+  .card-green .card-label { color: var(--nvidia); }
+
+  .consortium-card h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.4rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .consortium-card .card-stat {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin-bottom: 1rem;
+    font-style: italic;
+  }
+
+  .consortium-card p {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+    margin-bottom: 1rem;
+  }
+
+  .consortium-card .provides {
+    padding: 1rem;
+    border-radius: 12px;
+    background: var(--surface2);
+    font-size: 0.8rem;
+    line-height: 1.8;
+  }
+
+  .provides-label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+  }
+
+  .card-gold .provides-label { color: var(--gold); }
+  .card-blue .provides-label { color: var(--blue); }
+  .card-green .provides-label { color: var(--nvidia); }
+
+  .consortium-card .tag-line {
+    font-size: 1rem;
+    font-weight: 700;
+    margin-top: 0.75rem;
+  }
+
+  .card-gold .tag-line { color: var(--gold); }
+  .card-blue .tag-line { color: var(--blue); }
+  .card-green .tag-line { color: var(--nvidia); }
+
+  /* Triangle insight box */
+  .triangle-insight {
+    background: linear-gradient(135deg, rgba(10,111,219,0.08), rgba(118,185,0,0.05));
+    border: 1px solid rgba(10,111,219,0.25);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: center;
+  }
+
+  .triangle-insight h4 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.3rem;
+    margin-bottom: 1rem;
+    color: var(--text);
+  }
+
+  .triangle-insight .gap-item {
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    padding: 0.5rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    line-height: 1.7;
+  }
+
+  .triangle-insight .gap-item:last-child { border-bottom: none; }
+
+  .triangle-insight .gap-item strong { color: var(--accent3); }
+
+  .triangle-insight .conclusion {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--nvidia);
+    margin-top: 1.5rem;
+    font-family: 'Playfair Display', serif;
+  }
+
+  /* ====== ORIGIN STORY ====== */
+  .origin-timeline {
+    position: relative;
+    padding-left: 40px;
+  }
+
+  .origin-timeline::before {
+    content: '';
+    position: absolute;
+    left: 14px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(180deg, var(--blue), var(--nvidia), var(--gold));
+  }
+
+  .origin-item {
+    position: relative;
+    margin-bottom: 2.5rem;
+  }
+
+  .origin-item::before {
+    content: '';
+    position: absolute;
+    left: -33px;
+    top: 6px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--blue);
+    border: 2px solid var(--surface);
+  }
+
+  .origin-item:nth-child(2)::before { background: var(--nvidia); }
+  .origin-item:nth-child(3)::before { background: var(--accent2); }
+  .origin-item:nth-child(4)::before { background: var(--gold); }
+  .origin-item:nth-child(5)::before { background: var(--nvidia); }
+  .origin-item:nth-child(6)::before { background: var(--blue); }
+
+  .origin-item h4 {
+    font-size: 1rem;
+    font-weight: 700;
+    margin-bottom: 0.4rem;
+  }
+
+  .origin-item p {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+  }
+
+  .origin-quote {
+    background: var(--surface);
+    border-left: 3px solid var(--gold);
+    border-radius: 0 12px 12px 0;
+    padding: 1.5rem;
+    margin-top: 1rem;
+    font-style: italic;
+    font-size: 1rem;
+    color: var(--gold);
+    line-height: 1.7;
+  }
+
+  /* ====== PRODUCTS GRID ====== */
+  .products-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+  }
+
+  @media (max-width: 768px) {
+    .products-grid { grid-template-columns: 1fr; }
+  }
+
+  .product-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2rem;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .product-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 30px var(--nvidia-glow);
+  }
+
+  .product-card.lead-product {
+    border: 2px solid var(--nvidia);
+    grid-column: 1 / -1;
+  }
+
+  .product-card .lead-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    background: var(--nvidia);
+    color: #000;
+    padding: 3px 10px;
+    border-radius: 6px;
+    margin-bottom: 0.75rem;
+    font-weight: 700;
+  }
+
+  .product-card h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.3rem;
+    margin-bottom: 0.3rem;
+  }
+
+  .product-card .stage-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+    margin-bottom: 0.75rem;
+    font-weight: 500;
+  }
+
+  .product-card p {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+  }
+
+  .product-card .proven {
+    display: inline-block;
+    margin-top: 0.75rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--nvidia);
+    background: var(--nvidia-dim);
+    padding: 4px 12px;
+    border-radius: 8px;
+  }
+
+  /* ====== VALUE FOR EACH PARTNER ====== */
+  .value-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .value-grid { grid-template-columns: 1fr; }
+  }
+
+  .value-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2rem;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .value-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  }
+
+  .value-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    border-radius: 20px 20px 0 0;
+  }
+
+  .value-card.val-gold::before { background: linear-gradient(90deg, var(--gold), #f0c060); }
+  .value-card.val-blue::before { background: linear-gradient(90deg, var(--blue), #3d9bff); }
+  .value-card.val-green::before { background: linear-gradient(90deg, var(--nvidia), #a3e635); }
+
+  .value-card h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.15rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .value-card .for-label {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-weight: 700;
+    margin-bottom: 1rem;
+  }
+
+  .val-gold .for-label { color: var(--gold); }
+  .val-blue .for-label { color: var(--blue); }
+  .val-green .for-label { color: var(--nvidia); }
+
+  .value-card ul {
+    list-style: none;
+    padding: 0;
+  }
+
+  .value-card ul li {
+    padding: 6px 0 6px 18px;
+    position: relative;
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    line-height: 1.7;
+  }
+
+  .value-card ul li::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 14px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    opacity: 0.6;
+  }
+
+  .val-gold ul li::before { background: var(--gold); }
+  .val-blue ul li::before { background: var(--blue); }
+  .val-green ul li::before { background: var(--nvidia); }
+
+  /* ====== MARKET STATS ====== */
+  .market-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.5rem;
+    margin-bottom: 3rem;
+  }
+
+  @media (max-width: 768px) {
+    .market-stats-grid { grid-template-columns: 1fr 1fr; }
+  }
+
+  .market-stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: center;
+    transition: transform 0.3s;
+  }
+
+  .market-stat:hover { transform: translateY(-3px); }
+
+  .market-stat .big {
+    font-size: 2rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--blue), var(--nvidia));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    line-height: 1.1;
+  }
+
+  .market-stat .desc {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    margin-top: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  /* ====== TABLES ====== */
+  .styled-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1rem;
+  }
+
+  .styled-table th {
+    text-align: left;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    padding: 1rem 1.5rem;
+    border-bottom: 2px solid var(--border);
+  }
+
+  .styled-table td {
+    padding: 1rem 1.5rem;
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    vertical-align: top;
+  }
+
+  .styled-table tr:hover td {
+    background: rgba(10,111,219,0.03);
+  }
+
+  .styled-table td:first-child {
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  .styled-table .rank-col {
+    color: var(--nvidia);
+    font-weight: 800;
+    font-size: 0.9rem;
+  }
+
+  .styled-table .city-col {
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .styled-table .highlight-col {
+    color: var(--nvidia);
+    font-weight: 600;
+  }
+
+  /* ====== GPU MAP TABLE ====== */
+  .gpu-table th.nvidia-col { color: var(--nvidia); }
+  .gpu-table td.nvidia-val { color: var(--nvidia); font-weight: 600; }
+
+  /* ====== ASKS ====== */
+  .asks-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .asks-grid { grid-template-columns: 1fr; }
+  }
+
+  .ask-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2rem;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .ask-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 30px var(--blue-glow);
+  }
+
+  .ask-card .ask-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--blue), var(--nvidia));
+    color: #fff;
+    font-weight: 800;
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+  }
+
+  .ask-card h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+  }
+
+  .ask-card .timing {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--nvidia);
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+  }
+
+  .ask-card p {
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+  }
+
+  /* ====== ECOSYSTEM ====== */
+  .eco-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .eco-grid { grid-template-columns: 1fr; }
+  }
+
+  .eco-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2rem;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .eco-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 30px var(--nvidia-glow);
+  }
+
+  .eco-card h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.3rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .eco-card .eco-meta {
+    font-size: 0.78rem;
+    color: var(--nvidia);
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+  }
+
+  .eco-card p {
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+    margin-bottom: 0.75rem;
+  }
+
+  /* ====== NUMBERS / FINANCIALS ====== */
+  .fin-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+    margin-bottom: 3rem;
+  }
+
+  @media (max-width: 768px) {
+    .fin-grid { grid-template-columns: 1fr; }
+  }
+
+  .fin-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: center;
+    transition: transform 0.3s;
+  }
+
+  .fin-card:hover { transform: translateY(-3px); }
+
+  .fin-card .big {
+    font-size: 2rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--blue), var(--nvidia));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    line-height: 1.1;
+    margin-bottom: 0.3rem;
+  }
+
+  .fin-card .desc {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .fin-card .subdesc {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-top: 0.3rem;
+    opacity: 0.7;
+  }
+
+  .payback-callout {
+    background: linear-gradient(135deg, rgba(10,111,219,0.08), rgba(118,185,0,0.05));
+    border: 1px solid rgba(10,111,219,0.25);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: center;
+  }
+
+  .payback-callout .headline {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .payback-callout .headline span {
+    color: var(--nvidia);
+    font-weight: 700;
+  }
+
+  .payback-callout p {
+    color: var(--text-dim);
+    font-size: 0.95rem;
+  }
+
+  /* ====== TIMELINE / ROADMAP ====== */
+  .roadmap-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .roadmap-grid { grid-template-columns: 1fr; }
+  }
+
+  .roadmap-phase {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2rem;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .roadmap-phase:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  }
+
+  .roadmap-phase::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    border-radius: 20px 20px 0 0;
+  }
+
+  .roadmap-phase:nth-child(1)::before { background: linear-gradient(90deg, var(--blue), #3d9bff); }
+  .roadmap-phase:nth-child(2)::before { background: linear-gradient(90deg, var(--nvidia), #a3e635); }
+  .roadmap-phase:nth-child(3)::before { background: linear-gradient(90deg, var(--gold), #f0c060); }
+
+  .roadmap-phase .phase-label {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+  }
+
+  .roadmap-phase:nth-child(1) .phase-label { color: var(--blue); }
+  .roadmap-phase:nth-child(2) .phase-label { color: var(--nvidia); }
+  .roadmap-phase:nth-child(3) .phase-label { color: var(--gold); }
+
+  .roadmap-phase h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+  }
+
+  .roadmap-phase ul {
+    list-style: none;
+    padding: 0;
+  }
+
+  .roadmap-phase ul li {
+    padding: 6px 0 6px 18px;
+    position: relative;
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    line-height: 1.7;
+  }
+
+  .roadmap-phase ul li::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 14px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    opacity: 0.6;
+  }
+
+  .roadmap-phase:nth-child(1) ul li::before { background: var(--blue); }
+  .roadmap-phase:nth-child(2) ul li::before { background: var(--nvidia); }
+  .roadmap-phase:nth-child(3) ul li::before { background: var(--gold); }
+
+  /* ====== COMPETITIVE LANDSCAPE ====== */
+  .landscape-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    margin-bottom: 2rem;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    overflow: hidden;
+  }
+
+  @media (max-width: 768px) {
+    .landscape-grid { grid-template-columns: 1fr; }
+  }
+
+  .landscape-cell {
+    padding: 2.5rem;
+    background: var(--surface);
+    position: relative;
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+  }
+
+  @media (max-width: 768px) {
+    .landscape-cell { border-right: none; }
+  }
+
+  .landscape-cell:nth-child(2) { border-right: none; }
+  .landscape-cell:nth-child(4) { border-right: none; border-bottom: none; }
+  .landscape-cell:nth-child(3) { border-bottom: none; }
+
+  .landscape-cell h4 {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+  }
+
+  .landscape-cell .cell-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.15rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .landscape-cell p {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    line-height: 1.7;
+  }
+
+  .landscape-cell.empty-cell {
+    background: linear-gradient(135deg, rgba(10,111,219,0.08), rgba(118,185,0,0.05));
+    border-color: rgba(118,185,0,0.3);
+  }
+
+  .landscape-cell.empty-cell .cell-title {
+    color: var(--nvidia);
+    font-size: 1.3rem;
+  }
+
+  .landscape-cell .companies {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+  }
+
+  .landscape-cell .companies span {
+    font-size: 0.72rem;
+    padding: 3px 10px;
+    border-radius: 100px;
+    background: var(--surface2);
+    color: var(--text-dim);
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .landscape-cell.empty-cell .companies span {
+    background: var(--nvidia-dim);
+    color: var(--nvidia);
+    border-color: rgba(118,185,0,0.2);
+    font-weight: 600;
+  }
+
+  /* ====== CLOSING ====== */
+  .closing {
+    text-align: center;
+    padding: 6rem 2rem 4rem;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  .closing-quote {
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(1.5rem, 3.5vw, 2.5rem);
+    font-style: italic;
+    margin-bottom: 2rem;
+    background: linear-gradient(135deg, var(--blue), var(--nvidia));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    line-height: 1.4;
+  }
+
+  .closing-statement {
+    font-size: 1.1rem;
+    color: var(--text-dim);
+    margin-bottom: 3rem;
+    line-height: 1.8;
+  }
+
+  .closing-statement strong {
+    color: var(--text);
+  }
+
+  .credits {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    opacity: 0.5;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid rgba(255,255,255,0.05);
+  }
+
+  /* ====== OPPORTUNITY CARDS ====== */
+  .opp-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 2rem;
+    margin-bottom: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .opp-grid { grid-template-columns: 1fr; }
+  }
+
+  .opp-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2rem;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .opp-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  }
+
+  .opp-card h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 0.75rem;
+    color: var(--text);
+  }
+
+  .opp-card p {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+  }
+
+  .opp-card .stat-highlight {
+    font-size: 1.8rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--blue), var(--nvidia));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 0.5rem;
+    line-height: 1.1;
+  }
+
+  /* KEY INSIGHT CALLOUT */
+  .key-insight {
+    background: linear-gradient(135deg, rgba(255,107,157,0.06), rgba(10,111,219,0.06));
+    border: 1px solid rgba(255,107,157,0.2);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: center;
+  }
+
+  .key-insight h4 {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--accent3);
+    margin-bottom: 0.75rem;
+    font-weight: 700;
+  }
+
+  .key-insight p {
+    font-size: 1rem;
+    color: var(--text);
+    line-height: 1.8;
+  }
+
+  /* ====== RESPONSIVE TWEAKS ====== */
+  @media (max-width: 600px) {
+    .hero-stats { gap: 1.5rem; }
+    .hero-stat .num { font-size: 1.6rem; }
+    section { padding: 3rem 1.25rem; }
+    .market-stats-grid { grid-template-columns: 1fr 1fr; }
+    .asks-grid { grid-template-columns: 1fr; }
+  }
+
+  @media print {
+    body { background: #fff; color: #111; padding-top: 0; }
+    .conf-banner { position: relative; background: #333; }
+    .card, .consortium-card, .product-card, .value-card, .ask-card, .eco-card, .roadmap-phase, .fin-card, .market-stat, .opp-card, .landscape-cell { background: #f8f8f8; border-color: #ddd; }
+    .card:hover, .consortium-card:hover, .product-card:hover { transform: none; box-shadow: none; }
+    .hero { min-height: auto; padding: 3rem 2rem; }
+    .hero::before { display: none; }
+    .hero-triangles { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ================================================================ -->
+<!-- CONFIDENTIAL BANNER -->
+<!-- ================================================================ -->
+<div class="conf-banner">
+  Prepared for Marcus Pisani / Corinthia Hotels -- April 8, 2026 -- Strictly Confidential
+</div>
+
+<!-- ================================================================ -->
+<!-- I. HERO / COVER -->
+<!-- ================================================================ -->
+<div class="hero">
+  <div class="hero-triangles">
+    <div class="tri tri-1"></div>
+    <div class="tri tri-2"></div>
+    <div class="tri tri-3"></div>
+    <div class="tri tri-4"></div>
+    <div class="tri tri-5"></div>
+  </div>
+
+  <div class="hero-tag">Partnership Strategy</div>
+
+  <div class="hero-name">Brisen AI &times; NVIDIA &times; Corinthia</div>
+
+  <div class="hero-subtitle-main">AI Intelligence Across the Full Hotel Lifecycle: Design, Build, Operate</div>
+
+  <div class="hero-tagline">Design. Build. Operate. Intelligently. Powered by NVIDIA.</div>
+
+  <div class="hero-stats">
+    <div class="hero-stat">
+      <div class="num">EUR 33B</div>
+      <div class="label">European Market</div>
+    </div>
+    <div class="hero-stat">
+      <div class="num">EUR 2.8-4.2B</div>
+      <div class="label">AI TAM</div>
+    </div>
+    <div class="hero-stat">
+      <div class="num">0%</div>
+      <div class="label">AI Penetration</div>
+    </div>
+    <div class="hero-stat">
+      <div class="num">1,717</div>
+      <div class="label">Projects in Pipeline</div>
+    </div>
+  </div>
+
+  <div class="hero-conf">Confidential -- Brisen AI</div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- II. THE OPPORTUNITY -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">II</div>
+    <h2>The Opportunity</h2>
+    <p class="subtitle">A EUR 12-18B annual market with zero AI penetration on the owner side</p>
+  </div>
+
+  <div class="opp-grid">
+    <div class="opp-card">
+      <div class="stat-highlight">EUR 12-18B</div>
+      <h3>Annual Construction & Renovation Spend</h3>
+      <p>European luxury and upper-upscale hotel development deploys EUR 12-18 billion per year in construction and renovation capital -- across new builds, conversions, and mid-cycle refreshes.</p>
+    </div>
+    <div class="opp-card">
+      <div class="stat-highlight">0%</div>
+      <h3>AI Penetration on the Owner Side</h3>
+      <p>Hospitality AI targets operators and guests. Construction AI targets contractors. Nobody has built AI for the person who pays for all of it -- the hotel owner-developer.</p>
+    </div>
+    <div class="opp-card">
+      <div class="stat-highlight">36-42K</div>
+      <h3>4-5 Star Properties in Europe</h3>
+      <p>Approximately 36,000-42,000 upscale and luxury hotel properties across Europe, representing the core addressable market for owner-side AI products.</p>
+    </div>
+    <div class="opp-card">
+      <div class="stat-highlight">55-60%</div>
+      <h3>Independently Owned</h3>
+      <p>Europe is the global stronghold of independent luxury hotels. Unlike the US (~70% chain-affiliated), European independents lack the data infrastructure that chains provide centrally. This is the target market.</p>
+    </div>
+  </div>
+
+  <div class="key-insight">
+    <h4>The Gap</h4>
+    <p>Hospitality AI serves <strong>operators and guests</strong>. Construction AI serves <strong>contractors</strong>. Nobody serves the <strong>OWNER</strong> -- the person who finances, develops, and holds the asset. That is where Brisen AI sits.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- III. THE CONSORTIUM -- WHY THESE THREE -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">III</div>
+    <h2>The Consortium</h2>
+    <p class="subtitle">Why these three -- and no other combination</p>
+  </div>
+
+  <div class="consortium-grid">
+    <div class="consortium-card card-gold">
+      <div class="card-label">The Data</div>
+      <h3>Corinthia / QPML</h3>
+      <div class="card-stat">60 years -- 17 hotels -- Design, Build & Operate</div>
+      <p>Corinthia doesn't just operate hotels -- through <strong>QPML</strong> (qpml.com), the Pisani family's integrated design, engineering and management studio, they <strong>design, engineer, and build</strong> them. Architecture, structural engineering, MEP, project management, investment advisory -- all in-house. One of fewer than five groups globally with this full vertical integration.</p>
+      <div class="provides">
+        <div class="provides-label">Brings to the Consortium</div>
+        Proprietary architectural drawings, BIM models, structural calculations, MEP designs, and project management data from 17 properties across 10+ countries. QPML generates the exact structured data that Brisen AI products consume -- from day one of every development. Pipeline: Rome, Qatar, Riyadh, Maldives, Lake Como, Dubai.
+      </div>
+      <div class="tag-line">"Design &rarr; Build &rarr; Operate."</div>
+    </div>
+
+    <div class="consortium-card card-blue">
+      <div class="card-label">The Intelligence</div>
+      <h3>Brisen AI</h3>
+      <div class="card-stat">4 AI products -- EUR 250M MO Vienna -- EUR 6M claims proven</div>
+      <p>Built AI out of necessity on a EUR 250 million Mandarin Oriental project -- not as a tech startup, but as an owner-developer who needed solutions that did not exist. The products work because they were forged in real construction.</p>
+      <div class="provides">
+        <div class="provides-label">Brings to the Consortium</div>
+        Four deployed AI products covering the full hotel development lifecycle: ClaimsMax, TenderMax, SiteWatch, and OwnerView. Proven results. Domain authority that no pure-tech company can replicate.
+      </div>
+      <div class="tag-line">"The intelligence."</div>
+    </div>
+
+    <div class="consortium-card card-green">
+      <div class="card-label">The Engine</div>
+      <h3>NVIDIA</h3>
+      <div class="card-stat">$130.5B revenue -- Travel & Hospitality Vertical</div>
+      <p>The world's most powerful AI infrastructure company. NVIDIA's Travel & Hospitality vertical is actively seeking European proof points -- and has confirmed that Europe is a major gap. Zero European hospitality partnerships to date.</p>
+      <div class="provides">
+        <div class="provides-label">Brings to the Consortium</div>
+        GPU compute infrastructure (DGX Cloud, H100/B200), NVIDIA Inception programme, $100K cloud credits, preferential pricing, co-branding rights, and a global ecosystem of AI companies.
+      </div>
+      <div class="tag-line">"The engine."</div>
+    </div>
+  </div>
+
+  <div class="triangle-insight">
+    <h4>The Triangle is the Product</h4>
+    <div class="gap-item">Corinthia + NVIDIA without Brisen = <strong>infrastructure without domain AI products</strong></div>
+    <div class="gap-item">Brisen + NVIDIA without Corinthia = <strong>strong products but limited training data and no second brand-name proof point</strong></div>
+    <div class="gap-item">Corinthia + Brisen without NVIDIA = <strong>capable partnership without world-class compute, ecosystem access, or "Powered by NVIDIA" credibility</strong></div>
+    <div class="conclusion">Any two without the third has a fatal gap.</div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- IV. THE ORIGIN STORY -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">IV</div>
+    <h2>The Origin Story</h2>
+    <p class="subtitle">How a construction crisis created an AI company</p>
+  </div>
+
+  <div class="origin-timeline">
+    <div class="origin-item">
+      <h4>The Project</h4>
+      <p>European hotel developers. 35 years, over a billion in projects. Mandarin Oriental Vienna -- EUR 250 million, opened December 2025. Ultra-luxury, heritage building, the most complex type of hotel development.</p>
+    </div>
+
+    <div class="origin-item">
+      <h4>The Crisis</h4>
+      <p>The general contractor collapsed mid-project. Half a million documents. EUR 15 million in disputed claims. Consultants quoted 18 months to resolve. The project could not wait 18 months.</p>
+    </div>
+
+    <div class="origin-item">
+      <h4>The Build</h4>
+      <p>Built an agentic AI system out of necessity -- not as a product company, but because there was no other way. The system reads contracts, cross-references invoices, maps every contractor obligation against every deliverable.</p>
+    </div>
+
+    <div class="origin-item">
+      <h4>The Result</h4>
+      <p>EUR 6 million in recoverable damages identified in weeks -- not months. What would have taken a team of lawyers and claims consultants over a year was accomplished by AI in a fraction of the time.</p>
+    </div>
+
+    <div class="origin-item">
+      <h4>The Validation</h4>
+      <div class="origin-quote">"Ten companies would buy this tomorrow."<br><span style="font-style: normal; font-size: 0.82rem; color: var(--text-dim);">-- 60-year-old construction expert, after initially calling it nonsense</span></div>
+    </div>
+
+    <div class="origin-item">
+      <h4>The Insight</h4>
+      <p>Hospitality is the finished product. But to get there, you go through land, financing, construction, fit-out, claims, operations, asset management. Every stage is data-heavy, near-zero AI adoption -- and the same person pays for all of it: <strong style="color: var(--nvidia);">the developer-owner</strong>. That is the underserved buyer. Not the chains.</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- V. FOUR PRODUCTS -- THE VALUE CHAIN -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">V</div>
+    <h2>Four Products</h2>
+    <p class="subtitle">The full value chain for luxury hotel owner-developers</p>
+  </div>
+
+  <div class="products-grid">
+    <div class="product-card lead-product">
+      <span class="lead-badge">Lead Product -- The Door Opener</span>
+      <h3>ClaimsMax</h3>
+      <div class="stage-label">Construction Claims Substantiation</div>
+      <p>AI-driven claims analysis. Reads contracts, cross-references invoices, substantiates damages. Deployed and proven on the Mandarin Oriental Vienna (EUR 250M project). EUR 6 million in recoverable damages identified. This is the product that opened the NVIDIA door -- a deployed, working AI system, not a pitch deck.</p>
+      <span class="proven">EUR 6M Proven -- Live Production</span>
+    </div>
+
+    <div class="product-card">
+      <h3>TenderMax</h3>
+      <div class="stage-label">Fit-Out & Procurement</div>
+      <p>Translates 1,500+ page brand standards into automated tender packages. Generates specifications, evaluates bids, identifies optimal supplier combinations across concurrent projects. Reduces months of manual work to days.</p>
+    </div>
+
+    <div class="product-card">
+      <h3>SiteWatch</h3>
+      <div class="stage-label">Construction Monitoring -- GPU-Heavy</div>
+      <p>Camera-based computer vision for real-time construction progress monitoring. 3D site reconstruction. Safety violation detection. This is the product NVIDIA cares most about -- sustained GPU consumption at scale. The "Physical AI" narrative Jensen Huang is pushing.</p>
+      <span class="proven" style="background: var(--blue-dim); color: var(--blue);">Highest GPU Consumption</span>
+    </div>
+
+    <div class="product-card">
+      <h3>OwnerView</h3>
+      <div class="stage-label">Operations & Asset Management</div>
+      <p>Real-time intelligence dashboard for hotel owner-developers. Aggregates operational, financial, and compliance data across the portfolio. Monitors management company performance against HMA terms. The single screen that replaces quarterly PDF reports.</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- VI. VALUE FOR EACH PARTNER -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">VI</div>
+    <h2>Value for Each Partner</h2>
+    <p class="subtitle">Asymmetric value creation -- every partner gains more than they invest</p>
+  </div>
+
+  <div class="value-grid">
+    <div class="value-card val-gold">
+      <div class="for-label">For Corinthia</div>
+      <h3>"AI-Power the Entire QPML Pipeline"</h3>
+      <ul>
+        <li><strong style="color: var(--gold);">EUR 3-10M per project</strong> in identified savings or recoveries across the pipeline</li>
+        <li><strong>QPML workflows get AI superpowers</strong> -- ClaimsMax on QP Consult data, TenderMax on QP Architecture specs, SiteWatch on QPML-managed sites. AI embedded from day one of every development.</li>
+        <li><strong>"Properly Inventive" made real</strong> -- when pitching JV partners (RoundShield, Kervis, ShiLong), Corinthia says: "We design and build with NVIDIA-powered AI. No other group can."</li>
+        <li><strong>Succession story</strong> -- Alfred Pisani built Corinthia by hand over 60 years. QPML + Brisen AI secures the next generation with intelligence.</li>
+      </ul>
+    </div>
+
+    <div class="value-card val-blue">
+      <div class="for-label">For Brisen AI</div>
+      <h3>"From One Project to a Platform"</h3>
+      <ul>
+        <li><strong style="color: var(--blue);">Training data at scale</strong> -- 17 properties across 10+ countries vs. 1 project. Heritage, new builds, mixed-use.</li>
+        <li><strong>Brand-name reference client</strong> -- "We built this for ourselves AND Corinthia uses it" is the difference between a startup and a platform.</li>
+        <li><strong>Pipeline access</strong> -- Corinthia's JV partners (RoundShield, Kervis, ShiLong) create natural distribution. Network effects begin.</li>
+        <li><strong>NVIDIA Inception acceleration</strong> -- from "interesting European startup" to "the AI layer for a global luxury hotel group."</li>
+      </ul>
+    </div>
+
+    <div class="value-card val-green">
+      <div class="for-label">For NVIDIA</div>
+      <h3>"The European Proof Point NVIDIA Needs"</h3>
+      <ul>
+        <li><strong style="color: var(--nvidia);">GPU consumption in an empty vertical</strong> -- Travel & Hospitality is thin vs. healthcare, automotive, finance.</li>
+        <li><strong>A case study that sells itself</strong> -- "Corinthia Hotels, 60-year luxury dynasty, partnered with NVIDIA for AI-powered development." Keynote slide at GTC 2027.</li>
+        <li><strong>Omniverse/Digital Twin adoption</strong> -- SiteWatch is a natural Omniverse candidate. Construction site digital twins = "Physical AI."</li>
+        <li><strong>Sovereign AI alignment</strong> -- European data sovereignty is a strategic NVIDIA priority. This consortium fits perfectly.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- VII. THE MARKET -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">VII</div>
+    <h2>The Market</h2>
+    <p class="subtitle">European luxury hospitality -- data-driven market sizing</p>
+  </div>
+
+  <div class="market-stats-grid">
+    <div class="market-stat">
+      <div class="big">EUR 33B</div>
+      <div class="desc">European Luxury Hotel Market (2026)</div>
+    </div>
+    <div class="market-stat">
+      <div class="big">8.7%</div>
+      <div class="desc">CAGR to 2031</div>
+    </div>
+    <div class="market-stat">
+      <div class="big">1,717</div>
+      <div class="desc">Projects in Pipeline</div>
+    </div>
+    <div class="market-stat">
+      <div class="big">252,600</div>
+      <div class="desc">Rooms in Development</div>
+    </div>
+  </div>
+
+  <!-- Top 10 Cities -->
+  <div class="card" style="margin-bottom: 2rem;">
+    <h3 style="font-family: 'Playfair Display', serif; font-size: 1.3rem; margin-bottom: 1.5rem;">Top 10 European Cities by Luxury Hotel Development</h3>
+    <div style="overflow-x: auto;">
+      <table class="styled-table">
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>City</th>
+            <th>Projects</th>
+            <th>Rooms</th>
+            <th>Est. Annual Dev Spend</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="rank-col">1</td><td class="city-col">London</td><td>76</td><td>13,657</td><td>EUR 1.8-2.7B</td></tr>
+          <tr><td class="rank-col">2</td><td class="city-col">Istanbul</td><td>48</td><td>7,364</td><td>EUR 0.9-1.5B</td></tr>
+          <tr><td class="rank-col">3</td><td class="city-col">Lisbon</td><td>39</td><td>4,444</td><td>EUR 0.7-1.1B</td></tr>
+          <tr><td class="rank-col">4</td><td class="city-col">Paris</td><td>35</td><td>4,200</td><td>EUR 1.2-2.0B</td></tr>
+          <tr><td class="rank-col">5</td><td class="city-col">Dublin</td><td>25</td><td>4,648</td><td>EUR 0.6-1.0B</td></tr>
+          <tr><td class="rank-col">6</td><td class="city-col">Madrid</td><td>22</td><td>3,100</td><td>EUR 0.5-0.9B</td></tr>
+          <tr><td class="rank-col">7</td><td class="city-col">Rome</td><td>20</td><td>2,800</td><td>EUR 0.6-1.0B</td></tr>
+          <tr><td class="rank-col">8</td><td class="city-col">Munich</td><td>18</td><td>2,500</td><td>EUR 0.5-0.8B</td></tr>
+          <tr><td class="rank-col">9</td><td class="city-col">Milan</td><td>16</td><td>2,200</td><td>EUR 0.5-0.9B</td></tr>
+          <tr><td class="rank-col">10</td><td class="city-col">Vienna</td><td>14</td><td>1,900</td><td>EUR 0.4-0.7B</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size: 0.75rem; color: var(--text-dim); margin-top: 1rem; opacity: 0.6;">Source: Lodging Econometrics Q4 2025, Mordor Intelligence 2026. Paris, Madrid, Rome, Munich, Milan, Vienna estimated from country-level data.</p>
+  </div>
+
+  <!-- TAM Breakdown -->
+  <div class="opp-grid">
+    <div class="opp-card">
+      <div class="stat-highlight">EUR 1.8-2.7B</div>
+      <h3>Construction AI TAM</h3>
+      <p>Claims management (EUR 0.8-1.2B), tendering/procurement (EUR 0.6-0.9B), and site monitoring (EUR 0.4-0.6B). Based on ~1,200 active projects at EUR 50-100K per project per year.</p>
+    </div>
+    <div class="opp-card">
+      <div class="stat-highlight">EUR 1.0-1.5B</div>
+      <h3>Operational AI TAM</h3>
+      <p>Owner's dashboards (EUR 0.5-0.8B), predictive maintenance (EUR 0.3-0.4B), and HMA compliance monitoring (EUR 0.2-0.3B). Based on ~36,000 properties at EUR 15-25K per property per year.</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- VIII. GPU CONSUMPTION MAP -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">VIII</div>
+    <h2>GPU Consumption Map</h2>
+    <p class="subtitle">Every Brisen product drives NVIDIA revenue across the full stack</p>
+  </div>
+
+  <div class="card">
+    <div style="overflow-x: auto;">
+      <table class="styled-table gpu-table">
+        <thead>
+          <tr>
+            <th>Brisen Product</th>
+            <th class="nvidia-col">NVIDIA Product</th>
+            <th>Revenue Type</th>
+            <th>GPU Intensity</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>SiteWatch</strong></td>
+            <td class="nvidia-val">Isaac / Jetson + Omniverse</td>
+            <td>Edge hardware + simulation licensing</td>
+            <td><span style="color: var(--accent3); font-weight: 700;">Very High</span> -- 200-400 GPU-hrs/mo</td>
+          </tr>
+          <tr>
+            <td><strong>ClaimsMax</strong></td>
+            <td class="nvidia-val">DGX / Grace Blackwell</td>
+            <td>High-end compute (LLM inference)</td>
+            <td><span style="color: var(--gold); font-weight: 700;">High</span> -- 80-120 GPU-hrs/mo</td>
+          </tr>
+          <tr>
+            <td><strong>TenderMax</strong></td>
+            <td class="nvidia-val">Omniverse</td>
+            <td>Simulation licensing + NLP compute</td>
+            <td><span style="color: var(--blue); font-weight: 700;">Medium</span> -- 40-60 GPU-hrs/mo</td>
+          </tr>
+          <tr>
+            <td><strong>OwnerView</strong></td>
+            <td class="nvidia-val">NIM Microservices</td>
+            <td>Recurring AIaaS (inference + RAG)</td>
+            <td><span style="color: var(--accent2); font-weight: 700;">Moderate</span> -- 20-40 GPU-hrs/mo</td>
+          </tr>
+          <tr>
+            <td><strong>VERTEX Concept</strong></td>
+            <td class="nvidia-val">Full Stack (Omniverse / DGX SuperPOD)</td>
+            <td>Flagship deal -- maximum consumption</td>
+            <td><span style="color: var(--accent3); font-weight: 700;">Maximum</span> -- Full stack</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p style="font-size: 0.82rem; color: var(--text-dim); margin-top: 1.5rem; line-height: 1.8;">Total GPU consumption per property in construction phase: <strong style="color: var(--nvidia);">420-750 GPU-hours/month</strong>. In operations-only phase: <strong style="color: var(--nvidia);">100-170 GPU-hours/month</strong>. At 10% European adoption (3,800 properties), this generates <strong style="color: var(--nvidia);">EUR 180-280M annual NVIDIA ecosystem revenue</strong>.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- IX. THREE ASKS FROM NVIDIA -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">IX</div>
+    <h2>Three Asks from NVIDIA</h2>
+    <p class="subtitle">Phased requests -- each unlocking the next level of partnership</p>
+  </div>
+
+  <div class="asks-grid">
+    <div class="ask-card">
+      <div class="ask-num">1</div>
+      <h3>NVIDIA Inception Program</h3>
+      <div class="timing">Immediate</div>
+      <p>The "NVIDIA Inception Partner" badge is instant credibility with investors, clients, and partners. Benefits include up to <strong style="color: var(--nvidia);">$100K in cloud credits</strong>, preferred GPU pricing, co-marketing, investor network access, and DGX Cloud lab. NVIDIA's hospitality team can activate this quickly.</p>
+    </div>
+
+    <div class="ask-card">
+      <div class="ask-num">2</div>
+      <h3>Preferential GPU Pricing</h3>
+      <div class="timing">Second Meeting</div>
+      <p><strong style="color: var(--nvidia);">$2/hr vs standard $3/hr</strong>. Framed as infrastructure alignment, not a discount. NVIDIA still makes full margin. Critical for SiteWatch unit economics -- the product that drives the highest sustained GPU consumption.</p>
+    </div>
+
+    <div class="ask-card">
+      <div class="ask-num">3</div>
+      <h3>Co-Branding</h3>
+      <div class="timing">Longer Term</div>
+      <p><strong style="color: var(--nvidia);">"Powered by NVIDIA"</strong> on all Brisen products. Joint presence at European industry events: IHIF Berlin, MIPIM Cannes, Expo Real Munich. Positions the consortium as the NVIDIA-backed player in European luxury hospitality.</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- X. ECOSYSTEM PARTNERS -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">X</div>
+    <h2>Ecosystem Partners</h2>
+    <p class="subtitle">Introduced by NVIDIA -- complementary, not competitive</p>
+  </div>
+
+  <div class="eco-grid">
+    <div class="eco-card">
+      <h3>Bellboy Robotics</h3>
+      <div class="eco-meta">Hospitality Service Robots -- Sandy Hefftz, CEO</div>
+      <p>Deployed in Hilton Berlin, Marriott Paris/Rome. 13-person team. In-house AI running on NVIDIA hardware. Pilot at Mandarin Oriental Vienna being explored for their robot "Billy."</p>
+      <p><strong style="color: var(--nvidia);">Physical AI (Bellboy) + Intelligence AI (Brisen) + Voice AI (aiOla) = a complete NVIDIA-powered hospitality stack.</strong> That is the ecosystem story NVIDIA wants to tell to the industry.</p>
+    </div>
+
+    <div class="eco-card">
+      <h3>aiOla</h3>
+      <div class="eco-meta">Voice-to-Data AI -- $58M raised -- 120+ languages</div>
+      <p>Converts messy real-world speech (noisy construction sites, busy kitchens) into structured enterprise data. 95%+ accuracy. Already an NVIDIA Inception member.</p>
+      <p><strong style="color: var(--blue);">Zero competitive overlap with Brisen.</strong> Their voice layer feeds directly into ClaimsMax (site voice notes become structured claim evidence) and SiteWatch (verbal progress reports become system updates). Strong complementarity.</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- XI. THE NUMBERS -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">XI</div>
+    <h2>The Numbers</h2>
+    <p class="subtitle">Revenue potential from Corinthia alone and at European scale</p>
+  </div>
+
+  <div class="fin-grid">
+    <div class="fin-card">
+      <div class="big">EUR 3.4-5.1M</div>
+      <div class="desc">Corinthia Annual Value</div>
+      <div class="subdesc">Construction AI + Operations AI blended</div>
+    </div>
+    <div class="fin-card">
+      <div class="big">EUR 17-26M</div>
+      <div class="desc">Corinthia Lifetime (5yr)</div>
+      <div class="subdesc">Construction phases time-limited</div>
+    </div>
+    <div class="fin-card">
+      <div class="big">EUR 180-280M</div>
+      <div class="desc">GPU Ecosystem Revenue</div>
+      <div class="subdesc">At 10% European adoption -- annually</div>
+    </div>
+  </div>
+
+  <div class="payback-callout" style="margin-bottom: 2rem;">
+    <div class="headline">AI Premium: <span>3.6% of Development Cost</span></div>
+    <p>AI deployment adds approximately 3.6% to total development cost -- with full payback in 12.8 months through claims recovery, procurement savings, and operational intelligence.</p>
+  </div>
+
+  <!-- Corinthia Breakdown Table -->
+  <div class="card">
+    <h3 style="font-family: 'Playfair Display', serif; font-size: 1.2rem; margin-bottom: 1.5rem;">Corinthia Revenue Breakdown</h3>
+    <div style="overflow-x: auto;">
+      <table class="styled-table">
+        <thead>
+          <tr>
+            <th>AI Deployment</th>
+            <th>Properties</th>
+            <th>Annual Revenue / Property</th>
+            <th class="highlight-col">Total Annual</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Claims Analysis AI</td>
+            <td>15-20</td>
+            <td>EUR 80-120K</td>
+            <td class="highlight-col">EUR 1.2-2.4M</td>
+          </tr>
+          <tr>
+            <td>Tendering AI</td>
+            <td>15-20</td>
+            <td>EUR 50-80K</td>
+            <td class="highlight-col">EUR 0.75-1.6M</td>
+          </tr>
+          <tr>
+            <td>Site Monitoring</td>
+            <td>10-15</td>
+            <td>EUR 60-90K</td>
+            <td class="highlight-col">EUR 0.6-1.35M</td>
+          </tr>
+          <tr>
+            <td>Owner's Dashboard</td>
+            <td>40-44</td>
+            <td>EUR 20-30K</td>
+            <td class="highlight-col">EUR 0.8-1.32M</td>
+          </tr>
+          <tr>
+            <td>Predictive Maintenance</td>
+            <td>40-44</td>
+            <td>EUR 10-15K</td>
+            <td class="highlight-col">EUR 0.4-0.66M</td>
+          </tr>
+          <tr>
+            <td>HMA Compliance</td>
+            <td>20-25</td>
+            <td>EUR 15-25K</td>
+            <td class="highlight-col">EUR 0.3-0.63M</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- XII. PARTNERSHIP ROADMAP -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">XII</div>
+    <h2>Partnership Roadmap</h2>
+    <p class="subtitle">Three phases -- from introduction to European expansion</p>
+  </div>
+
+  <div class="roadmap-grid">
+    <div class="roadmap-phase">
+      <div class="phase-label">Phase 1 -- Weeks 1-4</div>
+      <h3>Foundation</h3>
+      <ul>
+        <li>Two-pager to NVIDIA hospitality team with Corinthia co-branding</li>
+        <li>Formal NVIDIA Inception Program application</li>
+        <li>Corinthia data onboarding -- initial construction documentation structured and ingested</li>
+        <li>Sergey (CTO) technical architecture walkthrough with NVIDIA</li>
+      </ul>
+    </div>
+
+    <div class="roadmap-phase">
+      <div class="phase-label">Phase 2 -- Months 2-3</div>
+      <h3>First Deployment</h3>
+      <ul>
+        <li>Corinthia Rome pilot -- ClaimsMax on post-completion documentation</li>
+        <li>SiteWatch prototype on NVIDIA DGX Cloud</li>
+        <li>VERTEX concept submission to NVIDIA competition</li>
+        <li>aiOla integration exploration for voice-to-data pipeline</li>
+      </ul>
+    </div>
+
+    <div class="roadmap-phase">
+      <div class="phase-label">Phase 3 -- Months 4-6</div>
+      <h3>Scale</h3>
+      <ul>
+        <li>Full pilot deployment across 2-3 Corinthia properties</li>
+        <li>First paid enterprise license signed</li>
+        <li>European expansion plan -- Verdi Hotels standard package</li>
+        <li>GTC 2027 joint case study preparation</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- XIII. COMPETITIVE LANDSCAPE -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">XIII</div>
+    <h2>Competitive Landscape</h2>
+    <p class="subtitle">The market map reveals one empty quadrant -- and it is ours</p>
+  </div>
+
+  <div class="landscape-grid">
+    <div class="landscape-cell">
+      <h4>Hospitality AI &times; Operator / Guest Side</h4>
+      <div class="cell-title">Served -- but not our market</div>
+      <p>Revenue management, chatbots, booking optimization. These companies sell to hotel operators and brand headquarters -- not to the owner who finances and builds.</p>
+      <div class="companies">
+        <span>Duetto</span>
+        <span>IDeaS</span>
+        <span>Mews</span>
+        <span>HiJiffy</span>
+        <span>Asksuite</span>
+        <span>SiteMinder</span>
+      </div>
+    </div>
+
+    <div class="landscape-cell">
+      <h4>Construction AI &times; Contractor Side</h4>
+      <div class="cell-title">Served -- but not our buyer</div>
+      <p>Tender management, cost estimation, progress tracking. These companies sell to contractors and subcontractors -- not to the project owner.</p>
+      <div class="companies">
+        <span>Volve</span>
+        <span>Aitenders</span>
+        <span>Disperse</span>
+        <span>Mastt</span>
+        <span>Conwize</span>
+        <span>Plancraft</span>
+      </div>
+    </div>
+
+    <div class="landscape-cell">
+      <h4>Hospitality AI &times; Owner / Developer Side</h4>
+      <div class="cell-title" style="color: var(--accent3);">EMPTY</div>
+      <p style="color: var(--accent3); opacity: 0.8;">No company currently offers AI tools designed for hotel owner-developers. No owner's dashboard, no claims analysis, no owner-side predictive maintenance.</p>
+      <div class="companies">
+        <span style="background: rgba(255,107,157,0.1); color: var(--accent3); border-color: rgba(255,107,157,0.2);">No players</span>
+      </div>
+    </div>
+
+    <div class="landscape-cell empty-cell">
+      <h4>Construction AI &times; Owner / Developer Side</h4>
+      <div class="cell-title">BRISEN AI x NVIDIA x CORINTHIA</div>
+      <p style="color: var(--nvidia);">The only AI platform built by owner-developers, for owner-developers. Construction claims, tendering, site monitoring, and owner intelligence -- all powered by NVIDIA and trained on real luxury hotel data.</p>
+      <div class="companies">
+        <span>ClaimsMax</span>
+        <span>TenderMax</span>
+        <span>SiteWatch</span>
+        <span>OwnerView</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="key-insight" style="margin-top: 2rem;">
+    <h4>First-Mover Advantage</h4>
+    <p>No second entrant is visible. By the time one appears, the consortium will have <strong>2-3 years of compounding data advantage</strong> from Corinthia's 17+ properties, a trained AI platform, and NVIDIA co-branding. The moat is data + domain + relationships -- and it widens every quarter.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- XIV. CLOSING -->
+<!-- ================================================================ -->
+<div class="closing">
+  <div class="section-num" style="margin: 0 auto 2rem;">XIV</div>
+
+  <div class="closing-quote">"We don't sell AI to hotels. We build hotels with AI."</div>
+
+  <div class="closing-statement">
+    <strong>Corinthia / QPML</strong> &times; <strong>Brisen AI</strong> &times; <strong>NVIDIA</strong><br>
+    Design &rarr; Build &rarr; Operate &rarr; AI. The full vertical, intelligently integrated.
+  </div>
+
+  <div style="display: flex; justify-content: center; gap: 2rem; flex-wrap: wrap; margin-bottom: 3rem;">
+    <div class="market-stat" style="min-width: 160px;">
+      <div class="big" style="font-size: 1.5rem;">EUR 33B</div>
+      <div class="desc">Market</div>
+    </div>
+    <div class="market-stat" style="min-width: 160px;">
+      <div class="big" style="font-size: 1.5rem;">3 Partners</div>
+      <div class="desc">One Platform</div>
+    </div>
+    <div class="market-stat" style="min-width: 160px;">
+      <div class="big" style="font-size: 1.5rem;">EUR 6M</div>
+      <div class="desc">Proven</div>
+    </div>
+    <div class="market-stat" style="min-width: 160px;">
+      <div class="big" style="font-size: 1.5rem;">0</div>
+      <div class="desc">Competitors</div>
+    </div>
+  </div>
+
+  <div class="credits">
+    Prepared by Brisen AI + Baker + Gemma 4 | April 7, 2026<br>
+    For Marcus Pisani / Corinthia Hotels -- Strictly Confidential
+  </div>
+</div>
+
+</body>
+</html>
