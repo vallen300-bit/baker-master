@@ -620,6 +620,26 @@ def check_new_emails():
     if should_skip_poll("email"):
         return
 
+    # ── BLUEWIN-IMAP-POLL-1: Poll Bluewin independently of Gmail ──
+    try:
+        from triggers.bluewin_poller import poll_bluewin
+        bluewin_threads = poll_bluewin()
+        if bluewin_threads:
+            logger.info(f"Bluewin: {len(bluewin_threads)} new emails to process")
+            _process_email_threads(bluewin_threads)
+    except Exception as e:
+        logger.warning(f"Bluewin poll failed (non-fatal): {e}")
+
+    # ── EXCHANGE-IMAP-POLL-1: Poll Exchange independently of Gmail ──
+    try:
+        from triggers.exchange_poller import poll_exchange
+        exchange_threads = poll_exchange()
+        if exchange_threads:
+            logger.info(f"Exchange: {len(exchange_threads)} new emails to process")
+            _process_email_threads(exchange_threads)
+    except Exception as e:
+        logger.warning(f"Exchange poll failed (non-fatal): {e}")
+
     import time as _time
     global _gmail_retry_after, _gmail_backoff_seconds
 
@@ -737,26 +757,6 @@ def check_new_emails():
         # ALWAYS update checked watermark and report success (poll itself worked)
         trigger_state.set_watermark("email_poll_checked", datetime.now(timezone.utc))
         _health_success("email")
-
-    # ── BLUEWIN-IMAP-POLL-1: Poll Bluewin alongside Gmail ──
-    try:
-        from triggers.bluewin_poller import poll_bluewin
-        bluewin_threads = poll_bluewin()
-        if bluewin_threads:
-            logger.info(f"Bluewin: {len(bluewin_threads)} new emails to process")
-            _process_email_threads(bluewin_threads)
-    except Exception as e:
-        logger.warning(f"Bluewin poll failed (non-fatal): {e}")
-
-    # ── EXCHANGE-IMAP-POLL-1: Poll Exchange alongside Gmail + Bluewin ──
-    try:
-        from triggers.exchange_poller import poll_exchange
-        exchange_threads = poll_exchange()
-        if exchange_threads:
-            logger.info(f"Exchange: {len(exchange_threads)} new emails to process")
-            _process_email_threads(exchange_threads)
-    except Exception as e:
-        logger.warning(f"Exchange poll failed (non-fatal): {e}")
 
     logger.info("Email trigger: poll cycle complete")
 
