@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-07",
+  "updated_at": "2026-04-08",
   "folders": [
     {
       "name": "NVIDIA",
@@ -17,6 +17,18 @@
           "file": "vertex-hotel.html",
           "created": "2026-04-05",
           "matter": "nvidia"
+        }
+      ]
+    },
+    {
+      "name": "CORINTHIA",
+      "slug": "corinthia",
+      "presentations": [
+        {
+          "title": "Brisen Group x Corinthia \u2014 Partnership Proposal",
+          "file": "partnership.html",
+          "created": "2026-04-08",
+          "matter": "corinthia"
         }
       ]
     }

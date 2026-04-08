@@ -1,0 +1,1958 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brisen Group x Corinthia -- A Technology Partnership for Hotel Development</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a28;
+    --accent: #6c63ff;
+    --blue: #0a6fdb;
+    --blue-dim: rgba(10,111,219,0.15);
+    --blue-glow: rgba(10,111,219,0.3);
+    --nvidia: #76B900;
+    --nvidia-dim: rgba(118,185,0,0.15);
+    --nvidia-glow: rgba(118,185,0,0.3);
+    --gold: #d4a853;
+    --accent2: #00d4aa;
+    --accent3: #ff6b9d;
+    --text: #e8e6f0;
+    --text-dim: #8a87a0;
+    --border: rgba(108,99,255,0.15);
+    --border-nv: rgba(118,185,0,0.2);
+    --border-blue: rgba(10,111,219,0.2);
+    --glow: rgba(108,99,255,0.3);
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  /* ====== CONFIDENTIAL BANNER ====== */
+  .conf-banner {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 1000;
+    background: linear-gradient(90deg, rgba(10,111,219,0.95), rgba(118,185,0,0.95));
+    padding: 8px 0;
+    text-align: center;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: #fff;
+    backdrop-filter: blur(20px);
+  }
+
+  body { padding-top: 36px; }
+
+  /* ====== HERO ====== */
+  .hero {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    padding: 2rem;
+  }
+
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(ellipse at 30% 50%, rgba(10,111,219,0.08) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 50%, rgba(118,185,0,0.07) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 20%, rgba(0,212,170,0.04) 0%, transparent 40%);
+    animation: heroGlow 15s ease-in-out infinite alternate;
+  }
+
+  @keyframes heroGlow {
+    0% { transform: translate(0, 0) rotate(0deg); }
+    100% { transform: translate(-5%, 5%) rotate(3deg); }
+  }
+
+  /* Triangle decoration */
+  .hero-triangles {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .hero-triangles .tri {
+    position: absolute;
+    width: 0; height: 0;
+    opacity: 0.04;
+  }
+
+  .tri-1 { border-left: 80px solid transparent; border-right: 80px solid transparent; border-bottom: 140px solid var(--blue); top: 10%; left: 5%; animation: triFloat 20s ease-in-out infinite; }
+  .tri-2 { border-left: 50px solid transparent; border-right: 50px solid transparent; border-bottom: 87px solid var(--nvidia); top: 20%; right: 8%; animation: triFloat 25s ease-in-out infinite reverse; }
+  .tri-3 { border-left: 120px solid transparent; border-right: 120px solid transparent; border-bottom: 208px solid var(--blue); bottom: 5%; left: 15%; animation: triFloat 30s ease-in-out infinite; }
+  .tri-4 { border-left: 40px solid transparent; border-right: 40px solid transparent; border-bottom: 69px solid var(--nvidia); bottom: 20%; right: 12%; animation: triFloat 18s ease-in-out infinite reverse; }
+  .tri-5 { border-left: 65px solid transparent; border-right: 65px solid transparent; border-bottom: 113px solid var(--accent2); top: 60%; left: 70%; animation: triFloat 22s ease-in-out infinite; }
+
+  @keyframes triFloat {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    50% { transform: translateY(-30px) rotate(8deg); }
+  }
+
+  .hero-tag {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 20px;
+    background: linear-gradient(135deg, var(--blue-dim), var(--nvidia-dim));
+    border: 1px solid rgba(10,111,219,0.3);
+    border-radius: 100px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--blue);
+    margin-bottom: 2rem;
+  }
+
+  .hero-name {
+    position: relative;
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(2.2rem, 6vw, 4rem);
+    font-weight: 700;
+    line-height: 1.15;
+    margin-bottom: 0.5rem;
+    background: linear-gradient(135deg, #fff 0%, var(--blue) 50%, var(--nvidia) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .hero-subtitle-main {
+    position: relative;
+    font-family: 'Playfair Display', serif;
+    font-style: italic;
+    font-size: clamp(1rem, 2.5vw, 1.5rem);
+    color: var(--text-dim);
+    margin-bottom: 0.5rem;
+  }
+
+  .hero-subtitle-sub {
+    position: relative;
+    font-size: 0.95rem;
+    color: var(--text-dim);
+    margin-bottom: 1.5rem;
+    opacity: 0.7;
+  }
+
+  .hero-tagline {
+    position: relative;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--nvidia);
+    max-width: 640px;
+    margin-bottom: 3rem;
+    letter-spacing: 0.5px;
+  }
+
+  .hero-stats {
+    position: relative;
+    display: flex;
+    gap: 3rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .hero-stat { text-align: center; }
+
+  .hero-stat .num {
+    font-size: 2.2rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--blue), var(--nvidia));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .hero-stat .label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  .hero-conf {
+    position: relative;
+    margin-top: 3rem;
+    font-size: 0.7rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    opacity: 0.5;
+  }
+
+  /* ====== SECTIONS ====== */
+  section {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 6rem 2rem;
+  }
+
+  .section-header {
+    text-align: center;
+    margin-bottom: 4rem;
+  }
+
+  .section-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, var(--blue), var(--nvidia));
+    color: #fff;
+    font-weight: 800;
+    font-size: 0.85rem;
+    margin-bottom: 1rem;
+    font-family: 'Playfair Display', serif;
+  }
+
+  .section-header h2 {
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(1.8rem, 4vw, 2.8rem);
+    margin-bottom: 0.5rem;
+  }
+
+  .section-header .subtitle {
+    color: var(--text-dim);
+    font-size: 1.05rem;
+  }
+
+  /* ====== DIVIDER ====== */
+  .divider {
+    max-width: 1200px;
+    margin: 0 auto;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border-blue), var(--border-nv), transparent);
+  }
+
+  /* ====== GENERIC CARDS ====== */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2.5rem;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 40px var(--blue-glow);
+  }
+
+  /* ====== CONSORTIUM GRID ====== */
+  .consortium-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+    margin-bottom: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .consortium-grid { grid-template-columns: 1fr; }
+  }
+
+  .consortium-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2.5rem;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .consortium-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 30px var(--nvidia-glow);
+  }
+
+  .consortium-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    border-radius: 20px 20px 0 0;
+  }
+
+  .consortium-card.card-gold::before { background: linear-gradient(90deg, var(--gold), #f0c060); }
+  .consortium-card.card-blue::before { background: linear-gradient(90deg, var(--blue), #3d9bff); }
+  .consortium-card.card-green::before { background: linear-gradient(90deg, var(--nvidia), #a3e635); }
+
+  .consortium-card .card-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 0.75rem;
+    font-weight: 600;
+  }
+
+  .card-gold .card-label { color: var(--gold); }
+  .card-blue .card-label { color: var(--blue); }
+  .card-green .card-label { color: var(--nvidia); }
+
+  .consortium-card h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.4rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .consortium-card .card-stat {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin-bottom: 1rem;
+    font-style: italic;
+  }
+
+  .consortium-card p {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+    margin-bottom: 1rem;
+  }
+
+  .consortium-card .provides {
+    padding: 1rem;
+    border-radius: 12px;
+    background: var(--surface2);
+    font-size: 0.8rem;
+    line-height: 1.8;
+  }
+
+  .provides-label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+  }
+
+  .card-gold .provides-label { color: var(--gold); }
+  .card-blue .provides-label { color: var(--blue); }
+  .card-green .provides-label { color: var(--nvidia); }
+
+  .consortium-card .tag-line {
+    font-size: 1rem;
+    font-weight: 700;
+    margin-top: 0.75rem;
+  }
+
+  .card-gold .tag-line { color: var(--gold); }
+  .card-blue .tag-line { color: var(--blue); }
+  .card-green .tag-line { color: var(--nvidia); }
+
+  /* Triangle insight box */
+  .triangle-insight {
+    background: linear-gradient(135deg, rgba(10,111,219,0.08), rgba(118,185,0,0.05));
+    border: 1px solid rgba(10,111,219,0.25);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: center;
+  }
+
+  .triangle-insight h4 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.3rem;
+    margin-bottom: 1rem;
+    color: var(--text);
+  }
+
+  .triangle-insight .gap-item {
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    padding: 0.5rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    line-height: 1.7;
+  }
+
+  .triangle-insight .gap-item:last-child { border-bottom: none; }
+
+  .triangle-insight .gap-item strong { color: var(--accent3); }
+
+  .triangle-insight .conclusion {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--nvidia);
+    margin-top: 1.5rem;
+    font-family: 'Playfair Display', serif;
+  }
+
+  /* ====== ORIGIN STORY ====== */
+  .origin-timeline {
+    position: relative;
+    padding-left: 40px;
+  }
+
+  .origin-timeline::before {
+    content: '';
+    position: absolute;
+    left: 14px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(180deg, var(--blue), var(--nvidia), var(--gold));
+  }
+
+  .origin-item {
+    position: relative;
+    margin-bottom: 2.5rem;
+  }
+
+  .origin-item::before {
+    content: '';
+    position: absolute;
+    left: -33px;
+    top: 6px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--blue);
+    border: 2px solid var(--surface);
+  }
+
+  .origin-item:nth-child(2)::before { background: var(--nvidia); }
+  .origin-item:nth-child(3)::before { background: var(--accent2); }
+  .origin-item:nth-child(4)::before { background: var(--gold); }
+  .origin-item:nth-child(5)::before { background: var(--nvidia); }
+  .origin-item:nth-child(6)::before { background: var(--blue); }
+
+  .origin-item h4 {
+    font-size: 1rem;
+    font-weight: 700;
+    margin-bottom: 0.4rem;
+  }
+
+  .origin-item p {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+  }
+
+  .origin-quote {
+    background: var(--surface);
+    border-left: 3px solid var(--gold);
+    border-radius: 0 12px 12px 0;
+    padding: 1.5rem;
+    margin-top: 1rem;
+    font-style: italic;
+    font-size: 1rem;
+    color: var(--gold);
+    line-height: 1.7;
+  }
+
+  /* ====== PRODUCTS GRID ====== */
+  .products-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+  }
+
+  @media (max-width: 768px) {
+    .products-grid { grid-template-columns: 1fr; }
+  }
+
+  .product-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2rem;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .product-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 30px var(--nvidia-glow);
+  }
+
+  .product-card.lead-product {
+    border: 2px solid var(--nvidia);
+    grid-column: 1 / -1;
+  }
+
+  .product-card .lead-badge {
+    display: inline-block;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    background: var(--nvidia);
+    color: #000;
+    padding: 3px 10px;
+    border-radius: 6px;
+    margin-bottom: 0.75rem;
+    font-weight: 700;
+  }
+
+  .product-card h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.3rem;
+    margin-bottom: 0.3rem;
+  }
+
+  .product-card .stage-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+    margin-bottom: 0.75rem;
+    font-weight: 500;
+  }
+
+  .product-card p {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+  }
+
+  .product-card .proven {
+    display: inline-block;
+    margin-top: 0.75rem;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--nvidia);
+    background: var(--nvidia-dim);
+    padding: 4px 12px;
+    border-radius: 8px;
+  }
+
+  /* ====== VALUE FOR EACH PARTNER ====== */
+  .value-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .value-grid { grid-template-columns: 1fr; }
+  }
+
+  .value-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2rem;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .value-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  }
+
+  .value-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    border-radius: 20px 20px 0 0;
+  }
+
+  .value-card.val-gold::before { background: linear-gradient(90deg, var(--gold), #f0c060); }
+  .value-card.val-blue::before { background: linear-gradient(90deg, var(--blue), #3d9bff); }
+  .value-card.val-green::before { background: linear-gradient(90deg, var(--nvidia), #a3e635); }
+
+  .value-card h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.15rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .value-card .for-label {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-weight: 700;
+    margin-bottom: 1rem;
+  }
+
+  .val-gold .for-label { color: var(--gold); }
+  .val-blue .for-label { color: var(--blue); }
+  .val-green .for-label { color: var(--nvidia); }
+
+  .value-card ul {
+    list-style: none;
+    padding: 0;
+  }
+
+  .value-card ul li {
+    padding: 6px 0 6px 18px;
+    position: relative;
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    line-height: 1.7;
+  }
+
+  .value-card ul li::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 14px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    opacity: 0.6;
+  }
+
+  .val-gold ul li::before { background: var(--gold); }
+  .val-blue ul li::before { background: var(--blue); }
+  .val-green ul li::before { background: var(--nvidia); }
+
+  /* ====== MARKET STATS ====== */
+  .market-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.5rem;
+    margin-bottom: 3rem;
+  }
+
+  @media (max-width: 768px) {
+    .market-stats-grid { grid-template-columns: 1fr 1fr; }
+  }
+
+  .market-stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: center;
+    transition: transform 0.3s;
+  }
+
+  .market-stat:hover { transform: translateY(-3px); }
+
+  .market-stat .big {
+    font-size: 2rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--blue), var(--nvidia));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    line-height: 1.1;
+  }
+
+  .market-stat .desc {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    margin-top: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  /* ====== TABLES ====== */
+  .styled-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1rem;
+  }
+
+  .styled-table th {
+    text-align: left;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    padding: 1rem 1.5rem;
+    border-bottom: 2px solid var(--border);
+  }
+
+  .styled-table td {
+    padding: 1rem 1.5rem;
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    vertical-align: top;
+  }
+
+  .styled-table tr:hover td {
+    background: rgba(10,111,219,0.03);
+  }
+
+  .styled-table td:first-child {
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  .styled-table .rank-col {
+    color: var(--nvidia);
+    font-weight: 800;
+    font-size: 0.9rem;
+  }
+
+  .styled-table .city-col {
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .styled-table .highlight-col {
+    color: var(--nvidia);
+    font-weight: 600;
+  }
+
+  /* ====== GPU MAP TABLE ====== */
+  .gpu-table th.nvidia-col { color: var(--nvidia); }
+  .gpu-table td.nvidia-val { color: var(--nvidia); font-weight: 600; }
+
+  /* ====== ASKS ====== */
+  .asks-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .asks-grid { grid-template-columns: 1fr; }
+  }
+
+  .ask-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2rem;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .ask-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 30px var(--blue-glow);
+  }
+
+  .ask-card .ask-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--blue), var(--nvidia));
+    color: #fff;
+    font-weight: 800;
+    font-size: 0.9rem;
+    margin-bottom: 1rem;
+  }
+
+  .ask-card h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 0.25rem;
+  }
+
+  .ask-card .timing {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--nvidia);
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+  }
+
+  .ask-card p {
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+  }
+
+  /* ====== ECOSYSTEM ====== */
+  .eco-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .eco-grid { grid-template-columns: 1fr; }
+  }
+
+  .eco-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2rem;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .eco-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 30px var(--nvidia-glow);
+  }
+
+  .eco-card h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.3rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .eco-card .eco-meta {
+    font-size: 0.78rem;
+    color: var(--nvidia);
+    font-weight: 600;
+    margin-bottom: 0.75rem;
+  }
+
+  .eco-card p {
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+    margin-bottom: 0.75rem;
+  }
+
+  /* ====== NUMBERS / FINANCIALS ====== */
+  .fin-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+    margin-bottom: 3rem;
+  }
+
+  @media (max-width: 768px) {
+    .fin-grid { grid-template-columns: 1fr; }
+  }
+
+  .fin-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: center;
+    transition: transform 0.3s;
+  }
+
+  .fin-card:hover { transform: translateY(-3px); }
+
+  .fin-card .big {
+    font-size: 2rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--blue), var(--nvidia));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    line-height: 1.1;
+    margin-bottom: 0.3rem;
+  }
+
+  .fin-card .desc {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .fin-card .subdesc {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-top: 0.3rem;
+    opacity: 0.7;
+  }
+
+  .payback-callout {
+    background: linear-gradient(135deg, rgba(10,111,219,0.08), rgba(118,185,0,0.05));
+    border: 1px solid rgba(10,111,219,0.25);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: center;
+  }
+
+  .payback-callout .headline {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .payback-callout .headline span {
+    color: var(--nvidia);
+    font-weight: 700;
+  }
+
+  .payback-callout p {
+    color: var(--text-dim);
+    font-size: 0.95rem;
+  }
+
+  /* ====== TIMELINE / ROADMAP ====== */
+  .roadmap-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .roadmap-grid { grid-template-columns: 1fr; }
+  }
+
+  .roadmap-phase {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2rem;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .roadmap-phase:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  }
+
+  .roadmap-phase::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    border-radius: 20px 20px 0 0;
+  }
+
+  .roadmap-phase:nth-child(1)::before { background: linear-gradient(90deg, var(--blue), #3d9bff); }
+  .roadmap-phase:nth-child(2)::before { background: linear-gradient(90deg, var(--nvidia), #a3e635); }
+  .roadmap-phase:nth-child(3)::before { background: linear-gradient(90deg, var(--gold), #f0c060); }
+
+  .roadmap-phase .phase-label {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+  }
+
+  .roadmap-phase:nth-child(1) .phase-label { color: var(--blue); }
+  .roadmap-phase:nth-child(2) .phase-label { color: var(--nvidia); }
+  .roadmap-phase:nth-child(3) .phase-label { color: var(--gold); }
+
+  .roadmap-phase h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+  }
+
+  .roadmap-phase ul {
+    list-style: none;
+    padding: 0;
+  }
+
+  .roadmap-phase ul li {
+    padding: 6px 0 6px 18px;
+    position: relative;
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    line-height: 1.7;
+  }
+
+  .roadmap-phase ul li::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 14px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    opacity: 0.6;
+  }
+
+  .roadmap-phase:nth-child(1) ul li::before { background: var(--blue); }
+  .roadmap-phase:nth-child(2) ul li::before { background: var(--nvidia); }
+  .roadmap-phase:nth-child(3) ul li::before { background: var(--gold); }
+
+  /* ====== COMPETITIVE LANDSCAPE ====== */
+  .landscape-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    margin-bottom: 2rem;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    overflow: hidden;
+  }
+
+  @media (max-width: 768px) {
+    .landscape-grid { grid-template-columns: 1fr; }
+  }
+
+  .landscape-cell {
+    padding: 2.5rem;
+    background: var(--surface);
+    position: relative;
+    border-bottom: 1px solid var(--border);
+    border-right: 1px solid var(--border);
+  }
+
+  @media (max-width: 768px) {
+    .landscape-cell { border-right: none; }
+  }
+
+  .landscape-cell:nth-child(2) { border-right: none; }
+  .landscape-cell:nth-child(4) { border-right: none; border-bottom: none; }
+  .landscape-cell:nth-child(3) { border-bottom: none; }
+
+  .landscape-cell h4 {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+  }
+
+  .landscape-cell .cell-title {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.15rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .landscape-cell p {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    line-height: 1.7;
+  }
+
+  .landscape-cell.empty-cell {
+    background: linear-gradient(135deg, rgba(10,111,219,0.08), rgba(118,185,0,0.05));
+    border-color: rgba(118,185,0,0.3);
+  }
+
+  .landscape-cell.empty-cell .cell-title {
+    color: var(--nvidia);
+    font-size: 1.3rem;
+  }
+
+  .landscape-cell .companies {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+  }
+
+  .landscape-cell .companies span {
+    font-size: 0.72rem;
+    padding: 3px 10px;
+    border-radius: 100px;
+    background: var(--surface2);
+    color: var(--text-dim);
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .landscape-cell.empty-cell .companies span {
+    background: var(--nvidia-dim);
+    color: var(--nvidia);
+    border-color: rgba(118,185,0,0.2);
+    font-weight: 600;
+  }
+
+  /* ====== CLOSING ====== */
+  .closing {
+    text-align: center;
+    padding: 6rem 2rem 4rem;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  .closing-quote {
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(1.5rem, 3.5vw, 2.5rem);
+    font-style: italic;
+    margin-bottom: 2rem;
+    background: linear-gradient(135deg, var(--blue), var(--nvidia));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    line-height: 1.4;
+  }
+
+  .closing-statement {
+    font-size: 1.1rem;
+    color: var(--text-dim);
+    margin-bottom: 3rem;
+    line-height: 1.8;
+  }
+
+  .closing-statement strong {
+    color: var(--text);
+  }
+
+  .credits {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    opacity: 0.5;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid rgba(255,255,255,0.05);
+  }
+
+  /* ====== OPPORTUNITY CARDS ====== */
+  .opp-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 2rem;
+    margin-bottom: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .opp-grid { grid-template-columns: 1fr; }
+  }
+
+  .opp-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2rem;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .opp-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  }
+
+  .opp-card h3 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 0.75rem;
+    color: var(--text);
+  }
+
+  .opp-card p {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+  }
+
+  .opp-card .stat-highlight {
+    font-size: 1.8rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--blue), var(--nvidia));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 0.5rem;
+    line-height: 1.1;
+  }
+
+  /* KEY INSIGHT CALLOUT */
+  .key-insight {
+    background: linear-gradient(135deg, rgba(255,107,157,0.06), rgba(10,111,219,0.06));
+    border: 1px solid rgba(255,107,157,0.2);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: center;
+  }
+
+  .key-insight h4 {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--accent3);
+    margin-bottom: 0.75rem;
+    font-weight: 700;
+  }
+
+  .key-insight p {
+    font-size: 1rem;
+    color: var(--text);
+    line-height: 1.8;
+  }
+
+  /* ====== TWO-COLUMN PAIN LAYOUT ====== */
+  .pain-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2.5rem;
+    margin-bottom: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .pain-grid { grid-template-columns: 1fr; }
+  }
+
+  .pain-column {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2.5rem;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .pain-column:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 30px var(--blue-glow);
+  }
+
+  .pain-column::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    border-radius: 20px 20px 0 0;
+  }
+
+  .pain-column:first-child::before { background: linear-gradient(90deg, var(--blue), #3d9bff); }
+  .pain-column:last-child::before { background: linear-gradient(90deg, var(--accent3), #ff9dc0); }
+
+  .pain-column h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.3rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .pain-column .pain-item {
+    margin-bottom: 1.5rem;
+    padding-left: 18px;
+    position: relative;
+  }
+
+  .pain-column .pain-item::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 8px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    opacity: 0.6;
+  }
+
+  .pain-column:first-child .pain-item::before { background: var(--blue); }
+  .pain-column:last-child .pain-item::before { background: var(--accent3); }
+
+  .pain-column .pain-item h4 {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 0.3rem;
+  }
+
+  .pain-column .pain-item p {
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    line-height: 1.7;
+  }
+
+  .source-footnote {
+    background: var(--surface);
+    border-left: 3px solid var(--text-dim);
+    border-radius: 0 12px 12px 0;
+    padding: 1.2rem 1.5rem;
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    line-height: 1.7;
+    font-style: italic;
+    margin-top: 1rem;
+  }
+
+  /* ====== MARKET GAP SECTION ====== */
+  .gap-bullets {
+    margin-bottom: 3rem;
+  }
+
+  .gap-bullet-item {
+    padding: 1.25rem 1.5rem 1.25rem 2rem;
+    position: relative;
+    font-size: 0.95rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+  }
+
+  .gap-bullet-item:last-child { border-bottom: none; }
+
+  .gap-bullet-item::before {
+    content: '';
+    position: absolute;
+    left: 0.5rem; top: 1.6rem;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent3);
+    opacity: 0.6;
+  }
+
+  .gap-bullet-item strong {
+    color: var(--text);
+    display: block;
+    margin-bottom: 0.3rem;
+    font-size: 0.98rem;
+  }
+
+  /* Landscape axis labels */
+  .landscape-wrapper {
+    position: relative;
+    margin-bottom: 2rem;
+  }
+
+  .landscape-axis-labels {
+    display: flex;
+    justify-content: space-between;
+    padding: 0 1rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .landscape-axis-labels span {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+
+  .landscape-axis-bottom {
+    display: flex;
+    justify-content: space-between;
+    padding: 0 1rem;
+    margin-top: 0.75rem;
+  }
+
+  .landscape-axis-bottom span {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    font-weight: 600;
+  }
+
+  /* ====== CLAIMSMAX FEATURE LIST ====== */
+  .feature-list {
+    list-style: none;
+    padding: 0;
+    margin: 2rem 0;
+  }
+
+  .feature-list li {
+    padding: 0.75rem 0 0.75rem 24px;
+    position: relative;
+    font-size: 0.92rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+  }
+
+  .feature-list li:last-child { border-bottom: none; }
+
+  .feature-list li::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 1.1rem;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--nvidia);
+    opacity: 0.7;
+  }
+
+  /* ====== HIGHLIGHT BOX ====== */
+  .highlight-box {
+    background: linear-gradient(135deg, rgba(118,185,0,0.08), rgba(10,111,219,0.05));
+    border: 1px solid rgba(118,185,0,0.3);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: center;
+    margin: 2rem 0;
+  }
+
+  .highlight-box p {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.2rem;
+    font-style: italic;
+    color: var(--nvidia);
+    line-height: 1.5;
+  }
+
+  /* ====== BENEFITS NUMBERED LIST ====== */
+  .benefits-list {
+    list-style: none;
+    padding: 0;
+    counter-reset: benefit-counter;
+  }
+
+  .benefits-list li {
+    counter-increment: benefit-counter;
+    padding: 1.5rem 1.5rem 1.5rem 4.5rem;
+    position: relative;
+    font-size: 0.95rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    background: var(--surface);
+    border-radius: 16px;
+    margin-bottom: 1rem;
+    border: 1px solid var(--border);
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .benefits-list li:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  }
+
+  .benefits-list li::before {
+    content: counter(benefit-counter);
+    position: absolute;
+    left: 1.25rem;
+    top: 1.3rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, var(--blue), var(--nvidia));
+    color: #fff;
+    font-weight: 800;
+    font-size: 0.85rem;
+  }
+
+  .benefits-list li strong {
+    color: var(--text);
+    display: block;
+    font-size: 1rem;
+    margin-bottom: 0.25rem;
+  }
+
+  /* ====== DATA SOVEREIGNTY BOX ====== */
+  .sovereignty-box {
+    background: var(--surface);
+    border: 2px solid var(--border-blue);
+    border-radius: 20px;
+    padding: 2.5rem;
+    margin-top: 2.5rem;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .sovereignty-box::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, var(--blue), var(--nvidia));
+    border-radius: 20px 20px 0 0;
+  }
+
+  .sovereignty-box h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.3rem;
+    margin-bottom: 1rem;
+    color: var(--blue);
+  }
+
+  .sovereignty-box p {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+  }
+
+  /* ====== PROPOSAL TABLE ====== */
+  .proposal-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 2rem 0;
+    background: var(--surface);
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+
+  .proposal-table th {
+    text-align: left;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    padding: 1.25rem 1.5rem;
+    border-bottom: 2px solid var(--border);
+    background: var(--surface2);
+  }
+
+  .proposal-table td {
+    padding: 1.25rem 1.5rem;
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    vertical-align: top;
+    line-height: 1.8;
+  }
+
+  .proposal-table td:first-child {
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .proposal-table tr:hover td {
+    background: rgba(10,111,219,0.03);
+  }
+
+  /* ====== FURTHER PRODUCTS ====== */
+  .further-products {
+    margin-top: 2rem;
+    padding: 1.5rem;
+    background: var(--surface2);
+    border-radius: 12px;
+  }
+
+  .further-products h4 {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    margin-bottom: 1rem;
+    font-weight: 700;
+  }
+
+  .further-products .fp-item {
+    padding: 0.5rem 0 0.5rem 18px;
+    position: relative;
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    line-height: 1.7;
+  }
+
+  .further-products .fp-item::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0.85rem;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--blue);
+    opacity: 0.5;
+  }
+
+  .further-products .fp-item strong {
+    color: var(--text);
+  }
+
+  /* ====== DISCLAIMER ====== */
+  .disclaimer {
+    background: var(--surface);
+    border: 1px solid rgba(255,255,255,0.05);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-top: 2rem;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+    opacity: 0.7;
+  }
+
+  /* ====== ATTACHMENT REF ====== */
+  .attachment-ref {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.25rem 1.5rem;
+    margin-top: 1.5rem;
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    line-height: 1.7;
+  }
+
+  .attachment-ref strong {
+    color: var(--text);
+  }
+
+  /* ====== RESPONSIVE TWEAKS ====== */
+  @media (max-width: 600px) {
+    .hero-stats { gap: 1.5rem; }
+    .hero-stat .num { font-size: 1.6rem; }
+    section { padding: 3rem 1.25rem; }
+    .market-stats-grid { grid-template-columns: 1fr 1fr; }
+    .asks-grid { grid-template-columns: 1fr; }
+  }
+
+  @media print {
+    body { background: #fff; color: #111; padding-top: 0; }
+    .conf-banner { position: relative; background: #333; }
+    .card, .consortium-card, .product-card, .value-card, .ask-card, .eco-card, .roadmap-phase, .fin-card, .market-stat, .opp-card, .landscape-cell { background: #f8f8f8; border-color: #ddd; }
+    .card:hover, .consortium-card:hover, .product-card:hover { transform: none; box-shadow: none; }
+    .hero { min-height: auto; padding: 3rem 2rem; }
+    .hero::before { display: none; }
+    .hero-triangles { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ================================================================ -->
+<!-- CONFIDENTIAL BANNER -->
+<!-- ================================================================ -->
+<div class="conf-banner">
+  Prepared for Corinthia Group -- April 2026 -- Strictly Confidential
+</div>
+
+<!-- ================================================================ -->
+<!-- I. HERO / COVER -->
+<!-- ================================================================ -->
+<div class="hero">
+  <div class="hero-triangles">
+    <div class="tri tri-1"></div>
+    <div class="tri tri-2"></div>
+    <div class="tri tri-3"></div>
+    <div class="tri tri-4"></div>
+    <div class="tri tri-5"></div>
+  </div>
+
+  <div class="hero-tag">Technology Partnership</div>
+
+  <div class="hero-name">Brisen Group &times; Corinthia</div>
+
+  <div class="hero-name" style="font-size: clamp(1.6rem, 4vw, 2.8rem); margin-bottom: 0.5rem;">Powered by NVIDIA</div>
+
+  <div class="hero-subtitle-main">A Technology Partnership for Hotel Development</div>
+
+  <div class="hero-subtitle-sub">April 2026 | Following discussions led by Marcus Pisani</div>
+
+  <div class="hero-conf">Confidential</div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- II. THE OWNER'S PAIN -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">II</div>
+    <h2>The Owner's Pain</h2>
+    <p class="subtitle">EUR 100-300M commitment. 3-5 year timeline. The owner bears 100% of the capital risk &mdash; yet sits farthest from the truth.</p>
+  </div>
+
+  <div class="pain-grid">
+    <div class="pain-column">
+      <h3>Development Phase</h3>
+
+      <div class="pain-item">
+        <h4>Design inefficiencies and procurement errors.</h4>
+        <p>Brand standards translated into specifications by hand. Errors compound across concurrent projects. How many design decisions are repeated without benchmarking against past outcomes?</p>
+      </div>
+
+      <div class="pain-item">
+        <h4>No independent view of progress.</h4>
+        <p>Reports come from the party with the strongest incentive to overstate completion. No real-time verification.</p>
+      </div>
+
+      <div class="pain-item">
+        <h4>Delays and cost overruns.</h4>
+        <p>Scope changes cascade through the programme unchecked. No system connects a design change to the budget, the timeline, and the financing covenant &mdash; simultaneously.</p>
+      </div>
+    </div>
+
+    <div class="pain-column">
+      <h3>Operations &amp; Oversight</h3>
+
+      <div class="pain-item">
+        <h4>Information asymmetry.</h4>
+        <p>Operators obscure operational weaknesses. Brands limit data access under system sovereignty. The owner who carries the risk has the least visibility.</p>
+      </div>
+
+      <div class="pain-item">
+        <h4>No early warning.</h4>
+        <p>Critical deviations surface in monthly reports &mdash; six weeks late. By the time the owner sees the problem, the downward spiral has begun.</p>
+      </div>
+
+      <div class="pain-item">
+        <h4>Possible claims left on the table.</h4>
+        <p>How many recoverable items go unnoticed in documentation no team has time to fully review?</p>
+      </div>
+
+      <div class="pain-item">
+        <h4>Decades of precious development experience.</h4>
+        <p>How much of it is in a structured database? How many decisions from project 5 informed project 15?</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="source-footnote">
+    Context: HospitalityInside (Jan 2026) describes hotel insolvencies as &ldquo;the collective failure of an ecosystem&rdquo; built on information asymmetry and zero data-driven controls.
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- III. A MARKET NOBODY SERVES -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">III</div>
+    <h2>A Market Nobody Serves</h2>
+    <p class="subtitle">To our knowledge, no product exists for the luxury hotel owner-developer. Construction tech serves contractors. Revenue AI serves operators. The owner is alone.</p>
+  </div>
+
+  <div class="gap-bullets">
+    <div class="gap-bullet-item">
+      <strong>Data trapped in individual projects.</strong>
+      Unstructured, dispersed across departments, never digitised. A group with 17 hotels starts project 18 without the structured benefit of the first 17.
+    </div>
+    <div class="gap-bullet-item">
+      <strong>Domain too complex for generic tools.</strong>
+      A dozen disciplines in parallel &mdash; architecture, heritage regulation, brand standards, FF&amp;E, construction, residences, pre-opening. No platform reasons across all of them.
+    </div>
+    <div class="gap-bullet-item">
+      <strong>Requires both hotel development experience and AI capability.</strong>
+      That combination has not existed until now.
+    </div>
+  </div>
+
+  <div style="text-align: center; margin-top: 2rem;">
+    <img src="https://www-cdn.anthropic.com/images/4zrzovbb/website/c1952c81bca02a7c8cc05ef7801e67ca60831c55-4096x4096.png" alt="Anthropic Economic Index — AI exposure by industry" style="max-width: 680px; width: 100%; border-radius: 12px; border: 1px solid var(--border);">
+    <p style="font-size: 0.75rem; color: var(--text-dim); margin-top: 1rem; opacity: 0.7;">Source: Anthropic Economic Index &mdash; Theoretical AI capability (blue) vs. observed adoption (red) by industry. Construction: ~17% theoretical, ~2% observed. Legal &amp; financial: 80-94% theoretical, 15-33% observed.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- IV. ONE PROJECT. ONE PRODUCT. EUR 6M IDENTIFIED. -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">IV</div>
+    <h2>One Project. One Product. EUR 6M Identified, Evidenced, Ready for Review.</h2>
+  </div>
+
+  <p style="font-size: 1.05rem; color: var(--text-dim); line-height: 1.8; margin-bottom: 2.5rem; text-align: center; max-width: 900px; margin-left: auto; margin-right: auto;">
+    Brisen Group built a EUR 300M Mandarin Oriental hotel in Vienna &mdash; and with AI developers and construction lawyers, built the product that solved its own claims problem.
+  </p>
+
+  <h3 style="font-family: 'Playfair Display', serif; font-size: 1.5rem; margin-bottom: 2rem; text-align: center;">ClaimsMax &mdash; live investigation platform</h3>
+
+  <div class="market-stats-grid">
+    <div class="market-stat">
+      <div class="big">~200K</div>
+      <div class="desc">Documents</div>
+    </div>
+    <div class="market-stat">
+      <div class="big">~180K</div>
+      <div class="desc">Emails</div>
+    </div>
+    <div class="market-stat">
+      <div class="big">1.4M</div>
+      <div class="desc">Searchable Passages</div>
+    </div>
+    <div class="market-stat">
+      <div class="big">EUR 6M+</div>
+      <div class="desc">Potential Claims</div>
+    </div>
+  </div>
+
+  <ul class="feature-list">
+    <li>Ask any question in plain language. &ldquo;Show me every deviation by Contractor X from approved specification.&rdquo; Evidenced answer with source documents &mdash; in minutes.</li>
+    <li>Reads 100% of the archive. A human team reviews a fraction under time pressure.</li>
+    <li>Connects what humans miss. Correspondence from one department contradicting claims submitted years later through a different system.</li>
+    <li>Traces masked changes. Unauthorised specification changes disguised as routine change orders &mdash; across 65,000 installed items.</li>
+    <li>Shifts the burden of proof. Dated, linked documents proving deviations. Substantially harder for contractors to dispute their own correspondence.</li>
+  </ul>
+
+  <div class="highlight-box">
+    <p>It surfaces what you did not know you were owed &mdash; and proves it.</p>
+  </div>
+
+  <div class="payback-callout" style="margin-top: 2rem;">
+    <div class="headline"><span>EUR 6M</span> Potential Claims</div>
+    <p>Potential claims identified for legal review. 1,000+ items. 30 days vs. 6-12 months.</p>
+  </div>
+
+  <p style="font-size: 0.95rem; color: var(--text-dim); line-height: 1.8; margin-top: 2rem; text-align: center; font-style: italic;">
+    Built by an owner's construction team, AI engineers, and construction lawyers.
+  </p>
+
+  <div class="further-products">
+    <h4>Further products in development</h4>
+    <div class="fp-item"><strong>TenderMax</strong> &mdash; brand standards &rarr; procurement specs, bid evaluation</div>
+    <div class="fp-item"><strong>OwnerView</strong> &mdash; portfolio dashboard across geographies</div>
+    <div class="fp-item"><strong>SiteWatch</strong> &mdash; computer vision, progress vs. plan</div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- V. WHAT IS IN IT FOR CORINTHIA -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">V</div>
+    <h2>What Is in It for Corinthia</h2>
+  </div>
+
+  <ol class="benefits-list">
+    <li>
+      <strong>Immediate deployment</strong>
+      AI on Corinthia's own pipeline: claims, procurement, portfolio intelligence
+    </li>
+    <li>
+      <strong>Data advantage</strong>
+      Proprietary intelligence asset no competitor can replicate
+    </li>
+    <li>
+      <strong>Distribution</strong>
+      Every QP third-party client encounters the platform
+    </li>
+    <li>
+      <strong>New capability for QP</strong>
+      AI-augmented project management as premium offering
+    </li>
+    <li>
+      <strong>Market position</strong>
+      Among the first luxury hotel groups to integrate AI into development
+    </li>
+  </ol>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- VI. WHY CORINTHIA + BRISEN -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">VI</div>
+    <h2>Why Corinthia + Brisen</h2>
+  </div>
+
+  <p style="font-size: 1.05rem; color: var(--text-dim); line-height: 1.8; margin-bottom: 2.5rem; text-align: center; max-width: 950px; margin-left: auto; margin-right: auto;">
+    ClaimsMax solved Brisen's problem. The opportunity is offering it to every luxury hotel developer. To do this at scale and in compliance with European AI regulation, Brisen is seeking a renowned technology partner and training data across numerous projects.
+  </p>
+
+  <div style="display: grid; gap: 1.5rem; margin-bottom: 2.5rem;">
+    <div class="card" style="border-left: 3px solid var(--nvidia);">
+      <h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--nvidia);">NVIDIA</h3>
+      <p style="font-size: 0.92rem; color: var(--text-dim); line-height: 1.8;">NVIDIA provides the processing power to run AI models at scale. Zero European hospitality partnerships today. Following meetings at GTC 2026, Brisen is in early-stage discussions with NVIDIA's hospitality team on compute infrastructure and technical partnership.</p>
+    </div>
+
+    <div class="card" style="border-left: 3px solid var(--blue);">
+      <h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--blue);">Training Data</h3>
+      <p style="font-size: 0.92rem; color: var(--text-dim); line-height: 1.8;">The AI trains further on proprietary multi-project hospitality development data &mdash; the kind that exists only inside organisations that have built luxury hotels for decades.</p>
+    </div>
+
+    <div class="card" style="border-left: 3px solid var(--gold);">
+      <h3 style="font-size: 1rem; font-weight: 700; margin-bottom: 0.5rem; color: var(--gold);">Corinthia</h3>
+      <p style="font-size: 0.92rem; color: var(--text-dim); line-height: 1.8;">Joining forces with Corinthia &mdash; QP, Disigneq, 17+ projects, 10 countries, third-party mega-developments, sixty years of decisions, costs, and outcomes &mdash; turns one product into a platform.</p>
+    </div>
+  </div>
+
+  <div class="sovereignty-box">
+    <h3>Data Sovereignty</h3>
+    <p>Data never leaves Corinthia's control. Your data stays on your systems &mdash; nothing copied or transferred. Hosted on SOC 2 Type II and ISO 27001 certified cloud infrastructure. EU-region processing. Role-scoped access. Full activity traceability. Designed for GDPR compliance. Data processing terms to be agreed in a formal DPA.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- VII. THE VISION -->
+<!-- ================================================================ -->
+<div class="closing">
+  <div class="section-num" style="margin-bottom: 1.5rem;">VII</div>
+
+  <div class="closing-quote" style="font-size: clamp(1.3rem, 3vw, 1.8rem); line-height: 1.6;">
+    The first AI platform for hospitality development &mdash; built by owners, for owners. Trained on real projects. Deployed to any market where luxury hotels are built. One mission: less risk, faster delivery, higher quality, tighter budgets.
+  </div>
+
+  <div style="margin-top: 2rem; text-align: center; font-size: 0.85rem; color: var(--text-dim); letter-spacing: 1px;">Powered by NVIDIA infrastructure</div>
+
+  <div style="margin-top: 3rem; text-align: center;">
+    <div style="display: inline-block; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 1.2rem 2.5rem; font-size: 1rem; color: var(--text);">
+      We propose a working session with Corinthia leadership to discuss structure, scope, and a live demonstration.
+    </div>
+  </div>
+
+  <div class="disclaimer">
+    This document is for discussion purposes only and does not constitute a binding offer or representation. All terms subject to formal agreement.
+  </div>
+
+  <div class="attachment-ref">
+    <strong>Attachment:</strong> Market Gap Analysis &mdash; five-question adversarial stress test across industry databases, trade publications, and competitive intelligence.
+  </div>
+
+  <div class="credits">
+    Brisen Group | Confidential | April 2026
+  </div>
+</div>
+
+<!-- REMOVED: old sections VII + VIII replaced by The Vision above -->
+<div style="display:none;">
+  </div>
+
+  <table class="proposal-table">
+    <thead>
+      <tr>
+        <th style="width: 50%;">Corinthia / QP Provides</th>
+        <th style="width: 50%;">Brisen Provides</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Documentation from one completed or active QP project</td>
+        <td>Full ClaimsMax deployment and analysis</td>
+      </tr>
+      <tr>
+        <td>QP project lead (~2-3 hours/week)</td>
+        <td>All engineering, compute, implementation at Brisen's cost</td>
+      </tr>
+      <tr>
+        <td>Feedback on findings</td>
+        <td>Monthly reports + final presentation to leadership</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="highlight-box">
+    <p style="font-size: 1rem; font-style: normal; color: var(--text);">
+      <strong style="color: var(--nvidia);">Suggested pilot:</strong> A completed QP third-party project with known outcomes &mdash; demonstrating what the AI would have caught, zero commercial sensitivity.
+    </p>
+  </div>
+
+  <div style="margin-top: 2rem;">
+    <h4 style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 2px; color: var(--text-dim); margin-bottom: 1rem; font-weight: 700; text-align: center;">Expected Outcomes</h4>
+    <ul class="feature-list">
+      <li>Potential claims identified for review (industry literature: 2-5% of construction spend typically under-claimed)</li>
+      <li>30 days of AI analysis vs. months of manual review</li>
+      <li>Business case for portfolio-wide deployment</li>
+    </ul>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!-- VIII. NEXT STEP -->
+<!-- ================================================================ -->
+<div class="closing">
+  <div class="section-num" style="margin-bottom: 1.5rem;">VIII</div>
+
+  <div class="closing-quote">
+    A working session between Brisen and Corinthia leadership on cooperation and structuring, together with a live demonstration of ClaimsMax and the future products in development.
+  </div>
+
+  <div class="disclaimer">
+    This document is for discussion purposes only and does not constitute a binding offer or representation. All terms subject to formal agreement. Phase 1 scope to be confirmed in a separate letter of intent.
+  </div>
+
+  <div class="attachment-ref">
+    <strong>Attachment:</strong> Market Gap Analysis &mdash; five-question adversarial stress test across industry databases, trade publications, and competitive intelligence.
+  </div>
+
+  </div>
+</div>
+
+</body>
+</html>
