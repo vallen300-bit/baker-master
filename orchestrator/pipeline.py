@@ -383,10 +383,10 @@ class SentinelPipeline:
     """
 
     def __init__(self):
-        self.retriever = SentinelRetriever()
+        self.retriever = SentinelRetriever._get_global_instance()
         self.prompt_builder = SentinelPromptBuilder()
         self.claude = anthropic.Anthropic(api_key=config.claude.api_key)
-        self.store = SentinelStoreBack()
+        self.store = SentinelStoreBack._get_global_instance()
 
     # -------------------------------------------------------
     # Step 1: Classify Trigger

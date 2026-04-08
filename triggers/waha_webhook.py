@@ -207,9 +207,9 @@ def _handle_wa_feedback(text: str):
 
 
 def _get_retriever():
-    """Lazy-initialize the retriever for RAG-based email body generation."""
+    """Lazy-initialize the retriever (singleton — avoids per-message client creation)."""
     from memory.retriever import SentinelRetriever
-    return SentinelRetriever()
+    return SentinelRetriever._get_global_instance()
 
 
 def _format_wa_context(contexts) -> str:

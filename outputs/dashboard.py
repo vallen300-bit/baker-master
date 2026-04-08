@@ -25,7 +25,8 @@ from pydantic import BaseModel, Field
 
 from config.settings import config
 from orchestrator.gemini_client import is_gemini_model, call_flash, GeminiResponse
-from document_generator import generate_document, get_file, cleanup_old_files, list_generated_documents
+# OOM-FIX: document_generator lazy-imported inside endpoint functions
+# (python-docx, openpyxl, reportlab, python-pptx = ~120 MB saved at startup)
 
 
 def _llm_call(model: str, messages: list, max_tokens: int = 2000, system: str = None):
@@ -185,7 +186,7 @@ def _get_retriever():
     global _retriever
     if _retriever is None:
         from memory.retriever import SentinelRetriever
-        _retriever = SentinelRetriever()
+        _retriever = SentinelRetriever._get_global_instance()
     return _retriever
 
 
@@ -7893,6 +7894,7 @@ def _scan_chat_legacy(req, start: float, domain_context: str = "",
 @app.post("/api/scan/generate-document", tags=["scan"], dependencies=[Depends(verify_api_key)])
 async def generate_doc_endpoint(req: DocumentRequest):
     """Generate a downloadable document from Baker Scan output."""
+    from document_generator import generate_document
     try:
         metadata = {
             "generated_by": "Baker Scan",
@@ -7920,6 +7922,7 @@ async def generate_doc_endpoint(req: DocumentRequest):
 @app.get("/api/scan/download/{file_id}", tags=["scan"])
 async def download_document(file_id: str):
     """Download a generated document. No auth — UUID acts as token."""
+    from document_generator import get_file
     info = get_file(file_id)
     if not info:
         raise HTTPException(status_code=404, detail="File not found or expired")
@@ -7944,6 +7947,7 @@ async def download_document(file_id: str):
 @app.get("/api/scan/generated-documents", tags=["scan"], dependencies=[Depends(verify_api_key)])
 async def list_generated_docs(limit: int = 20):
     """List recently generated documents for the right panel."""
+    from document_generator import list_generated_documents
     docs = list_generated_documents(limit=limit)
     return {"documents": docs}
 

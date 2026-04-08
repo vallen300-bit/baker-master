@@ -82,7 +82,7 @@ def gather_briefing_context() -> str:
     # 2. Pending alerts from PostgreSQL
     try:
         from memory.store_back import SentinelStoreBack
-        store = SentinelStoreBack()
+        store = SentinelStoreBack._get_global_instance()
         alerts = store.get_pending_alerts()
         if alerts:
             alert_lines = []
@@ -99,7 +99,7 @@ def gather_briefing_context() -> str:
     # 3. Active deals
     try:
         from memory.store_back import SentinelStoreBack
-        store = SentinelStoreBack()
+        store = SentinelStoreBack._get_global_instance()
         deals = store.get_active_deals()
         if deals:
             deal_lines = []

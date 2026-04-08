@@ -1685,7 +1685,7 @@ def handle_fireflies_fetch(message: str, retriever=None, project=None,
     # 1b. Check Baker's own memory first (PostgreSQL meeting_transcripts)
     try:
         from memory.retriever import SentinelRetriever
-        _retriever = retriever or SentinelRetriever()
+        _retriever = retriever or SentinelRetriever._get_global_instance()
         search_term = keyword or date_hint or message[:100]
         memory_results = _retriever.get_meeting_transcripts(search_term, limit=5)
         if memory_results:

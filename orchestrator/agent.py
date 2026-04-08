@@ -777,7 +777,7 @@ class ToolExecutor:
 
     def __init__(self):
         from memory.retriever import SentinelRetriever
-        self._retriever = SentinelRetriever()
+        self._retriever = SentinelRetriever._get_global_instance()
 
     def execute(self, tool_name: str, tool_input: dict) -> str:
         """

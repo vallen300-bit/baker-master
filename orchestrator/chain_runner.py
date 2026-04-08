@@ -217,7 +217,7 @@ def _build_planning_context(
     # Pull matter context
     try:
         from memory.retriever import SentinelRetriever
-        retriever = SentinelRetriever()
+        retriever = SentinelRetriever._get_global_instance()
         matter = retriever.get_matter_context(matter_slug)
         if matter:
             parts.append(

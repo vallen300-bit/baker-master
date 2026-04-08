@@ -507,7 +507,7 @@ def _handle_director_slack_message(text: str, channel_id: str, thread_ts: str,
     )
     from memory.retriever import SentinelRetriever
 
-    retriever = SentinelRetriever()
+    retriever = SentinelRetriever._get_global_instance()
 
     # Step 1: Build conversation history from recent Slack messages
     conversation_history = ""

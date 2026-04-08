@@ -87,7 +87,7 @@ def cmd_status(args):
 
     # Check Qdrant
     try:
-        retriever = SentinelRetriever()
+        retriever = SentinelRetriever._get_global_instance()
         collections = [
             config.qdrant.collection_whatsapp,
             config.qdrant.collection_email,

@@ -150,6 +150,14 @@ class SentinelRetriever:
     Retrieves relevant context from all memory sources.
     Implements semantic search (Qdrant) + structured queries (PostgreSQL).
     """
+    _instance = None
+
+    @classmethod
+    def _get_global_instance(cls):
+        """Singleton accessor — avoids duplicate Qdrant/Voyage/PG clients."""
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
 
     def __init__(self):
         # Qdrant client (vector search)
@@ -568,7 +576,7 @@ class SentinelRetriever:
             return row[0] if row and row[0] else None
         except Exception as e:
             logger.debug(f"Full transcript lookup failed for {transcript_id}: {e}")
-            self._pg_pool = None
+            self._reset_pg_conn()
             return None
 
     def _get_full_trigger_content(self, source_id: str) -> Optional[str]:
@@ -585,7 +593,7 @@ class SentinelRetriever:
             return row[0] if row and row[0] else None
         except Exception as e:
             logger.debug(f"Full trigger content lookup failed for {source_id}: {e}")
-            self._pg_pool = None
+            self._reset_pg_conn()
             return None
 
     def _get_full_document_text(self, source_path: str = None,
@@ -616,7 +624,7 @@ class SentinelRetriever:
             return row[0] if row and row[0] else None
         except Exception as e:
             logger.debug(f"Full document lookup failed: {e}")
-            self._pg_pool = None
+            self._reset_pg_conn()
             return None
 
     # ----------------------------------------------------------------
@@ -629,6 +637,15 @@ class SentinelRetriever:
             import psycopg2
             self._pg_pool = psycopg2.connect(**config.postgres.dsn_params)
         return self._pg_pool
+
+    def _reset_pg_conn(self):
+        """Safely close and reset PG connection on error (prevents leak)."""
+        if self._pg_pool is not None:
+            try:
+                self._pg_pool.close()
+            except Exception:
+                pass
+        self._pg_pool = None
 
     def get_contact_profile(self, contact_name: str) -> Optional[RetrievedContext]:
         """Retrieve structured contact profile from PostgreSQL.
@@ -700,7 +717,7 @@ class SentinelRetriever:
                 )
         except Exception as e:
             logger.warning(f"PostgreSQL contact lookup failed (non-fatal): {e}")
-            self._pg_pool = None
+            self._reset_pg_conn()
         return None
 
     def get_active_deals(self) -> list[RetrievedContext]:
@@ -741,7 +758,7 @@ class SentinelRetriever:
             return contexts
         except Exception as e:
             logger.warning(f"PostgreSQL deals lookup failed (non-fatal): {e}")
-            self._pg_pool = None
+            self._reset_pg_conn()
             return []
 
     def get_ceo_preferences(self) -> Optional[RetrievedContext]:
@@ -766,7 +783,7 @@ class SentinelRetriever:
                 )
         except Exception as e:
             logger.warning(f"PostgreSQL preferences lookup failed (non-fatal): {e}")
-            self._pg_pool = None
+            self._reset_pg_conn()
         return None
 
     def get_pending_alerts(self) -> list[RetrievedContext]:
@@ -798,7 +815,7 @@ class SentinelRetriever:
                 )]
         except Exception as e:
             logger.warning(f"PostgreSQL alerts lookup failed (non-fatal): {e}")
-            self._pg_pool = None
+            self._reset_pg_conn()
         return []
 
     def get_recent_decisions(self, limit: int = 5) -> list[RetrievedContext]:
@@ -830,7 +847,7 @@ class SentinelRetriever:
                 )]
         except Exception as e:
             logger.warning(f"PostgreSQL decisions lookup failed (non-fatal): {e}")
-            self._pg_pool = None
+            self._reset_pg_conn()
         return []
 
     # ----------------------------------------------------------------
@@ -893,7 +910,7 @@ class SentinelRetriever:
             return contexts
         except Exception as e:
             logger.warning(f"Meeting transcript search failed (non-fatal): {e}")
-            self._pg_pool = None
+            self._reset_pg_conn()
             return []
 
     # ----------------------------------------------------------------
@@ -953,7 +970,7 @@ class SentinelRetriever:
             return contexts
         except Exception as e:
             logger.warning(f"Email message search failed (non-fatal): {e}")
-            self._pg_pool = None
+            self._reset_pg_conn()
             return []
 
     def get_recent_emails(self, limit: int = 5) -> list[RetrievedContext]:
@@ -1002,7 +1019,7 @@ class SentinelRetriever:
             return contexts
         except Exception as e:
             logger.warning(f"Recent email fetch failed (non-fatal): {e}")
-            self._pg_pool = None
+            self._reset_pg_conn()
             return []
 
     # ----------------------------------------------------------------
@@ -1053,7 +1070,7 @@ class SentinelRetriever:
             return contexts
         except Exception as e:
             logger.warning(f"WhatsApp message search failed (non-fatal): {e}")
-            self._pg_pool = None
+            self._reset_pg_conn()
             return []
 
     def get_recent_whatsapp(self, limit: int = 5) -> list[RetrievedContext]:
@@ -1097,7 +1114,7 @@ class SentinelRetriever:
             return contexts
         except Exception as e:
             logger.warning(f"Recent WhatsApp fetch failed (non-fatal): {e}")
-            self._pg_pool = None
+            self._reset_pg_conn()
             return []
 
     # ----------------------------------------------------------------
@@ -1148,7 +1165,7 @@ class SentinelRetriever:
             return contexts
         except Exception as e:
             logger.warning(f"Insight search failed (non-fatal): {e}")
-            self._pg_pool = None
+            self._reset_pg_conn()
             return []
 
     def get_recent_meeting_transcripts(self, limit: int = 5) -> list[RetrievedContext]:
@@ -1202,7 +1219,7 @@ class SentinelRetriever:
             return contexts
         except Exception as e:
             logger.warning(f"Recent meeting transcript fetch failed (non-fatal): {e}")
-            self._pg_pool = None
+            self._reset_pg_conn()
             return []
 
     # ----------------------------------------------------------------
@@ -1299,7 +1316,7 @@ class SentinelRetriever:
             return contexts
         except Exception as e:
             logger.warning(f"ClickUp task search failed (non-fatal): {e}")
-            self._pg_pool = None
+            self._reset_pg_conn()
             return []
 
     # ----------------------------------------------------------------
@@ -1364,7 +1381,7 @@ class SentinelRetriever:
             return result
         except Exception as e:
             logger.debug(f"Matter expansion failed (non-fatal): {e}")
-            self._pg_pool = None
+            self._reset_pg_conn()
             return []
 
     def get_matter_context(self, query: str) -> Optional[dict]:
@@ -1400,7 +1417,7 @@ class SentinelRetriever:
             return dict(row) if row else None
         except Exception as e:
             logger.debug(f"get_matter_context failed (non-fatal): {e}")
-            self._pg_pool = None
+            self._reset_pg_conn()
             return None
 
     # ----------------------------------------------------------------
