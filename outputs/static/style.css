@@ -131,7 +131,8 @@ body {
 #navOpsHeader .nav-section-label,
 #navInboxHeader .nav-section-label,
 #navPeopleHeader .nav-section-label { color: #0d9488; }
-#navIdeasHeader .nav-section-label { color: #0d9488; }
+#navIdeasHeader .nav-section-label,
+#navMediaHeader .nav-section-label { color: #0d9488; }
 /* SIDEBAR-HIERARCHY-1: Logo icon (Brisen lens) */
 .sidebar-logo-icon { width: 24px; height: 24px; border-radius: 50%; vertical-align: middle; margin-left: 6px; }
 

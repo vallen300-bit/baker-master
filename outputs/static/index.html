@@ -13,7 +13,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=67">
+    <link rel="stylesheet" href="/static/style.css?v=68">
 </head>
 <body>
 
@@ -75,6 +75,14 @@
         </div>
         <div class="nav-sub" id="ideasSubList" style="display:none;"></div>
 
+        <!-- MEDIA-SIDEBAR: Media section (promoted to top tier, peer of Ideas/People) -->
+        <div class="nav-section-header" id="navMediaHeader" data-section="media">
+            <span class="nav-section-arrow">&#9656;</span>
+            <span class="nav-section-label">Media</span>
+            <span class="nav-count" id="mediaCount"></span>
+        </div>
+        <div class="nav-sub" id="mediaSubList" style="display:none;"></div>
+
         <div class="nav-divider"></div>
 
         <div class="nav-item" data-tab="ask-baker">
@@ -110,12 +118,6 @@
         <div class="nav-item" data-tab="travel">
             <span class="nav-label">Travel</span>
         </div>
-        <div class="nav-section-header" id="navMediaHeader" data-section="media">
-            <span class="nav-section-arrow">&#9656;</span>
-            <span class="nav-section-label">Media</span>
-            <span class="nav-count" id="mediaCount"></span>
-        </div>
-        <div class="nav-sub" id="mediaSubList" style="display:none;"></div>
 
         <div class="nav-divider"></div>
         <div class="nav-item" data-tab="baker-data">
