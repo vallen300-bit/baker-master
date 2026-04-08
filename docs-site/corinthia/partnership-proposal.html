@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brisen AI x Corinthia — Partnership Proposal</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;600;700&display=swap');
+
+  @page {
+    size: A4;
+    margin: 2cm 2.5cm;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    color: #1a1a2e;
+    background: #fff;
+    line-height: 1.65;
+    font-size: 10.5pt;
+    max-width: 210mm;
+    margin: 0 auto;
+    padding: 2cm 2.5cm;
+  }
+
+  /* Header */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 2px solid #1a1a2e;
+    padding-bottom: 16px;
+    margin-bottom: 24px;
+  }
+
+  .header-left h1 {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 18pt;
+    font-weight: 700;
+    letter-spacing: -0.3px;
+    color: #1a1a2e;
+    margin-bottom: 2px;
+  }
+
+  .header-left .subtitle {
+    font-size: 9.5pt;
+    color: #555;
+    font-weight: 400;
+  }
+
+  .header-right {
+    text-align: right;
+    font-size: 8pt;
+    color: #888;
+    line-height: 1.5;
+  }
+
+  .conf {
+    display: inline-block;
+    font-size: 7pt;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #fff;
+    background: #1a1a2e;
+    padding: 3px 10px;
+    border-radius: 2px;
+    margin-bottom: 6px;
+  }
+
+  /* Sections */
+  h2 {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 13pt;
+    font-weight: 600;
+    color: #1a1a2e;
+    margin-top: 22px;
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #e0e0e0;
+  }
+
+  h3 {
+    font-size: 10pt;
+    font-weight: 600;
+    color: #333;
+    margin-top: 14px;
+    margin-bottom: 4px;
+  }
+
+  p {
+    margin-bottom: 8px;
+    text-align: justify;
+    hyphens: auto;
+  }
+
+  .lead {
+    font-size: 11pt;
+    font-weight: 500;
+    color: #1a1a2e;
+    line-height: 1.6;
+    margin-bottom: 12px;
+  }
+
+  /* Proof box */
+  .proof-box {
+    background: #f7f7fa;
+    border-left: 3px solid #1a1a2e;
+    padding: 12px 16px;
+    margin: 14px 0;
+    border-radius: 0 4px 4px 0;
+  }
+
+  .proof-box .number {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 22pt;
+    font-weight: 700;
+    color: #1a1a2e;
+    line-height: 1.1;
+  }
+
+  .proof-box .label {
+    font-size: 9pt;
+    color: #555;
+    margin-top: 2px;
+  }
+
+  .proof-row {
+    display: flex;
+    gap: 20px;
+  }
+
+  .proof-row .proof-box {
+    flex: 1;
+  }
+
+  /* Products grid */
+  .products {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 16px;
+    margin: 10px 0;
+  }
+
+  .product {
+    padding: 8px 0;
+  }
+
+  .product-name {
+    font-weight: 600;
+    font-size: 9.5pt;
+    color: #1a1a2e;
+  }
+
+  .product-desc {
+    font-size: 8.5pt;
+    color: #666;
+    line-height: 1.4;
+  }
+
+  /* Table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 9.5pt;
+  }
+
+  th {
+    background: #1a1a2e;
+    color: #fff;
+    text-align: left;
+    padding: 8px 12px;
+    font-weight: 600;
+    font-size: 8.5pt;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #eee;
+    vertical-align: top;
+  }
+
+  tr:nth-child(even) td {
+    background: #fafafa;
+  }
+
+  /* Timeline */
+  .timeline {
+    margin: 12px 0;
+  }
+
+  .timeline-item {
+    display: flex;
+    gap: 12px;
+    padding: 6px 0;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 9.5pt;
+  }
+
+  .timeline-phase {
+    font-weight: 600;
+    color: #1a1a2e;
+    min-width: 90px;
+    flex-shrink: 0;
+  }
+
+  .timeline-detail {
+    color: #444;
+  }
+
+  /* Page break */
+  .page-break {
+    page-break-before: always;
+    margin-top: 0;
+    padding-top: 0;
+  }
+
+  /* Footer */
+  .footer {
+    margin-top: 24px;
+    padding-top: 12px;
+    border-top: 1px solid #ddd;
+    font-size: 7.5pt;
+    color: #aaa;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  /* Highlight */
+  .highlight {
+    background: #f0f4ff;
+    padding: 10px 14px;
+    border-radius: 4px;
+    margin: 12px 0;
+    font-size: 10pt;
+  }
+
+  .highlight strong {
+    color: #1a1a2e;
+  }
+
+  ul {
+    margin: 6px 0 10px 20px;
+  }
+
+  li {
+    margin-bottom: 4px;
+  }
+
+  @media print {
+    body { padding: 0; }
+    .page-break { page-break-before: always; }
+  }
+</style>
+</head>
+<body>
+
+<!-- PAGE 1 -->
+<div class="header">
+  <div class="header-left">
+    <div class="conf">Confidential</div>
+    <h1>Brisen AI x Corinthia</h1>
+    <div class="subtitle">AI-Powered Intelligence for Luxury Hotel Development</div>
+  </div>
+  <div class="header-right">
+    April 2026<br>
+    Following exploratory discussions<br>
+    led by Marcus Pisani
+  </div>
+</div>
+
+<h2>The Opportunity</h2>
+
+<p class="lead">European luxury hotel development is a EUR 50 billion annual market with essentially zero AI penetration. The developers who build the right AI first will own a category that does not yet exist.</p>
+
+<p>Luxury hotel development remains untouched by AI for structural reasons: proprietary data is locked inside family-owned groups, the domain is too complex for generic tools, and decision-makers trust only people who have built what they are building. This creates a rare window for an insider to build — and own — the solution.</p>
+
+<p><strong>Corinthia is uniquely positioned to seize this.</strong> Through QP and Disigneq, the Group already controls the full vertical: design, engineering, project management, and operations. Adding an AI intelligence layer transforms this vertical from analogue to intelligent — and creates a new revenue line that can be offered to third-party clients.</p>
+
+<div class="proof-row">
+  <div class="proof-box">
+    <div class="number">EUR 6M+</div>
+    <div class="label">Claims identified by AI on a single EUR 250M hotel project (Mandarin Oriental Vienna) — a 4.6% recovery rate on construction spend</div>
+  </div>
+  <div class="proof-box">
+    <div class="number">Zero</div>
+    <div class="label">Number of AI platforms built specifically for luxury hotel owner-developers. No one occupies this space.</div>
+  </div>
+</div>
+
+<h2>Brisen AI — Proven, Not Theoretical</h2>
+
+<p>Brisen Group built four AI products out of necessity — as an owner-developer on a EUR 250M Mandarin Oriental project, not as a technology company. The products work because they were forged in real construction:</p>
+
+<div class="products">
+  <div class="product">
+    <div class="product-name">ClaimsMax</div>
+    <div class="product-desc">Ingests 50,000+ pages of construction documentation. Cross-references contracts, variations, and invoices. Identifies recoverable claims in 30 days vs. 6-12 months manually.</div>
+  </div>
+  <div class="product">
+    <div class="product-name">TenderMax</div>
+    <div class="product-desc">Translates 1,500-page brand standards into procurement specifications. Generates tender packages, evaluates bids, optimises supplier selection across concurrent projects.</div>
+  </div>
+  <div class="product">
+    <div class="product-name">OwnerView</div>
+    <div class="product-desc">Portfolio-wide intelligence dashboard. Benchmarks cost-per-key, programme compliance, and contractor performance across geographies and currencies. Real-time, not quarterly.</div>
+  </div>
+  <div class="product">
+    <div class="product-name">SiteWatch</div>
+    <div class="product-desc">Computer vision for construction sites. Compares observed progress against planned schedule from continuous camera feeds. Objective verification replacing contractor self-reporting.</div>
+  </div>
+</div>
+
+<h2>Why Corinthia + Brisen AI</h2>
+
+<p>Corinthia brings what no technology company can replicate: <strong>60 years of proprietary development data</strong> across 17+ properties, a vertically integrated development capability (QP + Disigneq), and a pipeline spanning Rome to Riyadh to Dubai. Brisen brings <strong>deployed, revenue-generating AI products</strong> proven on a comparable ultra-luxury project.</p>
+
+<div class="highlight">
+  <strong>The key insight:</strong> Corinthia's data makes the AI smarter, but the data never leaves Corinthia's control. The AI comes to QP's data — not the other way around. Corinthia gains a proprietary intelligence advantage that no competitor can replicate, because no competitor has Corinthia's data.
+</div>
+
+<!-- PAGE 2 -->
+<h2 class="page-break">The Proposal</h2>
+
+<h3>Phase 1 — Proof of Concept (90 days, zero cost to Corinthia)</h3>
+
+<table>
+  <tr>
+    <th width="50%">Corinthia / QP Provides</th>
+    <th width="50%">Brisen AI Provides</th>
+  </tr>
+  <tr>
+    <td>Historical project documentation from one completed or active QP-managed project (contracts, change orders, final accounts, correspondence)</td>
+    <td>Full ClaimsMax deployment — AI ingestion, cross-referencing, and analysis of all project documentation</td>
+  </tr>
+  <tr>
+    <td>QP project lead for coordination (estimated 2-3 hours per week)</td>
+    <td>All engineering, compute, and implementation at Brisen's cost</td>
+  </tr>
+  <tr>
+    <td>Feedback on accuracy and relevance of AI-identified findings</td>
+    <td>Monthly progress reports and final results presentation to Corinthia leadership</td>
+  </tr>
+</table>
+
+<p><strong>Suggested pilot project:</strong> A completed or near-completed QP third-party project where outcomes are already known — allowing us to demonstrate what the AI would have caught, with zero commercial sensitivity risk. The 102-storey Dubai development or a completed European project would be ideal candidates.</p>
+
+<h3>Expected Outcomes</h3>
+<ul>
+  <li>Quantified claims and recoverable amounts identified (benchmark: EUR 2-5M per EUR 100M construction spend)</li>
+  <li>Demonstrated time savings vs. manual review (benchmark: 30 days vs. 6-12 months)</li>
+  <li>Clear business case for portfolio-wide deployment across QP-managed projects</li>
+</ul>
+
+<h3>Phase 2 — Portfolio Deployment (post-pilot, subject to commercial agreement)</h3>
+<p>Upon successful pilot, deploy across the Corinthia/QP pipeline. Commercial model options include per-project licensing, performance-based fees (share of identified claims), or annual platform licensing. The right structure follows from pilot results.</p>
+
+<h3>Phase 3 — NVIDIA Partnership & Market Positioning</h3>
+<p>With a proven Corinthia deployment, the consortium approaches <strong>NVIDIA</strong> for a strategic technology partnership. NVIDIA's Travel & Hospitality vertical currently has no European proof point. Corinthia + Brisen, running on NVIDIA infrastructure, fills that gap — positioning Corinthia as the world's first AI-powered luxury hotel development group.</p>
+
+<div class="highlight">
+  <strong>The vision:</strong> QP and Disigneq become AI-augmented — offering clients not just design, engineering, and project management, but <em>intelligent</em> design, engineering, and project management. Powered by proprietary AI. Backed by NVIDIA. This is "Properly Inventive" made real.
+</div>
+
+<h3>Proposed Timeline</h3>
+<div class="timeline">
+  <div class="timeline-item">
+    <div class="timeline-phase">April 2026</div>
+    <div class="timeline-detail">Introductory call between Brisen AI and QP leadership. Agree pilot scope and project selection.</div>
+  </div>
+  <div class="timeline-item">
+    <div class="timeline-phase">May 2026</div>
+    <div class="timeline-detail">Pilot agreement signed. Data onboarding begins. Confidentiality and data handling protocols confirmed.</div>
+  </div>
+  <div class="timeline-item">
+    <div class="timeline-phase">May — July 2026</div>
+    <div class="timeline-detail">90-day pilot execution with monthly progress reports.</div>
+  </div>
+  <div class="timeline-item">
+    <div class="timeline-phase">August 2026</div>
+    <div class="timeline-detail">Results presentation to Corinthia/QP leadership. Decision on portfolio-wide deployment.</div>
+  </div>
+  <div class="timeline-item">
+    <div class="timeline-phase">September 2026</div>
+    <div class="timeline-detail">Joint approach to NVIDIA. Target: GTC 2027 showcase as the first NVIDIA-powered luxury hotel development platform.</div>
+  </div>
+</div>
+
+<h3>Data Sovereignty & Security</h3>
+<p>All data remains under Corinthia/QP control. On-premise or private cloud deployment available. Encryption at rest and in transit. Role-based access controls. GDPR-compliant. Built to the standards required by Mandarin Oriental — one of the most brand-protective hotel companies in the world.</p>
+
+<div class="footer">
+  <span>Brisen Group | Confidential</span>
+  <span>Prepared for Corinthia Group — April 2026</span>
+</div>
+
+</body>
+</html>
