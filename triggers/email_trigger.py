@@ -748,6 +748,16 @@ def check_new_emails():
     except Exception as e:
         logger.warning(f"Bluewin poll failed (non-fatal): {e}")
 
+    # ── EXCHANGE-IMAP-POLL-1: Poll Exchange alongside Gmail + Bluewin ──
+    try:
+        from triggers.exchange_poller import poll_exchange
+        exchange_threads = poll_exchange()
+        if exchange_threads:
+            logger.info(f"Exchange: {len(exchange_threads)} new emails to process")
+            _process_email_threads(exchange_threads)
+    except Exception as e:
+        logger.warning(f"Exchange poll failed (non-fatal): {e}")
+
     logger.info("Email trigger: poll cycle complete")
 
 
