@@ -2307,25 +2307,9 @@ async def get_morning_brief():
                 conn.rollback()
                 _travel_deadlines_rows = []
 
-            # LANDING-FIX-3: Meeting alerts for Meetings card (alerts tagged 'meeting', not calendar)
-            try:
-                cur.execute("""
-                    SELECT id, title, body, tags, created_at
-                    FROM alerts
-                    WHERE status = 'pending'
-                      AND tags ? 'meeting'
-                      AND title ILIKE '%%meeting%%'
-                      AND NOT (tags ? 'travel')
-                      AND title NOT ILIKE '%%Critical:%%'
-                      AND created_at >= NOW() - INTERVAL '48 hours'
-                    ORDER BY created_at DESC
-                    LIMIT 5
-                """)
-                _meeting_alerts_rows = [_serialize(dict(r)) for r in cur.fetchall()]
-            except Exception as e:
-                logger.warning(f"Morning brief: meeting alerts query failed: {e}")
-                conn.rollback()
-                _meeting_alerts_rows = []
+            # LANDING-FIX-3: Meeting alerts removed — was pulling noise like
+            # "Meeting Transcript Processing Failed" into Meetings card.
+            _meeting_alerts_rows = []
 
             cur.close()
         finally:
@@ -2409,9 +2393,14 @@ async def get_morning_brief():
             logger.warning(f"Morning brief: calendar unavailable (travel cards use DB fallback): {e}")
 
         # EXCHANGE-CALENDAR-POLL-1: Merge Exchange/Outlook calendar events
+        # 8s timeout: cold EWS connections can take 10-20s
         try:
+            import asyncio as _aio_exc
             from triggers.exchange_calendar_poller import poll_exchange_todays_meetings
-            exchange_events = poll_exchange_todays_meetings()
+            exchange_events = await _aio_exc.wait_for(
+                _aio_exc.to_thread(poll_exchange_todays_meetings),
+                timeout=8.0
+            )
             for m in exchange_events:
                 # Dedup: skip if same title + same start time already in meetings_today or travel_today
                 m_title = (m.get('title', '') or '').lower().strip()
