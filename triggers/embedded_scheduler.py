@@ -437,6 +437,15 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: scheduler_heartbeat (every 5 min)")
 
+    # OOM-PHASE3: Memory watchdog — log RSS every 5 min, alert on thresholds
+    scheduler.add_job(
+        _memory_watchdog,
+        IntervalTrigger(minutes=5),
+        id="memory_watchdog", name="Memory watchdog",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: memory_watchdog (every 5 min)")
+
 
 def _expire_browser_actions():
     """Cancel browser actions that hit the 10-minute timeout. Dismiss linked alerts."""
@@ -481,6 +490,78 @@ def _scheduler_heartbeat():
         trigger_state.set_watermark("scheduler_heartbeat", datetime.now(timezone.utc))
     except Exception as e:
         logger.error(f"Scheduler heartbeat write failed: {e}")
+
+
+def _get_rss_mb():
+    """Get current process RSS in MB. Linux: /proc/self/status. Fallback: resource module."""
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) / 1024  # KB → MB
+    except FileNotFoundError:
+        pass
+    import resource
+    usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    # macOS returns bytes, Linux returns KB
+    import sys
+    if sys.platform == "darwin":
+        return usage / (1024 * 1024)
+    return usage / 1024
+
+
+def _memory_watchdog():
+    """OOM-PHASE3: Log RSS to baker_memory_log, alert on thresholds."""
+    try:
+        rss_mb = _get_rss_mb()
+        note = None
+
+        # Threshold alerts
+        if rss_mb > 3700:
+            logger.critical(f"MEMORY EMERGENCY: {rss_mb:.0f} MB (92% of 4 GB) — forcing GC")
+            import gc
+            gc.collect()
+            note = "EMERGENCY — forced GC"
+        elif rss_mb > 3400:
+            logger.critical(f"MEMORY CRITICAL: {rss_mb:.0f} MB (85% of 4 GB)")
+            note = "CRITICAL"
+        elif rss_mb > 3000:
+            logger.warning(f"MEMORY WARNING: {rss_mb:.0f} MB (75% of 4 GB)")
+            note = "WARNING"
+        else:
+            logger.info(f"Memory watchdog: {rss_mb:.0f} MB RSS")
+
+        # Log to PostgreSQL
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if conn:
+            try:
+                cur = conn.cursor()
+                # Ensure table exists
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS baker_memory_log (
+                        id SERIAL PRIMARY KEY,
+                        timestamp TIMESTAMPTZ DEFAULT NOW(),
+                        rss_mb INTEGER,
+                        note TEXT
+                    )
+                """)
+                # Log current reading
+                cur.execute(
+                    "INSERT INTO baker_memory_log (rss_mb, note) VALUES (%s, %s)",
+                    (int(rss_mb), note),
+                )
+                # Purge entries older than 7 days
+                cur.execute("DELETE FROM baker_memory_log WHERE timestamp < NOW() - INTERVAL '7 days'")
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                logger.warning(f"Memory log write failed: {e}")
+            finally:
+                store._put_conn(conn)
+    except Exception as e:
+        logger.warning(f"Memory watchdog failed (non-fatal): {e}")
 
 
 def restart_scheduler():

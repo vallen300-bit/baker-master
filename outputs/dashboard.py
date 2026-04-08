@@ -5462,6 +5462,84 @@ async def get_action_log():
     return {"events": list(_action_log), "count": len(_action_log)}
 
 
+@app.get("/api/debug/memory", tags=["debug"], dependencies=[Depends(verify_api_key)])
+async def debug_memory():
+    """OOM-PHASE3: Memory diagnostics endpoint."""
+    from triggers.embedded_scheduler import _get_rss_mb
+    rss_mb = _get_rss_mb()
+
+    # Count singleton instances
+    from memory.retriever import SentinelRetriever
+    from memory.store_back import SentinelStoreBack
+    retriever_exists = SentinelRetriever._instance is not None
+    storeback_exists = SentinelStoreBack._instance is not None
+
+    # PG pool stats from StoreBack singleton
+    pg_stats = {}
+    if storeback_exists:
+        store = SentinelStoreBack._get_global_instance()
+        pool = getattr(store, "_pool", None)
+        if pool:
+            pg_stats = {
+                "minconn": getattr(pool, "minconn", "?"),
+                "maxconn": getattr(pool, "maxconn", "?"),
+            }
+
+    # Scheduler info
+    try:
+        status = get_scheduler_status()
+        job_count = status.get("job_count", 0)
+        scheduler_running = status.get("running", False)
+    except Exception:
+        job_count = 0
+        scheduler_running = False
+
+    # Uptime
+    import os
+    try:
+        uptime_sec = os.popen("cat /proc/uptime 2>/dev/null").read().split()[0]
+        uptime_min = float(uptime_sec) / 60
+    except Exception:
+        uptime_min = -1
+
+    # Recent memory log (last 12 entries = ~1 hour)
+    recent_log = []
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT timestamp, rss_mb, note
+                FROM baker_memory_log
+                ORDER BY timestamp DESC LIMIT 12
+            """)
+            for row in cur.fetchall():
+                recent_log.append({
+                    "timestamp": row[0].isoformat() if row[0] else None,
+                    "rss_mb": row[1],
+                    "note": row[2],
+                })
+            cur.close()
+            store._put_conn(conn)
+    except Exception:
+        pass
+
+    return {
+        "rss_mb": int(rss_mb),
+        "rss_pct": round(rss_mb / 4096 * 100, 1),
+        "pg_pool": pg_stats,
+        "singletons": {
+            "retriever": retriever_exists,
+            "store_back": storeback_exists,
+        },
+        "scheduler_jobs": job_count,
+        "scheduler_running": scheduler_running,
+        "uptime_minutes": round(uptime_min, 1),
+        "recent_log": recent_log,
+    }
+
+
 # --- Deadlines (DEADLINE-SYSTEM-1) ---
 
 @app.get("/api/deadlines", tags=["deadlines"], dependencies=[Depends(verify_api_key)])
