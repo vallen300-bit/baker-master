@@ -13,7 +13,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=68">
+    <link rel="stylesheet" href="/static/style.css?v=69">
 </head>
 <body>
 
@@ -82,6 +82,11 @@
             <span class="nav-count" id="mediaCount"></span>
         </div>
         <div class="nav-sub" id="mediaSubList" style="display:none;"></div>
+
+        <div class="nav-item" data-tab="ao-dashboard">
+            <span class="nav-dot" id="aoDot" style="margin-top:1px;"></span>
+            <span class="nav-label">AO Dashboard</span>
+        </div>
 
         <div class="nav-divider"></div>
 
@@ -510,12 +515,19 @@
             <div id="bakerDataContent"></div>
         </div>
 
+        <!-- VIEW: AO Relationship Dashboard -->
+        <div class="view" id="viewAO">
+            <div class="ao-dash-header" id="aoHeader"></div>
+            <div class="ao-dash-grid" id="aoDashGrid"></div>
+            <div id="aoCollapsibles"></div>
+        </div>
+
     </div><!-- /content -->
 </div><!-- /right-area -->
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=102"></script>
+<script src="/static/app.js?v=103"></script>
 <script>
 // PWA-DESKTOP-1: Register service worker for installability
 if ('serviceWorker' in navigator) {

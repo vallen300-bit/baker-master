@@ -676,13 +676,14 @@ const TAB_VIEW_MAP = {
     'media': 'viewMedia',
     'documents': 'viewDocuments',
     'dossiers': 'viewDossiers',
+    'ao-dashboard': 'viewAO',
     'presentations': 'viewPresentations',
     'browser': 'viewBrowser',
     'baker-data': 'viewBakerData',
     'ideas': 'viewIdeas',
 };
 
-const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'person-detail', 'tags', 'search', 'ask-baker', 'ask-specialist', 'ask-client-pm', 'travel', 'media', 'documents', 'dossiers', 'presentations', 'browser', 'baker-data', 'ideas']);
+const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'person-detail', 'tags', 'search', 'ask-baker', 'ask-specialist', 'ask-client-pm', 'travel', 'media', 'documents', 'dossiers', 'presentations', 'browser', 'baker-data', 'ideas', 'ao-dashboard']);
 
 function switchTab(tabName) {
     document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
@@ -727,6 +728,7 @@ function switchTab(tabName) {
     else if (tabName === 'browser') loadBrowserTab();
     else if (tabName === 'baker-data') loadBakerData();
     else if (tabName === 'ideas') loadIdeasTab();
+    else if (tabName === 'ao-dashboard') loadAOTab();
 }
 
 // ═══ WEEKLY PRIORITIES WIDGET ═══
@@ -9560,3 +9562,271 @@ async function showAddTripPerson() {
         });
     }
 })();
+
+// ═══ AO RELATIONSHIP DASHBOARD ═══
+
+var _aoDataCache = null;
+var _aoDataCacheAt = 0;
+
+async function loadAOTab() {
+    var now = Date.now();
+    if (_aoDataCache && (now - _aoDataCacheAt) < 120000) {
+        _renderAODashboard(_aoDataCache);
+        return;
+    }
+    var header = document.getElementById('aoHeader');
+    if (header) header.innerHTML = '<div class="thinking"><span class="thinking-dots"><span></span><span></span><span></span></span> Loading AO dashboard...</div>';
+    try {
+        var resp = await bakerFetch('/api/dashboard/ao', { timeout: 15000 });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        var data = await resp.json();
+        _aoDataCache = data;
+        _aoDataCacheAt = Date.now();
+        _renderAODashboard(data);
+        _updateAODot(data);
+    } catch (e) {
+        if (header) header.innerHTML = '<div style="color:var(--red);padding:20px;">Failed to load AO dashboard: ' + esc(e.message) + '</div>';
+    }
+}
+
+function _updateAODot(data) {
+    var dot = document.getElementById('aoDot');
+    if (!dot || !data || !data.relationship_status) return;
+    var status = data.relationship_status.gap_status || 'green';
+    dot.className = 'nav-dot ' + status;
+}
+
+function _renderAODashboard(data) {
+    var rs = data.relationship_status || {};
+    var headerEl = document.getElementById('aoHeader');
+    var gridEl = document.getElementById('aoDashGrid');
+    var collEl = document.getElementById('aoCollapsibles');
+
+    // Header
+    if (headerEl) {
+        var gapClass = rs.gap_status || 'green';
+        var gapLabel = rs.comms_gap_days + ' days';
+        if (rs.comms_gap_days === 0) gapLabel = 'Today';
+        else if (rs.comms_gap_days === 1) gapLabel = '1 day';
+        var lastContactLabel = rs.last_contact_at ? fmtRelativeTime(rs.last_contact_at) : 'Unknown';
+
+        var h = '<div class="ao-dash-title">AO Relationship Dashboard</div>';
+        h += '<div class="ao-status-bar">';
+        h += '<span class="ao-status-pill ' + gapClass + '">Gap: ' + esc(gapLabel) + '</span>';
+        h += '<span style="color:var(--text3);">Last contact: ' + esc(lastContactLabel) + '</span>';
+        h += '<span style="font-weight:600;">' + esc(rs.investment_total || '') + '</span>';
+        h += '</div>';
+
+        if (rs.comms_gap_days > 10) {
+            h += '<div class="ao-gap-warning">Communication gap: ' + rs.comms_gap_days + ' days since last contact with AO. Consider reaching out.</div>';
+        }
+        setSafeHTML(headerEl, h);
+    }
+
+    // Grid: 6 cells
+    if (gridEl) {
+        var g = '';
+        g += _renderAOStatusCell(rs);
+        g += _renderAOConversations(data.pm_state);
+        g += _renderAOFinancials(data.view_files ? data.view_files.investment_channels : '');
+        g += _renderAODeadlines(data.deadlines || [], data.pm_state);
+        g += _renderAOOrbit(data.orbit_contacts || []);
+        g += _renderAOCommLog(data.comms_log || []);
+        setSafeHTML(gridEl, g);
+    }
+
+    // Collapsible sections
+    if (collEl) {
+        var c = '';
+        var vf = data.view_files || {};
+        c += _renderAOCollapsible('Sensitive Issues', vf.sensitive_issues || '');
+        c += _renderAOCollapsible('Psychology Cheat Sheet', vf.psychology || '');
+        c += _renderAOCollapsible('Agenda & Pipeline', vf.agenda || '');
+        if (data.pending_insights && data.pending_insights.length > 0) {
+            var insightMd = data.pending_insights.map(function(pi) {
+                return '- ' + (pi.insight_text || '') + ' (' + (pi.source_type || '') + ')';
+            }).join('\n');
+            c += _renderAOCollapsible('Pending Insights (' + data.pending_insights.length + ')', insightMd);
+        }
+        setSafeHTML(collEl, c);
+    }
+}
+
+function _renderAOStatusCell(rs) {
+    var h = '<div class="grid-cell"><div class="grid-cell-header grid-header-ao-status">';
+    h += '<span class="section-label" style="margin:0">Relationship Status</span></div>';
+    h += '<div class="grid-cell-body">';
+    h += '<div style="padding:8px 4px;">';
+    h += '<div style="display:flex;justify-content:space-between;margin-bottom:10px;">';
+    h += '<span style="font-size:12px;color:var(--text3);">Investment Total</span>';
+    h += '<span style="font-size:14px;font-weight:700;color:var(--text);">' + esc(rs.investment_total || '') + '</span>';
+    h += '</div>';
+    h += '<div style="display:flex;justify-content:space-between;margin-bottom:10px;">';
+    h += '<span style="font-size:12px;color:var(--text3);">Last Contact</span>';
+    h += '<span style="font-size:12px;color:var(--text);">' + esc(rs.last_contact_at ? fmtRelativeTime(rs.last_contact_at) : 'Unknown') + '</span>';
+    h += '</div>';
+    h += '<div style="display:flex;justify-content:space-between;">';
+    h += '<span style="font-size:12px;color:var(--text3);">Comms Gap</span>';
+    var gapColor = rs.gap_status === 'red' ? 'var(--red)' : rs.gap_status === 'amber' ? 'var(--amber)' : 'var(--green)';
+    h += '<span style="font-size:12px;font-weight:600;color:' + gapColor + ';">' + rs.comms_gap_days + ' days</span>';
+    h += '</div>';
+    h += '</div></div></div>';
+    return h;
+}
+
+function _renderAOConversations(pmState) {
+    var h = '<div class="grid-cell"><div class="grid-cell-header grid-header-ao-convos">';
+    h += '<span class="section-label" style="margin:0">Active Conversations</span>';
+    var subMatters = (pmState && pmState.sub_matters) ? pmState.sub_matters : [];
+    if (subMatters.length > 0) {
+        h += '<span class="grid-cell-count" style="position:absolute;right:16px;">' + subMatters.length + '</span>';
+    }
+    h += '</div><div class="grid-cell-body">';
+    if (subMatters.length === 0) {
+        h += '<div class="grid-empty">No active conversations tracked.</div>';
+    } else {
+        subMatters.forEach(function(sm) {
+            var status = (sm.status || 'active').toLowerCase();
+            var dotClass = status === 'stale' ? 'red' : status === 'waiting' ? 'amber' : 'green';
+            h += '<div class="card card-compact" style="cursor:pointer;" onclick="_toggleTriageCard(this)"><div class="card-header">';
+            h += '<span class="nav-dot ' + dotClass + '" style="margin-top:5px;"></span>';
+            h += '<span class="card-title">' + esc(sm.name || sm.key || '') + ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span></span>';
+            if (sm.last_updated) h += '<span class="card-time">' + esc(fmtRelativeTime(sm.last_updated)) + '</span>';
+            h += '</div>';
+            h += '<div class="triage-detail" style="display:none;">';
+            if (sm.current_position) h += '<div style="font-size:12px;color:var(--text2);padding:6px 18px 4px;line-height:1.5;border-top:1px solid var(--border-light);">' + md(sm.current_position) + '</div>';
+            if (sm.next_step) h += '<div style="font-size:11px;color:var(--text3);padding:2px 18px 8px;">Next: ' + esc(sm.next_step) + '</div>';
+            h += '</div></div>';
+        });
+    }
+    h += '</div></div>';
+    return h;
+}
+
+function _renderAOFinancials(mdText) {
+    var h = '<div class="grid-cell"><div class="grid-cell-header grid-header-ao-finance">';
+    h += '<span class="section-label" style="margin:0">Financial Position</span></div>';
+    h += '<div class="grid-cell-body" style="overflow-y:auto;">';
+    if (mdText) {
+        h += '<div class="md-content" style="padding:4px;">' + md(mdText) + '</div>';
+    } else {
+        h += '<div class="grid-empty">No financial data loaded.</div>';
+    }
+    h += '</div></div>';
+    return h;
+}
+
+function _renderAODeadlines(deadlines, pmState) {
+    var h = '<div class="grid-cell"><div class="grid-cell-header grid-header-ao-deadlines">';
+    h += '<span class="section-label" style="margin:0">Deadlines & Actions</span>';
+    if (deadlines.length > 0) {
+        h += '<span class="grid-cell-count" style="position:absolute;right:16px;">' + deadlines.length + '</span>';
+    }
+    h += '</div><div class="grid-cell-body">';
+    if (deadlines.length === 0) {
+        h += '<div class="grid-empty">No AO-related deadlines.</div>';
+    } else {
+        deadlines.forEach(function(dl) {
+            var daysText = fmtDeadlineDays(dl.due_date);
+            var priority = (dl.priority || 'normal').toLowerCase();
+            var dotClass = 'lgray';
+            var timeStyle = '';
+            if (priority === 'critical' || daysText === 'Today') { dotClass = 'red'; timeStyle = 'color:var(--red);font-weight:600;'; }
+            else if (priority === 'high' || daysText === 'Tomorrow') { dotClass = 'amber'; }
+            else if (daysText.includes('overdue')) { dotClass = 'red'; timeStyle = 'color:var(--red);font-weight:600;'; }
+
+            h += '<div class="card card-compact" style="cursor:pointer;" onclick="_toggleTriageCard(this)"><div class="card-header">';
+            h += '<span class="nav-dot ' + dotClass + '" style="margin-top:5px;"></span>';
+            h += '<span class="card-title">' + esc(dl.description || '') + ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span></span>';
+            h += '<span class="card-time" style="' + timeStyle + '">' + esc(daysText) + '</span>';
+            h += '</div>';
+            var snippet = (dl.source_snippet || '').trim();
+            if (snippet && snippet.length >= 20) {
+                h += '<div class="triage-detail" style="display:none;">';
+                h += '<div style="font-size:12px;color:var(--text2);padding:6px 18px 10px;line-height:1.5;border-top:1px solid var(--border-light);white-space:pre-wrap;">' + esc(snippet) + '</div>';
+                h += '</div>';
+            }
+            h += '</div>';
+        });
+    }
+    h += '</div></div>';
+    return h;
+}
+
+function _renderAOOrbit(contacts) {
+    var h = '<div class="grid-cell"><div class="grid-cell-header grid-header-ao-orbit">';
+    h += '<span class="section-label" style="margin:0">People in Orbit</span>';
+    if (contacts.length > 0) {
+        h += '<span class="grid-cell-count" style="position:absolute;right:16px;">' + contacts.length + '</span>';
+    }
+    h += '</div><div class="grid-cell-body">';
+    if (contacts.length === 0) {
+        h += '<div class="grid-empty">No orbit contacts found.</div>';
+    } else {
+        contacts.forEach(function(c) {
+            h += '<div class="card card-compact" style="cursor:pointer;" onclick="_toggleTriageCard(this)"><div class="card-header">';
+            h += '<span class="nav-dot blue" style="margin-top:5px;"></span>';
+            h += '<span class="card-title">' + esc(c.name || '') + ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span></span>';
+            if (c.role) h += '<span class="card-time">' + esc(c.role) + '</span>';
+            h += '</div>';
+            var detail = '';
+            if (c.role_context) detail += c.role_context + '\n';
+            if (c.expertise) detail += 'Expertise: ' + c.expertise + '\n';
+            if (c.email) detail += 'Email: ' + c.email + '\n';
+            if (c.communication_pref) detail += 'Preferred: ' + c.communication_pref;
+            if (detail.trim()) {
+                h += '<div class="triage-detail" style="display:none;">';
+                h += '<div style="font-size:12px;color:var(--text2);padding:6px 18px 10px;line-height:1.5;border-top:1px solid var(--border-light);white-space:pre-wrap;">' + esc(detail.trim()) + '</div>';
+                h += '</div>';
+            }
+            h += '</div>';
+        });
+    }
+    h += '</div></div>';
+    return h;
+}
+
+function _renderAOCommLog(log) {
+    var h = '<div class="grid-cell"><div class="grid-cell-header grid-header-ao-comms">';
+    h += '<span class="section-label" style="margin:0">Communication Log</span>';
+    if (log.length > 0) {
+        h += '<span class="grid-cell-count" style="position:absolute;right:16px;">' + log.length + '</span>';
+    }
+    h += '</div><div class="grid-cell-body">';
+    if (log.length === 0) {
+        h += '<div class="grid-empty">No communications found.</div>';
+    } else {
+        log.forEach(function(entry) {
+            var dateStr = entry.sent_at ? fmtRelativeTime(entry.sent_at) : '';
+            var replied = entry.reply_received ? ' replied' : '';
+            var dotClass = entry.reply_received ? 'green' : 'lgray';
+            h += '<div style="display:flex;align-items:center;gap:8px;padding:5px 4px;border-bottom:1px solid var(--border-light);">';
+            h += '<span class="nav-dot ' + dotClass + '" style="flex-shrink:0;"></span>';
+            h += '<span style="font-size:12px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(entry.subject || '') + '</span>';
+            h += '<span style="font-size:11px;color:var(--text3);flex-shrink:0;">' + esc(dateStr) + esc(replied) + '</span>';
+            h += '</div>';
+        });
+    }
+    h += '</div></div>';
+    return h;
+}
+
+function _renderAOCollapsible(title, mdText) {
+    if (!mdText) return '';
+    var uid = 'ao_coll_' + title.replace(/\s+/g, '_').toLowerCase();
+    var h = '<div class="ao-section-collapsible">';
+    h += '<div class="ao-section-toggle" onclick="_toggleAOSection(this)">';
+    h += '<span class="arrow">&#9656;</span> ' + esc(title);
+    h += '</div>';
+    h += '<div class="ao-section-body"><div class="md-content">' + md(mdText) + '</div></div>';
+    h += '</div>';
+    return h;
+}
+
+function _toggleAOSection(el) {
+    var body = el.nextElementSibling;
+    if (!body) return;
+    var isOpen = body.classList.contains('open');
+    body.classList.toggle('open');
+    el.classList.toggle('open');
+}

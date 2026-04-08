@@ -10217,6 +10217,218 @@ async def api_download_deep_analysis_dossier(analysis_id: str, key: str = ""):
 
 
 # ============================================================
+# AO RELATIONSHIP DASHBOARD
+# ============================================================
+
+_ao_view_cache: dict = {"data": None, "loaded_at": 0}
+
+def _load_ao_view_files() -> dict:
+    """Read 5 AO PM markdown view files with 10-minute cache."""
+    global _ao_view_cache
+    now = time.time()
+    if _ao_view_cache["data"] and (now - _ao_view_cache["loaded_at"]) < 600:
+        return _ao_view_cache["data"]
+
+    ao_dir = Path(__file__).parent.parent / "data" / "ao_pm"
+    files = {
+        "psychology": "psychology.md",
+        "investment_channels": "investment_channels.md",
+        "sensitive_issues": "sensitive_issues.md",
+        "communication_rules": "communication_rules.md",
+        "agenda": "agenda.md",
+    }
+    result = {}
+    for key, fname in files.items():
+        fpath = ao_dir / fname
+        try:
+            result[key] = fpath.read_text(encoding="utf-8") if fpath.exists() else ""
+        except Exception:
+            result[key] = ""
+    _ao_view_cache = {"data": result, "loaded_at": now}
+    return result
+
+
+def _get_ao_orbit_names() -> list:
+    """Return list of AO orbit contact name patterns for ILIKE matching."""
+    return [
+        "%Oskolkov%", "%Constantinos%", "%Aelio%", "%Balazs%",
+        "%Ilana%", "%Anna%", "%Siegfried%", "%Buchwalder%",
+        "%Ettore%", "%Francesca%", "%Csepregi%",
+    ]
+
+
+@app.get("/api/dashboard/ao")
+async def get_ao_dashboard():
+    """Aggregated AO relationship dashboard data."""
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # 1. PM state
+        pm_state = {}
+        try:
+            cur.execute(
+                "SELECT state_json FROM pm_project_state WHERE pm_slug='ao_pm' AND state_key='current' LIMIT 1"
+            )
+            row = cur.fetchone()
+            if row and row.get("state_json"):
+                pm_state = row["state_json"] if isinstance(row["state_json"], dict) else {}
+        except Exception:
+            conn.rollback()
+
+        # 2. Comms gap
+        last_wa = None
+        last_email = None
+        try:
+            cur.execute(
+                "SELECT MAX(timestamp) as last_ts FROM whatsapp_messages WHERE chat_id ILIKE %s",
+                ("%oskolkov%",),
+            )
+            r = cur.fetchone()
+            if r and r.get("last_ts"):
+                last_wa = r["last_ts"]
+        except Exception:
+            conn.rollback()
+
+        try:
+            cur.execute(
+                "SELECT MAX(sent_at) as last_ts FROM sent_emails WHERE to_address ILIKE %s OR to_address ILIKE %s",
+                ("%oskolkov%", "%aelio%"),
+            )
+            r = cur.fetchone()
+            if r and r.get("last_ts"):
+                last_email = r["last_ts"]
+        except Exception:
+            conn.rollback()
+
+        from datetime import datetime, timezone
+        last_contact_at = None
+        if last_wa and last_email:
+            last_contact_at = max(last_wa, last_email)
+        elif last_wa:
+            last_contact_at = last_wa
+        elif last_email:
+            last_contact_at = last_email
+
+        comms_gap_days = 0
+        gap_status = "green"
+        if last_contact_at:
+            if hasattr(last_contact_at, "tzinfo") and last_contact_at.tzinfo is None:
+                last_contact_at = last_contact_at.replace(tzinfo=timezone.utc)
+            comms_gap_days = (datetime.now(timezone.utc) - last_contact_at).days
+            if comms_gap_days > 14:
+                gap_status = "red"
+            elif comms_gap_days > 10:
+                gap_status = "amber"
+
+        # 3. Orbit contacts
+        orbit_names = _get_ao_orbit_names()
+        orbit_contacts = []
+        try:
+            cur.execute(
+                "SELECT name, role, email, tier, domain, role_context, expertise, communication_pref "
+                "FROM vip_contacts WHERE name ILIKE ANY(%s) LIMIT 20",
+                (orbit_names,),
+            )
+            orbit_contacts = [dict(r) for r in cur.fetchall()]
+        except Exception:
+            conn.rollback()
+
+        # 4. Deadlines
+        deadlines = []
+        try:
+            cur.execute(
+                "SELECT id, description, due_date, priority, status, confidence, source_snippet "
+                "FROM deadlines WHERE status='active' AND ("
+                "description ILIKE %s OR description ILIKE %s OR description ILIKE %s "
+                "OR description ILIKE %s OR description ILIKE %s"
+                ") ORDER BY due_date LIMIT 15",
+                ("%oskolkov%", "%capital call%", "%hagenauer%", "%rg7%", "%aelio%"),
+            )
+            deadlines = [dict(r) for r in cur.fetchall()]
+            for d in deadlines:
+                if d.get("due_date"):
+                    d["due_date"] = str(d["due_date"])
+        except Exception:
+            conn.rollback()
+
+        # 5. Decisions
+        decisions = []
+        try:
+            cur.execute(
+                "SELECT decision, reasoning, created_at, project, confidence "
+                "FROM baker_decisions WHERE project ILIKE %s OR project ILIKE %s "
+                "ORDER BY created_at DESC LIMIT 20",
+                ("%ao%", "%oskolkov%"),
+            )
+            decisions = [dict(r) for r in cur.fetchall()]
+            for d in decisions:
+                if d.get("created_at"):
+                    d["created_at"] = d["created_at"].isoformat() if hasattr(d["created_at"], "isoformat") else str(d["created_at"])
+        except Exception:
+            conn.rollback()
+
+        # 6. Comms log
+        comms_log = []
+        try:
+            cur.execute(
+                "SELECT id, to_address, subject, sent_at, reply_received "
+                "FROM sent_emails WHERE to_address ILIKE %s OR to_address ILIKE %s "
+                "ORDER BY sent_at DESC LIMIT 15",
+                ("%oskolkov%", "%aelio%"),
+            )
+            comms_log = [dict(r) for r in cur.fetchall()]
+            for c in comms_log:
+                if c.get("sent_at"):
+                    c["sent_at"] = c["sent_at"].isoformat() if hasattr(c["sent_at"], "isoformat") else str(c["sent_at"])
+        except Exception:
+            conn.rollback()
+
+        # 7. Pending insights
+        pending_insights = []
+        try:
+            cur.execute(
+                "SELECT id, insight_text, source_type, created_at, status "
+                "FROM pm_pending_insights WHERE pm_slug='ao_pm' AND status='pending' LIMIT 10"
+            )
+            pending_insights = [dict(r) for r in cur.fetchall()]
+            for p in pending_insights:
+                if p.get("created_at"):
+                    p["created_at"] = p["created_at"].isoformat() if hasattr(p["created_at"], "isoformat") else str(p["created_at"])
+        except Exception:
+            conn.rollback()
+
+        cur.close()
+
+    finally:
+        store._put_conn(conn)
+
+    # View files (cached separately)
+    view_files = _load_ao_view_files()
+
+    return {
+        "relationship_status": {
+            "investment_total": "EUR 66.5M",
+            "last_contact_at": last_contact_at.isoformat() if last_contact_at and hasattr(last_contact_at, "isoformat") else None,
+            "comms_gap_days": comms_gap_days,
+            "gap_status": gap_status,
+        },
+        "pm_state": pm_state,
+        "orbit_contacts": orbit_contacts,
+        "deadlines": deadlines,
+        "decisions": decisions,
+        "comms_log": comms_log,
+        "pending_insights": pending_insights,
+        "view_files": view_files,
+    }
+
+
+# ============================================================
 # CLI runner
 # ============================================================
 
