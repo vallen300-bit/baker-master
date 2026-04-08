@@ -9677,7 +9677,10 @@ function _renderAOStatusCell(rs) {
 function _renderAOConversations(pmState) {
     var h = '<div class="grid-cell"><div class="grid-cell-header grid-header-ao-convos">';
     h += '<span class="section-label" style="margin:0">Active Conversations</span>';
-    var subMatters = (pmState && pmState.sub_matters) ? pmState.sub_matters : [];
+    var rawSM = (pmState && pmState.sub_matters) ? pmState.sub_matters : {};
+    // sub_matters can be dict {key: {...}} or array — normalise to array
+    var subMatters = Array.isArray(rawSM) ? rawSM :
+        Object.keys(rawSM).map(function(k) { var o = rawSM[k]; o._key = k; return o; });
     if (subMatters.length > 0) {
         h += '<span class="grid-cell-count" style="position:absolute;right:16px;">' + subMatters.length + '</span>';
     }
@@ -9690,11 +9693,12 @@ function _renderAOConversations(pmState) {
             var dotClass = status === 'stale' ? 'red' : status === 'waiting' ? 'amber' : 'green';
             h += '<div class="card card-compact" style="cursor:pointer;" onclick="_toggleTriageCard(this)"><div class="card-header">';
             h += '<span class="nav-dot ' + dotClass + '" style="margin-top:5px;"></span>';
-            h += '<span class="card-title">' + esc(sm.name || sm.key || '') + ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span></span>';
+            h += '<span class="card-title">' + esc(sm.name || sm._key || '') + ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span></span>';
             if (sm.last_updated) h += '<span class="card-time">' + esc(fmtRelativeTime(sm.last_updated)) + '</span>';
             h += '</div>';
             h += '<div class="triage-detail" style="display:none;">';
-            if (sm.current_position) h += '<div style="font-size:12px;color:var(--text2);padding:6px 18px 4px;line-height:1.5;border-top:1px solid var(--border-light);">' + md(sm.current_position) + '</div>';
+            var smDetail = sm.current_position || sm.notes || sm.role || '';
+            if (smDetail) h += '<div style="font-size:12px;color:var(--text2);padding:6px 18px 4px;line-height:1.5;border-top:1px solid var(--border-light);">' + md(smDetail) + '</div>';
             if (sm.next_step) h += '<div style="font-size:11px;color:var(--text3);padding:2px 18px 8px;">Next: ' + esc(sm.next_step) + '</div>';
             h += '</div></div>';
         });
