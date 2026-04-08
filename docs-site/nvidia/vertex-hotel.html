@@ -1,0 +1,2102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VERTEX by NVIDIA x Corinthia — Concept Presentation</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a28;
+    --accent: #6c63ff;
+    --accent2: #00d4aa;
+    --accent3: #ff6b9d;
+    --nvidia: #76B900;
+    --nvidia-dim: rgba(118,185,0,0.15);
+    --nvidia-glow: rgba(118,185,0,0.3);
+    --gold: #d4a853;
+    --text: #e8e6f0;
+    --text-dim: #8a87a0;
+    --border: rgba(108,99,255,0.15);
+    --border-nv: rgba(118,185,0,0.2);
+    --glow: rgba(108,99,255,0.3);
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  /* ====== HERO ====== */
+  .hero {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    padding: 2rem;
+  }
+
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(ellipse at 30% 50%, rgba(118,185,0,0.07) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 50%, rgba(108,99,255,0.06) 0%, transparent 50%),
+                radial-gradient(ellipse at 50% 20%, rgba(0,212,170,0.04) 0%, transparent 40%);
+    animation: heroGlow 15s ease-in-out infinite alternate;
+  }
+
+  @keyframes heroGlow {
+    0% { transform: translate(0, 0) rotate(0deg); }
+    100% { transform: translate(-5%, 5%) rotate(3deg); }
+  }
+
+  /* Triangle decoration */
+  .hero-triangles {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .hero-triangles .tri {
+    position: absolute;
+    width: 0; height: 0;
+    opacity: 0.04;
+  }
+
+  .tri-1 { border-left: 80px solid transparent; border-right: 80px solid transparent; border-bottom: 140px solid var(--nvidia); top: 10%; left: 5%; animation: triFloat 20s ease-in-out infinite; }
+  .tri-2 { border-left: 50px solid transparent; border-right: 50px solid transparent; border-bottom: 87px solid var(--accent); top: 20%; right: 8%; animation: triFloat 25s ease-in-out infinite reverse; }
+  .tri-3 { border-left: 120px solid transparent; border-right: 120px solid transparent; border-bottom: 208px solid var(--nvidia); bottom: 5%; left: 15%; animation: triFloat 30s ease-in-out infinite; }
+  .tri-4 { border-left: 40px solid transparent; border-right: 40px solid transparent; border-bottom: 69px solid var(--accent2); bottom: 20%; right: 12%; animation: triFloat 18s ease-in-out infinite reverse; }
+  .tri-5 { border-left: 65px solid transparent; border-right: 65px solid transparent; border-bottom: 113px solid var(--accent); top: 60%; left: 70%; animation: triFloat 22s ease-in-out infinite; }
+
+  @keyframes triFloat {
+    0%, 100% { transform: translateY(0) rotate(0deg); }
+    50% { transform: translateY(-30px) rotate(8deg); }
+  }
+
+  .hero-tag {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 20px;
+    background: var(--nvidia-dim);
+    border: 1px solid rgba(118,185,0,0.3);
+    border-radius: 100px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--nvidia);
+    margin-bottom: 2rem;
+  }
+
+  .hero-name {
+    position: relative;
+    font-family: 'Inter', sans-serif;
+    font-size: clamp(4rem, 12vw, 9rem);
+    font-weight: 900;
+    letter-spacing: 0.15em;
+    line-height: 1;
+    margin-bottom: 0.5rem;
+    background: linear-gradient(135deg, #fff 0%, var(--nvidia) 60%, #a3e635 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .hero-subtitle-main {
+    position: relative;
+    font-family: 'Playfair Display', serif;
+    font-style: italic;
+    font-size: clamp(1.2rem, 3vw, 1.8rem);
+    color: var(--text-dim);
+    margin-bottom: 0.5rem;
+  }
+
+  .hero-subtitle-sub {
+    position: relative;
+    font-size: 0.95rem;
+    color: var(--text-dim);
+    margin-bottom: 3rem;
+    opacity: 0.7;
+  }
+
+  .hero p {
+    position: relative;
+    font-size: 1.15rem;
+    color: var(--text-dim);
+    max-width: 640px;
+    margin-bottom: 3rem;
+  }
+
+  .hero-stats {
+    position: relative;
+    display: flex;
+    gap: 3rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .hero-stat { text-align: center; }
+
+  .hero-stat .num {
+    font-size: 2.5rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--nvidia), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .hero-stat .label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  /* ====== SECTIONS ====== */
+  section {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 6rem 2rem;
+  }
+
+  .section-header {
+    text-align: center;
+    margin-bottom: 4rem;
+  }
+
+  .section-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, var(--nvidia), var(--accent2));
+    color: #fff;
+    font-weight: 800;
+    font-size: 1rem;
+    margin-bottom: 1rem;
+    font-family: 'Playfair Display', serif;
+  }
+
+  .section-header h2 {
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(2rem, 4vw, 3rem);
+    margin-bottom: 0.5rem;
+  }
+
+  .section-header .subtitle {
+    color: var(--text-dim);
+    font-size: 1.1rem;
+  }
+
+  /* ====== DIVIDER ====== */
+  .divider {
+    max-width: 1200px;
+    margin: 0 auto;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border-nv), transparent);
+  }
+
+  /* ====== GENERIC CARDS ====== */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2.5rem;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 40px var(--nvidia-glow);
+  }
+
+  /* ====== COMPETITION SECTION ====== */
+  .comp-brief {
+    background: var(--surface);
+    border: 1px solid var(--border-nv);
+    border-radius: 20px;
+    padding: 3rem;
+    text-align: center;
+    max-width: 800px;
+    margin: 0 auto;
+  }
+
+  .comp-brief h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .comp-brief p {
+    color: var(--text-dim);
+    font-size: 0.95rem;
+    margin-bottom: 1.5rem;
+    line-height: 1.8;
+  }
+
+  .criteria-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    justify-content: center;
+  }
+
+  .criteria-tag {
+    display: inline-block;
+    padding: 6px 16px;
+    border-radius: 100px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    background: var(--nvidia-dim);
+    color: var(--nvidia);
+    border: 1px solid rgba(118,185,0,0.2);
+  }
+
+  /* ====== WHY VERTEX ====== */
+  .vertex-story {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+    margin-bottom: 3rem;
+  }
+
+  @media (max-width: 768px) {
+    .vertex-story { grid-template-columns: 1fr; }
+  }
+
+  .vertex-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2rem;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .vertex-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 30px var(--nvidia-glow);
+  }
+
+  .vertex-card h3 {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin-bottom: 0.75rem;
+    color: var(--nvidia);
+  }
+
+  .vertex-card p {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+  }
+
+  .vertex-design {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+  }
+
+  @media (max-width: 768px) {
+    .vertex-design { grid-template-columns: 1fr; }
+  }
+
+  .design-pill {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 1.5rem;
+    text-align: center;
+    transition: transform 0.3s;
+  }
+
+  .design-pill:hover { transform: translateY(-3px); }
+
+  .design-pill .icon {
+    font-size: 2rem;
+    margin-bottom: 0.75rem;
+    display: block;
+  }
+
+  .design-pill h4 {
+    font-size: 0.9rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    color: var(--nvidia);
+  }
+
+  .design-pill p {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+
+  /* ====== CONSORTIUM ====== */
+  .consortium-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .consortium-grid { grid-template-columns: 1fr; }
+  }
+
+  .consortium-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2.5rem;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .consortium-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 30px var(--nvidia-glow);
+  }
+
+  .consortium-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    border-radius: 20px 20px 0 0;
+  }
+
+  .consortium-card:nth-child(1)::before { background: linear-gradient(90deg, var(--gold), #f0c060); }
+  .consortium-card:nth-child(2)::before { background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+  .consortium-card:nth-child(3)::before { background: linear-gradient(90deg, var(--nvidia), #a3e635); }
+
+  .consortium-card .card-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 0.75rem;
+    font-weight: 600;
+  }
+
+  .consortium-card:nth-child(1) .card-label { color: var(--gold); }
+  .consortium-card:nth-child(2) .card-label { color: var(--accent); }
+  .consortium-card:nth-child(3) .card-label { color: var(--nvidia); }
+
+  .consortium-card h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.4rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .consortium-card .card-stat {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    margin-bottom: 1rem;
+    font-style: italic;
+  }
+
+  .consortium-card p {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+    margin-bottom: 1rem;
+  }
+
+  .consortium-card .provides {
+    padding: 1rem;
+    border-radius: 12px;
+    background: var(--surface2);
+    font-size: 0.8rem;
+    line-height: 1.8;
+  }
+
+  .provides-label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--nvidia);
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+  }
+
+  /* ====== LOCATION ====== */
+  .location-hero {
+    background: var(--surface);
+    border: 1px solid var(--border-nv);
+    border-radius: 20px;
+    padding: 3rem;
+    text-align: center;
+    margin-bottom: 2rem;
+  }
+
+  .location-hero h3 {
+    font-family: 'Playfair Display', serif;
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .location-hero .loc-accent {
+    color: var(--nvidia);
+    font-weight: 700;
+  }
+
+  .location-reasons {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.5rem;
+  }
+
+  @media (max-width: 768px) {
+    .location-reasons { grid-template-columns: 1fr 1fr; }
+  }
+
+  .loc-reason {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 1.5rem;
+    text-align: center;
+    transition: transform 0.3s;
+  }
+
+  .loc-reason:hover { transform: translateY(-3px); }
+
+  .loc-reason .icon { font-size: 2rem; margin-bottom: 0.75rem; display: block; }
+
+  .loc-reason h4 {
+    font-size: 0.85rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+  }
+
+  .loc-reason p {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+
+  /* ====== ROOM CONCEPT ====== */
+  .room-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .room-grid { grid-template-columns: 1fr; }
+  }
+
+  .room-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2rem;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .room-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.2), 0 0 20px var(--nvidia-glow);
+  }
+
+  .room-count {
+    font-size: 2.5rem;
+    font-weight: 900;
+    background: linear-gradient(135deg, var(--nvidia), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    min-width: 60px;
+    text-align: center;
+  }
+
+  .room-info h4 { font-size: 1rem; font-weight: 700; margin-bottom: 0.25rem; }
+  .room-info p { font-size: 0.85rem; color: var(--text-dim); }
+
+  .amenities-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 1rem;
+  }
+
+  @media (max-width: 768px) {
+    .amenities-row { grid-template-columns: repeat(3, 1fr); }
+  }
+
+  .amenity {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1rem;
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    transition: transform 0.3s;
+  }
+
+  .amenity:hover { transform: translateY(-2px); }
+
+  .amenity .icon { font-size: 1.5rem; display: block; margin-bottom: 0.5rem; }
+
+  /* ====== GUEST JOURNEY PHASES ====== */
+  .phase {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 2.5rem;
+    margin-bottom: 2rem;
+    position: relative;
+    overflow: hidden;
+    transition: transform 0.3s, box-shadow 0.3s;
+  }
+
+  .phase:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 40px var(--nvidia-glow);
+  }
+
+  .phase::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    border-radius: 20px 20px 0 0;
+  }
+
+  .phase:nth-child(1)::before { background: linear-gradient(90deg, var(--nvidia), #a3e635); }
+  .phase:nth-child(2)::before { background: linear-gradient(90deg, #6c63ff, #8b83ff); }
+  .phase:nth-child(3)::before { background: linear-gradient(90deg, #00d4aa, #00f0c0); }
+  .phase:nth-child(4)::before { background: linear-gradient(90deg, #d4a853, #f0c060); }
+  .phase:nth-child(5)::before { background: linear-gradient(90deg, #ff6b9d, #ff8eb5); }
+  .phase:nth-child(6)::before { background: linear-gradient(90deg, #63b3ed, #90cdf4); }
+  .phase:nth-child(7)::before { background: linear-gradient(90deg, #b794f4, #d6bcfa); }
+  .phase:nth-child(8)::before { background: linear-gradient(90deg, #68d391, #9ae6b4); }
+
+  .phase-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .phase-icon {
+    width: 52px;
+    height: 52px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.6rem;
+    flex-shrink: 0;
+  }
+
+  .phase:nth-child(1) .phase-icon { background: var(--nvidia-dim); }
+  .phase:nth-child(2) .phase-icon { background: rgba(108,99,255,0.15); }
+  .phase:nth-child(3) .phase-icon { background: rgba(0,212,170,0.15); }
+  .phase:nth-child(4) .phase-icon { background: rgba(212,168,83,0.15); }
+  .phase:nth-child(5) .phase-icon { background: rgba(255,107,157,0.15); }
+  .phase:nth-child(6) .phase-icon { background: rgba(99,179,237,0.15); }
+  .phase:nth-child(7) .phase-icon { background: rgba(183,148,244,0.15); }
+  .phase:nth-child(8) .phase-icon { background: rgba(104,211,145,0.15); }
+
+  .phase-title { font-size: 1.4rem; font-weight: 700; }
+  .phase-num { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 2px; color: var(--text-dim); }
+
+  .phase-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 1.5rem;
+    margin-top: 1rem;
+  }
+
+  @media (max-width: 768px) {
+    .phase-grid { grid-template-columns: 1fr; }
+  }
+
+  .phase-card {
+    background: var(--surface2);
+    border-radius: 14px;
+    padding: 1.5rem;
+  }
+
+  .phase-card h4 {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .phase-card.experience h4 { color: var(--accent2); }
+  .phase-card.tech h4 { color: var(--nvidia); }
+  .phase-card.magic h4 { color: var(--accent3); }
+
+  .phase-card p, .phase-card ul {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    line-height: 1.7;
+  }
+
+  .phase-card ul { list-style: none; padding: 0; }
+
+  .phase-card ul li {
+    padding: 4px 0;
+    padding-left: 18px;
+    position: relative;
+  }
+
+  .phase-card ul li::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 12px;
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--nvidia);
+    opacity: 0.6;
+  }
+
+  /* ====== NVIDIA PRODUCT MAP ====== */
+  .product-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 1rem;
+  }
+
+  @media (max-width: 960px) {
+    .product-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+
+  @media (max-width: 600px) {
+    .product-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+
+  .product-tile {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 1.25rem;
+    text-align: center;
+    transition: transform 0.3s, box-shadow 0.3s, border-color 0.3s;
+  }
+
+  .product-tile:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 40px rgba(0,0,0,0.3), 0 0 25px var(--nvidia-glow);
+    border-color: rgba(118,185,0,0.4);
+  }
+
+  .product-tile .p-icon { font-size: 1.8rem; margin-bottom: 0.5rem; display: block; }
+
+  .product-tile h4 {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--nvidia);
+    margin-bottom: 0.4rem;
+  }
+
+  .product-tile p {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+
+  /* ====== FINANCIALS ====== */
+  .fin-hero-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.5rem;
+    margin-bottom: 3rem;
+  }
+
+  @media (max-width: 768px) {
+    .fin-hero-grid { grid-template-columns: 1fr 1fr; }
+  }
+
+  .fin-stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: center;
+    transition: transform 0.3s;
+  }
+
+  .fin-stat:hover { transform: translateY(-3px); }
+
+  .fin-stat .big {
+    font-size: 2.2rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--nvidia), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    line-height: 1.1;
+  }
+
+  .fin-stat .desc {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-top: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .ai-premium-callout {
+    background: linear-gradient(135deg, rgba(118,185,0,0.08), rgba(0,212,170,0.05));
+    border: 1px solid rgba(118,185,0,0.25);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: center;
+    margin-bottom: 3rem;
+  }
+
+  .ai-premium-callout .headline {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .ai-premium-callout .headline span {
+    color: var(--nvidia);
+    font-weight: 700;
+  }
+
+  .ai-premium-callout p {
+    color: var(--text-dim);
+    font-size: 0.95rem;
+  }
+
+  /* Comparison Table */
+  .comparison-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 1rem;
+  }
+
+  .comparison-table th {
+    text-align: left;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .comparison-table th:nth-child(3) { color: var(--nvidia); }
+
+  .comparison-table td {
+    padding: 1rem 1.5rem;
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    vertical-align: top;
+  }
+
+  .comparison-table tr:hover td {
+    background: rgba(118,185,0,0.03);
+  }
+
+  .comparison-table td:first-child {
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  .comparison-table td:nth-child(3) {
+    color: var(--nvidia);
+    font-weight: 600;
+  }
+
+  /* ====== COMPETITIVE EDGE ====== */
+  .edge-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .edge-table th {
+    text-align: left;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    padding: 1rem 1.5rem;
+    border-bottom: 2px solid var(--border);
+  }
+
+  .edge-table th.us { color: var(--nvidia); }
+  .edge-table th.them { color: var(--accent3); }
+
+  .edge-table td {
+    padding: 1rem 1.5rem;
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    vertical-align: top;
+  }
+
+  .edge-table tr:hover td {
+    background: rgba(118,185,0,0.03);
+  }
+
+  .edge-table td:first-child {
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .edge-table td.win {
+    color: var(--nvidia);
+    font-weight: 600;
+  }
+
+  .edge-table td.lose {
+    color: var(--accent3);
+    opacity: 0.7;
+  }
+
+  /* ====== HUMAN ELEMENT ====== */
+  .human-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 1.5rem;
+  }
+
+  @media (max-width: 768px) {
+    .human-grid { grid-template-columns: 1fr; }
+  }
+
+  .human-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2rem;
+    text-align: center;
+    transition: transform 0.3s;
+  }
+
+  .human-card:hover { transform: translateY(-3px); }
+
+  .human-card .emoji { font-size: 2.5rem; margin-bottom: 1rem; }
+  .human-card h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.5rem; }
+  .human-card p { font-size: 0.85rem; color: var(--text-dim); }
+
+  .ratio-bar {
+    margin: 2rem auto;
+    max-width: 600px;
+  }
+
+  .ratio-bar .bar {
+    height: 32px;
+    border-radius: 16px;
+    overflow: hidden;
+    display: flex;
+  }
+
+  .ratio-bar .ai-part {
+    background: linear-gradient(90deg, var(--nvidia), var(--accent2));
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #fff;
+  }
+
+  .ratio-bar .human-part {
+    background: linear-gradient(90deg, var(--gold), #f0c060);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--bg);
+  }
+
+  .ratio-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+  }
+
+  /* ====== RISK TABLE ====== */
+  .risk-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 2rem;
+  }
+
+  .risk-table th {
+    text-align: left;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .risk-table td {
+    padding: 1.2rem 1.5rem;
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    vertical-align: top;
+  }
+
+  .risk-table tr:hover td { background: rgba(118,185,0,0.03); }
+
+  .risk-table td:first-child {
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+  }
+
+  /* ====== NEXT STEPS / TIMELINE ====== */
+  .timeline {
+    position: relative;
+    padding-left: 40px;
+  }
+
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 14px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(180deg, var(--nvidia), var(--accent2), var(--accent));
+  }
+
+  .timeline-item {
+    position: relative;
+    margin-bottom: 2rem;
+    padding-left: 2rem;
+  }
+
+  .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -33px;
+    top: 6px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--nvidia);
+    border: 3px solid var(--bg);
+    box-shadow: 0 0 12px var(--nvidia-glow);
+  }
+
+  .timeline-item .date {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--nvidia);
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+  }
+
+  .timeline-item h4 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+  }
+
+  .timeline-item p {
+    font-size: 0.9rem;
+    color: var(--text-dim);
+  }
+
+  /* ====== CONCLUSION / VISION ====== */
+  .conclusion {
+    text-align: center;
+    padding: 4rem 2rem;
+    max-width: 800px;
+    margin: 0 auto;
+  }
+
+  .conclusion h2 {
+    font-family: 'Playfair Display', serif;
+    font-size: 2.5rem;
+    margin-bottom: 1.5rem;
+    background: linear-gradient(135deg, #fff, var(--nvidia));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .conclusion p {
+    font-size: 1.1rem;
+    color: var(--text-dim);
+    line-height: 1.8;
+  }
+
+  .conclusion blockquote {
+    margin: 2rem auto;
+    padding: 1.5rem 2rem;
+    border-left: 3px solid var(--nvidia);
+    background: rgba(118,185,0,0.05);
+    border-radius: 0 12px 12px 0;
+    font-family: 'Playfair Display', serif;
+    font-style: italic;
+    font-size: 1.3rem;
+    color: var(--nvidia);
+    max-width: 600px;
+  }
+
+  /* ====== FOOTER ====== */
+  .footer {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 4rem 2rem;
+    text-align: center;
+  }
+
+  .footer .sources {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-top: 2rem;
+    line-height: 2;
+  }
+
+  .footer .sources a {
+    color: var(--nvidia);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(118,185,0,0.3);
+  }
+
+  .footer .sources a:hover { border-bottom-color: var(--nvidia); }
+
+  .footer .credits {
+    margin-top: 2rem;
+    font-size: 0.7rem;
+    color: rgba(255,255,255,0.2);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  /* ====== CONFIDENTIAL BANNER ====== */
+  .confidential-bar {
+    background: rgba(118,185,0,0.06);
+    border-bottom: 1px solid rgba(118,185,0,0.15);
+    padding: 8px;
+    text-align: center;
+    font-size: 0.65rem;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: rgba(118,185,0,0.5);
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+
+  /* ====== SCROLL INDICATOR ====== */
+  .scroll-indicator {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    margin-top: 2rem;
+  }
+
+  .scroll-indicator span {
+    display: block;
+    width: 24px;
+    height: 40px;
+    border: 2px solid rgba(118,185,0,0.3);
+    border-radius: 12px;
+    position: relative;
+  }
+
+  .scroll-indicator span::after {
+    content: '';
+    position: absolute;
+    top: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 4px;
+    height: 8px;
+    background: var(--nvidia);
+    border-radius: 2px;
+    animation: scrollBounce 2s ease-in-out infinite;
+  }
+
+  @keyframes scrollBounce {
+    0%, 100% { transform: translateX(-50%) translateY(0); opacity: 1; }
+    50% { transform: translateX(-50%) translateY(12px); opacity: 0.3; }
+  }
+
+  /* ====== PRINT STYLES ====== */
+  @media print {
+    .confidential-bar { position: static; }
+    .phase:hover, .card:hover, .consortium-card:hover { transform: none; box-shadow: none; }
+    body { background: #fff; color: #111; }
+  }
+</style>
+</head>
+<body>
+
+<!-- CONFIDENTIAL BAR -->
+<div class="confidential-bar">Confidential &mdash; Prepared for Marcus Pisani / Corinthia Hotels &mdash; April 8, 2026</div>
+
+<!-- ================================================================ -->
+<!--  I. HERO / COVER                                                 -->
+<!-- ================================================================ -->
+<div class="hero" style="padding-top:3.5rem;">
+  <div class="hero-triangles">
+    <div class="tri tri-1"></div>
+    <div class="tri tri-2"></div>
+    <div class="tri tri-3"></div>
+    <div class="tri tri-4"></div>
+    <div class="tri tri-5"></div>
+  </div>
+
+  <div class="hero-tag">NVIDIA Hotel Concept Competition &bull; April 2026</div>
+  <div class="hero-name">VERTEX</div>
+  <div class="hero-subtitle-main">The First NVIDIA Hotel</div>
+  <p>Where computation becomes experience</p>
+  <div class="hero-subtitle-sub">A Corinthia Hotels &times; Brisen AI &times; NVIDIA Concept</div>
+
+  <div class="hero-stats">
+    <div class="hero-stat">
+      <div class="num">$15.5B</div>
+      <div class="label">AI in Hospitality<br>Market by 2030</div>
+    </div>
+    <div class="hero-stat">
+      <div class="num">82%</div>
+      <div class="label">Hotels Accelerating<br>AI Adoption in 2026</div>
+    </div>
+    <div class="hero-stat">
+      <div class="num">250%</div>
+      <div class="label">Surge in Hospitality<br>AI Investment (2025)</div>
+    </div>
+    <div class="hero-stat">
+      <div class="num">30%</div>
+      <div class="label">Cost Reduction<br>with AI Deployment</div>
+    </div>
+  </div>
+
+  <div class="scroll-indicator"><span></span></div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!--  II. THE COMPETITION                                              -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">II</div>
+    <h2>The Competition</h2>
+    <div class="subtitle">NVIDIA Hotel Concept &mdash; Human vs AI Creativity Challenge</div>
+  </div>
+
+  <div class="comp-brief">
+    <h3>Judged by Jensen Huang</h3>
+    <p>Design a 120&ndash;140 room hotel that embodies NVIDIA's brand, vision, and technology. Deliver a concept book (max 20 pages), mood board, hotel name, and optional video. The winner demonstrates how AI can transform hospitality from the ground up.</p>
+    <div class="criteria-row">
+      <span class="criteria-tag">Brand Coherence</span>
+      <span class="criteria-tag">Innovation</span>
+      <span class="criteria-tag">Guest Experience</span>
+      <span class="criteria-tag">Feasibility</span>
+      <span class="criteria-tag">Sustainability</span>
+      <span class="criteria-tag">Storytelling</span>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!--  III. WHY "VERTEX"                                                -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">III</div>
+    <h2>Why "VERTEX"</h2>
+    <div class="subtitle">The name is the brand. The brand is the architecture. The architecture is NVIDIA.</div>
+  </div>
+
+  <div class="vertex-story">
+    <div class="vertex-card">
+      <h3>The Triangle Is NVIDIA</h3>
+      <p>A vertex is where triangle edges meet &mdash; the fundamental unit of GPU rendering. Every 3D object you see on screen is built from millions of triangles, each defined by its vertices. The triangle <em>is</em> NVIDIA's origin story: NV1 bet on quadratics and nearly killed the company. NV3 returned to triangles &mdash; and saved it. NVIDIA HQ has 511 triangular skylights. The triangle isn't a design motif. It's a founding principle.</p>
+    </div>
+    <div class="vertex-card">
+      <h3>Rendering Reality</h3>
+      <p>A GPU renders polygons into photorealistic reality &mdash; turning invisible data into visible, tactile experience. VERTEX does the same with hospitality. The hotel "renders" guest experience from invisible signals: biometrics, preferences, context, mood. Just as a GPU turns code into worlds, VERTEX turns data into the most attentive stay a guest has ever had. You never see the computation. You only feel the result.</p>
+    </div>
+  </div>
+
+  <div class="vertex-design">
+    <div class="design-pill">
+      <span class="icon" style="color:var(--nvidia);">&#9650;</span>
+      <h4>Triangulated Facades</h4>
+      <p>Tessellated exterior surfaces that shift light throughout the day &mdash; a building that renders itself</p>
+    </div>
+    <div class="design-pill">
+      <span class="icon" style="color:var(--nvidia);">&#9670;</span>
+      <h4>Faceted Volumes</h4>
+      <p>Interior spaces defined by angular geometry &mdash; the GPU's polygon aesthetic made physical</p>
+    </div>
+    <div class="design-pill">
+      <span class="icon" style="color:var(--nvidia);">&#9632;</span>
+      <h4>Dark Anodized Metal</h4>
+      <p>Jensen's leather jacket in architectural form &mdash; #1E1E1E blacks as the hotel's backbone</p>
+    </div>
+    <div class="design-pill">
+      <span class="icon" style="color:var(--accent2);">&#9673;</span>
+      <h4>NVIDIA Green Accents</h4>
+      <p>#76B900 as living color &mdash; in vegetation, ambient light, and subtle digital surfaces</p>
+    </div>
+    <div class="design-pill">
+      <span class="icon" style="color:var(--accent);">&#9674;</span>
+      <h4>Glass &amp; Light</h4>
+      <p>Tessellated skylights echoing NVIDIA HQ &mdash; natural light rendered through computational geometry</p>
+    </div>
+    <div class="design-pill">
+      <span class="icon" style="color:var(--gold);">&#9788;</span>
+      <h4>Living Green</h4>
+      <p>Vertical gardens and biophilic design &mdash; technology serving nature, never replacing it</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!--  IV. THE CONSORTIUM                                               -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">IV</div>
+    <h2>The Consortium: Why Us</h2>
+    <div class="subtitle">Three organizations that together cover every dimension Jensen will evaluate</div>
+  </div>
+
+  <div class="consortium-grid">
+    <div class="consortium-card">
+      <div class="card-label">Hotel Development &amp; Operations</div>
+      <h3>Corinthia Hotels</h3>
+      <div class="card-stat">60 years &bull; 17 properties &bull; Pisani founding family</div>
+      <p>Vertically integrated: own, develop, and operate. "Grand Boutique" positioning in the ultra-luxury segment. Pipeline: Rome, Qatar, Riyadh, Maldives, Lake Como. The rare hotel group that builds from ground up &mdash; not just manages.</p>
+      <div class="provides">
+        <div class="provides-label">They Provide</div>
+        Hotel development data, operational expertise, brand credibility, construction pipeline know-how
+      </div>
+    </div>
+    <div class="consortium-card">
+      <div class="card-label">AI Technology Layer</div>
+      <h3>Brisen AI</h3>
+      <div class="card-stat">AI platform for European luxury hotel owners</div>
+      <p>Proven on EUR 250M Mandarin Oriental Vienna. Four product lines: ClaimsMax (construction claims), TenderMax (procurement AI), ConstructionAI (site intelligence), OwnerView (real-time project dashboards). Deep understanding of where AI creates value in hotels.</p>
+      <div class="provides">
+        <div class="provides-label">They Provide</div>
+        AI technology layer, NVIDIA product integration architecture, Baker AI orchestration system
+      </div>
+    </div>
+    <div class="consortium-card">
+      <div class="card-label">GPU Compute &amp; AI Infrastructure</div>
+      <h3>NVIDIA</h3>
+      <div class="card-stat">$130.5B revenue &bull; World's most valuable company</div>
+      <p>The company that made AI possible. From GPU compute to Omniverse digital twins, from Isaac robotics to Riva voice AI &mdash; NVIDIA's product ecosystem is the engine that powers every element of VERTEX.</p>
+      <div class="provides">
+        <div class="provides-label">They Provide</div>
+        Grace Blackwell / DGX compute, Omniverse, Isaac, NIM, Riva, Maxine, DRIVE, Earth-2, Picasso, CUDA
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!--  V. LOCATION: SINGAPORE                                          -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">V</div>
+    <h2>Location: Singapore</h2>
+    <div class="subtitle">The only city in the world where this hotel could open tomorrow</div>
+  </div>
+
+  <div class="location-hero">
+    <h3>The World's <span class="loc-accent">Smart Nation</span></h3>
+    <p style="color:var(--text-dim);font-size:1rem;max-width:700px;margin:1rem auto 0;">No luxury AI-native hotel exists anywhere on Earth. Singapore &mdash; global fintech hub, engineering capital, NVIDIA's Asia AI headquarters &mdash; is the natural launchpad. Its "Smart Nation" regulatory framework makes advanced AI integration seamless. Multicultural, tech-forward, globally relevant.</p>
+  </div>
+
+  <div class="location-reasons">
+    <div class="loc-reason">
+      <span class="icon">&#127758;</span>
+      <h4>Global AI Hub</h4>
+      <p>Home to NVIDIA's Asia AI operations, Google DeepMind, and hundreds of AI startups</p>
+    </div>
+    <div class="loc-reason">
+      <span class="icon">&#9878;</span>
+      <h4>Smart Nation Policy</h4>
+      <p>Government-backed AI integration framework &mdash; biometric check-in, autonomous vehicles, all legally viable</p>
+    </div>
+    <div class="loc-reason">
+      <span class="icon">&#9992;</span>
+      <h4>Global Gateway</h4>
+      <p>4-hour reach to 3 billion people. Changi Airport handles 68M+ passengers. Multicultural, English-speaking</p>
+    </div>
+    <div class="loc-reason">
+      <span class="icon">&#9889;</span>
+      <h4>vs. JCB's Yakushima</h4>
+      <p>Urban, accessible, globally relevant &mdash; not a remote island. Scalable concept, replicable worldwide</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!--  VI. THE CONCEPT: 135 ROOMS                                       -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">VI</div>
+    <h2>The Concept: 135 Rooms + Innovation Center</h2>
+    <div class="subtitle">A hotel that renders reality &mdash; room by room, floor by floor</div>
+  </div>
+
+  <div class="room-grid">
+    <div class="room-card">
+      <div class="room-count">85</div>
+      <div class="room-info">
+        <h4>VERTEX Rooms</h4>
+        <p>40&ndash;45 sqm &mdash; Adaptive environments with full Omniverse digital twin control. Every surface responds.</p>
+      </div>
+    </div>
+    <div class="room-card">
+      <div class="room-count">30</div>
+      <div class="room-info">
+        <h4>VERTEX Suites</h4>
+        <p>60&ndash;80 sqm &mdash; Dedicated wellness zones, Isaac-trained service robots, immersive media walls.</p>
+      </div>
+    </div>
+    <div class="room-card">
+      <div class="room-count">15</div>
+      <div class="room-info">
+        <h4>VERTEX Penthouses</h4>
+        <p>100&ndash;150 sqm &mdash; Private DGX compute nodes, personal AI concierge, rooftop garden access.</p>
+      </div>
+    </div>
+    <div class="room-card">
+      <div class="room-count">5</div>
+      <div class="room-info">
+        <h4>SORA Sky Suites</h4>
+        <p>200+ sqm &mdash; By invitation only. Full-floor residences. The ultimate expression of computational luxury.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="amenities-row">
+    <div class="amenity">
+      <span class="icon">&#9881;</span>
+      NVIDIA Innovation Center
+    </div>
+    <div class="amenity">
+      <span class="icon">&#127860;</span>
+      3 F&B Outlets
+    </div>
+    <div class="amenity">
+      <span class="icon">&#10024;</span>
+      REBORN Spa
+    </div>
+    <div class="amenity">
+      <span class="icon">&#128188;</span>
+      Conference Center
+    </div>
+    <div class="amenity">
+      <span class="icon">&#9733;</span>
+      Rooftop Observatory
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!--  VII. THE GUEST JOURNEY                                           -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">VII</div>
+    <h2>The Guest Journey</h2>
+    <div class="subtitle">Eight phases where NVIDIA technology becomes invisible, attentive hospitality</div>
+  </div>
+
+  <!-- Phase 1 -->
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-icon">&#128302;</div>
+      <div>
+        <div class="phase-num">Phase 1 &mdash; Pre-Arrival</div>
+        <div class="phase-title">"The Profile Render"</div>
+      </div>
+    </div>
+    <div class="phase-grid">
+      <div class="phase-card experience">
+        <h4>&#9679; Guest Experience</h4>
+        <p>No standard booking form. An adaptive interface learns what the guest <em>needs</em> &mdash; mood, sensory preferences, dietary requirements, travel context. The system builds a multi-dimensional "Profile Blueprint" that predicts the perfect stay before the guest has fully articulated it. Returning guests are recognized instantly &mdash; their profile evolves with every visit.</p>
+      </div>
+      <div class="phase-card tech">
+        <h4>&#9679; NVIDIA Technology</h4>
+        <ul>
+          <li><strong>NIM Microservices</strong> &mdash; modular AI agents for booking, dietary, wellness, and preference engines</li>
+          <li><strong>CUDA + cuDNN</strong> &mdash; powering predictive behavioral modeling and affective computing</li>
+          <li><strong>Grace Blackwell</strong> &mdash; on-premise inference for real-time profile computation</li>
+        </ul>
+      </div>
+      <div class="phase-card magic">
+        <h4>&#9679; The Magic</h4>
+        <p><strong>Narrative Suggestioning.</strong> If the system detects a stressful week (via calendar integration), it won't suggest a noisy party. Instead: a "Curated Moment of Stillness" &mdash; a specific path through hotel grounds, paired with optimal aromatherapy and a reserved silent lounge. The hotel already knows you before you arrive.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 2 -->
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-icon">&#128682;</div>
+      <div>
+        <div class="phase-num">Phase 2 &mdash; Arrival</div>
+        <div class="phase-title">"Zero Friction"</div>
+      </div>
+    </div>
+    <div class="phase-grid">
+      <div class="phase-card experience">
+        <h4>&#9679; Guest Experience</h4>
+        <p>The VERTEX experience starts at Changi Airport. An NVIDIA-powered autonomous vehicle collects the guest &mdash; no driver, no wait, no friction. Biometric recognition at the hotel entrance. No line, no keycard, no desk. The path leads through a triangulated glass gallery. A personalized scent profile greets them. A silent transit pod takes them directly to their floor.</p>
+      </div>
+      <div class="phase-card tech">
+        <h4>&#9679; NVIDIA Technology</h4>
+        <ul>
+          <li><strong>NVIDIA DRIVE</strong> &mdash; autonomous airport transfer in NVIDIA-branded vehicle</li>
+          <li><strong>NIM + Riva</strong> &mdash; multilingual voice greeting in guest's native language</li>
+          <li><strong>Omniverse</strong> &mdash; real-time traffic management and HVAC pre-calibration via digital twin</li>
+        </ul>
+      </div>
+      <div class="phase-card magic">
+        <h4>&#9679; The Magic</h4>
+        <p><strong>The Seamless Handoff.</strong> The autonomous vehicle already briefed the hotel. Room temperature set. Favorite drink prepared. A subtle holographic message greets by name: "We've already curated your sunset playlist." The guest doesn't check in. They simply arrive &mdash; and the hotel was waiting.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 3 -->
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-icon">&#127752;</div>
+      <div>
+        <div class="phase-num">Phase 3 &mdash; Room</div>
+        <div class="phase-title">"The Living Render"</div>
+      </div>
+    </div>
+    <div class="phase-grid">
+      <div class="phase-card experience">
+        <h4>&#9679; Guest Experience</h4>
+        <p>The room is a living computational environment. Lighting shifts to mimic the quality of light from a place the guest loves &mdash; a foggy Kyoto morning, a Tuscan golden hour. Audio calibrates to sleep cycle phase. The bed learns pressure points and temperature needs, making micro-adjustments hourly. Every surface, scent, and sound is a variable the room is optimizing in real-time.</p>
+      </div>
+      <div class="phase-card tech">
+        <h4>&#9679; NVIDIA Technology</h4>
+        <ul>
+          <li><strong>Omniverse Digital Twin</strong> &mdash; complete room simulation controlling environment, lighting, HVAC</li>
+          <li><strong>CUDA</strong> &mdash; adaptive lighting via GPU-accelerated circadian rhythm algorithms</li>
+          <li><strong>Grace Blackwell (on-premise)</strong> &mdash; all personalization runs locally. Guest data never leaves the building.</li>
+        </ul>
+      </div>
+      <div class="phase-card magic">
+        <h4>&#9679; The Magic</h4>
+        <p><strong>Invisible Rendering.</strong> Like a GPU that renders a world from polygons, the room renders comfort from data. The guest never sees sensors, never touches a control panel. They simply notice: the light feels right, the temperature is perfect, the silence is exactly the right depth. Computation becoming experience.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 4 -->
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-icon">&#127858;</div>
+      <div>
+        <div class="phase-num">Phase 4 &mdash; Dining</div>
+        <div class="phase-title">"Flavor Intelligence"</div>
+      </div>
+    </div>
+    <div class="phase-grid">
+      <div class="phase-card experience">
+        <h4>&#9679; Guest Experience</h4>
+        <p>No fixed menu. "Nutritional Profiles" and "Flavor Journey Maps" replace static lists. The AI suggests meals optimized for the guest's current physiology &mdash; energy levels, stress, sleep quality. Dining spaces adapt lighting and acoustics based on group size and desired intimacy. Each dish arrives with a story about its origin, crafted in real-time.</p>
+      </div>
+      <div class="phase-card tech">
+        <h4>&#9679; NVIDIA Technology</h4>
+        <ul>
+          <li><strong>NIM Dietary Agents</strong> &mdash; AI-curated menus cross-referencing allergies, nutrition, mood</li>
+          <li><strong>Isaac Robotics</strong> &mdash; kitchen assist and precision delivery robots trained in Isaac Sim</li>
+          <li><strong>Picasso / Edify</strong> &mdash; generative visual menu presentations, unique to each guest</li>
+        </ul>
+      </div>
+      <div class="phase-card magic">
+        <h4>&#9679; The Magic</h4>
+        <p><strong>The Shared Culinary Memory.</strong> The AI remembers the guest's favorite <em>moment</em> while dining, not just the dish. "A warm memory to guide your palate" &mdash; it suggests a similar regional dish paired with a note recalling the feeling, not just the flavor. Food becomes narrative.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 5 -->
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-icon">&#10024;</div>
+      <div>
+        <div class="phase-num">Phase 5 &mdash; Wellness</div>
+        <div class="phase-title">"REBORN Lab"</div>
+      </div>
+    </div>
+    <div class="phase-grid">
+      <div class="phase-card experience">
+        <h4>&#9679; Guest Experience</h4>
+        <p>Non-invasive health assessment on arrival: skin analysis, muscle tension via thermal imaging, HRV monitoring. The journey is mapped not by service categories but by goals: "Sleep Debt Recovery," "Cognitive Clarity," "Stress Discharge." Treatment rooms adjust scent, humidity, and light mid-session based on real-time biofeedback.</p>
+      </div>
+      <div class="phase-card tech">
+        <h4>&#9679; NVIDIA Technology</h4>
+        <ul>
+          <li><strong>NVIDIA Clara</strong> &mdash; health AI for biometric analysis, HRV monitoring, skin assessment</li>
+          <li><strong>CUDA</strong> &mdash; real-time biofeedback processing for adaptive treatment rooms</li>
+          <li><strong>Omniverse</strong> &mdash; spa environment digital twin adjusting conditions mid-treatment</li>
+        </ul>
+      </div>
+      <div class="phase-card magic">
+        <h4>&#9679; The Magic</h4>
+        <p><strong>The Dialogue of the Self.</strong> During deep relaxation, the AI provides subtle auditory cues and projected visuals for a personalized reflective journey &mdash; not just "relaxing," but guided inner exploration tailored to the guest's psychological and physiological state. You leave the spa knowing something new about yourself.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 6 -->
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-icon">&#127760;</div>
+      <div>
+        <div class="phase-num">Phase 6 &mdash; Concierge</div>
+        <div class="phase-title">"The Invisible Guide"</div>
+      </div>
+    </div>
+    <div class="phase-grid">
+      <div class="phase-card experience">
+        <h4>&#9679; Guest Experience</h4>
+        <p>No concierge desk. Speak to the hotel in any of 100+ languages &mdash; naturally, conversationally. Recommendations delivered via preferred channel: voice, holographic projection, or AR overlay while walking. The AI doesn't just book tickets; it orchestrates <em>experiences</em>. For an amateur ornithologist: a rare migratory bird viewing slot, reserved transport, local expert guide &mdash; all without being asked.</p>
+      </div>
+      <div class="phase-card tech">
+        <h4>&#9679; NVIDIA Technology</h4>
+        <ul>
+          <li><strong>NVIDIA Riva</strong> &mdash; speech AI enabling natural voice interaction in 100+ languages</li>
+          <li><strong>NIM</strong> &mdash; hyper-contextual recommendation engine cross-referencing mood, weather, events</li>
+          <li><strong>Earth-2</strong> &mdash; hyper-local weather prediction for perfect outdoor experience timing</li>
+        </ul>
+      </div>
+      <div class="phase-card magic">
+        <h4>&#9679; The Magic</h4>
+        <p><strong>The Accidental Discovery.</strong> Occasional "Serendipity Suggestions" &mdash; an activity the guest has never heard of, but the data says they'll love. "We knew it would rain at 3pm, so we moved your outdoor lunch to the glass pavilion and adjusted the menu." The hotel that reads the sky for you.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 7 -->
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-icon">&#128188;</div>
+      <div>
+        <div class="phase-num">Phase 7 &mdash; Business</div>
+        <div class="phase-title">"The Adaptive Arena"</div>
+      </div>
+    </div>
+    <div class="phase-grid">
+      <div class="phase-card experience">
+        <h4>&#9679; Guest Experience</h4>
+        <p>Meeting rooms that adapt to conversation type. High-stakes negotiation? Dampened frequencies to calm the room. Creative brainstorm? Dynamic lighting and alpha-wave-boosting ambient sound. AI manages materials, connectivity, real-time translation, and introduces perfectly-timed breaks when it senses creative impasse. Video calls feel like being in the same room.</p>
+      </div>
+      <div class="phase-card tech">
+        <h4>&#9679; NVIDIA Technology</h4>
+        <ul>
+          <li><strong>NVIDIA Maxine</strong> &mdash; AI-enhanced video conferencing, noise cancellation, eye contact correction</li>
+          <li><strong>Riva</strong> &mdash; real-time AI scribe for notes, action items, multilingual transcription</li>
+          <li><strong>NIM</strong> &mdash; meeting energy analysis and intervention timing agents</li>
+        </ul>
+      </div>
+      <div class="phase-card magic">
+        <h4>&#9679; The Magic</h4>
+        <p><strong>The Perfect Catalyst.</strong> Not a conference room &mdash; a space that manages the <em>energy</em> of the people inside. A perfectly timed moment of silence. A palette cleanser activity. The room doesn't just host the meeting &mdash; it makes the meeting better. Every participant leaves thinking the chemistry was unusually good.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Phase 8 -->
+  <div class="phase">
+    <div class="phase-header">
+      <div class="phase-icon">&#128156;</div>
+      <div>
+        <div class="phase-num">Phase 8 &mdash; Checkout</div>
+        <div class="phase-title">"The Reflection"</div>
+      </div>
+    </div>
+    <div class="phase-grid">
+      <div class="phase-card experience">
+        <h4>&#9679; Guest Experience</h4>
+        <p>No "checkout." The AI initiates a Reflection Dialogue &mdash; a curated digital "Memory Digest" highlighting peak moments, unique interactions, and small joys. Beyond the bill: a wellness journey analysis with personalized data insights and recommendations for home. A room-specific aroma the guest can take home. The profile evolves &mdash; the next visit will be even better.</p>
+      </div>
+      <div class="phase-card tech">
+        <h4>&#9679; NVIDIA Technology</h4>
+        <ul>
+          <li><strong>Picasso / Edify</strong> &mdash; AI-generated personalized Memory Digest with visual storytelling</li>
+          <li><strong>NIM</strong> &mdash; predictive loyalty modeling, Profile Blueprint evolution for next visit</li>
+          <li><strong>Grace Blackwell</strong> &mdash; holistic experience synthesis aggregating every touchpoint</li>
+        </ul>
+      </div>
+      <div class="phase-card magic">
+        <h4>&#9679; The Magic</h4>
+        <p><strong>The Promise of Continuation.</strong> A personalized "Departure Ritual" &mdash; a bespoke aroma, a printed piece of generative art the room created during the stay, and a message: <em>"We are already beginning to anticipate your return. Until then, rest well."</em> The hotel doesn't end at checkout. It stays with you.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!--  VIII. NVIDIA PRODUCT MAP                                         -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">VIII</div>
+    <h2>NVIDIA Product Map</h2>
+    <div class="subtitle">10 NVIDIA products. Every one integrated. Every one invisible to the guest.</div>
+  </div>
+
+  <div class="product-grid">
+    <div class="product-tile">
+      <span class="p-icon">&#127760;</span>
+      <h4>Omniverse</h4>
+      <p>Digital twin of entire hotel. Real-time simulation of energy, guest movement, maintenance. Room environment control.</p>
+    </div>
+    <div class="product-tile">
+      <span class="p-icon">&#129302;</span>
+      <h4>Isaac Robotics</h4>
+      <p>All service robots trained in Isaac Sim. Housekeeping, delivery, kitchen assist. Human-robot collaboration.</p>
+    </div>
+    <div class="product-tile">
+      <span class="p-icon">&#9889;</span>
+      <h4>Grace Blackwell / DGX</h4>
+      <p>On-premise AI compute. All personalization runs locally. "Your data never leaves the building."</p>
+    </div>
+    <div class="product-tile">
+      <span class="p-icon">&#9881;</span>
+      <h4>NIM Microservices</h4>
+      <p>Modular AI agents: booking, concierge, dietary, wellness, translation. Each department its own AI.</p>
+    </div>
+    <div class="product-tile">
+      <span class="p-icon">&#127908;</span>
+      <h4>Riva Speech AI</h4>
+      <p>Natural voice interface. 100+ languages. Voice-controlled everything. "Talk to the hotel."</p>
+    </div>
+    <div class="product-tile">
+      <span class="p-icon">&#127909;</span>
+      <h4>Maxine</h4>
+      <p>AI video conferencing. Noise cancellation. Eye contact correction. Background virtualization.</p>
+    </div>
+    <div class="product-tile">
+      <span class="p-icon">&#128663;</span>
+      <h4>DRIVE</h4>
+      <p>Autonomous airport transfer. Self-driving hotel shuttles. The experience starts at pickup.</p>
+    </div>
+    <div class="product-tile">
+      <span class="p-icon">&#127758;</span>
+      <h4>Earth-2</h4>
+      <p>Hyper-local weather prediction. Energy optimization. Proactive outdoor experience management.</p>
+    </div>
+    <div class="product-tile">
+      <span class="p-icon">&#127912;</span>
+      <h4>Picasso / Edify</h4>
+      <p>Generative art installations. Personalized digital art. AI-created Memory Digest at checkout.</p>
+    </div>
+    <div class="product-tile">
+      <span class="p-icon">&#128200;</span>
+      <h4>CUDA</h4>
+      <p>The invisible engine. Powers every neural network, every prediction, every real-time adaptation.</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!--  IX. THE NUMBERS                                                  -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">IX</div>
+    <h2>The Numbers</h2>
+    <div class="subtitle">A full financial model &mdash; something the competition does not have</div>
+  </div>
+
+  <div class="fin-hero-grid">
+    <div class="fin-stat">
+      <div class="big">&euro;264M</div>
+      <div class="desc">Total Investment</div>
+    </div>
+    <div class="fin-stat">
+      <div class="big">&euro;20.9M</div>
+      <div class="desc">Stabilized EBITDA</div>
+    </div>
+    <div class="fin-stat">
+      <div class="big">33%</div>
+      <div class="desc">EBITDA Margin</div>
+    </div>
+    <div class="fin-stat">
+      <div class="big">12-16%</div>
+      <div class="desc">Unlevered IRR</div>
+    </div>
+  </div>
+
+  <div class="ai-premium-callout">
+    <div class="headline">The AI Premium: <span>&euro;9.5M</span> &mdash; just 3.6% of total investment</div>
+    <p>It's NOT a cost problem. It's a positioning play. &euro;9.5M buys a 10&ndash;20% ADR premium, 33% EBITDA margins (vs 25% standard), and 12.8-month payback on the AI layer alone.</p>
+  </div>
+
+  <div class="fin-hero-grid">
+    <div class="fin-stat">
+      <div class="big">&euro;825-900</div>
+      <div class="desc">ADR (10-20% Premium)</div>
+    </div>
+    <div class="fin-stat">
+      <div class="big">12.8</div>
+      <div class="desc">AI Payback (Months)</div>
+    </div>
+    <div class="fin-stat">
+      <div class="big">&euro;418-523M</div>
+      <div class="desc">Exit Valuation (Yr 10)</div>
+    </div>
+    <div class="fin-stat">
+      <div class="big">&euro;9.5M</div>
+      <div class="desc">AI Layer Cost</div>
+    </div>
+  </div>
+
+  <div style="overflow-x:auto;">
+    <table class="comparison-table">
+      <thead>
+        <tr>
+          <th>Metric</th>
+          <th>Standard Ultra-Luxury</th>
+          <th>VERTEX (AI-Enhanced)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>ADR</td>
+          <td>&euro;700&ndash;750</td>
+          <td>&euro;825&ndash;900</td>
+        </tr>
+        <tr>
+          <td>EBITDA Margin</td>
+          <td>22&ndash;25%</td>
+          <td>30&ndash;33%</td>
+        </tr>
+        <tr>
+          <td>Staff-to-Room Ratio</td>
+          <td>1.8&ndash;2.2</td>
+          <td>1.2&ndash;1.5 (AI-augmented)</td>
+        </tr>
+        <tr>
+          <td>Energy Efficiency</td>
+          <td>Baseline</td>
+          <td>25&ndash;30% reduction via Omniverse + Earth-2</td>
+        </tr>
+        <tr>
+          <td>Guest Satisfaction (NPS)</td>
+          <td>55&ndash;65</td>
+          <td>75&ndash;85 (projected)</td>
+        </tr>
+        <tr>
+          <td>Revenue per Available Room</td>
+          <td>&euro;520&ndash;560</td>
+          <td>&euro;650&ndash;720</td>
+        </tr>
+        <tr>
+          <td>Construction Premium</td>
+          <td>Baseline</td>
+          <td>+3.6% for full AI integration</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!--  X. COMPETITIVE EDGE VS JCB                                       -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">X</div>
+    <h2>Competitive Edge vs. JCB</h2>
+    <div class="subtitle">Head-to-head comparison: VERTEX vs. "MA Hotel by NVIDIA"</div>
+  </div>
+
+  <div style="overflow-x:auto;">
+    <table class="edge-table">
+      <thead>
+        <tr>
+          <th>Dimension</th>
+          <th class="us">VERTEX (Ours)</th>
+          <th class="them">MA Hotel (JCB)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Room Count</td>
+          <td class="win">135 rooms (within spec)</td>
+          <td class="lose">35 villas (spec violation)</td>
+        </tr>
+        <tr>
+          <td>NVIDIA Products Named</td>
+          <td class="win">10 products, fully mapped</td>
+          <td class="lose">3 products (Omniverse, GPU golf, humanoid)</td>
+        </tr>
+        <tr>
+          <td>Business Model</td>
+          <td class="win">Full financial model (&euro;264M, IRR, EBITDA)</td>
+          <td class="lose">None</td>
+        </tr>
+        <tr>
+          <td>Conference Facilities</td>
+          <td class="win">Yes &mdash; Maxine-enhanced, AI scribe</td>
+          <td class="lose">No</td>
+        </tr>
+        <tr>
+          <td>Development Partner</td>
+          <td class="win">Corinthia Hotels (60 yrs, 17 hotels)</td>
+          <td class="lose">None</td>
+        </tr>
+        <tr>
+          <td>Location</td>
+          <td class="win">Singapore (global AI hub)</td>
+          <td class="lose">Yakushima (remote island)</td>
+        </tr>
+        <tr>
+          <td>Scalability</td>
+          <td class="win">Replicable concept, global pipeline</td>
+          <td class="lose">Unique site, not replicable</td>
+        </tr>
+        <tr>
+          <td>Storytelling</td>
+          <td style="color:var(--text-dim);">Strong &mdash; GPU rendering metaphor</td>
+          <td style="color:var(--text-dim);">Very strong &mdash; Shinto philosophy</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!--  XI. THE HUMAN ELEMENT                                            -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">XI</div>
+    <h2>The Human Element</h2>
+    <div class="subtitle">AI handles 90% of efficiency &mdash; humans deliver 100% of soul</div>
+  </div>
+
+  <div class="human-grid">
+    <div class="human-card">
+      <div class="emoji" style="font-size:2.5rem;">&#129309;</div>
+      <h3>The Empath</h3>
+      <p>Emotional crisis managers trained for unpredictable, high-emotion situations where AI fails &mdash; grief, relationship distress, severe anxiety. The irreplaceable human touch that no model can replicate.</p>
+    </div>
+    <div class="human-card">
+      <div class="emoji" style="font-size:2.5rem;">&#127912;</div>
+      <h3>The Artisan</h3>
+      <p>Master sommeliers, live musicians, textile artists, chefs. Authentic, non-standard experiences that AI cannot replicate &mdash; the warmth of human craft and creative spontaneity.</p>
+    </div>
+    <div class="human-card">
+      <div class="emoji" style="font-size:2.5rem;">&#128737;</div>
+      <h3>The Watchdog</h3>
+      <p>System overseers responsible for the emotional, physical, and technological integrity of the experience. They manage the AI's performance and intervene before the guest ever notices an issue.</p>
+    </div>
+  </div>
+
+  <div class="ratio-bar">
+    <p style="text-align:center;font-size:0.85rem;color:var(--text-dim);margin-bottom:1rem;">VERTEX Operational Ratio: 75% AI / 25% Human</p>
+    <div class="bar">
+      <div class="ai-part" style="width:75%">AI &mdash; 75%</div>
+      <div class="human-part" style="width:25%">Human &mdash; 25%</div>
+    </div>
+    <div class="ratio-labels">
+      <span>Efficiency, logistics, prediction, optimization</span>
+      <span>Empathy, craft, oversight</span>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!--  XII. RISKS & MITIGATION                                          -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">XII</div>
+    <h2>Risks &amp; Mitigation</h2>
+    <div class="subtitle">Eyes wide open &mdash; every transformative technology has failure modes</div>
+  </div>
+
+  <table class="risk-table">
+    <thead>
+      <tr>
+        <th>Risk</th>
+        <th>Threat</th>
+        <th>Mitigation</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Privacy</td>
+        <td>Data breach, constant surveillance feeling. Guests must never feel "watched."</td>
+        <td>Opt-in granular data model. Guests own their data. Grace Blackwell on-premise &mdash; raw biometrics never leave the building. Edge computing in every room.</td>
+      </tr>
+      <tr>
+        <td>Uncanny Valley</td>
+        <td>Almost-human robots causing unease and distrust.</td>
+        <td>Isaac-trained robots designed as overtly functional, not deceptive. Visible mechanical identity. Brand as "co-pilot," not replacement for humans.</td>
+      </tr>
+      <tr>
+        <td>System Failure</td>
+        <td>Network outage, cyberattack, cascading AI failures bringing the hotel to a halt.</td>
+        <td>Isolated analog backup for all critical systems. Staff trained on "AI Blackout Protocol." DGX redundancy with automatic failover.</td>
+      </tr>
+      <tr>
+        <td>Over-Reliance</td>
+        <td>Guests becoming dependent on AI for emotional regulation and decision-making.</td>
+        <td>Designed friction: physical suggestion boxes, human-staffed "low-tech lounge," gentle nudges to unplug and simply be present.</td>
+      </tr>
+      <tr>
+        <td>Talent Gap</td>
+        <td>Only 2.9% of hospitality workers have AI skills (vs 21% in tech). Who runs this?</td>
+        <td>In-house VERTEX Academy. Upskill existing Corinthia staff as "AI Curators." Partner with Singapore hospitality schools and NTU.</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!--  XIII. NEXT STEPS                                                 -->
+<!-- ================================================================ -->
+<section>
+  <div class="section-header">
+    <div class="section-num">XIII</div>
+    <h2>Next Steps</h2>
+    <div class="subtitle">Four weeks to submission &mdash; a clear path from breakfast to Jensen Huang</div>
+  </div>
+
+  <div class="timeline">
+    <div class="timeline-item">
+      <div class="date">Wednesday, April 9</div>
+      <h4>Two-Pager to NVIDIA Hospitality</h4>
+      <p>NVIDIA's hospitality team receives a concise two-page summary of the VERTEX concept. Goal: secure NVIDIA's informal endorsement and access to product documentation for the concept book.</p>
+    </div>
+    <div class="timeline-item">
+      <div class="date">Week 2 &mdash; April 14-18</div>
+      <h4>Corinthia Proprietary Data Integration</h4>
+      <p>Work with Corinthia development team to integrate real construction data, operational benchmarks, and brand guidelines into the concept. Refine financial model with actual Corinthia cost structures.</p>
+    </div>
+    <div class="timeline-item">
+      <div class="date">Week 3 &mdash; April 21-25</div>
+      <h4>Full Concept Book + Mood Board</h4>
+      <p>20-page concept book with architectural visualization, NVIDIA product integration diagrams, guest journey illustrations, and financial summary. Mood board with material palette, spatial renders, and design DNA.</p>
+    </div>
+    <div class="timeline-item">
+      <div class="date">Week 4 &mdash; April 28-30</div>
+      <h4>Submission to Jensen Huang</h4>
+      <p>Final concept book, mood board, and optional video submitted to the NVIDIA Hotel Concept Competition. The consortium that Jensen didn't expect &mdash; delivering the concept he's been waiting for.</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ================================================================ -->
+<!--  XIV. CLOSING VISION                                              -->
+<!-- ================================================================ -->
+<div class="conclusion">
+  <h2>The Vision</h2>
+  <blockquote>"The best technology disappears. VERTEX won't feel like technology. It will feel like the most attentive host you've ever had."</blockquote>
+  <p style="margin-top:2rem;">VERTEX is not a hotel with AI features. It is AI that manifests as a hotel. The building thinks. The room adapts. The kitchen knows. The departure promises continuation. The guest never interacts with "AI." They interact with an experience that happens to be impossibly, beautifully precise.</p>
+  <p style="margin-top:1.5rem;font-size:0.95rem;color:var(--nvidia);">A GPU renders polygons into worlds. VERTEX renders data into the finest hospitality on Earth.</p>
+</div>
+
+<!-- ================================================================ -->
+<!--  FOOTER                                                           -->
+<!-- ================================================================ -->
+<div class="divider"></div>
+<div class="footer">
+  <div class="sources">
+    <strong>Sources &amp; References</strong><br>
+    <a href="https://www.bcg.com/publications/2026/ai-first-hotels-leaner-faster-smarter">BCG &amp; NYU SPS: AI-First Hotels (2026)</a> &bull;
+    <a href="https://www.hostq.com/the-global-ai-race-in-hospitality-how-usa-china-and-japan-are-transforming-hotels-in-2026/">HostQ: Global AI Race in Hospitality (2026)</a> &bull;
+    <a href="https://www.travolution.com/news/hotel-ai-82-of-properties-set-to-accelerate-in-2026/">Travolution: 82% Hotels Accelerating AI (2026)</a> &bull;
+    <a href="https://conduit.ai/blog/ai-use-cases-hotels-2025">Conduit: AI Use Cases in Hotels</a> &bull;
+    <a href="https://www.prnewswire.com/news-releases/ai-tipping-point-mews-warns-2026-is-make-or-break-year-for-hotel-transformation-302638149.html">Mews: AI Tipping Point 2026</a> &bull;
+    <a href="https://www.hospitalitynet.org/opinion/4129522.html">HospitalityNet: What AI Will Do for Hotels in 2026</a> &bull;
+    <a href="https://appinventiv.com/blog/ai-in-hospitality/">AppInventiv: AI in Hospitality 2026</a> &bull;
+    <a href="https://www.corinthia.com">Corinthia Hotels</a> &bull;
+    <a href="https://www.nvidia.com/en-us/omniverse/">NVIDIA Omniverse</a> &bull;
+    <a href="https://www.nvidia.com/en-us/deep-learning-ai/solutions/large-language-models/">NVIDIA NIM</a> &bull;
+    <a href="https://developer.nvidia.com/isaac">NVIDIA Isaac</a> &bull;
+    <a href="https://developer.nvidia.com/riva">NVIDIA Riva</a> &bull;
+    <a href="https://developer.nvidia.com/maxine">NVIDIA Maxine</a> &bull;
+    <a href="https://www.nvidia.com/en-us/self-driving-cars/">NVIDIA DRIVE</a> &bull;
+    <a href="https://www.nvidia.com/en-us/high-performance-computing/earth-2/">NVIDIA Earth-2</a>
+  </div>
+  <div class="credits">
+    Prepared by Brisen AI + Baker AI + Gemma 4 &bull; April 7, 2026 &bull; Confidential
+  </div>
+</div>
+
+</body>
+</html>
