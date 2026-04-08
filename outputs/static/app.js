@@ -2928,7 +2928,10 @@ function _landingTriageBar(aid, title, body, cardType, itemId) {
     } else if (cardType === 'deadline') {
         html += '<button class="triage-pill" style="background:var(--green);color:#fff;border-color:var(--green);" onclick="event.stopPropagation();_landingMarkDone(' + itemId + ',this)">✓ Mark Done</button>';
     } else if (cardType === 'meeting') {
-        html += '<button class="triage-pill" style="background:var(--red);color:#fff;border-color:var(--red);" onclick="event.stopPropagation();_landingCancelMeeting(' + itemId + ',this)">✕ Cancel Meeting</button>';
+        // MEETING-TRIAGE-1: Confirmed / Declined / Prep me
+        html += '<button class="triage-pill" style="background:var(--green);color:#fff;border-color:var(--green);" onclick="event.stopPropagation();_meetingSetStatus(' + itemId + ',\'confirmed\',this)">✓ Confirmed</button>';
+        html += '<button class="triage-pill" style="background:var(--red);color:#fff;border-color:var(--red);" onclick="event.stopPropagation();_meetingSetStatus(' + itemId + ',\'declined\',this)">✕ Declined</button>';
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Prepare me for this meeting: \\x22' + _t + '\\x22. Run dossiers on attendees, pull relevant emails and WhatsApp messages, summarize context. Context: ' + _c + '\')">📋 Prep me</button>';
     }
     html += '</div>';
     return html;
@@ -3066,6 +3069,85 @@ function _landingCancelMeeting(meetingId, btn) {
         if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
         _showToast('Meeting cancelled');
     });
+}
+
+// MEETING-TRIAGE-1: Meeting status (confirmed/declined)
+function _meetingSetStatus(meetingId, status, btn) {
+    var card = btn.closest('.card');
+    var dot = card ? card.querySelector('.nav-dot') : null;
+
+    if (status === 'declined') {
+        // Calendar events (non-numeric IDs) — just dismiss from DOM
+        if (String(meetingId).indexOf('cal-') === 0 || String(meetingId).indexOf('exchange-') === 0 || isNaN(Number(meetingId))) {
+            if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
+            _showToast('Meeting declined');
+            return;
+        }
+        // Detected meetings — cancel via API
+        bakerFetch('/api/detected-meetings/' + meetingId + '/cancel', { method: 'POST' }).then(function() {
+            if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
+            _showToast('Meeting declined');
+        });
+        return;
+    }
+
+    if (status === 'confirmed') {
+        // Update dot to green immediately (live DOM update)
+        if (dot) {
+            dot.className = 'nav-dot green';
+            dot.style.marginTop = '5px';
+        }
+        // Update status text
+        var statusSpan = card ? card.querySelector('.card-body span[style*="color:var(--"]') : null;
+        if (statusSpan) {
+            statusSpan.textContent = 'Confirmed';
+            statusSpan.style.color = 'var(--green)';
+        }
+        _showToast('Meeting confirmed');
+
+        // For detected meetings, persist to DB
+        if (!isNaN(Number(meetingId)) && String(meetingId).indexOf('cal-') !== 0 && String(meetingId).indexOf('exchange-') !== 0) {
+            bakerFetch('/api/detected-meetings/' + meetingId + '/confirm', { method: 'POST' });
+        }
+        return;
+    }
+}
+
+// MEETING-TRIAGE-1: Quick-add meeting from dashboard
+function _meetingQuickAdd() {
+    var grid = document.getElementById('gridMeetings');
+    if (!grid) return;
+    if (document.getElementById('meetingQuickInput')) return;
+    var row = document.createElement('div');
+    row.id = 'meetingQuickInput';
+    row.style.cssText = 'display:flex;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border-light);';
+    var input = document.createElement('input');
+    input.style.cssText = 'flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:var(--font);';
+    input.placeholder = 'e.g. Meeting with Pisani tomorrow 14:00';
+    var addBtn = document.createElement('button');
+    addBtn.className = 'triage-pill';
+    addBtn.style.cssText = 'background:var(--blue);color:#fff;border-color:var(--blue);';
+    addBtn.textContent = 'Add';
+    addBtn.addEventListener('click', function() {
+        var desc = input.value.trim();
+        if (!desc) return;
+        addBtn.disabled = true;
+        addBtn.textContent = '...';
+        bakerFetch('/api/meetings/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: desc }),
+        }).then(function(r) { return r.json(); }).then(function(d) {
+            if (d.error) { _showToast(d.error); }
+            else { _showToast('Meeting added: ' + (d.title || desc).substring(0, 40)); loadMorningBrief(); }
+            row.remove();
+        }).catch(function() { addBtn.disabled = false; addBtn.textContent = 'Add'; });
+    });
+    input.addEventListener('keydown', function(e) { if (e.key === 'Enter') addBtn.click(); if (e.key === 'Escape') row.remove(); });
+    row.appendChild(input);
+    row.appendChild(addBtn);
+    grid.insertBefore(row, grid.firstChild);
+    input.focus();
 }
 
 function _renderCriticalItem(ci) {

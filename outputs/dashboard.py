@@ -5801,6 +5801,96 @@ async def cancel_detected_meeting(meeting_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/detected-meetings/{meeting_id}/confirm", tags=["meetings"], dependencies=[Depends(verify_api_key)])
+async def confirm_detected_meeting(meeting_id: int):
+    """MEETING-TRIAGE-1: Confirm a detected meeting."""
+    try:
+        store = _get_store()
+        conn = store._get_conn()
+        if not conn:
+            raise HTTPException(status_code=503, detail="Database unavailable")
+        try:
+            cur = conn.cursor()
+            cur.execute("UPDATE detected_meetings SET status = 'confirmed', updated_at = NOW() WHERE id = %s", (meeting_id,))
+            conn.commit()
+            cur.close()
+        finally:
+            store._put_conn(conn)
+        return {"status": "confirmed", "id": meeting_id}
+    except Exception as e:
+        logger.error(f"POST /api/detected-meetings/{meeting_id}/confirm failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/meetings/add", tags=["meetings"], dependencies=[Depends(verify_api_key)])
+async def add_meeting_quick(request: Request):
+    """MEETING-TRIAGE-1: Quick-add meeting from dashboard. Uses Flash to parse natural language."""
+    import json as _json_mod
+    try:
+        body = await request.json()
+        text = body.get("text", "").strip()
+        if not text:
+            return {"error": "Meeting description required"}
+
+        # Use Flash to parse meeting details from natural language
+        from orchestrator.gemini_client import call_flash
+        today = datetime.now().strftime('%Y-%m-%d')
+        resp = call_flash(
+            messages=[{"role": "user", "content": f"""Parse this meeting description into structured data. Today is {today}.
+
+Input: "{text}"
+
+Return JSON only (no markdown):
+{{
+  "title": "short meeting title",
+  "participants": ["Name1", "Name2"],
+  "date": "YYYY-MM-DD",
+  "time": "HH:MM or null",
+  "location": "place or null",
+  "status": "confirmed"
+}}
+
+If no date is specified, assume today. If "tomorrow", use the next day."""}],
+        )
+
+        parsed = _json_mod.loads(resp.text.strip().strip('`').replace('json\n', ''))
+
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        meeting_id = store.insert_detected_meeting(
+            title=parsed.get("title", text[:100]),
+            participant_names=parsed.get("participants", []),
+            meeting_date=parsed.get("date"),
+            meeting_time=parsed.get("time"),
+            location=parsed.get("location"),
+            status=parsed.get("status", "confirmed"),
+            source="dashboard",
+            raw_text=text,
+        )
+
+        return {
+            "status": "added",
+            "id": meeting_id,
+            "title": parsed.get("title", text[:100]),
+            "date": parsed.get("date"),
+            "time": parsed.get("time"),
+        }
+    except _json_mod.JSONDecodeError:
+        # Flash returned non-JSON — store as-is with minimal parsing
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        meeting_id = store.insert_detected_meeting(
+            title=text[:100],
+            status="confirmed",
+            source="dashboard",
+            raw_text=text,
+        )
+        return {"status": "added", "id": meeting_id, "title": text[:100]}
+    except Exception as e:
+        logger.error(f"POST /api/meetings/add failed: {e}")
+        return {"error": str(e)}
+
+
 @app.post("/api/deadlines/{deadline_id}/reschedule", tags=["deadlines"], dependencies=[Depends(verify_api_key)])
 async def reschedule_deadline_api(deadline_id: int, body: dict = None):
     """Reschedule a deadline to a new due_date."""

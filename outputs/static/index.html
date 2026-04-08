@@ -204,6 +204,7 @@
                 <div class="grid-cell">
                     <div class="grid-cell-header grid-header-meetings">
                         <span class="section-label" style="margin:0">Meetings</span>
+                        <button onclick="_meetingQuickAdd()" style="background:none;border:1px solid var(--border);border-radius:50%;width:22px;height:22px;font-size:14px;cursor:pointer;color:var(--text3);line-height:1;padding:0;margin-left:6px;" title="Add meeting">+</button>
                         <span class="grid-cell-count" id="gridMeetingsCount"></span>
                     </div>
                     <div class="grid-cell-body" id="gridMeetings">
@@ -512,7 +513,7 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=101"></script>
+<script src="/static/app.js?v=102"></script>
 <script>
 // PWA-DESKTOP-1: Register service worker for installability
 if ('serviceWorker' in navigator) {
