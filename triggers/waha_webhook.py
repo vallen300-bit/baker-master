@@ -1048,6 +1048,11 @@ async def waha_webhook(
             pipeline.run(trigger)
         except Exception as e:
             logger.error(f"WhatsApp webhook: pipeline failed for {sender_name}: {e}")
+            try:
+                from triggers.sentinel_health import report_failure
+                report_failure("whatsapp", str(e))
+            except Exception:
+                pass
     else:
         from triggers.state import trigger_state
         trigger_state.add_to_briefing_queue([{
@@ -1066,5 +1071,12 @@ async def waha_webhook(
         check_research_trigger(combined_body, sender_name, msg_id)
     except Exception as _rt_e:
         logger.debug(f"Research trigger check failed (non-fatal): {_rt_e}")
+
+    # WAHA-HEALTH-FIXES-1: Report successful processing to sentinel health
+    try:
+        from triggers.sentinel_health import report_success
+        report_success("whatsapp")
+    except Exception:
+        pass
 
     return {"status": "processed", "sender": sender_name}

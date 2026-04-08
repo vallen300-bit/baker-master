@@ -61,6 +61,12 @@ def _store_messages_to_postgres(msgs: list, chat_id: str):
             body = m.get("body", "") or ""
             ts = m.get("timestamp", 0)
 
+            # WAHA-HEALTH-FIXES-1: Fix sender attribution for outbound messages.
+            # When fromMe=True, WAHA's "from" field is the remote party, not Director.
+            if from_me:
+                sender_jid = DIRECTOR_WHATSAPP_CUS  # "41799605092@c.us"
+                name = "Director"
+
             is_director = from_me or sender_jid in (DIRECTOR_WHATSAPP_JID, DIRECTOR_WHATSAPP_CUS)
 
             ts_iso = None
@@ -564,8 +570,22 @@ def backfill_whatsapp():
             f"WhatsApp backfill complete: {ingested} ingested, "
             f"{skipped} deduped, {errors} errors"
         )
+        # WAHA-HEALTH-FIXES-1: Report backfill health
+        try:
+            from triggers.sentinel_health import report_success, report_failure
+            if errors == 0 or ingested > 0:
+                report_success("whatsapp_backfill")
+            else:
+                report_failure("whatsapp_backfill", f"{errors} errors, 0 ingested")
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"WhatsApp backfill failed: {e}")
+        try:
+            from triggers.sentinel_health import report_failure
+            report_failure("whatsapp_backfill", str(e))
+        except Exception:
+            pass
     finally:
         _backfill_running = False
 

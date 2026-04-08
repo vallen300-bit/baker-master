@@ -364,6 +364,7 @@ _WATERMARK_MAX_AGE = {
     "todoist": 2,            # polls every 5 min
     "dropbox": 6,            # polls every 5 min
     "slack": 2,              # polls every 5 min
+    "whatsapp_resync": 12,   # WAHA-HEALTH-FIXES-1: re-syncs every 6h, 12h max tolerable
 }
 
 # ClickUp workspaces — all should advance within 2 hours

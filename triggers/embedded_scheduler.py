@@ -144,6 +144,51 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: whatsapp_resync (every 6 hours)")
 
+    # WAHA-HEALTH-FIXES-1: Weekly WAHA restart — prevents memory accumulation
+    def _restart_waha_service():
+        import os, requests
+        render_api_key = os.getenv("RENDER_API_KEY", "")
+        waha_service_id = "srv-d6hiiff5r7bs73euhd4g"
+        if not render_api_key:
+            logger.warning("WAHA restart: RENDER_API_KEY not set — skipping")
+            return
+        try:
+            resp = requests.post(
+                f"https://api.render.com/v1/services/{waha_service_id}/deploys",
+                headers={"Authorization": f"Bearer {render_api_key}"},
+                json={"clearCache": "do_not_clear"},
+                timeout=30,
+            )
+            if resp.status_code in (200, 201):
+                logger.info("WAHA restart: deploy triggered successfully")
+                try:
+                    from triggers.sentinel_health import report_success
+                    report_success("waha_restart")
+                except Exception:
+                    pass
+            else:
+                logger.warning(f"WAHA restart failed: {resp.status_code} {resp.text[:200]}")
+                try:
+                    from triggers.sentinel_health import report_failure
+                    report_failure("waha_restart", f"HTTP {resp.status_code}")
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.error(f"WAHA restart exception: {e}")
+            try:
+                from triggers.sentinel_health import report_failure
+                report_failure("waha_restart", str(e))
+            except Exception:
+                pass
+
+    scheduler.add_job(
+        _restart_waha_service,
+        CronTrigger(day_of_week="sun", hour=4, minute=0),
+        id="waha_weekly_restart", name="WAHA weekly restart",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: waha_weekly_restart (Sunday 04:00 UTC)")
+
     # Daily briefing — 06:00 UTC (08:00 CET)
     from triggers.briefing_trigger import generate_morning_briefing
     scheduler.add_job(
