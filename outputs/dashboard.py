@@ -2408,6 +2408,47 @@ async def get_morning_brief():
         except Exception as e:
             logger.warning(f"Morning brief: calendar unavailable (travel cards use DB fallback): {e}")
 
+        # EXCHANGE-CALENDAR-POLL-1: Merge Exchange/Outlook calendar events
+        try:
+            from triggers.exchange_calendar_poller import poll_exchange_todays_meetings
+            exchange_events = poll_exchange_todays_meetings()
+            for m in exchange_events:
+                # Dedup: skip if same title + same start time already in meetings_today or travel_today
+                m_title = (m.get('title', '') or '').lower().strip()
+                m_start = (m.get('start', '') or '')[:16]  # Compare to minute precision
+                already_exists = False
+                for existing in meetings_today + travel_today:
+                    if (existing.get('title', '') or '').lower().strip() == m_title and \
+                       (existing.get('start', '') or '')[:16] == m_start:
+                        already_exists = True
+                        break
+                if already_exists:
+                    continue
+
+                attendee_names = [a.get('name', '') or a.get('email', '') for a in m.get('attendees', [])]
+                event_data = {
+                    "title": m['title'],
+                    "start": m['start'],
+                    "end": m.get('end', ''),
+                    "location": m.get('location', ''),
+                    "attendees": attendee_names[:5],
+                    "prepped": False,
+                    "prep_notes": "",
+                    "source": "exchange",
+                }
+
+                if _is_travel_event(m['title'], m.get('location', '')):
+                    event_data["event_type"] = "travel"
+                    travel_today.append(event_data)
+                else:
+                    event_data["event_type"] = "meeting"
+                    meetings_today.append(event_data)
+
+            if exchange_events:
+                logger.info(f"Exchange calendar: merged {len(exchange_events)} events into morning brief")
+        except Exception as e:
+            logger.warning(f"Morning brief: Exchange calendar unavailable (non-fatal): {e}")
+
         # TRIP-INTELLIGENCE-1: Match/create trips for travel events
         active_trips = []
         try:

@@ -63,3 +63,4 @@ pywebpush>=2.0.0             # Web Push notifications via VAPID
 # Future: Trigger integrations
 # msgraph-sdk>=1.0.0       # Microsoft 365 / Outlook
 slack-sdk>=3.0.0           # Slack
+exchangelib>=5.5.0         # EXCHANGE-CALENDAR-POLL-1: EWS calendar (temporary, until M365 migration)
