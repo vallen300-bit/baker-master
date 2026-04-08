@@ -1020,13 +1020,23 @@ async function loadMorningBrief() {
                     else if (_diffDays > 1 && _diffDays <= 7) _dayLabel = 'In ' + _diffDays + ' days';
                 }
                 var dateDisplay = (_dayLabel ? _dayLabel + ' \u00B7 ' : '') + dateStr;
+                // TRAVEL-DOT-UNIFY-1: Trip cards with triage bar for status change
+                var _tripGone = false;
+                try {
+                    var _tripEndDate = new Date((trip.end_date || trip.start_date) + 'T23:59:59');
+                    _tripGone = new Date() > _tripEndDate;
+                } catch(e) {}
+                if (_tripGone && (trip.status === 'completed' || trip.status === 'discarded')) continue;
                 allTravel.push(
-                    '<div class="card card-compact" onclick="showTripView(' + trip.id + ')" style="cursor:pointer;"><div class="card-header">' +
-                    '<span class="nav-dot" style="margin-top:5px;background:' + statusColor + ';"></span>' +
+                    '<div class="card card-compact" style="cursor:pointer;" data-trip-id="' + trip.id + '" onclick="_toggleTriageCard(this)"><div class="card-header">' +
+                    '<span class="nav-dot travel-status-dot" style="margin-top:5px;background:' + statusColor + ';"></span>' +
                     '<span class="card-title">' + esc(trip.event_name || trip.destination || 'Trip') +
                     (catLabel ? ' <span style="font-size:9px;font-weight:600;color:var(--text3);background:var(--bg2);padding:1px 4px;border-radius:3px;margin-left:6px;">' + esc(catLabel) + '</span>' : '') +
-                    ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9656;</span></span>' +
+                    ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span></span>' +
                     '<span class="card-time">' + esc(dateDisplay) + '</span>' +
+                    '</div>' +
+                    '<div class="triage-detail" style="display:none;">' +
+                    _travelTriageBar(null, trip.id, trip.event_name || trip.destination || 'Trip', '', trip.status) +
                     '</div></div>'
                 );
             }
@@ -1070,21 +1080,26 @@ async function loadMorningBrief() {
                     : '';
                 var tdChevron = hasDetail ? ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span>' : '';
                 // Build expandable detail with flight info + travel triage buttons
-                var _tdDone = false;
+                // TRAVEL-DOT-UNIFY-1: All flights start blue (planned). Director controls status via triage.
+                var _tdTripId = td.linked_trip_id || null;
+                var _tdStatus = td.trip_status || 'planned';
+                var _tdDotColor = _tripStatusColors[_tdStatus] || 'var(--blue, #0a6fdb)';
+                var _tdGone = false;
                 try {
                     if (td.due_date) {
-                        var _tdDep = new Date(td.due_date);
-                        _tdDone = new Date() > new Date(_tdDep.getTime() + 2 * 3600000);
+                        var _tdDueDate = new Date(td.due_date.slice(0, 10) + 'T23:59:59');
+                        _tdGone = new Date() > _tdDueDate;
                     }
                 } catch(e) {}
-                var _travelHtml = '<div class="card card-compact' + (_tdDone ? ' travel-done' : '') + '" style="cursor:pointer;" onclick="_toggleTriageCard(this)"><div class="card-header">' +
-                    '<span class="nav-dot ' + (_tdDone ? 'green' : 'amber') + '" style="margin-top:5px;"></span>' +
+                if (_tdGone && _tdStatus !== 'confirmed' && _tdStatus !== 'planned') continue;
+                var _travelHtml = '<div class="card card-compact" style="cursor:pointer;" data-deadline-id="' + td.id + '" data-trip-id="' + (_tdTripId || '') + '" onclick="_toggleTriageCard(this)"><div class="card-header">' +
+                    '<span class="nav-dot travel-status-dot" style="margin-top:5px;background:' + _tdDotColor + ';"></span>' +
                     '<span class="card-title">' + esc(td.description) + ' <span style="font-size:10px;color:var(--text3);margin-left:4px;">&#9662;</span></span>' +
                     '<span class="card-time" style="font-weight:600;">' + esc(dueLabel) + '</span>' +
                     '</div>';
                 _travelHtml += '<div class="triage-detail" style="display:none;">';
                 if (flightInfo) _travelHtml += '<div style="font-size:12px;color:var(--text2);padding:8px 18px 10px;border-top:1px solid var(--border-light);line-height:1.6;white-space:pre-wrap;">' + esc(flightInfo) + '</div>';
-                _travelHtml += _landingTriageBar(String(td.id), td.description, flightInfo, 'travel', td.id);
+                _travelHtml += _travelTriageBar(td.id, _tdTripId, td.description, flightInfo, _tdStatus);
                 _travelHtml += '</div></div>';
                 allTravel.push(_travelHtml);
             }
@@ -2917,6 +2932,95 @@ function _landingTriageBar(aid, title, body, cardType, itemId) {
     }
     html += '</div>';
     return html;
+}
+
+// TRAVEL-DOT-UNIFY-1: Travel-specific triage bar with status buttons
+function _travelTriageBar(deadlineId, tripId, title, flightInfo, currentStatus) {
+    var _t = escAttr(title);
+    var _c = escAttr((flightInfo || '').substring(0, 200));
+    var html = '<div class="triage-actions" style="display:flex;flex-wrap:wrap;gap:6px;padding:8px 16px 12px;">';
+
+    // Status buttons — always show all 4, highlight current
+    var statuses = [
+        { key: 'planned', label: 'Planned', color: 'var(--blue, #0a6fdb)' },
+        { key: 'confirmed', label: 'Confirmed', color: 'var(--green, #22c55e)' },
+        { key: 'completed', label: 'Completed', color: 'var(--amber, #f59e0b)' },
+        { key: 'discarded', label: 'Discard', color: 'var(--red, #ef4444)' }
+    ];
+    for (var si = 0; si < statuses.length; si++) {
+        var s = statuses[si];
+        var active = s.key === currentStatus;
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_travelSetStatus(this,' +
+            (tripId || 'null') + ',' + (deadlineId || 'null') + ',\'' + s.key + '\')" style="' +
+            (active ? 'background:' + s.color + ';color:#fff;border-color:' + s.color + ';' : '') +
+            '">' + s.label + '</button>';
+    }
+
+    // Utility buttons
+    html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Draft an email regarding: \\x22' + _t + '\\x22. Context: ' + _c + '\')">✉ Draft Email</button>';
+    html += '<button class="triage-pill" onclick="event.stopPropagation();_triageOpenBaker(\'Draft a WhatsApp message regarding: \\x22' + _t + '\\x22. Context: ' + _c + '\')">💬 Draft WA</button>';
+    if (tripId) {
+        html += '<button class="triage-pill" onclick="event.stopPropagation();showTripView(' + tripId + ')">📋 View Details</button>';
+    }
+    html += '<button class="triage-pill" onclick="event.stopPropagation();_landingDismiss(\'travel\',' + (deadlineId || tripId) + ',this)">✕ Dismiss</button>';
+
+    html += '</div>';
+    return html;
+}
+
+// TRAVEL-DOT-UNIFY-1: Set travel status — update trip (create if needed), live-update dot
+async function _travelSetStatus(btn, tripId, deadlineId, newStatus) {
+    var card = btn.closest('.card');
+    var dot = card ? card.querySelector('.travel-status-dot') : null;
+
+    // If no trip exists yet, create one from the deadline
+    if (!tripId && deadlineId) {
+        try {
+            var resp = await bakerFetch('/api/travel/promote-deadline/' + deadlineId, { method: 'POST' });
+            var result = await resp.json();
+            tripId = result.trip_id || result.id;
+            if (card) card.dataset.tripId = tripId;
+        } catch(e) {
+            _showToast('Failed to create trip');
+            return;
+        }
+    }
+
+    if (!tripId) { _showToast('No trip to update'); return; }
+
+    // Update trip status
+    try {
+        await bakerFetch('/api/trips/' + tripId, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: newStatus })
+        });
+
+        // Live-update dot color
+        var newColor = _tripStatusColors[newStatus] || 'var(--text3)';
+        if (dot) dot.style.background = newColor;
+
+        // Update button highlights
+        var pills = btn.parentElement.querySelectorAll('.triage-pill');
+        var statusKeys = ['planned', 'confirmed', 'completed', 'discarded'];
+        for (var pi = 0; pi < Math.min(pills.length, 4); pi++) {
+            var sk = statusKeys[pi];
+            var sc = _tripStatusColors[sk];
+            if (sk === newStatus) {
+                pills[pi].style.background = sc;
+                pills[pi].style.color = '#fff';
+                pills[pi].style.borderColor = sc;
+            } else {
+                pills[pi].style.background = '';
+                pills[pi].style.color = '';
+                pills[pi].style.borderColor = '';
+            }
+        }
+
+        _showToast('Status → ' + newStatus.charAt(0).toUpperCase() + newStatus.slice(1));
+    } catch(e) {
+        _showToast('Failed to update status');
+    }
 }
 
 function _landingDismiss(cardType, itemId, btn) {

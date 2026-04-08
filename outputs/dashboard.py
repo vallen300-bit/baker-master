@@ -2476,6 +2476,24 @@ async def get_morning_brief():
         # LANDING-FIX-2: travel_deadlines now fetched inside connection block above
         travel_deadlines = _travel_deadlines_rows
 
+        # TRAVEL-DOT-UNIFY-1: Enrich travel deadlines with linked trip status
+        try:
+            if _travel_deadlines_rows and active_trips:
+                for tdl in _travel_deadlines_rows:
+                    tdl_desc = (tdl.get("description") or "").lower()
+                    tdl_date = str(tdl.get("due_date", ""))[:10] if tdl.get("due_date") else ""
+                    for atrip in active_trips:
+                        trip_dest = (atrip.get("destination") or "").lower()
+                        trip_date = str(atrip.get("start_date", ""))
+                        if trip_dest and trip_dest in tdl_desc and trip_date == tdl_date:
+                            tdl["linked_trip_id"] = atrip.get("id")
+                            tdl["trip_status"] = atrip.get("status", "planned")
+                            break
+                    else:
+                        tdl["trip_status"] = "planned"  # Default: blue dot
+        except Exception:
+            pass
+
         # LANDING-FIX-3: meeting alerts for Meetings card
         meeting_alerts = _meeting_alerts_rows
 
@@ -2622,6 +2640,64 @@ async def update_trip(trip_id: int, body: TripUpdate):
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
     return _serialize(trip)
+
+
+@app.post("/api/travel/promote-deadline/{deadline_id}", tags=["trips"], dependencies=[Depends(verify_api_key)])
+async def promote_deadline_to_trip(deadline_id: int):
+    """TRAVEL-DOT-UNIFY-1: Create a trip from a travel deadline. Returns the new trip with id."""
+    store = _get_store()
+    from models.deadlines import get_conn, put_conn
+    conn = get_conn()
+    if not conn:
+        raise HTTPException(status_code=500, detail="DB connection failed")
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT id, description, due_date, source_snippet
+            FROM deadlines WHERE id = %s LIMIT 1
+        """, (deadline_id,))
+        dl = cur.fetchone()
+        cur.close()
+        if not dl:
+            raise HTTPException(status_code=404, detail="Deadline not found")
+
+        # Parse destination from description (e.g., "Return from Vienna to Geneva (Flight OS 155)")
+        desc = dl["description"] or ""
+        destination = ""
+        origin = ""
+        import re
+        to_match = re.search(r"(?:to|nach|→)\s+([A-Za-z\s]+?)(?:\s*\(|$)", desc)
+        from_match = re.search(r"(?:from|von|Return from)\s+([A-Za-z\s]+?)(?:\s+to|\s*\(|$)", desc, re.IGNORECASE)
+        if to_match:
+            destination = to_match.group(1).strip()
+        if from_match:
+            origin = from_match.group(1).strip()
+
+        flight_date = None
+        if dl.get("due_date"):
+            flight_date = dl["due_date"]
+            if hasattr(flight_date, "date"):
+                flight_date = flight_date.date()
+            flight_date = str(flight_date)
+
+        trip = store.upsert_trip(
+            destination=destination or "Unknown",
+            origin=origin or "",
+            start_date=flight_date,
+            end_date=flight_date,
+            event_name=desc,
+            category="meeting",
+            status="planned",
+        )
+        return _serialize(trip)
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Promote deadline to trip failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        put_conn(conn)
 
 
 class TripNote(BaseModel):
