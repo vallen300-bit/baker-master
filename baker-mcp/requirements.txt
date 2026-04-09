@@ -1,0 +1,3 @@
+# Baker MCP Server — read-only PostgreSQL access for Cowork / Claude Desktop
+psycopg2-binary>=2.9.9
+mcp>=1.0.0
