@@ -17,7 +17,7 @@ uvicorn>=0.32.0
 pydantic>=2.0.0
 
 # MCP server (BAKER-MCP-REMOTE)
-mcp>=1.0.0                 # Model Context Protocol SDK (SSE transport for remote MCP)
+mcp>=1.8.0                 # Model Context Protocol SDK (MCP-SSE-STABLE: Streamable HTTP transport)
 
 # Scheduling
 apscheduler>=3.10.0        # Trigger scheduling
@@ -67,3 +67,5 @@ pywebpush>=2.0.0             # Web Push notifications via VAPID
 # msgraph-sdk>=1.0.0       # Microsoft 365 / Outlook
 slack-sdk>=3.0.0           # Slack
 exchangelib>=5.5.0         # EXCHANGE-CALENDAR-POLL-1: EWS calendar (temporary, until M365 migration)
+
+# MCP Server (MCP-SSE-STABLE)

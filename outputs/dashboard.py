@@ -480,6 +480,133 @@ async def shutdown():
         logger.warning(f"Scheduler shutdown error: {e}")
 
 
+# ============================================================
+# BAKER MCP REMOTE — Streamable HTTP transport (MCP-SSE-STABLE)
+# Stateless JSON-RPC handler. No sessions, no reconnection issues.
+# Claude Code web + Cowork connect here for DB tool access.
+# ============================================================
+
+_mcp_module_cache = None
+
+
+def _get_mcp_module():
+    """Lazy-load baker_mcp tools + dispatch to avoid import overhead at startup."""
+    global _mcp_module_cache
+    if _mcp_module_cache is None:
+        try:
+            from baker_mcp.baker_mcp_server import TOOLS, _dispatch
+            _mcp_module_cache = {"tools": TOOLS, "dispatch": _dispatch}
+            logger.info("MCP module loaded: %d tools", len(TOOLS))
+        except Exception as e:
+            logger.error(f"Failed to load baker_mcp module: {e}")
+            raise
+    return _mcp_module_cache
+
+
+def _mcp_verify_key(request: Request) -> bool:
+    """Check MCP auth via ?key= query param or X-Baker-Key header."""
+    key = request.query_params.get("key") or request.headers.get("x-baker-key", "")
+    return bool(_BAKER_API_KEY) and key == _BAKER_API_KEY
+
+
+def _handle_mcp_message(msg: dict) -> dict | None:
+    """Process a single MCP JSON-RPC message. Returns None for notifications."""
+    method = msg.get("method", "")
+    msg_id = msg.get("id")
+    params = msg.get("params", {})
+
+    # Notifications (no id) — acknowledge silently
+    if msg_id is None:
+        return None
+
+    if method == "initialize":
+        return {
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "result": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": "baker-mcp", "version": "1.0.0"},
+            },
+        }
+
+    if method == "ping":
+        return {"jsonrpc": "2.0", "id": msg_id, "result": {}}
+
+    if method == "tools/list":
+        try:
+            mcp_mod = _get_mcp_module()
+            tools = [
+                {"name": t.name, "description": t.description or "", "inputSchema": t.inputSchema}
+                for t in mcp_mod["tools"]
+            ]
+            return {"jsonrpc": "2.0", "id": msg_id, "result": {"tools": tools}}
+        except Exception as e:
+            logger.error(f"MCP tools/list failed: {e}")
+            return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32603, "message": str(e)}}
+
+    if method == "tools/call":
+        tool_name = params.get("name", "")
+        arguments = params.get("arguments", {})
+        try:
+            mcp_mod = _get_mcp_module()
+            result_text = mcp_mod["dispatch"](tool_name, arguments)
+            return {
+                "jsonrpc": "2.0",
+                "id": msg_id,
+                "result": {"content": [{"type": "text", "text": result_text}]},
+            }
+        except Exception as e:
+            logger.error(f"MCP tools/call {tool_name} failed: {e}")
+            return {
+                "jsonrpc": "2.0",
+                "id": msg_id,
+                "result": {"content": [{"type": "text", "text": f"Error: {e}"}], "isError": True},
+            }
+
+    return {"jsonrpc": "2.0", "id": msg_id, "error": {"code": -32601, "message": f"Method not found: {method}"}}
+
+
+@app.post("/mcp", tags=["mcp"])
+async def mcp_streamable_http(request: Request):
+    """MCP Streamable HTTP endpoint — stateless JSON-RPC for remote tool access."""
+    if not _mcp_verify_key(request):
+        return JSONResponse(
+            {"jsonrpc": "2.0", "error": {"code": -32000, "message": "Unauthorized"}},
+            status_code=401,
+        )
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(
+            {"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
+            status_code=400,
+        )
+
+    # Batch request (array of messages)
+    if isinstance(body, list):
+        responses = [r for msg in body if (r := _handle_mcp_message(msg)) is not None]
+        if not responses:
+            return JSONResponse(content=None, status_code=202)
+        return JSONResponse(responses)
+
+    # Single request
+    resp = _handle_mcp_message(body)
+    if resp is None:
+        return JSONResponse(content=None, status_code=202)
+    return JSONResponse(resp)
+
+
+@app.get("/mcp", tags=["mcp"])
+async def mcp_sse_redirect(request: Request):
+    """Redirect legacy SSE clients to use POST (Streamable HTTP)."""
+    return JSONResponse(
+        {"info": "Baker MCP uses Streamable HTTP. Send POST requests with JSON-RPC body.", "endpoint": "/mcp"},
+        status_code=200,
+    )
+
+
 @app.get("/api/client-config", include_in_schema=False)
 async def client_config():
     return {"apiKey": _BAKER_API_KEY}
