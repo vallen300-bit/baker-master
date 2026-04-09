@@ -137,6 +137,7 @@ AO_PM_TOOLS = [
     "get_contact", "get_deadlines", "get_clickup_tasks", "search_deals_insights",
     "get_matter_context", "web_search", "read_document", "search_documents",
     "query_baker_data", "create_deadline", "draft_email",
+    "send_whatsapp", "send_email",
     "get_ao_state", "update_ao_state", "delegate_to_capability",
 ]
 

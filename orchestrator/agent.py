@@ -480,6 +480,65 @@ TOOL_DEFINITIONS = [
             "required": ["to", "subject", "body"],
         },
     },
+    # PM-WHATSAPP-EMAIL-TOOLS: Send WhatsApp
+    {
+        "name": "send_whatsapp",
+        "description": (
+            "Send a WhatsApp message to a contact. "
+            "Resolves recipient name to WhatsApp ID via VIP contacts table. "
+            "Baker signature is added automatically for external contacts.\n\n"
+            "Use when you need to:\n"
+            "- Send a message to a counterparty\n"
+            "- Follow up with a contact\n"
+            "- Request information from someone\n\n"
+            "Example: send_whatsapp(to='Constantinos', message='Hi, could you confirm...')"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to": {
+                    "type": "string",
+                    "description": "Recipient name (e.g. 'Constantinos') or WhatsApp ID (e.g. '35799492642@c.us')",
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Message text (plain text, professional tone)",
+                },
+            },
+            "required": ["to", "message"],
+        },
+    },
+    # PM-WHATSAPP-EMAIL-TOOLS: Send email
+    {
+        "name": "send_email",
+        "description": (
+            "Send an email via Baker's Gmail.\n"
+            "- Internal emails (@brisengroup.com) send immediately.\n"
+            "- External emails are queued as drafts for Director approval.\n\n"
+            "Use when you need to:\n"
+            "- Send a follow-up to a counterparty\n"
+            "- Request information via email\n"
+            "- Send status updates to stakeholders"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to": {
+                    "type": "string",
+                    "description": "Recipient email address",
+                },
+                "subject": {
+                    "type": "string",
+                    "description": "Email subject line",
+                },
+                "body": {
+                    "type": "string",
+                    "description": "Email body (plain text, professional tone)",
+                },
+            },
+            "required": ["to", "subject", "body"],
+        },
+    },
     # A3: Calendar write tool (Session 26)
     {
         "name": "create_calendar_event",
@@ -820,6 +879,10 @@ class ToolExecutor:
                 return self._create_calendar_event(tool_input)
             elif tool_name == "draft_email":
                 return self._draft_email(tool_input)
+            elif tool_name == "send_whatsapp":
+                return self._send_whatsapp(tool_input)
+            elif tool_name == "send_email":
+                return self._send_email(tool_input)
             elif tool_name == "enrich_linkedin":
                 return self._enrich_linkedin(tool_input)
             elif tool_name == "browse_website":
@@ -1476,9 +1539,9 @@ class ToolExecutor:
             return "[to, subject, and body are all required]"
 
         try:
-            from orchestrator.action_handler import _save_pending_draft
-            _save_pending_draft(
-                to_address=to,
+            from orchestrator.action_handler import _save_draft
+            _save_draft(
+                to=to,
                 subject=subject,
                 body=body,
                 content_req="",
@@ -1500,6 +1563,69 @@ class ToolExecutor:
         except Exception as e:
             logger.error(f"draft_email failed: {e}")
             return json.dumps({"error": f"Email draft failed: {str(e)}"})
+
+    def _send_whatsapp(self, inp: dict) -> str:
+        """PM-WHATSAPP-EMAIL-TOOLS: Send WhatsApp to a contact."""
+        to = inp.get("to", "").strip()
+        message = inp.get("message", "").strip()
+
+        if not to or not message:
+            return json.dumps({"error": "Both 'to' and 'message' are required"})
+
+        try:
+            # Resolve name → WhatsApp ID
+            if to.endswith("@c.us"):
+                wa_id = to
+                name = to
+            else:
+                from orchestrator.action_handler import _resolve_names_to_whatsapp_ids
+                resolved = _resolve_names_to_whatsapp_ids(to)
+                if not resolved:
+                    return json.dumps({"error": f"Could not find WhatsApp ID for '{to}'. Check VIP contacts."})
+                name, wa_id = resolved[0]
+
+            from outputs.whatsapp_sender import send_whatsapp
+            success = send_whatsapp(text=message, chat_id=wa_id)
+            if success:
+                return f"WhatsApp sent to {name} ({wa_id}):\n{message[:200]}..."
+            else:
+                return json.dumps({"error": f"WhatsApp delivery failed for {name}"})
+        except Exception as e:
+            logger.error(f"send_whatsapp tool failed: {e}")
+            return json.dumps({"error": f"WhatsApp send failed: {str(e)}"})
+
+    def _send_email(self, inp: dict) -> str:
+        """PM-WHATSAPP-EMAIL-TOOLS: Send email — auto-send internal, draft external."""
+        to = inp.get("to", "").strip()
+        subject = inp.get("subject", "").strip()
+        body = inp.get("body", "").strip()
+
+        if not to or not subject or not body:
+            return json.dumps({"error": "to, subject, and body are all required"})
+
+        try:
+            is_internal = to.lower().endswith("@brisengroup.com")
+
+            if is_internal:
+                from outputs.email_alerts import send_composed_email
+                result = send_composed_email(to=to, subject=subject, body=body)
+                if result:
+                    return f"Email sent to {to}:\n- **Subject:** {subject}\n- **Message ID:** {result.get('message_id', 'n/a')}"
+                else:
+                    return json.dumps({"error": f"Email delivery failed for {to}"})
+            else:
+                # External — queue as draft for Director approval
+                from orchestrator.action_handler import _save_draft
+                _save_draft(to=to, subject=subject, body=body, content_req="", channel="agent")
+                return (
+                    f"Email draft queued for Director approval:\n"
+                    f"- **To:** {to}\n- **Subject:** {subject}\n"
+                    f"- Preview: {body[:100]}...\n\n"
+                    f"Director can approve via dashboard or chat."
+                )
+        except Exception as e:
+            logger.error(f"send_email tool failed: {e}")
+            return json.dumps({"error": f"Email send failed: {str(e)}"})
 
     def _create_calendar_event(self, inp: dict) -> str:
         """A3: Create a Google Calendar event from the agent loop."""
