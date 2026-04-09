@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hotel Stabilization — How Long Does It Take?</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Georgia', serif; background: #0a0a0f; color: #e8e6f0; }
+
+  .slide {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 60px 40px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+
+  .slide-inner {
+    max-width: 900px;
+    width: 100%;
+  }
+
+  .slide-number {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    color: #c9a96e;
+    margin-bottom: 24px;
+  }
+
+  h1 {
+    font-size: 2.4rem;
+    font-weight: 400;
+    line-height: 1.3;
+    margin-bottom: 16px;
+    color: #fff;
+  }
+
+  h2 {
+    font-size: 1.6rem;
+    font-weight: 400;
+    line-height: 1.4;
+    margin-bottom: 24px;
+    color: #fff;
+  }
+
+  .subtitle {
+    font-size: 1.1rem;
+    color: #8a87a0;
+    margin-bottom: 40px;
+    line-height: 1.6;
+  }
+
+  .big-number {
+    font-size: 5rem;
+    font-weight: 300;
+    color: #c9a96e;
+    line-height: 1;
+    margin-bottom: 12px;
+  }
+
+  .big-label {
+    font-size: 1.2rem;
+    color: #8a87a0;
+    margin-bottom: 40px;
+  }
+
+  .fact-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin: 32px 0;
+  }
+
+  .fact-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(201,169,110,0.15);
+    border-radius: 12px;
+    padding: 28px;
+  }
+
+  .fact-card .number {
+    font-size: 2.2rem;
+    font-weight: 300;
+    color: #c9a96e;
+    margin-bottom: 8px;
+  }
+
+  .fact-card .label {
+    font-size: 0.9rem;
+    color: #8a87a0;
+    line-height: 1.5;
+  }
+
+  .timeline {
+    position: relative;
+    margin: 40px 0;
+    padding-left: 40px;
+  }
+
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 12px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(to bottom, #c9a96e, rgba(201,169,110,0.1));
+  }
+
+  .timeline-item {
+    position: relative;
+    margin-bottom: 36px;
+  }
+
+  .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -33px;
+    top: 6px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #0a0a0f;
+    border: 2px solid #c9a96e;
+  }
+
+  .timeline-item.active::before {
+    background: #c9a96e;
+    box-shadow: 0 0 12px rgba(201,169,110,0.4);
+  }
+
+  .timeline-item .period {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: #c9a96e;
+    margin-bottom: 6px;
+  }
+
+  .timeline-item .title {
+    font-size: 1.15rem;
+    color: #fff;
+    margin-bottom: 6px;
+  }
+
+  .timeline-item .desc {
+    font-size: 0.9rem;
+    color: #8a87a0;
+    line-height: 1.5;
+  }
+
+  .highlight-box {
+    background: rgba(201,169,110,0.08);
+    border: 1px solid rgba(201,169,110,0.25);
+    border-radius: 12px;
+    padding: 32px;
+    margin: 32px 0;
+  }
+
+  .highlight-box .quote {
+    font-size: 1.2rem;
+    font-style: italic;
+    color: #e8e6f0;
+    line-height: 1.6;
+    margin-bottom: 12px;
+  }
+
+  .highlight-box .source {
+    font-size: 0.8rem;
+    color: #c9a96e;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .comparison-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 32px 0;
+  }
+
+  .comparison-table th {
+    text-align: left;
+    padding: 14px 20px;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: #c9a96e;
+    border-bottom: 1px solid rgba(201,169,110,0.2);
+    font-weight: 500;
+  }
+
+  .comparison-table td {
+    padding: 16px 20px;
+    font-size: 0.95rem;
+    color: #e8e6f0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    line-height: 1.4;
+  }
+
+  .comparison-table tr:last-child td {
+    border-bottom: none;
+  }
+
+  .tag {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .tag-green { background: rgba(76,175,80,0.15); color: #81c784; }
+  .tag-gold { background: rgba(201,169,110,0.15); color: #c9a96e; }
+  .tag-blue { background: rgba(100,149,237,0.15); color: #90b4f0; }
+
+  .vienna-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+    margin: 32px 0;
+  }
+
+  .vienna-stat {
+    text-align: center;
+    padding: 24px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .vienna-stat .num {
+    font-size: 2rem;
+    font-weight: 300;
+    color: #c9a96e;
+    margin-bottom: 6px;
+  }
+
+  .vienna-stat .lbl {
+    font-size: 0.8rem;
+    color: #8a87a0;
+  }
+
+  .bottom-line {
+    font-size: 1.3rem;
+    color: #fff;
+    line-height: 1.6;
+    margin-top: 32px;
+    padding-top: 32px;
+    border-top: 1px solid rgba(201,169,110,0.2);
+  }
+
+  .footer {
+    text-align: center;
+    padding: 40px;
+    font-size: 0.65rem;
+    color: #333;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  @media (max-width: 700px) {
+    .fact-grid, .vienna-stats { grid-template-columns: 1fr; }
+    h1 { font-size: 1.8rem; }
+    .big-number { font-size: 3.5rem; }
+    .slide { padding: 40px 24px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- SLIDE 1: Title -->
+<div class="slide">
+  <div class="slide-inner" style="text-align: center;">
+    <div class="slide-number">Confidential</div>
+    <h1>When Do Luxury Hotels<br>Start Making Money?</h1>
+    <p class="subtitle">Industry data on how long new hotels take to reach stable performance.<br>Prepared April 2026.</p>
+  </div>
+</div>
+
+<!-- SLIDE 2: The Big Answer -->
+<div class="slide">
+  <div class="slide-inner">
+    <div class="slide-number">The Short Answer</div>
+    <div class="big-number">3 — 5 years</div>
+    <div class="big-label">This is how long every luxury hotel in the world takes to stabilize.</div>
+
+    <div class="fact-grid">
+      <div class="fact-card">
+        <div class="number">3.08</div>
+        <div class="label">Average years to stabilize across all hotel classes, according to the International Society of Hospitality Consultants (ISHC) and Penn State University research.</div>
+      </div>
+      <div class="fact-card">
+        <div class="number">58%</div>
+        <div class="label">Typical occupancy in month one of a new hotel. It takes up to two years to reach the level of comparable established hotels.</div>
+      </div>
+      <div class="fact-card">
+        <div class="number">7</div>
+        <div class="label">Quarters (nearly two years) for a new luxury hotel to match the occupancy of existing competitors in the same market.</div>
+      </div>
+      <div class="fact-card">
+        <div class="number">4 — 5</div>
+        <div class="label">Years for luxury hotels in competitive European cities. These markets have many established players and it takes longer to win a loyal customer base.</div>
+      </div>
+    </div>
+
+    <div class="highlight-box">
+      <div class="quote">"Historically, most developers of future hotel occupancy estimates have assumed a three-year build-up period."</div>
+      <div class="source">ISHC / Penn State University — Published Research</div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 3: The Journey -->
+<div class="slide">
+  <div class="slide-inner">
+    <div class="slide-number">What Happens Year By Year</div>
+    <h2>The road from opening to profit</h2>
+
+    <div class="timeline">
+      <div class="timeline-item active">
+        <div class="period">Year 1 — Where We Are Now</div>
+        <div class="title">Building awareness. Filling rooms. Testing operations.</div>
+        <div class="desc">Occupancy: 55 — 65% of target. Revenue covers about half to two-thirds of costs. The hotel is learning — which markets respond, which services work, how to staff efficiently. Every luxury hotel in the world goes through this phase. <span class="tag tag-gold">MO Vienna: Month 5</span></div>
+      </div>
+
+      <div class="timeline-item">
+        <div class="period">Year 2</div>
+        <div class="title">Momentum. Repeat guests. Word of mouth.</div>
+        <div class="desc">Occupancy: 70 — 78%. Revenue jumps 25 — 40% from Year 1. Positive reviews build trust. Corporate clients start booking regularly. The steepest improvement happens here.</div>
+      </div>
+
+      <div class="timeline-item">
+        <div class="period">Year 3</div>
+        <div class="title">The turning point. Stabilization in sight.</div>
+        <div class="desc">Occupancy: 80 — 88%. The hotel shifts focus from "selling rooms" to "optimizing revenue." Food &amp; beverage becomes a profit center. Local partnerships mature. The market has absorbed the new supply.</div>
+      </div>
+
+      <div class="timeline-item">
+        <div class="period">Year 4 — 5</div>
+        <div class="title">Stabilized. Predictable. Profitable.</div>
+        <div class="desc">Occupancy: 90%+. Revenue is consistent year-over-year. The hotel performs at the level projected in the original investment model. Management focuses on growth, not survival.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 4: What The Consultants Assume -->
+<div class="slide">
+  <div class="slide-inner">
+    <div class="slide-number">What Investment Advisers Use</div>
+    <h2>Standard assumptions in every hotel valuation model</h2>
+    <p class="subtitle">When firms like CBRE, HVS, JLL, or Cushman &amp; Wakefield value a new luxury hotel, they build in the following ramp-up assumptions. These are not opinions — they are standard practice across the industry.</p>
+
+    <table class="comparison-table">
+      <thead>
+        <tr>
+          <th>Year</th>
+          <th>Expected Occupancy</th>
+          <th>Revenue vs. Full Potential</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Year 1</strong></td>
+          <td>55 — 65%</td>
+          <td>50 — 65%</td>
+          <td><span class="tag tag-gold">Ramp-up</span></td>
+        </tr>
+        <tr>
+          <td><strong>Year 2</strong></td>
+          <td>70 — 78%</td>
+          <td>75 — 85%</td>
+          <td><span class="tag tag-blue">Growth</span></td>
+        </tr>
+        <tr>
+          <td><strong>Year 3</strong></td>
+          <td>80 — 88%</td>
+          <td>85 — 95%</td>
+          <td><span class="tag tag-blue">Approaching target</span></td>
+        </tr>
+        <tr>
+          <td><strong>Year 4+</strong></td>
+          <td>90%+</td>
+          <td>100%</td>
+          <td><span class="tag tag-green">Stabilized</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="highlight-box">
+      <div class="quote">"The luxury segment is less sensitive to price changes and attracts high-spending international tourists. Luxury hotel RevPAR in Vienna is already 20% above 2019 levels."</div>
+      <div class="source">Christie &amp; Co — Vienna Accommodation Market Report 2024</div>
+    </div>
+  </div>
+</div>
+
+<!-- SLIDE 5: Vienna Market -->
+<div class="slide">
+  <div class="slide-inner">
+    <div class="slide-number">The Vienna Market Today</div>
+    <h2>One of the strongest luxury hotel markets in Europe</h2>
+
+    <div class="vienna-stats">
+      <div class="vienna-stat">
+        <div class="num">76.8%</div>
+        <div class="lbl">Market-wide<br>occupancy</div>
+      </div>
+      <div class="vienna-stat">
+        <div class="num">&euro;211</div>
+        <div class="lbl">Average daily<br>rate (ADR)</div>
+      </div>
+      <div class="vienna-stat">
+        <div class="num">+20%</div>
+        <div class="lbl">Luxury RevPAR<br>vs. 2019</div>
+      </div>
+    </div>
+
+    <p class="subtitle">Vienna's luxury segment is outperforming the broader market. International tourism continues to recover strongly. The city's events calendar, cultural reputation, and business travel keep demand resilient.</p>
+
+    <p class="subtitle">New luxury entrants in Vienna recently include Rosewood and Imperial Riding School (Marriott Autograph Collection). All are going through the same stabilization process.</p>
+
+    <p class="bottom-line">Mandarin Oriental Vienna opened November 2025. It is five months into a journey that every hotel consultant in the world models as taking three to five years. The current operating gap is expected and temporary.</p>
+  </div>
+</div>
+
+<!-- SLIDE 6: Mandarin Oriental -->
+<div class="slide">
+  <div class="slide-inner">
+    <div class="slide-number">Mandarin Oriental — Global Context</div>
+    <h2>The brand is growing and performing</h2>
+
+    <div class="fact-grid">
+      <div class="fact-card">
+        <div class="number">+11%</div>
+        <div class="label">RevPAR growth across the MO portfolio in 2025. The brand is delivering.</div>
+      </div>
+      <div class="fact-card">
+        <div class="number">30</div>
+        <div class="label">Hotels in the development pipeline. 3 — 5 new openings per year through 2033.</div>
+      </div>
+      <div class="fact-card">
+        <div class="number">40</div>
+        <div class="label">Hotels worldwide today, including two new openings in 2025 and properties in Rome and Bali opening in 2026.</div>
+      </div>
+      <div class="fact-card">
+        <div class="number">19</div>
+        <div class="label">Branded residences in the pipeline globally — the same model as MO Vienna.</div>
+      </div>
+    </div>
+
+    <div class="highlight-box">
+      <div class="quote">"Expected margin expansion as properties stabilize."</div>
+      <div class="source">Mandarin Oriental — H1 2025 Results</div>
+    </div>
+
+    <p class="subtitle">Even Mandarin Oriental's own corporate reporting uses the word "stabilize" — acknowledging that newly opened hotels need time to reach their full potential. This is not a problem. This is how the business works.</p>
+  </div>
+</div>
+
+<!-- SLIDE 7: Bottom Line -->
+<div class="slide">
+  <div class="slide-inner" style="text-align: center;">
+    <div class="slide-number">Summary</div>
+    <h1 style="margin-bottom: 40px;">Every luxury hotel in the world<br>takes 3 — 5 years to stabilize.</h1>
+
+    <p class="subtitle" style="max-width: 680px; margin: 0 auto 40px;">
+      MO Vienna is five months into this journey.<br>
+      The Vienna luxury market is strong — 20% above pre-pandemic levels.<br>
+      The Mandarin Oriental brand is growing globally.<br><br>
+      The current operating gap is normal, expected, and temporary.<br>
+      It was always part of the investment model.
+    </p>
+
+    <div style="margin-top: 60px; padding-top: 32px; border-top: 1px solid rgba(201,169,110,0.15);">
+      <div style="font-size: 0.75rem; color: #8a87a0; line-height: 1.8;">
+        Sources: ISHC / Penn State University &bull; CoStar / STR Global &bull; CBRE Hotels<br>
+        Christie &amp; Co Vienna Market Report &bull; Mandarin Oriental H1 2025 Results<br>
+        HVS European Hotel Transactions 2024
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">Brisen Group | Confidential | April 2026</div>
+
+</body>
+</html>
