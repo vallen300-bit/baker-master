@@ -80,7 +80,6 @@ def list_chats(limit: int = 200) -> list[dict]:
     return [
         c for c in chats
         if not c.get("id", "").startswith("status@")
-        and "@lid" not in c.get("id", "")
     ]
 
 

@@ -28,7 +28,7 @@ logger = logging.getLogger("backfill_wa_contacts")
 DIRECTOR_WA_ID = "41799605092@c.us"
 
 # Skip group chats (contain '-' before @g.us) and status broadcasts
-SKIP_SUFFIXES = ("@g.us", "@broadcast", "@lid")
+SKIP_SUFFIXES = ("@g.us", "@broadcast")
 
 
 def get_conn():
