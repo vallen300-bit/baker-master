@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "baker": {
+      "type": "http",
+      "url": "https://baker-master.onrender.com/mcp?key=bakerbhavanga"
+    }
+  }
+}
