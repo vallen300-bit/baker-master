@@ -65,12 +65,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     logger.info(f"Registered: fireflies_scan (every {config.triggers.fireflies_scan_interval}s)")
 
     # ClickUp polling — every 5 minutes
+    # DEPLOY-FIX-2: Defer first run by 90s to avoid rate-limit sleeps blocking
+    # Render's deploy timeout window (ClickUp 5-workspace sync can take 2+ min)
     from triggers.clickup_trigger import run_clickup_poll
+    from datetime import timedelta
     scheduler.add_job(
         run_clickup_poll,
         IntervalTrigger(minutes=5),
         id="clickup_poll", name="ClickUp multi-workspace poll",
         coalesce=True, max_instances=1, replace_existing=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
     )
     logger.info("Registered: clickup_poll (every 5 minutes)")
 
