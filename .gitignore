@@ -18,6 +18,14 @@ EMAIL-FIX-1_items1-2.patch
 PL-2_HANDOVER.md
 
 # Session outputs (local artifacts, not deployed)
-# NOTE: outputs/ is production code (dashboard.py, static/) — do NOT ignore it
+# NOTE: outputs/ is production code (dashboard.py, static/) — do NOT ignore the folder itself
 strategy/
 pm/scheduled-tasks/
+
+# Generated deliverables in outputs/ — text artifacts archived, binaries ignored
+outputs/*.png
+outputs/*.pdf
+outputs/build_*.py
+outputs/convert_*.py
+outputs/generate_*.py
+outputs/share-site/

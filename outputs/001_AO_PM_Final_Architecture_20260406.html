@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AO PM — Final Architecture (Deployed)</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; padding: 40px 20px; }
+  .canvas { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 24px; font-weight: 700; color: #fff; }
+  .subtitle { font-size: 13px; color: #7d8590; margin: 4px 0 12px; }
+
+  /* Status bar */
+  .status-bar { display: flex; gap: 10px; margin-bottom: 32px; flex-wrap: wrap; }
+  .badge { font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 12px; text-transform: uppercase; letter-spacing: 0.8px; }
+  .badge-live { background: #1a3a2a; color: #3fb950; border: 1px solid #2ea04380; }
+  .badge-date { background: #172136; color: #58a6ff; border: 1px solid #388bfd80; }
+  .badge-commits { background: #2a1a3a; color: #bc8cff; border: 1px solid #8b5cf680; }
+
+  /* Section headers */
+  .section-label {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px;
+    color: #7d8590; margin: 36px 0 14px; padding-bottom: 6px;
+    border-bottom: 1px solid #21262d;
+  }
+
+  /* The wiki box */
+  .wiki {
+    background: linear-gradient(135deg, #0f2a1a 0%, #0d1f2d 100%);
+    border: 2px solid #3fb950; border-radius: 14px;
+    padding: 28px; margin: 20px 0; position: relative;
+  }
+  .wiki-badge {
+    position: absolute; top: -10px; left: 24px;
+    background: #3fb950; color: #0d1117; font-size: 10px; font-weight: 800;
+    padding: 3px 12px; border-radius: 6px; text-transform: uppercase; letter-spacing: 1px;
+  }
+  .wiki h2 { font-size: 18px; color: #3fb950; margin-bottom: 12px; }
+  .wiki-files { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .wiki-file {
+    background: #1a3a2a; border: 1px solid #2ea04360; border-radius: 8px;
+    padding: 10px 14px; flex: 1; min-width: 130px;
+  }
+  .wiki-file .fname { font-size: 12px; font-weight: 700; color: #58a6ff; font-family: 'SF Mono', monospace; }
+  .wiki-file .fdesc { font-size: 10px; color: #7d8590; margin-top: 2px; }
+
+  /* Boxes */
+  .row { display: flex; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
+  .box { border-radius: 10px; padding: 14px 16px; flex: 1; min-width: 160px; }
+  .box .title { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+  .box .desc { font-size: 10px; line-height: 1.5; opacity: 0.85; }
+
+  .b-gray { background: #161b22; border: 1px solid #30363d; }
+  .b-gray .title { color: #7d8590; }
+  .b-blue { background: #172136; border: 1px solid #388bfd60; }
+  .b-blue .title { color: #58a6ff; }
+  .b-purple { background: #2a1a3a; border: 1px solid #8b5cf660; }
+  .b-purple .title { color: #bc8cff; }
+  .b-teal { background: #1a3036; border: 1px solid #3ddbd960; }
+  .b-teal .title { color: #56d4cf; }
+  .b-orange { background: #2a2210; border: 1px solid #e3b34160; }
+  .b-orange .title { color: #e3b341; }
+  .b-green { background: #1a3a2a; border: 1px solid #2ea04360; }
+  .b-green .title { color: #3fb950; }
+  .b-red { background: #3a1a1a; border: 1px solid #f8514960; }
+  .b-red .title { color: #ff7b72; }
+
+  /* Vertical arrow */
+  .v-arrow { text-align: center; margin: 10px 0; color: #30363d; font-size: 20px; }
+  .v-label { text-align: center; font-size: 10px; color: #7d8590; font-style: italic; margin: -4px 0 6px; }
+
+  /* Loop */
+  .loop-container {
+    background: #161b22; border: 2px solid #e3b34140; border-radius: 14px;
+    padding: 24px; margin: 24px 0;
+  }
+  .loop-title { font-size: 14px; font-weight: 700; color: #e3b341; margin-bottom: 16px; text-align: center; }
+  .loop-steps {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px;
+    font-size: 12px; font-weight: 600;
+  }
+  .loop-step { padding: 8px 14px; border-radius: 8px; white-space: nowrap; }
+  .loop-arrow { color: #30363d; font-size: 14px; }
+  .ls-wiki { background: #1a3a2a; border: 1px solid #3fb95060; color: #3fb950; }
+  .ls-query { background: #2a1a3a; border: 1px solid #8b5cf660; color: #bc8cff; }
+  .ls-learn { background: #2a2210; border: 1px solid #e3b34160; color: #e3b341; }
+  .ls-db { background: #172136; border: 1px solid #388bfd60; color: #58a6ff; }
+  .ls-director { background: #3a1a2a; border: 1px solid #ff7b7260; color: #ff7b72; }
+  .loop-return { display: block; text-align: center; margin-top: 10px; font-size: 10px; color: #3fb950; font-weight: 600; }
+
+  /* Compare */
+  .compare {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 14px 0;
+    border: 1px solid #30363d; border-radius: 10px; overflow: hidden;
+  }
+  .compare-col { padding: 16px; }
+  .compare-col:first-child { border-right: 1px solid #30363d; background: #1a1215; }
+  .compare-col:last-child { background: #101a15; }
+  .compare-header { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .compare-col:first-child .compare-header { color: #ff7b72; }
+  .compare-col:last-child .compare-header { color: #3fb950; }
+  .compare-item { font-size: 11px; color: #e6edf3; margin: 6px 0; line-height: 1.4; }
+  .compare-col:first-child .compare-item::before { content: '\2715 '; color: #ff7b72; margin-right: 4px; }
+  .compare-col:last-child .compare-item::before { content: '\2713 '; color: #3fb950; margin-right: 4px; }
+
+  /* Principles */
+  .principles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0; }
+  .principle { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 14px; }
+  .principle .num { font-size: 20px; font-weight: 800; color: #3fb950; float: left; margin-right: 10px; line-height: 1; }
+  .principle .ptitle { font-size: 12px; font-weight: 700; color: #fff; }
+  .principle .prule { font-size: 10px; color: #7d8590; margin-top: 3px; line-height: 1.4; }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 10px 0; }
+  th { background: #161b22; color: #7d8590; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; padding: 8px 12px; text-align: left; border-bottom: 2px solid #21262d; }
+  td { padding: 8px 12px; border-bottom: 1px solid #21262d; vertical-align: top; }
+  code { font-family: 'SF Mono', monospace; font-size: 11px; background: #161b22; padding: 1px 5px; border-radius: 3px; color: #e3b341; }
+
+  /* Implementation tag */
+  .impl-tag {
+    display: inline-block; font-size: 9px; font-weight: 700; padding: 2px 7px;
+    border-radius: 4px; margin-left: 6px; vertical-align: middle;
+  }
+  .tag-file { background: #172136; color: #58a6ff; }
+  .tag-db { background: #2a1a3a; color: #bc8cff; }
+  .tag-method { background: #1a3036; color: #56d4cf; }
+
+  @media (max-width: 600px) {
+    .principles { grid-template-columns: 1fr; }
+    .compare { grid-template-columns: 1fr; }
+    .compare-col:first-child { border-right: none; border-bottom: 1px solid #30363d; }
+  }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+<h1>AO Project Manager &mdash; Final Architecture</h1>
+<p class="subtitle">Knowledge Compounding deployed &bull; Self-learning loop active &bull; April 2026</p>
+
+<div class="status-bar">
+  <span class="badge badge-live">Deployed &amp; Verified</span>
+  <span class="badge badge-date">2026-04-06</span>
+  <span class="badge badge-commits">6 commits &bull; All checks pass</span>
+</div>
+
+<!-- ════════ CORE PRINCIPLE ════════ -->
+<div class="section-label">Core Principle</div>
+
+<div style="text-align:center; padding: 20px; background: #0f2a1a; border: 1px solid #3fb95060; border-radius: 12px; margin-bottom: 20px;">
+  <div style="font-size: 18px; font-weight: 700; color: #3fb950;">The Wiki is the single source of truth.</div>
+  <div style="font-size: 12px; color: #7d8590; margin-top: 6px;">Everything else is either an input to the wiki, or a query against it.<br>Every Q&amp;A makes the PM smarter. Director stays in control.</div>
+</div>
+
+<!-- ════════ THE WIKI ════════ -->
+<div class="section-label">Layer 1 &mdash; View Files (Gospel) <span class="impl-tag tag-file">data/ao_pm/</span></div>
+
+<div class="wiki">
+  <div class="wiki-badge">Gospel</div>
+  <h2>View Files</h2>
+  <div style="font-size: 12px; color: #8b949e; margin-bottom: 10px;">
+    Loaded at every AO PM invocation via <code>_load_ao_view_files()</code>.<br>
+    Director edits via debrief. Baker proposes additions via pending insights.
+  </div>
+  <div class="wiki-files">
+    <div class="wiki-file">
+      <div class="fname">SCHEMA.md</div>
+      <div class="fdesc">Directory + rules</div>
+    </div>
+    <div class="wiki-file">
+      <div class="fname">psychology.md</div>
+      <div class="fdesc">Hunter archetype, 11 drivers</div>
+    </div>
+    <div class="wiki-file">
+      <div class="fname">investment_channels.md</div>
+      <div class="fdesc">Channel 1 + 2, EUR 67.3M</div>
+    </div>
+    <div class="wiki-file">
+      <div class="fname">sensitive_issues.md</div>
+      <div class="fdesc">3% question, red lines</div>
+    </div>
+    <div class="wiki-file">
+      <div class="fname">communication_rules.md</div>
+      <div class="fdesc">Rule Zero, hunting cycle</div>
+    </div>
+    <div class="wiki-file">
+      <div class="fname">agenda.md</div>
+      <div class="fdesc">Active + parked matters</div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════ DYNAMIC STATE ════════ -->
+<div class="section-label">Layer 2 &mdash; Dynamic State <span class="impl-tag tag-db">PostgreSQL</span></div>
+
+<div class="row">
+  <div class="box b-purple">
+    <div class="title">ao_project_state</div>
+    <div class="desc">JSONB singleton: open actions, red flags, relationship state, sub-matters, communication gap, mood. Auto-updated by Opus after every Q&amp;A.</div>
+  </div>
+  <div class="box b-purple">
+    <div class="title">ao_state_history</div>
+    <div class="desc">Audit trail: every mutation snapshot with source + summary. Optimistic locking (version field).</div>
+  </div>
+</div>
+
+<!-- ════════ SIGNAL DETECTION ════════ -->
+<div class="section-label">Layer 3 &mdash; Signal Detection (Real-time)</div>
+
+<div class="row">
+  <div class="box b-teal">
+    <div class="title">WhatsApp</div>
+    <div class="desc">AO + orbit contacts<br>Primary channel</div>
+  </div>
+  <div class="box b-teal">
+    <div class="title">Email</div>
+    <div class="desc">Buchwalder, Constantinos<br>Aelio, Aukera</div>
+  </div>
+  <div class="box b-teal">
+    <div class="title">Meetings</div>
+    <div class="desc">AO-related transcripts<br>Quarterly cadence</div>
+  </div>
+  <div class="box b-teal">
+    <div class="title">Briefing</div>
+    <div class="desc">Daily: gap check, deadlines<br>+ pending insight count</div>
+  </div>
+</div>
+
+<!-- ════════ KNOWLEDGE COMPOUNDING ════════ -->
+<div class="section-label">Layer 4 &mdash; Knowledge Compounding (NEW &mdash; PM-KNOWLEDGE-ARCH-1)</div>
+
+<div class="loop-container">
+  <div class="loop-title">The Self-Learning Loop &mdash; Every query makes the PM smarter</div>
+  <div class="loop-steps">
+    <span class="loop-step ls-wiki">View Files</span>
+    <span class="loop-arrow">&rarr;</span>
+    <span class="loop-step ls-query">PM Invocation (Opus)</span>
+    <span class="loop-arrow">&rarr;</span>
+    <span class="loop-step ls-query">Q&amp;A + Tools</span>
+    <span class="loop-arrow">&rarr;</span>
+    <span class="loop-step ls-learn">Extract Insights</span>
+    <span class="loop-arrow">&rarr;</span>
+    <span class="loop-step ls-db">pm_pending_insights</span>
+    <span class="loop-arrow">&rarr;</span>
+    <span class="loop-step ls-director">Director Review</span>
+    <span class="loop-arrow">&rarr;</span>
+    <span class="loop-step ls-wiki">View Files</span>
+  </div>
+  <span class="loop-return">&circlearrowleft; the wiki compounds</span>
+</div>
+
+<!-- Two paths -->
+<div class="row">
+  <div class="box b-blue" style="flex:1;">
+    <div class="title">Path 1: Director Debrief</div>
+    <div class="desc">
+      Director tells Baker something new &rarr; Baker writes <strong>directly into view file</strong> &rarr; git commit.<br><br>
+      Fast. Authoritative. No staging needed.
+    </div>
+  </div>
+  <div class="box b-orange" style="flex:1;">
+    <div class="title">Path 2: Discovered Knowledge</div>
+    <div class="desc">
+      Baker discovers insight during Q&amp;A &rarr; extended Opus call extracts it &rarr; <code>pm_pending_insights</code> table &rarr; Director promotes or rejects.<br><br>
+      Safe. No autonomous wiki corruption.
+    </div>
+  </div>
+</div>
+
+<!-- Implementation details -->
+<div class="section-label">Implementation Detail &mdash; What was built</div>
+
+<table>
+  <tr><th>Component</th><th>Location</th><th>What It Does</th></tr>
+  <tr>
+    <td><code>pm_pending_insights</code></td>
+    <td><span class="impl-tag tag-db">PostgreSQL</span></td>
+    <td>12-column table. pm_slug-based (generic for all PMs). Status flow: pending &rarr; approved/rejected &rarr; promoted.</td>
+  </tr>
+  <tr>
+    <td><code>_auto_update_ao_state()</code></td>
+    <td><span class="impl-tag tag-method">capability_runner.py</span></td>
+    <td>Extended Opus call (max_tokens 700). Extracts state updates AND wiki_insights in one call. pop() before state merge.</td>
+  </tr>
+  <tr>
+    <td><code>_get_extraction_dedup_context()</code></td>
+    <td><span class="impl-tag tag-method">capability_runner.py</span></td>
+    <td>Feeds existing pending + rejected insights (with review_note) into Opus prompt. Three-layer dedup: Opus self-dedup + rejection learning + ILIKE fallback.</td>
+  </tr>
+  <tr>
+    <td><code>_store_pending_insights()</code></td>
+    <td><span class="impl-tag tag-method">capability_runner.py</span></td>
+    <td>Max 3 per interaction. Min 50 chars. High/medium confidence only. ILIKE dedup on 80 chars within 7 days.</td>
+  </tr>
+  <tr>
+    <td><code>_get_pending_insights_context()</code></td>
+    <td><span class="impl-tag tag-method">capability_runner.py</span></td>
+    <td>Injects top 5 pending insights into system prompt with total count. "N more &mdash; say 'show all pending' for full list."</td>
+  </tr>
+  <tr>
+    <td><code>get_pending_insights</code> tool</td>
+    <td><span class="impl-tag tag-method">agent.py</span></td>
+    <td>Director says "show pending" &rarr; PM calls tool &rarr; returns full list from DB.</td>
+  </tr>
+  <tr>
+    <td><code>update_pending_insight</code> tool</td>
+    <td><span class="impl-tag tag-method">agent.py</span></td>
+    <td>Director says "promote #N" or "reject #N" &rarr; PM calls tool &rarr; updates status + review_note.</td>
+  </tr>
+  <tr>
+    <td>Briefing integration</td>
+    <td><span class="impl-tag tag-method">briefing_trigger.py</span></td>
+    <td>Daily briefing shows pending count when &gt; 0. Non-fatal if table missing.</td>
+  </tr>
+</table>
+
+<!-- Guards -->
+<div class="section-label">Safety Guards</div>
+
+<div class="row">
+  <div class="box b-green">
+    <div class="title">pop() before state merge</div>
+    <div class="desc">wiki_insights removed from Opus JSON before ao_project_state update. If extraction returns garbage, state update still works.</div>
+  </div>
+  <div class="box b-green">
+    <div class="title">Three-layer dedup</div>
+    <div class="desc">1. Opus sees existing pending in prompt (self-dedup)<br>2. Opus sees rejections with reasons (learns)<br>3. ILIKE on first 80 chars as fallback</div>
+  </div>
+  <div class="box b-green">
+    <div class="title">Quality filters</div>
+    <div class="desc">Min 50 chars (no trivial observations). High/medium confidence only. Max 3 per interaction. Low confidence dropped.</div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="box b-green">
+    <div class="title">Confidence definitions</div>
+    <div class="desc"><strong>High:</strong> Director-stated or document-confirmed<br><strong>Medium:</strong> Inferred from Q&amp;A with evidence<br><strong>Low:</strong> Speculative (auto-dropped)</div>
+  </div>
+  <div class="box b-green">
+    <div class="title">Promote flow clarity</div>
+    <div class="desc">"Approved. Queued for Code Brisen to merge into {file}." Director knows it's not instant &mdash; view file edit is a separate deploy step.</div>
+  </div>
+  <div class="box b-green">
+    <div class="title">Rejection propagation</div>
+    <div class="desc">Rejected insights + review_note fed back to Opus as "DO NOT re-extract." The PM learns from every rejection.</div>
+  </div>
+</div>
+
+<!-- Before / After -->
+<div class="section-label">Before vs After</div>
+
+<div class="compare">
+  <div class="compare-col">
+    <div class="compare-header">Before (April 1&ndash;5)</div>
+    <div class="compare-item">View files frozen between debrief sessions</div>
+    <div class="compare-item">Good Q&amp;A answers lost in chat history</div>
+    <div class="compare-item">22 decisions in DB, 0 in view files</div>
+    <div class="compare-item">No health checks on stale data</div>
+    <div class="compare-item">PM read same files from April 1st</div>
+    <div class="compare-item">Rejected insights re-discovered endlessly</div>
+  </div>
+  <div class="compare-col">
+    <div class="compare-header">After (April 6+)</div>
+    <div class="compare-item">Wiki grows with every substantive Q&amp;A</div>
+    <div class="compare-item">Insights staged in pm_pending_insights for review</div>
+    <div class="compare-item">Director promotes/rejects via natural language</div>
+    <div class="compare-item">Briefing surfaces pending count daily</div>
+    <div class="compare-item">PM gets smarter every interaction</div>
+    <div class="compare-item">Rejections teach extraction what NOT to repeat</div>
+  </div>
+</div>
+
+<!-- Four Rules -->
+<div class="section-label">Four Rules</div>
+
+<div class="principles">
+  <div class="principle">
+    <div class="num">1</div>
+    <div class="ptitle">Wiki is gospel</div>
+    <div class="prule">If anything contradicts the view files, the view files win. Everything else is input or scratchpad.</div>
+  </div>
+  <div class="principle">
+    <div class="num">2</div>
+    <div class="ptitle">Director writes directly</div>
+    <div class="prule">Debrief sessions go straight into view files. No staging needed. Baker commits immediately.</div>
+  </div>
+  <div class="principle">
+    <div class="num">3</div>
+    <div class="ptitle">Baker proposes, Director approves</div>
+    <div class="prule">Discovered knowledge goes to pm_pending_insights. Baker never writes to view files autonomously.</div>
+  </div>
+  <div class="principle">
+    <div class="num">4</div>
+    <div class="ptitle">The system learns from rejection</div>
+    <div class="prule">Rejected insights with reasons are fed back to the extraction prompt. The PM compounds knowledge from approvals AND rejections.</div>
+  </div>
+</div>
+
+<!-- What lives where -->
+<div class="section-label">What Lives Where</div>
+
+<table>
+  <tr><th>Location</th><th>Contains</th><th>Role</th></tr>
+  <tr>
+    <td style="color:#3fb950; font-family:monospace;">data/ao_pm/*.md</td>
+    <td>Compiled intelligence, verified facts, Director knowledge</td>
+    <td style="color:#3fb950;">GOSPEL &mdash; single source of truth</td>
+  </tr>
+  <tr>
+    <td style="color:#bc8cff; font-family:monospace;">ao_project_state</td>
+    <td>Dynamic: open actions, KPI snapshots, last contact, red flags</td>
+    <td style="color:#bc8cff;">Scratchpad &mdash; auto-updated, not gospel</td>
+  </tr>
+  <tr>
+    <td style="color:#e3b341; font-family:monospace;">pm_pending_insights</td>
+    <td>Discovered facts awaiting Director review, with target file + confidence</td>
+    <td style="color:#e3b341;">Staging queue &mdash; the compounding layer</td>
+  </tr>
+  <tr>
+    <td style="color:#7d8590; font-family:monospace;">Dropbox 04_AO-PM/</td>
+    <td>Architecture docs, source of truth spreadsheet, soul doc</td>
+    <td style="color:#7d8590;">Filing cabinet &mdash; reference artifacts</td>
+  </tr>
+</table>
+
+<!-- Applies to all PMs -->
+<div class="section-label">Generic by Design &mdash; pm_slug</div>
+
+<div class="row">
+  <div class="box b-green">
+    <div class="title">AO PM <span style="font-size:9px; opacity:0.6;">ao_pm</span></div>
+    <div class="desc">Deployed &amp; verified.<br>Self-learning active.<br>6 view files + pending queue.</div>
+  </div>
+  <div class="box b-teal">
+    <div class="title">MOVIE AM <span style="font-size:9px; opacity:0.6;">movie_am</span></div>
+    <div class="desc">Architecture approved.<br>Will use same table + methods.<br>Self-learning from day 1.</div>
+  </div>
+  <div class="box b-gray">
+    <div class="title">Future PMs <span style="font-size:9px; opacity:0.6;">{slug}</span></div>
+    <div class="desc">Same pattern.<br>data/{slug}/ + pm_pending_insights<br>where pm_slug = '{slug}'</div>
+  </div>
+</div>
+
+<!-- Future work -->
+<div class="section-label">Roadmap (Not Yet Built)</div>
+
+<div class="row">
+  <div class="box b-gray">
+    <div class="title">CEO Cockpit UI</div>
+    <div class="desc">Visual panel with promote/reject buttons</div>
+  </div>
+  <div class="box b-gray">
+    <div class="title">Lint Pass</div>
+    <div class="desc">Periodic health check: contradictions, stale data, gaps</div>
+  </div>
+  <div class="box b-gray">
+    <div class="title">Auto-Promotion</div>
+    <div class="desc">High-confidence insights confirmed 3x &rarr; auto-promote with notification</div>
+  </div>
+  <div class="box b-gray">
+    <div class="title">View File Git Commits</div>
+    <div class="desc">On promote, auto-edit target .md and commit (requires dev machine)</div>
+  </div>
+</div>
+
+<div style="margin-top:40px; padding:16px; background:#161b22; border:1px solid #30363d; border-radius:10px; text-align:center;">
+  <div style="font-size:11px; color:#7d8590;">
+    Built by AI Head (Claude Code) &bull; Reviewed by Cowork (Claude Desktop) &bull; Implemented by Code Brisen (Mac Mini)<br>
+    6 steps &bull; 6 commits &bull; 6 verification checks &bull; All pass &bull; April 6, 2026
+  </div>
+</div>
+
+</div>
+</body>
+</html>

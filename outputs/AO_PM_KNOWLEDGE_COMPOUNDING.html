@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AO PM — Knowledge Compounding Architecture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; padding: 40px; }
+  h1 { font-size: 22px; font-weight: 600; margin-bottom: 6px; color: #fff; }
+  .subtitle { font-size: 13px; color: #7d8590; margin-bottom: 40px; }
+  .canvas { max-width: 900px; margin: 0 auto; position: relative; }
+
+  /* Layer labels */
+  .layer-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px;
+    color: #7d8590; margin-bottom: 12px; margin-top: 36px;
+  }
+  .layer-label:first-of-type { margin-top: 0; }
+
+  /* Boxes */
+  .row { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+  .box {
+    border-radius: 10px; padding: 16px 20px; flex: 1; min-width: 180px;
+    position: relative;
+  }
+  .box .title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .box .desc { font-size: 11px; line-height: 1.4; opacity: 0.8; }
+
+  /* Colors */
+  .green { background: #1a3a2a; border: 1px solid #2ea04380; }
+  .green .title { color: #3fb950; }
+  .blue { background: #172136; border: 1px solid #388bfd80; }
+  .blue .title { color: #58a6ff; }
+  .purple { background: #2a1a3a; border: 1px solid #8b5cf680; }
+  .purple .title { color: #bc8cff; }
+  .orange { background: #3a2a1a; border: 1px solid #d29922b0; }
+  .orange .title { color: #e3b341; }
+  .red { background: #3a1a1a; border: 1px solid #f8514980; }
+  .red .title { color: #ff7b72; }
+  .teal { background: #1a3036; border: 1px solid #3ddbd980; }
+  .teal .title { color: #56d4cf; }
+  .gray { background: #1c2028; border: 1px solid #30363d; }
+  .gray .title { color: #7d8590; }
+
+  /* Arrows */
+  .arrow-section {
+    display: flex; align-items: center; justify-content: center;
+    margin: 8px 0; gap: 8px;
+  }
+  .arrow-down {
+    width: 2px; height: 28px; background: #30363d; position: relative; margin: 0 auto;
+  }
+  .arrow-down::after {
+    content: ''; position: absolute; bottom: -5px; left: -4px;
+    border-left: 5px solid transparent; border-right: 5px solid transparent;
+    border-top: 6px solid #30363d;
+  }
+  .arrow-label {
+    font-size: 10px; color: #7d8590; text-align: center; margin: 2px 0;
+    font-style: italic;
+  }
+
+  /* Flow connector */
+  .flow {
+    display: flex; align-items: center; justify-content: center;
+    margin: 16px 0; gap: 10px;
+  }
+  .flow-line { flex: 1; height: 1px; background: #30363d; }
+  .flow-text {
+    font-size: 10px; color: #e3b341; font-weight: 600; white-space: nowrap;
+    text-transform: uppercase; letter-spacing: 1px;
+    background: #0d1117; padding: 0 12px;
+  }
+
+  /* NEW badge */
+  .badge-new {
+    display: inline-block; font-size: 9px; font-weight: 700;
+    background: #e3b341; color: #0d1117; padding: 1px 6px;
+    border-radius: 4px; margin-left: 8px; vertical-align: middle;
+  }
+
+  /* Legend */
+  .legend {
+    margin-top: 40px; padding: 20px; background: #161b22; border-radius: 10px;
+    border: 1px solid #30363d;
+  }
+  .legend h3 { font-size: 13px; font-weight: 700; margin-bottom: 10px; color: #7d8590; }
+  .legend-row { display: flex; gap: 20px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+
+  /* Divider */
+  .divider { height: 1px; background: #21262d; margin: 30px 0; }
+
+  /* Today vs Future */
+  .status-tag {
+    display: inline-block; font-size: 9px; font-weight: 700;
+    padding: 2px 8px; border-radius: 4px; margin-bottom: 10px;
+  }
+  .tag-today { background: #1a3a2a; color: #3fb950; border: 1px solid #2ea04380; }
+  .tag-missing { background: #3a1a1a; color: #ff7b72; border: 1px solid #f8514980; }
+  .tag-new { background: #3a2a1a; color: #e3b341; border: 1px solid #d29922b0; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+<h1>AO PM &mdash; Knowledge Compounding Architecture</h1>
+<p class="subtitle">How the PM gets smarter with every interaction &bull; Draft for Director review &bull; April 2026</p>
+
+<!-- ═══════════════════ TODAY ═══════════════════ -->
+<span class="status-tag tag-today">EXISTS TODAY</span>
+
+<div class="layer-label">Layer 1 &mdash; Source of Truth (Dropbox)</div>
+<div class="row">
+  <div class="box green">
+    <div class="title">03_Source_Of_Truth/</div>
+    <div class="desc">The Actual Position (xlsx) + Reported_To_AO/<br>GOSPEL &mdash; overrides everything</div>
+  </div>
+</div>
+
+<div class="arrow-down"></div>
+<div class="arrow-label">Director verifies &amp; approves</div>
+
+<div class="layer-label">Layer 2 &mdash; Compiled Intelligence (Git repo)</div>
+<div class="row">
+  <div class="box blue">
+    <div class="title">psychology.md</div>
+    <div class="desc">Hunter archetype, 11 drivers, loyalty algorithm</div>
+  </div>
+  <div class="box blue">
+    <div class="title">investment_channels.md</div>
+    <div class="desc">Channel 1 + 2, EUR 67.3M total</div>
+  </div>
+  <div class="box blue">
+    <div class="title">communication_rules.md</div>
+    <div class="desc">Rule Zero, hunting cycle, framing</div>
+  </div>
+</div>
+<div class="row">
+  <div class="box blue">
+    <div class="title">sensitive_issues.md</div>
+    <div class="desc">3% question, institutional pivot, red lines</div>
+  </div>
+  <div class="box blue">
+    <div class="title">agenda.md</div>
+    <div class="desc">Active matters + parked matters</div>
+  </div>
+  <div class="box gray">
+    <div class="title">SCHEMA.md</div>
+    <div class="desc">Directory, rules, file ownership</div>
+  </div>
+</div>
+
+<div class="arrow-down"></div>
+<div class="arrow-label">Loaded at every AO PM invocation</div>
+
+<div class="layer-label">Layer 3 &mdash; Dynamic State (PostgreSQL)</div>
+<div class="row">
+  <div class="box purple">
+    <div class="title">ao_project_state</div>
+    <div class="desc">JSONB: open actions, red flags, relationship state, last contact, mood</div>
+  </div>
+  <div class="box purple">
+    <div class="title">ao_state_history</div>
+    <div class="desc">Audit trail: every mutation snapshot</div>
+  </div>
+</div>
+
+<div class="arrow-down"></div>
+<div class="arrow-label">Auto-updated after every Q&amp;A (Opus)</div>
+
+<div class="layer-label">Layer 4 &mdash; Signal Detection (Real-time)</div>
+<div class="row">
+  <div class="box teal">
+    <div class="title">WhatsApp</div>
+    <div class="desc">AO + orbit contacts</div>
+  </div>
+  <div class="box teal">
+    <div class="title">Email</div>
+    <div class="desc">Buchwalder, Constantinos</div>
+  </div>
+  <div class="box teal">
+    <div class="title">Meetings</div>
+    <div class="desc">AO-related transcripts</div>
+  </div>
+  <div class="box teal">
+    <div class="title">Briefing</div>
+    <div class="desc">Daily: gap check, deadlines</div>
+  </div>
+</div>
+
+<!-- ═══════════════════ THE GAP ═══════════════════ -->
+<div class="divider"></div>
+<span class="status-tag tag-missing">MISSING TODAY</span>
+
+<div class="layer-label">The Problem &mdash; Knowledge Dies in the Database</div>
+<div class="row">
+  <div class="box red">
+    <div class="title">Q&amp;A Insights</div>
+    <div class="desc">Director asks a great question &rarr; Opus discovers new facts &rarr; answer is returned &rarr; knowledge stays in chat history or deep_analyses table &rarr; <strong>never reaches view files</strong></div>
+  </div>
+</div>
+<div class="row">
+  <div class="box red">
+    <div class="title">Decisions &amp; Analyses</div>
+    <div class="desc">22 decisions stored since Monaco debrief. 0 have enriched the view files. The PM reads the same psychology.md from April 1.</div>
+  </div>
+</div>
+<div class="row">
+  <div class="box red">
+    <div class="title">No Health Checks</div>
+    <div class="desc">View files may contradict recent discoveries. Nobody audits. Stale data persists.</div>
+  </div>
+</div>
+
+<!-- ═══════════════════ THE FIX ═══════════════════ -->
+<div class="divider"></div>
+<span class="status-tag tag-new">PROPOSED</span>
+
+<div class="layer-label">The Fix &mdash; Knowledge Compounding Loop</div>
+
+<div class="row">
+  <div class="box orange" style="flex: 2;">
+    <div class="title">_pending_insights.md <span class="badge-new">NEW</span></div>
+    <div class="desc">
+      Staging file in <code>data/ao_pm/</code>. After every substantive Q&amp;A, Opus extracts discovered knowledge and appends it here with timestamp + source citation + target view file.<br><br>
+      <strong>Example entry:</strong><br>
+      <code>### 2026-04-08 | Capital Call Reframe</code><br>
+      <code>AO responds better to "ammunition" framing than "obligation" framing (confirmed in WhatsApp 2026-04-07)</code><br>
+      <code>&rarr; Promote to: communication_rules.md, Framing Table</code>
+    </div>
+  </div>
+</div>
+
+<div class="flow">
+  <div class="flow-line"></div>
+  <div class="flow-text">Weekly review cycle</div>
+  <div class="flow-line"></div>
+</div>
+
+<div class="row">
+  <div class="box orange">
+    <div class="title">Promote <span class="badge-new">NEW</span></div>
+    <div class="desc">Director approves &rarr; Baker moves insight into the target view file &rarr; git commit &rarr; view file gets smarter</div>
+  </div>
+  <div class="box orange">
+    <div class="title">Reject / Park</div>
+    <div class="desc">Director says "not yet" or "wrong" &rarr; item removed or parked &rarr; view file stays clean</div>
+  </div>
+</div>
+
+<div class="flow">
+  <div class="flow-line"></div>
+  <div class="flow-text">Periodic health check</div>
+  <div class="flow-line"></div>
+</div>
+
+<div class="row">
+  <div class="box orange">
+    <div class="title">Lint Pass <span class="badge-new">NEW</span></div>
+    <div class="desc">Baker audits view files against source documents:<br>
+    &bull; Contradictions between pages<br>
+    &bull; Stale claims (newer data exists)<br>
+    &bull; Missing topics (mentioned but no page)<br>
+    &bull; Data gaps (unverified claims)</div>
+  </div>
+</div>
+
+<!-- ═══════════════════ COMPLETE LOOP ═══════════════════ -->
+<div class="divider"></div>
+
+<div class="layer-label">Complete Knowledge Loop (After Fix)</div>
+
+<div style="background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 24px; margin-top: 8px;">
+  <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center; font-size: 13px; font-weight: 600;">
+    <span style="background:#1a3a2a; color:#3fb950; padding:8px 14px; border-radius:8px;">Source of Truth</span>
+    <span style="color:#30363d;">&rarr;</span>
+    <span style="background:#172136; color:#58a6ff; padding:8px 14px; border-radius:8px;">View Files</span>
+    <span style="color:#30363d;">&rarr;</span>
+    <span style="background:#2a1a3a; color:#bc8cff; padding:8px 14px; border-radius:8px;">PM Invocation</span>
+    <span style="color:#30363d;">&rarr;</span>
+    <span style="background:#2a1a3a; color:#bc8cff; padding:8px 14px; border-radius:8px;">Q&amp;A + Tools</span>
+    <span style="color:#30363d;">&rarr;</span>
+    <span style="background:#3a2a1a; color:#e3b341; padding:8px 14px; border-radius:8px;">_pending_insights</span>
+    <span style="color:#30363d;">&rarr;</span>
+    <span style="background:#3a2a1a; color:#e3b341; padding:8px 14px; border-radius:8px;">Director Review</span>
+    <span style="color:#30363d;">&rarr;</span>
+    <span style="background:#172136; color:#58a6ff; padding:8px 14px; border-radius:8px;">View Files</span>
+    <span style="color:#3fb950; font-size: 16px;">&circlearrowleft;</span>
+  </div>
+  <p style="text-align:center; font-size:11px; color:#7d8590; margin-top:14px;">
+    The loop closes. Every query makes the PM smarter. Director stays in control.
+  </p>
+</div>
+
+<!-- ═══════════════════ LEGEND ═══════════════════ -->
+<div class="legend">
+  <h3>Legend</h3>
+  <div class="legend-row">
+    <div class="legend-item"><div class="legend-dot" style="background:#3fb950;"></div> Source of Truth (Dropbox, Director-owned)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#58a6ff;"></div> View Files (Git repo, debrief-compiled)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#bc8cff;"></div> Dynamic State (PostgreSQL, auto-updated)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#56d4cf;"></div> Signal Detection (Real-time triggers)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e3b341;"></div> Knowledge Compounding (NEW)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ff7b72;"></div> Current Gaps</div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

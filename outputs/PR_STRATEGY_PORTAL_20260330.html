@@ -1,0 +1,1108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BRISEN GROUP — PR & Media Strategy Portal</title>
+<style>
+  :root {
+    --primary: #1B3A5C;
+    --accent: #2C5F8A;
+    --danger: #C0392B;
+    --success: #27AE60;
+    --warning: #E67E22;
+    --bg: #F7F8FA;
+    --card: #FFFFFF;
+    --text: #333333;
+    --meta: #666666;
+    --border: #E0E4E8;
+    --red-line: #C0392B;
+    --timeline-line: #2C5F8A;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+  .page-wrapper { display: flex; min-height: 100vh; }
+  .sidebar { width: 240px; min-width: 240px; background: var(--primary); color: #fff; position: fixed; top: 0; left: 0; bottom: 0; z-index: 100; display: flex; flex-direction: column; overflow-y: auto; }
+  .sidebar-header { padding: 20px 16px 16px; border-bottom: 1px solid rgba(255,255,255,0.15); }
+  .sidebar-header h1 { font-size: 13px; font-weight: 700; letter-spacing: 0.5px; line-height: 1.4; }
+  .sidebar-header .subtitle { font-size: 11px; opacity: 0.7; margin-top: 6px; line-height: 1.4; }
+  .conf-badge { background: var(--danger); color: #fff; font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 3px; letter-spacing: 1px; display: inline-block; margin-top: 10px; }
+  .sidebar-meta { font-size: 11px; opacity: 0.6; padding: 10px 16px; border-bottom: 1px solid rgba(255,255,255,0.1); line-height: 1.5; }
+  .nav { padding: 12px 0; flex: 1; }
+  .nav a { display: block; padding: 8px 16px; color: rgba(255,255,255,0.8); text-decoration: none; font-size: 12px; border-left: 3px solid transparent; transition: all 0.15s; cursor: pointer; }
+  .nav a:hover, .nav a.active { background: rgba(255,255,255,0.1); color: #fff; border-left-color: #fff; }
+  .nav a .nav-num { display: inline-block; width: 20px; opacity: 0.5; font-size: 11px; }
+  .main { margin-left: 240px; padding: 32px 40px; max-width: 960px; flex: 1; }
+  .section { display: none; }
+  .section.active { display: block; }
+  h2 { font-size: 22px; color: var(--primary); margin-bottom: 20px; padding-bottom: 12px; border-bottom: 2px solid var(--primary); }
+  h3 { font-size: 16px; color: var(--primary); margin: 24px 0 12px; }
+  h4 { font-size: 14px; color: var(--accent); margin: 16px 0 8px; }
+  p { margin-bottom: 12px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+  .card-header { font-weight: 700; font-size: 14px; color: var(--primary); margin-bottom: 10px; }
+  .card-accent { border-left: 4px solid var(--accent); }
+  .card-danger { border-left: 4px solid var(--danger); }
+  .card-success { border-left: 4px solid var(--success); }
+  .card-warning { border-left: 4px solid var(--warning); }
+  table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px; }
+  th { background: var(--primary); color: #fff; padding: 10px 12px; text-align: left; font-size: 12px; font-weight: 600; }
+  td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:hover td { background: #f0f4f8; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 3px; font-size: 11px; font-weight: 600; }
+  .badge-danger { background: #fde8e8; color: var(--danger); }
+  .badge-warning { background: #fef3e2; color: var(--warning); }
+  .badge-success { background: #e8f5e9; color: var(--success); }
+  .badge-info { background: #e3f2fd; color: var(--accent); }
+  .badge-neutral { background: #f0f0f0; color: #555; }
+  blockquote { border-left: 4px solid var(--accent); padding: 12px 16px; margin: 12px 0; background: #f0f4f8; font-style: italic; border-radius: 0 6px 6px 0; }
+  .red-line { background: #fde8e8; border: 1px solid #f5c6cb; border-radius: 6px; padding: 12px 16px; margin: 8px 0; font-size: 13px; }
+  .red-line strong { color: var(--danger); }
+  ul, ol { margin: 8px 0 12px 24px; }
+  li { margin-bottom: 6px; font-size: 13px; }
+  .timeline { position: relative; padding-left: 32px; margin: 20px 0; }
+  .timeline::before { content: ''; position: absolute; left: 12px; top: 0; bottom: 0; width: 2px; background: var(--timeline-line); }
+  .timeline-item { position: relative; margin-bottom: 16px; }
+  .timeline-item::before { content: ''; position: absolute; left: -24px; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 0 0 2px var(--accent); }
+  .timeline-item.critical::before { background: var(--danger); box-shadow: 0 0 0 2px var(--danger); }
+  .timeline-item.success::before { background: var(--success); box-shadow: 0 0 0 2px var(--success); }
+  .timeline-date { font-weight: 700; font-size: 13px; color: var(--primary); }
+  .timeline-text { font-size: 13px; margin-top: 4px; }
+  .timeline-note { font-size: 12px; color: var(--meta); margin-top: 2px; font-style: italic; }
+  .qa-item { margin-bottom: 20px; }
+  .qa-q { font-weight: 700; font-size: 14px; color: var(--primary); margin-bottom: 8px; }
+  .qa-label { font-size: 11px; font-weight: 600; margin-bottom: 4px; }
+  .toc-section { margin-bottom: 6px; }
+  .key-msg { background: #f0f4f8; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+  .key-msg-num { font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; margin-bottom: 4px; }
+  .print-only { display: none; }
+  @media print { .sidebar { display: none; } .main { margin-left: 0; } .section { display: block !important; } .print-only { display: block; } }
+  @media (max-width: 768px) { .sidebar { width: 200px; min-width: 200px; } .main { margin-left: 200px; padding: 20px; } }
+</style>
+</head>
+<body>
+<div class="page-wrapper">
+<nav class="sidebar">
+  <div class="sidebar-header">
+    <h1>BRISEN GROUP</h1>
+    <div class="subtitle">PR &amp; Media Strategy Portal<br>Hagenauer Insolvency Response</div>
+    <div class="conf-badge">STRICTLY CONFIDENTIAL</div>
+  </div>
+  <div class="sidebar-meta">Last Updated: 30 March 2026<br>Version: Portal 1.0<br>Prepared by: Baker PR &amp; Brand Intelligence</div>
+  <div class="nav">
+    <a onclick="show('exec')" class="active"><span class="nav-num">1.</span> Executive Summary</a>
+    <a onclick="show('agenda')"><span class="nav-num">2.</span> Agenda: 30 March</a>
+    <a onclick="show('strategy')"><span class="nav-num">3.</span> General PR Strategy</a>
+    <a onclick="show('sandra')"><span class="nav-num">4.</span> Sandra's Frameworks</a>
+    <a onclick="show('chronology')"><span class="nav-num">5.</span> Chronology</a>
+    <a onclick="show('article')"><span class="nav-num">6.</span> Article Analysis</a>
+    <a onclick="show('rebuttal')"><span class="nav-num">7.</span> Line-by-Line Rebuttal</a>
+    <a onclick="show('talking')"><span class="nav-num">8.</span> Talking Points</a>
+    <a onclick="show('qa')"><span class="nav-num">9.</span> Q&amp;A</a>
+    <a onclick="show('redlines')"><span class="nav-num">10.</span> Red Lines</a>
+    <a onclick="show('actions')"><span class="nav-num">11.</span> Actions &amp; Timeline</a>
+    <a onclick="show('tone')"><span class="nav-num">12.</span> Tone Guidance</a>
+    <a onclick="show('appendix')"><span class="nav-num">13.</span> Appendix: Participants</a>
+  </div>
+</nav>
+<div class="main">
+<div id="exec" class="section active">
+<h2>1. Executive Summary</h2>
+
+<div class="card card-danger">
+<div class="card-header">Current Situation -- 30 March 2026</div>
+<p>Hagenauer Austria GmbH &amp; Co KG filed for <strong>full insolvency</strong> on 27 March 2026, eleven days after entering Schutzschirmverfahren. The German parent (Hagenauer GmbH, Kempten) is also in restructuring. The Mandarin Oriental Vienna hotel is open and operational. Residences are being delivered.</p>
+<p>ImmoFokus has published <strong>four articles</strong> by Michael Neubauer, each escalating the narrative. Article #4 (30 March 2026) is the most damaging: it names Dimitry and Edita Vallen personally and presents Hagenauer's insolvency filing as established fact.</p>
+</div>
+
+<div class="card card-success">
+<div class="card-header">Strategic Position</div>
+<p>The insolvency has <strong>handed Brisen the narrative</strong>. The contractor who accused Brisen of non-payment is now bankrupt -- and their own filing reveals positive net assets and a "purely liquid" crisis. Key strengths:</p>
+<ul>
+<li><strong>EUR 114M paid</strong> -- over 95% of contract value. Actual outstanding: EUR 222K (ClaimsMax).</li>
+<li><strong>Self-reduction:</strong> EUR 13.2M demand cut to EUR 5.85M (55% reduction by Hagenauer's own lawyers).</li>
+<li><strong>KG assets exceed liabilities by EUR 2.4M</strong> -- "purely liquid" crisis per Hagenauer's own filing.</li>
+<li><strong>Schutzschirmverfahren failed in 11 days</strong> -- business was beyond restructuring.</li>
+<li><strong>15+ entities, 7 jurisdictions, EUR 25K holding capital</strong> -- structural overcommitment, not Brisen's fault.</li>
+<li><strong>Hamburg EUR 144M project</strong> also in restructuring -- group-wide failure.</li>
+<li><strong>Hotel opened Dec 2025</strong>, residences delivering. The project succeeded despite the contractor.</li>
+</ul>
+</div>
+
+<div class="card card-warning">
+<div class="card-header">The Three Narratives</div>
+<table>
+<tr><th style="width:30%">Stage</th><th>Narrative</th></tr>
+<tr><td><span class="badge badge-danger">OLD (pre-Mar 16)</span></td><td>"Developer refuses to pay contractor EUR 15 million"</td></tr>
+<tr><td><span class="badge badge-warning">PREVIOUS (v2.0)</span></td><td>"Contractor who accused developer of non-payment was itself insolvent"</td></tr>
+<tr><td><span class="badge badge-success">CURRENT (v3.0)</span></td><td>"An overexposed contractor with EUR 25,000 in capital, running two EUR 140M+ projects simultaneously, already failing on a EUR 30M tourism venture, manufactured a EUR 13.2M claim against his largest client -- then collapsed in 11 days when the numbers were examined"</td></tr>
+</table>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Immediate Priorities</div>
+<ol>
+<li><strong>Today's call</strong> with Sandra Luger (Gaisberg), E+H lawyers, and full Brisen team -- align on reactive vs. proactive posture.</li>
+<li><strong>Section 14 MedienG correction demand</strong> for factual errors in Article #4 -- E+H drafts, Sandra reviews tone.</li>
+<li><strong>On-record Brisen statement</strong> via Thomas Leitner -- ready for deployment to any journalist.</li>
+<li><strong>Accelerate Sandra's workstreams</strong> #1 (media monitoring), #7 (Q&amp;A), and #2 (Brisen factsheet).</li>
+</ol>
+</div>
+</div>
+<div id="agenda" class="section">
+<h2>2. Agenda: 30 March 2026 -- Joint PR + Legal Call</h2>
+
+<div class="card card-warning">
+<div class="card-header">Meeting Note</div>
+<p>This is a <strong>joint PR + Legal call</strong>, not a 1:1 with Sandra. E+H lawyers (Blaschka + Ofenheimer) will participate. Future meeting agendas will be added as new sections to this portal.</p>
+</div>
+
+<div class="card">
+<div class="card-header">Timing Update</div>
+<ul>
+<li><strong>07:10</strong> -- Sandra flagged a NEW ImmoFokus article ("Neue Wendung rund um das Prestigeprojekt Mandarin Oriental" by Neubauer, published today)</li>
+<li><strong>08:00</strong> -- Sandra sent Teams link ("Alignment and next steps")</li>
+<li><strong>09:24</strong> -- Director replied: "Lets discuss in the afternoon... We will send some materials in the meantime"</li>
+<li><strong>09:35</strong> -- E+H (Blaschka + Ofenheimer) offered 12:00-14:00</li>
+<li><strong>09:37</strong> -- Sandra offered <strong>12:00-12:30</strong> or <strong>14:00-15:00</strong></li>
+</ul>
+<p><strong>Attendees:</strong> Dimitry Vallen, Edita Vallen, Thomas Leitner, Sandra Luger, Flora Trotz (Gaisberg), Arndt Blaschka + Alric Ofenheimer (E+H)</p>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Opening (warm, direct, sets the tone)</div>
+<blockquote>"Sandra, thanks for flagging the article this morning -- and for making time on short notice. Since we last spoke, the situation has fundamentally changed. Hagenauer has filed for full insolvency. That changes the entire media narrative in our favour. Today I want to align with you and the lawyers on three things: how we handle the immediate press situation, what materials we send you this week so your team can work with the real facts, and when we make our first proactive move. We have a strong story to tell -- we just need to tell it to the right people."</blockquote>
+</div>
+
+<h3>Proposed Agenda Structure</h3>
+<table>
+<tr><th>#</th><th>Topic</th><th>Time</th><th>Decision needed</th></tr>
+<tr><td>1</td><td>Today's article -- immediate response?</td><td>5 min</td><td>React or hold?</td></tr>
+<tr><td>2</td><td>Insolvency = narrative shift -- agree on new core message</td><td>5 min</td><td>New core narrative</td></tr>
+<tr><td>3</td><td>Sandra's 8 workstreams -- priority and timing</td><td>10 min</td><td>Which 3 to accelerate?</td></tr>
+<tr><td>4</td><td>First proactive media move</td><td>5 min</td><td>Target journalist + format</td></tr>
+<tr><td>5</td><td>Materials Brisen will send to Gaisberg</td><td>5 min</td><td>What, when</td></tr>
+</table>
+
+<h3>5 Key Decisions for the Call</h3>
+
+<div class="card card-accent">
+<div class="card-header">Decision 1: React to today's article -- yes or no?</div>
+<p><strong>Recommendation: NO immediate public reaction.</strong> But use the article as the trigger to brief Sandra on the full picture and accelerate proactive work. The article actually helps -- it puts the insolvency on record without Brisen having to announce it.</p>
+<p>However, commission a <strong>formal correction demand (Section 14 MedienG)</strong> for the factual errors. E+H drafts; Sandra reviews for tone.</p>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Decision 2: What is the new core narrative?</div>
+<ul>
+<li><strong>OLD:</strong> "Developer dispute with contractor"</li>
+<li><strong>NEW:</strong> "A contractor with EUR 25K capital, operating 15+ entities across 7 jurisdictions, filed for insolvency after demanding EUR 13.2M following an EUR 11M advance -- 49 days apart. The hotel opened on time."</li>
+</ul>
+<p>Sandra needs to build all her workstreams around THIS story, not the old one.</p>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Decision 3: Which of Sandra's 8 workstreams to accelerate?</div>
+<table>
+<tr><th>Priority</th><th>Workstreams</th><th>Timeline</th></tr>
+<tr><td><span class="badge badge-danger">ACCELERATE NOW</span></td><td>#1 (media monitoring / reactive Q&amp;A) + #7 (Q&amp;A document)</td><td>This call</td></tr>
+<tr><td><span class="badge badge-warning">THIS WEEK</span></td><td>#2 (Brisen factsheet) -- must reflect insolvency narrative</td><td>By Fri 4 April</td></tr>
+<tr><td><span class="badge badge-neutral">HOLD</span></td><td>#3-6 (photos, CVs, company presentation) -- important but not urgent</td><td>Mid-April</td></tr>
+<tr><td><span class="badge badge-info">PLAN FOR APRIL</span></td><td>#8 (proactive media) -- but identify the right journalist NOW</td><td>Week of 7 April</td></tr>
+</table>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Decision 4: Should E+H review all external materials?</div>
+<p><strong>Yes -- non-negotiable.</strong> Every external-facing document must be legally cleared given the Saehn letter and ongoing insolvency proceedings. Workflow: Sandra drafts, E+H vets, Director approves.</p>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Decision 5: First proactive media move -- when and with whom?</div>
+<p><strong>Recommendation:</strong> Off-record background briefing with ONE trusted Austrian business journalist (Die Presse or Trend, not Neubauer/ImmoFokus) in the second week of April. Format: background talk, not interview. Frame: "Investor perspective on Austrian construction market risk." This positions the Director as a thought leader, not a party to a dispute.</p>
+</div>
+
+<h3>Materials to Send Sandra (before the call)</h3>
+<div class="card card-warning">
+<ol>
+<li><strong>PR Strategy v3.0</strong> -- the 7 key messages, Q&amp;A, DO NOT SAY list, Thomas Leitner talking points</li>
+<li><strong>Chronology v3</strong> -- the factual timeline Sandra needs to build her workstreams</li>
+<li><strong>ImmoFokus Article #3 Analysis</strong> -- Baker's assessment of Neubauer's editorial pattern</li>
+</ol>
+<p style="margin-top:12px"><strong>Do NOT send:</strong> Any E+H legal correspondence, the Saehn letter, internal Baker analyses of Durchgriffshaftung risk, or Brisen/E+H financial workpapers. These are privileged.</p>
+</div>
+
+<h3>Context Sandra May Not Know Yet</h3>
+<ul>
+<li>The <strong>Saehn letter</strong> (27 March) names the Director and Edita as "faktische Geschaeftsfuehrer" and effectively blames them for the insolvency. Sandra should know it exists but should NOT reference it publicly. E+H is handling.</li>
+<li>The <strong>Trend correction request</strong> (sent 24-25 March) -- Sandra was working on getting "russisches Ehepaar" corrected. Ask for a status update.</li>
+<li><strong>MORV sales position:</strong> 16 of 25 sold. This is a strong proof point for any proactive narrative.</li>
+</ul>
+</div>
+<div id="strategy" class="section">
+<h2>3. General PR Strategy -- Version 3.0</h2>
+<p style="color:var(--meta);font-size:12px;">Source: PR &amp; Press Strategy v3.0 (02-003) | 28 March 2026 | Prepared for Sandra Luger, Gaisberg Consulting</p>
+
+<h3>1. The Narrative -- Strengthened by Chronology</h3>
+<p>The complete chronological analysis of the Hagenauer dispute -- drawing on contracts, meeting transcripts, emails, corporate registry data, and financial records -- has fundamentally strengthened Brisen's position. The story is no longer a bilateral developer-contractor dispute. It is the story of a structurally overcommitted contractor with EUR 25,000 in holding capital who ran a EUR 100M+ construction empire across seven countries, lost millions on a failed tourism venture, created asset-protection vehicles as the walls closed in, and then blamed his largest client for his own collapse.</p>
+
+<h3>2. The Corporate Empire</h3>
+<div class="card">
+<p>Martin Hagenauer's business spans <strong>15+ entities across 7 jurisdictions</strong> (Germany, Austria, Poland, Switzerland, France, Netherlands, and ongoing). The parent company -- Hagenauer Holding GmbH -- has share capital of <strong>EUR 25,000</strong>. This entity controls approximately EUR 100M in annual revenue. The structural mismatch between capitalisation and exposure is the root cause of the insolvency, not any action by Brisen.</p>
+</div>
+
+<h3>3. The Asset-Protection Pattern</h3>
+<div class="card card-danger">
+<p>Two entities were created in the years immediately preceding the insolvency:</p>
+<ul>
+<li><strong>Hagenauer Landwirtschaft GmbH</strong> (agriculture/farm holdings) -- created 2022, connected to the 200+ year Hagenauer family farm</li>
+<li><strong>Hagenauer VV GmbH</strong> (residential property management) -- created 2023</li>
+</ul>
+<p>Both were established while EUR 100M+ construction projects were running and financial pressure was mounting from the Gruenten failure. These are potential Insolvenzanfechtung targets for the insolvency administrator.</p>
+</div>
+
+<h3>4. The Gruenten Bergwelt Failure (EUR 30M)</h3>
+<p>Hagenauer acquired Gruentenlifte from insolvency and planned a EUR 30M tourism development. The project was killed in January 2023 when the Alpgenossenschaft refused a land mortgage after 70,000 petition signatures and 2,000+ formal objections. Estimated sunk cost: EUR 2-5M. This failure occurred during the construction phase of the MO Vienna project -- directly contributing to Hagenauer's financial distress.</p>
+
+<h3>5. The Hamburg Collapse</h3>
+<p>Campus Schluetersstrasse Hamburg -- a EUR 144M project for Bayerische Versorgungskammer (Germany's largest public pension fund) -- entered Schutzschirmverfahren on the same day as the Austrian filing (16 March). Hagenauer was running TWO EUR 140M+ projects simultaneously on approximately EUR 100M group revenue. This is not a Brisen-specific failure. It is a group-wide structural collapse.</p>
+
+<h3>6. Dominik Buhl's Departure</h3>
+<p>Buhl was Hagenauer's co-Managing Director since 2016, handling all commercial and strategic matters. He departed on 24 February 2026 -- three weeks before insolvency. He is now a Junior Data Engineer at Der Spiegel. The commercial brain of the business exited when he saw what was coming.</p>
+
+<h3>7. The Self-Reduction</h3>
+<div class="card card-success">
+<p>Hagenauer's Section 1170b demand was EUR 13.2M. After Brisen presented its counter-calculations, Hagenauer's own lawyers reduced this to <strong>EUR 5.85M -- a 55% cut</strong>. The original demand was never genuine. It was a manufactured trigger for contract termination.</p>
+</div>
+
+<h3>8. The Real Numbers</h3>
+<div class="card card-success">
+<p>ClaimsMax analysis (9 March 2026) shows the actual outstanding amount is <strong>EUR 222,000</strong> (excluding EUR 1.8M retention). Compare this to the EUR 13.2M demand. Brisen has paid approximately EUR 114M of the contract value. The gap between rhetoric and reality is extraordinary.</p>
+</div>
+
+<h3>9. The Coordinated Blitz</h3>
+<div class="card card-danger">
+<p>On 16 March 2026, five events occurred simultaneously:</p>
+<ol>
+<li>Schutzschirmverfahren filed in both Germany and Austria</li>
+<li>ImmoFokus Article #1 published ("Dunkle Wolken"), quoting Punkt 26 of TUV verbatim</li>
+<li>Charles Steiner (DMV Medien) sends inquiry with 5pm deadline</li>
+<li>PR crisis call convened (Edita, Thomas, Sandra, Arndt)</li>
+<li>Edita to Blaschka on confidentiality breach: "It's pretty clear where that came from"</li>
+</ol>
+<p><strong>Assessment:</strong> This was not organic journalism. This was an orchestrated exit: file for protection, blame the client, feed the press, all on the same day.</p>
+</div>
+
+<h3>7 Key Messages (v3.0)</h3>
+
+<div class="key-msg">
+<div class="key-msg-num">Message 1: Brisen fulfilled its obligations -- with precision</div>
+<blockquote>"Brisen Development has paid approximately EUR 114 million to Hagenauer against verified work completions. The contractor demanded EUR 13.2 million in additional security -- a figure his own lawyers reduced to EUR 5.85 million within days of examining the actual documentation. An independent analysis shows actual outstanding amounts of approximately EUR 222,000. The contractor never submitted a final invoice despite repeated written demands."</blockquote>
+<p><em>Use when:</em> Any question about payment, the EUR 13.2M/EUR 15M/EUR 23M claim, or "non-payment" allegations.</p>
+</div>
+
+<div class="key-msg">
+<div class="key-msg-num">Message 2: The insolvency was structural, not caused by Brisen</div>
+<blockquote>"The contractor operated a group of 15+ entities across seven countries on holding capital of EUR 25,000. The same group was simultaneously running a EUR 144 million project in Hamburg that has also entered restructuring. The contractor lost millions on a failed tourism venture. The business model was structurally unsustainable -- this insolvency was not caused by any single client."</blockquote>
+<p><em>Use when:</em> Any question about the insolvency, who is responsible, or whether Brisen caused it.</p>
+</div>
+
+<div class="key-msg">
+<div class="key-msg-num">Message 3: Brisen is protecting the project and the subcontractors</div>
+<blockquote>"Brisen Development has declared Ersatzvornahme -- the contractual right to engage qualified firms directly to complete outstanding works. We are in direct communication with subcontractors to ensure continuity and fair treatment. The project will be completed to the highest standards."</blockquote>
+<p><em>Use when:</em> Questions about what happens next, subcontractor impact, or project completion.</p>
+</div>
+
+<div class="key-msg">
+<div class="key-msg-num">Message 4: The "faktischer Geschaeftsfuehrer" allegation is false and defamatory</div>
+<blockquote>"Brisen Development GmbH has professional managing directors registered in the Austrian commercial register. Mr. and Mrs. Vallen are shareholders. The allegation that they served as de facto directors of the contractor's company is factually false and legally unfounded. The person who circulated this claim previously acknowledged that the contractor's own management structure was flawed. We are considering all legal options."</blockquote>
+<p><em>Use when:</em> Questions about the Saehn letter, personal liability claims, or the Vallen family's role.</p>
+</div>
+
+<div class="key-msg">
+<div class="key-msg-num">Message 5: The hotel is operational and the residences are on track</div>
+<blockquote>"The Mandarin Oriental Vienna hotel opened in December 2025 and is fully operational. Residence owners are moving in. The project represents over a decade of development and a total investment exceeding EUR 250 million. A contractor insolvency does not change these facts."</blockquote>
+<p><em>Use when:</em> Any question about the project's viability, impact on operations, or buyer/guest confidence.</p>
+</div>
+
+<div class="key-msg">
+<div class="key-msg-num">Message 6: This is a contractor failure, not a project failure</div>
+<blockquote>"The contractor was running two projects worth over EUR 280 million combined on approximately EUR 100 million in annual revenue and EUR 25,000 in holding capital. The co-founder departed three weeks before the insolvency. The protective shield proceedings failed in eleven days. The contractor's own project manager has acknowledged the management structure was inadequate. This is a business that overextended itself."</blockquote>
+<p><em>Use when:</em> Contextualising the insolvency, rebutting "Brisen caused it" narratives.</p>
+</div>
+
+<div class="key-msg">
+<div class="key-msg-num">Message 7: The claim was manufactured</div>
+<blockquote>"The contractor demanded EUR 13.2 million in security. Within days, his own lawyers reduced this to EUR 5.85 million -- a 55% cut. When a party halves its own demand upon examination, the original figure was never genuine. This was a manufactured trigger, not a legitimate claim."</blockquote>
+<p><em>Use when:</em> Any discussion of the EUR 13.2M figure or the credibility of Hagenauer's financial claims.</p>
+</div>
+
+<h3>Proactive Media Strategy</h3>
+<p><strong>Timing:</strong> Wait 48-72 hours after the Ediktsdatei publication, then go proactive.</p>
+
+<h4>Story Angles to Pitch</h4>
+<table>
+<tr><th>Angle</th><th>Description</th><th>Use</th></tr>
+<tr><td><strong>A: "The Contractor Who Cried Wolf"</strong></td><td>Background only. EUR 13.2M to 5.85M self-reduction. Claim credibility.</td><td>Deep background</td></tr>
+<tr><td><strong>B: "MO Completes Despite Contractor Collapse"</strong></td><td>Success story: hotel open, residences delivering, EUR 250M investment.</td><td>On-record</td></tr>
+<tr><td><strong>C: "Vienna's Luxury Hotel Boom"</strong></td><td>Industry trend piece. MO Vienna as case study.</td><td>On-record</td></tr>
+<tr><td><strong>D: "The Subcontractor Economy"</strong></td><td>Brisen as responsible developer engaging directly with subs.</td><td>On-record</td></tr>
+<tr><td><strong>E: "The Contractor Who Overextended"</strong></td><td>Business failure analysis. Deep background only.</td><td>Background</td></tr>
+</table>
+
+<h3>The "Faktischer Geschaeftsfuehrer" PR Angle</h3>
+<h4>PR Neutralisation Strategy</h4>
+<div class="card">
+<p><strong>Step 1: Name it for what it is (this week)</strong></p>
+<blockquote>"A baseless allegation circulated on the day of the insolvency filing, naming the shareholders of the client company as responsible for the contractor's own financial failure. We note that the contractor was simultaneously in restructuring proceedings in Germany on a separate EUR 144 million project, had lost its co-founder three weeks earlier, had seen its own claims reduced by 55% upon examination, and was operating a group of 15+ entities on holding capital of EUR 25,000."</blockquote>
+</div>
+<div class="card">
+<p><strong>Step 2: Inoculate key relationships (this week)</strong></p>
+<blockquote>"You may be aware that a letter was circulated by Hagenauer's former project manager on the day of the insolvency filing, making certain allegations about the Vallen family. These allegations are factually false and legally unfounded. We are taking appropriate steps."</blockquote>
+</div>
+<div class="card card-warning">
+<p><strong>Step 3: Do NOT issue a public rebuttal of the Saehn letter (yet)</strong></p>
+<p>The Saehn letter is a private communication to subcontractors. If Brisen issues a public rebuttal, it risks amplifying the allegation to a wider audience. The response should remain targeted.</p>
+</div>
+</div>
+<div id="sandra" class="section">
+<h2>4. Sandra's Narrative Frameworks -- Gaisberg Consulting</h2>
+<p style="color:var(--meta);font-size:12px;">Source: Sandra Luger / Gaisberg PR Plan (26 March 2026) + Baker prioritisation analysis</p>
+
+<h3>8 Workstreams</h3>
+<table>
+<tr><th>#</th><th>Workstream</th><th>Timeline</th><th>Priority</th></tr>
+<tr><td>1</td><td>Media Monitoring and reactive strategy regarding Hagenauer</td><td>ONGOING</td><td><span class="badge badge-danger">ACCELERATE NOW</span></td></tr>
+<tr><td>2</td><td>Factsheet Brisen Group</td><td>March / Beginning of April</td><td><span class="badge badge-warning">THIS WEEK</span></td></tr>
+<tr><td>3</td><td>Factsheet Mandarin Oriental and other projects</td><td>March / Beginning of April</td><td><span class="badge badge-neutral">HOLD</span></td></tr>
+<tr><td>4</td><td>Photos corporate and projects</td><td>March / Beginning of April</td><td><span class="badge badge-neutral">HOLD</span></td></tr>
+<tr><td>5</td><td>CVs</td><td>March / Beginning of April</td><td><span class="badge badge-neutral">HOLD</span></td></tr>
+<tr><td>6</td><td>Company presentation</td><td>March / Beginning of April</td><td><span class="badge badge-neutral">HOLD</span></td></tr>
+<tr><td>7</td><td>Q&amp;A Document</td><td>March / Beginning of April</td><td><span class="badge badge-danger">ACCELERATE NOW</span></td></tr>
+<tr><td>8</td><td>Positive Media Frameworks</td><td>April -- June (Interview / Background talk with selected media)</td><td><span class="badge badge-info">PLAN FOR APRIL</span></td></tr>
+</table>
+
+<h3>5 Narrative Topics for Positive Media</h3>
+
+<div class="card card-accent">
+<div class="card-header">Topic 1: Growth in Vienna Luxury Tourism -- Residence Sales</div>
+<p><strong>Angle:</strong> 16 of 25 residences sold. Vienna luxury market growth story.</p>
+<p><strong>Target media:</strong> Vienna Deluxe, Kronen Zeitung (V. Graf, C. Engelmaier), Die Presse (M. Marits), Trend (Barbara Steininger, A. Kramer), ImmoFokus, Gewinn</p>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Topic 2: Company Profile -- Hotel &amp; Lifestyle Features</div>
+<p><strong>Angle:</strong> Reviews, dining, spa, design, architecture of MO Vienna.</p>
+<p><strong>Target media:</strong> NZZ (M. Baumann), FAZ, Handelsblatt, A3Bau, Businessart, Standard, Presse, Kurier</p>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Topic 3: 6 Months MO Vienna</div>
+<p><strong>Angle:</strong> Buyers move in, occupancy rates, outlook, review. Press release and interview.</p>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Topic 4: Project Communication -- Milestones, New Projects</div>
+<p><strong>Angle:</strong> Project milestones and new projects. Press releases.</p>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Topic 5: Brisen Group Semi-Annual Review (2x/year)</div>
+<p><strong>Angle:</strong> Operational performance, project overview. Press release (OTS), DACH distribution.</p>
+</div>
+
+<h3>Workstream Priorities (Baker Recommendation)</h3>
+<div class="card card-danger">
+<div class="card-header">ACCELERATE NOW (on today's call)</div>
+<ul>
+<li><strong>#1 Media monitoring / reactive Q&amp;A</strong> -- active monitoring of all outlets. Reactive statement ready for same-day deployment.</li>
+<li><strong>#7 Q&amp;A document</strong> -- must be updated to include insolvency + Article #4. Use Q1-Q22 from this portal as the base.</li>
+</ul>
+</div>
+
+<div class="card card-warning">
+<div class="card-header">ACCELERATE THIS WEEK (by Fri 4 April)</div>
+<ul>
+<li><strong>#2 Brisen factsheet</strong> -- must reflect the new insolvency narrative, not the old "payment dispute" frame. Include: EUR 250M investment, 10+ years development, MO partnership, hotel operational, residences delivering, institutional financing.</li>
+</ul>
+</div>
+
+<div class="card">
+<div class="card-header">HOLD (mid-April)</div>
+<ul>
+<li><strong>#3-6</strong> (photos, CVs, company presentation) -- important for proactive media push but not urgent until background briefings begin.</li>
+</ul>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">PLAN FOR APRIL (week of 7 April)</div>
+<ul>
+<li><strong>#8 Proactive media</strong> -- start identifying target journalist NOW. Recommendation: Angelika Kramer (Trend) or Die Presse real estate section. Format: off-record background talk, not interview.</li>
+</ul>
+</div>
+
+<h3>Lane Separation: Gaisberg vs. E+H vs. PRCO</h3>
+<table>
+<tr><th>Entity</th><th>Scope</th><th>Lane</th></tr>
+<tr><td><strong>Gaisberg (Sandra)</strong></td><td>Hagenauer insolvency media response. All reactive + proactive press.</td><td>Brisen corporate PR</td></tr>
+<tr><td><strong>E+H (Blaschka/Ofenheimer)</strong></td><td>Legal clearance of all external materials. Section 14/Section 9 actions. Insolvency proceedings.</td><td>Legal strategy</td></tr>
+<tr><td><strong>PRCO (Robert Lyle)</strong></td><td>Mandarin Oriental brand PR. Hotel marketing. Lifestyle press.</td><td>MO brand -- DO NOT MIX</td></tr>
+</table>
+</div>
+<div id="chronology" class="section">
+<h2>5. Chronology -- Hagenauer v. Brisen</h2>
+<p style="color:var(--meta);font-size:12px;">Source: Chronology v3 (02-001) | 28 March 2026 | Prepared for E+H and Gaisberg<br>Central question: Legitimate succession planning or pre-insolvency asset stripping?</p>
+
+<h3>Phase 1: Origins -- The Hagenauer Empire (1989-2021)</h3>
+<div class="timeline">
+<div class="timeline-item">
+<div class="timeline-date">1989</div>
+<div class="timeline-text">Martin Hagenauer founds carpentry business in Rettenberg, Bavaria.</div>
+<div class="timeline-note">Family business -- master carpenter, no formal business education, no external investors. This structure remains the same today.</div>
+</div>
+<div class="timeline-item">
+<div class="timeline-date">2003</div>
+<div class="timeline-text">Hagenauer GmbH formally registered (HRB entry). Initial capital: 50,000 DEM.</div>
+</div>
+<div class="timeline-item">
+<div class="timeline-date">2004</div>
+<div class="timeline-text">Martin &amp; Sabine Hagenauer purchase Alpsee Skizirkus (struggling winter ski area).</div>
+<div class="timeline-note">Redeveloped as Alpsee Bergwelt -- Germany's longest alpine coaster. Now >200K visitors/year. Flagship success.</div>
+</div>
+<div class="timeline-item">
+<div class="timeline-date">2008-2011</div>
+<div class="timeline-text">International expansion: hagenauer SARL (France, 2008), Mebloform Poland (2010), hagenauer Austria GmbH (2010), hagenauer Swiss GmbH (2011).</div>
+<div class="timeline-note">Markets now span 7+ countries. Growth on same management structure -- Martin Hagenauer + Dominik Buhl. No CFO. No professional board.</div>
+</div>
+<div class="timeline-item">
+<div class="timeline-date">2012-2019</div>
+<div class="timeline-text">Major growth phase: Zalando Berlin (EUR 13.5M), Ernst-Reuter-Platz Berlin (EUR 86M+), Ritz Carlton Vienna/Berlin, Breidenbacher Hof.</div>
+<div class="timeline-note">~250 employees, ~EUR 100M turnover by 2022. All growth on same flat management structure.</div>
+</div>
+<div class="timeline-item critical">
+<div class="timeline-date">Aug 2016</div>
+<div class="timeline-text">hoterio GmbH (Vienna hotel venture) liquidated. First of four Vienna entities abandoned.</div>
+<div class="timeline-note">Pattern: create SPV, fail, liquidate. Sequence: hoterio (2016), KEMEHT (2019), C.21.a (2019), MH Development (2021).</div>
+</div>
+<div class="timeline-item">
+<div class="timeline-date">2020-2021</div>
+<div class="timeline-text">Creates Hagenauer Holding GmbH as new group parent. EUR 25,000 share capital -- running EUR 100M+ operations.</div>
+</div>
+<div class="timeline-item critical">
+<div class="timeline-date">2021</div>
+<div class="timeline-text">Acquires Gruentenlifte from insolvency. Plans EUR 30M tourism project (cable car, hotel, Walderlebnisbahn).</div>
+<div class="timeline-note">Massive side bet while signing EUR 140M TUV with Brisen. Will result in EUR 2-5M sunk cost.</div>
+</div>
+</div>
+
+<h3>Phase 2: The Contract and Construction (2021-2024)</h3>
+<div class="timeline">
+<div class="timeline-item critical">
+<div class="timeline-date">23 Nov 2021</div>
+<div class="timeline-text"><strong>ORIGINAL TUV SIGNED</strong> -- EUR 140M total contractor agreement. Phase 1 budget: EUR 66.2M. Completion: 30 Sep 2024.</div>
+<div class="timeline-note">Same month: Martin Hagenauer Development GmbH enters liquidation. Winding down a Vienna entity while taking on EUR 140M project.</div>
+</div>
+<div class="timeline-item critical">
+<div class="timeline-date">27 Dec 2021</div>
+<div class="timeline-text"><strong>Hagenauer Landwirtschaft GmbH created</strong> -- farm holdings vehicle.</div>
+<div class="timeline-note">5 WEEKS after TUV signing. Simultaneously taking on biggest construction obligation AND sheltering ancestral land holdings.</div>
+</div>
+<div class="timeline-item">
+<div class="timeline-date">Jul 2022</div>
+<div class="timeline-text">Hagenauer requests budget term changes on Brisen project. Costs from Gruenten + Hamburg pressing.</div>
+</div>
+<div class="timeline-item">
+<div class="timeline-date">2022</div>
+<div class="timeline-text">Creates Hagenauer Landwirtschaft GmbH + acquires Buronlifte (Wertach). More capital diverted from construction.</div>
+</div>
+<div class="timeline-item critical">
+<div class="timeline-date">Oct 2021-2023</div>
+<div class="timeline-text"><strong>Hamburg Campus Schluetersstrasse</strong> -- EUR 144M project underway simultaneously.</div>
+<div class="timeline-note">TWO EUR 140M+ projects on EUR 100M revenue. Structural overcommitment.</div>
+</div>
+<div class="timeline-item">
+<div class="timeline-date">30 Nov 2022</div>
+<div class="timeline-text">Brisen formally assesses Hagenauer performance risk (Stockinger report). Head of Development flags concerns.</div>
+<div class="timeline-note">Shows Brisen exercised normal project oversight -- not faktischer GF.</div>
+</div>
+<div class="timeline-item critical">
+<div class="timeline-date">Jan 2023</div>
+<div class="timeline-text"><strong>Gruenten Bergwelt dies</strong> -- Alpgenossenschaft refuses land mortgage. 70,000 signatures against. EUR 2-5M sunk cost.</div>
+</div>
+<div class="timeline-item critical">
+<div class="timeline-date">Nov 2023</div>
+<div class="timeline-text"><strong>1st Nachtrag signed:</strong> budget to EUR 121.5M + EUR 4.8M reserve. Completion: 30 Jun 2025. Hagenauer warranted no delay.</div>
+<div class="timeline-note">SAME MONTH: Hagenauer VV GmbH created (residential property management). Budget increase + asset sheltering simultaneously.</div>
+</div>
+<div class="timeline-item">
+<div class="timeline-date">Dec 2023</div>
+<div class="timeline-text">hagenauer SARL (France) terminated. 15-year venture wound down.</div>
+</div>
+<div class="timeline-item">
+<div class="timeline-date">Jan 2024</div>
+<div class="timeline-text">Brisen employs its own team (~EUR 1.5M) to compensate lack of Hagenauer management on site.</div>
+</div>
+</div>
+
+<h3>Phase 3: The Escalation (2025-2026)</h3>
+<div class="timeline">
+<div class="timeline-item">
+<div class="timeline-date">30 Jun 2025</div>
+<div class="timeline-text"><strong>CONTRACTUAL HANDOVER DEADLINE MISSED.</strong> Hagenauer's own warranted deadline.</div>
+</div>
+<div class="timeline-item">
+<div class="timeline-date">Oct 2025</div>
+<div class="timeline-text">Rumours of Hagenauer financial distress. Brisen raises the question directly.</div>
+</div>
+<div class="timeline-item">
+<div class="timeline-date">Oct-Nov 2025</div>
+<div class="timeline-text">Hagenauer issues three invoices for unsubstantiated amounts. Brisen refuses to pay.</div>
+</div>
+<div class="timeline-item success">
+<div class="timeline-date">Dec 2025</div>
+<div class="timeline-text"><strong>Mandarin Oriental Vienna OPENS</strong> despite incomplete Hagenauer works. 2,000+ defects, 38% MEP, 3 workers instead of 20.</div>
+</div>
+<div class="timeline-item critical">
+<div class="timeline-date">~Late 2025</div>
+<div class="timeline-text">Dominique Buhl sends letter demanding payment, claiming total cost of EUR 138M (unjustified increase of EUR 18M).</div>
+</div>
+<div class="timeline-item">
+<div class="timeline-date">7 Feb 2026</div>
+<div class="timeline-text">Christine Saehn asks Brisen for meeting. At the meeting she admits management structure was "untimeful and probably not a good idea."</div>
+</div>
+<div class="timeline-item critical">
+<div class="timeline-date">17 Feb 2026</div>
+<div class="timeline-text"><strong>Buhl Section 1170b LETTER: EUR 13.2M security demand.</strong> If no payment -- contract termination threatened.</div>
+</div>
+<div class="timeline-item critical">
+<div class="timeline-date">24 Feb 2026</div>
+<div class="timeline-text"><strong>DOMINIK BUHL DEPARTS</strong> as co-MD. Commercial brain leaves 3 weeks before insolvency. Now at Der Spiegel as data engineer.</div>
+</div>
+<div class="timeline-item critical">
+<div class="timeline-date">25 Feb 2026</div>
+<div class="timeline-text"><strong>Hagenauer self-reduces demand from EUR 13.2M to EUR 5.85M.</strong> 55% self-reduction. Original demand was fabricated.</div>
+</div>
+<div class="timeline-item">
+<div class="timeline-date">9 Mar 2026</div>
+<div class="timeline-text">ClaimsMax shows actual outstanding = EUR 222K (not EUR 6M). Hard evidence destroying Hagenauer's claims.</div>
+</div>
+</div>
+
+<h3>Phase 4: The Coordinated Blitz (March 2026)</h3>
+<div class="timeline">
+<div class="timeline-item critical">
+<div class="timeline-date">12 Mar 2026</div>
+<div class="timeline-text">NHK (Nemetschke) letter to MOHG London -- pressures hotel brand. Tortious interference.</div>
+</div>
+<div class="timeline-item critical">
+<div class="timeline-date">14-15 Mar 2026</div>
+<div class="timeline-text"><strong>HAGENAUER TERMINATES THE TUV.</strong> Hagenauer chose to walk. The termination is the insolvency trigger.</div>
+</div>
+<div class="timeline-item critical">
+<div class="timeline-date">16 Mar 2026</div>
+<div class="timeline-text"><strong>THE BLITZ:</strong> Schutzschirmverfahren + ImmoFokus Article #1 + Steiner inquiry -- ALL SAME DAY.</div>
+<div class="timeline-note">Three events on one day = coordinated campaign. Hamburg subcontractors also receive Schutzschirmverfahren letter.</div>
+</div>
+<div class="timeline-item critical">
+<div class="timeline-date">18 Mar 2026</div>
+<div class="timeline-text">Nemetschke: "faktischer Geschaeftsfuehrer" letter -- cc'd to Aukera, Wilmington Trust, MOHG. Reputation warfare.</div>
+</div>
+<div class="timeline-item critical">
+<div class="timeline-date">27 Mar 2026</div>
+<div class="timeline-text"><strong>FULL INSOLVENCY FILED.</strong> Schutzschirm failed in 11 days. Saehn letter names Vallens to all subcontractors.</div>
+</div>
+<div class="timeline-item">
+<div class="timeline-date">28 Mar 2026</div>
+<div class="timeline-text">Corporate mapping complete: EUR 25K holding, EUR 100M+ revenue, 15+ entities, 7 jurisdictions. Asset-protection pattern documented.</div>
+</div>
+<div class="timeline-item critical">
+<div class="timeline-date">30 Mar 2026</div>
+<div class="timeline-text"><strong>ImmoFokus Article #4</strong> published. Names Dimitry and Edita Vallen personally. EUR 21M claim figure. Most damaging article yet.</div>
+</div>
+</div>
+
+<h3>The Complete Asset-Protection Timeline</h3>
+<div class="card card-danger">
+<table>
+<tr><th>Date</th><th>Event</th><th>Significance</th></tr>
+<tr><td>Nov 2021</td><td>TUV signed (EUR 140M obligation)</td><td>Largest liability created</td></tr>
+<tr><td>Dec 2021</td><td>Landwirtschaft GmbH created</td><td>Farmland sheltered -- 5 weeks after TUV</td></tr>
+<tr><td>Nov 2021</td><td>MH Development GmbH enters liquidation</td><td>Same month as TUV</td></tr>
+<tr><td>2022</td><td>Buronlifte acquired</td><td>More tourism assets added to BergWelt, separate from construction</td></tr>
+<tr><td>Nov 2023</td><td>VV GmbH created</td><td>Residential real estate sheltered -- same month as Nachtrag budget increase</td></tr>
+<tr><td>Apr 2025</td><td>VV ownership to Holding + Martin exits Swiss GF role</td><td>Further ring-fencing</td></tr>
+<tr><td>Aug 2025</td><td>Martin &amp; Sabine step down from VV GmbH</td><td>Next-gen management installed</td></tr>
+<tr><td>Feb 2026</td><td>Buhl departs</td><td>Last commercial brain leaves</td></tr>
+<tr><td>Mar 2026</td><td>hagenauer Austria GmbH &amp; Co KG -- INSOLVENT</td><td>Every other family entity: healthy</td></tr>
+</table>
+<p style="margin-top:12px"><strong>Conclusion:</strong> Systematic pre-insolvency asset separation executed over a 4-year period (Dec 2021 - Mar 2026), beginning the same month the largest liability was created.</p>
+</div>
+</div>
+<div id="article" class="section">
+<h2>6. Article Analysis -- ImmoFokus Article #4</h2>
+<p style="color:var(--meta);font-size:12px;">"Neue Wendung rund um das Prestigeprojekt Mandarin Oriental" | Michael Neubauer | 30 March 2026</p>
+
+<h3>What's NEW vs. Previous Articles</h3>
+<table>
+<tr><th>Claim in Article #4</th><th>New?</th><th>Assessment</th></tr>
+<tr><td>Naming Dimitry and Edita Vallen personally as "exclusively authorized"</td><td><span class="badge badge-danger">NEW in media</span></td><td>Previously only in Saehn's private subcontractor letter. Now public. Escalation.</td></tr>
+<tr><td>EUR 21M outstanding claims figure</td><td><span class="badge badge-danger">NEW</span></td><td>Previous articles cited EUR 15M or EUR 15-23M. New, higher, specific number.</td></tr>
+<tr><td>EUR 7.4M "tactical complaints" (Brisen letter dated 13 March)</td><td><span class="badge badge-danger">NEW</span></td><td>Specific reference to a Brisen letter. Hagenauer characterizing legitimate defect claims as "tactical."</td></tr>
+<tr><td>EUR 5.85M Section 1170b demand</td><td><span class="badge badge-warning">NEW detail</span></td><td>Previous articles mentioned security demand but not the amount. Self-reduction from EUR 13.2M not mentioned.</td></tr>
+<tr><td>"Over 100 project amendment notifications"</td><td><span class="badge badge-danger">NEW</span></td><td>Specific number for the first time. Positioned as client-initiated.</td></tr>
+<tr><td>"Payments largely stopped as of January 2026"</td><td><span class="badge badge-warning">NEW specificity</span></td><td>Previous articles said "non-payment." Now pinned to a date.</td></tr>
+<tr><td>Project volume "approximately EUR 150M"</td><td><span class="badge badge-info">LOWER than reality</span></td><td>Previous coverage cited EUR 250M. EUR 150M is just GU contract -- makes EUR 21M look larger.</td></tr>
+<tr><td>German Schutzschirmverfahren details (Case IN 140/26, Kempten)</td><td><span class="badge badge-danger">NEW</span></td><td>First time German case number appears in Austrian press.</td></tr>
+<tr><td>"Continuation not planned" -- both applicants agree to closure</td><td><span class="badge badge-success">NEW -- OPPORTUNITY</span></td><td>First confirmation Hagenauer is winding down, not restructuring.</td></tr>
+<tr><td>KG assets exceed liabilities by EUR 2.4M</td><td><span class="badge badge-success">NEW -- OPPORTUNITY</span></td><td>Contradicts "Brisen drove us bankrupt" -- if assets > liabilities, crisis is cash flow.</td></tr>
+</table>
+
+<h3>What's DANGEROUS</h3>
+<div class="card card-danger">
+<ol>
+<li><strong>Personal naming.</strong> The article identifies the Director and Edita as the two people "exclusively authorized to issue and receive binding declarations." One step short of calling them faktische Geschaeftsfuehrer in print.</li>
+<li><strong>EUR 21M figure.</strong> Biggest number yet. Will be repeated by other outlets without verification. Becomes "the number" in the public record.</li>
+<li><strong>"Payments largely stopped as of January 2026."</strong> Frames Brisen as an active bad actor. Erases all context (disputed invoices, no Schlussrechnung, legitimate defects).</li>
+<li><strong>"Tactical complaints regarding defects."</strong> Preemptively discredits Brisen's EUR 7.4M defect claim.</li>
+<li><strong>"Role of the Vallens is a point of contention."</strong> Keeps the faktischer GF angle alive without making the explicit legal claim.</li>
+</ol>
+</div>
+
+<h3>What's an OPPORTUNITY</h3>
+<div class="card card-success">
+<ol>
+<li><strong>"Continuation not planned."</strong> Hagenauer admits the business is being closed. A company "owed EUR 21M" by one client does not voluntarily wind down.</li>
+<li><strong>KG assets exceed liabilities by EUR 2.4M.</strong> "Brisen bankrupted us" narrative collapses. Crisis is "purely liquid" (their words).</li>
+<li><strong>Schutzschirmverfahren failed in 11 days.</strong> A company that cannot sustain restructuring for two weeks was not viable.</li>
+<li><strong>"Over 100 change orders."</strong> If Brisen's position is these were initiated BY Hagenauer, this claim boomerangs.</li>
+<li><strong>EUR 5.85M demand.</strong> Article does NOT mention the original EUR 13.2M. Sandra can brief journalists: demand was self-reduced by more than half.</li>
+</ol>
+</div>
+</div>
+<div id="rebuttal" class="section">
+<h2>7. Line-by-Line Rebuttal -- Article #4 Claims</h2>
+
+<div class="card card-accent">
+<div class="card-header">Claim 1: "Brisen Development GmbH largely stopped making payments on outstanding interim invoices as of January 2026"</div>
+<h4>Rebuttal:</h4>
+<ul>
+<li>Brisen paid EUR 130.5M of approximately EUR 142M contract value -- over 95%.</li>
+<li>Payments were made against verified work completions throughout the entire contract period.</li>
+<li>What stopped in early 2026 was Brisen's willingness to pay DISPUTED invoices for which Hagenauer had not provided adequate documentation.</li>
+<li>Hagenauer never submitted a Schlussrechnung (final invoice) despite repeated written demands.</li>
+<li>You cannot claim "non-payment" when you haven't presented a proper bill.</li>
+</ul>
+<p><em>Source: E+H correspondence; payment records; Schlussrechnung demands.</em></p>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Claim 2: "Outstanding claims of approximately EUR 21 million"</div>
+<h4>Rebuttal:</h4>
+<ul>
+<li>Hagenauer's gross claim, unilaterally stated, unverified.</li>
+<li>Section 1170b security demand started at EUR 13.2M and was self-reduced to EUR 5.85M -- more than 50% reduction the article omits.</li>
+<li>Brisen has counterclaims of EUR 5.2M+ for defects, delays, and completion costs.</li>
+<li>Brisen identified EUR 7.5M in disputed charges.</li>
+<li>A company winding down voluntarily ("continuation not planned") does not behave like one owed EUR 21M.</li>
+</ul>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Claim 3: "Blocked payments through tactical complaints regarding defects -- approximately EUR 7.4 million"</div>
+<h4>Rebuttal:</h4>
+<ul>
+<li>The EUR 7.4M represents legitimate, documented construction defects -- not "tactical complaints."</li>
+<li>Defects identified by independent experts, documented per OENORM standards.</li>
+<li>A EUR 250M luxury hotel with 2,000+ documented defects has every right to withhold payment. Standard Austrian construction law (Section 1170 ABGB / OENORM B 2110).</li>
+</ul>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Claim 4: "Significant delays" caused by "massive project changes" and "over 100 project amendment notifications"</div>
+<h4>Rebuttal:</h4>
+<ul>
+<li>Heritage preservation and subway requirements were known from the start and priced into the contract.</li>
+<li>Brisen's position: change orders were overwhelmingly initiated BY Hagenauer's own planning errors.</li>
+<li>Christine Saehn admitted "Hagenauer took on too many projects simultaneously" -- delays were a resource problem.</li>
+<li>The hotel opened on schedule in December 2025. If "massive client changes" had occurred, it would not be operational.</li>
+</ul>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Claim 5: Hagenauer demanded EUR 5.85M security under Section 1170b -- "rejected by Brisen"</div>
+<h4>Rebuttal:</h4>
+<ul>
+<li>Original demand was EUR 13.2M, self-reduced to EUR 5.85M -- a 55% admission the original was inflated.</li>
+<li>Brisen disputed on substantive legal grounds -- legitimate contractual dispute, not "rejection."</li>
+<li>Demand now moot: insolvency administrator takes over all claims.</li>
+</ul>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Claim 6: "Client's representative failed to fulfill coordination obligations to Mandarin Oriental"</div>
+<h4>Rebuttal:</h4>
+<ul>
+<li>Coordination with MOHG is between hotel operator and development company -- not the general contractor's concern.</li>
+<li>Building permits obtained. Hotel is open and operational. Claim refuted by the building's existence.</li>
+</ul>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Claim 7: "Project volume approximately EUR 150 million"</div>
+<h4>Rebuttal:</h4>
+<ul>
+<li>Total project investment exceeds EUR 250 million. EUR 150M is only the GU contract value.</li>
+<li>By citing the lower number, EUR 21M appears proportionally larger (14% vs 8.4%). Framing distortion.</li>
+</ul>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Claim 8: Naming Dimitry and Edita Vallen as "exclusively authorized"</div>
+<h4>Rebuttal:</h4>
+<ul>
+<li>Selective quote from one clause of the GU contract (Punkt 26 TUV), taken out of context.</li>
+<li>Brisen Dev has professional MDs (Thomas Leitner, formerly Conrad Bauer) registered in the Firmenbuch (FN 444495 w).</li>
+<li>Dimitry acted on basis of a Power of Attorney -- as a shareholder representative, not as a managing director.</li>
+<li>Thomas and Conrad, as registered MDs, signed the 2023 contract amendment -- MDs exercised real authority.</li>
+<li>OGH four-element test for faktischer Geschaeftsfuehrer: cumulative proof that fewer than 5% of cases achieve.</li>
+<li>E+H categorically rejected this characterisation on 22 March 2026.</li>
+</ul>
+</div>
+</div>
+<div id="talking" class="section">
+<h2>8. Talking Points</h2>
+
+<h3>7 Talking Points for the Call</h3>
+
+<div class="card card-accent">
+<div class="card-header">TP1: The article is Hagenauer's insolvency filing rewritten as journalism</div>
+<blockquote>"This is not independent reporting. This is Hagenauer's insolvency application -- their version of events -- published essentially verbatim. Every claim originates from the filing. There is no independent verification, no Brisen comment, and no public records check. Michael Neubauer is now four articles deep as Nemetschke's media channel."</blockquote>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">TP2: The insolvency filing itself destroys the narrative</div>
+<blockquote>"Their own filing says the crisis is 'purely liquid in nature.' Their own filing says KG assets exceed liabilities by EUR 2.4M. Their own filing says 'continuation is not planned.' If you are owed EUR 21M by one client and that is your only problem, you restructure and collect. You don't voluntarily wind down with positive net assets. This is a business that failed across multiple markets."</blockquote>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">TP3: The EUR 21M number must not go unchallenged</div>
+<blockquote>"Every article ups the number. First EUR 15M, then EUR 15-23M, now EUR 21M. Meanwhile, Hagenauer's own security demand went the other direction: from EUR 13.2M down to EUR 5.85M -- a self-reduction of more than half. That fact has never appeared in any article. Sandra needs to get it into the next journalist conversation."</blockquote>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">TP4: The personal naming crosses a line</div>
+<blockquote>"ImmoFokus has now put our names in print in connection with this insolvency. This is the article that future Google searches will find. We need to decide whether this triggers a formal Section 14 MedienG correction demand, a right of reply (Section 9 Gegendarstellung), or both. E+H should advise on the legal mechanism; Sandra should advise on the PR implications."</blockquote>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">TP5: The 'tactical complaints' framing must be flipped</div>
+<blockquote>"Hagenauer is reframing EUR 7.4M in legitimate defect claims as 'tactical.' This is the same company with 2,000+ documented defects on a luxury hotel. If anyone was 'tactical,' it was the contractor who launched a media campaign, a Letter to MOHG London, and a subcontractor blame letter -- all within weeks of filing insolvency."</blockquote>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">TP6: The change order narrative is false</div>
+<blockquote>"The article says 'massive project changes initiated by the client' and '100+ amendment notifications.' Our position is the opposite: these change orders were driven BY Hagenauer's own planning errors and coordination failures. The hotel opened on time in December 2025. If the client had genuinely changed the scope 100+ times, the project would not be delivered."</blockquote>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">TP7: The proactive counter-narrative is overdue</div>
+<blockquote>"We are now four articles into a one-sided media campaign and have not placed a single proactive piece. Sandra: what is the timeline for the positive MO Vienna article? And should we now consider a formal statement from Thomas Leitner -- not just reactive Q&amp;A, but a proactive on-record quote?"</blockquote>
+</div>
+
+<h3>Thomas Leitner -- Updated Talking Points Card</h3>
+<p style="color:var(--meta);font-size:12px;">Thomas Leitner is the sole authorised spokesperson. Print this. Keep it on your phone.</p>
+
+<div class="card" style="border:2px solid var(--primary);">
+<table>
+<tr><th style="width:30%">Topic</th><th>Approved Line</th></tr>
+<tr><td><strong>On Payment</strong></td><td>"Brisen has paid approximately EUR 114 million under this contract. The contractor's own claim was reduced by 55 percent when the real numbers were examined. The actual outstanding amount is a fraction of what was publicly claimed. The contractor has never submitted a final invoice despite repeated written requests."</td></tr>
+<tr><td><strong>On the Insolvency</strong></td><td>"This insolvency was caused by the contractor's structural overcommitment, not by any action of Brisen. The contractor was running projects worth over EUR 280 million across multiple countries on minimal capital. A separate EUR 144 million project in Hamburg has also entered restructuring. This is a group-wide failure."</td></tr>
+<tr><td><strong>On the Project</strong></td><td>"The Mandarin Oriental Vienna opened in December 2025 and is fully operational. Residence owners are moving in. The project represents over a decade of development and more than EUR 250 million in investment. We are completing all remaining works directly with qualified contractors."</td></tr>
+<tr><td><strong>On the Track Record</strong></td><td>"The contractor warranted in November 2023 that there would be no delay to the June 2025 handover. The project is now more than 18 months past that warranted date. There are over 2,000 documented defects. At the time of the insolvency, the contractor had only 3 workers on site instead of the 20 required."</td></tr>
+<tr><td><strong>On "Faktischer GF"</strong></td><td>"This is factually false. Brisen Development has its own registered managing directors. The Vallens are shareholders. The contractor had its own managing directors who were responsible for its business. This allegation was circulated on the very day of the insolvency filing to dozens of companies. We are taking legal steps."</td></tr>
+<tr><td><strong>On Subcontractors</strong></td><td>"We are in direct contact with the skilled tradespeople who built this project. Brisen will engage directly with qualified firms to complete all remaining works. The subcontractors are the victims of the contractor's mismanagement, not ours."</td></tr>
+<tr><td><strong>On Claim Credibility</strong></td><td>"The contractor demanded EUR 13.2 million in security. His own lawyers reduced this to EUR 5.85 million -- a 55 percent cut. When a party reduces its own claim by more than half within days, the original demand was not genuine."</td></tr>
+<tr><td><strong>On Timeline</strong></td><td>"The contractor filed for protective shield proceedings on March 16 and was in full insolvency by March 27 -- eleven days. A business that collapses in less than two weeks was not viable."</td></tr>
+<tr><td><strong>On Brisen's Finances</strong></td><td>"Brisen Development is fully solvent and institutionally financed. We have invested over EUR 250 million. The hotel is generating revenue. Residence sales are proceeding."</td></tr>
+<tr><td><strong>On What Happens Next</strong></td><td>"Our focus is on completing the project to the standards that our residents and Mandarin Oriental expect. We are participating fully in the insolvency proceedings to protect our rights."</td></tr>
+</table>
+<p style="margin-top:12px"><strong>Pivot phrases:</strong> "Rather than respond to speculation, let me share the facts..." | "What I can tell you is..." | "The facts speak for themselves..." | "Our focus is on the project and the people working on it..." | "Let me put that in perspective..."</p>
+</div>
+</div>
+<div id="qa" class="section">
+<h2>9. Q&amp;A -- Complete (Q1-Q22)</h2>
+<p style="color:var(--meta);font-size:12px;">All answers pre-approved for Thomas Leitner unless marked otherwise. Legal specifics must be cleared with E+H.</p>
+
+<h3>From PR Strategy v3.0 (Q1-Q16, Q18-Q20)</h3>
+
+<div class="qa-item"><div class="qa-q">Q1: "Did Brisen cause Hagenauer's insolvency?"</div>
+<blockquote>"No. Brisen Development has paid approximately EUR 114 million under the contract -- the vast majority of the contract value. The insolvency reflects the contractor's structural overcommitment across multiple European markets and jurisdictions. The same contractor group is also in restructuring proceedings in Germany on a separate EUR 144 million project. We understand the contractor was simultaneously managing over 15 entities across seven countries. This was a business model that proved unsustainable."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q2: "Is it true Brisen refused to pay?"</div>
+<blockquote>"That is factually incorrect. Brisen has paid approximately EUR 114 million to Hagenauer under the contract. An independent review shows actual outstanding amounts of approximately EUR 222,000. The contractor has never submitted a final invoice despite numerous written requests from Brisen. You cannot claim non-payment when you have not presented your bill."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q3: "What about the EUR 13.2M / EUR 15M / EUR 23M claim?"</div>
+<blockquote>"The contractor's own formal security demand started at EUR 13.2 million and was reduced by the contractor himself to EUR 5.85 million after examination of the documentation. The original figure in ImmoFokus was inaccurate. An independent review shows actual outstanding amounts are a fraction of what was publicly claimed."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q4: "Are the Vallens shadow directors (faktische Geschaeftsfuehrer)?"</div>
+<blockquote>"This allegation is factually false. Brisen Development has its own professional managing directors registered in the commercial register. Mr. and Mrs. Vallen are shareholders of the group -- not directors of the contractor's company. The contractor had its own managing directors responsible for its business. The fact that this baseless claim was circulated to dozens of companies on the very day of the insolvency filing speaks for itself. We are taking legal advice on appropriate remedies."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q5: "What happens to the subcontractors?"</div>
+<blockquote>"Brisen is committed to protecting the interests of the skilled tradespeople who built this project. We have declared Ersatzvornahme -- which means Brisen will engage directly with qualified firms, including many of the existing subcontractors, to complete the remaining works."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q6: "Is the hotel affected?"</div>
+<blockquote>"The Mandarin Oriental Vienna hotel has been fully operational since December 2025. Hotel operations are managed by Mandarin Oriental Hotel Group. The contractor insolvency has no impact on hotel services, guest experience, or daily operations."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q7: "Will residence owners be affected?"</div>
+<blockquote>"Residence owners are being welcomed and moving in. Brisen Development is managing the completion of all outstanding works directly. The contractor insolvency does not affect the quality, timeline, or value of the residences."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q8: "What about the Hamburg project?"</div>
+<blockquote>"We are aware that Hagenauer faces challenges on other projects in Germany, including a EUR 144 million project that has also entered restructuring. This reinforces our assessment that the insolvency is a contractor-wide structural issue, not specific to any single project."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q9: "Are you also in financial difficulty?"</div>
+<blockquote>"Brisen Development is fully solvent and institutionally financed. The company has invested over EUR 250 million in the Mandarin Oriental Vienna. The hotel is operational and generating revenue. Residence sales are proceeding. There is no question about Brisen's financial standing."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q10: "Why did the protective shield fail so quickly?"</div>
+<blockquote>"We cannot comment on the internal reasons for the contractor's failed restructuring. What we can say is that the speed of the collapse -- from protective shield to full insolvency in less than two weeks -- suggests the financial difficulties were profound and structural, not related to any single project or client."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q11: "This is like Signa, isn't it?"</div>
+<blockquote>"There is no basis for that comparison. Brisen Development is a solvent, institutionally financed company with one landmark project that has been delivered successfully. The hotel is open, the residences are selling, and the project represents a decade of committed development in Vienna."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q12: "The step-in clause is 'sittenwidrig'?"</div>
+<blockquote>"The contractual arrangements were prepared by leading Austrian law firms and reflect standard market practice for large-scale construction projects. We are confident in the validity of all contractual provisions."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q13: "What about the Section 1170b security demand?"</div>
+<blockquote>"The security demand was subject to a legitimate legal dispute. The contractor's own initial demand was reduced by 55% after examination of the facts. This matter is now overtaken by the insolvency proceedings."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q14: "Will Brisen file claims in the insolvency?"</div>
+<blockquote>"Brisen will participate fully in the insolvency proceedings to protect its rights and those of the project. We have substantive counterclaims for documented construction defects, delays, and completion costs. Our legal counsel E+H Rechtsanwaelte is managing this process."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q15: "Who is Christine Saehn?"</div>
+<blockquote>"We are aware that a letter containing false and defamatory allegations about the Vallen family was circulated to third parties. The letter was sent on the same day as the insolvency filing. We consider the timing and content to be self-explanatory and are taking appropriate legal steps."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q16: "Are the 'Russian investors' allegations true?"</div>
+<blockquote>"Mr. Vallen has never held a Russian passport. This claim is factually false. The project's financing is institutional and fully compliant with all applicable regulations."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q18: "The ImmoFokus article quotes the contract verbatim. Did Nemetschke leak it?"</div>
+<blockquote>"We note that a confidential commercial contract appears to have been provided to a journalist in breach of confidentiality obligations. We are taking appropriate steps."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q19: "What about the 2,000+ defects? Is the building safe?"</div>
+<blockquote>"Construction defects are a normal part of any large-scale development and are managed through structured defect resolution processes. The hotel is fully operational and safe. Brisen is now managing defect resolution directly with qualified contractors."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q20: "Was the coordinated media and legal campaign planned in advance?"</div>
+<blockquote>"We note that the contractor's insolvency filing, contract termination, and media activity occurred within a very compressed timeframe. We leave others to draw their own conclusions about the coordination of these events. Our focus is on completing the project."</blockquote></div>
+
+<h3>New Questions from Article #4 (Q17, Q21-Q22)</h3>
+
+<div class="qa-item"><div class="qa-q">Q17: "The article says outstanding claims are EUR 21 million. Is that accurate?"</div>
+<blockquote>"That figure is the contractor's unilateral claim and has not been verified by any independent party. For context: the contractor's own formal security demand under Section 1170b ABGB started at EUR 13.2 million and was reduced by the contractor himself to EUR 5.85 million after examination of the documentation. Brisen has substantive counterclaims for construction defects, delays, and completion costs. The net disputed amount is significantly lower than what has been reported."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q21: "Hagenauer says Brisen forced them into insolvency. But the filing says assets exceed liabilities. How?"</div>
+<blockquote>"We note the same point. The insolvency filing states the KG's assets exceed its liabilities by approximately EUR 2.4 million and describes the crisis as 'purely liquid in nature.' This is inconsistent with the narrative that any single client caused the insolvency. A liquidity crisis affecting a group running projects across Germany, Austria, Poland, Switzerland, and France -- with EUR 25,000 in holding capital -- is a business model failure, not a client payment issue."</blockquote></div>
+
+<div class="qa-item"><div class="qa-q">Q22: "What about the '100+ change orders'?"</div>
+<blockquote>"Change orders are standard in construction projects of this complexity. What the article does not mention is that the overwhelming majority of these amendments were necessitated by the contractor's own planning errors and coordination issues -- not by client-initiated changes. The hotel opened on schedule in December 2025."</blockquote></div>
+</div>
+<div id="redlines" class="section">
+<h2>10. Red Lines -- DO NOT SAY</h2>
+<p style="color:var(--danger);font-weight:700;margin-bottom:16px;">The following must NEVER appear in ANY external communication. Applies to ALL Brisen spokespersons.</p>
+
+<h3>Financial Figures -- DO NOT DISCLOSE</h3>
+<div class="red-line"><strong>1.</strong> Specific amounts paid by Hagenauer to subcontractors. <em>Reveals intelligence capability.</em></div>
+<div class="red-line"><strong>2.</strong> The EUR 222,000 actual outstanding figure. <em>Use "a fraction of what was claimed" instead.</em></div>
+<div class="red-line"><strong>3.</strong> EUR 114M exact figure on-record. <em>Use "approximately 95% of contract value" or "over EUR 110 million."</em></div>
+<div class="red-line"><strong>4.</strong> Specific contract value / max price guarantee (EUR 125.5M, EUR 142.6M).</div>
+<div class="red-line"><strong>5.</strong> EUR 5.23M outstanding installments (from 2nd Nachtrag).</div>
+<div class="red-line"><strong>6.</strong> EUR 30.8M participation loan or EUR 12M shareholder loan figures.</div>
+<div class="red-line"><strong>7.</strong> Specific residence sales numbers, buyer names, or pricing.</div>
+<div class="red-line"><strong>8.</strong> Aukera or Wilmington Trust financing terms, loan amounts, or covenants.</div>
+<div class="red-line"><strong>9.</strong> EUR 14M+ subcontractor claims against Hagenauer.</div>
+
+<h3>Legal Strategy -- DO NOT DISCLOSE</h3>
+<div class="red-line"><strong>10.</strong> The Polish torpedo lawsuit or any reference to Mebloform. <em>Even mentioning "Poland" or "Krakow" signals the torpedo.</em></div>
+<div class="red-line"><strong>11.</strong> Details of any litigation strategy or court filings.</div>
+<div class="red-line"><strong>12.</strong> Any specific clause number of the TUV (e.g., "Punkt 26", "Section 8.5").</div>
+<div class="red-line"><strong>13.</strong> The Forderungsanmeldung strategy or filing details.</div>
+<div class="red-line"><strong>14.</strong> Section 1330 ABGB injunction plans against Saehn.</div>
+<div class="red-line"><strong>15.</strong> The Section 14 MedienG correction demand against ImmoFokus.</div>
+<div class="red-line"><strong>16.</strong> Insolvenzanfechtung targets (VV GmbH, Landwirtschaft GmbH).</div>
+<div class="red-line"><strong>17.</strong> Personal counsel arrangements for Dimitry/Edita.</div>
+
+<h3>Names and Entities -- DO NOT MENTION</h3>
+<div class="red-line"><strong>18.</strong> Martin Hagenauer by name in criticism. <em>Use "the contractor" or "the contractor's management."</em></div>
+<div class="red-line"><strong>19.</strong> Christine Saehn by name. <em>Use "the contractor's former project manager."</em></div>
+<div class="red-line"><strong>20.</strong> Alfred Nemetschke or NHK by name. <em>Use "the contractor's legal representatives."</em></div>
+<div class="red-line"><strong>21.</strong> Philip Neubauer (NF Rechtsanwaelte) by name.</div>
+<div class="red-line"><strong>22.</strong> Dominik Buhl or his departure. <em>Save for legal proceedings.</em></div>
+<div class="red-line"><strong>23.</strong> Specific subcontractor names or their claim amounts.</div>
+<div class="red-line"><strong>24.</strong> Sandra Luger or Gaisberg Consulting. <em>Sandra works invisibly.</em></div>
+<div class="red-line"><strong>25.</strong> Aukera Real Estate or Wilmington Trust specifics.</div>
+
+<h3>Narrative Traps -- DO NOT ENGAGE</h3>
+<div class="red-line"><strong>26.</strong> "Signa" or "Benko" -- even in denial. <em>State affirmative facts instead.</em></div>
+<div class="red-line"><strong>27.</strong> "Panama" or "ICIJ" or "offshore" -- even in denial.</div>
+<div class="red-line"><strong>28.</strong> Russian nationality references -- even in denial. <em>One-line denial ONLY if directly asked.</em></div>
+<div class="red-line"><strong>29.</strong> Any comparison to other developer failures.</div>
+<div class="red-line"><strong>30.</strong> The "sittenwidrig" characterisation of the step-in clause.</div>
+<div class="red-line"><strong>31.</strong> "We are not insolvent." <em>Protesting solvency unprompted creates doubt.</em></div>
+<div class="red-line"><strong>32.</strong> "We have nothing to hide." <em>Implies the opposite.</em></div>
+<div class="red-line"><strong>33.</strong> "No comment." <em>Always say something constructive.</em></div>
+<div class="red-line"><strong>34.</strong> The word "defamation" in press contexts. <em>Use "false allegations" or "baseless claims."</em></div>
+
+<h3>Intelligence Products -- DO NOT REFERENCE</h3>
+<div class="red-line"><strong>35.</strong> Hagenauer's EUR 25K holding capital. <em>Save for insolvency proceedings. Background only.</em></div>
+<div class="red-line"><strong>36.</strong> The Gruenten Bergwelt failure or sunk costs. <em>Background only.</em></div>
+<div class="red-line"><strong>37.</strong> Hagenauer's corporate empire (15+ entities, 7 jurisdictions). <em>Background: "operations across multiple European markets."</em></div>
+<div class="red-line"><strong>38.</strong> Asset-protection vehicles (VV GmbH, Landwirtschaft GmbH). <em>Strictly for insolvency proceedings.</em></div>
+<div class="red-line"><strong>39.</strong> Liquidated entities (hoterio, entri/avara, Development GmbH). <em>Pattern evidence for legal only.</em></div>
+<div class="red-line"><strong>40.</strong> Saehn's admission about management structure. <em>Background only.</em></div>
+<div class="red-line"><strong>41.</strong> The February 7 meeting transcript content. <em>Strictly privileged.</em></div>
+<div class="red-line"><strong>42.</strong> ClaimsMax reports or methodology. <em>Never reference by name.</em></div>
+<div class="red-line"><strong>43.</strong> Baker or any AI analysis system.</div>
+<div class="red-line"><strong>44.</strong> Internal communications between Brisen and MOHG.</div>
+<div class="red-line"><strong>45.</strong> Buhl's Swiss GF role (April 2025) or timeline details. <em>Reveals corporate intelligence depth.</em></div>
+
+<h3>Additional Red Lines (from Meeting Brief)</h3>
+<div class="red-line"><strong>46.</strong> Do NOT disclose the exact EUR 130.5M amount paid. <em>Use "over EUR 130 million" or "more than 95%."</em></div>
+<div class="red-line"><strong>47.</strong> Do NOT discuss Punkt 26 of the TUV. <em>"We do not comment on specific contractual provisions."</em></div>
+<div class="red-line"><strong>48.</strong> Do NOT mention the torpedo lawsuit in Poland.</div>
+<div class="red-line"><strong>49.</strong> Do NOT discuss LCG, Aukera, or the financing structure.</div>
+<div class="red-line"><strong>50.</strong> Do NOT use the word "Signa" in any context.</div>
+<div class="red-line"><strong>51.</strong> Do NOT speculate on the insolvency administrator's actions.</div>
+<div class="red-line"><strong>52.</strong> Do NOT reference Hamburg/Campus Schluetersstrasse unless the journalist already has it.</div>
+<div class="red-line"><strong>53.</strong> Do NOT discuss PRCO, Robert Lyle, or any MO-related PR strategy.</div>
+<div class="red-line"><strong>54.</strong> Do NOT reveal Buhl's current employer (Der Spiegel). <em>Negotiation leverage only.</em></div>
+<div class="red-line"><strong>55.</strong> Do NOT discuss the Steinkopf/Peakside meeting or Hamburg intelligence.</div>
+</div>
+<div id="actions" class="section">
+<h2>11. Actions &amp; Timeline</h2>
+
+<h3>Immediate -- Today (30 March 2026)</h3>
+<table>
+<tr><th>#</th><th>Action</th><th>Owner</th><th>Deadline</th><th>Status</th></tr>
+<tr><td>1</td><td>Send PR Strategy v3.0 + Chronology v3 to Sandra</td><td>Director / Baker</td><td>TODAY before the call</td><td><span class="badge badge-warning">PENDING</span></td></tr>
+<tr><td>2</td><td>Align on response posture: reactive or proactive. Recommendation: go proactive.</td><td>All</td><td>On the call</td><td><span class="badge badge-warning">PENDING</span></td></tr>
+<tr><td>3</td><td>Commission Section 14 MedienG correction demand for factual errors (EUR 21M, "payments stopped", omission of self-reduction)</td><td>E+H (Blaschka)</td><td>EOD today</td><td><span class="badge badge-warning">PENDING</span></td></tr>
+<tr><td>4</td><td>Prepare on-record Brisen statement. Thomas Leitner as spokesperson. E+H vets.</td><td>Gaisberg + E+H</td><td>EOD today</td><td><span class="badge badge-warning">PENDING</span></td></tr>
+</table>
+
+<h3>This Week (31 March - 4 April)</h3>
+<table>
+<tr><th>#</th><th>Action</th><th>Owner</th><th>Deadline</th><th>Status</th></tr>
+<tr><td>5</td><td>Update Q&amp;A document to reflect insolvency + Article #4 (include Q17-Q22)</td><td>Gaisberg (Sandra / Flora)</td><td>Wed 2 April</td><td><span class="badge badge-neutral">UPCOMING</span></td></tr>
+<tr><td>6</td><td>Brisen factsheet draft incorporating new narrative + identify 2-3 target journalists</td><td>Gaisberg</td><td>Fri 4 April</td><td><span class="badge badge-neutral">UPCOMING</span></td></tr>
+<tr><td>7</td><td>Legal review of Q&amp;A and factsheet</td><td>E+H (Blaschka)</td><td>Mon 7 April</td><td><span class="badge badge-neutral">UPCOMING</span></td></tr>
+</table>
+
+<h3>Standing Items</h3>
+<table>
+<tr><th>#</th><th>Action</th><th>Owner</th><th>Notes</th></tr>
+<tr><td>8</td><td>Trend correction status ("russisches Ehepaar" correction, sent 24-25 March)</td><td>Sandra</td><td>Ask on today's call</td></tr>
+</table>
+
+<h3>Legal Track (E+H, parallel)</h3>
+<table>
+<tr><th>Action</th><th>Owner</th><th>Notes</th></tr>
+<tr><td>Section 9 MedienG Gegendarstellung for personal naming of Dimitry and Edita</td><td>E+H</td><td>Right of reply mechanism. E+H advises on feasibility.</td></tr>
+<tr><td>Section 1330 ABGB assessment update</td><td>E+H</td><td>Saehn letter was first trigger. This article may strengthen case. Assess if ImmoFokus/Neubauer is also a target.</td></tr>
+</table>
+
+<h3>Proactive Media (week of 7 April)</h3>
+<table>
+<tr><th>Action</th><th>Owner</th><th>Notes</th></tr>
+<tr><td>Brief Angelika Kramer (Trend) off-record</td><td>Sandra + Director</td><td>Give her the EUR 13.2M-to-5.85M self-reduction, "continuation not planned," assets-exceed-liabilities.</td></tr>
+<tr><td>Proactive article pitch: "MO Vienna Completes Despite Contractor Collapse"</td><td>Sandra</td><td>Target: Die Presse real estate, Trend. Thomas quotes. Operational hotel facts. Residence delivery update.</td></tr>
+<tr><td>Monitor Monday pickup</td><td>Sandra / Flora</td><td>Article dropped Sunday. Monday = other outlets may reproduce. Reactive Q&amp;A + statement ready.</td></tr>
+</table>
+</div>
+<div id="tone" class="section">
+<h2>12. Tone Guidance</h2>
+
+<div class="card" style="border:2px solid var(--primary); padding:24px;">
+<h3 style="text-align:center;margin-bottom:20px;">Not defensive. Not aggressive. Authoritative.</h3>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+<div class="card card-accent">
+<div class="card-header">Authoritative, not reactive</div>
+<p>Brisen is a solvent company that delivered a landmark project. The contractor failed. Brisen is now managing the completion. This is a management update, not a crisis response.</p>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Factual correction, not emotional response</div>
+<p>Every rebuttal is based on documented facts and numbers. No characterisations of Neubauer's motives, no accusations of "hit piece" (even if true). Let the facts speak.</p>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Signal strength, not desperation</div>
+<p>References to "considering legal options" and "appropriate remedies" signal that Brisen has the resources and the will to enforce its rights. Do not over-specify.</p>
+</div>
+
+<div class="card card-accent">
+<div class="card-header">Protect the project narrative</div>
+<p>Every statement should end on the project: hotel operational, residences delivering, EUR 250M investment, Mandarin Oriental partnership. The project is the answer to every question.</p>
+</div>
+</div>
+
+<div class="card card-danger" style="margin-top:16px;">
+<div class="card-header">ONE VOICE -- Non-negotiable</div>
+<p><strong>Thomas Leitner speaks.</strong> Sandra drafts. E+H vets. Dimitry and Edita are not available to press. Period. No exceptions.</p>
+</div>
+</div>
+</div>
+<div id="appendix" class="section">
+<h2>13. Appendix: Participants</h2>
+
+<h3>Call Participants -- 30 March 2026</h3>
+<table>
+<tr><th>Person</th><th>Role</th><th>What they need from this call</th></tr>
+<tr><td><strong>Dimitry Vallen</strong></td><td>Director, Brisen</td><td>Strategic alignment; decision on reactive vs. proactive; approval of materials to send</td></tr>
+<tr><td><strong>Edita Vallen</strong></td><td>Brisen shareholder</td><td>Alignment on personal naming response; correction demand decision</td></tr>
+<tr><td><strong>Thomas Leitner</strong></td><td>GF Brisen Dev, spokesperson</td><td>His name goes on everything. He needs the talking points and statement draft.</td></tr>
+<tr><td><strong>Sandra Luger</strong></td><td>PR lead, Gaisberg</td><td>Decision on reactive vs. proactive; approval to brief journalists; updated talking points</td></tr>
+<tr><td><strong>Flora Trotz</strong></td><td>Sandra's colleague, Gaisberg</td><td>Execution support; media monitoring assignment</td></tr>
+<tr><td><strong>Arndt Blaschka</strong></td><td>E+H lawyer</td><td>Legal clearance for any public statement; Section 14/Section 9 feasibility; vetting</td></tr>
+<tr><td><strong>Alric Ofenheimer</strong></td><td>E+H senior partner</td><td>Strategic legal view; Section 1330 update; personal naming implications</td></tr>
+</table>
+
+<h3>Key Team Contacts</h3>
+<table>
+<tr><th>Entity</th><th>Contact</th><th>Role</th></tr>
+<tr><td>Gaisberg Consulting</td><td>Sandra Luger, Flora Trotz</td><td>PR strategy, media relations, crisis communications</td></tr>
+<tr><td>E+H Rechtsanwaelte</td><td>Dr. Arndt Blaschka, Dr. Alric Ofenheimer</td><td>Legal counsel, insolvency proceedings, media law</td></tr>
+<tr><td>PRCO (Robert Lyle)</td><td>Robert Lyle</td><td>MO brand PR ONLY -- separate lane, do not mix</td></tr>
+<tr><td>Brisen Development</td><td>Thomas Leitner (GF)</td><td>Sole authorised spokesperson</td></tr>
+</table>
+
+<h3>Document Control</h3>
+<table>
+<tr><th>Document</th><th>Version</th><th>Date</th><th>Status</th></tr>
+<tr><td>PR Strategy Portal</td><td>1.0</td><td>30 March 2026</td><td><span class="badge badge-success">CURRENT</span></td></tr>
+<tr><td>PR &amp; Press Strategy</td><td>v3.0 (02-003)</td><td>28 March 2026</td><td><span class="badge badge-success">CURRENT</span></td></tr>
+<tr><td>Chronology</td><td>v3 (02-001)</td><td>28 March 2026</td><td><span class="badge badge-success">CURRENT</span></td></tr>
+<tr><td>Meeting Brief (merged)</td><td>1.0</td><td>30 March 2026</td><td><span class="badge badge-success">CURRENT</span></td></tr>
+</table>
+
+<p style="margin-top:24px;color:var(--meta);font-size:12px;border-top:1px solid var(--border);padding-top:12px;">
+<em>Baker PR &amp; Brand Intelligence | 30 March 2026</em><br>
+<em>Based on: ImmoFokus Articles #1-4, PR Strategy v3.0 (02-003), Chronology v3 (02-001), Gaisberg PR Plan (26 March), Legal Strategy Memo (00-004), Baker email/analysis archive, E+H correspondence.</em><br>
+<em>This is a living document. New meeting agendas and updates will be added as sections.</em>
+</p>
+</div>
+</div><!-- /main -->
+</div><!-- /page-wrapper -->
+<script>
+function show(id) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav a').forEach(a => a.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  // Find and activate the nav link
+  document.querySelectorAll('.nav a').forEach(a => {
+    if (a.getAttribute('onclick') && a.getAttribute('onclick').includes("'" + id + "'")) {
+      a.classList.add('active');
+    }
+  });
+  window.scrollTo(0, 0);
+}
+</script>
+</body>
+</html>

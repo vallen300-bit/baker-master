@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AO PM — Operating Playbook</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; padding: 40px 20px; line-height: 1.6; }
+  .canvas { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 24px; font-weight: 700; color: #fff; }
+  .subtitle { font-size: 13px; color: #7d8590; margin: 4px 0 32px; }
+
+  .section-label {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px;
+    color: #7d8590; margin: 40px 0 14px; padding-bottom: 6px;
+    border-bottom: 1px solid #21262d;
+  }
+
+  .row { display: flex; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
+  .box { border-radius: 10px; padding: 16px 18px; flex: 1; min-width: 180px; }
+  .box .title { font-size: 13px; font-weight: 700; margin-bottom: 4px; }
+  .box .desc { font-size: 11px; line-height: 1.6; opacity: 0.85; }
+
+  .b-green { background: #1a3a2a; border: 1px solid #2ea04360; }
+  .b-green .title { color: #3fb950; }
+  .b-blue { background: #172136; border: 1px solid #388bfd60; }
+  .b-blue .title { color: #58a6ff; }
+  .b-purple { background: #2a1a3a; border: 1px solid #8b5cf660; }
+  .b-purple .title { color: #bc8cff; }
+  .b-teal { background: #1a3036; border: 1px solid #3ddbd960; }
+  .b-teal .title { color: #56d4cf; }
+  .b-orange { background: #2a2210; border: 1px solid #e3b34160; }
+  .b-orange .title { color: #e3b341; }
+  .b-red { background: #3a1a1a; border: 1px solid #f8514960; }
+  .b-red .title { color: #ff7b72; }
+  .b-gray { background: #161b22; border: 1px solid #30363d; }
+  .b-gray .title { color: #7d8590; }
+
+  /* Steps */
+  .step {
+    background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+    padding: 20px 24px; margin: 12px 0; position: relative;
+  }
+  .step-num {
+    position: absolute; top: -12px; left: 20px;
+    background: #e3b341; color: #0d1117; font-size: 11px; font-weight: 800;
+    width: 24px; height: 24px; line-height: 24px; text-align: center;
+    border-radius: 12px;
+  }
+  .step .step-title { font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 6px; }
+  .step .step-body { font-size: 12px; color: #8b949e; line-height: 1.7; }
+  .step .step-body strong { color: #e6edf3; }
+  .step .step-body code { font-family: 'SF Mono', monospace; font-size: 11px; background: #0d1117; padding: 1px 5px; border-radius: 3px; color: #e3b341; }
+
+  /* Flow diagram */
+  .flow-container {
+    background: #161b22; border: 2px solid #3fb95040; border-radius: 14px;
+    padding: 24px; margin: 16px 0;
+  }
+  .flow-title { font-size: 14px; font-weight: 700; color: #3fb950; margin-bottom: 14px; text-align: center; }
+  .flow-steps {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px;
+    font-size: 12px; font-weight: 600;
+  }
+  .flow-step { padding: 8px 14px; border-radius: 8px; white-space: nowrap; }
+  .flow-arrow { color: #30363d; font-size: 14px; }
+  .fs-green { background: #1a3a2a; border: 1px solid #3fb95060; color: #3fb950; }
+  .fs-blue { background: #172136; border: 1px solid #388bfd60; color: #58a6ff; }
+  .fs-purple { background: #2a1a3a; border: 1px solid #8b5cf660; color: #bc8cff; }
+  .fs-orange { background: #2a2210; border: 1px solid #e3b34160; color: #e3b341; }
+  .fs-red { background: #3a1a1a; border: 1px solid #f8514960; color: #ff7b72; }
+
+  /* Trigger table */
+  table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 10px 0; }
+  th { background: #161b22; color: #7d8590; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; padding: 8px 12px; text-align: left; border-bottom: 2px solid #21262d; }
+  td { padding: 8px 12px; border-bottom: 1px solid #21262d; vertical-align: top; }
+
+  /* Callout */
+  .callout {
+    background: #0f2a1a; border: 1px solid #3fb95040; border-radius: 10px;
+    padding: 16px 20px; margin: 12px 0;
+  }
+  .callout-title { font-size: 12px; font-weight: 700; color: #3fb950; margin-bottom: 4px; }
+  .callout-body { font-size: 11px; color: #8b949e; line-height: 1.6; }
+
+  .callout-warn {
+    background: #2a2210; border: 1px solid #e3b34140;
+  }
+  .callout-warn .callout-title { color: #e3b341; }
+
+  .callout-danger {
+    background: #3a1a1a; border: 1px solid #f8514940;
+  }
+  .callout-danger .callout-title { color: #ff7b72; }
+
+  /* Divider */
+  .divider { height: 1px; background: #21262d; margin: 32px 0; }
+
+  code { font-family: 'SF Mono', monospace; font-size: 11px; background: #161b22; padding: 1px 5px; border-radius: 3px; color: #e3b341; }
+
+  @media (max-width: 600px) {
+    .row { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+<h1>AO Project Manager &mdash; Operating Playbook</h1>
+<p class="subtitle">How to work with Baker's AO PM &bull; Debrief, query, review, compound &bull; April 2026</p>
+
+<!-- ════════ OVERVIEW ════════ -->
+<div class="section-label">What AO PM Does</div>
+
+<div class="row">
+  <div class="box b-purple" style="flex:2;">
+    <div class="title">Single source of truth for everything AO</div>
+    <div class="desc">
+      AO PM is Baker's dedicated intelligence officer for Andrey Oskolkov. It maintains persistent state,
+      reads 6 compiled view files at every invocation, monitors signals across WhatsApp/email/meetings,
+      and now <strong>learns from every interaction</strong> via the knowledge compounding loop.<br><br>
+      It challenges assumptions, flags risks, presents counter-arguments. Not a yes-man.
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="box b-blue">
+    <div class="title">Monitors</div>
+    <div class="desc">Communication gap, AO mood, capital call deadlines, relationship health, Hagenauer cross-impact</div>
+  </div>
+  <div class="box b-teal">
+    <div class="title">Signals</div>
+    <div class="desc">WhatsApp (AO + orbit), email (Buchwalder, Constantinos), meetings, documents</div>
+  </div>
+  <div class="box b-orange">
+    <div class="title">Learns</div>
+    <div class="desc">Extracts insights after every Q&A, stages for your review, compounds knowledge weekly</div>
+  </div>
+</div>
+
+<!-- ════════ DAY-TO-DAY ════════ -->
+<div class="section-label">Day-to-Day: Asking AO PM Questions</div>
+
+<div class="callout">
+  <div class="callout-title">How to invoke</div>
+  <div class="callout-body">
+    Just ask Baker anything about AO. The classifier routes AO-related queries to AO PM automatically.<br><br>
+    <strong>CEO Cockpit:</strong> Type in the chat bar. <strong>Slack:</strong> Message Baker directly.<br>
+    Trigger words: <code>AO</code>, <code>Oskolkov</code>, <code>Andrey</code>, <code>capital call</code>, <code>Aelio</code>, <code>Aukera</code>, <code>Buchwalder</code>, <code>Constantinos</code>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-body">
+    <strong>Example queries:</strong><br>
+    &bull; "What's the current state of the capital call?"<br>
+    &bull; "When did we last hear from Buchwalder?"<br>
+    &bull; "Prepare me for a call with AO about the restructuring"<br>
+    &bull; "What are the risks if AO doesn't fund by May?"<br>
+    &bull; "Draft an update email for AO about RG7 progress"<br><br>
+    <strong>What happens under the hood:</strong><br>
+    1. Baker loads all 6 view files (psychology, channels, rules, sensitive issues, communication rules, agenda)<br>
+    2. Injects live state from PostgreSQL (last contact, open actions, red flags)<br>
+    3. Shows pending insights so PM doesn't re-discover known facts<br>
+    4. Opus reasons over the full context and responds<br>
+    5. After response: auto-extracts state updates + wiki-worthy insights (fire-and-forget)
+  </div>
+</div>
+
+<!-- ════════ DEBRIEF ════════ -->
+<div class="section-label">Debrief Sessions &mdash; Path 1: Director Writes Directly</div>
+
+<div class="flow-container">
+  <div class="flow-title">Debrief Flow</div>
+  <div class="flow-steps">
+    <span class="flow-step fs-red">Director has new info</span>
+    <span class="flow-arrow">&rarr;</span>
+    <span class="flow-step fs-purple">Tells Baker via Cowork</span>
+    <span class="flow-arrow">&rarr;</span>
+    <span class="flow-step fs-green">Baker writes to view file</span>
+    <span class="flow-arrow">&rarr;</span>
+    <span class="flow-step fs-blue">Git commit</span>
+    <span class="flow-arrow">&rarr;</span>
+    <span class="flow-step fs-green">PM reads updated view on next invocation</span>
+  </div>
+</div>
+
+<div class="callout">
+  <div class="callout-title">When to debrief</div>
+  <div class="callout-body">
+    After any significant AO interaction: a call, a meeting, a key WhatsApp exchange, a decision, a mood shift. Don't wait for a scheduled session &mdash; debrief while it's fresh.
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">1</div>
+  <div class="step-title">Open Cowork (Claude Desktop)</div>
+  <div class="step-body">
+    Cowork has access to Baker's MCP tools and can read/write the view files. Use Cowork for debriefs, not CEO Cockpit &mdash; debriefs need full file editing capability.
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">2</div>
+  <div class="step-title">Tell Baker what's new</div>
+  <div class="step-body">
+    Be direct. Examples:<br><br>
+    <strong>"Update psychology.md &mdash; AO mentioned he's worried about the Aukera timeline. Add to drivers: time pressure on restructuring is creating anxiety."</strong><br><br>
+    <strong>"Update agenda.md &mdash; Capital call is now parked until after the Aukera facility closes. Move it to parked matters."</strong><br><br>
+    <strong>"Update communication_rules.md &mdash; AO responds better to 'ammunition' framing than 'obligation' framing for capital calls. Confirmed in WhatsApp today."</strong><br><br>
+    Baker writes the edit directly into the .md file and commits. No staging, no pending queue. Your word is gospel.
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">3</div>
+  <div class="step-title">Verify the update</div>
+  <div class="step-body">
+    Ask Baker to show you the updated section: <strong>"Read back the Framing section of communication_rules.md."</strong><br>
+    If it's wrong, correct it immediately.
+  </div>
+</div>
+
+<div class="callout-warn callout">
+  <div class="callout-title">What goes in which file</div>
+  <div class="callout-body">
+    <strong>psychology.md</strong> &mdash; How AO thinks, what drives him, fears, motivations, personality patterns<br>
+    <strong>investment_channels.md</strong> &mdash; Financial positions, entity structures, amounts, terms<br>
+    <strong>sensitive_issues.md</strong> &mdash; Minefields: what NOT to say, what to avoid, red lines<br>
+    <strong>communication_rules.md</strong> &mdash; How to talk to AO: framing, timing, tone, Rule Zero<br>
+    <strong>agenda.md</strong> &mdash; What's active, what's parked, next actions<br><br>
+    Not sure? Ask Baker: <strong>"Where should I file this?"</strong>
+  </div>
+</div>
+
+<!-- ════════ KNOWLEDGE COMPOUNDING ════════ -->
+<div class="section-label">Knowledge Compounding &mdash; Path 2: Baker Discovers, You Approve</div>
+
+<div class="flow-container">
+  <div class="flow-title">Self-Learning Loop</div>
+  <div class="flow-steps">
+    <span class="flow-step fs-purple">You ask AO PM a question</span>
+    <span class="flow-arrow">&rarr;</span>
+    <span class="flow-step fs-purple">Opus reasons + responds</span>
+    <span class="flow-arrow">&rarr;</span>
+    <span class="flow-step fs-orange">Opus extracts wiki insights</span>
+    <span class="flow-arrow">&rarr;</span>
+    <span class="flow-step fs-blue">pm_pending_insights (DB)</span>
+    <span class="flow-arrow">&rarr;</span>
+    <span class="flow-step fs-red">You review</span>
+    <span class="flow-arrow">&rarr;</span>
+    <span class="flow-step fs-green">View files get smarter</span>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">1</div>
+  <div class="step-title">Insights appear automatically</div>
+  <div class="step-body">
+    Every time you ask AO PM a substantive question, Baker extracts wiki-worthy insights in the background. You don't need to do anything &mdash; it happens automatically.<br><br>
+    <strong>Daily briefing</strong> will tell you: <em>"KNOWLEDGE COMPOUNDING: 3 pending insight(s) awaiting your review."</em>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">2</div>
+  <div class="step-title">Review pending insights</div>
+  <div class="step-body">
+    Ask Baker (via CEO Cockpit, Slack, or Cowork):<br><br>
+    <strong>"Show me pending insights"</strong> or <strong>"What insights are waiting?"</strong><br><br>
+    Baker will list them with IDs, target files, dates, and confidence levels:<br><br>
+    <em>#14 [2026-04-06] AO responds better to "ammunition" framing than "obligation" framing for capital calls &rarr; Target: communication_rules.md (confidence: high)</em><br>
+    <em>#15 [2026-04-06] Buchwalder sends updates on 1st of each month &rarr; Target: agenda.md (confidence: medium)</em>
+  </div>
+</div>
+
+<div class="step">
+  <div class="step-num">3</div>
+  <div class="step-title">Promote or reject</div>
+  <div class="step-body">
+    <strong>To promote:</strong> <em>"Promote #14"</em><br>
+    Baker responds: "Insight #14 approved. Queued for Code Brisen to merge into communication_rules.md. It will appear in your next view file update."<br><br>
+    <strong>To reject:</strong> <em>"Reject #15 &mdash; that's not a reliable pattern yet"</em><br>
+    Baker stores your reason. The extraction model learns NOT to re-discover this insight.<br><br>
+    <strong>To skip:</strong> Just leave it pending. No action needed. It stays in the queue.
+  </div>
+</div>
+
+<div class="callout-danger callout">
+  <div class="callout-title">Important: Promote does NOT instantly edit view files</div>
+  <div class="callout-body">
+    "Promote" marks the insight as approved in the database. The actual view file edit happens when Code Brisen (or AI Head) picks up approved items and commits them. This is by design &mdash; view files only change through git commits, ensuring traceability and rollback ability.<br><br>
+    If you want an insight in the view file RIGHT NOW, use the debrief path instead: <strong>"Update communication_rules.md &mdash; add this: [insight text]"</strong>
+  </div>
+</div>
+
+<!-- ════════ DAILY BRIEFING ════════ -->
+<div class="section-label">Daily Briefing &mdash; What You See</div>
+
+<div class="step">
+  <div class="step-body">
+    The daily briefing's AO section checks:<br><br>
+    <strong>1. Communication gap</strong> &mdash; Days since last outbound to AO. Warning at 10 days. Critical at 14 days (Rule Zero).<br>
+    <strong>2. Pending discussion items</strong> &mdash; Count of topics queued for next AO interaction.<br>
+    <strong>3. Approaching deadlines</strong> &mdash; AO-related deadlines in next 14 days (capital calls, Aukera facility, etc.).<br>
+    <strong>4. Pending insights</strong> &mdash; Count of knowledge compounding items awaiting your review.<br>
+    <strong>5. Cross-matter alerts</strong> &mdash; Hagenauer/RG7 developments that affect AO.<br><br>
+    <em>Only appears in briefing if there's something actionable. No noise.</em>
+  </div>
+</div>
+
+<!-- ════════ ESCALATION ════════ -->
+<div class="section-label">Escalation Tiers</div>
+
+<div class="row">
+  <div class="box b-gray">
+    <div class="title">T3 &mdash; Baker auto-handles</div>
+    <div class="desc">Communication gap reminders, routine data lookups, pending insight extraction, state updates</div>
+  </div>
+  <div class="box b-orange">
+    <div class="title">T2 &mdash; Edita</div>
+    <div class="desc">Routine coordination, document requests, scheduling, non-sensitive follow-ups</div>
+  </div>
+  <div class="box b-red">
+    <div class="title">T1 &mdash; Director</div>
+    <div class="desc">Capital call decisions, restructuring strategy, sensitive communications, AO mood shift detected, red flag triggered</div>
+  </div>
+</div>
+
+<!-- ════════ SIGNAL DETECTION ════════ -->
+<div class="section-label">Signal Detection &mdash; What Triggers AO PM Awareness</div>
+
+<table>
+  <tr><th>Channel</th><th>Triggers On</th><th>What Happens</th></tr>
+  <tr>
+    <td style="color:#56d4cf;">WhatsApp</td>
+    <td>Messages from/about AO, Buchwalder, Constantinos, Aelio, Aukera</td>
+    <td>Flags signal, updates relationship_state in ao_project_state</td>
+  </tr>
+  <tr>
+    <td style="color:#56d4cf;">Email</td>
+    <td>Emails mentioning Oskolkov, Aelio, Aukera, capital call, RG7</td>
+    <td>Flags signal, checks communication gap timer</td>
+  </tr>
+  <tr>
+    <td style="color:#56d4cf;">Meetings</td>
+    <td>Transcripts mentioning AO or AO-related entities</td>
+    <td>Extracts action items, updates agenda.md candidates</td>
+  </tr>
+  <tr>
+    <td style="color:#56d4cf;">Documents</td>
+    <td>New documents tagged oskolkov-rg7 or fx-mayr</td>
+    <td>Ingests, indexes in Qdrant, available for PM queries</td>
+  </tr>
+  <tr>
+    <td style="color:#56d4cf;">Cross-matter</td>
+    <td>Hagenauer insolvency, RG7 construction claims</td>
+    <td>Injects cross-matter alerts into AO PM context (AO owns 25% of RG7)</td>
+  </tr>
+</table>
+
+<!-- ════════ RED FLAGS ════════ -->
+<div class="section-label">Red Flags &mdash; Always Monitored</div>
+
+<div class="row">
+  <div class="box b-red">
+    <div class="title">Two PA versions</div>
+    <div class="desc">25% signed PDF vs 45% draft DOCX. Never open unless AO raises it.</div>
+  </div>
+  <div class="box b-red">
+    <div class="title">EUR 20M facility expired</div>
+    <div class="desc">Expired Dec 2025. Unresolved. Don't surface proactively.</div>
+  </div>
+</div>
+<div class="row">
+  <div class="box b-red">
+    <div class="title">Co-ownership disclosure</div>
+    <div class="desc">Phased approach. Use "we/our project" language. Never "my property."</div>
+  </div>
+  <div class="box b-red">
+    <div class="title">AO mood shifts</div>
+    <div class="desc">Watch WhatsApp/email sentiment. Silence &gt;14 days = Rule Zero critical.</div>
+  </div>
+</div>
+
+<!-- ════════ DOCUMENT HIERARCHY ════════ -->
+<div class="section-label">Document Hierarchy</div>
+
+<div style="background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 20px; font-family: 'SF Mono', monospace; font-size: 12px; line-height: 2;">
+  <span style="color:#7d8590;">Dropbox: Baker-Project/01_Projects/Active_Projects/Oskolkov/</span><br>
+  &nbsp;&nbsp;<span style="color:#7d8590;">00_Raw/</span> <span style="color:#484f58;">&mdash; raw evidence (emails, attachments, scans)</span><br>
+  &nbsp;&nbsp;<span style="color:#7d8590;">01_Working/</span> <span style="color:#484f58;">&mdash; prep, deliberations, notes, drafts</span><br>
+  &nbsp;&nbsp;<span style="color:#7d8590;">02_Final/</span> <span style="color:#484f58;">&mdash; finalized reference docs</span><br>
+  &nbsp;&nbsp;<span style="color:#3fb950; font-weight:700;">03_Source_Of_Truth/</span> <span style="color:#3fb950;">&mdash; GOSPEL. Overrides everything.</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#3fb950;">The Actual Position</span> <span style="color:#484f58;">&mdash; living definitive state document</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;<span style="color:#3fb950;">Reported_To_AO/</span> <span style="color:#484f58;">&mdash; what was actually communicated to AO</span><br>
+  &nbsp;&nbsp;<span style="color:#58a6ff; font-weight:700;">04_AO-PM/</span> <span style="color:#58a6ff;">&mdash; Architecture, soul doc, playbook</span><br>
+</div>
+
+<div class="callout-danger callout" style="margin-top:12px;">
+  <div class="callout-title">Rule: 03_Source_Of_Truth is GOSPEL</div>
+  <div class="callout-body">
+    If 00-02 contradicts 03, TRUST 03. Never mix prep/working material into 03. Before ANY communication to AO, CHECK Reported_To_AO/ for consistency.
+  </div>
+</div>
+
+<!-- ════════ QUICK REFERENCE ════════ -->
+<div class="section-label">Quick Reference &mdash; Commands</div>
+
+<table>
+  <tr><th>You Say</th><th>What Happens</th></tr>
+  <tr><td><strong>"What's the state with AO?"</strong></td><td>Full situation report: open matters, flags, communication gap, risks</td></tr>
+  <tr><td><strong>"Prepare me for a call with AO"</strong></td><td>Agenda, talking points, risks to avoid, recommended framing</td></tr>
+  <tr><td><strong>"Show me pending insights"</strong></td><td>Lists discovered insights awaiting your promote/reject</td></tr>
+  <tr><td><strong>"Promote #N"</strong></td><td>Approves insight, queues for view file merge</td></tr>
+  <tr><td><strong>"Reject #N &mdash; [reason]"</strong></td><td>Rejects insight, stores reason, PM learns not to re-discover</td></tr>
+  <tr><td><strong>"Update [file].md &mdash; [content]"</strong></td><td>Direct debrief: Baker edits the view file immediately (via Cowork)</td></tr>
+  <tr><td><strong>"When did we last contact AO?"</strong></td><td>Communication gap check + last outbound summary</td></tr>
+  <tr><td><strong>"Draft an email to AO about [topic]"</strong></td><td>PM drafts with full psychological profiling + framing rules applied</td></tr>
+  <tr><td><strong>"What does AO think about [topic]?"</strong></td><td>PM synthesizes from psychology.md + recent signals + meeting history</td></tr>
+</table>
+
+<!-- ════════ CADENCE ════════ -->
+<div class="section-label">Recommended Cadence</div>
+
+<div class="row">
+  <div class="box b-green">
+    <div class="title">Daily</div>
+    <div class="desc">
+      &bull; Check briefing for AO section<br>
+      &bull; Note communication gap days<br>
+      &bull; Glance at pending insight count
+    </div>
+  </div>
+  <div class="box b-blue">
+    <div class="title">Weekly</div>
+    <div class="desc">
+      &bull; Review pending insights (promote/reject)<br>
+      &bull; Quick debrief if any AO interactions happened<br>
+      &bull; Check agenda.md is current
+    </div>
+  </div>
+  <div class="box b-purple">
+    <div class="title">After every AO interaction</div>
+    <div class="desc">
+      &bull; Debrief immediately via Cowork<br>
+      &bull; Update view files with new info<br>
+      &bull; Flag any mood shift or red flag
+    </div>
+  </div>
+  <div class="box b-orange">
+    <div class="title">Monthly</div>
+    <div class="desc">
+      &bull; Ask PM for full situation report<br>
+      &bull; Review all view files for staleness<br>
+      &bull; Check promoted insights were merged
+    </div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<div style="padding:16px; background:#161b22; border:1px solid #30363d; border-radius:10px; text-align:center;">
+  <div style="font-size:11px; color:#7d8590;">
+    AO PM Operating Playbook &bull; Companion to 001_Final_Architecture &bull; April 2026
+  </div>
+</div>
+
+</div>
+</body>
+</html>

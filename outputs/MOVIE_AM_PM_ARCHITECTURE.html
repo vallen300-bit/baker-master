@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MOVIE Asset Management PM — Architecture Proposal</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; padding: 40px; line-height: 1.6; }
+  .canvas { max-width: 1000px; margin: 0 auto; }
+  h1 { font-size: 24px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+  .subtitle { font-size: 13px; color: #7d8590; margin-bottom: 32px; }
+  h2 { font-size: 17px; font-weight: 700; color: #e3b341; margin-top: 40px; margin-bottom: 16px; padding-bottom: 6px; border-bottom: 1px solid #21262d; }
+  h3 { font-size: 14px; font-weight: 700; color: #58a6ff; margin-top: 20px; margin-bottom: 10px; }
+
+  /* Status badges */
+  .status-bar { display: flex; gap: 12px; align-items: center; margin-bottom: 28px; flex-wrap: wrap; }
+  .badge { font-size: 10px; font-weight: 700; padding: 3px 10px; border-radius: 12px; text-transform: uppercase; letter-spacing: 0.8px; }
+  .badge-approved { background: #1a3a2a; color: #3fb950; border: 1px solid #2ea04380; }
+  .badge-date { background: #172136; color: #58a6ff; border: 1px solid #388bfd80; }
+  .badge-reviewer { background: #2a1a3a; color: #bc8cff; border: 1px solid #8b5cf680; }
+
+  /* Comparison table */
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 13px; }
+  th { background: #161b22; color: #7d8590; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; padding: 10px 14px; text-align: left; border-bottom: 2px solid #21262d; }
+  td { padding: 10px 14px; border-bottom: 1px solid #21262d; vertical-align: top; }
+  tr:hover td { background: #161b2280; }
+
+  /* Cards */
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; margin: 12px 0; }
+  .card { border-radius: 10px; padding: 16px 20px; }
+  .card .label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+  .card .value { font-size: 13px; opacity: 0.85; }
+  .card-green { background: #1a3a2a; border: 1px solid #2ea04380; }
+  .card-green .label { color: #3fb950; }
+  .card-blue { background: #172136; border: 1px solid #388bfd80; }
+  .card-blue .label { color: #58a6ff; }
+  .card-purple { background: #2a1a3a; border: 1px solid #8b5cf680; }
+  .card-purple .label { color: #bc8cff; }
+  .card-orange { background: #3a2a1a; border: 1px solid #d29922b0; }
+  .card-orange .label { color: #e3b341; }
+  .card-teal { background: #1a3036; border: 1px solid #3ddbd980; }
+  .card-teal .label { color: #56d4cf; }
+  .card-red { background: #3a1a1a; border: 1px solid #f8514980; }
+  .card-red .label { color: #ff7b72; }
+  .card-gray { background: #1c2028; border: 1px solid #30363d; }
+  .card-gray .label { color: #7d8590; }
+
+  /* File tree */
+  .file-tree { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 20px 24px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px; margin: 12px 0; line-height: 1.8; }
+  .file-tree .dir { color: #58a6ff; }
+  .file-tree .file { color: #e6edf3; }
+  .file-tree .comment { color: #7d8590; }
+
+  /* Code blocks */
+  code { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px; background: #161b22; padding: 2px 6px; border-radius: 4px; color: #e3b341; }
+  pre { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 16px 20px; font-size: 12px; overflow-x: auto; margin: 12px 0; line-height: 1.6; }
+  pre code { background: none; padding: 0; }
+
+  /* Prompt block */
+  .prompt-block { background: #161b22; border: 1px solid #30363d; border-radius: 10px; padding: 20px 24px; font-size: 13px; margin: 12px 0; line-height: 1.7; white-space: pre-wrap; }
+  .prompt-block .heading { color: #e3b341; font-weight: 700; }
+  .prompt-block .rule { color: #ff7b72; }
+
+  /* Flow diagram */
+  .flow-row { display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+  .flow-step { padding: 10px 18px; border-radius: 10px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+  .flow-arrow { color: #30363d; font-size: 18px; }
+
+  /* Section numbers */
+  .section-num { display: inline-block; background: #e3b341; color: #0d1117; font-size: 11px; font-weight: 800; width: 22px; height: 22px; line-height: 22px; text-align: center; border-radius: 6px; margin-right: 8px; vertical-align: middle; }
+
+  /* Dividers */
+  .divider { height: 1px; background: #21262d; margin: 36px 0; }
+
+  /* Phase timeline */
+  .phase-row { display: flex; gap: 12px; margin: 12px 0; flex-wrap: wrap; }
+  .phase { flex: 1; min-width: 200px; border-radius: 10px; padding: 16px 20px; position: relative; }
+  .phase .phase-letter { font-size: 28px; font-weight: 800; opacity: 0.15; position: absolute; top: 10px; right: 16px; }
+  .phase .phase-title { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .phase .phase-desc { font-size: 11px; opacity: 0.8; line-height: 1.5; }
+  .phase .phase-time { font-size: 10px; font-weight: 700; margin-top: 8px; opacity: 0.6; }
+
+  /* Legend */
+  .legend { margin-top: 40px; padding: 20px; background: #161b22; border-radius: 10px; border: 1px solid #30363d; }
+  .legend h3 { font-size: 13px; font-weight: 700; margin-bottom: 10px; color: #7d8590; }
+  .legend-row { display: flex; gap: 20px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 3px; }
+
+  /* Emphasis */
+  strong { color: #fff; }
+  em { color: #7d8590; font-style: italic; }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+<h1>MOVIE Asset Management PM &mdash; Architecture Proposal</h1>
+<p class="subtitle">Mandarin Oriental, Vienna &bull; Persistent Baker capability for hotel operations &amp; operator oversight</p>
+
+<div class="status-bar">
+  <span class="badge badge-approved">Approved with Conditions</span>
+  <span class="badge badge-date">2026-04-06</span>
+  <span class="badge badge-reviewer">Reviewed by Cowork</span>
+</div>
+
+<!-- ═══════════ 1. WHAT THIS IS ═══════════ -->
+<h2><span class="section-num">1</span> What This Is</h2>
+<p style="font-size:14px; margin-bottom:16px;">A persistent, self-updating Baker capability for managing <strong>Mandarin Oriental, Vienna (MOVIE)</strong> &mdash; the luxury hotel operations at Riemergasse 7. <strong>Residences are excluded</strong> &mdash; separate business line, separate capability slug when ready.</p>
+
+<p style="font-size:13px; color:#7d8590; margin-bottom:16px;">Modeled after <strong style="color:#58a6ff;">AO PM</strong> (Baker's first persistent PM for investor Andrey Oskolkov), but fundamentally different:</p>
+
+<table>
+  <tr><th>Dimension</th><th style="color:#58a6ff;">AO PM (Person)</th><th style="color:#3fb950;">MOVIE AM (Asset)</th></tr>
+  <tr><td>Object</td><td>Investor relationship</td><td>Hotel operations + operator oversight</td></tr>
+  <tr><td>Core risk</td><td>Silence &rarr; broken trust</td><td>Missed KPI / obligation &rarr; money leaks</td></tr>
+  <tr><td>Time horizon</td><td>Event-driven (capital calls, meetings)</td><td>Calendar-driven (monthly reports, annual budgets)</td></tr>
+  <tr><td>Monitoring</td><td>Communication gap, mood, hunting cycle</td><td>Financial performance, contractual compliance</td></tr>
+  <tr><td>Red lines</td><td>What not to say to AO</td><td>What not to concede to MOHG</td></tr>
+  <tr><td>Signals</td><td>WhatsApp/emails from AO orbit</td><td>Monthly P&L, budget submissions, operator emails</td></tr>
+  <tr><td>State model</td><td>Relationship state + pending items</td><td>KPI snapshots + open approvals + compliance calendar</td></tr>
+</table>
+
+<!-- ═══════════ 2. ENTITY PROFILE ═══════════ -->
+<h2><span class="section-num">2</span> Entity Profile</h2>
+
+<div class="card-grid">
+  <div class="card card-green">
+    <div class="label">Property</div>
+    <div class="value">Mandarin Oriental, Vienna</div>
+  </div>
+  <div class="card card-green">
+    <div class="label">Legal Owner</div>
+    <div class="value">Riemergasse 7 Entwicklungs und Verwertungs GmbH</div>
+  </div>
+  <div class="card card-blue">
+    <div class="label">Operator</div>
+    <div class="value">Mandarin Oriental Hotel Group (MOHG), Hong Kong</div>
+  </div>
+  <div class="card card-purple">
+    <div class="label">Address</div>
+    <div class="value">Seilergasse 3/13+14, 1010 Vienna</div>
+  </div>
+  <div class="card card-orange">
+    <div class="label">Agreement Suite</div>
+    <div class="value">7 documents (MA, CSA, TSA, MLA, LA, DOG, FE Letter) &mdash; all dated 2020</div>
+  </div>
+  <div class="card card-teal">
+    <div class="label">Baker DB</div>
+    <div class="value">IDs 83200&ndash;83206 &bull; 133K tokens ingested</div>
+  </div>
+</div>
+
+<!-- ═══════════ 3. CAPABILITY REGISTRATION ═══════════ -->
+<h2><span class="section-num">3</span> Capability Registration</h2>
+
+<h3>Slug: <code>movie_am</code></h3>
+<table>
+  <tr><th>Parameter</th><th>Value</th><th>Rationale</th></tr>
+  <tr><td>slug</td><td><code>movie_am</code></td><td>Short, grep-friendly, matches data/ directory</td></tr>
+  <tr><td>name</td><td>MOVIE Asset Manager</td><td>Descriptive</td></tr>
+  <tr><td>capability_type</td><td><code>domain</code></td><td>Same as AO PM</td></tr>
+  <tr><td>domain</td><td><code>chairman</code></td><td>Owner's direct concern</td></tr>
+  <tr><td>max_iterations</td><td>8</td><td>Complex multi-tool reasoning</td></tr>
+  <tr><td>timeout_seconds</td><td>90</td><td>Same as AO PM</td></tr>
+  <tr><td>use_thinking</td><td>TRUE</td><td>Needs reasoning over KPIs + contractual terms</td></tr>
+  <tr><td>autonomy_level</td><td><code>recommend_wait</code></td><td>Flags issues, recommends, waits for Director</td></tr>
+</table>
+
+<h3>Tool Whitelist</h3>
+<div class="card-grid">
+  <div class="card card-gray">
+    <div class="label">Search (read)</div>
+    <div class="value">search_memory, search_meetings, search_emails, search_whatsapp, search_documents, read_document, query_baker_data</div>
+  </div>
+  <div class="card card-gray">
+    <div class="label">Context</div>
+    <div class="value">get_contact, get_deadlines, get_clickup_tasks, get_matter_context, search_deals_insights</div>
+  </div>
+  <div class="card card-gray">
+    <div class="label">State</div>
+    <div class="value">get_movie_am_state, update_movie_am_state</div>
+  </div>
+  <div class="card card-gray">
+    <div class="label">Actions</div>
+    <div class="value">create_deadline, draft_email, store_decision, delegate_to_capability, web_search</div>
+  </div>
+</div>
+
+<!-- ═══════════ 4. FILE ARCHITECTURE ═══════════ -->
+<h2><span class="section-num">4</span> File Architecture</h2>
+
+<h3>View Files (Compiled Intelligence)</h3>
+<div class="file-tree">
+  <span class="dir">data/movie_am/</span><br>
+  &nbsp;&nbsp;<span class="file">SCHEMA.md</span> <span class="comment">&mdash; Directory + rules + file ownership</span><br>
+  &nbsp;&nbsp;<span class="file">agreements_framework.md</span> <span class="comment">&mdash; HMA suite: key clauses, fees, thresholds, deadlines</span><br>
+  &nbsp;&nbsp;<span class="file">operator_dynamics.md</span> <span class="comment">&mdash; MOHG relationship: people, power, leverage</span><br>
+  &nbsp;&nbsp;<span class="file">kpi_framework.md</span> <span class="comment">&mdash; Metrics: definitions, targets, benchmarks, cadence</span><br>
+  &nbsp;&nbsp;<span class="file">owner_obligations.md</span> <span class="comment">&mdash; What RG7 owes MOHG (and vice versa)</span><br>
+  &nbsp;&nbsp;<span class="file">agenda.md</span> <span class="comment">&mdash; Active matters + parked matters</span>
+</div>
+
+<h3>File Mapping: MOVIE AM vs AO PM</h3>
+<table>
+  <tr><th>MOVIE AM File</th><th>AO PM Equivalent</th><th>Why Different</th></tr>
+  <tr><td><code>SCHEMA.md</code></td><td><code>SCHEMA.md</code></td><td>Same pattern &mdash; directory + rules</td></tr>
+  <tr><td><code>agreements_framework.md</code></td><td><code>investment_channels.md</code></td><td>AO has money channels; MOVIE has legal agreements</td></tr>
+  <tr><td><code>operator_dynamics.md</code></td><td><code>psychology.md</code></td><td>AO has personal psychology; MOVIE has corporate operator dynamics</td></tr>
+  <tr><td><code>kpi_framework.md</code></td><td><em>(replaces sensitive_issues slot)</em></td><td>AO PM doesn't track KPIs; MOVIE AM is KPI-driven</td></tr>
+  <tr><td><code>owner_obligations.md</code></td><td><code>communication_rules.md</code></td><td>AO has comms rules; MOVIE has contractual obligations</td></tr>
+  <tr><td><code>agenda.md</code></td><td><code>agenda.md</code></td><td>Same pattern &mdash; active + parked matters</td></tr>
+</table>
+
+<!-- ═══════════ 5. DATABASE TABLES ═══════════ -->
+<h2><span class="section-num">5</span> Database Tables</h2>
+
+<div class="card-grid">
+  <div class="card card-purple">
+    <div class="label">movie_am_project_state</div>
+    <div class="value">Singleton JSONB: KPI snapshots, open approvals, pending reports, insurance, warranties, red flags, open actions, relationship state. Optimistic locking via <code>version</code>.</div>
+  </div>
+  <div class="card card-purple">
+    <div class="label">movie_am_state_history</div>
+    <div class="value">Audit trail: every mutation snapshot with source + summary. Same pattern as AO PM.</div>
+  </div>
+</div>
+
+<h3>State JSON Structure</h3>
+<pre><code>{
+  "property": { "name", "status", "opening_date", "rooms" },
+  "kpi_snapshot": { "occupancy_pct", "adr_eur", "revpar_eur", "gop_eur", "gop_margin_pct", "noi_eur" },
+  "open_approvals": [],
+  "pending_reports": [],
+  "insurance": { "policies": [], "next_renewal": null },
+  "warranties": [],
+  "upcoming_meetings": [],
+  "red_flags": [],
+  "open_actions": [],
+  "relationship_state": { "last_inbound_*", "operator_compliance_status" }
+}</code></pre>
+
+<!-- ═══════════ 6. SIGNAL DETECTION ═══════════ -->
+<h2><span class="section-num">6</span> Signal Detection</h2>
+
+<h3>MO Orbit (People Triggers)</h3>
+<div class="card-grid">
+  <div class="card card-teal">
+    <div class="label">MO Contacts</div>
+    <div class="value">Francesco (primary) &bull; Robin (London HQ) &bull; Mario Habicher (Finance) &bull; GM (TBD)</div>
+  </div>
+  <div class="card card-teal">
+    <div class="label">Owner Side</div>
+    <div class="value">Rolf Huebner (Head of Ops) &bull; Henri (Building WhatsApp) &bull; Victor Rodriguez (Concierge)</div>
+  </div>
+  <div class="card card-teal">
+    <div class="label">Domain Patterns</div>
+    <div class="value"><code>@mohg.*</code> &bull; <code>@mandarinoriental.*</code></div>
+  </div>
+</div>
+
+<h3>Detection Channels</h3>
+<table>
+  <tr><th>Channel</th><th>Hook Point</th><th>What It Catches</th></tr>
+  <tr><td>Email</td><td><code>email_trigger.py</code></td><td>Monthly P&L from Mario, budget submissions, insurance notices</td></tr>
+  <tr><td>WhatsApp</td><td><code>waha_webhook.py</code></td><td>Messages from Henri, Victor Rodriguez, Rolf</td></tr>
+  <tr><td>Meetings</td><td><code>meeting_pipeline.py</code></td><td>Quarterly owner-operator meetings, MO finance calls</td></tr>
+  <tr><td>Documents</td><td><code>document_pipeline.py</code></td><td>Ingested reports, insurance policies, budgets</td></tr>
+</table>
+
+<!-- ═══════════ 7. CAPABILITY RUNNER ═══════════ -->
+<h2><span class="section-num">7</span> Capability Runner Wiring</h2>
+
+<h3>System Prompt Injection (at invocation)</h3>
+<div class="flow-row">
+  <div class="flow-step" style="background:#172136; color:#58a6ff;">View Files (6 .md)</div>
+  <span class="flow-arrow">+</span>
+  <div class="flow-step" style="background:#2a1a3a; color:#bc8cff;">Live State (JSONB)</div>
+  <span class="flow-arrow">+</span>
+  <div class="flow-step" style="background:#3a2a1a; color:#e3b341;">Deadlines (90 days)</div>
+  <span class="flow-arrow">&rarr;</span>
+  <div class="flow-step" style="background:#1a3a2a; color:#3fb950;">Opus Context</div>
+</div>
+
+<h3>Auto-Update with Complexity Guard</h3>
+<div class="card card-orange" style="margin:12px 0;">
+  <div class="label">Guard Logic</div>
+  <div class="value">Only auto-update state if <code>tool_use_count &gt; 0</code> OR answer contains KPI/compliance keywords (occupancy, RevPAR, GOP, approval, insurance, warranty, capex). Simple lookups skip it &rarr; saves ~$0.15&ndash;0.30/call.</div>
+</div>
+
+<h3>Methods to Add</h3>
+<table>
+  <tr><th>Method</th><th>Purpose</th></tr>
+  <tr><td><code>_load_movie_am_view_files()</code></td><td>Read all .md from <code>data/movie_am/</code> in defined order</td></tr>
+  <tr><td><code>_get_movie_am_project_state_context()</code></td><td>Format live state for system prompt</td></tr>
+  <tr><td><code>_auto_update_movie_am_state()</code></td><td>Post-run state extraction via Opus (with guard)</td></tr>
+</table>
+
+<!-- ═══════════ 8. BRIEFING ═══════════ -->
+<h2><span class="section-num">8</span> Briefing Integration</h2>
+
+<p style="font-size:13px; margin-bottom:12px;">Daily briefing section: <strong>"MOVIE ASSET STATUS"</strong> &mdash; only appears if there's something actionable.</p>
+
+<div class="card-grid">
+  <div class="card card-green"><div class="label">Monthly P&L</div><div class="value">Has MO submitted this month? If overdue, flag.</div></div>
+  <div class="card card-blue"><div class="label">Open Approvals</div><div class="value">Any owner approval requests pending?</div></div>
+  <div class="card card-orange"><div class="label">Insurance</div><div class="value">Policies expiring in next 60 days?</div></div>
+  <div class="card card-red"><div class="label">Warranties</div><div class="value">Gew&auml;hrleistung periods closing in 90 days?</div></div>
+  <div class="card card-purple"><div class="label">Meeting Cadence</div><div class="value">Is the quarterly meeting overdue?</div></div>
+  <div class="card card-teal"><div class="label">KPI Alerts</div><div class="value">Occupancy, ADR, GOP below thresholds?</div></div>
+</div>
+
+<!-- ═══════════ 9. SYSTEM PROMPT ═══════════ -->
+<h2><span class="section-num">9</span> System Prompt (Soul of the PM)</h2>
+
+<div class="prompt-block"><span class="heading">YOUR MANDATE</span>
+Single source of truth for MOVIE hotel operations, operator oversight, and asset
+performance. You protect the Owner's interests under the HMA suite while maintaining
+a productive relationship with MOHG.
+
+<span class="heading">PERSONALITY</span>
+<strong>ANALYTICAL:</strong> Track KPIs against targets and benchmarks. Numbers first, narrative second.
+<strong>PROACTIVE:</strong> Flag issues before they become problems. A warranty window closing
+  in 60 days is an alert TODAY, not in 55 days.
+<strong>PROTECTIVE:</strong> Owner's interests come first. If MO is underperforming, surface it.
+  If fees seem high vs GOP, flag it. If budget is inflated, challenge it.
+<strong>PRAGMATIC:</strong> MOHG is a long-term partner, not an adversary. Push back WITH data,
+  not emotion. The relationship needs to survive decades.
+
+<span class="heading">WHAT YOU DO</span>
+1. MONITOR: Monthly P&L review, KPI tracking, budget variance analysis
+2. ALERT: Flag deviations, approaching deadlines, compliance gaps
+3. PREPARE: Meeting agendas, budget review notes, negotiation positions
+4. TRACK: Owner approvals pipeline, insurance renewals, warranty windows
+5. ADVISE: Recommendations on operator performance, capex decisions, fee negotiations
+
+<span class="heading">ESCALATION TIERS</span>
+<span class="rule">T3 (Baker auto-handles):</span> Report receipt reminders, minor data requests
+<span style="color:#e3b341;">T2 (Edita):</span> Budget deviations, approval requests, routine compliance
+<span style="color:#ff7b72;">T1 (Director):</span> Performance failures, strategic decisions, fee disputes, termination
+
+<span class="heading">RULES</span>
+&bull; Always cite the specific agreement clause when referencing contractual obligations.
+&bull; Never commit the Owner to expenditure without Director approval.
+&bull; Flag, don't fix: surface problems with data &mdash; don't autonomously negotiate.
+&bull; Update your state after every interaction.</div>
+
+<!-- ═══════════ 10. DEBRIEF TOPICS ═══════════ -->
+<h2><span class="section-num">10</span> Debrief Topics</h2>
+
+<table>
+  <tr><th>#</th><th>Topic</th><th>Purpose</th><th>Priority</th></tr>
+  <tr><td>1</td><td><strong>Current state</strong></td><td>Is hotel operating? Opening date? Current phase?</td><td style="color:#ff7b72;">Essential</td></tr>
+  <tr><td>2</td><td><strong>Red lines</strong></td><td>What should Baker never say/do regarding MOHG?</td><td style="color:#ff7b72;">Essential</td></tr>
+  <tr><td>3</td><td><strong>Relationship health</strong></td><td>How's the relationship with MO? Friction areas?</td><td style="color:#ff7b72;">Essential</td></tr>
+  <tr><td>4</td><td><strong>Key people</strong></td><td>Actual contacts, who matters, who's difficult</td><td style="color:#ff7b72;">Essential</td></tr>
+  <tr><td>5</td><td><strong>Financial baseline</strong></td><td>Last GOP, RevPAR, occupancy, NOI, fee burden</td><td style="color:#ff7b72;">Essential</td></tr>
+  <tr><td>6</td><td><strong>Fee structure</strong></td><td>Actual fee %s, Owner's Priority Return</td><td style="color:#e3b341;">High</td></tr>
+  <tr><td>7</td><td><strong>Budget cycle</strong></td><td>When does MO submit? Review process?</td><td style="color:#e3b341;">High</td></tr>
+  <tr><td>8</td><td><strong>Insurance</strong></td><td>Policies, broker, renewal dates, gaps</td><td style="color:#e3b341;">High</td></tr>
+  <tr><td>9</td><td><strong>Warranties</strong></td><td>Construction, Gew&auml;hrleistung, claim status</td><td style="color:#e3b341;">High</td></tr>
+  <tr><td>10</td><td><strong>Recovery Lab</strong></td><td>What is it? Status? Operator?</td><td style="color:#58a6ff;">Medium</td></tr>
+  <tr><td>11</td><td><strong>Capex pipeline</strong></td><td>Open capex, deferred maintenance, FF&amp;E reserve</td><td style="color:#58a6ff;">Medium</td></tr>
+  <tr><td>12</td><td><strong>Compliance</strong></td><td>Hotel license, fire safety, permits</td><td style="color:#58a6ff;">Medium</td></tr>
+  <tr><td>13</td><td><strong>Meeting cadence</strong></td><td>Are quarterly/monthly meetings happening?</td><td style="color:#58a6ff;">Medium</td></tr>
+  <tr><td>14</td><td><strong>Open issues</strong></td><td>Anything else Director wants Baker to track?</td><td style="color:#58a6ff;">Medium</td></tr>
+</table>
+
+<!-- ═══════════ 11. IMPLEMENTATION SEQUENCE ═══════════ -->
+<h2><span class="section-num">11</span> Implementation Sequence</h2>
+
+<div class="phase-row">
+  <div class="phase card-green">
+    <div class="phase-letter">A</div>
+    <div class="phase-title" style="color:#3fb950;">Skeleton</div>
+    <div class="phase-desc">View files directory (6 files), DB tables (2), capability registration</div>
+    <div class="phase-time">~2h &bull; Code Brisen</div>
+  </div>
+  <div class="phase card-blue">
+    <div class="phase-letter">B</div>
+    <div class="phase-title" style="color:#58a6ff;">Plumbing</div>
+    <div class="phase-desc">Signal detector, capability_runner wiring, briefing integration, auto-update with guard</div>
+    <div class="phase-time">~3h &bull; Code Brisen</div>
+  </div>
+  <div class="phase card-orange">
+    <div class="phase-letter">C</div>
+    <div class="phase-title" style="color:#e3b341;">Debrief</div>
+    <div class="phase-desc">Fill view files through Director sessions (topics 1&ndash;6 essential, 7&ndash;14 high/medium)</div>
+    <div class="phase-time">~2&ndash;3 sessions &bull; Director + Cowork</div>
+  </div>
+  <div class="phase card-purple">
+    <div class="phase-letter">D</div>
+    <div class="phase-title" style="color:#bc8cff;">Activate</div>
+    <div class="phase-desc">Test end-to-end + auto-parse operator reports (P&L &rarr; KPI snapshots)</div>
+    <div class="phase-time">~2h &bull; Code Brisen</div>
+  </div>
+</div>
+
+<!-- ═══════════ 12. DESIGN DECISIONS ═══════════ -->
+<h2><span class="section-num">12</span> Design Decisions (Locked)</h2>
+
+<table>
+  <tr><th>#</th><th>Question</th><th>Decision</th><th>Rationale</th></tr>
+  <tr><td>1</td><td>Scope: MOVIE-only or portfolio?</td><td><strong>MOVIE-only</strong></td><td>Each asset gets its own PM. No portfolio PM until 3+ assets.</td></tr>
+  <tr><td>2</td><td>Naming convention?</td><td><strong><code>movie_am</code></strong></td><td>Specific slugs are greppable. Davos &rarr; <code>alpengold_am</code>.</td></tr>
+  <tr><td>3</td><td>Hagenauer overlap?</td><td><strong>Strict boundary</strong></td><td>MOVIE AM = hotel ops post-opening only. Cross-ref via search_memory.</td></tr>
+  <tr><td>4</td><td>Residences sub-PM?</td><td><strong>Separate capability</strong></td><td>Different stakeholders, economics, timelines. Own slug when ready.</td></tr>
+  <tr><td>5</td><td>Auto-parse operator reports?</td><td><strong>Yes, Phase D</strong></td><td>Valuable but not blocking. Skeleton + debrief first.</td></tr>
+  <tr><td>6</td><td>Opus auto-update cost?</td><td><strong>Justified with guard</strong></td><td>Complexity threshold skips simple lookups.</td></tr>
+  <tr><td>7</td><td>STR benchmarks?</td><td><strong>Not now</strong></td><td>Manual ingestion fine. Revisit in 6 months.</td></tr>
+  <tr><td>8</td><td>Decomposer registration?</td><td><strong>Yes</strong></td><td>Multi-cap queries need both PMs.</td></tr>
+</table>
+
+<!-- ═══════════ 13. RISKS ═══════════ -->
+<h2><span class="section-num">13</span> Risks &amp; Mitigations</h2>
+
+<table>
+  <tr><th>Risk</th><th>Impact</th><th>Mitigation</th></tr>
+  <tr><td style="color:#ff7b72;">View files stale (no debrief)</td><td>PM gives wrong advice</td><td>Phase C mandatory before Phase D activation</td></tr>
+  <tr><td style="color:#ff7b72;">Fee structure wrong in view file</td><td>Incorrect cost analysis</td><td>Source citation rule &mdash; every number needs doc reference</td></tr>
+  <tr><td style="color:#e3b341;">Signal detection too broad</td><td>Noise in briefing</td><td>Start with tight orbit, expand after testing</td></tr>
+  <tr><td style="color:#e3b341;">State bloat</td><td>Slow context injection</td><td>Compiled intelligence in view files, not JSONB</td></tr>
+  <tr><td style="color:#58a6ff;">Overlap with AO PM</td><td>Confusion on Hagenauer</td><td>Clear scope: MOVIE AM = hotel ops only</td></tr>
+</table>
+
+<!-- ═══════════ 14. LESSONS APPLIED ═══════════ -->
+<h2><span class="section-num">14</span> Lessons Applied from AO PM Build</h2>
+
+<div class="card-grid">
+  <div class="card card-green">
+    <div class="label">#1 JSONB is write-only</div>
+    <div class="value">View files for compiled intelligence, JSONB for dynamic state only</div>
+  </div>
+  <div class="card card-green">
+    <div class="label">#2 Source citations</div>
+    <div class="value">All fee %s, KPI targets must cite agreement clause or report</div>
+  </div>
+  <div class="card card-green">
+    <div class="label">#3 Red lines first</div>
+    <div class="value">Debrief topic #2 is red lines, before deep-diving into operations</div>
+  </div>
+  <div class="card card-green">
+    <div class="label">#4 Debrief state file</div>
+    <div class="value"><code>memory/movie-am-debrief-state.md</code> created at debrief start</div>
+  </div>
+  <div class="card card-green">
+    <div class="label">#5 Wire monitoring day one</div>
+    <div class="value">Signal detection + briefing runs parallel to debrief</div>
+  </div>
+  <div class="card card-green">
+    <div class="label">#6 Orbit people matter</div>
+    <div class="value">Signal detector covers MO contacts, not just MOHG corporate</div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<div class="legend">
+  <h3>Legend</h3>
+  <div class="legend-row">
+    <div class="legend-item"><div class="legend-dot" style="background:#3fb950;"></div> Entity / Source of Truth</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#58a6ff;"></div> View Files / Intelligence</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#bc8cff;"></div> Dynamic State (PostgreSQL)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#56d4cf;"></div> Signal Detection</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#e3b341;"></div> Implementation / Decisions</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#ff7b72;"></div> Risks / Alerts</div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

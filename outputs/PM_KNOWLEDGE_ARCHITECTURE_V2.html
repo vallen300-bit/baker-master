@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Baker PM — Knowledge Architecture v2</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d1117; color: #e6edf3; padding: 40px 20px; }
+  .canvas { max-width: 820px; margin: 0 auto; }
+  h1 { font-size: 24px; font-weight: 700; color: #fff; }
+  .subtitle { font-size: 13px; color: #7d8590; margin: 4px 0 40px; }
+
+  /* Section headers */
+  .section-label {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px;
+    color: #7d8590; margin: 36px 0 14px; padding-bottom: 6px;
+    border-bottom: 1px solid #21262d;
+  }
+
+  /* The wiki box - central */
+  .wiki {
+    background: linear-gradient(135deg, #0f2a1a 0%, #0d1f2d 100%);
+    border: 2px solid #3fb950; border-radius: 14px;
+    padding: 28px; margin: 20px 0; position: relative;
+  }
+  .wiki-badge {
+    position: absolute; top: -10px; left: 24px;
+    background: #3fb950; color: #0d1117; font-size: 10px; font-weight: 800;
+    padding: 3px 12px; border-radius: 6px; text-transform: uppercase; letter-spacing: 1px;
+  }
+  .wiki h2 { font-size: 18px; color: #3fb950; margin-bottom: 12px; }
+  .wiki-files { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .wiki-file {
+    background: #1a3a2a; border: 1px solid #2ea04360; border-radius: 8px;
+    padding: 10px 14px; flex: 1; min-width: 140px;
+  }
+  .wiki-file .fname { font-size: 12px; font-weight: 700; color: #58a6ff; font-family: 'SF Mono', monospace; }
+  .wiki-file .fdesc { font-size: 10px; color: #7d8590; margin-top: 2px; }
+  .wiki-file.pending { border-color: #e3b34160; background: #2a2210; }
+  .wiki-file.pending .fname { color: #e3b341; }
+
+  /* Arrow connector */
+  .connector {
+    display: flex; align-items: center; margin: 16px 0; gap: 0;
+  }
+  .conn-line { flex: 1; height: 1px; background: #30363d; }
+  .conn-arrow { color: #30363d; font-size: 18px; margin: 0 -2px; }
+  .conn-label {
+    font-size: 10px; color: #7d8590; padding: 0 10px; white-space: nowrap;
+    font-style: italic;
+  }
+
+  /* Vertical arrow */
+  .v-arrow { text-align: center; margin: 10px 0; color: #30363d; font-size: 20px; }
+  .v-label { text-align: center; font-size: 10px; color: #7d8590; font-style: italic; margin: -4px 0 6px; }
+
+  /* Input/output boxes */
+  .row { display: flex; gap: 10px; margin: 8px 0; flex-wrap: wrap; }
+  .box {
+    border-radius: 10px; padding: 14px 16px; flex: 1; min-width: 160px;
+  }
+  .box .title { font-size: 13px; font-weight: 700; margin-bottom: 3px; }
+  .box .desc { font-size: 10px; line-height: 1.4; opacity: 0.8; }
+
+  .b-gray { background: #161b22; border: 1px solid #30363d; }
+  .b-gray .title { color: #7d8590; }
+  .b-blue { background: #172136; border: 1px solid #388bfd60; }
+  .b-blue .title { color: #58a6ff; }
+  .b-purple { background: #2a1a3a; border: 1px solid #8b5cf660; }
+  .b-purple .title { color: #bc8cff; }
+  .b-teal { background: #1a3036; border: 1px solid #3ddbd960; }
+  .b-teal .title { color: #56d4cf; }
+  .b-orange { background: #2a2210; border: 1px solid #e3b34160; }
+  .b-orange .title { color: #e3b341; }
+
+  /* The loop diagram */
+  .loop-container {
+    background: #161b22; border: 1px solid #30363d; border-radius: 14px;
+    padding: 24px; margin: 24px 0;
+  }
+  .loop-title { font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 16px; text-align: center; }
+  .loop-steps {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px;
+    font-size: 12px; font-weight: 600;
+  }
+  .loop-step {
+    padding: 8px 14px; border-radius: 8px; white-space: nowrap;
+  }
+  .loop-arrow { color: #30363d; font-size: 14px; }
+  .ls-input { background: #161b22; border: 1px solid #30363d; color: #7d8590; }
+  .ls-wiki { background: #1a3a2a; border: 1px solid #3fb95060; color: #3fb950; }
+  .ls-query { background: #2a1a3a; border: 1px solid #8b5cf660; color: #bc8cff; }
+  .ls-learn { background: #2a2210; border: 1px solid #e3b34160; color: #e3b341; }
+  .loop-return {
+    display: block; text-align: center; margin-top: 10px;
+    font-size: 10px; color: #3fb950; font-weight: 600;
+  }
+
+  /* Principle boxes */
+  .principles {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0;
+  }
+  .principle {
+    background: #161b22; border: 1px solid #30363d; border-radius: 10px;
+    padding: 14px;
+  }
+  .principle .num { font-size: 20px; font-weight: 800; color: #3fb950; float: left; margin-right: 10px; line-height: 1; }
+  .principle .ptitle { font-size: 12px; font-weight: 700; color: #fff; }
+  .principle .prule { font-size: 10px; color: #7d8590; margin-top: 3px; line-height: 1.4; }
+
+  /* Comparison */
+  .compare {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 0; margin: 14px 0;
+    border: 1px solid #30363d; border-radius: 10px; overflow: hidden;
+  }
+  .compare-col { padding: 16px; }
+  .compare-col:first-child { border-right: 1px solid #30363d; background: #1a1215; }
+  .compare-col:last-child { background: #101a15; }
+  .compare-header { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  .compare-col:first-child .compare-header { color: #ff7b72; }
+  .compare-col:last-child .compare-header { color: #3fb950; }
+  .compare-item { font-size: 11px; color: #e6edf3; margin: 6px 0; line-height: 1.4; }
+  .compare-item::before { margin-right: 6px; }
+  .compare-col:first-child .compare-item::before { content: '✕'; color: #ff7b72; }
+  .compare-col:last-child .compare-item::before { content: '✓'; color: #3fb950; }
+
+  @media (max-width: 600px) {
+    .principles { grid-template-columns: 1fr; }
+    .compare { grid-template-columns: 1fr; }
+    .compare-col:first-child { border-right: none; border-bottom: 1px solid #30363d; }
+  }
+</style>
+</head>
+<body>
+<div class="canvas">
+
+<h1>Baker PM &mdash; Knowledge Architecture</h1>
+<p class="subtitle">Karpathy model applied to Baker &bull; The Wiki is the source of truth &bull; April 2026</p>
+
+<!-- ════════ THE CORE PRINCIPLE ════════ -->
+<div class="section-label">Core Principle</div>
+
+<div style="text-align:center; padding: 20px; background: #0f2a1a; border: 1px solid #3fb95060; border-radius: 12px; margin-bottom: 20px;">
+  <div style="font-size: 18px; font-weight: 700; color: #3fb950;">The Wiki is the single source of truth.</div>
+  <div style="font-size: 12px; color: #7d8590; margin-top: 6px;">Everything else is either an input to the wiki, or a query against it.</div>
+</div>
+
+<!-- ════════ THE WIKI ════════ -->
+<div class="section-label">The Wiki &mdash; <code>data/{slug}/</code></div>
+
+<div class="wiki">
+  <div class="wiki-badge">Gospel</div>
+  <h2>View Files</h2>
+  <div style="font-size: 12px; color: #8b949e; margin-bottom: 10px;">
+    Markdown files in the git repo. Baker reads them at every invocation.<br>
+    Director edits via debrief sessions. Baker proposes additions via pending insights.
+  </div>
+  <div class="wiki-files">
+    <div class="wiki-file">
+      <div class="fname">SCHEMA.md</div>
+      <div class="fdesc">Directory + rules</div>
+    </div>
+    <div class="wiki-file">
+      <div class="fname">{topic_1}.md</div>
+      <div class="fdesc">Compiled intelligence</div>
+    </div>
+    <div class="wiki-file">
+      <div class="fname">{topic_2}.md</div>
+      <div class="fdesc">Compiled intelligence</div>
+    </div>
+    <div class="wiki-file">
+      <div class="fname">{topic_N}.md</div>
+      <div class="fdesc">Compiled intelligence</div>
+    </div>
+    <div class="wiki-file">
+      <div class="fname">agenda.md</div>
+      <div class="fdesc">Active + parked matters</div>
+    </div>
+    <div class="wiki-file pending">
+      <div class="fname">_pending.md</div>
+      <div class="fdesc">Learned but not yet promoted</div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════ INPUTS ════════ -->
+<div class="section-label">Inputs &mdash; What feeds the wiki</div>
+
+<div class="row">
+  <div class="box b-gray">
+    <div class="title">Raw Documents</div>
+    <div class="desc">Contracts, reports, emails, PDFs.<br>Dropbox filing cabinet.<br>Processed INTO the wiki, not truth themselves.</div>
+  </div>
+  <div class="box b-blue">
+    <div class="title">Director Debrief</div>
+    <div class="desc">Structured sessions where Director shares knowledge.<br><strong>Goes directly into view files.</strong><br>This is the primary way the wiki grows.</div>
+  </div>
+  <div class="box b-teal">
+    <div class="title">Signals</div>
+    <div class="desc">Emails, WhatsApp, meetings from orbit contacts.<br>Detected in real-time.<br>Flagged &rarr; _pending.md</div>
+  </div>
+</div>
+
+<div class="v-arrow">&darr;</div>
+<div class="v-label">all inputs flow into the wiki</div>
+
+<!-- ════════ THE LEARNING LOOP ════════ -->
+<div class="section-label">The Learning Loop</div>
+
+<div class="loop-container">
+  <div class="loop-title">Every query makes the wiki smarter</div>
+  <div class="loop-steps">
+    <span class="loop-step ls-input">Raw Source</span>
+    <span class="loop-arrow">&rarr;</span>
+    <span class="loop-step ls-wiki">Wiki</span>
+    <span class="loop-arrow">&rarr;</span>
+    <span class="loop-step ls-query">Query / Q&amp;A</span>
+    <span class="loop-arrow">&rarr;</span>
+    <span class="loop-step ls-learn">New insight?</span>
+    <span class="loop-arrow">&rarr;</span>
+    <span class="loop-step ls-learn">_pending.md</span>
+    <span class="loop-arrow">&rarr;</span>
+    <span class="loop-step ls-wiki">Wiki</span>
+  </div>
+  <span class="loop-return">&circlearrowleft; the wiki compounds</span>
+</div>
+
+<!-- ════════ TWO PATHS INTO WIKI ════════ -->
+<div class="section-label">Two paths into the wiki</div>
+
+<div class="row">
+  <div class="box b-blue" style="flex:1;">
+    <div class="title">Path 1: Director Debrief</div>
+    <div class="desc">
+      Director tells Baker something new &rarr; Baker writes it <strong>directly into the view file</strong> &rarr; git commit.<br><br>
+      Fast. Authoritative. No staging needed.<br><br>
+      <em>"Baker, the GM changed. Update operator_dynamics.md — new GM is Thomas Berger, started March 2026."</em>
+    </div>
+  </div>
+  <div class="box b-orange" style="flex:1;">
+    <div class="title">Path 2: Discovered Knowledge</div>
+    <div class="desc">
+      Baker discovers something during a Q&amp;A or signal detection &rarr; writes to <strong>_pending.md</strong> &rarr; Director reviews &rarr; promote or reject.<br><br>
+      Safe. No autonomous wiki corruption.<br><br>
+      <em>"Found: Mario Habicher sends P&amp;L by 3rd of month (observed 3 consecutive months). Promote to kpi_framework.md?"</em>
+    </div>
+  </div>
+</div>
+
+<!-- ════════ HEALTH CHECK ════════ -->
+<div class="section-label">Self-Healing</div>
+
+<div class="row">
+  <div class="box b-orange" style="flex:1;">
+    <div class="title">Periodic Lint Pass</div>
+    <div class="desc">
+      Baker audits the wiki against raw sources and recent signals:<br><br>
+      &bull; <strong>Contradictions</strong> &mdash; view file says X, recent email says Y<br>
+      &bull; <strong>Stale data</strong> &mdash; figure from 6 months ago, newer data exists<br>
+      &bull; <strong>Gaps</strong> &mdash; topic mentioned but no page covers it<br>
+      &bull; <strong>Unverified</strong> &mdash; claim without source citation<br><br>
+      Results &rarr; _pending.md for Director review
+    </div>
+  </div>
+</div>
+
+<!-- ════════ WHAT LIVES WHERE ════════ -->
+<div class="section-label">What lives where</div>
+
+<div style="overflow-x:auto;">
+<table style="width:100%; border-collapse:collapse; font-size:12px; margin:10px 0;">
+  <tr style="border-bottom:1px solid #30363d;">
+    <th style="text-align:left; padding:8px; color:#7d8590;">Location</th>
+    <th style="text-align:left; padding:8px; color:#7d8590;">Contains</th>
+    <th style="text-align:left; padding:8px; color:#7d8590;">Role</th>
+  </tr>
+  <tr style="border-bottom:1px solid #21262d;">
+    <td style="padding:8px; color:#3fb950; font-weight:700;font-family:monospace;">data/{slug}/*.md</td>
+    <td style="padding:8px;">Compiled intelligence, verified facts, Director knowledge</td>
+    <td style="padding:8px; color:#3fb950;">GOSPEL &mdash; single source of truth</td>
+  </tr>
+  <tr style="border-bottom:1px solid #21262d;">
+    <td style="padding:8px; color:#bc8cff; font-family:monospace;">{slug}_project_state</td>
+    <td style="padding:8px;">Dynamic: open actions, KPI snapshots, last contact, red flags</td>
+    <td style="padding:8px; color:#bc8cff;">Scratchpad &mdash; auto-updated, not gospel</td>
+  </tr>
+  <tr style="border-bottom:1px solid #21262d;">
+    <td style="padding:8px; color:#7d8590; font-family:monospace;">Dropbox folders</td>
+    <td style="padding:8px;">PDFs, contracts, spreadsheets, evidence artifacts</td>
+    <td style="padding:8px; color:#7d8590;">Filing cabinet &mdash; raw inputs, not truth</td>
+  </tr>
+  <tr>
+    <td style="padding:8px; color:#7d8590; font-family:monospace;">deep_analyses, decisions</td>
+    <td style="padding:8px;">Past analyses and stored decisions</td>
+    <td style="padding:8px; color:#7d8590;">Archive &mdash; searchable history</td>
+  </tr>
+</table>
+</div>
+
+<!-- ════════ BEFORE / AFTER ════════ -->
+<div class="section-label">Before vs After</div>
+
+<div class="compare">
+  <div class="compare-col">
+    <div class="compare-header">Today</div>
+    <div class="compare-item">Wiki frozen between debrief sessions</div>
+    <div class="compare-item">Good Q&amp;A answers lost in chat history</div>
+    <div class="compare-item">22 decisions in DB, 0 in view files</div>
+    <div class="compare-item">No health checks on stale data</div>
+    <div class="compare-item">Source of truth split: Dropbox + repo</div>
+    <div class="compare-item">PM reads same files from April 1st</div>
+  </div>
+  <div class="compare-col">
+    <div class="compare-header">After</div>
+    <div class="compare-item">Wiki grows with every substantive query</div>
+    <div class="compare-item">Insights staged in _pending.md for review</div>
+    <div class="compare-item">Director debrief goes directly into wiki</div>
+    <div class="compare-item">Periodic lint catches contradictions + gaps</div>
+    <div class="compare-item">One source of truth: data/{slug}/*.md</div>
+    <div class="compare-item">PM gets smarter every week</div>
+  </div>
+</div>
+
+<!-- ════════ THE 4 RULES ════════ -->
+<div class="section-label">Four Rules</div>
+
+<div class="principles">
+  <div class="principle">
+    <div class="num">1</div>
+    <div class="ptitle">Wiki is gospel</div>
+    <div class="prule">If anything contradicts the view files, the view files win. Everything else is input or scratchpad.</div>
+  </div>
+  <div class="principle">
+    <div class="num">2</div>
+    <div class="ptitle">Director writes directly</div>
+    <div class="prule">Debrief sessions go straight into view files. No staging needed. Baker commits immediately.</div>
+  </div>
+  <div class="principle">
+    <div class="num">3</div>
+    <div class="ptitle">Baker proposes, Director approves</div>
+    <div class="prule">Discovered knowledge goes to _pending.md. Baker never writes to view files autonomously. Director promotes or rejects.</div>
+  </div>
+  <div class="principle">
+    <div class="num">4</div>
+    <div class="ptitle">The wiki heals itself</div>
+    <div class="prule">Periodic lint pass finds contradictions, stale claims, gaps. Results go to _pending.md for review.</div>
+  </div>
+</div>
+
+<!-- ════════ APPLIES TO ════════ -->
+<div class="section-label">Applies to all Baker PMs</div>
+
+<div class="row">
+  <div class="box b-blue">
+    <div class="title">AO PM</div>
+    <div class="desc">data/ao_pm/<br>Investor relationship<br><strong>Retrofit first</strong></div>
+  </div>
+  <div class="box b-teal">
+    <div class="title">MOVIE AM</div>
+    <div class="desc">data/movie_am/<br>Hotel asset management<br><strong>Build with this from day 1</strong></div>
+  </div>
+  <div class="box b-gray">
+    <div class="title">Future PMs</div>
+    <div class="desc">data/{slug}/<br>Any entity<br>Same pattern</div>
+  </div>
+</div>
+
+</div>
+</body>
+</html>

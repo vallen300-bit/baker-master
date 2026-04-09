@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Market Gap Analysis — AI in Luxury Hotel Development</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a28;
+    --accent: #6c63ff;
+    --accent-dim: rgba(108,99,255,0.15);
+    --accent-glow: rgba(108,99,255,0.3);
+    --nvidia: #76B900;
+    --nvidia-dim: rgba(118,185,0,0.15);
+    --red: #ff4d6a;
+    --red-dim: rgba(255,77,106,0.12);
+    --green: #00d4aa;
+    --green-dim: rgba(0,212,170,0.12);
+    --gold: #d4a853;
+    --gold-dim: rgba(212,168,83,0.12);
+    --blue: #0a6fdb;
+    --blue-dim: rgba(10,111,219,0.12);
+    --text: #e8e6f0;
+    --text-dim: #8a87a0;
+    --border: rgba(108,99,255,0.15);
+    --glow: rgba(108,99,255,0.3);
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  /* Confidential Banner */
+  .conf-banner {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 1000;
+    background: linear-gradient(90deg, rgba(108,99,255,0.95), rgba(0,212,170,0.95));
+    padding: 8px 0;
+    text-align: center;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: #fff;
+  }
+
+  body { padding-top: 36px; }
+
+  /* Hero */
+  .hero {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    position: relative;
+    padding: 2rem;
+  }
+
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -50%; left: -50%;
+    width: 200%; height: 200%;
+    background: radial-gradient(ellipse at 30% 50%, rgba(108,99,255,0.07) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 50%, rgba(0,212,170,0.05) 0%, transparent 50%);
+    animation: heroGlow 15s ease-in-out infinite alternate;
+  }
+
+  @keyframes heroGlow {
+    0% { transform: translate(0, 0) rotate(0deg); }
+    100% { transform: translate(-5%, 5%) rotate(3deg); }
+  }
+
+  .hero-tag {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 20px;
+    background: var(--accent-dim);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 2rem;
+  }
+
+  .hero-title {
+    position: relative;
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: clamp(2.2rem, 5vw, 3.8rem);
+    font-weight: 700;
+    line-height: 1.15;
+    margin-bottom: 1.5rem;
+    max-width: 800px;
+  }
+
+  .hero-sub {
+    position: relative;
+    font-size: 1.15rem;
+    color: var(--text-dim);
+    max-width: 650px;
+    line-height: 1.8;
+    margin-bottom: 2.5rem;
+  }
+
+  .hero-verdict {
+    position: relative;
+    display: inline-block;
+    padding: 14px 32px;
+    background: var(--green-dim);
+    border: 1px solid rgba(0,212,170,0.3);
+    border-radius: 12px;
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: 1px;
+  }
+
+  /* Sections */
+  section {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 5rem 2rem;
+  }
+
+  section h2 {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+  }
+
+  section .section-sub {
+    color: var(--text-dim);
+    font-size: 0.95rem;
+    margin-bottom: 2.5rem;
+  }
+
+  /* Question blocks */
+  .q-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2.5rem;
+    margin-bottom: 2rem;
+  }
+
+  .q-number {
+    display: inline-block;
+    width: 36px; height: 36px;
+    line-height: 36px;
+    text-align: center;
+    background: var(--accent-dim);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 1rem;
+  }
+
+  .q-question {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 1.3rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    line-height: 1.4;
+  }
+
+  .q-intent {
+    font-size: 0.85rem;
+    color: var(--text-dim);
+    font-style: italic;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+
+  .q-finding {
+    display: inline-block;
+    padding: 6px 16px;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-bottom: 1.2rem;
+  }
+
+  .finding-red { background: var(--red-dim); color: var(--red); border: 1px solid rgba(255,77,106,0.25); }
+  .finding-green { background: var(--green-dim); color: var(--green); border: 1px solid rgba(0,212,170,0.25); }
+  .finding-gold { background: var(--gold-dim); color: var(--gold); border: 1px solid rgba(212,168,83,0.25); }
+
+  .q-body { font-size: 0.95rem; line-height: 1.8; }
+  .q-body p { margin-bottom: 1rem; }
+  .q-body strong { color: #fff; }
+
+  /* Company table */
+  .company-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.5rem 0;
+    font-size: 0.85rem;
+  }
+
+  .company-table th {
+    text-align: left;
+    padding: 10px 14px;
+    background: var(--surface2);
+    color: var(--text-dim);
+    font-weight: 600;
+    font-size: 0.7rem;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .company-table td {
+    padding: 12px 14px;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    vertical-align: top;
+  }
+
+  .company-table tr:hover td { background: rgba(108,99,255,0.04); }
+
+  .gap-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    background: var(--red-dim);
+    color: var(--red);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .no-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    background: var(--red-dim);
+    color: var(--red);
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  /* Reason cards */
+  .reasons-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+    margin-top: 1.5rem;
+  }
+
+  .reason-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    transition: all 0.25s;
+  }
+
+  .reason-card:hover {
+    border-color: var(--accent-glow);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 30px rgba(108,99,255,0.08);
+  }
+
+  .reason-num {
+    display: inline-block;
+    width: 28px; height: 28px;
+    line-height: 28px;
+    text-align: center;
+    background: var(--accent-dim);
+    border-radius: 8px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 0.75rem;
+  }
+
+  .reason-title {
+    font-weight: 700;
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: #fff;
+  }
+
+  .reason-desc {
+    font-size: 0.88rem;
+    color: var(--text-dim);
+    line-height: 1.7;
+  }
+
+  .reason-example {
+    margin-top: 0.75rem;
+    padding: 10px 14px;
+    background: var(--bg);
+    border-radius: 8px;
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    font-style: italic;
+    border-left: 3px solid var(--accent);
+  }
+
+  /* Market map */
+  .market-map {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2.5rem;
+    margin: 2rem 0;
+    text-align: center;
+  }
+
+  .map-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 2px;
+    max-width: 600px;
+    margin: 2rem auto;
+    background: rgba(255,255,255,0.08);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .map-cell {
+    padding: 2rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+  }
+
+  .map-cell.filled { background: var(--surface); }
+  .map-cell.empty-cell { background: var(--surface2); }
+  .map-cell.target {
+    background: linear-gradient(135deg, rgba(108,99,255,0.15), rgba(0,212,170,0.15));
+    border: 2px solid var(--accent);
+  }
+
+  .map-cell .cell-title {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin-bottom: 0.5rem;
+  }
+
+  .map-cell .cell-companies {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+  }
+
+  .map-cell.target .cell-title {
+    color: var(--green);
+    font-size: 0.85rem;
+  }
+
+  .map-cell.target .cell-companies {
+    color: #fff;
+    font-weight: 600;
+  }
+
+  .map-axis {
+    display: flex;
+    justify-content: space-between;
+    max-width: 600px;
+    margin: 0 auto;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+  }
+
+  .map-axis-y {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    position: absolute;
+    left: -80px;
+    top: 0; bottom: 0;
+  }
+
+  /* Quote block */
+  .quote-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 2.5rem;
+    margin: 2rem 0;
+    position: relative;
+  }
+
+  .quote-mark {
+    font-family: 'Playfair Display', serif;
+    font-size: 4rem;
+    color: var(--accent);
+    opacity: 0.3;
+    position: absolute;
+    top: 10px;
+    left: 20px;
+    line-height: 1;
+  }
+
+  .quote-text {
+    font-family: 'Playfair Display', Georgia, serif;
+    font-size: 1.2rem;
+    font-style: italic;
+    line-height: 1.7;
+    padding-left: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .quote-attr {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    padding-left: 1rem;
+  }
+
+  /* Positioning section */
+  .positioning {
+    background: linear-gradient(135deg, rgba(108,99,255,0.08), rgba(0,212,170,0.06));
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 3rem;
+    margin: 2rem 0;
+  }
+
+  .positioning p {
+    font-size: 1.05rem;
+    line-height: 1.85;
+    margin-bottom: 1.2rem;
+  }
+
+  .positioning strong { color: #fff; }
+
+  /* Caveats */
+  .caveats {
+    background: var(--surface);
+    border: 1px solid rgba(212,168,83,0.2);
+    border-radius: 16px;
+    padding: 2rem;
+    margin: 2rem 0;
+  }
+
+  .caveats h3 {
+    color: var(--gold);
+    font-size: 0.8rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 1rem;
+  }
+
+  .caveats li {
+    font-size: 0.88rem;
+    margin-bottom: 0.75rem;
+    color: var(--text-dim);
+    line-height: 1.6;
+    list-style: none;
+    padding-left: 1.2rem;
+    position: relative;
+  }
+
+  .caveats li::before {
+    content: '!';
+    position: absolute;
+    left: 0;
+    color: var(--gold);
+    font-weight: 700;
+  }
+
+  /* Footer */
+  .footer {
+    text-align: center;
+    padding: 3rem 2rem;
+    font-size: 0.7rem;
+    color: #333;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  /* Methodology badge */
+  .method-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-bottom: 0.5rem;
+  }
+
+  .method-badge .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--green);
+  }
+
+  @media (max-width: 768px) {
+    .map-grid { grid-template-columns: 1fr; }
+    section { padding: 3rem 1.5rem; }
+    .q-block { padding: 1.5rem; }
+  }
+</style>
+</head>
+<body>
+
+<div class="conf-banner">Confidential — Brisen AI Market Intelligence</div>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-tag">Market Research</div>
+  <h1 class="hero-title">Is There Really Zero AI<br>in Luxury Hotel Development?</h1>
+  <p class="hero-sub">A rigorous five-question stress test of our core market thesis — deliberately attempting to disprove it. Cross-validated across industry databases, trade publications, and competitive intelligence.</p>
+  <div class="hero-verdict">CLAIM VALIDATED — with precise framing</div>
+</div>
+
+<!-- METHODOLOGY -->
+<section>
+  <h2>Research Methodology</h2>
+  <p class="section-sub">Adversarial approach: we tried to prove ourselves wrong before presenting to partners.</p>
+
+  <div class="q-block" style="padding: 2rem;">
+    <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
+      <div style="flex: 1; min-width: 200px;">
+        <div class="method-badge"><span class="dot"></span> Gemma 4 AI</div>
+        <p style="font-size: 0.88rem; color: var(--text-dim); margin-top: 0.5rem;">Five-question adversarial interrogation. Model was instructed to be "brutally honest" and name every possible competitor.</p>
+      </div>
+      <div style="flex: 1; min-width: 200px;">
+        <div class="method-badge"><span class="dot"></span> Web Intelligence</div>
+        <p style="font-size: 0.88rem; color: var(--text-dim); margin-top: 0.5rem;">Cross-validated against HospitalityNet, Hotel Dive, Unite.AI, Klover.ai, ICSC, PwC, Skyscraper Center.</p>
+      </div>
+      <div style="flex: 1; min-width: 200px;">
+        <div class="method-badge"><span class="dot"></span> Baker Intelligence</div>
+        <p style="font-size: 0.88rem; color: var(--text-dim); margin-top: 0.5rem;">NVIDIA partnership database, Inception programme analysis, hospitality vertical mapping.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Q1 -->
+<section>
+  <div class="q-block">
+    <div class="q-number">Q1</div>
+    <div class="q-question">Who offers AI for luxury hotel construction and development?</div>
+    <div class="q-intent">Stress test: Name every company globally. If our claim is wrong, we need to know.</div>
+
+    <div class="q-finding finding-green">Finding: No dedicated product exists</div>
+
+    <div class="q-body">
+      <p>The market has not adopted "AI for Luxury Hotel Development" as a product category. Instead, <strong>generic construction technology</strong> is applied to hotel projects — but none of these tools understand the owner-developer's world.</p>
+
+      <table class="company-table">
+        <tr>
+          <th>Company</th>
+          <th>What They Do</th>
+          <th>Owner-Developer Gap</th>
+        </tr>
+        <tr>
+          <td><strong>Autodesk</strong><br><span style="color:var(--text-dim);font-size:0.78rem;">BIM 360, Revit</span></td>
+          <td>Structural modeling, generative design</td>
+          <td><span class="gap-tag">No brand standards</span> <span class="gap-tag">No FF&E</span></td>
+        </tr>
+        <tr>
+          <td><strong>Procore</strong></td>
+          <td>Construction PM, cost tracking</td>
+          <td><span class="gap-tag">Serves contractors</span> <span class="gap-tag">No claims</span></td>
+        </tr>
+        <tr>
+          <td><strong>Trimble</strong></td>
+          <td>Digital twins, site modeling</td>
+          <td><span class="gap-tag">Infrastructure focus</span> <span class="gap-tag">No hospitality</span></td>
+        </tr>
+        <tr>
+          <td><strong>OpenSpace</strong></td>
+          <td>360-degree site documentation</td>
+          <td><span class="gap-tag">Documentation only</span> <span class="gap-tag">No intelligence</span></td>
+        </tr>
+        <tr>
+          <td><strong>ALICE Technologies</strong></td>
+          <td>AI scheduling optimisation</td>
+          <td><span class="gap-tag">Scheduling only</span> <span class="gap-tag">No financial model</span></td>
+        </tr>
+        <tr>
+          <td><strong>Matterport</strong></td>
+          <td>Site condition capture</td>
+          <td><span class="gap-tag">Capture tool</span> <span class="gap-tag">No analysis</span></td>
+        </tr>
+      </table>
+
+      <p><strong>None understand:</strong> brand standards, FF&E procurement cycles, operator pre-opening requirements, claims analysis against construction contracts, or the owner-developer investment perspective.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Q2 -->
+<section>
+  <div class="q-block">
+    <div class="q-number">Q2</div>
+    <div class="q-question">Can you name a single AI product for the hotel owner-developer?</div>
+    <div class="q-intent">The owner spending EUR 100-300M to build a luxury hotel. Not the contractor. Not the architect. Not the brand. The owner.</div>
+
+    <div class="q-finding finding-red">Finding: Zero. None exists anywhere in the world.</div>
+
+    <div class="q-body">
+      <div class="quote-block">
+        <div class="quote-mark">"</div>
+        <div class="quote-text">There is no single, off-the-shelf AI product marketed globally that explicitly targets the Owner-Developer of a luxury hotel.</div>
+        <div class="quote-attr">— Market analysis, adversarial stress test</div>
+      </div>
+
+      <p>The closest proxies are <strong>consulting services</strong>, not products:</p>
+      <p><strong>Big Four consultancies</strong> (Deloitte, PwC, EY, KPMG) sell bespoke "Digital Transformation Programs" at EUR 500K-2M per engagement. These use AI as a tool within a consulting service. They are not scalable, not productised, and not available to independent owner-developers.</p>
+      <p><strong>Major PM firms</strong> (AECOM, WSP) have proprietary internal tools — but these remain locked inside their organisations and are not available to the market.</p>
+
+      <p style="margin-top: 1.5rem;"><strong>To claim this space, a product must offer all three:</strong></p>
+      <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 1rem;">
+        <div style="background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:1.2rem; text-align:center;">
+          <div style="font-size:1.5rem; margin-bottom:0.5rem;">1</div>
+          <div style="font-size:0.82rem; font-weight:600;">Brand Standards Library</div>
+          <div style="font-size:0.75rem; color:var(--text-dim); margin-top:0.3rem;">Understanding luxury operator requirements</div>
+        </div>
+        <div style="background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:1.2rem; text-align:center;">
+          <div style="font-size:1.5rem; margin-bottom:0.5rem;">2</div>
+          <div style="font-size:0.82rem; font-weight:600;">Automated Claim Mapping</div>
+          <div style="font-size:0.75rem; color:var(--text-dim); margin-top:0.3rem;">Cross-referencing delays against contract clauses</div>
+        </div>
+        <div style="background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:1.2rem; text-align:center;">
+          <div style="font-size:1.5rem; margin-bottom:0.5rem;">3</div>
+          <div style="font-size:0.82rem; font-weight:600;">Owner Dashboard</div>
+          <div style="font-size:0.75rem; color:var(--text-dim); margin-top:0.3rem;">Financial deviation, brand compliance, investment ROI</div>
+        </div>
+      </div>
+      <p style="margin-top:1rem; text-align:center; font-weight:600; color:var(--red);">No existing product offers all three.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Q3 -->
+<section>
+  <div class="q-block">
+    <div class="q-number">Q3</div>
+    <div class="q-question">Have the major hotel brands deployed AI for development?</div>
+    <div class="q-intent">Marriott, Hilton, Accor, IHG, Four Seasons, Mandarin Oriental — any of them?</div>
+
+    <div class="q-finding finding-red">Finding: No brand has deployed AI for their construction pipeline</div>
+
+    <div class="q-body">
+      <table class="company-table">
+        <tr>
+          <th>Hotel Group</th>
+          <th>Where AI Is Deployed</th>
+          <th>Development AI?</th>
+        </tr>
+        <tr>
+          <td><strong>Marriott</strong></td>
+          <td>Guest experience, loyalty personalisation</td>
+          <td><span class="no-tag">No</span></td>
+        </tr>
+        <tr>
+          <td><strong>Hilton</strong></td>
+          <td>Guest-experience-led holistic strategy</td>
+          <td><span class="no-tag">No</span></td>
+        </tr>
+        <tr>
+          <td><strong>Accor</strong></td>
+          <td>Sustainability, ESG optimisation</td>
+          <td><span class="no-tag">No</span></td>
+        </tr>
+        <tr>
+          <td><strong>IHG</strong></td>
+          <td>Partnership-reliant operational AI</td>
+          <td><span class="no-tag">No</span></td>
+        </tr>
+        <tr>
+          <td><strong>Four Seasons</strong></td>
+          <td>Private, bespoke — virtually no public info</td>
+          <td><span class="no-tag">No</span></td>
+        </tr>
+        <tr>
+          <td><strong>Mandarin Oriental</strong></td>
+          <td>Private, bespoke — virtually no public info</td>
+          <td><span class="no-tag">No</span></td>
+        </tr>
+      </table>
+
+      <p><strong>82% of hotels</strong> are accelerating AI in 2026 (Hotel Dive) — but <strong>all focused on operations</strong>: guest experience, revenue management, energy optimisation. Not one public announcement of AI for the development/construction pipeline.</p>
+      <p style="font-size:0.82rem; color:var(--text-dim);">Sources: Hotel Dive (C-suite forecast 2026), Klover.ai (Hilton AI Strategy Analysis), Hospitality Upgrade (2025 Reality, 2026 Horizon)</p>
+    </div>
+  </div>
+</section>
+
+<!-- MARKET MAP -->
+<section>
+  <h2>The Market Map</h2>
+  <p class="section-sub">Where every existing AI player sits — and where the gap is.</p>
+
+  <div class="market-map">
+    <div style="font-size:0.7rem; font-weight:600; letter-spacing:2px; text-transform:uppercase; color:var(--text-dim); margin-bottom:1.5rem;">
+      <span style="float:left;">CONTRACTORS</span>
+      <span style="float:right;">OWNER-DEVELOPERS</span>
+      <div style="clear:both;"></div>
+    </div>
+
+    <div class="map-grid">
+      <div class="map-cell filled">
+        <div class="cell-title">CONSTRUCTION + CONTRACTORS</div>
+        <div class="cell-companies">Procore, Autodesk, Trimble<br>OpenSpace, ALICE, Matterport</div>
+      </div>
+      <div class="map-cell empty-cell">
+        <div class="cell-title" style="color:var(--red);">CONSTRUCTION + OWNERS</div>
+        <div class="cell-companies" style="color:var(--red); font-style:italic;">Empty</div>
+      </div>
+      <div class="map-cell filled">
+        <div class="cell-title">OPERATIONS + BRANDS</div>
+        <div class="cell-companies">IDeaS, Duetto, Revinate<br>Mews, Cloudbeds, Sabre</div>
+      </div>
+      <div class="map-cell target">
+        <div class="cell-title">DEVELOPMENT + OWNERS</div>
+        <div class="cell-companies">BRISEN AI x CORINTHIA<br>x NVIDIA</div>
+      </div>
+    </div>
+
+    <div style="font-size:0.7rem; font-weight:600; letter-spacing:2px; text-transform:uppercase; color:var(--text-dim); margin-top:1.5rem;">
+      <span style="float:left;">OPERATIONS</span>
+      <span style="float:right;">DEVELOPMENT</span>
+      <div style="clear:both;"></div>
+    </div>
+  </div>
+</section>
+
+<!-- Q4 -->
+<section>
+  <div class="q-block">
+    <div class="q-number">Q4</div>
+    <div class="q-question">Why has nobody filled this gap?</div>
+    <div class="q-intent">Five structural reasons why an owner-developer cannot simply use Procore + Autodesk + a consulting firm.</div>
+
+    <div class="q-finding finding-gold">Finding: The gap is structural, not accidental</div>
+
+    <div class="reasons-grid">
+      <div class="reason-card">
+        <div class="reason-num">1</div>
+        <div class="reason-title">Financial-to-Physical Loop</div>
+        <div class="reason-desc">The owner needs to see how a scope change ripples through total cost, financing covenants, and projected IRR — simultaneously. Procore tracks what was built. It cannot model what should be built for optimal returns.</div>
+        <div class="reason-example">"If I upgrade the spa wing by EUR 3M, what happens to my loan covenant, my IRR, and my break-even occupancy rate?" — No generic tool can answer this.</div>
+      </div>
+
+      <div class="reason-card">
+        <div class="reason-num">2</div>
+        <div class="reason-title">Multi-Jurisdictional Regulatory Complexity</div>
+        <div class="reason-desc">Luxury hotels in Europe face heritage preservation, zoning, environmental assessments, and multi-stage permitting. Generic tools handle building codes. They cannot navigate the politically charged, evolving regulatory landscape of a specific European city.</div>
+        <div class="reason-example">Building a luxury hotel in Rome vs. Dubai vs. Maldives — three entirely different regulatory universes. No generic tool contains this knowledge.</div>
+      </div>
+
+      <div class="reason-card">
+        <div class="reason-num">3</div>
+        <div class="reason-title">Value Engineering Through the Luxury Lens</div>
+        <div class="reason-desc">The owner doesn't want the cheapest solution — they want the optimal value solution that maintains the luxury guest experience. This requires understanding material aesthetics, brand standards, sustainability ratings, and cost simultaneously.</div>
+        <div class="reason-example">"Does this sustainable facade solution meet the brand's required level of opulence?" — A question no generic ConTech tool can even parse.</div>
+      </div>
+
+      <div class="reason-card">
+        <div class="reason-num">4</div>
+        <div class="reason-title">Stakeholder Coordination</div>
+        <div class="reason-desc">The owner manages lender expectations, brand requirements, local government relations, architect vision, and contractor delivery — simultaneously. Generic tools treat all stakeholders equally. The owner needs conflict detection and relationship-aware intelligence.</div>
+        <div class="reason-example">When the lender's cost requirement conflicts with the brand's amenity standard — who arbitrates? The owner. With no AI support.</div>
+      </div>
+
+      <div class="reason-card">
+        <div class="reason-num">5</div>
+        <div class="reason-title">Predictive Pre-Operational Modeling</div>
+        <div class="reason-desc">Development decisions must be informed by future operating performance. No ConTech tool connects the build to the business case.</div>
+        <div class="reason-example">"If I add 3 premium meeting rooms, how does my projected occupancy change in years 1-3, and does that justify the additional EUR 2M in construction cost?"</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Q5: POSITIONING -->
+<section>
+  <div class="q-block">
+    <div class="q-number">Q5</div>
+    <div class="q-question">The Definitive Market Positioning</div>
+    <div class="q-intent">For Corinthia Group board and QP leadership.</div>
+
+    <div class="positioning">
+      <p>Artificial Intelligence is not a novelty; it is a rapidly maturing frontier. Sophisticated tools already exist in adjacent spaces — construction management platforms for general contractors, revenue optimisation systems for hotel operators. These tools validate the potential of AI. However, they solve linear, operational challenges. They are fundamentally incapable of managing the multidimensional challenge of <strong>creation</strong>.</p>
+
+      <p>The structural gap lies not in AI's capability, but in its application. No system exists to holistically fuse the complex confluence of <strong>financial viability, regulatory compliance, brand luxury positioning, and projected owner's return</strong> into a single, actionable intelligence model. This is the owner-developer's core concern: structuring a project that is not merely built, but is financially guaranteed to succeed at the highest level of luxury service for decades.</p>
+
+      <p>This gap has persisted because development knowledge is locked inside family-owned groups — proprietary data that cannot be scraped, bought, or reverse-engineered. The domain is too complex for generic tools. And the decision-makers who allocate EUR 100-300M to a single project will only trust technology built by people who have built what they are building.</p>
+
+      <p>This is why the combination of Corinthia's unparalleled development depth — 60 years, 17+ properties, the full vertical through QP and Disigneq — coupled with Brisen's AI capability proven on a EUR 250M Mandarin Oriental project, is not merely advantageous. <strong>It is structurally necessary.</strong> No other combination possesses both the proprietary data and the deployed AI products required to fill this gap.</p>
+    </div>
+  </div>
+</section>
+
+<!-- CAVEATS -->
+<section>
+  <h2>Honest Caveats</h2>
+  <p class="section-sub">What we acknowledge internally — intellectual honesty strengthens the argument.</p>
+
+  <div class="caveats">
+    <h3>Transparency Notes</h3>
+    <ul>
+      <li><strong>Generic tools ARE used on hotel projects</strong> — Procore, Autodesk, etc. are used by contractors building hotels. But they serve the contractor's workflow, not the owner's investment thesis.</li>
+      <li><strong>Big Four consultancies offer AI-assisted services</strong> — but as bespoke consulting engagements at EUR 500K-2M per engagement. Not productised. Not scalable. Not available to independent owner-developers.</li>
+      <li><strong>In-house tools likely exist</strong> — large institutional developers (Brookfield, Related, Hines) may have internal tools. But these are proprietary, not productised, and not hospitality-specific.</li>
+      <li><strong>The claim is strongest when framed precisely:</strong> "No AI product exists for the luxury hotel owner-developer" — not "No AI is used in hotel construction." Precision matters.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<div class="footer">
+  Research: Gemma 4 + Web Intelligence + Baker Systems | Brisen AI | April 2026
+</div>
+
+</body>
+</html>

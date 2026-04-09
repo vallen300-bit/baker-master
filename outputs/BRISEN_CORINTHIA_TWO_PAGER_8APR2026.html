@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Brisen Group x Corinthia — Partnership Proposal</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+  @page { size: A4 landscape; margin: 0; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    color: #1a1a2e;
+    background: #e8e8ec;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  /* Slide container */
+  .slide {
+    width: 1024px;
+    min-height: 680px;
+    margin: 20px auto;
+    padding: 44px 56px 36px 56px;
+    position: relative;
+    page-break-after: always;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    box-shadow: 0 1px 8px rgba(0,0,0,0.08);
+    border-radius: 4px;
+  }
+
+  .slide:last-child { page-break-after: auto; }
+
+  /* Top bar */
+  .topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    border-bottom: 3px solid #1a1a2e;
+  }
+
+  .topbar-left {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: #1a1a2e;
+  }
+
+  .topbar-right {
+    font-size: 10px;
+    color: #999;
+    letter-spacing: 0.5px;
+  }
+
+  .conf-tag {
+    display: inline-block;
+    font-size: 8px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #fff;
+    background: #1a1a2e;
+    padding: 2px 8px;
+    border-radius: 2px;
+    margin-left: 12px;
+  }
+
+  /* Slide title */
+  .slide-title {
+    font-size: 28px;
+    font-weight: 800;
+    color: #1a1a2e;
+    margin: 20px 0 6px 0;
+    line-height: 1.2;
+  }
+
+  .slide-subtitle {
+    font-size: 14px;
+    color: #666;
+    font-weight: 400;
+    margin-bottom: 24px;
+    line-height: 1.5;
+  }
+
+  /* Key message bar */
+  .keymsg {
+    background: #1a1a2e;
+    color: #fff;
+    padding: 12px 20px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 24px;
+    line-height: 1.5;
+  }
+
+  /* Two column layout */
+  .cols { display: flex; gap: 40px; flex: 1; }
+  .col { flex: 1; }
+  .col-60 { flex: 1.5; }
+  .col-40 { flex: 1; }
+
+  /* Section headers */
+  h3 {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: #999;
+    margin-bottom: 10px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #e5e5e5;
+  }
+
+  /* Bullet lists */
+  .bl { list-style: none; padding: 0; margin: 0 0 16px 0; }
+
+  .bl li {
+    padding: 6px 0 6px 20px;
+    position: relative;
+    border-bottom: 1px solid #f5f5f5;
+    font-size: 12.5px;
+    line-height: 1.5;
+  }
+
+  .bl li:last-child { border-bottom: none; }
+
+  .bl li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 12px;
+    width: 8px;
+    height: 8px;
+    background: #1a1a2e;
+    border-radius: 2px;
+  }
+
+  .bl li strong { color: #1a1a2e; }
+
+  /* Pain bullets — red accent */
+  .bl-pain li::before { background: #c0392b; }
+
+  /* Green accent */
+  .bl-green li::before { background: #27ae60; }
+
+  /* Numbered list */
+  .bn { list-style: none; padding: 0; margin: 0 0 16px 0; counter-reset: item; }
+
+  .bn li {
+    padding: 8px 0 8px 36px;
+    position: relative;
+    border-bottom: 1px solid #f5f5f5;
+    font-size: 12.5px;
+    line-height: 1.5;
+    counter-increment: item;
+  }
+
+  .bn li:last-child { border-bottom: none; }
+
+  .bn li::before {
+    content: counter(item);
+    position: absolute;
+    left: 0;
+    top: 7px;
+    width: 22px;
+    height: 22px;
+    line-height: 22px;
+    text-align: center;
+    background: #1a1a2e;
+    color: #fff;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  /* Stat boxes */
+  .stats { display: flex; gap: 16px; margin: 16px 0; }
+
+  .stat-box {
+    flex: 1;
+    background: #f8f8fa;
+    border-left: 4px solid #1a1a2e;
+    padding: 14px 16px;
+    border-radius: 0 4px 4px 0;
+  }
+
+  .stat-box .stat-num {
+    font-size: 32px;
+    font-weight: 800;
+    color: #1a1a2e;
+    line-height: 1.1;
+  }
+
+  .stat-box .stat-label {
+    font-size: 11px;
+    color: #666;
+    margin-top: 2px;
+    line-height: 1.4;
+  }
+
+  .stat-box.red { border-left-color: #c0392b; }
+  .stat-box.red .stat-num { color: #c0392b; }
+  .stat-box.green { border-left-color: #27ae60; }
+  .stat-box.green .stat-num { color: #27ae60; }
+
+  /* Highlight box */
+  .hl {
+    background: #f0f4ff;
+    border-left: 4px solid #2c5cc5;
+    padding: 12px 16px;
+    border-radius: 0 4px 4px 0;
+    font-size: 13px;
+    line-height: 1.55;
+    margin: 12px 0;
+  }
+
+  .hl strong { color: #1a1a2e; }
+
+  /* Data governance box */
+  .gov-box {
+    background: #f8f8fa;
+    border: 1px solid #e5e5e5;
+    border-radius: 4px;
+    padding: 12px 16px;
+    font-size: 11px;
+    color: #555;
+    line-height: 1.5;
+    margin: 12px 0;
+  }
+
+  /* Table */
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
+
+  th {
+    background: #1a1a2e;
+    color: #fff;
+    text-align: left;
+    padding: 8px 12px;
+    font-weight: 600;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #eee;
+    vertical-align: top;
+  }
+
+  tr:nth-child(even) td { background: #fafafa; }
+
+  /* Next step box */
+  .next-box {
+    background: #1a1a2e;
+    color: #fff;
+    padding: 16px 20px;
+    border-radius: 6px;
+    margin-top: 16px;
+  }
+
+  .next-box .ns-label {
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.4);
+    margin-bottom: 4px;
+  }
+
+  .next-box p { font-size: 13px; line-height: 1.55; }
+
+  /* Source line */
+  .source {
+    font-size: 9px;
+    color: #aaa;
+    margin-top: 6px;
+    line-height: 1.4;
+  }
+
+  /* Footer */
+  .slide-footer {
+    margin-top: auto;
+    padding-top: 12px;
+    border-top: 1px solid #eee;
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    color: #bbb;
+  }
+
+  /* Disclaimer */
+  .disclaimer {
+    font-size: 8px;
+    color: #ccc;
+    line-height: 1.3;
+    font-style: italic;
+    margin-top: 8px;
+  }
+
+  /* Market map */
+  .map-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 2px;
+    background: #ddd;
+    border-radius: 6px;
+    overflow: hidden;
+    margin: 12px 0;
+  }
+
+  .map-cell {
+    padding: 20px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .map-cell.filled { background: #f8f8fa; }
+  .map-cell.empty { background: #fff; }
+  .map-cell.target { background: #eef4ff; border: 2px solid #2c5cc5; }
+
+  .map-cell .mc-title {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #999;
+    margin-bottom: 4px;
+  }
+
+  .map-cell.target .mc-title { color: #2c5cc5; }
+
+  .map-cell .mc-names { font-size: 11px; color: #666; }
+  .map-cell.target .mc-names { color: #1a1a2e; font-weight: 600; }
+  .map-cell.empty .mc-title { color: #c0392b; }
+  .map-cell.empty .mc-names { color: #c0392b; font-style: italic; }
+
+  .map-axis {
+    display: flex;
+    justify-content: space-between;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: #bbb;
+    margin: 4px 0;
+  }
+
+  @media print {
+    .slide { min-height: auto; page-break-after: always; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ SLIDE 1: COVER ============ -->
+<div class="slide" style="justify-content: center; align-items: center; text-align: center;">
+  <div class="conf-tag" style="margin-bottom: 32px;">Confidential</div>
+  <div class="slide-title" style="font-size: 42px; margin-bottom: 12px;">Brisen Group x Corinthia</div>
+  <div class="slide-subtitle" style="font-size: 18px; max-width: 600px;">A Technology Partnership<br>for Hotel Development</div>
+  <div style="margin-top: 40px; font-size: 12px; color: #999;">
+    April 2026<br>
+    Following discussions led by Marcus Pisani
+  </div>
+  <div class="slide-footer">
+    <span>Brisen Group</span>
+    <span>Confidential</span>
+  </div>
+</div>
+
+<!-- ============ SLIDE 2: THE OWNER'S PAIN ============ -->
+<div class="slide">
+  <div class="topbar">
+    <div class="topbar-left">Brisen Group x Corinthia</div>
+    <div class="topbar-right">Confidential | April 2026</div>
+  </div>
+
+  <div class="slide-title">The Owner's Pain</div>
+  <div class="slide-subtitle">EUR 100-300M commitment. 3-5 year timeline. The owner bears 100% of the capital risk — yet sits farthest from the truth.</div>
+
+  <div class="cols">
+    <div class="col">
+      <h3>Development Phase</h3>
+      <ul class="bl bl-pain">
+        <li><strong>Design inefficiencies and procurement errors.</strong> Brand standards translated into specifications by hand. Errors compound across concurrent projects. How many design decisions are repeated without benchmarking against past outcomes?</li>
+        <li><strong>No independent view of progress.</strong> Reports come from the party with the strongest incentive to overstate completion. No real-time verification.</li>
+        <li><strong>Delays and cost overruns.</strong> Scope changes cascade through the programme unchecked. No system connects a design change to the budget, the timeline, and the financing covenant — simultaneously.</li>
+      </ul>
+    </div>
+    <div class="col">
+      <h3>Operations & Oversight</h3>
+      <ul class="bl bl-pain">
+        <li><strong>Information asymmetry.</strong> Operators obscure operational weaknesses. Brands limit data access under system sovereignty. The owner who carries the risk has the least visibility.</li>
+        <li><strong>No early warning.</strong> Critical deviations surface in monthly reports — six weeks late. By the time the owner sees the problem, the downward spiral has begun.</li>
+        <li><strong>Possible claims left on the table.</strong> How many recoverable items go unnoticed in documentation no team has time to fully review?</li>
+        <li><strong>Decades of precious development experience.</strong> How much of it is in a structured database? How many decisions from project 5 informed project 15?</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="source">Context: HospitalityInside (Jan 2026) describes hotel insolvencies as "the collective failure of an ecosystem" built on information asymmetry and zero data-driven controls.</div>
+
+  <div class="slide-footer">
+    <span>Brisen Group x Corinthia</span>
+    <span>2</span>
+  </div>
+</div>
+
+<!-- ============ SLIDE 3: THE GAP ============ -->
+<div class="slide">
+  <div class="topbar">
+    <div class="topbar-left">Brisen Group x Corinthia</div>
+    <div class="topbar-right">Confidential | April 2026</div>
+  </div>
+
+  <div class="slide-title">A Market Nobody Serves</div>
+
+  <div class="keymsg">To our knowledge, no product exists for the luxury hotel owner-developer. Construction tech serves contractors. Revenue AI serves operators. The owner is alone.</div>
+
+  <div class="cols">
+    <div class="col-60">
+      <h3>Why the gap persists</h3>
+      <ul class="bl">
+        <li><strong>Data trapped in individual projects.</strong> Unstructured, dispersed across departments, never digitised. A group with 17 hotels starts project 18 without the structured benefit of the first 17.</li>
+        <li><strong>Domain too complex for generic tools.</strong> A dozen disciplines in parallel — architecture, heritage regulation, brand standards, FF&E, construction, residences, pre-opening. No platform reasons across all of them.</li>
+        <li><strong>Requires both hotel development experience and AI capability.</strong> That combination has not existed until now.</li>
+      </ul>
+    </div>
+    <div class="col-40">
+      <h3>Market map</h3>
+      <div class="map-axis"><span>Contractors</span><span>Owners</span></div>
+      <div class="map-grid">
+        <div class="map-cell filled">
+          <div class="mc-title">Construction + Contractors</div>
+          <div class="mc-names">Procore, Autodesk, OpenSpace</div>
+        </div>
+        <div class="map-cell empty">
+          <div class="mc-title">Construction + Owners</div>
+          <div class="mc-names">Empty</div>
+        </div>
+        <div class="map-cell filled">
+          <div class="mc-title">Operations + Brands</div>
+          <div class="mc-names">IDeaS, Duetto, Revinate</div>
+        </div>
+        <div class="map-cell target">
+          <div class="mc-title">Development + Owners</div>
+          <div class="mc-names">Brisen x Corinthia</div>
+        </div>
+      </div>
+      <div class="map-axis"><span>Operations</span><span>Development</span></div>
+    </div>
+  </div>
+
+  <div class="slide-footer">
+    <span>Brisen Group x Corinthia</span>
+    <span>3</span>
+  </div>
+</div>
+
+<!-- ============ SLIDE 4: PROOF ============ -->
+<div class="slide">
+  <div class="topbar">
+    <div class="topbar-left">Brisen Group x Corinthia</div>
+    <div class="topbar-right">Confidential | April 2026</div>
+  </div>
+
+  <div class="slide-title">One Project. One Product.<br>EUR 6M Identified, Evidenced, Ready for Review.</div>
+
+  <div class="keymsg">Brisen Group built a EUR 300M Mandarin Oriental hotel in Vienna — and with AI developers and construction lawyers, built the product that solved its own claims problem.</div>
+
+  <div class="cols">
+    <div class="col-60">
+      <h3>ClaimsMax — what it does</h3>
+      <ul class="bl bl-green">
+        <li><strong>Ask any question in plain language.</strong> "Show me every deviation by Contractor X from approved specification." Evidenced answer with source documents — in minutes.</li>
+        <li><strong>Reads 100% of the archive.</strong> A human team reviews a fraction under time pressure.</li>
+        <li><strong>Connects what humans miss.</strong> Correspondence from one department contradicting claims submitted years later through a different system.</li>
+        <li><strong>Traces masked changes.</strong> Unauthorised specification changes disguised as routine change orders — across 65,000 installed items.</li>
+        <li><strong>Shifts the burden of proof.</strong> Dated, linked documents proving deviations. Substantially harder for contractors to dispute their own correspondence.</li>
+      </ul>
+      <div class="hl"><strong>It surfaces what you did not know you were owed — and proves it.</strong></div>
+    </div>
+    <div class="col-40">
+      <h3>Platform scale</h3>
+      <div class="stats" style="flex-direction: column;">
+        <div class="stat-box">
+          <div class="stat-num">~200K</div>
+          <div class="stat-label">Documents ingested</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-num">~180K</div>
+          <div class="stat-label">Emails indexed</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-num">1.4M</div>
+          <div class="stat-label">Searchable passages across 9 categories</div>
+        </div>
+        <div class="stat-box green">
+          <div class="stat-num">EUR 6M+</div>
+          <div class="stat-label">Potential claims identified for legal review. 1,000+ items. 30 days vs. 6-12 months.</div>
+        </div>
+      </div>
+
+      <h3>In development</h3>
+      <ul class="bl">
+        <li><strong>TenderMax</strong> — brand standards → procurement specs, bid evaluation</li>
+        <li><strong>OwnerView</strong> — portfolio dashboard across geographies</li>
+        <li><strong>SiteWatch</strong> — computer vision, progress vs. plan</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="slide-footer">
+    <span>Brisen Group x Corinthia</span>
+    <span>4</span>
+  </div>
+</div>
+
+<!-- ============ SLIDE 5: WHY CORINTHIA + BRISEN ============ -->
+<div class="slide">
+  <div class="topbar">
+    <div class="topbar-left">Brisen Group x Corinthia</div>
+    <div class="topbar-right">Confidential | April 2026</div>
+  </div>
+
+  <div class="slide-title">Why Corinthia + Brisen</div>
+
+  <div class="keymsg">ClaimsMax solved Brisen's problem. The opportunity is offering it to every luxury hotel developer. To do this at scale and in compliance with European AI regulation, Brisen is seeking a renowned technology partner and training data across numerous projects.</div>
+
+  <div class="cols">
+    <div class="col-60">
+      <h3>The triangle</h3>
+      <ul class="bl">
+        <li><strong>NVIDIA</strong> provides the processing power to run AI models at scale. Zero European hospitality partnerships today. Following meetings at GTC 2026, Brisen is in early-stage discussions with NVIDIA's hospitality team on compute infrastructure and technical partnership.</li>
+        <li><strong>Training data</strong> — the AI trains further on proprietary multi-project hospitality development data. The kind that exists only inside organisations that have built luxury hotels for decades.</li>
+        <li><strong>Corinthia completes the triangle.</strong> QP, Disigneq, 17+ projects, 10 countries, third-party mega-developments, sixty years of decisions, costs, and outcomes. This turns one product into a platform.</li>
+      </ul>
+
+      <div class="gov-box">
+        <strong>Data sovereignty.</strong> Your data stays on your systems — nothing copied or transferred. Hosted on SOC 2 Type II and ISO 27001 certified cloud infrastructure. EU-region processing. Role-scoped access. Full activity traceability. Designed for GDPR compliance. Data processing terms to be agreed in a formal DPA.
+      </div>
+    </div>
+    <div class="col-40">
+      <h3>What is in it for Corinthia</h3>
+      <ul class="bn">
+        <li><strong>Immediate deployment</strong> — AI on Corinthia's own pipeline: claims, procurement, portfolio intelligence</li>
+        <li><strong>Data advantage</strong> — proprietary intelligence asset no competitor can replicate</li>
+        <li><strong>Distribution</strong> — every QP third-party client encounters the platform</li>
+        <li><strong>New capability for QP</strong> — AI-augmented project management as premium offering</li>
+        <li><strong>Market position</strong> — among the first luxury hotel groups to integrate AI into development</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="slide-footer">
+    <span>Brisen Group x Corinthia</span>
+    <span>5</span>
+  </div>
+</div>
+
+<!-- ============ SLIDE 6: THE PROPOSAL + NEXT STEP ============ -->
+<div class="slide">
+  <div class="topbar">
+    <div class="topbar-left">Brisen Group x Corinthia</div>
+    <div class="topbar-right">Confidential | April 2026</div>
+  </div>
+
+  <div class="slide-title">The Proposal</div>
+  <div class="slide-subtitle">Phase 1 — 90-Day Proof of Concept</div>
+
+  <div class="cols">
+    <div class="col-60">
+      <table>
+        <tr><th width="50%">Corinthia / QP Provides</th><th width="50%">Brisen Provides</th></tr>
+        <tr><td>Documentation from one completed or active QP project</td><td>Full ClaimsMax deployment and analysis</td></tr>
+        <tr><td>QP project lead (~2-3 hours/week)</td><td>All engineering, compute, implementation at Brisen's cost</td></tr>
+        <tr><td>Feedback on findings</td><td>Monthly reports + final presentation to leadership</td></tr>
+      </table>
+
+      <p style="font-size: 12px; margin-top: 12px;"><strong>Suggested pilot:</strong> A completed QP third-party project with known outcomes — demonstrating what the AI would have caught, zero commercial sensitivity.</p>
+
+      <h3 style="margin-top: 16px;">Expected outcomes</h3>
+      <ul class="bl bl-green">
+        <li>Potential claims identified for review (industry literature: 2-5% of construction spend typically under-claimed)</li>
+        <li>30 days of AI analysis vs. months of manual review</li>
+        <li>Business case for portfolio-wide deployment</li>
+      </ul>
+    </div>
+    <div class="col-40">
+      <div class="next-box">
+        <div class="ns-label">Next Step</div>
+        <p>A working session between Brisen and Corinthia leadership on cooperation and structuring, together with a live demonstration of ClaimsMax and the future products in development.</p>
+      </div>
+
+      <div class="disclaimer" style="margin-top: 20px;">
+        This document is for discussion purposes only and does not constitute a binding offer or representation. All terms subject to formal agreement. Phase 1 scope to be confirmed in a separate letter of intent.
+      </div>
+
+      <div style="margin-top: 20px; font-size: 10px; color: #aaa;">
+        <strong>Attachment:</strong> Market Gap Analysis<br>
+        Five-question adversarial stress test across industry databases, trade publications, and competitive intelligence.
+      </div>
+    </div>
+  </div>
+
+  <div class="slide-footer">
+    <span>Brisen Group x Corinthia</span>
+    <span>6</span>
+  </div>
+</div>
+
+</body>
+</html>
