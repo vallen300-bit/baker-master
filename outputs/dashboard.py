@@ -117,42 +117,6 @@ app.add_middleware(
 )
 
 # ============================================================
-# BAKER-MCP-REMOTE: SSE endpoint for remote MCP access
-# ============================================================
-try:
-    from mcp.server.sse import SseServerTransport
-    _mcp_sse = SseServerTransport("/mcp/messages/")
-
-    @app.get("/mcp/sse")
-    async def mcp_sse_endpoint(request: Request):
-        """SSE endpoint for Claude Code web MCP connections."""
-        api_key = request.headers.get("x-baker-key") or request.query_params.get("key")
-        if api_key != _BAKER_API_KEY:
-            return JSONResponse(status_code=401, content={"error": "Invalid API key"})
-
-        # Lazy import to avoid loading all MCP tools at startup
-        import importlib.util
-        spec = importlib.util.spec_from_file_location(
-            "baker_mcp_server",
-            os.path.join(os.path.dirname(__file__), "..", "baker-mcp", "baker_mcp_server.py"),
-        )
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        mcp_app = mod.app
-
-        async with _mcp_sse.connect_sse(request.scope, request.receive, request._send) as (read_stream, write_stream):
-            await mcp_app.run(read_stream, write_stream, mcp_app.create_initialization_options())
-
-    @app.post("/mcp/messages/")
-    async def mcp_messages_endpoint(request: Request):
-        """Message handler for MCP SSE transport."""
-        await _mcp_sse.handle_post_message(request.scope, request.receive, request._send)
-
-    logger.info("BAKER-MCP-REMOTE: SSE endpoint mounted at /mcp/sse")
-except ImportError:
-    logger.warning("BAKER-MCP-REMOTE: mcp package not installed — SSE endpoint disabled")
-
-# ============================================================
 # SCHEDULER-WATCHDOG-1: Request-time heartbeat check
 # ============================================================
 _watchdog_last_check = 0
