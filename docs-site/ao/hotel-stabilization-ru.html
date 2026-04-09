@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Стабилизация отеля — Сколько времени нужно?</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Georgia', serif; background: #0a0a0f; color: #e8e6f0; }
+
+  .slide {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    padding: 60px 40px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+
+  .slide-inner {
+    max-width: 900px;
+    width: 100%;
+  }
+
+  .slide-number {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 3px;
+    color: #c9a96e;
+    margin-bottom: 24px;
+  }
+
+  h1 {
+    font-size: 2.4rem;
+    font-weight: 400;
+    line-height: 1.3;
+    margin-bottom: 16px;
+    color: #fff;
+  }
+
+  h2 {
+    font-size: 1.6rem;
+    font-weight: 400;
+    line-height: 1.4;
+    margin-bottom: 24px;
+    color: #fff;
+  }
+
+  .subtitle {
+    font-size: 1.1rem;
+    color: #8a87a0;
+    margin-bottom: 40px;
+    line-height: 1.6;
+  }
+
+  .big-number {
+    font-size: 5rem;
+    font-weight: 300;
+    color: #c9a96e;
+    line-height: 1;
+    margin-bottom: 12px;
+  }
+
+  .big-label {
+    font-size: 1.2rem;
+    color: #8a87a0;
+    margin-bottom: 40px;
+  }
+
+  .fact-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin: 32px 0;
+  }
+
+  .fact-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(201,169,110,0.15);
+    border-radius: 12px;
+    padding: 28px;
+  }
+
+  .fact-card .number {
+    font-size: 2.2rem;
+    font-weight: 300;
+    color: #c9a96e;
+    margin-bottom: 8px;
+  }
+
+  .fact-card .label {
+    font-size: 0.9rem;
+    color: #8a87a0;
+    line-height: 1.5;
+  }
+
+  .timeline {
+    position: relative;
+    margin: 40px 0;
+    padding-left: 40px;
+  }
+
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 12px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(to bottom, #c9a96e, rgba(201,169,110,0.1));
+  }
+
+  .timeline-item {
+    position: relative;
+    margin-bottom: 36px;
+  }
+
+  .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -33px;
+    top: 6px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #0a0a0f;
+    border: 2px solid #c9a96e;
+  }
+
+  .timeline-item.active::before {
+    background: #c9a96e;
+    box-shadow: 0 0 12px rgba(201,169,110,0.4);
+  }
+
+  .timeline-item .period {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: #c9a96e;
+    margin-bottom: 6px;
+  }
+
+  .timeline-item .title {
+    font-size: 1.15rem;
+    color: #fff;
+    margin-bottom: 6px;
+  }
+
+  .timeline-item .desc {
+    font-size: 0.9rem;
+    color: #8a87a0;
+    line-height: 1.5;
+  }
+
+  .highlight-box {
+    background: rgba(201,169,110,0.08);
+    border: 1px solid rgba(201,169,110,0.25);
+    border-radius: 12px;
+    padding: 32px;
+    margin: 32px 0;
+  }
+
+  .highlight-box .quote {
+    font-size: 1.2rem;
+    font-style: italic;
+    color: #e8e6f0;
+    line-height: 1.6;
+    margin-bottom: 12px;
+  }
+
+  .highlight-box .source {
+    font-size: 0.8rem;
+    color: #c9a96e;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .comparison-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 32px 0;
+  }
+
+  .comparison-table th {
+    text-align: left;
+    padding: 14px 20px;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: #c9a96e;
+    border-bottom: 1px solid rgba(201,169,110,0.2);
+    font-weight: 500;
+  }
+
+  .comparison-table td {
+    padding: 16px 20px;
+    font-size: 0.95rem;
+    color: #e8e6f0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    line-height: 1.4;
+  }
+
+  .comparison-table tr:last-child td {
+    border-bottom: none;
+  }
+
+  .tag {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  .tag-green { background: rgba(76,175,80,0.15); color: #81c784; }
+  .tag-gold { background: rgba(201,169,110,0.15); color: #c9a96e; }
+  .tag-blue { background: rgba(100,149,237,0.15); color: #90b4f0; }
+
+  .vienna-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+    margin: 32px 0;
+  }
+
+  .vienna-stat {
+    text-align: center;
+    padding: 24px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .vienna-stat .num {
+    font-size: 2rem;
+    font-weight: 300;
+    color: #c9a96e;
+    margin-bottom: 6px;
+  }
+
+  .vienna-stat .lbl {
+    font-size: 0.8rem;
+    color: #8a87a0;
+  }
+
+  .bottom-line {
+    font-size: 1.3rem;
+    color: #fff;
+    line-height: 1.6;
+    margin-top: 32px;
+    padding-top: 32px;
+    border-top: 1px solid rgba(201,169,110,0.2);
+  }
+
+  .footer {
+    text-align: center;
+    padding: 40px;
+    font-size: 0.65rem;
+    color: #333;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  @media (max-width: 700px) {
+    .fact-grid, .vienna-stats { grid-template-columns: 1fr; }
+    h1 { font-size: 1.8rem; }
+    .big-number { font-size: 3.5rem; }
+    .slide { padding: 40px 24px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- СЛАЙД 1: Титул -->
+<div class="slide">
+  <div class="slide-inner" style="text-align: center;">
+    <div class="slide-number">Конфиденциально</div>
+    <h1>Когда люксовые отели<br>начинают зарабатывать?</h1>
+    <p class="subtitle">Данные индустрии о том, сколько времени нужно новому отелю<br>для выхода на стабильную работу. Апрель 2026.</p>
+  </div>
+</div>
+
+<!-- СЛАЙД 2: Главный ответ -->
+<div class="slide">
+  <div class="slide-inner">
+    <div class="slide-number">Короткий ответ</div>
+    <div class="big-number">3 — 5 лет</div>
+    <div class="big-label">Столько времени требуется каждому люксовому отелю в мире для выхода на стабильную прибыль.</div>
+
+    <div class="fact-grid">
+      <div class="fact-card">
+        <div class="number">3,08</div>
+        <div class="label">Среднее количество лет до стабилизации по всем классам отелей. По данным Международного общества гостиничных консультантов (ISHC) и Университета Пенсильвании.</div>
+      </div>
+      <div class="fact-card">
+        <div class="number">58%</div>
+        <div class="label">Типичная загрузка в первый месяц работы нового отеля. Нужно до двух лет, чтобы достичь уровня существующих конкурентов.</div>
+      </div>
+      <div class="fact-card">
+        <div class="number">7</div>
+        <div class="label">Кварталов (почти два года) нужно новому люксовому отелю, чтобы сравняться по загрузке с конкурентами на том же рынке.</div>
+      </div>
+      <div class="fact-card">
+        <div class="number">4 — 5</div>
+        <div class="label">Лет для люксовых отелей в конкурентных европейских городах. На таких рынках много сильных игроков, и нужно время, чтобы завоевать лояльных гостей.</div>
+      </div>
+    </div>
+
+    <div class="highlight-box">
+      <div class="quote">&laquo;Исторически большинство девелоперов закладывают трёхлетний период выхода на целевую загрузку.&raquo;</div>
+      <div class="source">ISHC / Университет Пенсильвании — опубликованное исследование</div>
+    </div>
+  </div>
+</div>
+
+<!-- СЛАЙД 3: Путь по годам -->
+<div class="slide">
+  <div class="slide-inner">
+    <div class="slide-number">Что происходит по годам</div>
+    <h2>Путь от открытия до прибыли</h2>
+
+    <div class="timeline">
+      <div class="timeline-item active">
+        <div class="period">Год 1 — Мы сейчас здесь</div>
+        <div class="title">Узнаваемость. Заполнение номеров. Настройка процессов.</div>
+        <div class="desc">Загрузка: 55 — 65% от целевой. Выручка покрывает от половины до двух третей расходов. Отель учится — какие рынки реагируют, какие услуги работают, как эффективно управлять персоналом. Каждый люксовый отель в мире проходит через этот этап. <span class="tag tag-gold">MO Вена: 5-й месяц</span></div>
+      </div>
+
+      <div class="timeline-item">
+        <div class="period">Год 2</div>
+        <div class="title">Набор оборотов. Постоянные гости. Репутация.</div>
+        <div class="desc">Загрузка: 70 — 78%. Выручка растёт на 25 — 40% по сравнению с первым годом. Положительные отзывы формируют доверие. Корпоративные клиенты начинают бронировать регулярно. Самый заметный рост — именно на этом этапе.</div>
+      </div>
+
+      <div class="timeline-item">
+        <div class="period">Год 3</div>
+        <div class="title">Переломный момент. Стабилизация на горизонте.</div>
+        <div class="desc">Загрузка: 80 — 88%. Фокус смещается с «продажи номеров» на «оптимизацию доходов». Рестораны начинают приносить прибыль. Партнёрства с локальным бизнесом укрепляются. Рынок принял нового игрока.</div>
+      </div>
+
+      <div class="timeline-item">
+        <div class="period">Год 4 — 5</div>
+        <div class="title">Стабильность. Предсказуемость. Прибыль.</div>
+        <div class="desc">Загрузка: 90%+. Выручка стабильна из года в год. Отель работает на уровне, заложенном в инвестиционной модели. Управление нацелено на рост, а не на выживание.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- СЛАЙД 4: Что используют консультанты -->
+<div class="slide">
+  <div class="slide-inner">
+    <div class="slide-number">Что используют инвестиционные консультанты</div>
+    <h2>Стандартные допущения в каждой модели оценки отеля</h2>
+    <p class="subtitle">Когда такие компании, как CBRE, HVS, JLL или Cushman &amp; Wakefield оценивают новый люксовый отель, они закладывают следующие параметры выхода на мощность. Это не мнения — это стандартная практика всей индустрии.</p>
+
+    <table class="comparison-table">
+      <thead>
+        <tr>
+          <th>Год</th>
+          <th>Ожидаемая загрузка</th>
+          <th>Выручка от потенциала</th>
+          <th>Статус</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Год 1</strong></td>
+          <td>55 — 65%</td>
+          <td>50 — 65%</td>
+          <td><span class="tag tag-gold">Разгон</span></td>
+        </tr>
+        <tr>
+          <td><strong>Год 2</strong></td>
+          <td>70 — 78%</td>
+          <td>75 — 85%</td>
+          <td><span class="tag tag-blue">Рост</span></td>
+        </tr>
+        <tr>
+          <td><strong>Год 3</strong></td>
+          <td>80 — 88%</td>
+          <td>85 — 95%</td>
+          <td><span class="tag tag-blue">Приближение к цели</span></td>
+        </tr>
+        <tr>
+          <td><strong>Год 4+</strong></td>
+          <td>90%+</td>
+          <td>100%</td>
+          <td><span class="tag tag-green">Стабильность</span></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="highlight-box">
+      <div class="quote">&laquo;Люксовый сегмент менее чувствителен к изменениям цен и привлекает состоятельных международных туристов. RevPAR люксовых отелей Вены уже на 20% выше уровня 2019 года.&raquo;</div>
+      <div class="source">Christie &amp; Co — Отчёт о рынке размещения Вены, 2024</div>
+    </div>
+  </div>
+</div>
+
+<!-- СЛАЙД 5: Рынок Вены -->
+<div class="slide">
+  <div class="slide-inner">
+    <div class="slide-number">Рынок Вены сегодня</div>
+    <h2>Один из сильнейших люксовых гостиничных рынков Европы</h2>
+
+    <div class="vienna-stats">
+      <div class="vienna-stat">
+        <div class="num">76,8%</div>
+        <div class="lbl">Загрузка<br>по рынку</div>
+      </div>
+      <div class="vienna-stat">
+        <div class="num">&euro;211</div>
+        <div class="lbl">Средний тариф<br>за номер (ADR)</div>
+      </div>
+      <div class="vienna-stat">
+        <div class="num">+20%</div>
+        <div class="lbl">RevPAR люкса<br>к 2019 году</div>
+      </div>
+    </div>
+
+    <p class="subtitle">Люксовый сегмент Вены опережает весь рынок. Международный туризм продолжает уверенно восстанавливаться. Культурная репутация города, деловой туризм и насыщенный календарь мероприятий обеспечивают устойчивый спрос.</p>
+
+    <p class="subtitle">Среди недавних открытий люксовых отелей в Вене — Rosewood и Imperial Riding School (Marriott Autograph Collection). Все они проходят тот же процесс стабилизации.</p>
+
+    <p class="bottom-line">Mandarin Oriental Vienna открылся в ноябре 2025 года. Прошло пять месяцев. Каждый гостиничный консультант в мире закладывает от трёх до пяти лет на стабилизацию. Текущий операционный разрыв — ожидаемый и временный.</p>
+  </div>
+</div>
+
+<!-- СЛАЙД 6: Mandarin Oriental -->
+<div class="slide">
+  <div class="slide-inner">
+    <div class="slide-number">Mandarin Oriental — глобальный контекст</div>
+    <h2>Бренд растёт и показывает результаты</h2>
+
+    <div class="fact-grid">
+      <div class="fact-card">
+        <div class="number">+11%</div>
+        <div class="label">Рост RevPAR по всему портфелю MO в 2025 году. Бренд работает.</div>
+      </div>
+      <div class="fact-card">
+        <div class="number">30</div>
+        <div class="label">Отелей в стадии разработки. 3 — 5 новых открытий в год до 2033 года.</div>
+      </div>
+      <div class="fact-card">
+        <div class="number">40</div>
+        <div class="label">Отелей по всему миру сегодня, включая два новых открытия в 2025 году и объекты в Риме и на Бали в 2026 году.</div>
+      </div>
+      <div class="fact-card">
+        <div class="number">19</div>
+        <div class="label">Брендированных резиденций в разработке по всему миру — та же модель, что и MO Vienna.</div>
+      </div>
+    </div>
+
+    <div class="highlight-box">
+      <div class="quote">&laquo;Ожидается рост маржинальности по мере стабилизации объектов.&raquo;</div>
+      <div class="source">Mandarin Oriental — результаты H1 2025</div>
+    </div>
+
+    <p class="subtitle">Даже в собственной корпоративной отчётности Mandarin Oriental использует слово «стабилизация» — признавая, что новым отелям нужно время для выхода на полный потенциал. Это не проблема. Так работает этот бизнес.</p>
+  </div>
+</div>
+
+<!-- СЛАЙД 7: Итог -->
+<div class="slide">
+  <div class="slide-inner" style="text-align: center;">
+    <div class="slide-number">Итог</div>
+    <h1 style="margin-bottom: 40px;">Каждому люксовому отелю в мире<br>нужно 3 — 5 лет для стабилизации.</h1>
+
+    <p class="subtitle" style="max-width: 680px; margin: 0 auto 40px;">
+      MO Vienna — пять месяцев с момента открытия.<br>
+      Люксовый рынок Вены силён — на 20% выше допандемийного уровня.<br>
+      Бренд Mandarin Oriental растёт глобально.<br><br>
+      Текущий операционный разрыв — нормален, ожидаем и временен.<br>
+      Он всегда был частью инвестиционной модели.
+    </p>
+
+    <div style="margin-top: 60px; padding-top: 32px; border-top: 1px solid rgba(201,169,110,0.15);">
+      <div style="font-size: 0.75rem; color: #8a87a0; line-height: 1.8;">
+        Источники: ISHC / Университет Пенсильвании &bull; CoStar / STR Global &bull; CBRE Hotels<br>
+        Christie &amp; Co — Отчёт о рынке Вены &bull; Mandarin Oriental H1 2025<br>
+        HVS European Hotel Transactions 2024
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">Brisen Group | Конфиденциально | Апрель 2026</div>
+
+</body>
+</html>
