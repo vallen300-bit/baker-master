@@ -1,171 +1,32 @@
 # Baker / Sentinel — Repo CLAUDE.md
 
-This file is read automatically by Claude Code at session start.
-It provides the context needed to work on this codebase from any machine.
-
-## What This Is
-
-**Sentinel** = the full AI system (triggers, infrastructure, memory).
-**Baker** = the persona/reasoning layer inside Sentinel — Dimitry Vallen's AI Chief of Staff.
-**CEO Cockpit** = the dashboard frontend at baker-master.onrender.com.
-
-3-layer architecture: Sentinel (Layer 1) → Baker (Layer 2) → CEO Cockpit (Layer 3).
+**Sentinel** = AI system. **Baker** = reasoning layer (Dimitry Vallen's AI Chief of Staff). **CEO Cockpit** = dashboard at baker-master.onrender.com.
 
 ## Stack
-
-- **Backend:** FastAPI (port 8080), Python 3.11+
-- **Database:** PostgreSQL on Neon (structured data, audit logs)
-- **Vectors:** Qdrant Cloud (Voyage AI voyage-3, 1024 dims) — cluster: baker-memory (AWS EU Central 1)
-- **LLM:** Claude claude-opus-4-6 (1M context) via Anthropic API
-- **Frontend:** Vanilla JS, served from outputs/static/
-- **Deployment:** Render (auto-deploys from main branch on push)
-- **Repo:** github.com/vallen300-bit/baker-master
+FastAPI (port 8080), Python 3.11+, PostgreSQL (Neon), Qdrant Cloud (Voyage AI voyage-3, 1024d), Claude claude-opus-4-6 via Anthropic API, Vanilla JS frontend, Render (auto-deploys from main). Repo: github.com/vallen300-bit/baker-master.
 
 ## Your Role — Two Hats
+1. **Code** — implement, debug, test, push. Syntax-check before committing.
+2. **PL** — scope work, sequence batches, think architecturally.
 
-1. **Code** — implement, debug, test, push. Syntax-check all modified files before committing.
-2. **PL (Project Lead)** — scope work, sequence batches, think architecturally.
+## Rules
+- **Plan mode** for non-trivial tasks (3+ steps). If something fails, STOP and re-plan.
+- **Demand elegance** — challenge your own approach. Skip for one-liners.
+- **Subagents** — use frequently to keep main context clean. Parallel when independent.
+- **Autonomous bugs** — just fix them. Diagnose from evidence, zero context switching from user.
+- **Self-improvement** — after corrections, update `tasks/lessons.md`.
+- **Verify before done** — test the actual flow. Syntax check: `python3 -c "import py_compile; py_compile.compile('file.py', doraise=True)"`
+- **Never force push** to main. Never store secrets in code. Fault-tolerant writes (try/except).
+- **Git identity:** Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
-Switch hats as needed. When coding, code. When scoping, think.
-
-## Plan Mode Default
-
-- **Enter plan mode** for any non-trivial task (3+ steps or architectural decisions). Write detailed specs upfront to reduce ambiguity.
-- **If something goes wrong, STOP and re-plan immediately** — don't keep pushing down a failing path. Step back, consider alternatives, then proceed.
-- **Use plan mode for verification steps too** — not just building. Plan how you'll prove it works before you start coding.
-
-## How to Orient at Session Start
-
-1. `git pull && git log --oneline -10` — see what shipped recently
-2. Read this file (you're doing it now)
-3. Scan key files if working on a specific area (see Key Files below)
-4. Ask the Director what to work on, or check ClickUp Handoff Notes list for queued tasks
-
-## Key Files
-
-### Core Pipeline
-| File | Purpose |
-|------|---------|
-| `orchestrator/pipeline.py` | 5-step RAG pipeline: Classify → Retrieve → Augment → Generate → Store |
-| `orchestrator/prompt_builder.py` | Pipeline prompt (structured JSON output) |
-| `orchestrator/scan_prompt.py` | Scan prompt + STEP1C domain/mode prompt extensions + STEP3 DB-driven preferences + build_mode_aware_prompt() |
-| `orchestrator/action_handler.py` | Intent router — email, WhatsApp, deadline, VIP, fireflies, ClickUp, **capability_task** actions |
-| `orchestrator/decision_engine.py` | **DECISION-ENGINE-1A:** score_trigger() — domain, urgency, tier, mode, overrides, VIP SLA |
-| `orchestrator/agent.py` | **AGENTIC-RAG-1 + STEP1B + RETRIEVAL-FIX-1:** Agent loop with 12 tools, ToolExecutor, tier-based routing, matter-aware search |
-| `orchestrator/capability_registry.py` | **AGENT-FRAMEWORK-1:** Loads capability definitions from DB, 5-min cache, trigger pattern matching |
-| `orchestrator/capability_router.py` | **AGENT-FRAMEWORK-1:** Fast path (single capability) + delegate path (decomposer → multi-capability → synthesizer) |
-| `orchestrator/capability_runner.py` | **AGENT-FRAMEWORK-1:** Executes capability runs — run_single, run_streaming, run_multi, run_synthesizer |
-| `memory/retriever.py` | Read-side: Qdrant vector search + PostgreSQL structured queries + **full-text enrichment (meetings, emails, documents)** |
-| `memory/store_back.py` | Write-side: PostgreSQL writes + Qdrant interaction embeddings + STEP3 director_preferences + VIP profiles + **capability framework tables** + **document storage** |
-| `tools/document_pipeline.py` | **SPECIALIST-UPGRADE-1B:** Haiku classify → extract pipeline for documents + email attachments |
-| `tools/extraction_schemas.py` | **EXTRACTION-VALIDATION-1:** 14 Pydantic v2 models, validate_extraction(), amount coercion, promotion SQL |
-| `orchestrator/cadence_tracker.py` | **F3:** Per-contact communication cadence (avg_inbound_gap_days), cadence-relative silence detection, 6h scheduled job |
-| `orchestrator/risk_detector.py` | **F1:** Compounding risk detector (6 signals, 2h cycle), advisory xact locks |
-| `orchestrator/chain_runner.py` | **AUTONOMOUS-CHAINS-1:** Plan-execute-verify engine. T1/T2 triggers → Claude plans → ToolExecutor runs → verify → WA notify Director |
-| `orchestrator/memory_consolidator.py` | **B4:** Weekly compression of old interactions (>30d) into per-matter Haiku summaries |
-| `orchestrator/trend_detector.py` | **F6:** Monthly pattern analysis — alerts, contacts, costs, matters, deadlines |
-| `orchestrator/initiative_engine.py` | **PROACTIVE-INITIATIVE-1:** Daily initiative proposals (priorities + calendar + deadlines + cadence → 2-3 actions) |
-| `orchestrator/sentiment_scorer.py` | **SENTIMENT-TRAJECTORY-1:** Haiku tone scoring (1-5 scale), batch backfill, sentiment trend computation |
-| `orchestrator/convergence_detector.py` | **CROSS-MATTER-CONVERGENCE-1:** Weekly cross-matter entity detection (people, companies, amounts across matters) |
-| `orchestrator/obligation_generator.py` | **OBLIGATION-GENERATOR:** Daily 06:50 UTC. Haiku extracts 5-15 per-item task proposals from signals → proposed_actions table → morning push |
-| `orchestrator/action_completion_detector.py` | **ACTION-COMPLETION:** Every 6h. Checks approved actions' email_to/email_from signals against sent_emails/email_messages. Auto-marks done. |
-| `orchestrator/research_trigger.py` | **ART-1:** Haiku classifies VIP WhatsApp for forwarded intelligence → research_proposals table → "Run Dossier?" card |
-| `tools/linkedin_client.py` | **C1:** Provider-agnostic LinkedIn enrichment (Netrows first, swap to PDL if needed) |
-
-### API & Dashboard
-| File | Purpose |
-|------|---------|
-| `outputs/dashboard.py` | FastAPI app — all REST endpoints + scan_chat() SSE streaming + /mobile route + /api/contacts/enrich |
-| `outputs/static/index.html` | CEO Cockpit frontend |
-| `outputs/static/app.js` | Frontend JS with bakerFetch() auth wrapper |
-| `outputs/static/mobile.html` | **MOBILE-WEB-1:** Standalone mobile page (Ask Baker + Ask Specialist, PWA) |
-| `outputs/static/mobile.js` | Mobile JS — SSE streaming, capability picker, dark mode |
-| `outputs/static/mobile.css` | Mobile CSS — touch-friendly, `100dvh`, dark mode via prefers-color-scheme |
-| `outputs/email_router.py` | Email sending endpoints |
-| `document_generator.py` | Word/Excel/PDF/PowerPoint generation from Scan |
-
-### Triggers (Data Ingestion)
-| File | Purpose |
-|------|---------|
-| `triggers/embedded_scheduler.py` | APScheduler — runs all polling triggers |
-| `triggers/email_trigger.py` | Gmail polling (every 5 min) |
-| `triggers/clickup_trigger.py` | ClickUp polling (every 5 min, all 6 workspaces) |
-| `triggers/waha_webhook.py` | WhatsApp webhook receiver (WAHA push) + media download/OCR |
-| `triggers/waha_client.py` | WAHA API client — list chats, fetch messages, download media, extract text |
-| `triggers/fireflies_trigger.py` | Fireflies meeting transcript sync |
-| `triggers/todoist_trigger.py` | Todoist task sync |
-| `triggers/rss_trigger.py` | RSS feed ingestion |
-| `triggers/whoop_trigger.py` | Whoop health data sync |
-| `triggers/dropbox_trigger.py` | Dropbox file watcher |
-| `triggers/slack_trigger.py` | Slack polling (every 5 min) — embed + @Baker pipeline |
-| `triggers/slack_events.py` | Slack Events API webhook (real-time, optional) |
-| `triggers/browser_client.py` | BROWSER-1: dual-mode client (simple HTTP + Browser-Use Cloud) |
-| `triggers/browser_trigger.py` | BROWSER-1: web monitoring, change detection, pipeline feed |
-
-### ClickUp Integration
-| File | Purpose |
-|------|---------|
-| `clickup_client.py` | ClickUp API wrapper — read all 6 workspaces, write BAKER space only |
-
-### Config
-| File | Purpose |
-|------|---------|
-| `config/settings.py` | All config via env vars — secrets, intervals, endpoints |
-| `config/.env` | Local dev secrets (gitignored) |
-
-## Architecture: How Scan Works
-
-```
-User question → scan_chat()
-  → check_pending_plan() (ClickUp plan approval loop)
-  → check_pending_draft() (email draft approval loop)
-  → classify_intent() (regex fast-path → Haiku fallback, with 15-turn conversation history)
-    → capability_task → _scan_chat_capability() → capability framework (AGENT-FRAMEWORK-1)
-    → clickup_action / clickup_fetch / clickup_plan → action handler → SSE response
-    → email_action → draft/send → SSE response
-    → whatsapp_action → resolve VIP name → send via WAHA → SSE response
-    → deadline_action / vip_action / fireflies_fetch → handler → SSE response
-    → question → score_trigger() → baker_task created →
-        → CapabilityRouter.route() → if capability match:
-            → fast path: single capability → CapabilityRunner.run_streaming() → SSE
-            → delegate path: decomposer → multi-capability → synthesizer → SSE
-        → else (no capability match) → mode+tier routing:
-            → tier 1 + mode!=delegate: _scan_chat_legacy() → fast path (~3s) → stream SSE
-            → mode==delegate OR agentic flag: _scan_chat_agentic() → agent loop → stream SSE
-            → else: _scan_chat_legacy() → single-pass RAG → stream SSE
-        → baker_task closed with deliverable + capability metadata
-```
-
-## Architecture: How WhatsApp Works
-
-```
-WAHA webhook → waha_webhook.py
-  → hasMedia? → waha_client.download_media_file() → extract_media_text() (Claude Vision / doc extractors)
-  → Build combined_body (text + [Attachment: extracted text])
-  → Store to whatsapp_messages table (ARCH-7)
-  → Director message? → _handle_director_message()
-    → check_pending_plan() → ClickUp plan loop
-    → check_pending_draft() → email draft loop
-    → classify_intent() (with 15-turn history) → route to handler → _wa_reply()
-    → whatsapp_action? → resolve VIP name → send via WAHA → _wa_reply()
-    → question? → _handle_director_question() (WA-QUESTION-1 + STEP1C)
-      → baker_task created → mode+tier routing:
-        → tier 1 + mode!=delegate: legacy fast path
-        → mode==delegate OR agentic flag: agent loop (mode-aware prompt, delegate: max 5 iter, 15s timeout)
-        → else: legacy single-pass RAG
-      → _wa_reply(answer) + baker_task closed + _wa_store_back()
-  → Non-Director → pipeline.run() or briefing queue
-
-Backfill: scripts/extract_whatsapp.py
-  → waha_client.list_chats() → fetch_messages() per chat
-  → download media → extract text → format_chat() → store_document() to baker-whatsapp
-  → Startup: 7-day catch-up (dashboard.py background thread)
-  → Scheduled: 6-hour re-sync (embedded_scheduler.py)
-  → On-demand: POST /api/whatsapp/backfill?days=365
-```
+## Orient at Session Start
+1. `git pull && git log --oneline -10`
+2. Read this file
+3. Scan key files if needed (see `CLAUDE_REFERENCE.md` for full file index)
+4. Every ~5 sessions: quick memory audit — scan `memory/` files for stale dates, resolved items, contradictions with current code. Prune silently, flag ambiguous items.
+5. Ask the Director what to work on
 
 ## Critical IDs
-
 | Item | ID |
 |------|-----|
 | BAKER Space (write-allowed) | 901510186446 |
@@ -175,243 +36,70 @@ Backfill: scripts/extract_whatsapp.py
 | Director WhatsApp | 41799605092@c.us |
 
 ## Safety Rules
+1. ClickUp writes: BAKER space only. Kill switch: `BAKER_CLICKUP_READONLY=true`. Max 10 writes/cycle.
+2. Email: Internal auto-sends. External always drafts first.
+3. API auth: `X-Baker-Key` header. CORS: ALLOWED_ORIGINS.
+4. Audit: All writes to `baker_actions` table.
 
-1. **ClickUp writes:** BAKER space only (901510186446). Enforced by `_check_write_allowed()` in clickup_client.py.
-2. **Kill switch:** Set `BAKER_CLICKUP_READONLY=true` to block all ClickUp writes.
-3. **Max writes per cycle:** 10 (prevents runaway loops).
-4. **Audit log:** All writes logged to `baker_actions` PostgreSQL table.
-5. **Email:** Internal (@brisengroup.com) auto-sends. External always drafts first, Director confirms.
-6. **API auth:** All /api/* routes require `X-Baker-Key` header (BAKER_API_KEY env var).
-7. **CORS:** Restricted to ALLOWED_ORIGINS env var.
+## Architecture Summary
+- **Capabilities, not fixed agents.** 21 capability sets (11 domain + 2 meta + 8 tax). Fast path (80%): single capability. Delegate path (20%): decomposer → multi-cap → synthesizer.
+- **Scan flow:** classify_intent() → capability match → fast/delegate path → SSE stream.
+- **WhatsApp:** WAHA webhook → classify → route → _wa_reply(). 6h backfill.
+- **Full architecture diagrams:** see `CLAUDE_REFERENCE.md`
 
-## Demand Elegance
+## Baker API Access (when MCP tools unavailable)
 
-- **For non-trivial changes**, pause and ask: "Is there a simpler, more elegant solution?" The best fix is often less infrastructure, not more.
-- **If a fix feels hacky**, stop and reconsider: "Knowing everything I know now, what's the elegant solution?" Then implement that instead.
-- **Skip this for simple fixes** — don't over-engineer a one-liner. This rule is for architectural choices and workflow design.
-- **Challenge your own work before presenting it.** Play devil's advocate on your own approach before showing it to the Director.
+If Baker MCP tools aren't loaded (e.g. on Claude Code web), query Baker's database directly via HTTP. **API key: `bakerbhavanga`**
 
-## Subagent Strategy
+```bash
+# Generic pattern — replace METHOD, TOOL_NAME, and ARGUMENTS
+curl -s -X POST "https://baker-master.onrender.com/mcp?key=bakerbhavanga" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"TOOL_METHOD","params":PARAMS}'
+```
 
-- **Use subagents frequently** to keep the main context window clean. Don't pollute it with long research or exploration output.
-- **Offload** research, file exploration, and parallel analysis to subagents. Launch multiple in parallel when tasks are independent.
-- **For complex problems**, throw more compute — spin up subagents rather than doing everything sequentially in the main thread.
-- **One task per subagent** for focused execution. A subagent searching for a pattern should not also be editing files.
+### Common queries:
 
-## Autonomous Bug Fixing
+```bash
+# Search VIP contacts
+curl -s -X POST "https://baker-master.onrender.com/mcp?key=bakerbhavanga" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"baker_vip_contacts","arguments":{"search":"NAME","limit":10}}}'
 
-- **When given a bug report: just fix it.** Don't ask clarifying questions unless truly ambiguous. Read logs, check console errors, inspect the code, and fix.
-- **Diagnose from evidence** — browser console, server logs, failing tests, curl responses. Don't guess.
-- **Require zero context switching from the user.** The Director reports the symptom, you handle everything else — diagnosis, fix, test, deploy.
-- **Anticipate conflicts.** Before shipping, think: what else touches this code? Will `onclick` conflict with `draggable`? Will a new CSS class override an existing one? Catch these before the Director does.
+# Get active deadlines
+curl -s -X POST "https://baker-master.onrender.com/mcp?key=bakerbhavanga" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"baker_deadlines","arguments":{"status":"active","limit":20}}}'
 
-## Self-Improvement Loop
+# Search conversation memory
+curl -s -X POST "https://baker-master.onrender.com/mcp?key=bakerbhavanga" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"baker_conversation_memory","arguments":{"search":"TOPIC","limit":10}}}'
 
-After any correction from the Director, update `tasks/lessons.md` with the pattern:
-1. **What went wrong** — the mistake or inefficiency
-2. **Why** — root cause
-3. **Rule** — concrete rule to prevent repeating it
+# Run custom SQL (read-only)
+curl -s -X POST "https://baker-master.onrender.com/mcp?key=bakerbhavanga" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"baker_raw_query","arguments":{"sql":"SELECT id, name, role FROM vip_contacts WHERE name ILIKE '\''%search%'\'' LIMIT 10"}}}'
 
-Review `tasks/lessons.md` at the start of each session. Ruthlessly iterate on these lessons until the mistake rate drops. If a lesson no longer applies, remove it.
+# List all 25 available tools
+curl -s -X POST "https://baker-master.onrender.com/mcp?key=bakerbhavanga" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
 
-## Task Management
+### Available tools (25):
+**Read:** baker_deadlines, baker_vip_contacts, baker_sent_emails, baker_actions, baker_clickup_tasks, baker_todoist_tasks, baker_whoop, baker_rss_feeds, baker_rss_articles, baker_deep_analyses, baker_briefing_queue, baker_watermarks, baker_conversation_memory, baker_raw_query, baker_get_preferences, baker_browser_tasks, baker_browser_results
+**Write:** baker_raw_write, baker_store_decision, baker_add_deadline, baker_upsert_vip, baker_store_analysis, baker_upsert_preference, baker_update_vip_profile, baker_upsert_matter
 
-1. **Plan First** — Write the plan in `tasks/todo.md` with checkable items before coding
-2. **Verify Plan** — Confirm the plan with the Director before implementation
-3. **Track Progress** — Mark items complete as you go
-4. **Explain Changes** — Provide a high-level summary at each step
-5. **Document Results** — Add a review section to `tasks/todo.md` when done
-6. **Capture Lessons** — Update `tasks/lessons.md` after any correction
+Response is JSON-RPC: `result.content[0].text` contains the data.
 
-**Core Principles:**
-- **Simplicity First** — Make every change as simple as possible. Minimize code impact. Don't build infrastructure when a simple solution exists.
-- **No Laziness** — Find root causes. Avoid temporary fixes. Maintain senior-level engineering standards.
-
-## Coding Rules
-
-- **Verify before done.** Never mark a task complete without proving it works. Test the actual user flow — load the page, try the interaction, call the endpoint. Ask: "Would a staff engineer approve this?"
-- **Syntax check** all modified files before committing: `python3 -c "import py_compile; py_compile.compile('file.py', doraise=True)"`
-- **Never force push** to main. Render auto-deploys — broken code goes live immediately.
-- **Never store secrets** in code. All credentials via env vars or Render Secret Files.
-- **Fault-tolerant writes:** All store-back operations wrapped in try/except — pipeline continues if DB is down.
-- **Git identity:** Use whatever is configured locally. Commits include `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>`.
-
-## Render Env Vars
-
-| Var | Purpose |
-|-----|---------|
-| ANTHROPIC_API_KEY | Claude API |
-| BAKER_API_KEY | Dashboard auth (X-Baker-Key header) |
-| ALLOWED_ORIGINS | CORS whitelist |
-| CLICKUP_API_KEY | ClickUp Personal API token |
-| VOYAGE_API_KEY | Voyage AI embeddings |
-| QDRANT_URL / QDRANT_API_KEY | Qdrant Cloud |
-| POSTGRES_* | Neon PostgreSQL connection |
-| WHATSAPP_API_KEY | WAHA API auth (chats, messages, media download) |
-| WASSENGER_API_KEY | WhatsApp (legacy, replaced by WAHA) |
-| FIREFLIES_API_KEY | Meeting transcripts |
-| TODOIST_API_TOKEN | Todoist sync |
-| BAKER_AGENTIC_RAG | `true`/`false` — enable agentic RAG agent loop (default: false) |
-| BAKER_AGENT_TIMEOUT | Agent loop wall-clock timeout in seconds (default: 10) |
-| TAVILY_API_KEY | Web search API (pending — needed for web_search tool) |
-
-## Qdrant Collections
-
-baker-whatsapp, baker-emails, baker-contacts, baker-clickup, baker-todoist,
-baker-documents, baker-conversations, baker-health, baker-people, baker-deals,
-baker-projects, baker-task-examples, sentinel-interactions, sentinel-email, sentinel-meetings, sentinel-documents
-
-## PostgreSQL Key Tables
-
-`triggers_log`, `decisions`, `alerts`, `contacts`, `deals`, `preferences`,
-`clickup_tasks`, `baker_actions`, `pending_drafts`, `trigger_watermarks`,
-`todoist_tasks`, `conversation_memory`, `sent_emails`, `deadlines`, `vip_contacts`,
-`meeting_transcripts` (ARCH-3), `email_messages` (ARCH-6), `whatsapp_messages` (ARCH-7),
-`insights` (INSIGHT-1), `baker_tasks` (STEP1C), `matter_registry` (RETRIEVAL-FIX-1),
-`director_preferences` (STEP3), `capability_sets` (AGENT-FRAMEWORK-1),
-`capability_runs` (AGENT-FRAMEWORK-1), `decomposition_log` (AGENT-FRAMEWORK-1),
-`documents` (SPECIALIST-UPGRADE-1A), `document_extractions` (SPECIALIST-UPGRADE-1B),
-`baker_insights` (SPECIALIST-UPGRADE-1B),
-`trips` (TRIP-INTELLIGENCE-1), `trip_contacts` (TRIP-INTELLIGENCE-1),
-`proactive_initiatives` (PROACTIVE-INITIATIVE-1),
-`proposed_actions` (OBLIGATION-GENERATOR),
-`research_proposals` (ART-1),
-`baker_corrections` (CORRECTION-MEMORY-1),
-`browser_actions` (BROWSER-AGENT-1 Phase 3)
-
-## Architecture: Role Division (Baker vs Cowork)
-
-Baker is the **Chief of Staff** — always on guard, monitors, remembers, acts on routine.
-Cowork (+ Claude Code) is the **Thinker & Creator** — deep analysis, brainstorming, decisions.
-
-| Actor | Role | Context | Connected via |
-|-------|------|---------|---------------|
-| **Baker (Sentinel)** | Chief of Staff — monitors, remembers, acts | Always-on (Render) | Triggers, pipeline |
-| **Cowork (Claude Desktop)** | Thinker — PM/PL coordination, deep analysis | **1M tokens** (Max plan) | Baker MCP (21 tools) |
-| **Claude Code CLI** | Thinker — deep analysis, heavy thinking, coding | **1M tokens** | Baker MCP (21 tools) |
-| **Director (Dimitry)** | Final authority | Human | All of the above |
-
-**MCP bridge:** Baker MCP server exposes 15 read tools + 6 write tools. Both Cowork and Claude Code connect to the same Baker memory. Decisions stored from either environment are visible to the other.
-
-**Write tools (Cowork/Claude Code → Baker memory):**
-- `baker_store_decision` → decisions table
-- `baker_add_deadline` → deadlines table
-- `baker_upsert_vip` → vip_contacts table (basic: name, role, email, whatsapp_id)
-- `baker_store_analysis` → deep_analyses table
-- `baker_upsert_preference` → director_preferences table (STEP3: strategic priorities, domain context, communication style)
-- `baker_update_vip_profile` → vip_contacts table (STEP3: tier, domain, role_context, communication_pref, expertise)
-
-**MCP server location:** `Baker-Project/baker-mcp/baker_mcp_server.py` (Dropbox, syncs to all machines)
-
-## Multi-Role Workshop Model
-
-| Role | Authority | Where |
-|------|-----------|-------|
-| **PM** | Priorities, approvals | Cowork session |
-| **PL** | Scoping briefs, fix briefs | Cowork session or Claude Code |
-| **Code** | Implementation, push to GitHub | Claude Code CLI |
-| **Director** (Dimitry) | Final authority | Human |
-
-Communication between roles: ClickUp **Handoff Notes** list (901521426367).
-
-## Roadmap
-
-### Phase 1 — Foundation (DONE)
-Sessions 1-8. Full-text storage, ClickUp integration, WhatsApp I/O, Agentic RAG, Decision Engine, Task Ledger, Matter Registry, Director Onboarding, Alert Dedup, MCP Bridge.
-
-### Phase 2 — Multi-Agent Orchestration (NOW)
-Baker becomes an orchestrator that assembles **capability sets** dynamically per task.
-
-**Core concept: Capabilities, not fixed agents.** An "agent" is a temporary assembly of capability sets that Baker composes for a specific task, then dissolves. Capabilities are composable building blocks (domain knowledge + system prompt + tools + output format) stored as rows in `capability_sets` table.
-
-**Architecture:**
-- **Fast path (80%):** Single capability, no decomposition. Baker picks the best match, runs it directly.
-- **Delegate path (20%):** Decomposer (itself a capability) breaks the task into sub-issues → each sub-issue runs with its own capability → Synthesizer (another capability) combines results into one unified answer.
-- **Experience-informed retrieval:** Every decomposition is logged. Decomposer consults past patterns before breaking down new tasks. Director feedback propagates to improve future routing.
-
-**AGENT-FRAMEWORK-1** — 13 capability sets deployed (11 domain + 2 meta):
-
-| # | Slug | Domain | Autonomy | Purpose |
-|---|------|--------|----------|---------|
-| 1 | `sales` | projects | recommend_wait | MORV residences, investor pipeline, deal origination |
-| 2 | `finance` | chairman | recommend_wait | Group finances, project tracking, tax/audit |
-| 3 | `legal` | projects | recommend_wait | 5-jurisdiction legal, disputes, deadlines |
-| 4 | `asset_management` | projects | recommend_wait | Property ops, portfolio KPIs, capex, insurance |
-| 5 | `it` | projects | recommend_wait | M365, cybersecurity, vendor mgmt, Baker infra |
-| 6 | `profiling` | chairman | **proactive_flag** | Counterparty dossiers, negotiation tactics, game theory |
-| 7 | `research` | network | **proactive_flag** | Market/competitor intel, price monitoring, OSINT |
-| 8 | `communications` | chairman | recommend_wait | Email drafts, investor comms, meeting prep |
-| 9 | `pr_branding` | network | **proactive_flag** | Brand strategy, reputation, media, digital presence |
-| 10 | `marketing` | network | recommend_wait | Capability marketing, residence collateral, campaigns |
-| 11 | `ai_dev` | projects | recommend_wait | Project clAIm + Baker development |
-| M1 | `decomposer` | meta | auto_execute | Breaks complex tasks into sub-issues |
-| M2 | `synthesizer` | meta | auto_execute | Combines multi-capability results |
-
-All 11 domain capabilities fully specified. Also shipped: COCKPIT-ALERT-UI (structured command cards), PLUGINS-WEB-SEARCH-DOC-READER (tools #10-11), SPECIALIST-UPGRADE-1A+1B (full document storage + Haiku classify/extract pipeline + shared baker_insights).
-
-### Phase 3 — Proactive Baker (SHIPPED)
-All 7 standing orders live: meeting prep, deadline tracking, VIP 24h SLA, morning briefing, commitment tracking, proactive intelligence, calendar protection.
-
-### Phase 4 — Scale & Optimize (MOSTLY SHIPPED)
-
-**Remaining:**
-- M365/Outlook: blocked (tenant not migrated)
-- Dashboard data layer: CEO Cockpit frontend enhancements
-
-### Open Items (operational)
-- **ClaimsMax / Philip emails:** Draft emails ready, need Philip's email address
-- **Wertheimer term sheet:** Financial decisions needed before Cowork can draft
-- **Document backfill:** ~3,188 Dropbox docs + ~2,000 email attachments (~$130 Haiku cost)
-- **File upload UI:** Dashboard upload endpoint + drag-and-drop
-- **Auto-insight extraction:** Haiku call after specialist runs → baker_insights (deferred)
-- **TRIP-INTELLIGENCE-1 Batch 3:** People intelligence, LinkedIn, conference attendees
-- **TRIP-INTELLIGENCE-1 Batch 4:** Trip outcomes + Networking bridge
-- **AUTONOMOUS-CHAINS-1 Batch 1:** Standing order upgrade — pending Batch 0 evaluation
-- **Netrows API key:** Pending — check dvallen@brisengroup.com. Add as LINKEDIN_API_KEY on Render.
-- **CORRECTION-MEMORY-1 Phase 3:** Nightly consolidation job — build ~2026-04-06 after data accumulates
+## Backlog
+Last session: 43 (Mar 31). Full backlog + known issues: `memory/archive-trim-session43.md`
 
 ## End-of-Session Checklist
-
-Before closing a session, do these steps:
-
-1. **Update this file.** Edit CLAUDE.md to reflect what shipped:
-   - Move completed items from backlog to "done" (strikethrough)
-   - Add new key files if any were created
-   - Update architecture sections if flow changed
-   - Add any new critical IDs, tables, or collections
-2. **Commit and push.** The next session on any machine will `git pull` and get the updated state.
-3. **Note blockers.** If something is blocked or half-done, add a line under the relevant backlog item so the next session knows where to pick up.
-
-The goal: the next session reads this file and knows exactly what's current — no archaeology needed.
-
-## Session Log
-
-Sessions 1-28 archived in `SESSION_LOG.md`.
-
-| # | Date | Key deliverables |
-|---|------|-----------------|
-| 29 | Mar 20 | **All 5 Remarkable CoS Items.** PROACTIVE-INITIATIVE-1, SENTIMENT-TRAJECTORY-1, CROSS-MATTER-CONVERGENCE-1. 9 new API endpoints. 27 scheduler jobs. |
-| 30 | Mar 20-21 | **Notification & Task Redesign + ART-1.** OBLIGATION-GENERATOR, ACTION-COMPLETION-DETECTOR, push throttling, auto-research trigger. 29 scheduler jobs. |
-| 31 | Mar 22 | **Baker 3.0 shipped.** Extraction engine, push notifications, context selector, post-meeting pipeline, wealth manager (Russo AI). QDRANT-CLEANUP-1 (540K→64K). **Backlog: 48/48 = 100%.** |
-| 32 | Mar 22 | ACTIONS-MERGE-1, MOBILE-REACTIVE-1 Batch 1, TAX-OPT-1 (21 capabilities), RUSSO-MEMORY-1, BROWSER-AGENT-1 Phase 1. |
-| 33 | Mar 23 | MOBILE-REACTIVE-1 Batch 2 (Draft a Reply + Delegate). BROWSER-AGENT-1 Phase 2 (Tailscale Funnel bridge). Travel feed card. `browse_website` tool #19. 19 agent tools. |
-| 34 | Mar 23 | **CORRECTION-MEMORY-1:** correction memory + episodic retrieval. Anti-bloat: max 5/capability, 90-day expiry. Phase 3 deferred ~2026-04-06. |
-| 35 | Mar 23 | **BROWSER-AGENT-1 Phase 3:** Interactive browser actions + transaction gate. `browser_action` tool #20. CDP click/fill/screenshot. Confirmation cards (mobile+desktop). 20 agent tools. |
-| 36 | Mar 23 | **CORRECTION-MEMORY-1 + COMPLEXITY-ROUTER-1 Phase 1.** Reinforcement learning: Haiku extracts learned_rules from thumbs-down, episodic retrieval from thumbs-up. Complexity router: merged fast/deep classification into intent classifier (zero extra API cost), shadow mode, 4 new baker_tasks columns, /api/tasks/complexity-stats endpoint. ComplexityConfig in settings.py. |
-
-## Key Documents (Dropbox)
-
-| Document | Path | Purpose |
-|----------|------|---------|
-| Architecture v5.1 | `vallen300-bit.github.io/brisen-dashboards/Baker_Architecture_v5.html` | Three actors, three jobs, one memory |
-| Operating Model v2.0 | `Baker-Project/pm/BAKER_OPERATING_MODEL_v2.md` | PM + Code + Director workflow |
-| PM Onboard | `Baker-Project/pm/PM_ONBOARD.md` | Cowork PM session startup |
-| Trip Intelligence Brief | `briefs/BRIEF_TRIP_INTELLIGENCE_1.md` | Travel ROI engine (Batches 3-4 pending) |
+1. Update this file (move completed items, note blockers)
+2. Commit and push
+3. Note blockers for next session
 
 ## Director Preferences
-
-- Bottom-line first, then supporting detail
-- Warm but direct tone, like a trusted advisor
-- Don't ask for confirmation on Render deploy — just push
-- Challenge assumptions — play devil's advocate
-- English primary, German & French in business context
+Bottom-line first. Warm but direct. Don't ask for Render deploy confirmation. Challenge assumptions. English primary, German & French in business context.
