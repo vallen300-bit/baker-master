@@ -1,7 +1,19 @@
 {
   "version": 1,
-  "updated_at": "2026-04-07",
+  "updated_at": "2026-04-10",
   "folders": [
+    {
+      "name": "AO",
+      "slug": "ao",
+      "presentations": [
+        {
+          "title": "Hotel Stabilization \u2014 How Long Does It Take?",
+          "file": "hotel-stabilization.html",
+          "created": "2026-04-10",
+          "matter": "oskolkov"
+        }
+      ]
+    },
     {
       "name": "NVIDIA",
       "slug": "nvidia",
@@ -17,6 +29,18 @@
           "file": "vertex-hotel.html",
           "created": "2026-04-05",
           "matter": "nvidia"
+        }
+      ]
+    },
+    {
+      "name": "CORINTHIA",
+      "slug": "corinthia",
+      "presentations": [
+        {
+          "title": "Brisen Group x Corinthia \u2014 Partnership Proposal",
+          "file": "partnership.html",
+          "created": "2026-04-08",
+          "matter": "corinthia"
         }
       ]
     }

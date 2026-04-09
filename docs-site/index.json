@@ -1,7 +1,19 @@
 {
   "version": 1,
-  "updated_at": "2026-04-08",
+  "updated_at": "2026-04-10",
   "folders": [
+    {
+      "name": "AO",
+      "slug": "ao",
+      "presentations": [
+        {
+          "title": "Hotel Stabilization \u2014 How Long Does It Take?",
+          "file": "hotel-stabilization.html",
+          "created": "2026-04-10",
+          "matter": "oskolkov"
+        }
+      ]
+    },
     {
       "name": "NVIDIA",
       "slug": "nvidia",
