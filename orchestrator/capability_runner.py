@@ -92,6 +92,7 @@ PM_REGISTRY = {
             "State updates: {\"sub_matters\": {}, \"open_actions\": [], "
             "\"red_flags\": [], \"relationship_state\": {}, \"summary\": \"...\"}"
         ),
+        "peer_pms": ["movie_am"],
     },
     "movie_am": {
         "registry_version": 1,
@@ -107,7 +108,8 @@ PM_REGISTRY = {
             "francesco", "robin", "mario habicher", "rolf huebner",
             "mandarin oriental", "mohg",
         ],
-        "entangled_matters": [],
+        "entangled_matters": ["rg7"],
+        "peer_pms": ["ao_pm"],
         "briefing_section_title": "MOVIE ASSET STATUS",
         "briefing_email_patterns": ["mandarin", "mohg", "mario.habicher"],
         "briefing_whatsapp_patterns": ["henri movie", "victor rodriguez", "rolf"],
@@ -841,6 +843,10 @@ class CapabilityRunner:
                     pending_ctx = self._get_pending_insights_context(pm_slug)
                     if pending_ctx:
                         prompt += f"\n\n# KNOWLEDGE COMPOUNDING\n{pending_ctx}\n"
+                    # CROSS-PM-SIGNALS: Inject peer PM state + signals
+                    cross_pm_ctx = self._get_cross_pm_context(pm_slug)
+                    if cross_pm_ctx:
+                        prompt += f"\n\n# CROSS-PM AWARENESS\n{cross_pm_ctx}\n"
                     # PM-KNOWLEDGE-ARCH-1: Promotion instructions
                     if pending_ctx:
                         prompt += (
@@ -1375,6 +1381,60 @@ class CapabilityRunner:
         except Exception:
             return ""
 
+    def _get_cross_pm_context(self, pm_slug: str) -> str:
+        """CROSS-PM-SIGNALS: Read peer PM states + active inbound signals."""
+        config = PM_REGISTRY.get(pm_slug, {})
+        peers = config.get("peer_pms", [])
+        if not peers:
+            return ""
+        try:
+            from memory.store_back import SentinelStoreBack
+            import json as _json
+            store = SentinelStoreBack._get_global_instance()
+            parts = []
+
+            for peer in peers:
+                peer_config = PM_REGISTRY.get(peer, {})
+                peer_label = peer_config.get("state_label", peer.upper())
+
+                peer_state = store.get_pm_project_state(peer)
+                sj = peer_state.get("state_json", {})
+                if isinstance(sj, str):
+                    sj = _json.loads(sj)
+
+                peer_parts = []
+                if sj.get("red_flags"):
+                    flags = [str(rf)[:150] for rf in sj["red_flags"][:5]]
+                    peer_parts.append("Red flags: " + "; ".join(flags))
+                if sj.get("open_actions"):
+                    actions = [str(a)[:100] for a in sj["open_actions"][:3]]
+                    peer_parts.append("Open actions: " + "; ".join(actions))
+                if sj.get("summary"):
+                    peer_parts.append(f"Summary: {str(sj['summary'])[:300]}")
+                if sj.get("kpi_snapshot"):
+                    peer_parts.append(f"KPIs: {_json.dumps(sj['kpi_snapshot'])[:300]}")
+
+                if peer_parts:
+                    parts.append(f"## {peer_label} STATE (peer PM)\n" + "\n".join(peer_parts))
+
+            # Active inbound signals
+            signals = store.get_cross_pm_signals(pm_slug, status="active", limit=5)
+            if signals:
+                sig_lines = []
+                for s in signals:
+                    src_label = PM_REGISTRY.get(s["source_pm"], {}).get("state_label", s["source_pm"])
+                    sig_lines.append(f"- [{s['signal_type']}] from {src_label}: {s['signal_text'][:200]}")
+                parts.append("## INBOUND CROSS-PM SIGNALS\n" + "\n".join(sig_lines))
+                parts.append(
+                    "(These signals are from your peer PM. Incorporate relevant ones "
+                    "into your analysis. If Director confirms an action on a signal, "
+                    "update your state accordingly.)"
+                )
+
+            return "\n\n".join(parts) if parts else ""
+        except Exception:
+            return ""
+
     def _get_pending_insights_context(self, pm_slug: str) -> str:
         """PM-KNOWLEDGE-ARCH-1: Load pending insights for system prompt injection.
         Cowork refinement #2: Cap at 5 most recent, show total count."""
@@ -1496,6 +1556,29 @@ class CapabilityRunner:
             # Store wiki insights as pending
             if wiki_insights and isinstance(wiki_insights, list):
                 self._store_pending_insights(pm_slug, wiki_insights, question, summary)
+
+            # CROSS-PM-SIGNALS: Auto-signal peer PMs on new red flags
+            import re as _re
+            peer_pms = config.get("peer_pms", [])
+            new_flags = updates.get("red_flags", [])
+            if peer_pms and new_flags:
+                signal_count = 0
+                for peer in peer_pms:
+                    peer_kw = PM_REGISTRY.get(peer, {}).get("signal_keyword_patterns", [])
+                    for flag in new_flags:
+                        if signal_count >= 3:
+                            break
+                        flag_str = str(flag)
+                        for pattern in peer_kw:
+                            if _re.search(pattern, flag_str, _re.IGNORECASE):
+                                store.create_cross_pm_signal(
+                                    source_pm=pm_slug, target_pm=peer,
+                                    signal_type="red_flag",
+                                    signal_text=flag_str[:500],
+                                    context=f"Auto-detected from {label} state update",
+                                )
+                                signal_count += 1
+                                break  # one signal per flag per peer
 
         except Exception as e:
             logger.debug(f"PM state ({pm_slug}) auto-update failed (non-fatal): {e}")

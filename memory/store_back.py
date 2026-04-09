@@ -167,6 +167,9 @@ class SentinelStoreBack:
         # PM-KNOWLEDGE-ARCH-1: Pending insights for PM knowledge bases
         self._ensure_pm_pending_insights_table()
 
+        # CROSS-PM-SIGNALS: Inter-PM communication bus
+        self._ensure_pm_cross_signals_table()
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -4964,6 +4967,137 @@ class SentinelStoreBack:
             except Exception:
                 pass
             logger.warning(f"update_pending_insight_status failed: {e}")
+            return False
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # CROSS-PM SIGNAL BUS
+    # -------------------------------------------------------
+
+    def _ensure_pm_cross_signals_table(self):
+        """Create inter-PM communication signal table."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS pm_cross_signals (
+                    id          SERIAL PRIMARY KEY,
+                    source_pm   TEXT NOT NULL,
+                    target_pm   TEXT NOT NULL,
+                    signal_type TEXT DEFAULT 'info',
+                    signal_text TEXT NOT NULL,
+                    context     TEXT,
+                    status      TEXT DEFAULT 'active',
+                    created_at  TIMESTAMPTZ DEFAULT NOW(),
+                    consumed_at TIMESTAMPTZ
+                )
+            """)
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_cross_signals_target "
+                "ON pm_cross_signals(target_pm, status)"
+            )
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure pm_cross_signals table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def create_cross_pm_signal(self, source_pm: str, target_pm: str,
+                                signal_type: str, signal_text: str,
+                                context: str = "") -> int | None:
+        """Insert a cross-PM signal with 7-day dedup."""
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor()
+            # Dedup: skip if identical signal_text exists for same pair within 7 days
+            cur.execute("""
+                SELECT id FROM pm_cross_signals
+                WHERE source_pm = %s AND target_pm = %s
+                  AND signal_text = %s
+                  AND created_at > NOW() - INTERVAL '7 days'
+                LIMIT 1
+            """, (source_pm, target_pm, signal_text[:500]))
+            if cur.fetchone():
+                cur.close()
+                return None  # duplicate
+            cur.execute("""
+                INSERT INTO pm_cross_signals (source_pm, target_pm, signal_type, signal_text, context)
+                VALUES (%s, %s, %s, %s, %s) RETURNING id
+            """, (source_pm, target_pm, signal_type, signal_text[:500], (context or "")[:500]))
+            row = cur.fetchone()
+            conn.commit()
+            cur.close()
+            return row[0] if row else None
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"create_cross_pm_signal failed: {e}")
+            return None
+        finally:
+            self._put_conn(conn)
+
+    def get_cross_pm_signals(self, target_pm: str, status: str = "active",
+                              limit: int = 10) -> list:
+        """Fetch inbound cross-PM signals for a given PM."""
+        conn = self._get_conn()
+        if not conn:
+            return []
+        try:
+            import psycopg2.extras
+            cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+            cur.execute("""
+                SELECT id, source_pm, signal_type, signal_text, context, created_at
+                FROM pm_cross_signals
+                WHERE target_pm = %s AND status = %s
+                ORDER BY created_at DESC LIMIT %s
+            """, (target_pm, status, limit))
+            rows = [dict(r) for r in cur.fetchall()]
+            cur.close()
+            return rows
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"get_cross_pm_signals failed: {e}")
+            return []
+        finally:
+            self._put_conn(conn)
+
+    def consume_cross_pm_signal(self, signal_id: int) -> bool:
+        """Mark a cross-PM signal as consumed."""
+        conn = self._get_conn()
+        if not conn:
+            return False
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                UPDATE pm_cross_signals
+                SET status = 'consumed', consumed_at = NOW()
+                WHERE id = %s AND status = 'active'
+            """, (signal_id,))
+            affected = cur.rowcount
+            conn.commit()
+            cur.close()
+            return affected > 0
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"consume_cross_pm_signal failed: {e}")
             return False
         finally:
             self._put_conn(conn)
