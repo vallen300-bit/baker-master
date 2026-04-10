@@ -1,0 +1,1597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FX Mayr — Meeting Agenda</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Georgia&display=swap');
+
+  :root {
+    --bg: #0f1117;
+    --card-bg: #1a1d27;
+    --card-border: #2a2d3a;
+    --gold: #c9a96e;
+    --gold-dim: rgba(201, 169, 110, 0.15);
+    --gold-glow: rgba(201, 169, 110, 0.3);
+    --text: #e8e6e1;
+    --text-dim: #8a8a8a;
+    --text-bright: #ffffff;
+    --red: #e74c3c;
+    --red-dim: rgba(231, 76, 60, 0.15);
+    --green: #2ecc71;
+    --green-dim: rgba(46, 204, 113, 0.15);
+    --blue: #3498db;
+    --blue-dim: rgba(52, 152, 219, 0.15);
+    --orange: #f39c12;
+    --orange-dim: rgba(243, 156, 18, 0.15);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    line-height: 1.6;
+    padding: 20px;
+    max-width: 900px;
+    margin: 0 auto;
+  }
+
+  .header {
+    text-align: center;
+    padding: 30px 0 20px;
+    border-bottom: 1px solid var(--card-border);
+    margin-bottom: 30px;
+  }
+  .header h1 {
+    font-family: Georgia, serif;
+    font-size: 1.8em;
+    color: var(--gold);
+    font-weight: 400;
+    letter-spacing: 0.5px;
+  }
+  .header .subtitle {
+    color: var(--text-dim);
+    font-size: 0.9em;
+    margin-top: 8px;
+  }
+  .header .date {
+    color: var(--gold);
+    font-size: 0.85em;
+    margin-top: 4px;
+    font-weight: 500;
+  }
+
+  .nav-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+    margin-bottom: 30px;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    padding: 12px 0;
+    z-index: 100;
+    border-bottom: 1px solid var(--card-border);
+  }
+  .nav-pill {
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 0.8em;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s;
+    border: 1px solid var(--card-border);
+    background: var(--card-bg);
+    color: var(--text-dim);
+    text-decoration: none;
+  }
+  .nav-pill:hover, .nav-pill.active {
+    border-color: var(--gold);
+    color: var(--gold);
+    background: var(--gold-dim);
+  }
+  .nav-pill .pill-num {
+    display: inline-block;
+    width: 18px; height: 18px; line-height: 18px;
+    text-align: center;
+    border-radius: 50%;
+    background: var(--gold-dim);
+    color: var(--gold);
+    font-size: 0.75em;
+    margin-right: 4px;
+  }
+
+  /* Sections */
+  .section {
+    margin-bottom: 24px;
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--card-bg);
+  }
+  .section-header {
+    padding: 18px 24px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    transition: background 0.2s;
+    user-select: none;
+  }
+  .section-header:hover { background: rgba(255,255,255,0.03); }
+  .section-num {
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 0.95em; flex-shrink: 0;
+  }
+  .section-title {
+    font-family: Georgia, serif;
+    font-size: 1.15em;
+    color: var(--text-bright);
+    flex: 1;
+  }
+  .section-subtitle {
+    font-size: 0.8em;
+    color: var(--text-dim);
+    font-family: 'Inter', sans-serif;
+    font-weight: 400;
+  }
+  .chevron {
+    color: var(--text-dim);
+    transition: transform 0.3s;
+    font-size: 1.2em;
+    flex-shrink: 0;
+  }
+  .section.open .chevron { transform: rotate(180deg); }
+  .section-body { max-height: 0; overflow: hidden; transition: max-height 0.5s ease; }
+  .section.open .section-body { max-height: 30000px; }
+  .section-content { padding: 0 24px 24px; }
+
+  .s1 .section-num { background: var(--blue-dim); color: var(--blue); }
+  .s2 .section-num { background: var(--red-dim); color: var(--red); }
+  .s3 .section-num { background: var(--orange-dim); color: var(--orange); }
+  .s4 .section-num { background: var(--red-dim); color: var(--red); }
+  .s5 .section-num { background: var(--green-dim); color: var(--green); }
+  .s6 .section-num { background: var(--gold-dim); color: var(--gold); }
+
+  /* Cards */
+  .card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .card:last-child { margin-bottom: 0; }
+  .card-title {
+    font-weight: 600; font-size: 0.9em;
+    margin-bottom: 8px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card p, .card li { font-size: 0.88em; color: var(--text); line-height: 1.7; }
+  .card ul { list-style: none; padding: 0; }
+  .card ul li { padding: 4px 0 4px 20px; position: relative; }
+  .card ul li::before { content: '›'; position: absolute; left: 4px; color: var(--gold); font-weight: 700; }
+
+  /* Vivid card borders per section */
+  .s1 .card, .s1 .drill {
+    border: 1.5px solid rgba(201, 169, 110, 0.5);
+    background: rgba(201, 169, 110, 0.04);
+  }
+  .s2 .card, .s2 .drill {
+    border: 1.5px solid rgba(231, 76, 60, 0.4);
+    background: rgba(231, 76, 60, 0.03);
+  }
+  .s3 .card, .s3 .drill {
+    border: 1.5px solid rgba(243, 156, 18, 0.4);
+    background: rgba(243, 156, 18, 0.03);
+  }
+  .s4 .card, .s4 .drill {
+    border: 1.5px solid rgba(231, 76, 60, 0.4);
+    background: rgba(231, 76, 60, 0.03);
+  }
+  .s5 .card, .s5 .drill {
+    border: 1.5px solid rgba(46, 204, 113, 0.4);
+    background: rgba(46, 204, 113, 0.03);
+  }
+  .s6 .card, .s6 .drill {
+    border: 1.5px solid rgba(201, 169, 110, 0.5);
+    background: rgba(201, 169, 110, 0.04);
+  }
+  .card .status-line {
+    margin-top: 8px;
+    font-size: 0.78em;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+  .status-green { color: var(--green); }
+  .status-orange { color: var(--orange); }
+  .status-red { color: var(--red); }
+  .status-blue { color: var(--blue); }
+
+  /* Level 1 drill-down (card → sub-cards) */
+  .drill {
+    cursor: pointer;
+    user-select: none;
+    padding: 14px 16px;
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    transition: border-color 0.2s, background 0.2s;
+  }
+  .drill:hover { border-color: var(--gold); background: var(--gold-dim); }
+  .drill.open { border-color: var(--gold); }
+  .drill-title {
+    display: flex; align-items: center; gap: 8px;
+    font-weight: 600; font-size: 0.9em;
+  }
+  .drill-arrow {
+    display: inline-block;
+    transition: transform 0.2s;
+    font-size: 0.7em;
+    color: var(--gold);
+  }
+  .drill.open .drill-arrow { transform: rotate(90deg); }
+  .drill-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s ease;
+    margin-top: 0;
+  }
+  .drill.open .drill-body { max-height: 10000px; margin-top: 12px; }
+
+  /* Level 2 drill-down (sub-items) */
+  .sub-drill {
+    cursor: pointer;
+    user-select: none;
+    padding: 10px 14px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--card-border);
+    border-radius: 6px;
+    margin-bottom: 6px;
+    transition: border-color 0.2s;
+  }
+  .sub-drill:hover { border-color: rgba(201,169,110,0.5); }
+  .sub-drill.open { border-color: rgba(201,169,110,0.5); }
+  .sub-drill-title {
+    display: flex; align-items: center; gap: 8px;
+    font-weight: 500; font-size: 0.85em;
+  }
+  .sub-drill-arrow {
+    display: inline-block;
+    transition: transform 0.2s;
+    font-size: 0.65em;
+    color: var(--gold);
+  }
+  .sub-drill.open .sub-drill-arrow { transform: rotate(90deg); }
+  .sub-drill-body {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+  }
+  .sub-drill.open .sub-drill-body { max-height: 5000px; margin-top: 10px; }
+
+  /* Brief (leaf detail) */
+  .brief {
+    background: var(--gold-dim);
+    border-left: 3px solid var(--gold);
+    padding: 14px 18px;
+    border-radius: 0 8px 8px 0;
+    font-size: 0.85em;
+    color: var(--text);
+    line-height: 1.8;
+  }
+  .brief p { margin-bottom: 8px; }
+  .brief p:last-child { margin-bottom: 0; }
+  .brief strong { color: var(--text-bright); }
+
+  /* Number cards */
+  .number-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .number-card {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+  }
+  .number-card .label {
+    font-size: 0.75em; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;
+  }
+  .number-card .value { font-size: 1.5em; font-weight: 700; font-family: Georgia, serif; }
+  .number-card .note { font-size: 0.75em; color: var(--text-dim); margin-top: 4px; }
+  .value-red { color: var(--red); }
+  .value-gold { color: var(--gold); }
+  .value-green { color: var(--green); }
+
+  /* Badges */
+  .badge {
+    display: inline-block; padding: 2px 10px; border-radius: 12px;
+    font-size: 0.72em; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .badge-done { background: var(--green-dim); color: var(--green); }
+  .badge-pending { background: var(--orange-dim); color: var(--orange); }
+  .badge-urgent { background: var(--red-dim); color: var(--red); }
+  .badge-live { background: var(--green-dim); color: var(--green); }
+
+  /* Cascade */
+  .cascade { display: flex; flex-direction: column; margin: 12px 0; }
+  .cascade-step { display: flex; align-items: stretch; gap: 12px; }
+  .cascade-line { width: 30px; display: flex; flex-direction: column; align-items: center; }
+  .cascade-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; margin-top: 14px; }
+  .cascade-connector { width: 2px; flex: 1; min-height: 10px; }
+  .cascade-content { flex: 1; padding: 10px 14px; border-radius: 8px; margin-bottom: 4px; font-size: 0.85em; }
+  .cascade-content strong { display: block; margin-bottom: 2px; }
+  .c-red .cascade-dot, .c-red .cascade-connector { background: var(--red); }
+  .c-red .cascade-content { background: var(--red-dim); border: 1px solid rgba(231,76,60,0.2); }
+  .c-orange .cascade-dot, .c-orange .cascade-connector { background: var(--orange); }
+  .c-orange .cascade-content { background: var(--orange-dim); border: 1px solid rgba(243,156,18,0.2); }
+  .c-gold .cascade-dot, .c-gold .cascade-connector { background: var(--gold); }
+  .c-gold .cascade-content { background: var(--gold-dim); border: 1px solid rgba(201,169,110,0.2); }
+
+  .link-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 16px; border-radius: 8px;
+    background: var(--gold-dim); border: 1px solid rgba(201,169,110,0.3);
+    color: var(--gold); text-decoration: none;
+    font-size: 0.82em; font-weight: 500;
+    transition: all 0.2s; margin-top: 8px; margin-right: 8px;
+  }
+  .link-btn:hover { background: var(--gold-glow); border-color: var(--gold); }
+
+  .highlight-box {
+    background: var(--gold-dim);
+    border-left: 3px solid var(--gold);
+    padding: 14px 18px;
+    border-radius: 0 8px 8px 0;
+    margin: 16px 0;
+    font-size: 0.88em;
+    color: var(--text);
+    line-height: 1.7;
+  }
+
+  @media (max-width: 600px) {
+    body { padding: 12px; }
+    .header h1 { font-size: 1.4em; }
+    .section-header { padding: 14px 16px; }
+    .section-content { padding: 0 16px 16px; }
+    .number-row { grid-template-columns: 1fr 1fr; }
+    .nav-pills { gap: 6px; }
+    .nav-pill { padding: 6px 12px; font-size: 0.75em; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>FX Mayr</h1>
+  <div class="subtitle">Meeting Agenda</div>
+  <div class="date">April 10, 2026</div>
+</div>
+
+<nav class="nav-pills" id="nav">
+  <a class="nav-pill" href="#s1" onclick="openSection('s1')"><span class="pill-num">1</span> Requests</a>
+  <a class="nav-pill" href="#s2" onclick="openSection('s2')"><span class="pill-num">2</span> Project Status</a>
+  <a class="nav-pill" href="#s3" onclick="openSection('s3')"><span class="pill-num">3</span> Root Causes</a>
+  <a class="nav-pill" href="#s4" onclick="openSection('s4')"><span class="pill-num">4</span> Impact</a>
+  <a class="nav-pill" href="#s5" onclick="openSection('s5')"><span class="pill-num">5</span> Next Steps</a>
+  <a class="nav-pill" href="#s6" onclick="openSection('s6')"><span class="pill-num">6</span> Funding</a>
+  <a class="nav-pill" href="#s7" onclick="openSection('s7')" style="border-color:var(--text-dim);"><span class="pill-num">7</span> Other</a>
+</nav>
+
+<!-- ==================== SECTION 1: OPEN ITEMS ==================== -->
+<div class="section s1 open" id="s1">
+  <div class="section-header" onclick="toggleSection('s1')">
+    <div class="section-num">1</div>
+    <div>
+      <div class="section-title">Requests & Follow-Ups</div>
+      <div class="section-subtitle">Personal requests and action items</div>
+    </div>
+    <div class="chevron">▾</div>
+  </div>
+  <div class="section-body"><div class="section-content">
+
+    <div class="card">
+      <div class="card-title">📦 Parcel from Baden-Baden</div>
+      <p contenteditable="true" class="editable">Caroline checking with DHL Germany. AO needs to collect by Sunday.</p>
+      <div class="status-line status-green">DHL Express Germany — parcel on the way to recipient region. Expected by latest tomorrow. (Caroline, 10:31 AM)</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🏥 FX Mayr Invoice</div>
+      <p contenteditable="true" class="editable">Constantinos contacted to issue invoice to the company account. Same procedure as last year.</p>
+      <div class="status-line status-green">Done — Constantinos notified this morning.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">🏡 Villa La Plana — UBS</div>
+      <p contenteditable="true" class="editable">EUR 17M outstanding. Dimitry to contact UBS for details on acquisition terms.</p>
+      <div class="status-line status-orange">Scheduled — calls to UBS next week.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">💳 American Express — CBH Geneva</div>
+      <p contenteditable="true" class="editable">To be raised with CBH.</p>
+      <div class="status-line status-orange">Scheduled — to be raised with CBH next week.</div>
+    </div>
+    <div class="card">
+      <div class="card-title">📊 Financing to Completion Table</div>
+      <p contenteditable="true" class="editable">Full project overview being finalized. Line-by-line breakdown of all project costs, sources, and equity requirements.</p>
+      <div class="status-line status-red">Delivery this evening.</div>
+    </div>
+
+  </div></div>
+</div>
+
+<!-- ==================== SECTION 2: PROJECT STATUS ==================== -->
+<div class="section s2" id="s2">
+  <div class="section-header" onclick="toggleSection('s2')">
+    <div class="section-num">2</div>
+    <div>
+      <div class="section-title">Project Status — Current Challenges</div>
+      <div class="section-subtitle">Where the project stands and what needs attention</div>
+    </div>
+    <div class="chevron">▾</div>
+  </div>
+  <div class="section-body"><div class="section-content">
+
+    <!-- CORE: Financing to Completion Table — the foundation of all discussions -->
+    <div class="drill" onclick="toggleDrill(this)" style="border-color: var(--gold) !important; border-width: 2px !important;">
+      <div class="drill-title"><span class="drill-arrow">▸</span> 📊 Financing to Completion Table</div>
+      <div class="status-line status-red">Delivery this evening. Full line-by-line project overview.</div>
+      <div class="drill-body">
+        <div class="number-row">
+          <div class="number-card">
+            <div class="label">Remaining Equity Needed</div>
+            <div class="value value-red">EUR 10.7M</div>
+            <div class="note">To reach project completion</div>
+          </div>
+          <div class="number-card">
+            <div class="label">Partner Share (48%)</div>
+            <div class="value value-gold">EUR 5.1M</div>
+            <div class="note">Phased over April–June</div>
+          </div>
+          <div class="number-card">
+            <div class="label">Fund Share (52%)</div>
+            <div class="value value-red">EUR 5.5M</div>
+            <div class="note">Fund continues to contribute</div>
+          </div>
+        </div>
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> What the table covers</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p>The Financing to Completion table is the full project financial picture — every cost, every source of funds, every gap — from project inception through to completion.</p>
+              <p><strong>Uses (costs):</strong> Construction, hotel pre-opening, bank interest, VAT, working capital, Hagenauer settlement, MO obligations, professional fees.</p>
+              <p><strong>Sources (income):</strong> Bank facility (fully drawn), apartment sales, shareholder contributions.</p>
+              <p><strong>The gap:</strong> Total uses minus total sources = remaining equity needed. Split 48/52 between both partners.</p>
+              <p>This is the single document that answers: how much, for what, and who pays. Every issue discussed below is a line item in this table.</p>
+            </div>
+          </div>
+        </div>
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Key corrections applied vs. original version</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>VAT:</strong> Corrected from EUR 6.0M to EUR 5.77M (EUR 4.43M clawback + EUR 1.34M mismatch).</p>
+              <p><strong>Working capital:</strong> Increased from EUR 600K to EUR 1.5M (Mandarin Oriental contractual obligation).</p>
+              <p><strong>March contribution:</strong> EUR 2.5M allocated — EUR 1.05M to bank interest, EUR 1.45M to subcontractors.</p>
+              <p><strong>Missing row:</strong> One line item was absent from the original total — now corrected.</p>
+              <p>All corrections documented. Original version preserved untouched.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3 style="color:var(--gold); font-family:Georgia; font-size:1em; margin:20px 0 12px;">Current Issues</h3>
+
+    <!-- DRILL: Apartment Handovers -->
+    <div class="drill" onclick="toggleDrill(this)">
+      <div class="drill-title"><span class="drill-arrow">▸</span> 🪟 Apartment Handovers Blocked</div>
+      <div class="status-line status-red">Multiple apartments blocked. Buyers waiting. New contractors needed urgently.</div>
+      <div class="drill-body">
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Apartment #1 — Russian buyer refused handover</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>Buyer:</strong> Russian national, connected to Gazprom. Apartment purchased in 2025.</p>
+              <p><strong>Timeline:</strong> Apartment was ready December 2025. Client inspected in January 2026, found cracked and bubbled historic windows. Refused to accept handover. He is returning next week (mid-April).</p>
+              <p><strong>Cost to fix:</strong> Approximately EUR 5,000 — replacement of historic window finishing. However, the original subcontractor (engaged by Hagenauer) refuses to return because Hagenauer did not pay them.</p>
+              <p><strong>Status:</strong> A new contractor must be sourced and paid upfront. If the apartment is not ready when the buyer returns, there is a serious reputational risk — this buyer is well connected in the Russian business community.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Show apartment — pergola and electrical not connected</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>Issue:</strong> The show apartment's terrace pergola — which should demonstrate the outdoor living experience to prospective buyers — has zero electrical connection. Electricians inspected yesterday and found that nothing was wired at all.</p>
+              <p><strong>Impact:</strong> This is the apartment used to show prospective buyers. Without a functioning pergola, blinds, and outdoor features, we cannot demonstrate the product properly. This directly affects our ability to sell remaining units.</p>
+              <p><strong>Root cause:</strong> Hagenauer's electrical subcontractor also went bankrupt. The work was paid for but never completed.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> KNX smart home systems not programmed</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>Issue:</strong> KNX is the building automation system controlling lighting, heating, blinds, and security in each apartment. Multiple units have improperly programmed or non-functional KNX systems.</p>
+              <p><strong>Handover requirement:</strong> Each buyer must receive a working smart home system with a complete instruction manual. Without this, legal handover cannot proceed.</p>
+              <p><strong>Fix required:</strong> Two specialized KNX technicians must visit each affected apartment. The original provider (Hagenauer's subcontractor) refuses to come. A new KNX specialist must be engaged and paid in full upfront.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> The compounding cost: EUR 5,000 → EUR 20,000</div>
+          <div class="sub-drill-body">
+            <div class="cascade">
+              <div class="cascade-step c-gold">
+                <div class="cascade-line"><div class="cascade-dot"></div><div class="cascade-connector"></div></div>
+                <div class="cascade-content"><strong>EUR 5,000</strong> New contractor to repair the defect</div>
+              </div>
+              <div class="cascade-step c-orange">
+                <div class="cascade-line"><div class="cascade-dot"></div><div class="cascade-connector"></div></div>
+                <div class="cascade-content"><strong>+ Mandarin service charges</strong> We pay monthly for concierge, cleaning, and management on every unhanded apartment</div>
+              </div>
+              <div class="cascade-step c-orange">
+                <div class="cascade-line"><div class="cascade-dot"></div><div class="cascade-connector"></div></div>
+                <div class="cascade-content"><strong>+ Lost rental income</strong> Apartment cannot enter the MO rental pool — revenue lost every month</div>
+              </div>
+              <div class="cascade-step c-red">
+                <div class="cascade-line"><div class="cascade-dot"></div><div class="cascade-connector"></div></div>
+                <div class="cascade-content"><strong>+ Client relationship damage</strong> Four months waiting. Reputational risk with connected buyers.</div>
+              </div>
+              <div class="cascade-step c-red">
+                <div class="cascade-line"><div class="cascade-dot"></div><div class="cascade-connector"></div></div>
+                <div class="cascade-content"><strong>= EUR 5,000 becomes EUR 20,000+</strong> Per apartment. Multiplied across the portfolio.</div>
+              </div>
+            </div>
+            <div class="brief">
+              <p>This is both a money problem and a contractor problem — but money comes first. New contractors are available in the market. They require upfront payment because no subcontractor extends credit on a project where the main contractor went bankrupt. The moment funding is available, work can begin immediately.</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- DRILL: Hotel Operating Gap -->
+    <div class="drill" onclick="toggleDrill(this)">
+      <div class="drill-title"><span class="drill-arrow">▸</span> 🏨 Hotel Operating Gap — ~EUR 200K/Month</div>
+      <div class="status-line status-red">Month 5 of 36-month ramp-up. Monthly injection required to bridge to profitability.</div>
+      <div class="drill-body">
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Why the hotel is not yet profitable</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>Mandarin Oriental Vienna opened November 2025.</strong> We are currently in month 5 of operations.</p>
+              <p>Industry research (ISHC, Penn State, CBRE, HVS, JLL) consistently shows that luxury hotels require <strong>3 to 5 years</strong> to reach stabilized performance. The average is 3.08 years.</p>
+              <p>This is not unique to our hotel. Every major luxury brand — Ritz-Carlton, Four Seasons, Aman, Mandarin Oriental — operates at a loss during the initial years. The gap between revenue and operating costs must be funded by the owner during this period.</p>
+              <p>Vienna's tourism market is performing at record levels: 76.8% occupancy, EUR 211 average daily rate, luxury RevPAR +20% vs 2019. The trajectory is positive.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> EUR 1.5M working capital — Mandarin contractual right</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p>Under the Hotel Management Agreement (HMA), Mandarin Oriental has the contractual right to demand a <strong>EUR 1.5M working capital reserve</strong> at any time. This reserve covers day-to-day hotel operations: staff payroll, supplies, utilities.</p>
+              <p><strong>Current status:</strong> This reserve is unfunded. Mandarin Oriental has not yet formally demanded it, but they have the right to do so. If called and not funded, this creates a breach of the HMA and risks the brand relationship.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> 5% branding fee — EUR 3.6M</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p>Mandarin Oriental charges a <strong>5% branding and licensing fee</strong> on total project sales. On projected total sales of EUR 72M, this equals <strong>EUR 3.6M</strong>.</p>
+              <p>This is a standard contractual obligation in all MO-branded developments worldwide and is non-negotiable. It is part of the cost structure that was agreed when the brand partnership was established.</p>
+            </div>
+          </div>
+        </div>
+
+        <a class="link-btn" href="hotel-stabilization-ru.html" target="_blank">📊 Hotel Stabilization Research (Russian)</a>
+        <a class="link-btn" href="hotel-stabilization.html" target="_blank">📊 Hotel Stabilization Research (English)</a>
+      </div>
+    </div>
+
+    <!-- DRILL: Bank Interest -->
+    <div class="drill" onclick="toggleDrill(this)">
+      <div class="drill-title"><span class="drill-arrow">▸</span> 🏦 Bank Interest — EUR 3.38M Outstanding</div>
+      <div class="status-line status-red">Senior lender. 5.4% p.a. Payable in advance. Relationship under pressure.</div>
+      <div class="drill-body">
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Senior facility structure — Aukera, 5.4% p.a.</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>Lender:</strong> Aukera AG — senior secured lender on the project.</p>
+              <p><strong>Facility size:</strong> Approximately EUR 150M senior debt facility.</p>
+              <p><strong>Interest rate:</strong> 5.4% per annum, payable 6 months in advance.</p>
+              <p><strong>Outstanding 2026 interest:</strong> EUR 3,375,964.</p>
+              <p>The senior lender has first priority on all project cash flows. Staying current on interest payments is essential to maintaining the banking relationship and avoiding default triggers.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> How the March EUR 2.5M was allocated</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p>The EUR 2.5M contributed in March 2026 was allocated as follows:</p>
+              <p><strong>~EUR 1.05M</strong> — Bank interest (catching up on overdue pre-opening period interest)</p>
+              <p><strong>~EUR 1.45M</strong> — Subcontractor payments (urgent construction works that could not wait)</p>
+              <p>This allocation was necessary because bank interest was overdue and subcontractors required payment to continue work on the building.</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- DRILL: VAT -->
+    <div class="drill" onclick="toggleDrill(this)">
+      <div class="drill-title"><span class="drill-arrow">▸</span> 📋 VAT Clawback — EUR 5.77M</div>
+      <div class="status-line status-orange">New Austrian legislation. Retroactive. Funds redirected to tax office.</div>
+      <div class="drill-body">
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> EUR 4.43M — New Austrian law on luxury apartments</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>Legislation:</strong> Betrugsbekämpfungsgesetz 2025 (Anti-Fraud Act 2025) — new Austrian legislation.</p>
+              <p><strong>Change:</strong> Luxury residential apartments with a sale price exceeding EUR 2M can no longer claim VAT refund on construction costs. Previously, these refunds were standard practice.</p>
+              <p><strong>Impact:</strong> EUR 4.43M in apartment sale proceeds that were expected to flow into the project were instead directed to the Austrian tax office as VAT clawback.</p>
+              <p><strong>Timing:</strong> This law was enacted after construction had already begun and after the financial model was established. It was impossible to anticipate or plan for this retroactive change.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> EUR 1.34M — VAT mismatch between entities</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>Issue:</strong> A EUR 1.34M VAT mismatch arose from invoicing between the project's different legal entities (HotelCo and ApartCo/BD). This is a structural VAT issue related to the multi-entity project setup.</p>
+              <p>Combined with the EUR 4.43M clawback, the total VAT impact on the project is EUR 5.77M — funds that were expected to be available but are not.</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- DRILL: Construction -->
+    <div class="drill" onclick="toggleDrill(this)">
+      <div class="drill-title"><span class="drill-arrow">▸</span> 🔨 Construction Settlement Outstanding</div>
+      <div class="status-line status-red">No final close-out. EUR 5.6M unpaid. EUR 5M guarantee lost. EUR 7M claim filed.</div>
+      <div class="drill-body">
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Open-book contract — no final close-out</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>Contract type:</strong> Open-book with maximum price guarantee. This means all costs are transparent, with a guaranteed ceiling.</p>
+              <p><strong>Status:</strong> The final invoice was never received. Hagenauer became insolvent on March 27, 2026, before the construction accounts could be formally closed out. This means the final reconciliation between work completed, amounts paid, and amounts owed is still unresolved.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> EUR 5.6M — Completed works unpaid</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>Situation:</strong> Approximately EUR 5.6M worth of construction work was completed by Hagenauer and his subcontractors but remains unpaid.</p>
+              <p><strong>Why unpaid:</strong> Under the open-book contract, payments were staged against verified work completion. The final tranches were due but Hagenauer filed for insolvency before they could be processed.</p>
+              <p><strong>Consequence:</strong> Subcontractors who performed this work were not paid by Hagenauer, despite the fact that the project had allocated funds for it. This is why subcontractors now refuse to return for defect repairs — they are owed money by Hagenauer.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> EUR 5M — Bank guarantee lost</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>What it was:</strong> Hagenauer provided a EUR 5M bank guarantee (Bankgarantie) as security for the proper completion of the construction contract. This is standard practice in Austrian construction — it protects the client if the contractor fails to perform.</p>
+              <p><strong>What happened:</strong> When Hagenauer filed for insolvency, the bank guarantee was drawn upon by the insolvency administrator to satisfy claims from other creditors. The guarantee that was meant to protect our project was consumed by the insolvency estate.</p>
+              <p><strong>Impact:</strong> This EUR 5M was meant to be available as a safety net for exactly the situation we now face — contractor failure and incomplete works. Its loss means the project bears the full cost of completing and repairing the work without this backstop.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> EUR 7M claim filed — limited recovery expected</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>Claim filed:</strong> EUR 7M Forderungsanmeldung (claim registration) filed against the Hagenauer insolvency estate. This covers: defective works, uncompleted works, overpayments for work not delivered, and costs of engaging replacement contractors.</p>
+              <p><strong>Expected recovery:</strong> In Austrian insolvency proceedings, unsecured creditors typically recover 5–20 cents on the euro. Given the size of Hagenauer's liabilities and the number of creditors, realistic recovery is expected to be minimal.</p>
+              <p><strong>Timeline:</strong> Insolvency proceedings in Austria typically take 12–24 months. Any recovery will be slow and uncertain.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> EUR 4M settlement fund for insolvency proceedings</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>Purpose:</strong> Approximately EUR 4M must be reserved for legal costs, expert assessments, and settlement negotiations as part of the formal insolvency proceedings.</p>
+              <p><strong>Why necessary:</strong> To protect our claims and position in the insolvency, we need specialized insolvency counsel, construction experts to quantify defects, and funds to participate in creditor committee proceedings. Without adequate legal representation, our EUR 7M claim risks being reduced or subordinated.</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <h3 style="color:var(--gold); font-family:Georgia; font-size:1em; margin:20px 0 12px;">Key Characteristics</h3>
+    <div class="card">
+      <ul>
+        <li><strong>Multiple simultaneous pressures</strong> — several independent events converging at the same time</li>
+        <li><strong>Time-sensitive</strong> — bank obligations and hotel operating costs accrue monthly</li>
+        <li><strong>Shared responsibility</strong> — both partners carry their proportional share (48/52)</li>
+        <li><strong>External events</strong> — contractor insolvency, legislative change, hotel ramp-up. Market events, not management decisions.</li>
+        <li><strong>Recent triggers</strong> — contractor insolvency March 27, VAT law 2025, hotel opened November 2025</li>
+      </ul>
+    </div>
+
+  </div></div>
+</div>
+
+<!-- ==================== SECTION 3: ROOT CAUSES ==================== -->
+<div class="section s3" id="s3">
+  <div class="section-header" onclick="toggleSection('s3')">
+    <div class="section-num">3</div>
+    <div>
+      <div class="section-title">Root Causes</div>
+      <div class="section-subtitle">Three external events that created the funding gap</div>
+    </div>
+    <div class="chevron">▾</div>
+  </div>
+  <div class="section-body"><div class="section-content">
+
+    <!-- RC1: Hagenauer -->
+    <div class="drill" onclick="toggleDrill(this)">
+      <div class="drill-title"><span class="drill-arrow">▸</span> 💥 Contractor Insolvency — March 27, 2026</div>
+      <div class="status-line status-red">Hagenauer filed insolvency. All subcontractors ceased. Double cost on every repair.</div>
+      <div class="drill-body">
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> What happened</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p>Hagenauer GmbH, the main construction contractor for the RG7 project, filed for insolvency (Insolvenzantrag) on <strong>March 27, 2026</strong>. This occurred while construction works were still active and before the project could be formally closed out.</p>
+              <p>Hagenauer was responsible for the complete construction delivery including all trades — structural, mechanical, electrical, finishing, and specialist historic restoration works. Their insolvency immediately halted all subcontractor activity on the project.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Financial impact — EUR 5.6M unpaid works + EUR 5M guarantee lost</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>EUR 5.6M completed works unpaid:</strong> Subcontractors completed work that was invoiced by Hagenauer but payments from Hagenauer to his subcontractors were not made. The project had allocated these funds, but they were consumed within Hagenauer's insolvency.</p>
+              <p><strong>EUR 5M bank guarantee lost:</strong> The performance guarantee meant to protect the project was absorbed into the insolvency estate. This safety net no longer exists.</p>
+              <p><strong>EUR 7M claim filed:</strong> Formal claim registered with the insolvency court. Expected recovery: 5–20 cents on the euro, over 12–24 months.</p>
+              <p><strong>Net exposure:</strong> The project is effectively carrying the full cost of completing and repairing all outstanding works without recourse to the original contractor or his guarantee.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Operational impact — subcontractors will not return</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p>Every subcontractor who worked under Hagenauer is owed money. When contacted for defect repairs, the universal response is: <strong>"Hagenauer did not pay us. We are not coming back."</strong></p>
+              <p>This means every outstanding defect — windows, electrical, KNX, plumbing, finishing — requires sourcing a new contractor at full market price. These new contractors demand upfront payment because they see a project where the main contractor went bankrupt.</p>
+              <p><strong>Double cost effect:</strong> Work that was already paid for (through payments to Hagenauer) must now be paid for again to new contractors. Every defect costs twice.</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- RC2: VAT -->
+    <div class="drill" onclick="toggleDrill(this)">
+      <div class="drill-title"><span class="drill-arrow">▸</span> 📜 Austrian Tax Law Change — 2025</div>
+      <div class="status-line status-orange">EUR 5.77M redirected to tax authorities. Law enacted after construction began.</div>
+      <div class="drill-body">
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> The law: Betrugsbekämpfungsgesetz 2025</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p>Austria enacted the <strong>Betrugsbekämpfungsgesetz 2025</strong> (Anti-Fraud Act 2025), which changed the VAT treatment of luxury residential property.</p>
+              <p><strong>Previous rule:</strong> Developers could claim VAT refund on construction costs for all residential apartments, regardless of sale price.</p>
+              <p><strong>New rule:</strong> Apartments with a sale price exceeding EUR 2M are excluded from VAT refund on construction costs. The VAT already refunded must be clawed back.</p>
+              <p><strong>Timing:</strong> The law was enacted after our project's financial model was established and after construction was underway. There was no way to anticipate or structure around this change.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> EUR 5.77M total impact</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>EUR 4.43M</strong> — Direct VAT clawback on apartment sales. Sale proceeds that should have flowed into the project were directed to the Austrian tax office.</p>
+              <p><strong>EUR 1.34M</strong> — Additional VAT mismatch between invoicing entities within the project structure.</p>
+              <p><strong>Total: EUR 5.77M</strong> — These funds were included in the original financing plan as available project resources. Their redirection to the tax authority is the second-largest single contributor to the current funding gap.</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- RC3: Hotel Ramp-Up -->
+    <div class="drill" onclick="toggleDrill(this)">
+      <div class="drill-title"><span class="drill-arrow">▸</span> 🏨 Luxury Hotel Ramp-Up Cycle</div>
+      <div class="status-line status-orange">Industry standard 3–5 years. Month 5 of 36. Vienna market at record levels.</div>
+      <div class="drill-body">
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Industry standard: 3–5 years to stabilization</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p>Research from <strong>ISHC</strong> (International Society of Hospitality Consultants) and <strong>Penn State University</strong> shows the average luxury hotel reaches stabilized performance in <strong>3.08 years</strong>.</p>
+              <p><strong>CBRE</strong> uses 3–4 year ramp-up assumptions in all hotel valuations. <strong>HVS</strong> and <strong>JLL</strong> assume 4–5 years for luxury properties in their appraisal models.</p>
+              <p>Every major luxury hotel brand — Ritz-Carlton, Four Seasons, Aman, Mandarin Oriental — operates at a loss during the initial ramp-up period. This is the normal and expected trajectory of luxury hospitality investment.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Vienna market context — strong fundamentals</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>Vienna hotel market 2025/2026:</strong></p>
+              <p>• Occupancy: 76.8% (above European average)</p>
+              <p>• Average Daily Rate: EUR 211</p>
+              <p>• Luxury segment RevPAR: +20% compared to 2019 (pre-COVID)</p>
+              <p>• Vienna ranked among top European destinations for luxury tourism growth</p>
+              <p><strong>Mandarin Oriental globally:</strong> +11% RevPAR growth across portfolio, 30 hotels in development pipeline. The brand is expanding, not contracting.</p>
+              <p>The fundamentals support the investment thesis. The hotel is in the right city, with the right brand, at the right time. The ramp-up period is simply the bridge that must be funded.</p>
+            </div>
+          </div>
+        </div>
+
+        <a class="link-btn" href="hotel-stabilization-ru.html" target="_blank">📊 Detailed Research — Stabilization Periods</a>
+        <a class="link-btn" href="hotel-stabilization.html" target="_blank">📊 English Version</a>
+      </div>
+    </div>
+
+    <div class="highlight-box">
+      Each of these three events independently creates a funding requirement. Their simultaneous occurrence is what produces the current gap. None of these were caused by project decisions — they are external market events.
+    </div>
+
+  </div></div>
+</div>
+
+<!-- ==================== SECTION 4: IMPACT ==================== -->
+<div class="section s4" id="s4">
+  <div class="section-header" onclick="toggleSection('s4')">
+    <div class="section-num">4</div>
+    <div>
+      <div class="section-title">Impact If Not Addressed</div>
+      <div class="section-subtitle">What happens without timely funding</div>
+    </div>
+    <div class="chevron">▾</div>
+  </div>
+  <div class="section-body"><div class="section-content">
+
+    <div class="drill" onclick="toggleDrill(this)">
+      <div class="drill-title"><span class="drill-arrow">▸</span> 🏨 Mandarin Oriental Obligations</div>
+      <div class="status-line status-red">EUR 1.5M can be demanded at any time. Branding fee non-negotiable. Salaries ongoing.</div>
+      <div class="drill-body">
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> EUR 1.5M working capital demand risk</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p>Mandarin Oriental has the contractual right to demand a EUR 1.5M working capital reserve at any time. If demanded and not funded, this constitutes a breach of the Hotel Management Agreement. MO has never terminated a relationship mid-operation, but a breach creates leverage for renegotiation of terms in their favor.</p>
+            </div>
+          </div>
+        </div>
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Employee salaries and branding fees</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>Salaries:</strong> Mandarin Oriental staff are serving the hotel daily. Their salaries are an ongoing obligation regardless of hotel performance. Failure to fund salaries creates immediate operational and legal risk.</p>
+              <p><strong>Branding fee:</strong> 5% of total project sales (EUR 3.6M on EUR 72M). This is contractually non-negotiable and accrues regardless of project profitability. It is the price of having one of the world's most prestigious hotel brands on the building.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="drill" onclick="toggleDrill(this)">
+      <div class="drill-title"><span class="drill-arrow">▸</span> 🏦 Senior Lender Relationship</div>
+      <div class="status-line status-red">EUR 3.38M interest outstanding. Default risk. Overdraft facility stalled.</div>
+      <div class="drill-body">
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Default risk on EUR 150M senior facility</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p>EUR 3.38M in interest is outstanding on the senior facility. The lender (Aukera) has first priority on all project cash flows. Continued non-payment creates a technical default situation, which gives the lender the right to accelerate the loan — meaning they can demand full repayment of the entire facility.</p>
+              <p>The relationship is already under pressure: apartment sale proceeds (EUR 4.43M) went to the tax office instead of to the bank, which was not what the lender expected. A planned Bank Austria overdraft facility to provide liquidity has stalled because Aukera is withholding required documentation.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="drill" onclick="toggleDrill(this)">
+      <div class="drill-title"><span class="drill-arrow">▸</span> 🪟 Revenue Locked in Unhanded Apartments</div>
+      <div class="status-line status-orange">Service charges unpaid. Rental income lost. Client relationships at risk.</div>
+      <div class="drill-body">
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Daily cost of non-handover</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p>Every apartment that cannot be handed over creates three concurrent costs:</p>
+              <p><strong>1. Service charges borne by the project:</strong> Mandarin provides concierge, cleaning, and building management to all apartments. For unhanded units, the project pays these charges instead of the apartment owner.</p>
+              <p><strong>2. Lost rental income:</strong> Handed-over apartments can enter the MO rental pool and generate revenue. Unhanded apartments sit empty — lost income every month.</p>
+              <p><strong>3. Client relationship:</strong> Buyers who have paid for apartments and are waiting months for handover become increasingly dissatisfied. In the luxury segment, word travels fast. One unhappy buyer can influence multiple prospective purchasers.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="drill" onclick="toggleDrill(this)">
+      <div class="drill-title"><span class="drill-arrow">▸</span> 📉 Asset Value at Exit</div>
+      <div class="status-line status-orange">Sale process starting. Current performance determines price. Every month counts.</div>
+      <div class="drill-body">
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Sale process timing and performance</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p>The hotel sale process is being initiated with a leading international adviser. The hotel's current operating performance will be presented to potential buyers as part of the sale materials.</p>
+              <p><strong>Better performance now = higher price.</strong> Hotel buyers and their advisers apply a capitalization rate to the hotel's trailing 12-month performance. Every month of improved performance (higher occupancy, higher ADR, lower losses) directly increases the achievable sale price.</p>
+              <p><strong>Unresolved defects reduce value.</strong> Construction issues, unhanded apartments, and pending legal matters are all flagged during buyer due diligence and result in price adjustments or contingency holdbacks.</p>
+              <p>The investment made now to improve performance and resolve issues will be reflected directly in the exit valuation.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="highlight-box">
+      The cost of delay exceeds the cost of funding. Monthly operating losses, unpaid bank interest, and frozen apartment revenue compound over time. With the hotel sale process starting now, current performance directly determines the exit value.
+    </div>
+
+  </div></div>
+</div>
+
+<!-- ==================== SECTION 5: NEXT STEPS ==================== -->
+<div class="section s5" id="s5">
+  <div class="section-header" onclick="toggleSection('s5')">
+    <div class="section-num">5</div>
+    <div>
+      <div class="section-title">Next Steps</div>
+      <div class="section-subtitle">New developments and forward momentum</div>
+    </div>
+    <div class="chevron">▾</div>
+  </div>
+  <div class="section-body"><div class="section-content">
+
+    <!-- Hotel Sale -->
+    <div class="drill" onclick="toggleDrill(this)">
+      <div class="drill-title"><span class="drill-arrow">▸</span> 🎯 Hotel Sale Process</div>
+      <div class="status-line status-green">Live — NDA received this morning. Eastdil Secured engaged.</div>
+      <div class="drill-body">
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> NDA received — April 10, 2026</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>Status:</strong> Laura Wenk from Eastdil Secured sent the Non-Disclosure Agreement to Balazs Csepregi this morning (April 10, 2026).</p>
+              <p><strong>What this means:</strong> The NDA is the formal first step of any hotel sale process. Once signed, Eastdil can begin compiling the offering memorandum, approaching qualified buyers, and running the competitive sale process.</p>
+              <p><strong>Next milestone:</strong> NDA signed → Eastdil site visit (expected ~April 28 per earlier discussions with Balazs) → Offering memorandum preparation → Buyer shortlist → Indicative offers.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Who is Eastdil Secured?</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>Eastdil Secured</strong> is the world's leading real estate investment bank, specializing in hotel and hospitality transactions. Headquartered in New York with offices in London, Frankfurt, Paris, and other major cities.</p>
+              <p>They have advised on many of the largest luxury hotel sales globally, including Mandarin Oriental-branded properties. Their involvement signals to the market that this is a premium, institutional-quality transaction.</p>
+              <p><strong>Why Eastdil:</strong> Their buyer network includes sovereign wealth funds, family offices, luxury hospitality REITs, and high-net-worth individuals specifically seeking branded luxury hotel assets in European gateway cities.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Why timing matters now</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p>The hotel's performance during the sale process directly determines the achievable price. Buyers evaluate trailing performance — occupancy, revenue, operating margin — and apply capitalization rates to project future returns.</p>
+              <p><strong>Every EUR 1 invested now in hotel operations and defect resolution improves the sale metrics.</strong> A hotel showing improving monthly performance commands a premium over one showing stagnation or decline.</p>
+              <p>The Vienna luxury market is performing at record levels. This is the optimal window to run a sale process — strong market fundamentals combined with a prestigious brand and improving performance trajectory.</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Prague -->
+    <div class="drill" onclick="toggleDrill(this)">
+      <div class="drill-title"><span class="drill-arrow">▸</span> 🇨🇿 Mandarin Oriental Prague</div>
+      <div class="status-line status-green">Active — CITIC Group and Savills leads being explored.</div>
+      <div class="drill-body">
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> CITIC Group opportunity</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>Property:</strong> Mandarin Oriental Prague is currently owned by CITIC Group (Chinese state-backed conglomerate). The hotel is located in the historic Malá Strana district.</p>
+              <p><strong>Contact:</strong> Balazs Csepregi has existing contacts with CITIC (Liu Yansong). Exploration underway to understand if CITIC would consider a sale or partnership.</p>
+              <p><strong>Strategic fit:</strong> A second Mandarin Oriental property would create a Central European MO portfolio — Vienna + Prague — with significant synergies in marketing, operations, and luxury tourism routing.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Prague CBD Hotel — Škodův Palác (Savills)</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>New lead (April 10):</strong> Dennis Egorenkov received an opportunity for a CBD hotel development in Prague — Škodův Palác, marketed by Savills Czech Republic.</p>
+              <p><strong>Status:</strong> Initial review underway. Could be an alternative or complementary opportunity to the MO Prague angle.</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Val d'Isère -->
+    <div class="drill" onclick="toggleDrill(this)">
+      <div class="drill-title"><span class="drill-arrow">▸</span> 🏔️ Val d'Isère</div>
+      <div class="status-line status-green">NDA being signed by Balazs. Discussion in Vienna next week.</div>
+      <div class="drill-body">
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Current status</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>Origin:</strong> Opportunity originally sourced from Ettore (forwarded February 11, 2026). Luxury hotel development in Val d'Isère, one of the world's most prestigious ski resorts.</p>
+              <p><strong>Status:</strong> Balazs Csepregi confirmed he will sign the NDA on behalf of Brisen Capital as CIO. He plans to discuss in detail in Vienna next week (second part of the week).</p>
+              <p><strong>Next steps:</strong> NDA signed → information memorandum received → preliminary analysis → decision on further engagement.</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Vienna Market -->
+    <div class="drill" onclick="toggleDrill(this)">
+      <div class="drill-title"><span class="drill-arrow">▸</span> 📈 Vienna Market — Record Performance</div>
+      <div class="status-line status-green">76.8% occupancy. EUR 211 ADR. Luxury RevPAR +20% vs 2019.</div>
+      <div class="drill-body">
+
+        <div class="sub-drill" onclick="event.stopPropagation(); toggleDrill(this)">
+          <div class="sub-drill-title"><span class="sub-drill-arrow">▸</span> Key market metrics</div>
+          <div class="sub-drill-body">
+            <div class="brief">
+              <p><strong>Vienna hotel market performance:</strong></p>
+              <p>• Hotel occupancy: 76.8% (above European gateway city average)</p>
+              <p>• Average Daily Rate: EUR 211</p>
+              <p>• Luxury segment Revenue per Available Room: +20% compared to 2019 (pre-COVID baseline)</p>
+              <p><strong>Mandarin Oriental global context:</strong></p>
+              <p>• +11% RevPAR growth across the global portfolio</p>
+              <p>• 30 new hotels in the development pipeline</p>
+              <p>• The brand is expanding into new markets, increasing its global presence and marketing reach</p>
+              <p>The asset is positioned in a strong market with a globally expanding brand. The fundamentals support long-term value appreciation.</p>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div></div>
+</div>
+
+<!-- ==================== SECTION 6: FUNDING ==================== -->
+<div class="section s6" id="s6">
+  <div class="section-header" onclick="toggleSection('s6')">
+    <div class="section-num">6</div>
+    <div>
+      <div class="section-title">Proposed Funding Schedule</div>
+      <div class="section-subtitle">Phased approach over three months</div>
+    </div>
+    <div class="chevron">▾</div>
+  </div>
+  <div class="section-body"><div class="section-content">
+
+    <div class="number-row">
+      <div class="number-card">
+        <div class="label">April</div>
+        <div class="value value-gold">EUR 2M</div>
+        <div class="note">Hotel operations + subcontractors</div>
+      </div>
+      <div class="number-card">
+        <div class="label">May</div>
+        <div class="value value-gold">EUR 2M</div>
+        <div class="note">Bank interest + construction</div>
+      </div>
+      <div class="number-card">
+        <div class="label">June</div>
+        <div class="value value-gold">EUR 2–3M</div>
+        <div class="note">Subject to apartment sales progress</div>
+      </div>
+    </div>
+
+    <div class="drill" onclick="toggleDrill(this)">
+      <div class="drill-title"><span class="drill-arrow">▸</span> Why phased — not a lump sum</div>
+      <div class="drill-body">
+        <div class="brief">
+          <p>A phased approach of EUR 2M per month provides several advantages:</p>
+          <p><strong>1. Flexibility:</strong> Each month's contribution can be adjusted based on apartment sales progress and hotel performance improvements. If sales accelerate, the June requirement may decrease.</p>
+          <p><strong>2. Visibility:</strong> Both partners can track exactly how each tranche is deployed — which subcontractors are paid, which apartments are handed over, which bank obligations are met.</p>
+          <p><strong>3. Proportional:</strong> Both partners contribute their share (48/52). The Fund continues its contributions alongside the partner's contributions.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="drill" onclick="toggleDrill(this)">
+      <div class="drill-title"><span class="drill-arrow">▸</span> What the April EUR 2M covers</div>
+      <div class="drill-body">
+        <div class="brief">
+          <p><strong>Priority allocation:</strong></p>
+          <p>• Mandarin Oriental operating gap — bridge funding to keep the hotel running and improving performance metrics ahead of the sale process</p>
+          <p>• Subcontractor payments — unlock apartment handovers by engaging new contractors for critical defects (windows, KNX, electrical)</p>
+          <p>• Bank interest — partial payment to maintain senior lender relationship and avoid default triggers</p>
+          <p>The detailed allocation by line item will be in the Financing to Completion table being delivered this evening.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="highlight-box">
+      The full financing picture — line by line — will be presented in the Financing to Completion table this evening. This schedule provides a manageable framework for both partners to fund the project through to completion while the hotel sale process runs in parallel.
+    </div>
+
+  </div></div>
+</div>
+
+<!-- ==================== SECTION 7: OTHER ISSUES ==================== -->
+<div class="section s7" id="s7">
+  <div class="section-header" onclick="toggleSection('s7')">
+    <div class="section-num" style="background:rgba(138,138,138,0.15); color:var(--text-dim);">7</div>
+    <div>
+      <div class="section-title">Other Issues</div>
+      <div class="section-subtitle">Outstanding matters between partners — not for today's discussion</div>
+    </div>
+    <div class="chevron">▾</div>
+  </div>
+  <div class="section-body"><div class="section-content" id="s7-content">
+
+    <div class="card" style="border-color: rgba(138,138,138,0.3);">
+      <div class="card-title">📋 Four Moscow Adviser Questions (Feb 7 — unanswered)</div>
+      <p contenteditable="true" class="editable">(a) SHL interest rate — what rate applies to the shareholder loans<br>(b) EUR 5M bonds restructuring — current status and mechanics<br>(c) "On first demand" EUR 13M — what this clause means in practice<br>(d) 23% equity format between partners — how this is structured</p>
+      <div class="status-line status-red">Unanswered since February 7. Moscow advisers may escalate.</div>
+    </div>
+
+    <div class="card" style="border-color: rgba(138,138,138,0.3);">
+      <div class="card-title">👔 Wertheimer Family Follow-Up (Feb 27)</div>
+      <p contenteditable="true" class="editable">Chanel owners approached about MO Vienna via Balducci. Information shared but never followed up. Source: Balducci — needs to be contacted for current status.</p>
+      <div class="status-line status-orange">Pending follow-up with Balducci.</div>
+    </div>
+
+    <div class="card" style="border-color: rgba(138,138,138,0.3);">
+      <div class="card-title">🏢 Eastdil Update Promise</div>
+      <p contenteditable="true" class="editable">Eastdil site visit expected ~April 28 (per Balazs). Update to be shared after their visit.</p>
+      <div class="status-line status-green">NDA received today. Process moving.</div>
+    </div>
+
+    <div class="card" style="border-color: rgba(138,138,138,0.3);">
+      <div class="card-title">📝 Documents for Signature</div>
+      <p contenteditable="true" class="editable">Constantinos has prepared documents requiring both signatures. To be signed this afternoon.</p>
+      <div class="status-line status-orange">This afternoon.</div>
+    </div>
+
+    <div class="card" style="border-color: rgba(138,138,138,0.3);">
+      <div class="card-title">📝 Sign Mertz Protocol + Loan Agreement</div>
+      <p contenteditable="true" class="editable">Constantinos reminded. Documents to be signed between partners. Part of the corporate housekeeping backlog.</p>
+      <div class="status-line status-orange">Pending — Constantinos coordinating.</div>
+    </div>
+
+    <div class="card" style="border-color: rgba(138,138,138,0.3);">
+      <div class="card-title">🏔️ Kempinski Kitzbühel</div>
+      <p contenteditable="true" class="editable">Deprioritized. Yurkovich price considered too high. Partner accepts this assessment.</p>
+      <div class="status-line status-green">Closed — deprioritized by mutual agreement.</div>
+    </div>
+
+    <div class="card" style="border-color: rgba(138,138,138,0.3);">
+      <div class="card-title">💰 Lilienmatt Restructuring</div>
+      <p contenteditable="true" class="editable">Tax restructuring and issues to be presented to partner. Originally scheduled for this week.</p>
+      <div class="status-line status-orange">Overdue — was due April 10.</div>
+    </div>
+
+    <div class="card" style="border-color: rgba(138,138,138,0.3);">
+      <div class="card-title">🔐 Bond Payout Mechanics</div>
+      <p contenteditable="true" class="editable">Clarify when and how partner receives proceeds from the securitisation vehicle. Complete documentation on waterfall priority needed.</p>
+      <div class="status-line status-red">Overdue — documentation not yet provided.</div>
+    </div>
+
+    <div id="s7-added"></div>
+
+  </div></div>
+</div>
+
+<!-- Footer -->
+<div style="text-align:center; padding:30px 0 20px; color:var(--text-dim); font-size:0.75em;">
+  Brisen Group — Confidential
+</div>
+
+<!-- Add Item Button (floating) -->
+<div id="add-btn" onclick="showAddDialog()" style="
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--gold);
+  color: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2em;
+  font-weight: 300;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(201,169,110,0.4);
+  z-index: 200;
+  transition: transform 0.2s, box-shadow 0.2s;
+  user-select: none;
+">+</div>
+
+<!-- Add Dialog -->
+<div id="add-dialog" style="
+  display: none;
+  position: fixed;
+  bottom: 90px;
+  right: 24px;
+  width: 340px;
+  max-width: calc(100vw - 48px);
+  background: var(--card-bg);
+  border: 1.5px solid var(--gold);
+  border-radius: 12px;
+  padding: 20px;
+  z-index: 201;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.5);
+">
+  <div style="font-weight:600; font-size:0.9em; color:var(--gold); margin-bottom:12px;">Add New Item</div>
+  <select id="add-section" style="
+    width: 100%;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--card-border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.85em;
+    margin-bottom: 10px;
+    font-family: 'Inter', sans-serif;
+  ">
+    <option value="s1">1. Open Items</option>
+    <option value="s2">2. Project Status</option>
+    <option value="s3">3. Root Causes</option>
+    <option value="s4">4. Impact</option>
+    <option value="s5">5. Next Steps</option>
+    <option value="s6">6. Funding</option>
+    <option value="s7" selected>7. Other Issues</option>
+  </select>
+  <input id="add-title" placeholder="Title (e.g., New discussion point)" style="
+    width: 100%;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--card-border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.85em;
+    margin-bottom: 10px;
+    font-family: 'Inter', sans-serif;
+  ">
+  <textarea id="add-note" placeholder="Details (optional)" rows="3" style="
+    width: 100%;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid var(--card-border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 0.85em;
+    margin-bottom: 12px;
+    font-family: 'Inter', sans-serif;
+    resize: vertical;
+  "></textarea>
+  <div style="display:flex; gap:8px;">
+    <button onclick="addItem()" style="
+      flex:1;
+      padding: 10px;
+      border-radius: 8px;
+      border: none;
+      background: var(--gold);
+      color: var(--bg);
+      font-weight: 600;
+      font-size: 0.85em;
+      cursor: pointer;
+      font-family: 'Inter', sans-serif;
+    ">Add</button>
+    <button onclick="hideAddDialog()" style="
+      flex:1;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid var(--card-border);
+      background: var(--bg);
+      color: var(--text-dim);
+      font-weight: 500;
+      font-size: 0.85em;
+      cursor: pointer;
+      font-family: 'Inter', sans-serif;
+    ">Cancel</button>
+  </div>
+</div>
+
+<style>
+  /* Editable fields */
+  .editable {
+    border-radius: 4px;
+    padding: 2px 4px;
+    margin: -2px -4px;
+    transition: background 0.2s, outline 0.2s;
+  }
+  .editable:focus {
+    background: rgba(201, 169, 110, 0.1);
+    outline: 1px solid rgba(201, 169, 110, 0.4);
+  }
+  .editable:hover {
+    background: rgba(255,255,255,0.03);
+  }
+
+  /* Section 7 styling */
+  .s7 .card {
+    border: 1.5px solid rgba(138, 138, 138, 0.3);
+    background: rgba(138, 138, 138, 0.03);
+  }
+
+  /* Added items styling */
+  .added-card {
+    background: rgba(201, 169, 110, 0.04);
+    border: 1.5px dashed rgba(201, 169, 110, 0.4);
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 12px;
+    position: relative;
+  }
+  .added-card .card-title {
+    font-weight: 600;
+    font-size: 0.9em;
+    margin-bottom: 8px;
+    color: var(--gold);
+  }
+  .added-card .remove-btn {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 1.1em;
+    opacity: 0.5;
+    transition: opacity 0.2s;
+  }
+  .added-card .remove-btn:hover { opacity: 1; color: var(--red); }
+
+  /* Edit hint on cards */
+  .card p[contenteditable="true"]::after,
+  .added-card p[contenteditable="true"]::after {
+    /* subtle hint removed for cleanliness */
+  }
+
+  #add-btn:hover {
+    transform: scale(1.1);
+    box-shadow: 0 6px 30px rgba(201,169,110,0.6);
+  }
+  #add-btn:active { transform: scale(0.95); }
+</style>
+
+<script>
+const STORAGE_KEY = 'fxmayr-agenda-v1';
+
+function toggleSection(id) {
+  const el = document.getElementById(id);
+  el.classList.toggle('open');
+  document.querySelectorAll('.nav-pill').forEach(p => p.classList.remove('active'));
+  if (el.classList.contains('open')) {
+    document.querySelector(`[href="#${id}"]`)?.classList.add('active');
+  }
+}
+
+function openSection(id) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('open'));
+  document.getElementById(id).classList.add('open');
+  document.querySelectorAll('.nav-pill').forEach(p => p.classList.remove('active'));
+  document.querySelector(`[href="#${id}"]`)?.classList.add('active');
+  setTimeout(() => {
+    document.getElementById(id).scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, 100);
+}
+
+function toggleDrill(el) {
+  if (el.classList.contains('drill') || el.classList.contains('sub-drill')) {
+    el.classList.toggle('open');
+  }
+}
+
+// ===== ADD ITEM =====
+function showAddDialog() {
+  document.getElementById('add-dialog').style.display = 'block';
+  document.getElementById('add-title').focus();
+}
+function hideAddDialog() {
+  document.getElementById('add-dialog').style.display = 'none';
+  document.getElementById('add-title').value = '';
+  document.getElementById('add-note').value = '';
+}
+
+function addItem() {
+  const section = document.getElementById('add-section').value;
+  const title = document.getElementById('add-title').value.trim();
+  const note = document.getElementById('add-note').value.trim();
+  if (!title) { document.getElementById('add-title').style.borderColor = 'var(--red)'; return; }
+
+  const card = document.createElement('div');
+  card.className = 'added-card';
+  card.innerHTML = `
+    <span class="remove-btn" onclick="removeItem(this)">&times;</span>
+    <div class="card-title">📌 ${escapeHtml(title)}</div>
+    <p contenteditable="true" class="editable">${escapeHtml(note) || 'Tap to add details...'}</p>
+    <div class="status-line status-blue" style="color:var(--blue);">Added during meeting</div>
+  `;
+
+  // Find the target section's content area
+  const sectionEl = document.getElementById(section);
+  const content = sectionEl.querySelector('.section-content');
+  // For section 7, insert before the s7-added placeholder
+  if (section === 's7') {
+    document.getElementById('s7-added').before(card);
+  } else {
+    content.appendChild(card);
+  }
+
+  // Make sure section is open
+  if (!sectionEl.classList.contains('open')) {
+    sectionEl.classList.add('open');
+  }
+
+  hideAddDialog();
+  saveState();
+  card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function removeItem(btn) {
+  const card = btn.closest('.added-card');
+  card.style.opacity = '0';
+  card.style.transform = 'translateX(20px)';
+  card.style.transition = 'all 0.3s';
+  setTimeout(() => { card.remove(); saveState(); }, 300);
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// ===== SAVE / LOAD STATE (localStorage) =====
+function saveState() {
+  const state = {
+    editedFields: {},
+    addedItems: []
+  };
+
+  // Save all edited contenteditable fields
+  document.querySelectorAll('.editable').forEach((el, i) => {
+    const key = el.closest('.card, .added-card')?.querySelector('.card-title')?.textContent?.trim() || `field-${i}`;
+    if (el.dataset.original === undefined) {
+      el.dataset.original = el.innerHTML;
+    }
+    if (el.innerHTML !== el.dataset.original) {
+      state.editedFields[key] = el.innerHTML;
+    }
+  });
+
+  // Save added items
+  document.querySelectorAll('.added-card').forEach(card => {
+    const section = card.closest('.section')?.id || 's7';
+    const title = card.querySelector('.card-title')?.textContent?.replace('📌 ', '') || '';
+    const note = card.querySelector('.editable')?.innerHTML || '';
+    state.addedItems.push({ section, title, note });
+  });
+
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
+
+function loadState() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return;
+  try {
+    const state = JSON.parse(raw);
+
+    // Restore edited fields
+    if (state.editedFields) {
+      document.querySelectorAll('.editable').forEach((el, i) => {
+        const key = el.closest('.card')?.querySelector('.card-title')?.textContent?.trim() || `field-${i}`;
+        if (state.editedFields[key]) {
+          el.dataset.original = el.innerHTML;
+          el.innerHTML = state.editedFields[key];
+        }
+      });
+    }
+
+    // Restore added items
+    if (state.addedItems) {
+      state.addedItems.forEach(item => {
+        const sectionEl = document.getElementById(item.section);
+        if (!sectionEl) return;
+        const card = document.createElement('div');
+        card.className = 'added-card';
+        card.innerHTML = `
+          <span class="remove-btn" onclick="removeItem(this)">&times;</span>
+          <div class="card-title">📌 ${item.title}</div>
+          <p contenteditable="true" class="editable">${item.note}</p>
+          <div class="status-line status-blue" style="color:var(--blue);">Added during meeting</div>
+        `;
+        if (item.section === 's7') {
+          const placeholder = document.getElementById('s7-added');
+          if (placeholder) placeholder.before(card);
+          else sectionEl.querySelector('.section-content').appendChild(card);
+        } else {
+          sectionEl.querySelector('.section-content').appendChild(card);
+        }
+      });
+    }
+  } catch (e) {
+    console.error('Failed to load state:', e);
+  }
+}
+
+// Auto-save on edits
+document.addEventListener('input', (e) => {
+  if (e.target.classList?.contains('editable')) {
+    clearTimeout(window._saveTimeout);
+    window._saveTimeout = setTimeout(saveState, 1000);
+  }
+});
+
+// Init
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelector('[href="#s1"]')?.classList.add('active');
+  loadState();
+
+  // Store original values for edit tracking
+  document.querySelectorAll('.editable').forEach(el => {
+    el.dataset.original = el.innerHTML;
+  });
+});
+</script>
+
+</body>
+</html>
