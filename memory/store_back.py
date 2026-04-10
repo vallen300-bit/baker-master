@@ -941,6 +941,13 @@ class SentinelStoreBack:
                     ingested_at TIMESTAMPTZ DEFAULT NOW()
                 )
             """)
+            # WHATSAPP-MEDIA-DROPBOX-1: media metadata columns
+            cur.execute("""
+                ALTER TABLE whatsapp_messages
+                ADD COLUMN IF NOT EXISTS media_mimetype TEXT,
+                ADD COLUMN IF NOT EXISTS media_dropbox_path TEXT,
+                ADD COLUMN IF NOT EXISTS media_size_bytes INTEGER
+            """)
             conn.commit()
             cur.close()
             logger.info("whatsapp_messages table verified")
@@ -952,7 +959,10 @@ class SentinelStoreBack:
     def store_whatsapp_message(self, msg_id: str, sender: str = None,
                                sender_name: str = None, chat_id: str = None,
                                full_text: str = None, timestamp: str = None,
-                               is_director: bool = False) -> bool:
+                               is_director: bool = False,
+                               media_mimetype: str = None,
+                               media_dropbox_path: str = None,
+                               media_size_bytes: int = None) -> bool:
         """Upsert a full WhatsApp message. Returns True on success."""
         conn = self._get_conn()
         if not conn:
@@ -961,17 +971,23 @@ class SentinelStoreBack:
             cur = conn.cursor()
             cur.execute("""
                 INSERT INTO whatsapp_messages
-                    (id, sender, sender_name, chat_id, full_text, timestamp, is_director)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (id, sender, sender_name, chat_id, full_text, timestamp, is_director,
+                     media_mimetype, media_dropbox_path, media_size_bytes)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     full_text = EXCLUDED.full_text,
+                    media_mimetype = COALESCE(EXCLUDED.media_mimetype, whatsapp_messages.media_mimetype),
+                    media_dropbox_path = COALESCE(EXCLUDED.media_dropbox_path, whatsapp_messages.media_dropbox_path),
+                    media_size_bytes = COALESCE(EXCLUDED.media_size_bytes, whatsapp_messages.media_size_bytes),
                     ingested_at = NOW()
-            """, (msg_id, sender, sender_name, chat_id, full_text, timestamp, is_director))
+            """, (msg_id, sender, sender_name, chat_id, full_text, timestamp, is_director,
+                  media_mimetype, media_dropbox_path, media_size_bytes))
             conn.commit()
             cur.close()
             return True
         except Exception as e:
             logger.error(f"store_whatsapp_message failed: {e}")
+            conn.rollback()
             return False
         finally:
             self._put_conn(conn)

@@ -93,6 +93,7 @@ PM_REGISTRY = {
             "\"red_flags\": [], \"relationship_state\": {}, \"summary\": \"...\"}"
         ),
         "peer_pms": ["movie_am"],
+        "media_folder": "/Baker-Project/01_Projects/Active_Projects/Oskolkov/Media and Files",
     },
     "movie_am": {
         "registry_version": 1,
@@ -110,6 +111,7 @@ PM_REGISTRY = {
         ],
         "entangled_matters": ["rg7"],
         "peer_pms": ["ao_pm"],
+        "media_folder": "/Baker-Project/01_Projects/Active_Projects/MOVIE/Media and Files",
         "briefing_section_title": "MOVIE ASSET STATUS",
         "briefing_email_patterns": ["mandarin", "mohg", "mario.habicher"],
         "briefing_whatsapp_patterns": ["henri movie", "victor rodriguez", "rolf"],

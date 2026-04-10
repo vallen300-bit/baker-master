@@ -789,28 +789,51 @@ async def waha_webhook(
 
     logger.info(f"WhatsApp webhook: message from {sender_name} ({sender})")
 
-    # --- Media handling: download and extract text from attachments ---
+    # --- Media handling: download, extract text, persist to Dropbox ---
     media_text = ""
+    media_mimetype = None
+    media_dropbox_path = None
+    media_size_bytes = None
     if has_media:
         try:
-            from triggers.waha_client import download_media_file, extract_media_text, is_extractable
+            from triggers.waha_client import (
+                download_media_file, extract_media_text, is_extractable,
+                upload_media_to_dropbox,
+            )
 
             media = payload.get("media") or {}
             media_url = media.get("url", "")
             mimetype = media.get("mimetype", "")
+            media_mimetype = mimetype or None
 
-            if media_url and is_extractable(mimetype):
+            if media_url:
                 filepath = download_media_file(media_url)
                 if filepath:
-                    media_text = extract_media_text(filepath, mimetype)
-                    if media_text:
-                        logger.info(f"Extracted {len(media_text)} chars from WA media ({mimetype})")
-                    # Clean up temp file to prevent /tmp accumulation
                     try:
-                        import os
-                        os.unlink(filepath)
-                    except OSError:
-                        pass
+                        # 1. Upload to Dropbox FIRST (before extraction, which may be slow)
+                        try:
+                            from orchestrator.pm_signal_detector import detect_relevant_pms_whatsapp
+                            pm_slugs = detect_relevant_pms_whatsapp(sender_name, message_body or "")
+                            pm_slug = pm_slugs[0] if pm_slugs else None
+                        except Exception:
+                            pm_slug = None
+
+                        media_dropbox_path, media_size_bytes = upload_media_to_dropbox(
+                            filepath, sender_name, mimetype, pm_slug=pm_slug,
+                        )
+
+                        # 2. Extract text (images → Vision, docs → extractors)
+                        if is_extractable(mimetype):
+                            media_text = extract_media_text(filepath, mimetype)
+                            if media_text:
+                                logger.info(f"Extracted {len(media_text)} chars from WA media ({mimetype})")
+                    finally:
+                        # 3. Clean up temp file — ALWAYS runs, even if extract/upload fails
+                        try:
+                            import os
+                            os.unlink(filepath)
+                        except OSError:
+                            pass
         except Exception as e:
             logger.warning(f"WhatsApp media processing failed (continuing with text only): {e}")
 
@@ -835,6 +858,9 @@ async def waha_webhook(
             full_text=combined_body,
             timestamp=datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat() if timestamp else None,
             is_director=(sender == DIRECTOR_WHATSAPP),
+            media_mimetype=media_mimetype,
+            media_dropbox_path=media_dropbox_path,
+            media_size_bytes=media_size_bytes,
         )
     except Exception as _e:
         logger.warning(f"Failed to store WhatsApp msg {msg_id} to PostgreSQL (non-fatal): {_e}")

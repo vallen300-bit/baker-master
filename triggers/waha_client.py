@@ -120,6 +120,9 @@ _MIME_TO_EXT = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
     "text/plain": ".txt",
     "text/csv": ".csv",
+    "audio/ogg": ".ogg",
+    "audio/mpeg": ".mp3",
+    "video/mp4": ".mp4",
 }
 
 # Media types we can extract text from (skip audio/video)
@@ -172,7 +175,7 @@ def extract_media_text(filepath: Path, mimetype: str = "") -> str:
     Extract text from a downloaded media file.
     Images → Claude Vision. Documents → text extractors.
     Returns extracted text, or empty string on failure.
-    Cleans up the temp file after extraction.
+    NOTE: Caller is responsible for cleaning up the temp file.
     """
     from tools.ingest.extractors import IMAGE_EXTENSIONS
 
@@ -187,8 +190,58 @@ def extract_media_text(filepath: Path, mimetype: str = "") -> str:
     except Exception as e:
         logger.warning(f"Media text extraction failed for {filepath.name}: {e}")
         return ""
-    finally:
-        try:
-            filepath.unlink(missing_ok=True)
-        except Exception:
-            pass
+
+
+# ------------------------------------------------------------------
+# PM media Dropbox persistence (WHATSAPP-MEDIA-DROPBOX-1)
+# ------------------------------------------------------------------
+
+_FALLBACK_MEDIA_FOLDER = "/Baker-Project/WhatsApp-Media"
+MAX_MEDIA_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB — skip Dropbox upload for large video/audio
+
+
+def _get_pm_media_folder(pm_slug: str) -> str:
+    """Get Dropbox media folder for a PM from PM_REGISTRY. Falls back to generic folder."""
+    if not pm_slug:
+        return _FALLBACK_MEDIA_FOLDER
+    try:
+        from orchestrator.capability_runner import PM_REGISTRY
+        config = PM_REGISTRY.get(pm_slug, {})
+        return config.get("media_folder", _FALLBACK_MEDIA_FOLDER)
+    except Exception:
+        return _FALLBACK_MEDIA_FOLDER
+
+
+def upload_media_to_dropbox(filepath: Path, sender_name: str, mimetype: str,
+                            pm_slug: str = None) -> tuple:
+    """
+    Upload a WhatsApp media file to the appropriate PM's Dropbox folder.
+    Returns (dropbox_path, size_bytes) or (None, 0) on failure.
+    Skips upload if file exceeds MAX_MEDIA_UPLOAD_BYTES (10 MB).
+    """
+    from datetime import date
+
+    size_bytes = filepath.stat().st_size
+    if size_bytes > MAX_MEDIA_UPLOAD_BYTES:
+        logger.warning(f"Skipping Dropbox upload: {mimetype} too large ({size_bytes} bytes, limit {MAX_MEDIA_UPLOAD_BYTES})")
+        return None, size_bytes  # still return size for DB record
+
+    base_folder = _get_pm_media_folder(pm_slug)
+    safe_sender = "".join(c for c in (sender_name or "Unknown") if c.isalnum() or c in " _-").strip()
+    if not safe_sender:
+        safe_sender = "Unknown"
+
+    date_prefix = date.today().isoformat()
+    filename = f"{date_prefix}_{filepath.name}"
+    dropbox_path = f"{base_folder}/{safe_sender}/{filename}"
+
+    try:
+        from triggers.dropbox_client import DropboxClient
+        client = DropboxClient._get_global_instance()
+        result = client.upload_file(str(filepath), dropbox_path)
+        actual_path = result.get("path_display", dropbox_path)
+        logger.info(f"Media uploaded to Dropbox: {actual_path} ({size_bytes} bytes)")
+        return actual_path, size_bytes
+    except Exception as e:
+        logger.warning(f"Dropbox media upload failed (non-fatal): {e}")
+        return None, 0
