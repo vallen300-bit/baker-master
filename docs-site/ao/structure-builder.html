@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AO Dashboard — Structure Builder</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Georgia&display=swap');
+  :root {
+    --bg: #0f1117;
+    --col-bg: #1a1d27;
+    --card-bg: #22253a;
+    --border: #2a2d3a;
+    --gold: #c9a96e;
+    --gold-dim: rgba(201,169,110,0.15);
+    --text: #e8e6e1;
+    --text-dim: #8a8a8a;
+    --text-bright: #fff;
+    --red: #e74c3c;
+    --green: #2ecc71;
+    --blue: #3498db;
+    --orange: #f39c12;
+    --purple: #9b59b6;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    padding: 20px;
+    min-height: 100vh;
+  }
+  .header {
+    text-align: center;
+    padding: 20px 0 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+  }
+  .header h1 {
+    font-family: Georgia, serif;
+    font-size: 1.5em;
+    color: var(--gold);
+    font-weight: 400;
+  }
+  .header p { color: var(--text-dim); font-size: 0.8em; margin-top: 6px; }
+  .legend {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    padding: 10px 0 16px;
+    flex-wrap: wrap;
+    font-size: 0.75em;
+    color: var(--text-dim);
+  }
+  .legend span { display: flex; align-items: center; gap: 4px; }
+  .legend-dot {
+    width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+  }
+  .controls {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .ctrl-btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--col-bg);
+    color: var(--text-dim);
+    font-size: 0.8em;
+    cursor: pointer;
+    font-family: 'Inter', sans-serif;
+    transition: all 0.2s;
+  }
+  .ctrl-btn:hover { border-color: var(--gold); color: var(--gold); }
+  .ctrl-btn.primary { background: var(--gold); color: var(--bg); border-color: var(--gold); font-weight: 600; }
+
+  .board {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+    align-items: start;
+  }
+
+  /* Columns — draggable */
+  .column {
+    background: var(--col-bg);
+    border: 1.5px solid var(--border);
+    border-radius: 12px;
+    min-height: 120px;
+    transition: border-color 0.2s, opacity 0.2s, transform 0.15s;
+  }
+  .column.drag-over { border-color: var(--gold); box-shadow: 0 0 20px rgba(201,169,110,0.2); }
+  .column.col-dragging { opacity: 0.4; transform: scale(0.97); }
+  .column.internal-only { border-style: dashed; }
+
+  .col-header {
+    padding: 14px 16px 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 1px solid var(--border);
+    cursor: grab;
+  }
+  .col-header:active { cursor: grabbing; }
+  .col-num {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 0.8em; flex-shrink: 0;
+  }
+  .col-title {
+    font-family: Georgia, serif;
+    font-weight: 600;
+    font-size: 0.95em;
+    color: var(--gold);
+    flex: 1;
+  }
+  .col-title[contenteditable]:focus {
+    outline: 1px solid rgba(201,169,110,0.4);
+    border-radius: 3px;
+    background: rgba(201,169,110,0.1);
+  }
+  .col-count {
+    font-size: 0.7em;
+    color: var(--text-dim);
+    background: rgba(255,255,255,0.05);
+    padding: 2px 8px;
+    border-radius: 10px;
+  }
+  .col-vis {
+    cursor: pointer;
+    font-size: 1em;
+    transition: opacity 0.2s;
+    user-select: none;
+    flex-shrink: 0;
+  }
+  .col-vis:hover { opacity: 0.8; }
+  .col-vis.lp-visible { opacity: 1; }
+  .col-vis.lp-hidden { opacity: 0.4; }
+  .col-label {
+    font-size: 0.6em;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  .label-lp { background: rgba(46,204,113,0.15); color: var(--green); }
+  .label-gp { background: rgba(231,76,60,0.15); color: var(--red); }
+
+  .col-body { padding: 10px; min-height: 60px; }
+
+  /* Items */
+  .item {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    cursor: grab;
+    transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s;
+    user-select: none;
+    position: relative;
+  }
+  .item:active { cursor: grabbing; }
+  .item.dragging { opacity: 0.4; transform: scale(0.95); }
+  .item-title {
+    font-size: 0.82em;
+    font-weight: 500;
+    color: var(--text-bright);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .item-title span[contenteditable]:focus {
+    outline: 1px solid rgba(201,169,110,0.4);
+    border-radius: 3px;
+    background: rgba(201,169,110,0.1);
+  }
+  .item-remove {
+    position: absolute;
+    top: 6px; right: 8px;
+    color: var(--text-dim);
+    font-size: 0.9em;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .item:hover .item-remove { opacity: 0.6; }
+  .item-remove:hover { opacity: 1 !important; color: var(--red); }
+
+  .add-item-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    color: var(--text-dim);
+    font-size: 0.78em;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.2s;
+  }
+  .add-item-btn:hover { color: var(--gold); background: var(--gold-dim); }
+
+  .drop-placeholder {
+    border: 2px dashed var(--gold);
+    border-radius: 8px;
+    height: 40px;
+    margin-bottom: 8px;
+    background: var(--gold-dim);
+  }
+  .col-drop-placeholder {
+    border: 2px dashed var(--gold);
+    border-radius: 12px;
+    min-height: 120px;
+    background: var(--gold-dim);
+  }
+
+  .add-col-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    min-height: 120px;
+    color: var(--text-dim);
+    font-size: 0.85em;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .add-col-btn:hover { border-color: var(--gold); color: var(--gold); }
+
+  /* Color coding */
+  .c-blue .col-num { background: rgba(52,152,219,0.2); color: var(--blue); }
+  .c-gold .col-num { background: var(--gold-dim); color: var(--gold); }
+  .c-red .col-num { background: rgba(231,76,60,0.2); color: var(--red); }
+  .c-orange .col-num { background: rgba(243,156,18,0.2); color: var(--orange); }
+  .c-green .col-num { background: rgba(46,204,113,0.2); color: var(--green); }
+  .c-purple .col-num { background: rgba(155,89,182,0.2); color: var(--purple); }
+  .c-dim .col-num { background: rgba(138,138,138,0.15); color: var(--text-dim); }
+
+  #export-output {
+    display: none;
+    margin: 20px auto;
+    max-width: 800px;
+    background: var(--col-bg);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+  }
+  #export-output pre {
+    font-size: 0.82em;
+    color: var(--text);
+    white-space: pre-wrap;
+    line-height: 1.6;
+  }
+
+  @media (max-width: 600px) {
+    .board { grid-template-columns: 1fr; }
+    body { padding: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>AO Dashboard — Structure Builder</h1>
+  <p>GP view. Drag sections and items. Click to rename. Eye icon toggles LP visibility.</p>
+</div>
+
+<div class="legend">
+  <span><div class="legend-dot" style="background:var(--green)"></div> LP-visible (can show AO)</span>
+  <span><div class="legend-dot" style="background:var(--red)"></div> GP-only (internal)</span>
+  <span>Dashed border = internal section</span>
+</div>
+
+<div class="controls">
+  <button class="ctrl-btn" onclick="resetToDefault()">Reset</button>
+  <button class="ctrl-btn" onclick="exportStructure()">Export</button>
+  <button class="ctrl-btn primary" onclick="saveState()">Save</button>
+</div>
+
+<div class="board" id="board"></div>
+
+<div id="export-output"><pre id="export-text"></pre><br><button class="ctrl-btn" onclick="document.getElementById('export-output').style.display='none'">Close</button></div>
+
+<script>
+const STORAGE_KEY = 'ao-structure-builder-v2';
+
+const DEFAULT_DATA = {
+  columns: [
+    {
+      id: 'crm', title: 'CRM', color: 'c-blue', num: '1', lpVisible: true,
+      items: [
+        { id: 'p1', text: '📦 Parcel from Baden-Baden' },
+        { id: 'p2', text: '🏥 FX Mayr Invoice' },
+        { id: 'p3', text: '🏡 Villa La Plana — UBS' },
+        { id: 'p4', text: '💳 Amex — CBH Geneva' },
+      ]
+    },
+    {
+      id: 'capital', title: 'Capital Call', color: 'c-gold', num: '2', lpVisible: false,
+      items: [
+        { id: 'c1', text: '📊 Financing to Completion Table' },
+        { id: 'c2', text: '📅 Funding Schedule (Apr/May/Jun)' },
+        { id: 'c3', text: '⚖️ Fund vs LP Contributions' },
+        { id: 'c4', text: '🇨🇭 Swiss Account Redirect' },
+        { id: 'c5', text: '💰 EUR 1M available (CH account)' },
+      ]
+    },
+    {
+      id: 'status', title: 'Project Status', color: 'c-red', num: '3', lpVisible: true,
+      items: [
+        { id: 'i1', text: '🪟 Apartment Handovers Blocked' },
+        { id: 'i2', text: '🏨 Hotel Operating Gap (~200K/mo)' },
+        { id: 'i3', text: '🏦 Bank Interest — EUR 3.38M' },
+        { id: 'i4', text: '📋 VAT Clawback — EUR 5.77M' },
+        { id: 'i5', text: '🔨 Construction Settlement' },
+      ]
+    },
+    {
+      id: 'causes', title: 'Root Causes', color: 'c-orange', num: '4', lpVisible: true,
+      items: [
+        { id: 'r1', text: '💥 Contractor Insolvency (Mar 27)' },
+        { id: 'r2', text: '📜 Austrian Tax Law Change' },
+        { id: 'r3', text: '🏨 Hotel Ramp-Up Cycle' },
+      ]
+    },
+    {
+      id: 'consequences', title: 'Consequences', color: 'c-red', num: '5', lpVisible: false,
+      items: [
+        { id: 'q1', text: '🏨 MO Obligations' },
+        { id: 'q2', text: '🏦 Senior Lender Default Risk' },
+        { id: 'q3', text: '🪟 Revenue Locked (Apartments)' },
+        { id: 'q4', text: '📉 Asset Value at Exit' },
+      ]
+    },
+    {
+      id: 'opportunities', title: 'Opportunities', color: 'c-green', num: '6', lpVisible: true,
+      items: [
+        { id: 'o1', text: '🎯 Hotel Sale (Eastdil)' },
+        { id: 'o2', text: '🇨🇿 MO Prague (CITIC/Savills)' },
+        { id: 'o3', text: '🏔️ Val d\'Isère' },
+        { id: 'o4', text: '📈 Vienna Market Performance' },
+      ]
+    },
+    {
+      id: 'corporate', title: 'Corporate & Legal', color: 'c-dim', num: '7', lpVisible: false,
+      items: [
+        { id: 'x1', text: '📝 Documents for Signature' },
+        { id: 'x2', text: '📝 Mertz Protocol + Loan' },
+        { id: 'x3', text: '🔐 Bond Payout Mechanics' },
+        { id: 'x4', text: '📋 4 Moscow Adviser Questions' },
+        { id: 'x5', text: '👔 Wertheimer Family' },
+        { id: 'x6', text: '💰 Lilienmatt Restructuring' },
+        { id: 'x7', text: '🏔️ Kempinski Kitzbühel (closed)' },
+      ]
+    },
+    {
+      id: 'agenda', title: 'Meeting Agenda', color: 'c-purple', num: '8', lpVisible: false,
+      items: [
+        { id: 'a1', text: '📋 Today\'s talking order' },
+        { id: 'a2', text: '✏️ Notes from meeting' },
+        { id: 'a3', text: '✅ Action items from session' },
+        { id: 'a4', text: '🔄 Items for next meeting' },
+      ]
+    },
+  ]
+};
+
+let data = null;
+let draggedItem = null;
+let draggedCol = null;
+
+function loadData() {
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) { try { data = JSON.parse(saved); return; } catch(e) {} }
+  data = JSON.parse(JSON.stringify(DEFAULT_DATA));
+}
+
+function saveState() {
+  data.columns = [];
+  document.querySelectorAll('.column').forEach(col => {
+    const d = {
+      id: col.dataset.colId,
+      title: col.querySelector('.col-title').textContent.trim(),
+      color: col.dataset.color || 'c-dim',
+      num: col.querySelector('.col-num')?.textContent?.trim() || '',
+      lpVisible: col.dataset.lpVisible === 'true',
+      items: []
+    };
+    col.querySelectorAll('.item').forEach(item => {
+      d.items.push({
+        id: item.dataset.itemId,
+        text: item.querySelector('.item-title span')?.textContent?.trim() || ''
+      });
+    });
+    data.columns.push(d);
+  });
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  const btn = document.querySelector('.ctrl-btn.primary');
+  btn.textContent = 'Saved ✓';
+  setTimeout(() => btn.textContent = 'Save', 1500);
+}
+
+function resetToDefault() {
+  if (!confirm('Reset to default? Changes will be lost.')) return;
+  data = JSON.parse(JSON.stringify(DEFAULT_DATA));
+  localStorage.removeItem(STORAGE_KEY);
+  render();
+}
+
+function render() {
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+
+  data.columns.forEach((col, ci) => {
+    const colEl = document.createElement('div');
+    colEl.className = `column ${col.color}${col.lpVisible ? '' : ' internal-only'}`;
+    colEl.dataset.colId = col.id;
+    colEl.dataset.color = col.color;
+    colEl.dataset.lpVisible = col.lpVisible ? 'true' : 'false';
+    const visIcon = col.lpVisible ? '👁️' : '🔒';
+    const visClass = col.lpVisible ? 'lp-visible' : 'lp-hidden';
+    const labelClass = col.lpVisible ? 'label-lp' : 'label-gp';
+    const labelText = col.lpVisible ? 'LP' : 'GP';
+
+    colEl.innerHTML = `
+      <div class="col-header" draggable="true">
+        <div class="col-num">${col.num || ci+1}</div>
+        <div class="col-title" contenteditable="true">${esc(col.title)}</div>
+        <span class="col-label ${labelClass}">${labelText}</span>
+        <span class="col-vis ${visClass}" onclick="event.stopPropagation(); toggleVis(this)" title="Toggle LP visibility">${visIcon}</span>
+        <div class="col-count">${col.items.length}</div>
+      </div>
+      <div class="col-body" data-col-id="${col.id}"></div>
+    `;
+
+    const body = colEl.querySelector('.col-body');
+    col.items.forEach(item => body.appendChild(createItemEl(item)));
+
+    const addBtn = document.createElement('div');
+    addBtn.className = 'add-item-btn';
+    addBtn.innerHTML = '<span style="font-size:1.1em;">+</span> Add item';
+    addBtn.onclick = (e) => { e.stopPropagation(); addNewItem(body); };
+    body.appendChild(addBtn);
+
+    // Item drop zone
+    body.addEventListener('dragover', handleItemDragOver);
+    body.addEventListener('drop', handleItemDrop);
+
+    // Column drag — attach to header
+    const colHeader = colEl.querySelector('.col-header');
+    colHeader.addEventListener('dragstart', function(e) {
+      // Don't drag if clicking on editable title or visibility toggle
+      if (e.target.isContentEditable || e.target.closest('.col-vis') || e.target.closest('.col-label')) {
+        e.preventDefault();
+        return;
+      }
+      draggedCol = colEl;
+      draggedItem = null;
+      colDragId = colEl.dataset.colId;
+      setTimeout(() => colEl.classList.add('col-dragging'), 0);
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', 'column');
+    });
+    colHeader.addEventListener('dragend', function() {
+      colEl.classList.remove('col-dragging');
+      document.querySelectorAll('.column').forEach(c => c.style.outline = 'none');
+      draggedCol = null;
+      colDragId = null;
+      renumberColumns();
+    });
+
+    board.appendChild(colEl);
+  });
+
+  // Set up column-to-column drop zones (live swap on dragover)
+  setupColumnDropZones();
+
+  // Add column button
+  const addCol = document.createElement('div');
+  addCol.className = 'add-col-btn';
+  addCol.innerHTML = '+ Add Section';
+  addCol.onclick = addNewColumn;
+  board.appendChild(addCol);
+}
+
+function createItemEl(item) {
+  const el = document.createElement('div');
+  el.className = 'item';
+  el.draggable = true;
+  el.dataset.itemId = item.id;
+  el.innerHTML = `
+    <div class="item-title"><span contenteditable="true">${esc(item.text)}</span></div>
+    <span class="item-remove" onclick="event.stopPropagation(); removeItem(this)">&times;</span>
+  `;
+  el.addEventListener('dragstart', (e) => {
+    e.stopPropagation();
+    draggedItem = el;
+    draggedCol = null;
+    el.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('type', 'item');
+  });
+  el.addEventListener('dragend', () => {
+    el.classList.remove('dragging');
+    document.querySelectorAll('.drop-placeholder').forEach(p => p.remove());
+    document.querySelectorAll('.column').forEach(c => c.classList.remove('drag-over'));
+    draggedItem = null;
+    updateCounts();
+  });
+  return el;
+}
+
+function toggleVis(el) {
+  const col = el.closest('.column');
+  const isVis = col.dataset.lpVisible === 'true';
+  col.dataset.lpVisible = isVis ? 'false' : 'true';
+  el.textContent = isVis ? '🔒' : '👁️';
+  el.className = `col-vis ${isVis ? 'lp-hidden' : 'lp-visible'}`;
+  const label = col.querySelector('.col-label');
+  label.className = `col-label ${isVis ? 'label-gp' : 'label-lp'}`;
+  label.textContent = isVis ? 'GP' : 'LP';
+  col.classList.toggle('internal-only', isVis);
+}
+
+function addNewItem(body) {
+  const text = prompt('New item:');
+  if (!text) return;
+  const item = { id: 'n' + Date.now(), text: '📌 ' + text };
+  const el = createItemEl(item);
+  body.insertBefore(el, body.querySelector('.add-item-btn'));
+  updateCounts();
+}
+
+function addNewColumn() {
+  const title = prompt('Section title:');
+  if (!title) return;
+  data.columns.push({
+    id: 'col' + Date.now(), title, color: 'c-dim',
+    num: String(data.columns.length + 1), lpVisible: false, items: []
+  });
+  render();
+}
+
+function removeItem(btn) {
+  const item = btn.closest('.item');
+  item.style.opacity = '0'; item.style.transform = 'scale(0.9)';
+  item.style.transition = 'all 0.2s';
+  setTimeout(() => { item.remove(); updateCounts(); }, 200);
+}
+
+// ===== ITEM DRAG =====
+function handleItemDragOver(e) {
+  if (!draggedItem) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  const body = this;
+  document.querySelectorAll('.drop-placeholder').forEach(p => p.remove());
+  const afterEl = getAfterEl(body, e.clientY);
+  const ph = document.createElement('div');
+  ph.className = 'drop-placeholder';
+  if (afterEl) body.insertBefore(ph, afterEl);
+  else {
+    const ab = body.querySelector('.add-item-btn');
+    if (ab) body.insertBefore(ph, ab); else body.appendChild(ph);
+  }
+  this.closest('.column')?.classList.add('drag-over');
+}
+
+function handleItemDrop(e) {
+  if (!draggedItem) return;
+  e.preventDefault(); e.stopPropagation();
+  document.querySelectorAll('.drop-placeholder').forEach(p => p.remove());
+  document.querySelectorAll('.column').forEach(c => c.classList.remove('drag-over'));
+  const body = this;
+  const afterEl = getAfterEl(body, e.clientY);
+  if (afterEl) body.insertBefore(draggedItem, afterEl);
+  else {
+    const ab = body.querySelector('.add-item-btn');
+    if (ab) body.insertBefore(draggedItem, ab); else body.appendChild(draggedItem);
+  }
+  updateCounts();
+}
+
+function getAfterEl(container, y) {
+  const items = [...container.querySelectorAll('.item:not(.dragging)')];
+  return items.reduce((cl, ch) => {
+    const b = ch.getBoundingClientRect();
+    const off = y - b.top - b.height/2;
+    return (off < 0 && off > cl.offset) ? { offset: off, element: ch } : cl;
+  }, { offset: -Infinity }).element;
+}
+
+// ===== COLUMN DRAG (live swap on dragover) =====
+let colDragId = null;
+let _colSwapThrottle = 0;
+
+function setupColumnDropZones() {
+  const board = document.getElementById('board');
+  document.querySelectorAll('.column').forEach(col => {
+    col.addEventListener('dragover', (e) => {
+      if (!draggedCol || draggedCol === col) return;
+      if (draggedItem) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+
+      // Throttle swaps to prevent flicker (max 1 swap per 150ms)
+      const now = Date.now();
+      if (now - _colSwapThrottle < 150) return;
+      _colSwapThrottle = now;
+
+      // Live swap: move draggedCol before or after target based on position
+      const rect = col.getBoundingClientRect();
+      const dragRect = draggedCol.getBoundingClientRect();
+      // If dragged col is before target in DOM, insert after; otherwise insert before
+      const dragIdx = [...board.querySelectorAll('.column')].indexOf(draggedCol);
+      const targetIdx = [...board.querySelectorAll('.column')].indexOf(col);
+
+      if (dragIdx < targetIdx) {
+        // Moving forward — insert after target
+        const next = col.nextElementSibling;
+        if (next) board.insertBefore(draggedCol, next);
+        else {
+          const addBtn = board.querySelector('.add-col-btn');
+          if (addBtn) board.insertBefore(draggedCol, addBtn);
+          else board.appendChild(draggedCol);
+        }
+      } else {
+        // Moving backward — insert before target
+        board.insertBefore(draggedCol, col);
+      }
+      renumberColumns();
+    });
+
+    // Also allow drop (needed for HTML5 drag API to work, even though swap already happened)
+    col.addEventListener('drop', (e) => {
+      if (!draggedCol) return;
+      if (draggedItem) return;
+      e.preventDefault();
+      e.stopPropagation();
+    });
+  });
+
+  // Board-level fallback
+  board.addEventListener('dragover', (e) => {
+    if (!draggedCol) return;
+    e.preventDefault();
+  });
+  board.addEventListener('drop', (e) => {
+    if (!draggedCol) return;
+    e.preventDefault();
+  });
+}
+
+function renumberColumns() {
+  document.querySelectorAll('.column').forEach((col, i) => {
+    const num = col.querySelector('.col-num');
+    if (num) num.textContent = i + 1;
+  });
+}
+
+function updateCounts() {
+  document.querySelectorAll('.column').forEach(col => {
+    const c = col.querySelectorAll('.item').length;
+    const el = col.querySelector('.col-count');
+    if (el) el.textContent = c;
+  });
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function exportStructure() {
+  let t = 'AO DASHBOARD — GP VIEW\n' + '═'.repeat(40) + '\n\n';
+  document.querySelectorAll('.column').forEach(col => {
+    const num = col.querySelector('.col-num')?.textContent || '';
+    const title = col.querySelector('.col-title')?.textContent?.trim() || '';
+    const vis = col.dataset.lpVisible === 'true' ? '[LP-visible]' : '[GP-only]';
+    t += `${num}. ${title.toUpperCase()} ${vis}\n`;
+    col.querySelectorAll('.item').forEach(item => {
+      const tx = item.querySelector('.item-title span')?.textContent?.trim() || '';
+      t += `   ├── ${tx}\n`;
+    });
+    t += '\n';
+  });
+  document.getElementById('export-text').textContent = t;
+  document.getElementById('export-output').style.display = 'block';
+  document.getElementById('export-output').scrollIntoView({ behavior: 'smooth' });
+}
+
+loadData();
+render();
+</script>
+</body>
+</html>
