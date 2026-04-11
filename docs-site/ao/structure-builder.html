@@ -382,7 +382,7 @@ const DEFAULT_DATA = {
       ]
     },
     {
-      id: 'consequences', title: 'Consequences', color: 'c-red', num: '5', lpVisible: false,
+      id: 'risks', title: 'Risks', color: 'c-red', num: '5', lpVisible: false,
       items: [
         { id: 'q1', text: '\u{1F3E8} MO Obligations' },
         { id: 'q2', text: '\u{1F3E6} Senior Lender Default Risk' },
@@ -391,7 +391,42 @@ const DEFAULT_DATA = {
       ]
     },
     {
-      id: 'opportunities', title: 'Opportunities', color: 'c-green', num: '6', lpVisible: true,
+      id: 'conseq_rg7', title: 'Consequences: No Funding for RG7', color: 'c-red', num: '6', lpVisible: true,
+      items: [
+        { id: 'cr1', text: '\u{1F510} Permit Revocation (May 26 inspection)' },
+        { id: 'cr2', text: '\u2696\uFE0F EUR 19M Claim \u2014 Litigation Funder Risk' },
+        { id: 'cr3', text: '\u{1F3E0} Apartment Buyer Rescission' },
+        { id: 'cr4', text: '\u{1F3E6} Aukera Bank Default \u2014 Forced Sale' },
+        { id: 'cr5', text: '\u{1F4B0} VAT Penalty Cascade (EUR 5.77M)' },
+        { id: 'cr6', text: '\u{1F3E8} MO Terminates Management Agreement' },
+        { id: 'cr7', text: '\u{1F6D1} Hotel Operations Cease' },
+        { id: 'cr8', text: '\u{1F6A7} Construction Work Stops' },
+        { id: 'cr9', text: '\u{1F4CB} Hotel Unsellable (No Plans/Warranties)' },
+        { id: 'cr10', text: '\u{1F4C9} Eastdil Sale Process Collapses' },
+        { id: 'cr11', text: '\u{1F4F0} Negative Press Spiral' },
+        { id: 'cr12', text: '\u{1F4C8} Compound Cost Escalation' },
+      ]
+    },
+    {
+      id: 'conseq_ao', title: 'Consequences: No Funding for AO', color: 'c-orange', num: '7', lpVisible: false,
+      items: [
+        { id: 'ca1', text: '\u{1F4C9} Dilution Under Participation Agreement' },
+        { id: 'ca2', text: '\u{1F4B8} Total Investment Write-Off' },
+        { id: 'ca3', text: '\u{1F91D} EUR 2.5M Special Deal Collapses' },
+        { id: 'ca4', text: '\u2696\uFE0F Fund Rebalancing Claim' },
+        { id: 'ca5', text: '\u{1F512} Loss of Blocking Power' },
+        { id: 'ca6', text: '\u{1F6AB} No Exit \u2014 Investment Illiquid' },
+        { id: 'ca7', text: '\u{1F4C4} Equity Recharacterized as Debt' },
+        { id: 'ca8', text: '\u26A0\uFE0F EUR 13M "On First Demand" Triggered' },
+        { id: 'ca9', text: '\u{1F4CA} EUR 5M Bond Structure Unravels' },
+        { id: 'ca10', text: '\u{1F1E8}\u{1F1FE} Cyprus Tax Structure Stress' },
+        { id: 'ca11', text: '\u{1F3E8} MO Future Deals Closed (Prague)' },
+        { id: 'ca12', text: '\u{1F465} Moscow Advisers Escalate' },
+        { id: 'ca13', text: '\u{1F3F7}\uFE0F Personal Reputation Damage' },
+      ]
+    },
+    {
+      id: 'opportunities', title: 'Opportunities', color: 'c-green', num: '8', lpVisible: true,
       items: [
         { id: 'o1', text: '\u{1F3AF} Hotel Sale (Eastdil)' },
         { id: 'o2', text: '\u{1F1E8}\u{1F1FF} MO Prague (CITIC/Savills)' },
@@ -400,7 +435,7 @@ const DEFAULT_DATA = {
       ]
     },
     {
-      id: 'corporate', title: 'Corporate & Legal', color: 'c-dim', num: '7', lpVisible: false,
+      id: 'corporate', title: 'Corporate & Legal', color: 'c-dim', num: '9', lpVisible: false,
       items: [
         { id: 'x1', text: '\u{1F4DD} Documents for Signature' },
         { id: 'x2', text: '\u{1F4DD} Mertz Protocol + Loan' },
@@ -412,7 +447,7 @@ const DEFAULT_DATA = {
       ]
     },
     {
-      id: 'agenda', title: 'Meeting Agenda', color: 'c-purple', num: '8', lpVisible: false,
+      id: 'agenda', title: 'Meeting Agenda', color: 'c-purple', num: '10', lpVisible: false,
       items: [
         { id: 'a1', text: '\u{1F4CB} Today\'s talking order' },
         { id: 'a2', text: '\u270F\uFE0F Notes from meeting' },
@@ -873,8 +908,37 @@ function exportStructure() {
   document.getElementById('export-output').scrollIntoView({ behavior: 'smooth' });
 }
 
+// Migration: add new consequence columns if not in saved state
+function migrateData() {
+  if (!data || !data.columns) return;
+  const ids = data.columns.map(c => c.id);
+  // Rename old 'consequences' to 'risks'
+  const oldCon = data.columns.find(c => c.id === 'consequences');
+  if (oldCon) { oldCon.id = 'risks'; oldCon.title = 'Risks'; }
+  // Add RG7 consequences if missing
+  if (!ids.includes('conseq_rg7')) {
+    const newRG7 = DEFAULT_DATA.columns.find(c => c.id === 'conseq_rg7');
+    if (newRG7) {
+      const risksIdx = data.columns.findIndex(c => c.id === 'risks');
+      data.columns.splice(risksIdx >= 0 ? risksIdx + 1 : data.columns.length, 0, JSON.parse(JSON.stringify(newRG7)));
+    }
+  }
+  // Add AO consequences if missing
+  if (!ids.includes('conseq_ao')) {
+    const newAO = DEFAULT_DATA.columns.find(c => c.id === 'conseq_ao');
+    if (newAO) {
+      const rg7Idx = data.columns.findIndex(c => c.id === 'conseq_rg7');
+      data.columns.splice(rg7Idx >= 0 ? rg7Idx + 1 : data.columns.length, 0, JSON.parse(JSON.stringify(newAO)));
+    }
+  }
+  // Renumber
+  data.columns.forEach((c, i) => c.num = String(i + 1));
+}
+
 loadData();
+migrateData();
 render();
+autoSave();
 </script>
 </body>
 </html>
