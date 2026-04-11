@@ -7,6 +7,7 @@ Read ALL files at every AO PM invocation. No exceptions.
 |------|----------|-------|
 | psychology.md | Hunter archetype, 11 drivers, loyalty algorithm, vulnerability | Director |
 | investment_channels.md | Channel 1 (Hayford), Channel 2 (Cyprus), total position | Director + Constantinos |
+| financing_to_completion.md | Baker v009 (Edita 11 Apr 2026) — uses, sources, AO position, Q2 breakdown | Edita + Baker |
 | agenda.md | Active matters (3-5) + parked matters | Director + Baker |
 | sensitive_issues.md | Minefields and dance instructions | Director only |
 | communication_rules.md | Rule Zero, hunting cycle, framing principles | Director |

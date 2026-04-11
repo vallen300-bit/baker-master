@@ -48,6 +48,7 @@ PM_REGISTRY = {
         "view_dir": "data/ao_pm",
         "view_file_order": [
             "SCHEMA.md", "psychology.md", "investment_channels.md",
+            "financing_to_completion.md",
             "sensitive_issues.md", "communication_rules.md", "agenda.md",
         ],
         "state_label": "AO PM",
@@ -82,6 +83,7 @@ PM_REGISTRY = {
         ],
         "extraction_view_files": [
             "psychology.md", "investment_channels.md",
+            "financing_to_completion.md",
             "sensitive_issues.md", "communication_rules.md", "agenda.md",
         ],
         "extraction_system": (
