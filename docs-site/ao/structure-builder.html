@@ -364,7 +364,7 @@
 <div id="export-output"><pre id="export-text"></pre><br><button class="ctrl-btn" onclick="document.getElementById('export-output').style.display='none'">Close</button></div>
 
 <script>
-const STORAGE_KEY = 'ao-structure-builder-v4';
+const STORAGE_KEY = 'ao-structure-builder-v5';
 const DRAG_THRESHOLD = 8; // px before drag activates
 
 const DEFAULT_DATA = {
@@ -476,6 +476,20 @@ const DEFAULT_DATA = {
         // ── Previous / Future ──
         { id: 'sec_mtg_future', text: '\u2500\u2500 UPCOMING \u2500\u2500', detail: 'Future meetings to schedule.' },
         { id: 'af1', text: '\u{1F4C5} Next AO meeting (TBD)', detail: 'Agenda: Sources section review (Apr 13 data), Eastdil update, Moscow adviser answers, Balgerstrasse plan.' },
+      ]
+    },
+    {
+      id: 'actions', title: 'ACTIONS', color: 'c-red', num: '6', lpVisible: false,
+      items: [
+        // ── DV (Director) ──
+        { id: 'sec_act_dv', text: '\u2500\u2500 DV (Director) \u2500\u2500', detail: 'Actions for Dimitry to execute. Drag items here from other cards and fill in the instruction.' },
+        { id: 'act_dv_template', text: '\u{1F4CC} [Drag item here or click + to add]', detail: 'INSTRUCTION: [What exactly needs to be done]\nOWNER: DV\nDEADLINE: [Date]\nSOURCE: [Which card/meeting this came from]\nSTATUS: Open' },
+        // ── BAKER (AI) ──
+        { id: 'sec_act_baker', text: '\u2500\u2500 BAKER (AI) \u2500\u2500', detail: 'Actions for Baker/AO PM to execute. Research, drafts, analysis, follow-ups.' },
+        { id: 'act_baker_template', text: '\u{1F4CC} [Drag item here or click + to add]', detail: 'INSTRUCTION: [What exactly needs to be done]\nOWNER: Baker\nDEADLINE: [Date]\nSOURCE: [Which card/meeting this came from]\nSTATUS: Open' },
+        // ── OTHERS (Edita, Constantinos, Balazs) ──
+        { id: 'sec_act_others', text: '\u2500\u2500 OTHERS \u2500\u2500', detail: 'Actions for Edita, Constantinos, Balazs, or other team members.' },
+        { id: 'act_other_template', text: '\u{1F4CC} [Drag item here or click + to add]', detail: 'INSTRUCTION: [What exactly needs to be done]\nOWNER: [Name]\nDEADLINE: [Date]\nSOURCE: [Which card/meeting this came from]\nSTATUS: Open' },
       ]
     },
   ]
