@@ -364,7 +364,7 @@
 <div id="export-output"><pre id="export-text"></pre><br><button class="ctrl-btn" onclick="document.getElementById('export-output').style.display='none'">Close</button></div>
 
 <script>
-const STORAGE_KEY = 'ao-structure-builder-v3';
+const STORAGE_KEY = 'ao-structure-builder-v4';
 const DRAG_THRESHOLD = 8; // px before drag activates
 
 const DEFAULT_DATA = {
@@ -459,12 +459,23 @@ const DEFAULT_DATA = {
       ]
     },
     {
-      id: 'agenda', title: 'Meeting Agenda', color: 'c-purple', num: '5', lpVisible: false,
+      id: 'agenda', title: 'Meeting Agendas', color: 'c-purple', num: '5', lpVisible: false,
       items: [
-        { id: 'a1', text: '\u{1F4CB} Today\'s talking order', detail: 'Part 1: Personal requests \u2192 Part 2: The Problem (manifestations + characteristics) \u2192 Part 3: Root Causes \u2192 Part 4: Consequences \u2192 Part 5: Good news / opportunities.' },
-        { id: 'a2', text: '\u270F\uFE0F Notes from meeting', detail: 'Capture live notes during AO conversation. Key reactions, objections, commitments.' },
-        { id: 'a3', text: '\u2705 Action items from session', detail: 'Record action items as they arise. Assign owners (DV, Edita, Constantinos, Balazs, Baker).' },
-        { id: 'a4', text: '\u{1F504} Items for next meeting', detail: 'Park items that can\'t be resolved today for follow-up. Sources section (Sunday Apr 13), Balgerstrasse plan, Moscow adviser answers.' },
+        // ── 11 Apr 2026 — FX Mayr ──
+        { id: 'sec_mtg3', text: '\u2500\u2500 11 APR 2026 \u2014 FX Mayr \u2500\u2500', detail: 'Current meeting. AO + DV at FX Mayr clinic.' },
+        { id: 'a3_1', text: '\u{1F4CB} Talking order', detail: 'Part 1: Personal requests (CRM) \u2192 Part 2: MOVIE RG7 project \u2192 Part 3: Opportunities \u2192 Part 4: Corporate & Legal \u2192 Part 5: Action items.' },
+        { id: 'a3_2', text: '\u{1F4CA} Financing to Completion v009', detail: 'Present Edita\'s updated table. Total gap EUR 12.08M. AO capital call EUR 6.9M. New items: EUR 13.82M not in Sep call (replacement construction, settlement fund, VAT, working capital).' },
+        { id: 'a3_3', text: '\u270F\uFE0F Notes from meeting', detail: 'Capture live: AO reactions, objections, commitments, questions.' },
+        { id: 'a3_4', text: '\u2705 Action items', detail: 'Assign owners (DV, Edita, Constantinos, Balazs, Baker). Deadlines.' },
+        { id: 'a3_5', text: '\u{1F504} Items for next meeting', detail: 'Sources section (Sunday Apr 13), Balgerstrasse plan, Moscow adviser answers, Eastdil visit ~Apr 28.' },
+        // ── 09 Apr 2026 — FX Mayr ──
+        { id: 'sec_mtg2', text: '\u2500\u2500 09 APR 2026 \u2014 FX Mayr \u2500\u2500', detail: 'Previous session. AO + DV at FX Mayr clinic.' },
+        { id: 'a2_1', text: '\u{1F4CB} Structure presentation', detail: 'First presentation of the Baker dashboard structure to AO. 10-section board. AO reviewed all cards.' },
+        { id: 'a2_2', text: '\u270F\uFE0F Notes', detail: 'AO asked about Hagenauer construction price (answered: EUR 66.2M original, EUR 121.5M Nachtrag, EUR 130M+ paid). Discussed capital call phasing.' },
+        { id: 'a2_3', text: '\u2705 Actions agreed', detail: 'Edita to update Financing to Completion table (done \u2192 v009). Baker to merge RG7 cards into single view.' },
+        // ── Previous / Future ──
+        { id: 'sec_mtg_future', text: '\u2500\u2500 UPCOMING \u2500\u2500', detail: 'Future meetings to schedule.' },
+        { id: 'af1', text: '\u{1F4C5} Next AO meeting (TBD)', detail: 'Agenda: Sources section review (Apr 13 data), Eastdil update, Moscow adviser answers, Balgerstrasse plan.' },
       ]
     },
   ]
