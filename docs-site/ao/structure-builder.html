@@ -364,7 +364,7 @@
 <div id="export-output"><pre id="export-text"></pre><br><button class="ctrl-btn" onclick="document.getElementById('export-output').style.display='none'">Close</button></div>
 
 <script>
-const STORAGE_KEY = 'ao-structure-builder-v2';
+const STORAGE_KEY = 'ao-structure-builder-v3';
 const DRAG_THRESHOLD = 8; // px before drag activates
 
 const DEFAULT_DATA = {
@@ -379,79 +379,66 @@ const DEFAULT_DATA = {
       ]
     },
     {
-      id: 'capital', title: 'Capital Call', color: 'c-gold', num: '2', lpVisible: false,
+      id: 'movie_rg7', title: 'MOVIE RG7', color: 'c-gold', num: '2', lpVisible: false,
       items: [
-        { id: 'c1', text: '\u{1F4CA} Financing to Completion Table', detail: 'Baker version 008 with formulas sent to Edita. Total Uses 2026: EUR -21.66M. Sources: EUR 6.93M. Gap: EUR -14.73M. AO\'s 48% share: ~EUR 5.1M.' },
+        // ── CAPITAL CALL ──
+        { id: 'sec_capital', text: '\u2500\u2500 CAPITAL CALL \u2500\u2500', detail: 'Financing to completion, funding schedule, Fund vs LP split.' },
+        { id: 'c1', text: '\u{1F4CA} Financing to Completion Table', detail: 'Baker version 009 (Edita 11 Apr). Total Uses Oct-Jun: EUR -27.13M. Sources: EUR 15.05M. Gap: EUR -12.08M. AO capital call Apr 2026: EUR 6.9M.' },
         { id: 'c2', text: '\u{1F4C5} Funding Schedule (Apr/May/Jun)', detail: 'Phased approach: EUR 2M (April) + EUR 2M (May) + EUR 2-3M (June). Total EUR 6-7M across 3 months. Not a lump sum \u2014 manageable monthly tranches.' },
-        { id: 'c3', text: '\u2696\uFE0F Fund vs LP Contributions', detail: 'Fund (LCG) already funded EUR 5,848K Oct-Dec deficit alone. AO\'s unpaid share ~EUR 2,807K. Sources section due Sunday Apr 13 \u2014 shows exact Fund vs AO split.' },
+        { id: 'c3', text: '\u2696\uFE0F Fund vs LP Contributions', detail: 'Fund (LCG) already funded EUR 5,848K Oct-Dec deficit alone. AO\'s unpaid share ~EUR 2,807K. Fund over-invested EUR 4.95M accumulated. Sources section due Sunday Apr 13.' },
         { id: 'c4', text: '\u{1F1E8}\u{1F1ED} Swiss Account Redirect', detail: 'Same playbook as March EUR 2.5M. Constantinos coordinates. EUR 200K reserved for Cyprus operations, rest redirected to RG7 project account.' },
         { id: 'c5', text: '\u{1F4B0} EUR 1M available (CH account)', detail: 'EUR 1M currently in AO\'s Swiss account. Constantinos reserves EUR 200K for Cyprus, EUR 800K available for immediate redirect to RG7.' },
-      ]
-    },
-    {
-      id: 'status', title: 'Project Status', color: 'c-red', num: '3', lpVisible: true,
-      items: [
+        // ── PROJECT STATUS ──
+        { id: 'sec_status', text: '\u2500\u2500 PROJECT STATUS \u2500\u2500', detail: 'Current state of hotel, apartments, bank, taxes, construction.' },
         { id: 'i1', text: '\u{1FA9F} Apartment Handovers Blocked', detail: 'Window defects, KNX failures, pergola issues, sewage smell in corridors. Each EUR 5K defect compounds to EUR 20K+ (new consultant + new contractor since originals won\'t come). Buyers have R\u00fccktrittsrecht after Nachfrist.' },
         { id: 'i2', text: '\u{1F3E8} Hotel Operating Gap (~200K/mo)', detail: 'Hotel losing ~EUR 200K/month. F&B at 4x budget loss (EUR 1.57M swing). MO can demand EUR 1.5M working capital reserve. Staff on payroll, can\'t reduce under Austrian labor law.' },
-        { id: 'i3', text: '\u{1F3E6} Bank Interest \u2014 EUR 3.38M', detail: 'EUR 3,375,964 outstanding to Aukera at 5.4% p.a. ~EUR 500K/month. Facility fully drawn since June 2025. Question sent to Edita on rate deviations between periods.' },
-        { id: 'i4', text: '\u{1F4CB} VAT Clawback \u2014 EUR 5.77M', detail: 'Betrugsbekämpfungsgesetz 2025 (Nov 20): luxury apartments >EUR 2M can\'t claim VAT refund. EUR 4.43M clawback + EUR 1.34M BD entity mismatch. Law published 4 months after Sep capital call \u2014 nobody could have known.' },
+        { id: 'i3', text: '\u{1F3E6} Bank Interest \u2014 EUR 3.38M', detail: 'EUR 3,375,964 outstanding to Aukera at 5.4% p.a. ~EUR 500K/month. Facility fully drawn since June 2025.' },
+        { id: 'i4', text: '\u{1F4CB} VAT Clawback \u2014 EUR 5.77M', detail: 'Betrugsbekämpfungsgesetz 2025 (Nov 20): luxury apartments >EUR 2M can\'t claim VAT refund. EUR 4.43M clawback + EUR 1.34M BD entity mismatch. Law published 4 months after Sep capital call.' },
         { id: 'i5', text: '\u{1F528} Construction Settlement', detail: 'Hagenauer insolvency Mar 27. EUR 19M subcontractor claims. Quick settlement at EUR 2M possible now while administrator is cash-poor. Otherwise litigation funder buys claim and sues for years.' },
+        // ── ROOT CAUSES ──
+        { id: 'sec_causes', text: '\u2500\u2500 ROOT CAUSES \u2500\u2500', detail: 'Three external events that caused the funding gap.' },
+        { id: 'r1', text: '\u{1F4A5} Contractor Insolvency (Mar 27)', detail: 'Hagenauer filed insolvency March 27, 2026. Left project without main contractor, certificates, warranties, or MEP plans. All replacement costs stem from this single event.' },
+        { id: 'r2', text: '\u{1F4DC} Austrian Tax Law Change', detail: 'Betrugsbekämpfungsgesetz 2025 published Nov 20, 2025. EUR 4.7M previously claimed must be repaid. Published 4 months after September capital call. Unforeseeable.' },
+        { id: 'r3', text: '\u{1F3E8} Hotel Ramp-Up Cycle', detail: 'Luxury hotels take 3-5 years to reach break-even. MO Vienna opened Nov 29, 2025 \u2014 currently in FY1. Operating losses are normal and expected.' },
+        // ── RISKS ──
+        { id: 'sec_risks', text: '\u2500\u2500 RISKS \u2500\u2500', detail: 'Active risks to the project if current trajectory continues.' },
+        { id: 'q1', text: '\u{1F3E8} MO Obligations', detail: '5% branding fee (EUR 3.6M), EUR 1.5M working capital reserve (unfunded, MO can demand anytime). Non-compliance = termination right.' },
+        { id: 'q2', text: '\u{1F3E6} Senior Lender Default Risk', detail: 'Aukera ~EUR 30M at 5.4%. Missing interest triggers cross-default. Bank can call entire facility and force sale.' },
+        { id: 'q3', text: '\u{1FA9F} Revenue Locked (Apartments)', detail: '12 units under contract but defects block handover. EUR 4.43M projected 2026 sales at risk.' },
+        { id: 'q4', text: '\u{1F4C9} Asset Value at Exit', detail: 'Without plans, warranties, clean permit \u2014 hotel sale at massive discount. Eastdil can\'t market a distressed asset.' },
+        // ── CONSEQUENCES: NO FUNDING FOR RG7 ──
+        { id: 'sec_conseq_rg7', text: '\u2500\u2500 IF NO FUNDING: RG7 PROJECT \u2500\u2500', detail: 'What happens to the project itself without capital injection.' },
+        { id: 'cr1', text: '\u{1F510} Permit Revocation (May 26)', detail: 'Vienna commission inspects May 26. Without EUR 250-300K for audit + repairs: permit revoked \u2192 hotel MUST CLOSE. 45 days.' },
+        { id: 'cr2', text: '\u2696\uFE0F EUR 19M Claim \u2014 Litigation Funder', detail: 'Can settle NOW at EUR 2M. Without money: Prozessfinanzierer buys claim, sues for full EUR 19M for years.' },
+        { id: 'cr3', text: '\u{1F3E0} Apartment Buyer Rescission', detail: 'Defects block handover. Buyers can rescind after Nachfrist. EUR 4.43M 2026 sales lost + deposit refunds.' },
+        { id: 'cr4', text: '\u{1F3E6} Aukera Bank Default \u2014 Forced Sale', detail: 'EUR 3.375M interest outstanding. Bank calls full ~EUR 30M. Forced sale \u2014 ALL equity wiped out.' },
+        { id: 'cr5', text: '\u{1F4B0} VAT Penalty Cascade', detail: 'EUR 5.77M owed. Late payment: S\u00e4umniszuschlag 2% + ongoing. Tax authority can file Exekution \u2192 lien \u2192 blocks ALL transactions.' },
+        { id: 'cr6', text: '\u{1F3E8} MO Terminates', detail: 'Failure to fund \u2192 MO terminates. Losing MO brand = 30-40% of asset value gone. Prague deal dies too.' },
+        { id: 'cr7', text: '\u{1F6D1} Hotel Operations Cease', detail: 'Suppliers stop \u2192 restaurant closes \u2192 rooms unserviceable \u2192 reviews tank \u2192 reputation destroyed in weeks.' },
+        { id: 'cr8', text: '\u{1F6A7} Construction Stops', detail: 'Subcontractors demand upfront payment. Without money: ALL work stops. Building sits incomplete.' },
+        { id: 'cr9', text: '\u{1F4CB} Hotel Unsellable', detail: 'MEP plans hostage. Without EUR 4M settlement: no warranties \u2192 no bidders or EUR 10-15M discount.' },
+        { id: 'cr10', text: '\u{1F4C9} Eastdil Collapses', detail: 'Buyer due diligence finds: no plans, no warranties, EUR 19M claim, permit risk. No bids or equity-zero bids.' },
+        { id: 'cr11', text: '\u{1F4F0} Negative Press Spiral', detail: 'Each headline lowers prices. AO\'s name could surface as shadow investor.' },
+        { id: 'cr12', text: '\u{1F4C8} Compound Cost Escalation', detail: '~EUR 500K/month interest + claims growing. EUR 12M gap today \u2192 EUR 16M in 3 months \u2192 EUR 18M+ in 6 months.' },
+        // ── CONSEQUENCES: NO FUNDING FOR AO ──
+        { id: 'sec_conseq_ao', text: '\u2500\u2500 IF NO FUNDING: AO PERSONALLY \u2500\u2500', detail: 'What happens to AO\'s position, equity, and reputation without capital injection.' },
+        { id: 'ca1', text: '\u{1F4C9} Dilution Under Participation Agreement', detail: 'Non-defaulting party funds shortfall \u2192 equity shifts. AO\'s 48% could drop to 35%, 25%, or less.' },
+        { id: 'ca2', text: '\u{1F4B8} Total Investment Write-Off', detail: 'AO subordinated to Aukera bank debt. In distress: bank first, then creditors, then shareholders. Nothing left.' },
+        { id: 'ca3', text: '\u{1F91D} EUR 2.5M Special Deal Collapses', detail: 'If AO defaults on regular calls, DV loses leverage to maintain the EUR 4M claim at distribution.' },
+        { id: 'ca4', text: '\u2696\uFE0F Fund Rebalancing Claim', detail: 'Fund already paid EUR 5,848K that should have been 52/48. AO\'s unpaid share ~EUR 2,807K. Grows monthly.' },
+        { id: 'ca5', text: '\u{1F512} Loss of Blocking Power', detail: '48% = veto. Diluted below 33% = no blocking power. Fund decides unilaterally.' },
+        { id: 'ca6', text: '\u{1F6AB} No Exit \u2014 Illiquid', detail: 'No Eastdil \u2192 no sale \u2192 no exit. Can\'t sell shadow participation privately. Locked forever.' },
+        { id: 'ca7', text: '\u{1F4C4} Equity Recharacterized as Debt', detail: 'Fund lawyers argue AO\'s contribution was subordinated loan. Face value only, no upside.' },
+        { id: 'ca8', text: '\u26A0\uFE0F EUR 13M "On First Demand"', detail: 'Moscow advisers flagged. Capital call default could trigger review and acceleration.' },
+        { id: 'ca9', text: '\u{1F4CA} EUR 5M Bond Unravels', detail: 'Bonds treated as SHL. Default makes status questionable. Court may recharacterize.' },
+        { id: 'ca10', text: '\u{1F1E8}\u{1F1FE} Cyprus Tax Structure Stress', detail: 'Participation breach could trigger deemed disposal \u2192 tax liability.' },
+        { id: 'ca11', text: '\u{1F3E8} MO Future Deals Closed', detail: 'AO = "the investor who let a Mandarin Oriental close." Prague dies permanently.' },
+        { id: 'ca12', text: '\u{1F465} Moscow Advisers Escalate', detail: 'Four unanswered questions since Feb 7. Default = ammunition to challenge entire structure.' },
+        { id: 'ca13', text: '\u{1F3F7}\uFE0F Reputation Damage', detail: 'Walking away from EUR 70M+ project = abandons commitments. Affects future deals and partnerships.' },
       ]
     },
     {
-      id: 'causes', title: 'Root Causes', color: 'c-orange', num: '4', lpVisible: true,
-      items: [
-        { id: 'r1', text: '\u{1F4A5} Contractor Insolvency (Mar 27)', detail: 'Hagenauer filed insolvency March 27, 2026. Left project without main contractor, certificates, warranties, or MEP plans. All replacement costs (Rows 15-16) stem from this single event.' },
-        { id: 'r2', text: '\u{1F4DC} Austrian Tax Law Change', detail: 'Betrugsbekämpfungsgesetz 2025 published Nov 20, 2025. Luxury apartments >EUR 2M can no longer be let VAT-liable. EUR 4.7M previously claimed must be repaid. Published 4 months after September capital call. Unforeseeable.' },
-        { id: 'r3', text: '\u{1F3E8} Hotel Ramp-Up Cycle', detail: 'Luxury hotels take 3-5 years to reach break-even. MO Vienna opened Nov 29, 2025 \u2014 currently in first year of operations (FY1). Operating losses are normal and expected at this stage.' },
-      ]
-    },
-    {
-      id: 'risks', title: 'Risks', color: 'c-red', num: '5', lpVisible: false,
-      items: [
-        { id: 'q1', text: '\u{1F3E8} MO Obligations', detail: '5% branding fee (EUR 3.6M on EUR 72M apartment sales), EUR 1.5M working capital reserve (unfunded, MO can demand anytime), employee salaries are MO-mandated levels. Non-compliance = termination right.' },
-        { id: 'q2', text: '\u{1F3E6} Senior Lender Default Risk', detail: 'Aukera facility ~EUR 30M at 5.4% p.a., first-priority security over entire property. Missing interest payments triggers cross-default. Bank can call entire facility and force sale.' },
-        { id: 'q3', text: '\u{1FA9F} Revenue Locked (Apartments)', detail: '12 units under contract but defects block handover. EUR 4.43M projected 2026 apartment sales at risk. Each delayed handover = ongoing holding costs + buyer frustration + rescission risk.' },
-        { id: 'q4', text: '\u{1F4C9} Asset Value at Exit', detail: 'Without plans, warranties, clean permit, and resolved claims \u2014 hotel sale at massive discount or impossible. Every unresolved issue = haircut on valuation. Eastdil can\'t market a distressed asset at premium.' },
-      ]
-    },
-    {
-      id: 'conseq_rg7', title: 'Consequences: No Funding for RG7', color: 'c-red', num: '6', lpVisible: true,
-      items: [
-        { id: 'cr1', text: '\u{1F510} Permit Revocation (May 26 inspection)', detail: 'Vienna commission inspects May 26. Electrical certificates likely invalid (Hagenauer rushed). Without EUR 250-300K for audit + repairs: non-compliance \u2192 permit revoked \u2192 hotel MUST CLOSE. 45 days.' },
-        { id: 'cr2', text: '\u2696\uFE0F EUR 19M Claim \u2014 Litigation Funder Risk', detail: 'Insolvency administrator holds EUR 19M claims. Can settle NOW at EUR 2M (cash-poor). Without money: Prozessfinanzierer buys claim for ~EUR 3M, sues for full EUR 19M for years. Legal costs EUR 500K+/year. Arik warned this is imminent.' },
-        { id: 'cr3', text: '\u{1F3E0} Apartment Buyer Rescission', detail: 'Defects block handover (windows, KNX, sewage). EUR 5K defect \u2192 EUR 20K+ to fix with new contractors. Buyers can rescind after Nachfrist. EUR 4.43M 2026 sales lost + deposit refunds + market signal kills remaining inventory.' },
-        { id: 'cr4', text: '\u{1F3E6} Aukera Bank Default \u2014 Forced Sale', detail: 'EUR 3.375M interest outstanding. Non-payment = default. Bank has first-priority security. Calls full ~EUR 30M facility. Forced sale at fire-sale price \u2014 ALL equity wiped out, both Fund and AO.' },
-        { id: 'cr5', text: '\u{1F4B0} VAT Penalty Cascade (EUR 5.77M)', detail: 'EUR 5.77M owed to tax authority. Late payment: S\u00e4umniszuschlag 2% first month + 1% ongoing + Versp\u00e4tungszuschlag up to 10%. Tax authority can file Exekution \u2192 lien on property \u2192 blocks ALL transactions.' },
-        { id: 'cr6', text: '\u{1F3E8} MO Terminates Management Agreement', detail: 'MO can demand EUR 1.5M working capital. Operating gap ~EUR 200K/month. Failure to fund \u2192 MO terminates. Losing MO brand = 30-40% of asset value gone. Sale price drops EUR 20-30M. Prague deal dies too.' },
-        { id: 'cr7', text: '\u{1F6D1} Hotel Operations Cease', detail: 'F&B losing 4x budget. Staff can\'t be fired (Austrian labor law). Suppliers stop delivering \u2192 restaurant closes \u2192 rooms unserviceable \u2192 guests leave \u2192 reviews tank \u2192 reputation destroyed in weeks.' },
-        { id: 'cr8', text: '\u{1F6A7} Construction Work Stops', detail: 'EUR 2.5M needed for completion. Subcontractors demand upfront payment (burned by Hagenauer). Without money: ALL work stops. Apartments unfinished. Hotel defects unfixed. Building sits incomplete.' },
-        { id: 'cr9', text: '\u{1F4CB} Hotel Unsellable (No Plans/Warranties)', detail: 'Sovancy administrator holds MEP plans hostage. Without EUR 4M settlement fund: can\'t negotiate 3-year warranties. No plans + no warranties = no bidders or EUR 10-15M discount. MEP settlement possible at EUR 800-900K.' },
-        { id: 'cr10', text: '\u{1F4C9} Eastdil Sale Process Collapses', detail: 'Eastdil NDA arrived, visit ~Apr 28. Buyer due diligence finds: no plans, no warranties, EUR 19M claim, permit risk, VAT liens, unfinished apartments. No bids or equity-zero bids. AO\'s exit becomes impossible.' },
-        { id: 'cr11', text: '\u{1F4F0} Negative Press Spiral', detail: 'Hagenauer bankruptcy already in press. May 26 failure = immediate coverage. Each headline lowers apartment prices and hotel value. AO\'s name could surface as shadow investor \u2014 personal reputational damage.' },
-        { id: 'cr12', text: '\u{1F4C8} Compound Cost Escalation', detail: 'Every month: ~EUR 500K bank interest, subcontractor claims grow (4% p.a.), EUR 19M claim grows, tax penalties compound, hotel losses compound. EUR 14.7M gap today \u2192 EUR 16M in 3 months \u2192 EUR 18M+ in 6 months.' },
-      ]
-    },
-    {
-      id: 'conseq_ao', title: 'Consequences: No Funding for AO', color: 'c-orange', num: '7', lpVisible: false,
-      items: [
-        { id: 'ca1', text: '\u{1F4C9} Dilution Under Participation Agreement', detail: 'Participation Agreement (Jan 26, 2026) governs capital calls. Non-defaulting party funds the shortfall \u2192 equity shifts. Every euro the Fund covers for AO dilutes his 48%. Could drop to 35%, 25%, or less.' },
-        { id: 'ca2', text: '\u{1F4B8} Total Investment Write-Off', detail: 'AO\'s entire investment is subordinated to Aukera bank debt (first priority). In distress: bank first (~EUR 30M), then creditors (EUR 19M Hagenauer, subcontractors, tax), then shareholders. Nothing left. Total wipe-out.' },
-        { id: 'ca3', text: '\u{1F91D} EUR 2.5M Special Deal Collapses', detail: 'March EUR 2.5M structured outside Fund \u2014 AO gets EUR 4M claim at distribution instead of pro-rata. If AO defaults on regular calls, DV loses leverage to maintain this. No distribution = no EUR 4M return.' },
-        { id: 'ca4', text: '\u2696\uFE0F Fund Rebalancing Claim', detail: 'Fund (LCG) already paid entire EUR 5,848K Oct-Dec deficit that should have been 52/48. AO\'s unpaid share: ~EUR 2,807K. Fund can demand rebalancing via dilution, priority claim, or offset. Grows every month.' },
-        { id: 'ca5', text: '\u{1F512} Loss of Blocking Power', detail: '48% = near-parity, effective veto on major decisions. Diluted below 33% = no blocking power. Fund decides unilaterally: sell hotel at any price, settle Hagenauer, restructure debt \u2014 all without AO\'s consent.' },
-        { id: 'ca6', text: '\u{1F6AB} No Exit \u2014 Investment Illiquid', detail: 'Without funding \u2192 Eastdil fails \u2192 no hotel sale \u2192 no exit. Can\'t sell shadow participation privately \u2014 no buyer takes minority stake in distressed Austrian hotel. Investment locked forever, depreciating to zero.' },
-        { id: 'ca7', text: '\u{1F4C4} Equity Recharacterized as Debt', detail: 'Fund lawyers can argue AO\'s contribution was subordinated shareholder loan, not equity. At distribution: face value repayment only, no upside \u2014 no share of hotel sale premium or apartment profits.' },
-        { id: 'ca8', text: '\u26A0\uFE0F EUR 13M "On First Demand" Triggered', detail: 'Moscow advisers flagged this (unanswered Feb 7 question). Capital call default could trigger review. Depending on drafting, default on capital obligations may expose AO to acceleration or call on this guarantee.' },
-        { id: 'ca9', text: '\u{1F4CA} EUR 5M Bond Structure Unravels', detail: 'Bonds treated as SHL (Constantinos confirmed). Default makes bond status questionable \u2014 debt or equity? Court may recharacterize in distress. Moscow advisers specifically asked about this.' },
-        { id: 'ca10', text: '\u{1F1E8}\u{1F1FE} Cyprus Tax Structure Stress', detail: 'Investment flows through Cyprus (Constantinos manages). Participation agreement breach or distressed unwinding could trigger deemed disposal \u2192 tax liability. Austrian authorities already attentive.' },
-        { id: 'ca11', text: '\u{1F3E8} MO Future Deals Closed (Prague)', detail: 'AO wants MO Prague (CITIC Group), Val d\'Is\u00e8re. MO is a tight-knit ownership community. If MO Vienna fails because owner didn\'t fund \u2192 AO = "the investor who let a Mandarin Oriental close." Prague dies permanently.' },
-        { id: 'ca12', text: '\u{1F465} Moscow Advisers Escalate', detail: 'Four unanswered questions since Feb 7 (SHL rate, bonds, EUR 13M guarantee, equity format). Default = ammunition to challenge entire structure. DV took Fund money without informing AO, structured EUR 2.5M unilaterally.' },
-        { id: 'ca13', text: '\u{1F3F7}\uFE0F Personal Reputation Damage', detail: 'Known in Vienna, Moscow, Monaco circles. Walking away from EUR 70M+ luxury hotel project = abandons commitments under pressure. Affects future deals, bank relationships, and partnerships.' },
-      ]
-    },
-    {
-      id: 'opportunities', title: 'Opportunities', color: 'c-green', num: '8', lpVisible: true,
+      id: 'opportunities', title: 'Opportunities', color: 'c-green', num: '3', lpVisible: true,
       items: [
         { id: 'o1', text: '\u{1F3AF} Hotel Sale (Eastdil)', detail: 'Eastdil NDA arrived. Balazs coordinating visit ~Apr 28. Once hotel is stabilized with warranties and clean permit, luxury hotel market in Vienna supports strong valuation.' },
         { id: 'o2', text: '\u{1F1E8}\u{1F1FF} MO Prague (CITIC/Savills)', detail: 'AO "super keen." CITIC Group owns current property. Balazs already in touch with CITIC (Liu Yansong). Requires MO Vienna success as credential.' },
@@ -460,7 +447,7 @@ const DEFAULT_DATA = {
       ]
     },
     {
-      id: 'corporate', title: 'Corporate & Legal', color: 'c-dim', num: '9', lpVisible: false,
+      id: 'corporate', title: 'Corporate & Legal', color: 'c-dim', num: '4', lpVisible: false,
       items: [
         { id: 'x1', text: '\u{1F4DD} Documents for Signature', detail: 'Constantinos waiting for Director to sign documents. Coordinated for this afternoon at FX Mayr.' },
         { id: 'x2', text: '\u{1F4DD} Mertz Protocol + Loan', detail: 'Sign Mertz protocol + loan agreement with AO. Constantinos sent reminder. Part of the EUR 2.5M formalization.' },
@@ -472,7 +459,7 @@ const DEFAULT_DATA = {
       ]
     },
     {
-      id: 'agenda', title: 'Meeting Agenda', color: 'c-purple', num: '10', lpVisible: false,
+      id: 'agenda', title: 'Meeting Agenda', color: 'c-purple', num: '5', lpVisible: false,
       items: [
         { id: 'a1', text: '\u{1F4CB} Today\'s talking order', detail: 'Part 1: Personal requests \u2192 Part 2: The Problem (manifestations + characteristics) \u2192 Part 3: Root Causes \u2192 Part 4: Consequences \u2192 Part 5: Good news / opportunities.' },
         { id: 'a2', text: '\u270F\uFE0F Notes from meeting', detail: 'Capture live notes during AO conversation. Key reactions, objections, commitments.' },
