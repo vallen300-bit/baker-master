@@ -364,7 +364,7 @@
 <div id="export-output"><pre id="export-text"></pre><br><button class="ctrl-btn" onclick="document.getElementById('export-output').style.display='none'">Close</button></div>
 
 <script>
-const STORAGE_KEY = 'ao-structure-builder-v6';
+const STORAGE_KEY = 'ao-structure-builder-v7';
 const DRAG_THRESHOLD = 8; // px before drag activates
 
 const DEFAULT_DATA = {
@@ -373,7 +373,7 @@ const DEFAULT_DATA = {
       id: 'crm', title: 'CRM', color: 'c-blue', num: '1', lpVisible: true,
       items: [
         { id: 'p1', text: '\u{1F4E6} Parcel from Baden-Baden \u2014 URGENT', detail: 'Aloe vera for AO\'s mother (shipped US \u2192 Baden \u2192 FX Mayr). Stuck at Klagenfurt depot, arrives FX Mayr tomorrow (Apr 13). DV already left FX Mayr. PLAN: collect tomorrow, DV writing to FX Mayr for pickup. Then ship to Russia \u2014 DV working on logistics Monday. AO needs this urgently.' },
-        { id: 'p2', text: '\u{1F3E5} FX Mayr Invoice', detail: 'Constantinos paid EUR 12,467 from Eli\'s company account. Business invoices requested for both DV and AO.' },
+        { id: 'p2', text: '\u{1F3E5} FX Mayr Invoice \u2014 PAID', detail: 'Constantinos paid EUR 12,467 from Eli\'s account (Apr 10). Business invoices requested for both DV and AO. Note: Mertz said can\'t switch billing party from Ilana to Andrey, but AO can pay on her behalf.' },
         { id: 'p3', text: '\u{1F3E1} Villa La Plana \u2014 UBS', detail: 'AO wants inquiry about UBS situation regarding Villa La Plana. Status pending.' },
         { id: 'p4', text: '\u{1F4B3} Amex \u2014 CBH Geneva', detail: 'AO wants American Express credit card through CBH in Geneva, same as Director\'s card.' },
       ]
@@ -440,9 +440,10 @@ const DEFAULT_DATA = {
     {
       id: 'opportunities', title: 'Opportunities', color: 'c-green', num: '3', lpVisible: true,
       items: [
-        { id: 'o1', text: '\u{1F3AF} Hotel Sale (Eastdil)', detail: 'Eastdil NDA arrived. Balazs coordinating visit ~Apr 28. Once hotel is stabilized with warranties and clean permit, luxury hotel market in Vienna supports strong valuation.' },
-        { id: 'o2', text: '\u{1F1E8}\u{1F1FF} MO Prague (CITIC/Savills)', detail: 'AO "super keen." CITIC Group owns current property. Balazs already in touch with CITIC (Liu Yansong). Requires MO Vienna success as credential.' },
-        { id: 'o3', text: '\u{1F3D4}\uFE0F Val d\'Is\u00e8re', detail: 'AO interested. Originally from Ettore (forwarded Feb 11). Separate from dead Tuscany/Italian property. Alpine luxury market.' },
+        { id: 'o1', text: '\u{1F3AF} Hotel Sale (Eastdil) \u2014 Apr 28', detail: 'Eastdil visit confirmed for Tuesday Apr 28. Balazs coordinating (Apr 9 WhatsApp). Once hotel is stabilized with warranties and clean permit, luxury hotel market in Vienna supports strong valuation.' },
+        { id: 'o2', text: '\u{1F1E8}\u{1F1FF} MO Prague (CITIC/Savills)', detail: 'AO "super keen" (confirmed Apr 9 meeting). CITIC Group owns current property. Balazs activated approach immediately. Balazs also said he meets 2 appropriate candidates soon (Apr 6). Requires MO Vienna success as credential.' },
+        { id: 'o3', text: '\u{1F3D4}\uFE0F Val d\'Is\u00e8re', detail: 'AO interested (confirmed Apr 9). Originally from Ettore (forwarded Feb 11). Balazs instructed to explore. Alpine luxury market.' },
+        { id: 'o5', text: '\u{1F4E8} Savills \u2014 Another MO in Europe (NEW)', detail: 'Apr 10: forwarded Savills letter about another Mandarin Oriental opportunity in Europe. Source: 420774323982 WhatsApp. Director to review the email and assess fit alongside Prague and Val d\'Is\u00e8re.' },
         { id: 'o4', text: '\u{1F4C8} Vienna Market Performance', detail: 'Vienna luxury hospitality market strong. MO brand premium 30-40% of asset value. Post-stabilization sale potential is significant if project is properly funded through current phase.' },
       ]
     },
@@ -450,8 +451,8 @@ const DEFAULT_DATA = {
       id: 'corporate', title: 'Corporate & Legal', color: 'c-dim', num: '4', lpVisible: false,
       items: [
         { id: 'x1', text: '\u{1F4DD} Documents for Signature', detail: 'Constantinos waiting for Director to sign documents. Coordinated for this afternoon at FX Mayr.' },
-        { id: 'x2', text: '\u{1F4DD} Mertz Protocol + Loan', detail: 'Sign Mertz protocol + loan agreement with AO. Constantinos sent reminder. Part of the EUR 2.5M formalization.' },
-        { id: 'x3', text: '\u{1F510} Bond Payout Mechanics', detail: 'Clarify when and how AO receives proceeds from the securitisation vehicle. Moscow advisers requesting complete documentation. Bonds confirmed as part of SHL by Constantinos.' },
+        { id: 'x2', text: '\u{1F4DD} Mertz Protocol + Loan', detail: 'Sign Mertz protocol + loan agreement with AO. German accountants paid in full (Constantinos Apr 11). Mertz and Eli informed. Part of the EUR 2.5M formalization.' },
+        { id: 'x3', text: '\u{1F510} Bond Payout Mechanics', detail: 'Bonds amount + Aelio Loan #2 = total SHL till Dec 2025. Add EUR 2.5M = total SHL to date. Bonds are PART of SHL (Constantinos confirmed Apr 9). Moscow advisers requesting complete documentation.' },
         { id: 'x4', text: '\u{1F4CB} 4 Moscow Adviser Questions', detail: '(a) SHL interest rate, (b) EUR 5M bonds restructuring, (c) "on first demand" EUR 13M meaning, (d) 23% equity format between AO and DV. Outstanding since Feb 7. CRITICAL \u2014 answer before they escalate.' },
         { id: 'x5', text: '\u{1F454} Wertheimer Family', detail: 'Chanel owners approached about MO Vienna via Balducci. DV told AO but never followed up. Need to ask Balducci for status update.' },
         { id: 'x6', text: '\u{1F4B0} Lilienmatt Restructuring', detail: 'Tax restructuring and implications to discuss with AO. Aukera financing decision already taken. Restructuring and tax implications still need presentation.' },
