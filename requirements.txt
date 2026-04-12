@@ -63,6 +63,9 @@ websocket-client>=1.7.0      # Chrome CDP WebSocket (Phase 2+3)
 # Web Push (E3)
 pywebpush>=2.0.0             # Web Push notifications via VAPID
 
+# YouTube transcript ingestion (YOUTUBE-GEMMA-INGEST-1)
+youtube-transcript-api>=1.2.0
+
 # Future: Trigger integrations
 # msgraph-sdk>=1.0.0       # Microsoft 365 / Outlook
 slack-sdk>=3.0.0           # Slack

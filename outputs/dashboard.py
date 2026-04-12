@@ -690,6 +690,57 @@ async def email_attachments_backfill_endpoint(
     return {"status": "ok", "message": f"Email attachment backfill ({days} days) started in background", "days": days}
 
 
+# ---------------------------------------------------------------------------
+# YouTube Transcript Ingestion (YOUTUBE-GEMMA-INGEST-1)
+# ---------------------------------------------------------------------------
+@app.post("/api/youtube/ingest", tags=["youtube"], dependencies=[Depends(verify_api_key)])
+async def youtube_ingest(request: Request):
+    """Ingest a YouTube video: fetch transcript, summarize with Gemma 4, store."""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    url = body.get("url", "")
+    if not url:
+        raise HTTPException(status_code=400, detail="url is required")
+
+    from triggers.youtube_ingest import extract_video_id, ingest_youtube_video
+
+    video_id = extract_video_id(url)
+    if not video_id:
+        raise HTTPException(status_code=400, detail=f"Could not extract video ID from: {url}")
+
+    # Check dedup
+    from triggers.state import trigger_state
+    source_id = f"youtube_{video_id}"
+    if trigger_state.is_processed("youtube", source_id):
+        # Already ingested — return existing data
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            conn = store._get_conn()
+            if conn:
+                try:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT title, summary FROM meeting_transcripts WHERE id = %s LIMIT 1",
+                        (source_id,),
+                    )
+                    row = cur.fetchone()
+                    cur.close()
+                    if row:
+                        return {"status": "already_ingested", "title": row[0], "summary": row[1], "video_id": video_id}
+                finally:
+                    store._put_conn(conn)
+        except Exception:
+            pass
+        return {"status": "already_ingested", "video_id": video_id}
+
+    result = ingest_youtube_video(video_id, title=body.get("title", ""))
+    return result
+
+
 @app.post("/api/whatsapp/backfill", tags=["whatsapp"], dependencies=[Depends(verify_api_key)])
 async def whatsapp_backfill_endpoint(
     days: int = Query(90, ge=1, le=365),
@@ -7040,6 +7091,23 @@ async def scan_chat(req: ScanRequest):
                 yield "data: [DONE]\n\n"
             return StreamingResponse(_idea_stream(), media_type="text/event-stream",
                                      headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+        # YOUTUBE-GEMMA-INGEST-1: Auto-detect YouTube URLs in scan input
+        try:
+            from triggers.youtube_ingest import detect_youtube_urls, ingest_youtube_video
+            from triggers.state import trigger_state as _yt_ts
+            _yt_ids = detect_youtube_urls(req.question)
+            for _yt_vid in _yt_ids[:2]:  # Max 2 videos per query
+                _yt_src = f"youtube_{_yt_vid}"
+                if not _yt_ts.is_processed("youtube", _yt_src):
+                    try:
+                        _yt_result = ingest_youtube_video(_yt_vid)
+                        if _yt_result.get("status") == "ok":
+                            logger.info(f"Auto-ingested YouTube video from scan: {_yt_result.get('title')}")
+                    except Exception as _yt_e:
+                        logger.debug(f"YouTube auto-ingest failed (non-fatal): {_yt_e}")
+        except Exception:
+            pass  # Non-fatal — scan continues regardless
 
         _classify_question = req.question
         if _alert_ctx:

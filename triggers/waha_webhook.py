@@ -986,6 +986,21 @@ async def waha_webhook(
         except Exception:
             pass
 
+    # YOUTUBE-GEMMA-INGEST-1: Auto-detect YouTube URLs in Director WhatsApp messages
+    if sender == DIRECTOR_WHATSAPP and combined_body:
+        try:
+            from triggers.youtube_ingest import detect_youtube_urls, ingest_youtube_video
+            from triggers.state import trigger_state as _yt_ts
+            _yt_ids = detect_youtube_urls(combined_body)
+            for _yt_vid in _yt_ids[:1]:  # Max 1 per message
+                _yt_src = f"youtube_{_yt_vid}"
+                if not _yt_ts.is_processed("youtube", _yt_src):
+                    _yt_result = ingest_youtube_video(_yt_vid)
+                    if _yt_result.get("status") == "ok":
+                        logger.info(f"Auto-ingested YouTube from WhatsApp: {_yt_result.get('title')}")
+        except Exception as _yt_e:
+            logger.debug(f"YouTube WhatsApp auto-ingest failed (non-fatal): {_yt_e}")
+
     # WHATSAPP-ACTION-1: Director messages → action detection first
     _wa_intent = None
     if sender == DIRECTOR_WHATSAPP and combined_body:
