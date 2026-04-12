@@ -480,6 +480,25 @@ TOOL_DEFINITIONS = [
             "required": ["to", "subject", "body"],
         },
     },
+    # Store decision/insight into Baker's permanent memory
+    {
+        "name": "store_decision",
+        "description": (
+            "Store a decision, insight, or conclusion into Baker's permanent memory. "
+            "Use when analysis reaches a firm conclusion the Director should be able "
+            "to retrieve in future sessions."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "decision": {"type": "string", "description": "The decision or insight"},
+                "reasoning": {"type": "string", "description": "Supporting logic or evidence"},
+                "confidence": {"type": "string", "description": "high / medium / low", "default": "high"},
+                "trigger_type": {"type": "string", "description": "Source tag e.g. movie_am, ao_pm"},
+            },
+            "required": ["decision"],
+        },
+    },
     # PM-WHATSAPP-EMAIL-TOOLS: Send WhatsApp
     {
         "name": "send_whatsapp",
@@ -879,6 +898,8 @@ class ToolExecutor:
                 return self._create_calendar_event(tool_input)
             elif tool_name == "draft_email":
                 return self._draft_email(tool_input)
+            elif tool_name == "store_decision":
+                return self._store_decision(tool_input)
             elif tool_name == "send_whatsapp":
                 return self._send_whatsapp(tool_input)
             elif tool_name == "send_email":
@@ -1563,6 +1584,27 @@ class ToolExecutor:
         except Exception as e:
             logger.error(f"draft_email failed: {e}")
             return json.dumps({"error": f"Email draft failed: {str(e)}"})
+
+    def _store_decision(self, inp: dict) -> str:
+        """Store a decision/insight into Baker's permanent memory."""
+        decision = inp.get("decision", "").strip()
+        if not decision:
+            return json.dumps({"error": "'decision' is required"})
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            decision_id = store.log_decision(
+                decision=decision,
+                reasoning=inp.get("reasoning", ""),
+                confidence=inp.get("confidence", "high"),
+                trigger_type=inp.get("trigger_type", "agent"),
+            )
+            if decision_id:
+                return json.dumps({"success": True, "decision_id": decision_id})
+            return json.dumps({"error": "Failed to store decision"})
+        except Exception as e:
+            logger.error(f"store_decision failed: {e}")
+            return json.dumps({"error": f"store_decision failed: {str(e)}"})
 
     def _send_whatsapp(self, inp: dict) -> str:
         """PM-WHATSAPP-EMAIL-TOOLS: Send WhatsApp to a contact."""
