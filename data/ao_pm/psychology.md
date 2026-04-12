@@ -1,5 +1,8 @@
 # AO Psychology Profile
 
+## Names & Aliases
+**Andrey Oskolkov** = AO = **Eli** (alias used in personal and financial contexts). All three refer to the same person. Constantinos and Edita often use "Eli" in WhatsApp and emails.
+
 ## Core Archetype: The Hunter
 Most alive during the chase, loses interest after the kill. Sausage-making (maintenance) bores him. Every interaction must be framed as a hunt, not housekeeping.
 
