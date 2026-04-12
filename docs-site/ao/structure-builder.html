@@ -364,7 +364,7 @@
 <div id="export-output"><pre id="export-text"></pre><br><button class="ctrl-btn" onclick="document.getElementById('export-output').style.display='none'">Close</button></div>
 
 <script>
-const STORAGE_KEY = 'ao-structure-builder-v7';
+const STORAGE_KEY = 'ao-structure-builder-v8';
 const DRAG_THRESHOLD = 8; // px before drag activates
 
 const DEFAULT_DATA = {
@@ -493,6 +493,18 @@ const DEFAULT_DATA = {
         // ── OTHERS (Edita, Constantinos, Balazs) ──
         { id: 'sec_act_others', text: '\u2500\u2500 OTHERS \u2500\u2500', detail: 'Actions for Edita, Constantinos, Balazs, or other team members.' },
         { id: 'act_other_template', text: '\u{1F4CC} [Drag item here or click + to add]', detail: 'INSTRUCTION: [What exactly needs to be done]\nOWNER: [Name]\nDEADLINE: [Date]\nSOURCE: [Which card/meeting this came from]\nSTATUS: Open' },
+      ]
+    },
+    {
+      id: 'done', title: 'DONE', color: 'c-green', num: '7', lpVisible: false,
+      items: [
+        // ── Important Things Done ──
+        { id: 'sec_done_important', text: '\u2500\u2500 Important Things Done \u2500\u2500', detail: 'Completed actions, resolved matters, confirmed deliverables. Drag items here from other cards when done.' },
+        { id: 'done_template_1', text: '\u{1F4CC} [Drag completed item here]', detail: 'WHAT: [Description of completed task]\nCOMPLETED: [Date]\nSOURCE: [Which card this came from]\nOUTCOME: [Result or confirmation]' },
+        // ── Money Changed Hands ──
+        { id: 'sec_done_money', text: '\u2500\u2500 Money Changed Hands \u2500\u2500', detail: 'Payments made, received, or confirmed. Track all financial movements here.' },
+        { id: 'done_money_1', text: '\u2705 German accountants paid in full', detail: 'WHAT: German accountants paid in full\nDATE: Apr 11, 2026\nCONFIRMED BY: Constantinos ("I have informed Mertz and Eli")\nSOURCE: CRM / Constantinos WhatsApp' },
+        { id: 'done_money_template', text: '\u{1F4CC} [Drag payment item here]', detail: 'WHAT: [Payment description]\nAMOUNT: [EUR X]\nDATE: [Date]\nCONFIRMED BY: [Who confirmed]\nSOURCE: [Which card this came from]' },
       ]
     },
   ]
