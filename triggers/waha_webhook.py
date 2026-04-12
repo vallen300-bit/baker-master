@@ -768,6 +768,59 @@ async def waha_webhook(
     body = await request.json()
     event_type = body.get("event")
 
+    # WAHA-SILENT-GUARD-1: Handle session status events (instant detection)
+    if event_type == "session.status":
+        session_payload = body.get("payload", {})
+        session_status = session_payload.get("status", "")
+        logger.warning(f"WAHA session status event: {session_status}")
+
+        _WAHA_DEAD_STATUSES = {"SCAN_QR_CODE", "STOPPED", "FAILED"}
+        if session_status in _WAHA_DEAD_STATUSES:
+            # Fire T1 alert — session needs manual QR re-scan
+            try:
+                from memory.store_back import SentinelStoreBack
+                store = SentinelStoreBack._get_global_instance()
+                store.create_alert(
+                    tier=1,
+                    title=f"WAHA SESSION DEAD: {session_status}",
+                    body=(
+                        f"WhatsApp session status changed to {session_status}. "
+                        f"Inbound messages are NOT being received. "
+                        f"Action: Re-scan QR code at https://baker-waha.onrender.com/#/sessions/default"
+                    ),
+                    source="waha_session",
+                    source_id=f"session-{session_status}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M')}",
+                )
+            except Exception as alert_err:
+                logger.error(f"Failed to create WAHA session alert: {alert_err}")
+
+            try:
+                from triggers.sentinel_health import report_failure
+                report_failure("whatsapp", f"Session status: {session_status}")
+            except Exception:
+                pass
+
+            # Try WhatsApp alert (may fail if session is truly dead — that's OK)
+            try:
+                from outputs.whatsapp_sender import send_whatsapp
+                send_whatsapp(
+                    f"*WAHA SESSION DOWN*\n\nStatus: {session_status}\n"
+                    f"Inbound WhatsApp messages are NOT being received.\n\n"
+                    f"Re-scan QR: https://baker-waha.onrender.com/#/sessions/default"
+                )
+            except Exception:
+                pass
+
+        elif session_status == "WORKING":
+            try:
+                from triggers.sentinel_health import report_success
+                report_success("whatsapp")
+            except Exception:
+                pass
+            logger.info("WAHA session status: WORKING — session healthy")
+
+        return {"status": "session_event", "session_status": session_status}
+
     # Only process incoming messages (not our own outbound)
     if event_type != "message":
         return {"status": "ignored", "event": event_type}

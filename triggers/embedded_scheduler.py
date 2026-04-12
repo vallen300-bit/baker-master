@@ -342,6 +342,26 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: health_watchdog (every 2 hours)")
 
+    # WAHA-SILENT-GUARD-1: Detect WhatsApp inbound silence
+    from triggers.sentinel_health import check_waha_silence
+    scheduler.add_job(
+        check_waha_silence,
+        IntervalTrigger(hours=2),
+        id="waha_silence_check", name="WAHA inbound silence detector",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: waha_silence_check (every 2 hours)")
+
+    # WAHA-SILENT-GUARD-1: Active WAHA session health poll
+    from triggers.sentinel_health import poll_waha_session
+    scheduler.add_job(
+        poll_waha_session,
+        IntervalTrigger(minutes=30),
+        id="waha_session_poll", name="WAHA session health poll",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: waha_session_poll (every 30 minutes)")
+
     # F4: Financial signal detector — every 6 hours (Session 27)
     from orchestrator.financial_detector import run_financial_detection
     scheduler.add_job(

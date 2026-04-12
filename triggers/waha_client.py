@@ -37,6 +37,29 @@ def _rewrite_media_url(url: str) -> str:
 
 
 # ------------------------------------------------------------------
+# Session status (WAHA-SILENT-GUARD-1)
+# ------------------------------------------------------------------
+
+def get_session_status(session: str = None) -> dict:
+    """WAHA-SILENT-GUARD-1: Check WAHA session status.
+    Returns {"status": "WORKING", ...} or {"error": "..."}.
+    """
+    if session is None:
+        session = config.waha.session
+    try:
+        resp = httpx.get(
+            f"{config.waha.base_url}/api/sessions/{session}",
+            headers=_headers(),
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            return resp.json()
+        return {"error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ------------------------------------------------------------------
 # Contacts endpoint (INTERACTION-PIPELINE-1)
 # ------------------------------------------------------------------
 

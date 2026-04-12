@@ -596,3 +596,165 @@ def run_health_watchdog():
         logger.error(f"Health watchdog failed: {e}")
     finally:
         _put_conn(store, conn)
+
+
+def check_waha_silence():
+    """WAHA-SILENT-GUARD-1: Detect if no inbound WhatsApp messages in 4+ hours
+    during business hours (06:00-22:00 UTC, roughly 08:00-00:00 CET).
+
+    Fires T1 alert if silent. Skips overnight (low message volume is normal).
+    """
+    now = datetime.now(timezone.utc)
+    hour_utc = now.hour
+
+    # Only check during business hours (06:00-22:00 UTC = 08:00-00:00 CET)
+    if hour_utc < 6 or hour_utc >= 22:
+        logger.debug("WAHA silence check: outside business hours, skipping")
+        return
+
+    conn, store = _get_conn()
+    if not conn:
+        return
+
+    try:
+        _ensure_table(conn)
+        cur = conn.cursor()
+
+        # Check latest INBOUND message (not Baker's own outbound alerts)
+        cur.execute("""
+            SELECT MAX(timestamp) FROM whatsapp_messages
+            WHERE is_director = false
+            LIMIT 1
+        """)
+        row = cur.fetchone()
+        latest_inbound = row[0] if row and row[0] else None
+        cur.close()
+
+        if latest_inbound is None:
+            logger.warning("WAHA silence check: no inbound messages ever recorded")
+            return
+
+        # Calculate age
+        if latest_inbound.tzinfo is None:
+            latest_inbound = latest_inbound.replace(tzinfo=timezone.utc)
+
+        age_hours = (now - latest_inbound).total_seconds() / 3600
+
+        if age_hours > 4:
+            alert_msg = (
+                f"No inbound WhatsApp messages in {age_hours:.1f} hours. "
+                f"Last inbound: {latest_inbound.strftime('%Y-%m-%d %H:%M UTC')}. "
+                f"WAHA session may be dead. "
+                f"Check: https://baker-waha.onrender.com/#/sessions/default"
+            )
+            logger.warning(f"WAHA silence detected: {alert_msg}")
+
+            # Report failure to sentinel health
+            report_failure("waha_silence", f"No inbound messages in {age_hours:.1f}h")
+
+            # T1 alert
+            try:
+                from memory.store_back import SentinelStoreBack
+                st = SentinelStoreBack._get_global_instance()
+                st.create_alert(
+                    tier=1,
+                    title="WAHA SILENT — no inbound WhatsApp messages",
+                    body=alert_msg,
+                    source="waha_silence",
+                    source_id=f"silence-{now.strftime('%Y%m%d-%H')}",
+                )
+            except Exception:
+                pass
+
+            # Try WhatsApp (may fail if session dead — falls through to dashboard alert)
+            try:
+                from outputs.whatsapp_sender import send_whatsapp
+                send_whatsapp(f"*WAHA SILENT*\n\n{alert_msg}")
+            except Exception:
+                pass
+        else:
+            # Healthy — clear any previous silence failure
+            report_success("waha_silence")
+            logger.debug(f"WAHA silence check: last inbound {age_hours:.1f}h ago — OK")
+
+    except Exception as e:
+        logger.error(f"WAHA silence check failed: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        _put_conn(store, conn)
+
+
+def poll_waha_session():
+    """WAHA-SILENT-GUARD-1: Actively poll WAHA session status every 30 min.
+    Catches session death even when no messages are flowing.
+    """
+    try:
+        from triggers.waha_client import get_session_status
+        result = get_session_status()
+    except Exception as e:
+        logger.error(f"WAHA session poll: import/call failed: {e}")
+        report_failure("waha_session_poll", str(e))
+        return
+
+    if "error" in result:
+        error_msg = result["error"]
+        logger.warning(f"WAHA session poll: error — {error_msg}")
+        report_failure("waha_session_poll", error_msg)
+
+        # T1 alert if WAHA is completely unreachable
+        try:
+            from memory.store_back import SentinelStoreBack
+            st = SentinelStoreBack._get_global_instance()
+            st.create_alert(
+                tier=1,
+                title="WAHA UNREACHABLE",
+                body=f"Cannot reach WAHA API: {error_msg}. Check https://baker-waha.onrender.com",
+                source="waha_session_poll",
+                source_id=f"unreachable-{datetime.now(timezone.utc).strftime('%Y%m%d-%H')}",
+            )
+        except Exception:
+            pass
+        return
+
+    status = result.get("status", "UNKNOWN")
+    logger.info(f"WAHA session poll: status={status}")
+
+    _HEALTHY = {"WORKING"}
+    _DEAD = {"SCAN_QR_CODE", "STOPPED", "FAILED"}
+
+    if status in _HEALTHY:
+        report_success("waha_session_poll")
+    elif status in _DEAD:
+        report_failure("waha_session_poll", f"Session status: {status}")
+
+        alert_msg = (
+            f"WAHA session is {status}. Inbound WhatsApp messages are NOT being received.\n"
+            f"Re-scan QR: https://baker-waha.onrender.com/#/sessions/default"
+        )
+
+        # T1 alert
+        try:
+            from memory.store_back import SentinelStoreBack
+            st = SentinelStoreBack._get_global_instance()
+            st.create_alert(
+                tier=1,
+                title=f"WAHA SESSION: {status}",
+                body=alert_msg,
+                source="waha_session_poll",
+                source_id=f"poll-{status}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H')}",
+            )
+        except Exception:
+            pass
+
+        # Try WhatsApp (best effort)
+        try:
+            from outputs.whatsapp_sender import send_whatsapp
+            send_whatsapp(f"*WAHA SESSION DOWN*\n\nStatus: {status}\n\n{alert_msg}")
+        except Exception:
+            pass
+    else:
+        # Unknown status — log but don't alert
+        logger.warning(f"WAHA session poll: unexpected status '{status}'")
