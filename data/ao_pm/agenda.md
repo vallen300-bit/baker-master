@@ -2,20 +2,23 @@
 
 ## Active Matters
 
-### 1. Capital Call EUR 6M
-- **Hunting Phase:** wounded_animal → reframe
-- **Status:** ACTIVE — Monaco seed planted, consequence conversation next
-- **Monaco Outcome (Apr 2-3):** DV deliberately did NOT make the direct ask. Strategy: prey first, consequences Tuesday. AO's "you only call when you need money" was active — avoided triggering it by leading with prey.
-- **Director Position:** Frame as CONSEQUENCE of Hagenauer insolvency (protecting the investment), NOT as standalone ask. EUR 2M × 3 months (Apr/May/Jun), not EUR 6M lump sum.
-- **Next Step:** Tuesday — explain consequences: can't be late on any payments, need EUR 2M/month for 3 months.
-- **"Yes" Signal Detected:** AO showed willingness — the capital call is NOT dead, it's staged.
+### 1. Capital Call EUR 7M
+- **Hunting Phase:** LIVE — ask delivered, AO engaged
+- **Status:** ACTIVE — Full walkthrough delivered at FX Mayr (Apr 11). AO heard numbers, asked clarifying questions, did NOT push back. Capital call letter + Excel to follow.
+- **FX Mayr Outcome (Apr 11):** DV walked AO through entire v009 table line by line. Explained: Hagenauer contract (121.5M+17M), 2-month delay, replacement costs (electrical audit 250-300K, MEP, apartments), VAT clawback (5.77M from Nov 2025 law change), bank interest, hotel working capital.
+- **Key Number Communicated:** ~EUR 11M total deficit until June, split roughly in half = ~EUR 6M each. Phased: "two, two and two" per month.
+- **Director Decision (Apr 12):** Final call = **EUR 7M** — EUR 2.5M April, EUR 2.5M May, EUR 2M June. Slightly above what AO heard (6M) — frame as rounding for contingency.
+- **Fund's EUR 5.7M — CORRECTED UNDERSTANDING:** This was a CASHED BANK GUARANTEE, not a voluntary capital contribution. Fund provided guarantee at construction start; DV cashed it to cover delay expenses. Fund "didn't feel anything." NOT an equity over-investment requiring AO rectification.
+- **EUR 2.5M Special Deal — CONFIRMED TO AO:** AO's prior 2.5M transfer sits OUTSIDE the 48/52 framework. AO gets EUR 4M claim at distribution (not 2.5M shareholder capital). Fund was told "we closed construction gap for 4M." Not factored in Fund relations.
+- **Bank Financing:** DV committed to AO: "From Monday I start working with all banks. We need a pillow. Not to take from shareholders."
+- **Next Steps:** (1) Edita finalizes table, (2) Capital call letter + Excel produced, (3) Letter sent to AO formalizing the 2.5/2.5/2 phasing.
 
 ### 2. Hagenauer Austria Acquisition
 - **Hunting Phase:** reframe (sausage → hunt)
-- **Status:** ACTIVE — AO told about insolvency in Monaco, press story NOT yet revealed
-- **Monaco Outcome:** DV told AO everything about insolvency itself. DV has NOT told AO about press terror (negative press coverage). Two-stage reveal: (1) Monday: press story with solutions attached, (2) Tuesday: capital call consequences.
-- **Director Position:** Buy shares through German insolvency receiver via clean vehicle, offer creditors 1-5% quota to eliminate EUR 21.2M claim. Frame as a HUNT for AO, not housekeeping.
-- **Apartment Sales:** DV told AO that Hagenauer leaving work unfinished is slowing sales — reinforces the capital call narrative.
+- **Status:** ACTIVE — AO fully briefed at FX Mayr (Apr 11)
+- **FX Mayr Outcome (Apr 11):** DV told AO: insolvency administrator has EUR 19M claims from subcontractors. Only asset = claim against RG7 for EUR 19M. Options: (a) pay EUR 2M quick settlement, (b) risk financial buyer purchasing claims and litigating for years. Administrator already hinted that a buyer may come quickly.
+- **Warranty Strategy Explained to AO:** EUR 4M settlement/warranty fund. Approach major subcontractors (e.g. MEP): offer EUR 500K + defect repairs in exchange for 3-year guarantee with bank guarantee backing. Cheaper than 10 years of litigation. Essential for hotel sale — no buyer wants a hotel without warranties and plans.
+- **Director Position:** Buy shares through German insolvency receiver via clean vehicle, offer creditors 1-5% quota to eliminate EUR 21.2M claim. Frame as a HUNT for AO.
 - **Window:** June/July 2026
 - **Critical:** Pre-agree with AO — acquisition cost is project cost, NOT equity adjustment trigger
 

@@ -50,8 +50,21 @@ DV demonstrated a multi-day staging approach in Monaco:
 Personal gestures matter. Never arrive empty-handed. Expensive wine, truffles, cheese. Social capital > business deals. Connecting AO to interesting people earns more loyalty than any spreadsheet.
 
 ## Number Safety
-- AO's total investment = ~EUR 67.3M (BOTH channels combined).
+- AO's total investment = ~EUR 66.5M principal (BOTH channels combined).
 - NEVER quote EUR 50.4M as the total — that is Channel 2 (Cyprus) only.
 - NEVER quote EUR 19.3M as the total — that is Channel 1 (Hayford) only.
-- If in doubt, say "approximately EUR 67 million across all instruments."
+- If in doubt, say "approximately EUR 66 to 67 million in principal across all instruments."
 - This is the most common error in Baker's history on AO matters.
+
+## Fund Guarantee vs Capital Call (CRITICAL — Apr 2026)
+- The Fund's EUR 5.7M (Oct-Dec 2025) was a CASHED BANK GUARANTEE — NOT a voluntary capital contribution.
+- Fund provided guarantee (~EUR 5.5-5.6M) at start of construction. DV cashed it to cover delay expenses.
+- Fund "didn't feel anything" — DV manages everything. No conscious equity decision.
+- NEVER frame this as "Fund over-invested and AO must rectify." The correct framing: "The guarantee was converted to cover delay, and now both sides need to contribute forward."
+- AO was told this directly at FX Mayr (Apr 11).
+
+## EUR 2.5M Special Deal
+- AO's EUR 2.5M (Mar 2026) sits OUTSIDE the 48/52 framework.
+- AO gets a EUR 4M return claim at distribution (not EUR 2.5M shareholder capital).
+- The Fund was NOT asked to match. It was told: "we closed the construction gap for 4M."
+- NEVER include the EUR 2.5M in 48/52 capital call math. It is a separate instrument.
