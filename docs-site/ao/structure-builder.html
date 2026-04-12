@@ -364,7 +364,7 @@
 <div id="export-output"><pre id="export-text"></pre><br><button class="ctrl-btn" onclick="document.getElementById('export-output').style.display='none'">Close</button></div>
 
 <script>
-const STORAGE_KEY = 'ao-structure-builder-v5';
+const STORAGE_KEY = 'ao-structure-builder-v6';
 const DRAG_THRESHOLD = 8; // px before drag activates
 
 const DEFAULT_DATA = {
@@ -372,7 +372,7 @@ const DEFAULT_DATA = {
     {
       id: 'crm', title: 'CRM', color: 'c-blue', num: '1', lpVisible: true,
       items: [
-        { id: 'p1', text: '\u{1F4E6} Parcel from Baden-Baden', detail: 'AO\'s parcel sent from Baden-Baden. Caroline confirmed DHL Express, arriving tomorrow. Track and confirm delivery to AO.' },
+        { id: 'p1', text: '\u{1F4E6} Parcel from Baden-Baden \u2014 URGENT', detail: 'Aloe vera for AO\'s mother (shipped US \u2192 Baden \u2192 FX Mayr). Stuck at Klagenfurt depot, arrives FX Mayr tomorrow (Apr 13). DV already left FX Mayr. PLAN: collect tomorrow, DV writing to FX Mayr for pickup. Then ship to Russia \u2014 DV working on logistics Monday. AO needs this urgently.' },
         { id: 'p2', text: '\u{1F3E5} FX Mayr Invoice', detail: 'Constantinos paid EUR 12,467 from Eli\'s company account. Business invoices requested for both DV and AO.' },
         { id: 'p3', text: '\u{1F3E1} Villa La Plana \u2014 UBS', detail: 'AO wants inquiry about UBS situation regarding Villa La Plana. Status pending.' },
         { id: 'p4', text: '\u{1F4B3} Amex \u2014 CBH Geneva', detail: 'AO wants American Express credit card through CBH in Geneva, same as Director\'s card.' },
@@ -483,6 +483,8 @@ const DEFAULT_DATA = {
       items: [
         // ── DV (Director) ──
         { id: 'sec_act_dv', text: '\u2500\u2500 DV (Director) \u2500\u2500', detail: 'Actions for Dimitry to execute. Drag items here from other cards and fill in the instruction.' },
+        { id: 'act_dv_1', text: '\u{1F4E6} Write to FX Mayr re parcel pickup', detail: 'INSTRUCTION: Email/call FX Mayr reception \u2014 authorize parcel collection tomorrow (Apr 13). Tracking: CY 4338 6204 9DE.\nOWNER: DV\nDEADLINE: Today (Apr 12)\nSOURCE: CRM / Siegfried WhatsApp\nSTATUS: Open' },
+        { id: 'act_dv_2', text: '\u{1F4E6} Arrange Russia shipping for parcel', detail: 'INSTRUCTION: Figure out how to ship aloe vera parcel from Austria to Russia for AO\'s mother. Urgently needed.\nOWNER: DV\nDEADLINE: Monday Apr 14\nSOURCE: CRM / Siegfried WhatsApp\nSTATUS: Open' },
         { id: 'act_dv_template', text: '\u{1F4CC} [Drag item here or click + to add]', detail: 'INSTRUCTION: [What exactly needs to be done]\nOWNER: DV\nDEADLINE: [Date]\nSOURCE: [Which card/meeting this came from]\nSTATUS: Open' },
         // ── BAKER (AI) ──
         { id: 'sec_act_baker', text: '\u2500\u2500 BAKER (AI) \u2500\u2500', detail: 'Actions for Baker/AO PM to execute. Research, drafts, analysis, follow-ups.' },
