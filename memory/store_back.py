@@ -177,6 +177,9 @@ class SentinelStoreBack:
         # CORTEX-PHASE-2A: Event bus
         self._ensure_cortex_events_table()
 
+        # CORTEX-PHASE-2B: Qdrant dedup collection
+        self._ensure_cortex_obligations_collection()
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -2622,6 +2625,33 @@ class SentinelStoreBack:
             logger.warning(f"Could not ensure cortex_events table: {e}")
         finally:
             self._put_conn(conn)
+
+    def _ensure_cortex_obligations_collection(self):
+        """CORTEX-PHASE-2B: Create Qdrant collection for semantic dedup."""
+        try:
+            from qdrant_client import QdrantClient
+            from qdrant_client.models import VectorParams, Distance
+            from config.settings import config
+
+            if not config.qdrant.url or not config.qdrant.api_key:
+                logger.warning("Qdrant not configured — skipping cortex_obligations collection")
+                return
+
+            client = QdrantClient(url=config.qdrant.url, api_key=config.qdrant.api_key)
+            try:
+                client.get_collection("cortex_obligations")
+                logger.info("cortex_obligations collection already exists")
+            except Exception:
+                client.create_collection(
+                    collection_name="cortex_obligations",
+                    vectors_config=VectorParams(
+                        size=1024,  # Voyage AI voyage-3
+                        distance=Distance.COSINE,
+                    ),
+                )
+                logger.info("Created cortex_obligations Qdrant collection")
+        except Exception as e:
+            logger.warning(f"Could not ensure cortex_obligations collection: {e}")
 
     def _ensure_capability_runs_table(self):
         """Create capability_runs table. Idempotent."""

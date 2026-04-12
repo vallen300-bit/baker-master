@@ -1,8 +1,10 @@
 """
-Baker Cortex v2 — Event Bus
+Baker Cortex v2 — Event Bus + Semantic Dedup Gate
 CORTEX-PHASE-2A: publish_event() + audit + decisions→insights pipeline.
-Behind tool_router_enabled feature flag.
+CORTEX-PHASE-2B: Qdrant semantic dedup gate + shadow mode.
+Behind tool_router_enabled + auto_merge_enabled feature flags.
 """
+import hashlib
 import json
 import logging
 from typing import Optional
@@ -26,6 +28,144 @@ def _put_conn(conn):
     store._put_conn(conn)
 
 
+# ─── Qdrant Semantic Dedup Gate (Phase 2B) ───
+
+def _get_qdrant():
+    """Get Qdrant client singleton."""
+    from qdrant_client import QdrantClient
+    from config.settings import config
+    if not hasattr(_get_qdrant, '_client'):
+        if not config.qdrant.url:
+            _get_qdrant._client = None
+        else:
+            _get_qdrant._client = QdrantClient(
+                url=config.qdrant.url,
+                api_key=config.qdrant.api_key,
+            )
+    return _get_qdrant._client
+
+
+def _embed_text(text: str) -> list:
+    """Embed text using Voyage AI. Returns 1024-dim vector."""
+    import voyageai
+    from config.settings import config
+    if not config.voyage.api_key:
+        return []
+    client = voyageai.Client(api_key=config.voyage.api_key)
+    result = client.embed(
+        texts=[text[:2000]],  # Cap at 2000 chars to control cost
+        model=config.voyage.model,  # "voyage-3"
+        input_type="document",
+    )
+    return result.embeddings[0]
+
+
+def check_dedup(
+    description: str,
+    category: str,
+    due_date: str = None,
+    amount: float = None,
+) -> tuple:
+    """
+    Unconditional semantic check before any shared write.
+    Returns: ('new', None) | ('auto_merge', canonical_id) | ('review', canonical_id)
+
+    Thresholds:
+    - >= 0.92: auto-merge (same obligation, different words)
+    - 0.85-0.92: human review queue
+    - < 0.85: definitely new
+
+    Field override: if dates or amounts differ, NEVER auto-merge.
+    """
+    qdrant = _get_qdrant()
+    if not qdrant:
+        return ('new', None)
+
+    try:
+        embedding = _embed_text(description)
+        if not embedding:
+            return ('new', None)
+
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+        results = qdrant.search(
+            collection_name="cortex_obligations",
+            query_vector=embedding,
+            query_filter=Filter(
+                must=[FieldCondition(key="category", match=MatchValue(value=category))]
+            ),
+            score_threshold=0.85,  # Floor — below this, definitely new
+            limit=3,
+        )
+
+        if not results:
+            return ('new', None)
+
+        best = results[0]
+        score = best.score
+        existing = best.payload
+
+        # NEVER auto-merge if structured fields differ
+        if due_date and existing.get('due_date') and due_date != existing['due_date']:
+            return ('new', None)  # Different dates = different obligation
+        if amount and existing.get('amount') and abs(amount - existing['amount']) > 0.01:
+            return ('new', None)  # Different amounts = different obligation
+
+        if score >= 0.92:
+            return ('auto_merge', existing.get('canonical_id'))
+        elif score >= 0.85:
+            return ('review', existing.get('canonical_id'))
+        else:
+            return ('new', None)
+
+    except Exception as e:
+        logger.warning("check_dedup failed (non-fatal, treating as new): %s", e)
+        return ('new', None)
+
+
+def upsert_obligation_vector(
+    canonical_id: int,
+    description: str,
+    category: str,
+    due_date: str = None,
+    source_agent: str = None,
+):
+    """Write/update the Qdrant vector for an obligation."""
+    qdrant = _get_qdrant()
+    if not qdrant:
+        return
+
+    try:
+        embedding = _embed_text(description)
+        if not embedding:
+            return
+
+        from qdrant_client.models import PointStruct
+
+        point_id = f"{category}_{canonical_id}"
+        numeric_id = int(hashlib.sha256(point_id.encode()).hexdigest()[:16], 16)
+        qdrant.upsert(
+            collection_name="cortex_obligations",
+            points=[PointStruct(
+                id=numeric_id,  # Deterministic hash — survives Render restarts
+                vector=embedding,
+                payload={
+                    "canonical_id": canonical_id,
+                    "category": category,
+                    "description": description[:500],
+                    "due_date": due_date,
+                    "source_agent": source_agent,
+                    "point_key": point_id,
+                },
+            )],
+        )
+        logger.info("cortex: upserted vector for %s", point_id)
+    except Exception as e:
+        logger.warning("upsert_obligation_vector failed (non-fatal): %s", e)
+
+
+# ─── Event Bus Core ───
+
 def publish_event(
     event_type: str,
     category: str,
@@ -39,8 +179,62 @@ def publish_event(
     Publish an event to the Cortex event bus.
     This is the SINGLE entry point for all coordinated writes.
 
+    PHASE-2B: Pre-write semantic dedup gate for deadlines/decisions.
+    Shadow mode (auto_merge_enabled=false): logs dedup decisions, doesn't block.
+    Live mode (auto_merge_enabled=true): score >= 0.92 → skip write.
+
     Returns: event ID or None on failure.
     """
+    # CORTEX-PHASE-2B: Pre-write semantic dedup gate
+    dedup_category = category if category in ("deadline", "decision") else None
+    dedup_result = ('new', None)
+
+    if dedup_category:
+        try:
+            dedup_result = check_dedup(
+                description=payload.get("description", payload.get("decision", "")),
+                category=dedup_category,
+                due_date=payload.get("due_date"),
+                amount=payload.get("amount"),
+            )
+        except Exception as e:
+            logger.warning("Dedup gate failed (non-fatal): %s", e)
+            dedup_result = ('new', None)
+
+        # Check auto_merge_enabled flag
+        store = _get_store()
+        auto_merge = store.get_cortex_config('auto_merge_enabled', False)
+
+        if dedup_result[0] == 'auto_merge':
+            if auto_merge:
+                # LIVE MODE: Actually merge — skip the write, return existing
+                logger.info(
+                    "cortex DEDUP: auto-merge %s into canonical #%s (score >= 0.92)",
+                    category, dedup_result[1]
+                )
+                _log_dedup_event(event_type, category, source_agent, payload,
+                                 dedup_result, "merged")
+                return dedup_result[1]  # Return existing canonical_id
+            else:
+                # SHADOW MODE: Log but don't block
+                logger.info(
+                    "cortex SHADOW: would_merge %s into canonical #%s (auto_merge OFF)",
+                    category, dedup_result[1]
+                )
+                _log_dedup_event(event_type, category, source_agent, payload,
+                                 dedup_result, "would_merge")
+                # Fall through to normal insert
+
+        elif dedup_result[0] == 'review':
+            logger.info(
+                "cortex DEDUP: review_needed %s — similar to canonical #%s (0.85-0.92)",
+                category, dedup_result[1]
+            )
+            _log_dedup_event(event_type, category, source_agent, payload,
+                             dedup_result, "review_needed")
+            # Fall through to normal insert (Director reviews later)
+
+    # Insert the event
     conn = _get_conn()
     if not conn:
         logger.error("cortex.publish_event: no DB connection")
@@ -65,7 +259,20 @@ def publish_event(
             event_id, event_type, category, source_agent, canonical_id
         )
 
-        # Post-write hooks (non-blocking — failures logged, not raised)
+        # Post-write: upsert vector (so future writes can dedup against this one)
+        if dedup_category and canonical_id:
+            try:
+                upsert_obligation_vector(
+                    canonical_id=canonical_id,
+                    description=payload.get("description", payload.get("decision", "")),
+                    category=dedup_category,
+                    due_date=payload.get("due_date"),
+                    source_agent=source_agent,
+                )
+            except Exception as e:
+                logger.warning("Post-write vector upsert failed (non-fatal): %s", e)
+
+        # Existing post-write hooks (non-blocking)
         try:
             _audit_to_baker_actions(event_type, category, source_agent, payload, event_id)
         except Exception as e:
@@ -87,6 +294,46 @@ def publish_event(
     finally:
         _put_conn(conn)
 
+
+def _log_dedup_event(
+    event_type: str, category: str, source_agent: str,
+    payload: dict, dedup_result: tuple, dedup_action: str,
+):
+    """Log dedup decisions to cortex_events for shadow mode analysis."""
+    conn = _get_conn()
+    if not conn:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO cortex_events
+                (event_type, category, source_agent, source_type,
+                 payload, refers_to)
+            VALUES (%s, %s, %s, 'dedup_gate', %s, %s)
+        """, (
+            dedup_action,  # "would_merge", "merged", "review_needed"
+            category,
+            source_agent,
+            json.dumps({
+                **payload,
+                "dedup_score": ">=0.92" if dedup_result[0] == "auto_merge" else "0.85-0.92",
+                "matched_canonical": dedup_result[1],
+            }),
+            dedup_result[1],  # refers_to = canonical_id of the matched obligation
+        ))
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning("_log_dedup_event failed: %s", e)
+    finally:
+        _put_conn(conn)
+
+
+# ─── Audit Trail ───
 
 def _audit_to_baker_actions(
     event_type: str, category: str, source_agent: str,
