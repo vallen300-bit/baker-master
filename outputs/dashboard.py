@@ -737,7 +737,11 @@ async def youtube_ingest(request: Request):
             pass
         return {"status": "already_ingested", "video_id": video_id}
 
-    result = ingest_youtube_video(video_id, title=body.get("title", ""))
+    result = ingest_youtube_video(
+        video_id,
+        title=body.get("title", ""),
+        pre_fetched_transcript=body.get("transcript"),
+    )
     return result
 
 

@@ -170,18 +170,23 @@ Be concise and factual. Only include what's actually in the transcript."""
 # Full ingest pipeline
 # ---------------------------------------------------------------------------
 
-def ingest_youtube_video(video_id: str, title: str = "", requested_by: str = "director") -> dict:
+def ingest_youtube_video(video_id: str, title: str = "", requested_by: str = "director",
+                         pre_fetched_transcript: str = None) -> dict:
     """Full pipeline: fetch transcript → summarize with Gemma → store in DB.
+    If pre_fetched_transcript is provided, skips YouTube fetch (for cloud IP workaround).
     Returns {"status": "ok", "title": ..., "summary": ..., "transcript_id": ...}
     or {"status": "error", "error": ...}.
     """
-    # 1. Fetch transcript
-    result = fetch_youtube_transcript(video_id)
-    if "error" in result:
-        return {"status": "error", "error": result["error"]}
-
-    transcript_text = result["text"]
-    language = result.get("language", "unknown")
+    # 1. Use pre-fetched transcript or fetch from YouTube
+    if pre_fetched_transcript:
+        transcript_text = pre_fetched_transcript
+        language = "unknown"
+    else:
+        result = fetch_youtube_transcript(video_id)
+        if "error" in result:
+            return {"status": "error", "error": result["error"]}
+        transcript_text = result["text"]
+        language = result.get("language", "unknown")
 
     if not transcript_text or len(transcript_text.strip()) < 20:
         return {"status": "error", "error": "Transcript too short or empty"}
