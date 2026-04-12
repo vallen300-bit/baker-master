@@ -170,6 +170,10 @@ class SentinelStoreBack:
         # CROSS-PM-SIGNALS: Inter-PM communication bus
         self._ensure_pm_cross_signals_table()
 
+        # CORTEX-PHASE-1A: Wiki infrastructure
+        self._ensure_wiki_pages_table()
+        self._ensure_cortex_config_table()
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -2212,6 +2216,9 @@ class SentinelStoreBack:
             # SPECIALIST-THINKING-1: Add use_thinking column
             cur.execute("ALTER TABLE capability_sets ADD COLUMN IF NOT EXISTS use_thinking BOOLEAN DEFAULT FALSE")
 
+            # CORTEX-PHASE-1A: Add wiki_config for agent knowledge routing
+            cur.execute("ALTER TABLE capability_sets ADD COLUMN IF NOT EXISTS wiki_config JSONB DEFAULT '{}'::jsonb")
+
             # Seed data — only if table is empty
             cur.execute("SELECT COUNT(*) FROM capability_sets")
             if cur.fetchone()[0] == 0:
@@ -2223,6 +2230,34 @@ class SentinelStoreBack:
                 WHERE slug IN ('legal', 'finance', 'profiling', 'sales', 'asset_management', 'research')
                   AND use_thinking = FALSE
             """)
+
+            # CORTEX-PHASE-1A: Set wiki_config for AO PM and MOVIE AM
+            import json as _json_wc
+            cur.execute("""
+                UPDATE capability_sets SET wiki_config = %s
+                WHERE slug = 'ao_pm' AND (wiki_config IS NULL OR wiki_config = '{}'::jsonb)
+            """, (_json_wc.dumps({
+                "matters": ["hagenauer", "ao", "morv", "balgerstrasse"],
+                "shared_docs": [
+                    "documents/hma-mo-vienna",
+                    "documents/ftc-table-v008",
+                    "documents/participation-agreement",
+                    "documents/hagenauer-insolvency"
+                ],
+                "compiled_state": ["deadlines-active", "decisions-recent", "contacts-vip"]
+            }),))
+
+            cur.execute("""
+                UPDATE capability_sets SET wiki_config = %s
+                WHERE slug = 'movie_am' AND (wiki_config IS NULL OR wiki_config = '{}'::jsonb)
+            """, (_json_wc.dumps({
+                "matters": ["movie", "rg7"],
+                "shared_docs": [
+                    "documents/hma-mo-vienna",
+                    "documents/movie-operating-budget"
+                ],
+                "compiled_state": ["deadlines-active", "decisions-recent", "contacts-vip"]
+            }),))
 
             conn.commit()
             cur.close()
@@ -2362,6 +2397,175 @@ class SentinelStoreBack:
                 vals,
             )
         logger.info(f"Seeded {len(seed)} capability sets")
+
+    # -------------------------------------------------------
+    # CORTEX-PHASE-1A: Wiki Infrastructure
+    # -------------------------------------------------------
+
+    def _ensure_wiki_pages_table(self):
+        """Create wiki_pages table + indexes. Auto-seed if empty. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS wiki_pages (
+                    id BIGSERIAL PRIMARY KEY,
+                    slug TEXT UNIQUE NOT NULL,
+                    title TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    agent_owner TEXT,
+                    page_type TEXT NOT NULL,
+                    matter_slugs TEXT[],
+                    backlinks TEXT[],
+                    generation INT DEFAULT 1,
+                    updated_at TIMESTAMPTZ DEFAULT NOW(),
+                    updated_by TEXT
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_wiki_pages_type ON wiki_pages(page_type)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_wiki_pages_owner ON wiki_pages(agent_owner)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_wiki_pages_matter ON wiki_pages USING GIN(matter_slugs)")
+            cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_wiki_pages_slug ON wiki_pages(slug)")
+
+            # Auto-seed if table is empty (Option C — same pattern as _seed_capability_sets)
+            cur.execute("SELECT COUNT(*) FROM wiki_pages")
+            if cur.fetchone()[0] == 0:
+                self._seed_wiki_from_view_files(cur)
+
+            conn.commit()
+            cur.close()
+            logger.info("wiki_pages table verified")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure wiki_pages table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _seed_wiki_from_view_files(self, cur):
+        """Seed wiki_pages from existing view files. Called once if table is empty."""
+        import os
+
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+        pm_configs = {
+            "ao_pm": {
+                "view_dir": "data/ao_pm",
+                "files": [
+                    "SCHEMA.md", "psychology.md", "investment_channels.md",
+                    "financing_to_completion.md", "sensitive_issues.md",
+                    "communication_rules.md", "agenda.md", "ftc-table-explanations.md",
+                ],
+                "matter_slugs": ["ao", "hagenauer"],
+            },
+            "movie_am": {
+                "view_dir": "data/movie_am",
+                "files": [
+                    "SCHEMA.md", "agreements_framework.md", "operator_dynamics.md",
+                    "kpi_framework.md", "owner_obligations.md", "agenda.md",
+                ],
+                "matter_slugs": ["movie", "rg7"],
+            },
+        }
+
+        total = 0
+        for pm_slug, cfg in pm_configs.items():
+            view_path = os.path.join(base_dir, cfg["view_dir"])
+            if not os.path.isdir(view_path):
+                logger.warning("wiki seed: %s not found, skipping", view_path)
+                continue
+
+            for fname in cfg["files"]:
+                fpath = os.path.join(view_path, fname)
+                if not os.path.isfile(fpath):
+                    logger.info("wiki seed: %s not found, skipping", fname)
+                    continue
+
+                with open(fpath, "r", encoding="utf-8") as f:
+                    content = f.read()
+
+                # Build slug: SCHEMA.md → index, psychology.md → psychology
+                base = fname.replace(".md", "").lower().replace("_", "-").replace(" ", "-")
+                if base == "schema":
+                    base = "index"
+                slug = f"{pm_slug}/{base}"
+
+                title = fname.replace(".md", "").replace("_", " ").title()
+                if fname == "SCHEMA.md":
+                    title = f"{pm_slug.upper().replace('_', ' ')} — Index"
+
+                cur.execute("""
+                    INSERT INTO wiki_pages (slug, title, content, agent_owner, page_type, matter_slugs, updated_by)
+                    VALUES (%s, %s, %s, %s, 'agent_knowledge', %s, 'auto_seed')
+                    ON CONFLICT (slug) DO NOTHING
+                """, (slug, title, content, pm_slug, cfg["matter_slugs"]))
+
+                if cur.rowcount > 0:
+                    total += 1
+
+        logger.info("wiki seed: %d pages seeded from view files", total)
+
+    def _ensure_cortex_config_table(self):
+        """Create cortex_config table with feature flags. Idempotent."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS cortex_config (
+                    key TEXT PRIMARY KEY,
+                    value JSONB NOT NULL,
+                    updated_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            # Seed feature flags — only if not present (idempotent)
+            cur.execute("""
+                INSERT INTO cortex_config (key, value) VALUES
+                    ('wiki_context_enabled', 'false'::jsonb),
+                    ('auto_merge_enabled', 'false'::jsonb),
+                    ('tool_router_enabled', 'false'::jsonb)
+                ON CONFLICT (key) DO NOTHING
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("cortex_config table verified (3 feature flags)")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure cortex_config table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def get_cortex_config(self, key: str, default=None):
+        """Read a Cortex feature flag. Returns Python value (bool/str/dict)."""
+        conn = self._get_conn()
+        if not conn:
+            return default
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT value FROM cortex_config WHERE key = %s LIMIT 1", (key,))
+            row = cur.fetchone()
+            cur.close()
+            if row:
+                import json as _json_cc
+                return _json_cc.loads(row[0]) if isinstance(row[0], str) else row[0]
+            return default
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"get_cortex_config({key}) failed: {e}")
+            return default
+        finally:
+            self._put_conn(conn)
 
     def _ensure_capability_runs_table(self):
         """Create capability_runs table. Idempotent."""

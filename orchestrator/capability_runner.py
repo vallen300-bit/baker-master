@@ -835,10 +835,24 @@ class CapabilityRunner:
                     pm_slug = capability.slug
                     pm_config = PM_REGISTRY[pm_slug]
                     label = pm_config.get("state_label", pm_slug)
-                    # View files: stable compiled intelligence
-                    view_ctx = self._load_pm_view_files(pm_slug)
-                    if view_ctx:
-                        prompt += f"\n\n# {label} VIEW (from {pm_config['view_dir']}/)\n{view_ctx}\n"
+
+                    # CORTEX-PHASE-1A: Dual-run — wiki or filesystem
+                    wiki_enabled = self._get_cortex_config('wiki_context_enabled', False)
+                    if wiki_enabled:
+                        view_ctx = self._load_wiki_context(pm_slug)
+                        if view_ctx:
+                            prompt += f"\n\n# {label} KNOWLEDGE (from wiki_pages)\n{view_ctx}\n"
+                        else:
+                            # Wiki returned empty — fall back to filesystem
+                            logger.warning("wiki_context empty for %s, falling back to filesystem", pm_slug)
+                            view_ctx = self._load_pm_view_files(pm_slug)
+                            if view_ctx:
+                                prompt += f"\n\n# {label} VIEW (from {pm_config['view_dir']}/)\n{view_ctx}\n"
+                    else:
+                        # Feature flag OFF — use existing filesystem path (unchanged)
+                        view_ctx = self._load_pm_view_files(pm_slug)
+                        if view_ctx:
+                            prompt += f"\n\n# {label} VIEW (from {pm_config['view_dir']}/)\n{view_ctx}\n"
                     # Live state: dynamic data
                     state_ctx = self._get_pm_project_state_context(pm_slug)
                     if state_ctx:
@@ -1292,6 +1306,62 @@ class CapabilityRunner:
                     logger.warning("Failed to read PM view file %s/%s: %s", pm_slug, fname, e)
 
         return "\n\n---\n\n".join(parts) if parts else ""
+
+    def _get_cortex_config(self, key: str, default=False):
+        """Read a Cortex config flag from cortex_config table."""
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            return store.get_cortex_config(key, default)
+        except Exception:
+            return default
+
+    def _load_wiki_context(self, pm_slug: str) -> str:
+        """CORTEX-PHASE-1A: Load agent context from wiki_pages table.
+        Budget: ~8K tokens. Falls back to empty string on any error."""
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            conn = store._get_conn()
+            if not conn:
+                return ""
+
+            cur = conn.cursor()
+
+            # Load all agent_knowledge pages for this PM
+            cur.execute("""
+                SELECT slug, title, content FROM wiki_pages
+                WHERE agent_owner = %s AND page_type = 'agent_knowledge'
+                ORDER BY CASE WHEN slug LIKE '%%/index' THEN 0 ELSE 1 END, slug
+                LIMIT 20
+            """, (pm_slug,))
+
+            pages = cur.fetchall()
+            cur.close()
+            store._put_conn(conn)
+
+            if not pages:
+                logger.info("wiki_context: no pages for %s, falling back to filesystem", pm_slug)
+                return ""
+
+            # Format: same structure as _load_pm_view_files() for compatibility
+            parts = []
+            total_chars = 0
+            max_chars = 32000  # ~8K tokens
+
+            for slug, title, content in pages:
+                if total_chars + len(content) > max_chars:
+                    logger.warning("wiki_context: budget exceeded at %s (%d chars), truncating", slug, total_chars)
+                    break
+                parts.append(f"## WIKI: {title}\n{content}")
+                total_chars += len(content)
+
+            logger.info("wiki_context: loaded %d pages for %s (%d chars)", len(parts), pm_slug, total_chars)
+            return "\n\n---\n\n".join(parts) if parts else ""
+
+        except Exception as e:
+            logger.warning("wiki_context failed for %s: %s — falling back to filesystem", pm_slug, e)
+            return ""
 
     def _get_pm_project_state_context(self, pm_slug: str) -> str:
         """PM-FACTORY: Format persistent PM state for system prompt injection."""
