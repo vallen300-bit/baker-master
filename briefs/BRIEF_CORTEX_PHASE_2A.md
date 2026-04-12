@@ -503,8 +503,8 @@ def _cortex_route(self, tool_name: str, tool_input: dict) -> str:
         )
         return result
 
-    # Fallback — shouldn't reach here
-    return self.execute(tool_name, tool_input)
+    # Fallback — return error, NEVER call self.execute() (infinite recursion)
+    return json.dumps({"error": f"Cortex route: unhandled tool {tool_name}"})
 
 
 def _update_source_agent(self, table: str, record_id: int, source_agent: str):
