@@ -174,6 +174,9 @@ class SentinelStoreBack:
         self._ensure_wiki_pages_table()
         self._ensure_cortex_config_table()
 
+        # CORTEX-PHASE-2A: Event bus
+        self._ensure_cortex_events_table()
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -2564,6 +2567,59 @@ class SentinelStoreBack:
                 pass
             logger.warning(f"get_cortex_config({key}) failed: {e}")
             return default
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_cortex_events_table(self):
+        """CORTEX-PHASE-2A: Append-only event bus for shared writes."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS cortex_events (
+                    id BIGSERIAL PRIMARY KEY,
+                    event_type TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    source_agent TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    source_ref TEXT,
+                    payload JSONB NOT NULL,
+                    refers_to BIGINT,
+                    canonical_id INTEGER,
+                    qdrant_id TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_cortex_events_type
+                ON cortex_events(event_type, created_at)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_cortex_events_category
+                ON cortex_events(category, created_at)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_cortex_events_agent
+                ON cortex_events(source_agent, created_at)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_cortex_events_refers
+                ON cortex_events(refers_to) WHERE refers_to IS NOT NULL
+            """)
+            # Add source_agent to deadlines and decisions (nullable — won't break existing inserts)
+            cur.execute("ALTER TABLE deadlines ADD COLUMN IF NOT EXISTS source_agent TEXT")
+            cur.execute("ALTER TABLE decisions ADD COLUMN IF NOT EXISTS source_agent TEXT")
+            conn.commit()
+            cur.close()
+            logger.info("cortex_events table verified (+ source_agent columns)")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure cortex_events table: {e}")
         finally:
             self._put_conn(conn)
 

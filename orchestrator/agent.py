@@ -864,6 +864,16 @@ class ToolExecutor:
         gets a structured error and can try an alternative.
         """
         try:
+            # CORTEX-PHASE-2A: Route shared writes through event bus when flag ON
+            if tool_name in ("create_deadline", "store_decision"):
+                try:
+                    from memory.store_back import SentinelStoreBack
+                    store = SentinelStoreBack._get_global_instance()
+                    if store.get_cortex_config('tool_router_enabled', False):
+                        return self._cortex_route(tool_name, tool_input)
+                except Exception as e:
+                    logger.warning("Cortex routing check failed, using legacy path: %s", e)
+
             if tool_name == "search_memory":
                 return self._search_memory(tool_input)
             elif tool_name == "search_meetings":
@@ -1605,6 +1615,100 @@ class ToolExecutor:
         except Exception as e:
             logger.error(f"store_decision failed: {e}")
             return json.dumps({"error": f"store_decision failed: {str(e)}"})
+
+    # ─── CORTEX-PHASE-2A: Event Bus Routing ───
+
+    def _cortex_route(self, tool_name: str, tool_input: dict) -> str:
+        """Route tool calls through the Cortex event bus for attribution + audit."""
+        from models.cortex import publish_event
+
+        source_agent = getattr(self, '_current_capability', 'unknown')
+
+        if tool_name == "create_deadline":
+            # Still create via legacy path
+            result = self._create_deadline(tool_input)
+
+            # Extract deadline ID from result
+            dl_id = None
+            if "Deadline created (#" in result:
+                try:
+                    dl_id = int(result.split("(#")[1].split(")")[0])
+                except (IndexError, ValueError):
+                    pass
+
+            # Update source_agent on the deadline row
+            if dl_id:
+                self._update_source_agent("deadlines", dl_id, source_agent)
+
+            # Publish to Cortex event bus
+            publish_event(
+                event_type="accepted",
+                category="deadline",
+                source_agent=source_agent,
+                source_type="agent",
+                payload={
+                    "description": tool_input.get("description", ""),
+                    "due_date": tool_input.get("due_date", ""),
+                    "priority": tool_input.get("priority", "normal"),
+                },
+                canonical_id=dl_id,
+            )
+            return result
+
+        elif tool_name == "store_decision":
+            # Still store via legacy path
+            result = self._store_decision(tool_input)
+
+            # Extract decision ID
+            dec_id = None
+            try:
+                parsed = json.loads(result)
+                dec_id = parsed.get("decision_id")
+            except (ValueError, TypeError):
+                pass
+
+            # Update source_agent on the decision row
+            if dec_id:
+                self._update_source_agent("decisions", dec_id, source_agent)
+
+            # Publish to Cortex event bus
+            publish_event(
+                event_type="accepted",
+                category="decision",
+                source_agent=source_agent,
+                source_type="agent",
+                payload={
+                    "decision": tool_input.get("decision", ""),
+                    "reasoning": tool_input.get("reasoning", ""),
+                    "confidence": tool_input.get("confidence", "high"),
+                },
+                canonical_id=dec_id,
+            )
+            return result
+
+        # Fallback — return error, NEVER call self.execute() (infinite recursion)
+        return json.dumps({"error": f"Cortex route: unhandled tool {tool_name}"})
+
+    def _update_source_agent(self, table: str, record_id: int, source_agent: str):
+        """Set source_agent on a deadline or decision row."""
+        if table not in ("deadlines", "decisions"):
+            return  # safety
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            conn = store._get_conn()
+            if not conn:
+                return
+            cur = conn.cursor()
+            cur.execute(
+                f"UPDATE {table} SET source_agent = %s WHERE id = %s",
+                (source_agent, record_id),
+            )
+            conn.commit()
+            cur.close()
+            store._put_conn(conn)
+        except Exception as e:
+            logger.warning("_update_source_agent(%s, %s) failed: %s", table, record_id, e)
 
     def _send_whatsapp(self, inp: dict) -> str:
         """PM-WHATSAPP-EMAIL-TOOLS: Send WhatsApp to a contact."""

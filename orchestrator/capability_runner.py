@@ -302,6 +302,8 @@ class CapabilityRunner:
         Same agent loop structure as run_agent_loop() in agent.py.
         """
         t0 = time.time()
+        # CORTEX-PHASE-2A: Set capability slug on executor for agent attribution
+        self.executor._current_capability = capability.slug
         # COMPLEXITY-ROUTER-1: Model config based on complexity
         mc = self._get_model_config(complexity)
         _model = mc["model"]
@@ -500,6 +502,8 @@ class CapabilityRunner:
         Yields {"token": text}, {"tool_call": name}, {"_agent_result": AgentResult}.
         """
         t0 = time.time()
+        # CORTEX-PHASE-2A: Set capability slug on executor for agent attribution
+        self.executor._current_capability = capability.slug
         # COMPLEXITY-ROUTER-1: Model config based on complexity
         mc = self._get_model_config(complexity)
         _model = mc["model"]
