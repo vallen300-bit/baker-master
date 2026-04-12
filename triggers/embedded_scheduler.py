@@ -216,6 +216,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info(f"Registered: daily_briefing (at {config.triggers.daily_briefing_hour:02d}:00 UTC)")
 
+    # Wiki lint — daily 06:30 UTC (before morning brief) (CORTEX-PHASE-3)
+    scheduler.add_job(
+        _run_wiki_lint,
+        CronTrigger(hour=6, minute=30, timezone="UTC"),
+        id="wiki_lint",
+        name="wiki_lint",
+        replace_existing=True,
+    )
+    logger.info("Registered: wiki_lint (daily 06:30 UTC)")
+
     # ALERT-DEDUP-1: Alert digest flush DISABLED.
     # Was sending ~48 digest emails/day. Slack (with dedup) + daily briefing email
     # now cover all alerting. Re-enable by uncommenting.
@@ -527,6 +537,22 @@ def _register_jobs(scheduler: BackgroundScheduler):
         coalesce=True, max_instances=1, replace_existing=True,
     )
     logger.info("Registered: memory_watchdog (every 5 min)")
+
+
+def _run_wiki_lint():
+    """CORTEX-PHASE-3: Run wiki lint and log results."""
+    try:
+        from models.cortex import run_wiki_lint
+        findings = run_wiki_lint()
+        logger.info("wiki_lint: completed with %d findings", len(findings))
+        if findings:
+            try:
+                from triggers.sentinel_health import report_success
+                report_success("wiki_lint", {"findings_count": len(findings)})
+            except Exception:
+                pass
+    except Exception as e:
+        logger.error("wiki_lint scheduler failed: %s", e)
 
 
 def _expire_browser_actions():

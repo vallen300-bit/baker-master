@@ -3769,6 +3769,184 @@ async def get_activity_feed(hours: int = Query(24, ge=1, le=168)):
 
 
 # ============================================================
+# CORTEX-PHASE-3 — Intent Feed API
+# ============================================================
+
+@app.get("/api/cortex/events", tags=["cortex"], dependencies=[Depends(verify_api_key)])
+async def get_cortex_events(
+    event_type: str = None,
+    category: str = None,
+    source_agent: str = None,
+    limit: int = 30,
+):
+    """Cortex event feed — filterable by type, category, agent."""
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        clauses = []
+        params = []
+        if event_type:
+            clauses.append("event_type = %s")
+            params.append(event_type)
+        if category:
+            clauses.append("category = %s")
+            params.append(category)
+        if source_agent:
+            clauses.append("source_agent = %s")
+            params.append(source_agent)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        safe_limit = min(max(limit, 1), 100)
+        params.append(safe_limit)
+        cur.execute(f"""
+            SELECT id, event_type, category, source_agent, source_type,
+                   source_ref, payload, refers_to, canonical_id, created_at
+            FROM cortex_events
+            {where}
+            ORDER BY created_at DESC
+            LIMIT %s
+        """, params)
+        events = [_serialize(dict(r)) for r in cur.fetchall()]
+        cur.close()
+        conn.commit()
+        return {"events": events, "count": len(events)}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error("get_cortex_events: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        store._put_conn(conn)
+
+
+@app.get("/api/cortex/lint", tags=["cortex"], dependencies=[Depends(verify_api_key)])
+async def get_cortex_lint(status: str = "open", limit: int = 50):
+    """Lint results — wiki health findings."""
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        safe_limit = min(max(limit, 1), 100)
+        cur.execute("""
+            SELECT id, finding_type, severity, slug_or_ref, description, status, created_at
+            FROM cortex_lint_results
+            WHERE status = %s
+            ORDER BY
+                CASE severity WHEN 'critical' THEN 1 WHEN 'warning' THEN 2 ELSE 3 END,
+                created_at DESC
+            LIMIT %s
+        """, (status, safe_limit))
+        results = [_serialize(dict(r)) for r in cur.fetchall()]
+        cur.close()
+        conn.commit()
+        return {"lint_results": results, "count": len(results)}
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error("get_cortex_lint: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        store._put_conn(conn)
+
+
+@app.post("/api/cortex/lint/run", tags=["cortex"], dependencies=[Depends(verify_api_key)])
+async def run_cortex_lint_now():
+    """Trigger wiki lint on demand."""
+    try:
+        from models.cortex import run_wiki_lint
+        findings = run_wiki_lint()
+        return {"findings": len(findings), "details": findings[:20]}
+    except Exception as e:
+        logger.error("run_cortex_lint_now: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/cortex/stats", tags=["cortex"], dependencies=[Depends(verify_api_key)])
+async def get_cortex_stats():
+    """Cortex summary stats for dashboard card header."""
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # Event counts by type (last 7 days)
+        cur.execute("""
+            SELECT event_type, COUNT(*) as cnt
+            FROM cortex_events
+            WHERE created_at > NOW() - INTERVAL '7 days'
+            GROUP BY event_type
+            ORDER BY cnt DESC
+            LIMIT 20
+        """)
+        event_counts = {r["event_type"]: r["cnt"] for r in cur.fetchall()}
+
+        # Total events
+        cur.execute("SELECT COUNT(*) as cnt FROM cortex_events LIMIT 1")
+        total_events = cur.fetchone()["cnt"]
+
+        # Lint findings
+        cur.execute("""
+            SELECT severity, COUNT(*) as cnt
+            FROM cortex_lint_results
+            WHERE status = 'open'
+            GROUP BY severity
+            LIMIT 10
+        """)
+        lint_counts = {r["severity"]: r["cnt"] for r in cur.fetchall()}
+
+        # Wiki pages
+        cur.execute("""
+            SELECT page_type, COUNT(*) as cnt
+            FROM wiki_pages
+            GROUP BY page_type
+            LIMIT 10
+        """)
+        wiki_counts = {r["page_type"]: r["cnt"] for r in cur.fetchall()}
+
+        # Dedup stats (shadow)
+        cur.execute("""
+            SELECT event_type, COUNT(*) as cnt
+            FROM cortex_events
+            WHERE event_type IN ('would_merge', 'review_needed', 'merged')
+            GROUP BY event_type
+            LIMIT 10
+        """)
+        dedup_counts = {r["event_type"]: r["cnt"] for r in cur.fetchall()}
+
+        cur.close()
+        conn.commit()
+        return {
+            "total_events": total_events,
+            "events_7d": event_counts,
+            "dedup": dedup_counts,
+            "lint_open": lint_counts,
+            "wiki_pages": wiki_counts,
+        }
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error("get_cortex_stats: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        store._put_conn(conn)
+
+
+# ============================================================
 # V3 Phase C2 — RSS articles + feeds (Media tab)
 # ============================================================
 

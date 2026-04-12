@@ -13,7 +13,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=69">
+    <link rel="stylesheet" href="/static/style.css?v=70">
 </head>
 <body>
 
@@ -217,6 +217,22 @@
                     <div class="grid-cell-body" id="gridMeetings">
                         <div class="grid-empty">No meetings today.</div>
                     </div>
+                </div>
+            </div>
+
+            <!-- Cortex Intent Feed (CORTEX-PHASE-3) -->
+            <div id="cortexFeedCard" class="cortex-feed-card" hidden>
+                <div class="grid-cell-header grid-header-cortex">
+                    <span class="section-label" style="margin:0">Cortex</span>
+                    <span class="cortex-tabs">
+                        <button class="cortex-tab active" onclick="_cortexTab('events')" id="cortexTabEvents">Events</button>
+                        <button class="cortex-tab" onclick="_cortexTab('dedup')" id="cortexTabDedup">Dedup</button>
+                        <button class="cortex-tab" onclick="_cortexTab('lint')" id="cortexTabLint">Lint</button>
+                    </span>
+                    <span class="grid-cell-count" id="cortexCount"></span>
+                </div>
+                <div class="cortex-feed-body" id="cortexFeedBody">
+                    <div class="grid-empty">Loading Cortex data...</div>
                 </div>
             </div>
 
@@ -527,7 +543,7 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=104"></script>
+<script src="/static/app.js?v=105"></script>
 <script>
 // PWA-DESKTOP-1: Register service worker for installability
 if ('serviceWorker' in navigator) {

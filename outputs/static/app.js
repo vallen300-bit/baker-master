@@ -1232,6 +1232,7 @@ async function loadMorningBrief() {
         loadPeopleSidebar();
         loadMediaSidebar();
         loadIdeasSidebar();
+        loadCortexFeed();
 
         // System widgets moved to Baker Data tab (BAKER-DATA-TUCK-1)
     } catch (e) {
@@ -9833,4 +9834,93 @@ function _toggleAOSection(el) {
     var isOpen = body.classList.contains('open');
     body.classList.toggle('open');
     el.classList.toggle('open');
+}
+
+/* ── Cortex Intent Feed (CORTEX-PHASE-3) ── */
+var _cortexCurrentTab = 'events';
+var _cortexData = { events: [], dedup: [], lint: [], stats: {} };
+
+async function loadCortexFeed() {
+    try {
+        var [eventsRes, lintRes, statsRes] = await Promise.all([
+            bakerFetch('/api/cortex/events?limit=30'),
+            bakerFetch('/api/cortex/lint?status=open&limit=20'),
+            bakerFetch('/api/cortex/stats'),
+        ]);
+        if (eventsRes.ok) {
+            var d = await eventsRes.json();
+            _cortexData.events = d.events || [];
+            _cortexData.dedup = _cortexData.events.filter(
+                function(e) { return ['would_merge', 'review_needed', 'merged'].indexOf(e.event_type) !== -1; }
+            );
+        }
+        if (lintRes.ok) {
+            var d2 = await lintRes.json();
+            _cortexData.lint = d2.lint_results || [];
+        }
+        if (statsRes.ok) {
+            _cortexData.stats = await statsRes.json();
+        }
+
+        var card = document.getElementById('cortexFeedCard');
+        var total = (_cortexData.events.length || 0);
+        var lintOpen = (_cortexData.lint.length || 0);
+        if (total > 0 || lintOpen > 0) {
+            card.hidden = false;
+            document.getElementById('cortexCount').textContent =
+                total + ' events' + (lintOpen > 0 ? ', ' + lintOpen + ' lint' : '');
+        } else {
+            card.hidden = true;
+            return;
+        }
+        _renderCortexTab(_cortexCurrentTab);
+    } catch (e) {
+        console.warn('loadCortexFeed:', e);
+    }
+}
+
+function _cortexTab(tab) {
+    _cortexCurrentTab = tab;
+    document.querySelectorAll('.cortex-tab').forEach(function(t) { t.classList.remove('active'); });
+    document.getElementById('cortexTab' + tab.charAt(0).toUpperCase() + tab.slice(1)).classList.add('active');
+    _renderCortexTab(tab);
+}
+
+function _renderCortexTab(tab) {
+    var body = document.getElementById('cortexFeedBody');
+    var items = tab === 'dedup' ? _cortexData.dedup :
+                tab === 'lint' ? _cortexData.lint :
+                _cortexData.events;
+
+    if (!items || items.length === 0) {
+        body.innerHTML = '<div class="grid-empty">No ' + tab + ' data yet.</div>';
+        return;
+    }
+
+    if (tab === 'lint') {
+        // All dynamic text sanitized via esc() and escAttr() — safe innerHTML pattern per codebase convention
+        body.innerHTML = items.map(function(r) {
+            return '<div class="cortex-event-row">' +
+                '<span class="cortex-lint-severity cortex-lint-' + esc(r.severity) + '">' + esc(r.severity) + '</span>' +
+                '<span class="cortex-event-type">' + esc(r.finding_type) + '</span>' +
+                '<span class="cortex-event-desc" title="' + escAttr(r.description) + '">' + esc(r.description) + '</span>' +
+                '</div>';
+        }).join('');
+        return;
+    }
+
+    // All dynamic text sanitized via esc() and escAttr() — safe innerHTML pattern per codebase convention
+    body.innerHTML = items.map(function(ev) {
+        var payload = typeof ev.payload === 'string' ? JSON.parse(ev.payload) : (ev.payload || {});
+        var desc = payload.description || payload.decision || JSON.stringify(payload).substring(0, 120);
+        var time = ev.created_at ? new Date(ev.created_at).toLocaleString('en-GB', {
+            day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+        }) : '';
+        return '<div class="cortex-event-row">' +
+            '<span class="cortex-event-type cortex-type-' + esc(ev.event_type) + '">' + esc(ev.event_type) + '</span>' +
+            '<span class="cortex-event-agent">' + esc(ev.source_agent || '') + '</span>' +
+            '<span class="cortex-event-desc" title="' + escAttr(desc) + '">' + esc(desc) + '</span>' +
+            '<span class="cortex-event-time">' + esc(time) + '</span>' +
+            '</div>';
+    }).join('');
 }

@@ -2,6 +2,7 @@
 Baker Cortex v2 — Event Bus + Semantic Dedup Gate
 CORTEX-PHASE-2A: publish_event() + audit + decisions→insights pipeline.
 CORTEX-PHASE-2B: Qdrant semantic dedup gate + shadow mode.
+CORTEX-PHASE-3: Wiki lint + intent feed dashboard.
 Behind tool_router_enabled + auto_merge_enabled feature flags.
 """
 import hashlib
@@ -637,3 +638,134 @@ def cortex_store_decision(
         logger.warning("cortex_store_decision: publish_event failed (non-fatal): %s", e)
 
     return dec_id
+
+
+# ─── Wiki Lint (CORTEX-PHASE-3) ───
+
+def run_wiki_lint() -> list[dict]:
+    """
+    Periodic wiki health check. Detects stale pages, orphan VIPs,
+    generation mismatches, broken backlinks.
+    Returns list of finding dicts.
+    """
+    findings = []
+    conn = _get_conn()
+    if not conn:
+        logger.error("run_wiki_lint: no DB connection")
+        return findings
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        # ── 1. STALE PAGES — agent_knowledge not updated in 14+ days ──
+        cur.execute("""
+            SELECT slug, title, updated_at
+            FROM wiki_pages
+            WHERE page_type = 'agent_knowledge'
+              AND updated_at < NOW() - INTERVAL '14 days'
+            LIMIT 50
+        """)
+        for row in cur.fetchall():
+            findings.append({
+                "finding_type": "stale_page",
+                "severity": "warning",
+                "slug_or_ref": row["slug"],
+                "description": f"Page '{row['title']}' last updated {row['updated_at'].strftime('%Y-%m-%d')} (>14 days ago)",
+            })
+
+        # ── 2. ORPHAN VIPs — contacts not mentioned in any wiki page ──
+        cur.execute("SELECT string_agg(content, ' ') AS all_content FROM wiki_pages LIMIT 1")
+        all_content_row = cur.fetchone()
+        all_content = (all_content_row["all_content"] or "").lower() if all_content_row else ""
+
+        cur.execute("SELECT name FROM vip_contacts WHERE name IS NOT NULL LIMIT 100")
+        for row in cur.fetchall():
+            name_lower = row["name"].lower()
+            parts = name_lower.split()
+            last_name = parts[-1] if parts else name_lower
+            if len(last_name) > 2 and last_name not in all_content:
+                findings.append({
+                    "finding_type": "orphan_vip",
+                    "severity": "info",
+                    "slug_or_ref": row["name"],
+                    "description": f"VIP '{row['name']}' not mentioned in any wiki page",
+                })
+
+        # ── 3. GENERATION BEHIND — cortex events newer than compiled pages ──
+        cur.execute("""
+            SELECT wp.slug, wp.updated_at,
+                   (SELECT MAX(ce.created_at) FROM cortex_events ce
+                    WHERE ce.category = CASE
+                        WHEN wp.slug LIKE 'deadlines%%' THEN 'deadline'
+                        WHEN wp.slug LIKE 'decisions%%' THEN 'decision'
+                        ELSE 'unknown'
+                    END) AS latest_event_at
+            FROM wiki_pages wp
+            WHERE wp.page_type = 'compiled_state'
+            LIMIT 20
+        """)
+        for row in cur.fetchall():
+            if row["latest_event_at"] and row["latest_event_at"] > row["updated_at"]:
+                findings.append({
+                    "finding_type": "generation_behind",
+                    "severity": "warning",
+                    "slug_or_ref": row["slug"],
+                    "description": f"Compiled page '{row['slug']}' is behind latest Cortex event ({row['latest_event_at'].strftime('%Y-%m-%d %H:%M')})",
+                })
+
+        # ── 4. BROKEN BACKLINKS — referenced slugs that don't exist ──
+        cur.execute("SELECT slug FROM wiki_pages LIMIT 500")
+        existing_slugs = {r["slug"] for r in cur.fetchall()}
+
+        cur.execute("SELECT slug, backlinks FROM wiki_pages WHERE backlinks IS NOT NULL AND array_length(backlinks, 1) > 0 LIMIT 100")
+        for row in cur.fetchall():
+            for link in (row["backlinks"] or []):
+                if link not in existing_slugs:
+                    findings.append({
+                        "finding_type": "broken_backlink",
+                        "severity": "warning",
+                        "slug_or_ref": row["slug"],
+                        "description": f"Page '{row['slug']}' has backlink to non-existent '{link}'",
+                    })
+
+        # ── 5. MISSING INDEX — PM agents without an index page ──
+        cur.execute("""
+            SELECT DISTINCT agent_owner FROM wiki_pages
+            WHERE agent_owner IS NOT NULL
+            LIMIT 20
+        """)
+        for row in cur.fetchall():
+            agent = row["agent_owner"]
+            cur.execute("SELECT 1 FROM wiki_pages WHERE slug = %s LIMIT 1", (f"{agent}/index",))
+            if not cur.fetchone():
+                findings.append({
+                    "finding_type": "missing_index",
+                    "severity": "warning",
+                    "slug_or_ref": agent,
+                    "description": f"Agent '{agent}' has wiki pages but no index page at '{agent}/index'",
+                })
+
+        conn.commit()
+
+        # ── Store findings (clear old open, insert new) ──
+        cur.execute("DELETE FROM cortex_lint_results WHERE status = 'open'")
+        for f in findings:
+            cur.execute("""
+                INSERT INTO cortex_lint_results (finding_type, severity, slug_or_ref, description)
+                VALUES (%s, %s, %s, %s)
+            """, (f["finding_type"], f["severity"], f["slug_or_ref"], f["description"]))
+        conn.commit()
+        cur.close()
+
+        logger.info("wiki_lint: %d findings stored", len(findings))
+        return findings
+
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error("run_wiki_lint failed: %s", e)
+        return findings
+    finally:
+        _put_conn(conn)

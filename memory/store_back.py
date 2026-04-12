@@ -2614,9 +2614,28 @@ class SentinelStoreBack:
             # Add source_agent to deadlines and decisions (nullable — won't break existing inserts)
             cur.execute("ALTER TABLE deadlines ADD COLUMN IF NOT EXISTS source_agent TEXT")
             cur.execute("ALTER TABLE decisions ADD COLUMN IF NOT EXISTS source_agent TEXT")
+
+            # CORTEX-PHASE-3: Lint results table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS cortex_lint_results (
+                    id          SERIAL PRIMARY KEY,
+                    finding_type TEXT NOT NULL,
+                    severity    TEXT DEFAULT 'warning',
+                    slug_or_ref TEXT NOT NULL,
+                    description TEXT NOT NULL,
+                    status      TEXT DEFAULT 'open',
+                    created_at  TIMESTAMPTZ DEFAULT NOW(),
+                    resolved_at TIMESTAMPTZ
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_lint_results_status
+                ON cortex_lint_results (status, severity)
+            """)
+
             conn.commit()
             cur.close()
-            logger.info("cortex_events table verified (+ source_agent columns)")
+            logger.info("cortex_events table verified (+ source_agent columns + cortex_lint_results)")
         except Exception as e:
             try:
                 conn.rollback()
