@@ -66,29 +66,20 @@ def fetch_youtube_transcript(video_id: str, languages: list[str] = None) -> dict
         languages = ["en", "de", "fr", "ru", "es", "it"]
 
     try:
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        # youtube-transcript-api v1.x: instance-based API
+        ytt_api = YouTubeTranscriptApi()
+        fetched = ytt_api.fetch(video_id, languages=languages)
 
-        # Try manual transcripts first (more accurate), then auto-generated
-        transcript = None
-        for method in ["find_manually_created_transcript", "find_generated_transcript"]:
-            try:
-                transcript = getattr(transcript_list, method)(languages)
-                break
-            except Exception:
-                continue
+        # FetchedTranscript is iterable, each snippet has .text, .start, .duration
+        segments = []
+        text_parts = []
+        for snippet in fetched:
+            seg = {"text": snippet.text, "start": snippet.start, "duration": snippet.duration}
+            segments.append(seg)
+            text_parts.append(snippet.text)
 
-        if not transcript:
-            # Fallback: get any available transcript
-            for t in transcript_list:
-                transcript = t
-                break
-
-        if not transcript:
-            return {"error": f"No transcript available for video {video_id}"}
-
-        segments = transcript.fetch()
-        full_text = " ".join(seg.get("text", "") for seg in segments)
-        language = transcript.language_code if hasattr(transcript, "language_code") else "unknown"
+        full_text = " ".join(text_parts)
+        language = fetched.language_code if hasattr(fetched, "language_code") else "unknown"
 
         return {
             "text": full_text,
