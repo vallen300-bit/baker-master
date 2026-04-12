@@ -3,9 +3,10 @@
 ## Context
 Baker has 3 agents today (AO PM, MOVIE AM, email pipeline) scaling to 15-20. They all write to shared PostgreSQL tables with zero coordination. The same obligation surfaces from multiple sources (phone, email, WhatsApp, Plod) creating cross-source duplicates. Agents lack access to raw documents and depend on stale context files. Director requires: full document access in Phase 1, Obsidian as human interface, reusable onboarding for agents 3-20.
 
-## Estimated time: ~36-40h (Phase 0 hotfix + 4 phases over 3-4 weeks)
+## Estimated time: ~45-50h (Phase 0 ✅ done + 5 phases over 4-5 weeks)
 ## Complexity: High
 ## Prerequisites: Install Obsidian on Director's MacBook
+## Status: Phase 0 COMPLETE (store_decision hotfix, commit 73dea80). Architecture reviewed and approved by Cowork with 4 conditions (all accepted, incorporated below).
 
 ---
 
@@ -445,45 +446,93 @@ New agents get their config at onboarding time — no code change, no redeploy.
 
 ---
 
+## Cowork Review Conditions (All Accepted)
+
+**A. Split Phase 1 into 1A and 1B.** Phase 1 was too big (10 steps, 16-20h). 1A = wiki_pages table + context loading (unblocks Phase 2). 1B = document extraction + Obsidian (content work, runs in parallel with Phase 2). This prevents document extraction delays from blocking the Cortex bus.
+
+**B. Kill switch for auto-merge.** Add `cortex_config` table with `auto_merge_enabled` boolean. Shadow mode logs dedup decisions. When ready, flip the flag to enable. If auto-merge goes wrong in production, flip back in 10 seconds — no redeploy needed.
+
+```sql
+CREATE TABLE cortex_config (
+    key TEXT PRIMARY KEY,
+    value JSONB NOT NULL,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+INSERT INTO cortex_config VALUES ('auto_merge_enabled', 'false');
+INSERT INTO cortex_config VALUES ('tool_router_enabled', 'false');
+```
+
+**C. Obsidian reverse sync = manual only for v1.** No file watchers (race conditions with synced folders). A CLI command `python scripts/sync_obsidian_to_db.py` or dashboard button. Bidirectional auto-sync is Phase 5+ complexity.
+
+**D. TOOL_ROUTER_ENABLED feature flag.** If the router breaks, flip one boolean → all agents fall back to direct writes. Zero-downtime rollback without redeploying.
+
+```python
+# In ToolExecutor.execute() — the safety gate
+async def execute(self, tool_name, tool_args):
+    if not get_cortex_config('tool_router_enabled'):
+        # Feature flag OFF → bypass router, use legacy direct writes
+        return await self._execute_tool_legacy(tool_name, tool_args)
+    # Feature flag ON → route through Cortex/Wiki/Doc classification
+    ...
+```
+
+**Debounce: 2 minutes** (not 30 seconds). Compiled state pages are a convenience cache, not a live feed. 2 min cuts recompile frequency by 4x. Generation counter + direct DB fallback handles staleness.
+
+---
+
 ## Implementation Phases
 
-### Phase 0: Hotfix — Fix `store_decision` (~1h)
-**Do this NOW before any Cortex work.**
+### Phase 0: Hotfix — Fix `store_decision` ✅ COMPLETE
+Commit `73dea80`. MOVIE AM can now store decisions. Deployed to Render.
 
-MOVIE AM has been silently dropping every `store_decision` call since deployment. One-line fix in `ToolExecutor.execute()` — add the tool to the handler, wire to `store_back.log_decision()`.
+### Phase 1A: Wiki Infrastructure (~6-8h) — START HERE
 
-→ verify: MOVIE AM calls store_decision → check decisions table has new row
+This is pure infrastructure — unblocks Phase 2. No document extraction here.
 
-**File:** `orchestrator/agent.py`
-
-### Phase 1: Knowledge Layer — wiki_pages + Document Extraction + Obsidian (~16-20h)
-
-1. Create `wiki_pages` table (migration SQL above)
-   → verify: `\d wiki_pages` shows all columns
-2. Create `scripts/ingest_document.py` with PDF, Excel, DOCX extractors
-   → verify: run on test PDF, check wiki_pages has structured pages with [[links]]
-3. Extract AO PM's key documents (HMA, Participation Agreement, FTC Table, Hagenauer filing)
-   → verify: `SELECT slug FROM wiki_pages WHERE slug LIKE 'documents/%' LIMIT 20` shows all pages
-4. Extract MOVIE AM's key documents (HMA shared, hotel reports, debrief materials)
-   → verify: same query, MOVIE AM documents present
-5. Populate agent wiki folders — migrate existing view files + PM state to wiki_pages
-   → verify: `SELECT slug FROM wiki_pages WHERE agent_owner = 'ao_pm'` returns index + domain pages
-6. Add `wiki_config` JSONB column to `capability_sets`. Populate for AO PM and MOVIE AM
+1. Create `wiki_pages` table (migration SQL in Architecture section above)
+   → verify: `\d wiki_pages` shows all columns including generation counter
+2. Create `cortex_config` table with feature flags (auto_merge_enabled=false, tool_router_enabled=false)
+   → verify: `SELECT * FROM cortex_config` shows both flags
+3. Add `wiki_config` JSONB column to `capability_sets`. Populate for AO PM and MOVIE AM
    → verify: `SELECT name, wiki_config FROM capability_sets WHERE name IN ('ao_pm','movie_am')`
-7. Implement `load_agent_context()` in `capability_runner.py` (~8K token budget)
-   → verify: AO PM session start includes wiki context in system prompt
-8. Implement Obsidian sync script (`sync_wiki_to_obsidian.py`)
-   → verify: run script, open Obsidian vault, see pages with [[links]] and graph
-9. Implement reverse sync (Obsidian → DB via file watcher or manual trigger)
-   → verify: edit page in Obsidian, run sync, check wiki_pages updated_by='director'
-10. Director installs Obsidian, points vault at `memory/wiki/`, installs git community plugin
-    → verify: Director sees graph view with documents linked to matters
+4. Populate initial agent wiki pages — migrate existing view files + PM state to wiki_pages
+   → verify: `SELECT slug FROM wiki_pages WHERE agent_owner = 'ao_pm'` returns index + domain pages
+5. Implement `load_agent_context()` in `capability_runner.py` (~8K token budget, wiki first, fetch as fallback)
+   → verify: AO PM session start includes wiki context in system prompt, total < 8K tokens
+6. Test: AO PM session with wiki context vs without — compare quality
 
-**Files:** `wiki_pages` migration in `dashboard.py`, `scripts/ingest_document.py` (new), `scripts/sync_wiki_to_obsidian.py` (new), `capability_runner.py`, `memory/wiki/` (generated)
+**Files:** `dashboard.py` (migrations), `capability_runner.py`, wiki_pages seed data
+
+### Phase 1B: Document Extraction + Obsidian (~20-25h) — PARALLEL with Phase 2
+
+Content work. Unpredictable timelines (Austrian legal PDFs). Runs in parallel with Phase 2.
+Order: FTC Table (Excel, predictable) → HMA (cleanest PDF) → Hagenauer (messiest).
+
+1. Create `scripts/ingest_document.py` with PDF, Excel, DOCX extractors
+   → verify: run on test Excel, check wiki_pages has structured pages with [[links]]
+2. Extract FTC Table v008 (migrate existing `ao-ftc-table-explanations.md` + enhance)
+   → verify: `SELECT slug FROM wiki_pages WHERE slug LIKE 'documents/ftc-table%' LIMIT 10`
+3. Extract HMA (MO Vienna management agreement)
+   → verify: wiki_pages has section-by-section pages with [[links]] to [[mo-obligations]]
+4. Extract Participation Agreement
+   → verify: wiki_pages has dilution clause, capital call mechanics, default provisions
+5. Extract Hagenauer insolvency filing
+   → verify: wiki_pages has claims register, settlement options, timeline
+6. Extract MOVIE AM documents (hotel reports, debrief materials)
+   → verify: wiki_pages has MOVIE AM documents
+7. Implement Obsidian sync script (`sync_wiki_to_obsidian.py`) — PostgreSQL → markdown files
+   → verify: run script, open Obsidian vault, see pages with [[links]] and graph view
+8. Implement reverse sync — MANUAL ONLY for v1 (`python scripts/sync_obsidian_to_db.py`)
+   → verify: edit page in Obsidian, run CLI command, check wiki_pages updated_by='director'
+9. Director installs Obsidian, points vault at `memory/wiki/`
+   → verify: Director sees graph view with documents linked to matters
+
+**Files:** `scripts/ingest_document.py` (new), `scripts/sync_wiki_to_obsidian.py` (new), `scripts/sync_obsidian_to_db.py` (new), `memory/wiki/` (generated)
 
 ### Phase 2: Cortex Event Bus + Qdrant Dedup + Tool Router (~12-14h)
 
 Ship bus and dedup gate together — never ship one without the other.
+Deploy behind `tool_router_enabled` feature flag (OFF by default). Test thoroughly. Flip ON when verified.
 
 1. Create `cortex_events` table (migration SQL above)
    → verify: `\d cortex_events` shows all columns
@@ -494,10 +543,12 @@ Ship bus and dedup gate together — never ship one without the other.
 4. Create `cortex_obligations` Qdrant collection
    → verify: Qdrant dashboard shows collection
 5. Implement tool router in `ToolExecutor.execute()` with TOOL_CONFIG + permission layer
-   → verify: AO PM calls create_deadline → cortex_events row with source_agent='ao_pm'
-   → verify: AO PM calls write_note → wiki_pages row, NOT cortex_events
-   → verify: AO PM calls send_email → queued for approval, NOT sent
-6. Rewire MCP `baker_add_deadline` through `publish_event()`
+   **CRITICAL: Guard with `tool_router_enabled` flag. If flag=false, fall back to legacy direct writes.**
+   → verify: flag OFF → agents use legacy path (no breakage)
+   → verify: flag ON → AO PM create_deadline → cortex_events row with source_agent='ao_pm'
+   → verify: flag ON → AO PM write_note → wiki_pages row, NOT cortex_events
+   → verify: flag ON → AO PM send_email → queued for approval, NOT sent
+6. Rewire MCP `baker_add_deadline` through `publish_event()` (also behind feature flag)
    → verify: Cowork creates deadline → cortex_events row with source_agent='cowork'
 7. Rewire email pipeline (both paths) through `publish_event()`
    → verify: email with commitment → cortex_events with source_agent='email_pipeline'
@@ -505,12 +556,15 @@ Ship bus and dedup gate together — never ship one without the other.
    → verify: meeting commitment → cortex_events with source_agent='meeting_pipeline'
 9. Add audit logging — every Cortex write → baker_actions
    → verify: `SELECT * FROM baker_actions WHERE action_type LIKE 'cortex:%' LIMIT 5`
-10. Wire Cortex post-write → compiled state recompilation (debounced, 30s, generation counter)
-    → verify: create deadline → deadlines-active wiki page updated within 30s
-11. Deploy in SHADOW MODE — log dedup decisions but don't block writes for first 2 weeks
+10. Wire Cortex post-write → compiled state recompilation (debounced **2 minutes**, generation counter)
+    → verify: create deadline → deadlines-active wiki page updated within 2 min
+11. Deploy in SHADOW MODE — `auto_merge_enabled=false`. Log dedup decisions but don't block writes.
     → verify: check cortex_events for 'would_merge' entries, review threshold accuracy
+    → After 2 weeks: review logs, calibrate threshold, flip `auto_merge_enabled=true`
 12. Backfill: embed existing active deadlines into Qdrant collection
     → verify: `SELECT COUNT(*) FROM deadlines WHERE status='active'` matches Qdrant point count
+13. Nightly Qdrant snapshot for `cortex_obligations` collection (dedup protection backup)
+    → verify: snapshot exists in Qdrant dashboard
 
 **Files:** `models/cortex.py` (new), `models/deadlines.py`, `baker_mcp/baker_mcp_server.py`, `orchestrator/agent.py`, `triggers/email_trigger.py`, `triggers/fireflies_trigger.py`, `dashboard.py`
 
@@ -546,6 +600,29 @@ Ship bus and dedup gate together — never ship one without the other.
 **Files:** `scripts/onboard_agent.py` (new), `triggers/plod_trigger.py` (new)
 
 ---
+
+## Phase Dependencies
+
+```
+Phase 0 ✅ DONE (store_decision hotfix)
+    │
+    ▼
+Phase 1A (wiki infrastructure, ~6-8h) ─── START HERE
+    │                                │
+    │                                ▼
+    │                          Phase 1B (document extraction + Obsidian, ~20-25h)
+    │                          PARALLEL — runs alongside Phase 2
+    ▼
+Phase 2 (Cortex + dedup + router, ~12-14h)
+    │    Requires: Phase 1A complete (wiki_pages table exists)
+    │    Behind feature flags: tool_router_enabled, auto_merge_enabled
+    ▼
+Phase 3 (lint + dashboard, ~4-6h)
+    │    Requires: Phase 2 complete (cortex_events flowing)
+    ▼
+Phase 4 (onboarding + Plod, ~4h)
+         Requires: Phase 2 + Phase 3 complete
+```
 
 ## Files Summary
 
