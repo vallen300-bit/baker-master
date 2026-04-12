@@ -136,6 +136,12 @@ class FirefliesConfig:
 
 
 @dataclass
+class PlaudConfig:
+    api_token: str = os.getenv("PLAUD_TOKEN", "")
+    api_domain: str = os.getenv("PLAUD_API_DOMAIN", "https://api-euc1.plaud.ai")
+
+
+@dataclass
 class PostgresConfig:
     host: str = os.getenv("POSTGRES_HOST", "localhost")
     port: int = int(os.getenv("POSTGRES_PORT", "5432"))
@@ -256,6 +262,8 @@ class TriggerConfig:
     slack_check_interval: int = int(os.getenv("SLACK_CHECK_INTERVAL", "300"))  # 5 minutes
     # Browser task polling interval (BROWSER-1)
     browser_check_interval: int = int(os.getenv("BROWSER_CHECK_INTERVAL", "1800"))  # 30 minutes
+    # Plaud Note Pro scanning interval
+    plaud_scan_interval: int = int(os.getenv("PLAUD_SCAN_INTERVAL", "900"))  # 15 minutes
     # Daily briefing time (UTC)
     daily_briefing_hour: int = 6  # 06:00 UTC = 08:00 CET
     # Pending approval reminder interval
@@ -315,6 +323,7 @@ class SentinelConfig:
     gemini: GeminiConfig = field(default_factory=GeminiConfig)
     gmail: GmailConfig = field(default_factory=GmailConfig)
     fireflies: FirefliesConfig = field(default_factory=FirefliesConfig)
+    plaud: PlaudConfig = field(default_factory=PlaudConfig)
     todoist: TodoistConfig = field(default_factory=TodoistConfig)
     dropbox: DropboxConfig = field(default_factory=DropboxConfig)
     rss: RssConfig = field(default_factory=RssConfig)

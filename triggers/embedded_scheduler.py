@@ -64,6 +64,19 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info(f"Registered: fireflies_scan (every {config.triggers.fireflies_scan_interval}s)")
 
+    # Plaud Note Pro scanning — every 15 minutes
+    if config.plaud.api_token:
+        from triggers.plaud_trigger import check_new_plaud_recordings
+        scheduler.add_job(
+            check_new_plaud_recordings,
+            IntervalTrigger(seconds=config.triggers.plaud_scan_interval),
+            id="plaud_scan", name="Plaud Note Pro scanning",
+            coalesce=True, max_instances=1, replace_existing=True,
+        )
+        logger.info(f"Registered: plaud_scan (every {config.triggers.plaud_scan_interval}s)")
+    else:
+        logger.info("Plaud trigger: PLAUD_TOKEN not set — skipping registration")
+
     # ClickUp polling — every 5 minutes
     # DEPLOY-FIX-2: Defer first run by 90s to avoid rate-limit sleeps blocking
     # Render's deploy timeout window (ClickUp 5-workspace sync can take 2+ min)

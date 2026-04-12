@@ -417,6 +417,13 @@ async def startup():
             backfill_fireflies()
         except Exception as e:
             logger.warning(f"Fireflies backfill failed (non-fatal): {e}")
+        # Plaud backfill (PG-only, sequential after Fireflies)
+        if config.plaud.api_token:
+            try:
+                from triggers.plaud_trigger import backfill_plaud
+                backfill_plaud()
+            except Exception as e:
+                logger.warning(f"Plaud backfill failed (non-fatal): {e}")
         # OOM-FIX-2: WhatsApp backfill removed from startup.
         # It fetched 500 chats + media + Qdrant embedding → 2-3GB memory spike.
         # Regular WhatsApp periodic re-sync (scheduler) handles catch-up safely.
