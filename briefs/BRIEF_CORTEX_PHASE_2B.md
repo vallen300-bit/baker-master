@@ -202,10 +202,12 @@ def upsert_obligation_vector(
         from qdrant_client.models import PointStruct
 
         point_id = f"{category}_{canonical_id}"
+        import hashlib
+        numeric_id = int(hashlib.sha256(point_id.encode()).hexdigest()[:16], 16)
         qdrant.upsert(
             collection_name="cortex_obligations",
             points=[PointStruct(
-                id=abs(hash(point_id)) % (2**63),  # Qdrant needs int or UUID
+                id=numeric_id,  # Deterministic hash — survives Render restarts
                 vector=embedding,
                 payload={
                     "canonical_id": canonical_id,
@@ -587,7 +589,7 @@ cd /opt/render/project/src && python scripts/backfill_deadline_vectors.py
 
 **Option B: One-time API endpoint** (add to dashboard.py, remove after use)
 ```python
-@app.get("/api/admin/backfill-vectors")
+@app.get("/api/admin/backfill-vectors", dependencies=[Depends(verify_api_key)])
 async def backfill_vectors():
     import subprocess
     result = subprocess.run(
@@ -597,4 +599,4 @@ async def backfill_vectors():
     return {"stdout": result.stdout, "stderr": result.stderr}
 ```
 
-**Recommended: Option B** — I can trigger it via curl after deploy, no Render shell needed.
+**Recommended: Option B** — uses existing `verify_api_key` auth (same as all /api/ endpoints). I can trigger via curl with `X-Baker-Key` header. Remove endpoint after use.
