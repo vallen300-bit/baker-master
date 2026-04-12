@@ -35,6 +35,17 @@ In quiet periods (no active ask), send:
 - Photos from property
 - Ask his opinion on something
 
+## Monaco Sequencing Pattern (Apr 2-3, 2026)
+DV demonstrated a multi-day staging approach in Monaco:
+1. **Days 1-2 (Monaco):** Prey discussions only. Plant seeds (Hagenauer insolvency, CITIC/Prague). NO direct ask.
+2. **Monday:** Deliver press story with solutions attached — AO hears from DV first, not cold from media.
+3. **Tuesday:** Capital call as CONSEQUENCE of everything above — not standalone ask.
+4. **Thu/Fri:** Operational/financial topics (Lilienmatt restructuring, Francesca/MO working capital).
+
+**"Yes" Signal Detection:** AO showed willingness in Monaco despite "you only call when you need money" being active. The prey-first approach worked — capital call framed as consequence, not ask. EUR 2M/month phasing (not EUR 6M lump) is easier to digest.
+
+**Key Lesson:** Never lead with sausage. Spend 2 days on prey, plant the seed, then return with the consequence chain. Turns a rescue ask into protecting the kill.
+
 ## Ettore Principle
 Personal gestures matter. Never arrive empty-handed. Expensive wine, truffles, cheese. Social capital > business deals. Connecting AO to interesting people earns more loyalty than any spreadsheet.
 

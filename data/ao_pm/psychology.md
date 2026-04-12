@@ -34,6 +34,17 @@ AO is deeply sensitive about being recognized as co-owner, despite holding 0% re
 - **Rule:** ALWAYS use "we/our project" language in AO's presence. Never claim sole ownership. Not optional — tested and failed.
 - **Udmurtia** = Russian republic where AO's wealth/business originates. "Half of Udmurtia" = his way of saying the scale of his contribution is immense.
 
+## Rosfinmonitoring Disclosure (Monaco, Apr 2-3)
+AO voluntarily disclosed he received requests from Rosfinmonitoring (Russian Financial Intelligence Unit — handles AML, counter-terror financing, cross-border capital monitoring). He is answering questions.
+
+**Implications:**
+- Potential delays in AO's ability to move capital for EUR 6M call
+- Additional documentation requirements may slow Constantinos
+- Possible source-of-funds requests on the RG7 investment
+- EUR 66.5M across Cyprus/Switzerland/Austria is exactly the profile they monitor
+
+**Rule:** Do NOT raise proactively — let AO manage. Monitor only. Watch for signs of capital flow friction.
+
 ## 11 Return Drivers (Ranked)
 
 1. **Identity/Legacy** — the deepest driver
