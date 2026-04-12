@@ -1,37 +1,40 @@
-# BRIEF: AGENT-ORCHESTRATION-1 — Baker Cortex: Multi-Agent Write Coordination
+# BRIEF: AGENT-ORCHESTRATION-1 — Baker Cortex: Multi-Agent Coordination + Knowledge System
 
 ## Context
-Baker has 3 agents today (AO PM, MOVIE AM, email pipeline) scaling to 15-20. They all write to shared PostgreSQL tables — deadlines, decisions, actions — with zero coordination. Additionally, the same obligation surfaces from multiple ingestion sources (phone/Fireflies, email, WhatsApp, Plod) creating cross-source duplicates that keyword matching cannot catch. Director identified this as a critical architectural gap.
+Baker has 3 agents today (AO PM, MOVIE AM, email pipeline) scaling to 15-20. They all write to shared PostgreSQL tables with zero coordination — duplicates, no attribution, no audit. The same obligation surfaces from multiple sources (phone, email, WhatsApp, Plod) creating cross-source duplicates. Agents also lack access to raw documents (contracts, spreadsheets, legal filings) and depend on manually maintained, often stale context files.
 
-## Estimated time: ~20-24h (4 phases over 2-3 weeks)
+Director's requirements:
+- Agents must think deeply with full access to raw documents
+- No "later" — document access is Phase 1, not a future brief
+- Obsidian as the human interface to the knowledge graph
+- Basic Memory as the wiki engine (open source, MCP-native)
+- Architecture must be a reusable workflow for onboarding agents 15-20
+
+## Estimated time: ~30-36h (5 phases over 3-4 weeks)
 ## Complexity: High
-## Prerequisites: None — backward-compatible, phased rollout
+## Prerequisites: Install Obsidian + Basic Memory
 
 ---
 
 ## The Problem
 
-**What's broken:** Multiple agents and ingestion sources INSERT into shared tables independently.
-
 | Problem | Evidence |
 |---|---|
 | **Duplicates** | Two identical "Slack subscription renewal" deadlines created 0.2s apart |
-| **Cross-source duplicates** | Same obligation from phone call + email + WhatsApp = 3 records |
-| **No source attribution** | Agent-created deadlines have `source_type="agent"` — can't tell which agent |
-| **MCP bypasses dedup** | `baker_add_deadline` (Cowork path) does raw INSERT — zero dedup |
-| **Silent tool failures** | `store_decision` in MOVIE AM capability doesn't exist in ToolExecutor |
-| **No audit trail** | Only ClickUp writes go to `baker_actions`. Agent writes invisible |
-| **No compiled knowledge** | Memory files manually maintained, often stale vs DB state |
-
-**What causes it:** Baker evolved with one agent. PM Factory added parallel agents without coordination. Each new ingestion source (Fireflies, Bluewin, Exchange) got direct DB write access.
+| **Cross-source duplicates** | Same obligation from phone + email + WhatsApp = 3 records |
+| **No source attribution** | Agent-created deadlines say `source_type="agent"` — which agent? |
+| **MCP bypasses dedup** | `baker_add_deadline` does raw INSERT — zero dedup |
+| **Silent tool failures** | `store_decision` in MOVIE AM doesn't exist in ToolExecutor |
+| **No audit trail** | Only ClickUp writes go to `baker_actions` |
+| **No document access** | Agents can't read contracts, spreadsheets, legal filings |
+| **Stale context** | Memory files manually maintained, drift from reality |
 
 **What success looks like:**
-1. Every shared write carries agent identity and goes through a single bus
-2. Cross-source duplicates caught by semantic similarity (Qdrant) before INSERT
-3. All agent writes audited
-4. Compiled wiki auto-updated from DB state (Karpathy pattern) — agents start with fresh context, zero retrieval cost
+1. Every shared write has agent identity, goes through a single bus, deduped by Qdrant
+2. Agents navigate full documents as wiki pages — not summaries, full extraction
+3. Director browses the same knowledge in Obsidian — graph view, backlinks, search
+4. Adding agent #15 = one config + one wiki folder. Zero custom coordination code
 5. Conflicts surfaced to Director, not silently swallowed
-6. Architecture scales to 20 agents + Plod + future sources without redesign
 
 ---
 
@@ -39,62 +42,196 @@ Baker has 3 agents today (AO PM, MOVIE AM, email pipeline) scaling to 15-20. The
 
 | Source | Key Insight |
 |---|---|
-| **Anthropic Managed Agents** (Apr 8) | Append-only event log as source of truth. Agents don't own state. |
-| **Harrison Chase / LangChain** (Apr 11) | "Memory is the most valuable part of an agent system." Own your persistence layer. 477K views. |
-| **Sherwood / Sazabi / a16z** (Apr 10) | "Handle race conditions where two agents update the same file." Uses git for shared state. Watching Mesa.dev. |
-| **RoboRhythms production pattern** | Vector similarity dedup (Qdrant). Unconditional retrieval before every write. |
-| **Karpathy LLM Wiki** (Apr 3) | MD files as compiled knowledge layer. Zero retrieval cost. LLM maintains wiki from raw sources. 95% cheaper than RAG for reads. |
-| **Databricks/ZenML** | "State stored as append-only log using insert operations rather than updates." |
+| **Anthropic Managed Agents** (Apr 8) | Append-only event log. Agents don't own state. |
+| **Harrison Chase** (Apr 11) | "Memory is the most valuable part." Own your persistence. 477K views. |
+| **Karpathy LLM Wiki** (Apr 3) | Full extraction into MD. Zero retrieval cost. 95% cheaper. |
+| **Sherwood / a16z** (Apr 10) | Shared agent memory race conditions. Git as coordination. |
+| **Basic Memory** (Apr 12) | Open-source MD wiki + semantic search + MCP. Obsidian-native. |
+| **RoboRhythms** | Unconditional Qdrant retrieval before every write. |
 
 ---
 
-## Architecture: Two-Layer Design
+## Architecture: Three Components
 
 ```
-┌───────────────────────────────────────────────────────────┐
-│  LAYER 1: Compiled Wiki (Karpathy Pattern)                │
-│  Purpose: Agent context — zero-cost reads                 │
-│  Format: Markdown files in memory/ folder                 │
-│  Contents: Matter summaries, entity pages, active         │
-│    deadlines, decision history, relationship maps         │
-│  Updated by: Wiki compiler (post-write hook)              │
-│  Read by: Every agent at session start via CLAUDE.md      │
-│  Access: ~0ms (already in context window)                 │
-└────────────────────────┬──────────────────────────────────┘
-                         │ auto-compiled from
-┌────────────────────────▼──────────────────────────────────┐
-│  LAYER 2: PostgreSQL + Qdrant (Source of Truth)           │
-│  Purpose: Multi-agent writes, ACID safety, audit trail    │
-│  Write path: All writes go through Cortex Event Bus       │
-│  Dedup: Qdrant semantic similarity (pre-write gate)       │
-│  Contents: Raw deadlines, decisions, emails, contacts     │
-│  Access: ~100ms (DB query + optional Qdrant call)         │
-└───────────────────────────────────────────────────────────┘
+═══════════════════════════════════════════════════════════════════
+ COMPONENT 1: OBSIDIAN VAULT + BASIC MEMORY (Knowledge Layer)
+═══════════════════════════════════════════════════════════════════
+ │                                                               │
+ │  Engine: Basic Memory (open source, AGPL-3.0)                 │
+ │  Storage: Markdown files in memory/wiki/                      │
+ │  Search: Hybrid full-text + semantic (built into Basic Memory) │
+ │  Access: MCP tools (search_notes, read_note, write_note)      │
+ │  Human UI: Obsidian app — graph view, backlinks, search       │
+ │  Sync: Git (repo ↔ Render ↔ local machines)                  │
+ │                                                               │
+ │  AGENT KNOWLEDGE (each agent owns its folder)                 │
+ │    ao_pm/    movie_am/    legal_pm/    deal_analyst/           │
+ │                                                               │
+ │  DOCUMENTS (full extraction — NOT summaries)                  │
+ │    documents/                                                 │
+ │      hma-mo-vienna/          ← full contract, section by section │
+ │      ftc-table-v008/         ← full spreadsheet, row by row   │
+ │      hagenauer-insolvency/   ← full legal filing              │
+ │      participation-agreement/ ← full contract                 │
+ │                                                               │
+ │  COMPILED STATE (auto-generated from DB, read-only)           │
+ │    deadlines-active.md    decisions-recent.md                 │
+ │    contacts-vip.md        matters-overview.md                 │
+ │                                                               │
+ │  All cross-linked via [[wiki-links]]                          │
+ │                                                               │
+═══════════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════════
+ COMPONENT 2: CORTEX EVENT BUS (Shared Write Coordination)
+═══════════════════════════════════════════════════════════════════
+ │                                                               │
+ │  Entry point: publish_event() — ALL shared writes go here     │
+ │  Pre-write gate: Qdrant semantic check (cosine > 0.85)        │
+ │  Storage: cortex_events table (append-only)                   │
+ │  Resolution: auto-merge, auto-reject, or flag conflict        │
+ │  Audit: every write logged to baker_actions                   │
+ │  Post-write: triggers wiki compilation for affected pages     │
+ │                                                               │
+═══════════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════════
+ COMPONENT 3: TOOL ROUTER (Invisible to Agents)
+═══════════════════════════════════════════════════════════════════
+ │                                                               │
+ │  ToolExecutor.execute() classifies every tool call:           │
+ │                                                               │
+ │  CORTEX_TOOLS → publish_event() → PostgreSQL + Qdrant         │
+ │    create_deadline, store_decision, send_email,               │
+ │    send_whatsapp, clickup_create, upsert_vip_contact          │
+ │                                                               │
+ │  WIKI_TOOLS → Basic Memory MCP → agent's wiki folder          │
+ │    write_note, update_knowledge, store_insight                │
+ │                                                               │
+ │  DOC_TOOLS → Basic Memory MCP → documents/ folder             │
+ │    read_document, search_documents                            │
+ │                                                               │
+ │  Agents call tools. They never know the routing.              │
+ │                                                               │
+═══════════════════════════════════════════════════════════════════
 ```
 
-### Write Flow (Cortex Event Bus)
+### How an Agent Uses the System (AO PM Example)
 
 ```
-Agent/Pipeline wants to write (deadline, decision, contact update, etc.)
-                    │
-                    ▼
-        ┌───────────────────────┐
-        │  1. RETRIEVE FIRST    │  ← Query Qdrant: "is this already known?"
-        │     (unconditional)   │     cosine similarity > 0.85 = match
-        └───────────┬───────────┘
-                    │
-            ┌───────┴───────┐
-            │               │
-         KNOWN           NEW
-            │               │
-            ▼               ▼
-     Return existing   2. INSERT into cortex_events
-     canonical ID         (intent_type, payload, source_agent)
-                       3. Embed in Qdrant for future dedup
-                       4. Resolver creates canonical record
-                       5. Audit to baker_actions
-                       6. Trigger wiki compilation for affected pages
+1. SESSION START
+   capability_runner loads context via Basic Memory MCP:
+   - search_notes("ao_pm") → agent's domain pages
+   - read_note("ao_pm/index.md") → master context
+   - read_note("deadlines-active.md") → compiled shared state
+   All injected into system prompt. Zero PostgreSQL calls.
+
+2. DEEP THINKING
+   Director: "What are AO's obligations under the Participation Agreement?"
+   AO PM: search_notes("participation agreement obligations")
+   → Basic Memory returns [[participation-agreement/section-4.md]]
+   → AO PM reads FULL contract clause, not a summary
+   → Follows [[links]] to [[capital-call]], [[dilution-risk]]
+   → Reasons with complete information
+
+3. KNOWLEDGE UPDATE
+   AO PM learns: "AO reacted negatively to EUR 5.77M VAT figure"
+   → Calls write_note("ao_pm/conversation-history.md", append=True)
+   → Basic Memory writes to agent's wiki folder
+   → Obsidian shows update. Next session, AO PM remembers.
+
+4. SHARED WRITE
+   AO PM creates: "Sources section due Sunday Apr 13"
+   → Calls create_deadline(description=..., due_date=...)
+   → ToolExecutor routes through Cortex
+   → Qdrant checks for existing obligation → not found → creates
+   → Wiki compiler updates deadlines-active.md
+   → Director sees it in Obsidian immediately
 ```
+
+### Full Document Extraction (Not Summaries)
+
+When a document enters Baker's world, it gets FULLY extracted into navigable wiki pages:
+
+**Contract → wiki pages:**
+```
+documents/hma-mo-vienna/
+  index.md                 ← parties, dates, purpose, critical clauses summary
+  section-1-definitions.md ← full text with annotations
+  section-2-term.md        ← full text with annotations
+  section-7-obligations.md ← full text, linked to [[mo-obligations]]
+  financial-terms.md       ← every EUR figure, every %, linked
+  termination-triggers.md  ← what kills the deal, linked to [[risks]]
+```
+
+**Spreadsheet → wiki pages:**
+```
+documents/ftc-table-v008/
+  index.md                 ← structure, totals, key takeaways
+  uses-2026.md             ← every row, every number, explanations
+  sources-2026.md          ← fund vs LP split, row by row
+  gap-analysis.md          ← what's missing, phased timeline
+  formulas.md              ← how key cells are calculated
+```
+
+**Legal filing → wiki pages:**
+```
+documents/hagenauer-insolvency/
+  index.md                 ← timeline, key facts, status
+  claims-register.md       ← EUR 19M breakdown by subcontractor
+  settlement-options.md    ← EUR 2M now vs litigation funder risk
+```
+
+The agent navigates these like a human: read index → go to relevant section → check specific clause → follow [[links]] to related matters. Full fidelity. No summaries.
+
+**Ingestion trigger:** When a file lands in `Baker-Project/` on Dropbox (or Director flags it), Baker:
+1. Reads raw file (PDF via vision/extraction, Excel via pandas, DOCX via python-docx)
+2. Extracts FULL content into structured markdown with [[wiki-links]]
+3. Writes pages to `memory/wiki/documents/{slug}/` via Basic Memory
+4. Basic Memory auto-indexes for semantic search
+5. Updates vault index
+
+### Basic Memory as Wiki Engine
+
+Instead of building wiki compilation from scratch, [Basic Memory](https://github.com/basicmachines-co/basic-memory) provides:
+
+| Feature | Built-in | We build |
+|---|---|---|
+| Markdown file read/write | Yes (MCP tools) | — |
+| Semantic search over wiki | Yes (hybrid full-text + vector) | — |
+| [[wiki-link]] graph traversal | Yes | — |
+| Obsidian compatibility | Yes (native) | — |
+| Per-agent project isolation | Yes (projects) | Configure per capability |
+| SQLite index for fast search | Yes | — |
+| Document extraction into wiki | — | Yes (PDF, Excel, DOCX extractors) |
+| Cortex event bus integration | — | Yes (publish_event → wiki update) |
+| Tool routing layer | — | Yes (ToolExecutor classification) |
+| Compiled state from DB | — | Yes (wiki compiler for deadlines, decisions) |
+
+**Customization per agent:** Each agent gets a Basic Memory "project" with its own config:
+
+```python
+AGENT_WIKI_CONFIG = {
+    'ao_pm': {
+        'project': 'ao_pm',
+        'root': 'memory/wiki/ao_pm/',
+        'shared_docs': ['documents/ftc-table-v008/', 'documents/hma-mo-vienna/',
+                        'documents/participation-agreement/'],
+        'compiled_state': ['deadlines-active.md', 'decisions-recent.md', 'contacts-vip.md'],
+        'matters': ['hagenauer', 'ao', 'morv', 'balgerstrasse'],
+    },
+    'movie_am': {
+        'project': 'movie_am',
+        'root': 'memory/wiki/movie_am/',
+        'shared_docs': ['documents/hma-mo-vienna/', 'documents/mo-operations/'],
+        'compiled_state': ['deadlines-active.md', 'decisions-recent.md'],
+        'matters': ['movie', 'mo-vienna'],
+    },
+}
+```
+
+This config determines: which documents the agent can access, which compiled state it sees, which matters are relevant. The agent doesn't know about the config — it just searches and reads via Basic Memory MCP tools.
 
 ### The `cortex_events` Table
 
@@ -102,34 +239,29 @@ Agent/Pipeline wants to write (deadline, decision, contact update, etc.)
 CREATE TABLE cortex_events (
   id            BIGSERIAL PRIMARY KEY,
   event_type    TEXT NOT NULL,        -- 'write_intent', 'signal', 'conflict', 'resolution'
-  category      TEXT NOT NULL,        -- 'deadline', 'decision', 'contact', 'knowledge'
-  source_agent  TEXT NOT NULL,        -- 'ao_pm', 'movie_am', 'email_pipeline', 'fireflies', 'plod'
+  category      TEXT NOT NULL,        -- 'deadline', 'decision', 'contact', 'knowledge', 'document'
+  source_agent  TEXT NOT NULL,        -- 'ao_pm', 'movie_am', 'email_pipeline', etc.
   source_type   TEXT NOT NULL,        -- 'agent', 'email', 'meeting', 'phone', 'whatsapp', 'cowork'
-  source_ref    TEXT,                 -- email_id, transcript_id, message_id for tracing
-  payload       JSONB NOT NULL,       -- {description, due_date, priority, ...}
+  source_ref    TEXT,                 -- email_id, transcript_id, message_id
+  payload       JSONB NOT NULL,
   status        TEXT DEFAULT 'pending', -- pending → accepted | merged | rejected | conflict
-  canonical_id  INTEGER,              -- links to actual record (deadlines.id, decisions.id)
-  merged_into   INTEGER,              -- if duplicate, points to winning event
-  qdrant_id     TEXT,                 -- vector ID for future similarity checks
+  canonical_id  INTEGER,
+  merged_into   INTEGER,
+  qdrant_id     TEXT,
   resolved_at   TIMESTAMPTZ,
   resolved_by   TEXT,                 -- 'auto' or 'director'
   created_at    TIMESTAMPTZ DEFAULT NOW()
 );
-
-CREATE INDEX idx_cortex_events_status ON cortex_events(status) WHERE status = 'pending';
-CREATE INDEX idx_cortex_events_category ON cortex_events(category, created_at);
 ```
 
 ### Semantic Dedup (Qdrant Pre-Write Gate)
 
-Baker already has Qdrant Cloud + Voyage AI (voyage-3, 1024d). New collection:
-
 ```python
-COLLECTION = "cortex_obligations"  # deadlines, commitments, action items
+COLLECTION = "cortex_obligations"
 
 async def check_existing_obligation(description: str, category: str) -> Optional[int]:
-    """Check Qdrant before any shared write. Returns canonical_id if match found."""
-    embedding = await embed_text(description)  # Voyage AI
+    """Unconditional check before ANY shared write."""
+    embedding = await embed_text(description)
     results = qdrant.search(
         collection_name=COLLECTION,
         query_vector=embedding,
@@ -140,340 +272,236 @@ async def check_existing_obligation(description: str, category: str) -> Optional
     if results:
         return results[0].payload["canonical_id"]
     return None
-
-async def register_obligation(description: str, category: str, canonical_id: int):
-    """After creating canonical record, register in Qdrant for future dedup."""
-    embedding = await embed_text(description)
-    qdrant.upsert(
-        collection_name=COLLECTION,
-        points=[PointStruct(
-            id=str(uuid4()),
-            vector=embedding,
-            payload={"canonical_id": canonical_id, "category": category, "text": description},
-        )]
-    )
 ```
-
-This catches cross-source duplicates:
-- "Send Balgerstrasse plan by Friday" (Fireflies transcript)
-- "Balgerstrasse financing plan — deliver to AO by Apr 18" (email pipeline)
-- Cosine similarity ~0.89 → **merged**
-
-### Wiki Compilation (Karpathy Layer)
-
-After the Cortex resolves a write, it triggers wiki compilation for affected pages:
-
-```python
-async def compile_wiki_page(category: str, matter_slug: str = None):
-    """Recompile a wiki page from current DB state."""
-    if category == "deadline":
-        deadlines = await get_active_deadlines(matter_slug=matter_slug, limit=50)
-        content = format_deadlines_wiki(deadlines)
-        write_wiki_page(f"memory/wiki/deadlines-{matter_slug or 'all'}.md", content)
-    elif category == "decision":
-        decisions = await get_recent_decisions(matter_slug=matter_slug, limit=30)
-        content = format_decisions_wiki(decisions)
-        write_wiki_page(f"memory/wiki/decisions-{matter_slug or 'all'}.md", content)
-    # ... contacts, matters, etc.
-
-    # Update index
-    rebuild_wiki_index()
-```
-
-Wiki pages are human-readable markdown:
-
-```markdown
-# Active Deadlines — Hagenauer
-_Auto-compiled from Baker DB. Last updated: 2026-04-12 14:30 UTC_
-
-## Critical
-- **May 26 inspection** — Vienna commission electrical audit. EUR 250-300K needed.
-  Source: AO PM + email pipeline (3 sources agree) | Created: Apr 9
-
-## High
-- **E+H formal opinion on BAO Section 22** — Due Apr 10 (OVERDUE)
-  Source: Cowork session | Created: Apr 2
-
-## Normal
-- **Construction settlement — Hagenauer EUR 2M** — Negotiate while administrator cash-poor
-  Source: email pipeline | Created: Mar 31
-```
-
-Agents read these at session start via `CLAUDE.md` references — zero API calls, instant context.
 
 ---
 
 ## Core Design Principle: Agents Stay Dumb, Infrastructure Stays Smart
 
-Agents do NOT know about Cortex, MD files, or routing rules. They call tools — `create_deadline`, `store_decision`, `update_pm_state` — and the infrastructure decides what happens. This is enforced at two layers:
-
-### Layer A: Tool Handler Routing (orchestrator/agent.py)
-
-The `ToolExecutor.execute()` method is the single chokepoint for all agent writes. It classifies each tool call:
+Agents call tools. They never know about Cortex, Basic Memory, Qdrant, or routing. The `ToolExecutor` and `capability_runner` handle everything invisibly.
 
 ```python
-# In ToolExecutor.execute()
+# ToolExecutor.execute() — the single routing chokepoint
 
-# Shared-state tools → route through Cortex (PostgreSQL + Qdrant)
 CORTEX_TOOLS = {
-    'create_deadline',      # → publish_event(category='deadline')
-    'store_decision',       # → publish_event(category='decision')
-    'draft_email',          # → publish_event(category='email_draft')
-    'send_email',           # → publish_event(category='email_send')
-    'send_whatsapp',        # → publish_event(category='whatsapp')
-    'clickup_create',       # → publish_event(category='clickup')
-    'upsert_vip_contact',   # → publish_event(category='contact')
+    'create_deadline', 'store_decision', 'draft_email',
+    'send_email', 'send_whatsapp', 'clickup_create', 'upsert_vip_contact',
 }
 
-# Domain-knowledge tools → route to agent's own MD wiki (Karpathy layer)
 WIKI_TOOLS = {
-    'update_pm_state',      # → write to memory/wiki/{agent_slug}/state.md
-    'store_insight',        # → write to memory/wiki/{agent_slug}/insights.md
-    'update_knowledge',     # → write to memory/wiki/{agent_slug}/{topic}.md
+    'write_note', 'update_knowledge', 'store_insight',
+}
+
+DOC_TOOLS = {
+    'read_document', 'search_documents',
 }
 
 async def execute(self, tool_name: str, tool_args: dict) -> str:
-    capability = self.current_capability_name  # e.g. 'ao_pm', 'movie_am'
+    capability = self.current_capability_name
 
     if tool_name in CORTEX_TOOLS:
-        # SHARED STATE: goes through Cortex event bus
-        # Agent doesn't know this — it just called "create_deadline"
-        result = await publish_event(
-            category=TOOL_TO_CATEGORY[tool_name],
-            payload=tool_args,
-            source_agent=capability,
-            source_type='agent',
-        )
-        # Audit automatically logged by publish_event()
-        return result
+        return await publish_event(category=..., payload=tool_args,
+                                   source_agent=capability, source_type='agent')
 
     elif tool_name in WIKI_TOOLS:
-        # DOMAIN KNOWLEDGE: goes to agent's own MD files
-        # No DB, no Qdrant, no Cortex — just a file write
-        result = await write_agent_wiki(
-            agent_slug=capability,
-            tool_name=tool_name,
-            content=tool_args,
-        )
-        return result
+        return await basic_memory.write_note(
+            project=capability, **tool_args)
+
+    elif tool_name in DOC_TOOLS:
+        return await basic_memory.search_notes(
+            project='documents', query=tool_args['query'])
 
     else:
-        # Read-only tools, calculation tools, etc. — execute directly
         return await self._execute_tool(tool_name, tool_args)
 ```
 
-**The agent calls `create_deadline`. It has no idea whether that goes to PostgreSQL, Qdrant, MD files, or the moon. The ToolExecutor routes it.**
+---
 
-### Layer B: Wiki Context Loading (capability_runner.py)
+## Agent Onboarding Workflow (Reusable for Agents 3-20)
 
-When a capability starts, the runner loads its wiki context automatically:
+Adding a new agent follows a standard checklist — no custom coordination code:
 
+### Step 1: Define Capability (~30 min)
+```sql
+INSERT INTO capability_sets (name, description, system_prompt, tools, ...)
+VALUES ('legal_pm', 'Legal matter project manager', '...', '{...}');
+```
+
+### Step 2: Create Wiki Folder (~1h)
+```
+memory/wiki/legal_pm/
+  index.md        ← "You are Legal PM. Your matters: [[hagenauer]], [[cupial]].
+                      Your contacts: [[arik]], [[e-and-h]].
+                      Read [[documents/participation-agreement/]] for contract terms."
+  matters.md      ← Which legal matters this agent tracks
+  contacts.md     ← Key people in the legal domain
+  playbook.md     ← How this agent approaches its work
+```
+
+### Step 3: Configure Wiki Access (~15 min)
 ```python
-# In capability_runner.py, run_capability()
-
-async def run_capability(self, capability_name: str, query: str, ...):
-    cap = self.registry.get(capability_name)
-
-    # Load agent's domain wiki (Karpathy layer — zero API cost)
-    wiki_context = load_agent_wiki(capability_name)
-    # Returns contents of memory/wiki/{capability_name}/index.md
-    # + any referenced sub-pages
-
-    # Load compiled shared state (auto-generated from DB)
-    shared_context = load_compiled_state(capability_name)
-    # Returns contents of memory/wiki/deadlines-{matter}.md
-    # + memory/wiki/decisions-{matter}.md
-    # Relevant matters determined from PM_REGISTRY[capability_name]
-
-    # Build system prompt with both contexts
-    system = f"""{cap.system_prompt}
-
-## Your Knowledge (domain-specific)
-{wiki_context}
-
-## Current Shared State (deadlines, decisions)
-{shared_context}
-"""
-    # Agent sees this as plain text in its context — doesn't know the source
-    return await self.agent.run(system=system, query=query, ...)
+# Add to AGENT_WIKI_CONFIG
+'legal_pm': {
+    'project': 'legal_pm',
+    'root': 'memory/wiki/legal_pm/',
+    'shared_docs': ['documents/participation-agreement/',
+                    'documents/hagenauer-insolvency/'],
+    'compiled_state': ['deadlines-active.md', 'decisions-recent.md'],
+    'matters': ['hagenauer', 'cupial', 'lilienmatt'],
+},
 ```
 
-**The agent sees compiled knowledge in its context window. It doesn't know that part came from MD files and part was compiled from PostgreSQL.**
-
-### Layer C: Pipeline/Ingestion Routing (triggers)
-
-Email, Fireflies, Plod, WhatsApp pipelines also route through Cortex for shared writes:
-
-```python
-# In any trigger (email_trigger.py, fireflies_trigger.py, plod_trigger.py)
-
-# BEFORE (direct INSERT — no dedup, no audit):
-insert_deadline(description=text, due_date=date, source_type="email")
-
-# AFTER (routed through Cortex):
-await publish_event(
-    category='deadline',
-    payload={'description': text, 'due_date': str(date), 'priority': 'normal'},
-    source_agent='email_pipeline',       # or 'fireflies', 'plod_pipeline'
-    source_type='email',                 # or 'meeting', 'phone'
-    source_ref=f'email:{message_id}',    # traceability
-)
+### Step 4: Ingest Domain Documents (~2-4h per document)
+Run document extractor for each key document:
+```bash
+python scripts/ingest_document.py \
+  --source "Baker-Project/01_working/participation-agreement.pdf" \
+  --slug "participation-agreement" \
+  --type contract
 ```
 
-### What Each Agent's Wiki Folder Looks Like
+### Step 5: Test (~30 min)
+- Agent reads wiki at session start → verify context is loaded
+- Agent creates deadline → verify routes through Cortex
+- Agent searches documents → verify Basic Memory returns results
+- Agent writes knowledge → verify wiki folder updated
 
-```
-memory/wiki/
-  index.md                     ← Master index, referenced by CLAUDE.md
-
-  ao_pm/                       ← AO PM's domain knowledge (Karpathy — agent owns this)
-    index.md                   ← AO PM reads this first at session start
-    relationship.md            ← AO personality, preferences, communication style
-    capital-call.md            ← Current funding situation, numbers, phasing
-    project-status.md          ← What AO knows vs doesn't know
-    conversation-history.md    ← Key reactions, commitments from past meetings
-    open-questions.md          ← Moscow advisers, Wertheimer, unresolved items
-
-  movie_am/                    ← MOVIE AM's domain knowledge (agent owns this)
-    index.md
-    hotel-operations.md        ← F&B, staffing, MO obligations
-    debrief-status.md          ← Which topics covered, which pending
-    key-contacts.md            ← Mario Habicher, Francesco Cefalù, etc.
-    intel.md                   ← Accumulated operational intelligence
-
-  deadlines-hagenauer.md       ← Auto-compiled from DB (read-only for agents)
-  deadlines-ao.md              ← Auto-compiled from DB
-  deadlines-morv.md            ← Auto-compiled from DB
-  decisions-recent.md          ← Auto-compiled from DB
-  contacts-vip.md              ← Auto-compiled from DB
-```
-
-**Rule: Files inside `{agent_slug}/` are owned by that agent. Files outside are compiled from DB and read-only.**
-
-### Adding a New Agent (Future-Proofing)
-
-To add agent #15 (e.g., `legal_pm`):
-
-1. Define capability in `capability_sets` table (existing pattern)
-2. Create `memory/wiki/legal_pm/index.md` with initial domain knowledge
-3. Done. The routing infrastructure handles everything else:
-   - Tool calls auto-route through Cortex or wiki based on `CORTEX_TOOLS` / `WIKI_TOOLS`
-   - Wiki context auto-loaded at session start
-   - Shared state auto-compiled into readable MD
-   - Qdrant dedup catches cross-agent duplicates
-
-No prompt engineering for coordination. No teaching the agent about Cortex.
+**Total onboarding time per agent: ~3-5 hours** (mostly document ingestion).
+The framework, routing, Cortex, and Basic Memory are shared infrastructure — built once, used by all.
 
 ---
 
 ## Implementation Phases
 
-### Phase 1: Cortex Event Bus + Tool Routing + Agent Identity (~8h)
+### Phase 1: Basic Memory + Obsidian + Document Extraction (~10h)
 
-1. Create `cortex_events` table (migration SQL above)
-2. Create `models/cortex.py` with `publish_event()` — single entry point for all shared writes
-3. Add `created_by_agent` column to `deadlines` and `decisions` tables
-4. Implement tool routing in `ToolExecutor.execute()` — classify CORTEX_TOOLS vs WIKI_TOOLS
-5. Rewire all CORTEX_TOOLS to route through `publish_event()`
-6. Rewire MCP `baker_add_deadline` to use `publish_event()` (fixes raw INSERT bypass)
-7. Add audit logging to `baker_actions` for all agent tool calls
-8. Fix `store_decision` silent failure in MOVIE AM
-9. Create `memory/wiki/ao_pm/` and `memory/wiki/movie_am/` with initial index.md files
-10. Add `load_agent_wiki()` to `capability_runner.py` — loads agent's wiki at session start
+1. Install Basic Memory (self-hosted Docker on Render, or local + remote MCP)
+2. Set up Obsidian vault at `memory/wiki/`
+3. Create initial wiki structure: `ao_pm/`, `movie_am/`, `documents/`
+4. Build document extractor (`scripts/ingest_document.py`):
+   - PDF → markdown (using Claude vision or PyPDF2 + structure detection)
+   - Excel → markdown tables (using pandas)
+   - DOCX → markdown (using python-docx)
+   - All output as wiki pages with [[links]]
+5. Extract AO PM's key documents:
+   - HMA (MO Vienna management agreement)
+   - Participation Agreement
+   - FTC Table v008 (already done as `ao-ftc-table-explanations.md` — migrate)
+   - Hagenauer insolvency filing
+6. Extract MOVIE AM's key documents:
+   - HMA (same, shared with AO PM)
+   - Hotel operating reports
+   - Debrief materials
+7. Populate agent wiki folders with current knowledge (migrate from existing view files + PM state)
+8. Wire Basic Memory MCP into `capability_runner.py` for context loading
+9. Configure `AGENT_WIKI_CONFIG` for AO PM and MOVIE AM
+10. Director installs Obsidian, points vault at `memory/wiki/`, installs git plugin
 
-**Files:** `models/cortex.py` (new), `models/deadlines.py`, `baker_mcp/baker_mcp_server.py`, `orchestrator/agent.py`, `capability_runner.py`, `dashboard.py` (migration), `memory/wiki/ao_pm/index.md` (new), `memory/wiki/movie_am/index.md` (new)
+**Files:** `scripts/ingest_document.py` (new), `memory/wiki/**` (new), `capability_runner.py`, Docker config for Basic Memory
 
-### Phase 2: Qdrant Semantic Dedup (~6h)
+### Phase 2: Cortex Event Bus + Tool Routing (~8h)
+
+1. Create `cortex_events` table
+2. Create `models/cortex.py` with `publish_event()`
+3. Add `created_by_agent` column to `deadlines` and `decisions`
+4. Implement tool routing in `ToolExecutor.execute()` (CORTEX / WIKI / DOC classification)
+5. Rewire all shared-write tools through `publish_event()`
+6. Rewire MCP `baker_add_deadline` through `publish_event()`
+7. Add audit logging to `baker_actions`
+8. Fix `store_decision` silent failure
+9. Wire Cortex post-write → Basic Memory wiki update (compiled state pages)
+
+**Files:** `models/cortex.py` (new), `models/deadlines.py`, `baker_mcp/baker_mcp_server.py`, `orchestrator/agent.py`, `dashboard.py`
+
+### Phase 3: Qdrant Semantic Dedup (~6h)
 
 1. Create `cortex_obligations` Qdrant collection
-2. Implement `check_existing_obligation()` — pre-write gate
-3. Implement `register_obligation()` — post-write registration
-4. Wire into `publish_event()` flow: check Qdrant → if match, merge → if new, create + register
-5. Backfill: embed existing active deadlines into Qdrant collection
-6. Rewire email pipeline paths (Path A + Path B) to use `publish_event()`
-7. Rewire Fireflies trigger to use `publish_event()`
+2. Implement `check_existing_obligation()` pre-write gate
+3. Wire into `publish_event()` flow
+4. Backfill existing active deadlines
+5. Rewire email pipeline + Fireflies through `publish_event()`
 
 **Files:** `models/cortex.py`, `triggers/email_trigger.py`, `triggers/fireflies_trigger.py`
 
-### Phase 3: Wiki Compilation Layer (~6h)
+### Phase 4: Dashboard + Conflict Resolution (~4h)
 
-1. Create `memory/wiki/` directory structure with `index.md`
-2. Implement wiki compilers for: deadlines, decisions, contacts, matters
-3. Wire compilation trigger into `publish_event()` post-write hook
-4. Add `CLAUDE.md` references to wiki pages
-5. Implement periodic full recompilation (daily, or on `render_start`)
-6. Dashboard: show "Intent Feed" card with pending/merged/conflict counts
+1. Dashboard "Intent Feed" card — pending/merged/conflict counts
+2. Agent attribution badges on deadlines ("via AO PM", "via email")
+3. Conflict resolution UI — Director resolves disagreements
+4. Wiki compiled state shown in dashboard sidebar
 
-**Files:** `models/wiki_compiler.py` (new), `memory/wiki/*.md` (new), `CLAUDE.md`, `dashboard.py`
+**Files:** `dashboard.py`, `static/app.js`
 
-### Phase 4: Plod + Future Sources (~4h)
+### Phase 5: Plod + Agent Onboarding Template (~4h)
 
-1. Add Plod webhook ingestion (same pattern as Fireflies)
-2. Wire Plod → `publish_event()` with `source_type="phone"`, `source_agent="plod_pipeline"`
-3. Cross-source dedup automatically handled by Qdrant gate
-4. Wiki auto-updates when Plod creates new obligations
+1. Plod webhook → `publish_event()` integration
+2. Create `scripts/onboard_agent.py` — automated agent setup:
+   - Creates capability_sets row from template
+   - Creates wiki folder structure
+   - Configures AGENT_WIKI_CONFIG entry
+   - Runs initial document ingestion
+   - Generates test queries
+3. Document the onboarding workflow in `memory/wiki/baker-ops/onboarding.md`
+4. Test: onboard a third agent (e.g., `legal_pm`) using the workflow
 
-**Files:** `triggers/plod_trigger.py` (new), `dashboard.py`
+**Files:** `scripts/onboard_agent.py` (new), `triggers/plod_trigger.py` (new), `memory/wiki/baker-ops/onboarding.md` (new)
 
 ---
 
-## Files Modified
+## Files Summary
 
-### New files:
-- `models/cortex.py` — Event bus: `publish_event()`, resolver, `check_existing_obligation()`
-- `models/wiki_compiler.py` — Karpathy-pattern wiki compilation from DB state
-- `memory/wiki/index.md` — Auto-compiled wiki index
-- `memory/wiki/deadlines-*.md` — Compiled deadline pages by matter
-- `memory/wiki/decisions-*.md` — Compiled decision pages
-- `triggers/plod_trigger.py` — Plod ingestion (Phase 4)
+### New:
+- `scripts/ingest_document.py` — PDF/Excel/DOCX → wiki pages extractor
+- `scripts/onboard_agent.py` — Automated agent onboarding (capability + wiki + config)
+- `models/cortex.py` — Event bus, `publish_event()`, resolver
+- `memory/wiki/**` — Obsidian vault (agent knowledge + documents + compiled state)
+- `triggers/plod_trigger.py` — Plod integration
+- `memory/wiki/baker-ops/onboarding.md` — Agent onboarding playbook
 
-### Modified files:
-- `models/deadlines.py` — Add `created_by_agent`, wire through `publish_event()`
-- `baker_mcp/baker_mcp_server.py` — Replace raw INSERT with `publish_event()`
-- `orchestrator/agent.py` — All write tools route through `publish_event()`, add audit, fix `store_decision`
-- `triggers/email_trigger.py` — Both paths route through `publish_event()`
+### Modified:
+- `capability_runner.py` — Wiki context loading via Basic Memory MCP
+- `orchestrator/agent.py` — Tool routing (CORTEX / WIKI / DOC), audit logging, fix `store_decision`
+- `models/deadlines.py` — `created_by_agent` column
+- `baker_mcp/baker_mcp_server.py` — Route through `publish_event()`
+- `triggers/email_trigger.py` — Route through `publish_event()`
 - `triggers/fireflies_trigger.py` — Route through `publish_event()`
-- `dashboard.py` — Migration SQL, agent badges, Intent Feed card
-- `CLAUDE.md` — Reference wiki pages
-
-### Modified (routing layer):
-- `capability_runner.py` — Add wiki context loading at session start (`load_agent_wiki()` + `load_compiled_state()`)
-- `orchestrator/agent.py` — `ToolExecutor.execute()` classifies tools into CORTEX_TOOLS vs WIKI_TOOLS and routes accordingly
+- `dashboard.py` — Migration, Intent Feed card, agent badges
+- `CLAUDE.md` — Reference wiki, onboarding workflow
 
 ### Do NOT Touch:
 - `pipeline.py` — Pipeline flow unchanged
 - `capability_registry.py` — Tool filtering unchanged
-- Agent system prompts — No coordination logic in prompts. Agents stay dumb about infrastructure.
+- Agent system prompts — Agents stay dumb about infrastructure
 
 ---
 
 ## Quality Checkpoints
 
-**Routing (agents stay dumb):**
-1. AO PM calls `create_deadline` → verify it routed through Cortex (check `cortex_events` row)
-2. AO PM calls `update_pm_state` → verify it wrote to `memory/wiki/ao_pm/` (NOT to PostgreSQL)
-3. AO PM's system prompt → verify it contains wiki context (no explicit Cortex/routing instructions)
-4. Add new agent `legal_pm` → verify only needs: capability_sets row + `memory/wiki/legal_pm/index.md`
+**Document access (Phase 1):**
+1. AO PM searches "participation agreement dilution clause" → Basic Memory returns full section text
+2. AO PM reads [[ftc-table-v008/sources-2026]] → sees every row with numbers
+3. Director opens Obsidian → sees graph with documents linked to matters
+4. New document ingested → wiki pages created with [[links]] → searchable immediately
 
-**Cortex event bus:**
-5. Create deadline via Cowork MCP → verify `cortex_events` row + `created_by_agent = 'cowork'`
-6. Create deadline via AO PM agent → verify `created_by_agent = 'ao_pm'`
-7. Create near-duplicate deadline (different words, same meaning) → verify Qdrant catches it, status = 'merged'
-8. Create deadline via email pipeline → verify routes through `publish_event()`
-9. Check `baker_actions` after agent creates deadline → verify audit row exists
+**Routing (Phase 2):**
+5. AO PM calls `create_deadline` → routed through Cortex → `cortex_events` row created
+6. AO PM calls `write_note` → routed to Basic Memory → `ao_pm/` folder updated
+7. AO PM's system prompt contains wiki context but no routing instructions
 
-**Wiki compilation:**
-10. After deadline creation → verify wiki page updated automatically
-11. MOVIE AM calls `store_decision` → verify it works (was silently failing)
-12. Dashboard Intent Feed → verify shows pending/merged/conflict counts
-13. Reload page → verify wiki files contain fresh compiled state
-14. AO PM session start → verify `memory/wiki/ao_pm/index.md` + compiled deadlines in context
+**Dedup (Phase 3):**
+8. Near-duplicate deadline (different words, same meaning) → Qdrant catches, status = 'merged'
+9. Email + Fireflies + WhatsApp mention same obligation → one canonical deadline
+
+**Onboarding (Phase 5):**
+10. Run `onboard_agent.py legal_pm` → capability created, wiki folder ready, config set
+11. New agent reads wiki at session start → full context loaded
+12. New agent creates deadline → routes through Cortex without any custom code
 
 ## Verification SQL
 
 ```sql
 -- Cortex event flow
-SELECT id, event_type, category, source_agent, status, canonical_id, created_at
+SELECT id, event_type, category, source_agent, status, canonical_id
 FROM cortex_events ORDER BY created_at DESC LIMIT 10;
 
 -- Agent attribution
@@ -482,39 +510,29 @@ FROM deadlines WHERE created_at > NOW() - INTERVAL '1 day'
 ORDER BY created_at DESC LIMIT 10;
 
 -- Merged duplicates
-SELECT e1.id, e1.payload->>'description' as original,
-       e2.id as merged_id, e2.payload->>'description' as duplicate,
-       e2.source_agent
+SELECT e1.payload->>'description' as original, e2.payload->>'description' as duplicate,
+       e2.source_agent, e2.status
 FROM cortex_events e1
 JOIN cortex_events e2 ON e2.merged_into = e1.id
 ORDER BY e1.created_at DESC LIMIT 10;
-
--- Audit trail
-SELECT action_type, trigger_source, created_at
-FROM baker_actions WHERE action_type LIKE 'agent_tool:%'
-ORDER BY created_at DESC LIMIT 10;
 ```
 
 ---
 
 ## Architecture Decision
 
-**Baker Cortex** = two-layer architecture combining:
-- **Karpathy pattern** (compiled MD wiki for zero-cost agent reads)
-- **Anthropic pattern** (append-only event log for multi-agent write safety)
-- **Industry consensus** (Qdrant semantic dedup for cross-source obligation matching)
+**Baker Cortex** = three components:
 
-No new infrastructure required — uses existing PostgreSQL (Neon) + Qdrant Cloud + Voyage AI.
+1. **Obsidian + Basic Memory** — Knowledge layer. Full document extraction. Agent reads via MCP. Director browses in Obsidian. Karpathy pattern.
+2. **PostgreSQL + Qdrant Cortex Bus** — Shared write coordination. Semantic dedup. Append-only events. Anthropic pattern.
+3. **Tool Router** — Invisible to agents. Classifies every write. Routes to wiki or Cortex. Agents stay dumb.
 
-**Graduation path if needed:**
-- 20+ agents with latency issues → PostgreSQL `LISTEN/NOTIFY` for async resolution
-- Cross-service agents → Temporal.io for durable workflow orchestration
-- Enterprise scale → Full CQRS with materialized views
+**Agent onboarding = 3-5 hours:** capability row + wiki folder + config + document ingestion. Framework is shared. No custom coordination code per agent.
 
 **Sources:**
-- Anthropic Managed Agents (Apr 8, 2026) — append-only event log architecture
-- Harrison Chase "Your Harness, Your Memory" (Apr 11) — own your persistence, memory > model
-- Karpathy LLM Wiki (Apr 3) — compiled MD knowledge base, zero retrieval cost
-- Sherwood/Sazabi (Apr 10) — shared memory race conditions, git as coordination
-- RoboRhythms — unconditional Qdrant retrieval before write (production pattern)
-- Databricks/ZenML — insert-only state, no concurrent row mutation
+- Anthropic Managed Agents (Apr 8) — append-only event log
+- Harrison Chase (Apr 11) — "Memory > model." Own your persistence.
+- Karpathy LLM Wiki (Apr 3) — full extraction into MD, zero retrieval cost
+- Basic Memory (Apr 12) — open source wiki engine with MCP + Obsidian + semantic search
+- Sherwood/a16z (Apr 10) — shared agent memory via git
+- RoboRhythms — unconditional retrieval before write
