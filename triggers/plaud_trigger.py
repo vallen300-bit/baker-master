@@ -390,6 +390,7 @@ def check_new_plaud_recordings():
                     source_type="plaud",
                     source_id=source_id,
                     sender_name="",
+                    source_agent="meeting_pipeline",
                 )
             except Exception as _e:
                 logger.debug(f"Deadline extraction failed for Plaud {source_id}: {_e}")
@@ -537,6 +538,7 @@ def backfill_plaud():
                     source_type="plaud",
                     source_id=source_id,
                     sender_name="",
+                    source_agent="meeting_pipeline",
                 )
             except Exception:
                 pass

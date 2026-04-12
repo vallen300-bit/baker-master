@@ -930,6 +930,7 @@ def _process_email_threads(new_threads: list):
                 source_id=message_id,
                 sender_name=metadata.get("primary_sender", ""),
                 sender_email=metadata.get("primary_sender_email", ""),
+                source_agent="email_pipeline",
             )
         except Exception as _e:
             logger.debug(f"Deadline extraction failed for email {message_id}: {_e}")

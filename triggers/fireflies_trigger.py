@@ -224,15 +224,38 @@ Rules:
         except (ValueError, TypeError):
             _dd = datetime.now(timezone.utc) + timedelta(days=3)
         priority = "high" if c.get("urgency") == "high" else "normal"
-        did = insert_deadline(
-            description=f"[Commitment to {to_whom}] {desc}" if to_whom else f"[Meeting commitment] {desc}",
-            due_date=_dd,
-            source_type="meeting",
-            source_id=f"commitment-meeting:{source_id}",
-            confidence="medium",
-            priority=priority,
-            source_snippet=f"Meeting: {meeting_title}\nParticipants: {participants}",
-        )
+        # CORTEX-PHASE-2B-II: Route through event bus when flag ON
+        _use_cortex = False
+        try:
+            from memory.store_back import SentinelStoreBack
+            _cstore = SentinelStoreBack._get_global_instance()
+            _use_cortex = _cstore.get_cortex_config('tool_router_enabled', False)
+        except Exception:
+            pass
+
+        _dl_desc = f"[Commitment to {to_whom}] {desc}" if to_whom else f"[Meeting commitment] {desc}"
+        if _use_cortex:
+            from models.cortex import cortex_create_deadline
+            did = cortex_create_deadline(
+                description=_dl_desc,
+                due_date=_dd,
+                source_type="meeting",
+                source_agent="meeting_pipeline",
+                confidence="medium",
+                priority=priority,
+                source_id=f"commitment-meeting:{source_id}",
+                source_snippet=f"Meeting: {meeting_title}\nParticipants: {participants}",
+            )
+        else:
+            did = insert_deadline(
+                description=_dl_desc,
+                due_date=_dd,
+                source_type="meeting",
+                source_id=f"commitment-meeting:{source_id}",
+                confidence="medium",
+                priority=priority,
+                source_snippet=f"Meeting: {meeting_title}\nParticipants: {participants}",
+            )
         if did:
             inserted += 1
 
@@ -347,6 +370,7 @@ def check_new_transcripts():
                     source_type="fireflies",
                     source_id=source_id,
                     sender_name=metadata.get("organizer", ""),
+                    source_agent="meeting_pipeline",
                 )
             except Exception as _e:
                 logger.debug(f"Deadline extraction failed for transcript {source_id}: {_e}")
@@ -513,6 +537,7 @@ def backfill_fireflies():
                     source_type="fireflies",
                     source_id=source_id,
                     sender_name=formatted.get("metadata", {}).get("organizer", ""),
+                    source_agent="meeting_pipeline",
                 )
             except Exception:
                 pass

@@ -56,6 +56,7 @@ def extract_deadlines(
     sender_name: str = "",
     sender_email: str = "",
     sender_whatsapp: str = "",
+    source_agent: str = "",
 ) -> int:
     """
     Extract deadlines from ingested content using Claude Haiku.
@@ -146,15 +147,38 @@ def extract_deadlines(
 
         snippet = content
 
-        dl_id = insert_deadline(
-            description=description,
-            due_date=due_date,
-            source_type=source_type,
-            confidence=confidence,
-            priority=priority,
-            source_id=source_id,
-            source_snippet=snippet,
-        )
+        # CORTEX-PHASE-2B-II: Route through event bus when flag ON
+        _use_cortex = False
+        try:
+            from memory.store_back import SentinelStoreBack
+            _cstore = SentinelStoreBack._get_global_instance()
+            _use_cortex = _cstore.get_cortex_config('tool_router_enabled', False)
+        except Exception:
+            pass
+
+        if _use_cortex:
+            from models.cortex import cortex_create_deadline
+            dl_id = cortex_create_deadline(
+                description=description,
+                due_date=due_date,
+                source_type=source_type,
+                source_agent=source_agent or f"{source_type}_pipeline",
+                confidence=confidence,
+                priority=priority,
+                source_id=source_id,
+                source_snippet=snippet,
+            )
+        else:
+            dl_id = insert_deadline(
+                description=description,
+                due_date=due_date,
+                source_type=source_type,
+                confidence=confidence,
+                priority=priority,
+                source_id=source_id,
+                source_snippet=snippet,
+            )
+
         if dl_id:
             inserted += 1
             conf_label = "SOFT" if confidence == "soft" else "HARD"

@@ -480,3 +480,160 @@ def _auto_queue_insights(
             logger.warning("_auto_queue_insights failed for %s: %s", pm_slug, e)
         finally:
             _put_conn(conn)
+
+
+# ─── Convenience Wrappers (Phase 2B-ii) ───
+
+def cortex_create_deadline(
+    description: str,
+    due_date,  # datetime or str
+    source_type: str,
+    source_agent: str,
+    confidence: str = "medium",
+    priority: str = "normal",
+    source_id: str = None,
+    source_snippet: str = None,
+) -> Optional[int]:
+    """
+    Create a deadline through the Cortex event bus.
+    1. INSERT via legacy insert_deadline()
+    2. Set source_agent on the row
+    3. Publish event (dedup + audit + vector upsert)
+
+    Returns deadline ID or None. publish_event failure is non-fatal.
+    """
+    from models.deadlines import insert_deadline
+    from datetime import datetime, timezone
+
+    # Normalize due_date to datetime
+    if isinstance(due_date, str):
+        try:
+            due_date = datetime.fromisoformat(due_date)
+            if due_date.tzinfo is None:
+                due_date = due_date.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            logger.warning("cortex_create_deadline: invalid due_date %s", due_date)
+            return None
+
+    # 1. Legacy INSERT
+    dl_id = insert_deadline(
+        description=description,
+        due_date=due_date,
+        source_type=source_type,
+        confidence=confidence,
+        priority=priority,
+        source_id=source_id,
+        source_snippet=source_snippet,
+    )
+    if not dl_id:
+        return None
+
+    # 2. Set source_agent
+    try:
+        conn = _get_conn()
+        if conn:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE deadlines SET source_agent = %s WHERE id = %s",
+                (source_agent, dl_id),
+            )
+            conn.commit()
+            cur.close()
+            _put_conn(conn)
+    except Exception as e:
+        logger.warning("cortex_create_deadline: source_agent update failed: %s", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        _put_conn(conn)
+
+    # 3. Publish event (non-fatal)
+    due_str = due_date.strftime("%Y-%m-%d") if hasattr(due_date, 'strftime') else str(due_date)
+    try:
+        publish_event(
+            event_type="accepted",
+            category="deadline",
+            source_agent=source_agent,
+            source_type=source_type,
+            payload={
+                "description": description,
+                "due_date": due_str,
+                "priority": priority,
+                "confidence": confidence,
+            },
+            source_ref=source_id,
+            canonical_id=dl_id,
+        )
+    except Exception as e:
+        logger.warning("cortex_create_deadline: publish_event failed (non-fatal): %s", e)
+
+    return dl_id
+
+
+def cortex_store_decision(
+    decision: str,
+    source_agent: str,
+    reasoning: str = "",
+    confidence: str = "high",
+    trigger_type: str = "pipeline",
+    project: str = "",
+) -> Optional[int]:
+    """
+    Store a decision through the Cortex event bus.
+    1. INSERT via legacy log_decision()
+    2. Set source_agent on the row
+    3. Publish event (dedup + audit + insights pipeline)
+
+    Returns decision ID or None. publish_event failure is non-fatal.
+    """
+    # 1. Legacy INSERT
+    store = _get_store()
+    dec_id = store.log_decision(
+        decision=decision,
+        reasoning=reasoning,
+        confidence=confidence,
+        trigger_type=trigger_type,
+    )
+    if not dec_id:
+        return None
+
+    # 2. Set source_agent
+    try:
+        conn = _get_conn()
+        if conn:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE decisions SET source_agent = %s WHERE id = %s",
+                (source_agent, dec_id),
+            )
+            conn.commit()
+            cur.close()
+            _put_conn(conn)
+    except Exception as e:
+        logger.warning("cortex_store_decision: source_agent update failed: %s", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        _put_conn(conn)
+
+    # 3. Publish event (non-fatal)
+    try:
+        publish_event(
+            event_type="accepted",
+            category="decision",
+            source_agent=source_agent,
+            source_type=trigger_type,
+            payload={
+                "decision": decision,
+                "reasoning": reasoning,
+                "confidence": confidence,
+                "project": project,
+            },
+            canonical_id=dec_id,
+        )
+    except Exception as e:
+        logger.warning("cortex_store_decision: publish_event failed (non-fatal): %s", e)
+
+    return dec_id

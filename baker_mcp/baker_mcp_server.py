@@ -755,18 +755,43 @@ def _dispatch(name: str, args: dict) -> str:
         reasoning = args.get("reasoning", "")
         confidence = args.get("confidence", "high")
         project = args.get("project", "")
-        metadata = json.dumps({"source": "cowork_mcp", "project": project}) if project else json.dumps({"source": "cowork_mcp"})
-        row = _write(
-            """
-            INSERT INTO decisions (decision, reasoning, confidence, trigger_type, metadata, created_at)
-            VALUES (%s, %s, %s, 'cowork_session', %s::jsonb, NOW())
-            RETURNING id, decision, confidence
-            """,
-            (decision, reasoning, confidence, metadata),
-        )
-        if row:
-            return f"Decision stored (id={row['id']}, confidence={row['confidence']}):\n  {row['decision']}"
-        return "Error: failed to store decision"
+
+        # CORTEX-PHASE-2B-II: Route through event bus when flag ON
+        _use_cortex = False
+        try:
+            from memory.store_back import SentinelStoreBack
+            _store = SentinelStoreBack._get_global_instance()
+            _use_cortex = _store.get_cortex_config('tool_router_enabled', False)
+        except Exception:
+            pass
+
+        if _use_cortex:
+            from models.cortex import cortex_store_decision
+            dec_id = cortex_store_decision(
+                decision=decision,
+                source_agent="cowork",
+                reasoning=reasoning,
+                confidence=confidence,
+                trigger_type="cowork_session",
+                project=project,
+            )
+            if dec_id:
+                return f"Decision stored via Cortex (id={dec_id}, confidence={confidence}):\n  {decision}"
+            return "Error: failed to store decision"
+        else:
+            # Legacy path (feature flag OFF)
+            metadata = json.dumps({"source": "cowork_mcp", "project": project}) if project else json.dumps({"source": "cowork_mcp"})
+            row = _write(
+                """
+                INSERT INTO decisions (decision, reasoning, confidence, trigger_type, metadata, created_at)
+                VALUES (%s, %s, %s, 'cowork_session', %s::jsonb, NOW())
+                RETURNING id, decision, confidence
+                """,
+                (decision, reasoning, confidence, metadata),
+            )
+            if row:
+                return f"Decision stored (id={row['id']}, confidence={row['confidence']}):\n  {row['decision']}"
+            return "Error: failed to store decision"
 
     elif name == "baker_add_deadline":
         description = args["description"]
@@ -774,17 +799,44 @@ def _dispatch(name: str, args: dict) -> str:
         priority = args.get("priority", "normal")
         source_snippet = args.get("source_snippet", "")
         confidence = args.get("confidence", "high")
-        row = _write(
-            """
-            INSERT INTO deadlines (description, due_date, source_type, source_id, source_snippet, confidence, priority, status)
-            VALUES (%s, %s, 'cowork_session', 'mcp', %s, %s, %s, 'active')
-            RETURNING id, description, due_date, priority
-            """,
-            (description, due_date, source_snippet, confidence, priority),
-        )
-        if row:
-            return f"Deadline created (id={row['id']}, priority={row['priority']}):\n  {row['description']}\n  Due: {row['due_date']}"
-        return "Error: failed to create deadline"
+
+        # CORTEX-PHASE-2B-II: Route through event bus when flag ON
+        _use_cortex = False
+        try:
+            from memory.store_back import SentinelStoreBack
+            _store = SentinelStoreBack._get_global_instance()
+            _use_cortex = _store.get_cortex_config('tool_router_enabled', False)
+        except Exception:
+            pass
+
+        if _use_cortex:
+            from models.cortex import cortex_create_deadline
+            dl_id = cortex_create_deadline(
+                description=description,
+                due_date=due_date,
+                source_type="cowork_session",
+                source_agent="cowork",
+                confidence=confidence,
+                priority=priority,
+                source_id="mcp",
+                source_snippet=source_snippet,
+            )
+            if dl_id:
+                return f"Deadline created via Cortex (id={dl_id}, priority={priority}):\n  {description}\n  Due: {due_date}"
+            return "Error: failed to create deadline"
+        else:
+            # Legacy path (feature flag OFF)
+            row = _write(
+                """
+                INSERT INTO deadlines (description, due_date, source_type, source_id, source_snippet, confidence, priority, status)
+                VALUES (%s, %s, 'cowork_session', 'mcp', %s, %s, %s, 'active')
+                RETURNING id, description, due_date, priority
+                """,
+                (description, due_date, source_snippet, confidence, priority),
+            )
+            if row:
+                return f"Deadline created (id={row['id']}, priority={row['priority']}):\n  {row['description']}\n  Due: {row['due_date']}"
+            return "Error: failed to create deadline"
 
     elif name == "baker_upsert_vip":
         name_val = args["name"]
