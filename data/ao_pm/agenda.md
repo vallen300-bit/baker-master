@@ -11,7 +11,10 @@
 - **Fund's EUR 5.7M — CORRECTED UNDERSTANDING:** This was a CASHED BANK GUARANTEE, not a voluntary capital contribution. Fund provided guarantee at construction start; DV cashed it to cover delay expenses. Fund "didn't feel anything." NOT an equity over-investment requiring AO rectification.
 - **EUR 2.5M Special Deal — CONFIRMED TO AO:** AO's prior 2.5M transfer sits OUTSIDE the 48/52 framework. AO gets EUR 4M claim at distribution (not 2.5M shareholder capital). Fund was told "we closed construction gap for 4M." Not factored in Fund relations.
 - **Bank Financing:** DV committed to AO: "From Monday I start working with all banks. We need a pillow. Not to take from shareholders."
-- **Next Steps:** (1) Edita finalizes table, (2) Capital call letter + Excel produced, (3) Letter sent to AO formalizing the 2.5/2.5/2 phasing.
+- **FINAL TABLE REPORTED (Apr 13):** `009_MOVIE_AO_Financing_Final_Reported.xlsx` (+ English version `_Eng`) sent to AO via WhatsApp. Supersedes Edita v009. Sheet="Aelios". EUR 27,134,844 total = 15,051,718 (provided) + 12,083,126 (to provide). Fund adjusted: EUR 2,062,458. Aelios adjusted: EUR 6,900,669. Apt Sales: EUR 3,120,000. Baker decisions #11557, #11558. Dropbox: `Oskolkov/03_Source_Of_Truth/The_Actual_Position/`.
+- **DRAWDOWN REQUESTS DRAFTED:** `LCG_Drawdown_Requests_AO_April2026.docx` — 3 formal requests under AO→LCG Loan Facility Agreement (Dec 16, 2025), Clause 2.1. EUR 2.5M / 2.5M / 2M. Issuer: LCG (Edita signs as Director). Addressee: AO personally. Payment: 2 Business Days, irrevocable. Dropbox: `Oskolkov/02_final/`.
+- **PARTICIPATION AGREEMENT UNSIGNED** — LCG↔Aelio PA (Jan 26, 2026 redline) NOT executed. Contains dilution clause (Clause 3). Must be signed by May 31 or no dilution leverage if AO defaults. Constantinos to finalize.
+- **Next Steps:** (1) WhatsApp AO before formal letter ("as discussed at FX Mayr"), (2) Edita signs Drawdown Request #1, (3) Push Constantinos on PA signature, (4) Await Edita response on 5 open items from Apr 12 briefing.
 
 ### 2. Hagenauer Austria Acquisition
 - **Hunting Phase:** reframe (sausage → hunt)
