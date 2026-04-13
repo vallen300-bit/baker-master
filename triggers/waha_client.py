@@ -60,6 +60,70 @@ def get_session_status(session: str = None) -> dict:
 
 
 # ------------------------------------------------------------------
+# LID Resolution (WHATSAPP-LID-RESOLUTION-1)
+# ------------------------------------------------------------------
+
+_lid_mem_cache: dict[str, Optional[str]] = {}
+
+
+def resolve_lid(lid: str) -> Optional[str]:
+    """Resolve a @lid WhatsApp ID to a @c.us phone number.
+
+    Resolution order:
+    1. In-memory cache (instant)
+    2. PostgreSQL whatsapp_lid_map table (fast)
+    3. WAHA API GET /api/{session}/lids/{lid} (network call)
+
+    Returns @c.us phone string or None if unresolvable.
+    Caches result at all levels (including None to avoid re-querying).
+    """
+    if not lid or not lid.endswith("@lid"):
+        return None
+
+    # 1. Memory cache
+    if lid in _lid_mem_cache:
+        return _lid_mem_cache[lid]
+
+    # 2. PostgreSQL cache
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        cached = store.get_lid_phone(lid)
+        if cached:
+            _lid_mem_cache[lid] = cached
+            return cached
+    except Exception:
+        pass
+
+    # 3. WAHA API
+    phone = None
+    try:
+        lid_escaped = lid.replace("@", "%40")
+        url = f"{config.waha.base_url}/api/{config.waha.session}/lids/{lid_escaped}"
+        resp = httpx.get(url, headers=_headers(), timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            pn = data.get("pn")
+            if pn:
+                phone = pn
+                logger.info(f"LID resolved via API: {lid} → {phone}")
+    except Exception as e:
+        logger.warning(f"WAHA LID API call failed for {lid}: {e}")
+
+    # Cache result (even None — avoids re-querying unresolvable LIDs)
+    _lid_mem_cache[lid] = phone
+    if phone:
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            store.cache_lid_phone(lid, phone, source="api")
+        except Exception:
+            pass
+
+    return phone
+
+
+# ------------------------------------------------------------------
 # Contacts endpoint (INTERACTION-PIPELINE-1)
 # ------------------------------------------------------------------
 

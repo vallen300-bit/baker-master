@@ -93,6 +93,9 @@ class SentinelStoreBack:
         # Ensure whatsapp_messages table exists (ARCH-7)
         self._ensure_whatsapp_messages_table()
 
+        # WHATSAPP-LID-RESOLUTION-1: Ensure LID mapping cache table exists
+        self._ensure_whatsapp_lid_map_table()
+
         # SLACK-STRUCTURED-1: Ensure slack_messages table exists
         self._ensure_slack_messages_table()
 
@@ -966,6 +969,33 @@ class SentinelStoreBack:
         finally:
             self._put_conn(conn)
 
+    def _ensure_whatsapp_lid_map_table(self):
+        """WHATSAPP-LID-RESOLUTION-1: Create LID→phone cache table."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS whatsapp_lid_map (
+                    lid TEXT PRIMARY KEY,
+                    phone TEXT,
+                    resolved_at TIMESTAMPTZ DEFAULT NOW(),
+                    source TEXT DEFAULT 'api'
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_lid_map_phone
+                    ON whatsapp_lid_map (phone)
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("whatsapp_lid_map table verified")
+        except Exception as e:
+            logger.warning(f"Could not ensure whatsapp_lid_map table: {e}")
+        finally:
+            self._put_conn(conn)
+
     def store_whatsapp_message(self, msg_id: str, sender: str = None,
                                sender_name: str = None, chat_id: str = None,
                                full_text: str = None, timestamp: str = None,
@@ -999,6 +1029,54 @@ class SentinelStoreBack:
             logger.error(f"store_whatsapp_message failed: {e}")
             conn.rollback()
             return False
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # LID Resolution Cache (WHATSAPP-LID-RESOLUTION-1)
+    # -------------------------------------------------------
+
+    def get_lid_phone(self, lid: str) -> Optional[str]:
+        """Look up cached phone number for a @lid ID. Returns @c.us format or None."""
+        conn = self._get_conn()
+        if not conn:
+            return None
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT phone FROM whatsapp_lid_map WHERE lid = %s LIMIT 1", (lid,))
+            row = cur.fetchone()
+            cur.close()
+            return row[0] if row else None
+        except Exception as e:
+            logger.warning(f"LID cache lookup failed: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            return None
+        finally:
+            self._put_conn(conn)
+
+    def cache_lid_phone(self, lid: str, phone: str, source: str = "api") -> None:
+        """Cache a @lid → @c.us mapping. Upsert — updates if exists."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO whatsapp_lid_map (lid, phone, source, resolved_at)
+                VALUES (%s, %s, %s, NOW())
+                ON CONFLICT (lid) DO UPDATE SET phone = EXCLUDED.phone, resolved_at = NOW()
+            """, (lid, phone, source))
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            logger.warning(f"LID cache write failed: {e}")
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         finally:
             self._put_conn(conn)
 

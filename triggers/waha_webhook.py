@@ -837,6 +837,44 @@ async def waha_webhook(
     has_media = payload.get("hasMedia", False)
     msg_id = payload.get("id", "")
 
+    # WHATSAPP-LID-RESOLUTION-1: Resolve @lid to @c.us phone number
+    original_lid = None
+    if sender.endswith("@lid"):
+        original_lid = sender
+        try:
+            from triggers.waha_client import resolve_lid
+            resolved = resolve_lid(sender)
+            if resolved:
+                sender = resolved
+                logger.info(f"LID resolved: {original_lid} → {sender}")
+            else:
+                logger.info(f"LID unresolved: {original_lid} (sender_name={sender_name})")
+        except Exception as e:
+            logger.warning(f"LID resolution failed for {sender}: {e}")
+
+    # If sender_name is still a raw number, try VIP name lookup by resolved phone
+    if sender_name and sender_name.replace("@lid", "").replace("@c.us", "").isdigit():
+        try:
+            from memory.store_back import SentinelStoreBack
+            _store_name = SentinelStoreBack._get_global_instance()
+            _conn_name = _store_name._get_conn()
+            if _conn_name:
+                try:
+                    _cur_name = _conn_name.cursor()
+                    _cur_name.execute(
+                        "SELECT name FROM vip_contacts WHERE whatsapp_id = %s LIMIT 1",
+                        (sender,),
+                    )
+                    _row_name = _cur_name.fetchone()
+                    if _row_name and _row_name[0]:
+                        sender_name = _row_name[0]
+                        logger.info(f"Resolved sender_name from VIP: {sender_name}")
+                    _cur_name.close()
+                finally:
+                    _store_name._put_conn(_conn_name)
+        except Exception:
+            pass
+
     if not message_body and not has_media:
         return {"status": "ignored", "reason": "empty"}
 
@@ -907,7 +945,7 @@ async def waha_webhook(
             msg_id=msg_id,
             sender=sender,
             sender_name=sender_name,
-            chat_id=sender,
+            chat_id=original_lid or sender,
             full_text=combined_body,
             timestamp=datetime.fromtimestamp(timestamp, tz=timezone.utc).isoformat() if timestamp else None,
             is_director=(sender == DIRECTOR_WHATSAPP),
