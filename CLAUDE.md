@@ -9,6 +9,12 @@ FastAPI (port 8080), Python 3.11+, PostgreSQL (Neon), Qdrant Cloud (Voyage AI vo
 1. **Code** — implement, debug, test, push. Syntax-check before committing.
 2. **PL** — scope work, sequence batches, think architecturally.
 
+## Four Principles
+1. **Always think before coding.** Avoid wrong assumptions, hidden confusion, missing trade-offs.
+2. **Simplicity first.** Avoid overcomplications, bloated abstractions.
+3. **Surgical changes.** Orthogonal edits — avoid touching code you shouldn't.
+4. **Goal-driven execution.** Tests first. Verifiable success criteria. Instead of "fix the bug" → write a test that reproduces it, then make it pass.
+
 ## Rules
 - **Plan mode** for non-trivial tasks (3+ steps). If something fails, STOP and re-plan.
 - **Demand elegance** — challenge your own approach. Skip for one-liners.
