@@ -2,7 +2,8 @@
 
 **Status:** DRAFT — Being built collaboratively with Director
 **Date started:** 13 April 2026
-**Participants:** Director + AI Head (Tier 3 session)
+**Session 2 stopped:** 14 April 2026 — 30 decisions (25 locked, 1 parked-in-place, 4 parked for study)
+**Participants:** Director + AI Head (Tier 3 session) + Cowork (architecture review)
 
 ---
 
@@ -249,8 +250,8 @@ Add `confidence FLOAT`, `last_accessed TIMESTAMP`, `access_count INT` to wiki_pa
 ### 27. Checkpoint-before-exhaustion on Tier 2
 When a `claude -p` session approaches ~150K tokens, it must save intermediate results to vault before continuing. Prevents lost work from context overflow. Pattern from Anthropic's multi-agent research system: "Agents save research plans to external memory before context window approaches 200,000 tokens."
 
-### 28. Qwen 3.5 4B as Baker SLM — primary triage model
-Fine-tune on 2,000 curated classification examples from Baker's email/WhatsApp history. 10-15 min training via MLX + QLoRA on Mac Mini. 3GB RAM, ~60-80 tok/s. Runs alongside Gemma 4 via Ollama. Zero ongoing cost. Knows Baker's matters, people, terminology. Replaces Gemini Pro for triage once trained. Training data pipeline: extract labeled examples from PostgreSQL → generate synthetic labels with Claude → curate and balance → JSONL format. Proof-of-concept on 1,000 examples first, full model after 2 weeks of Tier 2 event data.
+### 28. Baker SLM — PARKED for deeper study
+Domain-trained small language model (Qwen 3.5 4B or Gemma 4 E4B) as potential triage/content layer. Could replace Gemini Pro for classification and write Tier 1 dashboard content. Fine-tuning feasible on Mac Mini via MLX + QLoRA (10-15 min, 3GB RAM). BUT: Gemini Pro already works, costs ~$2-3/month, needs zero training or maintenance. SLM decision deferred until: (a) dedicated study session with Director, (b) volume/complexity justifies the training pipeline, (c) Tier 2 produces enough event data for quality fine-tuning. Not a launch requirement — a growth option. Research report: `outputs/RESEARCH_DOMAIN_SLM_PERSISTENT_INFERENCE.md`.
 
 ### 29. Four-tier memory consolidation
 Working memory (current session context) → Episodic memory (cortex_events — what happened) → Semantic memory (wiki_pages — what is true) → Procedural memory (schema/specialist configs — how to do things). Each tier has different retention: working = session, episodic = 90 days, semantic = permanent with confidence decay, procedural = permanent. Nightly consolidation job moves knowledge up the tiers.
@@ -258,11 +259,18 @@ Working memory (current session context) → Episodic memory (cortex_events — 
 ### 30. Nightly consolidation job — the brain sleeping
 Runs on Mac Mini overnight. Clusters the day's cortex_events → extracts patterns → updates wiki pages → decays confidence on untouched knowledge → flags contradictions for Director. Like memory consolidation during sleep. The system gets smarter overnight without any human input.
 
+## Parked Items
+
+1. **Signal classification** — walk through 1-2 months real WhatsApp/email messages with Director
+2. **Dashboard content ownership** — walk through live dashboard, classify each card by tier author
+3. **Baker SLM practical path** — 5-step pipeline: (1) collect training data from PG + vault, (2) format as instruction/response JSONL pairs, (3) fine-tune Qwen 3.5 4B via MLX on Mac Mini, (4) `ollama create baker-slm -f Modelfile`, (5) OpenClaw routes to it. Goal: local model that knows Baker's matters, people, terminology for triage. Cannot replace Claude for deep analysis — but answers "is this signal worth Claude's time?" better than any cloud API. Needs deeper study + setup as dedicated workstream.
+
 ## Next Steps
 
-- [ ] Complete research brief: domain SLMs + persistent inference (assigned to fresh Claude session)
+- [ ] ~~Complete research brief: domain SLMs + persistent inference~~ DONE — `outputs/RESEARCH_DOMAIN_SLM_PERSISTENT_INFERENCE.md`
 - [ ] Resolve signal classification with Director (parked — needs message review)
 - [ ] Resolve dashboard content ownership with Director (parked — needs dashboard walkthrough)
+- [ ] Baker SLM setup (parked — deeper study needed, dedicated workstream)
 - [ ] Write implementation brief for signal_queue table
 - [ ] Write implementation brief for Mac Mini reasoning engine + Obsidian vault
 - [ ] Design enriched card UI for dashboard
