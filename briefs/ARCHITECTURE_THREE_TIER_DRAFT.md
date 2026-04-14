@@ -237,12 +237,16 @@ CREATE TABLE signal_queue (
 
 ---
 
+### 24. Domain-trained Baker SLM as triage layer (not future — this architecture)
+Fine-tune a local small language model on Baker's domain data (wiki pages, extracted contracts, classified signals, VIP contacts, matter terminology). Runs locally on Mac Mini via Ollama + OpenClaw, free. Replaces Gemini Pro for triage AND Gemma for fallback — one model that knows Baker's world. Claude reserved strictly for deep analysis. Training data comes from the system itself (signals, cards, classifications). Fine-tuning via MLX (Apple Silicon) or Unsloth. Study NVIDIA Nemotron pattern (domain SLMs), persistent inference architecture, and industry best practices before implementation. Full research brief assigned separately.
+
 ## Next Steps
 
-- [ ] Resolve open questions with Director
-- [ ] Write implementation brief for signal_queue table (Phase 1B-alpha, ~3h)
-- [ ] Write implementation brief for Mac Mini reasoning engine (Phase 1B-beta, ~8-10h)
-- [ ] Define which Tier 1 signals auto-write to signal_queue
+- [ ] Complete research brief: domain SLMs + persistent inference (assigned to fresh Claude session)
+- [ ] Resolve signal classification with Director (parked — needs message review)
+- [ ] Resolve dashboard content ownership with Director (parked — needs dashboard walkthrough)
+- [ ] Write implementation brief for signal_queue table
+- [ ] Write implementation brief for Mac Mini reasoning engine + Obsidian vault
 - [ ] Design enriched card UI for dashboard
 
 ---
