@@ -240,6 +240,24 @@ CREATE TABLE signal_queue (
 ### 24. Domain-trained Baker SLM as triage layer (not future — this architecture)
 Fine-tune a local small language model on Baker's domain data (wiki pages, extracted contracts, classified signals, VIP contacts, matter terminology). Runs locally on Mac Mini via Ollama + OpenClaw, free. Replaces Gemini Pro for triage AND Gemma for fallback — one model that knows Baker's world. Claude reserved strictly for deep analysis. Training data comes from the system itself (signals, cards, classifications). Fine-tuning via MLX (Apple Silicon) or Unsloth. Study NVIDIA Nemotron pattern (domain SLMs), persistent inference architecture, and industry best practices before implementation. Full research brief assigned separately.
 
+### 25. Single-call intent+depth classifier
+`classify_intent()` returns `{intent, capability, depth, priority, matter}` in one structured JSON call — not two round-trips. Adopted from NVIDIA AI-Q pattern. Every signal classified once, routed once. Depth field tells Tier 1 whether to handle locally or write to signal_queue.
+
+### 26. Confidence scoring on wiki_pages
+Add `confidence FLOAT`, `last_accessed TIMESTAMP`, `access_count INT` to wiki_pages. Every read increments access_count. Confidence decays with `e^(-t/stability)` where stability increases with each access. Tier 2 reads high-confidence pages first. Stale knowledge decays naturally. Critical once vault grows beyond 50 pages.
+
+### 27. Checkpoint-before-exhaustion on Tier 2
+When a `claude -p` session approaches ~150K tokens, it must save intermediate results to vault before continuing. Prevents lost work from context overflow. Pattern from Anthropic's multi-agent research system: "Agents save research plans to external memory before context window approaches 200,000 tokens."
+
+### 28. Qwen 3.5 4B as Baker SLM — primary triage model
+Fine-tune on 2,000 curated classification examples from Baker's email/WhatsApp history. 10-15 min training via MLX + QLoRA on Mac Mini. 3GB RAM, ~60-80 tok/s. Runs alongside Gemma 4 via Ollama. Zero ongoing cost. Knows Baker's matters, people, terminology. Replaces Gemini Pro for triage once trained. Training data pipeline: extract labeled examples from PostgreSQL → generate synthetic labels with Claude → curate and balance → JSONL format. Proof-of-concept on 1,000 examples first, full model after 2 weeks of Tier 2 event data.
+
+### 29. Four-tier memory consolidation
+Working memory (current session context) → Episodic memory (cortex_events — what happened) → Semantic memory (wiki_pages — what is true) → Procedural memory (schema/specialist configs — how to do things). Each tier has different retention: working = session, episodic = 90 days, semantic = permanent with confidence decay, procedural = permanent. Nightly consolidation job moves knowledge up the tiers.
+
+### 30. Nightly consolidation job — the brain sleeping
+Runs on Mac Mini overnight. Clusters the day's cortex_events → extracts patterns → updates wiki pages → decays confidence on untouched knowledge → flags contradictions for Director. Like memory consolidation during sleep. The system gets smarter overnight without any human input.
+
 ## Next Steps
 
 - [ ] Complete research brief: domain SLMs + persistent inference (assigned to fresh Claude session)
