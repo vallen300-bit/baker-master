@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Domain SLMs + Persistent Inference — Baker Research</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #242836;
+    --border: #2e3345;
+    --text: #e0e0e6;
+    --text-dim: #8b8fa3;
+    --accent: #6c8cff;
+    --accent2: #4ecdc4;
+    --green: #4ecdc4;
+    --amber: #f0ad4e;
+    --red: #e74c5f;
+    --purple: #b68cff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    padding: 0;
+  }
+  .header {
+    background: linear-gradient(135deg, #1a1d27 0%, #242836 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 40px 0;
+    text-align: center;
+  }
+  .header h1 {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    margin-bottom: 8px;
+  }
+  .header .subtitle {
+    color: var(--text-dim);
+    font-size: 14px;
+  }
+  .container {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 40px 24px;
+  }
+  h2 {
+    font-size: 22px;
+    font-weight: 700;
+    margin: 48px 0 20px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--accent);
+    display: inline-block;
+  }
+  h3 {
+    font-size: 17px;
+    font-weight: 600;
+    margin: 32px 0 12px;
+    color: var(--accent2);
+  }
+  h4 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 20px 0 8px;
+    color: var(--purple);
+  }
+  p { margin: 12px 0; }
+  strong { color: #fff; }
+  code {
+    background: var(--surface2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    color: var(--accent);
+  }
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.5;
+    margin: 16px 0;
+  }
+  pre code {
+    background: none;
+    padding: 0;
+    color: var(--text);
+  }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin: 20px 0;
+  }
+  .card.highlight {
+    border-color: var(--accent);
+    background: linear-gradient(135deg, rgba(108,140,255,0.05), rgba(78,205,196,0.05));
+  }
+  .card.warn {
+    border-color: var(--amber);
+    background: rgba(240,173,78,0.05);
+  }
+  .card.success {
+    border-color: var(--green);
+    background: rgba(78,205,196,0.05);
+  }
+  .bottomline {
+    background: linear-gradient(135deg, rgba(108,140,255,0.1), rgba(78,205,196,0.1));
+    border: 2px solid var(--accent);
+    border-radius: 12px;
+    padding: 24px;
+    margin: 24px 0;
+    font-size: 15px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  th {
+    background: var(--surface2);
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 2px solid var(--border);
+    white-space: nowrap;
+  }
+  td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tr:hover td { background: rgba(108,140,255,0.03); }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .badge.green { background: rgba(78,205,196,0.15); color: var(--green); }
+  .badge.amber { background: rgba(240,173,78,0.15); color: var(--amber); }
+  .badge.red { background: rgba(231,76,95,0.15); color: var(--red); }
+  .badge.blue { background: rgba(108,140,255,0.15); color: var(--accent); }
+  .badge.purple { background: rgba(182,140,255,0.15); color: var(--purple); }
+  ul, ol { padding-left: 24px; margin: 12px 0; }
+  li { margin: 6px 0; }
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 24px;
+    margin: 24px 0;
+  }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .toc ol { padding-left: 20px; }
+  .toc li { margin: 4px 0; font-size: 14px; }
+  .sources {
+    margin-top: 48px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+  }
+  .sources a { color: var(--accent); text-decoration: none; font-size: 13px; }
+  .sources a:hover { text-decoration: underline; }
+  .sources li { margin: 4px 0; }
+  .flow-diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    margin: 20px 0;
+    font-family: 'SF Mono', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    white-space: pre;
+    overflow-x: auto;
+    color: var(--text-dim);
+  }
+  .flow-diagram .hl { color: var(--accent); font-weight: 600; }
+  .flow-diagram .g { color: var(--green); }
+  .flow-diagram .a { color: var(--amber); }
+  @media (max-width: 768px) {
+    .container { padding: 20px 16px; }
+    table { font-size: 12px; }
+    th, td { padding: 6px 8px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Domain SLMs + Persistent Inference</h1>
+  <div class="subtitle">Baker Three-Tier Architecture Research &mdash; 14 April 2026 &mdash; Architecture Decision #24</div>
+</div>
+
+<div class="container">
+
+<div class="toc">
+  <strong>Contents</strong>
+  <ol>
+    <li><a href="#exec">Executive Summary</a></li>
+    <li><a href="#comparison">Architecture Comparison: AI-Q vs Baker</a></li>
+    <li><a href="#slm">Domain SLM Feasibility</a></li>
+    <li><a href="#persistent">Persistent Inference Patterns</a></li>
+    <li><a href="#recommendations">Recommended Additions</a></li>
+    <li><a href="#training">Training Data Plan</a></li>
+    <li><a href="#questions">Open Questions</a></li>
+    <li><a href="#sources">Sources</a></li>
+  </ol>
+</div>
+
+<!-- ═══════════════════ 1. EXECUTIVE SUMMARY ═══════════════════ -->
+<h2 id="exec">1. Executive Summary</h2>
+
+<p>Baker's three-tier architecture (Render &rarr; Mac Mini &rarr; MacBook) is architecturally ahead of most production agent systems in 2026. The question was: <strong>can a domain-trained small language model replace cloud APIs for signal classification?</strong></p>
+
+<div class="bottomline">
+  <strong>Bottom line:</strong> Fine-tune <strong>Qwen 3.5 4B</strong> on 2,000 curated classification examples from Baker's email/WhatsApp history. Serve via Ollama alongside Gemma 4. Wire into <code>classify_intent()</code>. Total investment: <strong>2-3 days of work, zero ongoing cost.</strong>
+</div>
+
+<div class="card highlight">
+<strong>Key Findings:</strong>
+<ol>
+  <li><strong>Fine-tuning is feasible on Mac Mini M4 Pro (24GB).</strong> MLX + QLoRA can fine-tune a 7B model in 30 minutes. Full pipeline: MLX &rarr; fuse &rarr; GGUF &rarr; Ollama. Timeline: 2-3 days.</li>
+  <li><strong>Recommended base model: Qwen 3.5 4B or Gemma 4 E4B.</strong> Both fit on 24GB, run at 50-80 tok/s, co-exist with Gemma 4 12B.</li>
+  <li><strong>The case is latency and independence, not cost.</strong> Cloud classification costs &lt;$1/month. Local is 5-10x faster (50ms vs 300ms) and works offline.</li>
+  <li><strong>NVIDIA patterns are architecture references, not tools.</strong> Nemotron fine-tuning requires NVIDIA GPUs. But AI-Q's routing patterns are directly adoptable.</li>
+  <li><strong>Baker's persistent inference is already best-in-class.</strong> <code>cortex_events</code> matches Anthropic Managed Agents. Don't adopt frameworks &mdash; adopt the 3-4 missing patterns.</li>
+  <li><strong>Karpathy's LLM Wiki IS Baker Cortex v2.</strong> Missing pieces: confidence scoring, forgetting curves, nightly consolidation.</li>
+</ol>
+</div>
+
+<!-- ═══════════════════ 2. ARCHITECTURE COMPARISON ═══════════════════ -->
+<h2 id="comparison">2. Architecture Comparison: NVIDIA AI-Q vs Baker</h2>
+
+<table>
+  <tr><th>Dimension</th><th>NVIDIA AI-Q</th><th>Baker Three-Tier</th><th>Assessment</th></tr>
+  <tr><td><strong>Entry classifier</strong></td><td>Single LLM call &rarr; {intent, depth, meta_response}</td><td><code>classify_intent()</code> &rarr; capability match</td><td><span class="badge amber">Adopt</span> single-call pattern</td></tr>
+  <tr><td><strong>Routing tiers</strong></td><td>meta / shallow / deep</td><td>Tier 1 (8K) / Tier 2 (200K) / Tier 3 (1M)</td><td><span class="badge green">Aligned</span></td></tr>
+  <tr><td><strong>Deep research</strong></td><td>plan &rarr; iterate &rarr; cite (3 subagents)</td><td><code>baker_deep_analyses</code></td><td><span class="badge amber">Adopt</span> plan-iterate-cite</td></tr>
+  <tr><td><strong>State management</strong></td><td>LangGraph checkpoints</td><td><code>cortex_events</code> + <code>wiki_pages</code></td><td><span class="badge green">Baker is simpler &amp; more robust</span></td></tr>
+  <tr><td><strong>Human-in-the-loop</strong></td><td>Clarifier agent</td><td>Director approval (draft flow)</td><td><span class="badge green">Aligned</span></td></tr>
+  <tr><td><strong>Model routing</strong></td><td>YAML-defined cost/quality tiers</td><td>Hardcoded Python</td><td><span class="badge amber">Move to declarative config</span></td></tr>
+  <tr><td><strong>Agent definition</strong></td><td>YAML agent configs</td><td>Python capability sets</td><td><span class="badge blue">Phase 4 opportunity</span></td></tr>
+  <tr><td><strong>Reliability</strong></td><td>Middleware stack (retry, sanitize)</td><td>Ad-hoc try/except</td><td><span class="badge amber">Formalize middleware</span></td></tr>
+  <tr><td><strong>Infrastructure</strong></td><td>NVIDIA NIM + Kubernetes</td><td>Render + Mac Mini + PostgreSQL</td><td><span class="badge green">Simpler, cheaper, sufficient</span></td></tr>
+</table>
+
+<h3>Adopt from AI-Q</h3>
+<ol>
+  <li>Single-call intent+depth classifier (one structured JSON output)</li>
+  <li>YAML-driven workflow configs for agent onboarding</li>
+  <li>Plan-iterate-cite research with 5-level citation verification</li>
+  <li>Formal reliability middleware (retry, sanitize, timeout)</li>
+</ol>
+
+<h3>Ignore</h3>
+<ul>
+  <li>NIM microservices, Triton, TensorRT (NVIDIA-specific)</li>
+  <li>Kubernetes orchestration (overkill for single-instance)</li>
+  <li>LLM Router neural network (volume too low)</li>
+</ul>
+
+<!-- ═══════════════════ 3. DOMAIN SLM FEASIBILITY ═══════════════════ -->
+<h2 id="slm">3. Domain SLM Feasibility</h2>
+
+<div class="card success">
+  <strong>Hardware confirmed:</strong> Mac Mini M4 Pro, 24GB unified memory. Above 16GB minimum, well within range for models up to ~14B quantized.
+</div>
+
+<h3>Fine-Tuning Pipeline: MLX + QLoRA &rarr; GGUF &rarr; Ollama</h3>
+
+<table>
+  <tr><th>Step</th><th>Tool</th><th>Time</th><th>Notes</th></tr>
+  <tr><td>Data preparation</td><td>Python + Claude labeling</td><td>6-12h</td><td>Export from PostgreSQL, format as JSONL</td></tr>
+  <tr><td>Fine-tune (4B)</td><td><code>mlx_lm.lora</code></td><td>10-15 min</td><td>QLoRA, 1000 iters, batch 1</td></tr>
+  <tr><td>Fine-tune (7B)</td><td><code>mlx_lm.lora</code></td><td>30-45 min</td><td>~10-12GB peak RAM</td></tr>
+  <tr><td>Fuse adapter</td><td><code>mlx_lm.fuse</code></td><td>2-5 min</td><td>Merge LoRA into base</td></tr>
+  <tr><td>Convert to GGUF</td><td><code>convert_hf_to_gguf.py</code></td><td>5-10 min</td><td>Q4_K_M quantization</td></tr>
+  <tr><td>Import to Ollama</td><td><code>ollama create</code></td><td>1 min</td><td>Custom Modelfile</td></tr>
+  <tr><td><strong>Total</strong></td><td></td><td><strong>2-3 days</strong></td><td>Conservative, includes curation</td></tr>
+</table>
+
+<h3>Base Model Comparison</h3>
+
+<table>
+  <tr><th>Model</th><th>Params</th><th>Q4 RAM</th><th>Fine-tune 24GB?</th><th>Speed</th><th>Recommendation</th></tr>
+  <tr><td><strong>Qwen 3.5 4B</strong></td><td>4B</td><td>~3 GB</td><td><span class="badge green">Easy</span></td><td>60-80 tok/s</td><td><span class="badge blue">PRIMARY</span> Best instruction-following, multilingual</td></tr>
+  <tr><td><strong>Gemma 4 E4B</strong></td><td>9B (4.1B active)</td><td>~6 GB</td><td><span class="badge green">Yes</span></td><td>40-55 tok/s</td><td><span class="badge purple">ALTERNATIVE</span> Already in stack</td></tr>
+  <tr><td>Phi-4-mini</td><td>3.8B</td><td>~3 GB</td><td><span class="badge green">Easy</span></td><td>60-80 tok/s</td><td>Good reasoning, weaker multilingual</td></tr>
+  <tr><td>Qwen 2.5 7B</td><td>7B</td><td>~5 GB</td><td><span class="badge green">Yes</span></td><td>40-55 tok/s</td><td>Best accuracy, more training time</td></tr>
+  <tr><td>Llama 3.2 3B</td><td>3B</td><td>~2.5 GB</td><td><span class="badge green">Easy</span></td><td>70-90 tok/s</td><td>Fastest but weakest on nuance</td></tr>
+</table>
+
+<h3>Cost Comparison</h3>
+
+<table>
+  <tr><th>Approach</th><th>Per-classification</th><th>Monthly (3K calls)</th><th>Annual</th></tr>
+  <tr><td>Gemini Flash-Lite (cloud)</td><td>$0.00007</td><td>$0.21</td><td>$2.52</td></tr>
+  <tr><td>Claude Haiku (cloud)</td><td>$0.00019</td><td>$0.56</td><td>$6.72</td></tr>
+  <tr><td><strong>Fine-tuned local SLM</strong></td><td><strong>$0.00</strong></td><td><strong>$0.00</strong></td><td><strong>$0.00</strong></td></tr>
+</table>
+
+<div class="card warn">
+  <strong>The case is NOT cost.</strong> It's latency (50ms vs 300ms), reliability (no API failures), offline capability, and architectural independence. Cloud APIs cost under $1/month at Baker's volume.
+</div>
+
+<h3>Nemotron on Apple Silicon</h3>
+<p>Nemotron 3 Nano 4B inference works on Apple Silicon (~60+ tok/s, 2.84GB RAM). But <strong>all Nemotron fine-tuning requires NVIDIA GPUs</strong> (NeMo, CUDA, Slurm). Pre-trained Nemotron is a viable inference option but cannot be domain-adapted on Mac Mini.</p>
+
+<!-- ═══════════════════ 4. PERSISTENT INFERENCE ═══════════════════ -->
+<h2 id="persistent">4. Persistent Inference Patterns</h2>
+
+<h3>What It Means for Baker</h3>
+<p>When the AO PM processes a WhatsApp message about Hagenauer on day 47, it should know everything from days 1-46 without re-reading every transcript. <strong>The state is the product.</strong></p>
+
+<h3>Three Validated Production Patterns</h3>
+
+<div class="card success">
+  <h4>Pattern 1: Append-Only Event Log (Anthropic Managed Agents)</h4>
+  <p>Sessions are durable, append-only logs external to the context window. <code>getEvents()</code> enables flexible context interrogation. On crash, a new harness boots and resumes.</p>
+  <p><strong>&rarr; Baker already has this.</strong> <code>cortex_events</code> is the append-only log. <code>classify_intent()</code> + <code>capability_runner</code> is the stateless harness.</p>
+</div>
+
+<div class="card highlight">
+  <h4>Pattern 2: Three-Primitive Context Stack (Anthropic API-native)</h4>
+  <ol>
+    <li><strong>Tool-Result Clearing</strong> (~50K tokens) &mdash; replace old tool outputs with <code>[cleared]</code></li>
+    <li><strong>Compaction</strong> (~150K tokens) &mdash; LLM-summarize history</li>
+    <li><strong>Memory Tool</strong> (cross-session) &mdash; persistent file storage</li>
+  </ol>
+  <p><strong>&rarr; Baker should adopt for Tier 1.</strong> Capability runner calls can use compaction + clearing. Memory tool maps to <code>wiki_pages</code>.</p>
+</div>
+
+<div class="card">
+  <h4>Pattern 3: Checkpoint-Before-Exhaustion</h4>
+  <p>Agents save state to external storage when approaching context limits.</p>
+  <p><strong>&rarr; Tier 2 (Mac Mini, 200K) should checkpoint to PostgreSQL at ~150K.</strong></p>
+</div>
+
+<h3>Preventing Context Drift</h3>
+
+<table>
+  <tr><th>Strategy</th><th>Description</th><th>Baker Status</th></tr>
+  <tr><td><strong>Bounded compressed state</strong></td><td>Wiki pages overwritten, not appended</td><td><span class="badge green">Cortex v2</span></td></tr>
+  <tr><td><strong>Source grounding</strong></td><td>Every claim cites its source</td><td><span class="badge green">Deployed</span></td></tr>
+  <tr><td><strong>Periodic lint</strong></td><td>Contradiction detection, staleness, orphans</td><td><span class="badge green">Phase 3</span></td></tr>
+  <tr><td><strong>Write-path validation</strong></td><td>Semantic dedup before INSERT</td><td><span class="badge green">Phase 2B</span></td></tr>
+  <tr><td><strong>Confidence decay</strong></td><td>Untouched knowledge loses trust</td><td><span class="badge red">Not yet</span></td></tr>
+</table>
+
+<h3>Karpathy LLM Wiki = Baker Cortex v2</h3>
+
+<table>
+  <tr><th>Karpathy Layer</th><th>Baker Equivalent</th><th>Status</th></tr>
+  <tr><td><strong>Raw sources</strong></td><td>Dropbox &rarr; Obsidian <code>raw/</code></td><td><span class="badge blue">Planned</span></td></tr>
+  <tr><td><strong>Wiki</strong></td><td><code>wiki_pages</code> &rarr; Obsidian <code>wiki/</code></td><td><span class="badge green">14 pages</span></td></tr>
+  <tr><td><strong>Schema</strong></td><td>CLAUDE.md + capability configs</td><td><span class="badge green">Deployed</span></td></tr>
+  <tr><td><strong>Ingest</strong></td><td>Email/WA/meeting &rarr; cortex_events</td><td><span class="badge green">Phase 2B-II</span></td></tr>
+  <tr><td><strong>Query</strong></td><td>Wiki context loading</td><td><span class="badge green">Phase 1A</span></td></tr>
+  <tr><td><strong>Lint</strong></td><td>Wiki lint job</td><td><span class="badge green">Phase 3</span></td></tr>
+  <tr><td><strong>Confidence scoring</strong></td><td>&mdash;</td><td><span class="badge amber">Recommended</span></td></tr>
+  <tr><td><strong>Forgetting curves</strong></td><td>&mdash;</td><td><span class="badge amber">Recommended</span></td></tr>
+  <tr><td><strong>Knowledge graph</strong></td><td>&mdash;</td><td><span class="badge purple">At 200+ pages</span></td></tr>
+</table>
+
+<h3>Memory Consolidation Tiers</h3>
+<ul>
+  <li><strong>Working memory:</strong> current session context</li>
+  <li><strong>Episodic memory:</strong> <code>cortex_events</code> (what happened)</li>
+  <li><strong>Semantic memory:</strong> <code>wiki_pages</code> (what is true)</li>
+  <li><strong>Procedural memory:</strong> capability configs (how to do things)</li>
+</ul>
+
+<!-- ═══════════════════ 5. RECOMMENDATIONS ═══════════════════ -->
+<h2 id="recommendations">5. Recommended Additions to Baker Architecture</h2>
+
+<h3>Priority 1: Build Now <span class="badge green">Production-Validated</span></h3>
+
+<table>
+  <tr><th>#</th><th>Change</th><th>Effort</th><th>Where</th></tr>
+  <tr><td>A</td><td><strong>Single-call intent+depth classifier</strong> &mdash; returns {intent, capability, depth, priority} in one JSON</td><td>4h</td><td><code>capability_router.py</code></td></tr>
+  <tr><td>B</td><td><strong>Confidence scoring on wiki_pages</strong> &mdash; add confidence, last_accessed, access_count</td><td>2h</td><td><code>store_back.py</code></td></tr>
+  <tr><td>C</td><td><strong>Nightly consolidation job</strong> &mdash; cluster events, update wiki, decay confidence</td><td>8h</td><td><code>embedded_scheduler.py</code></td></tr>
+  <tr><td>D</td><td><strong>Compaction + clearing on Tier 1</strong> &mdash; Anthropic API-native context management</td><td>4h</td><td><code>capability_runner.py</code></td></tr>
+  <tr><td>E</td><td><strong>Fine-tune Baker classifier SLM</strong> &mdash; Qwen 3.5 4B, 2K examples, Ollama deploy</td><td>2-3 days</td><td>Mac Mini</td></tr>
+</table>
+
+<h3>Priority 2: Build During Tier 2 Implementation <span class="badge blue">Medium Priority</span></h3>
+
+<table>
+  <tr><th>#</th><th>Change</th><th>Effort</th></tr>
+  <tr><td>F</td><td><strong>Checkpoint-before-exhaustion</strong> on Mac Mini agents</td><td>4h</td></tr>
+  <tr><td>G</td><td><strong>Citation verification</strong> (5-level URL matching from AI-Q)</td><td>6h</td></tr>
+  <tr><td>H</td><td><strong>Forgetting curves</strong> (Ebbinghaus decay) on wiki_pages</td><td>4h</td></tr>
+  <tr><td>I</td><td><strong>YAML agent configs</strong> for Tier 2 specialist onboarding</td><td>8h</td></tr>
+</table>
+
+<h3>Priority 3: Evaluate Later <span class="badge purple">Low Priority</span></h3>
+
+<table>
+  <tr><th>#</th><th>Change</th><th>When</th><th>Why Wait</th></tr>
+  <tr><td>J</td><td><strong>Engraph</strong> knowledge graph overlay</td><td>200+ pages</td><td>Premature below threshold</td></tr>
+  <tr><td>K</td><td><strong>Claude Managed Agents API</strong> for Tier 1</td><td>Cost evaluation</td><td>May replace Render</td></tr>
+  <tr><td>L</td><td><strong>A2A protocol</strong> cross-agent comms</td><td>Ecosystem maturity</td><td>No standard yet</td></tr>
+</table>
+
+<!-- ═══════════════════ 6. TRAINING DATA ═══════════════════ -->
+<h2 id="training">6. Training Data Plan</h2>
+
+<h3>Available Data</h3>
+
+<table>
+  <tr><th>Source</th><th>Volume</th><th>Value</th></tr>
+  <tr><td>Classified emails (Gmail + Bluewin + Exchange)</td><td>~50K</td><td><span class="badge green">High</span></td></tr>
+  <tr><td>WhatsApp messages</td><td>~20K</td><td><span class="badge green">High</span></td></tr>
+  <tr><td>VIP contacts with roles</td><td>~500</td><td><span class="badge blue">Medium</span></td></tr>
+  <tr><td>Deadlines with priorities</td><td>~200</td><td><span class="badge blue">Medium</span></td></tr>
+  <tr><td>Wiki pages</td><td>14</td><td>Domain anchors</td></tr>
+  <tr><td>cortex_events</td><td>~500+</td><td>Routing decisions</td></tr>
+  <tr><td>Conversation memory</td><td>~200+</td><td>Question &rarr; capability</td></tr>
+</table>
+
+<h3>Target: 2,000-3,000 Curated Examples</h3>
+
+<div class="card">
+<strong>Format: JSONL (chat/instruction)</strong>
+<pre><code>{"conversations": [
+  {"from": "human", "value": "Classify this signal:\n\nSource: email\nFrom: Mario Habicher\nSubject: F&B Budget Overrun Q1\nBody: exceeded budget by EUR 400K..."},
+  {"from": "gpt", "value": "{\"intent\": \"financial_alert\", \"priority\": \"high\", \"matter\": \"movie_am\", \"capability\": \"baker-asset-mgmt\"}"}
+]}</code></pre>
+</div>
+
+<h3>Data Preparation Pipeline</h3>
+
+<table>
+  <tr><th>Step</th><th>Method</th><th>Time</th></tr>
+  <tr><td>1. Extract labeled examples</td><td>SQL from Baker's DB</td><td>2-4h</td></tr>
+  <tr><td>2. Generate synthetic labels</td><td>Claude batch classification (~$5-10)</td><td>2-3h</td></tr>
+  <tr><td>3. Curate and balance</td><td>Review, balance priorities/matters</td><td>4-8h</td></tr>
+  <tr><td>4. Split (80/10/10)</td><td>Train / validation / test</td><td>30 min</td></tr>
+</table>
+
+<h3>Class Balance Requirements</h3>
+<ul>
+  <li><strong>Priority levels:</strong> Equal representation (don't over-index on "normal")</li>
+  <li><strong>Matters:</strong> All active matters (Hagenauer, AO, MORV, Movie AM, etc.)</li>
+  <li><strong>Capabilities:</strong> All 21 capability sets</li>
+  <li><strong>Edge cases:</strong> Ambiguous messages, multi-matter, non-English (DE/FR/RU)</li>
+  <li><strong>VIP mentions:</strong> Include examples with known contacts</li>
+</ul>
+
+<!-- ═══════════════════ 7. OPEN QUESTIONS ═══════════════════ -->
+<h2 id="questions">7. Open Questions for Director</h2>
+
+<div class="card warn">
+<h4>Decisions Required</h4>
+<ol>
+  <li><strong>Base model: Qwen 3.5 4B vs Gemma 4 E4B?</strong><br>
+    Qwen: smaller (3GB), faster, better multilingual. Gemma: already in stack, MoE.<br>
+    <em>Recommendation: Start with Qwen 3.5 4B (smaller = faster iteration).</em></li>
+  <li><strong>Classification taxonomy?</strong><br>
+    Intent labels, priority levels, matter detection scope.<br>
+    <em>Needs 1-hour interview session before data prep.</em></li>
+  <li><strong>When to build?</strong><br>
+    Now (improves Tier 1 immediately) vs after Tier 2 (more training data).<br>
+    <em>Recommendation: Build extraction pipeline now, POC on 1K examples. Full model after 2 weeks of Tier 2 data.</em></li>
+</ol>
+</div>
+
+<div class="card">
+<h4>Information Needed</h4>
+<ol start="4">
+  <li><strong>Mac Mini RAM:</strong> Confirmed 24GB. Upgrade possible? (M4 Pro supports up to 48GB)</li>
+  <li><strong>Ollama co-existence:</strong> Two models (classifier 4B + Gemma 4 12B). ~2-3s cold-start when switching. Acceptable?</li>
+  <li><strong>Cloud fine-tuning budget:</strong> If 4B proves too small &rarr; 7B still on Mac Mini. 27B+ needs cloud GPU (~$2-5/hr). Likely not needed.</li>
+</ol>
+</div>
+
+<!-- ═══════════════════ SOURCES ═══════════════════ -->
+<div class="sources" id="sources">
+<h2>Sources</h2>
+
+<h4>NVIDIA Nemotron + AI-Q</h4>
+<ul>
+  <li><a href="https://developer.nvidia.com/nemotron">NVIDIA Nemotron Developer Page</a></li>
+  <li><a href="https://huggingface.co/nvidia/NVIDIA-Nemotron-3-Nano-4B-GGUF">Nemotron 3 Nano 4B GGUF (HuggingFace)</a></li>
+  <li><a href="https://developer.nvidia.com/blog/how-small-language-models-are-key-to-scalable-agentic-ai/">NVIDIA SLM Blog</a></li>
+  <li><a href="https://docs.nvidia.com/nemotron/latest/nemotron/nano3/README.html">Nemotron 3 Nano Training Recipe</a></li>
+  <li><a href="https://github.com/NVIDIA-AI-Blueprints/aiq">AI-Q GitHub Repo</a></li>
+  <li><a href="https://docs.nvidia.com/aiq-blueprint/2.0.0/architecture/overview.html">AI-Q Architecture Overview</a></li>
+  <li><a href="https://github.com/NVIDIA-AI-Blueprints/llm-router">LLM Router Blueprint</a></li>
+  <li><a href="https://huggingface.co/blog/nvidia/how-nvidia-won-deepresearch-bench">How NVIDIA Won DeepResearch Bench</a></li>
+</ul>
+
+<h4>Apple Silicon Fine-Tuning</h4>
+<ul>
+  <li><a href="https://github.com/ml-explore/mlx-examples/blob/main/lora/README.md">MLX Examples LoRA README</a></li>
+  <li><a href="https://developer.apple.com/videos/play/wwdc2025/298/">WWDC 2025: LLMs on Apple Silicon with MLX</a></li>
+  <li><a href="https://docs.ollama.com/import">Ollama Importing Models</a></li>
+  <li><a href="https://arxiv.org/abs/2604.07035">Gemma 4, Phi-4, Qwen3 Accuracy Tradeoffs (arXiv)</a></li>
+  <li><a href="https://blog.starmorph.com/blog/apple-silicon-llm-inference-optimization-guide">Apple Silicon LLM Optimization Guide</a></li>
+</ul>
+
+<h4>Persistent Inference + Multi-Agent</h4>
+<ul>
+  <li><a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">Anthropic: Effective Context Engineering</a></li>
+  <li><a href="https://www.anthropic.com/engineering/managed-agents">Anthropic: Scaling Managed Agents</a></li>
+  <li><a href="https://www.anthropic.com/engineering/multi-agent-research-system">Anthropic: Multi-Agent Research System</a></li>
+  <li><a href="https://platform.claude.com/cookbook/tool-use-context-engineering-context-engineering-tools">Anthropic: Context Engineering Cookbook</a></li>
+  <li><a href="https://platform.claude.com/docs/en/agent-sdk/overview">Claude Agent SDK Overview</a></li>
+  <li><a href="https://redis.io/blog/ai-agent-architecture/">Redis: AI Agent Architecture 2026</a></li>
+  <li><a href="https://arxiv.org/html/2601.11653v1">arXiv: Agent Cognitive Compressor</a></li>
+</ul>
+
+<h4>Karpathy LLM Wiki</h4>
+<ul>
+  <li><a href="https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f">Karpathy: LLM Wiki (Original Gist)</a></li>
+  <li><a href="https://gist.github.com/rohitg00/2067ab416f7bbe447c1977edaaa681e2">LLM Wiki v2 (Rohit Garg)</a></li>
+  <li><a href="https://aaronfulkerson.com/2026/04/12/karpathys-pattern-for-an-llm-wiki-in-production/">LLM Wiki in Production (Aaron Fulkerson)</a></li>
+  <li><a href="https://github.com/devwhodevs/engraph">Engraph: Local Knowledge Graph</a></li>
+  <li><a href="https://mem0.ai/blog/state-of-ai-agent-memory-2026">Mem0: State of AI Agent Memory 2026</a></li>
+  <li><a href="https://www.leoniemonigatti.com/blog/from-rag-to-agent-memory.html">From RAG to Agent Memory</a></li>
+</ul>
+</div>
+
+</div>
+</body>
+</html>
