@@ -93,8 +93,8 @@ curl -s -X POST "https://baker-master.onrender.com/mcp?key=bakerbhavanga" \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 ```
 
-### Available tools (25):
-**Read:** baker_deadlines, baker_vip_contacts, baker_sent_emails, baker_actions, baker_clickup_tasks, baker_todoist_tasks, baker_whoop, baker_rss_feeds, baker_rss_articles, baker_deep_analyses, baker_briefing_queue, baker_watermarks, baker_conversation_memory, baker_raw_query, baker_get_preferences, baker_browser_tasks, baker_browser_results
+### Available tools (24):
+**Read:** baker_deadlines, baker_vip_contacts, baker_sent_emails, baker_actions, baker_clickup_tasks, baker_todoist_tasks, baker_rss_feeds, baker_rss_articles, baker_deep_analyses, baker_briefing_queue, baker_watermarks, baker_conversation_memory, baker_raw_query, baker_get_preferences, baker_browser_tasks, baker_browser_results
 **Write:** baker_raw_write, baker_store_decision, baker_add_deadline, baker_upsert_vip, baker_store_analysis, baker_upsert_preference, baker_update_vip_profile, baker_upsert_matter
 
 Response is JSON-RPC: `result.content[0].text` contains the data.

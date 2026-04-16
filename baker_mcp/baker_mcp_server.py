@@ -220,18 +220,6 @@ TOOLS = [
         },
     ),
     Tool(
-        name="baker_whoop",
-        description="Whoop health data — recovery scores, sleep, strain, HRV.",
-        inputSchema={
-            "type": "object",
-            "properties": {
-                "record_type": {"type": "string", "description": "Filter: recovery, sleep, cycle, workout"},
-                "days": {"type": "integer", "description": "Records from last N days (default: 7)", "default": 7},
-                "limit": {"type": "integer", "default": 20},
-            },
-        },
-    ),
-    Tool(
         name="baker_rss_feeds",
         description="RSS feeds monitored by Baker's RSS sentinel.",
         inputSchema={
@@ -587,19 +575,6 @@ def _dispatch(name: str, args: dict) -> str:
         sql = f"SELECT * FROM todoist_tasks WHERE {' AND '.join(clauses)} ORDER BY due_date NULLS LAST"
         rows = _query(sql, tuple(params), limit)
         return _format_results(rows, "Todoist Tasks")
-
-    elif name == "baker_whoop":
-        record_type = args.get("record_type")
-        days = args.get("days", 7)
-        limit = args.get("limit", 20)
-        clauses = ["recorded_at >= NOW() - INTERVAL '%s days'"]
-        params: list = [days]
-        if record_type:
-            clauses.append("record_type = %s")
-            params.append(record_type)
-        sql = f"SELECT * FROM whoop_records WHERE {' AND '.join(clauses)} ORDER BY recorded_at DESC"
-        rows = _query(sql, tuple(params), limit)
-        return _format_results(rows, "Whoop Records")
 
     elif name == "baker_rss_feeds":
         active_only = args.get("active_only", True)

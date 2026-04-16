@@ -136,9 +136,6 @@ class SentinelScheduler:
             f"Registered: todoist_poll (every {config.triggers.todoist_check_interval}s)"
         )
 
-        logger.info(
-            f"Registered: whoop_poll (every {config.triggers.whoop_check_interval}s)"
-        )
 
         # -------------------------------------------------------
         # Daily briefing — 08:00 CET (06:00 UTC)
@@ -205,7 +202,7 @@ def main():
     )
     parser.add_argument(
         "--run-once", type=str, default=None,
-        choices=["email", "fireflies", "briefing", "clickup", "todoist", "dropbox", "whoop"],
+        choices=["email", "fireflies", "briefing", "clickup", "todoist", "dropbox"],
         help="Run a single trigger immediately and exit",
     )
     args = parser.parse_args()

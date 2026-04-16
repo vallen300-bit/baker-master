@@ -139,7 +139,6 @@ _DOMAIN_PATTERNS = {
 
 # Source-type default domain mapping
 _SOURCE_DOMAIN_MAP = {
-    "whoop": "private",
     "todoist": "projects",
     "clickup": "projects",
     "clickup_handoff_note": "projects",
