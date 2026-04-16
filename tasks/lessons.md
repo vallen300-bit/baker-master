@@ -135,3 +135,32 @@ Review at session start. Add new lessons after any correction. Remove stale ones
 ### 26. Wrong import path = feature silently dead since day one
 **Mistake:** `compile_knowledge_digest()` in `rss_trigger.py` imported `from llm.gemini_client import call_flash`. No `llm/` directory exists — actual path is `orchestrator.gemini_client`. The outer try/except caught the `ModuleNotFoundError` and logged it as a generic error. Knowledge digests were empty since the feature shipped (KNOWLEDGE-DIGEST-1). Director found it weeks later.
 **Rule:** After shipping any feature with a lazy import (`from x.y import z` inside a function), verify it works on the actual server — not just locally. Lazy imports inside try/except are invisible killers: they fail silently every time. `grep -rn "from llm\." triggers/ orchestrator/` would have caught this in 2 seconds. This is Lesson #17's cousin: verify the import path, not just the function signature.
+
+### 27. WAHA session needs store config on recreation
+**Mistake:** WAHA session corrupted (bad decrypt errors). Deleted and restarted it without `config.noweb.store.enabled=True`. Session worked for sending but backfill couldn't fetch chats — returned 400 "Enable NOWEB store". Had to delete + restart AGAIN with store config, requiring another QR scan.
+**Rule:** When recreating a WAHA session, ALWAYS include store config: `{"name": "default", "config": {"noweb": {"store": {"enabled": true, "fullSync": true}}}}`. Without it, `list_chats()` and message history APIs fail.
+
+### 28. WhatsApp @lid format — don't filter, normalize
+**Mistake:** WhatsApp migrated chat IDs to `@lid` format. Baker's `list_chats()`, contact sync, and backfill all had `@lid` filters that silently dropped these messages. Messages from contacts like Constantinos and Sergey were invisible for days.
+**Rule:** Never filter out `@lid` chat IDs. WhatsApp is migrating to this format. Accept all formats (`@c.us`, `@s.whatsapp.net`, `@lid`). Future improvement: normalize `@lid` → `@c.us` using WAHA's contact lookup API.
+
+### 29. Claude Code web (claude.ai/code) runs on cloud VM, not the Mac Mini
+**Mistake:** Assumed Code Brisen via claude.ai/code ran directly on the Mac Mini. Tried to run `brew install`, `hostname`, GUI apps — all failed. The environment is a Linux cloud VM that syncs the repo via git. Cannot install apps, run GUI, or access local network.
+**Rule:** claude.ai/code = cloud VM (Linux). It can: edit files, git operations, run Python/Node. It cannot: install macOS apps, access GUI, reach local network, run MCP servers locally. For Mac Mini physical operations, need Supremo/VNC/physical access.
+
+### 30. MCP connectors in Claude Code web load at session start only
+**Mistake:** Added Baker MCP as a custom connector in Claude Code web settings, then tried to use it in the existing session. ToolSearch returned "No matching deferred tools found". Wasted time retrying.
+**Rule:** MCP connectors are loaded when a session starts. Adding a connector mid-session has no effect. Must start a NEW session for new connectors to be available.
+
+### 31. SSE MCP transport — session ID mismatch on reconnect
+**Mistake:** Baker MCP SSE endpoint works on first connection (ListToolsRequest processed). But when Claude Code web reconnects (which it does frequently), it gets a new SSE session with a different session_id. POST messages to the old session_id return 404. Tools appear stuck "connecting".
+**Rule:** SSE transport with MCP has a reconnection problem. Each GET /mcp/sse creates a new session. Use Streamable HTTP transport instead (stateless JSON-RPC, no sessions). Fixed in commit `0c0b7e5`.
+
+### 32. Claude Code web sandbox blocks outbound HTTP to custom domains
+**Mistake:** Built a working Streamable HTTP MCP endpoint at `POST /mcp` on baker-master.onrender.com. Verified with curl from MacBook (25 tools, all working). Added `.mcp.json`, custom connector, and `claude mcp add` — none worked. Spent 2+ hours trying 4 different approaches. The sandbox proxy blocks all outbound connections to `baker-master.onrender.com` — both MCP and curl return "host not allowed" / exit code 56.
+**Rule:** Claude Code web (claude.ai/code) runs in a sandboxed cloud VM with a network proxy allowlist. Custom domains like `baker-master.onrender.com` are NOT on the allowlist. Neither MCP tools, curl, nor any HTTP client can reach them. Don't build features that depend on Claude Code web calling custom endpoints. Only the CLI version of Claude Code (running on Mac Mini or any local machine) can reach arbitrary URLs. Plan accordingly — if Code Brisen needs Baker data, it must run as CLI, not web.
+
+### 33. Vault structure: optimize for machine retrieval, not human navigation
+**Mistake:** Director's instinct was matter-first vault structure (matching his Dropbox `1_ACTIVE_PROJECTS/` layout). Each matter would contain its own raw/wiki/schema layers. This mirrors how humans think — "everything about Aukera in one place."
+**Root cause:** Neither the filer (Tier 2) nor the retriever (Tier 2/Tier 3) is human. Both are Claude. Claude doesn't navigate folders visually — it searches by filename, greps content, follows `[[links]]`. A cross-matter document (e.g., contract between AO and Movie) would need to be duplicated or arbitrarily assigned to one matter.
+**Rule:** When designing storage structure for AI-operated systems (vault, PG schema, file trees), optimize for the reader — which is a machine. Karpathy three-layer at top (raw/wiki/schema) prevents filing ambiguity and duplication. Wiki pages carry matter context via `[[links]]`, not folder hierarchy. The human (Director) never sees the structure — only the results.

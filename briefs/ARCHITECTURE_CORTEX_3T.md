@@ -1,9 +1,11 @@
-# Baker Three-Tier Architecture — Draft Specification
+# Baker Cortex 3T — Three-Tier Architecture Specification
 
+**Name:** Cortex 3T (three tiers — built on Cortex V2 which is Tier 1)
 **Status:** DRAFT — Being built collaboratively with Director
 **Date started:** 13 April 2026
-**Session 2 stopped:** 14 April 2026 — 30 decisions (25 locked, 1 parked-in-place, 4 parked for study)
+**Session 3:** 16 April 2026 — 34 decisions locked, vault smoke test complete
 **Participants:** Director + AI Head (Tier 3 session) + Cowork (architecture review)
+**Foundation:** Cortex V2 Phases 0-3 (all deployed) = Tier 1 infrastructure. See `briefs/CORTEX_V2_BIG_PICTURE.md`
 
 ---
 
@@ -259,6 +261,18 @@ Working memory (current session context) → Episodic memory (cortex_events — 
 ### 30. Nightly consolidation job — the brain sleeping
 Runs on Mac Mini overnight. Clusters the day's cortex_events → extracts patterns → updates wiki pages → decays confidence on untouched knowledge → flags contradictions for Director. Like memory consolidation during sleep. The system gets smarter overnight without any human input.
 
+### 31. Vault structure: Karpathy three-layer at top, not matter-first
+Director's Dropbox is organized by project (1_ACTIVE_PROJECTS/01_MOVIE_PROJECT, AO_MASTER, etc.). Initial instinct: replicate this in vault with Karpathy layers inside each matter. But: both filer (Tier 2) and retriever (Tier 2 + Tier 3) are machines — neither navigates visually. Karpathy top-level (raw/wiki/schema) eliminates filing ambiguity for cross-matter documents, prevents duplication, and wiki pages carry the matter context via `[[links]]`. Director never sees or touches the vault — decision #8d applies. Structure optimizes for machine accuracy, not human navigation.
+
+### 32. Emails and WhatsApp stay in PostgreSQL — vault stores knowledge, not communications
+Raw messages are high-volume operational data (hundreds of emails/week, dozens of WhatsApp/day). PostgreSQL handles this well — searchable, indexed, queryable. Vault would become a dump. Clean split: PG = what happened (Tier 1 operational), vault = what it means (Tier 2 knowledge). Signals EXTRACTED from emails/WhatsApp go to vault as enriched cards in `wiki/matters/*/cards/`. Exception: formal documents (legal notices, signed letters) file to `raw/correspondence/`.
+
+### 33. Meeting transcripts go to vault — low volume, high value
+Fireflies, Plaud, YouTube transcripts → `raw/transcripts/` with source summary in `wiki/`. ~5-10/week, each worth keeping as an original. Tier 1 signals arrival, Tier 2 files transcript + creates source summary card with key takeaways, action items, and cross-links to people/matters mentioned. The summary is where the value lives — Tier 2 reads the full transcript, cross-references against matter knowledge, extracts what changed.
+
+### 34. Browser clipper — one-button capture from Director's browser
+Bookmarklet in Director's browser sends URL + selected text + page title to Baker Render endpoint (`POST /api/clip` → `signal_queue` with `signal_type='web_clip'`). Optional matter selection popup (oskolkov, movie, hagenauer... or "auto"). Tier 2 classifies and files to `raw/clippings/` with source summary in wiki/. Director clips an apartment ad for Movie residences → 15 min later it's filed, summarized, cross-linked. Zero context-switching to WhatsApp. Zero manual filing.
+
 ## Parked Items
 
 1. **Signal classification** — walk through 1-2 months real WhatsApp/email messages with Director
@@ -272,7 +286,8 @@ Runs on Mac Mini overnight. Clusters the day's cortex_events → extracts patter
 - [ ] Resolve dashboard content ownership with Director (parked — needs dashboard walkthrough)
 - [ ] Baker SLM setup (parked — deeper study needed, dedicated workstream)
 - [ ] Write implementation brief for signal_queue table
-- [ ] Write implementation brief for Mac Mini reasoning engine + Obsidian vault
+- [x] Write implementation brief for Obsidian vault Phase 1 — `briefs/BRIEF_VAULT_PHASE1_SCHEMA_AND_CONTENT.md` (awaiting Director discussion)
+- [ ] Write implementation brief for Mac Mini reasoning engine (signal_queue processor + vault daemon)
 - [ ] Design enriched card UI for dashboard
 
 ---

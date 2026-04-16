@@ -1,5 +1,7 @@
 # Baker Cortex v2 — Big Picture Architecture
 
+> **NOTE (April 2026):** Cortex V2 is now Tier 1 of the full three-tier architecture — **Cortex 3T**. Phases 0-3 below are all deployed and running on Render. The Tier 2 (Mac Mini reasoning engine) and Tier 3 (Director + AI Head sessions) implementation plan is in `briefs/ARCHITECTURE_CORTEX_3T.md`. This document remains the reference for what Tier 1 does and how it was built.
+
 ## The Insight
 
 Baker has two kinds of work. They need different infrastructure.
