@@ -1,25 +1,41 @@
-# Pre-KBL-A Decision Log — V2.2 (DRAFT)
+# Pre-KBL-A Decision Log — V2.3 (DRAFT)
 
-**Status:** DRAFT v2.2 — post Code Brisen R4 review, awaiting Director ratification
-**Supersedes:** `briefs/DECISIONS_PRE_KBL_A.md` (v1) and v2 draft commit `5cc48ec` and v2.1 commit `0f48ba9`
+**Status:** DRAFT v2.3 — post Code Brisen R5 spot-check, awaiting Director ratification
+**Supersedes:** v1, v2 draft `5cc48ec`, v2.1 commit `0f48ba9`, v2.2 commit `27b3a5f`
 **Date:** 2026-04-17
 **Prepared by:** AI Head (Claude Opus 4.7)
-**Review lineage:** v1 → CB-R1 → AH-R2 → v2 → CB-R3 (5B/15S/6N/6M) → v2.1 → CB-R4 (3B/12S/3N/1M) → **this v2.2**
+**Review lineage:** v1 → CB-R1 → AH-R2 → v2 → CB-R3 (5B/15S/6N/6M) → v2.1 → CB-R4 (3B/12S/3N/1M) → v2.2 → CB-R5 (1B/1S) → **this v2.3**
 **Director sign-offs received:** D2 redirect to queue-poll pattern (drop HTTP endpoint); `feature-dev:code-reviewer` subagent available (R4 asked for evidence — see Appendix A)
 
 ---
 
-## What Changed From V2.1 (30-second summary)
+## What Changed From V2.2 (10-second summary)
+
+- **1 R5 blocker fixed:** D13 git pull strategy — `-X theirs` → `-X ours` (semantics invert during rebase; `-X ours` in rebase mode = prefer upstream = Director's push wins, which is the rotation gold-path guarantee).
+- **1 R5 should-fix applied:** D13 yq expression adds `select($p | last | type != "number")` to suppress stray `_0`, `_1` numeric-index exports from arrays.
+
+## What Changed From V2.1 (carried forward)
 
 - **3 R4 blockers fixed:** D13 yq expression rewritten for nested YAML (B1), array→CSV conversion added (B2), D14 FK types corrected to match `signal_queue.id` = INTEGER (B3).
 - **4 high-value should-fixes integrated:** D6 Gate 2 split into 2a-auto-cost + 2b-manual-architecture (S3), D6 Gate 3 invocation spec'd as AI-Head-at-pre-dispatch (S4), D14 token estimation mechanism defined (S7), D12 Mac Mini install mechanism spec'd (S12).
 - **3 quick wins:** D13 git-pull conflict strategy (S6), D14 80%-cap alert dedupe (S8), D15 `kbl_alert_dedupe` table + rsync cron moved into yml + sudo items added to hardening (S9-S11).
-- **New appendix A:** Subagent smoke-test evidence (M1).
-- **Skipped for KBL-A stage** (per R4 reviewer recommendation): S1, S2, S5, N1, N2, N3 — noted below, not blocking.
+- **Appendix A:** Subagent smoke-test evidence (M1).
 
 ---
 
 ## Review Response Log
+
+### Round 5 — Code Brisen on v2.2 (1 BLOCKER + 1 SHOULD)
+
+| # | Finding | V2.3 Action |
+|---|---|---|
+| R5.B1 | D13 `git pull --rebase -X theirs` — semantics inverted during rebase (rebase swaps ours/theirs), so local Mac Mini commits win, NOT Director's push. Rotation gold-path guarantee broken. | Changed to `git pull --rebase -X ours` — in rebase mode, `ours` = upstream = Director's push = wins on conflict. Validated with `git-rebase(1)` docs. |
+| R5.S1 | D13 yq `paths(scalars, arrays)` recurses INTO arrays, producing stray `KBL_<PATH>_0`, `_1` exports alongside canonical CSV | Added `select($p | last | type != "number")` filter to drop numeric-index path components |
+
+R5 verifications (all passed):
+- D14 `signal_id INTEGER` matches `signal_queue.id` SERIAL/INTEGER ✓
+- Token estimation fallback chain practical (char/4 conservative) ✓
+- Appendix A smoke-test evidence sufficient per R4.M1 ✓
 
 ### Round 4 — Code Brisen on v2.1 (3 BLOCKERS + 12 SHOULD + 3 NICE + 1 MISSING)
 
@@ -645,16 +661,20 @@ observability:
 
 All values stored as STRINGS (quoted) for uniform `tostring` in the export expression — prevents YAML-parsed ints/bools from surprising the shell.
 
-**Deploy mechanism (B1 + B2 + S6 fix):**
+**Deploy mechanism (B1 + B2 + S6 + R5.B1 + R5.S1 fixes):**
 
-1. Mac Mini cron wrapper (`/usr/local/bin/kbl-pipeline-tick.sh`) first step: `git -C ~/baker-vault pull --rebase -X theirs`
-   - `--rebase -X theirs` = if conflict on config file, Director's copy (MacBook auto-push) wins.
-   - If unresolvable conflict remains: wrapper aborts, inserts CRITICAL row in `kbl_log` with `component=git-conflict`, triggers WhatsApp alert, flock releases, next cron retries.
+1. Mac Mini cron wrapper (`/usr/local/bin/kbl-pipeline-tick.sh`) first step:
+   ```bash
+   git -C ~/baker-vault pull --rebase -X ours
+   ```
+   - **Why `-X ours` (R5.B1):** during rebase, git swaps "ours" and "theirs" — `ours` in rebase mode refers to the upstream being rebased onto (origin/main = Director's push). So `-X ours` = prefer upstream on conflict = Director's config change wins. This is the rotation gold-path guarantee.
+   - If unresolvable conflict remains after `-X ours`: `git rebase --abort`, wrapper inserts CRITICAL row in `kbl_log` with `component=git-conflict`, triggers WhatsApp alert via `kbl_alert_dedupe`, flock releases, next cron retries.
 
-2. Wrapper sources config via `yq` (correct recursive flattening + array-to-CSV):
+2. Wrapper sources config via `yq` (correct recursive flattening + array-to-CSV + R5.S1 numeric-index filter):
    ```bash
    eval "$(yq -r '
      [paths(scalars, arrays) as $p |
+       select($p | last | type != "number") |
        "export KBL_" + ($p | map(. | ascii_upcase) | join("_")) + "=" +
        (getpath($p) |
          if type == "array" then join(",") else tostring end
@@ -662,7 +682,8 @@ All values stored as STRINGS (quoted) for uniform `tostring` in the export expre
      ] | .[]
    ' ~/baker-vault/config/env.mac-mini.yml)"
    ```
-   Produces: `KBL_OLLAMA_MODEL=gemma4:latest`, `KBL_MATTER_SCOPE_ALLOWED=hagenauer-rg7`, `KBL_MATTER_SCOPE_NEWSLETTER_BLOCKLIST=""`, etc.
+   - `select($p | last | type != "number")` prevents `paths` from emitting individual array-index paths (`matter_scope.allowed.0`) in addition to the array-as-a-whole path (`matter_scope.allowed`). Without this filter, you get BOTH `KBL_MATTER_SCOPE_ALLOWED=hagenauer-rg7` (canonical) AND stray `KBL_MATTER_SCOPE_ALLOWED_0=hagenauer-rg7`.
+   - Produces (clean): `KBL_OLLAMA_MODEL=gemma4:latest`, `KBL_MATTER_SCOPE_ALLOWED=hagenauer-rg7`, `KBL_MATTER_SCOPE_NEWSLETTER_BLOCKLIST=""`, etc.
 
 3. Pipeline Python reads via `os.getenv("KBL_MATTER_SCOPE_ALLOWED", "").split(",")` for list types, direct `os.getenv()` for scalars.
 
@@ -945,7 +966,7 @@ Brief submitted for Code Brisen architecture review → Director ratification �
 
 ---
 
-*Prepared 2026-04-17 by AI Head (Claude Opus 4.7). V2.2 post Code Brisen R4 review. Status: DRAFT pending Director ratification.*
+*Prepared 2026-04-17 by AI Head (Claude Opus 4.7). V2.3 post Code Brisen R5 spot-check. Status: DRAFT pending Director ratification.*
 
 ---
 
