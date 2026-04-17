@@ -1,177 +1,159 @@
 # Code Brisen #3 — Pending Task
 
 **From:** AI Head
-**To:** Code Brisen #3 (app instance, fresh session, dedicated labeling companion)
+**To:** Code Brisen #3 (app instance, fresh session, D1 eval retry)
 **Task posted:** 2026-04-17
 **Status:** OPEN — awaiting execution
+**Supersedes:** the labeling-companion task previously at this path (completed — results in `briefs/_reports/B3_d1_eval_results_20260417.md`)
 
 ---
 
-## Task: D1 Pre-Shadow Eval — Director Labeling Companion + Gemma Eval Runner
+## Task: D1 Pre-Shadow Eval — Retry with Fair Prompt (Option C)
 
-### Purpose
+### Context (60-second read)
 
-D1 is ratified conditionally on Gemma 4 8B achieving **≥90% vedana accuracy on a 50-signal Director-labeled eval**. Your job: make the 60-min labeling session as frictionless as possible for Director, then run the eval.
+Your first eval run failed both models at Option-A thresholds:
 
-### Prerequisites (verify before starting)
+- Gemma: 70% vedana / 100% JSON / 30% matter (need ≥90% / 100% / ≥80%)
+- Qwen: 66% / 100% / 36%
 
-Run these quick checks, report fail if any:
+Your own §4 analysis identified the cause as **prompt engineering, not model capability**:
 
-```bash
-cd <baker-master-clone>
+1. The Step-1 prompt lists only 6 of the 19 canonical matter slugs
+2. Director's vedana semantics ("opportunity = NEW strategic gains only; defensive wins stay in threat arc") are nowhere in the prompt
+3. Near-duplicate Baker self-analyses + 1 garbled transcript drag the average
 
-# 1. Scripts present
-ls -la scripts/build_eval_seed.py scripts/validate_eval_labels.py scripts/run_kbl_eval.py
-
-# 2. DATABASE_URL set (you'll need this to pull signals)
-echo "${DATABASE_URL:+SET}" | grep -q SET || echo "FAIL: DATABASE_URL not in env"
-
-# 3. SSH to macmini works (for run_kbl_eval at the end)
-ssh -o ConnectTimeout=5 macmini "echo ok" || echo "FAIL: macmini SSH not reachable"
-
-# 4. Ollama on macmini has gemma4 + qwen2.5:14b
-ssh macmini "ollama list" | grep -E "gemma4|qwen2.5:14b"
-```
-
-If any fail, report to Director via chat, don't proceed.
-
-### Step 1 — Build eval seed (~30 sec)
-
-```bash
-python3 scripts/build_eval_seed.py
-```
-
-Should produce `outputs/kbl_eval_set_<YYYYMMDD>.jsonl` (50 signals) + a labeling template file.
-
-Confirm 50 signals loaded. Report counts per source:
-```
-Email: <N>   WhatsApp: <N>   Meeting: <N>
-Total: 50 ✓
-```
-
-### Step 2 — Labeling session (~55 min, Director-interactive)
-
-**Your role:** present signals one at a time in chat; parse Director's one-line replies; write labels back to JSONL file progressively (save after each signal so a mid-session pause doesn't lose work).
-
-**Presentation format per signal:**
-
-```
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Signal 12/50 | source: email | date: 2026-03-22
-From: m.hassa@tfkable.com
-Subject: RG7 Schlussabrechnung — response to 18 March
-
-<full body or first 600 chars if longer>
-
-Hint matter (from tags, may be empty): hagenauer-rg7
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Your call:
-  vedana: opportunity | threat | routine
-  primary_matter: <slug> (e.g., hagenauer-rg7, cupial, mo-vie, ao, null)
-  related_matters: comma list (or empty)
-  triage_pass (would you want to be alerted?): y/n
-  notes (optional): <free text>
-
-Format: "threat | hagenauer-rg7 | cupial | y | final account escalation"
-```
-
-**Parsing:** accept `<vedana> | <primary> | <related csv> | <y/n> | <notes>`. Be tolerant:
-- Empty `related_matters` is `""` or `none` or `-`
-- Director may drop the trailing notes field — that's fine
-- Case-insensitive on vedana + y/n
-- If the line doesn't parse, ask for a re-type; don't skip
-
-**Vedana enum (STRICTLY these 3 values):** `opportunity` | `threat` | `routine`. If Director types `pleasant` / `unpleasant` / `neutral` (classical Buddhist vocab), gently correct and explain the production schema uses `opportunity/threat/routine`. DO NOT accept the classical vocab — validator will reject it.
-
-**Matter slugs (production canonical):** `hagenauer-rg7`, `cupial`, `mo-vie`, `ao`, `morv`, `lilienmatt`, `wertheimer`. If Director uses a variant, normalize or ask. If none apply, use `null` (the string `null`, which the validator accepts).
-
-**Progress indicator:** after every 10 signals, report `Labeled 10/50. Estimated remaining: ~45 min.` etc.
-
-**Save-after-each:** append to or update the labels file after each Director response. Never batch — if session drops at signal 34, resume from 35.
-
-**Filename for labels:** `outputs/kbl_eval_set_<YYYYMMDD>_labeled.jsonl` (the labeling template file, filled in). Create if not present at start.
-
-### Step 3 — Validate labels (~1 sec)
-
-```bash
-python3 scripts/validate_eval_labels.py outputs/kbl_eval_set_<YYYYMMDD>_labeled.jsonl
-```
-
-**Expected:** exit 0, "50/50 valid".
-
-If validator rejects any rows:
-- Fix inline with Director (show the specific row + error, ask for re-label)
-- Re-run validator until clean
-
-### Step 4 — Run eval against Gemma + Qwen (~5-10 min)
-
-```bash
-python3 scripts/run_kbl_eval.py outputs/kbl_eval_set_<YYYYMMDD>_labeled.jsonl --compare-qwen
-```
-
-This SSHes to macmini, runs Gemma 4 8B on each of the 50 signals, then runs Qwen 2.5 14B for comparison. Produces `outputs/kbl_eval_results_<YYYYMMDD>.json`.
-
-### Step 5 — Report results
-
-File per mailbox pattern at `briefs/_reports/B3_d1_eval_results_20260417.md`.
-
-**Must include:**
-
-1. **TL;DR one-liner:** `D1 eval: Gemma <X>% vedana, <Y>% JSON, <Z>% matter. <PASS|FAIL> D1 thresholds.`
-2. Per-source breakdown (email / WA / meeting) with vedana accuracy each
-3. Qwen comparison numbers (does Qwen pass if Gemma failed?)
-4. Any signals where BOTH models failed — likely schema/prompt issue, flag for KBL-B tuning
-5. Commit SHAs: the JSONL file(s) + results JSON + this report
-
-**Acceptance (D1 thresholds):**
-- Vedana overall ≥ 90%
-- Vedana per-source ≥ 85%
-- JSON validity 100%
-- Primary matter accuracy ≥ 80%
-
-### Step 6 — Commit + push
-
-```bash
-git add outputs/kbl_eval_set_*.jsonl outputs/kbl_eval_results_*.json briefs/_reports/B3_d1_eval_results_20260417.md
-git -c user.name="Code Brisen 3" -c user.email="dvallen@brisengroup.com" commit -m "feat: D1 pre-shadow eval — Director labels + Gemma/Qwen results"
-git push origin main
-```
-
-Chat one-liner to Director:
-```
-D1 eval report at briefs/_reports/B3_d1_eval_results_20260417.md, commit <SHA>.
-TL;DR: Gemma <X>% vedana, <PASS|FAIL> D1.
-```
-
-### Time budget
-
-| Step | Estimated |
-|---|---|
-| Prerequisites | 1 min |
-| Step 1 (seed) | 30 sec |
-| Step 2 (labeling, Director-interactive) | **55 min** |
-| Step 3 (validate) | 1 sec |
-| Step 4 (eval runner) | 5-10 min |
-| Step 5 (report) | 5 min |
-| Step 6 (commit) | 1 min |
-| **Total Director time** | ~60 min |
-| **Total B3 wall-clock** | ~75 min including runner |
-
-### Critical reminders
-
-- **Save labels incrementally** — never batch. Session crash mid-labeling is recoverable.
-- **Strict vedana enum** — `opportunity/threat/routine` only.
-- **One signal at a time** — don't dump 5 signals in a block; Director can't parallelize.
-- **Don't offer your own labels** — you present the signal, Director decides. If Director ASKS for a hint ("what do you think?"), you can suggest, but default to letting them decide cold.
-- **Report file is MANDATORY even if Gemma fails** — D1 has a defined fallback path (retry with Qwen; if both fail, D1 reverts to option B). Failure isn't a reporting exception.
-
-### Parallel context
-
-- AI Head (me) is running KBL-A R2 review flow with Code B1 in parallel.
-- B2 is standing by with no task.
-- Director will context-switch between me (KBL-A ratification) and you (labeling) during the 60 min.
-- SSH hardening (5-min Director task) may happen in parallel — ignore for your scope.
+Director approved **Option C**: patch the prompt, re-run against the same labeled set, and let the retry decide D1. The labels at `outputs/kbl_eval_set_20260417_labeled.jsonl` are ground truth — **do NOT re-label**.
 
 ---
 
-*Task posted by AI Head 2026-04-17. This is Code Brisen #3's first task — fresh session, no prior context. If you hit anything unexpected (table not present, SSH fails, DATABASE_URL drift), STOP and report to Director via chat — don't improvise.*
+## What to do
+
+### 1. Patch the prompt in `scripts/run_kbl_eval.py`
+
+Current prompt (lines 55–65):
+
+```python
+STEP1_PROMPT = """You are a triage agent for a 28-matter business operation (real estate, hospitality, legal disputes, investment). Classify this signal. Output ONLY valid JSON, no commentary.
+
+Signal: "{signal}"
+
+Respond with exactly this JSON:
+{{
+  "matter": "which business matter (e.g. hagenauer-rg7, cupial, mo-vie, ao, brisen-lp, mrci)",
+  "vedana": "opportunity | threat | routine",
+  "triage_score": 0-100,
+  "summary": "one line"
+}}"""
+```
+
+Replace with a prompt that:
+
+**(a)** Enumerates the full canonical matter allowlist (19 slugs + `null`). **Source of truth:** `scripts/validate_eval_labels.py` → `MATTER_ALLOWLIST` (19 entries as of commit `7a3ea2d`). Import it rather than duplicate — single source.
+
+**(b)** States that `null` is a valid output when no matter applies, and that non-slug strings like `"none"`, `"hospitality"`, `"investment"`, `"legal disputes"` are invalid.
+
+**(c)** Embeds Director's vedana rule verbatim:
+
+```
+Vedana classification rules:
+- opportunity: NEW strategic gains ONLY — a new deal, investor interest,
+  unrequested approach, favorable market shift, novel capability revealed.
+  Defensive wins inside an ongoing threat arc (e.g., court ruling in our
+  favor on a dispute, successful rectification) stay in threat, not opportunity.
+- threat: risks, problems, disputes, deadlines, unpaid invoices, regulatory
+  issues, counterparty demands, adverse events, and defensive moves/recoveries
+  inside an ongoing threat arc.
+- routine: noise — receipts, automated notifications, newsletters, FYI
+  emails, admin correspondence with no action required.
+```
+
+**(d)** Keeps D1 sampling config (`temperature=0.0, seed=42, top_p=0.9, num_predict=512`) untouched. This is a prompt-only change.
+
+**(e)** Do NOT change `ACCEPT` thresholds, `NORMALIZE_VEDANA`, or the scoring logic. Same bar.
+
+### 2. Optional but recommended — fix the stale alias
+
+`scripts/run_kbl_eval.py` line 83:
+
+```python
+"brisen-lp": ["brisen", "wertheimer"],
+```
+
+Director split `wertheimer` out as its own slug during labeling. Remove `"wertheimer"` from the `brisen-lp` alias list (otherwise model outputs of `"wertheimer"` get coerced to `brisen-lp` and accuracy gets spuriously dinged when ground truth is `wertheimer`). Rely on the exact-canonical match at line 113, or add `"wertheimer": ["wertheimer"]` explicitly.
+
+Document this fix in the report.
+
+### 3. Re-run the eval
+
+```bash
+cd /tmp/bm-b3
+git pull --ff-only origin main
+.venv/bin/python3 scripts/run_kbl_eval.py outputs/kbl_eval_set_20260417_labeled.jsonl --compare-qwen
+```
+
+Same labeled set, same sampling, same macmini Ollama. Only prompt changed.
+
+### 4. Compare results vs thresholds
+
+D1 pass criteria (from `ACCEPT` in the script):
+
+- Gemma vedana_overall ≥ 90%
+- Gemma vedana_per_source ≥ 85% (email / meeting / whatsapp)
+- Gemma json_validity = 100%
+- Gemma primary_matter ≥ 80%
+
+Report pass/fail per metric, per model. Gemma is the D1 target; Qwen is comparison.
+
+### 5. File report
+
+Path: `briefs/_reports/B3_d1_eval_retry_20260417.md`
+
+Include:
+
+- TL;DR (1 line: pass / fail + key numbers)
+- Before/after comparison table (Gemma overall + per-source; Qwen overall)
+- Which specific signals flipped from miss → hit (top 5 for vedana, top 5 for matter)
+- Any signals still missed by both models — is it a genuine capability gap, or further prompt drift? (your judgment)
+- Recommendation: D1 ratify, revert to Option B (Qwen primary), or further iterate
+- Commit SHAs for: prompt patch, alias fix, eval results JSON
+
+### 6. Dispatch back
+
+Chat one-liner to Director via me (standard mailbox dispatch):
+
+> `B3 D1 retry complete — see briefs/_reports/B3_d1_eval_retry_20260417.md, commit <SHA>. TL;DR: <pass|fail> with <Gemma vedana%> / <matter%>.`
+
+---
+
+## Scope guardrails
+
+- **Do NOT touch** the labeled set. Labels are ground truth.
+- **Do NOT touch** ACCEPT thresholds, NORMALIZE_VEDANA, scoring logic, or D1_OPTIONS.
+- **Do NOT** add few-shot examples — this retry isolates the slug-enum + vedana-rule variables. Few-shot is a KBL-B experiment, not an Option-C move.
+- **Do NOT** rewrite the eval runner architecture. One-function prompt swap.
+- **DO** note any further issues you spot (garbled transcripts, near-duplicates, slug drift) in the report's "side-effects" section. AI Head wants the signals for the KBL-B brief.
+
+---
+
+## Decision logic after your report
+
+- **If Gemma passes all 4 thresholds:** D1 ratifies. AI Head moves to KBL-B brief.
+- **If Gemma passes vedana but not matter (or vice versa):** partial capability signal — AI Head weighs whether D1 ratifies with a narrower scope or needs further work.
+- **If Gemma still fails both with a fair prompt:** capability gap is real. D1 reverts to Option B (Qwen primary) or model swap. AI Head's KBL-B brief will use a model-agnostic choice.
+
+Director's Option-C directive: **the fair-prompt retry is what settles D1.** No further iterations on this eval set after this retry — if it fails, D1 closes via revert.
+
+---
+
+## Est. time
+
+~30 minutes:
+
+- 10 min prompt patch + alias fix
+- 10 min eval run (50 signals × 2 models on macmini)
+- 10 min report + commits
+
+---
+
+*Dispatched 2026-04-17 by AI Head. Supersedes prior pending content. Acknowledge by committing work to main on `/tmp/bm-b3` with git identity `Code Brisen 3` / `dvallen@brisengroup.com`.*
