@@ -38,3 +38,7 @@ The previous task's content is preserved in git history. If you want permanent r
 - Tasks self-contained — assume Code has zero session memory of prior exchanges
 - Include: target file, scope, output format, time budget, pass criteria, parallel context
 - Commit atomically — one task update = one commit
+
+## Paired with `briefs/_reports/`
+
+See `briefs/_reports/README.md` — the symmetric pattern for Code Brisen reports back to AI Head / Director. Substantive reports go in files; short status confirmations stay inline in chat.
