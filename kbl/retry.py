@@ -100,9 +100,12 @@ def check_and_clear_anthropic_circuit(anthropic: Anthropic) -> bool:
     Returns True if circuit now clear."""
     if get_state("anthropic_circuit_open") != "true":
         return True
+    # B2.S5: health-check model configurable so bare family aliases
+    # don't silently stop working if Anthropic deprecates them.
+    health_model = cfg("circuit_health_model", "claude-haiku-4-5")
     try:
         anthropic.messages.create(
-            model="claude-haiku-4",
+            model=health_model,
             messages=[{"role": "user", "content": "ok"}],
             max_tokens=1,
         )
