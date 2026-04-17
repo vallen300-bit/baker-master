@@ -67,21 +67,21 @@ def sample_query(seed: int) -> str:
     return f"""
     WITH
       email_hg AS (
-        SELECT 'email' AS source, id::text AS sid, subject AS title,
+        SELECT 'email' AS source, message_id::text AS sid, subject AS title,
                LEFT(COALESCE(full_body, ''), 3000) AS raw_content
           FROM email_messages
          WHERE (subject ILIKE '%hagenauer%' OR full_body ILIKE '%hagenauer%'
                 OR subject ILIKE '%RG7%')
-         ORDER BY md5(id::text || '{seed}') LIMIT 15
+         ORDER BY md5(message_id::text || '{seed}') LIMIT 15
       ),
       email_other AS (
-        SELECT 'email', id::text, subject,
+        SELECT 'email', message_id::text, subject,
                LEFT(COALESCE(full_body, ''), 3000)
           FROM email_messages
          WHERE NOT (subject ILIKE '%hagenauer%' OR full_body ILIKE '%hagenauer%' OR subject ILIKE '%RG7%')
            AND full_body IS NOT NULL
            AND length(full_body) > 100
-         ORDER BY md5(id::text || '{seed}') LIMIT 10
+         ORDER BY md5(message_id::text || '{seed}') LIMIT 10
       ),
       wa_hg AS (
         SELECT 'whatsapp', id::text, NULL::text,
