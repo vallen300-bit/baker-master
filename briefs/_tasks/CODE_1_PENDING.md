@@ -1,249 +1,172 @@
 # Code Brisen #1 — Pending Task
 
 **From:** AI Head
-**To:** Code Brisen #1 (terminal instance, deepest brief context across R1/R2/R3)
-**Previous report:** [`briefs/_reports/B1_kbl_a_r3_verify_20260417.md`](../_reports/B1_kbl_a_r3_verify_20260417.md) @ commit `db1ddf8` — R3 ratify verdict
+**To:** Code Brisen #1 (terminal instance, KBL-A implementer)
+**Previous report:** [`briefs/_reports/B1_kbl_a_implementation_20260417.md`](../_reports/B1_kbl_a_implementation_20260417.md) @ `bbefea8`
+**B2 PR review:** [`briefs/_reports/B2_pr1_review_20260417.md`](../_reports/B2_pr1_review_20260417.md) @ `f7402c9` — verdict REQUEST CHANGES
 **Task posted:** 2026-04-17
-**Status:** OPEN — awaiting execution (BIG task, 12-16h budget)
+**Status:** OPEN — awaiting execution
 
 ---
 
-## Task: IMPLEMENT KBL-A Infrastructure
+## Task: KBL-A PR #1 Revisions (v2)
 
 ### Authority
 
-**Ratified brief:** [`briefs/KBL-A_INFRASTRUCTURE_CODE_BRIEF.md`](../KBL-A_INFRASTRUCTURE_CODE_BRIEF.md) @ commit `c815bbf` — Director Dimitry Vallen ratified 2026-04-17 after 3 review rounds.
+**Target branch:** `kbl-a-impl` (add commits, don't force-push — PR #1 auto-updates)
+**Ratified brief:** [`briefs/KBL-A_INFRASTRUCTURE_CODE_BRIEF.md`](../KBL-A_INFRASTRUCTURE_CODE_BRIEF.md) @ `c815bbf`
+**Review source:** [`briefs/_reports/B2_pr1_review_20260417.md`](../_reports/B2_pr1_review_20260417.md) — read fully before starting
 
-**This task = build everything in that brief.** You've reviewed it 3 times; you know the scope. This task file is NOT a re-spec — it's the dispatch wrapper (branch strategy, commit discipline, PR handoff).
+B2's review was structured, precise, and identified 1 blocker + 5 should-fix + 6 nice-to-have. Your revision addresses the blocker + all 5 should-fix + 4 of the 6 nice (N5 is AI Head's, N6 deferred).
 
-### Scope reminder (from ratified brief)
+### Scope (10 items — mostly small, one is structural)
 
-- 5 new PG tables + `signal_queue` additions (§5)
-- Mac Mini install script + 4 LaunchAgents + newsyslog (§6, §12)
-- yq-sourced config deployment (§7)
-- flock-wrapped pipeline tick wrapper (§8) with Python orchestrator stub
-- Gold promote queue drain worker with push-failure rollback (§9)
-- Retry ladders + circuit breaker + runtime state (§10)
-- Cost tracking with pre-call estimate + daily cap (§11)
-- Logging + alert dedupe + heartbeat (§12)
-- 9 Python modules under `kbl/*.py` (pipeline_tick, gold_drain, retry, cost, logging, runtime_state, heartbeat, db, whatsapp)
-- 5 shell wrapper scripts under `scripts/`
-- 4 LaunchAgent plists under `launchd/`
+#### BLOCKER — must fix
 
-**`kbl/pipeline_tick.py` is a STUB per §17 — KBL-A just claims a signal and marks it `classified-deferred`. KBL-B replaces with actual 8-step pipeline logic. Do NOT implement pipeline logic.**
+**B2.B1 — LaunchAgent environment missing secrets.**
+- **Root cause:** `launchd` doesn't source `~/.zshrc`. Plists only set `PATH`. `kbl/db.py:27` does `os.environ["DATABASE_URL"]` bare subscript → `KeyError` at first Python import once `KBL_FLAGS_PIPELINE_ENABLED=true`.
+- **Fix (B2's option 1 — preferred):** dedicated env file `~/.kbl.env` sourced by wrapper.
+  - Add near top of `scripts/kbl-pipeline-tick.sh` (before the yq step):
+    ```bash
+    # Load secrets from dedicated env file (launchd doesn't source ~/.zshrc)
+    [ -f "${HOME}/.kbl.env" ] && . "${HOME}/.kbl.env"
+    ```
+  - Same line also added to `scripts/kbl-heartbeat.sh`, `scripts/kbl-dropbox-mirror.sh`, `scripts/kbl-purge-dedupe.sh` — every wrapper that invokes Python needs it.
+  - Update `scripts/install_kbl_mac_mini.sh` to:
+    - Create `~/.kbl.env` if missing (template with 5 secret names, blank values)
+    - `chmod 600 ~/.kbl.env`
+    - Echo clear message: "Edit ~/.kbl.env to populate ANTHROPIC_API_KEY, DATABASE_URL, QDRANT_URL, QDRANT_API_KEY, VOYAGE_API_KEY before enabling pipeline."
+  - Update brief §6 install script section + §8 wrapper section to reflect the new env-file pattern (I'll make the brief edit separately — you focus on code).
 
-### Build strategy
+#### SHOULD-FIX (all 5)
 
-#### Branch
+**B2.S1 — Gold drain concurrent-drain race.**
+- Keep the SELECT-FOR-UPDATE transaction open until after push succeeds. Single commit: the final `UPDATE processed_at`. Remove the early `conn.commit()` after the SELECT.
+- Restructure `drain_queue` so the row locks protect the critical section through filesystem + commit + push.
+- Cost: ~15 min refactor. Preserves SKIP LOCKED semantics for the full drain.
 
-Work on a branch, NOT main:
+**B2.S2 — Cost-alert date boundary (UTC vs Europe/Vienna).**
+- `kbl/cost.py:197` — change `date.today().isoformat()` → `datetime.now(timezone.utc).date().isoformat()` so the dedupe key aligns with DB `NOW()::date` (UTC).
+- One line.
 
-```bash
-git checkout -b kbl-a-impl
+**B2.S3 — `call_gemma_with_retry` short-circuit when Qwen active + inline recovery.**
+- Skip Gemma attempts 1-3 when `get_state("qwen_active") == "true"`. Go straight to Qwen.
+- Occasionally probe Gemma for recovery — either (a) every Nth call (`cfg_int("qwen_recovery_probe_every", 5)`), or (b) opportunistic on successful Gemma attempt 1 in non-Qwen mode. B2 suggested both; I'd do (a) plus keep existing `maybe_recover_gemma` for count/hours triggers. Belt+suspenders.
+- If opportunistic Gemma probe succeeds while Qwen-active, immediately trigger recovery path (clear `qwen_active`, reset counters, log).
+- Cost: ~20 min.
+
+**B2.S4 — Gold drain: `git add`/`git commit` error path not caught.**
+- Broaden the `except` in `drain_queue` to catch `subprocess.CalledProcessError` in addition to `GitPushFailed`, OR catch `CalledProcessError` inside `_commit_and_push` and re-raise as `GitPushFailed`.
+- Latter is cleaner — one type to catch in drain_queue.
+- Cost: ~5 min.
+
+**B2.S5 — Hardcoded health-check model.**
+- Add `KBL_CIRCUIT_HEALTH_MODEL` to `env.mac-mini.yml` under `ollama:` section (no — better under a new `circuit:` or existing `pipeline:` section since it's Anthropic-side, not Ollama). Default `"claude-haiku-4-5"`.
+- `kbl/retry.py:105` — read via `cfg("circuit_health_model", "claude-haiku-4-5")`.
+- Also add to brief §16 env var table.
+- Cost: ~5 min.
+
+#### NICE-TO-HAVE (4 of 6 — skip N5 and N6)
+
+**B2.N1 — Anthropic-circuit-open WARN log dedupe.**
+- `kbl/pipeline_tick.py:53-58` — route through `kbl_alert_dedupe` with a 15-min bucket, OR downgrade to local-logger-only for this specific message.
+- Cleaner: route through dedupe — consistent with cost alerts.
+- Cost: ~5 min.
+
+**B2.N2 — Frontmatter fabrication on headerless files.**
+- `kbl/gold_drain.py:156-163` — if `content` doesn't start with `---\n`, return `"error:no_frontmatter"` instead of injecting frontmatter into a file that never had any.
+- Cost: ~5 min.
+
+**B2.N3 — Vault branch hardcode `main`.**
+- `kbl/gold_drain.py:206` — `cfg("vault_branch", "main")` instead of literal `"main"`.
+- Add `vault_branch` to `env.mac-mini.yml` template (under new `vault:` section or under `gold_promote:`).
+- Add to brief §16.
+- Cost: ~3 min.
+
+**B2.N4 — `was_inserted` defensive type check.**
+- `kbl/logging.py:141-145` — `cur.fetchone()[0] is True` instead of `bool(...)`.
+- Prevents `bool('f') == True` trap if adapter returns string.
+- Cost: ~1 min.
+
+**SKIP:**
+- B2.N5: brief doc drift "3 new columns" — AI Head fixes in separate commit
+- B2.N6: install script venv check — defer, add to follow-up brief
+
+### Commit strategy
+
+**Single commit per fix**, semantic messages:
+```
+fix(kbl-a): B2.B1 — LaunchAgent env-file plumbing (load ~/.kbl.env)
+fix(kbl-a): B2.S1 — gold drain: single tx for lock + commit + push
+fix(kbl-a): B2.S2 — cost alert dedupe key uses UTC date
+fix(kbl-a): B2.S3 — gemma retry short-circuit when qwen active + recovery probe
+fix(kbl-a): B2.S4 — git subprocess errors caught in gold drain
+fix(kbl-a): B2.S5 — circuit health-check model configurable via env
+fix(kbl-a): B2.N1 — anthropic-circuit-open log dedupe
+fix(kbl-a): B2.N2 — gold drain refuses headerless files
+fix(kbl-a): B2.N3 — vault branch configurable via env
+fix(kbl-a): B2.N4 — was_inserted strict True check
 ```
 
-**Why:** Render auto-deploys on `main` push. Every broken commit = Render deploy failure = restart loop. Branch isolates WIP until Director merges the PR at completion.
-
-**Exception:** schema changes land on `main` via `_ensure_*` at Render startup. That means your branch must eventually merge for Phase 1 migrations to run. Don't merge mid-build — finish all phases + PR review first.
-
-#### Phase-per-commit
-
-Per brief §5-§12, there are 8 buildable phases. Commit each phase separately with semantic message:
-
-```
-feat(kbl-a): Phase 1 — schema migrations
-feat(kbl-a): Phase 2 — Mac Mini install script
-feat(kbl-a): Phase 3 — config deployment (yml + yq)
-feat(kbl-a): Phase 4 — pipeline wrapper (flock + cron + orchestrator stub)
-feat(kbl-a): Phase 5 — Gold drain worker
-feat(kbl-a): Phase 6 — retry + circuit breaker + runtime state
-feat(kbl-a): Phase 7 — cost tracking
-feat(kbl-a): Phase 8 — logging + alert dedupe + heartbeat
-```
-
-Each commit body: brief 3-5 bullet summary + acceptance test results.
-
-**Why per-phase:** reviewer (B2) can walk your PR commit-by-commit. Isolates bugs. Easier bisect if something regresses post-deploy.
-
-#### Acceptance tests inline
-
-Run per-phase acceptance tests as you go (from brief §14). Don't batch to the end — catch bugs near the commit that introduced them.
-
-Where tests need real infrastructure (e.g., PG INSERT for signal_queue test, SSH to macmini for flock test):
-- Use Director's DATABASE_URL env
-- SSH to macmini via existing Tailscale (`ssh macmini`)
-- Write test results in the commit body
-
-### Per-phase notes
-
-#### Phase 1 — Schema (Render)
-
-- Extend `memory/store_back.py::SentinelStoreBack` with new `_ensure_*` methods per brief §5
-- Reference pre-staged `briefs/_drafts/KBL_A_SCHEMA.sql` v3 (commit `8782813`) — inline FKs adopted, B2 already validated
-- **Apply R2.NEW-B1 clarification:** kbl Python code does NOT use `SentinelStoreBack` — it uses the simple `kbl/db.py` direct psycopg2 contextmanager. `SentinelStoreBack` is ONLY for running the `_ensure_*` migrations at Render startup.
-- Enforce ordering invariant: `_ensure_signal_queue_additions` runs BEFORE `_ensure_kbl_cost_ledger` + `_ensure_kbl_log` (FK target must exist)
-- Test against Director's DATABASE_URL on a Neon branch if possible; else stage locally + verify via `\d` in psql
-
-#### Phase 2 — Install script
-
-- Shell script per brief §6
-- Idempotent: re-run should not fail
-- sudo prompts for `/var/log/kbl/` creation + newsyslog.d install
-- Verify `yq`, `flock`, `ollama`, `gemma4:latest`, `qwen2.5:14b` all present
-- Chmod 600 `~/.zshrc` (R1.N3)
-
-#### Phase 3 — Config deployment
-
-- Example `config/env.mac-mini.yml` template committed to `baker-vault` repo (separate PR on that repo — Director merges)
-- yq flattening expression per brief §7, includes:
-  - R1.B1+B2 corrections (paths recursion, array-to-CSV)
-  - R1.S1 `select($p | last | type != "number")` filter
-- `kbl/config.py` with `cfg()`, `cfg_list()`, `cfg_bool()`, `cfg_int()`, `cfg_float()` helpers
-
-#### Phase 4 — Pipeline wrapper
-
-- `scripts/kbl-pipeline-tick.sh` per brief §8
-  - flock mutex
-  - git pull --rebase -X ours (R1.B1/R2 correction)
-  - yml guard (R1.M3)
-  - Correct yq expression
-- `kbl/pipeline_tick.py` STUB — claims 1 signal, marks `classified-deferred`, exits
-- Single `__main__` block (R2.NEW-S1 — no duplicate)
-- NOT writing heartbeat (R1.S7 single-owner)
-- LaunchAgent plist `com.brisen.kbl.pipeline.plist`
-
-#### Phase 5 — Gold drain
-
-- `kbl/gold_drain.py` per brief §9
-- R1.B4 transaction order: claim → apply filesystem → commit+push with retry → mark PG done ONLY on push success; push failure rolls back files
-- R1.S3: `git add <specific paths>`, NOT `-A`
-- R1.S4: commit message includes path + queue_id + wa_msg_id
-- R1.N4: VAULT path from env `KBL_VAULT_PATH` with default
-- R2.NEW-S3: error results → `emit_log("ERROR", ...)`; success results → stdlib local logger (bypass emit_log, no PG spam)
-- `__main__` dispatcher per R1.B3
-
-#### Phase 6 — Retry + circuit breaker
-
-- `kbl/retry.py`, `kbl/runtime_state.py` per brief §10
-- R1.B2: Qwen `active_since` uses `datetime.now(timezone.utc).isoformat()`, NOT literal `"NOW()"`
-- R1.S8: Qwen recovery = either-condition (count OR hours elapsed)
-- R1.S9: `_call_ollama` timeout=180s
-- Circuit breaker with health check (skip_circuit flag, 10-min backoff)
-- `kbl_runtime_state` key-value access with atomic UPSERT
-
-#### Phase 7 — Cost tracking
-
-- `kbl/cost.py` per brief §11
-- R1.B6: `_model_key()` normalizer — raises `ValueError` on unknown model (stricter than silent $0)
-- Pre-call estimate via Anthropic `count_tokens` endpoint + fallbacks
-- Post-call actual logging
-- 80%/95%/100% thresholds with dedupe via `kbl_alert_dedupe` table
-- `daily_cost_circuit_clear` at UTC midnight (called by purge-dedupe script)
-
-#### Phase 8 — Logging + dedupe + heartbeat
-
-- `kbl/logging.py` per brief §12
-- R1.B5: try/except around `FileHandler` at import
-- R1.B3: `__main__` argv dispatcher (emit_critical, emit_info, emit_warn, emit_error)
-- `kbl/heartbeat.py` sole heartbeat owner (R1.S7)
-- `kbl/whatsapp.py` wraps existing `triggers/waha_client.py` (R1.S1)
-- `kbl/db.py` direct psycopg2 contextmanager (R2.NEW-B1)
-- `scripts/kbl-heartbeat.sh`, `kbl-dropbox-mirror.sh`, `kbl-purge-dedupe.sh`
-- LaunchAgents: `com.brisen.kbl.heartbeat.plist`, `.dropbox-mirror.plist`, `.purge-dedupe.plist`
-
-### Testing
-
-For each phase, run the acceptance tests in brief §14 that apply. Common gotchas you'll hit:
-
-- **Non-interactive SSH + PATH:** `ssh macmini "ollama list"` fails because `/opt/homebrew/bin` isn't in non-interactive PATH. Use `PATH=/opt/homebrew/bin:$PATH` prefix OR full path.
-- **DATABASE_URL:** for local testing, pull from macmini's zshrc via SSH one-liner:
-  ```bash
-  export DATABASE_URL=$(ssh macmini 'source ~/.zshrc 2>/dev/null; echo $DATABASE_URL')
-  ```
-- **Fresh clone required** for your B1 workspace if `01_build` is also 700+ commits behind (it probably is). Use `/tmp/bm-b1-impl` or similar disposable path.
-
-### PR creation (at completion)
-
-```bash
-git push -u origin kbl-a-impl
-gh pr create --base main --head kbl-a-impl \
-  --title "KBL-A: infrastructure foundation" \
-  --body "$(cat <<'EOF'
-## KBL-A Implementation
-
-Ratified brief: briefs/KBL-A_INFRASTRUCTURE_CODE_BRIEF.md @ c815bbf
-
-### What's in this PR
-
-- 5 new PG tables + signal_queue additions
-- 9 Python modules (kbl/*)
-- 5 shell wrapper scripts + 4 LaunchAgent plists
-- Install script + newsyslog config + env.mac-mini.yml template
-
-### Phase-per-commit
-
-See git log --oneline for commit-per-phase breakdown.
-
-### Acceptance tests
-
-Per-phase tests passing (details in commit bodies).
-
-### Deploy sequence (post-merge)
-
-1. Render auto-deploys on merge → _ensure_* migrations run at startup
-2. Director + Code run install_kbl_mac_mini.sh on macmini
-3. Director commits config/env.mac-mini.yml to baker-vault repo
-4. First pipeline tick fires — logs "pipeline disabled" (KBL_FLAGS_PIPELINE_ENABLED=false)
-5. Director flips the flag when ready to go live
-
-### Review by
-
-Code Brisen #2 — see briefs/_tasks/CODE_2_PENDING.md for review task (will be written post-PR-open).
-
-### Post-merge cleanup
-
-- Delete kbl-a-impl branch after merge
-- Update CODE_1_PENDING.md (me) to "standby / await KBL-B brief"
-EOF
-)"
-```
-
-After PR opened, report in chat:
-```
-KBL-A PR open: <URL>. Commit count: <N>. Per-phase acceptance tests: <N>/<N> pass.
-Filed report at briefs/_reports/B1_kbl_a_implementation_20260417.md (or later date).
-Awaiting B2 PR review.
-```
+10 commits on top of current branch head. PR #1 auto-updates.
 
 ### Time budget
 
-12-16 hours wall-clock. Split across multiple sessions is fine — commit-per-phase means any handoff point is clean. If you hit a ceiling (context exhaustion, model rotation), commit current work, document state in commit body, next session resumes from clean state.
+**60-90 minutes.** B2's estimate + my concurrence.
 
-### Escalate to me (AI Head) immediately if
+If you hit a snag (e.g., S3 restructure turns out to be harder than 20 min), commit what works and flag the remainder. Don't push broken code.
 
-- Brief has contradictions you can't resolve (possible post-ratification; I'll write clarifying ADR)
-- Acceptance test fails in a way that suggests the brief itself is wrong (not an implementation bug)
-- Schema conflict with existing Cortex V2 code that the brief didn't account for
-- Director is unreachable and a decision is needed for >2h (shouldn't happen — eval labeling is bounded)
+### Testing (do after all commits)
 
-Don't escalate for:
-- Python import fixes (just solve it)
-- Minor shell script differences between macOS BSD tools and Linux GNU expectations (adapt)
-- Formatting / linting decisions (use repo's existing style — grep for examples)
+Re-run the 8 local tests from your first implementation:
+- `python3 -c "import py_compile"` on all kbl/*.py
+- `bash -n` on all scripts/kbl-*.sh
+- `plutil -lint` on all launchd/*.plist
+- Full `from kbl import ...` sweep
+- Make sure nothing regressed
+
+No deferred-to-deploy tests change — still Director/me after merge.
+
+### File report at completion
+
+`briefs/_reports/B1_kbl_a_pr1_revisions_20260417.md` per mailbox pattern.
+
+Header:
+```
+Re: briefs/_tasks/CODE_1_PENDING.md commit <SHA>
+PR: https://github.com/vallen300-bit/baker-master/pull/1 (branch kbl-a-impl @ new HEAD)
+Revises: briefs/_reports/B2_pr1_review_20260417.md @ f7402c9
+```
+
+Summary: 10 commits, B2.B1 fix + B2.S1-S5 + B2.N1-N4, local tests pass.
+
+Chat one-liner:
+```
+PR #1 revisions shipped. 10 commits on kbl-a-impl. Report at briefs/_reports/B1_kbl_a_pr1_revisions_20260417.md, commit <SHA>.
+Awaiting B2 re-review.
+```
+
+### Pass criteria
+
+| Result | Next step |
+|---|---|
+| B2 narrow re-review → 0 blockers | Director merges PR → Render deploys → install on macmini |
+| B2 re-review → 1-2 blockers | Another small revision cycle |
+| B2 re-review → ≥3 blockers | Diagnose (unlikely given scope is bounded) |
 
 ### Parallel context
 
-- **B2:** standing by. Will be tasked with PR review when your PR opens.
-- **B3:** running D1 eval labeling with Director (independent critical path, ~60 min).
-- **Director:** splits attention between B3 (labeling) and occasional check-ins with me/you.
-- **SSH hardening:** still Director's 5-min task, bundled with install script sudo prompts — could do during Phase 2 acceptance testing.
+- **B2:** standing by for re-review. Their task file will be updated to narrow-scope verify after you push.
+- **B3:** running Director's D1 eval labeling (independent).
+- **Director:** labeling with B3, occasional check-ins with me.
 
-### File your report after PR
+### Do NOT
 
-`briefs/_reports/B1_kbl_a_implementation_<YYYYMMDD>.md` per mailbox pattern.
-
-Contents: commits list with SHAs, acceptance test results per phase, known deviations from brief (if any), gotchas encountered, B2-reviewer hints.
+- Force-push the branch (adds confusion to PR history)
+- Address N5 (my brief fix) or N6 (deferred)
+- Re-open B2's deviation accepts — all 3 stand
+- Restructure beyond the 10 listed items — we're in narrow-fix mode
 
 ---
 
-*Task posted by AI Head 2026-04-17. Previous report: R3 verify clean. KBL-A ratified (c815bbf) by Director. Build 12-16h, phase-per-commit, PR-to-main for B2 review. Go.*
+*Task posted by AI Head 2026-04-17. 10 fixes, ~60-90 min. Branch kbl-a-impl continues from your Phase 8 head; PR #1 auto-updates with each push.*

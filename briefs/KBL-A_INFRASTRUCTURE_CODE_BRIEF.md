@@ -1,6 +1,8 @@
-# KBL-A — Infrastructure Code Brief (DRAFT v3)
+# KBL-A — Infrastructure Code Brief (RATIFIED)
 
-**Status:** DRAFT v3 — post Code Brisen R2 narrow-scope review (1B/3S, all surface-level). Awaiting optional R3 spot-check OR Director ratification.
+**Status:** RATIFIED 2026-04-17 by Director (Dimitry Vallen). Final version v3.
+**Review history:** v1 → R1 (48 min, 6B/12S/4N/4M) → v2 → R2 (25 min, 1B/3S) → v3 → R3 (verify, 0 findings, ratify verdict).
+**Ready for dispatch.**
 **Ratified decisions source:** [`briefs/DECISIONS_PRE_KBL_A_V2.md`](DECISIONS_PRE_KBL_A_V2.md) (15 decisions, ratified 2026-04-17)
 **Pre-staged artifacts:**
 - `briefs/_drafts/KBL_A_SCHEMA.sql` (schema DDL v3, B2 reconciled inline FKs — commit `8782813`)
@@ -1607,7 +1609,7 @@ Code Brisen signs off on KBL-A when ALL of the following pass:
 
 ### Schema
 - [ ] All 5 new tables present with correct columns + CHECK constraints
-- [ ] `signal_queue` has 3 new columns + 3 new indexes + expanded status CHECK
+- [ ] `signal_queue` has 4 new columns (`primary_matter`, `related_matters`, `triage_confidence`, `started_at`) + 3 new indexes + expanded status CHECK
 - [ ] `kbl_runtime_state` seeded with 6 flag keys
 - [ ] FK constraints (`kbl_cost_ledger.signal_id`, `kbl_log.signal_id`) present with `ON DELETE SET NULL`
 
@@ -1757,4 +1759,4 @@ All tunables (sourced from `env.mac-mini.yml` except where noted):
 
 ---
 
-*Prepared 2026-04-17 by AI Head (Claude Opus 4.7). V1 drafted; R1 reviewed by Code Brisen #1 (48 min, 6B/12S/4N/4M); V2 incorporates all 6 blockers + 10 should-fix + 3 missing; V3 post-R2 (25 min, 1B/3S) fixes kbl/db.py spec, duplicate __main__, heartbeat test wording, gold_drain log-level ternary. Target: optional R3 spot-check → Director ratification → dispatch. Expected build: 12-16 hours.*
+*Prepared 2026-04-17 by AI Head (Claude Opus 4.7). Three review rounds by Code Brisen #1: R1 (48 min, 6B/12S/4N/4M), R2 (25 min, 1B/3S), R3 verify (0 findings, ratify verdict). **Status: RATIFIED 2026-04-17 by Director Dimitry Vallen.** Ready for dispatch. Expected implementation build: 12-16 hours.*
