@@ -184,10 +184,10 @@ def main():
             template = dict(base)
             template.update({
                 # Director fills these in Option A (see KBL_EVAL_SET_PLAYBOOK.md §3)
-                "vedana_expected": None,          # 'pleasant' | 'unpleasant' | 'neutral'
-                "primary_matter_expected": None,  # matter slug or null
+                "vedana_expected": None,          # 'opportunity' | 'threat' | 'routine' — production schema (signal_queue.vedana CHECK)
+                "primary_matter_expected": None,  # matter slug or null (see scripts/validate_eval_labels.py:MATTER_ALLOWLIST)
                 "related_matters_expected": [],   # list of matter slugs
-                "triage_threshold_pass_expected": None,   # true = should have alerted
+                "triage_threshold_pass_expected": None,   # true = "should have alerted me"; false = should not have
                 "notes": "",
             })
             f_tp.write(json.dumps(template, ensure_ascii=False) + "\n")

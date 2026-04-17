@@ -140,13 +140,12 @@ Each line in `eval/seed_unlabeled.jsonl` becomes one record with `{source, id, t
   "signal_text": "...",
   "occurred_at": "2026-03-14T09:12:00Z",
 
-  // --- Director adds ---
-  "vedana": "threat",                    // "opportunity" | "threat" | "routine"
-  "primary_matter": "hagenauer-rg7",     // canonical matter slug; null if no matter applies
-  "related_matters": ["cupial"],         // array of secondary matter slugs; [] if none
-  "triage_threshold": 50,                // 0–100. "If Gemma scores >= this, it should alert me."
-                                         // Implicit: score < threshold means the signal should not
-                                         // have interrupted Director. Calibrates §6 acceptance.
+  // --- Director adds (field names must match scripts/validate_eval_labels.py) ---
+  "vedana_expected": "threat",             // "opportunity" | "threat" | "routine" — production schema (signal_queue.vedana CHECK)
+  "primary_matter_expected": "hagenauer-rg7",   // canonical matter slug; null if no matter applies
+  "related_matters_expected": ["cupial"],       // array of secondary matter slugs; [] if none
+  "triage_threshold_pass_expected": true,       // true = "should have alerted me"; false = should not have.
+                                                 // Compared against (model_triage_score >= KBL_TRIAGE_THRESHOLD=40).
   "notes": "Final-account threat letter; time-critical 14-day deadline"
 }
 ```
@@ -233,10 +232,10 @@ parsed, json_ok = parse_json_response(response)   # reuse
 
 | Check | Pass condition |
 |---|---|
-| JSON validity | `json.loads(output)` succeeds with `vedana`, `primary_matter`, `triage_score` present |
-| vedana match | `output["vedana"] == label["vedana"]` (case-insensitive) |
-| primary_matter match | `output["primary_matter"] == label["primary_matter"]`, OR both are null, OR matches alias map (see benchmark_ollama_triage.py:171) |
-| triage_score bucket | `(output["triage_score"] >= label["triage_threshold"]) == (label["vedana"] != "routine")`  — i.e. model's alert decision agrees with Director's |
+| JSON validity | `json.loads(output)` succeeds with `vedana`, `matter`, `triage_score` present |
+| vedana match | `normalize(output["vedana"]) == normalize(label["vedana_expected"])` — normalizer accepts production (opportunity/threat/routine) or classical Buddhist (pleasant/unpleasant/neutral) synonyms defensively, but the canonical vocabulary Director labels in is the production one |
+| primary_matter match | `normalize_matter(output["matter"]) == label["primary_matter_expected"]`, OR both null, OR model output aliases to the allowlist slug (see run_kbl_eval.py:MATTER_ALIASES) |
+| triage alert bucket | `(output["triage_score"] >= KBL_TRIAGE_THRESHOLD) == label["triage_threshold_pass_expected"]` — model's alert decision agrees with Director's bool |
 
 Per-source + overall accuracy reported. Per-signal failures logged to `eval/results_<model>_<timestamp>.jsonl` for diff review.
 

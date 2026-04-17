@@ -15,7 +15,7 @@ Exit codes:
 A "valid" row satisfies ALL of:
   signal_id                       — non-empty string
   source                          — in {"email", "whatsapp", "meeting"}
-  vedana_expected                 — in {"pleasant", "unpleasant", "neutral"}
+  vedana_expected                 — in {"opportunity", "threat", "routine"} (production schema)
   primary_matter_expected         — in MATTER_ALLOWLIST or None
   related_matters_expected        — list of strings each in MATTER_ALLOWLIST
   triage_threshold_pass_expected  — boolean
@@ -28,7 +28,7 @@ import sys
 from pathlib import Path
 from typing import List
 
-VALID_VEDANA = {"pleasant", "unpleasant", "neutral"}
+VALID_VEDANA = {"opportunity", "threat", "routine"}
 VALID_SOURCES = {"email", "whatsapp", "meeting"}
 
 MATTER_ALLOWLIST = {

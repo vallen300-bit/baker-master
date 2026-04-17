@@ -197,8 +197,14 @@ def ollama_generate(model: str, prompt: str, *,
 
 
 def score_row(label: dict, parsed: dict, json_ok: bool) -> dict:
-    """Compare one model response to the Director label. Returns a result dict."""
-    label_vedana = label.get("vedana_expected")
+    """Compare one model response to the Director label. Returns a result dict.
+
+    Canonical Director-labeling vocab is production (opportunity/threat/routine).
+    Normalizer maps both production and Buddhist (pleasant/unpleasant/neutral)
+    synonyms to one internal key so the comparison is robust if the model
+    defies the prompt and emits the other vocabulary.
+    """
+    label_vedana_raw = label.get("vedana_expected")
     label_pm = label.get("primary_matter_expected")
     label_pass = label.get("triage_threshold_pass_expected")
 
@@ -206,10 +212,11 @@ def score_row(label: dict, parsed: dict, json_ok: bool) -> dict:
     out_matter_raw = parsed.get("matter")
     out_score = parsed.get("triage_score")
 
+    label_vedana = normalize_vedana(label_vedana_raw)
     out_vedana = normalize_vedana(out_vedana_raw)
     out_matter = normalize_matter(out_matter_raw)
 
-    vedana_ok = (out_vedana == label_vedana) if json_ok else False
+    vedana_ok = (out_vedana is not None and out_vedana == label_vedana) if json_ok else False
     matter_ok = (out_matter == label_pm) if json_ok else False
     score_bucket_ok = False
     if json_ok and isinstance(out_score, (int, float)) and isinstance(label_pass, bool):
@@ -226,7 +233,7 @@ def score_row(label: dict, parsed: dict, json_ok: bool) -> dict:
         "model_vedana":     out_vedana_raw,
         "model_matter":     out_matter_raw,
         "model_score":      out_score,
-        "label_vedana":     label_vedana,
+        "label_vedana":     label_vedana_raw,   # as Director labeled (e.g. "threat")
         "label_matter":     label_pm,
         "label_pass":       label_pass,
     }
