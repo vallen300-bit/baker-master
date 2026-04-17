@@ -139,7 +139,12 @@ def check_alert_dedupe(component: str, message: str, bucket_minutes: int) -> boo
                         """,
                         (alert_key,),
                     )
-                    was_inserted = bool(cur.fetchone()[0])
+                    # B2.N4: `is True` (not bool(...)) defends against the
+                    # bool('f') == True trap if a Postgres adapter ever
+                    # returns a string instead of a real bool. psycopg2's
+                    # default adapter returns Python True/False, but
+                    # strict identity is cheap insurance.
+                    was_inserted = cur.fetchone()[0] is True
                     conn.commit()
                     return was_inserted
             except Exception:
