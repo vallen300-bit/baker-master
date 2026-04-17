@@ -1,0 +1,10 @@
+version: 1
+matters:
+  - slug: mo-vie
+    status: active
+    description: "first"
+    aliases: [mohg]
+  - slug: hagenauer-rg7
+    status: active
+    description: "second — aliases mohg again (illegal)"
+    aliases: [mohg]

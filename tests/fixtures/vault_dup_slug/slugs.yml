@@ -1,0 +1,10 @@
+version: 1
+matters:
+  - slug: alpha
+    status: active
+    description: "first"
+    aliases: []
+  - slug: alpha
+    status: active
+    description: "duplicate canonical"
+    aliases: []

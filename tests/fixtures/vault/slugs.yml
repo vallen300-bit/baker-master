@@ -1,0 +1,18 @@
+version: 1
+updated_at: 2026-04-17
+
+matters:
+  - slug: alpha
+    status: active
+    description: "Alpha test matter"
+    aliases: [al, "alpha one"]
+
+  - slug: beta
+    status: active
+    description: "Beta test matter"
+    aliases: [bee]
+
+  - slug: gamma
+    status: active
+    description: "Gamma test matter"
+    aliases: []
