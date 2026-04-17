@@ -2,89 +2,72 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (terminal instance)
-**Previous task:** R1 review on KBL-A brief — complete, report filed in chat (pre-report-mailbox; from next review onwards, file reports per `briefs/_reports/README.md`)
+**Previous report:** [`briefs/_reports/B1_kbl_a_r2_review_20260417.md`](../_reports/B1_kbl_a_r2_review_20260417.md) @ commit `41d5fbf` — R2 verdict: fast v3 revision
 **Task posted:** 2026-04-17
 **Status:** OPEN — awaiting execution
 
 ---
 
-## Task: R2 Narrow-Scope Re-Review on KBL-A v2
+## Task: R3 Narrow-Scope Verification on KBL-A v3
 
 ### Target
 
 **File:** `briefs/KBL-A_INFRASTRUCTURE_CODE_BRIEF_DRAFT.md`
-**Commit:** `4efca68`
-**URL:** https://github.com/vallen300-bit/978-baker-master/blob/main/briefs/KBL-A_INFRASTRUCTURE_CODE_BRIEF_DRAFT.md
+**New commit:** `<HEAD>` (run `git pull` first)
+**URL:** https://github.com/vallen300-bit/baker-master/blob/main/briefs/KBL-A_INFRASTRUCTURE_CODE_BRIEF_DRAFT.md
 
-(Correct URL: https://github.com/vallen300-bit/baker-master/blob/main/briefs/KBL-A_INFRASTRUCTURE_CODE_BRIEF_DRAFT.md)
+### Scope — ULTRA-NARROW (10-min spot-check max, per your own R2 recommendation)
 
-### Scope — NARROW (not a full re-read)
+V3 addresses exactly 4 items you flagged in R2. Verify only these:
 
-V2 is a revision of v1, not a new brief. Focus R2 **only** on:
-
-**(a) Verify all 6 R1 blockers are actually resolved.** One-by-one check:
-
-| R1 Blocker | Expected V2 Fix Location | What to verify |
-|---|---|---|
-| B1 started_at column | §5 schema additions | `ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ` present |
-| B2 "NOW()" literal | §8 pipeline_tick + anywhere qwen_active_since is set | No literal `"NOW()"` strings stored; uses `datetime.now(timezone.utc).isoformat()` |
-| B3 __main__ dispatchers | §9 gold_drain.py end + §12 logging.py end | Both files have `if __name__ == "__main__":` blocks with argv parsing |
-| B4 Gold push failure rollback | §9 gold_drain.py drain_queue restructure | Commit+push BEFORE PG row marking; push failure triggers `git checkout` rollback + rows stay pending |
-| B5 FileHandler import safety | §12 logging.py module top | try/except around FileHandler creation; NullHandler+stderr fallback |
-| B6 Price-key normalizer | §11 cost.py | `_model_key()` function exists, called in both estimate_cost + log_cost_actual |
-
-**(b) Spot-check the 10 should-fixes applied.** Not exhaustive — sample 3-4 randomly and verify they landed as described in the "R1 Review Response Log" section.
-
-**(c) Verify no NEW blockers introduced.** The v2 delta is ~400 lines. Skim for:
-- Broken references (function/class/file names that don't exist elsewhere in the brief)
-- Logic bugs in new code (especially the Gold drain rollback path — easy to get subtly wrong)
-- Schema changes that miss the `_ensure_*` ordering invariant
-
-**(d) Confirm B2 schema reconciliation adoption.** §5 should adopt B2's inline FK form (auto-named), match `briefs/_drafts/KBL_A_SCHEMA.sql` v3 at commit `8782813`.
+| # | R2 Finding | V3 Fix Expected Location | What to verify |
+|---|---|---|---|
+| NEW-B1 | `kbl/db.py` spec referenced non-existent `.conn` | §2 Deliverables, `kbl/db.py` bullet | Spec now shows `psycopg2.connect(DATABASE_URL)` contextmanager; explicit statement that `SentinelStoreBack` is bypassed; no more `.conn` attribute reference |
+| NEW-S1 | Duplicate `__main__` in `pipeline_tick.py` | §8 end of pipeline_tick.py block | Exactly ONE `if __name__ == "__main__":` block |
+| NEW-S2 | Heartbeat test wording | §8 line ~720 + §14 acceptance test list | Both places reference dedicated LaunchAgent every 30 min, NOT "every tick" |
+| NEW-S3 | Dead `"WARN" if error else "WARN"` ternary | §9 gold_drain.py after push-success marking | Error path uses `emit_log("ERROR", ...)`; success path uses stdlib logger directly (local-file-only, bypasses emit_log) |
 
 ### Do NOT
 
-- Re-open should-fixes that were deferred (S6 = separate doc fix, already pushed; S11 = Phase 2; N1-N4 = mostly absorbed/deferred)
-- Re-open architectural decisions (those are ratified in `DECISIONS_PRE_KBL_A_V2.md`)
-- Full 1407-line re-read (v2 delta only)
+- Re-read the full brief
+- Re-open R1 findings (all verified resolved in R2)
+- Look for new issues outside the 4 R2 fixes — **unless** one of the v3 edits introduces an obvious new bug in immediate surrounding code
 
 ### Output structure
 
-Same format as R1. Pass criteria:
+Same format. If all 4 fixes land clean: single-line verdict + no findings table needed. If anything regressed or a fix is wrong: structured findings.
 
-| Result | Next step |
-|---|---|
-| 0 blockers | Director ratifies KBL-A → dispatch to implementation |
-| 1-2 blockers | Fast v3 revision |
-| ≥3 blockers | Stop — something in v2 regressed, diagnose |
+### File your report
 
-### File your report per the new pattern
+`briefs/_reports/B1_kbl_a_r3_verify_20260417.md` per mailbox pattern.
 
-Per `briefs/_reports/README.md`, file substantive reports to `briefs/_reports/`:
-
-Expected path: `briefs/_reports/B1_kbl_a_r2_review_20260417.md`
-
-Header should reference this task file commit:
+Chat one-liner:
 ```
-Re: briefs/_tasks/CODE_1_PENDING.md commit <SHA when you read this>
-```
-
-Chat one-liner when filed:
-```
-Report at briefs/_reports/B1_kbl_a_r2_review_20260417.md, commit <SHA>.
-TL;DR: <X> blockers, <Y> should-fix, verdict <pass|v3|restructure>.
+R3 verify: <N> findings, verdict <ratify|v4|regression>. Report at <path>, commit <SHA>.
 ```
 
 ### Time budget
 
-**20-30 minutes** (narrower scope than R1's 48 min). If you find yourself reading the whole brief, you've drifted from narrow scope — stop and refocus.
+**10 minutes max.** This is a verify-only pass, not a review.
 
-### Parallel context (informational)
+### Pass criteria
 
-- Code Brisen #2 standing by with no pending task. Will be asked for further work post-ratification or if R2 surfaces blockers.
-- Decisions doc updated (separate commit) for R1.S6 env var name drift — non-behavioral fix.
-- Director's D1 eval-labeling session still pending — independent critical path, not blocking R2 or KBL-A ratification.
+| Result | Next step |
+|---|---|
+| 0 findings | **Director ratifies KBL-A → dispatch implementation** |
+| 1-2 new findings | Fast v4 revision, immediate re-verify |
+| ≥3 findings or any blocker | Stop — something in v3 went sideways |
+
+### After-verify action for YOU (if clean pass)
+
+If 0 findings: report "R3 clean, recommend ratification" and standby. AI Head will prompt Director to ratify; ratification commit is AI Head's job.
+
+### Parallel context
+
+- B3 is running Director's D1 eval labeling session (~60 min interactive) — unrelated to this review.
+- B2 idle.
+- Director may be context-switching between labeling (B3) and ratification review (me). Don't block them with follow-up questions if possible — ultra-narrow verify.
 
 ---
 
-*Task posted by AI Head 2026-04-17. Previous report: Code Brisen #1 R1 review (delivered in chat, 48 min, 6B/12S/4N/4M — pre-report-mailbox pattern). Overwritten when next task lands.*
+*Task posted by AI Head 2026-04-17, after R2 fix push. Previous report: B1_kbl_a_r2_review_20260417.md (commit 41d5fbf).*

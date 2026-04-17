@@ -1,6 +1,6 @@
-# KBL-A — Infrastructure Code Brief (DRAFT v2)
+# KBL-A — Infrastructure Code Brief (DRAFT v3)
 
-**Status:** DRAFT v2 — post Code Brisen R1 review, all 6 blockers fixed. Awaiting R2 narrow-scope re-review.
+**Status:** DRAFT v3 — post Code Brisen R2 narrow-scope review (1B/3S, all surface-level). Awaiting optional R3 spot-check OR Director ratification.
 **Ratified decisions source:** [`briefs/DECISIONS_PRE_KBL_A_V2.md`](DECISIONS_PRE_KBL_A_V2.md) (15 decisions, ratified 2026-04-17)
 **Pre-staged artifacts:**
 - `briefs/_drafts/KBL_A_SCHEMA.sql` (schema DDL v3, B2 reconciled inline FKs — commit `8782813`)
@@ -11,6 +11,23 @@
 **Prepared by:** AI Head (Claude Opus 4.7)
 **Target executor:** Code Brisen (CLI harness, 1M context)
 **Estimated build time:** 12-16 hours
+
+---
+
+## R2 Review Response Log (v3 delta — read first)
+
+Code Brisen #1 returned R2 (~25 min, narrow scope): all 6 R1 blockers verified resolved + sampled should-fixes clean. **1 new blocker, 3 new should-fixes. All 4 addressed in v3.**
+
+| # | Issue | V3 Fix | Section |
+|---|---|---|---|
+| R2.NEW-B1 | `kbl/db.py` spec referenced non-existent `SentinelStoreBack().conn` attribute | Rewrote `kbl/db.py` spec to use direct `psycopg2.connect(DATABASE_URL)` contextmanager; bypasses `SentinelStoreBack` (which also drags in Qdrant/Voyage/30+ ensure_* unneeded by KBL) | §2 |
+| R2.NEW-S1 | Duplicate `__main__` block in `pipeline_tick.py` (dead code but Code Brisen would carry forward) | Deleted second block | §8 |
+| R2.NEW-S2 | Acceptance tests still claimed `pipeline_tick` updates heartbeat every tick (contradicts R1.S7 single-owner fix) | Reworded both test lines (§8 and §14) to reference dedicated `kbl.heartbeat` LaunchAgent every 30 min | §8, §14 |
+| R2.NEW-S3 | Dead ternary `"WARN" if result.startswith("error") else "WARN"` in gold_drain — both branches identical; intended was `"ERROR"` for error results. Also: emitting WARN for successful promotions floods `kbl_log` over time | Split: errors → `emit_log("ERROR", ...)` (PG visibility); successes → local-file-only via stdlib logger, bypassing `emit_log` (preserves R1.S2 "WARN+ to PG" invariant) | §9 |
+
+**R2 bonus confirmations:** all 6 R1 blocker fixes verified in code (B1-B6); 6/6 sampled should-fixes applied cleanly; B2 schema reconciliation adoption verified at 4/4 requirements.
+
+**B1's verdict:** fast v3 revision, ~20-30 min turnaround, R3 optional (10-min spot-check max). "Architecture is solid. V2 delta is overwhelmingly clean."
 
 ---
 
@@ -122,7 +139,23 @@ KBL (Knowledge Base Layer) is Baker's compiled-wiki knowledge architecture repla
 - [ ] `kbl/logging.py` — tiered logging (local file + PG WARN+ + CRITICAL alerts with dedupe)
 - [ ] `kbl/runtime_state.py` — key-value access to `kbl_runtime_state`
 - [ ] `kbl/heartbeat.py` — updates `mac_mini_heartbeat` key (sole owner per S7)
-- [ ] `kbl/db.py` — **NEW per R1.M1/S1.** Wraps `memory/store_back.py::SentinelStoreBack` with `get_conn()` helper: `from memory.store_back import SentinelStoreBack; def get_conn(): return SentinelStoreBack().conn`. If `SentinelStoreBack` not importable (Mac Mini path issue), fallback: `psycopg2.connect(os.getenv("DATABASE_URL"))`. Contextmanager-compatible for `with get_conn() as conn:`.
+- [ ] `kbl/db.py` — **NEW per R1.M1/S1 + R2.NEW-B1 correction.** Direct psycopg2 connection with explicit close (not via `SentinelStoreBack` — that class lacks a public `.conn` attribute and its pool semantics require manual `putconn`; easier to bypass for KBL code). Implementation:
+  ```python
+  import os
+  import psycopg2
+  from contextlib import contextmanager
+
+  @contextmanager
+  def get_conn():
+      """Short-lived PG connection. Matches Mac Mini's ~1-per-tick pattern;
+      Neon pool handles Render concurrency. Contextmanager releases on exit."""
+      conn = psycopg2.connect(os.getenv("DATABASE_URL"))
+      try:
+          yield conn
+      finally:
+          conn.close()
+  ```
+  Every kbl module imports `from kbl.db import get_conn` and uses `with get_conn() as conn:` blocks. No coupling to `SentinelStoreBack` bootstrap (which also initializes Qdrant/Voyage/30+ `_ensure_*` — unneeded overhead for KBL Python code paths).
 - [ ] `kbl/whatsapp.py` — **NEW per R1.S1.** Thin wrapper exposing `send_director_alert(message: str)` that calls the existing WAHA HTTP client (check `triggers/waha_client.py` for the canonical send path; reuse, don't reimplement).
 
 ### Baker-vault repo additions (separate PR on `vallen300-bit/baker-vault`)
@@ -707,9 +740,6 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-
-if __name__ == "__main__":
-    sys.exit(main())
 ```
 
 ### Acceptance for Phase 4
@@ -717,7 +747,7 @@ if __name__ == "__main__":
 - Run two `kbl-pipeline-tick.sh` concurrently → second exits immediately (flock held), log shows nothing for second
 - Insert test signal (R1.S5 — correct columns per KBL-19 schema): `INSERT INTO signal_queue (status, priority, source, summary, payload) VALUES ('pending', 'normal', 'test', 'test signal', '{}'::jsonb)` → next tick claims it, updates `started_at`, marks `classified-deferred`, `kbl_log` WARN row present (stub emit uses WARN per R1.S2 since INFO→PG is disabled)
 - `KBL_FLAGS_PIPELINE_ENABLED=false` → tick exits 0 without claiming signals
-- Heartbeat: after 1 tick, `SELECT value FROM kbl_runtime_state WHERE key='mac_mini_heartbeat'` is within last 2 min
+- Heartbeat: after ≥35 min from install (first dedicated `kbl.heartbeat` LaunchAgent firing at StartInterval=1800s), `SELECT value FROM kbl_runtime_state WHERE key='mac_mini_heartbeat'` is within last 30 min. Note: `pipeline_tick` does NOT write heartbeat (per R1.S7 single-owner fix) — tests that expect every-tick writes would false-positive a regression.
 
 ---
 
@@ -805,18 +835,26 @@ def drain_queue():
 
         # 4. Only after push success: mark PG rows done
         with conn.cursor() as cur:
+            import logging as _stdlib_logging
+            _local_logger = _stdlib_logging.getLogger("kbl")
             for row_id, path, wa_msg_id, result in applied:
                 cur.execute("""
                     UPDATE gold_promote_queue
                     SET processed_at = NOW(), result = %s
                     WHERE id = %s
                 """, (result, row_id))
-                emit_log(
-                    "WARN" if result.startswith("error") else "WARN",  # WARN level, not INFO (R1.S2)
-                    "gold_drain", None,
-                    f"Promoted {path}: {result}",
-                    metadata={"wa_msg_id": wa_msg_id, "queue_id": row_id}
-                )
+                # R2.NEW-S3 fix: error results escalate to ERROR (PG visibility);
+                # success results are INFO-level (local file only, NOT in PG — avoids kbl_log
+                # flooding with routine Gold promotions over time per R1.S2 invariant).
+                if result.startswith("error"):
+                    emit_log(
+                        "ERROR",
+                        "gold_drain", None,
+                        f"Promoted {path}: {result}",
+                        metadata={"wa_msg_id": wa_msg_id, "queue_id": row_id}
+                    )
+                else:
+                    _local_logger.info(f"[gold_drain] Promoted {path}: {result} (queue_id={row_id}, wa_msg_id={wa_msg_id})")
             conn.commit()
     finally:
         conn.close()
@@ -1588,7 +1626,7 @@ Code Brisen signs off on KBL-A when ALL of the following pass:
 - [ ] Flock mutex prevents concurrent ticks
 - [ ] `KBL_FLAGS_PIPELINE_ENABLED=false` → ticks skip processing
 - [ ] Pipeline claims 1 signal via `FOR UPDATE SKIP LOCKED` (verified with concurrent inserts)
-- [ ] Heartbeat updates `mac_mini_heartbeat` every tick
+- [ ] Heartbeat: dedicated `kbl/heartbeat.py` (via LaunchAgent every 30 min) writes `mac_mini_heartbeat` — pipeline_tick does NOT write it (R1.S7 single-owner)
 
 ### Gold drain
 - [ ] INSERT into `gold_promote_queue` → file frontmatter flipped to `author: director` + commit with Director identity + push within 2 cron cycles
@@ -1719,4 +1757,4 @@ All tunables (sourced from `env.mac-mini.yml` except where noted):
 
 ---
 
-*Prepared 2026-04-17 by AI Head (Claude Opus 4.7). V1 drafted; R1 reviewed by Code Brisen #1 (48 min, 6B/12S/4N/4M); V2 incorporates all 6 blockers + 10 should-fix + 3 missing per R1 reviewer's prioritization. Target: Code Brisen R2 narrow-scope re-review → Director ratification → dispatch. Expected build: 12-16 hours.*
+*Prepared 2026-04-17 by AI Head (Claude Opus 4.7). V1 drafted; R1 reviewed by Code Brisen #1 (48 min, 6B/12S/4N/4M); V2 incorporates all 6 blockers + 10 should-fix + 3 missing; V3 post-R2 (25 min, 1B/3S) fixes kbl/db.py spec, duplicate __main__, heartbeat test wording, gold_drain log-level ternary. Target: optional R3 spot-check → Director ratification → dispatch. Expected build: 12-16 hours.*
