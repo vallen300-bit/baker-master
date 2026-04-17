@@ -39,6 +39,7 @@ MATTER_ALLOWLIST = {
     "brisen-lp",
     "mrci",
     "lilienmat",
+    "aukera",
     "edita-russo",
     "theailogy",
     "baker-internal",
