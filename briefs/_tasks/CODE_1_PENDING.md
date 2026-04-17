@@ -1,94 +1,90 @@
 # Code Brisen #1 — Pending Task
 
 **From:** AI Head
-**To:** Code Brisen #1 (terminal instance, 1M context, R3/R4/R5 reviewer of decisions doc)
+**To:** Code Brisen #1 (terminal instance)
+**Previous task:** R1 review on KBL-A brief — complete, report filed in chat (pre-report-mailbox; from next review onwards, file reports per `briefs/_reports/README.md`)
 **Task posted:** 2026-04-17
 **Status:** OPEN — awaiting execution
 
 ---
 
-## Task: R1 Architecture Review on KBL-A Infrastructure Code Brief
+## Task: R2 Narrow-Scope Re-Review on KBL-A v2
 
 ### Target
 
 **File:** `briefs/KBL-A_INFRASTRUCTURE_CODE_BRIEF_DRAFT.md`
-**URL:** https://github.com/vallen300-bit/baker-master/blob/main/briefs/KBL-A_INFRASTRUCTURE_CODE_BRIEF_DRAFT.md
-**Commit:** `942c347`
-**Size:** 1407 lines
+**Commit:** `4efca68`
+**URL:** https://github.com/vallen300-bit/978-baker-master/blob/main/briefs/KBL-A_INFRASTRUCTURE_CODE_BRIEF_DRAFT.md
 
-### Scope — full architectural pass (not a spot-check)
+(Correct URL: https://github.com/vallen300-bit/baker-master/blob/main/briefs/KBL-A_INFRASTRUCTURE_CODE_BRIEF_DRAFT.md)
 
-Verify that all 15 ratified decisions in `briefs/DECISIONS_PRE_KBL_A_V2.md` (commit `d8bc2c0`) are correctly translated into implementation spec. Check:
+### Scope — NARROW (not a full re-read)
 
-- **(a) Decision fidelity** — every D1-D15 spec reflected correctly in build phases
-- **(b) Schema** — `signal_queue` additions + 5 new tables + FK reconciliation (`INTEGER` type + `ON DELETE SET NULL`). Check `briefs/_drafts/KBL_A_SCHEMA.sql` alignment (Code B2 is updating this to match — if not yet aligned when you review, flag as should-fix for B2 follow-up)
-- **(c) Mac Mini install** — `scripts/install_kbl_mac_mini.sh`, LaunchAgents, flock wrapper. Correct macOS semantics? Idempotent? Handles failure modes? sudo prompt UX?
-- **(d) kbl/*.py modules** — retry ladder, circuit breaker, cost tracking, logging, alert dedupe. Any race conditions, state consistency issues, or silent-failure paths?
-- **(e) Gold drain worker** — idempotency guarantees, git commit with Director identity, push path, conflict handling, frontmatter parse/write correctness
-- **(f) Deploy sequence** — Render-first + Mac Mini-second. Rollback plan viable? Data loss risk?
-- **(g) Acceptance criteria per phase** — testable, complete, measurable? Missing any edge cases?
-- **(h) Env var table** — complete? Anything hardcoded that should be env? Anything env-configurable that should be hardcoded?
-- **(i) Known Open Items §17** — any you'd add or elevate?
+V2 is a revision of v1, not a new brief. Focus R2 **only** on:
+
+**(a) Verify all 6 R1 blockers are actually resolved.** One-by-one check:
+
+| R1 Blocker | Expected V2 Fix Location | What to verify |
+|---|---|---|
+| B1 started_at column | §5 schema additions | `ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ` present |
+| B2 "NOW()" literal | §8 pipeline_tick + anywhere qwen_active_since is set | No literal `"NOW()"` strings stored; uses `datetime.now(timezone.utc).isoformat()` |
+| B3 __main__ dispatchers | §9 gold_drain.py end + §12 logging.py end | Both files have `if __name__ == "__main__":` blocks with argv parsing |
+| B4 Gold push failure rollback | §9 gold_drain.py drain_queue restructure | Commit+push BEFORE PG row marking; push failure triggers `git checkout` rollback + rows stay pending |
+| B5 FileHandler import safety | §12 logging.py module top | try/except around FileHandler creation; NullHandler+stderr fallback |
+| B6 Price-key normalizer | §11 cost.py | `_model_key()` function exists, called in both estimate_cost + log_cost_actual |
+
+**(b) Spot-check the 10 should-fixes applied.** Not exhaustive — sample 3-4 randomly and verify they landed as described in the "R1 Review Response Log" section.
+
+**(c) Verify no NEW blockers introduced.** The v2 delta is ~400 lines. Skim for:
+- Broken references (function/class/file names that don't exist elsewhere in the brief)
+- Logic bugs in new code (especially the Gold drain rollback path — easy to get subtly wrong)
+- Schema changes that miss the `_ensure_*` ordering invariant
+
+**(d) Confirm B2 schema reconciliation adoption.** §5 should adopt B2's inline FK form (auto-named), match `briefs/_drafts/KBL_A_SCHEMA.sql` v3 at commit `8782813`.
+
+### Do NOT
+
+- Re-open should-fixes that were deferred (S6 = separate doc fix, already pushed; S11 = Phase 2; N1-N4 = mostly absorbed/deferred)
+- Re-open architectural decisions (those are ratified in `DECISIONS_PRE_KBL_A_V2.md`)
+- Full 1407-line re-read (v2 delta only)
 
 ### Output structure
 
-Same format as R3/R4/R5:
-
-```markdown
-## BLOCKERS (must fix before dispatch)
-- [B1] <description>
-
-## SHOULD FIX (strongly recommended)
-- [S1] <description>
-
-## NICE TO HAVE (optional)
-- [N1] <description>
-
-## MISSING (gaps)
-- [M1] <description>
-```
-
-### Context — do NOT re-open settled material
-
-The decisions document went through 5 review rounds (R1-R5). DO NOT re-litigate decisions. Focus review on:
-- Implementation correctness (code paths, SQL, bash)
-- Schema details (types, constraints, indexes)
-- Failure modes (what happens when X breaks?)
-- Race conditions (concurrency on PG, filesystem, WAHA)
-- Completeness of acceptance tests
-
-If you find a decision that looks broken in implementation, flag as `[B<n>] Implementation diverges from D<x>` rather than reopening the decision.
-
-### Time budget
-
-**45-60 minutes** (this is a 1407-line brief; invest appropriately). If you finish in <30 min, you probably skimmed.
-
-### Pass criteria
+Same format as R1. Pass criteria:
 
 | Result | Next step |
 |---|---|
-| 0 blockers | Director ratifies KBL-A → dispatch to Code Brisen for implementation |
-| 1-3 blockers | AI Head revises to v2 → re-review |
-| ≥4 blockers | AI Head restructures (architectural miss, not incremental fix) |
+| 0 blockers | Director ratifies KBL-A → dispatch to implementation |
+| 1-2 blockers | Fast v3 revision |
+| ≥3 blockers | Stop — something in v2 regressed, diagnose |
 
-### Parallel context (informational, not your scope)
+### File your report per the new pattern
 
-- Code Brisen #2 (app instance) aligning `briefs/_drafts/KBL_A_SCHEMA.sql` to match KBL-A §5 FK reconciliation. Their task at `briefs/_tasks/CODE_2_PENDING.md`.
-- Director's D1 eval-labeling session pending (~60 min when ready) — unblocks D1 conditional ratification, not blocking KBL-A dispatch.
-- Director's SSH hardening run pending — drop-in ready at `briefs/_drafts/200-hardening.conf`, not blocking dispatch.
+Per `briefs/_reports/README.md`, file substantive reports to `briefs/_reports/`:
 
-### Reporting
+Expected path: `briefs/_reports/B1_kbl_a_r2_review_20260417.md`
 
-Return findings in the structured format above. When complete:
-
+Header should reference this task file commit:
 ```
-R1 review complete (<N> min).
-Findings: <X> blockers, <Y> should-fix, <Z> nice-to-have, <W> missing.
-Verdict: <ratification-ready | v2 revision | restructure>.
+Re: briefs/_tasks/CODE_1_PENDING.md commit <SHA when you read this>
 ```
 
-Then paste structured findings.
+Chat one-liner when filed:
+```
+Report at briefs/_reports/B1_kbl_a_r2_review_20260417.md, commit <SHA>.
+TL;DR: <X> blockers, <Y> should-fix, verdict <pass|v3|restructure>.
+```
+
+### Time budget
+
+**20-30 minutes** (narrower scope than R1's 48 min). If you find yourself reading the whole brief, you've drifted from narrow scope — stop and refocus.
+
+### Parallel context (informational)
+
+- Code Brisen #2 standing by with no pending task. Will be asked for further work post-ratification or if R2 surfaces blockers.
+- Decisions doc updated (separate commit) for R1.S6 env var name drift — non-behavioral fix.
+- Director's D1 eval-labeling session still pending — independent critical path, not blocking R2 or KBL-A ratification.
 
 ---
 
-*Task posted by AI Head 2026-04-17. Overwritten when next task lands for Code Brisen #1.*
+*Task posted by AI Head 2026-04-17. Previous report: Code Brisen #1 R1 review (delivered in chat, 48 min, 6B/12S/4N/4M — pre-report-mailbox pattern). Overwritten when next task lands.*

@@ -1,6 +1,6 @@
-# Pre-KBL-A Decision Log — V2.3 (DRAFT)
+# Pre-KBL-A Decision Log — V2 (RATIFIED)
 
-**Status:** DRAFT v2.3 — post Code Brisen R5 spot-check, awaiting Director ratification
+**Status:** RATIFIED 2026-04-17 by Director (Dimitry Vallen). Final version v2.3.
 **Supersedes:** v1, v2 draft `5cc48ec`, v2.1 commit `0f48ba9`, v2.2 commit `27b3a5f`
 **Date:** 2026-04-17
 **Prepared by:** AI Head (Claude Opus 4.7)
@@ -315,9 +315,19 @@ Clean slate, no plaintext. Rejected for Phase 1 momentum; residual risk mitigate
 **DO LATER (Phase 1 close-out, week 4-5):**
 - 1Password Plan A migration: `op` items, `.zshrc` rewritten to `$(op read ...)`, LaunchAgent plists updated (scope includes plist, not just zshrc).
 
-### Ratification
-- [ ] **A — Sequenced rotation + SSH hardening NOW; 1Password migration post-Phase 1**
-- [ ] B — Full 1Password migration before KBL-A dispatch (~45 min blocker)
+### Ratification — RATIFIED with Director override 2026-04-17
+
+**Director override applied:** key rotation postponed ("other things to worry about now"). SSH hardening still proceeds NOW (drop-in ready at `briefs/_drafts/200-hardening.conf`).
+
+**Effective D4:**
+- **DO NOW:** SSH hardening (`/etc/ssh/sshd_config.d/200-hardening.conf` + `sshd -t` + reload)
+- **DEFERRED to Phase 1 close-out (bundled):** `ANTHROPIC_API_KEY` rotation + `DATABASE_URL` rotation + 1Password migration + `~/.zshrc` rewrite + LaunchAgent plist updates
+
+**Residual risk assessment (Phase 1):**
+- Tailscale is sole SSH entry path (no public surface)
+- SSH hardening drop-in eliminates password auth + restricts to `dimitry` user
+- `.zshrc` secrets at rest on Mac Mini protected by FileVault (assumed on)
+- Acceptable for ~4-6 week Phase 1 window
 
 ---
 
@@ -884,6 +894,8 @@ def emit_critical_alert(component: str, message: str, bucket_minutes: int = 5):
 
 Every tunable has a default. Per D13, Mac Mini tunables live in `~/baker-vault/config/env.mac-mini.yml`. Secrets stay in `.zshrc`. Render env via dashboard.
 
+> **Note (2026-04-17, post-R1 doc fix for S6):** the table below is the canonical **names as they exist in env after yq flattening** — corrected from flat names (`KBL_ALLOWED_MATTERS`) to hierarchical (`KBL_MATTER_SCOPE_ALLOWED`) to match what D13's yq expression actually produces. For the complete implementation-grade reference see `briefs/KBL-A_INFRASTRUCTURE_CODE_BRIEF_DRAFT.md` §16.
+
 | Var (after yml flatten) | Default | Source |
 |---|---|---|
 | `KBL_OLLAMA_MODEL` | `gemma4:latest` | D1 |
@@ -892,47 +904,51 @@ Every tunable has a default. Per D13, Mac Mini tunables live in `~/baker-vault/c
 | `KBL_OLLAMA_SEED` | `42` | D1 |
 | `KBL_OLLAMA_TOP_P` | `0.9` | D1 |
 | `KBL_OLLAMA_KEEP_ALIVE` | `-1` | D1/S2 |
-| `KBL_QWEN_RECOVERY_AFTER_SIGNALS` | `10` | D1/S3 |
-| `KBL_QWEN_RECOVERY_AFTER_HOURS` | `1` | D1/S3 |
-| `KBL_ALLOWED_MATTERS` | `hagenauer-rg7` | D3 |
-| `KBL_LAYER0_ENABLED` | `true` | D3 |
-| `KBL_NEWSLETTER_BLOCKLIST` | `""` (CSV) | D3 |
-| `KBL_WA_BLOCKLIST` | `""` | D3 |
+| `KBL_MATTER_SCOPE_ALLOWED` | `hagenauer-rg7` | D3 |
+| `KBL_MATTER_SCOPE_LAYER0_ENABLED` | `true` | D3 |
+| `KBL_MATTER_SCOPE_NEWSLETTER_BLOCKLIST` | `""` (CSV) | D3 |
+| `KBL_MATTER_SCOPE_WA_BLOCKLIST` | `""` (CSV) | D3 |
 | `KBL_GOLD_PROMOTE_DISABLED` | `false` | D2 |
-| `KBL_GOLD_WHITELIST_WA_ID` | `41799605092@c.us` | D2 |
-| `KBL_CRON_INTERVAL` | `*/2 * * * *` (post-bench) | D5 |
-| `KBL_TRIAGE_THRESHOLD` | `40` | existing |
-| `KBL_DAILY_COST_CAP` | `15` (USD, KBL-only) | D6/D14 |
-| `KBL_MAX_ALERTS_PER_DAY` | `20` | D6 |
-| `KBL_MAX_SIGNAL_QUEUE_SIZE` | `10000` | D10 |
-| `KBL_PIPELINE_ENABLED` | `false` (flips `true` at go-live) | existing |
+| `KBL_GOLD_PROMOTE_WHITELIST_WA_ID` | `41799605092@c.us` | D2 |
+| `KBL_PIPELINE_CRON_INTERVAL_MINUTES` | `2` (TBD post-bench) | D5 |
+| `KBL_PIPELINE_TRIAGE_THRESHOLD` | `40` | existing |
+| `KBL_PIPELINE_MAX_QUEUE_SIZE` | `10000` | D10 |
+| `KBL_PIPELINE_QWEN_RECOVERY_AFTER_SIGNALS` | `10` | D1/S3 |
+| `KBL_PIPELINE_QWEN_RECOVERY_AFTER_HOURS` | `1` | D1/S3 |
+| `KBL_COST_DAILY_CAP_USD` | `15` (KBL-only) | D6/D14 |
+| `KBL_COST_MAX_ALERTS_PER_DAY` | `20` | D6 |
+| `KBL_FLAGS_PIPELINE_ENABLED` | `false` (flips `true` at go-live) | existing |
+| `KBL_OBSERVABILITY_DROPBOX_RSYNC_TIME` | `23:50` | D15 |
+| `KBL_OBSERVABILITY_VAULT_SIZE_WARN_MB` | `500` | D15 |
+| `KBL_OBSERVABILITY_VAULT_SIZE_CRITICAL_MB` | `1000` | D15 |
 
 **Removed from v2:** `KBL_CRON_TZ` (N4 — not load-bearing, replaced by Mac Mini `systemsetup`).
 
 **Runtime state (NOT env vars, live in `kbl_runtime_state` PG table per D8):**
-- `anthropic_circuit_open`, `anthropic_5xx_counter`, `qwen_active`, `qwen_active_since`, `qwen_swap_count_today`, `mac_mini_heartbeat`
+- `anthropic_circuit_open`, `anthropic_5xx_counter`, `qwen_active`, `qwen_active_since`, `qwen_swap_count_today`, `mac_mini_heartbeat`, `cost_circuit_open`
 
 ---
 
-## Ratification Checklist
+## Ratification Checklist — ALL RATIFIED 2026-04-17
 
-Tick the recommended option (or override) for each:
+- [x] **D1** — Gemma 4 8B + Qwen cold-swap (conditional on 50-signal pre-shadow eval ≥90% vedanā)
+- [x] **D2** — Queue-poll pattern (Director-signed 2026-04-17)
+- [x] **D3** — 3-layer per-source scoping
+- [x] **D4** — **[DIRECTOR OVERRIDE 2026-04-17]** SSH harden NOW; key rotation + 1Password migration deferred together to Phase 1 close-out. Mitigating controls: Tailscale-only SSH + SSH hardening drop-in.
+- [x] **D5** — Serial via flock + p95 cadence post-bench
+- [x] **D6** — Phase 1: 2-auto-proceed + 4-manual gates
+- [x] **D7** — Vault commit matrix + GitHub branch protection (Phase 1 identity-only Gold; GPG = Phase 2)
+- [x] **D8** — Retry ladders + circuit breaker + `kbl_runtime_state` table
+- [x] **D9** — TTL hierarchy + per-source vault policy (wiki retention open for Phase 1 close-out)
+- [x] **D10** — Partition + recovery SLO
+- [x] **D11** — Clock/TZ (UTC storage, IANA in payload, system TZ Europe/Vienna)
+- [x] **D12** — Render-owns-migrations + sequenced deploy + `install_kbl_mac_mini.sh`
+- [x] **D13** — Config deployment via `env.mac-mini.yml` in baker-vault (git pull --rebase -X ours)
+- [x] **D14** — Cost tracking via `kbl_cost_ledger` + circuit at cap + token estimation
+- [x] **D15** — Logging: local rotating + PG WARN+ + Dropbox mirror + heartbeat + `kbl_alert_dedupe`
 
-- [ ] **D1** — Gemma 4 8B + Qwen cold-swap (conditional on 50-signal pre-shadow eval ≥90% vedanā)
-- [x] **D2** — Queue-poll pattern (DIRECTOR-SIGNED 2026-04-17)
-- [ ] **D3** — 3-layer per-source scoping
-- [ ] **D4** — Sequenced rotation + SSH hardening NOW; 1Password post-Phase 1
-- [ ] **D5** — Serial via flock + p95 cadence post-bench
-- [ ] **D6** — Phase 1: 2-auto-proceed + 4-manual gates
-- [ ] **D7** — Vault commit matrix + GitHub branch protection
-- [ ] **D8** — Retry ladders + circuit breaker + `kbl_runtime_state` table
-- [ ] **D9** — TTL hierarchy + per-source vault policy (wiki retention open for Phase 1 close-out)
-- [ ] **D10** — Partition + recovery SLO
-- [ ] **D11** — Clock/TZ (UTC storage, IANA in payload, system TZ Europe/Vienna)
-- [ ] **D12** — Render-owns-migrations + sequenced deploy
-- [ ] **D13** — Config deployment via `env.mac-mini.yml` in baker-vault
-- [ ] **D14** — Cost tracking via `kbl_cost_ledger` + circuit at cap
-- [ ] **D15** — Logging: local rotating + PG WARN+ + Dropbox mirror + heartbeat
+**Vocabulary standardization (AI Head ruling 2026-04-17, not a decision, clarification):**
+- `vedana` enum throughout KBL: `opportunity | threat | routine` (production schema canonical). Classical `pleasant / unpleasant / neutral` map deprecated at Phase 1 close-out.
 
 ---
 
@@ -966,7 +982,7 @@ Brief submitted for Code Brisen architecture review → Director ratification �
 
 ---
 
-*Prepared 2026-04-17 by AI Head (Claude Opus 4.7). V2.3 post Code Brisen R5 spot-check. Status: DRAFT pending Director ratification.*
+*Prepared 2026-04-17 by AI Head (Claude Opus 4.7). V2.3 post Code Brisen R5 spot-check. **Status: RATIFIED 2026-04-17 by Director Dimitry Vallen.** 5 review rounds (R1 through R5), 71 findings addressed across iterations. 15 decisions locked.*
 
 ---
 
