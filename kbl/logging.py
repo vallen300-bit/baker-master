@@ -112,22 +112,19 @@ def emit_log(
         emit_critical_alert(component, message)
 
 
-def emit_critical_alert(
-    component: str,
-    message: str,
-    bucket_minutes: int = DEDUPE_BUCKET_MINUTES,
-) -> None:
-    """Send CRITICAL to Director WhatsApp with 5-min bucket dedupe.
+def check_alert_dedupe(component: str, message: str, bucket_minutes: int) -> bool:
+    """Dedupe UPSERT for any alert key. Returns True iff this is a FRESH
+    alert within its time bucket (caller should proceed to emit/notify).
 
-    Dedupe key: `<component>_<sha256(message)[:16]>_<5min-bucket>`. The
-    UPSERT RETURNING (xmax = 0) trick reports whether the row is newly
-    inserted (fire alert) or already existed (increment count only).
+    Extracted from emit_critical_alert so WARN-level noise suppression
+    (B2.N1 pipeline_tick) can reuse the same dedupe backend with a
+    different bucket. On DB write failure returns False — safer to
+    suppress than spam.
     """
     bucket = int(time.time() // (bucket_minutes * 60))
     msg_hash = hashlib.sha256(message.encode()).hexdigest()[:16]
     alert_key = f"{component}_{msg_hash}_{bucket}"
 
-    was_inserted = False
     try:
         with get_conn() as conn:
             try:
@@ -144,15 +141,22 @@ def emit_critical_alert(
                     )
                     was_inserted = bool(cur.fetchone()[0])
                     conn.commit()
+                    return was_inserted
             except Exception:
                 conn.rollback()
                 raise
     except Exception as e:
         sys.stderr.write(f"[kbl.logging] kbl_alert_dedupe write failed: {e}\n")
-        # Best-effort: without dedupe we'd risk spamming, so DON'T send in the
-        # failure branch. The local file still has the CRITICAL for audit.
-        return
+        return False  # safer to suppress than spam on dedupe outage
 
+
+def emit_critical_alert(
+    component: str,
+    message: str,
+    bucket_minutes: int = DEDUPE_BUCKET_MINUTES,
+) -> None:
+    """Send CRITICAL to Director WhatsApp with 5-min bucket dedupe."""
+    was_inserted = check_alert_dedupe(component, message, bucket_minutes)
     if was_inserted:
         try:
             from kbl.whatsapp import send_director_alert

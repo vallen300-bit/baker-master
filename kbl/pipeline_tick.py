@@ -16,8 +16,12 @@ import logging as _stdlib_logging
 import sys
 
 from kbl.db import get_conn
-from kbl.logging import emit_log
+from kbl.logging import check_alert_dedupe, emit_log
 from kbl.runtime_state import get_state
+
+# B2.N1: anthropic-circuit-open WARN routes through kbl_alert_dedupe with
+# a 15-min bucket so a multi-hour outage doesn't spam kbl_log at 120s cadence.
+_CIRCUIT_WARN_BUCKET_MIN = 15
 
 _local = _stdlib_logging.getLogger("kbl.pipeline_tick")
 
@@ -50,12 +54,11 @@ def main() -> int:
     # Circuit-breaker short-circuits (INFO-level messages stay local per
     # R1.S2 — only WARN+ hits PG via emit_log).
     if get_state("anthropic_circuit_open") == "true":
-        emit_log(
-            "WARN",
-            "pipeline_tick",
-            None,
-            "Anthropic circuit open, skipping API calls this tick",
-        )
+        circuit_msg = "Anthropic circuit open, skipping API calls this tick"
+        # Always log locally; only escalate to PG once per 15-min bucket.
+        _local.warning("[pipeline_tick] %s", circuit_msg)
+        if check_alert_dedupe("pipeline_tick", circuit_msg, _CIRCUIT_WARN_BUCKET_MIN):
+            emit_log("WARN", "pipeline_tick", None, circuit_msg)
         return 0
 
     if get_state("cost_circuit_open") == "true":
