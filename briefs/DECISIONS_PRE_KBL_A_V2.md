@@ -950,6 +950,20 @@ Every tunable has a default. Per D13, Mac Mini tunables live in `~/baker-vault/c
 **Vocabulary standardization (AI Head ruling 2026-04-17, not a decision, clarification):**
 - `vedana` enum throughout KBL: `opportunity | threat | routine` (production schema canonical). Classical `pleasant / unpleasant / neutral` map deprecated at Phase 1 close-out.
 
+**D1 Qwen-fallback role re-scoped (Director-ratified 2026-04-17, clarification):**
+
+Original D1 §173-177 framed Qwen 2.5 14B cold-swap as a fallback that would rescue Gemma failures. D1 eval retry v2 (`briefs/_reports/B3_d1_eval_retry_20260417.md` @ `6328f11`) showed Qwen **underperforms** Gemma on vedana accuracy (80% vs 86%) under the shared fair-prompt conditions. The "accuracy rescue" framing is therefore incorrect.
+
+Director ratified **option (b):** Qwen remains wired as an **availability fallback only** — if Gemma is unreachable, Qwen keeps the pipeline moving at acceptable-but-lower accuracy. Qwen is **not** an accuracy rescue.
+
+Operational implications:
+- `OLLAMA_FALLBACK=qwen2.5:14b` remains in config (per §161)
+- Cold-swap mechanism + auto-recovery (§173-177) remain unchanged
+- Expectations change: a Qwen-active pipeline tick emits a `WARN`-level `kbl_log` entry (`component=triage`, message: "running on availability fallback, accuracy degraded") so Director sees it. KBL-B brief §6 will wire this.
+- **Deferred:** third-model eval for a real *accuracy* fallback (candidates: Llama 3.3 70B, Mixtral 8x7B) moved to Phase 1 close-out or later. Not blocking D1.
+
+D1 itself remains CONDITIONAL on v3 eval retry (dispatched `c598eea`) achieving Gemma ≥ 90% vedana + ≥ 80% matter. Qwen's re-scoping is independent of that pass/fail.
+
 ---
 
 ## Deferred (flagged for post-Phase-1 or Phase 2)
