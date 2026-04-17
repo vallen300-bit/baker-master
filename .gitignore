@@ -29,3 +29,6 @@ outputs/build_*.py
 outputs/convert_*.py
 outputs/generate_*.py
 outputs/share-site/
+
+# Claude Code worktrees (parallel sessions)
+.claude/worktrees/

@@ -1,6 +1,6 @@
 ---
 name: ai-head
-description: "AI development and strategy agent connected to Baker's memory. Use for Baker system development, AI strategy (Project clAIm), capability framework management, prompt engineering, and automation design.\n\nExamples:\n\n<example>\nuser: \"What capabilities does Baker have and which need upgrading?\"\nassistant: \"Let me use the baker-ai-dev agent to audit the capability framework.\"\n</example>\n\n<example>\nuser: \"Design the architecture for the next Baker feature.\"\nassistant: \"I'll use the baker-ai-dev agent to analyze the codebase and propose architecture.\"\n</example>\n\n<example>\nuser: \"What new Claude API features could we use in Baker?\"\nassistant: \"Let me use the baker-ai-dev agent to research and recommend.\"\n</example>"
+description: "Baker system development, AI strategy (Project clAIm), capability framework management, prompt engineering, and automation design. Triggers: Baker architecture, capability audit, Claude API features, system health, cost monitoring."
 model: opus
 maxTurns: 30
 permissionMode: plan

@@ -1,6 +1,6 @@
 # Russo AI — Setup & Usage Guide for Edita
 
-## Step 1: Install Prerequisites
+## Step 1: Install Claude Code
 
 Open **Terminal** on your Mac (Spotlight → type "Terminal" → Enter).
 
@@ -13,12 +13,7 @@ If `brew` is not found, first install Homebrew:
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
 
-**1b. Install Python dependencies** (for Baker MCP connection):
-```
-pip3 install psycopg2-binary mcp
-```
-
-**1c. Install Claude Code:**
+**1b. Install Claude Code:**
 ```
 npm install -g @anthropic-ai/claude-code
 ```
@@ -27,78 +22,35 @@ If you get a permission error:
 sudo npm install -g @anthropic-ai/claude-code
 ```
 
-## Step 2: Access Baker's Code
+## Step 2: Connect to Baker (One Command)
 
-The **baker-code** folder is shared via Dropbox. Once synced to your Mac, find it at:
+This gives Claude Code access to Baker's database — your wealth data, tax calendar, contacts, and all 25 Baker tools.
+
 ```
-/Users/edita/Vallen Dropbox/Dimitry vallen/Baker-Project/baker-code
-```
-*(Your Dropbox path may differ — check your Dropbox folder location.)*
-
-## Step 3: Configure Baker MCP Connection
-
-This connects Claude Code to Baker's database so you can query your real wealth data.
-
-**3a.** Navigate to the baker-code folder and create the config directory:
-```
-cd "/Users/edita/Vallen Dropbox/Dimitry vallen/Baker-Project/baker-code"
-mkdir -p .claude
+claude mcp add --transport http baker "https://baker-master.onrender.com/mcp?key=bakerbhavanga"
 ```
 
-**3b.** Create the MCP config file:
-```
-cat > .claude/settings.local.json << 'ENDCONFIG'
-{
-  "permissions": {
-    "defaultMode": "bypassPermissions"
-  },
-  "mcpServers": {
-    "baker": {
-      "command": "python3",
-      "args": ["baker_mcp_server.py"],
-      "cwd": "/Users/edita/Vallen Dropbox/Dimitry vallen/Baker-Project/baker-mcp",
-      "env": {
-        "POSTGRES_HOST": "ep-summer-sun-aih7ha4h.c-4.us-east-1.aws.neon.tech",
-        "POSTGRES_PORT": "5432",
-        "POSTGRES_DB": "neondb",
-        "POSTGRES_USER": "neondb_owner",
-        "POSTGRES_PASSWORD": "npg_26tjJyupOSfi",
-        "POSTGRES_SSLMODE": "require"
-      }
-    }
-  }
-}
-ENDCONFIG
-```
+That's it. This is a one-time setup. Every future Claude Code session will have Baker access automatically.
 
-**Important:** Adjust the `cwd` path if your Dropbox folder is in a different location.
+## Step 3: Start Claude Code
 
-**3c.** Verify the MCP server file exists:
+Open Terminal and type:
 ```
-ls "/Users/edita/Vallen Dropbox/Dimitry vallen/Baker-Project/baker-mcp/baker_mcp_server.py"
-```
-You should see the file listed. If not, ask Dimitry to share the Baker-Project folder.
-
-## Step 4: Start Claude Code
-
-From the baker-code folder:
-```
-cd "/Users/edita/Vallen Dropbox/Dimitry vallen/Baker-Project/baker-code"
 claude
 ```
 
 The first time, it will ask you to log in with an Anthropic account. Follow the prompts in your browser.
 
-## Step 5: Select the Right Model
+## Step 4: Select the Right Model
 
 Once Claude Code is running, type:
 ```
 /model opus
 ```
 
-This selects Claude Opus 4.6 with 1M context — the most capable model. You'll see a confirmation.
+This selects Claude Opus 4.6 with 1M context — the most capable model.
 
-## Step 6: Your Opening Prompt
+## Step 5: Your Opening Prompt
 
 Copy and paste this as your **first message** in every new session:
 
@@ -125,7 +77,7 @@ Use the Baker MCP tools to query my actual data before answering:
 Always consider tax optimization opportunities across jurisdictions.
 ```
 
-## Step 7: Start Asking Questions
+## Step 6: Start Asking Questions
 
 After the opening prompt, just ask naturally. Examples:
 
@@ -141,12 +93,11 @@ After the opening prompt, just ask naturally. Examples:
 
 ```
 1. Open Terminal
-2. cd "/Users/edita/Vallen Dropbox/Dimitry vallen/Baker-Project/baker-code"
-3. claude
-4. /model opus
-5. Paste opening prompt (Step 6)
-6. Ask your questions
-7. /exit when done
+2. claude
+3. /model opus
+4. Paste opening prompt (Step 5)
+5. Ask your questions
+6. /exit when done
 ```
 
 ## Tips

@@ -1,6 +1,6 @@
 ---
 name: code-architecture-reviewer
-description: "Use this agent when code has been written or modified and needs a thorough architecture and quality review. Performs principal-engineer-level code review with severity ratings and clear verdicts.\n\nExamples:\n\n<example>\nContext: User just finished implementing a feature.\nuser: \"Review the changes I made to the pipeline.\"\nassistant: \"Let me use the code-architecture-reviewer agent to do a thorough review.\"\n</example>\n\n<example>\nContext: User wants to assess code quality before merging.\nuser: \"Is this PR ready to merge?\"\nassistant: \"I'll use the code-architecture-reviewer agent to evaluate the changes.\"\n</example>\n\n<example>\nContext: User wants architectural feedback.\nuser: \"Does this new module fit our architecture?\"\nassistant: \"Let me use the code-architecture-reviewer agent to assess architectural alignment.\"\n</example>"
+description: "Principal-engineer-level code review with severity ratings and clear verdicts. Checks architecture, correctness, security, performance, and maintainability. Triggers: review code, PR review, architecture check, ready to merge."
 model: inherit
 color: blue
 memory: project
