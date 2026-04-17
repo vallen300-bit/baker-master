@@ -16,8 +16,8 @@ A "valid" row satisfies ALL of:
   signal_id                       — non-empty string
   source                          — in {"email", "whatsapp", "meeting"}
   vedana_expected                 — in {"opportunity", "threat", "routine"} (production schema)
-  primary_matter_expected         — in MATTER_ALLOWLIST or None
-  related_matters_expected        — list of strings each in MATTER_ALLOWLIST
+  primary_matter_expected         — canonical slug (per kbl.slug_registry) or None
+  related_matters_expected        — list of strings each a canonical slug
   triage_threshold_pass_expected  — boolean
 """
 from __future__ import annotations
@@ -28,30 +28,12 @@ import sys
 from pathlib import Path
 from typing import List
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from kbl.slug_registry import canonical_slugs  # noqa: E402
+
 VALID_VEDANA = {"opportunity", "threat", "routine"}
 VALID_SOURCES = {"email", "whatsapp", "meeting"}
-
-MATTER_ALLOWLIST = {
-    "hagenauer-rg7",
-    "cupial",
-    "mo-vie",
-    "ao",
-    "brisen-lp",
-    "mrci",
-    "lilienmat",
-    "aukera",
-    "kitzbuhel-six-senses",
-    "kitz-kempinski",
-    "steininger",
-    "wertheimer",
-    "balducci",
-    "constantinos",
-    "franck-muller",
-    "edita-russo",
-    "theailogy",
-    "baker-internal",
-    "personal",
-}
 
 
 def validate_row(row: dict, line_no: int) -> List[str]:
@@ -73,11 +55,13 @@ def validate_row(row: dict, line_no: int) -> List[str]:
             f"line {line_no} [{sid}]: vedana_expected={vedana!r} must be one of {sorted(VALID_VEDANA)}"
         )
 
+    allowlist = canonical_slugs()
+
     pm = row.get("primary_matter_expected")
-    if pm is not None and pm not in MATTER_ALLOWLIST:
+    if pm is not None and pm not in allowlist:
         errors.append(
             f"line {line_no} [{sid}]: primary_matter_expected={pm!r} "
-            f"not in allowlist (null OR one of {sorted(MATTER_ALLOWLIST)})"
+            f"not in allowlist (null OR one of {sorted(allowlist)})"
         )
 
     rel = row.get("related_matters_expected")
@@ -87,7 +71,7 @@ def validate_row(row: dict, line_no: int) -> List[str]:
         )
     else:
         for i, m in enumerate(rel):
-            if m not in MATTER_ALLOWLIST:
+            if m not in allowlist:
                 errors.append(
                     f"line {line_no} [{sid}]: related_matters_expected[{i}]={m!r} not in allowlist"
                 )
