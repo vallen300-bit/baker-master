@@ -1,16 +1,63 @@
-# KBL-A — Infrastructure Code Brief (DRAFT)
+# KBL-A — Infrastructure Code Brief (DRAFT v2)
 
-**Status:** DRAFT — pending Code Brisen architecture review + Director ratification
+**Status:** DRAFT v2 — post Code Brisen R1 review, all 6 blockers fixed. Awaiting R2 narrow-scope re-review.
 **Ratified decisions source:** [`briefs/DECISIONS_PRE_KBL_A_V2.md`](DECISIONS_PRE_KBL_A_V2.md) (15 decisions, ratified 2026-04-17)
 **Pre-staged artifacts:**
-- `briefs/_drafts/KBL_A_SCHEMA.sql` (schema DDL)
+- `briefs/_drafts/KBL_A_SCHEMA.sql` (schema DDL v3, B2 reconciled inline FKs — commit `8782813`)
 - `briefs/_drafts/200-hardening.conf` + `SSH_HARDENING_PROCEDURE.md`
-- `briefs/_drafts/KBL_EVAL_SET_PLAYBOOK.md` (pending vocab update)
+- `briefs/_drafts/KBL_EVAL_SET_PLAYBOOK.md` (vocab-unified at `6c4db29`)
 - `scripts/build_eval_seed.py`, `validate_eval_labels.py`, `run_kbl_eval.py`
 **Date:** 2026-04-17
 **Prepared by:** AI Head (Claude Opus 4.7)
 **Target executor:** Code Brisen (CLI harness, 1M context)
-**Estimated build time:** 12-16 hours (recalibrated from earlier 6-8 h after v2.3 scope growth)
+**Estimated build time:** 12-16 hours
+
+---
+
+## R1 Review Response Log (read this before re-reviewing)
+
+Code Brisen #1 returned R1 (48 min): 6 BLOCKERS / 12 SHOULD-FIX / 4 NICE / 4 MISSING. All blockers localized implementation bugs (not architectural restructures).
+
+**BLOCKERS — all fixed in v2:**
+
+| # | Issue | V2 Fix | Section |
+|---|---|---|---|
+| B1 | `signal_queue.started_at` column doesn't exist | Added `started_at TIMESTAMPTZ` to §5 schema additions | §5 |
+| B2 | `mac_mini_heartbeat` stored as literal string `"NOW()"` | Use `datetime.now(timezone.utc).isoformat()` | §8, §12 |
+| B3 | `python3 -m kbl.gold_drain` / `kbl.logging` have no `__main__` | Added `if __name__ == "__main__"` dispatchers | §9, §12 |
+| B4 | Gold push failure = silent half-done state | Restructured `drain_queue`: commit+push first, mark PG rows done only on push success | §9 |
+| B5 | `FileHandler` at import fails if `/var/log/kbl/` missing | try/except with NullHandler+stderr fallback | §12 |
+| B6 | Price-table keys don't match versioned Anthropic model IDs | Added `_model_key()` normalizer, called at both estimate + log sites | §11 |
+
+**SHOULD-FIX integrated in v2 (10 of 12):**
+
+| # | Issue | V2 Fix |
+|---|---|---|
+| S1 / M1 | `kbl.db`, `kbl.whatsapp` imports undefined | Spec'd in §2 Deliverables: extend `memory/store_back.get_conn()`; reuse existing WAHA client path |
+| S2 / S12 | INFO routing to PG contradicts kbl_log CHECK | Dropped `INFO` from `kbl_log.level` CHECK; vault-size events bumped to WARN/CRITICAL |
+| S3 | `git add -A` sweeps unrelated changes | Track promoted paths in drain loop; `git add <specific paths>` |
+| S4 | Gold commit message lacks audit trail | Include `path + queue_id + wa_msg_id` in commit body |
+| S5 | Acceptance test INSERT uses wrong columns | Fixed to `(status, priority, source, summary, payload)` with correct types |
+| S7 | Heartbeat duplicate writer confusion | Single owner: dedicated `kbl/heartbeat.py` module; removed from `pipeline_tick.main()` |
+| S8 | Qwen recovery missing hours-based trigger | Added `now() - qwen_active_since > hours` branch |
+| S9 | `_call_ollama` timeout=60s tight for Qwen cold-swap | Bumped to 180s |
+| S10 | `kbl-purge-dedupe.sh` log not rotated | Added `purge.log` entry to `newsyslog-kbl.conf` |
+| M2 | DLQ caller contract ambiguous | Explicit contract in §10: caller catches exception, marks `status='failed'`, logs |
+| M4 | `_ensure_*` source file unspec'd | Locked to `memory/store_back.py::SentinelStoreBack` extension |
+| M3 | Bootstrap ordering first-ever tick | Wrapper guards yq step when yml missing |
+
+**Deferred from v2 (per R1 reviewer recommendation):**
+- S6 (decisions doc env-var naming drift) — separate minor commit on decisions doc, documentation fix
+- S11 (PG-unreachable cost backstop) — Phase 2
+- N1 (log_cost_actual wired into retry) — post-dispatch cleanup
+- N2 (pre-call/post-call flow pseudocode) — KBL-B
+- N3 (chmod 600 assert in install) — included anyway (defensive — see §6)
+- N4 (hardcoded vault path) — included anyway (see §9)
+
+**B2 schema reconciliation reconciled** (per report `briefs/_reports/B2_schema_fk_reconciliation_20260417.md`):
+- FK naming style: adopt B2's inline form (auto-named constraints) — simpler, already implemented in `KBL_A_SCHEMA.sql` v3
+- `_ensure_*` ordering invariant: explicit note added to §5 — `_ensure_signal_queue_additions` must run BEFORE `_ensure_kbl_cost_ledger` + `_ensure_kbl_log` (FK target must exist)
+- `TRUNCATE signal_queue CASCADE` note added to §15 rollback
 
 ---
 
@@ -74,7 +121,9 @@ KBL (Knowledge Base Layer) is Baker's compiled-wiki knowledge architecture repla
 - [ ] `kbl/cost.py` — pre-call estimation + post-call logging + cap enforcement
 - [ ] `kbl/logging.py` — tiered logging (local file + PG WARN+ + CRITICAL alerts with dedupe)
 - [ ] `kbl/runtime_state.py` — key-value access to `kbl_runtime_state`
-- [ ] `kbl/heartbeat.py` — updates `mac_mini_heartbeat` key
+- [ ] `kbl/heartbeat.py` — updates `mac_mini_heartbeat` key (sole owner per S7)
+- [ ] `kbl/db.py` — **NEW per R1.M1/S1.** Wraps `memory/store_back.py::SentinelStoreBack` with `get_conn()` helper: `from memory.store_back import SentinelStoreBack; def get_conn(): return SentinelStoreBack().conn`. If `SentinelStoreBack` not importable (Mac Mini path issue), fallback: `psycopg2.connect(os.getenv("DATABASE_URL"))`. Contextmanager-compatible for `with get_conn() as conn:`.
+- [ ] `kbl/whatsapp.py` — **NEW per R1.S1.** Thin wrapper exposing `send_director_alert(message: str)` that calls the existing WAHA HTTP client (check `triggers/waha_client.py` for the canonical send path; reuse, don't reimplement).
 
 ### Baker-vault repo additions (separate PR on `vallen300-bit/baker-vault`)
 - [ ] `config/env.mac-mini.yml` (template with Phase 1 defaults)
@@ -176,27 +225,65 @@ WhatsApp ─ WAHA ──► │  - Signal sentinels (email/WA/etc)   │
 ### Execution
 Code Brisen references `briefs/_drafts/KBL_A_SCHEMA.sql` (pre-staged by Code Brisen #2 at commit `c275ffe`). Wraps into `_ensure_*` methods under `memory/store_back.py` (or equivalent SentinelStoreBack pattern).
 
-### FK type reconciliation (resolves pre-staged caveat)
+### FK type reconciliation (resolved in pre-staged schema v3 + B2 report `52e2653`)
 
-The pre-staged schema declares `signal_id BIGINT` without FK. v2.3 D14 specifies `INTEGER` to match `signal_queue.id SERIAL`.
+**Decision locked:** `signal_queue.id = SERIAL (INTEGER)` (no bump to BIGSERIAL — INT max 2.1B signals is decades of headroom at Phase 1 scale).
 
-**Decision locked here:** keep `signal_queue.id = SERIAL (INTEGER)` (no bump to BIGSERIAL — INT max 2.1B signals is decades of headroom at Phase 1 scale). Update pre-staged schema:
+**FK implementation:** Inline in `CREATE TABLE` (auto-named by Postgres as `kbl_cost_ledger_signal_id_fkey`, `kbl_log_signal_id_fkey`). Per B2 schema draft commit `8782813`. Functionally identical to explicit-name form but simpler to author.
 
 ```sql
--- kbl_cost_ledger.signal_id: BIGINT → INTEGER, add FK with ON DELETE SET NULL
-ALTER TABLE kbl_cost_ledger ALTER COLUMN signal_id TYPE INTEGER;
-ALTER TABLE kbl_cost_ledger
-    ADD CONSTRAINT fk_cost_ledger_signal
-    FOREIGN KEY (signal_id) REFERENCES signal_queue(id) ON DELETE SET NULL;
-
--- kbl_log.signal_id: same
-ALTER TABLE kbl_log ALTER COLUMN signal_id TYPE INTEGER;
-ALTER TABLE kbl_log
-    ADD CONSTRAINT fk_kbl_log_signal
-    FOREIGN KEY (signal_id) REFERENCES signal_queue(id) ON DELETE SET NULL;
+-- In CREATE TABLE for kbl_cost_ledger / kbl_log, signal_id column line:
+signal_id INTEGER REFERENCES signal_queue(id) ON DELETE SET NULL,
 ```
 
 **Why `ON DELETE SET NULL`:** when a signal is purged from `signal_queue` (30-day TTL on `done`/`classified-deferred`), its cost and log rows stay for rollups. We lose the per-signal join but keep the aggregate cost/log data.
+
+### `signal_queue` additions (R1.B1 fix — `started_at` added)
+
+```sql
+ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS primary_matter TEXT;
+ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS related_matters JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS triage_confidence NUMERIC(3,2);
+ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;  -- R1.B1: claim time for latency metrics
+
+ALTER TABLE signal_queue DROP CONSTRAINT IF EXISTS signal_queue_triage_confidence_range;
+ALTER TABLE signal_queue ADD CONSTRAINT signal_queue_triage_confidence_range
+    CHECK (triage_confidence IS NULL OR (triage_confidence >= 0 AND triage_confidence <= 1));
+
+-- Expanded status CHECK
+ALTER TABLE signal_queue DROP CONSTRAINT IF EXISTS signal_queue_status_check;
+ALTER TABLE signal_queue ADD CONSTRAINT signal_queue_status_check
+    CHECK (status IN ('pending','processing','done','failed','expired',
+                      'classified-deferred','failed-reviewed','cost-deferred'));
+
+-- Indexes (unchanged)
+CREATE INDEX IF NOT EXISTS idx_signal_queue_primary_matter ON signal_queue (primary_matter) WHERE primary_matter IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_signal_queue_related_matters_gin ON signal_queue USING gin (related_matters);
+CREATE INDEX IF NOT EXISTS idx_signal_queue_status_priority ON signal_queue (status, priority, created_at);
+```
+
+### `kbl_log` CHECK constraint (R1.S2/S12 fix — INFO dropped)
+
+```sql
+-- Was: CHECK (level IN ('WARN','ERROR','CRITICAL','INFO'))
+-- Now: drop INFO — emit_log never routes INFO to PG
+level TEXT NOT NULL CHECK (level IN ('WARN','ERROR','CRITICAL')),
+```
+
+Vault-size events (previously flagged as INFO per D15 line 870) are bumped to WARN (at >500 MB) and CRITICAL (at >1 GB). Routine vault-size telemetry is local-file-only.
+
+### `_ensure_*` ordering invariant (per B2 concern #2)
+
+`SentinelStoreBack` MUST run the following order on startup:
+
+1. `_ensure_signal_queue_additions` (adds columns + indexes to existing `signal_queue`)
+2. `_ensure_kbl_runtime_state`
+3. `_ensure_kbl_cost_ledger` (requires `signal_queue` for FK target)
+4. `_ensure_kbl_log` (requires `signal_queue` for FK target)
+5. `_ensure_kbl_alert_dedupe`
+6. `_ensure_gold_promote_queue`
+
+Enforced by method call order in the SentinelStoreBack bootstrap. If order is wrong, step 3-4 fail with `relation signal_queue does not exist` (if base table not yet bootstrapped) or FK type mismatch (if additions not yet applied).
 
 ### Additional table introduced here (not in pre-staged schema)
 
@@ -246,6 +333,17 @@ command -v ollama >/dev/null 2>&1 || { echo "FAIL: ollama not installed."; exit 
 ollama list | grep -q 'gemma4' || { echo "FAIL: gemma4 not pulled. Run: ollama pull gemma4:latest"; exit 1; }
 ollama list | grep -q 'qwen2.5:14b' || { echo "FAIL: qwen2.5:14b not pulled. Run: ollama pull qwen2.5:14b"; exit 1; }
 
+# R1.N3: enforce ~/.zshrc mode 0600 (defense for plaintext secrets per D4 override)
+if [ -f "${HOME}/.zshrc" ]; then
+    chmod 600 "${HOME}/.zshrc" 2>/dev/null && echo "OK: ~/.zshrc mode 0600 enforced" || echo "WARN: chmod 600 ~/.zshrc failed"
+fi
+
+# R1.M3: warn (not fail) if env.mac-mini.yml not yet in vault — Director may not have pushed yet
+if [ ! -f "${VAULT}/config/env.mac-mini.yml" ]; then
+    echo "WARN: ${VAULT}/config/env.mac-mini.yml not present yet."
+    echo "      Install continues; pipeline will idle until Director pushes the yml file."
+fi
+
 # --- 1. Symlink pipeline scripts ---
 for script in kbl-pipeline-tick.sh kbl-gold-drain.sh kbl-heartbeat.sh kbl-dropbox-mirror.sh kbl-purge-dedupe.sh; do
     sudo ln -sf "${REPO}/scripts/${script}" "${TARGET_BIN}/${script}"
@@ -292,7 +390,7 @@ echo "Next: verify env.mac-mini.yml exists at ${VAULT}/config/env.mac-mini.yml"
 echo "Then trigger first pipeline tick: launchctl start com.brisen.kbl.pipeline"
 ```
 
-### `config/newsyslog-kbl.conf`
+### `config/newsyslog-kbl.conf` (R1.S10: purge.log added)
 
 ```
 # Rotates /var/log/kbl/pipeline.log and related KBL logs
@@ -300,6 +398,7 @@ echo "Then trigger first pipeline tick: launchctl start com.brisen.kbl.pipeline"
 /var/log/kbl/pipeline.log   644  7  10240  *  J
 /var/log/kbl/gold-drain.log 644  7  10240  *  J
 /var/log/kbl/heartbeat.log  644  7   1024  *  J
+/var/log/kbl/purge.log      644  7   1024  *  J
 ```
 
 ### Acceptance for Phase 2
@@ -460,11 +559,16 @@ cd "${VAULT}"
 if ! git pull --rebase -X ours origin main 2>> "${LOG}"; then
     log "CRITICAL: git pull conflict, aborting tick"
     git rebase --abort 2>/dev/null || true
-    python3 -m kbl.logging emit_critical "git-conflict" "baker-vault pull failed — manual intervention required"
+    # R1.B3: kbl.logging now has argv dispatcher
+    (cd "${REPO}" && python3 -m kbl.logging emit_critical "git-conflict" "baker-vault pull failed — manual intervention required") || log "WARN: emit_critical alert failed"
     exit 1
 fi
 
-# --- Step 2: source config ---
+# --- Step 2: source config (R1.M3: guard when yml not yet deployed) ---
+if [ ! -f "${VAULT}/config/env.mac-mini.yml" ]; then
+    log "INFO: ${VAULT}/config/env.mac-mini.yml not yet deployed — pipeline idle"
+    exit 0
+fi
 eval "$(yq -r '
   [paths(scalars, arrays) as $p |
     select($p | last | type != "number") |
@@ -566,19 +670,20 @@ def claim_one_signal(conn) -> int | None:
         return signal_id
 
 def main():
-    # Heartbeat first — even if nothing to process, prove aliveness
-    set_state("mac_mini_heartbeat", "NOW()")
+    # NOTE (R1.S7): heartbeat is OWNED by kbl/heartbeat.py on its own 30-min LaunchAgent.
+    # pipeline_tick does NOT write mac_mini_heartbeat — removed to avoid dual-owner confusion.
 
-    # Check circuit breaker
+    # Check circuit breaker (Anthropic)
     if get_state("anthropic_circuit_open") == "true":
         emit_log("WARN", "pipeline_tick", None,
                  "Anthropic circuit open, skipping API calls this tick")
         return 0
 
-    # Check cost-circuit
+    # Check cost-circuit (note: INFO logs go to local file only per R1.S2, not to PG)
     if get_state("cost_circuit_open") == "true":
-        emit_log("INFO", "pipeline_tick", None,
-                 "Cost cap reached today, skipping until UTC midnight")
+        # Use Python logger directly (no PG write for INFO)
+        import logging as _stdlib_logging
+        _stdlib_logging.getLogger("kbl").info("Cost cap reached today, skipping until UTC midnight")
         return 0
 
     conn = get_conn()
@@ -588,7 +693,7 @@ def main():
             return 0  # queue empty, normal exit
 
         # KBL-A STUB: just log + mark as done. KBL-B replaces this.
-        emit_log("INFO", "pipeline_tick", signal_id,
+        emit_log("WARN", "pipeline_tick", signal_id,
                  "KBL-A stub: signal claimed but no pipeline logic yet (awaiting KBL-B)")
         with conn.cursor() as cur:
             cur.execute(
@@ -602,12 +707,15 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+
+if __name__ == "__main__":
+    sys.exit(main())
 ```
 
 ### Acceptance for Phase 4
 - `launchctl start com.brisen.kbl.pipeline` → exits 0, log shows "=== tick start === / tick end ==="
 - Run two `kbl-pipeline-tick.sh` concurrently → second exits immediately (flock held), log shows nothing for second
-- Insert test signal (`INSERT INTO signal_queue (status, priority, source, raw_content) VALUES ('pending', 50, 'test', 'hello')`) → next tick claims it, marks `classified-deferred`, `kbl_log` INFO row present
+- Insert test signal (R1.S5 — correct columns per KBL-19 schema): `INSERT INTO signal_queue (status, priority, source, summary, payload) VALUES ('pending', 'normal', 'test', 'test signal', '{}'::jsonb)` → next tick claims it, updates `started_at`, marks `classified-deferred`, `kbl_log` WARN row present (stub emit uses WARN per R1.S2 since INFO→PG is disabled)
 - `KBL_FLAGS_PIPELINE_ENABLED=false` → tick exits 0 without claiming signals
 - Heartbeat: after 1 tick, `SELECT value FROM kbl_runtime_state WHERE key='mac_mini_heartbeat'` is within last 2 min
 
@@ -615,14 +723,20 @@ if __name__ == "__main__":
 
 ## 9. Phase 5 — Gold Promote Drain Worker
 
-### `kbl/gold_drain.py`
+### `kbl/gold_drain.py` (v2 — R1.B3, B4, S3, S4, N4 fixes applied)
 
 ```python
 """Drains gold_promote_queue on each pipeline tick.
 Per D2: WhatsApp /gold → WAHA/Render → gold_promote_queue INSERT
-→ Mac Mini drains → frontmatter edit → commit with Director identity → push."""
+→ Mac Mini drains → frontmatter edit → commit with Director identity → push.
 
+R1.B4 transaction invariant: PG rows marked done ONLY after git push succeeds.
+If push fails, files are checked out (undone), rows stay pending for next drain."""
+
+import os
+import sys
 import subprocess
+import time
 from pathlib import Path
 import yaml
 from datetime import datetime, timezone
@@ -630,18 +744,27 @@ from kbl.db import get_conn
 from kbl.logging import emit_log
 from kbl.config import cfg_bool
 
-VAULT = Path.home() / "baker-vault"
+# R1.N4: vault path configurable via env var
+VAULT = Path(os.getenv("KBL_VAULT_PATH", str(Path.home() / "baker-vault")))
 DIRECTOR_EMAIL = "dvallen@brisengroup.com"
 DIRECTOR_NAME = "Dimitry Vallen"
+PUSH_RETRY_DELAYS = [2, 10, 30]  # seconds between retries on push fail
+
+class GitPushFailed(Exception):
+    pass
 
 def drain_queue():
+    """R1.B4: reordered for correct transaction semantics.
+    Steps: claim → apply filesystem changes → commit+push (with retry) → mark PG done.
+    Push failure rolls back filesystem, rows stay pending."""
+
     if cfg_bool("gold_promote_disabled", False):
-        emit_log("INFO", "gold_drain", None, "Gold promotion disabled via kill-switch")
+        emit_log("WARN", "gold_drain", None, "Gold promotion disabled via kill-switch")
         return
 
     conn = get_conn()
     try:
-        # Claim pending rows with SKIP LOCKED (though conflicts unlikely — Mac Mini is sole consumer)
+        # 1. Claim rows (SKIP LOCKED — though conflicts unlikely since Mac Mini is sole consumer)
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT id, path, wa_msg_id FROM gold_promote_queue
@@ -650,28 +773,51 @@ def drain_queue():
                 LIMIT 10
                 FOR UPDATE SKIP LOCKED
             """)
-            rows = cur.fetchall()
+            claimed = cur.fetchall()
+            conn.commit()  # release the row locks
 
-            if not rows:
+        if not claimed:
+            return
+
+        # 2. Apply filesystem changes (no PG updates yet)
+        applied = []  # [(row_id, path, wa_msg_id, result)]
+        promoted_paths = []  # for git add (S3 — specific paths only)
+        for row_id, path, wa_msg_id in claimed:
+            result = promote_one(path)
+            applied.append((row_id, path, wa_msg_id, result))
+            if result == "ok":
+                promoted_paths.append(path)
+
+        # 3. Commit + push ATOMICALLY (with retry). Only after success: mark PG rows done.
+        if promoted_paths:
+            try:
+                _commit_and_push(promoted_paths, applied)
+            except GitPushFailed as e:
+                # ROLLBACK: restore files to origin/main state
+                emit_log("CRITICAL", "gold_drain", None,
+                         f"Push failed after retries: {e}. Rolling back filesystem, PG rows stay pending.")
+                subprocess.run(
+                    ["git", "-C", str(VAULT), "checkout", "HEAD", "--"] + promoted_paths,
+                    check=False  # best effort — don't fail the rollback
+                )
+                # Do NOT mark PG rows done. Next drain retries.
                 return
 
-            for row_id, path, wa_msg_id in rows:
-                result = promote_one(path)
+        # 4. Only after push success: mark PG rows done
+        with conn.cursor() as cur:
+            for row_id, path, wa_msg_id, result in applied:
                 cur.execute("""
                     UPDATE gold_promote_queue
                     SET processed_at = NOW(), result = %s
                     WHERE id = %s
                 """, (result, row_id))
-                conn.commit()
                 emit_log(
-                    "INFO" if result in ("ok", "noop") else "ERROR",
+                    "WARN" if result.startswith("error") else "WARN",  # WARN level, not INFO (R1.S2)
                     "gold_drain", None,
                     f"Promoted {path}: {result}",
                     metadata={"wa_msg_id": wa_msg_id, "queue_id": row_id}
                 )
-
-        # After all promotions: commit + push if any changes
-        _commit_and_push()
+            conn.commit()
     finally:
         conn.close()
 
@@ -679,7 +825,7 @@ def promote_one(path: str) -> str:
     """Apply Gold promotion to a single file. Returns 'ok', 'noop', or 'error:...'."""
     target = VAULT / path
     if not target.exists():
-        return f"error:file_not_found"
+        return "error:file_not_found"
 
     try:
         content = target.read_text()
@@ -710,24 +856,58 @@ def _parse_frontmatter(content: str) -> tuple[dict, str]:
 def _format_frontmatter(fm: dict) -> str:
     return f"---\n{yaml.safe_dump(fm, sort_keys=False)}---\n"
 
-def _commit_and_push():
-    """Commit staged changes with Director identity and push."""
-    # Check if any changes
-    diff = subprocess.run(
-        ["git", "-C", str(VAULT), "diff", "--stat"],
-        capture_output=True, text=True
-    )
-    if not diff.stdout.strip():
-        return
+def _commit_and_push(promoted_paths: list[str], applied: list[tuple]):
+    """R1.S3: git add specific paths, not -A.
+    R1.S4: include path + queue_id + wa_msg_id in commit message.
+    Retries push up to 3 times before raising GitPushFailed."""
 
-    subprocess.run(["git", "-C", str(VAULT), "add", "-A"], check=True)
+    # S3: specific paths only — never sweep unrelated dirty state
+    for path in promoted_paths:
+        subprocess.run(["git", "-C", str(VAULT), "add", path], check=True)
+
+    # S4: rich commit message with audit trail
+    msg_lines = ["gold: Director promotion", ""]
+    for row_id, path, wa_msg_id, result in applied:
+        if result == "ok":
+            msg_lines.append(f"- {path} (queue_id={row_id}, wa_msg_id={wa_msg_id})")
+    msg = "\n".join(msg_lines)
+
     subprocess.run([
         "git", "-C", str(VAULT),
         "-c", f"user.name={DIRECTOR_NAME}",
         "-c", f"user.email={DIRECTOR_EMAIL}",
-        "commit", "-m", "gold: Director promotion"
+        "commit", "-m", msg
     ], check=True)
-    subprocess.run(["git", "-C", str(VAULT), "push", "origin", "main"], check=True)
+
+    # B4: retry push up to 3 times with backoff before giving up
+    last_error = None
+    for delay in [0] + PUSH_RETRY_DELAYS:
+        if delay > 0:
+            time.sleep(delay)
+        try:
+            subprocess.run(
+                ["git", "-C", str(VAULT), "push", "origin", "main"],
+                check=True, capture_output=True, text=True
+            )
+            return  # success
+        except subprocess.CalledProcessError as e:
+            last_error = e
+            emit_log("WARN", "gold_drain", None,
+                     f"Push failed (attempt after {delay}s delay): {e.stderr[:200]}")
+            continue
+
+    # All retries failed — rollback the local commit too, then raise
+    subprocess.run(
+        ["git", "-C", str(VAULT), "reset", "--hard", "HEAD~1"],
+        check=False  # best effort
+    )
+    raise GitPushFailed(str(last_error))
+
+
+# R1.B3: python3 -m kbl.gold_drain entry point
+if __name__ == "__main__":
+    drain_queue()
+    sys.exit(0)
 ```
 
 ### Backup path: git-diff-on-pull
@@ -899,15 +1079,17 @@ def call_gemma_with_retry(signal: dict, prompt_template: str) -> dict:
 
     # Attempt 4: Qwen cold-swap
     try:
+        from datetime import datetime, timezone
         set_state("qwen_active", "true")
         if not get_state("qwen_active_since"):
-            set_state("qwen_active_since", "NOW()")
+            # R1.B2 lesson: use ISO format, not literal "NOW()"
+            set_state("qwen_active_since", datetime.now(timezone.utc).isoformat())
         result = _call_ollama(fallback, prompt_template.format(**signal), temp=0)
         increment_state("qwen_swap_count_today")
         return result
     except Exception as e:
         emit_log("ERROR", "retry_gemma", signal.get("id"), f"Qwen also failed: {e}")
-        raise  # caller decides DLQ
+        raise  # caller must catch — see DLQ contract (R1.M2) below
 
 def _pare_prompt(template: str) -> str:
     """Strip vault context chunks, keep instruction + signal + schema. KBL-B refines."""
@@ -916,7 +1098,9 @@ def _pare_prompt(template: str) -> str:
     return template
 
 def _call_ollama(model: str, prompt: str, temp: float = 0) -> dict:
-    """Call Ollama locally, parse JSON response."""
+    """Call Ollama locally, parse JSON response.
+    R1.S9: timeout bumped to 180s — Qwen cold-swap can take 25s warm-up + 9s inference
+    baseline, and Mac Mini pressure with concurrent claude -p could push further."""
     import requests
     resp = requests.post(
         "http://localhost:11434/api/generate",
@@ -927,7 +1111,7 @@ def _call_ollama(model: str, prompt: str, temp: float = 0) -> dict:
             "stream": False,
             "options": {"temperature": temp, "seed": 42, "top_p": 0.9}
         },
-        timeout=60
+        timeout=180
     )
     resp.raise_for_status()
     data = resp.json()
@@ -943,24 +1127,69 @@ class InvalidJSONError(Exception):
 ### Qwen recovery (runs periodically — e.g., at start of every N ticks)
 
 ```python
-# In kbl/pipeline_tick.py, after heartbeat:
+# In kbl/pipeline_tick.py, after claim:
 def maybe_recover_gemma():
-    """After N signals or X hours on Qwen, try Gemma again on next call."""
+    """R1.S8: recover after N signals OR M hours elapsed (either-condition)."""
+    from datetime import datetime, timezone, timedelta
+
     if get_state("qwen_active") != "true":
         return
+
     swap_count = int(get_state("qwen_swap_count_today") or "0")
-    if swap_count >= cfg_int("qwen_recovery_after_signals", 10):
+    active_since_raw = get_state("qwen_active_since")
+
+    count_trigger = swap_count >= cfg_int("qwen_recovery_after_signals", 10)
+
+    hours_trigger = False
+    if active_since_raw:
+        try:
+            active_since = datetime.fromisoformat(active_since_raw)
+            elapsed_hours = (datetime.now(timezone.utc) - active_since).total_seconds() / 3600
+            hours_trigger = elapsed_hours >= cfg_int("qwen_recovery_after_hours", 1)
+        except ValueError:
+            pass  # malformed timestamp → count-based only
+
+    if count_trigger or hours_trigger:
+        trigger_reason = []
+        if count_trigger: trigger_reason.append(f"count={swap_count}")
+        if hours_trigger: trigger_reason.append(f"hours_elapsed")
         set_state("qwen_active", "false")
         set_state("qwen_active_since", "")
         set_state("qwen_swap_count_today", "0")
-        emit_log("INFO", "qwen_recovery", None, f"Recovered to Gemma after {swap_count} signals")
+        emit_log("WARN", "qwen_recovery", None,
+                 f"Recovered to Gemma (triggers: {', '.join(trigger_reason)})")
 ```
+
+### DLQ caller contract (R1.M2)
+
+`retry.call_anthropic_with_retry` and `retry.call_gemma_with_retry` re-raise on exhausted retries. **Caller contract** (enforced by KBL-B pipeline, stubbed in KBL-A):
+
+```python
+try:
+    result = call_gemma_with_retry(signal, prompt_template)
+except Exception as e:
+    # DLQ: mark signal as failed, log with error details
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE signal_queue SET status='failed', processed_at=NOW() WHERE id=%s",
+            (signal["id"],)
+        )
+        conn.commit()
+    emit_log("ERROR", "dlq", signal["id"],
+             f"Signal DLQ'd after retry exhaustion: {type(e).__name__}: {e}",
+             metadata={"step": "gemma_retry"})
+    return  # do NOT re-raise — caller has handled DLQ
+```
+
+This contract is documented in `kbl/retry.py` module docstring. KBL-B must wrap every `call_*_with_retry` with this pattern. Violations detectable in code review (grep for `call_*_with_retry` without an accompanying `try/except`).
 
 ### Acceptance for Phase 6
 - Mock Anthropic with 3× `APIError(status_code=502)` → circuit opens, `kbl_runtime_state.anthropic_circuit_open='true'`
 - `check_and_clear_anthropic_circuit` with mocked 200 response → circuit clears
-- Force Gemma JSON failure → retry ladder cycles → Qwen picked up → `qwen_active='true'`
+- Force Gemma JSON failure → retry ladder cycles → Qwen picked up → `qwen_active='true'`, `qwen_active_since` contains ISO-8601 timestamp (not literal "NOW()")
 - After 10 successful Qwen calls → `maybe_recover_gemma` flips back → next call uses Gemma
+- After 1 hour on Qwen (even with <10 signals) → `maybe_recover_gemma` triggers via hours branch
+- DLQ contract: simulate retry exhaustion → caller marks signal `status='failed'`, `kbl_log` ERROR row present
 
 ---
 
@@ -980,7 +1209,9 @@ from kbl.runtime_state import get_state, set_state
 from kbl.logging import emit_log
 from kbl.config import cfg_float
 
-# Per-million-token prices (USD) — env-seeded, Director updates on Anthropic changes
+# Per-million-token prices (USD) — env-seeded, Director updates on Anthropic changes.
+# Keys are FAMILY-LEVEL aliases — real model IDs are versioned (e.g., claude-opus-4-6,
+# claude-haiku-4-5-20251001). See _model_key() for normalization.
 PRICING = {
     "claude-opus-4":   {"input": float(os.getenv("PRICE_OPUS4_IN",  "15.00")),  "output": float(os.getenv("PRICE_OPUS4_OUT",  "75.00"))},
     "claude-sonnet-4": {"input": float(os.getenv("PRICE_SONNET4_IN", "3.00")),  "output": float(os.getenv("PRICE_SONNET4_OUT", "15.00"))},
@@ -988,6 +1219,20 @@ PRICING = {
     "gemma4:latest":   {"input": 0.0, "output": 0.0},
     "qwen2.5:14b":     {"input": 0.0, "output": 0.0},
 }
+
+def _model_key(full_id: str) -> str:
+    """R1.B6: normalize full model ID to PRICING key.
+    Real Anthropic IDs are versioned (claude-opus-4-6, claude-haiku-4-5-20251001).
+    PRICING uses family-level aliases. Without this, log_cost_actual with a real ID
+    would get {input:0, output:0} and silently log $0 — cap enforcement breaks."""
+    # Anthropic family detection
+    if "opus" in full_id:   return "claude-opus-4"
+    if "sonnet" in full_id: return "claude-sonnet-4"
+    if "haiku" in full_id:  return "claude-haiku-4"
+    # Local models — exact ID matches (already family-level)
+    if full_id in PRICING:  return full_id
+    # Unknown — raise so we catch it early, not silently log $0
+    raise ValueError(f"Unknown model for pricing: {full_id!r}. Add to PRICING or update _model_key().")
 
 def estimate_cost(model: str, prompt: str, max_output_tokens: int, anthropic: Anthropic | None = None) -> float:
     """Pre-call cost estimate. USD."""
@@ -1015,7 +1260,8 @@ def estimate_cost(model: str, prompt: str, max_output_tokens: int, anthropic: An
     if input_tokens is None:
         input_tokens = len(prompt) // 4 + 1
 
-    price = PRICING.get(model, {"input": 0, "output": 0})
+    # R1.B6: normalize model ID to pricing key
+    price = PRICING[_model_key(model)]
     return (input_tokens * price["input"] + max_output_tokens * price["output"]) / 1_000_000
 
 def today_spent_usd() -> float:
@@ -1038,8 +1284,8 @@ def check_cost_cap(model: str, prompt: str, max_output_tokens: int, anthropic: A
 def log_cost_actual(signal_id: int | None, step: str, model: str,
                     input_tokens: int, output_tokens: int, latency_ms: int,
                     success: bool = True, metadata: dict | None = None):
-    """Post-call actual cost logging."""
-    price = PRICING.get(model, {"input": 0, "output": 0})
+    """Post-call actual cost logging. R1.B6: normalize model ID to pricing key."""
+    price = PRICING[_model_key(model)]
     cost = (input_tokens * price["input"] + output_tokens * price["output"]) / 1_000_000
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute("""
@@ -1103,35 +1349,56 @@ def daily_cost_circuit_clear():
 
 ## 12. Phase 8 — Logging + Alert Dedupe + Heartbeat
 
-### `kbl/logging.py`
+### `kbl/logging.py` (v2 — R1.B3, B5, S2 fixes applied)
 
 ```python
-"""Tiered logging: local file (DEBUG+), PG (WARN+), WhatsApp alert (CRITICAL with dedupe)."""
+"""Tiered logging: local file (DEBUG+), PG (WARN+ only), WhatsApp alert (CRITICAL with dedupe).
 
+Per R1.S2: INFO is local-file-only — not routed to PG.
+Vault-size events (previously spec'd as INFO) are now WARN/CRITICAL at >500MB/>1GB.
+PG kbl_log.level CHECK accordingly restricted to WARN/ERROR/CRITICAL."""
+
+import sys
 import json
 import hashlib
 import logging
 import time
 from pathlib import Path
 from kbl.db import get_conn
-from kbl.whatsapp import send_director_alert  # existing WAHA client helper
+from kbl.whatsapp import send_director_alert
 
 LOG_FILE = Path("/var/log/kbl/pipeline.log")
 DEDUPE_BUCKET_MINUTES = 5
 
-# Local Python logger
+# Local Python logger — R1.B5: FileHandler creation must NOT fail module import
+# if /var/log/kbl/ is missing (install not yet run, permissions drift).
 _logger = logging.getLogger("kbl")
 _logger.setLevel(logging.DEBUG)
-_handler = logging.FileHandler(LOG_FILE)
-_handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
-_logger.addHandler(_handler)
+
+try:
+    _handler = logging.FileHandler(LOG_FILE)
+    _handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
+    _logger.addHandler(_handler)
+except (FileNotFoundError, PermissionError) as e:
+    # Fallback: stderr only. Print once so Director sees on first import after breakage.
+    _stderr = logging.StreamHandler(sys.stderr)
+    _stderr.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(name)s %(message)s'))
+    _logger.addHandler(_stderr)
+    sys.stderr.write(
+        f"[kbl.logging] WARNING: cannot open {LOG_FILE} ({type(e).__name__}: {e}). "
+        f"Falling back to stderr. Run scripts/install_kbl_mac_mini.sh to set up /var/log/kbl/.\n"
+    )
 
 def emit_log(level: str, component: str, signal_id: int | None, message: str,
              metadata: dict | None = None):
-    """Tiered emission. INFO and DEBUG go to file only; WARN+ to PG; CRITICAL to WhatsApp."""
+    """Tiered emission.
+    DEBUG/INFO → local file only (R1.S2)
+    WARN/ERROR/CRITICAL → local file + PG kbl_log
+    CRITICAL → additionally WhatsApp alert (with dedupe)."""
     # Always local
     _logger.log(getattr(logging, level, logging.INFO), f"[{component}] signal={signal_id} {message}")
 
+    # PG only for WARN+. INFO is never PG'd (schema CHECK enforces this too — R1.S2/S12).
     if level in ("WARN", "ERROR", "CRITICAL"):
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("""
@@ -1164,12 +1431,43 @@ def emit_critical_alert(component: str, message: str, bucket_minutes: int = DEDU
     if was_inserted:
         send_director_alert(f"[KBL CRITICAL] {component}: {message}")
 
-# Convenience shims used by bash wrappers via python3 -m
+# Convenience functions — callable from Python OR from bash via python3 -m kbl.logging <cmd> args
 def emit_info(component: str, message: str):
-    emit_log("INFO", component, None, message)
+    emit_log("WARN", component, None, message)  # INFO bumped to WARN for PG visibility if called via shim
 
 def emit_critical(component: str, message: str):
     emit_log("CRITICAL", component, None, message)
+
+
+# R1.B3: python3 -m kbl.logging <command> <args...> entry point
+# Usage:
+#   python3 -m kbl.logging emit_critical <component> <message>
+#   python3 -m kbl.logging emit_info <component> <message>
+if __name__ == "__main__":
+    if len(sys.argv) < 4:
+        sys.stderr.write(
+            "usage: python3 -m kbl.logging {emit_critical|emit_info|emit_warn|emit_error} "
+            "<component> <message>\n"
+        )
+        sys.exit(2)
+
+    cmd = sys.argv[1]
+    component = sys.argv[2]
+    message = " ".join(sys.argv[3:])
+
+    level_map = {
+        "emit_critical": "CRITICAL",
+        "emit_error":    "ERROR",
+        "emit_warn":     "WARN",
+        "emit_info":     "WARN",  # INFO not valid for PG; shim bumps to WARN for visibility
+    }
+    level = level_map.get(cmd)
+    if level is None:
+        sys.stderr.write(f"Unknown subcommand: {cmd}\n")
+        sys.exit(2)
+
+    emit_log(level, component, None, message)
+    sys.exit(0)
 ```
 
 ### `kbl/heartbeat.py`
@@ -1338,6 +1636,18 @@ Code Brisen signs off on KBL-A when ALL of the following pass:
 5. **Vault state preserved:** baker-vault repo untouched. `gold_promote_queue` rows retained for post-mortem.
 6. **Cortex V2 continues running independently.** KBL-A is additive infrastructure; rollback leaves baseline intact.
 
+### Dev-reset note (per B2 schema report concern 3)
+
+`TRUNCATE signal_queue` will fail after KBL-A deploys because of the `ON DELETE SET NULL` FK from `kbl_cost_ledger.signal_id` and `kbl_log.signal_id`. Use one of:
+
+```sql
+TRUNCATE signal_queue, kbl_cost_ledger, kbl_log RESTART IDENTITY;
+-- or:
+TRUNCATE signal_queue CASCADE;  -- also truncates referring tables, be deliberate
+```
+
+Add to any dev-reset/seed script.
+
 ---
 
 ## 16. Env Var Complete Reference
@@ -1400,8 +1710,13 @@ All tunables (sourced from `env.mac-mini.yml` except where noted):
 
 7. **MacBook Obsidian Git plugin auto-push dependency.** If Director forgets to enable plugin, D2 backup path (git-diff-on-pull) will not fire for MacBook-originated Gold edits. Prerequisite check covers this (§3).
 
-8. **Signal-queue type mismatch already reconciled** (`BIGINT` → `INTEGER` FKs in §5). Documented in deploy sequence.
+8. **Signal-queue type mismatch already reconciled** (`BIGINT` → `INTEGER` FKs in §5). Documented in deploy sequence. B2 schema draft (`briefs/_drafts/KBL_A_SCHEMA.sql` v3 at commit `8782813`) uses inline auto-named FKs — KBL-A adopts that form for consistency.
+
+9. **R1 deferred items** to be addressed post-KBL-A or in KBL-B:
+   - S6: `DECISIONS_PRE_KBL_A_V2.md` env var table (lines 897-902) uses old flat names — separate documentation commit, no behavioral impact
+   - S11: PG-unreachable cost-tracking backstop — Phase 2 design
+   - N1-N4: polish items (log_cost_actual auto-wire, pseudocode doc, zshrc chmod, env vault path) — mostly absorbed into v2 where trivial; rest deferred
 
 ---
 
-*Prepared 2026-04-17 by AI Head (Claude Opus 4.7). Target: Code Brisen review (R1) → Director ratification → dispatch. Expected build: 12-16 hours.*
+*Prepared 2026-04-17 by AI Head (Claude Opus 4.7). V1 drafted; R1 reviewed by Code Brisen #1 (48 min, 6B/12S/4N/4M); V2 incorporates all 6 blockers + 10 should-fix + 3 missing per R1 reviewer's prioritization. Target: Code Brisen R2 narrow-scope re-review → Director ratification → dispatch. Expected build: 12-16 hours.*
