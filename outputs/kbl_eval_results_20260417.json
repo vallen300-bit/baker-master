@@ -1,5 +1,5 @@
 {
-  "run_at": "2026-04-17T16:51:53.394573+00:00",
+  "run_at": "2026-04-17T17:53:34.351355+00:00",
   "labeled_path": "outputs/kbl_eval_set_20260417_labeled.jsonl",
   "models": {
     "gemma4:latest": {
@@ -9,120 +9,120 @@
           "source": "email",
           "json_ok": true,
           "vedana_ok": true,
-          "matter_ok": false,
+          "matter_ok": true,
           "score_bucket_ok": true,
           "model_vedana": "routine",
-          "model_matter": "brisen-lp",
-          "model_score": 20,
+          "model_matter": null,
+          "model_score": 10,
           "label_vedana": "routine",
           "label_matter": null,
           "label_pass": false,
-          "elapsed_s": 10.5
+          "elapsed_s": 9.57
         },
         {
           "signal_id": "email:1964a26249bc2c0c",
           "source": "email",
           "json_ok": true,
-          "vedana_ok": false,
+          "vedana_ok": true,
           "matter_ok": false,
-          "score_bucket_ok": false,
-          "model_vedana": "threat",
-          "model_matter": "none",
-          "model_score": 95,
+          "score_bucket_ok": true,
+          "model_vedana": "routine",
+          "model_matter": "null",
+          "model_score": 10,
           "label_vedana": "routine",
           "label_matter": null,
           "label_pass": false,
-          "elapsed_s": 4.54
+          "elapsed_s": 5.01
         },
         {
           "signal_id": "email:1975e7d294e34a34",
           "source": "email",
           "json_ok": true,
-          "vedana_ok": false,
-          "matter_ok": false,
-          "score_bucket_ok": false,
-          "model_vedana": "opportunity",
-          "model_matter": "ao",
-          "model_score": 85,
+          "vedana_ok": true,
+          "matter_ok": true,
+          "score_bucket_ok": true,
+          "model_vedana": "routine",
+          "model_matter": null,
+          "model_score": 20,
           "label_vedana": "routine",
           "label_matter": null,
           "label_pass": false,
-          "elapsed_s": 5.92
+          "elapsed_s": 6.02
         },
         {
           "signal_id": "email:1981a5b34a9b24c7",
           "source": "email",
           "json_ok": true,
-          "vedana_ok": false,
-          "matter_ok": false,
-          "score_bucket_ok": false,
-          "model_vedana": "opportunity",
-          "model_matter": "hospitality",
-          "model_score": 65,
+          "vedana_ok": true,
+          "matter_ok": true,
+          "score_bucket_ok": true,
+          "model_vedana": "routine",
+          "model_matter": null,
+          "model_score": 10,
           "label_vedana": "routine",
           "label_matter": null,
           "label_pass": false,
-          "elapsed_s": 7.04
+          "elapsed_s": 8.12
         },
         {
           "signal_id": "email:198bf7246fa5649b",
           "source": "email",
           "json_ok": true,
-          "vedana_ok": false,
-          "matter_ok": false,
-          "score_bucket_ok": false,
-          "model_vedana": "opportunity",
-          "model_matter": "ao",
-          "model_score": 75,
+          "vedana_ok": true,
+          "matter_ok": true,
+          "score_bucket_ok": true,
+          "model_vedana": "routine",
+          "model_matter": null,
+          "model_score": 10,
           "label_vedana": "routine",
           "label_matter": null,
           "label_pass": false,
-          "elapsed_s": 5.36
+          "elapsed_s": 5.87
         },
         {
           "signal_id": "email:1993d6b3a1dda25a",
           "source": "email",
           "json_ok": true,
           "vedana_ok": true,
-          "matter_ok": false,
+          "matter_ok": true,
           "score_bucket_ok": true,
           "model_vedana": "routine",
-          "model_matter": "none",
+          "model_matter": null,
           "model_score": 10,
           "label_vedana": "routine",
           "label_matter": null,
           "label_pass": false,
-          "elapsed_s": 6.34
+          "elapsed_s": 6.68
         },
         {
           "signal_id": "email:1999a3807914bdde",
           "source": "email",
           "json_ok": true,
-          "vedana_ok": false,
-          "matter_ok": false,
-          "score_bucket_ok": false,
-          "model_vedana": "opportunity",
-          "model_matter": "investment",
-          "model_score": 85,
+          "vedana_ok": true,
+          "matter_ok": true,
+          "score_bucket_ok": true,
+          "model_vedana": "routine",
+          "model_matter": null,
+          "model_score": 20,
           "label_vedana": "routine",
           "label_matter": null,
           "label_pass": false,
-          "elapsed_s": 5.77
+          "elapsed_s": 5.91
         },
         {
           "signal_id": "email:19c526f1c6d3f2ee",
           "source": "email",
           "json_ok": true,
           "vedana_ok": true,
-          "matter_ok": true,
+          "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "threat",
-          "model_matter": "hagenauer-rg7",
-          "model_score": 95,
+          "model_matter": "brisen-lp",
+          "model_score": 85,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 5.98
+          "elapsed_s": 7.46
         },
         {
           "signal_id": "email:19c6b2a3b05880ca",
@@ -132,12 +132,12 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "routine",
-          "model_matter": "brisen-lp",
+          "model_matter": "null",
           "model_score": 30,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": false,
-          "elapsed_s": 4.41
+          "elapsed_s": 4.96
         },
         {
           "signal_id": "email:19caf068b7875e37",
@@ -152,37 +152,37 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 6.37
+          "elapsed_s": 6.82
         },
         {
           "signal_id": "email:19cb01431b40fddf",
           "source": "email",
           "json_ok": true,
           "vedana_ok": true,
-          "matter_ok": true,
+          "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "threat",
-          "model_matter": "hagenauer-rg7",
+          "model_matter": "brisen-lp",
           "model_score": 90,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 5.57
+          "elapsed_s": 5.93
         },
         {
           "signal_id": "email:19cb074316b37f87",
           "source": "email",
           "json_ok": true,
           "vedana_ok": true,
-          "matter_ok": true,
+          "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "threat",
-          "model_matter": "hagenauer-rg7",
+          "model_matter": "brisen-lp",
           "model_score": 85,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 6.07
+          "elapsed_s": 6.43
         },
         {
           "signal_id": "email:19cb4717946b40b4",
@@ -197,7 +197,7 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 5.75
+          "elapsed_s": 5.74
         },
         {
           "signal_id": "email:19ce27d503340937",
@@ -212,25 +212,10 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 5.77
+          "elapsed_s": 6.31
         },
         {
           "signal_id": "email:19ce77b63e767e78",
-          "source": "email",
-          "json_ok": true,
-          "vedana_ok": true,
-          "matter_ok": true,
-          "score_bucket_ok": true,
-          "model_vedana": "threat",
-          "model_matter": "hagenauer-rg7",
-          "model_score": 90,
-          "label_vedana": "threat",
-          "label_matter": "hagenauer-rg7",
-          "label_pass": true,
-          "elapsed_s": 5.97
-        },
-        {
-          "signal_id": "email:19cf74275b13867c",
           "source": "email",
           "json_ok": true,
           "vedana_ok": true,
@@ -242,7 +227,22 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 5.53
+          "elapsed_s": 6.57
+        },
+        {
+          "signal_id": "email:19cf74275b13867c",
+          "source": "email",
+          "json_ok": true,
+          "vedana_ok": true,
+          "matter_ok": false,
+          "score_bucket_ok": true,
+          "model_vedana": "threat",
+          "model_matter": "null",
+          "model_score": 85,
+          "label_vedana": "threat",
+          "label_matter": "hagenauer-rg7",
+          "label_pass": true,
+          "elapsed_s": 5.73
         },
         {
           "signal_id": "email:19cfa90afe0b438b",
@@ -253,11 +253,11 @@
           "score_bucket_ok": true,
           "model_vedana": "threat",
           "model_matter": "brisen-lp",
-          "model_score": 90,
+          "model_score": 95,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 6.34
+          "elapsed_s": 6.68
         },
         {
           "signal_id": "email:19d11ad2d0a1eb26",
@@ -272,40 +272,10 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 5.5
+          "elapsed_s": 5.89
         },
         {
           "signal_id": "email:19d3309733c2ac7f",
-          "source": "email",
-          "json_ok": true,
-          "vedana_ok": true,
-          "matter_ok": false,
-          "score_bucket_ok": true,
-          "model_vedana": "threat",
-          "model_matter": "legal disputes",
-          "model_score": 95,
-          "label_vedana": "threat",
-          "label_matter": "hagenauer-rg7",
-          "label_pass": true,
-          "elapsed_s": 5.46
-        },
-        {
-          "signal_id": "email:19d3d94fc290db9c",
-          "source": "email",
-          "json_ok": true,
-          "vedana_ok": false,
-          "matter_ok": true,
-          "score_bucket_ok": true,
-          "model_vedana": "opportunity",
-          "model_matter": "hagenauer-rg7",
-          "model_score": 75,
-          "label_vedana": "threat",
-          "label_matter": "hagenauer-rg7",
-          "label_pass": true,
-          "elapsed_s": 4.79
-        },
-        {
-          "signal_id": "email:19d454224b03e00a",
           "source": "email",
           "json_ok": true,
           "vedana_ok": true,
@@ -317,7 +287,37 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 5.85
+          "elapsed_s": 5.94
+        },
+        {
+          "signal_id": "email:19d3d94fc290db9c",
+          "source": "email",
+          "json_ok": true,
+          "vedana_ok": false,
+          "matter_ok": true,
+          "score_bucket_ok": false,
+          "model_vedana": "routine",
+          "model_matter": "hagenauer-rg7",
+          "model_score": 30,
+          "label_vedana": "threat",
+          "label_matter": "hagenauer-rg7",
+          "label_pass": true,
+          "elapsed_s": 5.59
+        },
+        {
+          "signal_id": "email:19d454224b03e00a",
+          "source": "email",
+          "json_ok": true,
+          "vedana_ok": true,
+          "matter_ok": false,
+          "score_bucket_ok": true,
+          "model_vedana": "threat",
+          "model_matter": "brisen-lp",
+          "model_score": 85,
+          "label_vedana": "threat",
+          "label_matter": "hagenauer-rg7",
+          "label_pass": true,
+          "elapsed_s": 6.93
         },
         {
           "signal_id": "email:19d4a06e5fd935dc",
@@ -328,11 +328,11 @@
           "score_bucket_ok": true,
           "model_vedana": "threat",
           "model_matter": "hagenauer-rg7",
-          "model_score": 90,
+          "model_score": 95,
           "label_vedana": "threat",
           "label_matter": "franck-muller",
           "label_pass": true,
-          "elapsed_s": 5.9
+          "elapsed_s": 5.94
         },
         {
           "signal_id": "email:19d77f4c155b7b86",
@@ -347,22 +347,22 @@
           "label_vedana": "opportunity",
           "label_matter": "mrci",
           "label_pass": true,
-          "elapsed_s": 5.42
+          "elapsed_s": 5.62
         },
         {
           "signal_id": "email:20260415010106.45209209.347602@sailthru.com",
           "source": "email",
           "json_ok": true,
           "vedana_ok": true,
-          "matter_ok": false,
+          "matter_ok": true,
           "score_bucket_ok": true,
           "model_vedana": "routine",
-          "model_matter": "none",
+          "model_matter": null,
           "model_score": 10,
           "label_vedana": "routine",
           "label_matter": null,
           "label_pass": false,
-          "elapsed_s": 6.36
+          "elapsed_s": 6.24
         },
         {
           "signal_id": "email:8370465D-9074-4327-A59A-E73BA10E5FDE@brisengroup.com",
@@ -372,12 +372,12 @@
           "matter_ok": false,
           "score_bucket_ok": false,
           "model_vedana": "routine",
-          "model_matter": "brisengroup",
+          "model_matter": "brisen-lp",
           "model_score": 30,
           "label_vedana": "opportunity",
           "label_matter": "lilienmat",
           "label_pass": true,
-          "elapsed_s": 6.1
+          "elapsed_s": 6.55
         },
         {
           "signal_id": "meeting:01KES6JZPVPQKXYB3WP9H7NDN2",
@@ -387,12 +387,12 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "threat",
-          "model_matter": "multi-faceted litigation/investment",
+          "model_matter": "steininger",
           "model_score": 95,
           "label_vedana": "opportunity",
           "label_matter": "kitzbuhel-six-senses",
           "label_pass": true,
-          "elapsed_s": 6.73
+          "elapsed_s": 5.84
         },
         {
           "signal_id": "meeting:01KFBBFT92YTXDV6YPDTRCKTVA",
@@ -407,22 +407,22 @@
           "label_vedana": "threat",
           "label_matter": "cupial",
           "label_pass": true,
-          "elapsed_s": 5.29
+          "elapsed_s": 6.06
         },
         {
           "signal_id": "meeting:01KFJGBHN7PFVQKEV1MSXVYMB1",
           "source": "meeting",
           "json_ok": true,
-          "vedana_ok": false,
+          "vedana_ok": true,
           "matter_ok": true,
           "score_bucket_ok": true,
-          "model_vedana": "opportunity",
+          "model_vedana": "threat",
           "model_matter": "cupial",
           "model_score": 95,
           "label_vedana": "threat",
           "label_matter": "cupial",
           "label_pass": true,
-          "elapsed_s": 5.71
+          "elapsed_s": 6.01
         },
         {
           "signal_id": "meeting:01KGMW7QJH530CT89AGFHYGTEE",
@@ -432,27 +432,27 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "opportunity",
-          "model_matter": "hospitality-tech",
-          "model_score": 90,
+          "model_matter": null,
+          "model_score": 85,
           "label_vedana": "opportunity",
           "label_matter": "mo-vie",
           "label_pass": true,
-          "elapsed_s": 5.55
+          "elapsed_s": 5.76
         },
         {
           "signal_id": "meeting:01KJB66KQWSFF5TP65QD1QHD8P",
           "source": "meeting",
           "json_ok": true,
-          "vedana_ok": false,
-          "matter_ok": false,
-          "score_bucket_ok": false,
-          "model_vedana": "threat",
-          "model_matter": "ao",
-          "model_score": 65,
+          "vedana_ok": true,
+          "matter_ok": true,
+          "score_bucket_ok": true,
+          "model_vedana": "routine",
+          "model_matter": null,
+          "model_score": 10,
           "label_vedana": "routine",
           "label_matter": null,
           "label_pass": false,
-          "elapsed_s": 4.39
+          "elapsed_s": 5.14
         },
         {
           "signal_id": "meeting:01KJDFEB1VB8YNXM92ZX4FAY44",
@@ -467,7 +467,7 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 5.43
+          "elapsed_s": 7.01
         },
         {
           "signal_id": "meeting:01KJF5XZQ2EGZ14TN70RHAWWH7",
@@ -477,12 +477,12 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "opportunity",
-          "model_matter": "investment",
+          "model_matter": "null",
           "model_score": 95,
           "label_vedana": "opportunity",
           "label_matter": "brisen-lp",
           "label_pass": true,
-          "elapsed_s": 5.45
+          "elapsed_s": 5.84
         },
         {
           "signal_id": "meeting:01KJWYMZ1VE6CW61HHQ319ZDZ7",
@@ -492,12 +492,12 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "threat",
-          "model_matter": "brisen-scorpios-heidenauer",
+          "model_matter": "brisen-lp",
           "model_score": 95,
           "label_vedana": "threat",
           "label_matter": "cupial",
           "label_pass": true,
-          "elapsed_s": 6.08
+          "elapsed_s": 6.22
         },
         {
           "signal_id": "meeting:01KKE46362DSS8TEBZ4WY7HZ51",
@@ -507,12 +507,12 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "threat",
-          "model_matter": "investment",
+          "model_matter": "personal",
           "model_score": 90,
           "label_vedana": "threat",
           "label_matter": "ao",
           "label_pass": true,
-          "elapsed_s": 5.75
+          "elapsed_s": 5.86
         },
         {
           "signal_id": "meeting:01KKHK3BJB9YCT2Q4PGSHDWRVS",
@@ -522,12 +522,12 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "threat",
-          "model_matter": "haagenauer-insolvency",
+          "model_matter": null,
           "model_score": 95,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 5.77
+          "elapsed_s": 5.96
         },
         {
           "signal_id": "whatsapp:false_41798986876@c.us_AC0C466E0FF0784F45075A6534AB75B4",
@@ -537,12 +537,12 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "opportunity",
-          "model_matter": "investment",
+          "model_matter": "wertheimer",
           "model_score": 95,
           "label_vedana": "opportunity",
           "label_matter": "wertheimer",
           "label_pass": true,
-          "elapsed_s": 4.36
+          "elapsed_s": 4.96
         },
         {
           "signal_id": "whatsapp:false_41798986876@c.us_AC18CFD25F98FC000B6A6419F74ACC17",
@@ -557,22 +557,22 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 5.12
+          "elapsed_s": 5.79
         },
         {
           "signal_id": "whatsapp:false_447578191477@c.us_3A776C43AE2E3BF063CE",
           "source": "whatsapp",
           "json_ok": true,
-          "vedana_ok": true,
+          "vedana_ok": false,
           "matter_ok": false,
-          "score_bucket_ok": true,
-          "model_vedana": "opportunity",
-          "model_matter": "brisen-lp",
-          "model_score": 75,
+          "score_bucket_ok": false,
+          "model_vedana": "routine",
+          "model_matter": "null",
+          "model_score": 20,
           "label_vedana": "opportunity",
           "label_matter": "steininger",
           "label_pass": true,
-          "elapsed_s": 4.8
+          "elapsed_s": 4.46
         },
         {
           "signal_id": "whatsapp:false_status@broadcast_A5ACEFDCFAFC37318A030EE183D9585A_246651583258642@lid",
@@ -582,23 +582,23 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "routine",
-          "model_matter": "none",
+          "model_matter": null,
           "model_score": 10,
           "label_vedana": "routine",
           "label_matter": "personal",
           "label_pass": false,
-          "elapsed_s": 4.58
+          "elapsed_s": 4.96
         },
         {
           "signal_id": "whatsapp:true_120363419098188402@g.us_3B51EA5A97CEB97FA5BE",
           "source": "whatsapp",
           "json_ok": true,
-          "vedana_ok": false,
-          "matter_ok": false,
-          "score_bucket_ok": false,
-          "model_vedana": "threat",
-          "model_matter": "ao",
-          "model_score": 75,
+          "vedana_ok": true,
+          "matter_ok": true,
+          "score_bucket_ok": true,
+          "model_vedana": "routine",
+          "model_matter": "baker-internal",
+          "model_score": 20,
           "label_vedana": "routine",
           "label_matter": "baker-internal",
           "label_pass": false,
@@ -609,15 +609,15 @@
           "source": "whatsapp",
           "json_ok": true,
           "vedana_ok": false,
-          "matter_ok": true,
+          "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "threat",
-          "model_matter": "ao",
-          "model_score": 95,
+          "model_matter": "constantinos",
+          "model_score": 85,
           "label_vedana": "routine",
           "label_matter": "ao",
           "label_pass": true,
-          "elapsed_s": 5.79
+          "elapsed_s": 6.02
         },
         {
           "signal_id": "whatsapp:true_246076007297228@lid_3EB01491FC9138E22B90D8",
@@ -632,7 +632,7 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 6.8
+          "elapsed_s": 5.89
         },
         {
           "signal_id": "whatsapp:true_246076007297228@lid_3EB0AC05945CEB0A19B0EC",
@@ -647,37 +647,37 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 5.27
+          "elapsed_s": 5.61
         },
         {
           "signal_id": "whatsapp:true_246076007297228@lid_3EB0E89A443ECACECF694F",
           "source": "whatsapp",
           "json_ok": true,
-          "vedana_ok": false,
+          "vedana_ok": true,
           "matter_ok": false,
           "score_bucket_ok": true,
-          "model_vedana": "opportunity",
-          "model_matter": "real estate",
+          "model_vedana": "threat",
+          "model_matter": "null",
           "model_score": 85,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 4.54
+          "elapsed_s": 4.84
         },
         {
           "signal_id": "whatsapp:true_246076007297228@lid_3EB0EFAA58E2F496235372",
           "source": "whatsapp",
           "json_ok": true,
           "vedana_ok": true,
-          "matter_ok": true,
+          "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "threat",
-          "model_matter": "brisen-rg7",
+          "model_matter": "brisen-lp",
           "model_score": 95,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 5.41
+          "elapsed_s": 5.76
         },
         {
           "signal_id": "whatsapp:true_36303005919@c.us_3BDFDE8EC74BD24EC7D8",
@@ -687,12 +687,12 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "opportunity",
-          "model_matter": "ao",
-          "model_score": 85,
+          "model_matter": "null",
+          "model_score": 75,
           "label_vedana": "opportunity",
           "label_matter": "kitz-kempinski",
           "label_pass": true,
-          "elapsed_s": 4.68
+          "elapsed_s": 4.5
         },
         {
           "signal_id": "whatsapp:true_41799605092@c.us_3EB06069672263987BA3C5",
@@ -707,22 +707,22 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 5.2
+          "elapsed_s": 5.88
         },
         {
           "signal_id": "whatsapp:true_41799605092@c.us_3EB0F6EEB43B1AA70ED424",
           "source": "whatsapp",
           "json_ok": true,
           "vedana_ok": true,
-          "matter_ok": true,
+          "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "threat",
-          "model_matter": "hagenauer-rg7",
+          "model_matter": null,
           "model_score": 95,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 4.71
+          "elapsed_s": 5.24
         },
         {
           "signal_id": "whatsapp:true_41799605092@c.us_3EB0F7E513D73782BEC4B6",
@@ -733,11 +733,11 @@
           "score_bucket_ok": true,
           "model_vedana": "threat",
           "model_matter": "brisen-lp",
-          "model_score": 90,
+          "model_score": 95,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 5.66
+          "elapsed_s": 6.07
         },
         {
           "signal_id": "whatsapp:true_420774323982@c.us_3B330BA027F3346C5809",
@@ -747,8 +747,8 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "routine",
-          "model_matter": "ao",
-          "model_score": 20,
+          "model_matter": "personal",
+          "model_score": 10,
           "label_vedana": "routine",
           "label_matter": "baker-internal",
           "label_pass": false,
@@ -758,40 +758,38 @@
       "summary": {
         "total": 50,
         "json_validity": 1.0,
-        "vedana_overall": 0.7,
-        "primary_matter": 0.3,
-        "score_bucket": 0.82,
+        "vedana_overall": 0.86,
+        "primary_matter": 0.34,
+        "score_bucket": 0.92,
         "per_source": {
           "email": {
             "n": 25,
             "json_validity": 1.0,
-            "vedana": 0.64,
-            "primary_matter": 0.32,
-            "score_bucket": 0.72
+            "vedana": 0.84,
+            "primary_matter": 0.44,
+            "score_bucket": 0.88
           },
           "meeting": {
             "n": 10,
             "json_validity": 1.0,
-            "vedana": 0.7,
-            "primary_matter": 0.3,
-            "score_bucket": 0.9
+            "vedana": 0.9,
+            "primary_matter": 0.4,
+            "score_bucket": 1.0
           },
           "whatsapp": {
             "n": 15,
             "json_validity": 1.0,
-            "vedana": 0.8,
-            "primary_matter": 0.26666666666666666,
+            "vedana": 0.8666666666666667,
+            "primary_matter": 0.13333333333333333,
             "score_bucket": 0.9333333333333333
           }
         }
       },
       "passed": false,
       "failures": [
-        "vedana_overall 70.00% < 90%",
-        "primary_matter 30.00% < 80%",
-        "vedana[email] 64.00% < 85%",
-        "vedana[meeting] 70.00% < 85%",
-        "vedana[whatsapp] 80.00% < 85%"
+        "vedana_overall 86.00% < 90%",
+        "primary_matter 34.00% < 80%",
+        "vedana[email] 84.00% < 85%"
       ]
     },
     "qwen2.5:14b": {
@@ -809,7 +807,7 @@
           "label_vedana": "routine",
           "label_matter": null,
           "label_pass": false,
-          "elapsed_s": 30.41
+          "elapsed_s": 17.26
         },
         {
           "signal_id": "email:1964a26249bc2c0c",
@@ -819,12 +817,12 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "routine",
-          "model_matter": "none",
+          "model_matter": "null",
           "model_score": 20,
           "label_vedana": "routine",
           "label_matter": null,
           "label_pass": false,
-          "elapsed_s": 6.88
+          "elapsed_s": 8.24
         },
         {
           "signal_id": "email:1975e7d294e34a34",
@@ -834,12 +832,12 @@
           "matter_ok": false,
           "score_bucket_ok": false,
           "model_vedana": "opportunity",
-          "model_matter": "mo-vie",
+          "model_matter": "hagenauer-rg7",
           "model_score": 85,
           "label_vedana": "routine",
           "label_matter": null,
           "label_pass": false,
-          "elapsed_s": 10.44
+          "elapsed_s": 12.44
         },
         {
           "signal_id": "email:1981a5b34a9b24c7",
@@ -849,27 +847,27 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "routine",
-          "model_matter": "mo-vie",
+          "model_matter": "null",
           "model_score": 20,
           "label_vedana": "routine",
           "label_matter": null,
           "label_pass": false,
-          "elapsed_s": 14.71
+          "elapsed_s": 16.01
         },
         {
           "signal_id": "email:198bf7246fa5649b",
           "source": "email",
           "json_ok": true,
-          "vedana_ok": false,
+          "vedana_ok": true,
           "matter_ok": false,
-          "score_bucket_ok": false,
-          "model_vedana": "opportunity",
-          "model_matter": "ao",
-          "model_score": 75,
+          "score_bucket_ok": true,
+          "model_vedana": "routine",
+          "model_matter": "hagenauer-rg7",
+          "model_score": 20,
           "label_vedana": "routine",
           "label_matter": null,
           "label_pass": false,
-          "elapsed_s": 9.84
+          "elapsed_s": 12.37
         },
         {
           "signal_id": "email:1993d6b3a1dda25a",
@@ -879,57 +877,57 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "routine",
-          "model_matter": "mo-vie",
+          "model_matter": "null",
           "model_score": 20,
           "label_vedana": "routine",
           "label_matter": null,
           "label_pass": false,
-          "elapsed_s": 12.92
+          "elapsed_s": 14.09
         },
         {
           "signal_id": "email:1999a3807914bdde",
           "source": "email",
           "json_ok": true,
-          "vedana_ok": false,
+          "vedana_ok": true,
           "matter_ok": false,
-          "score_bucket_ok": false,
-          "model_vedana": "opportunity",
-          "model_matter": "ao",
-          "model_score": 75,
+          "score_bucket_ok": true,
+          "model_vedana": "routine",
+          "model_matter": "null",
+          "model_score": 20,
           "label_vedana": "routine",
           "label_matter": null,
           "label_pass": false,
-          "elapsed_s": 9.94
+          "elapsed_s": 11.31
         },
         {
           "signal_id": "email:19c526f1c6d3f2ee",
           "source": "email",
           "json_ok": true,
           "vedana_ok": true,
-          "matter_ok": true,
+          "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "threat",
-          "model_matter": "hagenauer-rg7",
-          "model_score": 85,
+          "model_matter": "brisen-lp",
+          "model_score": 75,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 10.38
+          "elapsed_s": 11.87
         },
         {
           "signal_id": "email:19c6b2a3b05880ca",
           "source": "email",
           "json_ok": true,
           "vedana_ok": false,
-          "matter_ok": false,
+          "matter_ok": true,
           "score_bucket_ok": true,
           "model_vedana": "routine",
-          "model_matter": "brisen-lp",
-          "model_score": 30,
+          "model_matter": "hagenauer-rg7",
+          "model_score": 20,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": false,
-          "elapsed_s": 7.11
+          "elapsed_s": 9.32
         },
         {
           "signal_id": "email:19caf068b7875e37",
@@ -940,11 +938,11 @@
           "score_bucket_ok": true,
           "model_vedana": "threat",
           "model_matter": "hagenauer-rg7",
-          "model_score": 85,
+          "model_score": 50,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 12.44
+          "elapsed_s": 13.7
         },
         {
           "signal_id": "email:19cb01431b40fddf",
@@ -959,7 +957,7 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 8.85
+          "elapsed_s": 10.02
         },
         {
           "signal_id": "email:19cb074316b37f87",
@@ -974,7 +972,7 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 8.25
+          "elapsed_s": 9.3
         },
         {
           "signal_id": "email:19cb4717946b40b4",
@@ -985,11 +983,11 @@
           "score_bucket_ok": false,
           "model_vedana": "routine",
           "model_matter": "brisen-lp",
-          "model_score": 30,
+          "model_score": 20,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 9.24
+          "elapsed_s": 10.32
         },
         {
           "signal_id": "email:19ce27d503340937",
@@ -1004,22 +1002,22 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 10.48
+          "elapsed_s": 11.94
         },
         {
           "signal_id": "email:19ce77b63e767e78",
           "source": "email",
           "json_ok": true,
           "vedana_ok": true,
-          "matter_ok": true,
+          "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "threat",
-          "model_matter": "hagenauer-rg7",
-          "model_score": 85,
+          "model_matter": "mo-vie",
+          "model_score": 75,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 11.86
+          "elapsed_s": 13.29
         },
         {
           "signal_id": "email:19cf74275b13867c",
@@ -1034,7 +1032,7 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 8.57
+          "elapsed_s": 10.61
         },
         {
           "signal_id": "email:19cfa90afe0b438b",
@@ -1044,12 +1042,12 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "threat",
-          "model_matter": "brisen-lp",
-          "model_score": 75,
+          "model_matter": "mo-vie",
+          "model_score": 50,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 11.61
+          "elapsed_s": 12.95
         },
         {
           "signal_id": "email:19d11ad2d0a1eb26",
@@ -1064,7 +1062,7 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 10.05
+          "elapsed_s": 11.15
         },
         {
           "signal_id": "email:19d3309733c2ac7f",
@@ -1079,7 +1077,7 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 9.78
+          "elapsed_s": 10.77
         },
         {
           "signal_id": "email:19d3d94fc290db9c",
@@ -1087,14 +1085,14 @@
           "json_ok": true,
           "vedana_ok": false,
           "matter_ok": true,
-          "score_bucket_ok": true,
-          "model_vedana": "opportunity",
+          "score_bucket_ok": false,
+          "model_vedana": "routine",
           "model_matter": "hagenauer-rg7",
-          "model_score": 50,
+          "model_score": 20,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 7.68
+          "elapsed_s": 8.94
         },
         {
           "signal_id": "email:19d454224b03e00a",
@@ -1109,7 +1107,7 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 12.02
+          "elapsed_s": 12.36
         },
         {
           "signal_id": "email:19d4a06e5fd935dc",
@@ -1124,7 +1122,7 @@
           "label_vedana": "threat",
           "label_matter": "franck-muller",
           "label_pass": true,
-          "elapsed_s": 9.65
+          "elapsed_s": 10.96
         },
         {
           "signal_id": "email:19d77f4c155b7b86",
@@ -1139,37 +1137,37 @@
           "label_vedana": "opportunity",
           "label_matter": "mrci",
           "label_pass": true,
-          "elapsed_s": 8.89
+          "elapsed_s": 9.94
         },
         {
           "signal_id": "email:20260415010106.45209209.347602@sailthru.com",
           "source": "email",
           "json_ok": true,
           "vedana_ok": true,
-          "matter_ok": false,
+          "matter_ok": true,
           "score_bucket_ok": true,
           "model_vedana": "routine",
-          "model_matter": "brisen-lp",
-          "model_score": 20,
+          "model_matter": null,
+          "model_score": 10,
           "label_vedana": "routine",
           "label_matter": null,
           "label_pass": false,
-          "elapsed_s": 10.87
+          "elapsed_s": 11.74
         },
         {
           "signal_id": "email:8370465D-9074-4327-A59A-E73BA10E5FDE@brisengroup.com",
           "source": "email",
           "json_ok": true,
           "vedana_ok": false,
-          "matter_ok": false,
+          "matter_ok": true,
           "score_bucket_ok": false,
           "model_vedana": "routine",
-          "model_matter": "brisen-lp",
+          "model_matter": "lilienmat",
           "model_score": 20,
           "label_vedana": "opportunity",
           "label_matter": "lilienmat",
           "label_pass": true,
-          "elapsed_s": 11.04
+          "elapsed_s": 12.12
         },
         {
           "signal_id": "meeting:01KES6JZPVPQKXYB3WP9H7NDN2",
@@ -1179,12 +1177,12 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "threat",
-          "model_matter": "brisen-lp",
-          "model_score": 85,
+          "model_matter": "steininger",
+          "model_score": 75,
           "label_vedana": "opportunity",
           "label_matter": "kitzbuhel-six-senses",
           "label_pass": true,
-          "elapsed_s": 9.73
+          "elapsed_s": 11.09
         },
         {
           "signal_id": "meeting:01KFBBFT92YTXDV6YPDTRCKTVA",
@@ -1199,22 +1197,22 @@
           "label_vedana": "threat",
           "label_matter": "cupial",
           "label_pass": true,
-          "elapsed_s": 10.08
+          "elapsed_s": 10.87
         },
         {
           "signal_id": "meeting:01KFJGBHN7PFVQKEV1MSXVYMB1",
           "source": "meeting",
           "json_ok": true,
-          "vedana_ok": false,
+          "vedana_ok": true,
           "matter_ok": true,
           "score_bucket_ok": true,
-          "model_vedana": "opportunity",
+          "model_vedana": "threat",
           "model_matter": "cupial",
           "model_score": 75,
           "label_vedana": "threat",
           "label_matter": "cupial",
           "label_pass": true,
-          "elapsed_s": 9.87
+          "elapsed_s": 10.48
         },
         {
           "signal_id": "meeting:01KGMW7QJH530CT89AGFHYGTEE",
@@ -1229,22 +1227,22 @@
           "label_vedana": "opportunity",
           "label_matter": "mo-vie",
           "label_pass": true,
-          "elapsed_s": 11.09
+          "elapsed_s": 11.31
         },
         {
           "signal_id": "meeting:01KJB66KQWSFF5TP65QD1QHD8P",
           "source": "meeting",
           "json_ok": true,
-          "vedana_ok": false,
-          "matter_ok": false,
-          "score_bucket_ok": false,
-          "model_vedana": "threat",
-          "model_matter": "mo-vie",
-          "model_score": 75,
+          "vedana_ok": true,
+          "matter_ok": true,
+          "score_bucket_ok": true,
+          "model_vedana": "routine",
+          "model_matter": null,
+          "model_score": 20,
           "label_vedana": "routine",
           "label_matter": null,
           "label_pass": false,
-          "elapsed_s": 6.48
+          "elapsed_s": 7.68
         },
         {
           "signal_id": "meeting:01KJDFEB1VB8YNXM92ZX4FAY44",
@@ -1259,22 +1257,22 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 10.28
+          "elapsed_s": 11.28
         },
         {
           "signal_id": "meeting:01KJF5XZQ2EGZ14TN70RHAWWH7",
           "source": "meeting",
           "json_ok": true,
           "vedana_ok": true,
-          "matter_ok": true,
+          "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "opportunity",
-          "model_matter": "brisen-lp",
+          "model_matter": "hagenauer-rg7",
           "model_score": 85,
           "label_vedana": "opportunity",
           "label_matter": "brisen-lp",
           "label_pass": true,
-          "elapsed_s": 10.16
+          "elapsed_s": 11.22
         },
         {
           "signal_id": "meeting:01KJWYMZ1VE6CW61HHQ319ZDZ7",
@@ -1285,11 +1283,11 @@
           "score_bucket_ok": true,
           "model_vedana": "threat",
           "model_matter": "brisen-lp",
-          "model_score": 85,
+          "model_score": 75,
           "label_vedana": "threat",
           "label_matter": "cupial",
           "label_pass": true,
-          "elapsed_s": 10.27
+          "elapsed_s": 10.94
         },
         {
           "signal_id": "meeting:01KKE46362DSS8TEBZ4WY7HZ51",
@@ -1299,12 +1297,12 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "threat",
-          "model_matter": "brisen-lp",
-          "model_score": 85,
+          "model_matter": "constantinos",
+          "model_score": 75,
           "label_vedana": "threat",
           "label_matter": "ao",
           "label_pass": true,
-          "elapsed_s": 9.96
+          "elapsed_s": 10.68
         },
         {
           "signal_id": "meeting:01KKHK3BJB9YCT2Q4PGSHDWRVS",
@@ -1319,7 +1317,7 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 10.03
+          "elapsed_s": 11.34
         },
         {
           "signal_id": "whatsapp:false_41798986876@c.us_AC0C466E0FF0784F45075A6534AB75B4",
@@ -1329,12 +1327,12 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "opportunity",
-          "model_matter": "hagenauer-rg7",
+          "model_matter": "wertheimer",
           "model_score": 85,
           "label_vedana": "opportunity",
           "label_matter": "wertheimer",
           "label_pass": true,
-          "elapsed_s": 6.83
+          "elapsed_s": 7.67
         },
         {
           "signal_id": "whatsapp:false_41798986876@c.us_AC18CFD25F98FC000B6A6419F74ACC17",
@@ -1349,7 +1347,7 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 9.57
+          "elapsed_s": 9.24
         },
         {
           "signal_id": "whatsapp:false_447578191477@c.us_3A776C43AE2E3BF063CE",
@@ -1358,13 +1356,13 @@
           "vedana_ok": false,
           "matter_ok": false,
           "score_bucket_ok": false,
-          "model_vedana": "routine",
+          "model_vedana": "threat",
           "model_matter": "brisen-lp",
           "model_score": 20,
           "label_vedana": "opportunity",
           "label_matter": "steininger",
           "label_pass": true,
-          "elapsed_s": 5.9
+          "elapsed_s": 6.81
         },
         {
           "signal_id": "whatsapp:false_status@broadcast_A5ACEFDCFAFC37318A030EE183D9585A_246651583258642@lid",
@@ -1374,57 +1372,57 @@
           "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "routine",
-          "model_matter": "mo-vie",
-          "model_score": 20,
+          "model_matter": null,
+          "model_score": 0,
           "label_vedana": "routine",
           "label_matter": "personal",
           "label_pass": false,
-          "elapsed_s": 8.21
+          "elapsed_s": 7.87
         },
         {
           "signal_id": "whatsapp:true_120363419098188402@g.us_3B51EA5A97CEB97FA5BE",
           "source": "whatsapp",
           "json_ok": true,
-          "vedana_ok": false,
-          "matter_ok": false,
-          "score_bucket_ok": false,
-          "model_vedana": "threat",
-          "model_matter": "ao",
-          "model_score": 50,
+          "vedana_ok": true,
+          "matter_ok": true,
+          "score_bucket_ok": true,
+          "model_vedana": "routine",
+          "model_matter": "baker-internal",
+          "model_score": 20,
           "label_vedana": "routine",
           "label_matter": "baker-internal",
           "label_pass": false,
-          "elapsed_s": 6.27
+          "elapsed_s": 8.38
         },
         {
           "signal_id": "whatsapp:true_127783967711391@lid_3B50C45AFADFEA775221",
           "source": "whatsapp",
           "json_ok": true,
           "vedana_ok": false,
-          "matter_ok": true,
+          "matter_ok": false,
           "score_bucket_ok": true,
           "model_vedana": "threat",
-          "model_matter": "ao",
+          "model_matter": "constantinos",
           "model_score": 75,
           "label_vedana": "routine",
           "label_matter": "ao",
           "label_pass": true,
-          "elapsed_s": 8.37
+          "elapsed_s": 9.9
         },
         {
           "signal_id": "whatsapp:true_246076007297228@lid_3EB01491FC9138E22B90D8",
           "source": "whatsapp",
           "json_ok": true,
           "vedana_ok": true,
-          "matter_ok": false,
+          "matter_ok": true,
           "score_bucket_ok": true,
           "model_vedana": "threat",
-          "model_matter": "brisen-lp",
+          "model_matter": "hagenauer-rg7",
           "model_score": 85,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 10.28
+          "elapsed_s": 11.66
         },
         {
           "signal_id": "whatsapp:true_246076007297228@lid_3EB0AC05945CEB0A19B0EC",
@@ -1435,89 +1433,29 @@
           "score_bucket_ok": true,
           "model_vedana": "threat",
           "model_matter": "hagenauer-rg7",
-          "model_score": 85,
+          "model_score": 65,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 9.43
+          "elapsed_s": 11.12
         },
         {
           "signal_id": "whatsapp:true_246076007297228@lid_3EB0E89A443ECACECF694F",
           "source": "whatsapp",
           "json_ok": true,
-          "vedana_ok": false,
+          "vedana_ok": true,
           "matter_ok": true,
           "score_bucket_ok": true,
-          "model_vedana": "opportunity",
+          "model_vedana": "threat",
           "model_matter": "hagenauer-rg7",
-          "model_score": 85,
+          "model_score": 80,
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 6.89
+          "elapsed_s": 8.39
         },
         {
           "signal_id": "whatsapp:true_246076007297228@lid_3EB0EFAA58E2F496235372",
-          "source": "whatsapp",
-          "json_ok": true,
-          "vedana_ok": true,
-          "matter_ok": false,
-          "score_bucket_ok": true,
-          "model_vedana": "threat",
-          "model_matter": "brisen-lp",
-          "model_score": 85,
-          "label_vedana": "threat",
-          "label_matter": "hagenauer-rg7",
-          "label_pass": true,
-          "elapsed_s": 10.14
-        },
-        {
-          "signal_id": "whatsapp:true_36303005919@c.us_3BDFDE8EC74BD24EC7D8",
-          "source": "whatsapp",
-          "json_ok": true,
-          "vedana_ok": true,
-          "matter_ok": false,
-          "score_bucket_ok": true,
-          "model_vedana": "opportunity",
-          "model_matter": "hagenauer-rg7",
-          "model_score": 85,
-          "label_vedana": "opportunity",
-          "label_matter": "kitz-kempinski",
-          "label_pass": true,
-          "elapsed_s": 5.94
-        },
-        {
-          "signal_id": "whatsapp:true_41799605092@c.us_3EB06069672263987BA3C5",
-          "source": "whatsapp",
-          "json_ok": true,
-          "vedana_ok": true,
-          "matter_ok": true,
-          "score_bucket_ok": true,
-          "model_vedana": "threat",
-          "model_matter": "hagenauer-rg7",
-          "model_score": 85,
-          "label_vedana": "threat",
-          "label_matter": "hagenauer-rg7",
-          "label_pass": true,
-          "elapsed_s": 11.2
-        },
-        {
-          "signal_id": "whatsapp:true_41799605092@c.us_3EB0F6EEB43B1AA70ED424",
-          "source": "whatsapp",
-          "json_ok": true,
-          "vedana_ok": true,
-          "matter_ok": true,
-          "score_bucket_ok": true,
-          "model_vedana": "threat",
-          "model_matter": "hagenauer-rg7",
-          "model_score": 95,
-          "label_vedana": "threat",
-          "label_matter": "hagenauer-rg7",
-          "label_pass": true,
-          "elapsed_s": 7.05
-        },
-        {
-          "signal_id": "whatsapp:true_41799605092@c.us_3EB0F7E513D73782BEC4B6",
           "source": "whatsapp",
           "json_ok": true,
           "vedana_ok": true,
@@ -1529,61 +1467,120 @@
           "label_vedana": "threat",
           "label_matter": "hagenauer-rg7",
           "label_pass": true,
-          "elapsed_s": 10.22
+          "elapsed_s": 10.83
+        },
+        {
+          "signal_id": "whatsapp:true_36303005919@c.us_3BDFDE8EC74BD24EC7D8",
+          "source": "whatsapp",
+          "json_ok": true,
+          "vedana_ok": true,
+          "matter_ok": false,
+          "score_bucket_ok": true,
+          "model_vedana": "opportunity",
+          "model_matter": "hagenauer-rg7",
+          "model_score": 50,
+          "label_vedana": "opportunity",
+          "label_matter": "kitz-kempinski",
+          "label_pass": true,
+          "elapsed_s": 7.52
+        },
+        {
+          "signal_id": "whatsapp:true_41799605092@c.us_3EB06069672263987BA3C5",
+          "source": "whatsapp",
+          "json_ok": true,
+          "vedana_ok": true,
+          "matter_ok": false,
+          "score_bucket_ok": true,
+          "model_vedana": "threat",
+          "model_matter": "brisen-lp",
+          "model_score": 75,
+          "label_vedana": "threat",
+          "label_matter": "hagenauer-rg7",
+          "label_pass": true,
+          "elapsed_s": 12.06
+        },
+        {
+          "signal_id": "whatsapp:true_41799605092@c.us_3EB0F6EEB43B1AA70ED424",
+          "source": "whatsapp",
+          "json_ok": true,
+          "vedana_ok": true,
+          "matter_ok": true,
+          "score_bucket_ok": true,
+          "model_vedana": "threat",
+          "model_matter": "hagenauer-rg7",
+          "model_score": 90,
+          "label_vedana": "threat",
+          "label_matter": "hagenauer-rg7",
+          "label_pass": true,
+          "elapsed_s": 8.44
+        },
+        {
+          "signal_id": "whatsapp:true_41799605092@c.us_3EB0F7E513D73782BEC4B6",
+          "source": "whatsapp",
+          "json_ok": true,
+          "vedana_ok": true,
+          "matter_ok": true,
+          "score_bucket_ok": true,
+          "model_vedana": "threat",
+          "model_matter": "hagenauer-rg7",
+          "model_score": 85,
+          "label_vedana": "threat",
+          "label_matter": "hagenauer-rg7",
+          "label_pass": true,
+          "elapsed_s": 12.04
         },
         {
           "signal_id": "whatsapp:true_420774323982@c.us_3B330BA027F3346C5809",
           "source": "whatsapp",
           "json_ok": true,
-          "vedana_ok": false,
+          "vedana_ok": true,
           "matter_ok": false,
           "score_bucket_ok": true,
-          "model_vedana": "threat",
-          "model_matter": "routine",
+          "model_vedana": "routine",
+          "model_matter": null,
           "model_score": 20,
           "label_vedana": "routine",
           "label_matter": "baker-internal",
           "label_pass": false,
-          "elapsed_s": 5.76
+          "elapsed_s": 6.7
         }
       ],
       "summary": {
         "total": 50,
         "json_validity": 1.0,
-        "vedana_overall": 0.66,
-        "primary_matter": 0.36,
-        "score_bucket": 0.82,
+        "vedana_overall": 0.8,
+        "primary_matter": 0.4,
+        "score_bucket": 0.88,
         "per_source": {
           "email": {
             "n": 25,
             "json_validity": 1.0,
-            "vedana": 0.68,
-            "primary_matter": 0.24,
-            "score_bucket": 0.76
+            "vedana": 0.76,
+            "primary_matter": 0.28,
+            "score_bucket": 0.8
           },
           "meeting": {
             "n": 10,
             "json_validity": 1.0,
-            "vedana": 0.6,
+            "vedana": 0.8,
             "primary_matter": 0.6,
-            "score_bucket": 0.9
+            "score_bucket": 1.0
           },
           "whatsapp": {
             "n": 15,
             "json_validity": 1.0,
-            "vedana": 0.6666666666666666,
-            "primary_matter": 0.4,
-            "score_bucket": 0.8666666666666667
+            "vedana": 0.8666666666666667,
+            "primary_matter": 0.4666666666666667,
+            "score_bucket": 0.9333333333333333
           }
         }
       },
       "passed": false,
       "failures": [
-        "vedana_overall 66.00% < 90%",
-        "primary_matter 36.00% < 80%",
-        "vedana[email] 68.00% < 85%",
-        "vedana[meeting] 60.00% < 85%",
-        "vedana[whatsapp] 66.67% < 85%"
+        "vedana_overall 80.00% < 90%",
+        "primary_matter 40.00% < 80%",
+        "vedana[email] 76.00% < 85%",
+        "vedana[meeting] 80.00% < 85%"
       ]
     }
   },

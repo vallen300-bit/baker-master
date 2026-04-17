@@ -52,17 +52,46 @@ D1_OPTIONS = {
 
 # KBL Step-1 prompt. Uses production vocabulary (opportunity/threat/routine)
 # then normalized to Buddhist vedana in comparison (see NORMALIZE_VEDANA).
+# Slug list is union of handover enum + ground-truth labels (labels file wins
+# on spelling conflicts per handover rule). Vedana rules added verbatim from
+# B3 handover to fix prior eval's 70%/66% vedana accuracy (root cause: no
+# semantic rule distinguishing defensive wins from new strategic gains).
 STEP1_PROMPT = """You are a triage agent for a 28-matter business operation (real estate, hospitality, legal disputes, investment). Classify this signal. Output ONLY valid JSON, no commentary.
 
 Signal: "{signal}"
 
 Respond with exactly this JSON:
 {{
-  "matter": "which business matter (e.g. hagenauer-rg7, cupial, mo-vie, ao, brisen-lp, mrci)",
+  "matter": "<slug from allowed list below, or the literal string null if no matter applies>",
   "vedana": "opportunity | threat | routine",
   "triage_score": 0-100,
   "summary": "one line"
-}}"""
+}}
+
+Allowed matter slugs (use EXACTLY one of these, or null):
+- hagenauer-rg7
+- cupial
+- mo-vie
+- ao
+- morv
+- lilienmat
+- wertheimer
+- brisen-lp
+- aukera
+- kitzbuhel-six-senses
+- kitz-kempinski
+- steininger
+- balducci
+- constantinos
+- franck-muller
+- mrci
+- baker-internal
+- personal
+
+vedana classification rules (STRICT):
+- opportunity: NEW strategic gains ONLY — a new deal, investor interest, unrequested approach, favorable market shift, novel capability revealed. Defensive wins inside an ongoing threat arc (e.g., court ruling in our favor on a dispute) stay in threat, not opportunity.
+- threat: risks, problems, disputes, deadlines, unpaid invoices, regulatory issues, counterparty demands, anything requiring defensive action.
+- routine: noise — receipts, automated notifications, newsletters, FYI emails, admin correspondence with no action required."""
 
 # Production uses opportunity/threat/routine; Director labels use Buddhist
 # vedana pleasant/unpleasant/neutral. Map both to a canonical form for comparison.
