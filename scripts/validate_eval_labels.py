@@ -43,6 +43,8 @@ MATTER_ALLOWLIST = {
     "kitzbuhel-six-senses",
     "kitz-kempinski",
     "steininger",
+    "wertheimer",
+    "balducci",
     "edita-russo",
     "theailogy",
     "baker-internal",

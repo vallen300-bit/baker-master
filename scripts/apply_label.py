@@ -28,10 +28,9 @@ MATTER_MENU = {
     "5": "mrci", "6": "lilienmat", "7": "brisen-lp", "8": "aukera",
     "9": "null",
 }
-# Accept typo variants silently
+# Accept typo variants silently (wertheimer removed — now its own slug)
 SLUG_ALIASES = {
     "lilienmatt": "lilienmat",
-    "wertheimer": "brisen-lp",
 }
 
 
