@@ -41,6 +41,7 @@ MATTER_ALLOWLIST = {
     "lilienmat",
     "aukera",
     "kitzbuhel-six-senses",
+    "kitz-kempinski",
     "steininger",
     "edita-russo",
     "theailogy",
