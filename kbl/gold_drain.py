@@ -178,31 +178,41 @@ def _commit_and_push(promoted_paths: list[str], applied: list[tuple]) -> None:
     """S3: git add specific paths (never -A — would sweep unrelated dirt).
     S4: commit message includes path + queue_id + wa_msg_id for audit.
     B4: push up to 4 attempts (0s, 2s, 10s, 30s) before raising GitPushFailed.
+
+    B2.S4: `git add` / `git commit` subprocess failures are converted to
+    `GitPushFailed` so drain_queue catches a single exception type +
+    rolls back filesystem and PG atomically. Without this, an add/commit
+    failure would bubble past drain_queue's try/except and leave
+    filesystem-modified + PG-rows-pending state drift possible on
+    a future refactor that separates filesystem-write from commit.
     """
-    for path in promoted_paths:
-        subprocess.run(["git", "-C", str(VAULT), "add", path], check=True)
+    try:
+        for path in promoted_paths:
+            subprocess.run(["git", "-C", str(VAULT), "add", path], check=True)
 
-    msg_lines = ["gold: Director promotion", ""]
-    for row_id, path, wa_msg_id, result in applied:
-        if result == "ok":
-            msg_lines.append(f"- {path} (queue_id={row_id}, wa_msg_id={wa_msg_id})")
-    msg = "\n".join(msg_lines)
+        msg_lines = ["gold: Director promotion", ""]
+        for row_id, path, wa_msg_id, result in applied:
+            if result == "ok":
+                msg_lines.append(f"- {path} (queue_id={row_id}, wa_msg_id={wa_msg_id})")
+        msg = "\n".join(msg_lines)
 
-    subprocess.run(
-        [
-            "git",
-            "-C",
-            str(VAULT),
-            "-c",
-            f"user.name={DIRECTOR_NAME}",
-            "-c",
-            f"user.email={DIRECTOR_EMAIL}",
-            "commit",
-            "-m",
-            msg,
-        ],
-        check=True,
-    )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(VAULT),
+                "-c",
+                f"user.name={DIRECTOR_NAME}",
+                "-c",
+                f"user.email={DIRECTOR_EMAIL}",
+                "commit",
+                "-m",
+                msg,
+            ],
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        raise GitPushFailed(f"git add/commit failed: {e}") from e
 
     last_error: Exception | None = None
     for delay in [0] + PUSH_RETRY_DELAYS:
