@@ -5,6 +5,11 @@
 
 set -euo pipefail
 
+# B2.B1: consistent wrapper pattern — load secrets if present.
+# This script is pure rsync today, but the pattern carries forward if
+# any Python-based vault-size telemetry is added later.
+[ -f "${HOME}/.kbl.env" ] && . "${HOME}/.kbl.env"
+
 SRC="/var/log/kbl/"
 DEST="${HOME}/Dropbox-Vallen/_02_DASHBOARDS/kbl_logs/$(date +%Y-%m-%d)/"
 mkdir -p "${DEST}"

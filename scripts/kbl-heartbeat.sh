@@ -10,5 +10,8 @@ LOG="/var/log/kbl/heartbeat.log"
 
 mkdir -p "$(dirname "${LOG}")" 2>/dev/null || true
 
+# B2.B1: launchd does NOT source ~/.zshrc — load secrets explicitly.
+[ -f "${HOME}/.kbl.env" ] && . "${HOME}/.kbl.env"
+
 cd "${REPO}"
 python3 -m kbl.heartbeat >> "${LOG}" 2>&1

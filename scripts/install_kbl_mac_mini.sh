@@ -34,6 +34,49 @@ if [ -f "${HOME}/.zshrc" ]; then
     chmod 600 "${HOME}/.zshrc" 2>/dev/null && echo "OK: ~/.zshrc mode 0600 enforced" || echo "WARN: chmod 600 ~/.zshrc failed"
 fi
 
+# B2.B1: dedicated env file for LaunchAgent secrets (launchd does NOT source
+# ~/.zshrc). All kbl-*.sh wrappers `[ -f ~/.kbl.env ] && . ~/.kbl.env`.
+KBL_ENV_FILE="${HOME}/.kbl.env"
+if [ ! -f "${KBL_ENV_FILE}" ]; then
+    cat > "${KBL_ENV_FILE}" <<'ENV_TEMPLATE'
+# KBL Mac Mini environment — populated manually, chmod 600.
+# Sourced by kbl-pipeline-tick.sh / kbl-heartbeat.sh / kbl-dropbox-mirror.sh /
+# kbl-purge-dedupe.sh because launchd does NOT source ~/.zshrc.
+# NEVER commit this file to any repo.
+
+# PostgreSQL (Neon)
+export DATABASE_URL=""
+
+# Anthropic (Claude)
+export ANTHROPIC_API_KEY=""
+
+# Qdrant (vector store — not used by KBL-A pipeline stub, but required by
+# SentinelStoreBack import chain which the logging module touches)
+export QDRANT_URL=""
+export QDRANT_API_KEY=""
+
+# Voyage AI (embeddings — same rationale as Qdrant)
+export VOYAGE_API_KEY=""
+ENV_TEMPLATE
+    chmod 600 "${KBL_ENV_FILE}"
+    echo ""
+    echo "=============================================================="
+    echo "CREATED: ${KBL_ENV_FILE} (empty template, mode 0600)"
+    echo ""
+    echo "EDIT IT NOW to populate:"
+    echo "  DATABASE_URL, ANTHROPIC_API_KEY, QDRANT_URL,"
+    echo "  QDRANT_API_KEY, VOYAGE_API_KEY"
+    echo ""
+    echo "Pipeline will KeyError on Python import if these are blank when"
+    echo "KBL_FLAGS_PIPELINE_ENABLED flips to true."
+    echo "=============================================================="
+    echo ""
+else
+    # Re-enforce mode on re-run.
+    chmod 600 "${KBL_ENV_FILE}" 2>/dev/null || true
+    echo "OK: ${KBL_ENV_FILE} already present (mode 0600 re-enforced)"
+fi
+
 # R1.M3: warn (not fail) if env.mac-mini.yml not yet in vault —
 # Director may not have pushed yet; pipeline wrapper also guards this.
 if [ ! -f "${VAULT}/config/env.mac-mini.yml" ]; then

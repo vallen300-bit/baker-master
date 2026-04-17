@@ -18,6 +18,14 @@ LOG="/var/log/kbl/pipeline.log"
 
 mkdir -p "$(dirname "${LOG}")" 2>/dev/null || true
 
+# --- Load secrets (B2.B1: launchd does NOT source ~/.zshrc) ---
+# ~/.kbl.env is populated by install_kbl_mac_mini.sh (chmod 600) with
+# DATABASE_URL, ANTHROPIC_API_KEY, QDRANT_URL, QDRANT_API_KEY,
+# VOYAGE_API_KEY. Absence isn't fatal here — the yml guard + pipeline
+# flag below short-circuit before any Python import touches the env,
+# so a first-install without secrets still logs cleanly.
+[ -f "${HOME}/.kbl.env" ] && . "${HOME}/.kbl.env"
+
 # --- Acquire lock (non-blocking: second tick exits silently) ---
 exec 9>"${LOCK_FILE}"
 if ! flock -n 9; then

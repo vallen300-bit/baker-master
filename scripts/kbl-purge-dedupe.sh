@@ -10,6 +10,9 @@ LOG="/var/log/kbl/purge.log"
 
 mkdir -p "$(dirname "${LOG}")" 2>/dev/null || true
 
+# B2.B1: launchd does NOT source ~/.zshrc — load secrets explicitly.
+[ -f "${HOME}/.kbl.env" ] && . "${HOME}/.kbl.env"
+
 cd "${REPO}"
 python3 - <<'PY' >> "${LOG}" 2>&1
 from kbl.cost import daily_cost_circuit_clear
