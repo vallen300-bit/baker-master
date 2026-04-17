@@ -37,18 +37,21 @@ logger = logging.getLogger("build_eval_seed")
 
 sys.path.insert(0, ".")
 
+from kbl import slug_registry  # noqa: E402
 
-MATTER_HINTS = {
-    "hagenauer-rg7": ["hagenauer", "rg7"],
-    "cupial": ["cupial", "cupials", "monika cupial", "cupial-zgryzek"],
-    "mo-vie": ["mandarin oriental", "mo vienna", "mohg", "movie"],
-    "ao": ["oskolkov", "andrey oskolkov"],
-    "brisen-lp": ["wertheimer", "epi bond"],
-    "mrci": ["mrci"],
-    "lilienmat": ["lilienmat"],
-    "edita-russo": ["edita russo"],
-    "theailogy": ["theailogy"],
-}
+
+def _build_matter_hints() -> Dict[str, list[str]]:
+    """Derive hints from the slug registry: canonical slug + humanized form
+    + registered aliases. Lazy so BAKER_VAULT_PATH is read at call time, not
+    import time (keeps --help usable without the env var). Sorted for
+    determinism — guess_matter_hint returns the first matching slug, so
+    ordering affects ambiguous-signal hints (cosmetic, never authoritative).
+    """
+    hints: Dict[str, list[str]] = {}
+    for slug in sorted(slug_registry.active_slugs()):
+        keywords = {slug, slug.replace("-", " "), *slug_registry.aliases_for(slug)}
+        hints[slug] = sorted(k for k in keywords if k)
+    return hints
 
 
 def guess_matter_hint(text: str) -> Optional[str]:
@@ -56,7 +59,7 @@ def guess_matter_hint(text: str) -> Optional[str]:
     if not text:
         return None
     lower = text.lower()
-    for matter, keywords in MATTER_HINTS.items():
+    for matter, keywords in _build_matter_hints().items():
         if any(k in lower for k in keywords):
             return matter
     return None
@@ -185,7 +188,7 @@ def main():
             template.update({
                 # Director fills these in Option A (see KBL_EVAL_SET_PLAYBOOK.md §3)
                 "vedana_expected": None,          # 'opportunity' | 'threat' | 'routine' — production schema (signal_queue.vedana CHECK)
-                "primary_matter_expected": None,  # matter slug or null (see scripts/validate_eval_labels.py:MATTER_ALLOWLIST)
+                "primary_matter_expected": None,  # matter slug or null (canonical slugs: kbl/slug_registry.py → baker-vault/slugs.yml)
                 "related_matters_expected": [],   # list of matter slugs
                 "triage_threshold_pass_expected": None,   # true = "should have alerted me"; false = should not have
                 "notes": "",
