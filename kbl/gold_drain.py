@@ -38,17 +38,22 @@ class GitPushFailed(Exception):
 
 
 def drain_queue() -> None:
-    """Claim → apply filesystem → commit+push (with retry) → mark PG done.
+    """Single-transaction drain: claim via FOR UPDATE SKIP LOCKED, apply
+    filesystem, commit+push, mark PG rows done — then ONE commit releases
+    the row locks. Ad-hoc concurrent drainers block on the same rows (B2.S1).
 
-    Push failure rolls back filesystem; rows stay pending for next drain.
+    Push failure rolls back filesystem AND the PG transaction (so rows
+    stay pending for next drain — no status drift possible).
     """
     if cfg_bool("gold_promote_disabled", False):
         emit_log("WARN", "gold_drain", None, "Gold promotion disabled via kill-switch")
         return
 
     with get_conn() as conn:
-        # 1. Claim rows (SKIP LOCKED — defensive; Mac Mini is sole consumer)
         try:
+            # 1. Claim rows under FOR UPDATE SKIP LOCKED. Locks stay held
+            #    until the final conn.commit() below — this is the
+            #    concurrent-drain race guard (B2.S1).
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -60,42 +65,44 @@ def drain_queue() -> None:
                     """
                 )
                 claimed = cur.fetchall()
-                conn.commit()  # release the row locks
-        except Exception:
-            conn.rollback()
-            raise
 
-        if not claimed:
-            return
+            if not claimed:
+                # Release the (empty) lock cleanly.
+                conn.commit()
+                return
 
-        # 2. Apply filesystem changes (no PG updates yet).
-        applied: list[tuple[int, str, str | None, str]] = []
-        promoted_paths: list[str] = []  # S3: track for specific-path `git add`
-        for row_id, path, wa_msg_id in claimed:
-            result = promote_one(path)
-            applied.append((row_id, path, wa_msg_id, result))
-            if result == "ok":
-                promoted_paths.append(path)
+            # 2. Apply filesystem changes (no PG updates yet). Row locks
+            #    are still held — no other drainer can see these rows.
+            applied: list[tuple[int, str, str | None, str]] = []
+            promoted_paths: list[str] = []  # S3: specific-path `git add`
+            for row_id, path, wa_msg_id in claimed:
+                result = promote_one(path)
+                applied.append((row_id, path, wa_msg_id, result))
+                if result == "ok":
+                    promoted_paths.append(path)
 
-        # 3. Commit + push atomically (with retry). Rollback on failure.
-        if promoted_paths:
-            try:
-                _commit_and_push(promoted_paths, applied)
-            except GitPushFailed as e:
-                emit_log(
-                    "CRITICAL",
-                    "gold_drain",
-                    None,
-                    f"Push failed after retries: {e}. Rolling back filesystem, PG rows stay pending.",
-                )
-                subprocess.run(
-                    ["git", "-C", str(VAULT), "checkout", "HEAD", "--"] + promoted_paths,
-                    check=False,
-                )
-                return  # do NOT mark PG rows done — next drain retries
+            # 3. Commit + push atomically (with retry). Rollback on failure.
+            if promoted_paths:
+                try:
+                    _commit_and_push(promoted_paths, applied)
+                except GitPushFailed as e:
+                    emit_log(
+                        "CRITICAL",
+                        "gold_drain",
+                        None,
+                        f"Push failed after retries: {e}. "
+                        "Rolling back filesystem + PG tx, rows stay pending.",
+                    )
+                    subprocess.run(
+                        ["git", "-C", str(VAULT), "checkout", "HEAD", "--"] + promoted_paths,
+                        check=False,
+                    )
+                    # PG ROLLBACK also releases the row locks — rows go
+                    # back to processed_at IS NULL and next drain retries.
+                    conn.rollback()
+                    return
 
-        # 4. Push succeeded (or nothing to push): mark PG rows done.
-        try:
+            # 4. Push succeeded (or nothing to push): mark PG rows done.
             with conn.cursor() as cur:
                 for row_id, path, wa_msg_id, result in applied:
                     cur.execute(
@@ -106,10 +113,9 @@ def drain_queue() -> None:
                         """,
                         (result, row_id),
                     )
-                    # R2.NEW-S3: errors → PG (ERROR level for visibility);
-                    # successes → local file only so kbl_log doesn't flood
-                    # with routine Gold promotions over time (R1.S2 invariant:
-                    # only WARN+ to PG).
+                    # R2.NEW-S3: errors → PG ERROR (visibility);
+                    # successes → local file only (R1.S2 "WARN+ to PG" invariant
+                    # keeps kbl_log from flooding with routine promotions).
                     if result.startswith("error"):
                         emit_log(
                             "ERROR",
@@ -126,7 +132,8 @@ def drain_queue() -> None:
                             row_id,
                             wa_msg_id,
                         )
-                conn.commit()
+            # Single commit closes the transaction + releases row locks.
+            conn.commit()
         except Exception:
             conn.rollback()
             raise
