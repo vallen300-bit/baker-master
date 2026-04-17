@@ -40,6 +40,7 @@ MATTER_ALLOWLIST = {
     "mrci",
     "lilienmat",
     "aukera",
+    "kitzbuhel-six-senses",
     "edita-russo",
     "theailogy",
     "baker-internal",
