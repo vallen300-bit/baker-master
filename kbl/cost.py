@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import logging as _stdlib_logging
 import os
-from datetime import date
+from datetime import datetime, timezone
 from typing import Optional
 
 from anthropic import Anthropic
@@ -194,7 +194,11 @@ def _maybe_alert_cost_threshold() -> None:
         return  # misconfigured; don't divide by zero
     today = today_spent_usd()
     today_pct = today / cap * 100
-    today_date = date.today().isoformat()
+    # B2.S2: UTC date for dedupe key alignment with `NOW()::date` used by
+    # today_spent_usd(). Prior `date.today()` used system TZ (Europe/Vienna);
+    # during the local-vs-UTC midnight window that divergence could let the
+    # same calendar day fire two 100pct alerts with different dedupe keys.
+    today_date = datetime.now(timezone.utc).date().isoformat()
 
     thresholds = [
         (100, "cost_100pct_open_circuit"),
