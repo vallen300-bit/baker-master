@@ -80,7 +80,7 @@ def main():
     triage_pass = yn == "y"
 
     if primary.lower() in ("null", "none", "-", ""):
-        primary_val = "null"
+        primary_val = None
     else:
         primary_val = primary
 
