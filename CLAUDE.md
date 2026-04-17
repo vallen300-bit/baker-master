@@ -5,6 +5,14 @@
 ## Stack
 FastAPI (port 8080), Python 3.11+, PostgreSQL (Neon), Qdrant Cloud (Voyage AI voyage-3, 1024d), Claude claude-opus-4-6 via Anthropic API, Vanilla JS frontend, Render (auto-deploys from main). Repo: github.com/vallen300-bit/baker-master.
 
+### Matter slug registry
+Canonical matter slugs live in `baker-vault/slugs.yml` (separate repo). Edit
+there via PR — changes propagate to validator, eval runner, and seed-hint
+script at next process start. Schema + loader API in `kbl/slug_registry.py`.
+Consumers: `scripts/validate_eval_labels.py`, `scripts/run_kbl_eval.py`,
+`scripts/build_eval_seed.py`. Env var `BAKER_VAULT_PATH` must point at the
+vault checkout. 19 canonical slugs @ version 1.
+
 ## Your Role — Two Hats
 1. **Code** — implement, debug, test, push. Syntax-check before committing.
 2. **PL** — scope work, sequence batches, think architecturally.
