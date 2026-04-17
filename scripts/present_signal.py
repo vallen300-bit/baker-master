@@ -26,7 +26,7 @@ MATTERS = [
     ("8", "aukera"),
     ("9", "null"),
 ]
-EXTRA_MATTERS_BY_NAME = ("kitzbuhel-six-senses", "kitz-kempinski", "steininger", "wertheimer", "balducci", "constantinos", "edita-russo", "theailogy", "baker-internal", "personal")
+EXTRA_MATTERS_BY_NAME = ("kitzbuhel-six-senses", "kitz-kempinski", "steininger", "wertheimer", "balducci", "constantinos", "franck-muller", "edita-russo", "theailogy", "baker-internal", "personal")
 
 
 def extract_meta(body: str) -> dict:

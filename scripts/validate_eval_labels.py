@@ -46,6 +46,7 @@ MATTER_ALLOWLIST = {
     "wertheimer",
     "balducci",
     "constantinos",
+    "franck-muller",
     "edita-russo",
     "theailogy",
     "baker-internal",
