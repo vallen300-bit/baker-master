@@ -116,40 +116,90 @@ def check_and_clear_anthropic_circuit(anthropic: Anthropic) -> bool:
 
 
 def call_gemma_with_retry(signal: dict, prompt_template: str) -> dict:
-    """Gemma ladder: full prompt → pared prompt → temp=0.3 → Qwen cold-swap → raise."""
+    """Gemma ladder: full prompt → pared prompt → temp=0.3 → Qwen cold-swap → raise.
+
+    B2.S3: when qwen_active=true, skip attempts 1-3 by default and go
+    straight to Qwen — saves 3 guaranteed-failing Ollama calls + 3 WARN
+    rows per signal during an outage. Every Nth call
+    (KBL_PIPELINE_QWEN_RECOVERY_PROBE_EVERY, default 5), still probe
+    Gemma attempt 1 to detect a natural recovery; success → inline
+    recovery (clears qwen_active) before returning.
+    """
     model = cfg("ollama_model", "gemma4:latest")
     fallback = cfg("ollama_fallback", "qwen2.5:14b")
 
-    # Attempt 1: full prompt, temp=0
-    try:
-        return _call_ollama(model, prompt_template.format(**signal), temp=0)
-    except Exception as e:
-        emit_log("WARN", "retry_gemma", signal.get("id"), f"attempt 1 failed: {e}")
+    qwen_already_active = get_state("qwen_active") == "true"
 
-    # Attempt 2: pared prompt, temp=0
-    try:
-        pared = _pare_prompt(prompt_template).format(**signal)
-        return _call_ollama(model, pared, temp=0)
-    except Exception as e:
-        emit_log("WARN", "retry_gemma", signal.get("id"), f"attempt 2 failed: {e}")
+    # Qwen-active path: skip the Gemma ladder unless it's a probe tick.
+    if qwen_already_active:
+        probe_every = cfg_int("pipeline_qwen_recovery_probe_every", 5)
+        probe_counter = increment_state("qwen_recovery_probe_counter")
+        should_probe = probe_every > 0 and (probe_counter % probe_every == 0)
+        if should_probe:
+            try:
+                result = _call_ollama(model, prompt_template.format(**signal), temp=0)
+                # Gemma answered — recovery signal. Inline-trigger recovery.
+                _inline_gemma_recovery(reason="probe_success")
+                return result
+            except Exception as e:
+                emit_log(
+                    "WARN",
+                    "retry_gemma",
+                    signal.get("id"),
+                    f"qwen-active probe failed, staying on Qwen: {e}",
+                )
+        return _qwen_attempt(signal, prompt_template, fallback)
 
-    # Attempt 3: full prompt, temp=0.3
-    try:
-        return _call_ollama(model, prompt_template.format(**signal), temp=0.3)
-    except Exception as e:
-        emit_log("WARN", "retry_gemma", signal.get("id"), f"attempt 3 failed: {e}")
+    # Gemma-active path: 3-attempt ladder, then Qwen cold-swap.
+    for attempt_num, (prompt_fn, temp) in enumerate(
+        [
+            (lambda: prompt_template.format(**signal), 0),
+            (lambda: _pare_prompt(prompt_template).format(**signal), 0),
+            (lambda: prompt_template.format(**signal), 0.3),
+        ],
+        start=1,
+    ):
+        try:
+            return _call_ollama(model, prompt_fn(), temp=temp)
+        except Exception as e:
+            emit_log(
+                "WARN",
+                "retry_gemma",
+                signal.get("id"),
+                f"attempt {attempt_num} failed: {e}",
+            )
 
-    # Attempt 4: Qwen cold-swap. R1.B2: ISO-8601 timestamp, not 'NOW()' literal.
+    # Ladder exhausted → Qwen cold-swap.
+    return _qwen_attempt(signal, prompt_template, fallback)
+
+
+def _qwen_attempt(signal: dict, prompt_template: str, fallback_model: str) -> dict:
+    """Cold-swap to Qwen. R1.B2: ISO-8601 `qwen_active_since` (never 'NOW()')."""
     try:
         set_state("qwen_active", "true")
         if not get_state("qwen_active_since"):
             set_state("qwen_active_since", datetime.now(timezone.utc).isoformat())
-        result = _call_ollama(fallback, prompt_template.format(**signal), temp=0)
+        result = _call_ollama(fallback_model, prompt_template.format(**signal), temp=0)
         increment_state("qwen_swap_count_today")
         return result
     except Exception as e:
         emit_log("ERROR", "retry_gemma", signal.get("id"), f"Qwen also failed: {e}")
         raise  # DLQ contract (R1.M2): caller must catch + mark 'failed'.
+
+
+def _inline_gemma_recovery(reason: str) -> None:
+    """Flip state back to Gemma-active; mirrors maybe_recover_gemma but
+    called inline when a probe succeeds (B2.S3)."""
+    set_state("qwen_active", "false")
+    set_state("qwen_active_since", "")
+    set_state("qwen_swap_count_today", "0")
+    set_state("qwen_recovery_probe_counter", "0")
+    emit_log(
+        "WARN",
+        "qwen_recovery",
+        None,
+        f"Recovered to Gemma (trigger: {reason})",
+    )
 
 
 def maybe_recover_gemma() -> None:
@@ -188,6 +238,7 @@ def maybe_recover_gemma() -> None:
         set_state("qwen_active", "false")
         set_state("qwen_active_since", "")
         set_state("qwen_swap_count_today", "0")
+        set_state("qwen_recovery_probe_counter", "0")  # B2.S3 consistency
         emit_log(
             "WARN",
             "qwen_recovery",
