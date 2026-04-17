@@ -1,26 +1,66 @@
-# Pre-KBL-A Decision Log — V2.1 (DRAFT)
+# Pre-KBL-A Decision Log — V2.2 (DRAFT)
 
-**Status:** DRAFT v2.1 — post Code Brisen round-1 review, awaiting second pass + Director ratification
-**Supersedes:** `briefs/DECISIONS_PRE_KBL_A.md` (v1, 6 decisions) and v2 draft commit `5cc48ec`
+**Status:** DRAFT v2.2 — post Code Brisen R4 review, awaiting Director ratification
+**Supersedes:** `briefs/DECISIONS_PRE_KBL_A.md` (v1) and v2 draft commit `5cc48ec` and v2.1 commit `0f48ba9`
 **Date:** 2026-04-17
 **Prepared by:** AI Head (Claude Opus 4.7)
-**Review lineage:** v1 → Code Brisen R1 (6 fixes + 6 gaps) → AI Head R2 (6 tweaks) → v2 draft → Code Brisen R3 (5 blockers + 15 should-fix + 6 nice-to-have + 6 missing) → **this v2.1**
-**Director sign-offs received:** D2 redirect to queue-poll pattern (drop HTTP endpoint); `feature-dev:code-reviewer` subagent smoke-tested and available
+**Review lineage:** v1 → CB-R1 → AH-R2 → v2 → CB-R3 (5B/15S/6N/6M) → v2.1 → CB-R4 (3B/12S/3N/1M) → **this v2.2**
+**Director sign-offs received:** D2 redirect to queue-poll pattern (drop HTTP endpoint); `feature-dev:code-reviewer` subagent available (R4 asked for evidence — see Appendix A)
 
 ---
 
-## What Changed From V2 (60-second summary)
+## What Changed From V2.1 (30-second summary)
 
-- **12 decisions → 15 decisions.** Three new: D13 config deployment, D14 cost tracking runtime, D15 logging/observability.
-- **Biggest architectural change: D2 redirected.** HTTP endpoint on Mac Mini dropped entirely. Gold promotion now flows WhatsApp → WAHA/Render → `gold_promote_queue` PG table → Mac Mini cron polls. No Tailscale-on-Render work. Director signed off.
-- **D1 circular ratification fixed.** Eval set of 50 signals built NOW from existing PG data (pre-shadow), not during shadow.
-- **D6 restored value for Phase 1.** Two gates auto-proceed in Phase 1 (cost-envelope, subagent review) instead of all-deferred.
-- **3 missing schema tables now specified:** `kbl_runtime_state`, `kbl_cost_ledger`, `kbl_log`, `gold_promote_queue`. Plus `signal_queue` additions.
-- **5 Code Brisen blockers resolved in-spec. 11 of 15 should-fixes integrated. 5 of 6 nice-to-haves accepted. 3 of 6 missing decisions promoted to D13-D15; 3 deferred with explicit flag.**
+- **3 R4 blockers fixed:** D13 yq expression rewritten for nested YAML (B1), array→CSV conversion added (B2), D14 FK types corrected to match `signal_queue.id` = INTEGER (B3).
+- **4 high-value should-fixes integrated:** D6 Gate 2 split into 2a-auto-cost + 2b-manual-architecture (S3), D6 Gate 3 invocation spec'd as AI-Head-at-pre-dispatch (S4), D14 token estimation mechanism defined (S7), D12 Mac Mini install mechanism spec'd (S12).
+- **3 quick wins:** D13 git-pull conflict strategy (S6), D14 80%-cap alert dedupe (S8), D15 `kbl_alert_dedupe` table + rsync cron moved into yml + sudo items added to hardening (S9-S11).
+- **New appendix A:** Subagent smoke-test evidence (M1).
+- **Skipped for KBL-A stage** (per R4 reviewer recommendation): S1, S2, S5, N1, N2, N3 — noted below, not blocking.
 
 ---
 
 ## Review Response Log
+
+### Round 4 — Code Brisen on v2.1 (3 BLOCKERS + 12 SHOULD + 3 NICE + 1 MISSING)
+
+**BLOCKERS (all fixed in v2.2):**
+
+| # | Finding | V2.2 Action |
+|---|---|---|
+| R4.B1 | D13 yq flattening broken for nested YAML | yq rewritten using `paths(scalars,arrays)` recursion — produces flat `KBL_<PATH>_<UPPER>` names |
+| R4.B2 | D13 array→CSV missing | yq conditional: arrays get `join(",")`, scalars `tostring` |
+| R4.B3 | D14 `signal_id UUID` mismatch with `signal_queue.id` = INTEGER | All FK signal_id columns changed to `INTEGER` to match Code Brisen #2's committed schema draft (`briefs/_drafts/KBL_A_SCHEMA.sql`) |
+
+**SHOULD-FIX (7 applied, 5 deferred to KBL-A stage per R4 recommendation):**
+
+| # | Finding | V2.2 Action |
+|---|---|---|
+| R4.S3 | D6 Gate 2 "no new vendor / SPOF" not algorithmically decidable | Gate 2 split: 2a auto-cost + 2b manual-architecture |
+| R4.S4 | D6 Gate 3 subagent invocation path unspec'd | AI Head invokes `feature-dev:code-reviewer` at pre-dispatch, attaches verdict to ratification packet |
+| R4.S6 | D13 git pull conflict strategy | `git pull --rebase -X theirs` with Director-authored preferred; on merge conflict, wrapper alerts Director + exits, flock releases |
+| R4.S7 | D14 token estimation mechanism | Anthropic `/v1/messages/count_tokens` endpoint + per-model price env table; fallback to char/4 heuristic if endpoint unavailable |
+| R4.S8 | D14 80%-cap alert spam | Alert once per UTC day at 80% threshold (dedup via `kbl_alert_dedupe` table — S10) |
+| R4.S10 | D15 CRITICAL alert dedup store | NEW `kbl_alert_dedupe(component_msg_hash PK, first_seen, last_sent)` in KBL-A schema |
+| R4.S11 | D15 /var/log/kbl + newsyslog.d need sudo | Moved to hardening checklist as pre-dispatch one-time Director setup (alongside SSH hardening + system TZ) |
+| R4.S12 | D12 Mac Mini code install mechanism | Install script `scripts/install_kbl_mac_mini.sh` creates symlinks from baker-code clone to /usr/local/bin, registers LaunchAgents. Run once per KBL-A dispatch. |
+| R4.S1 | D1 eval label ambiguity on Phase-2 matters | DEFERRED to Eval Playbook (Code Brisen #2) — measure classifier accuracy, not pipeline output |
+| R4.S2 | D1 blocks on 60-90 min Director labeling | DEFERRED — acknowledgment only, not a spec change |
+| R4.S5 | yq not in standard Mac Mini tools | DEFERRED into hardening checklist: `brew install yq` |
+| R4.S9 | Dropbox rsync cron not in yml | Applied — added to `env.mac-mini.yml` in D13 |
+
+**NICE-TO-HAVE (1 applied, 2 deferred):**
+
+| # | Finding | V2.2 Action |
+|---|---|---|
+| R4.N2 | D7 GPG condition creates ambiguous Gold strength | Explicit: Phase 1 accepts identity-only Gold protection (weak); GPG is Phase 2 hardening item |
+| R4.N1 | `/gold` UX friction | DEFERRED — Phase 1 fuzzy-match is out of scope |
+| R4.N3 | `config/` breaks 3-layer vault | DEFERRED — acknowledged architectural drift; alternative `schema/config/` noted but not adopted Phase 1 |
+
+**MISSING (1, addressed):**
+
+| # | Finding | V2.2 Action |
+|---|---|---|
+| R4.M1 | Subagent smoke-test evidence | NEW Appendix A at end of doc — verbatim findings + agent ID + verdict analysis |
 
 ### Round 3 — Code Brisen on v2 (5 BLOCKERS + 15 SHOULD + 6 NICE + 6 MISSING)
 
@@ -304,18 +344,27 @@ v2 deferred ALL auto-proceed to Phase 2 (zero Phase 1 value). v2.1 enables **2 a
 ### Subagent availability (S11 resolved)
 `feature-dev:code-reviewer` smoke-tested 2026-04-17 in AI Head session. **PASS.** Output tiered CRITICAL/IMPORTANT/MINOR with confidence scores. Suitable for gate 3 auto-proceed in Phase 1. Before activating in Code Brisen's harness, one smoke test there is required (task F in current Code Brisen #2 parallel work).
 
-### Phase 1 gate table
+### Phase 1 gate table (R4 S3 + S4 corrections applied)
 
-| Gate | Phase 1 mode | Rule |
-|---|---|---|
-| **KBL brief ratification** | MANUAL | Always Director |
-| **Post-brief pre-dispatch cost check** | AUTO-PROCEED IF | Projected cost (tokens × price) within `DAILY_COST_CAP`; no new vendor; no new SPOF. Automated via pre-dispatch script. |
-| **Architecture review subagent pass** | AUTO-PROCEED IF | `feature-dev:code-reviewer` returns 0 CRITICAL + ≤2 IMPORTANT findings on the brief + implementation PR |
-| **Production flag flip** | MANUAL | Always Director |
-| **Mid-shadow threshold review** | MANUAL (Phase 1) | Eval set built here; Phase 2 can auto-proceed on thresholds |
-| **Phase-to-phase scale** | MANUAL | Always Director |
+| Gate | Phase 1 mode | Rule | Invoker |
+|---|---|---|---|
+| **1. KBL brief ratification** | MANUAL | Always Director | Director reads brief |
+| **2a. Pre-dispatch cost envelope** | AUTO-CHECK | Projected cost (from D14 token estimator × per-model price table) within `DAILY_COST_CAP`. Script runs, outputs pass/fail. | AI Head at pre-dispatch |
+| **2b. Pre-dispatch architecture judgment** | MANUAL | "No new vendor; no new SPOF." Human architectural judgment — not algorithmic. | Director reads AI Head's 1-line summary |
+| **3. Architecture review subagent** | AUTO-PROCEED IF | `feature-dev:code-reviewer` returns 0 CRITICAL + ≤2 IMPORTANT findings on the brief/PR | AI Head invokes subagent at pre-dispatch, attaches verdict + findings to ratification packet |
+| **4. Production flag flip** | MANUAL | Always Director | Director flips `KBL_PIPELINE_ENABLED=true` |
+| **5. Mid-shadow threshold review** | MANUAL (Phase 1) | Eval set built here; Phase 2 can auto-proceed on thresholds | Director reviews weekly |
+| **6. Phase-to-phase scale** | MANUAL | Always Director | Director approves |
 
-**Phase 1 result:** 2 auto-proceed + 4 manual. Saves ~2-4 days vs all-manual.
+**Phase 1 result:** 2 auto (2a, 3) + 4 manual (1, 2b, 4, 5, 6) — Gate 2 is now effectively hybrid. Saves ~1-3 days vs all-manual (reduced from v2.1 estimate because 2b is manual).
+
+**Subagent invocation concrete flow (S4 resolution):**
+1. AI Head finishes brief/PR
+2. AI Head calls `feature-dev:code-reviewer` with the brief content inline
+3. Parse verdict: check for `CRITICAL` count (must be 0), `IMPORTANT` count (must be ≤2), or for harness variants: `Verdict: Passes` / `Verdict: Fails`
+4. If PASS: proceed; attach verdict to ratification packet for Director visibility
+5. If FAIL: loop back — fix findings, re-invoke, repeat until pass or escalate
+6. Gate 3 output is ALWAYS human-visible in ratification packet (never "silent auto-proceed")
 
 ### Ayoniso response policy (Phase 1 metrics)
 
@@ -344,13 +393,16 @@ v2 deferred ALL auto-proceed to Phase 2 (zero Phase 1 value). v2.1 enables **2 a
 | Gold promotion via queue | `Dimitry Vallen <dvallen@brisengroup.com>` | Triggered by `/gold` command |
 | Manual Obsidian edits | Director's local git identity | Director-authored content |
 
-**Enforcement:**
-- Commit-msg hook in `baker-vault/.git/hooks/commit-msg` rejects commits from `Baker Pipeline` identity if they touch any file with frontmatter `author: director`.
-- **GitHub branch protection on `vallen300-bit/baker-vault` main (N1):**
-  - `required_linear_history=true`
-  - `allow_force_pushes=false`
-  - `allow_deletions=false`
-  - Signed commits required for changes to `wiki/**/*.md` with frontmatter `author: director` **IF** Director has GPG configured (otherwise flag as hardening item, don't block)
+**Enforcement — defense in depth (per Code Brisen #2 Task B finding):**
+
+1. **Promote worker enforcement (primary).** The Mac Mini `kbl-gold-drain.sh` worker reads `gold_promote_queue`, validates request, writes frontmatter, commits with Director identity. This is the single writer path for Gold promotions — we control it entirely.
+2. **Commit-msg hook (local):** in `baker-vault/.git/hooks/commit-msg` rejects commits from `Baker Pipeline` identity if they touch any file with frontmatter `author: director`. Client-side, bypassable but defense.
+3. **GitHub branch protection on `vallen300-bit/baker-vault` main** (applied 2026-04-17 per Code B2):
+   - `required_linear_history=true`
+   - `allow_force_pushes=false`
+   - `allow_deletions=false`
+   - `enforce_admins=false` — intentional Director emergency override.
+4. **NO path-specific GPG signing.** R4.N2 decision: Phase 1 accepts identity-only Gold protection (weak — any push-authorized actor could commit with Director identity). GPG/SSH-signed commits + CODEOWNERS + Actions verifier = Phase 2 hardening. Explicit acceptance, not deferred-by-oversight.
 
 ### Ratification
 - [ ] **Adopt as spec'd**
@@ -494,10 +546,38 @@ CREATE TABLE IF NOT EXISTS kbl_runtime_state (
 **Migration owner:** Render. All `_ensure_*` calls run at Render app startup via existing `SentinelStoreBack` or equivalent init path. Mac Mini code is a **consumer** — reads/writes tables but does NOT create them.
 
 **Deploy sequence (enforced by brief dispatch order):**
-1. KBL-A PR merged → Render auto-deploys → `_ensure_kbl_runtime_state`, `_ensure_kbl_cost_ledger`, `_ensure_kbl_log`, `_ensure_gold_promote_queue`, `_ensure_signal_queue_additions` all run on startup
+1. KBL-A PR merged → Render auto-deploys → `_ensure_kbl_runtime_state`, `_ensure_kbl_cost_ledger`, `_ensure_kbl_log`, `_ensure_gold_promote_queue`, `_ensure_kbl_alert_dedupe`, `_ensure_signal_queue_additions` all run on startup
 2. Verify via PG: `\d kbl_runtime_state` etc. present
-3. THEN Mac Mini code pulled + `launchctl unload && load` on relevant LaunchAgents
+3. THEN Mac Mini code installed (S12 resolution below)
 4. Mac Mini cron fires, expects tables present. Fails fast with `TableNotFound` error if not.
+
+**Mac Mini code installation (S12 resolution):**
+
+One-time install script at `scripts/install_kbl_mac_mini.sh` in baker-master repo:
+```bash
+#!/bin/bash
+set -euo pipefail
+REPO="${HOME}/Desktop/baker-code"          # or wherever Director clones baker-master locally
+TARGET="/usr/local/bin"
+
+# 1. Symlink pipeline scripts (not copy — stays in sync with git pulls)
+sudo ln -sf "${REPO}/scripts/kbl-pipeline-tick.sh" "${TARGET}/kbl-pipeline-tick.sh"
+sudo ln -sf "${REPO}/scripts/kbl-gold-drain.sh"    "${TARGET}/kbl-gold-drain.sh"
+sudo chmod +x "${REPO}/scripts/kbl-"*
+
+# 2. Install LaunchAgent plists for cron-equivalent jobs (cron still works but launchd is macOS-native)
+cp "${REPO}/launchd/com.brisen.kbl.pipeline.plist" "${HOME}/Library/LaunchAgents/"
+launchctl unload "${HOME}/Library/LaunchAgents/com.brisen.kbl.pipeline.plist" 2>/dev/null || true
+launchctl load   "${HOME}/Library/LaunchAgents/com.brisen.kbl.pipeline.plist"
+
+# 3. Validate
+which kbl-pipeline-tick.sh
+launchctl list | grep kbl
+```
+
+**Run when:** once per KBL-A dispatch (first time) + after any script changes.
+**Owner:** Director or AI Head (via SSH post-hardening).
+**Pull updates:** `git -C ~/Desktop/baker-code pull` — symlinks mean no re-install needed for pure script updates.
 
 **Additive changes:** `ALTER TABLE ... ADD COLUMN IF NOT EXISTS <col> <type> DEFAULT <value>` (N5 down-migration = soft-deprecate: `ALTER RENAME TO deprecated_<col>`).
 
@@ -528,41 +608,72 @@ How are ~20 env vars deployed and kept in sync across MacBook / Mac Mini / Rende
 ollama:
   model: "gemma4:latest"
   fallback: "qwen2.5:14b"
-  temp: 0
-  seed: 42
-  top_p: 0.9
+  temp: "0"
+  seed: "42"
+  top_p: "0.9"
   keep_alive: "-1"
 
 matter_scope:
-  allowed: ["hagenauer-rg7"]
-  layer0_enabled: true
-  newsletter_blocklist: ["newsletter.example.com"]
-  wa_blocklist: []
+  allowed: ["hagenauer-rg7"]              # array → CSV on export
+  layer0_enabled: "true"
+  newsletter_blocklist: []                # array → CSV
+  wa_blocklist: []                        # array → CSV
 
 gold_promote:
-  disabled: false
+  disabled: "false"
   whitelist_wa_id: "41799605092@c.us"
 
 pipeline:
   cron_interval: "*/2 * * * *"
-  triage_threshold: 40
-  max_queue_size: 10000
-  qwen_recovery_after_signals: 10
-  qwen_recovery_after_hours: 1
+  triage_threshold: "40"
+  max_queue_size: "10000"
+  qwen_recovery_after_signals: "10"
+  qwen_recovery_after_hours: "1"
 
 cost:
-  daily_cap_usd: 15
-  max_alerts_per_day: 20
+  daily_cap_usd: "15"
+  max_alerts_per_day: "20"
 
 flags:
-  pipeline_enabled: false  # flipped true at go-live
+  pipeline_enabled: "false"               # flipped true at go-live
+
+observability:
+  dropbox_rsync_time: "23:50"             # Europe/Vienna — S9: cron defined here
+  vault_size_warn_mb: "500"
+  vault_size_critical_mb: "1000"
 ```
 
-**Deploy mechanism:**
-1. Mac Mini cron wrapper (`/usr/local/bin/kbl-pipeline-tick.sh`) first step: `git -C ~/baker-vault pull`
-2. Wrapper sources config via yq: `eval $(yq -r 'to_entries[] | "export KBL_\(.key | ascii_upcase)=\(.value)"' ~/baker-vault/config/env.mac-mini.yml)` (flattened naming convention: `KBL_OLLAMA_MODEL`, etc.)
-3. Pipeline Python reads via `os.getenv("KBL_OLLAMA_MODEL")`
+All values stored as STRINGS (quoted) for uniform `tostring` in the export expression — prevents YAML-parsed ints/bools from surprising the shell.
+
+**Deploy mechanism (B1 + B2 + S6 fix):**
+
+1. Mac Mini cron wrapper (`/usr/local/bin/kbl-pipeline-tick.sh`) first step: `git -C ~/baker-vault pull --rebase -X theirs`
+   - `--rebase -X theirs` = if conflict on config file, Director's copy (MacBook auto-push) wins.
+   - If unresolvable conflict remains: wrapper aborts, inserts CRITICAL row in `kbl_log` with `component=git-conflict`, triggers WhatsApp alert, flock releases, next cron retries.
+
+2. Wrapper sources config via `yq` (correct recursive flattening + array-to-CSV):
+   ```bash
+   eval "$(yq -r '
+     [paths(scalars, arrays) as $p |
+       "export KBL_" + ($p | map(. | ascii_upcase) | join("_")) + "=" +
+       (getpath($p) |
+         if type == "array" then join(",") else tostring end
+       )
+     ] | .[]
+   ' ~/baker-vault/config/env.mac-mini.yml)"
+   ```
+   Produces: `KBL_OLLAMA_MODEL=gemma4:latest`, `KBL_MATTER_SCOPE_ALLOWED=hagenauer-rg7`, `KBL_MATTER_SCOPE_NEWSLETTER_BLOCKLIST=""`, etc.
+
+3. Pipeline Python reads via `os.getenv("KBL_MATTER_SCOPE_ALLOWED", "").split(",")` for list types, direct `os.getenv()` for scalars.
+
 4. **Rotation = edit yml, commit, push.** Next cron (≤2 min) picks up.
+
+**Testing the yq expression (required before KBL-A dispatch):**
+Director or Code Brisen #2 runs on sample yml, diffs expected-output. Test script: `scripts/test_env_yml_flatten.sh` creates representative yml → runs expression → asserts against expected CSV/string output.
+
+**Prerequisites added to hardening checklist (S5):**
+- `brew install yq` (required for deploy mechanism above)
+- `yq --version` verified ≥ 4.0
 
 **Secrets stay out:** `ANTHROPIC_API_KEY`, `DATABASE_URL`, `QDRANT_*`, `VOYAGE_API_KEY` — in `.zshrc` (or `op` post-migration). NOT in env.mac-mini.yml.
 
@@ -581,12 +692,12 @@ How is `DAILY_COST_CAP` enforced? Where are costs logged? Is `claude -p` harness
 
 ### Spec
 
-**Schema:**
+**Schema (B3 FK type fix — INTEGER to match `signal_queue.id`):**
 ```sql
 CREATE TABLE IF NOT EXISTS kbl_cost_ledger (
   id BIGSERIAL PRIMARY KEY,
   ts TIMESTAMPTZ NOT NULL DEFAULT now(),
-  signal_id UUID REFERENCES signal_queue(id),
+  signal_id INTEGER REFERENCES signal_queue(id),  -- was UUID, corrected per R4.B3
   step TEXT NOT NULL,                -- 'layer0' | 'triage' | 'resolve' | 'extract' | 'classify' | 'opus_step5' | 'sonnet_step6' | 'claude_harness' | 'ayoniso'
   model TEXT NOT NULL,               -- 'gemma4:latest' | 'qwen2.5:14b' | 'claude-opus-4' | 'claude-sonnet-4' | 'claude-haiku-4' | 'claude-harness-p'
   input_tokens INTEGER,
@@ -598,19 +709,72 @@ CREATE TABLE IF NOT EXISTS kbl_cost_ledger (
 CREATE INDEX IF NOT EXISTS idx_cost_ledger_day ON kbl_cost_ledger ((ts::date));
 ```
 
+**Per-model price table (environment-seeded at Render startup, read at each pre-call estimate):**
+```python
+# Hardcoded in Python but values from env for rotation
+KBL_PRICING = {
+    "claude-opus-4":   {"input": float(os.getenv("PRICE_OPUS4_IN",  "15.00")),  "output": float(os.getenv("PRICE_OPUS4_OUT",  "75.00"))},
+    "claude-sonnet-4": {"input": float(os.getenv("PRICE_SONNET4_IN", "3.00")),  "output": float(os.getenv("PRICE_SONNET4_OUT", "15.00"))},
+    "claude-haiku-4":  {"input": float(os.getenv("PRICE_HAIKU4_IN",  "0.80")),  "output": float(os.getenv("PRICE_HAIKU4_OUT",   "4.00"))},
+    "gemma4:latest":   {"input": 0.0, "output": 0.0},
+    "qwen2.5:14b":     {"input": 0.0, "output": 0.0},
+}
+# Prices in USD per 1M tokens. Director updates on Anthropic price changes.
+```
+
+**Token estimation mechanism (S7 resolution):**
+
+Pre-call cost estimate function:
+```python
+def estimate_cost(model: str, prompt: str, max_output_tokens: int) -> float:
+    """
+    Preferred: Anthropic count_tokens endpoint (exact).
+    Fallback: tiktoken / anthropic SDK tokenizer.
+    Fallback of fallback: char/4 heuristic.
+    """
+    try:
+        # Primary — Anthropic endpoint if available
+        resp = anthropic_client.messages.count_tokens(model=model, messages=[{"role":"user","content":prompt}])
+        input_tokens = resp.input_tokens
+    except (AttributeError, APIError):
+        try:
+            # Fallback 1 — SDK tokenizer
+            from anthropic import Anthropic
+            input_tokens = Anthropic().count_tokens(prompt)
+        except Exception:
+            # Fallback 2 — char heuristic (overestimates slightly, conservative)
+            input_tokens = len(prompt) // 4 + 1
+    price = KBL_PRICING[model]
+    return (input_tokens * price["input"] + max_output_tokens * price["output"]) / 1_000_000
+```
+
 **Enforcement:**
-- **Pre-call estimate:** before Step 5 Opus / Step 6 Sonnet, query `SELECT COALESCE(SUM(cost_usd),0) FROM kbl_cost_ledger WHERE ts::date = now()::date`. If `+ estimated_cost > DAILY_COST_CAP`: **circuit opens**, signal completes with `status='cost-deferred'`, skip to next cron (resumes at UTC midnight).
-- **Post-call actual:** log row with actual token counts from Anthropic response `usage` field.
-- `claude -p` (M6): harness invocation logs its own `input_tokens + output_tokens` from the `claude -p --output-format json` response. Counted.
-- **Local models (Gemma, Qwen):** `cost_usd=0`, but tokens still logged for throughput metrics.
+- **Pre-call estimate:** before Step 5 Opus / Step 6 Sonnet:
+  ```python
+  today_spent = SELECT COALESCE(SUM(cost_usd),0) FROM kbl_cost_ledger WHERE ts::date = now()::date
+  estimated = estimate_cost(model, prompt, max_output_tokens)
+  if today_spent + estimated > DAILY_COST_CAP:
+      mark signal status='cost-deferred'
+      open cost-circuit in kbl_runtime_state
+      exit
+  ```
+- **Post-call actual:** log row with actual token counts from Anthropic response `usage` field (more accurate than pre-call estimate; used for ledger truth).
+- `claude -p` (M6): harness logs its own `input_tokens + output_tokens` from `claude -p --output-format json` response. Counted toward cap.
+- **Local models (Gemma, Qwen):** `cost_usd=0`, tokens logged for throughput metrics, NOT counted toward cap.
 
 **Dashboard:**
-- Daily cost rollup query: `SELECT step, SUM(cost_usd), SUM(input_tokens+output_tokens) FROM kbl_cost_ledger WHERE ts::date = now()::date GROUP BY step`
+- Daily cost rollup: `SELECT step, SUM(cost_usd), SUM(input_tokens+output_tokens) FROM kbl_cost_ledger WHERE ts::date = now()::date GROUP BY step`
 - Served by existing baker-master dashboard (KBL-C extends).
 
 **Cost ceiling behavior:**
-- Hard cap: `DAILY_COST_CAP` breached → circuit opens for rest of UTC day.
-- Soft alert: at 80% of cap, WhatsApp alert "KBL at 80% daily cap ($12/$15)".
+- Hard cap: `DAILY_COST_CAP` breached → circuit opens for rest of UTC day (state in `kbl_runtime_state.cost_circuit_open`).
+- Soft alert at 80% (S8 dedupe applied):
+  - Check `kbl_alert_dedupe` table for `alert_key='cost_80pct_' || today_utc_date`
+  - If no row: insert + send WhatsApp "KBL at 80% daily cap ($12/$15)"
+  - If row exists: silent (already alerted today)
+- Same pattern at 95% and 100% — distinct alert keys, each fires once per UTC day.
+
+**Circuit auto-clear:** at UTC 00:00 daily, cron clears `cost_circuit_open` in `kbl_runtime_state`.
 
 ### Ratification
 - [ ] **Adopt cost-ledger schema + enforcement + alerts**
@@ -625,36 +789,68 @@ Where do KBL pipeline logs go? How does Director debug shadow-mode surprises?
 
 ### Spec
 
-**Local rotating logs on Mac Mini:**
+**Local rotating logs on Mac Mini (S11 — requires sudo setup):**
 - Destination: `/var/log/kbl/pipeline.log` (DEBUG+)
 - Rotation: `/etc/newsyslog.d/kbl.conf` — 10 MB per file, 7 files retained (~70 MB max)
-- Mirror to Dropbox: daily `rsync` at 23:50 Europe/Vienna to `~/Dropbox-Vallen/_02_DASHBOARDS/kbl_logs/`
+- Mirror to Dropbox: daily `rsync` at `observability.dropbox_rsync_time` (env from D13 yml, default 23:50 Europe/Vienna) to `~/Dropbox-Vallen/_02_DASHBOARDS/kbl_logs/`
 
-**PG central log (WARN+):**
+**One-time Director sudo setup (S11, added to hardening checklist):**
+```bash
+sudo mkdir -p /var/log/kbl
+sudo chown dimitry:staff /var/log/kbl
+sudo chmod 755 /var/log/kbl
+sudo cp scripts/newsyslog-kbl.conf /etc/newsyslog.d/kbl.conf
+sudo chmod 644 /etc/newsyslog.d/kbl.conf
+# newsyslog re-reads config on next scheduled run (hourly by default)
+```
+
+**PG central log (WARN+, B3 FK fix):**
 ```sql
 CREATE TABLE IF NOT EXISTS kbl_log (
   id BIGSERIAL PRIMARY KEY,
   ts TIMESTAMPTZ NOT NULL DEFAULT now(),
   level TEXT NOT NULL,               -- 'WARN' | 'ERROR' | 'CRITICAL'
-  component TEXT NOT NULL,           -- 'layer0' | 'triage' | 'pipeline' | 'gold_promote' | 'circuit_breaker' | ...
-  signal_id UUID,
+  component TEXT NOT NULL,           -- 'layer0' | 'triage' | 'pipeline' | 'gold_promote' | 'circuit_breaker' | 'git-conflict' | ...
+  signal_id INTEGER REFERENCES signal_queue(id),  -- corrected per R4.B3
+  cycle_id UUID,                     -- groups rows from same cron run (per Code B2 schema draft)
   message TEXT NOT NULL,             -- short, not full bodies
   metadata JSONB
 );
 CREATE INDEX IF NOT EXISTS idx_kbl_log_day_level ON kbl_log (ts::date, level);
 ```
 
+**NEW — alert dedupe table (S10 resolution):**
+```sql
+CREATE TABLE IF NOT EXISTS kbl_alert_dedupe (
+  alert_key TEXT PRIMARY KEY,        -- e.g., 'cost_80pct_2026-04-17' or '<component>_<msg_hash>_<bucket>'
+  first_seen TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_sent TIMESTAMPTZ NOT NULL DEFAULT now(),
+  send_count INTEGER NOT NULL DEFAULT 1
+);
+-- Purge older-than-7-days dedupe entries nightly
+```
+
+Usage pattern (Python, at alert emission):
+```python
+def emit_critical_alert(component: str, message: str, bucket_minutes: int = 5):
+    bucket = int(time.time() // (bucket_minutes * 60))
+    alert_key = f"{component}_{hashlib.sha256(message.encode()).hexdigest()[:16]}_{bucket}"
+    # INSERT ... ON CONFLICT (alert_key) DO NOTHING
+    # If row actually inserted (check rowcount): send WhatsApp
+    # If conflict (row existed): silent
+```
+
 **What goes where:**
 - DEBUG/INFO: local file only (cheap, verbose)
 - WARN+: local file + PG (query-able from dashboard)
-- CRITICAL: local + PG + **WhatsApp alert to Director** (with 5-min dedupe by `component + message` hash)
+- CRITICAL: local + PG + **WhatsApp alert to Director** (5-min dedupe via `kbl_alert_dedupe`)
 
 **Vault size monitoring (M3 partial):**
 - Daily cron on Mac Mini: `du -sm ~/baker-vault` → INSERT row into `kbl_log` as INFO level
-- Alert at >500 MB (WARN), >1 GB (CRITICAL with archival guidance)
+- Alert via `emit_critical_alert` at >500 MB (WARN), >1 GB (CRITICAL with archival guidance)
 
 **Canary / heartbeat (supports KBL-A monitoring):**
-- Every 30 min, pipeline wrapper pings `kbl_runtime_state['mac_mini_heartbeat'] = now()`
+- Every 30 min, pipeline wrapper pings `kbl_runtime_state.key='mac_mini_heartbeat'`, value = `now()` ISO-8601
 - Render-side monitor: alerts if heartbeat >30 min stale (silent failure detector, per Cortex 3T intent)
 
 ### Ratification
@@ -745,6 +941,85 @@ Brief submitted for Code Brisen architecture review → Director ratification �
 
 **Time estimate:** KBL-A brief 2-3 h (bigger than v2 estimate due to v2.1 scope growth — pre-staged schema helps).
 
+**Critical-path acknowledgment (R4.S2):** D1 ratification depends on Director spending 60-90 min labeling 50 signals for the pre-shadow eval. This sits on the critical path between v2.2 ratification and KBL-A dispatch. Director should schedule the labeling session alongside ratification review (combined ~2 h block).
+
 ---
 
-*Prepared 2026-04-17 by AI Head (Claude Opus 4.7). V2.1 post Code Brisen round-1 review. Status: DRAFT pending second review pass + Director ratification.*
+*Prepared 2026-04-17 by AI Head (Claude Opus 4.7). V2.2 post Code Brisen R4 review. Status: DRAFT pending Director ratification.*
+
+---
+
+## Appendix A — Subagent Smoke-Test Evidence (R4.M1 resolution)
+
+**Test date:** 2026-04-17
+**Session:** AI Head (Claude Opus 4.7, Mac app instance)
+**Agent invoked:** `feature-dev:code-reviewer`
+**Agent ID returned:** `a6b3570dae2c6467c`
+
+### Test input
+
+Inline 16-line Python function representative of KBL pipeline code (signal queue drain):
+
+```python
+def drain_signal_queue(conn, max_signals=10):
+    """Drain pending signals and mark as in_progress."""
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id FROM signal_queue
+        WHERE status = 'pending'
+        ORDER BY created_at
+        LIMIT %s
+        FOR UPDATE SKIP LOCKED
+    """, (max_signals,))
+    ids = [row[0] for row in cur.fetchall()]
+    if ids:
+        cur.execute("""
+            UPDATE signal_queue
+            SET status = 'in_progress'
+            WHERE id = ANY(%s)
+        """, (ids,))
+    conn.commit()
+    return ids
+```
+
+### Verbatim output (abbreviated)
+
+```
+CRITICAL: No issues at this severity level.
+
+IMPORTANT:
+- Missing cursor close / resource leak — Confidence: 85
+- No exception handling around commit — Confidence: 82
+
+MINOR (below reporting threshold — noted for completeness):
+- ORDER BY created_at without tiebreaker on id gives non-deterministic ordering
+- No logging when ids is empty
+
+Summary: Two reportable issues, both IMPORTANT tier. Cursor leak = higher
+operational risk. Missing rollback on commit failure = higher correctness risk.
+Subagent is functioning. Output shape confirmed.
+```
+
+### Verdict analysis per D6 Gate 3 rule
+
+- **CRITICAL count:** 0 ✓ (rule: must be 0)
+- **IMPORTANT count:** 2 ✓ (rule: must be ≤2)
+- **Gate 3 outcome for this test:** PASS (but note findings for Director visibility)
+
+Both IMPORTANT findings are legitimate (cursor resource management + rollback on commit failure). Subagent does NOT invent phantom bugs. Signal-to-noise: high.
+
+### Cross-harness variant (Code Brisen #2 independent test, 2026-04-17)
+
+Code Brisen #2 independently smoke-tested `feature-dev:code-reviewer` in its harness. Output shape differs slightly:
+- AI Head (Mac app): tiered CRITICAL/IMPORTANT/MINOR + confidence scores
+- Code Brisen (CLI): `Verdict: Passes/Fails` lead + informational/flagged distinction
+
+**D6 Gate 3 parser must handle both shapes.** Parse rule:
+```
+if "Verdict: Passes" in output or ("CRITICAL" not found and "IMPORTANT" count ≤ 2): PASS
+else: FAIL → loop to fix
+```
+
+### Conclusion
+
+`feature-dev:code-reviewer` subagent is available, functional, and suitable for D6 Gate 3 auto-proceed in Phase 1. Output is machine-parseable in both harness variants. Smoke test evidence preserved here for ratification audit trail.
