@@ -20,7 +20,7 @@ from pathlib import Path
 
 import yaml
 
-from kbl.config import cfg_bool
+from kbl.config import cfg, cfg_bool
 from kbl.db import get_conn
 from kbl.logging import emit_log
 
@@ -228,13 +228,17 @@ def _commit_and_push(promoted_paths: list[str], applied: list[tuple]) -> None:
     except subprocess.CalledProcessError as e:
         raise GitPushFailed(f"git add/commit failed: {e}") from e
 
+    # B2.N3: vault branch configurable so a future default-branch rename
+    # on baker-vault doesn't silently break pushes.
+    vault_branch = cfg("gold_promote_vault_branch", "main")
+
     last_error: Exception | None = None
     for delay in [0] + PUSH_RETRY_DELAYS:
         if delay > 0:
             time.sleep(delay)
         try:
             subprocess.run(
-                ["git", "-C", str(VAULT), "push", "origin", "main"],
+                ["git", "-C", str(VAULT), "push", "origin", vault_branch],
                 check=True,
                 capture_output=True,
                 text=True,
