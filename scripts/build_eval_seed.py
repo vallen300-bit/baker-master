@@ -75,8 +75,8 @@ def sample_query(seed: int) -> str:
          ORDER BY md5(message_id::text || '{seed}') LIMIT 15
       ),
       email_other AS (
-        SELECT 'email', message_id::text, subject,
-               LEFT(COALESCE(full_body, ''), 3000)
+        SELECT 'email' AS source, message_id::text AS sid, subject AS title,
+               LEFT(COALESCE(full_body, ''), 3000) AS raw_content
           FROM email_messages
          WHERE NOT (subject ILIKE '%hagenauer%' OR full_body ILIKE '%hagenauer%' OR subject ILIKE '%RG7%')
            AND full_body IS NOT NULL
@@ -84,15 +84,15 @@ def sample_query(seed: int) -> str:
          ORDER BY md5(message_id::text || '{seed}') LIMIT 10
       ),
       wa_hg AS (
-        SELECT 'whatsapp', id::text, NULL::text,
-               LEFT(COALESCE(full_text, ''), 3000)
+        SELECT 'whatsapp' AS source, id::text AS sid, NULL::text AS title,
+               LEFT(COALESCE(full_text, ''), 3000) AS raw_content
           FROM whatsapp_messages
          WHERE full_text ILIKE '%hagenauer%' OR full_text ILIKE '%RG7%'
          ORDER BY md5(id::text || '{seed}') LIMIT 10
       ),
       wa_other AS (
-        SELECT 'whatsapp', id::text, NULL::text,
-               LEFT(COALESCE(full_text, ''), 3000)
+        SELECT 'whatsapp' AS source, id::text AS sid, NULL::text AS title,
+               LEFT(COALESCE(full_text, ''), 3000) AS raw_content
           FROM whatsapp_messages
          WHERE NOT (full_text ILIKE '%hagenauer%' OR full_text ILIKE '%RG7%')
            AND full_text IS NOT NULL
@@ -100,16 +100,16 @@ def sample_query(seed: int) -> str:
          ORDER BY md5(id::text || '{seed}') LIMIT 5
       ),
       mtg_hg AS (
-        SELECT 'meeting', id::text, title,
-               LEFT(COALESCE(full_transcript, ''), 4000)
+        SELECT 'meeting' AS source, id::text AS sid, title AS title,
+               LEFT(COALESCE(full_transcript, ''), 4000) AS raw_content
           FROM meeting_transcripts
          WHERE (title ILIKE '%hagenauer%' OR full_transcript ILIKE '%hagenauer%'
                 OR full_transcript ILIKE '%RG7%')
          ORDER BY md5(id::text || '{seed}') LIMIT 7
       ),
       mtg_other AS (
-        SELECT 'meeting', id::text, title,
-               LEFT(COALESCE(full_transcript, ''), 4000)
+        SELECT 'meeting' AS source, id::text AS sid, title AS title,
+               LEFT(COALESCE(full_transcript, ''), 4000) AS raw_content
           FROM meeting_transcripts
          WHERE NOT (title ILIKE '%hagenauer%' OR full_transcript ILIKE '%hagenauer%' OR full_transcript ILIKE '%RG7%')
            AND full_transcript IS NOT NULL
