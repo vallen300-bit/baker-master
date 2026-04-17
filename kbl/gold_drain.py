@@ -140,12 +140,26 @@ def drain_queue() -> None:
 
 
 def promote_one(path: str) -> str:
-    """Flip author→director on a single file. Returns 'ok'|'noop'|'error:...'."""
+    """Flip author→director on a single file. Returns 'ok'|'noop'|'error:...'.
+
+    B2.N2: refuses headerless files. Gold promotion is meant for existing
+    wiki pages already under the author: pipeline → author: director flow.
+    Fabricating frontmatter on an arbitrary Markdown file (e.g., a note
+    the Director pasted into the vault without running it through the
+    pipeline) is almost never what was intended.
+    """
     target = VAULT / path
     if not target.exists():
         return "error:file_not_found"
+
+    # Headerless-file guard BEFORE reading frontmatter: keep the check
+    # cheap and explicit so `_parse_frontmatter`'s tolerant-to-missing
+    # semantics aren't disturbed (other callers may rely on it).
+    content = target.read_text()
+    if not content.startswith("---\n") or content.find("\n---\n", 4) == -1:
+        return "error:no_frontmatter"
+
     try:
-        content = target.read_text()
         fm, body = _parse_frontmatter(content)
     except Exception as e:
         return f"error:parse:{e}"
