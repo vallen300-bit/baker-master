@@ -2,105 +2,95 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (terminal instance)
-**Previous:** LAYER0-LOADER-1 shipped as PR #4 at `fa0cfe8`. In B2 review.
+**Previous:** LOOP-SCHEMA-1 shipped at PR #5 (`51adc44`). LAYER0-LOADER-1 PR #4 APPROVED by B2 with 1 should-fix.
 **Task posted:** 2026-04-18
-**Status:** OPEN
+**Status:** OPEN — two small follow-ups
 
 ---
 
-## AI Head quick confirms
+## AI Head decision on BIGINT/INTEGER FK mismatch
 
-- **`BAKER_VAULT_PATH` is canonical.** Brief typo. No rename needed. Noted in B2's review dispatch.
+**Decision: upgrade `signal_queue.id` to `BIGSERIAL`** in the same LOOP-SCHEMA-1 migration.
+
+Rationale: `signal_queue` is the primary ingestion table; `INTEGER` (2.1B max) is a latent Phase-2+ overflow risk we remove cheaply now while the table is small. Downgrading the new FK columns would entrench the limit across loop infrastructure. No `REFERENCES` clauses — application-level integrity per your literal-brief read, preserves ledger immutability under CHANDA Inv 2 atomicity. Clean.
 
 ---
 
-## Task: LOOP-SCHEMA-1 — Create Learning Loop Infrastructure Tables
+## Task A (immediate): Amend PR #5 — signal_queue.id → BIGSERIAL
 
-**Why now:** B3's CHANDA audit surfaced **Step 1 prompt violates Inv 3** (`hot.md` + `feedback_ledger` not loaded). B2's Step 0 review surfaced **S5 undefined `kbl_layer0_hash_seen` storage** + **S6 undefined `kbl_layer0_review` queue**. All three tables are loop-critical (Legs 2+3 of CHANDA §2) and currently absent from schema. Until they exist, neither the Step 1 Inv-3 fix nor the Layer 0 S5/S6 fixes are implementable. You unblock three downstream tickets with one schema migration PR.
+### What to do
 
-### Scope
-
-**IN**
-- New migration file: `migrations/20260418_loop_infrastructure.sql` (or next-in-sequence number)
-- Three tables:
+Add to `migrations/20260418_loop_infrastructure.sql` UP section, BEFORE the three CREATE TABLE blocks:
 
 ```sql
--- feedback_ledger (CHANDA §2 Leg 2 Capture)
-CREATE TABLE IF NOT EXISTS feedback_ledger (
-  id             BIGSERIAL PRIMARY KEY,
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  action_type    TEXT NOT NULL,       -- 'promote' | 'correct' | 'ignore' | 'ayoniso_respond' | 'ayoniso_dismiss'
-  target_matter  TEXT,                -- slug from slug_registry, nullable for cross-matter actions
-  target_path    TEXT,                -- vault path of affected wiki entry, nullable for non-vault actions
-  signal_id      BIGINT,              -- FK to signal_queue.id, nullable
-  payload        JSONB NOT NULL DEFAULT '{}'::jsonb,  -- action-specific detail
-  director_note  TEXT                 -- free-text rationale, optional
-);
-CREATE INDEX IF NOT EXISTS idx_feedback_ledger_created_at ON feedback_ledger(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_feedback_ledger_matter ON feedback_ledger(target_matter);
-
--- kbl_layer0_hash_seen (S5 from B2 Step 0 review — 72h dedupe)
-CREATE TABLE IF NOT EXISTS kbl_layer0_hash_seen (
-  content_hash     TEXT PRIMARY KEY,           -- sha256 of normalized content
-  first_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  ttl_expires_at   TIMESTAMPTZ NOT NULL,
-  source_signal_id BIGINT,                     -- FK to signal_queue.id (first instance)
-  source_kind      TEXT NOT NULL               -- 'email' | 'whatsapp' | 'meeting_transcript' | 'scan_query'
-);
-CREATE INDEX IF NOT EXISTS idx_kbl_layer0_hash_ttl ON kbl_layer0_hash_seen(ttl_expires_at);
-
--- kbl_layer0_review (S6 from B2 Step 0 review — 1-in-50 drop sampling queue)
-CREATE TABLE IF NOT EXISTS kbl_layer0_review (
-  id              BIGSERIAL PRIMARY KEY,
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  signal_id       BIGINT NOT NULL,             -- FK to signal_queue.id
-  dropped_by_rule TEXT NOT NULL,               -- rule name that triggered drop
-  signal_excerpt  TEXT NOT NULL,               -- first 500 chars of payload for quick Director scan
-  source_kind     TEXT NOT NULL,
-  reviewed_at     TIMESTAMPTZ,                 -- NULL = pending, set when Director clicks through
-  review_verdict  TEXT                         -- 'correct_drop' | 'false_positive' | 'ambiguous', NULL if unreviewed
-);
-CREATE INDEX IF NOT EXISTS idx_kbl_layer0_review_pending ON kbl_layer0_review(created_at) WHERE reviewed_at IS NULL;
+-- Upgrade signal_queue.id to BIGINT (prevents Phase 2+ integer overflow, matches new FK column types)
+ALTER TABLE signal_queue ALTER COLUMN id TYPE BIGINT;
+ALTER SEQUENCE signal_queue_id_seq AS BIGINT;
 ```
 
-- No business logic changes, no loader, no writer — schema only
-- Rollback section in migration file (DROP TABLE IF EXISTS × 3) for disaster recovery
-- `tests/test_migrations.py` entry that runs the migration up + rollback against a test DB to confirm syntax
+And to the DOWN section (rollback):
 
-**OUT**
-- Writer code (Step 1 reader, ledger writer, Layer 0 hash writer) — those land in KBL-B impl + KBL-C
-- Data seeding (empty tables are correct initial state)
-- Any change to `signal_queue` or `kbl_cost_ledger` (existing tables untouched)
+```sql
+-- Downgrade signal_queue.id back to INTEGER (rollback — assumes row count fits in INTEGER)
+ALTER TABLE signal_queue ALTER COLUMN id TYPE INTEGER;
+ALTER SEQUENCE signal_queue_id_seq AS INTEGER;
+```
 
-### CHANDA pre-push self-check
+Verify the sequence name with `SELECT pg_get_serial_sequence('signal_queue', 'id');` if it differs from the default naming.
 
-- **Q1 Loop Test:** This migration CREATES the storage layer Legs 2+3 depend on. It does not modify existing reading/writing behavior; it enables future compliance. Proceeds without Director stop — the creation of loop infrastructure IS the remedy for detected non-compliance, not a new loop modification. Reference CHANDA §2 Leg 2 (ledger must exist atomically-writable) and Leg 3 (Step 1 must read ledger).
-- **Q2 Wish Test:** Pure wish-service. No convenience shortcut.
-- **Inv 2 note:** This migration makes Inv 2 (atomic ledger write on every Director action) *possible*. Actual atomicity is enforced by KBL-C write path + the strict-read policy we ratified during CHANDA adoption.
+Keep the new FK columns as `BIGINT` (unchanged from your PR #5).
 
-### Branch + PR
+### CHANDA pre-push
 
-- Branch: `loop-schema-1`
-- Base: `main` (latest)
-- PR title: `LOOP-SCHEMA-1: feedback_ledger + kbl_layer0_hash_seen + kbl_layer0_review`
-- PR body: cite CHANDA §2 Leg 2/3 + B2 S5/S6 findings + B3 CHANDA audit Flag 1
-
-### Reviewer
-
-B2 (reviewer-separation).
-
-### Timeline
-
-~45-60 min. You've done N migrations before; this is N+1.
+- Q1 Loop Test: schema-only table-type upgrade, no loop-mechanism modification. Pass.
+- Q2 Wish Test: forward-compatibility for Phase 2+ signal volume. Wish-service. Pass.
 
 ### Dispatch back
 
-> B1 LOOP-SCHEMA-1 shipped — PR #5 open, branch `loop-schema-1`, head `<SHA>`, tests green. 3 new tables. Ready for B2 review.
-
-### Work-in-flight note
-
-PR #4 (LAYER0-LOADER-1) stays in B2 review. No action needed from you on PR #4 unless B2 returns fixes.
+> B1 PR #5 amended — signal_queue.id upgraded to BIGSERIAL, head `<SHA>`, <N>/<N> tests green. Ready for B2 review.
 
 ---
 
-*Posted 2026-04-18 by AI Head. PR #4 in B2 queue. This is parallel production-moving work.*
+## Task B (after Task A): Amend PR #4 — version int-not-string (S1 from B2 review)
+
+### What to do
+
+On branch `layer0-loader-1`, apply the 3-line patch for S1:
+
+1. In `kbl/layer0_rules.py`, change `version` field validation from `str` to `int` (matching `slug_registry.py` convention and B3's Step 0 draft `version: 1`)
+2. In `tests/fixtures/layer0_rules_valid.yml` and `layer0_rules_malformed.yml`, change `version: "1.0.0"` to `version: 1`
+3. In `tests/test_layer0_rules.py`, update the version-type assertion
+
+Amend commit + force-push to `layer0-loader-1`.
+
+### Why int not string
+
+- Matches `slug_registry.py` convention (`version: 1`)
+- Matches B3's Step 0 draft (`version: 1`) — without this, loader would reject B3's vault commit with `Layer0RulesError`
+- Minimizes coordination cost with B3's parallel vault YAML work
+
+### Dispatch back
+
+> B1 PR #4 S1 amended — version field now int, head `<SHA>`, <N>/<N> tests green. Ready for Director merge.
+
+---
+
+## Sequence + timing
+
+- Task A (PR #5 amend): ~10-15 min
+- Task B (PR #4 S1 patch): ~10-15 min
+- Total: ~20-30 min both
+
+Can do either order — your call. PR #5 review by B2 is more time-sensitive (unblocks B3's Step 1 Inv-3 implementation), so A-first is preferred.
+
+---
+
+## Work-in-flight note
+
+- PR #4 ready for Director merge as soon as Task B lands + tests re-green
+- PR #5 in B2 queue right after Task A lands
+- B3 is parallel-running Step 1 Inv-3 amendment; their Python-helper impl depends on `feedback_ledger` table existing (your PR #5). Merge order: PR #5 → PR #4 → B3's subsequent KBL-B wiring
+
+---
+
+*Posted 2026-04-18 by AI Head. Two small follow-ups to close both PRs in the pipe. PR #5 + S1 fix together unblock Director merges + B3 Step 1 wiring.*
