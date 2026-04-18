@@ -1,0 +1,12 @@
+version: 1
+rules:
+  - name: "test_email_null_sender"
+    source: "email"
+    match:
+      sender_domain_in: ["nytimes.com"]
+    detail: "bulk newsletter — Director-labeled null"
+  - name: "test_cross_source_throwaway"
+    source: "*"
+    match:
+      content_length_lt: 20
+    detail: "too-thin signal"
