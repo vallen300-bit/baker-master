@@ -2,82 +2,60 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (terminal instance)
-**Previous:** PR #7 phone fix + PR #9 LOOP-GOLD-READER-1 shipped. PR #9 merged at `c95db55`. PR #7 awaits B2 phone-delta re-verify. Idle since.
+**Previous:** STEP2-RESOLVE-IMPL shipped as PR #10 at `d735136`. Idle since.
 **Task posted:** 2026-04-18
 **Status:** OPEN
 
 ---
 
-## Task: STEP2-RESOLVE-IMPL — Source-Specific Thread/Arc Resolver
+## Task: STEP3-EXTRACT-IMPL — Gemma Structured Entity Extraction
 
-**Why now:** All dependencies ready. Step 1 triage writes `primary_matter` and `related_matters` (PR #8). Layer 0 upstream (PR #7). LOOP-GOLD-READER-1 for downstream Step 5 (PR #9 merged). Step 2 is the next pipeline unit. Spec ratified in KBL-B §4.3.
+**Why now:** Step 2 shipped (PR #10 pending review). Step 3 is the next pipeline unit. Spec ratified in KBL-B §4.4. Prompt ratified (B3-authored, B2-reviewed READY at `briefs/_drafts/KBL_B_STEP3_EXTRACT_PROMPT.md`).
 
 ### Scope
 
 **IN**
 
-1. **`kbl/steps/step2_resolve.py`** — source-dispatched resolver
-   - Strategy pattern: one `Resolver` per source
-   - Public: `resolve(signal_id, conn) -> list[str]` — returns resolved vault-relative paths
-   - State transitions: `awaiting_resolve` → `resolve_running` → `awaiting_extract` (or `resolve_failed`)
-   - Writes: `signal_queue.resolved_thread_paths` (JSONB array)
-   - Degraded-mode behavior: on Voyage API unreachable for transcript/scan sources → log WARN, write empty array (new-thread semantics), advance to `awaiting_extract` (do NOT fail the signal)
+1. **`kbl/prompts/step3_extract.txt`** — extract template text from `briefs/_drafts/KBL_B_STEP3_EXTRACT_PROMPT.md`. File-based load pattern per Inv 10.
 
-2. **`kbl/resolvers/email.py`** — metadata resolver
-   - Input: `payload->>'email_message_id'`, `payload->>'in_reply_to'`, `payload->'references'`, `payload->>'subject'`
-   - Walk `in_reply_to` chain via `signal_queue.payload` lookups (same thread = same `in_reply_to`/`references` graph)
-   - Fall back to Subject `Re:` normalization if no header graph match
-   - Output: up to 3 vault paths from `wiki/<primary_matter>/*.md` where matching signals' committed paths exist
+2. **`kbl/steps/step3_extract.py`** — the evaluator
+   - `build_prompt(signal_text, source, primary_matter, resolved_thread_paths) -> str`
+   - `parse_gemma_response(raw: str) -> ExtractedEntities` — structured dataclass with keys `people`, `orgs`, `money`, `dates`, `references`, `action_items` (all arrays, possibly empty)
+   - `call_ollama(prompt: str, model="gemma2:8b", timeout=30)` — reuse pattern from `step1_triage.py` or lift to shared `kbl/ollama.py` module if not already there
+   - `extract(signal_id: int, conn) -> ExtractedEntities` — full pipeline: load signal, build prompt, call Ollama, parse, write to `signal_queue.extracted_entities JSONB`, write `kbl_cost_ledger` row (`step='extract'`, `model='gemma2:8b'`, `cost_usd=0`), advance state
+   - State transitions: `awaiting_extract` → `extract_running` → `awaiting_classify` OR `extract_failed`
+   - Partial-JSON handling (per §7 error matrix): missing sub-keys → drop from output (not NULL), log WARN, continue
 
-3. **`kbl/resolvers/whatsapp.py`** — metadata resolver
-   - Input: `payload->>'chat_id'`, `payload->>'sent_at'`
-   - Same `chat_id` + last-90-day window + same `primary_matter` = same thread
-   - Output: vault paths of most recent N prior committed signals in chat
+3. **`kbl/exceptions.py`** — add `ExtractParseError` (coexists with existing exceptions per B1's PR #10 pattern)
 
-4. **`kbl/resolvers/transcript.py`** — embedding resolver
-   - Input: `raw_content`, `primary_matter`
-   - Compute Voyage embedding (voyage-3)
-   - Query `wiki/<primary_matter>/*.md` frontmatter-stored embeddings (IF stored — else compute on-the-fly for Phase 1)
-   - Return top-3 with cosine similarity ≥ `KBL_STEP2_RESOLVE_THRESHOLD` (default 0.75, env-configurable)
-   - Degraded-mode: Voyage 500/timeout → empty list, log WARN
-
-5. **`kbl/resolvers/scan.py`** — embedding resolver
-   - Same as transcript but scoped to `payload->>'director_context_hint'` if present
-
-6. **`kbl/voyage_client.py`** (if not exists) — HTTP client wrapper for `voyage-3`
-   - Single `embed(text: str) -> list[float]`
-   - Timeout 10s
-   - Raises `VoyageUnavailableError` on 5xx / timeout
-   - Env: `VOYAGE_API_KEY` (already in KBL-A secrets)
-
-7. **Tests** — `tests/test_step2_resolve.py`:
-   - Email resolver: In-Reply-To graph walk (3-signal chain → 2 prior paths)
-   - Email resolver: no match → `[]`
-   - WhatsApp resolver: same chat_id → prior N paths
-   - Transcript resolver: mocked Voyage client, 3-match happy path
-   - Transcript resolver: Voyage unavailable → degraded mode (empty list + WARN log)
-   - Scan resolver: same as transcript
-   - `resolve()` dispatcher: routes by source correctly
-   - Invariant: `resolved_thread_paths` always array (never None), always vault-relative starting `wiki/`
-
-### Cost ledger
-
-- Email + WhatsApp: no row (metadata-only, zero cost)
-- Transcript + Scan: one row per call, `step='resolve'`, `model='voyage-3'`, `input_tokens` (approx = chars / 4), `cost_usd ≈ 0.00005`
+4. **Tests** — `tests/test_step3_extract.py`:
+   - `build_prompt` integration: mock signal + placeholders filled correctly
+   - `parse_gemma_response` happy path (all 6 keys populated)
+   - `parse_gemma_response` partial JSON (4 of 6 keys) → accepts, missing keys default to `[]`
+   - `parse_gemma_response` unparseable → raises `ExtractParseError`
+   - `call_ollama` mocked (no live Ollama in CI)
+   - `extract` end-to-end: DB writes + cost ledger row + state transition
+   - R3 retry path: first call unparseable, second call valid → final result written
 
 ### CHANDA pre-push
 
-- **Q1:** Step 2 is downstream of Step 1 reads (Leg 3). It does not touch the reading pattern itself. Pass.
-- **Q2:** serves wish (arc continuity = loop compounding). Pass.
-- **Inv 1:** empty resolved_thread_paths = valid zero-Gold read for new-arc signals. Test explicitly.
-- **Inv 9:** resolver READS baker-vault only. No writes (that's Step 7). Verify.
+- **Q1 Loop Test:** Step 3 does not read hot.md / ledger / Gold. Not a Leg touch. Pass.
+- **Q2 Wish Test:** serves wish (structured entities feed Step 5 synthesis). Pass.
+- **Inv 10:** prompt loaded once from file; no self-modification. Verify.
+- **Shared ollama client:** if you lift to `kbl/ollama.py`, verify no duplication-drift between Step 1 and Step 3 client code.
+
+### Dependencies
+
+- PR #8 (Step 1 triage) merged or mergeable — provides signal_queue columns your state machine needs
+- Step 3 extract prompt @ `briefs/_drafts/KBL_B_STEP3_EXTRACT_PROMPT.md` (B3-authored, READY)
+- `signal_queue.extracted_entities JSONB` column — verify exists, add migration if missing
 
 ### Branch + PR
 
-- Branch: `step2-resolve-impl`
+- Branch: `step3-extract-impl`
 - Base: `main`
-- PR title: `STEP2-RESOLVE-IMPL: source-specific thread/arc resolver`
-- Target PR: #10
+- PR title: `STEP3-EXTRACT-IMPL: kbl/steps/step3_extract.py + kbl/prompts/step3_extract.txt`
+- Target PR: #11
 
 ### Reviewer
 
@@ -85,12 +63,12 @@ B2.
 
 ### Timeline
 
-~75-105 min (4 resolvers + Voyage client wrapper + tests).
+~60-90 min (similar shape to Step 1, smaller because no hot.md/ledger loading).
 
 ### Dispatch back
 
-> B1 STEP2-RESOLVE-IMPL shipped — PR #10 open, branch `step2-resolve-impl`, head `<SHA>`, <N>/<N> tests green. Ready for B2 review.
+> B1 STEP3-EXTRACT-IMPL shipped — PR #11 open, branch `step3-extract-impl`, head `<SHA>`, <N>/<N> tests green. Ready for B2 review.
 
 ---
 
-*Posted 2026-04-18 by AI Head. B2 on REDIRECT fold review (Task D). B3 idle.*
+*Posted 2026-04-18 by AI Head. B2 reviewing PR #8 + PR #10. B3 idle.*

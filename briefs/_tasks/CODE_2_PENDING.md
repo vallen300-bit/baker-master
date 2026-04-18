@@ -170,9 +170,49 @@ B3 applied S1 rename at `02e5063` (10 sites total: your 9 + 1 extra for internal
 
 ---
 
-## Task D (queued, fires when AI Head commits REDIRECT fold)
+## Task D (DONE — APPROVE at f712647)
 
-When `fold(KBL-B): Step 6 REDIRECT` lands in git log, review per prior spec (§2, §3.2, §4.7, §6, §8, §9, §10, §11). File at `briefs/_reports/B2_kbl_b_redirect_fold_review_20260418.md`. ~20-30 min.
+REDIRECT fold reviewed + APPROVE'd. 3 nice-to-haves tracked:
+- N1: §13 acceptance criteria — <5% "needs editing" threshold stated in §6.4 but not formalized in §13 acceptance list. Note: brief was extended by Director/linter; §13 now has concrete thresholds. Verify N1 superseded.
+- N2: name deterministic metadata override as safety feature
+- N3: document cross-link partial-failure idempotency semantics
+
+Pre-flag for AI Head acknowledged: Step 6 impl ticket will include `author: pipeline` regardless-of-Opus-emission test.
+
+---
+
+## Task E (new): Review PR #10 — STEP2-RESOLVE-IMPL
+
+**PR:** https://github.com/vallen300-bit/baker-master/pull/10
+**Branch:** `step2-resolve-impl`
+**Head:** `d735136`
+**Tests:** 41/41 new green; related suite 100/100 (1 live-PG skip)
+
+### Scope
+
+**IN**
+- `kbl/steps/step2_resolve.py` — source-dispatched `resolve(signal_id, conn)` + state machine + JSONB result write + conditional cost-ledger
+- `kbl/resolvers/{email,whatsapp,transcript,scan,_embedding}.py` — 4 resolvers + shared vault-scan/cosine helper
+- `kbl/voyage_client.py` — urllib wrapper for `/v1/embeddings`
+- `kbl/exceptions.py` adds `VoyageUnavailableError` + `ResolverError`
+- `migrations/20260418_step2_resolved_thread_paths.sql` — JSONB column + GIN index (idempotent)
+- **Degraded-mode per §4.3:** Voyage 5xx/timeout → empty paths + WARN + ledger row `success=False` + advance to `awaiting_extract` (not `resolve_failed`)
+- **Invariants:** `resolved_thread_paths` always JSONB array (never NULL); entries must start `wiki/` (non-compliant dropped with WARN)
+
+**Specific scrutiny**
+1. **Degraded-mode correctness** — Voyage unreachable does NOT fail the signal; signal continues with empty resolve. Verify no edge case flips to `resolve_failed` incorrectly.
+2. **Email In-Reply-To graph walk** — depth cap? Cycle detection? If A→B→C→A exists, does the walker terminate?
+3. **WhatsApp chat_id sliding window** — 90-day filter applied correctly?
+4. **Embedding resolver threshold** — `KBL_STEP2_RESOLVE_THRESHOLD=0.75` default. Env-configurable?
+5. **Wiki-relative path validation** — rejection of non-compliant entries with WARN is correct (not silent filter).
+6. **Cost-ledger row for Voyage** — correct `step='resolve'`, `model='voyage-3'`, `cost_usd ≈ 0.00005` when fires; zero rows for email/WA resolvers.
+
+### Format
+`briefs/_reports/B2_pr10_review_20260418.md`
+Verdict: APPROVE / REDIRECT / BLOCK
+
+### Timeline
+~30-40 min.
 
 ---
 
