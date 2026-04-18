@@ -2,96 +2,108 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (terminal instance)
-**Previous:** TCC fix + DATABASE_URL shipped (PR #3 in review, 1P item live)
+**Previous:** SLUGS-1 S1+S2 shipped on `slugs-1-impl` (commit `4468b68`)
 **Task posted:** 2026-04-18
-**Status:** OPEN — awaiting execution
-**Supersedes:** TCC + DB_URL task (shipped)
+**Status:** OPEN — urgent (unblocks SLUGS-1 merge)
+**Supersedes:** S1+S2 task (shipped)
 
 ---
 
-## Task: SLUGS-1 S1 + S2 Cleanup
+## Task: Rebase `slugs-1-impl` on main + resolve `run_kbl_eval.py` 3-way merge
 
-Should-fix items B2 flagged in the original SLUGS-1 review (`briefs/_reports/B2_slugs1_review_20260417.md`). Small cleanup before they rot. ~30 min combined.
+### Context
 
-### Deliverable 1 — S1: test for `score_row` `unknown_non_canonical` guard
+Director and AI Head pushed merges through KBL-A + baker-vault first. SLUGS-1 PR #2 (`slugs-1-impl`) is now **CONFLICTING** on `scripts/run_kbl_eval.py`. Blocks merge.
 
-**Context:** `kbl/slug_registry.py` has `normalize()` returning None for unknown slugs. But `run_kbl_eval.py`'s `score_row` has an explicit `unknown_non_canonical` guard that prevents a model outputting an unknown slug like `"hospitality"` from spuriously matching a label of `None`. The registry tests don't cover this contract dependence — it's a runtime invariant that lives in the eval runner, not the registry.
+The conflict:
 
-**Fix:** Add a test at `tests/test_run_kbl_eval.py` (new file) that exercises the invariant:
+- **Main** has commit `aba04d6` — B3's v3 eval prompt (semantic glossary, 18-slug list, vedana rule, null-handling fix). `STEP1_PROMPT` is static.
+- **Your branch `slugs-1-impl`** has commit `5f53ee0` — refactored `STEP1_PROMPT` into dynamic `_build_step1_prompt()` that enumerates from `slug_registry`.
 
-```python
-# pseudocode
-def test_unknown_non_canonical_scores_false():
-    # model outputs "hospitality" (unknown), label says primary_matter is None
-    # expected: matter_ok = False (because model hallucinated a matter where truth is null)
-    result = score_row(
-        label={"primary_matter_expected": None, ...},
-        parsed={"matter": "hospitality", ...}  # unknown string
-    )
-    assert result["matter_ok"] is False
+Both edits land on the same prompt region. Rebase needs 3-way merge.
 
-def test_unknown_non_canonical_still_catches_legitimate_nulls():
-    # model outputs None, label is None
-    # expected: matter_ok = True (both null, aligned)
-    ...
+### Desired result
 
-def test_alias_normalization_still_works():
-    # model outputs "Hagenauer" (alias), label is "hagenauer-rg7"
-    # expected: matter_ok = True (normalize() resolves alias)
-    ...
-```
+`_build_step1_prompt()` on rebased branch must produce a prompt functionally equivalent to B3's v3 static glossary prompt — dynamic from registry, containing:
 
-Aim for 3-4 cases covering: unknown-string-vs-null-label, null-vs-null, alias-match, canonical-match.
+1. **Full slug enumeration** via `active_slugs()` (already in your function)
+2. **Per-slug descriptions** via `registry.describe(slug)` — forms the semantic glossary (this is the v3 addition — pull from main's `STEP1_PROMPT` content + migrate to `registry.describe()` calls)
+3. **Verbatim vedana rule block** — copy from main's `STEP1_PROMPT` verbatim as a static string inside the function
+4. **Disambiguation rules** — copy from main's `STEP1_PROMPT` (e.g., "brisengroup.com header ≠ brisen-lp", "hagenauer-rg7 vs cupial", "kitzbuhel-six-senses vs steininger")
+5. **Generic-category reject list** — copy from main (`"hospitality"`, `"investment"`, `"legal"`)
+6. **`null` permitted** explicit language
+7. **Null-handling fix** (string `"null"`/`"none"` → Python None) — must survive the rebase (should already be in `slug_registry.normalize()`; verify)
 
-### Deliverable 2 — S2: catalogue 3 residual hardcoded slug sites
+Your `briefs/_drafts/KBL_B_STEP1_TRIAGE_PROMPT.md` is the production reference — aligned with what B3 had in mind. The eval runner prompt should match that spec.
 
-**Context:** B2 noted B1's original SLUGS-1 residual list missed 3 sites in `tools/`, `orchestrator/`, `memory/`. The original task-brief scope was the 3 explicit consumers (`validate_eval_labels.py`, `run_kbl_eval.py`, `build_eval_seed.py`) — those 3 are clean. The other 3 may or may not need registry migration.
-
-**Fix:**
-
-1. Grep the 3 directories for hardcoded slug references:
+### Procedure
 
 ```bash
-grep -rn "hagenauer-rg7\|cupial\|mo-vie\|brisen-lp\|wertheimer\|aukera" tools/ orchestrator/ memory/ 2>&1 | grep -v __pycache__ | head -30
+git fetch origin
+git checkout slugs-1-impl
+git rebase origin/main
+# When conflict hits in scripts/run_kbl_eval.py:
+# - Accept your _build_step1_prompt() structure as base
+# - Port v3's glossary + vedana + disambiguation into the function body
+# - git add scripts/run_kbl_eval.py
+# - git rebase --continue
 ```
 
-2. For each hit, classify:
-   - **UI/keypress map** (like `present_signal.py` 1→hagenauer-rg7): stays as-is, not a registry concern
-   - **Canonical-list duplication**: migrate to `kbl.slug_registry.canonical_slugs()` — open follow-up PR
-   - **Documentation/comment**: leave alone
+Run tests:
 
-3. File a catalogue at `briefs/_drafts/SLUGS_2_RESIDUAL_CATALOGUE.md`:
-   - Table: file:line, current reference, classification, action (keep / migrate / delete)
-   - Summary: count per classification, total migrate-needed
-   - Recommendation: fold migrations into one small follow-up PR OR defer to per-file basis
+```bash
+.venv/bin/python3 -m pytest tests/test_slug_registry.py tests/test_score_row.py -v
+# All 15 should remain green
+```
 
-**Do NOT** actually migrate in this task. Catalogue + recommendation only. Migration is a separate dispatch.
+Verify prompt output:
+
+```python
+# Quick smoke: _build_step1_prompt() output contains all 19 slug descriptions
+from kbl.slug_registry import active_slugs
+from scripts.run_kbl_eval import _build_step1_prompt  # or wherever it lives
+p = _build_step1_prompt()
+assert len(active_slugs()) == 19
+for slug in active_slugs():
+    assert slug in p  # every slug mentioned
+    # ideally: assert registry.describe(slug) is somewhere in p
+assert "opportunity" in p and "threat" in p and "routine" in p  # vedana rule present
+assert "brisen-lp" in p  # disambiguation content
+```
+
+### Push
+
+```bash
+git push --force-with-lease origin slugs-1-impl
+```
+
+**`--force-with-lease`** not `--force` — safety against racing pushes.
+
+### Deliverable
+
+- PR #2 becomes `mergeable: CLEAN` again
+- 15/15 tests green
+- `_build_step1_prompt()` produces glossary-rich content
 
 ### Report
 
-File: `briefs/_reports/B1_slugs1_s1_s2_20260418.md`
+One-liner:
 
-- Deliverable 1: test file PR URL + pytest output showing new tests green
-- Deliverable 2: catalogue file path + count-per-classification summary + recommendation (fold-all-in-one vs per-file)
+> B1 slugs-1-impl rebased — conflict resolved on scripts/run_kbl_eval.py, PR #2 now CLEAN, 15/15 tests green, commit `<SHA>`. Ready for Director merge.
 
-### Dispatch back
-
-> B1 S1+S2 done — see `briefs/_reports/B1_slugs1_s1_s2_20260418.md`, commit `<SHA>`. Test PR: `<URL>`. Catalogue: `<N>` sites in 3 dirs, `<M>` need migrate.
+Short report at `briefs/_reports/B1_slugs1_rebase_20260418.md` only if anything unexpected surfaced.
 
 ### Scope guardrails
 
-- **Do NOT** migrate residual hardcoded slugs in this task. Catalogue only.
-- **Do NOT** touch KBL-B files (that's the §6-13 authoring in flight).
+- **Do NOT** add N1-N4 nice-to-haves. Rebase + conflict resolution only.
+- **Do NOT** re-run D1 eval against the rebased code (B3 is stood down, D1 ratified).
+- **Do NOT** touch any other file during rebase other than the conflict.
 
 ---
 
 ## Est. time
 
-~30 min:
-
-- 15 min S1 test file
-- 10 min S2 grep + catalogue
-- 5 min report + PR
+~15 min.
 
 ---
 
