@@ -2,51 +2,73 @@
 
 **From:** AI Head
 **To:** Code Brisen #2 (app instance)
-**Previous report:** [`briefs/_reports/B2_kbl_b_skeleton_review_20260418.md`](../_reports/B2_kbl_b_skeleton_review_20260418.md) — REDIRECT (small surface, blockers applied inline)
+**Previous:** KBL-B §4-5 review shipped (`0743def`), 3 blockers applied by AI Head inline (`1448479`)
 **Task posted:** 2026-04-18
 **Status:** OPEN — awaiting execution
-**Supersedes:** KBL-B skeleton review task (shipped)
+**Supersedes:** KBL-B §4-5 review task (shipped)
 
 ---
 
-## Task: KBL-B §4-5 Review (I/O contracts + status migration)
+## Task: Review PR #3 — TCC-Safe Install Fix
 
-AI Head drafted §4 (per-step I/O contracts) and §5 (two-track status migration) post-skeleton ratification. Commits `5ba00c1` + `43d499a` on main. Review before §6-13 builds on top.
+**PR:** https://github.com/vallen300-bit/baker-master/pull/3
+**Branch:** `kbl-a-tcc-fix`
+**Head commit:** `04b494b`
+**Report:** `briefs/_reports/B1_tcc_fix_dburl_20260418.md` (commit `c86aed0` on main)
 
-### Scope
+B1 shipped both deliverables from CODE_1_PENDING. TCC fix is in PR #3 awaiting merge. DATABASE_URL 1P item is live (separate, no PR needed).
 
-**IN**
-- §4.1-4.9: per-step I/O contracts (reads/writes/ledger/log/invariants per step, plus §4.9 TOAST cleanup)
-- §5.1-5.7: two-track status migration design
+### Scope of this review
 
-**OUT**
-- §1-3 (already ratified)
-- §6-13 (not yet written; forthcoming)
-- Code implementation (design review only)
+**IN — PR #3:**
+- Templated plists with `__REPO__` placeholder + install-time sed substitution
+- Post-sed `grep __REPO__` guard (fails install if placeholder didn't get replaced)
+- `/usr/local/bin/kbl-*.sh` symlinks dropped entirely (plist-as-source-of-truth per B2's earlier N2 implicit preference)
+- TCC refuse-guard on `~/Desktop/`, `~/Documents/`, `~/Downloads/`
+- Default `KBL_REPO` → `~/baker-code`
+- KBL-A brief §6 TCC note + updated acceptance criteria
 
-### What to scrutinize
+**OUT:**
+- DATABASE_URL 1P item (created via `op item create`, no code change, no PR)
+- Mac Mini live state (B1 verified byte-identical re-run)
 
-1. **§4 I/O completeness.** Are there reads/writes the steps will need that aren't listed? Specifically: does Step 1 (triage) need to read `source` for the prompt template selection? Does Step 5 (Opus) need `subject` or just `raw_content`?
-2. **§4 invariants.** Each step has a one-line invariant. Are any of them wrong, unprovable, or missing (e.g., is there a termination invariant for the whole pipeline)?
-3. **§4.9 TOAST cleanup.** Is the same-transaction approach right, or should nulling be a post-commit trigger/deferred task?
-4. **§5 compatibility mirror.** Table at §5.3 maps `(stage, state)` → `status` for legacy compat. Does it cover all cases? Do existing KBL-A queries on `status` keep working?
-5. **§5 worker claim query.** §5.4 SQL uses `ORDER BY started_at NULLS FIRST, id`. Does this handle fair scheduling correctly, or create starvation risk for signals stuck in retry loops?
-6. **§5.6 no-backfill stance.** Is leaving existing pre-KBL-B rows with `status` populated and `stage`+`state` NULL the right call, or does it create dual-read complexity downstream?
+### Specific scrutiny
+
+Apply your usual reviewer discipline. On top of that:
+
+1. **`__REPO__` substitution safety.** sed replacing a placeholder in a plist — is the sed robust against edge cases (repo path contains spaces? special chars? trailing slash?)? Would an adversarial `KBL_REPO=/path'/with"quote` break parsing?
+2. **Refuse-guard coverage.** B1 blocklisted `~/Desktop/`, `~/Documents/`, `~/Downloads/`. Are there other TCC-protected paths on macOS 15 worth blocklisting (e.g., `~/Pictures/`, iCloud Drive `~/Library/Mobile Documents/`)? Or is conservative blocklist acceptable with `__REPO__` guard as backstop?
+3. **Non-regression vs live Mac Mini.** B1 claims re-running installer produces byte-identical ProgramArguments to the manual bandage. Verify the claim by pulling the branch and comparing output of a dry-run to the current `~/Library/LaunchAgents/*.plist` on Mac Mini (via `ssh macmini`).
+4. **Backward compat on clones that were installed pre-this-fix.** Mac Mini has the bandaged plists already. If Director re-runs the new installer, does it clean the stale `/usr/local/bin/kbl-*.sh` symlinks (would need sudo) OR does it leave them dangling (harmless but messy)?
+5. **Brief §6 note.** Check that the TCC explanation in the brief is self-contained — a fresh reader in 6 months understands why plist-as-source-of-truth without needing git-blame archaeology.
 
 ### Output format
 
-File: `briefs/_reports/B2_kbl_b_phase2_review_20260418.md`
+File: `briefs/_reports/B2_pr3_review_20260418.md`
 
-- **Verdict:** READY / REDIRECT / BLOCK
-- **Blockers** / **Should-fix** / **Nice-to-have** / **Questions** (same pattern as prior reviews)
+Sections:
+1. **Verdict:** APPROVE / REQUEST CHANGES / REJECT
+2. **Blockers**
+3. **Should-fix**
+4. **Nice-to-have**
+5. **Non-regression check result** (actual diff output from your Mac Mini pull + compare)
+
+Match the format of `B2_pr1_review_20260417.md`.
 
 ### Time budget
 
-~30 min. If >45 min, ship partial.
+~30 min. PR is small (targeted fix + tests, ~100-200 line diff estimated).
 
 ### Dispatch back
 
-> B2 KBL-B §4-5 review done — see `briefs/_reports/B2_kbl_b_phase2_review_20260418.md`, commit `<SHA>`. Verdict: <READY | REDIRECT | BLOCK>.
+> B2 PR #3 review done — see `briefs/_reports/B2_pr3_review_20260418.md`, commit `<SHA>`. Verdict: <APPROVE | REQUEST CHANGES | REJECT>.
+
+---
+
+## Scope guardrails
+
+- Merge decision is Director's — you report verdict, don't auto-merge.
+- Don't re-open KBL-A ratified architecture. Scope is THIS PR's 4 deliverables.
 
 ---
 
