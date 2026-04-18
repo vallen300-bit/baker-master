@@ -51,7 +51,44 @@ Verdict: APPROVE / REDIRECT (list inline-appliable fixes) / BLOCK
 
 ---
 
-## Task B (queued, fires when AI Head commits REDIRECT fold)
+## Task B (now): Review STEP5-OPUS-PROMPT draft
+
+**File:** `briefs/_drafts/KBL_B_STEP5_OPUS_PROMPT.md` at commit `7ea63c6` (570 lines, 36KB)
+**Author:** B3
+
+### AI Head resolutions to pass through your review
+
+1. **OQ1 (author frontmatter field) resolution:** Step 5 outputs `author: pipeline`. Director promotion flips to `author: gold` / `voice: gold`. Two distinct author values track lifecycle: `pipeline` (machine-generated, Silver) vs `director` (Gold-promoted). Verify B3's draft spec aligns; if it currently says `author: tier2`, flag as should-fix for `author: pipeline`.
+2. **OQ5 (`load_gold_context_by_matter` helper):** confirmed needed. B1 follow-on PR will land separately. Treat OQ5 as "unblocks deployment, not draft review" per B3's own flag.
+
+### Scope of review
+
+**IN**
+- Template completeness against §4.6 Step 5 I/O contract (reads, writes, invariants)
+- Input blocks present: `{signal_raw_text}`, `{extracted_entities}`, `{primary_matter}`, `{related_matters}`, `{vedana}`, `{triage_summary}`, `{resolved_thread_paths}`, `{gold_context_by_matter}`, `{hot_md_block}`, `{feedback_ledger_recent}`
+- **Leg 1 compliance:** `gold_context_by_matter` MUST be read + honored, even when empty. Zero-Gold case MUST produce valid first entry (not error). Worked example #1 tests this.
+- **Inv 8 compliance:** frontmatter `voice: silver` ALWAYS. No self-promote.
+- **Contradiction handling:** if signal contradicts prior Gold, flag with `⚠ CONTRADICTION:` marker in body, don't silently overwrite
+- Hard constraints stated in §1.2: no hallucination, no speculation, no long quotes without citation
+- Output contract: frontmatter + body, no preamble/postamble, 300-800 token target
+- Worked examples (§3): 2-3 from the labeled corpus — zero-Gold, continuation, cross-matter
+- CHANDA §5 Q1 + Q2 cited in §4 pre-push self-check
+
+**OUT**
+- Re-opening REDIRECT (Step 6 stays deterministic)
+- OQ5 helper impl (B1 ticket)
+- Pydantic frontmatter schema (KBL-B §4.7 impl)
+
+### Format
+`briefs/_reports/B2_step5_opus_prompt_review_20260418.md`
+Verdict: APPROVE / REDIRECT (list fix items, inline-appliable) / BLOCK
+
+### Timeline
+~25-35 min.
+
+---
+
+## Task C (queued, fires when AI Head commits REDIRECT fold)
 
 When `fold(KBL-B): Step 6 REDIRECT` lands in git log, review per prior spec (§2, §3.2, §4.7, §6, §8, §9, §10, §11). File at `briefs/_reports/B2_kbl_b_redirect_fold_review_20260418.md`. ~20-30 min.
 
@@ -59,13 +96,13 @@ When `fold(KBL-B): Step 6 REDIRECT` lands in git log, review per prior spec (§2
 
 ## Parallel state
 
-- B1: idle post-PR-#7-ship.
-- B3: working STEP5-OPUS-PROMPT draft (~60-90 min).
+- B1: STEP1-TRIAGE-IMPL dispatched (~60-90 min). PR #7 S1 phone-trunk-prefix fix queued for after.
+- B3: STEP5-OPUS-PROMPT shipped, idle.
 - AI Head: REDIRECT fold in progress.
 
-### Dispatch back
+### Dispatch back (after each task)
 
-> B2 PR #7 review done — `briefs/_reports/B2_pr7_review_20260418.md`, commit `<SHA>`. Verdict: <...>.
+> B2 STEP5-OPUS-PROMPT review done — `briefs/_reports/B2_step5_opus_prompt_review_20260418.md`, commit `<SHA>`. Verdict: <...>.
 > B2 REDIRECT fold review done — `briefs/_reports/B2_kbl_b_redirect_fold_review_20260418.md`, commit `<SHA>`. Verdict: <...>.
 
 ---
