@@ -996,6 +996,7 @@ D1 v3 eval retry (`briefs/_reports/B3_d1_eval_v3_20260417.md` @ `aba04d6`) lande
 | `feature-dev:code-reviewer` in Code Brisen harness smoke test | Confirmed available in AI Head Claude app; harness verification outstanding | Before first D6 auto-proceed activation |
 | 1Password secret migration | D4 explicit deferral | Phase 1 close-out |
 | UPS (APC BE600) | Hardware delivery | Concurrent with other hardening |
+| **Autonomous orchestration loop** (Director 2026-04-18) | Agents poll git mailboxes + auto-execute + auto-report, AI Head auto-routes. Removes Director from relay path; he stays as judgment layer. Feasibility confirmed — pattern is Sentinel-adjacent (same polling architecture). Components exist: `/loop` skill, `scheduled-tasks` MCP, git as shared state, `BAKER-MCP-1` brief (pending build) for richer inter-agent comms. Risks: context refresh, rebase race conditions, cost. Est ~1-2 days to build full loop after KBL-B stable. | **Post-Cortex-3T production** (after Phase 1 go-live + stable burn-in). Revisit with dedicated brief at that point. |
 
 ---
 
