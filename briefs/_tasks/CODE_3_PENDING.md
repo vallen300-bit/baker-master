@@ -2,59 +2,70 @@
 
 **From:** AI Head
 **To:** Code Brisen #3 (app instance)
-**Previous reports:**
-- `briefs/_reports/B3_d1_eval_results_20260417.md` (v1 — FAIL)
-- `briefs/_reports/B3_d1_eval_retry_20260417.md` (v2 — FAIL on matter)
-- `briefs/_reports/B3_d1_eval_v3_20260417.md` (v3 — 88v/76m, glossary +42pp)
+**Previous:** Stood down after D1 ratification (`397c391`)
 **Task posted:** 2026-04-18
-**Status:** STAND DOWN — D1 ratified, no further eval iteration required
+**Status:** OPEN — re-engaged for prompt authoring
 
 ---
 
-## Task: Stand Down — D1 Ratified
+## Task: Draft KBL-B §6 — Production Prompts for Steps 1 + 3 (Gemma local)
 
-### What just happened
+You have the deepest empirical knowledge of Gemma prompt behavior (v1/v2/v3 evals). AI Head is writing §6 for Opus + Sonnet prompts in parallel. You handle the two local-LLM prompts.
 
-Director ratified D1 on 2026-04-18 as **Gemma-final at 88v/76m for Phase 1**, overriding original 90/80 thresholds based on operational reasoning (Layer 2 Hagenauer-only scoping + inbox safety net + downstream Step 2/4 recovery).
+### Deliverables — 2 production prompt templates
 
-Ratification record: `briefs/DECISIONS_PRE_KBL_A_V2.md` §"D1 Phase 1 acceptance" (added in clarification block).
+**Step 1 — `triage` prompt**
 
-Path B (bug-fix + relabel + v4) is **not executed**. Reason: measurement hygiene gains are marginal; Phase 1 close-out will re-eval on live production data, which is a better measurement anyway.
+Based on your v3 glossary prompt that landed Gemma at 88v/76m. Harden for production:
 
-Path A (third-model eval) is **not executed**. Gemma is ratified.
+- Slug enumeration sourced from `kbl.slug_registry.active_slugs()` at prompt-build time (not hardcoded). Per-slug one-line descriptions from `registry.describe(slug)`.
+- Vedana rules block verbatim per v3.
+- JSON output spec with exact field types (per §4.2 contract: `primary_matter` nullable, `related_matters` array, `vedana` enum, `triage_confidence` 0-1, `triage_score` 0-100).
+- D1 sampling config unchanged (temp=0, seed=42, top_p=0.9).
+- Prompt preamble explicitly permits `null` for primary_matter + rejects generic category strings ("hospitality", "investment", etc.).
 
-Your 9 self-written slug descriptions (§2c of v3 report) are **accepted as-is** into `baker-vault/slugs.yml` via SLUGS-1 merge. Director retains editorial control via direct baker-vault PR at any time.
+**Step 3 — `extract` prompt**
 
-### What this means for you
+New prompt (no prior draft). Structured entity extraction per §4.4 schema:
 
-**Eval iteration loop is closed.** v1/v2/v3 reports are canonical artifacts — preserve them. They will be cited in KBL-B §6 prompt-design (AI Head's next authoring task) and in Phase 1 close-out Phase-2-gate re-eval.
+```json
+{"people": [...], "orgs": [...], "money": [...], "dates": [...], "references": [...], "action_items": [...]}
+```
 
-### What to do now
+All 6 keys always present, values always arrays (possibly empty). Non-extractable → omit from sub-object, not null/missing.
 
-**Nothing, immediately.** Stand by for next dispatch. You will likely be re-engaged for one of:
+Include 2-3 few-shot examples spanning email / WA / transcript source types (use signals from `outputs/kbl_eval_set_20260417_labeled.jsonl` as source material — you know the content shape).
 
-1. **Phase 1 close-out re-eval** (weeks away — live production signal corpus against same prompt)
-2. **Third-model eval** if Phase 2 expansion needs real accuracy fallback
-3. **Ad-hoc eval work** if a new classifier question arises in KBL-B/C
+### Where to put them
 
-You can close any scratch state on `/tmp/bm-b3` but preserve:
-- `outputs/kbl_eval_set_20260417_labeled.jsonl` (ground truth for future re-eval)
-- `outputs/kbl_eval_results_*` (baseline numbers for longitudinal comparison)
-- Your v3 prompt patch in `scripts/run_kbl_eval.py` (superseded by SLUGS-1's dynamic prompt once it merges, but the v3 pattern is canonical for how KBL-B Step 1 production prompt should look)
+File: `briefs/_drafts/KBL_B_STEP1_TRIAGE_PROMPT.md` and `briefs/_drafts/KBL_B_STEP3_EXTRACT_PROMPT.md`.
 
-### No dispatch back required
+Each file:
+- The prompt template (copy-paste-ready for a Python `.format()` or similar)
+- Rationale notes (why this structure, what empirical result motivated each piece)
+- Expected failure modes + recovery (tied to §4 invariants)
 
-This task is informational. No report needed unless you have:
-- Side-effects / state changes to flag (e.g., a file you meant to commit but didn't)
-- Questions about the ratification scope
-- Observations from v3 that weren't in your report but should be preserved
+These drafts will be imported verbatim into KBL-B §6 when AI Head assembles the full section.
 
-In those cases, file a brief note at `briefs/_reports/B3_standdown_notes_20260418.md`. Otherwise idle.
+### Scope guardrails
 
-### Thanks
+- **Do NOT** run evals. This is authoring, not measurement.
+- **Do NOT** modify `scripts/run_kbl_eval.py` or labeled set.
+- **Do NOT** speculate on Opus/Sonnet prompts (§6 covers those — AI Head authoring).
+- Use Director's slug descriptions (from `baker-vault/slugs.yml` post-SLUGS-1 merge, or the 9 you drafted yourself in v3 report).
 
-3 evals, prompt engineering breakthroughs (vedana rule +16pp, glossary +42pp), ground truth labels, scoring bug discovery, measurement hygiene. Clean sessions, structured reports, honest decision-forcing. This is exactly what the B3 role was scoped for.
+### Dispatch back
+
+> B3 §6 prompts drafted — Step 1 at `briefs/_drafts/KBL_B_STEP1_TRIAGE_PROMPT.md`, Step 3 at `briefs/_drafts/KBL_B_STEP3_EXTRACT_PROMPT.md`, commit `<SHA>`.
+
+### Est. time
+
+~45 min total:
+
+- 15 min Step 1 prompt (v3 hardening + registry-dynamic)
+- 25 min Step 3 prompt (new, with few-shot examples)
+- 5 min rationale notes + commit
 
 ---
 
-*Dispatched 2026-04-18 by AI Head. Git identity: `Code Brisen 3` / `dvallen@brisengroup.com`. Idle posture until next dispatch.*
+*Dispatched 2026-04-18 by AI Head. Re-engaged from stand-down per Director speed directive.*
