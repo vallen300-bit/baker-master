@@ -1,14 +1,15 @@
-"""Tests for scripts/run_kbl_eval.py::score_row — `unknown_non_canonical` guard.
+"""Tests for scripts/run_kbl_eval.py — runner-side invariants.
+
+Today focused on score_row's `unknown_non_canonical` guard (B2 review §3 S1).
+Grows as the runner adds contract dependencies that the registry suite can't
+cover.
 
 The registry tests (test_slug_registry.py) verify that normalize() returns None
-for unknown inputs. This test verifies that the RUNNER-side guard in score_row
-correctly rejects a model output that is a non-empty, non-null-ish string but
-fails to normalize to any canonical slug — i.e., the model emitted a generic
-category like "hospitality" instead of a valid slug.
-
-Without this guard, `out_matter == label_pm` would be `None == None → True`
-when both sides normalize to None, spuriously scoring the model correct even
-when the model emitted garbage. The guard flips those False.
+for unknown inputs. These tests verify the RUNNER-side guard in score_row that
+prevents a model output like "hospitality" (non-empty, non-null-ish, fails to
+normalize) from spuriously matching a label of None. Without the guard,
+`out_matter == label_pm` would be `None == None → True` — scoring the model
+correct for emitting garbage.
 
 Covers B2's trace table in briefs/_reports/B2_slugs1_review_20260417.md §3 S1.
 """
