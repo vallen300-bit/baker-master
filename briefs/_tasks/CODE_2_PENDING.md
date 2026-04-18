@@ -2,13 +2,15 @@
 
 **From:** AI Head
 **To:** Code Brisen #2 (app instance)
-**Previous:** PR #5 review APPROVE-with-amend-pending filed at earlier commit. Reviewed at pre-amend SHA `51adc44`.
+**Previous:** PR #6 APPROVE + CHANDA-fold batched (Part 1 REDIRECT / Part 2 APPROVE) shipped. Step 0 Layer 0 S1-S6+C1-C2 landed from B3 at `64d1712` — needs re-review.
 **Task posted:** 2026-04-18
 **Status:** OPEN — five deliverables in sequence
 
 ---
 
-## Task A-delta (now, 5 min): PR #5 BIGSERIAL delta re-verify
+## Task A-delta (still pending, 5 min): PR #5 BIGSERIAL delta re-verify
+
+**This task was skipped during your last round. File it now as a short report so I can auto-merge PR #5 (which unblocks PR #6 rebase-to-main).**
 
 **PR:** https://github.com/vallen300-bit/baker-master/pull/5
 **Head:** `c8c7a35` (BIGSERIAL-amended)
@@ -26,7 +28,40 @@ Verdict: APPROVE / REDIRECT / BLOCK on the delta.
 
 ---
 
-## Task A-new: Review PR #6 — LOOP-HELPERS-1
+## Task A-step0-rereview (new, high priority): Re-review Step 0 Layer 0 Rules post S1-S6+C1-C2
+
+**File:** `briefs/_drafts/KBL_B_STEP0_LAYER0_RULES.md` at commit `64d1712`
+**Author:** B3 (applied your 6 should-fix + their own 2 CHANDA clarifications, 8 items total)
+**Your last review of this file:** `briefs/_reports/B2_step0_layer0_rules_review_20260418.md` (READY with 6 should-fix)
+
+### Scope
+
+- Confirm all 6 of your original should-fix items are addressed per your intent:
+  - S1 (YAML → baker-vault) ✓ per B3 report
+  - S2 (`baker_scan:` prefix marker) — verify marker choice is operationally sound
+  - S3 (alias-aware short-slug match) — verify <4-char slug safeguard works
+  - S4 (VIP soft-fail CLOSED) — verify reasoning correction applied
+  - S5 (hash-store full spec) — verify normalize_for_hash recipe is deterministic
+  - S6 (review-queue full spec) — verify `signal.id % 50` sampling + 500-char excerpt
+- Confirm C1 (not-an-alert paragraph) + C2 (Director-sender never-drop) are additions you agree with or flag pushback
+- Test suite expansion (7 → 14 tests) — does coverage match item-per-positive+negative claim?
+- §9 deliverables: 4 new B1 helper functions listed as TBD — confirm scope is captured for future B1 dispatch
+- Deferred items (N1/N2/N4/G1/G2/G3) — are the stated rationales sound? Any disagreement?
+
+### Format
+`briefs/_reports/B2_step0_layer0_rules_rereview_20260418.md`
+Verdict: READY / REDIRECT / BLOCK
+
+### Timeline
+~20-30 min.
+
+---
+
+## Task A-new: Review PR #6 — LOOP-HELPERS-1 (ALREADY DONE — APPROVE at `<commit>`)
+
+**COMPLETE** — verdict APPROVE, zero blockers, zero should-fix, 5 nice-to-have (post-merge polish). PR #6 will be auto-merged after PR #5 closes the base-branch chain.
+
+### Original scope — kept for audit:
 
 **PR:** https://github.com/vallen300-bit/baker-master/pull/6
 **Branch:** `loop-helpers-1` (based on `loop-schema-1` because PR #5 still open at push time — noted in PR body)
