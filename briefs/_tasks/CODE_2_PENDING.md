@@ -2,32 +2,62 @@
 
 **From:** AI Head
 **To:** Code Brisen #2 (app instance)
-**Previous:** PR #4 review APPROVE filed at `cc211ed`. Self-corrected process incident cleanly.
+**Previous:** PR #5 review APPROVE-with-amend-pending filed at earlier commit. Reviewed at pre-amend SHA `51adc44`.
 **Task posted:** 2026-04-18
-**Status:** OPEN — four deliverables in sequence (batched where coordination saves time)
+**Status:** OPEN — five deliverables in sequence
 
 ---
 
-## Task A (now): Review PR #5 — LOOP-SCHEMA-1
+## Task A-delta (now, 5 min): PR #5 BIGSERIAL delta re-verify
 
 **PR:** https://github.com/vallen300-bit/baker-master/pull/5
-**Branch:** `loop-schema-1`
-**Head:** `c8c7a35` (B1 amended — `signal_queue.id → BIGINT` upgrade now in UP, DOWN mirrors reverse)
-**Tests:** 4 parser tests green + 1 live-PG skip by design
+**Head:** `c8c7a35` (BIGSERIAL-amended)
+**Delta from your last review:** B1's `signal_queue.id → BIGINT` amend landed.
 
-### Scope of review — as previously spec'd, plus BIGSERIAL-upgrade specifics
-
-- Three new tables: `feedback_ledger`, `kbl_layer0_hash_seen`, `kbl_layer0_review`
-- **`signal_queue.id → BIGINT` upgrade verification:**
-  - UP section runs `ALTER TABLE` + `ALTER SEQUENCE` BEFORE CREATE TABLE blocks ✓ (per B1 report)
-  - DOWN section mirrors reverse order — confirm: CREATE tables go last in UP, so in DOWN they drop FIRST, then the ALTER reverts
-  - Sequence name matches actual PG `signal_queue_id_seq` (B1 verified)
-- FK columns (`feedback_ledger.signal_id`, `kbl_layer0_hash_seen.source_signal_id`, `kbl_layer0_review.signal_id`) all `BIGINT` matching upgraded parent
-- No REFERENCES clauses (application-level integrity ratified)
-- Rollback safety check: DOWN's INTEGER-downgrade assumes row count fits in INTEGER. If Phase 1 ever exceeds 2.1B signal_queue rows, rollback becomes unsafe. Flag this edge-case in review.
+### Scope (5-min focused delta)
+- ALTER ordering (must precede CREATE TABLE blocks)
+- Sequence rename (`signal_queue_id_seq` → AS BIGINT)
+- DOWN section reverse (drop tables first, then BIGINT→INTEGER, then sequence reset)
+- Optional: assess whether REFERENCES clauses now safe to add (type mismatch removed); recommend but do not block
 
 ### Format
-`briefs/_reports/B2_pr5_review_20260418.md`
+Append verdict section to existing `briefs/_reports/B2_pr5_review_20260418.md` OR short separate report `briefs/_reports/B2_pr5_delta_review_20260418.md` — your choice.
+Verdict: APPROVE / REDIRECT / BLOCK on the delta.
+
+---
+
+## Task A-new: Review PR #6 — LOOP-HELPERS-1
+
+**PR:** https://github.com/vallen300-bit/baker-master/pull/6
+**Branch:** `loop-helpers-1` (based on `loop-schema-1` because PR #5 still open at push time — noted in PR body)
+**Head:** `6c23d36`
+**Tests:** 25/25 green
+
+### Scope of review
+
+**IN**
+- `kbl/loop.py` — three helpers: `load_hot_md()`, `load_recent_feedback()`, `render_ledger()`
+- `LoopReadError` exception class
+- Env var: `KBL_STEP1_LEDGER_LIMIT` default 20
+- Tests in `tests/test_loop_helpers.py`:
+  - `load_hot_md`: happy path, missing file returns None, permission error raises LoopReadError
+  - `load_recent_feedback`: happy path, empty table returns [], limit override, env-var default
+  - `render_ledger`: empty list placeholder, N rows render, special-char escape
+- Fixture hot.md files in `tests/fixtures/`
+- CHANDA compliance: Inv 1 (missing file = valid zero-Gold), Inv 10 (helpers read, don't rewrite)
+
+**Specific scrutiny**
+1. `load_hot_md` missing-file returns None (not raise) — Inv 1 compliance
+2. `load_recent_feedback` empty-table returns [] (not raise) — Inv 1 compliance
+3. Env-var default: 20 matches CHANDA §2 Leg 3 spec + OQ2 resolution
+4. `render_ledger` format is Director-scannable (`[YYYY-MM-DD] action target: note` shape)
+
+**OUT**
+- Writer-side (KBL-C)
+- Prompt wiring (KBL-B impl separate)
+
+### Format
+`briefs/_reports/B2_pr6_review_20260418.md`
 Verdict: APPROVE / REDIRECT / BLOCK
 
 ### Timeline
