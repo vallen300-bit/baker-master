@@ -6,7 +6,7 @@
     <string>com.brisen.kbl.heartbeat</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/kbl-heartbeat.sh</string>
+        <string>__REPO__/scripts/kbl-heartbeat.sh</string>
     </array>
     <key>StartInterval</key>
     <integer>1800</integer>

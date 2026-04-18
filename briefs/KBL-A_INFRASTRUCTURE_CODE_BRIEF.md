@@ -342,6 +342,23 @@ CREATE TABLE IF NOT EXISTS kbl_alert_dedupe (
 
 ## 6. Phase 2 — Mac Mini Install Script
 
+> **TCC note (macOS 15+, added 2026-04-18 post-install):** launchd refuses to
+> execute scripts that live under TCC-protected locations (`~/Desktop/`,
+> `~/Documents/`, `~/Downloads/`, iCloud/Dropbox-synced roots). First install
+> on Mac Mini cloned to `~/Desktop/baker-code` and silently failed to fire
+> LaunchAgents. Fix (PR `kbl-a-tcc-fix`):
+>
+> - **Default clone path changed** from `~/Desktop/baker-code` → `~/baker-code`.
+> - Install script **refuses** if `$REPO` is under `~/Desktop/`, `~/Documents/`,
+>   or `~/Downloads/` with a clear remediation message.
+> - Committed plists carry a `__REPO__` placeholder; install sed-substitutes
+>   the resolved `$REPO` path before `launchctl load`. Plist is now the single
+>   source of truth for script paths — no `/usr/local/bin/` symlink layer
+>   (removes a sudo step + a stale-symlink failure mode on re-install).
+>
+> The code block below is a **snapshot** of the pre-TCC-fix shape — authoritative
+> source is `scripts/install_kbl_mac_mini.sh` at HEAD.
+
 ### `scripts/install_kbl_mac_mini.sh`
 
 ```bash
@@ -438,7 +455,8 @@ echo "Then trigger first pipeline tick: launchctl start com.brisen.kbl.pipeline"
 
 ### Acceptance for Phase 2
 - Run `install_kbl_mac_mini.sh` on clean-ish Mac Mini → exit 0
-- `ls /usr/local/bin/kbl-*` shows 5 symlinks
+- Clone NOT under `~/Desktop/`/`~/Documents/`/`~/Downloads/` (TCC refuse guard)
+- `grep -L __REPO__ ~/Library/LaunchAgents/com.brisen.kbl.*.plist` returns all 4 (placeholder substituted)
 - `launchctl list | grep brisen.kbl` shows 4 agents loaded
 - `/var/log/kbl/` exists, owned by dimitry, mode 755
 - Re-run idempotent (no errors, no duplicate LaunchAgents)

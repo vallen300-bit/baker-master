@@ -6,7 +6,7 @@
     <string>com.brisen.kbl.purge-dedupe</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/kbl-purge-dedupe.sh</string>
+        <string>__REPO__/scripts/kbl-purge-dedupe.sh</string>
     </array>
     <key>StartCalendarInterval</key>
     <dict>

@@ -1,22 +1,43 @@
 #!/bin/bash
 # install_kbl_mac_mini.sh — one-time KBL Mac Mini installer.
 # Per briefs/KBL-A_INFRASTRUCTURE_CODE_BRIEF.md §6.
-# Idempotent: safe to re-run after code updates (symlinks refresh,
+# Idempotent: safe to re-run after code updates (plists refresh,
 # LaunchAgents reload).
 #
 # Usage:
 #   ./scripts/install_kbl_mac_mini.sh
 #
 # Env overrides:
-#   KBL_REPO   — path to baker-master clone (default: ~/Desktop/baker-code)
+#   KBL_REPO   — path to baker-master clone (default: ~/baker-code)
 #   KBL_VAULT  — path to baker-vault clone  (default: ~/baker-vault)
+#
+# TCC (macOS 15+): launchd refuses to execute scripts under TCC-protected
+# locations (~/Desktop, ~/Documents, ~/Downloads, iCloud/Dropbox roots). The
+# repo clone MUST live outside those paths — this script refuses upfront if
+# $REPO is under ~/Desktop and recommends relocating. Plists reference the
+# clone path directly (templated via __REPO__) so the script path is
+# transparent; no /usr/local/bin/ symlinks, no sudo for script staging.
 
 set -euo pipefail
 
-REPO="${KBL_REPO:-${HOME}/Desktop/baker-code}"
+REPO="${KBL_REPO:-${HOME}/baker-code}"
 VAULT="${KBL_VAULT:-${HOME}/baker-vault}"
-TARGET_BIN="/usr/local/bin"
 LAUNCHD_DIR="${HOME}/Library/LaunchAgents"
+
+# --- TCC guard ---
+# launchd under macOS 15+ denies execute on scripts in ~/Desktop/, ~/Documents/,
+# ~/Downloads/ and iCloud-synced roots. Fail fast with a clear remediation
+# instead of silently installing plists that will never fire.
+case "${REPO}" in
+    "${HOME}/Desktop/"*|"${HOME}/Documents/"*|"${HOME}/Downloads/"*)
+        echo "FAIL: REPO=${REPO} is under a TCC-protected location."
+        echo "      launchd on macOS 15+ cannot execute scripts from here."
+        echo "      Move the clone, e.g.:"
+        echo "          mv '${REPO}' '${HOME}/baker-code'"
+        echo "      then re-run this script (or pass KBL_REPO=/path/to/clone)."
+        exit 1
+        ;;
+esac
 
 # --- Sanity checks ---
 [ -d "${REPO}" ] || { echo "FAIL: ${REPO} not found. Set KBL_REPO or clone baker-master there."; exit 1; }
@@ -90,20 +111,31 @@ if [ ! -f "${VAULT}/config/env.mac-mini.yml" ]; then
     echo "      Install continues; pipeline will idle until Director pushes the yml file."
 fi
 
-# --- 1. Symlink pipeline scripts ---
+# --- 1. Ensure pipeline scripts are executable (user-owned, no sudo) ---
 for script in kbl-pipeline-tick.sh kbl-gold-drain.sh kbl-heartbeat.sh kbl-dropbox-mirror.sh kbl-purge-dedupe.sh; do
     [ -f "${REPO}/scripts/${script}" ] || { echo "FAIL: ${REPO}/scripts/${script} missing"; exit 1; }
-    sudo ln -sf "${REPO}/scripts/${script}" "${TARGET_BIN}/${script}"
-    sudo chmod +x "${REPO}/scripts/${script}"
+    chmod +x "${REPO}/scripts/${script}"
 done
 
-# --- 2. Install LaunchAgent plists ---
+# --- 2. Render + install LaunchAgent plists ---
+# Committed plists carry the literal placeholder `__REPO__` in their
+# ProgramArguments path. This step sed-substitutes `__REPO__` with the
+# resolved $REPO and writes to ~/Library/LaunchAgents/. Plist is the single
+# source of truth for the script path — no /usr/local/bin/ symlink layer.
 mkdir -p "${LAUNCHD_DIR}"
+REPO_ESCAPED=$(printf '%s\n' "${REPO}" | sed 's/[\/&]/\\&/g')
 for plist in com.brisen.kbl.pipeline com.brisen.kbl.heartbeat com.brisen.kbl.dropbox-mirror com.brisen.kbl.purge-dedupe; do
-    [ -f "${REPO}/launchd/${plist}.plist" ] || { echo "FAIL: ${REPO}/launchd/${plist}.plist missing"; exit 1; }
-    cp "${REPO}/launchd/${plist}.plist" "${LAUNCHD_DIR}/${plist}.plist"
-    launchctl unload "${LAUNCHD_DIR}/${plist}.plist" 2>/dev/null || true
-    launchctl load "${LAUNCHD_DIR}/${plist}.plist"
+    SRC="${REPO}/launchd/${plist}.plist"
+    DEST="${LAUNCHD_DIR}/${plist}.plist"
+    [ -f "${SRC}" ] || { echo "FAIL: ${SRC} missing"; exit 1; }
+    sed "s/__REPO__/${REPO_ESCAPED}/g" "${SRC}" > "${DEST}"
+    # Sanity-check substitution actually ran (stale placeholder → launchd silent fail).
+    if grep -q '__REPO__' "${DEST}"; then
+        echo "FAIL: __REPO__ placeholder still present in ${DEST}. Check sed."
+        exit 1
+    fi
+    launchctl unload "${DEST}" 2>/dev/null || true
+    launchctl load "${DEST}"
 done
 
 # --- 3. Create log dir (requires sudo) ---
@@ -127,10 +159,12 @@ DROPBOX_DIR="${HOME}/Dropbox-Vallen/_02_DASHBOARDS/kbl_logs"
 # --- 5. Validate ---
 echo ""
 echo "=== KBL Mac Mini install complete ==="
-echo "Scripts in ${TARGET_BIN}:"
-ls -la "${TARGET_BIN}"/kbl-* 2>/dev/null || echo "  (none symlinked)"
 echo "LaunchAgents loaded:"
 launchctl list | grep brisen.kbl || echo "  (none loaded)"
+echo "Plist script paths:"
+for plist in com.brisen.kbl.pipeline com.brisen.kbl.heartbeat com.brisen.kbl.dropbox-mirror com.brisen.kbl.purge-dedupe; do
+    grep -A1 ProgramArguments "${LAUNCHD_DIR}/${plist}.plist" | grep string || true
+done
 echo "Log dir:"
 ls -la /var/log/kbl
 echo ""

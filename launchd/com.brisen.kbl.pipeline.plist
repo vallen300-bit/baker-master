@@ -6,7 +6,7 @@
     <string>com.brisen.kbl.pipeline</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/kbl-pipeline-tick.sh</string>
+        <string>__REPO__/scripts/kbl-pipeline-tick.sh</string>
     </array>
     <key>StartInterval</key>
     <integer>120</integer>

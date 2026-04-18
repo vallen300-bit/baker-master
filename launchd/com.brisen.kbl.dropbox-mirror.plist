@@ -6,7 +6,7 @@
     <string>com.brisen.kbl.dropbox-mirror</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/kbl-dropbox-mirror.sh</string>
+        <string>__REPO__/scripts/kbl-dropbox-mirror.sh</string>
     </array>
     <key>StartCalendarInterval</key>
     <dict>
