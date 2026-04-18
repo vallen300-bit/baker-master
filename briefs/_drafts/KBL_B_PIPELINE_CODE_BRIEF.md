@@ -595,7 +595,30 @@ Post-REDIRECT, the pipeline has **3 LLM prompts** (not 4). No prompt for Step 4 
 
 ## 7. Error matrix
 
-*(Authoring pending)* — per-step × per-failure × recovery-action grid with `kbl_log` levels and circuit-breaker vs cost-cap distinctions. Anchor for §4 failure-mode references.
+Every failure maps to exactly one recovery action. Ambiguity = design bug.
+
+| Step | Failure | Detection | Log | Recovery | Terminal |
+|---|---|---|---|---|---|
+| Layer 0 | YAML malformed | `Layer0RulesError` at load | ERROR | halt tick, alert operator | N |
+| Layer 0 | hash-store DB unreachable | PG raise | ERROR | fail-CLOSED (drop to review queue) | per-signal |
+| Triage | Ollama unreachable | HTTP timeout | ERROR | Qwen availability-fallback; both down → `paused_circuit_brkr` | N |
+| Triage | Gemma JSON unparseable | `TriageParseError` | WARN | R3 retry (pared prompt); 2 failures → inbox | Y after R3 |
+| Triage | Slug not in registry | `normalize()` None | INFO | `primary_matter=null` → inbox | Y |
+| Resolve (email/WA) | Metadata unparseable | `ResolverError` | WARN | empty `resolved_thread_paths` (new arc) | N |
+| Resolve (transcript/scan) | Voyage unreachable | HTTP timeout | WARN | degraded: empty paths + mark for review; no circuit trip | N |
+| Extract | Gemma JSON unparseable | `ExtractParseError` | WARN | R3 retry; 2 failures → empty entities + continue | N |
+| Classify | Missing upstream field | Python raise | ERROR | halt tick (programming bug) | N |
+| Opus Step 5 | Anthropic 529 / overloaded | HTTP 529 | WARN | R3 ladder: temp=0, pared prompt, fail; 3 consecutive across signals → circuit trip | Y after R3 |
+| Opus Step 5 | Cost cap projected | pre-call estimate | INFO | `paused_cost_cap`, re-queue next UTC day | N |
+| Opus Step 5 | Circuit breaker open | runtime state | INFO | signal returns to claimable pool; tick exits | N |
+| Opus Step 5 | Output malformed | split fails in Step 6 | WARN | flip to `opus_failed`, R3 retry (not Sonnet — REDIRECT) | Y after R3 |
+| Finalize (Step 6) | Pydantic validation | `FinalizationError` | WARN | flip Step 5 → `opus_failed`, Opus R3; 3 failures → `finalize_failed` → inbox | Y after R3 |
+| Finalize (Step 6) | Cross-link write IO | OSError | ERROR | `finalize_failed` + alert (vault permission issue) | Y |
+| Commit (Step 7) | git push conflict | non-zero exit | WARN | rebase + retry once; second → fail | Y after 1 |
+| Commit (Step 7) | Permission denied | non-zero exit | ERROR | halt tick, credentials expired | N |
+| Commit (Step 7) | flock timeout | lock not acquired | WARN | re-queue signal; next tick retries | N |
+
+Every per-signal-terminal (Y) failure routes the signal to `wiki/_inbox/` with a stub explaining why. Director sees via Ayoniso (KBL-C) or inbox review.
 
 ## 8. Model config + retry ladder
 
@@ -612,7 +635,35 @@ Post-REDIRECT, the pipeline has **3 LLM prompts** (not 4). No prompt for Step 4 
 
 ## 9. Cost-control integration
 
-*(Authoring pending)* — pre-call estimate implementation, daily cap behavior, circuit breaker trip/recovery wiring. `kbl_cost_ledger` schema per KBL-A. Per-step ledger rows: `triage` (Gemma, cost_usd=0), `extract` (Gemma, cost_usd=0), `resolve` (Voyage for transcripts/scan only), `opus_step5` (Anthropic). No rows for Steps 0/4/6/7 (deterministic).
+### 9.1 Ledger write rules (post-REDIRECT)
+
+| Step | Model | Rows per signal | Cost |
+|---|---|---|---|
+| triage | gemma2:8b local | 1 | $0 (tokens logged for instrumentation) |
+| resolve | Voyage (transcripts/scan only) | 0-1 | ~$0.00005 when fires |
+| extract | gemma2:8b | 1 | $0 |
+| opus_step5 | claude-opus-4-7 | 1 on `full_synthesis`, 0 on stub/skip | variable, billed from Anthropic response |
+| claude_harness | `claude -p` (optional commit-message synthesis) | 0-1 | ~$0.001 when fires |
+
+Steps 0/2-metadata/4/6 write **zero** ledger rows. The `sonnet_step6` enum value stays in the CHECK constraint — unused post-REDIRECT, preserves re-introduction option without migration.
+
+### 9.2 Daily cap enforcement (per-signal)
+
+Step 5 entry checks projected-total against `KBL_COST_DAILY_CAP_USD=15`. On exceed: `state='paused_cost_cap'`, re-entered next UTC day by the pipeline tick.
+
+```python
+def _can_fire_step5(conn, signal) -> bool:
+    today = datetime.now(UTC).date()
+    today_total = conn.execute(
+        "SELECT COALESCE(SUM(cost_usd), 0) FROM kbl_cost_ledger WHERE created_at >= %s", (today,)
+    ).scalar()
+    projected = today_total + _estimate_step5_cost(signal)
+    return projected <= Decimal(os.environ.get('KBL_COST_DAILY_CAP_USD', '15.00'))
+```
+
+### 9.3 Global circuit breaker (KBL-A §1062)
+
+Separate from per-signal cost cap. Trips on 3+ consecutive Anthropic-side first-attempt failures across signals (in-signal R3 retries do NOT count). Recovery: probe every 60s; success → reset + flip `anthropic_circuit_open='false'`.
 
 ## 10. Testing plan
 
@@ -623,15 +674,46 @@ Post-REDIRECT, the pipeline has **3 LLM prompts** (not 4). No prompt for Step 4 
 
 ## 11. Observability
 
-*(Authoring pending)* — per-step `kbl_log` row spec, `kbl_pipeline_run` rollup fields, dashboard-ready metrics. Post-REDIRECT metrics: drop all Sonnet latency/cost gauges; add `finalize_latency_ms` gauge (expected p95 <200ms — 2 orders of magnitude below Step 5 Opus call).
+### 11.1 `kbl_log` row spec
+
+Every Python step writes `kbl_log` rows on WARN + ERROR. Schema (KBL-A): `(id, created_at, level, component, message, signal_id, payload JSONB)`. Per-step `component` strings: `layer0`, `triage`, `resolve`, `extract`, `classify`, `opus_step5`, `finalize`, `claude_harness`. Dashboard rollups group by `component`.
+
+### 11.2 `kbl_pipeline_run` rollup
+
+Per-tick row (KBL-A §3.3):
+
+```sql
+kbl_pipeline_run (run_id, started_at, ended_at, signals_claimed, signals_completed,
+                  signals_failed, circuit_breaker_tripped BOOL)
+```
+
+### 11.3 Dashboard-ready metrics (KBL-C consumes)
+
+Per-step latency p50/p95/p99 and error rate. **`finalize_latency_ms`** is a new post-REDIRECT metric — expected p95 ≤ 200ms; alert if p95 > 500ms (signals Pydantic thrashing or cross-link IO pathology). **No `sonnet_step6` metrics** (step doesn't fire an LLM). Cost metrics: daily Opus spend vs `KBL_COST_DAILY_CAP_USD`, cost-cap-deferred signal count, circuit-breaker trips per day.
 
 ## 12. Rollout sequence
 
-*(Authoring pending)* — shadow mode mechanics (vault `_shadow/` subtree), flag flip to production, Hagenauer-only burn-in procedure, Phase 2 gate (D1 re-eval on live corpus).
+1. **Schema migrations apply** — PR #5 (loop infra) + PR #8 (Step 1 signal_queue columns) already merged. Any residual §3 additions land in a cleanup migration.
+2. **Loader + helper PRs land** — PR #4 (Layer 0 loader) ✓, PR #6 (loop helpers) ✓, PR #9 (Gold reader) ✓. PR #7 (Layer 0 evaluator) pending phone-fix delta re-verify.
+3. **Step impls land in dependency order** — Step 0 ✓ (PR #7), Step 1 ✓ (PR #8), Step 2 → Step 3 → Step 4 → Step 5 → Step 6 (small, deterministic) → Step 7.
+4. **Shadow mode burn-in** — `KBL_PIPELINE_WRITE_TARGET=shadow` env var; writes go to `wiki/_shadow/<matter>/` subtree. Director reviews N days before production flag flip.
+5. **Flip to production** — `pipeline_enabled=true` + `KBL_PIPELINE_WRITE_TARGET=production`; Phase 1 scoping via `KBL_MATTER_SCOPE_ALLOWED=[hagenauer-rg7]`.
+6. **Phase 1 monitor** — D1 gate holds (88% vedana / 76% matter); cost cap respected; circuit breaker trips <1/day across burn-in week.
+7. **Phase 2 gate** — re-run D1 eval on live Phase 1 data; if accuracy holds at 88v/76m or better, expand `KBL_MATTER_SCOPE_ALLOWED`.
 
 ## 13. Acceptance criteria
 
-*(Authoring pending)* — numerical thresholds for declaring KBL-B done (completion rate, cost/signal p95, latency p95, Director-inbox-review signal).
+Phase 1 go-live is declared achieved when ALL of:
+
+- End-to-end fixture (14 signals per `KBL_B_TEST_FIXTURES.md`) passes pytest with hard-asserts on loop compliance (`hot_md_loaded`, `feedback_ledger_queried`, `gold_context_by_matter_loaded`)
+- Shadow-mode N-day run produces zero Director-flagged "silent drop" or "silent contradiction" cases
+- Opus Step 5 cost per `full_synthesis` signal, p95 ≤ $0.25
+- `finalize_latency_ms` p95 ≤ 500ms
+- Circuit breaker trips per day ≤ 1 across shadow-mode week
+- Zero CHANDA Inv 1 / Inv 3 / Inv 10 violations in the shadow log (zero-Gold cases explicitly logged as Inv 1 compliance, not errors)
+- Cost-cap defer + next-day re-entry tested at least once (synthetic pre-seed fixture #10)
+
+Phase 2 gate (separate): re-run D1 eval on live Phase 1 data; if accuracy holds at 88v/76m or better, expand `KBL_MATTER_SCOPE_ALLOWED` beyond hagenauer-rg7.
 
 ---
 
