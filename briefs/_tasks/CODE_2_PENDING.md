@@ -3,7 +3,7 @@
 **From:** AI Head
 **To:** Code Brisen #2 (app instance)
 **Task posted:** 2026-04-18 (late)
-**Status:** OPEN — two reviews in queue
+**Status:** OPEN — three reviews in queue (PR #12 FIRST — unblocks rest)
 
 ---
 
@@ -17,7 +17,75 @@
 - Task D — REDIRECT fold (APPROVE @ `f712647`) ✓
 - Task E — PR #10 STEP2-RESOLVE-IMPL (REDIRECT @ `7059ce3`, pipeline-wide S1) ✓
 
-Your S1 from Task E is with Director. AI Head ratification of remediation path pending.
+**Update:** Director ratified path (b) — CHECK-expansion migration. B1 shipped PR #12. Review PR #12 FIRST, then continue with Task F + Task C.
+
+---
+
+## Task G (NOW, priority): Review PR #12 — STATUS-CHECK-EXPAND-1
+
+**PR:** https://github.com/vallen300-bit/baker-master/pull/12
+**Branch:** `status-check-expand-1`
+**Head:** `0d78c0b`
+**Tests:** 7/7 parse-level green + 1 live-PG skip (gated on `TEST_DATABASE_URL`)
+**Why priority:** unblocks PR #7/#8/#10/#11 merge cascade. Your S1 from Task E ratified as remediation.
+
+### Scope
+
+**IN**
+- `migrations/20260418_expand_signal_queue_status_check.sql` — idempotent DROP + ADD CONSTRAINT, UP/DOWN markers, 34-value set
+- `memory/store_back.py` `_ensure_signal_queue_additions()` — app-boot writer carrying same 34-value set (redeploy-safe)
+- `tests/test_status_check_expand_migration.py` — parse-level structure tests + exact 34-value match + store_back-in-sync guard + `<step>_running` naming enforcement + awaiting/running/failed triple per phase + live-PG SAVEPOINT test
+
+### Specific scrutiny
+
+1. **Exact 34-value set correctness** — verify against this canonical list I dispatched B1 against:
+   - KBL-A 8: `pending, processing, done, failed, expired, classified-deferred, failed-reviewed, cost-deferred`
+   - KBL-B Layer 0: `dropped_layer0`
+   - KBL-B Step 1: `awaiting_triage, triage_running, triage_failed, triage_invalid, routed_inbox`
+   - KBL-B Step 2: `awaiting_resolve, resolve_running, resolve_failed`
+   - KBL-B Step 3: `awaiting_extract, extract_running, extract_failed`
+   - KBL-B Step 4: `awaiting_classify, classify_running, classify_failed`
+   - KBL-B Step 5: `awaiting_opus, opus_running, opus_failed, paused_cost_cap`
+   - KBL-B Step 6: `awaiting_finalize, finalize_running, finalize_failed`
+   - KBL-B Step 7: `awaiting_commit, commit_running, commit_failed`
+   - Terminal: `completed`
+   - Total: 34. Flag any missing or extra.
+
+2. **Idempotence** — `DROP CONSTRAINT IF EXISTS` + re-add. Re-running on an already-migrated DB must be a no-op (no error, no duplicate constraint). Verify.
+
+3. **Covers PR #7/#8/#10/#11 writes** — cross-check that every status string written by those 4 PRs is in the new set:
+   - PR #7: `dropped_layer0` ✓
+   - PR #8: `awaiting_triage`, `triage_running`, `triage_failed`, `awaiting_resolve`, `routed_inbox`
+   - PR #10: `resolve_running`, `resolve_failed`, `awaiting_extract`
+   - PR #11: `extract_running`, `extract_failed`, `awaiting_classify`, `success_false` rows in cost ledger (NOT a status — skip)
+   - Any gap = blocker.
+
+4. **`store_back.py` sync** — B1 added the list to `_ensure_signal_queue_additions()` for redeploy safety. Verify both locations hold identical sets (the sync-guard test should catch drift — verify the test actually compares both).
+
+5. **DOWN narrows to legacy 8** — verify DOWN section reverts to KBL-A's original 8 values (disaster-recovery only; never auto-applied).
+
+6. **Naming reconciliation** — `<step>_running` enforced across all 7 phases. No `triaging`/`resolving`/`extracting`/`classifying`/`committing` leftover from brief §3.2's original inconsistent wording.
+
+7. **Live-PG SAVEPOINT test quality** — verify the test actually asserts `CheckViolation` per bogus value, not just catches any exception.
+
+### CHANDA audit
+
+- **Q1 Loop Test:** schema-only change; no Leg surface touched. Pass.
+- **Q2 Wish Test:** unblocks pipeline that serves the loop. No convenience drift. Pass.
+- Per-invariant: Inv 9 (Mac Mini single writer) preserved — Render writes schema, not content. Inv 1 (zero-Gold) unaffected.
+
+### Format
+
+`briefs/_reports/B2_pr12_review_20260418.md`
+Verdict: APPROVE / REDIRECT / BLOCK
+
+### Timeline
+
+~20-30 min. Simple surface, high-stakes correctness check.
+
+### Dispatch back
+
+> B2 PR #12 review done — `briefs/_reports/B2_pr12_review_20260418.md`, commit `<SHA>`. Verdict: <...>.
 
 ---
 
