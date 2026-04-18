@@ -1,7 +1,0 @@
-version: "1.0.0"
-rules:
-  - name: "broken_rule"
-    source: "email
-    match: {"unterminated: true
-  - name: "second"
-    source: *
