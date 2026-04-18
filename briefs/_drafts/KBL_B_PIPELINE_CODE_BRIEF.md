@@ -1,6 +1,6 @@
 # KBL-B Pipeline — Code Brief (SKELETON / DRAFT)
 
-**Status:** SKELETON — §1-3 only. §4-N await Director ratification.
+**Status:** §1-3 **RATIFIED by Director 2026-04-18**. §4+ in progress.
 **Author:** AI Head
 **Date:** 2026-04-17 (original), 2026-04-18 (amendments applied)
 **Purpose of skeleton:** surface architecture decisions early so Director can redirect scope before per-step detail is written.
@@ -271,20 +271,256 @@ All per-step data lives on `signal_queue`. Existing FKs from `kbl_cost_ledger.si
 
 ---
 
-## 4-N. Pending (will land after B2/B3 reports)
+## 4. Per-step I/O contracts
 
-Section outline, drafted but empty:
+Each step reads named columns from `signal_queue`, writes named columns, emits 0-1 `kbl_cost_ledger` rows, emits 0-N `kbl_log` rows. Contracts here are the interface; §6 covers prompts, §7 covers error semantics.
 
-- **§4 Per-step I/O contracts** — precise JSON schemas, field types, null-handling rules per step
-- **§5 Status-column collapse design** — if §3.2 ratified, explicit stage+state table
-- **§6 Prompt templates** — triage, extract, classify, opus_step5, sonnet_step6 (5 prompts)
-- **§7 Error matrix** — per-step × per-failure-mode × recovery-action grid
-- **§8 Model config + retry ladder wiring** — temps, token budgets, R3 retry sequence concrete
-- **§9 Cost-control integration** — pre-call estimate, circuit breaker trip conditions, daily cap behavior
-- **§10 Testing plan** — unit (per step), integration (end-to-end 10-signal fixture), shadow-mode run
-- **§11 Observability** — what kbl_log rows to emit per step, what metrics to emit
-- **§12 Rollout sequence** — shadow mode → flag flip → Phase 1 Hagenauer-only burn-in
-- **§13 Acceptance criteria** — numerical thresholds for declaring KBL-B done
+Naming convention: inputs are columns already populated by prior steps; outputs are columns this step writes. Unless noted, all writes happen in a single transaction with `stage`+`state` advance (§5).
+
+### 4.1 Step 0 — `layer0`
+
+**Reads:** `source`, `raw_content`, `sender`, `recipients`, `chat_id`, `subject` (source-dependent).
+**Writes:** `stage='layer0'`, `state='done'` + route-forward, OR `state='dropped_layer0'` terminal.
+**Ledger:** none (deterministic, zero cost).
+**Log:** on drop only — `component='layer0'`, `level='INFO'`, `message=<rule name that fired>`.
+**Invariant:** a signal never re-enters Step 0 after exiting.
+
+### 4.2 Step 1 — `triage`
+
+**Reads:** `raw_content`, `source`, `subject` (hint for email).
+**Writes:** `primary_matter TEXT` (nullable), `related_matters JSONB` (default `[]`), `vedana TEXT` ∈ `{opportunity, threat, routine}`, `triage_confidence NUMERIC(3,2)`, `triage_score NUMERIC(5,2)`.
+**Ledger:** one row, `step='triage'`, `model=ollama_gemma4` (or qwen on fallback), `input_tokens`, `output_tokens`, `cost_usd=0` (local), `latency_ms`.
+**Log:** on retry / normalize-miss / fallback-activation only.
+**Invariant:** post-write, `vedana IS NOT NULL` AND `triage_score IS NOT NULL`. `primary_matter` may be NULL (valid signal of "no matter applies"), in which case `related_matters = '[]'::jsonb`.
+**Routing:** `triage_score < KBL_PIPELINE_TRIAGE_THRESHOLD` (default 40) → `state='routed_inbox'` terminal, `target_vault_path='wiki/_inbox/<yyyymmdd>_<signal_id_short>.md'`.
+
+### 4.3 Step 2 — `resolve`
+
+**Reads:** `source`, `primary_matter`, plus source-dependent metadata:
+- email: `email_message_id`, `in_reply_to`, `references`, `sender`, `recipients`, `subject`
+- whatsapp: `chat_id`, `sent_at`, `sender_phone`
+- meeting: `raw_content`, `subject` (title)
+- scan: `raw_content`, `director_context_hint` (Scan-side metadata)
+
+**Writes:** `resolved_thread_paths JSONB` = list of vault-relative paths (e.g., `["wiki/hagenauer-rg7/2026-04-03_ofenheimer-letter.md"]`). Empty array = new thread.
+**Ledger:** email/WA = no row (metadata only, zero cost). Transcript/Scan = one row, `step='resolve'`, `model='voyage-3'`, `input_tokens` (approx from chars/4), `cost_usd ≈ 0.00005`.
+**Log:** when embedding API is unavailable for transcript/scan → degraded mode (empty resolve, log `level='WARN'`, proceed as new thread).
+**Invariant:** `resolved_thread_paths` is always an array (never NULL). Paths are vault-relative, always start with `wiki/`.
+
+### 4.4 Step 3 — `extract`
+
+**Reads:** `raw_content`, `source`, `primary_matter`, `resolved_thread_paths` (for context).
+**Writes:** `extracted_entities JSONB` with schema:
+
+```json
+{
+  "people":       [{"name": "...", "role": "...", "company": "..."}],
+  "orgs":         [{"name": "...", "type": "law_firm|bank|..."}],
+  "money":        [{"amount": 100000, "currency": "EUR", "context": "..."}],
+  "dates":        [{"date": "2026-04-30", "event": "...", "iso8601": true}],
+  "references":   [{"type": "contract|invoice|case", "id": "..."}],
+  "action_items": [{"actor": "...", "action": "...", "deadline": "..."}]
+}
+```
+
+All sub-keys are arrays (possibly empty). Unparseable fields → drop from output, not set to NULL/missing.
+
+**Ledger:** one row, `step='extract'`, `model=ollama_gemma4`, tokens, `cost_usd=0`, `latency_ms`.
+**Log:** on retry / malformed JSON only.
+**Invariant:** `extracted_entities` is always a JSON object with all 6 keys present, values are arrays.
+
+### 4.5 Step 4 — `classify` (deterministic policy)
+
+**Reads:** `triage_score`, `primary_matter`, `related_matters`, `resolved_thread_paths`.
+**Writes:** `step_5_decision TEXT` ∈ `{'full_synthesis', 'stub_only', 'cross_link_only', 'skip_inbox'}`.
+**Ledger:** none (no model call).
+**Log:** only on Layer 2 gate block → `level='INFO'`, `message='layer2_blocked: primary_matter=<X> not in allowed=[<Y>]'`.
+**Decision table:**
+
+| Condition (Python) | Decision |
+|---|---|
+| `primary_matter not in env.KBL_MATTER_SCOPE_ALLOWED` | `skip_inbox` |
+| `triage_score < THRESHOLD + NOISE_BAND` (e.g., 40-45) | `stub_only` |
+| `resolved_thread_paths == []` AND `related_matters == []` | `full_synthesis` (new arc, single matter) |
+| `resolved_thread_paths == []` AND `related_matters != []` | `full_synthesis` + flag for cross-links in Step 6 |
+| `resolved_thread_paths != []` | `full_synthesis` (continuation, Step 5 updates existing entry) |
+| edge: `triage_score < THRESHOLD` | unreachable — Step 1 already routed this to inbox |
+
+**Invariant:** `step_5_decision` set before Step 5 is claimable.
+
+### 4.6 Step 5 — `opus_step5`
+
+**Reads:** all prior-step outputs + `step_5_decision`. If `decision='skip_inbox'` or `'stub_only'`, Step 5 does NOT call Opus — writes a stub `opus_draft_markdown` deterministically and advances. Opus call only on `full_synthesis`.
+**Writes:** `opus_draft_markdown TEXT`.
+**Ledger:** one row on Opus call. `step='opus_step5'`, `model='claude-opus-4-7'`, `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_write_tokens`, `cost_usd` (from Anthropic response billing), `latency_ms`.
+**Log:** on retry / cost-cap defer / circuit breaker trip.
+**Invariant:** exactly one of `opus_draft_markdown IS NOT NULL` OR `state='paused_cost_cap'` OR `state='failed'`.
+**Cost gate:** see §9.
+
+### 4.7 Step 6 — `sonnet_step6`
+
+**Reads:** `opus_draft_markdown`, `extracted_entities`, `related_matters`, `resolved_thread_paths`.
+**Writes:** `final_markdown TEXT`, `target_vault_path TEXT`.
+**Ledger:** one row. `step='sonnet_step6'`, `model='claude-sonnet-4-6'`, tokens, `cost_usd`, `latency_ms`.
+**Log:** on retry / malformed frontmatter.
+**Invariant:** `final_markdown` is YAML-frontmatter + Markdown body, parseable. `target_vault_path` starts with `wiki/` and ends `.md`.
+
+### 4.8 Step 7 — `claude_harness` (commit)
+
+**Reads:** `final_markdown`, `target_vault_path`, `related_matters` (for cross-link commit message).
+**Writes:** `state='done'`, `committed_at TIMESTAMPTZ`, `commit_sha TEXT`.
+**Side-effect:** writes file to baker-vault local clone at `target_vault_path`, `git commit` with identity `Baker Pipeline <pipeline@brisengroup.com>`, `git push origin main` under `flock` mutex (D5).
+**Ledger:** none (no model call; `claude -p` harness if needed for commit message synthesis charges to `step='claude_harness'` — one row with tokens/cost — else no row).
+**Log:** on rebase retry / push conflict.
+**Invariant:** `committed_at` + `commit_sha` both set OR both NULL. Never half-committed.
+
+### 4.9 Post-commit TOAST cleanup (S4 from B2 review)
+
+After Step 7 sets `state='done'`, a follow-up write within the same transaction nulls `opus_draft_markdown` and `final_markdown`:
+
+```sql
+UPDATE signal_queue
+SET opus_draft_markdown = NULL,
+    final_markdown = NULL
+WHERE id = <signal_id> AND state = 'done';
+```
+
+Canonical content lives in the vault at `target_vault_path` from this point. PG intermediate copies are debug-only; dropping them frees TOAST storage immediately.
+
+---
+
+## 5. Status-column collapse — two-track migration
+
+### 5.1 Design (ratified §3.2 principle + AI Head picks two-track per B2 S3)
+
+**Keep legacy `status` column unchanged.** KBL-A's existing 8-value CHECK stays in place. All existing pre-KBL-B rows continue using `status` with current semantics.
+
+**Add `stage` + `state` columns** for KBL-B pipeline rows. New KBL-B writes populate both; `status` gets a compatibility mirror (see §5.3).
+
+**Deprecate after Phase 2 burn-in:** once Phase 2 is stable, drop `status` and its CHECK constraint in a cleanup migration. Target: ≥3 months post-Phase 1 go-live.
+
+### 5.2 Schema — `stage` + `state` columns
+
+```sql
+-- Stage: which pipeline step the signal is currently at or most-recently completed
+ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS stage TEXT;
+ALTER TABLE signal_queue ADD CONSTRAINT chk_signal_queue_stage
+  CHECK (stage IS NULL OR stage IN (
+    'layer0', 'triage', 'resolve', 'extract', 'classify',
+    'opus_step5', 'sonnet_step6', 'claude_harness'
+  ));
+
+-- State: within a stage, what's happening
+ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS state TEXT;
+ALTER TABLE signal_queue ADD CONSTRAINT chk_signal_queue_state
+  CHECK (state IS NULL OR state IN (
+    'awaiting',            -- queued, not yet claimed
+    'running',             -- worker is actively processing
+    'done',                -- stage completed, either terminal or ready for next stage
+    'failed',              -- stage failed, terminal unless retried manually
+    'dropped_layer0',      -- terminal — dropped by deterministic Layer 0 rule
+    'routed_inbox',        -- terminal — routed to wiki/_inbox/ (low triage, layer2 block, unparseable)
+    'paused_cost_cap',     -- paused — per-signal daily cost cap exceeded, re-queues next UTC day
+    'paused_circuit_brkr'  -- paused — global circuit breaker open, re-entered on recovery
+  ));
+
+-- Compound index for worker claim query
+CREATE INDEX IF NOT EXISTS idx_signal_queue_stage_state
+  ON signal_queue (stage, state)
+  WHERE state IN ('awaiting', 'paused_cost_cap', 'paused_circuit_brkr');
+```
+
+### 5.3 Compatibility mirror
+
+KBL-B writes both `status` (legacy) and `stage`+`state` (new) on every transition for the compatibility window. Mirror table:
+
+| KBL-B (stage, state) | Mirror `status` value |
+|---|---|
+| any stage, `awaiting` | `pending` |
+| any stage, `running` | `processing` |
+| `claude_harness`, `done` | `done` |
+| any stage, `failed` | `failed` |
+| any stage, `dropped_layer0` | `dropped` |
+| any stage, `routed_inbox` | `inbox` |
+| any stage, `paused_*` | `deferred` |
+
+Existing queries like `WHERE status='pending'` continue to find claimable rows, including new KBL-B ones. Any KBL-A code that filters by `status` keeps working.
+
+### 5.4 Worker claim query
+
+New KBL-B worker claims by `(stage, state)`, not `status`:
+
+```sql
+WITH next AS (
+  SELECT id FROM signal_queue
+  WHERE stage = $1           -- e.g., 'triage'
+    AND state = 'awaiting'
+  ORDER BY started_at NULLS FIRST, id
+  FOR UPDATE SKIP LOCKED
+  LIMIT 1
+)
+UPDATE signal_queue
+SET state = 'running', started_at = NOW()
+FROM next WHERE signal_queue.id = next.id
+RETURNING signal_queue.*;
+```
+
+Each stage has its own worker-loop invocation. Serial per stage per tick (D5 flock).
+
+### 5.5 `next_stage` derivation
+
+Rather than a `next_stage TEXT` column (which denormalizes and can drift), compute next stage in Python via a pure function:
+
+```python
+NEXT_STAGE = {
+    'layer0': 'triage',
+    'triage': 'resolve',
+    'resolve': 'extract',
+    'extract': 'classify',
+    'classify': 'opus_step5',
+    'opus_step5': 'sonnet_step6',
+    'sonnet_step6': 'claude_harness',
+    'claude_harness': None,  # terminal
+}
+
+def advance_stage(current: str, state: str) -> tuple[str | None, str]:
+    """Return (next_stage, next_state) given current stage and state after completion."""
+    if state in ('dropped_layer0', 'routed_inbox', 'failed', 'done') and current == 'claude_harness':
+        return (None, state)  # terminal
+    if state in ('paused_cost_cap', 'paused_circuit_brkr'):
+        return (current, state)  # stay at same stage, paused
+    if state == 'done':
+        return (NEXT_STAGE[current], 'awaiting')
+    raise ValueError(f"unexpected (stage={current}, state={state})")
+```
+
+### 5.6 Migration — no backfill
+
+KBL-A's existing rows do NOT get `stage` or `state` populated. They stay NULL forever and are handled via the `status` column as before. Only rows inserted post-KBL-B deploy receive the new columns.
+
+No backfill SQL, no downtime window, no double-ingestion risk. Two-track from day one.
+
+### 5.7 Deprecation (Phase 2 close-out item)
+
+Target date: ≥3 months post Phase 1 go-live. At deprecation:
+
+1. Verify no KBL-A code path still reads `status` column
+2. Drop `status` column + CHECK
+3. Drop compatibility-mirror writes in KBL-B code
+4. Flagged in decisions doc for close-out
+
+---
+
+## 6-N. Remaining sections (next AI Head push)
+
+- **§6 Prompt templates** — 4 prompts: triage (wrapper around v3 eval prompt), extract, opus_step5, sonnet_step6 (no prompt for Step 4 — deterministic)
+- **§7 Error matrix** — per-step × per-failure × recovery-action grid with `kbl_log` levels and circuit-breaker vs cost-cap distinctions
+- **§8 Model config + retry ladder** — `ollama` HTTP settings, Anthropic `claude-opus-4-7` / `claude-sonnet-4-6` request shape, R3 retry sequence
+- **§9 Cost-control integration** — pre-call estimate implementation, daily cap behavior, circuit breaker trip/recovery wiring
+- **§10 Testing plan** — per-step unit tests, 10-signal end-to-end fixture, shadow-mode run semantics
+- **§11 Observability** — per-step `kbl_log` row spec, `kbl_pipeline_run` rollup fields, dashboard-ready metrics
+- **§12 Rollout sequence** — shadow mode mechanics (vault `_shadow/` subtree), flag flip to production, Hagenauer-only burn-in procedure
+- **§13 Acceptance criteria** — numerical thresholds for declaring KBL-B done (completion rate, cost/signal p95, latency p95, Director-inbox-review signal)
 
 ---
 
