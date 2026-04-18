@@ -125,6 +125,14 @@ Verdict: APPROVE / REDIRECT / BLOCK
 
 ---
 
+## Task C-delta (fast, ~5 min): STEP5-OPUS S1 delta APPROVE
+
+B3 applied S1 rename at `02e5063` (10 sites total: your 9 + 1 extra for internal consistency). Confirm and close out with short APPROVE report:
+
+`briefs/_reports/B2_step5_opus_s1_delta_20260418.md` — one-paragraph verdict, note the 1 extra site B3 added (header Inv 4 bullet line 14) was a sensible preemptive catch.
+
+---
+
 ## Task D (queued, fires when AI Head commits REDIRECT fold)
 
 When `fold(KBL-B): Step 6 REDIRECT` lands in git log, review per prior spec (§2, §3.2, §4.7, §6, §8, §9, §10, §11). File at `briefs/_reports/B2_kbl_b_redirect_fold_review_20260418.md`. ~20-30 min.
