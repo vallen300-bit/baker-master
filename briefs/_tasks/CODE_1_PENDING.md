@@ -2,137 +2,112 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (terminal instance)
-**Previous report:** [`briefs/_reports/B1_slugs1_impl_20260417.md`](../_reports/B1_slugs1_impl_20260417.md) — SLUGS-1 shipped (PRs #2 + baker-vault #1 open)
+**Previous report:** [`briefs/_reports/B1_kbl_a_preinstall_verify_20260418.md`](../_reports/B1_kbl_a_preinstall_verify_20260418.md) — verification CLEAR / Mac Mini prereqs BLOCKED
+**Runbook paired:** [`briefs/_runbooks/KBL_A_MERGE_RUNBOOK.md`](../_runbooks/KBL_A_MERGE_RUNBOOK.md)
 **Task posted:** 2026-04-18
 **Status:** OPEN — awaiting execution
-**Supersedes:** SLUGS-1 implementation task (shipped, awaiting B2 review)
+**Supersedes:** verification + runbook task (both shipped)
 
 ---
 
-## Task: KBL-A Pre-Install Verification + Merge Runbook
+## Task: Mac Mini Prereq Install (fix the 5 failures you flagged)
 
-### Why you, now
+### Context
 
-KBL-A PR #1 is about to merge. Two things need to happen *before* Director clicks merge, and you're the only agent with the context + access to do them in parallel with B2's SLUGS-1 review and B3's D1 v3 retry.
+Your verification caught 5 missing prereqs on Mac Mini that would make `install_kbl_mac_mini.sh` exit 1 at its sanity check. Fixing them now — **in parallel with Director's PR #1 merge** — means when Director runs the install script (post-merge Step 3 of the runbook), it runs clean.
 
-**This is a parallelism play** — we're trying to compress the critical path. Don't block on B2/B3. Report when done.
+**This is an execution task, not a report task.** You fix, you verify, you commit evidence, you report done.
 
-### Scope (two deliverables, same ~1-hour session)
+### Constraints
 
----
+- **Safe to run now:** Mac Mini is not yet running any KBL pipeline ticks (`KBL_FLAGS_PIPELINE_ENABLED=false` default, also `install_kbl_mac_mini.sh` hasn't been run yet). No risk of interfering with running production work.
+- **Do NOT** run `install_kbl_mac_mini.sh` itself — that's Director's call post-merge per the runbook.
+- **Do NOT** edit `~/.kbl.env` or populate secrets — that's the runbook's Step 4, Director-owned.
+- **Do NOT** commit `env.mac-mini.yml` to baker-vault — that's Step 5, Director-owned.
+- Scope is: (a) install missing Homebrew binaries, (b) install missing Python deps into the python3 that LaunchAgent uses, (c) verify fixes hold, (d) report.
 
-## Deliverable 1 — Pre-install verification report
+### What to install
 
-### Goal
+#### (a) Homebrew binaries (via `ssh macmini`)
 
-Prove that KBL-A's post-merge 7-step install sequence will not fail on hidden environment state. The merge has to succeed cleanly or Director + AI Head burn an hour debugging.
+```bash
+ssh macmini 'brew install yq util-linux'
+```
 
-### Checks to run
+`util-linux` provides GNU `flock` (distinct from macOS native flock which has incompatible flags per D5).
 
-**On Render (you can hit Render API via `gh`-style CLI or Render dashboard info in the codebase — if neither works, produce a checklist for Director to verify manually):**
+#### (b) Python deps into LaunchAgent's python3
 
-1. `BAKER_VAULT_PATH` env var is set
-2. `DATABASE_URL` env var is set (KBL-A migrations fail without it)
-3. Current deployed commit on Render's `baker-master` service — confirm it's the latest main (post-PR#1 it'll be the merge commit)
-4. Render has `yq` available (KBL-A wrapper uses it to flatten `env.mac-mini.yml`)
+LaunchAgent PATH is `/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin` per the plist. Target python3 is `/opt/homebrew/bin/python3` (Python 3.14.4 per your report).
 
-**On Mac Mini (via `ssh macmini` — Tailscale already wired per KBL-A):**
+Install the full `requirements.txt` from `baker-master` into this python3. Two approaches:
 
-1. `BAKER_VAULT_PATH` env var is set in the production shell environment (not just your SSH session — check the LaunchAgent context or the actual env the pipeline tick wrapper inherits)
-2. `/path/to/baker-vault` clone exists at whatever `BAKER_VAULT_PATH` points to
-3. That clone is on `main` and up-to-date with `origin/main`
-4. `ollama` binary is on PATH in non-interactive SSH context (Lesson #34 flagged `/opt/homebrew/bin` missing)
-5. Gemma 4 8B + Qwen 2.5 14B models are pulled and warm
-6. `claude` CLI is installed + authenticated
-7. `flock` binary available (D5 mutex)
-8. PostgreSQL client (`psql`) available for `_ensure_*` verification
+**Option 1 (simpler, less isolated):** install globally on the target python3
 
-**On baker-vault repo:**
+```bash
+ssh macmini '/opt/homebrew/bin/python3 -m pip install --user -r <baker-master>/requirements.txt'
+```
 
-1. `config/env.mac-mini.yml` file exists on `main` (not just in a PR) — or note if it's pending
-2. `slugs.yml` exists on `main` OR on the `slugs-1-vault` branch (for the SLUGS-1 PR — note which)
+(adjust `<baker-master>` to wherever the Mac Mini's baker-master clone lives — if it doesn't exist yet, that's a finding: the Mac Mini needs a baker-master clone before the install script can run. Flag in your report.)
+
+**Option 2 (cleaner, more aligned with Python best practice):** create a venv at a known path, install there, patch the LaunchAgent plist or the pipeline wrapper to activate the venv before running Python.
+
+**Recommendation:** Option 1 for now. Option 2 is a better end-state but touches the plist + wrapper, which is scope creep. Document Option 2 as a follow-up if you go Option 1.
+
+If `requirements.txt` itself doesn't exist on the Mac Mini yet (because the baker-master clone isn't there), clone it first — that's a legitimate pre-install step (the runbook's Step 3 assumes a clone exists).
+
+#### (c) Verify fixes
+
+Re-run your original verification checks against the LaunchAgent PATH context:
+
+```bash
+ssh macmini '/bin/bash -c "PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin; \
+  which yq flock python3; \
+  /opt/homebrew/bin/python3 -c \"import psycopg2, yaml; print(psycopg2.__version__, yaml.__version__)\""'
+```
+
+All should now ✅ PASS.
+
+Also re-run the install script's sanity checks (the lines you originally found failing, L26-L27 etc.) — confirm they pass, but **do NOT** run the install script itself end-to-end. Just verify the early sanity-check gates clear.
 
 ### Output format
 
-File at `briefs/_reports/B1_kbl_a_preinstall_verify_20260418.md`:
+File: `briefs/_reports/B1_kbl_a_prereq_install_20260418.md`
 
-- Section per environment (Render / Mac Mini / baker-vault)
-- Per-check: ✅ PASS / ❌ FAIL / ⚠️  UNKNOWN (with what the failure looked like)
-- Overall verdict: CLEAR TO MERGE / BLOCKED ON <list>
-- For any ❌ or ⚠️: a one-line fix recommendation (install this, set this env var, commit this file)
+Sections:
 
-**Critical:** do NOT fix anything in this task. Report only. Director + AI Head decide whether to fix pre-merge or post-merge.
+1. **TL;DR:** all fixes landed / partial / blocked on X
+2. **Before/after table:** each of the 5 originally failing checks, before status → after status
+3. **What you installed:** exact commands run, versions landed (`brew install` output, `pip install` output versions)
+4. **Followups:** any deferred items (Option 2 venv migration, missing baker-master clone, etc.)
+5. **Evidence:** paste the verification command outputs showing all ✅ PASS
 
----
+### Dispatch back
 
-## Deliverable 2 — KBL-A merge runbook
+Chat one-liner:
 
-### Goal
-
-Translate KBL-A brief's 7-step post-merge install sequence (§1612 onwards + the handover's §"Action 2" recap) into a tight executable runbook. Director executes without re-reading the 1600-line brief.
-
-### File
-
-Path: `briefs/_runbooks/KBL_A_MERGE_RUNBOOK.md`
-
-(If `briefs/_runbooks/` doesn't exist yet, create it. Add a tiny README.md explaining "runbooks = operator-facing procedures; briefs = design docs".)
-
-### Structure
-
-For each of the 7 post-merge steps:
-
-1. **Step title** (e.g., "Step 3: SSH to Mac Mini + run install_kbl_mac_mini.sh")
-2. **Precondition** — what must be true before starting this step
-3. **Exact commands** — copy-paste-ready, no "adjust as needed" language
-4. **Expected output** — what success looks like (sample output, grep pattern to confirm)
-5. **Failure triage** — if this step fails, where to look (log path, common causes)
-6. **Rollback** (if applicable) — how to undo this step's changes
-
-Include the KBL-A brief sections you reference (e.g., "see §1612 for schema CHECK constraint details") so Director can jump to source-of-truth if needed.
-
-### Specific scrutiny
-
-- The install script `scripts/install_kbl_mac_mini.sh` — does it actually idempotent-safely? If re-run, does it fail noisily on already-installed pieces, or skip silently?
-- The `~/.kbl.env` secret population — which 5 secrets? Name them. Not "populate 5 secrets" but "populate ANTHROPIC_API_KEY, POSTGRES_PASSWORD, ..."
-- The `KBL_FLAGS_PIPELINE_ENABLED=false` start state — verify the env-source flow actually picks it up (yq flatten → env → Python config reader)
-- The "flip flag when ready" final step — how does Director flip it? Edit `env.mac-mini.yml` in baker-vault, commit, push, wait for next pipeline tick to pull? Or a manual reload trigger? Document it.
-
-### What NOT to include
-
-- Design rationale (that's in the brief)
-- Decision history (that's in DECISIONS_PRE_KBL_A_V2.md)
-- Anything requiring a decision from Director mid-procedure — if you hit one, call it out + stop. Runbooks are straight-line execution.
-
----
-
-## Dispatch back
-
-Two chat one-liners to Director via AI Head when done:
-
-> B1 done (1/2): pre-install verification at `briefs/_reports/B1_kbl_a_preinstall_verify_20260418.md`, commit `<SHA>`. Verdict: <CLEAR / BLOCKED on ...>.
-
-> B1 done (2/2): merge runbook at `briefs/_runbooks/KBL_A_MERGE_RUNBOOK.md`, commit `<SHA>`. <line count> lines, 7 steps.
+> B1 Mac Mini prereqs installed — see `briefs/_reports/B1_kbl_a_prereq_install_20260418.md`, commit `<SHA>`. Status: <CLEAN / partial>.
 
 ---
 
 ## Scope guardrails
 
-- **Do NOT** fix any issues you find in verification. Report only.
-- **Do NOT** touch the SLUGS-1 PRs (B2 is reviewing).
-- **Do NOT** write KBL-B content — that's AI Head + B2 post-D1.
-- **DO** flag surprises in the report's "Side-effects / unexpected findings" section.
-- **Time-box:** ~1 hour total. If any single check takes >15 min, skip + flag UNKNOWN.
+- **No secrets.** Do not create or populate `~/.kbl.env`.
+- **No pipeline start.** Do not run `install_kbl_mac_mini.sh`, launch the LaunchAgent, or touch `KBL_FLAGS_PIPELINE_ENABLED`.
+- **No production file edits.** LaunchAgent plist, crontab, systemd units — all off-limits.
+- **DO** flag surprises (e.g., "baker-master clone doesn't exist on mac mini" → stop + report).
+- **Time-box:** ~30 min. If install or verification takes >45 min, stop + flag.
 
 ---
 
 ## Est. time
 
-~1 hour:
+~30 min:
 
-- 25 min verification (Render + Mac Mini + baker-vault checks)
-- 25 min runbook drafting
-- 10 min report + commits + push
+- 10 min brew + pip install
+- 10 min re-verify
+- 10 min report + commit
 
 ---
 
-*Dispatched 2026-04-18 by AI Head. Git identity: `Code Brisen 1` / `dvallen@brisengroup.com`. Your standard terminal clone.*
+*Dispatched 2026-04-18 by AI Head. Git identity: `Code Brisen 1` / `dvallen@brisengroup.com`. SSH to `macmini` via Tailscale.*
