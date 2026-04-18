@@ -50,12 +50,15 @@ D1_OPTIONS = {
     "num_predict": 512,
 }
 
-# KBL Step-1 prompt. Uses production vocabulary (opportunity/threat/routine)
-# then normalized to Buddhist vedana in comparison (see NORMALIZE_VEDANA).
-# Slug list is union of handover enum + ground-truth labels (labels file wins
-# on spelling conflicts per handover rule). Vedana rules added verbatim from
-# B3 handover to fix prior eval's 70%/66% vedana accuracy (root cause: no
-# semantic rule distinguishing defensive wins from new strategic gains).
+# KBL Step-1 prompt — v3.
+# v2 root-cause: list-expansion lifted vedana (+16pp) but matter stuck at 34%.
+# Dominant error was hagenauer-rg7 → brisen-lp (13/33 Gemma misses) — model
+# sees slug names without knowing what each MEANS, anchors on word "Brisen" in
+# email headers. v3 adds a semantic glossary so each slug has content.
+# Slug set is baker-vault (SLUGS-1) canonical 19; descriptions are exact
+# baker-vault text for 10 real entries + B3 best-guesses for the 9
+# "(Director to annotate)" placeholders, documented in the v3 retry report
+# for Director post-hoc ratification.
 STEP1_PROMPT = """You are a triage agent for a 28-matter business operation (real estate, hospitality, legal disputes, investment). Classify this signal. Output ONLY valid JSON, no commentary.
 
 Signal: "{signal}"
@@ -68,25 +71,39 @@ Respond with exactly this JSON:
   "summary": "one line"
 }}
 
-Allowed matter slugs (use EXACTLY one of these, or null):
-- hagenauer-rg7
-- cupial
-- mo-vie
-- ao
-- morv
-- lilienmat
-- wertheimer
-- brisen-lp
-- aukera
-- kitzbuhel-six-senses
-- kitz-kempinski
-- steininger
-- balducci
-- constantinos
-- franck-muller
-- mrci
-- baker-internal
-- personal
+Matter slugs (pick ONE slug whose description best matches the signal, or null if none apply):
+
+  hagenauer-rg7         — RG7 final-account dispute, Baden bei Wien (insolvency Mar 2026)
+  cupial                — Cupial handover dispute — Tops 4,5,6,18 (buyer payment + defects)
+  mo-vie                — Mandarin Oriental Vienna — asset management
+  ao                    — Andrey Oskolkov — principal investor (Aelio Holding Ltd)
+  brisen-lp             — Brisen LP — EPI Bond investor vehicle (fund/LP matters only)
+  wertheimer            — Wertheimer SFO — Chanel family-office LP opportunity
+  mrci                  — MRCI — Oskolkov-linked vehicle, Lilienmatt restructuring context
+  lilienmat             — Lilienmatt — Baden-Baden co-ownership, KPMG tax restructuring
+  aukera                — Aukera — term-sheet / deal-structuring work related to MO Vienna
+  kitzbuhel-six-senses  — Kitzbühel Six Senses — hotel development, Steininger-family dispute
+  kitz-kempinski        — Kempinski Kitzbühel — acquisition opportunity, UBM counterparty
+  steininger            — Steininger family — counterparty in Kitzbühel Six Senses dispute
+  franck-muller         — Franck Muller Group / LCG — counterparty in Hagenauer-adjacent legal matter
+  balducci              — Balducci — counterparty / relationship (unspecified)
+  constantinos          — Constantinos — counterparty / relationship (unspecified)
+  edita-russo           — Edita Vallen personal / family matters
+  theailogy             — TheAilogy — AI playbook / personal project (theailogy.ai / .com)
+  baker-internal        — Baker system / internal operations
+  personal              — Director personal matters
+  null                  — no matter applies (automated noise, newsletters, FYI with no business link)
+
+Disambiguation notes (IMPORTANT — common errors):
+- A brisengroup.com email header or "Brisen" in a sender name does NOT imply brisen-lp.
+  brisen-lp is ONLY for fund/LP vehicle matters. A Hagenauer-project email from a
+  brisengroup.com address is hagenauer-rg7, not brisen-lp.
+- hagenauer-rg7 vs cupial: both relate to the RG7 project, but cupial is specifically
+  the buyer-side dispute over Tops 4,5,6,18. If the signal mentions Cupial(s), Hassa,
+  Ofenheimer in a buyer-contract context → cupial. If it's about the contractor (Heidenauer),
+  Schlussabrechnung, or general project-level → hagenauer-rg7.
+- kitzbuhel-six-senses vs steininger: both share the court case. Choose the slug that
+  the signal's main subject is about — the project development vs the family credibility.
 
 vedana classification rules (STRICT):
 - opportunity: NEW strategic gains ONLY — a new deal, investor interest, unrequested approach, favorable market shift, novel capability revealed. Defensive wins inside an ongoing threat arc (e.g., court ruling in our favor on a dispute) stay in threat, not opportunity.
@@ -133,10 +150,19 @@ def normalize_vedana(v: str | None) -> str | None:
 
 
 def normalize_matter(m: str | None) -> str | None:
-    """Map any model-produced matter to an allowlist slug (or None)."""
+    """Map any model-produced matter to an allowlist slug (or None).
+
+    v3 fix: string "null" / "none" / "" are treated as Python None so they
+    compare equal to labels where primary_matter_expected is null. Previously
+    a model returning "null" (valid JSON) scored as miss against a null label.
+    Costs 1-4 rows per model per v2 analysis. Follow-up: same fix belongs in
+    kbl/slug_registry.normalize() once SLUGS-1 merges to main.
+    """
     if not isinstance(m, str) or not m.strip():
         return None
     low = m.lower().strip()
+    if low in ("null", "none"):
+        return None
     # Exact canonical
     for canon in MATTER_ALIASES:
         if low == canon:
