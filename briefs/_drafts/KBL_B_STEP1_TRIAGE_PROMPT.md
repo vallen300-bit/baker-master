@@ -2,7 +2,7 @@
 
 **Author:** Code Brisen 3 — empirical lead (v1/v2/v3 evals, D1 ratified 2026-04-18)
 **Task:** `briefs/_tasks/CODE_3_PENDING.md` (2026-04-18, re-engagement dispatch)
-**Model target:** `gemma4:latest` (local, macmini Ollama) — Qwen 2.5 14B as SLA fallback
+**Model target:** `gemma4:latest` (local, macmini Ollama). **Qwen 2.5 14B is wired as AVAILABILITY fallback ONLY** per D1 ratification 2026-04-18 (`briefs/DECISIONS_PRE_KBL_A_V2.md` → §"D1 Phase 1 acceptance" + §"Qwen-fallback role re-scoped"). Qwen fires when Gemma is **unreachable** (Ollama down, 3× retry failed), NOT on low-confidence. Qwen is NOT an accuracy rescue.
 **Ratified D1 perf:** Gemma 88% vedana / 76% matter / 100% JSON (glossary prompt v3)
 **Writes to:** `signal_queue.primary_matter`, `related_matters`, `vedana`, `triage_confidence`, `triage_score` (§4.2 contract)
 
@@ -105,7 +105,7 @@ All three retained in production prompt.
 |---|---|
 | Slug list + descriptions sourced from `slug_registry` at call time, not hardcoded | Single source of truth. When SLUGS-2 splits `edita-russo`, the prompt self-updates. No prompt re-deploy needed. |
 | Added `related_matters` array | Required by §4.4 schema (Step 4 `classify` policy uses it for cross-link decisions). Not in v1-v3 evals because those didn't test it. |
-| Added `triage_confidence` (0-1) | Required by §4.2 contract. Not in v1-v3 prompts — those only asked for `triage_score`. §4.4 Step 4 doesn't use confidence YET, but schema requires it for future ensemble-scoring (Step 1 fallback to Qwen when confidence < 0.5). |
+| Added `triage_confidence` (0-1) | Required by §4.2 contract. Not in v1-v3 prompts — those only asked for `triage_score`. Confidence is captured for future calibration studies + low-confidence routing to `wiki/_inbox/` for Director review. **NOT used to trigger Qwen fallback** — Qwen is availability-only per D1 re-scoping (2026-04-18). |
 | Explicit reject-list for generic categories ("hospitality", "investment") | Gemma in v1 hallucinated those at 4% rate. Glossary alone in v3 eliminated most. Explicit rejection makes it robust for production corpus (broader than 50-signal eval). |
 | "A brisengroup.com email header does NOT imply brisen-lp" | v3's most effective disambiguator — kill the dominant v2 error. Retained verbatim. |
 
@@ -138,7 +138,8 @@ Step 1 MUST NOT put `primary_matter` inside `related_matters` (would double-coun
 | `primary_matter` is a well-formed slug not in registry | `slug_registry.normalize()` returns None (same path as generic category) | Same as above. Logged at `level='WARN'` in case a new slug is in flux (e.g., mid-SLUGS-2 split). |
 | `vedana` not in enum | Validate at Python level | Force `vedana='routine'`, `triage_score=20`, log `WARN`. Don't retry — Gemma deviating from enum after v3 rules means something is wrong structurally. |
 | `related_matters` contains `primary_matter` | Python dedupe | Strip `primary_matter` from the array before write. No log. |
-| `triage_confidence < 0.5` + `primary_matter != null` | Step 1 post-processing | Fall back to Qwen 2.5 14B for a second opinion. Use Qwen's `primary_matter` if Qwen's confidence ≥ 0.7. Else keep Gemma's. (Requires `compare_qwen` infra — same as eval runner.) |
+| `triage_confidence < LOW_CONF_THRESHOLD` (default 0.5) | Step 1 post-processing | Route signal to `wiki/_inbox/` for Director review regardless of `triage_score`. Log `level='INFO'`, `component='triage'`, `message='low_confidence_to_inbox'`. **Do NOT retry with Qwen.** Qwen is availability-only fallback per D1 ratification 2026-04-18. |
+| Gemma unreachable (Ollama timeout or 3× connection failure) | Ollama HTTP client | Cold-swap to Qwen 2.5 14B (existing KBL-A mechanism, §D1 §173-177). Emit `level='WARN'`, `component='triage'`, `message='running on availability fallback, accuracy degraded'` per D1 Qwen-fallback clarification. Auto-recovery after 10 signals on Qwen OR 1h elapsed, retry Gemma. |
 | Gemma returns no triage_confidence (pre-v3 schema) | Python post-parse | Default to 0.7 if other fields clean, 0.3 if any other field had to be coerced. Log `WARN` for telemetry drift. |
 
 ### 3.1 Invariants (§4.2 restated)
@@ -180,7 +181,7 @@ Ledger row: `step='triage'`, `model='ollama_gemma4'`, `input_tokens`, `output_to
 
 ## 6. Open questions for AI Head
 
-1. **Qwen fallback threshold.** Spec says "confidence < 0.5 → Qwen re-run." Is that per-signal-second-call (2× latency) or batch-level (only when Gemma run fails bulk-validation)? I'd argue per-signal is correct for D1 safety, even at 2× cost (still $0).
+1. **Qwen fallback trigger** — ~~confidence threshold~~ **RESOLVED by AI Head 2026-04-18.** Qwen fires ONLY on Gemma unreachability (Ollama down or 3× retry failed). D1 ratification 2026-04-18 re-scoped Qwen as availability-only fallback, not accuracy rescue. Confidence-based Qwen ensemble is not spec. Low confidence → route to `wiki/_inbox/` for Director review (see §3 table).
 
 2. **`triage_score` calibration.** No eval measured score calibration. In v3 the score bucket hit 94% (alignment with Director's triage_pass_expected y/n), which is good but not a calibration proof. If Phase-1 close-out shows drift (e.g., Gemma consistently over-scores), add a post-hoc linear rescale. Out of scope for this prompt draft.
 
