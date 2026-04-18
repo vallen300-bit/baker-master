@@ -2,70 +2,98 @@
 
 **From:** AI Head
 **To:** Code Brisen #3 (app instance)
-**Previous:** Stood down after D1 ratification (`397c391`)
+**Previous:** §6 prompts shipped (`242a4d3`, corrected at `cd8abab` for Qwen re-scoping)
 **Task posted:** 2026-04-18
-**Status:** OPEN — re-engaged for prompt authoring
+**Status:** OPEN — awaiting execution
 
 ---
 
-## Task: Draft KBL-B §6 — Production Prompts for Steps 1 + 3 (Gemma local)
+## Task: Draft KBL-B Step 0 — Layer 0 Deterministic Rules (per-source)
 
-You have the deepest empirical knowledge of Gemma prompt behavior (v1/v2/v3 evals). AI Head is writing §6 for Opus + Sonnet prompts in parallel. You handle the two local-LLM prompts.
+You saw 50 real signals across 3 eval cycles (email + WhatsApp + meeting transcripts). You know empirically what's noise vs substance per source. Draft the deterministic Layer 0 filter rules that drop 10-30% of signals before Step 1 Triage even sees them.
 
-### Deliverables — 2 production prompt templates
+### Context
 
-**Step 1 — `triage` prompt**
+Per §4.1 of `briefs/_drafts/KBL_B_PIPELINE_CODE_BRIEF.md`:
 
-Based on your v3 glossary prompt that landed Gemma at 88v/76m. Harden for production:
+> **Step 0 — `layer0`** (per-source deterministic filter) drops obvious noise before any LLM touches it. 10-30% of signals drop here.
 
-- Slug enumeration sourced from `kbl.slug_registry.active_slugs()` at prompt-build time (not hardcoded). Per-slug one-line descriptions from `registry.describe(slug)`.
-- Vedana rules block verbatim per v3.
-- JSON output spec with exact field types (per §4.2 contract: `primary_matter` nullable, `related_matters` array, `vedana` enum, `triage_confidence` 0-1, `triage_score` 0-100).
-- D1 sampling config unchanged (temp=0, seed=42, top_p=0.9).
-- Prompt preamble explicitly permits `null` for primary_matter + rejects generic category strings ("hospitality", "investment", etc.).
+Per D3 §247 in decisions doc: Layer 0 is "per-source deterministic filter" — no model calls, no embeddings. Pure Python rules on signal metadata + content heuristics.
 
-**Step 3 — `extract` prompt**
+### Deliverable
 
-New prompt (no prior draft). Structured entity extraction per §4.4 schema:
+File: `briefs/_drafts/KBL_B_STEP0_LAYER0_RULES.md`
 
-```json
-{"people": [...], "orgs": [...], "money": [...], "dates": [...], "references": [...], "action_items": [...]}
-```
+Structure per source:
 
-All 6 keys always present, values always arrays (possibly empty). Non-extractable → omit from sub-object, not null/missing.
+#### For each of email / whatsapp / meeting_transcript / scan_query
 
-Include 2-3 few-shot examples spanning email / WA / transcript source types (use signals from `outputs/kbl_eval_set_20260417_labeled.jsonl` as source material — you know the content shape).
+1. **Rule list** — each rule has:
+   - **Name** (e.g., `email_sender_blocklist`, `wa_automated_number`, `transcript_too_short`)
+   - **Trigger condition** (exact Python predicate on `signal_queue` row + payload JSONB)
+   - **Action** (drop, always) + log message
+   - **Empirical basis** — which signal(s) in your eval set motivated this rule (cite by `signal_id` or label JSONL line number)
+   - **False-positive risk** — signals that LOOK like the pattern but aren't noise (your judgment)
 
-### Where to put them
+2. **Ordering** — some rules need to run before others (e.g., check "Baker self-analysis dedupe" before "short content" because self-analyses are often short)
 
-File: `briefs/_drafts/KBL_B_STEP1_TRIAGE_PROMPT.md` and `briefs/_drafts/KBL_B_STEP3_EXTRACT_PROMPT.md`.
+3. **Configurability** — which rules are hardcoded vs env-var tunable (e.g., `KBL_LAYER0_EMAIL_BLOCKLIST_DOMAINS` as CSV, `KBL_LAYER0_WA_MIN_LENGTH=20`)
 
-Each file:
-- The prompt template (copy-paste-ready for a Python `.format()` or similar)
-- Rationale notes (why this structure, what empirical result motivated each piece)
-- Expected failure modes + recovery (tied to §4 invariants)
+### Rules you should cover at minimum
 
-These drafts will be imported verbatim into KBL-B §6 when AI Head assembles the full section.
+**Email:**
+- Sender blocklist (LinkedIn, newsletter senders, unsubscribe-pattern domains)
+- Unsubscribe link + auto-generated header detection
+- Bounce/autoreply patterns
+- Baker self-analysis dedupe (the 7 duplicates in your v1 eval set — they share signature patterns)
+- Subject-line noise (e.g., "Your receipt for...")
 
-### Scope guardrails
+**WhatsApp:**
+- Automated number ranges (verification codes, 2FA services — patterns like `+12025550123` US-throwaway)
+- Forwarded-without-context chain (msg body starts with `Forwarded:` or contains only a link)
+- Group-join/group-leave system messages
+- Voice-note placeholder signals (no transcribed content)
 
-- **Do NOT** run evals. This is authoring, not measurement.
-- **Do NOT** modify `scripts/run_kbl_eval.py` or labeled set.
-- **Do NOT** speculate on Opus/Sonnet prompts (§6 covers those — AI Head authoring).
-- Use Director's slug descriptions (from `baker-vault/slugs.yml` post-SLUGS-1 merge, or the 9 you drafted yourself in v3 report).
+**Meeting transcript:**
+- Minimum content threshold (your garbled Fireflies transcript at signal idx 29 — what did it look like?)
+- Internal-only meeting pattern match (e.g., title contains "Baker team standup")
+- Test/demo transcripts (title contains "test", "demo", "throwaway")
+
+**Scan query:**
+- Director's own queries — NEVER drop, always pass-through. Document this rule explicitly.
+
+### What NOT to include
+
+- **No model-based rules.** Layer 0 is deterministic only.
+- **No aggregate filters** (e.g., "drop if total emails from sender > 10 this week"). Those are stateful; belong in later steps if at all.
+- **No per-matter rules.** Layer 0 runs before matter classification (Step 1).
+- **No retroactive rules** ("if Step 5 previously returned X for this sender"). Forward-only rules.
+
+### Reference for Step 0 contract
+
+§4.1 of `briefs/_drafts/KBL_B_PIPELINE_CODE_BRIEF.md` defines the IO contract. Your rules must fit within it (read `source`, `raw_content`, `payload->>`... / write `state='dropped_layer0'` terminal OR `state='done'` + route forward).
 
 ### Dispatch back
 
-> B3 §6 prompts drafted — Step 1 at `briefs/_drafts/KBL_B_STEP1_TRIAGE_PROMPT.md`, Step 3 at `briefs/_drafts/KBL_B_STEP3_EXTRACT_PROMPT.md`, commit `<SHA>`.
+> B3 Step 0 rules drafted — see `briefs/_drafts/KBL_B_STEP0_LAYER0_RULES.md`, commit `<SHA>`. Rules: `<N>` per source, `<X>` env-var-tunable.
 
-### Est. time
+### Scope guardrails
 
-~45 min total:
-
-- 15 min Step 1 prompt (v3 hardening + registry-dynamic)
-- 25 min Step 3 prompt (new, with few-shot examples)
-- 5 min rationale notes + commit
+- **Do NOT** implement Python. This is rule specification, not code. AI Head assembles into §6 / implementation brief later.
+- **Do NOT** propose new `signal_queue` columns. Work within current shape.
+- **DO** cite specific eval-set signals as empirical basis — this is your unique value-add.
 
 ---
 
-*Dispatched 2026-04-18 by AI Head. Re-engaged from stand-down per Director speed directive.*
+## Est. time
+
+~45 min:
+
+- 10 min re-read your eval labels + extract noise patterns
+- 30 min rule drafting with empirical citations
+- 5 min ordering + configurability pass
+- Commit
+
+---
+
+*Dispatched 2026-04-18 by AI Head.*

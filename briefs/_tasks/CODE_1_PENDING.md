@@ -2,75 +2,96 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (terminal instance)
-**Previous:** Install steps 3+4+5 shipped (`fba1d9b`), SIGPIPE hotfix landed via PR #1 merge (`3f130f1`)
+**Previous:** TCC fix + DATABASE_URL shipped (PR #3 in review, 1P item live)
 **Task posted:** 2026-04-18
 **Status:** OPEN — awaiting execution
+**Supersedes:** TCC + DB_URL task (shipped)
 
 ---
 
-## Task: TCC/Desktop Install Fix + DATABASE_URL to 1Password
+## Task: SLUGS-1 S1 + S2 Cleanup
 
-Two quick cleanups from the install session's unresolved items. ~40 min combined.
+Should-fix items B2 flagged in the original SLUGS-1 review (`briefs/_reports/B2_slugs1_review_20260417.md`). Small cleanup before they rot. ~30 min combined.
 
-### Deliverable 1 — TCC-safe install script
+### Deliverable 1 — S1: test for `score_row` `unknown_non_canonical` guard
 
-**Problem:** macOS 15 launchd can't execute scripts under `~/Desktop` due to TCC restrictions. Current install bandaged by editing plists on Mac Mini to bypass `/usr/local/bin/` symlinks and point at `~/baker-code/` directly. Anyone running `install_kbl_mac_mini.sh` fresh from a Desktop clone will hit the same failure.
+**Context:** `kbl/slug_registry.py` has `normalize()` returning None for unknown slugs. But `run_kbl_eval.py`'s `score_row` has an explicit `unknown_non_canonical` guard that prevents a model outputting an unknown slug like `"hospitality"` from spuriously matching a label of `None`. The registry tests don't cover this contract dependence — it's a runtime invariant that lives in the eval runner, not the registry.
 
-**Fix (pick one, document rationale):**
+**Fix:** Add a test at `tests/test_run_kbl_eval.py` (new file) that exercises the invariant:
 
-**(a)** Install script detects clone location at runtime. If `$(git rev-parse --show-toplevel)` is under `~/Desktop/`, script refuses with a clear error + recommends `mv ~/Desktop/baker-code ~/baker-code` then re-run.
+```python
+# pseudocode
+def test_unknown_non_canonical_scores_false():
+    # model outputs "hospitality" (unknown), label says primary_matter is None
+    # expected: matter_ok = False (because model hallucinated a matter where truth is null)
+    result = score_row(
+        label={"primary_matter_expected": None, ...},
+        parsed={"matter": "hospitality", ...}  # unknown string
+    )
+    assert result["matter_ok"] is False
 
-**(b)** Install script skips `/usr/local/bin/` symlinks entirely. Plists reference the clone path directly (same as the manual fix I applied). Removes root-owned symlinks as an install artifact.
+def test_unknown_non_canonical_still_catches_legitimate_nulls():
+    # model outputs None, label is None
+    # expected: matter_ok = True (both null, aligned)
+    ...
 
-**(c)** Install script copies the scripts into `~/.local/bin/kbl-*.sh` (user-owned, non-TCC-protected) and plists reference that. Keeps install self-contained under user home.
+def test_alias_normalization_still_works():
+    # model outputs "Hagenauer" (alias), label is "hagenauer-rg7"
+    # expected: matter_ok = True (normalize() resolves alias)
+    ...
+```
 
-AI Head preference: **(b)** — least install surface, no sudo required, plist is the single source of truth for script path. (c) is also good but changes install shape.
+Aim for 3-4 cases covering: unknown-string-vs-null-label, null-vs-null, alias-match, canonical-match.
 
-Add a short note to the KBL-A brief `§install` section explaining the TCC context for future re-installs.
+### Deliverable 2 — S2: catalogue 3 residual hardcoded slug sites
 
-**PR against main.** Branch: `kbl-a-tcc-fix`. B2 reviews before merge.
+**Context:** B2 noted B1's original SLUGS-1 residual list missed 3 sites in `tools/`, `orchestrator/`, `memory/`. The original task-brief scope was the 3 explicit consumers (`validate_eval_labels.py`, `run_kbl_eval.py`, `build_eval_seed.py`) — those 3 are clean. The other 3 may or may not need registry migration.
 
-### Deliverable 2 — DATABASE_URL to 1Password
+**Fix:**
 
-**Problem:** Render has split `POSTGRES_HOST/PORT/DB/USER/PASSWORD/SSLMODE` env vars. Assembly into a single `DATABASE_URL` required a Python hack (§6.3 of install report). Future automation will repeat.
+1. Grep the 3 directories for hardcoded slug references:
 
-**Fix:** Add a `DATABASE_URL` item to the 1Password `Baker API Keys` vault. Value = the already-assembled URL with `urllib.parse.quote` applied to special chars. Document the format in the item's notes field.
+```bash
+grep -rn "hagenauer-rg7\|cupial\|mo-vie\|brisen-lp\|wertheimer\|aukera" tools/ orchestrator/ memory/ 2>&1 | grep -v __pycache__ | head -30
+```
 
-**Procedure:**
+2. For each hit, classify:
+   - **UI/keypress map** (like `present_signal.py` 1→hagenauer-rg7): stays as-is, not a registry concern
+   - **Canonical-list duplication**: migrate to `kbl.slug_registry.canonical_slugs()` — open follow-up PR
+   - **Documentation/comment**: leave alone
 
-1. On Mac Mini via `ssh macmini`, `export OP_SERVICE_ACCOUNT_TOKEN=...` (from `/tmp/b1-op.env` if still present, else Director re-provides)
-2. Retrieve split vars via Render API (you know the pattern from §6.3)
-3. Assemble URL
-4. Create new 1P item: `op item create --category 'API Credential' --vault 'Baker API Keys' --title 'DATABASE_URL' credential='<url>'`
-5. Verify: `op item get 'DATABASE_URL' --vault 'Baker API Keys' --fields credential --reveal | head -c 40` (just to confirm retrievable)
-6. Update Mac Mini `~/.kbl.env` to pull from the new item on next rebuild (document in the report, don't re-populate now)
+3. File a catalogue at `briefs/_drafts/SLUGS_2_RESIDUAL_CATALOGUE.md`:
+   - Table: file:line, current reference, classification, action (keep / migrate / delete)
+   - Summary: count per classification, total migrate-needed
+   - Recommendation: fold migrations into one small follow-up PR OR defer to per-file basis
+
+**Do NOT** actually migrate in this task. Catalogue + recommendation only. Migration is a separate dispatch.
 
 ### Report
 
-File: `briefs/_reports/B1_tcc_fix_dburl_20260418.md`
+File: `briefs/_reports/B1_slugs1_s1_s2_20260418.md`
 
-- Deliverable 1: which option (a/b/c) picked + rationale + PR URL
-- Deliverable 2: 1P item created (name only, no value) + verify output (first 40 chars of URL, NOT full value)
-
-### Scope guardrails
-
-- **Do NOT** touch the bandaged plist paths on Mac Mini (they're live and working — don't regress Step 6 state)
-- **Do NOT** commit secrets to git in any form
-- Token hygiene: `unset OP_SERVICE_ACCOUNT_TOKEN` at session end
+- Deliverable 1: test file PR URL + pytest output showing new tests green
+- Deliverable 2: catalogue file path + count-per-classification summary + recommendation (fold-all-in-one vs per-file)
 
 ### Dispatch back
 
-> B1 TCC + DB_URL done — see `briefs/_reports/B1_tcc_fix_dburl_20260418.md`, commit `<SHA>`. PR `<URL>` for TCC fix. Standing by.
+> B1 S1+S2 done — see `briefs/_reports/B1_slugs1_s1_s2_20260418.md`, commit `<SHA>`. Test PR: `<URL>`. Catalogue: `<N>` sites in 3 dirs, `<M>` need migrate.
+
+### Scope guardrails
+
+- **Do NOT** migrate residual hardcoded slugs in this task. Catalogue only.
+- **Do NOT** touch KBL-B files (that's the §6-13 authoring in flight).
 
 ---
 
 ## Est. time
 
-~40 min:
+~30 min:
 
-- 20 min TCC fix (option b) + PR
-- 10 min DATABASE_URL to 1P
-- 10 min report
+- 15 min S1 test file
+- 10 min S2 grep + catalogue
+- 5 min report + PR
 
 ---
 
