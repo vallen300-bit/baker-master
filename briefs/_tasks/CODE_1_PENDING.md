@@ -2,83 +2,91 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (terminal instance)
-**Previous:** PR #4 + PR #5 amendments shipped. PR #4 merged at `8a55e82`. PR #5 in B2 review at head `c8c7a35`.
+**Previous:** PR #5 merged at `45c0962`. PR #6 merged at `de7fd6f`. Idle since.
 **Task posted:** 2026-04-18
 **Status:** OPEN
 
 ---
 
-## Task: LOOP-HELPERS-1 — Implement `kbl/loop.py` helper functions
+## Task: LAYER0-IMPL — Step 0 Layer 0 Evaluator + Helpers
 
-**Why now:** B3's Step 1 amendment references three helper functions that don't yet exist. PR #5 schema (merging soon) creates `feedback_ledger` for the ledger read. These helpers are the Python glue between CHANDA §2 Leg 3 (Step 1 reads) and the loop-infrastructure tables. Small, testable, production-moving. Unblocks Step 1 impl the moment KBL-B §6-13 authoring is done.
+**Why now:** Layer 0 rules spec ratified (B2 READY at commit `64d1712`). Loader shipped (PR #4). Schema shipped (PR #5). Now build the evaluator that glues rules + signals together. Production-moving.
 
 ### Scope
 
-**IN**
-- New module `kbl/loop.py` with three helpers:
+**IN — new modules + helpers**
 
-```python
-def load_hot_md(path: str | None = None) -> str | None:
-    """Read hot.md from $BAKER_VAULT_PATH/wiki/hot.md by default, or explicit path.
+1. **`kbl/layer0.py`** — the evaluator
+   - `evaluate(signal, ruleset=None) -> Layer0Decision` — returns `pass` / `drop(rule_name, detail)`
+   - `_process_layer0(signal, conn) -> Layer0Decision` — wraps `evaluate()` + writes to `kbl_layer0_hash_seen` on PASS + `kbl_layer0_review` on 1-in-50 drop sample
+   - First-match-wins over rules list ordering
+   - Director-sender check runs BEFORE any rule (C2 invariant — never-drop)
+   - VIP-sender soft-fail CLOSED (S4 — treat as VIP during VIP-service downtime)
+   - Short-slug alias-aware topic-override (S3)
+   - Content-hash dedupe (S5) — insert hash on PASS only (not on drop)
+   - Review-queue sampling (S6) — deterministic `signal.id % 50 == 0`, 500-char excerpt
 
-    Returns file contents as str, or None if file absent.
-    Does NOT raise on missing file (valid zero-Gold state per CHANDA Inv 1).
-    Raises LoopReadError on permission/IO errors.
-    """
+2. **`baker/director_identity.py`** — `is_director_sender(signal) -> bool`
+   - Normalizes phone via `re.sub(r'\D', '', raw)` to match WAHA serialization `41799605092`
+   - Recognizes emails: `dvallen@brisengroup.com`, `vallen300@gmail.com`, `office.vienna@brisengroup.com`
+   - Recognizes WhatsApp numbers: `41799605092` (after normalization of any format — `+41 79 960 50 92`, `+41799605092`, `41799605092@c.us`, etc.)
+   - Single source of truth — Layer 0 + future Ayoniso + future Gold-promote checks all use this
 
-def load_recent_feedback(conn, limit: int | None = None) -> list[dict]:
-    """Query feedback_ledger for the N most recent rows.
+3. **`kbl/layer0_dedupe.py`** — hash-store ops
+   - `normalize_for_hash(content: str) -> str` — lowercase, trim, collapse multi-space, strip trailing whitespace per line, drop standard sig blocks (`\n--\n.*`). Deterministic recipe.
+   - `has_seen_recent(conn, content_hash: str) -> bool` — checks `kbl_layer0_hash_seen` with `ttl_expires_at > now()`
+   - `insert_hash(conn, content_hash, source_signal_id, source_kind, ttl_hours=72)`
+   - `cleanup_expired(conn) -> int` — daily cron callable; returns count of rows purged
 
-    limit: int override; if None, reads env var KBL_STEP1_LEDGER_LIMIT (default 20).
-    Returns list of dicts with keys: id, created_at, action_type, target_matter,
-        target_path, signal_id, payload, director_note.
-    Returns empty list if table empty (valid zero-Gold state).
-    Raises LoopReadError on DB errors.
-    """
+4. **`kbl_layer0_review_insert(conn, signal_id, rule_name, excerpt, source_kind)`** — in `kbl/layer0.py` or separate small module
+   - Column names match PR #5 schema exactly: `signal_id`, `dropped_by_rule`, `signal_excerpt`, `source_kind`, `created_at` (default now())
+   - Note: B2 PR #5 review N1/N2 flagged B3's draft uses `rule_name` / `excerpt` / `sampled_at` in §3.5/§3.6. Schema wins — use PR #5 column names (`dropped_by_rule`, `signal_excerpt`, `created_at`).
 
-def render_ledger(rows: list[dict]) -> str:
-    """Format ledger rows into prompt-insertable Markdown block.
-
-    Renders one line per row in Director-scannable format:
-        [YYYY-MM-DD] <action_type> <target_matter|target_path>: <director_note or payload-summary>
-    Returns "(no recent Director actions)" if rows is empty.
-    """
-```
-
-- `LoopReadError` exception class (for IO / DB read failures, distinct from zero-data case)
-- Env var reader with default: `KBL_STEP1_LEDGER_LIMIT=20`
-- Unit tests in `tests/test_loop_helpers.py`:
-  - `load_hot_md`: happy path, missing file returns None, permission error raises `LoopReadError`
-  - `load_recent_feedback`: happy path (mock PG or test DB), empty table returns `[]`, DB error raises `LoopReadError`, `limit` param override works, env-var default works
-  - `render_ledger`: empty list renders placeholder, single row renders correctly, 20 rows render correctly, special chars escaped if any (director_note may contain markdown)
-- Fixture hot.md files in `tests/fixtures/`:
-  - `hot_md_sample.md` (realistic 6-bullet content)
-  - `hot_md_empty.md` (edge case — file exists but zero content)
+**Reconciliations (per B2 Step 0 rereview N1/N2/N4):**
+- Step 0 draft's §3.5/§3.6 column names: writer code uses schema column names; if spec and schema diverge, update the spec in a follow-up docs commit (not in this PR)
+- Phone normalization: `is_director_sender()` normalizes `+41 79 960 50 92` / `+41799605092` / `41799605092@c.us` to canonical `41799605092` before comparison
 
 **OUT**
-- Writer-side functions (ledger writer is KBL-C territory)
-- Actual Step 1 prompt wiring (KBL-B implementation, separate ticket after §6-13 authoring)
-- Template rendering / prompt assembly (lives in `run_kbl_eval.py` or successor module)
-- Any change to `signal_queue`, `slug_registry`, or other existing modules
+- Rule content in baker-vault (Director / B3 own the YAML)
+- Loader changes (PR #4 already shipped; just call `get_ruleset()`)
+- Pipeline wiring beyond Step 0 (Step 1 onward is separate impl)
+- Review-queue UI (KBL-C)
 
-### Dependencies
+### Tests (new)
 
-- PR #5 (`feedback_ledger` table schema) — merge-pending on B2 review. You can write the helpers + tests against the schema SPEC now; tests use the test DB with migration applied. If PR #5 hasn't merged by the time you push, flag — I'll sequence merge before review of PR #6.
-- `BAKER_VAULT_PATH` env var (already canonical per SLUGS-1)
+- `tests/test_layer0_eval.py`:
+  - Pass happy path (signal matches no rule)
+  - Drop on each rule name in the fixture ruleset
+  - First-match-wins ordering
+  - Director-sender short-circuits to PASS (C2 invariant)
+  - VIP-sender soft-fail CLOSED (S4) — mock VIP service unreachable, signal still passes
+  - Short-slug alias override (S3) — "Andrey Oskolkov" whole-word matches `ao` only via alias
+- `tests/test_layer0_dedupe.py`:
+  - `normalize_for_hash` deterministic (same input → same output)
+  - `has_seen_recent` returns True when hash present + within TTL
+  - `has_seen_recent` returns False when hash expired
+  - `insert_hash` + `cleanup_expired` round-trip
+- `tests/test_director_identity.py`:
+  - All email variants recognized
+  - WhatsApp number formats all normalize to canonical
+  - Non-Director sender returns False
+  - Edge: malformed phone string doesn't crash
 
-### CHANDA pre-push self-check
+### CHANDA pre-push
 
-- **Q1 Loop Test:** helpers IMPLEMENT Leg 3 reading pattern. This is remedy for Inv 3 non-compliance per B3's CHANDA audit. Director pre-approved amend-now. Cite CHANDA §2 Leg 3 + §5 Q1 amend-now authorization in PR body.
-- **Q2 Wish Test:** pure wish-service. No convenience shortcut.
-- **Inv 1 compliance:** `load_hot_md` returning None when file absent is valid zero-Gold read (not an error). `load_recent_feedback` returning `[]` when table empty is valid zero-Gold read. Both must be tested explicitly.
-- **Inv 10 compliance:** helpers read data. They do NOT rewrite prompts. Inv 10 preserved.
+- Q1 Loop Test: Layer 0 is upstream of loop reading. Evaluator doesn't modify Leg 1/2/3 mechanism. Pass.
+- Q2 Wish Test: serves wish (filters noise so loop operates on signal). Pass.
+- Inv 1: all PASS signals flow downstream to Step 1. Zero-match case = PASS. Correct.
+- Inv 4: Director-sender short-circuit enforces author:director authority at signal-intake boundary.
+- Inv 7: Layer 0 ≠ alert. Review queue is audit, not notification. Log-only on drop.
 
 ### Branch + PR
 
-- Branch: `loop-helpers-1`
-- Base: `main` (after PR #5 merges; if PR #5 still pending when you finish, base on PR #5's branch and note in PR body)
-- PR title: `LOOP-HELPERS-1: kbl/loop.py — hot.md + feedback_ledger readers`
-- Target PR: #6
+- Branch: `layer0-impl`
+- Base: `main`
+- PR title: `LAYER0-IMPL: kbl/layer0.py + director_identity + dedupe helpers`
+- Target PR: #7
+- PR body: cite rules spec @ `64d1712`, schema @ PR #5, loader @ PR #4; flag N1/N2 docs-update follow-up
 
 ### Reviewer
 
@@ -86,12 +94,12 @@ B2 (reviewer-separation).
 
 ### Timeline
 
-~45-60 min.
+~90-120 min — largest KBL-B impl unit so far but bounded by the spec.
 
 ### Dispatch back
 
-> B1 LOOP-HELPERS-1 shipped — PR #6 open, branch `loop-helpers-1`, head `<SHA>`, <N>/<N> tests green. Ready for B2 review.
+> B1 LAYER0-IMPL shipped — PR #7 open, branch `layer0-impl`, head `<SHA>`, <N>/<N> tests green. Ready for B2 review.
 
 ---
 
-*Posted 2026-04-18 by AI Head. B3 parallel-running Step 0 Layer 0 rules 6-should-fix application. B2 reviewing PR #5 (your parent schema).*
+*Posted 2026-04-18 by AI Head. B3 on micro-fix (env-var typo). B2 CHANDA ack done — awaits REDIRECT fold review task C. Director: Fireflies labeling in separate session (~10 transcripts).*
