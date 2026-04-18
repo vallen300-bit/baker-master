@@ -4,131 +4,57 @@
 **To:** Code Brisen #3 (app instance)
 **Previous reports:**
 - `briefs/_reports/B3_d1_eval_results_20260417.md` (v1 — FAIL)
-- `briefs/_reports/B3_d1_eval_retry_20260417.md` (v2 — FAIL, vedana +16pp / matter stuck)
-**Task posted:** 2026-04-17
-**Status:** OPEN — awaiting execution
-**Supersedes:** v2 retry task (complete, reported at commit `6328f11`)
+- `briefs/_reports/B3_d1_eval_retry_20260417.md` (v2 — FAIL on matter)
+- `briefs/_reports/B3_d1_eval_v3_20260417.md` (v3 — 88v/76m, glossary +42pp)
+**Task posted:** 2026-04-18
+**Status:** STAND DOWN — D1 ratified, no further eval iteration required
 
 ---
 
-## Task: D1 Pre-Shadow Eval — v3 (Semantic Glossary + Scoring Bug Fix)
+## Task: Stand Down — D1 Ratified
 
-### Context (60-second read)
+### What just happened
 
-v2 result: Gemma 86% vedana / 100% JSON / **34% matter** (FAIL on matter only; vedana cleared the +16pp bar). Qwen 80% / 100% / 36% — worse on vedana.
+Director ratified D1 on 2026-04-18 as **Gemma-final at 88v/76m for Phase 1**, overriding original 90/80 thresholds based on operational reasoning (Layer 2 Hagenauer-only scoping + inbox safety net + downstream Step 2/4 recovery).
 
-**Diagnosis you reported (v2 §findings):**
+Ratification record: `briefs/DECISIONS_PRE_KBL_A_V2.md` §"D1 Phase 1 acceptance" (added in clarification block).
 
-1. Vedana rule landed as designed — prompt engineering works when given semantic content
-2. List-expansion alone didn't fix matter — model sees 18 slug names but doesn't know what each *means*
-3. Dominant error: `hagenauer-rg7 → brisen-lp` (13/33 misses) — model conflates real-estate dispute with capital structure
+Path B (bug-fix + relabel + v4) is **not executed**. Reason: measurement hygiene gains are marginal; Phase 1 close-out will re-eval on live production data, which is a better measurement anyway.
 
-The hypothesis is clear: **the model needs a semantic glossary, not a longer list**. One line per slug describing what the matter IS. If vedana precedent holds, matter accuracy should jump meaningfully.
+Path A (third-model eval) is **not executed**. Gemma is ratified.
 
-Also: the scoring bug you flagged (`normalize_matter()` doesn't convert `"null"` / `"none"` string to Python `None` → 1-4 rows scored wrong per model) should be fixed before v3 so the measurement is honest.
+Your 9 self-written slug descriptions (§2c of v3 report) are **accepted as-is** into `baker-vault/slugs.yml` via SLUGS-1 merge. Director retains editorial control via direct baker-vault PR at any time.
 
----
+### What this means for you
 
-## What to do
+**Eval iteration loop is closed.** v1/v2/v3 reports are canonical artifacts — preserve them. They will be cited in KBL-B §6 prompt-design (AI Head's next authoring task) and in Phase 1 close-out Phase-2-gate re-eval.
 
-### 1. Patch the prompt in `scripts/run_kbl_eval.py`
+### What to do now
 
-**Add a per-slug glossary block to `_build_step1_prompt()` (introduced in SLUGS-1).** Source of truth for descriptions: `kbl.slug_registry.describe(slug)` — populated from `baker-vault/slugs.yml` per-entry `description` field.
+**Nothing, immediately.** Stand by for next dispatch. You will likely be re-engaged for one of:
 
-Format proposal (adjust if a different layout reads better to the model):
+1. **Phase 1 close-out re-eval** (weeks away — live production signal corpus against same prompt)
+2. **Third-model eval** if Phase 2 expansion needs real accuracy fallback
+3. **Ad-hoc eval work** if a new classifier question arises in KBL-B/C
 
-```
-Matter slugs (pick one or null):
+You can close any scratch state on `/tmp/bm-b3` but preserve:
+- `outputs/kbl_eval_set_20260417_labeled.jsonl` (ground truth for future re-eval)
+- `outputs/kbl_eval_results_*` (baseline numbers for longitudinal comparison)
+- Your v3 prompt patch in `scripts/run_kbl_eval.py` (superseded by SLUGS-1's dynamic prompt once it merges, but the v3 pattern is canonical for how KBL-B Step 1 production prompt should look)
 
-  hagenauer-rg7 — RG7 final-account dispute, Baden bei Wien (contractor/developer litigation)
-  cupial        — Cupial handover dispute — Tops 4,5,6,18 (buyer payment + defects)
-  mo-vie        — Mandarin Oriental Vienna, asset management oversight
-  brisen-lp     — Brisen fund / capital structure matters with LPs
-  wertheimer    — Wertheimer relationship / SFO outreach (separated from brisen-lp)
-  ao            — Andrej Oskolkov — VIP contact, contract matter
-  mrci          — MRCI GmbH real estate investment, Baden-Baden DE
-  lilienmat     — Lilienmat GmbH (7% ownership), Baden-Baden DE
-  ...
-  null          — no matter applies (personal, automated, noise)
-```
+### No dispatch back required
 
-**Key design note:** several of the "new 8" slugs (`aukera`, `kitzbuhel-six-senses`, `kitz-kempinski`, `steininger`, `balducci`, `constantinos`, `franck-muller`) currently have `description: "(Director to annotate)"` placeholder in baker-vault. For v3 purposes, either:
+This task is informational. No report needed unless you have:
+- Side-effects / state changes to flag (e.g., a file you meant to commit but didn't)
+- Questions about the ratification scope
+- Observations from v3 that weren't in your report but should be preserved
 
-**(a)** Run with placeholders — model gets the name + "(Director to annotate)" and will likely guess less confidently. Honest but weakens the experiment.
-**(b)** Pull one-line descriptions from `CLAUDE.md` where documented (hagenauer-rg7, cupial, mo-vie, ao, mrci, lilienmat, brisen-lp, wertheimer are all in there). For the slugs not in CLAUDE.md, either leave placeholder OR write your best-guess description based on what appeared in the labeled signals that used those slugs.
+In those cases, file a brief note at `briefs/_reports/B3_standdown_notes_20260418.md`. Otherwise idle.
 
-**Preference: (b).** Document every description you write yourself in the report so Director can ratify them post-hoc. This is a prompt-engineering artifact — the canonical Director-ratified descriptions can land via a later baker-vault PR.
+### Thanks
 
-### 2. Fix the `normalize_matter` scoring bug
-
-**Two-line fix.** Per your v2 finding, the `normalize()` path doesn't treat string `"null"` / `"none"` as Python `None`. This costs 1-4 rows per model. Fix in `kbl/slug_registry.py` OR in `scripts/run_kbl_eval.py` score_row, whichever is cleaner given the SLUGS-1 landing state.
-
-If you're on a clone that has SLUGS-1 merged: fix in `slug_registry.normalize()` — that's the canonical normalizer and fixes the bug everywhere at once. Add a test case for it.
-
-If SLUGS-1 hasn't merged yet (baker-vault PR #1 + baker-master PR #2 pending): fix locally in `run_kbl_eval.py`, note the duplicate-fix-in-registry as a follow-up.
-
-**Document which branch you're on and which path you took in the report.**
-
-### 3. Re-run the eval
-
-Same command, same labeled set:
-
-```bash
-cd /tmp/bm-b3
-git pull --ff-only origin main
-BAKER_VAULT_PATH=<your baker-vault clone with slugs-1-vault or main> \
-  .venv/bin/python3 scripts/run_kbl_eval.py \
-    outputs/kbl_eval_set_20260417_labeled.jsonl \
-    --compare-qwen
-```
-
-### 4. File report at `briefs/_reports/B3_d1_eval_v3_20260417.md`
-
-Include:
-
-- **TL;DR** (1 line: pass/fail + key numbers)
-- **Before/after table** — v2 vs v3, Gemma + Qwen, overall + per-source
-- **Matter misses analysis** — did the `hagenauer-rg7 → brisen-lp` confusion resolve? Which categories of miss persist?
-- **Vedana stability check** — did the v2 vedana gain (86%) hold or regress?
-- **Scoring-bug fix evidence** — 1-2 example rows that now score differently
-- **Descriptions you wrote yourself** — list them with slug for Director review
-- **Recommendation:** D1 ratify / fourth iteration / architectural escalation
-
-### 5. Dispatch back
-
-Chat one-liner:
-
-> `B3 D1 v3 done — see briefs/_reports/B3_d1_eval_v3_20260417.md, commit <SHA>. TL;DR: <pass|fail> with <Gemma vedana%/matter%>.`
+3 evals, prompt engineering breakthroughs (vedana rule +16pp, glossary +42pp), ground truth labels, scoring bug discovery, measurement hygiene. Clean sessions, structured reports, honest decision-forcing. This is exactly what the B3 role was scoped for.
 
 ---
 
-## Scope guardrails
-
-- **Do NOT touch** labels, D1_OPTIONS, ACCEPT thresholds.
-- **Do NOT re-open** the slug set itself. SLUGS-1 owns the canonical list.
-- **DO** document every self-written description so Director can ratify.
-- **DO** note any further architectural signals — if matter plateaus *again* despite glossary, that's a real capability ceiling and needs escalation, not a fourth retry.
-
----
-
-## Decision logic after v3
-
-- **Gemma vedana ≥ 90% AND matter ≥ 80%** → D1 ratifies for Gemma. AI Head flags Qwen-fallback-structural-issue to Director separately.
-- **Gemma matter < 80% but ≥ 60%** → partial progress. Architectural question: does KBL-B's Step 2 (resolve) + Step 4 (classify) recover enough to make Step 1 matter-accuracy at 60-80% tolerable, or is 80% a hard requirement? AI Head escalates to Director.
-- **Gemma matter < 60%** → hard capability ceiling at 8B local. Options: (a) cloud-based triage (breaks data-residency), (b) different local model (Llama 3.3 70B, Mixtral 8x7B — requires new eval), (c) relax D1 entirely and ship with tolerance. Director decides.
-- **No v4.** If v3 doesn't pass cleanly, we stop iterating this prompt and escalate. Diminishing returns are clear.
-
----
-
-## Est. time
-
-~40 minutes:
-
-- 15 min glossary drafting + prompt patch
-- 5 min scoring-bug fix + test
-- 10 min eval run
-- 10 min report + commits
-
----
-
-*Dispatched 2026-04-17 by AI Head. Git identity: `Code Brisen 3` / `dvallen@brisengroup.com`.*
+*Dispatched 2026-04-18 by AI Head. Git identity: `Code Brisen 3` / `dvallen@brisengroup.com`. Idle posture until next dispatch.*

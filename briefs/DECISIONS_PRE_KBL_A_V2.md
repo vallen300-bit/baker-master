@@ -931,7 +931,7 @@ Every tunable has a default. Per D13, Mac Mini tunables live in `~/baker-vault/c
 
 ## Ratification Checklist — ALL RATIFIED 2026-04-17
 
-- [x] **D1** — Gemma 4 8B + Qwen cold-swap (conditional on 50-signal pre-shadow eval ≥90% vedanā)
+- [x] **D1** — Gemma 4 8B + Qwen availability-fallback. **Ratified 2026-04-18 at 88v/76m for Phase 1** (see §"D1 Phase 1 acceptance" clarification below for rationale + Phase 2 gate). Original 90/80 thresholds superseded by Phase-1-operational-acceptance framing.
 - [x] **D2** — Queue-poll pattern (Director-signed 2026-04-17)
 - [x] **D3** — 3-layer per-source scoping
 - [x] **D4** — **[DIRECTOR OVERRIDE 2026-04-17]** SSH harden NOW; key rotation + 1Password migration deferred together to Phase 1 close-out. Mitigating controls: Tailscale-only SSH + SSH hardening drop-in.
@@ -962,7 +962,27 @@ Operational implications:
 - Expectations change: a Qwen-active pipeline tick emits a `WARN`-level `kbl_log` entry (`component=triage`, message: "running on availability fallback, accuracy degraded") so Director sees it. KBL-B brief §6 will wire this.
 - **Deferred:** third-model eval for a real *accuracy* fallback (candidates: Llama 3.3 70B, Mixtral 8x7B) moved to Phase 1 close-out or later. Not blocking D1.
 
-D1 itself remains CONDITIONAL on v3 eval retry (dispatched `c598eea`) achieving Gemma ≥ 90% vedana + ≥ 80% matter. Qwen's re-scoping is independent of that pass/fail.
+---
+
+**D1 Phase 1 acceptance — Gemma ratified at 88v/76m (Director-ratified 2026-04-18, ACCEPTANCE):**
+
+D1 v3 eval retry (`briefs/_reports/B3_d1_eval_v3_20260417.md` @ `aba04d6`) landed Gemma at **88% vedana (target 90%, 2pp short) / 100% JSON / 76% matter (target 80%, 4pp short)**. v3 glossary lifted matter from 34% (v2) → 76% (+42pp) — clearly not diminishing returns.
+
+**Director ratified Gemma-final for Phase 1** on 2026-04-18, overriding the original 90%/80% thresholds based on the following operational reasoning:
+
+1. **Phase 1 scope is Hagenauer-only.** Layer 2 enforcement (`KBL_MATTER_SCOPE_ALLOWED=hagenauer-rg7`) blocks non-Hagenauer from reaching Step 5 Opus. 24% matter errors in Phase 1 mostly route to `wiki/_inbox/` — the designed catch-all, not a failure state.
+2. **Inbox + weekly Director review** is the safety net. Misclassified signals are recoverable with Director's weekly inbox pass, which is architectural intent, not a workaround.
+3. **Downstream pipeline recovery.** Step 2 (resolve) and Step 4 (classify) independently filter noise and detect routing errors. Single-step classifier accuracy at 76% does not equal pipeline-end correctness at 76%.
+4. **Measurement noise.** Measurement bug #2 (stale `MATTER_ALIASES["brisen-lp"]` including `wertheimer`) contributes ~1-2pp of the gap. Auto-resolves on SLUGS-1 merge (no manual fix required). 4-5 ambiguous signals in the labeled set contribute an additional uncertain margin.
+5. **Pre-data thresholds were prophylactic, not operational.** 90%/80% was set before we knew what Gemma could do or how downstream safety nets performed. Post-v3, we have both pieces of evidence.
+
+**Phase 2 gate (not yet ratified, flagged for close-out):** before expanding `KBL_MATTER_SCOPE_ALLOWED` beyond `hagenauer-rg7`, re-eval Gemma against live Phase 1 production data (not synthetic labels). Minimum threshold for Phase 2 expansion to be revisited at that point — live data is a more honest measurement than a 50-signal eval set.
+
+**B3's 9 self-written slug descriptions** (from `briefs/_reports/B3_d1_eval_v3_20260417.md` §2c) are accepted as-is into `baker-vault/slugs.yml` via the SLUGS-1 merge. Director retains editorial control — can refine any description via direct baker-vault PR at any time. No further ratification ceremony required.
+
+**Path B (bug-fix + relabel + v4 run)** is **not executed.** Reason: the measurement hygiene gains are marginal relative to the Phase 2 close-out gate, where live-data re-eval supersedes synthetic-set measurement anyway. Path A (third-model eval) is also not executed — Gemma-ratified means no alternate model needed.
+
+**D1 status: RATIFIED.** Qwen remains wired as availability fallback per prior clarification. All downstream briefs (KBL-B §1.4, §6, etc.) can now reference Gemma-final without conditional framing.
 
 ---
 
