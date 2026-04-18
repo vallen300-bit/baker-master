@@ -2,83 +2,114 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (terminal instance)
-**Previous:** LAYER0-IMPL shipped as PR #7 at `7342617`. Idle since.
+**Previous:** STEP1-TRIAGE-IMPL shipped as PR #8. PR #7 REDIRECT with 1 should-fix (phone trunk prefix).
 **Task posted:** 2026-04-18
-**Status:** OPEN
+**Status:** OPEN — two items in sequence
 
 ---
 
-## Task: STEP1-TRIAGE-IMPL — Step 1 Gemma Triage Evaluator
+## Task A (small, now): PR #7 Phone Trunk-Prefix Fix
 
-**Why now:** All inputs ratified. Layer 0 PASS emits `awaiting_triage` signals (PR #7). Step 1 consumes them, runs Gemma triage, writes results + routes. Production-moving, unblocks Step 2/3 impl.
+**Source:** `briefs/_reports/B2_pr7_review_20260418.md` S1
+
+### What
+
+In `baker/director_identity.py`, the digit-only normalizer currently handles `+41 79 960 50 92`, `+41799605092`, `41799605092@c.us` — but misses the `0041` international trunk-prefix form (European dial-convention alternative to `+41`).
+
+**Fix:** after digit extraction, if the result starts with `00` followed by country code, strip the leading `00`. One-line addition. Add parametrized test case `0041799605092` → canonical `41799605092`.
+
+### Branch
+
+Amend the `layer0-impl` branch (PR #7 open), push. B2 re-verifies via 5-min delta.
+
+### Dispatch back
+
+> B1 PR #7 S1 phone trunk-prefix fix applied — head `<SHA>`, <N>/<N> tests green. Ready for B2 re-verify.
+
+---
+
+## Task B (medium, after Task A): LOOP-GOLD-READER-1 — `load_gold_context_by_matter` helper
+
+**Why now:** STEP5-OPUS-PROMPT §1.4 (B3 draft at `7ea63c6`) references `load_gold_context_by_matter(matter, vault_path=None)` as an input block. B3 framed as deployment-blocker (not draft-review blocker) per their OQ5. Step 5 can't fire without it. Same SLUGS-1 / LOOP-HELPERS-1 loader-style shape.
 
 ### Scope
 
 **IN**
+- New helper in `kbl/loop.py` (extending existing module):
 
-1. **`kbl/prompts/step1_triage.txt`** — extract the template text from `briefs/_drafts/KBL_B_STEP1_TRIAGE_PROMPT.md` §1.1. Plain-text file with `{signal}`, `{slug_glossary}`, `{hot_md_block}`, `{feedback_ledger_recent}` placeholders. Source of truth for the prompt text going forward.
+```python
+def load_gold_context_by_matter(matter: str, vault_path: str | None = None) -> str:
+    """Load all Gold wiki entries under baker-vault/wiki/<matter>/ into a single prompt-insertable block.
 
-2. **`kbl/steps/step1_triage.py`** — the evaluator module:
-   - `build_prompt(signal_text: str, conn) -> str` — assembles the prompt per the template draft §1.1 builder (calls `slug_registry`, `load_hot_md`, `load_recent_feedback`, `render_ledger` from `kbl/loop.py`). Caller owns `conn`.
-   - `parse_gemma_response(raw: str) -> TriageResult` — parses Gemma's structured JSON output. Returns dataclass with: `primary_matter`, `related_matters`, `vedana`, `triage_score`, `triage_confidence`, `summary`. Raises `TriageParseError` on malformed.
-   - `normalize_matter(raw: str | None) -> str | None` — delegates to `slug_registry.normalize()` (handles aliases, returns None for "null"/"none").
-   - `call_ollama(prompt: str, model="gemma2:8b", timeout=30) -> str` — HTTP POST to Ollama `/api/generate`, seed=42, temperature=0, format=json. Returns raw response text.
-   - `triage(signal_id: int, conn) -> TriageResult` — full pipeline: load signal from `signal_queue.id`, build prompt, call Ollama, parse, write results to `signal_queue` columns (`primary_matter`, `related_matters`, `vedana`, `triage_score`, `triage_confidence`, `triage_summary`), write `kbl_cost_ledger` row (`step='triage'`, `model='gemma2:8b'`, tokens from Ollama response if available), advance state.
-   - State transitions: `awaiting_triage` → `triage_running` → `awaiting_resolve` OR `awaiting_inbox_route` (if triage_score < `KBL_PIPELINE_TRIAGE_THRESHOLD`, default 40)
+    vault_path: override `$BAKER_VAULT_PATH`. Required via env var otherwise.
+    matter: the primary_matter slug (canonical; caller normalizes via slug_registry if needed).
 
-3. **`kbl/exceptions.py`** (if not exists) — `TriageParseError`, `OllamaUnavailableError`
+    Returns:
+      A concatenated Markdown block with page-break separators:
 
-4. **Tests** — `tests/test_step1_triage.py`:
-   - `build_prompt` integration: mock signal + mock DB with seeded hot.md + ledger rows → prompt contains expected blocks
-   - `parse_gemma_response` happy path
-   - `parse_gemma_response` malformed → raises
-   - `normalize_matter` alias resolution (e.g., "hagenauer" → "hagenauer-rg7", "lilienmat" → "lilienmatt")
-   - `call_ollama` mocked (don't require live Ollama in CI)
-   - `triage` end-to-end with mocked Ollama: verifies DB writes (columns + cost ledger row + state transition)
-   - Triage-threshold gating: score < 40 → state `awaiting_inbox_route`; score >= 40 → `awaiting_resolve`
+        <!-- GOLD: wiki/<matter>/2026-04-01_topic.md -->
+        ---
+        <frontmatter>
+        ---
+        <body>
+
+        <!-- GOLD: wiki/<matter>/2026-04-03_other.md -->
+        ...
+
+      Returns "" (empty string) if the matter directory has no Gold entries.
+      Empty return is Inv 1 compliant: zero Gold is read AS zero Gold.
+
+    Raises:
+      LoopReadError on IO/permission errors.
+
+    Filter: only files with frontmatter `voice: gold`. Silver entries are EXCLUDED.
+    Ordering: sorted by filename (date-prefix convention → chronological).
+    """
+```
+
+- Unit tests in `tests/test_loop_gold_reader.py`:
+  - Happy path: 3 Gold files in matter dir → concatenated with page-breaks, correct order
+  - Zero-Gold case: empty dir → returns `""` (not raise, not None)
+  - Mixed Silver + Gold: Silver filtered out
+  - Missing matter dir (new matter, no dir yet) → returns `""` (zero-Gold equivalent)
+  - Permission error → raises `LoopReadError`
+  - Malformed frontmatter (no `voice:` key) → treated as Silver, excluded
+- Fixture vault layout in `tests/fixtures/gold_reader_vault/`:
+  - `wiki/hagenauer-rg7/2026-04-01_kick_off.md` (voice: gold)
+  - `wiki/hagenauer-rg7/2026-04-03_hassa_reply.md` (voice: gold)
+  - `wiki/hagenauer-rg7/2026-04-05_draft.md` (voice: silver)
+  - `wiki/mo-vie/2026-04-02_egger_sync.md` (voice: gold)
 
 **OUT**
-- Ollama service management (systemd/launchd config) — KBL-A territory
-- Qwen fallback (availability-only per D1; separate ticket when Phase 1 runs into actual availability issue)
-- Step 2 resolver — next ticket
-- Anthropic cost ledger mapping — this step uses Gemma (local, free), ledger row has `cost_usd=0.0`, `input_tokens` + `output_tokens` from Ollama response if exposed
+- Writer side (any Step 5/6 write logic) — separate tickets
+- Caching — Step 5 reads per-call; if profiling shows hot-path cost, add caching in a follow-up
+- Frontmatter schema validation — just look for `voice: gold`; full Pydantic is Step 6 territory
 
 ### CHANDA pre-push
 
-- **Q1 Loop Test:** This step READS hot.md + feedback_ledger on every call — core Leg 3 behavior. **Loop-compliant by construction.** Cite in PR body. Must not short-circuit the reads (no "if-hot-md-empty-skip"). Zero reads = Inv 1 violation.
-- **Q2 Wish Test:** pure wish-service. Pass.
-- **Inv 1:** gold_context_by_matter is Step 5's concern, not Step 1's. Step 1 reads hot.md + ledger; Inv 1 compliance.
-- **Inv 3:** explicit — `triage()` calls `load_hot_md()` + `load_recent_feedback(conn)` before `call_ollama()`. Test this in the `build_prompt` integration test.
-- **Inv 10:** template is loaded from `kbl/prompts/step1_triage.txt` once per process. No self-modification.
-
-### Dependencies
-
-- `kbl/slug_registry.py` ✓ (PR #2)
-- `kbl/loop.py` ✓ (PR #6)
-- `kbl/layer0.py` emits `awaiting_triage` ✓ (PR #7)
-- `feedback_ledger` schema ✓ (PR #5)
-- `signal_queue` columns: `primary_matter TEXT`, `related_matters TEXT[]`, `vedana TEXT`, `triage_score NUMERIC`, `triage_confidence NUMERIC`, `triage_summary TEXT` — if not all exist in current schema, include ALTER TABLE ADD COLUMN in the migration sub-step; verify against current schema first
-- Triage prompt text @ `briefs/_drafts/KBL_B_STEP1_TRIAGE_PROMPT.md` commit `d7db987`
+- **Q1 Loop Test:** This helper IS Leg 1 (Gold-read-by-matter). Creating it is the enabler of Inv 1 compliance in Step 5. Cite in PR body — this is LOOP-CRITICAL infra, treat with the gravity CHANDA §2 gives it.
+- **Q2 Wish Test:** pure wish (Leg 1 pattern realization). Pass.
+- **Inv 1:** zero-Gold → empty string (tested explicitly).
 
 ### Branch + PR
 
-- Branch: `step1-triage-impl`
+- Branch: `loop-gold-reader-1`
 - Base: `main`
-- PR title: `STEP1-TRIAGE-IMPL: kbl/steps/step1_triage.py + kbl/prompts/step1_triage.txt`
-- Target PR: #8
+- PR title: `LOOP-GOLD-READER-1: kbl/loop.py load_gold_context_by_matter`
+- Target PR: #9
 
 ### Reviewer
 
-B2 (reviewer-separation).
+B2.
 
 ### Timeline
 
-~60-90 min.
+~30-45 min.
 
 ### Dispatch back
 
-> B1 STEP1-TRIAGE-IMPL shipped — PR #8 open, branch `step1-triage-impl`, head `<SHA>`, <N>/<N> tests green. Ready for B2 review.
+> B1 LOOP-GOLD-READER-1 shipped — PR #9 open, branch `loop-gold-reader-1`, head `<SHA>`, <N>/<N> tests green. Ready for B2 review.
 
 ---
 
-*Posted 2026-04-18 by AI Head. B2 reviewing PR #7 in parallel. B3 authoring STEP5-OPUS-PROMPT in parallel. Director: Fireflies labeling in separate session.*
+*Posted 2026-04-18 by AI Head. B2 reviewing PR #8. B3 applying STEP5-OPUS S1 rename.*
