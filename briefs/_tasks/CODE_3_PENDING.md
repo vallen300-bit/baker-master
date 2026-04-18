@@ -2,98 +2,81 @@
 
 **From:** AI Head
 **To:** Code Brisen #3 (app instance)
-**Previous:** Step 0 Layer 0 rules shipped at `6341b94` (being reviewed by B2 in parallel)
+**Previous:** §10 test fixtures shipped at `742f4a1` (10-signal end-to-end corpus).
 **Task posted:** 2026-04-18
-**Status:** OPEN — awaiting execution
+**Status:** OPEN — ritual acknowledgment task, short
 
 ---
 
-## Task: Draft KBL-B §10 Test Fixtures — 10-Signal End-to-End Corpus
+## Task: CHANDA.md Onboarding — Read, Acknowledge, File Compliance Report
 
-You own the richest empirical knowledge of the 50-signal labeled set (`outputs/kbl_eval_set_20260417_labeled.jsonl`). AI Head is about to write §10 (test plan) and needs a 10-signal fixture that exercises every path through the 8-step pipeline.
+**Director adopted `CHANDA.md` today at `915f8ad`** — Gold file at repo root establishing KBL architectural intent. This is now the **inviolable root anchor** for every KBL session. From this commit forward, every agent startup ritual begins with CHANDA.md, *before* reading any mailbox task.
+
+### What you must do
+
+1. `git pull --ff-only origin main`
+2. Read `CHANDA.md` end-to-end. It's one file, ~100 lines.
+3. **Internalize §2 "The Learning Loop"** — the three legs (Compounding / Capture / Flow-forward). This is the main thing KBL exists to protect.
+4. **Internalize §3 Invariants 1-10.** Pay particular attention to the ones that bind your empirical / prompt-engineering / rule-drafting work:
+   - **Inv 1** (Gold is read before Silver is compiled, zero Gold is read *as* zero Gold) — relevant to every prompt you draft for Step 1, Step 3, Step 5, Step 6
+   - **Inv 3** (Step 1 reads `hot.md` AND feedback ledger every run) — check your Step 1 triage prompt draft satisfies this; if not, flag
+   - **Inv 10** (pipeline prompts do not self-modify — learning is through data) — rules out adaptive-prompt patterns you might otherwise propose
+5. **Internalize §5 The Test.** Every prompt draft and every rule spec you author passes both:
+   - **Q1 Loop Test:** does this change preserve all three legs? Any touch on reading pattern / ledger write / Step 1 integration → stop + flag + wait.
+   - **Q2 Wish Test:** does this serve the wish or engineering convenience? Convenience → stop + flag + wait. Both → state the tradeoff in commit message.
 
 ### Deliverable
 
-File: `briefs/_drafts/KBL_B_TEST_FIXTURES.md`
-
-### Selection criteria — pick 10 signals that collectively exercise these paths
-
-Every signal should be annotated with:
-- **Source `signal_id`** (from the labeled JSONL, by source + source-specific ID)
-- **Source kind** (email / whatsapp / meeting_transcript / scan_query)
-- **Expected Layer 0 outcome** (pass | drop with rule-name)
-- **Expected Step 1 triage outcome** (primary_matter, vedana, triage_score range)
-- **Expected Step 2 resolve outcome** (thread match expected? based on what eval signal context?)
-- **Expected Step 3 extract outcome** (rough schema — e.g., "extract Ofenheimer, Brisen, 1 money figure, 1 deadline, 1 action_item")
-- **Expected Step 4 classify decision** (full_synthesis | stub_only | cross_link_only | skip_inbox)
-- **Expected Step 5 opus firing** (yes/no, if no why — cost-cap / skip_inbox / paused)
-- **Expected Step 6 sonnet firing** (yes/no)
-- **Expected Step 7 commit outcome** (target_vault_path template)
-
-### Required path coverage
-
-The 10 signals must collectively hit ALL of these paths at least once:
-
-| Path | Signals count minimum |
-|---|---|
-| Layer 0 drops (per-source, different rules) | 2 (one email drop + one WA/transcript drop) |
-| Triage routes to inbox (low triage_score) | 1 |
-| Thread-resolve hits existing vault entry (arc continuation) | 1 |
-| New arc (empty resolved_thread_paths) | 1 |
-| Cross-link multi-matter (related_matters[] non-empty) | 1 |
-| Full synthesis path (clean through all steps) | 2 (one email + one transcript) |
-| Layer 2 gate blocks (non-hagenauer-rg7 matter routed to inbox) | 1 |
-| Expected Step 5 cost-cap defer (synthetic — hypothetical scenario) | 1 |
-
-Total: 10 signals, each covering 1-3 distinct path aspects. Some signals will naturally cover multiple (e.g., a Hagenauer transcript with continuation arc covers "new arc" OR "continuation" + "full synthesis").
-
-### Format
-
-For each signal, use a card-style block:
+File: `briefs/_reports/B3_chanda_ack_20260418.md` — short, ~30 lines. Structure:
 
 ```markdown
-### Fixture #N — <short descriptive title>
+# B3 CHANDA.md Acknowledgment
 
-**Signal:** `<source>:<signal_id>`  (line <N> of labeled.jsonl)
-**Paths exercised:** <Path 1>, <Path 2>, ...
-**Raw content excerpt:** `"<first 80 chars>..."`
+**Read at commit:** 915f8ad
+**Timestamp:** <UTC>
 
-| Step | Expected |
-|---|---|
-| 0 layer0 | pass / drop (rule: `<name>`) |
-| 1 triage | primary_matter=`<X>`, vedana=`<Y>`, triage_score ≈ <N> |
-| 2 resolve | resolved_thread_paths = [<path>] OR [] |
-| 3 extract | `{"people": [<N> expected], "money": [<N>], ...}` (high-level) |
-| 4 classify | `<decision>` |
-| 5 opus | fires / skipped (reason: `<why>`) |
-| 6 sonnet | fires / skipped |
-| 7 commit | `wiki/<matter>/<yyyymmdd>_<title-slug>.md` OR N/A |
+## The three legs in my own words
+1. <one sentence per leg — what it means for my prompt-engineering / empirical work>
+2. ...
+3. ...
 
-**Rationale:** why this signal was chosen for this path, referencing v1/v2/v3 eval observations.
+## Invariants most likely to bind my typical work
+- <inv number>: <how it shapes decisions in prompt/rule authoring>
+- ...
+
+## Compliance audit of my prior deliverables
+- **Step 1 triage prompt (`KBL_B_STEP1_TRIAGE_PROMPT.md`):** does it satisfy Inv 1 (reads Gold) and Inv 3 (reads hot.md + feedback ledger)? If not, flag the gap.
+- **Step 3 extract prompt (`KBL_B_STEP3_EXTRACT_PROMPT.md`):** any CHANDA conflict?
+- **Step 0 Layer 0 rules (`KBL_B_STEP0_LAYER0_RULES.md`):** does the drop logic respect Inv 7 (ayoniso prompts, never overrides) and Inv 4 (author:director protection)?
+- **§10 test fixtures (`KBL_B_TEST_FIXTURES.md`):** do the expected outcomes demonstrate loop compliance, or only pipeline mechanical compliance?
+
+## Pre-push checklist I now run before every draft
+- [ ] Q1 Loop Test passed (or flagged to AI Head)
+- [ ] Q2 Wish Test passed (or tradeoff stated in commit body)
+- [ ] <any additional check you adopt>
+
+## Questions / tensions surfaced
+<anything in CHANDA that conflicts with your prior drafts or with ratified decisions — flag, don't silently absorb. Specifically: does any of your Step 1 triage prompt need adjustment to explicitly surface the Gold-read + hot.md + ledger-read requirements, per Invariants 1 and 3?>
 ```
 
-### Out of scope
+### Why this task exists + why the audit matters for you specifically
 
-- Running any signal through actual Python — paper fixtures only
-- Speculating about signals not in the labeled set
-- Writing pytest code — that's §10 implementation work, separate ticket
-- Adjusting labels or D1 outcomes
+You have drafted **the most CHANDA-adjacent content of any agent**: Step 1 prompt (the heart of the Learning Loop), Step 3 extract, Step 0 rules, fixtures. If any of your prior work silently violates an invariant, it's better to catch it now and amend than to have AI Head fold it into KBL-B §6-13 and discover the conflict post-merge.
 
-### Why this is your task
+Director specifically invited critique during CHANDA adoption; if you think an invariant is wrong, flag — don't absorb silently.
 
-You labeled the signals with Director. You know their content, ambiguity, and empirical behavior. AI Head picking signals from text alone would miss the nuance.
+### Status after this task
+
+You return to stand-by per D1 ratification (standing-down-between-evals posture). When Step 1 / Step 3 prompts need to be revised for CHANDA compliance — which your audit may trigger — you'll be dispatched again.
+
+### Timeline
+
+~20-30 min total (10 min CHANDA read, 15 min compliance audit of four prior deliverables, 5 min commit + report).
 
 ### Dispatch back
 
-> B3 §10 fixtures drafted — see `briefs/_drafts/KBL_B_TEST_FIXTURES.md`, commit `<SHA>`. 10 signals covering <N> distinct paths.
-
-### Est. time
-
-~30-45 min:
-- 10 min re-read labels + path-coverage matrix
-- 25 min fixture authoring
-- 5 min commit + report
+> B3 CHANDA ack done — report at `briefs/_reports/B3_chanda_ack_20260418.md`, commit `<SHA>`. <any flags on prior drafts>
 
 ---
 
-*Dispatched 2026-04-18 by AI Head.*
+*Posted 2026-04-18 by AI Head. B1 doing the same ack task in parallel (CODE_1_PENDING.md). B2 still mid-Step-6-scope-challenge; B2 CHANDA ack will be queued after their verdict lands.*
