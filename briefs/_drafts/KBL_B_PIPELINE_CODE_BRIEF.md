@@ -277,9 +277,15 @@ Each step reads named columns from `signal_queue`, writes named columns, emits 0
 
 Naming convention: inputs are columns already populated by prior steps; outputs are columns this step writes. Unless noted, all writes happen in a single transaction with `stage`+`state` advance (§5).
 
+### 4.0 Data-shape note (applies to §4.1-4.8)
+
+Per `memory/store_back.py:6326-6363`, source-specific fields live in `signal_queue.payload JSONB`, NOT as direct columns. Throughout §4, references like "`subject`" or "`chat_id`" mean **`payload->>'subject'`**, **`payload->>'chat_id'`** etc. (email headers: `payload->>'email_message_id'`, `payload->>'in_reply_to'`, `payload->'references'`; WhatsApp: `payload->>'chat_id'`, `payload->>'sent_at'`, `payload->>'sender_phone'`; meeting: `payload->>'title'`). Direct columns on `signal_queue` remain: `id`, `source`, `raw_content`, `primary_matter`, `related_matters`, `triage_confidence`, `triage_score`, `vedana`, `started_at`, plus the new KBL-B columns (§3.1) and the `stage`+`state` columns (§5.2).
+
+**Corrected per B2 blocker B3** — prior contracts listed these as direct columns, which would silently read NULL. §6 prompt builders must use JSONB accessors.
+
 ### 4.1 Step 0 — `layer0`
 
-**Reads:** `source`, `raw_content`, `sender`, `recipients`, `chat_id`, `subject` (source-dependent).
+**Reads:** `source`, `raw_content`, `payload->>'sender'`, `payload->>'recipients'`, `payload->>'chat_id'`, `payload->>'subject'` (source-dependent).
 **Writes:** `stage='layer0'`, `state='done'` + route-forward, OR `state='dropped_layer0'` terminal.
 **Ledger:** none (deterministic, zero cost).
 **Log:** on drop only — `component='layer0'`, `level='INFO'`, `message=<rule name that fired>`.
@@ -287,7 +293,7 @@ Naming convention: inputs are columns already populated by prior steps; outputs 
 
 ### 4.2 Step 1 — `triage`
 
-**Reads:** `raw_content`, `source`, `subject` (hint for email).
+**Reads:** `raw_content`, `source`, `payload->>'subject'` (hint for email).
 **Writes:** `primary_matter TEXT` (nullable), `related_matters JSONB` (default `[]`), `vedana TEXT` ∈ `{opportunity, threat, routine}`, `triage_confidence NUMERIC(3,2)`, `triage_score NUMERIC(5,2)`.
 **Ledger:** one row, `step='triage'`, `model=ollama_gemma4` (or qwen on fallback), `input_tokens`, `output_tokens`, `cost_usd=0` (local), `latency_ms`.
 **Log:** on retry / normalize-miss / fallback-activation only.
@@ -296,11 +302,11 @@ Naming convention: inputs are columns already populated by prior steps; outputs 
 
 ### 4.3 Step 2 — `resolve`
 
-**Reads:** `source`, `primary_matter`, plus source-dependent metadata:
-- email: `email_message_id`, `in_reply_to`, `references`, `sender`, `recipients`, `subject`
-- whatsapp: `chat_id`, `sent_at`, `sender_phone`
-- meeting: `raw_content`, `subject` (title)
-- scan: `raw_content`, `director_context_hint` (Scan-side metadata)
+**Reads:** `source`, `primary_matter`, plus source-dependent metadata (all via `payload JSONB`):
+- email: `payload->>'email_message_id'`, `payload->>'in_reply_to'`, `payload->'references'`, `payload->>'sender'`, `payload->'recipients'`, `payload->>'subject'`
+- whatsapp: `payload->>'chat_id'`, `payload->>'sent_at'`, `payload->>'sender_phone'`
+- meeting: `raw_content`, `payload->>'title'`
+- scan: `raw_content`, `payload->>'director_context_hint'`
 
 **Writes:** `resolved_thread_paths JSONB` = list of vault-relative paths (e.g., `["wiki/hagenauer-rg7/2026-04-03_ofenheimer-letter.md"]`). Empty array = new thread.
 **Ledger:** email/WA = no row (metadata only, zero cost). Transcript/Scan = one row, `step='resolve'`, `model='voyage-3'`, `input_tokens` (approx from chars/4), `cost_usd ≈ 0.00005`.
@@ -434,15 +440,20 @@ CREATE INDEX IF NOT EXISTS idx_signal_queue_stage_state
 
 KBL-B writes both `status` (legacy) and `stage`+`state` (new) on every transition for the compatibility window. Mirror table:
 
-| KBL-B (stage, state) | Mirror `status` value |
-|---|---|
-| any stage, `awaiting` | `pending` |
-| any stage, `running` | `processing` |
-| `claude_harness`, `done` | `done` |
-| any stage, `failed` | `failed` |
-| any stage, `dropped_layer0` | `dropped` |
-| any stage, `routed_inbox` | `inbox` |
-| any stage, `paused_*` | `deferred` |
+KBL-A `signal_queue.status` CHECK allows: `pending, processing, done, failed, classified-deferred, cost-deferred, failed-reviewed, dropped` (per KBL-A §290-292). The mirror MUST stay within that set.
+
+| KBL-B (stage, state) | Mirror `status` value | Notes |
+|---|---|---|
+| any stage, `awaiting` | `pending` | claimable |
+| any stage, `running` | `processing` | in-flight |
+| `claude_harness`, `done` | `done` | terminal success |
+| any stage, `failed` | `failed` | terminal failure |
+| any stage, `dropped_layer0` | `dropped` | already in CHECK set |
+| any stage, `routed_inbox` | `classified-deferred` | maps to existing "classifier routed it aside" value |
+| any stage, `paused_cost_cap` | `cost-deferred` | existing value, semantic match |
+| any stage, `paused_circuit_brkr` | `processing` | circuit-pause is transient, not deferral — stays claimable-looking to legacy code |
+
+Corrected (B2 blocker B2): the prior draft used `inbox` and `deferred` strings not in the CHECK set — every mirrored UPDATE for ~30%+ of signals would have failed. Remap to existing CHECK values above. No migration / no CHECK expansion needed.
 
 Existing queries like `WHERE status='pending'` continue to find claimable rows, including new KBL-B ones. Any KBL-A code that filters by `status` keeps working.
 
@@ -483,12 +494,24 @@ NEXT_STAGE = {
     'claude_harness': None,  # terminal
 }
 
+TERMINAL_STATES = {'dropped_layer0', 'routed_inbox', 'failed'}
+
 def advance_stage(current: str, state: str) -> tuple[str | None, str]:
-    """Return (next_stage, next_state) given current stage and state after completion."""
-    if state in ('dropped_layer0', 'routed_inbox', 'failed', 'done') and current == 'claude_harness':
-        return (None, state)  # terminal
+    """Return (next_stage, next_state) given current stage and state after completion.
+
+    A signal can terminate at any stage (layer0 drop, triage routes to inbox, opus fails, etc.),
+    not only at claude_harness. Terminal states stick to their current stage.
+    """
+    # Terminal at any stage — signal ends here
+    if state in TERMINAL_STATES:
+        return (None, state)
+    # Final-stage completion terminates
+    if current == 'claude_harness' and state == 'done':
+        return (None, state)
+    # Paused states hold at current stage, re-entered by same worker
     if state in ('paused_cost_cap', 'paused_circuit_brkr'):
-        return (current, state)  # stay at same stage, paused
+        return (current, state)
+    # Normal stage advance
     if state == 'done':
         return (NEXT_STAGE[current], 'awaiting')
     raise ValueError(f"unexpected (stage={current}, state={state})")
