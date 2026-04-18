@@ -20,9 +20,27 @@ CHANDA compliance:
 State transitions (per task contract):
     awaiting_triage  -->  triage_running  -->  awaiting_resolve
                                         \\->   awaiting_inbox_route
-                                                  (score < KBL_PIPELINE_TRIAGE_THRESHOLD)
+                                                  (score < KBL_PIPELINE_TRIAGE_THRESHOLD
+                                                   OR retries-exhausted stub)
 
 Threshold default: 40. Override via ``KBL_PIPELINE_TRIAGE_THRESHOLD`` env var.
+
+Parse-failure recovery (§7 row 3 — ``R3 retry (pared prompt); 2 failures → inbox``):
+    The first attempt uses the full prompt (slug glossary + hot.md + ledger).
+    If Gemma returns unparseable JSON the triage function retries once with
+    a pared prompt — ledger block replaced with an ``[LEDGER OMITTED — R3
+    retry]`` marker — on the hypothesis that an over-large ledger block is
+    the most likely confound. If the retry ALSO fails, ``triage()`` writes
+    a stub ``TriageResult`` (``primary_matter=None``, ``vedana=None``,
+    ``summary="parse_failed"``) and advances the signal to
+    ``awaiting_inbox_route`` — Director-visible, pipeline flows. No
+    ``TriageParseError`` is raised past the retry budget.
+
+    Inv 3 preservation: both attempts share the same ``load_hot_md()`` +
+    ``load_recent_feedback()`` reads done by ``build_prompt``. The pared
+    retry reuses those already-fresh values; the reads still happened on
+    this ``triage()`` invocation. Test ``test_build_prompt_reads_on_every_call``
+    enforces.
 
 Out of scope (future tickets):
     - Ollama service management (KBL-A)
@@ -66,17 +84,31 @@ _VEDANA_VALUES = frozenset({"opportunity", "threat", "routine"})
 _HOT_MD_FALLBACK = "(no current-priorities cache available)"
 _LEDGER_FALLBACK = "(no recent Director actions)"
 
+# Parse-failure recovery (§7 row 3). One retry after the initial call —
+# 2 total Ollama calls max per signal. On retries-exhausted, ``triage()``
+# writes a stub + advances to the inbox route rather than raising.
+_RETRY_BUDGET = 1
+_LEDGER_PARED_MARKER = "[LEDGER OMITTED — R3 retry]"
+_STUB_SUMMARY = "parse_failed"
+_INBOX_ROUTE_STATE = "awaiting_inbox_route"
+
 
 # ---------------------------- result dataclass ----------------------------
 
 
 @dataclass(frozen=True)
 class TriageResult:
-    """Parsed + validated Gemma response. Shape matches §4.2 contract."""
+    """Parsed + validated Gemma response. Shape matches §4.2 contract.
+
+    ``vedana`` is ``Optional[str]`` to accommodate the retries-exhausted
+    stub (``vedana=None``, ``summary="parse_failed"``) that Step 1 writes
+    when Gemma returns unparseable JSON twice in a row. On the happy path
+    the parser still enforces the three-value enum.
+    """
 
     primary_matter: Optional[str]
     related_matters: tuple[str, ...] = field(default_factory=tuple)
-    vedana: str = "routine"
+    vedana: Optional[str] = "routine"
     triage_score: int = 0
     triage_confidence: float = 0.0
     summary: str = ""
@@ -159,6 +191,32 @@ def build_prompt(signal_text: str, conn: Any) -> str:
         slug_glossary=glossary,
         hot_md_block=hot_md_block,
         feedback_ledger_block=feedback_ledger_block,
+    )
+
+
+def _build_pared_prompt(
+    signal_text: str, slug_glossary: str, hot_md_block: str
+) -> str:
+    """Assemble the Step 1 triage prompt WITHOUT the feedback ledger block.
+
+    Used as the R3 retry after the first Gemma call returned unparseable
+    JSON — the hypothesis is that an over-large ledger block is the most
+    likely confound. Slug glossary + hot.md + signal remain; the ledger
+    placeholder is replaced with a short marker so the template still
+    formats cleanly.
+
+    Inv 3 note: this helper does NOT read hot.md or the ledger. The caller
+    (``triage()``) has already executed those reads once per invocation
+    via ``build_prompt``; the retry reuses the already-fresh values rather
+    than re-reading. Inv 3's per-invocation-fresh-read contract is still
+    satisfied.
+    """
+    template = _load_template()
+    return template.format(
+        signal=signal_text.replace('"', "'")[:_DEFAULT_SIGNAL_TRUNCATE],
+        slug_glossary=slug_glossary,
+        hot_md_block=hot_md_block,
+        feedback_ledger_block=_LEDGER_PARED_MARKER,
     )
 
 
@@ -442,35 +500,28 @@ def _next_state_for(result: TriageResult, threshold: int) -> str:
     return "awaiting_resolve"
 
 
-def triage(
-    signal_id: int,
+def _run_triage_attempt(
     conn: Any,
-    model: str = _DEFAULT_MODEL,
-    timeout: int = _DEFAULT_TIMEOUT,
-) -> TriageResult:
-    """Run Step 1 triage for a single signal. Full side-effect path:
-    fetch signal, build prompt, call Ollama, parse, write result + cost,
-    transition state.
+    signal_id: int,
+    prompt: str,
+    model: str,
+    timeout: int,
+) -> Optional[TriageResult]:
+    """Single call-Ollama-and-parse attempt.
 
-    Raises:
-        LookupError: when the signal_id is not in ``signal_queue``.
-        OllamaUnavailableError: when Ollama cannot be reached. Caller
-            (pipeline tick) swaps to availability fallback or defers.
-        TriageParseError: when model output is malformed past recovery.
-            Caller writes a stub + routes to inbox per §3.
+    On successful parse writes the result UPDATE + a ``success=True`` cost
+    ledger row and returns the ``TriageResult``. On parse failure writes a
+    ``success=False`` cost ledger row and returns ``None`` so ``triage()``
+    can loop into the retry path.
+
+    ``OllamaUnavailableError`` is re-raised unchanged — transport failures
+    aren't part of the parse-retry budget; the caller's pipeline tick
+    handles availability-fallback per §3.
     """
-    signal_text = _fetch_signal(conn, signal_id)
-    _mark_running(conn, signal_id)
-
-    prompt = build_prompt(signal_text, conn)
-
     start = time.monotonic()
     envelope = call_ollama(prompt, model=model, timeout=timeout)
     latency_ms = int((time.monotonic() - start) * 1000)
 
-    # Ollama's /api/generate returns {"response": "<text>", ...}. Keep the
-    # raw text extraction forgiving so a future envelope change surfaces
-    # as TriageParseError rather than KeyError.
     raw_text = envelope.get("response")
     input_tokens = envelope.get("prompt_eval_count")
     output_tokens = envelope.get("eval_count")
@@ -487,11 +538,10 @@ def triage(
             latency_ms=latency_ms,
             success=False,
         )
-        raise
+        return None
 
     threshold = _get_triage_threshold()
     next_state = _next_state_for(result, threshold)
-
     _write_triage_result(conn, signal_id, result, next_state)
     _write_cost_ledger(
         conn,
@@ -503,3 +553,93 @@ def triage(
         success=True,
     )
     return result
+
+
+def _read_prompt_inputs(
+    conn: Any,
+) -> tuple[str, str, str]:
+    """Fresh Inv 3 reads — hot.md + feedback ledger — executed once per
+    ``triage()`` invocation and shared across all attempts. Returns
+    ``(slug_glossary, hot_md_block, ledger_block)``.
+
+    Keeping the read collocated with ``triage()`` (rather than implicit
+    inside ``build_prompt``) lets the retry path reuse the already-fresh
+    values without re-reading. Inv 3 is satisfied per-invocation, not
+    per-prompt-build.
+    """
+    glossary = _build_glossary()
+    hot_md_content = load_hot_md()
+    hot_md_block = hot_md_content if hot_md_content else _HOT_MD_FALLBACK
+    ledger_rows = load_recent_feedback(conn, limit=20)
+    rendered = render_ledger(ledger_rows)
+    ledger_block = rendered if rendered.strip() else _LEDGER_FALLBACK
+    return glossary, hot_md_block, ledger_block
+
+
+def _build_stub_result() -> TriageResult:
+    """The retries-exhausted stub. Director-visible via
+    ``triage_summary='parse_failed'`` + inbox route."""
+    return TriageResult(
+        primary_matter=None,
+        related_matters=(),
+        vedana=None,
+        triage_score=0,
+        triage_confidence=0.0,
+        summary=_STUB_SUMMARY,
+    )
+
+
+def triage(
+    signal_id: int,
+    conn: Any,
+    model: str = _DEFAULT_MODEL,
+    timeout: int = _DEFAULT_TIMEOUT,
+) -> TriageResult:
+    """Run Step 1 triage for a single signal. Full side-effect path:
+    fetch signal, build prompt, call Ollama, parse, write result + cost,
+    transition state. Parse failures absorb internally via the retry
+    budget + stub-and-route pattern (§7 row 3) — no ``TriageParseError``
+    escapes past ``_RETRY_BUDGET`` attempts.
+
+    Raises:
+        LookupError: when the signal_id is not in ``signal_queue``.
+        OllamaUnavailableError: when Ollama cannot be reached. Caller
+            (pipeline tick) swaps to availability fallback or defers.
+            Transport failures are NOT counted against the parse-retry
+            budget — the ``_RETRY_BUDGET`` is reserved for malformed
+            model output only.
+    """
+    signal_text = _fetch_signal(conn, signal_id)
+    _mark_running(conn, signal_id)
+
+    # Inv 3: fresh reads once per invocation, shared across all attempts.
+    glossary, hot_md_block, ledger_block = _read_prompt_inputs(conn)
+
+    template = _load_template()
+    signal_truncated = signal_text.replace('"', "'")[:_DEFAULT_SIGNAL_TRUNCATE]
+
+    # Attempt 0 — full prompt (glossary + hot.md + ledger).
+    prompt = template.format(
+        signal=signal_truncated,
+        slug_glossary=glossary,
+        hot_md_block=hot_md_block,
+        feedback_ledger_block=ledger_block,
+    )
+
+    for attempt in range(_RETRY_BUDGET + 1):
+        result = _run_triage_attempt(conn, signal_id, prompt, model, timeout)
+        if result is not None:
+            return result
+        # Parse failed on this attempt. Build the next-attempt prompt if
+        # retries remain. The pared prompt drops the ledger block — our
+        # best guess at the most likely confound — while keeping the
+        # glossary + hot.md + signal intact.
+        if attempt < _RETRY_BUDGET:
+            prompt = _build_pared_prompt(signal_text, glossary, hot_md_block)
+
+    # Retries exhausted. Each failed attempt already wrote its own
+    # success=False cost row. Write the stub result + advance to inbox
+    # so the Director sees the signal; pipeline keeps flowing.
+    stub = _build_stub_result()
+    _write_triage_result(conn, signal_id, stub, _INBOX_ROUTE_STATE)
+    return stub

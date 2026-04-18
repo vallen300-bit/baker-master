@@ -159,6 +159,106 @@ def test_build_prompt_hot_md_block_content_rendered() -> None:
     assert "BACKBURNER: ao" in out
 
 
+# ------------------------------ _build_pared_prompt ------------------------------
+
+
+def test_pared_prompt_omits_ledger() -> None:
+    """R3 retry uses a pared prompt — the feedback ledger block is
+    replaced with a short marker so the template still formats cleanly.
+    The actual ledger rows must NOT appear in the retry text."""
+    pared = step1_triage._build_pared_prompt(
+        signal_text="Confirm payment deadline tomorrow.",
+        slug_glossary="  movie   — hotel",
+        hot_md_block="- ACTIVE: movie — hotel ops",
+    )
+    # Marker present + signal + hot.md + glossary all present.
+    assert "[LEDGER OMITTED — R3 retry]" in pared
+    assert 'Signal: "Confirm payment deadline tomorrow."' in pared
+    assert "ACTIVE: movie" in pared
+    assert "movie" in pared  # slug glossary
+
+    # Ledger-row content (e.g., a "correct"/"override" action line) is
+    # NOT in the pared prompt. Any Director-action phrase typical of
+    # render_ledger output would sit under the ledger block.
+    assert "Director ledger" not in pared
+    # All placeholders substituted.
+    for placeholder in ("{signal}", "{slug_glossary}", "{hot_md_block}", "{feedback_ledger_block}"):
+        assert placeholder not in pared
+
+
+def test_pared_prompt_escapes_quotes_and_truncates() -> None:
+    """Pared helper inherits the same signal-escape + 3000-char truncate
+    rules as ``build_prompt`` — produces a well-formed ``Signal: "..."``
+    wrapper regardless of input content."""
+    long = 'He said "hello" ' + "x" * 5000
+    pared = step1_triage._build_pared_prompt(
+        signal_text=long,
+        slug_glossary="  movie   — hotel",
+        hot_md_block="- ACTIVE: movie",
+    )
+    # Outer wrapper survives; inner quotes downgraded.
+    assert "Signal: \"He said 'hello' " in pared
+    # Signal truncated at 3000 chars (post-escape length check).
+    assert "x" * 2980 in pared  # some x content reached the prompt
+    assert "x" * 5000 not in pared  # but not the full 5000
+
+
+def test_pared_prompt_does_not_read_hot_md_or_ledger() -> None:
+    """``_build_pared_prompt`` is a pure render helper — it takes already-
+    computed blocks. Inv 3 is satisfied by ``triage()`` reading fresh
+    inputs once per invocation via ``_read_prompt_inputs`` and sharing
+    the values across both attempts, NOT by the retry re-reading."""
+    with patch("kbl.steps.step1_triage.load_hot_md") as m_hot, patch(
+        "kbl.steps.step1_triage.load_recent_feedback"
+    ) as m_ledger:
+        step1_triage._build_pared_prompt(
+            signal_text="s",
+            slug_glossary="glossary",
+            hot_md_block="hot",
+        )
+    assert m_hot.call_count == 0
+    assert m_ledger.call_count == 0
+
+
+def test_triage_invocation_reads_hot_md_and_ledger_once() -> None:
+    """Inv 3 anchor: every ``triage()`` call produces at least one fresh
+    read of hot.md AND the feedback ledger — regardless of whether the
+    parse happy-path or the retry path is taken. Retries reuse the
+    already-fresh values; they don't re-read, but they don't skip either."""
+    conn = _triage_conn()
+    valid = {
+        "response": _sample_response(primary_matter="movie"),
+        "prompt_eval_count": 100,
+        "eval_count": 30,
+    }
+    with patch.object(
+        step1_triage, "call_ollama", return_value=valid
+    ), patch(
+        "kbl.steps.step1_triage.load_hot_md", return_value="- ACTIVE: movie"
+    ) as m_hot, patch(
+        "kbl.steps.step1_triage.load_recent_feedback", return_value=[]
+    ) as m_ledger:
+        triage(signal_id=1, conn=conn)
+    # Exactly one read each per invocation (happy path, no retry needed).
+    assert m_hot.call_count == 1
+    assert m_ledger.call_count == 1
+
+    # Same Inv 3 contract on the retries-exhausted path — still one
+    # read each, not zero.
+    conn2 = _triage_conn()
+    unparseable = {"response": "garbage", "prompt_eval_count": 100, "eval_count": 20}
+    with patch.object(
+        step1_triage, "call_ollama", side_effect=[unparseable, unparseable]
+    ), patch(
+        "kbl.steps.step1_triage.load_hot_md", return_value="- ACTIVE: movie"
+    ) as m_hot2, patch(
+        "kbl.steps.step1_triage.load_recent_feedback", return_value=[]
+    ) as m_ledger2:
+        triage(signal_id=2, conn=conn2)
+    assert m_hot2.call_count == 1
+    assert m_ledger2.call_count == 1
+
+
 # ------------------------------ normalize_matter ------------------------------
 
 
@@ -499,19 +599,123 @@ def test_triage_boundary_at_threshold_routes_to_resolve() -> None:
     assert "awaiting_resolve" in params
 
 
-def test_triage_parse_error_writes_failure_ledger_row_and_raises() -> None:
+def test_triage_parse_error_first_attempt_triggers_retry() -> None:
+    """R3 retry path: first call unparseable, second call valid → final
+    result written once + ONE success=True cost row (from the good
+    second attempt). The failed first attempt writes its own
+    success=False cost row. No raise escapes."""
     conn = _triage_conn()
-    gemma_payload = {"response": "not valid json at all"}
-    with patch.object(step1_triage, "call_ollama", return_value=gemma_payload):
-        with pytest.raises(TriageParseError):
-            triage(signal_id=5, conn=conn)
-    # Cost row written with success=False, no result UPDATE fired.
+    unparseable = {"response": "not json at all", "prompt_eval_count": 1000, "eval_count": 40}
+    valid = {
+        "response": _sample_response(triage_score=55, primary_matter="movie"),
+        "prompt_eval_count": 1100,
+        "eval_count": 60,
+    }
+    with patch.object(
+        step1_triage, "call_ollama", side_effect=[unparseable, valid]
+    ) as m_call:
+        result = triage(signal_id=42, conn=conn)
+
+    assert m_call.call_count == 2
+    # The pared retry prompt must NOT include the ledger content —
+    # capture the second call's prompt and assert the marker surfaces.
+    _, second_kwargs = m_call.call_args_list[1]
+    second_prompt = (
+        m_call.call_args_list[1].args[0]
+        if m_call.call_args_list[1].args
+        else second_kwargs["prompt"]
+    )
+    assert "[LEDGER OMITTED — R3 retry]" in second_prompt
+
+    assert result.primary_matter == "movie"
+    assert result.triage_score == 55
+
+    # Exactly TWO cost rows: first success=False (parse fail), second
+    # success=True (good result). Order-preserving.
     cost_rows = [c for c in conn._calls if "kbl_cost_ledger" in c[0].lower()]
-    assert cost_rows
-    _, params = cost_rows[0]
-    assert False in params  # success flag
-    update_rows = [c for c in conn._calls if "update signal_queue set" in c[0].lower() and "primary_matter" in c[0].lower()]
-    assert not update_rows  # no result row written on parse failure
+    assert len(cost_rows) == 2
+    assert cost_rows[0][1][-1] is False  # failed attempt
+    assert cost_rows[1][1][-1] is True  # winning attempt
+
+    # Exactly ONE result UPDATE (the winning attempt).
+    update_rows = [
+        c for c in conn._calls
+        if "update signal_queue set" in c[0].lower()
+        and "primary_matter" in c[0].lower()
+    ]
+    assert len(update_rows) == 1
+    _, params = update_rows[0]
+    # Route based on score (55 ≥ 40 → awaiting_resolve).
+    assert "awaiting_resolve" in params
+
+
+def test_triage_parse_error_retries_exhausted_writes_stub() -> None:
+    """§7 row 3 terminal path: both attempts unparseable → stub written,
+    status advances to ``awaiting_inbox_route``, TWO cost rows both
+    success=False. No raise — pipeline keeps flowing."""
+    conn = _triage_conn()
+    unparseable = {"response": "garbage", "prompt_eval_count": 1000, "eval_count": 40}
+
+    with patch.object(
+        step1_triage, "call_ollama", side_effect=[unparseable, unparseable]
+    ) as m_call:
+        result = triage(signal_id=11, conn=conn)
+
+    assert m_call.call_count == 2
+
+    # Stub shape per brief: primary_matter=None, vedana=None, score=0,
+    # confidence=0.0, summary='parse_failed'.
+    assert result.primary_matter is None
+    assert result.vedana is None
+    assert result.triage_score == 0
+    assert result.triage_confidence == 0.0
+    assert result.summary == "parse_failed"
+    assert result.related_matters == ()
+
+    # Exactly TWO cost rows, both success=False.
+    cost_rows = [c for c in conn._calls if "kbl_cost_ledger" in c[0].lower()]
+    assert len(cost_rows) == 2
+    for _, params in cost_rows:
+        assert params[-1] is False
+
+    # Exactly ONE result UPDATE — the stub write. Status = inbox route.
+    update_rows = [
+        c for c in conn._calls
+        if "update signal_queue set" in c[0].lower()
+        and "primary_matter" in c[0].lower()
+    ]
+    assert len(update_rows) == 1
+    _, params = update_rows[0]
+    assert "awaiting_inbox_route" in params
+    # The stub values are the row written.
+    assert None in params  # primary_matter=None
+    assert "parse_failed" in params
+
+
+def test_triage_parse_error_does_not_raise_past_retry_budget() -> None:
+    """Explicit companion to the retries-exhausted test: ``TriageParseError``
+    is absorbed internally and MUST NOT leak past ``triage()``."""
+    conn = _triage_conn()
+    unparseable = {"response": "garbage", "prompt_eval_count": 500, "eval_count": 20}
+    with patch.object(
+        step1_triage, "call_ollama", side_effect=[unparseable, unparseable]
+    ):
+        # No ``pytest.raises`` — the exception must not escape.
+        triage(signal_id=99, conn=conn)
+
+
+def test_triage_ollama_unreachable_still_propagates() -> None:
+    """``OllamaUnavailableError`` is transport — NOT part of the parse
+    retry budget. It bubbles unchanged so the caller can defer the signal
+    and let availability-fallback take over on the next tick."""
+    conn = _triage_conn()
+    with patch.object(
+        step1_triage,
+        "call_ollama",
+        side_effect=step1_triage.OllamaUnavailableError("down"),
+    ):
+        with pytest.raises(step1_triage.OllamaUnavailableError, match="down"):
+            triage(signal_id=1, conn=conn)
 
 
 def test_triage_signal_not_found_raises() -> None:
