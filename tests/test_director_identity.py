@@ -24,6 +24,10 @@ from baker.director_identity import (
         ("41799605092", "41799605092"),
         ("+41-79-960-50-92", "41799605092"),
         ("tel:+41.79.960.50.92", "41799605092"),
+        # S1 (PR #7 review): `00` is the international-dial prefix
+        # (E.164 alternate to `+`) — must canonicalize to the same form.
+        ("0041 79 960 50 92", "41799605092"),
+        ("0041799605092", "41799605092"),
     ],
 )
 def test_normalize_phone_strips_non_digits(raw: str, expected: str) -> None:
@@ -86,6 +90,9 @@ def test_non_director_email_not_recognized() -> None:
         "41799605092@c.us",
         "41799605092",
         "+41-79-960-50-92",
+        # S1 (PR #7 review): `00` international-dial prefix equivalent of `+`.
+        "0041 79 960 50 92",
+        "0041799605092",
     ],
 )
 def test_director_whatsapp_recognized_all_formats(sender: str) -> None:

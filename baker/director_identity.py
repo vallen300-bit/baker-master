@@ -46,21 +46,24 @@ DIRECTOR_PHONES: frozenset[str] = frozenset({"41799605092"})
 def _normalize_phone(raw: str) -> str:
     """Return digits-only canonical form for phone comparison.
 
-    Handles all documented formats per B2 N4:
+    Handles all documented formats per B2 N4 + S1 (PR #7 review):
         ``+41 79 960 50 92``        -> ``41799605092``
         ``+41799605092``            -> ``41799605092``
         ``41799605092@c.us``        -> ``41799605092``
-        ``0041 79 960 50 92``       -> ``00041799605092`` (distinct!)
+        ``0041 79 960 50 92``       -> ``41799605092``  (S1: strip 00 IDD)
 
-    Note the ``0041`` case: some WhatsApp ports preserve an ``00`` trunk
-    prefix, giving a 14-digit result that does NOT match the 11-digit
-    canonical. This is accurate — Swiss trunk-prefix ``00`` is not the same
-    as the empty plus-replacement. If Director adds a format that serializes
-    as ``00…`` we add it to DIRECTOR_PHONES explicitly.
+    ``00`` is the international-call prefix (E.164 alternate to ``+``) used
+    across Europe/Africa/Asia. Handsets, GSM clients, and calendaring apps
+    sometimes emit it instead of ``+``; both route to the same number.
+    Stripping a leading ``00`` after digit extraction canonicalizes both
+    forms to the same E.164 digits, matching how phone libraries do it.
     """
     if not raw:
         return ""
-    return re.sub(r"\D", "", raw)
+    digits = re.sub(r"\D", "", raw)
+    if digits.startswith("00"):
+        digits = digits[2:]
+    return digits
 
 
 def _extract_email(raw: str) -> str:
