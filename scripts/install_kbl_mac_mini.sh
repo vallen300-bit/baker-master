@@ -26,8 +26,14 @@ command -v yq >/dev/null 2>&1 || { echo "FAIL: yq not installed. Run: brew insta
 command -v flock >/dev/null 2>&1 || { echo "FAIL: flock not installed. Run: brew install util-linux"; exit 1; }
 command -v ollama >/dev/null 2>&1 || { echo "FAIL: ollama not installed."; exit 1; }
 
-ollama list | grep -q 'gemma4' || { echo "FAIL: gemma4 not pulled. Run: ollama pull gemma4:latest"; exit 1; }
-ollama list | grep -q 'qwen2.5:14b' || { echo "FAIL: qwen2.5:14b not pulled. Run: ollama pull qwen2.5:14b"; exit 1; }
+# Buffer `ollama list` into a var before grep: with `set -o pipefail`, `grep -q`
+# closes stdin on first match → ollama writer gets SIGPIPE → pipeline exits
+# non-zero even when the model is pulled. Position-dependent (models emitted
+# later in the list would win the race; earlier ones lose). Assembling once
+# and grepping the variable avoids the pipe entirely.
+OLLAMA_LIST="$(ollama list)"
+echo "$OLLAMA_LIST" | grep -q 'gemma4' || { echo "FAIL: gemma4 not pulled. Run: ollama pull gemma4:latest"; exit 1; }
+echo "$OLLAMA_LIST" | grep -q 'qwen2.5:14b' || { echo "FAIL: qwen2.5:14b not pulled. Run: ollama pull qwen2.5:14b"; exit 1; }
 
 # R1.N3: enforce ~/.zshrc mode 0600 (defense for plaintext secrets per D4 override).
 if [ -f "${HOME}/.zshrc" ]; then
