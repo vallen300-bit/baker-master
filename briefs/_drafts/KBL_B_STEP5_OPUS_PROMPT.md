@@ -11,7 +11,7 @@
 - **Inv 3** — `{hot_md_block}` and `{feedback_ledger_recent}` are re-read from source on every call (same `kbl/loop.py` helpers as Step 1, no caching).
 - **Inv 8** — frontmatter `voice: silver` emitted unconditionally. Step 5 never self-promotes to `gold` (§1.3 rule F1).
 - **Inv 10** — this prompt is a stable template. All variability comes through data blocks.
-- **Inv 4** — frontmatter `author: tier2` (pipeline-authored). `author: director` is reserved and this prompt never writes it.
+- **Inv 4** — frontmatter `author: pipeline` (machine-generated Silver). `author: director` is reserved for Gold promotions and this prompt never writes it.
 
 **Q1 Loop Test self-assessment:** prompt DESIGN is the Leg 1 compounding mechanism (it is where Gold is read, honored, and fed back into Silver). §1.2 rules G1-G3 codify the mandatory handling. A reviewer disagreeing with any G-rule is flagging a Leg 1 concern and MUST escalate per CHANDA §5. See §4.
 
@@ -107,7 +107,7 @@ _STEP5_SYSTEM_TEMPLATE = """You are the synthesis agent for the Baker wiki (KBL 
 
 **F1 — Frontmatter `voice: silver` always.** You never emit `voice: gold`. Promotion is the Director's action, triggered by explicit frontmatter edit, not by this prompt.
 
-**F2 — Frontmatter `author: tier2` always.** You are the Tier-2 synthesis layer. `author: director` and `author: pipeline` are reserved for other writers. Use `tier2`.
+**F2 — Frontmatter `author: pipeline` always.** You are the machine-generated Silver writer. `author: director` is reserved for Gold promotions (CHANDA Inv 4 protection engages on that value — pipeline never writes it). Use `pipeline`.
 
 ## Hard constraints (signal-level discipline)
 
@@ -144,7 +144,7 @@ Exactly one Markdown document. Frontmatter first, then body. Both mandatory.
 ---
 title: <short noun phrase, under 80 chars, no trailing period>
 voice: silver
-author: tier2
+author: pipeline
 created: <ISO-8601 UTC timestamp, provided as {iso_now}>
 source_id: <signal_id from input>
 primary_matter: <slug or null>
@@ -176,7 +176,7 @@ Never resolve the contradiction yourself. Never delete or revise Gold content. F
 
 ## Invariants summary (for your self-check before emitting)
 
-- Frontmatter begins with `---`, 9 required keys present, `voice: silver`, `author: tier2`.
+- Frontmatter begins with `---`, 9 required keys present, `voice: silver`, `author: pipeline`.
 - Body begins with prose summary, not a heading.
 - No preamble, no postamble.
 - Gold referenced by path if referenced at all.
@@ -285,7 +285,7 @@ def load_gold_context_by_matter(matter_slug: str, vault_path: str | Path | None 
 None — this is first authoring of the Step 5 Opus prompt. KBL-B §6.3 is currently a stub in the main brief; this draft is the fill-in. When AI Head folds this into KBL-B §6.3, treat this file as the authoritative source and replace the stub wholesale.
 
 One consequential reconciliation to flag:
-- **`author` value** — this draft uses `author: tier2` per the dispatch task spec (line 56). The existing `kbl/gold_drain.py` docstring (line 146) and B2's Step 6 scope review (2026-04-18) refer to `author: pipeline`. Two names for the same writer is a divergence. See §5 OQ1 — does not block first draft, blocks production deployment.
+- **`author` value — resolved to `author: pipeline`** (AI Head 2026-04-18, per B2 STEP5-OPUS review S1). Aligns with existing `kbl/gold_drain.py` (line 146) and B2's Step 6 scope review. Lifecycle semantics: pipeline writes `author: pipeline` + `voice: silver`; Director promotes to `author: director` + `voice: gold` (CHANDA Inv 4 protection engages on `author: director`). Draft-session `tier2` convention retired. See §5 OQ1.
 
 ---
 
@@ -338,7 +338,7 @@ iso_now:               2026-03-02T18:43:00Z
 ---
 title: Ofenheimer first letter to Hagenauer — Aufschlüsselung request
 voice: silver
-author: tier2
+author: pipeline
 created: 2026-03-02T18:43:00Z
 source_id: email:19cb01431b40fddf
 primary_matter: hagenauer-rg7
@@ -375,14 +375,15 @@ First record for `hagenauer-rg7` in the wiki. No prior Gold context. This entry 
 **Input blocks:**
 
 ```
-primary_matter:        mo-vie
-matter purpose:        Mandarin Oriental Vienna hotel — Brisen-owned, MOHG-operated
-related_matters:       theailogy
+primary_matter:        mo-vie-am
+matter purpose:        Mandarin Oriental Vienna — Asset Management (hotel ops, F&B,
+                       residences, service, occupancy). Distinct from mo-vie-exit.
+related_matters:       m365
 vedana:                opportunity
 triage_summary:        MOVIE AI platform scoping — elevated per Director's hot.md focus on
-                       mo-vie; integrates with theailogy.
+                       mo-vie-am; intersects with the m365 migration initiative.
 
-resolved_thread_paths: wiki/mo-vie/2026-01-28_ai-platform-scoping.md
+resolved_thread_paths: wiki/mo-vie-am/2026-01-28_ai-platform-scoping.md
 
 extracted_entities:
   people: (none — summary format, no direct attributions)
@@ -394,18 +395,19 @@ extracted_entities:
                 Dimitry: recruit DB architect + programmer
 
 gold_context_block:
-  --- wiki/mo-vie/2026-01-28_ai-platform-scoping.md created 2026-01-28T14:00:00Z ---
+  --- wiki/mo-vie-am/2026-01-28_ai-platform-scoping.md created 2026-01-28T14:00:00Z ---
   # MO Vienna AI/data platform — initial scoping
   ...3 paragraphs of Director-promoted content re initial vendor scan,
   Data Vision dissatisfaction, and intent to build in-house...
 
 hot_md_block:
-  - ACTIVE: mo-vie — AI platform build
-  - ACTIVE: hagenauer-rg7
-  - BACKBURNER: theailogy
+  - ACTIVE: mo-vie-am — Residence #8 offer, residences sales website, AI platform
+  - ACTIVE: hagenauer-rg7 — GC takeover, administrator defence, press containment
+  - ACTIVE: m365 — kick off Microsoft 365 migration
+  - WATCH: mo-vie-exit — start sale process via Laura Wenk + MO
 
 feedback_ledger_block:
-  2026-02-01 11:20 | promote | mo-vie | sig:2101abc | "initial scoping — promoted as-is"
+  2026-02-01 11:20 | promote | mo-vie-am | sig:2101abc | "initial scoping — promoted as-is"
 
 signal_raw_text:       [44min meeting summary, ~2400 chars]
 iso_now:               2026-02-04T18:47:00Z
@@ -417,13 +419,13 @@ iso_now:               2026-02-04T18:47:00Z
 ---
 title: MO Vienna AI platform — Feb 4 scoping follow-up
 voice: silver
-author: tier2
+author: pipeline
 created: 2026-02-04T18:47:00Z
 source_id: meeting:01KGMW7QJH530CT89AGFHYGTEE
-primary_matter: mo-vie
-related_matters: [theailogy]
+primary_matter: mo-vie-am
+related_matters: [m365]
 vedana: opportunity
-thread_continues: [wiki/mo-vie/2026-01-28_ai-platform-scoping.md]
+thread_continues: [wiki/mo-vie-am/2026-01-28_ai-platform-scoping.md]
 money_mentioned: [3000 GBP]
 ---
 
@@ -440,16 +442,16 @@ This 44-minute meeting extends the Jan 28 scoping thread. Three additions since 
 - Dimitry: source DB architect + programmer (no deadline stated).
 
 ## Continues
-Extends `wiki/mo-vie/2026-01-28_ai-platform-scoping.md`. The Jan 28 entry introduced dissatisfaction with Data Vision and the intent to build; this entry quantifies the replacement case and names the two hires needed to execute. No contradiction with the prior Gold.
+Extends `wiki/mo-vie-am/2026-01-28_ai-platform-scoping.md`. The Jan 28 entry introduced dissatisfaction with Data Vision and the intent to build; this entry quantifies the replacement case and names the two hires needed to execute. No contradiction with the prior Gold.
 
 **Context**
-Director's current focus on `mo-vie` (hot.md ACTIVE) elevated this meeting's triage — the Feb 1 promotion of the scoping entry confirms the matter is on the Gold track. `theailogy` cross-referenced because the proposed vertical-AI work overlaps the AI playbook initiative.
+Director's current focus on `mo-vie-am` (hot.md ACTIVE) elevated this meeting's triage — the Feb 1 promotion of the scoping entry confirms the matter is on the Gold track. `m365` cross-referenced because the Microsoft 365 migration is the live tech-infrastructure thread in hot.md and the proposed data-platform work runs through the same identity / tenancy stack.
 
 ## Cross-references
-- see wiki/theailogy/ — vertical-AI methodology overlap
+- see wiki/m365/ — M365 migration intersects data-platform identity + tenancy
 ```
 
-**Rationale:** Body explicitly continues prior Gold (`## Continues` section with path). hot.md acknowledgement is one sentence in Context. Ledger `promote` event is acknowledged via "Feb 1 promotion … confirms the matter is on the Gold track" — this is how ledger pattern propagates WITHOUT parroting. `money_mentioned` frontmatter surfaces the £3K figure. `related_matters: [theailogy]` triggers the `## Cross-references` bullet. No contradiction with prior Gold, so no ⚠ line.
+**Rationale:** Body explicitly continues prior Gold (`## Continues` section with path). hot.md acknowledgement is one sentence in Context. Ledger `promote` event is acknowledged via "Feb 1 promotion … confirms the matter is on the Gold track" — this is how ledger pattern propagates WITHOUT parroting. `money_mentioned` frontmatter surfaces the £3K figure. `related_matters: [m365]` triggers the `## Cross-references` bullet. No contradiction with prior Gold, so no ⚠ line. (Cross-link swapped from the retired `theailogy` slug — v9 slugs.yml fold.)
 
 ### Example 3 — Cross-matter WhatsApp (Wertheimer primary, hot.md-linked secondary)
 
@@ -462,11 +464,11 @@ Director's current focus on `mo-vie` (hot.md ACTIVE) elevated this meeting's tri
 ```
 primary_matter:        wertheimer
 matter purpose:        Wertheimer family office — UHNW counterparty, exploratory
-related_matters:       mo-vie, balducci
+related_matters:       mo-vie-am, balducci
 vedana:                opportunity
-triage_summary:        Wertheimer SFO approach; elevated per hot.md (wertheimer ACTIVE) +
-                       slug-mention of RG7 in text (hagenauer-rg7 ACTIVE, cross-matter
-                       single-shot elevation applied per STEP1-S1).
+triage_summary:        Wertheimer SFO approach; elevated per hot.md (wertheimer slug-mention
+                       upstream of signal) + slug-mention of RG7 in text (hagenauer-rg7
+                       ACTIVE, cross-matter single-shot elevation applied per STEP1-S1).
 
 resolved_thread_paths: (none — new thread)
 
@@ -481,9 +483,9 @@ extracted_entities:
 gold_context_block:    (no prior Gold entries for this matter)
 
 hot_md_block:
-  - ACTIVE: wertheimer — ongoing intro cycle
-  - ACTIVE: hagenauer-rg7 — drawdown sequence
-  - BACKBURNER: mo-vie
+  - ACTIVE: hagenauer-rg7 — GC takeover, administrator defence, press containment
+  - ACTIVE: mo-vie-am — Residence #8 offer, residences sales website, AI platform
+  - WATCH: mo-vie-exit — start sale process via Laura Wenk + MO
 
 feedback_ledger_block:
   2026-04-15 17:30 | promote | wertheimer | sig:44aa01 | "first WG message — accepted"
@@ -498,11 +500,11 @@ iso_now:               2026-04-17T09:12:00Z
 ---
 title: Wertheimer SFO — intro request re RG7 and EU-Switzerland ideas
 voice: silver
-author: tier2
+author: pipeline
 created: 2026-04-17T09:12:00Z
 source_id: whatsapp:false_41798986876@c.us_AC0C466E0FF0784F45075A6534AB75B4
 primary_matter: wertheimer
-related_matters: [mo-vie, balducci]
+related_matters: [mo-vie-am, balducci]
 vedana: opportunity
 ---
 
@@ -518,14 +520,14 @@ An intermediary with a meeting scheduled next week at Wertheimer's family office
 - Dimitry: advise the intermediary on the RG7 framing — what dimension of RG7 (non-flats) is the right positioning for a high-liquidity UHNW buyer.
 
 **Context**
-Director's current focus (`hot.md`: `wertheimer` ACTIVE, `hagenauer-rg7` ACTIVE) elevated the triage — both the primary matter and the RG7 mention in the signal independently qualify for elevation, applied single-shot per the cross-matter rule. This is the opening Gold-track record for `wertheimer`; the Apr 15 promotion of the first Wertheimer message in the ledger confirms the matter is live. No prior Gold context for `wertheimer` — treat as the opening record for strategic framing decisions.
+Director's current focus (`hot.md`: `hagenauer-rg7` ACTIVE, `mo-vie-am` ACTIVE) elevated the triage — the RG7 mention in the signal text qualifies for cross-matter elevation against the hagenauer-rg7 ACTIVE entry, applied single-shot per the rule. This is the opening Gold-track record for `wertheimer`; the Apr 15 promotion of the first Wertheimer message in the ledger confirms the matter is live. No prior Gold context for `wertheimer` — treat as the opening record for strategic framing decisions.
 
 ## Cross-references
-- see wiki/mo-vie/ — SFO would plausibly be introduced to the hotel asset alongside RG7
+- see wiki/mo-vie-am/ — SFO would plausibly be introduced to the hotel asset alongside RG7
 - see wiki/balducci/ — prior intermediary pattern
 ```
 
-**Rationale:** Zero-Gold on `wertheimer` → opening-record tone in Context. hot.md elevation acknowledged, and the cross-matter single-shot rule is referenced by name so the Director can trace the steering. Ledger `promote` event referenced without copying content. `related_matters: [mo-vie, balducci]` from Step 1 is honored verbatim as frontmatter + cross-refs — the prompt does NOT second-guess the Step 1 cross-link choice (post-REDIRECT contract). Note that `hagenauer-rg7` is NOT in `related_matters` despite the RG7 text mention — that's a Step 1 classification decision and Step 5 respects it; the RG7 mention enters the narrative as signal content, not as a cross-matter link.
+**Rationale:** Zero-Gold on `wertheimer` → opening-record tone in Context. hot.md elevation acknowledged, and the cross-matter single-shot rule is referenced by name so the Director can trace the steering. Ledger `promote` event referenced without copying content. `related_matters: [mo-vie-am, balducci]` from Step 1 is honored verbatim as frontmatter + cross-refs — the prompt does NOT second-guess the Step 1 cross-link choice (post-REDIRECT contract). Note that `hagenauer-rg7` is NOT in `related_matters` despite the RG7 text mention — that's a Step 1 classification decision and Step 5 respects it; the RG7 mention enters the narrative as signal content, not as a cross-matter link.
 
 ---
 
@@ -537,7 +539,7 @@ Director's current focus (`hot.md`: `wertheimer` ACTIVE, `hagenauer-rg7` ACTIVE)
 | **Q2 Wish Test** | Serves wish (synthesis of loop inputs into reviewable Silver, with Gold honored). Engineering convenience is co-satisfied (prompt-caching on the stable system block). Tradeoff: input cost rises with Gold corpus size — a matter with 100 Gold entries will push per-call cost up noticeably. Mitigated by prompt-caching on the system block + ledger-limited context. Revisit if Phase 1 shows a single matter exceeds ~40K tokens of Gold; at that point, a Gold-summarization pre-step is the right answer, not a truncation cap. |
 | **Inv 1 compliance** | Zero-Gold case produces a valid first entry (Example 1). Empty-sentinel block, not absent. Prompt rule G2 enforces first-record behavior. |
 | **Inv 3 compliance** | `hot.md` + feedback ledger re-read on every call via the same `kbl/loop.py` helpers Step 1 uses. Not cached. |
-| **Inv 4 compliance** | Frontmatter `author: tier2`. `author: director` never emitted by this prompt (nor `author: pipeline` — see §5 OQ1 reconciliation). |
+| **Inv 4 compliance** | Frontmatter `author: pipeline` always. `author: director` never emitted by this prompt — it is reserved for Director Gold promotions, where CHANDA Inv 4's "never modified by agents" protection engages. (§5 OQ1 resolved 2026-04-18 — `tier2` convention retired in favor of `pipeline`.) |
 | **Inv 5 compliance** | Every emitted wiki file has full 9-key frontmatter. Missing frontmatter is a pipeline failure (Step 6 `finalize()` validates — out of this prompt's scope but the prompt is the producer). |
 | **Inv 6 compliance** | Cross-link section emitted when `related_matters` non-empty. Step 6 finalize() applies structural cross-link handling deterministically, NOT this prompt. |
 | **Inv 7 compliance** | No ayoniso override behavior in this prompt — Step 5 is the synthesis step, not the alerting step. |
@@ -549,7 +551,7 @@ Director's current focus (`hot.md`: `wertheimer` ACTIVE, `hagenauer-rg7` ACTIVE)
 
 ## 5. Open questions for AI Head
 
-1. **`author:` frontmatter value — `tier2` vs `pipeline`.** My task dispatch (line 56) specifies `author: tier2`. Existing `kbl/gold_drain.py` docstring (line 146) and B2's Step 6 scope review use `author: pipeline`. Two names for the same writer is a production-blocker-sized divergence. **Recommend:** pick one globally — if `tier2` wins, update `gold_drain.py` docstring; if `pipeline` wins, amend this prompt. Not blocking first draft; blocking deployment. AI Head decision, please.
+1. **`author:` frontmatter value — RESOLVED 2026-04-18 to `author: pipeline`** (AI Head, per B2 STEP5-OPUS review S1). Lifecycle locked: pipeline writes `author: pipeline` + `voice: silver`; Director promotion flips both to `author: director` + `voice: gold`, at which point CHANDA Inv 4's "never modified by agents" protection engages. Draft-session `tier2` convention retired throughout this file in the STEP5-S1-AUTHOR-RENAME pass. Aligns with existing `kbl/gold_drain.py` (line 146) and B2's Step 6 scope review. No outstanding question.
 
 2. **Ledger limit env-var shape.** This prompt proposes `KBL_STEP5_LEDGER_LIMIT` to mirror PR #6's `KBL_STEP1_LEDGER_LIMIT`. Two env vars may be overkill — the ledger is the same table, the recency window the same concept. **Recommend:** single `KBL_LEDGER_LIMIT` governing both Step 1 and Step 5 unless profiling shows Step 5 benefits from a deeper window. I'll amend per your call.
 

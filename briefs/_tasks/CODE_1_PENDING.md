@@ -2,83 +2,65 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (terminal instance)
-**Previous:** LAYER0-IMPL shipped as PR #7 at `7342617`. Idle since.
-**Task posted:** 2026-04-18
-**Status:** OPEN
+**Previous:** PR8-S2-FIX shipped at `067e29c`. B2 review delta pending. Director ratified path (b) on PR #12 S1.
+**Task posted:** 2026-04-18 (late evening)
+**Status:** OPEN — tiny rename amend on existing PR #8 branch
 
 ---
 
-## Task: STEP1-TRIAGE-IMPL — Step 1 Gemma Triage Evaluator
+## Task: PR8-S1-RENAME — `awaiting_inbox_route` → `routed_inbox` canonical
 
-**Why now:** All inputs ratified. Layer 0 PASS emits `awaiting_triage` signals (PR #7). Step 1 consumes them, runs Gemma triage, writes results + routes. Production-moving, unblocks Step 2/3 impl.
+**Source:** B2's PR #12 review @ `1feebf7` (S1) + Director ratification of option (b).
+
+### Why
+
+Your PR8-S2-FIX advances low-score triage signals to `'awaiting_inbox_route'`, but the KBL-B brief §4.2 canonical terminal state is `'routed_inbox'`. PR #12 (now MERGED at `68db3568`) includes `routed_inbox` in the CHECK set but NOT `awaiting_inbox_route`. Your choice was a silent spec drift from the brief.
+
+Director ratified option (b): rename PR #8's writes to `'routed_inbox'` instead of adding a 35th CHECK value. Bundles cleanly with B2's pending S2 delta review — single B1 commit closes both S1 (rename) + S2 (already fixed in your PR8-S2-FIX).
 
 ### Scope
 
 **IN**
 
-1. **`kbl/prompts/step1_triage.txt`** — extract the template text from `briefs/_drafts/KBL_B_STEP1_TRIAGE_PROMPT.md` §1.1. Plain-text file with `{signal}`, `{slug_glossary}`, `{hot_md_block}`, `{feedback_ledger_recent}` placeholders. Source of truth for the prompt text going forward.
+1. **`kbl/steps/step1_triage.py`** — rename every occurrence of `'awaiting_inbox_route'` (string literal + any constant like `_STATE_INBOX_ROUTE` if you defined one) → `'routed_inbox'`. Semantic note: `routed_inbox` is **terminal** (not `awaiting_*`), so clarify the docstring / comments around the state transition to reflect "signal reaches terminal inbox state" rather than "signal awaits inbox routing."
 
-2. **`kbl/steps/step1_triage.py`** — the evaluator module:
-   - `build_prompt(signal_text: str, conn) -> str` — assembles the prompt per the template draft §1.1 builder (calls `slug_registry`, `load_hot_md`, `load_recent_feedback`, `render_ledger` from `kbl/loop.py`). Caller owns `conn`.
-   - `parse_gemma_response(raw: str) -> TriageResult` — parses Gemma's structured JSON output. Returns dataclass with: `primary_matter`, `related_matters`, `vedana`, `triage_score`, `triage_confidence`, `summary`. Raises `TriageParseError` on malformed.
-   - `normalize_matter(raw: str | None) -> str | None` — delegates to `slug_registry.normalize()` (handles aliases, returns None for "null"/"none").
-   - `call_ollama(prompt: str, model="gemma2:8b", timeout=30) -> str` — HTTP POST to Ollama `/api/generate`, seed=42, temperature=0, format=json. Returns raw response text.
-   - `triage(signal_id: int, conn) -> TriageResult` — full pipeline: load signal from `signal_queue.id`, build prompt, call Ollama, parse, write results to `signal_queue` columns (`primary_matter`, `related_matters`, `vedana`, `triage_score`, `triage_confidence`, `triage_summary`), write `kbl_cost_ledger` row (`step='triage'`, `model='gemma2:8b'`, tokens from Ollama response if available), advance state.
-   - State transitions: `awaiting_triage` → `triage_running` → `awaiting_resolve` OR `awaiting_inbox_route` (if triage_score < `KBL_PIPELINE_TRIAGE_THRESHOLD`, default 40)
+2. **Tests** — `tests/test_step1_triage.py` — update every assertion that expects `'awaiting_inbox_route'` → `'routed_inbox'`. This should include the new tests you added in PR8-S2-FIX (`test_triage_parse_error_retries_exhausted_writes_stub` + low-score routing tests).
 
-3. **`kbl/exceptions.py`** (if not exists) — `TriageParseError`, `OllamaUnavailableError`
+3. **Any docstrings / comments referencing "awaiting inbox route"** — update wording to reflect terminal-state semantic.
 
-4. **Tests** — `tests/test_step1_triage.py`:
-   - `build_prompt` integration: mock signal + mock DB with seeded hot.md + ledger rows → prompt contains expected blocks
-   - `parse_gemma_response` happy path
-   - `parse_gemma_response` malformed → raises
-   - `normalize_matter` alias resolution (e.g., "hagenauer" → "hagenauer-rg7", "lilienmat" → "lilienmatt")
-   - `call_ollama` mocked (don't require live Ollama in CI)
-   - `triage` end-to-end with mocked Ollama: verifies DB writes (columns + cost ledger row + state transition)
-   - Triage-threshold gating: score < 40 → state `awaiting_inbox_route`; score >= 40 → `awaiting_resolve`
-
-**OUT**
-- Ollama service management (systemd/launchd config) — KBL-A territory
-- Qwen fallback (availability-only per D1; separate ticket when Phase 1 runs into actual availability issue)
-- Step 2 resolver — next ticket
-- Anthropic cost ledger mapping — this step uses Gemma (local, free), ledger row has `cost_usd=0.0`, `input_tokens` + `output_tokens` from Ollama response if exposed
+4. **No migration changes.** PR #12 is merged; `routed_inbox` is already in the CHECK set.
 
 ### CHANDA pre-push
 
-- **Q1 Loop Test:** This step READS hot.md + feedback_ledger on every call — core Leg 3 behavior. **Loop-compliant by construction.** Cite in PR body. Must not short-circuit the reads (no "if-hot-md-empty-skip"). Zero reads = Inv 1 violation.
-- **Q2 Wish Test:** pure wish-service. Pass.
-- **Inv 1:** gold_context_by_matter is Step 5's concern, not Step 1's. Step 1 reads hot.md + ledger; Inv 1 compliance.
-- **Inv 3:** explicit — `triage()` calls `load_hot_md()` + `load_recent_feedback(conn)` before `call_ollama()`. Test this in the `build_prompt` integration test.
-- **Inv 10:** template is loaded from `kbl/prompts/step1_triage.txt` once per process. No self-modification.
-
-### Dependencies
-
-- `kbl/slug_registry.py` ✓ (PR #2)
-- `kbl/loop.py` ✓ (PR #6)
-- `kbl/layer0.py` emits `awaiting_triage` ✓ (PR #7)
-- `feedback_ledger` schema ✓ (PR #5)
-- `signal_queue` columns: `primary_matter TEXT`, `related_matters TEXT[]`, `vedana TEXT`, `triage_score NUMERIC`, `triage_confidence NUMERIC`, `triage_summary TEXT` — if not all exist in current schema, include ALTER TABLE ADD COLUMN in the migration sub-step; verify against current schema first
-- Triage prompt text @ `briefs/_drafts/KBL_B_STEP1_TRIAGE_PROMPT.md` commit `d7db987`
+- **Q1 Loop Test:** rename + semantic clarification; no Leg touched. Pass.
+- **Q2 Wish Test:** aligns implementation with brief §4.2 (ratified wish). Pass.
 
 ### Branch + PR
 
-- Branch: `step1-triage-impl`
-- Base: `main`
-- PR title: `STEP1-TRIAGE-IMPL: kbl/steps/step1_triage.py + kbl/prompts/step1_triage.txt`
-- Target PR: #8
+- **Branch:** `step1-triage-impl` (same PR #8 branch).
+- **Amend as an additional commit** on top of `067e29c`. Do NOT open a new PR.
+- **PR #8 head advances to `<new_SHA>`** — B2 will re-review S1 rename + S2 fix together as single APPROVE cycle.
 
 ### Reviewer
 
-B2 (reviewer-separation).
+B2 — combined delta re-review covering both S1 (rename) + S2 (state-leak fix).
 
 ### Timeline
 
-~60-90 min.
+~10-15 min (mechanical rename + test-assertion updates + commit).
 
 ### Dispatch back
 
-> B1 STEP1-TRIAGE-IMPL shipped — PR #8 open, branch `step1-triage-impl`, head `<SHA>`, <N>/<N> tests green. Ready for B2 review.
+> B1 PR8-S1-RENAME shipped — PR #8 head advanced to `<SHA>`, `awaiting_inbox_route` → `routed_inbox` across code + tests + docstrings, `<N>`/`<N>` tests green. Ready for B2 combined S1+S2 delta re-review.
 
 ---
 
-*Posted 2026-04-18 by AI Head. B2 reviewing PR #7 in parallel. B3 authoring STEP5-OPUS-PROMPT in parallel. Director: Fireflies labeling in separate session.*
+## After this task (for context)
+
+1. B2 re-reviews PR #8 combined S1+S2 delta → APPROVE → I auto-merge PR #8.
+2. PR #7 (LAYER0), PR #10 (STEP2-RESOLVE), PR #11 (STEP3-EXTRACT) — I verify each against new main (post PR #12 merge), auto-merge on clean CI. You are not needed for these.
+3. Your next dispatch: **STEP4-CLASSIFY-IMPL** (deterministic classifier, ~30 min) OR **OLLAMA-CLIENT-REFACTOR-1** (lift `call_ollama` into shared `kbl/ollama.py` — PR #11 N1).
+
+---
+
+*Posted 2026-04-18 (late evening) by AI Head. PR #12 merged at `68db3568`. Tiny fold.*

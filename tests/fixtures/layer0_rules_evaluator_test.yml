@@ -1,0 +1,45 @@
+version: 1
+rules:
+  - name: "email_newsletter_domain"
+    source: "email"
+    match:
+      type: "email_sender_domain_contains"
+      match_any: ["bulk-newsletter.test", "e.newyorktimes.test"]
+    detail: "sender domain on newsletter blocklist"
+
+  - name: "wa_status_broadcast"
+    source: "whatsapp"
+    match:
+      type: "wa_chat_id_suffix"
+      suffixes: ["status@broadcast"]
+    detail: "WhatsApp status-ring broadcast"
+
+  - name: "wa_minimum_content_length"
+    source: "whatsapp"
+    match:
+      type: "content_min_chars"
+      threshold: 4
+    detail: "WA content under 4 chars"
+
+  - name: "baker_self_analysis_echo"
+    source: "*"
+    match:
+      type: "content_starts_with_marker"
+      markers: ["baker_scan:", "<!-- baker-output -->"]
+    detail: "Baker storage-layer output echo"
+
+  - name: "meeting_quality_floor"
+    source: "meeting"
+    match:
+      type: "meeting_transcript_quality"
+      min_words: 50
+      max_unknown_speaker_ratio: 0.8
+      min_unique_tokens_ratio: 0.3
+    detail: "meeting transcript ASR quality below floor"
+
+  - name: "duplicate_content_hash"
+    source: "*"
+    match:
+      type: "content_hash_seen_within_hours"
+      window_hours: 72
+    detail: "duplicate content seen within 72h"
