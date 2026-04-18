@@ -5,11 +5,11 @@
 **Previous:** KBL-B §4-5 review shipped (`0743def`), 3 blockers applied by AI Head inline (`1448479`)
 **Task posted:** 2026-04-18
 **Status:** OPEN — awaiting execution
-**Supersedes:** KBL-B §4-5 review task (shipped)
+**Two deliverables — execute in any order (you asked for a parallel task):**
 
 ---
 
-## Task: Review PR #3 — TCC-Safe Install Fix
+## Deliverable 1 — Review PR #3 — TCC-Safe Install Fix
 
 **PR:** https://github.com/vallen300-bit/baker-master/pull/3
 **Branch:** `kbl-a-tcc-fix`
@@ -72,4 +72,53 @@ Match the format of `B2_pr1_review_20260417.md`.
 
 ---
 
-*Dispatched 2026-04-18 by AI Head.*
+## Deliverable 2 — Review B3's KBL-B §6 Prompt Drafts
+
+**Files to review:**
+- `briefs/_drafts/KBL_B_STEP1_TRIAGE_PROMPT.md` (commit `cd8abab` — B3 authored, AI Head corrected Qwen re-scoping)
+- `briefs/_drafts/KBL_B_STEP3_EXTRACT_PROMPT.md` (commit `242a4d3` — B3 authored)
+
+**Why you:** B3 authored, AI Head touched Step 1. Reviewer-separation discipline — neither of them reviews their own work.
+
+### Scope
+
+**IN**
+- Step 1 triage prompt: schema compliance with §4.2 (reads/writes/invariants), slug-registry dynamic sourcing correctness, vedana rule verbatim preservation from v3, Qwen re-scoping correctly applied (no accuracy-rescue framing), disambiguation block completeness
+- Step 3 extract prompt: schema compliance with §4.4 (6 keys always present, arrays always), few-shot coverage across sources, self-reference skip rule, machine-usable normalization of money/dates/references
+- Open questions in each file's §6 — any you want to close or elevate
+
+**OUT**
+- Running evals (B3 explicitly stood down from eval loop post-D1 ratification)
+- Opus/Sonnet prompts (AI Head writing, not yet drafted)
+- Step 0 Layer 0 rules (B3 drafting separately)
+
+### Scrutiny points
+
+1. **Step 1 §3 failure table** — AI Head corrected low-confidence → inbox routing + Gemma-unreachable → Qwen cold-swap. Verify the threshold (0.5) is reasonable given v3 data. Qwen-swap retry cap of 3 tries before cold-swap — appropriate?
+2. **Step 1 §2.4 related_matters dedupe** — Python post-processor strips `primary_matter` from `related_matters`. Should this dedupe happen at prompt-level too (asking the model not to include it), or is post-processing sufficient?
+3. **Step 3 few-shot examples** — are the 3 shots empirically grounded or generic? B3's rationale says they span edge cases — verify each shot's edge case is real and not contrived.
+4. **Step 3 §4.4 invariant alignment** — "all 6 keys present, values arrays" — does the prompt actually enforce this, or rely on Python validation? If prompt-enforcement is weak, flag.
+5. **Token budget consistency** — Step 1 `num_predict=512`, Step 3 `num_predict=1024`. Both at Gemma 8B on Mac Mini. Are these realistic given real-world signal lengths (especially transcripts which can be 10K+ tokens)?
+
+### Output
+
+File: `briefs/_reports/B2_kbl_b_step1_step3_prompts_review_20260418.md`
+
+Same format as your other reviews (verdict + blockers + should-fix + nice-to-have + confirmations on AI Head's fixes).
+
+### Time budget
+
+~20-30 min for Deliverable 2 (prompts are tight, narrow scope).
+
+---
+
+## Dispatch-back pattern
+
+One chat message per deliverable OR combined — your call.
+
+> B2 Deliverable 1 (PR #3) done — see `<report>`, commit `<SHA>`. Verdict: <...>.
+> B2 Deliverable 2 (§6 prompts) done — see `<report>`, commit `<SHA>`. Verdict: <...>.
+
+---
+
+*Dispatched 2026-04-18 by AI Head. Two deliverables per B2 capacity request; order is B2's choice.*
