@@ -2,86 +2,65 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (terminal instance)
-**Previous:** PR #12 STATUS-CHECK-EXPAND-1 shipped at `0d78c0b`. Pending B2 review (Task G queued).
-**Task posted:** 2026-04-18 (late afternoon)
-**Status:** OPEN — PR #8 S2 fix while PR #12 awaits B2
+**Previous:** PR8-S2-FIX shipped at `067e29c`. B2 review delta pending. Director ratified path (b) on PR #12 S1.
+**Task posted:** 2026-04-18 (late evening)
+**Status:** OPEN — tiny rename amend on existing PR #8 branch
 
 ---
 
-## Task: PR8-S2-FIX — Fix state-leak on triage parse failure
+## Task: PR8-S1-RENAME — `awaiting_inbox_route` → `routed_inbox` canonical
 
-**Source:** B2's PR #8 review @ `85a759f` — `briefs/_reports/B2_pr8_review_20260418.md` §3 S2.
+**Source:** B2's PR #12 review @ `1feebf7` (S1) + Director ratification of option (b).
 
 ### Why
 
-On Gemma parse failure, PR #8 writes the cost-ledger row (success=False) + re-raises `TriageParseError`. But the signal's `status` stays at `'triage_running'` — never rolled back. Signal is stuck indefinitely unless the caller (pipeline_tick, not yet shipped) explicitly catches and updates. Three peer step impls handle this differently:
-- PR #10 Step 2: on failure, writes `status='resolve_failed'` BEFORE re-raise (terminal, operator-visible)
-- PR #11 Step 3: retry-budget + stub + advance to `awaiting_classify` (pipeline flows)
-- PR #8 Step 1: no status write on failure → **leak**
+Your PR8-S2-FIX advances low-score triage signals to `'awaiting_inbox_route'`, but the KBL-B brief §4.2 canonical terminal state is `'routed_inbox'`. PR #12 (now MERGED at `68db3568`) includes `routed_inbox` in the CHECK set but NOT `awaiting_inbox_route`. Your choice was a silent spec drift from the brief.
 
-Brief §7 row 3 says: *"Triage | Gemma JSON unparseable | TriageParseError | WARN | R3 retry (pared prompt); 2 failures → inbox | Y after R3"*. PR #8 implements zero of the retry/inbox-route logic.
+Director ratified option (b): rename PR #8's writes to `'routed_inbox'` instead of adding a 35th CHECK value. Bundles cleanly with B2's pending S2 delta review — single B1 commit closes both S1 (rename) + S2 (already fixed in your PR8-S2-FIX).
 
-### Scope — implement option (b) from B2's review
+### Scope
 
-**Match PR #11's pattern exactly.** Internal retry budget + stub + advance to inbox.
+**IN**
 
-1. **`kbl/steps/step1_triage.py`** — rework `triage()`:
-   - Add `_RETRY_BUDGET = 1` (1 retry after initial → 2 total calls max, mirrors PR #11's `R3` policy).
-   - On first `TriageParseError`: log WARN, write cost-ledger row (`success=False`), retry with a **pared prompt** (remove the feedback ledger block — B3's STEP1-TRIAGE-PROMPT §7 suggests this as the R3 strategy; keep hot.md + slug glossary + signal).
-   - On second `TriageParseError`: log ERROR, write second cost-ledger row (`success=False`), write stub `TriageResult(primary_matter=None, related_matters=[], vedana=None, triage_score=0, triage_confidence=0.0, triage_summary="parse_failed")`, advance status to `'awaiting_inbox_route'` + set triage columns to the stub values. Pipeline keeps flowing. No raise.
-   - On success (either call): existing path unchanged.
-   - Keep `OllamaUnavailableError` re-raise behavior as-is (transient transport failure, caller decides retry-claim).
+1. **`kbl/steps/step1_triage.py`** — rename every occurrence of `'awaiting_inbox_route'` (string literal + any constant like `_STATE_INBOX_ROUTE` if you defined one) → `'routed_inbox'`. Semantic note: `routed_inbox` is **terminal** (not `awaiting_*`), so clarify the docstring / comments around the state transition to reflect "signal reaches terminal inbox state" rather than "signal awaits inbox routing."
 
-2. **Pared prompt helper** — add `_build_pared_prompt(signal_text, slug_glossary, hot_md_block) -> str` that omits the `{feedback_ledger_block}` placeholder substitution (substitute empty string or a fallback marker like `[LEDGER OMITTED — R3 retry]`).
+2. **Tests** — `tests/test_step1_triage.py` — update every assertion that expects `'awaiting_inbox_route'` → `'routed_inbox'`. This should include the new tests you added in PR8-S2-FIX (`test_triage_parse_error_retries_exhausted_writes_stub` + low-score routing tests).
 
-3. **Tests** — `tests/test_step1_triage.py`:
-   - Update `test_triage_parse_error_writes_failure_ledger_row_and_raises` → split into two tests:
-     - `test_triage_parse_error_first_attempt_triggers_retry` — first call unparseable, second valid → single status update at end, final result written, ONE cost row success=True, no raise
-     - `test_triage_parse_error_retries_exhausted_writes_stub` — both calls unparseable → stub written, status = `'awaiting_inbox_route'`, TWO cost rows both success=False, NO raise
-   - `test_pared_prompt_omits_ledger` — verify `_build_pared_prompt` output does not contain the `{feedback_ledger_block}` content
-   - Update any existing assertions that expect a raise on single-parse-failure
+3. **Any docstrings / comments referencing "awaiting inbox route"** — update wording to reflect terminal-state semantic.
 
-4. **Brief alignment note** — the statement in PR #8's current docstring *"Caller writes a stub + routes to inbox per §3"* should be removed or updated. Step 1 now owns the stub-and-route behavior internally, matching PR #11's self-contained pattern.
+4. **No migration changes.** PR #12 is merged; `routed_inbox` is already in the CHECK set.
 
 ### CHANDA pre-push
 
-- **Q1 Loop Test:** this PR touches **Leg 3** (Step 1 reads hot.md + feedback ledger on every run). Rework preserves this: both initial and retry calls invoke `build_prompt` or `_build_pared_prompt`, both READ hot.md AND ledger. Retry pares the ledger from the prompt for model robustness but does NOT skip the read — the helper is still invoked. **Leg 3 preserved.** State this explicitly in the commit message and module docstring.
-- **Q2 Wish Test:** serves wish (pipeline keeps flowing on parse failure, no silent stalls; Director still judges stub-routed inbox entries). Wish-aligned, not convenience.
-
-### Dependencies
-
-- PR #12 STATUS-CHECK-EXPAND-1 must merge before PR #8 can merge (adds `'awaiting_inbox_route'` + `'triage_running'` to the CHECK set — your new status write depends on it). No code dependency on PR #12; just a deploy-order constraint.
-- Re-use existing `_write_cost_ledger` / `_mark_running` / write helpers; no new schema.
+- **Q1 Loop Test:** rename + semantic clarification; no Leg touched. Pass.
+- **Q2 Wish Test:** aligns implementation with brief §4.2 (ratified wish). Pass.
 
 ### Branch + PR
 
-- **Branch:** `step1-triage-impl` (amend existing PR #8, do NOT open a new PR).
-- **Push as additional commit** on top of `4918b52`. Keeps reviewer cycle tight.
-- **PR #8 head will advance to `<new_SHA>`** — B2 will re-review the S2 delta as a fast APPROVE once PR #12 lands.
+- **Branch:** `step1-triage-impl` (same PR #8 branch).
+- **Amend as an additional commit** on top of `067e29c`. Do NOT open a new PR.
+- **PR #8 head advances to `<new_SHA>`** — B2 will re-review S1 rename + S2 fix together as single APPROVE cycle.
 
 ### Reviewer
 
-B2 (delta review on S2 fix only).
+B2 — combined delta re-review covering both S1 (rename) + S2 (state-leak fix).
 
 ### Timeline
 
-~45-60 min (two code paths + pared-prompt helper + 3 new tests + test split).
+~10-15 min (mechanical rename + test-assertion updates + commit).
 
 ### Dispatch back
 
-> B1 PR8-S2-FIX shipped — PR #8 head advanced to `<SHA>`, `_RETRY_BUDGET=1` + stub/inbox route matches PR #11 pattern, 3 new tests green, total `<N>`/`<N>` passing. Ready for B2 S2 delta re-review.
+> B1 PR8-S1-RENAME shipped — PR #8 head advanced to `<SHA>`, `awaiting_inbox_route` → `routed_inbox` across code + tests + docstrings, `<N>`/`<N>` tests green. Ready for B2 combined S1+S2 delta re-review.
 
 ---
 
-## After this task
+## After this task (for context)
 
-1. B2 reviews PR #12 (Task G in CODE_2_PENDING) → on APPROVE, I auto-merge PR #12.
-2. PR #7 auto-merges (already APPROVE'd, just waiting on #12).
-3. B2 re-reviews PR #8 S2 delta → on APPROVE, I auto-merge PR #8.
-4. PR #10 auto-merges (S1 resolved by #12 merge; 4 nice-to-haves tracked for follow-up).
-5. PR #11 auto-merges (S1 resolved by #12 merge; 5 nice-to-haves tracked).
-6. Your next dispatch: **STEP4-CLASSIFY-IMPL** (deterministic classifier, ~30 min) OR **OLLAMA-CLIENT-REFACTOR-1** (lift shared helper per B2's PR #11 N1).
+1. B2 re-reviews PR #8 combined S1+S2 delta → APPROVE → I auto-merge PR #8.
+2. PR #7 (LAYER0), PR #10 (STEP2-RESOLVE), PR #11 (STEP3-EXTRACT) — I verify each against new main (post PR #12 merge), auto-merge on clean CI. You are not needed for these.
+3. Your next dispatch: **STEP4-CLASSIFY-IMPL** (deterministic classifier, ~30 min) OR **OLLAMA-CLIENT-REFACTOR-1** (lift `call_ollama` into shared `kbl/ollama.py` — PR #11 N1).
 
 ---
 
-*Posted 2026-04-18 (late afternoon) by AI Head. S2 is the only PR-intrinsic bug across the 4 pipeline PRs — worth fixing cleanly now.*
+*Posted 2026-04-18 (late evening) by AI Head. PR #12 merged at `68db3568`. Tiny fold.*
