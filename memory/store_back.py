@@ -183,6 +183,18 @@ class SentinelStoreBack:
         # CORTEX-PHASE-2B: Qdrant dedup collection
         self._ensure_cortex_obligations_collection()
 
+        # KBL-A: infrastructure schema (§5 of KBL-A brief).
+        # Order is load-bearing: signal_queue must exist (and have KBL-A columns)
+        # BEFORE kbl_cost_ledger / kbl_log because their inline FKs reference
+        # signal_queue(id). See briefs/_drafts/KBL_A_SCHEMA.sql header.
+        self._ensure_signal_queue_base()
+        self._ensure_signal_queue_additions()
+        self._ensure_kbl_runtime_state()
+        self._ensure_kbl_cost_ledger()
+        self._ensure_kbl_log()
+        self._ensure_kbl_alert_dedupe()
+        self._ensure_gold_promote_queue()
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -6304,6 +6316,323 @@ class SentinelStoreBack:
                 pass
             logger.error(f"update_browser_action failed: {e}")
             return False
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # KBL-A infrastructure (schema — §5 of KBL-A brief)
+    # -------------------------------------------------------
+
+    def _ensure_signal_queue_base(self):
+        """KBL-19 base table (Cortex 3T bridge between Tier 1 and Tier 2).
+
+        Creates signal_queue from the KBL-19 spec if it doesn't already exist.
+        Idempotent via CREATE TABLE IF NOT EXISTS. KBL-A additions in
+        _ensure_signal_queue_additions layer on top. id stays SERIAL (INTEGER)
+        per KBL-A §5 FK reconciliation decision.
+        """
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS signal_queue (
+                    id                SERIAL PRIMARY KEY,
+                    created_at        TIMESTAMPTZ DEFAULT NOW(),
+                    source            TEXT,
+                    signal_type       TEXT,
+                    matter            TEXT,
+                    summary           TEXT,
+                    triage_score      INT,
+                    vedana            TEXT,
+                    hot_md_match      BOOLEAN,
+                    payload           JSONB,
+                    priority          TEXT DEFAULT 'normal',
+                    status            TEXT DEFAULT 'pending',
+                    stage             TEXT,
+                    enriched_summary  TEXT,
+                    result            TEXT,
+                    wiki_page_path    TEXT,
+                    card_id           TEXT,
+                    ayoniso_alert     BOOLEAN DEFAULT FALSE,
+                    ayoniso_type      TEXT,
+                    processed_at      TIMESTAMPTZ,
+                    ttl_expires_at    TIMESTAMPTZ
+                )
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("signal_queue base table verified (KBL-19)")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure signal_queue base table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_signal_queue_additions(self):
+        """KBL-A §5: additive columns + expanded CHECK + 3 indexes on signal_queue.
+
+        MUST run before _ensure_kbl_cost_ledger / _ensure_kbl_log because
+        their inline FKs reference signal_queue(id).
+        """
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            # Columns (additive, idempotent)
+            cur.execute("ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS primary_matter TEXT")
+            cur.execute(
+                "ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS related_matters JSONB "
+                "NOT NULL DEFAULT '[]'::jsonb"
+            )
+            cur.execute(
+                "ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS triage_confidence NUMERIC(3,2)"
+            )
+            # R1.B1: started_at for claim-time latency metrics
+            cur.execute("ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ")
+
+            # triage_confidence range CHECK
+            cur.execute(
+                "ALTER TABLE signal_queue DROP CONSTRAINT IF EXISTS signal_queue_triage_confidence_range"
+            )
+            cur.execute("""
+                ALTER TABLE signal_queue ADD CONSTRAINT signal_queue_triage_confidence_range
+                CHECK (triage_confidence IS NULL OR (triage_confidence >= 0 AND triage_confidence <= 1))
+            """)
+
+            # Expanded status CHECK: classified-deferred (R1.11), failed-reviewed (DLQ), cost-deferred (D14)
+            cur.execute("ALTER TABLE signal_queue DROP CONSTRAINT IF EXISTS signal_queue_status_check")
+            cur.execute("""
+                ALTER TABLE signal_queue ADD CONSTRAINT signal_queue_status_check
+                CHECK (status IN (
+                    'pending','processing','done','failed','expired',
+                    'classified-deferred','failed-reviewed','cost-deferred'
+                ))
+            """)
+
+            # Indexes
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_signal_queue_primary_matter
+                    ON signal_queue (primary_matter)
+                    WHERE primary_matter IS NOT NULL
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_signal_queue_related_matters_gin
+                    ON signal_queue USING gin (related_matters)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_signal_queue_status_priority
+                    ON signal_queue (status, priority, created_at)
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("signal_queue KBL-A additions applied (4 columns, 2 CHECKs, 3 indexes)")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure signal_queue KBL-A additions: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_kbl_runtime_state(self):
+        """KBL-A §5 / D8: key-value runtime flags. Seeded with 6 boot defaults."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS kbl_runtime_state (
+                    key         TEXT PRIMARY KEY,
+                    value       TEXT NOT NULL,
+                    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_by  TEXT
+                )
+            """)
+            # Seed canonical keys; ON CONFLICT preserves live values across re-runs.
+            cur.execute("""
+                INSERT INTO kbl_runtime_state (key, value, updated_by) VALUES
+                    ('anthropic_circuit_open', 'false', 'kbl_a_bootstrap'),
+                    ('anthropic_5xx_counter',  '0',     'kbl_a_bootstrap'),
+                    ('qwen_active',            'false', 'kbl_a_bootstrap'),
+                    ('qwen_active_since',      '',      'kbl_a_bootstrap'),
+                    ('qwen_swap_count_today',  '0',     'kbl_a_bootstrap'),
+                    ('mac_mini_heartbeat',     '',      'kbl_a_bootstrap')
+                ON CONFLICT (key) DO NOTHING
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("kbl_runtime_state table verified (6 seed keys)")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure kbl_runtime_state table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_kbl_cost_ledger(self):
+        """KBL-A §5 / D14: per-call cost tracking. FK to signal_queue with
+        ON DELETE SET NULL so cost rows survive the 30-day signal purge."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS kbl_cost_ledger (
+                    id             BIGSERIAL PRIMARY KEY,
+                    ts             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    signal_id      INTEGER REFERENCES signal_queue(id) ON DELETE SET NULL,
+                    step           TEXT NOT NULL,
+                    model          TEXT,
+                    input_tokens   INT,
+                    output_tokens  INT,
+                    latency_ms     INT,
+                    cost_usd       NUMERIC(10,6) NOT NULL DEFAULT 0,
+                    success        BOOLEAN NOT NULL DEFAULT TRUE,
+                    metadata       JSONB
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_cost_ledger_day
+                    ON kbl_cost_ledger ((ts::date))
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_cost_ledger_signal
+                    ON kbl_cost_ledger (signal_id, ts) WHERE signal_id IS NOT NULL
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_cost_ledger_step_day
+                    ON kbl_cost_ledger (step, (ts::date))
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("kbl_cost_ledger table verified (FK signal_id → signal_queue)")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure kbl_cost_ledger table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_kbl_log(self):
+        """KBL-A §5 / D15: WARN+ central log. R1.S2/S12: INFO dropped from
+        CHECK (INFO routed to local rotating files only). FK to signal_queue
+        with ON DELETE SET NULL."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS kbl_log (
+                    id         BIGSERIAL PRIMARY KEY,
+                    ts         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    level      TEXT NOT NULL
+                               CHECK (level IN ('WARN','ERROR','CRITICAL')),
+                    component  TEXT NOT NULL,
+                    signal_id  INTEGER REFERENCES signal_queue(id) ON DELETE SET NULL,
+                    message    TEXT NOT NULL,
+                    metadata   JSONB
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kbl_log_day_level
+                    ON kbl_log ((ts::date), level)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_kbl_log_component
+                    ON kbl_log (component, ts)
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("kbl_log table verified (WARN+ only; FK signal_id → signal_queue)")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure kbl_log table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_kbl_alert_dedupe(self):
+        """KBL-A §5: 5-min bucket dedupe for CRITICAL alerts (D15) and
+        cost threshold alerts (D14 — 80/95/100%% day-scoped).
+        Purged nightly via scripts/kbl-purge-dedupe.sh on Mac Mini."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS kbl_alert_dedupe (
+                    alert_key   TEXT PRIMARY KEY,
+                    first_seen  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    last_sent   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    send_count  INTEGER NOT NULL DEFAULT 1
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_alert_dedupe_last_sent
+                    ON kbl_alert_dedupe (last_sent)
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("kbl_alert_dedupe table verified")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure kbl_alert_dedupe table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_gold_promote_queue(self):
+        """KBL-A §5 / D2: Director /gold WhatsApp promotion queue.
+        WAHA inserts, Mac Mini cron drains via FOR UPDATE SKIP LOCKED."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS gold_promote_queue (
+                    id            SERIAL PRIMARY KEY,
+                    path          TEXT NOT NULL,
+                    requested_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    wa_msg_id     TEXT,
+                    processed_at  TIMESTAMPTZ,
+                    result        TEXT,
+                    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_gold_queue_pending
+                    ON gold_promote_queue (requested_at)
+                    WHERE processed_at IS NULL
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("gold_promote_queue table verified")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure gold_promote_queue table: {e}")
         finally:
             self._put_conn(conn)
 
