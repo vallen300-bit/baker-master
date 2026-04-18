@@ -2,123 +2,71 @@
 
 **From:** AI Head
 **To:** Code Brisen #2 (app instance)
-**Previous:** KBL-B §4-5 review shipped (`0743def`), 3 blockers applied by AI Head inline (`1448479`)
+**Previous:** PR #3 APPROVE + §6 prompts READY shipped (both reviews, AI Head applied S1+S2 inline at `5bac5c5`)
 **Task posted:** 2026-04-18
 **Status:** OPEN — awaiting execution
-**Two deliverables — execute in any order (you asked for a parallel task):**
+**Supersedes:** both prior-turn deliverables (shipped)
 
 ---
 
-## Deliverable 1 — Review PR #3 — TCC-Safe Install Fix
+## Task: Review B3's Step 0 Layer 0 Rules Draft
 
-**PR:** https://github.com/vallen300-bit/baker-master/pull/3
-**Branch:** `kbl-a-tcc-fix`
-**Head commit:** `04b494b`
-**Report:** `briefs/_reports/B1_tcc_fix_dburl_20260418.md` (commit `c86aed0` on main)
+**File to review:** `briefs/_drafts/KBL_B_STEP0_LAYER0_RULES.md` (commit `6341b94`, 527 lines)
+**Author:** B3 (empirical lead, 50-signal eval corpus experience)
+**Reviewer-separation:** B3 authored, AI Head didn't touch, you didn't touch — clean.
 
-B1 shipped both deliverables from CODE_1_PENDING. TCC fix is in PR #3 awaiting merge. DATABASE_URL 1P item is live (separate, no PR needed).
+### Scope
 
-### Scope of this review
+**IN**
+- Per-source rule coverage (email, WhatsApp, meeting transcript, scan query)
+- Rule ordering + first-match semantics
+- Rules-as-data YAML architecture (B3's proposal to lift rules into `kbl/config/layer0_rules.yml`)
+- Configurability boundaries (hardcoded vs env-var tunable)
+- Empirical basis — does each rule cite specific eval-set signals? Are citations sound?
+- Integration with §4.1 I/O contract (writes `state='done'` or `'dropped_layer0'`, log on drop only, zero LLM cost)
+- False-positive risk analysis — are legitimate signals at risk of accidental drop?
 
-**IN — PR #3:**
-- Templated plists with `__REPO__` placeholder + install-time sed substitution
-- Post-sed `grep __REPO__` guard (fails install if placeholder didn't get replaced)
-- `/usr/local/bin/kbl-*.sh` symlinks dropped entirely (plist-as-source-of-truth per B2's earlier N2 implicit preference)
-- TCC refuse-guard on `~/Desktop/`, `~/Documents/`, `~/Downloads/`
-- Default `KBL_REPO` → `~/baker-code`
-- KBL-A brief §6 TCC note + updated acceptance criteria
-
-**OUT:**
-- DATABASE_URL 1P item (created via `op item create`, no code change, no PR)
-- Mac Mini live state (B1 verified byte-identical re-run)
+**OUT**
+- Running any eval (B3 stood down from eval loop)
+- Rule implementation code (this is rule *spec* review, Python impl lands in KBL-B)
+- Proposing new rules not in B3's draft (if you see gaps, flag — don't author)
+- Second-guessing D3 §247 "10-30% drop rate" ratification
 
 ### Specific scrutiny
 
-Apply your usual reviewer discipline. On top of that:
-
-1. **`__REPO__` substitution safety.** sed replacing a placeholder in a plist — is the sed robust against edge cases (repo path contains spaces? special chars? trailing slash?)? Would an adversarial `KBL_REPO=/path'/with"quote` break parsing?
-2. **Refuse-guard coverage.** B1 blocklisted `~/Desktop/`, `~/Documents/`, `~/Downloads/`. Are there other TCC-protected paths on macOS 15 worth blocklisting (e.g., `~/Pictures/`, iCloud Drive `~/Library/Mobile Documents/`)? Or is conservative blocklist acceptable with `__REPO__` guard as backstop?
-3. **Non-regression vs live Mac Mini.** B1 claims re-running installer produces byte-identical ProgramArguments to the manual bandage. Verify the claim by pulling the branch and comparing output of a dry-run to the current `~/Library/LaunchAgents/*.plist` on Mac Mini (via `ssh macmini`).
-4. **Backward compat on clones that were installed pre-this-fix.** Mac Mini has the bandaged plists already. If Director re-runs the new installer, does it clean the stale `/usr/local/bin/kbl-*.sh` symlinks (would need sudo) OR does it leave them dangling (harmless but messy)?
-5. **Brief §6 note.** Check that the TCC explanation in the brief is self-contained — a fresh reader in 6 months understands why plist-as-source-of-truth without needing git-blame archaeology.
+1. **Rules-as-data YAML choice** — B3 proposes `kbl/config/layer0_rules.yml`. Is this the right shape vs hardcoded Python constants vs baker-vault config? What's the Director edit path?
+2. **Email self-analysis dedupe** — v1 eval had 7 duplicates of Baker's own Ofenheimer-email analysis. What's the signature pattern? Is the rule specific enough to catch them without false-positive on legitimate Baker outputs (e.g., if Baker later emails itself a genuine note)?
+3. **WhatsApp automated-number detection** — US-throwaway ranges, verification codes. Is the pattern match too narrow (only matches specific ranges) or too broad (could drop legitimate international contacts)?
+4. **Meeting transcript minimum threshold** — B3 spec'd a minimum content check. What's the threshold value? Does it account for signals that are legitimately short (tight decision meeting transcripts)?
+5. **Scan-query pass-through** — "Director's own queries NEVER drop." How is a "Director scan query" identified? (source=scan should be enough, but verify.)
+6. **Ordering dependencies** — B3 listed some ordering constraints. Are there others? E.g., does Baker-self-analysis dedupe need to run BEFORE the "short content" check because self-analyses are often terse?
+7. **Idempotency** — rules are deterministic, same signal produces same outcome every time. Confirm no hidden state.
 
 ### Output format
 
-File: `briefs/_reports/B2_pr3_review_20260418.md`
+File: `briefs/_reports/B2_step0_layer0_rules_review_20260418.md`
 
-Sections:
-1. **Verdict:** APPROVE / REQUEST CHANGES / REJECT
-2. **Blockers**
-3. **Should-fix**
-4. **Nice-to-have**
-5. **Non-regression check result** (actual diff output from your Mac Mini pull + compare)
-
-Match the format of `B2_pr1_review_20260417.md`.
+Same pattern as your prior reviews:
+1. **Verdict:** READY / REDIRECT / BLOCK
+2. **Blockers** / **Should-fix** / **Nice-to-have** / **Gaps flagged** (rules that should exist but don't)
+3. **Architectural notes** on the rules-as-data YAML choice
 
 ### Time budget
 
-~30 min. PR is small (targeted fix + tests, ~100-200 line diff estimated).
+~30-45 min. 527 lines of rule spec is substantial but tight — skim once, then scrutinize the sections where B3 makes concrete claims about drop rates or false-positive risks.
 
 ### Dispatch back
 
-> B2 PR #3 review done — see `briefs/_reports/B2_pr3_review_20260418.md`, commit `<SHA>`. Verdict: <APPROVE | REQUEST CHANGES | REJECT>.
+> B2 Step 0 Layer 0 review done — see `briefs/_reports/B2_step0_layer0_rules_review_20260418.md`, commit `<SHA>`. Verdict: <...>.
 
 ---
 
 ## Scope guardrails
 
-- Merge decision is Director's — you report verdict, don't auto-merge.
-- Don't re-open KBL-A ratified architecture. Scope is THIS PR's 4 deliverables.
+- Don't propose Python implementation — you're reviewing the rule spec, not building the filter
+- Don't re-open D3 §247 (10-30% drop rate ratified)
+- If you flag a gap (rule that should exist), state why in operational terms — don't over-engineer
 
 ---
 
-## Deliverable 2 — Review B3's KBL-B §6 Prompt Drafts
-
-**Files to review:**
-- `briefs/_drafts/KBL_B_STEP1_TRIAGE_PROMPT.md` (commit `cd8abab` — B3 authored, AI Head corrected Qwen re-scoping)
-- `briefs/_drafts/KBL_B_STEP3_EXTRACT_PROMPT.md` (commit `242a4d3` — B3 authored)
-
-**Why you:** B3 authored, AI Head touched Step 1. Reviewer-separation discipline — neither of them reviews their own work.
-
-### Scope
-
-**IN**
-- Step 1 triage prompt: schema compliance with §4.2 (reads/writes/invariants), slug-registry dynamic sourcing correctness, vedana rule verbatim preservation from v3, Qwen re-scoping correctly applied (no accuracy-rescue framing), disambiguation block completeness
-- Step 3 extract prompt: schema compliance with §4.4 (6 keys always present, arrays always), few-shot coverage across sources, self-reference skip rule, machine-usable normalization of money/dates/references
-- Open questions in each file's §6 — any you want to close or elevate
-
-**OUT**
-- Running evals (B3 explicitly stood down from eval loop post-D1 ratification)
-- Opus/Sonnet prompts (AI Head writing, not yet drafted)
-- Step 0 Layer 0 rules (B3 drafting separately)
-
-### Scrutiny points
-
-1. **Step 1 §3 failure table** — AI Head corrected low-confidence → inbox routing + Gemma-unreachable → Qwen cold-swap. Verify the threshold (0.5) is reasonable given v3 data. Qwen-swap retry cap of 3 tries before cold-swap — appropriate?
-2. **Step 1 §2.4 related_matters dedupe** — Python post-processor strips `primary_matter` from `related_matters`. Should this dedupe happen at prompt-level too (asking the model not to include it), or is post-processing sufficient?
-3. **Step 3 few-shot examples** — are the 3 shots empirically grounded or generic? B3's rationale says they span edge cases — verify each shot's edge case is real and not contrived.
-4. **Step 3 §4.4 invariant alignment** — "all 6 keys present, values arrays" — does the prompt actually enforce this, or rely on Python validation? If prompt-enforcement is weak, flag.
-5. **Token budget consistency** — Step 1 `num_predict=512`, Step 3 `num_predict=1024`. Both at Gemma 8B on Mac Mini. Are these realistic given real-world signal lengths (especially transcripts which can be 10K+ tokens)?
-
-### Output
-
-File: `briefs/_reports/B2_kbl_b_step1_step3_prompts_review_20260418.md`
-
-Same format as your other reviews (verdict + blockers + should-fix + nice-to-have + confirmations on AI Head's fixes).
-
-### Time budget
-
-~20-30 min for Deliverable 2 (prompts are tight, narrow scope).
-
----
-
-## Dispatch-back pattern
-
-One chat message per deliverable OR combined — your call.
-
-> B2 Deliverable 1 (PR #3) done — see `<report>`, commit `<SHA>`. Verdict: <...>.
-> B2 Deliverable 2 (§6 prompts) done — see `<report>`, commit `<SHA>`. Verdict: <...>.
-
----
-
-*Dispatched 2026-04-18 by AI Head. Two deliverables per B2 capacity request; order is B2's choice.*
+*Dispatched 2026-04-18 by AI Head.*
