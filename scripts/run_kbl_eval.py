@@ -36,6 +36,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from kbl import slug_registry  # noqa: E402
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 logger = logging.getLogger("run_kbl_eval")
 
@@ -50,65 +54,64 @@ D1_OPTIONS = {
     "num_predict": 512,
 }
 
-# KBL Step-1 prompt — v3.
-# v2 root-cause: list-expansion lifted vedana (+16pp) but matter stuck at 34%.
-# Dominant error was hagenauer-rg7 → brisen-lp (13/33 Gemma misses) — model
-# sees slug names without knowing what each MEANS, anchors on word "Brisen" in
-# email headers. v3 adds a semantic glossary so each slug has content.
-# Slug set is baker-vault (SLUGS-1) canonical 19; descriptions are exact
-# baker-vault text for 10 real entries + B3 best-guesses for the 9
-# "(Director to annotate)" placeholders, documented in the v3 retry report
-# for Director post-hoc ratification.
-STEP1_PROMPT = """You are a triage agent for a 28-matter business operation (real estate, hospitality, legal disputes, investment). Classify this signal. Output ONLY valid JSON, no commentary.
-
-Signal: "{signal}"
-
-Respond with exactly this JSON:
-{{
-  "matter": "<slug from allowed list below, or the literal string null if no matter applies>",
-  "vedana": "opportunity | threat | routine",
-  "triage_score": 0-100,
-  "summary": "one line"
-}}
-
-Matter slugs (pick ONE slug whose description best matches the signal, or null if none apply):
-
-  hagenauer-rg7         — RG7 final-account dispute, Baden bei Wien (insolvency Mar 2026)
-  cupial                — Cupial handover dispute — Tops 4,5,6,18 (buyer payment + defects)
-  mo-vie                — Mandarin Oriental Vienna — asset management
-  ao                    — Andrey Oskolkov — principal investor (Aelio Holding Ltd)
-  brisen-lp             — Brisen LP — EPI Bond investor vehicle (fund/LP matters only)
-  wertheimer            — Wertheimer SFO — Chanel family-office LP opportunity
-  mrci                  — MRCI — Oskolkov-linked vehicle, Lilienmatt restructuring context
-  lilienmat             — Lilienmatt — Baden-Baden co-ownership, KPMG tax restructuring
-  aukera                — Aukera — term-sheet / deal-structuring work related to MO Vienna
-  kitzbuhel-six-senses  — Kitzbühel Six Senses — hotel development, Steininger-family dispute
-  kitz-kempinski        — Kempinski Kitzbühel — acquisition opportunity, UBM counterparty
-  steininger            — Steininger family — counterparty in Kitzbühel Six Senses dispute
-  franck-muller         — Franck Muller Group / LCG — counterparty in Hagenauer-adjacent legal matter
-  balducci              — Balducci — counterparty / relationship (unspecified)
-  constantinos          — Constantinos — counterparty / relationship (unspecified)
-  edita-russo           — Edita Vallen personal / family matters
-  theailogy             — TheAilogy — AI playbook / personal project (theailogy.ai / .com)
-  baker-internal        — Baker system / internal operations
-  personal              — Director personal matters
-  null                  — no matter applies (automated noise, newsletters, FYI with no business link)
-
-Disambiguation notes (IMPORTANT — common errors):
-- A brisengroup.com email header or "Brisen" in a sender name does NOT imply brisen-lp.
-  brisen-lp is ONLY for fund/LP vehicle matters. A Hagenauer-project email from a
-  brisengroup.com address is hagenauer-rg7, not brisen-lp.
-- hagenauer-rg7 vs cupial: both relate to the RG7 project, but cupial is specifically
-  the buyer-side dispute over Tops 4,5,6,18. If the signal mentions Cupial(s), Hassa,
-  Ofenheimer in a buyer-contract context → cupial. If it's about the contractor (Heidenauer),
-  Schlussabrechnung, or general project-level → hagenauer-rg7.
-- kitzbuhel-six-senses vs steininger: both share the court case. Choose the slug that
-  the signal's main subject is about — the project development vs the family credibility.
-
-vedana classification rules (STRICT):
-- opportunity: NEW strategic gains ONLY — a new deal, investor interest, unrequested approach, favorable market shift, novel capability revealed. Defensive wins inside an ongoing threat arc (e.g., court ruling in our favor on a dispute) stay in threat, not opportunity.
-- threat: risks, problems, disputes, deadlines, unpaid invoices, regulatory issues, counterparty demands, anything requiring defensive action.
-- routine: noise — receipts, automated notifications, newsletters, FYI emails, admin correspondence with no action required."""
+# KBL Step-1 prompt — v3 content, built dynamically from the slug registry.
+#
+# v2 eval root-caused matter miss to the model seeing slug names without
+# knowing what each MEANS (hagenauer-rg7 → brisen-lp was 13/33 Gemma misses —
+# the model anchored on "Brisen" in email headers). v3 fixes this with a
+# per-slug semantic glossary, a disambiguation block for the most common
+# errors, and STRICT vedana rules. SLUGS-1 moves the slug list + descriptions
+# to baker-vault's slugs.yml so the prompt never drifts from the validator /
+# production router. Built once at process start; if registry.reload() fires
+# mid-process, call _build_step1_prompt() again.
+def _build_step1_prompt() -> str:
+    slugs_sorted = sorted(slug_registry.active_slugs())
+    width = max((len(s) for s in slugs_sorted), default=0) + 2
+    glossary_lines = [
+        f"  {s:<{width}}— {slug_registry.describe(s)}" for s in slugs_sorted
+    ]
+    glossary_lines.append(
+        f"  {'null':<{width}}— no matter applies "
+        "(automated noise, newsletters, FYI with no business link)"
+    )
+    glossary = "\n".join(glossary_lines)
+    return (
+        "You are a triage agent for a Baker business operation (real estate, "
+        "hospitality, legal disputes, investment). Classify this signal. "
+        "Output ONLY valid JSON, no commentary.\n\n"
+        'Signal: "{signal}"\n\n'
+        "Respond with exactly this JSON:\n"
+        "{{\n"
+        '  "matter": "<slug from allowed list below, or the literal string null if no matter applies>",\n'
+        '  "vedana": "opportunity | threat | routine",\n'
+        '  "triage_score": 0-100,\n'
+        '  "summary": "one line"\n'
+        "}}\n\n"
+        "Matter slugs (pick ONE slug whose description best matches the "
+        "signal, or null if none apply):\n\n"
+        f"{glossary}\n\n"
+        "Never invent new slugs. Never return generic category strings like "
+        '"hospitality", "investment", "legal" — those are invalid; return '
+        "null instead.\n\n"
+        "Disambiguation notes (IMPORTANT — common errors):\n"
+        "- A brisengroup.com email header or \"Brisen\" in a sender name does NOT imply brisen-lp.\n"
+        "  brisen-lp is ONLY for fund/LP vehicle matters. A Hagenauer-project email from a\n"
+        "  brisengroup.com address is hagenauer-rg7, not brisen-lp.\n"
+        "- hagenauer-rg7 vs cupial: both relate to the RG7 project, but cupial is specifically\n"
+        "  the buyer-side dispute over Tops 4,5,6,18. If the signal mentions Cupial(s), Hassa,\n"
+        "  Ofenheimer in a buyer-contract context → cupial. If it's about the contractor (Heidenauer),\n"
+        "  Schlussabrechnung, or general project-level → hagenauer-rg7.\n"
+        "- kitzbuhel-six-senses vs steininger: both share the court case. Choose the slug that\n"
+        "  the signal's main subject is about — the project development vs the family credibility.\n\n"
+        "vedana classification rules (STRICT):\n"
+        "- opportunity: NEW strategic gains ONLY — a new deal, investor interest, unrequested "
+        "approach, favorable market shift, novel capability revealed. Defensive wins inside an "
+        "ongoing threat arc (e.g., court ruling in our favor on a dispute) stay in threat, not opportunity.\n"
+        "- threat: risks, problems, disputes, deadlines, unpaid invoices, regulatory issues, "
+        "counterparty demands, anything requiring defensive action.\n"
+        "- routine: noise — receipts, automated notifications, newsletters, FYI emails, admin "
+        "correspondence with no action required."
+    )
 
 # Production uses opportunity/threat/routine; Director labels use Buddhist
 # vedana pleasant/unpleasant/neutral. Map both to a canonical form for comparison.
@@ -119,15 +122,6 @@ NORMALIZE_VEDANA = {
     "unpleasant":  "unpleasant",
     "routine":     "neutral",
     "neutral":     "neutral",
-}
-
-# Matter slug aliases — model returns varied forms, map them to the allowlist.
-MATTER_ALIASES = {
-    "mo-vie": ["movie", "mo vienna", "mandarin", "mo-vienna", "mandarin oriental", "mohg"],
-    "hagenauer-rg7": ["hagenauer", "rg7"],
-    "cupial": ["cupial", "cupials"],
-    "brisen-lp": ["brisen", "wertheimer"],
-    "ao": ["oskolkov", "andrey"],
 }
 
 # Triage threshold used to decide "would this have alerted Director?"
@@ -147,31 +141,6 @@ def normalize_vedana(v: str | None) -> str | None:
     if not isinstance(v, str):
         return None
     return NORMALIZE_VEDANA.get(v.lower().strip())
-
-
-def normalize_matter(m: str | None) -> str | None:
-    """Map any model-produced matter to an allowlist slug (or None).
-
-    v3 fix: string "null" / "none" / "" are treated as Python None so they
-    compare equal to labels where primary_matter_expected is null. Previously
-    a model returning "null" (valid JSON) scored as miss against a null label.
-    Costs 1-4 rows per model per v2 analysis. Follow-up: same fix belongs in
-    kbl/slug_registry.normalize() once SLUGS-1 merges to main.
-    """
-    if not isinstance(m, str) or not m.strip():
-        return None
-    low = m.lower().strip()
-    if low in ("null", "none"):
-        return None
-    # Exact canonical
-    for canon in MATTER_ALIASES:
-        if low == canon:
-            return canon
-    # Alias contains
-    for canon, aliases in MATTER_ALIASES.items():
-        if any(a in low for a in aliases):
-            return canon
-    return low  # unknown, return as-is so comparison can fail clearly
 
 
 def parse_json_response(text: str) -> tuple[dict, bool]:
@@ -269,10 +238,22 @@ def score_row(label: dict, parsed: dict, json_ok: bool) -> dict:
 
     label_vedana = normalize_vedana(label_vedana_raw)
     out_vedana = normalize_vedana(out_vedana_raw)
-    out_matter = normalize_matter(out_matter_raw)
+    out_matter = slug_registry.normalize(out_matter_raw)
+
+    # Preserve pre-registry semantic: a non-empty model string that fails to
+    # normalize (e.g. "hospitality") is "unknown" — it must NOT equal a
+    # label of None. Only empty / null-ish inputs are treated as legitimately None.
+    model_returned_non_empty = (
+        isinstance(out_matter_raw, str)
+        and out_matter_raw.strip() != ""
+        and out_matter_raw.strip().lower() not in {"none", "null"}
+    )
+    unknown_non_canonical = model_returned_non_empty and out_matter is None
 
     vedana_ok = (out_vedana is not None and out_vedana == label_vedana) if json_ok else False
-    matter_ok = (out_matter == label_pm) if json_ok else False
+    matter_ok = (
+        (out_matter == label_pm) and not unknown_non_canonical
+    ) if json_ok else False
     score_bucket_ok = False
     if json_ok and isinstance(out_score, (int, float)) and isinstance(label_pass, bool):
         model_would_alert = out_score >= TRIAGE_ALERT_THRESHOLD
@@ -364,9 +345,10 @@ def print_report(model: str, summary: dict, fails: list[str]) -> None:
 def run_model(labels: list[dict], model: str, *, use_http: bool,
               host: str, ssh_host: str) -> list[dict]:
     results: list[dict] = []
+    step1_prompt_tmpl = _build_step1_prompt()
     for i, label in enumerate(labels, start=1):
         signal = (label.get("raw_content") or label.get("signal_text") or "")[:3000]
-        prompt = STEP1_PROMPT.format(signal=signal.replace('"', "'"))
+        prompt = step1_prompt_tmpl.format(signal=signal.replace('"', "'"))
         text, elapsed = ollama_generate(
             model, prompt, use_http=use_http, host=host, ssh_host=ssh_host,
         )
@@ -473,6 +455,7 @@ def main():
             "models":   all_results,
             "acceptance_thresholds": ACCEPT,
             "triage_alert_threshold": TRIAGE_ALERT_THRESHOLD,
+            "slugs_version": slug_registry.registry_version(),
         }, f, indent=2)
     logger.info("wrote full results -> %s", out_path)
 

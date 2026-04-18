@@ -1,0 +1,14 @@
+version: 2
+matters:
+  - slug: live-one
+    status: active
+    description: "still active"
+    aliases: []
+  - slug: old-closed
+    status: retired
+    description: "project closed"
+    aliases: []
+  - slug: candidate
+    status: draft
+    description: "Director flagged mid-session"
+    aliases: []
