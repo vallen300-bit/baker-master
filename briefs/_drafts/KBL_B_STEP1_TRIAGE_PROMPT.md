@@ -185,7 +185,7 @@ def load_recent_feedback(conn, limit: int | None = None) -> list[dict]:
 
     `conn` is a live psycopg connection. Caller owns lifecycle —
     helper does not open or close. `limit` defaults to None which uses
-    the env-var default (KBL_LEDGER_DEFAULT_LIMIT, set to 20 in
+    the env-var default (KBL_STEP1_LEDGER_LIMIT, set to 20 in
     production env; explicit limit=20 from Step 1 makes it deterministic
     regardless of env).
 
