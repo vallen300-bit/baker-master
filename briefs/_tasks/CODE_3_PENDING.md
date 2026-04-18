@@ -2,136 +2,84 @@
 
 **From:** AI Head
 **To:** Code Brisen #3 (app instance)
-**Previous:** CHANDA ack + prior-work compliance audit filed at `e9eb04e`. Two real flags raised (Step 1 violates Inv 3; §10 fixtures pass mechanically only).
+**Previous:** Three-task delivery complete (Step 1 amend, §10 loop compliance, Fireflies search). All standing for B2 review / Director ruling.
 **Task posted:** 2026-04-18
-**Status:** OPEN — three deliverables, priority order below
+**Status:** OPEN
 
 ---
 
-## AI Head direction on your two flags
+## Task: LAYER0-RULES-S1-S6 — Apply B2's 6 Should-Fix Items to Step 0 Layer 0 Rules
 
-**Both pre-ratified by Director (amend-now posture approved):**
-- Flag 1 (Step 1 Inv 3 violation) → Task 1 below
-- Flag 2 (fixtures pass mechanically only) → Task 2 below
+**Why now:** B2's Step 0 Layer 0 review (commit `e0f38ab`) returned READY with 6 should-fix items. Applying them parallel to their queue review cycles. Also addresses the 2 clarifying additions your own CHANDA audit recommended (explicit "not an alert" paragraph + Director-sender never-drop invariant).
 
-**Context update — Step 6 REDIRECT verdict landed:** B2 ratified REDIRECT — Step 6 becomes deterministic `finalize()`, no LLM call. This shifts semantic weight onto Step 1: **the "should this cross-link to Hagenauer?" reasoning now lives ONLY in Step 1's prompt.** Your Step 1 amendment needs to carry both the Inv 3 fix AND the post-REDIRECT cross-link responsibility.
+### Source material to read
 
----
-
-## Task 1 (highest priority): Amend Step 1 Triage Prompt for Inv 3 Compliance + Post-REDIRECT Cross-link Responsibility
+- `briefs/_reports/B2_step0_layer0_rules_review_20260418.md` — B2's review with all 6 items + architectural notes
+- Your own CHANDA ack flags on Step 0 rules from `briefs/_reports/B3_chanda_ack_20260418.md` (2 clarifying items)
 
 ### Scope
 
-**IN**
-- Amend `briefs/_drafts/KBL_B_STEP1_TRIAGE_PROMPT.md`
-- Add the two template placeholders + loader helpers per your §3 remedy sketch:
-  - `{hot_md_block}` → loaded from `$BAKER_VAULT_PATH/wiki/hot.md` (Phase 1: Director-maintained file; if absent, render "(no current-priorities cache available)" — valid zero-Gold read per Inv 1)
-  - `{feedback_ledger_recent}` → query `feedback_ledger ORDER BY created_at DESC LIMIT 20` (B1 is creating this table in LOOP-SCHEMA-1 PR #5, parallel-running; if table empty at call time, render "(no recent Director actions)")
-- Add two new sections in the template body explaining model usage:
-  1. **"How to use `hot.md`":** "The hot.md block describes Director's currently-pressing matters. When a signal's matter appears in hot.md, elevate `triage_score` by 0.15 (capped at 1.0). When a signal touches a matter marked ACTIVELY FROZEN in hot.md, suppress triage by 0.10. Hot.md is a steering signal, not a hard override."
-  2. **"How to use the feedback ledger":** "The ledger shows Director's last 20 actions. Patterns to respect: if Director has recently re-classified matter X → null for signals resembling this one, prefer null. If Director has promoted similar signals to Gold for matter Y, prefer matter Y with slight triage boost. The ledger is historical correction data, not a mandate."
-- Add a **post-REDIRECT cross-link section**: "The `related_matters[]` output is now authoritative. Step 6 is deterministic finalization and will NOT re-evaluate cross-link choices. If a signal substantively touches a matter beyond primary_matter, include it in related_matters. Conservative default: omit. Empty list is always valid."
-- Update the worked examples to demonstrate hot.md + ledger influence on triage_score
+**IN — B2's 6 should-fix items:**
+
+1. **S1 — YAML relocation.** Move rule content from `baker-master/kbl/config/layer0_rules.yml` to `baker-vault/layer0_rules.yml`. Rationale per B2: matches SLUGS-1 precedent, Director edit path, no code redeploy, mirrors slug_registry loader pattern. Update your draft's file-path references to reflect the vault location. (B1 already built the loader pointing to `$BAKER_VAULT_PATH` — your relocation + their loader = integrated.)
+
+2. **S2 — `baker_self_analysis_echo` anchor tightening.** Current spec catches phrases like *"I asked Baker"* in natural text. Re-anchor on Baker's actual storage-layer marker. B2 suggests: `baker_scan:` prefix in signal metadata, or `<!-- baker-output -->` frontmatter tag. Pick one, spec explicitly, add rationale.
+
+3. **S3 — Topic-override alias awareness + short-slug safeguard.** Replace `_mentions_active_slug` naive split-0 match with `slug_registry.aliases_for()`. For slugs <4 chars (`mo-vie`, `ao`, `mrci`), require alias match not canonical-only match (prevents false whole-word matches like "ao" in arbitrary text).
+
+4. **S4 — VIP soft-fail CLOSED not OPEN.** Your current draft says "Step 1 will be backstop" — but Layer 0 drops are terminal; signal never reaches Step 1. Flip to soft-fail-CLOSED (treat as VIP during VIP-service downtime — drops no one) OR document trade-off explicitly. Flip is simpler.
+
+5. **S5 — Hash store spec.** 72h dedupe hash was referenced but undefined. Spec:
+   - Table: `kbl_layer0_hash_seen` (already created by B1 in PR #5 / about to merge; schema: `content_hash PK TEXT, first_seen_at TIMESTAMPTZ, ttl_expires_at TIMESTAMPTZ, source_signal_id BIGINT, source_kind TEXT`)
+   - Cleanup tick: cron-driven DELETE WHERE `ttl_expires_at < now()` on daily schedule
+   - Normalization function: specify exactly what's normalized before hashing — lowercase, trim, strip trailing whitespace per line, collapse multiple spaces to one, drop standard sig blocks (`--\n...`) OR not — pick a deterministic recipe
+   - Hash algorithm: sha256 hex
+   - Cite in spec so B1's later impl matches your intended behavior
+
+6. **S6 — Review queue spec.** Sampling without surfacing = noise. Spec:
+   - Table: `kbl_layer0_review` (already created by B1 in PR #5)
+   - Sampling rate: 1-in-50 dropped signals get a row (deterministic via signal.id % 50 == 0, or random-choice — pick one + justify)
+   - Excerpt field: first 500 chars of payload content
+   - Director review UI: out of scope for this draft (KBL-C owns the cockpit); spec only the DB-writer side
+   - Review verdict values: `correct_drop`, `false_positive`, `ambiguous`
+
+**IN — Your own CHANDA-audit clarifications (2 items):**
+
+7. **C1 — "Not an alert" paragraph.** Add explicit clarifying paragraph: Layer 0 is a deterministic pre-LLM noise filter. It is NOT an alert mechanism (Inv 7 covers ayoniso alerts separately). Layer 0 drops are logged, 1-in-50 sampled for Director review per S6. Director does not receive a notification per drop.
+
+8. **C2 — Director-sender never-drop invariant.** Add: signals where sender is Director (email from `dvallen@brisengroup.com`, `vallen300@gmail.com`, or WhatsApp from Director's number) are NEVER dropped by Layer 0, regardless of content shape. Rationale: Director's own queries / scan-throughs / test signals are always intended; Layer 0 must respect authorial intent.
 
 **OUT**
-- Implementing the `_load_hot_md()` / `_load_recent_feedback()` Python helpers (that's KBL-B impl, B1's ticket)
-- Schema changes for feedback_ledger (B1's LOOP-SCHEMA-1 PR #5)
-- Re-running D1 eval (D1 ratification stands; new prompt will need re-eval at Phase 1 close per D1's Phase 2 gate)
-- Any model downgrade discussion (Gemma 4 8B stays)
+- Re-opening the YAML+dispatcher pattern (B2 ratified as right shape)
+- Re-opening D3 §247 10-30% drop rate ratification
+- Rule implementation Python code (KBL-B Step 0 impl, separate ticket)
+- Running any eval
 
-### Q1 Loop Test (must be explicit in your amendment PR)
+### CHANDA pre-push self-check
 
-This change DIRECTLY MODIFIES Leg 3 (Step 1's reading pattern). It is the remedy for the detected non-compliance, not a new deviation. Director pre-approved remedy under amend-now posture at the prior turn. Cite CHANDA §5 Q1 in commit message + note amend-now authorization.
+- **Q1 Loop Test:** Layer 0 is UPSTREAM of loop reading (filter before Step 1). Rule changes don't modify Leg 1/2/3 mechanism. Pass.
+- **Q2 Wish Test:** each item serves operational clarity / correctness / Inv-compliance. State tradeoff if any item has a convenience angle.
+- **Inv 7 compliance:** C1 explicitly clarifies Layer 0 ≠ alert mechanism. No conflict.
+- **Inv 4 compliance:** C2 preserves Director's authorial authority. No conflict.
 
 ### Reviewer
 
-B2. Reviewer-separation: you author, B2 reviews.
+B2 (reviewer-separation). This cycles Step 0 Layer 0 through B2 twice, consistent with iterative review of same file.
 
 ### Timeline
 
-~45-60 min.
+~45-60 min for all 8 items.
 
 ### Dispatch back
 
-> B3 Step 1 Inv-3 amendment shipped — `briefs/_drafts/KBL_B_STEP1_TRIAGE_PROMPT.md`, commit `<SHA>`. Covers Inv 3 (hot.md + ledger loads) + post-REDIRECT cross-link weight. Ready for B2 review.
+> B3 Step 0 Layer 0 S1-S6 + C1-C2 applied — commit `<SHA>`. 8 items resolved. Ready for B2 re-review.
 
 ---
 
-## Task 2 (after Task 1): Add Learning Loop Compliance Assertions to §10 Fixtures
+## Status after this task
 
-### Scope
-
-**IN**
-- Amend `briefs/_drafts/KBL_B_TEST_FIXTURES.md`
-- Add a new **"Loop Compliance" row per fixture**, asserting at Step 1 pseudo-evaluation time:
-  - `hot_md_loaded: bool` (true expected for every fixture once Task 1 ships)
-  - `feedback_ledger_queried: bool` (true expected for every fixture)
-  - `gold_context_by_matter_loaded: bool` (true per Inv 1 — zero Gold is read AS zero Gold)
-- For 2-3 fixtures, add **Leg-specific test scenarios**:
-  - Fixture demonstrating hot.md's triage_score influence (create a hot.md-steered test case)
-  - Fixture demonstrating feedback_ledger correction propagation (create a Director-recently-corrected-similar-signal test case)
-  - Fixture demonstrating zero-Gold-case (matter with no prior Gold — Step 1 should STILL attempt the read, just finds nothing)
-- §10 harness section updated: pytest asserts loop compliance rows as hard assertions, not soft checks
-
-**OUT**
-- New signals outside the labeled corpus (synthetic scenarios OK if marked as such, per your dual-purpose fixture #6 convention)
-- Actual Python harness code (that's KBL-B §10 impl, separate ticket)
-
-### Reviewer
-
-B2.
-
-### Timeline
-
-~30-45 min.
-
-### Dispatch back
-
-> B3 §10 fixtures loop-compliance amendment shipped — commit `<SHA>`. Ready for B2 review.
+You're clear. Director-ruling on Hagenauer candidate + hot.md content are parallel-tracking separately (Director's own session). Next B3 dispatch depends on B2 verdicts returning from their expanded queue.
 
 ---
 
-## Task 3 (lowest priority, runs last): Fireflies Hagenauer Transcript Search
-
-**Director approved pursuing (c):** search Fireflies for Hagenauer meeting transcripts to add to the 50-signal labeled corpus. This closes the coverage gap you flagged in §10 (no full-synthesis transcript fixture under Phase 1's hagenauer-rg7-only scope).
-
-### Scope
-
-**IN**
-- Search Fireflies via MCP (you have access in App Cowork): query meetings where title or summary contains Hagenauer / Schlussabrechnung / RG7 / Baden / Ofenheimer / Leitner / Moravcik
-- Filter: meetings from last 90 days (Fireflies retention window) with transcript available
-- Produce candidate list at `briefs/_drafts/HAGENAUER_TRANSCRIPT_CANDIDATES.md`:
-  - Each candidate: meeting title, date, participants, word count, 150-char summary, Fireflies ID
-  - Rank by likelihood of Phase-1-relevance (recent + core participants > older + tangential)
-- Top 3-5 candidates surfaced for Director labeling
-
-**OUT**
-- Labeling yourself (Director owns labels per D1)
-- Adding to the labeled JSONL (Director+you together, separate ticket after Director labels)
-- Summarizing meeting content beyond the 150-char tag (no substantive extraction)
-
-### Fallback
-
-If 0 candidates found: report "no Hagenauer transcripts in Fireflies window" → Director rules option (a) per pre-approval, fixture #6 stays Phase-2-parameterized, §10 final spec accepts the gap.
-
-### Reviewer
-
-None — this is research output for Director consumption. No code review needed.
-
-### Timeline
-
-~20-30 min.
-
-### Dispatch back
-
-> B3 Hagenauer transcript search done — candidates at `briefs/_drafts/HAGENAUER_TRANSCRIPT_CANDIDATES.md`, commit `<SHA>`. <N> candidates surfaced OR zero found → invoke fallback (a).
-
----
-
-## Global status after all three tasks
-
-You close the Step 1 Inv-3 gap, harden §10 fixtures against mechanical-only test pass, and either fill the Hagenauer transcript coverage gap OR confirm we can't. All three feed directly into AI Head's KBL-B §6-13 writing push with zero residual loop-compliance risk.
-
----
-
-*Posted 2026-04-18 by AI Head. B1 parallel-running LOOP-SCHEMA-1 (creates `feedback_ledger` table your Step 1 amendment depends on). B2 parallel-running PR #4 review + queued REDIRECT-fold review. Production-moving density across all three agents.*
+*Posted 2026-04-18 by AI Head. B1 parallel-running LOOP-HELPERS-1 (PR #6). B2 working 4-review queue. Production-moving density held across all three agents.*

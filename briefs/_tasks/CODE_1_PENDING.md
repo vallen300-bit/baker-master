@@ -2,95 +2,96 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (terminal instance)
-**Previous:** LOOP-SCHEMA-1 shipped at PR #5 (`51adc44`). LAYER0-LOADER-1 PR #4 APPROVED by B2 with 1 should-fix.
+**Previous:** PR #4 + PR #5 amendments shipped. PR #4 merged at `8a55e82`. PR #5 in B2 review at head `c8c7a35`.
 **Task posted:** 2026-04-18
-**Status:** OPEN — two small follow-ups
+**Status:** OPEN
 
 ---
 
-## AI Head decision on BIGINT/INTEGER FK mismatch
+## Task: LOOP-HELPERS-1 — Implement `kbl/loop.py` helper functions
 
-**Decision: upgrade `signal_queue.id` to `BIGSERIAL`** in the same LOOP-SCHEMA-1 migration.
+**Why now:** B3's Step 1 amendment references three helper functions that don't yet exist. PR #5 schema (merging soon) creates `feedback_ledger` for the ledger read. These helpers are the Python glue between CHANDA §2 Leg 3 (Step 1 reads) and the loop-infrastructure tables. Small, testable, production-moving. Unblocks Step 1 impl the moment KBL-B §6-13 authoring is done.
 
-Rationale: `signal_queue` is the primary ingestion table; `INTEGER` (2.1B max) is a latent Phase-2+ overflow risk we remove cheaply now while the table is small. Downgrading the new FK columns would entrench the limit across loop infrastructure. No `REFERENCES` clauses — application-level integrity per your literal-brief read, preserves ledger immutability under CHANDA Inv 2 atomicity. Clean.
+### Scope
 
----
+**IN**
+- New module `kbl/loop.py` with three helpers:
 
-## Task A (immediate): Amend PR #5 — signal_queue.id → BIGSERIAL
+```python
+def load_hot_md(path: str | None = None) -> str | None:
+    """Read hot.md from $BAKER_VAULT_PATH/wiki/hot.md by default, or explicit path.
 
-### What to do
+    Returns file contents as str, or None if file absent.
+    Does NOT raise on missing file (valid zero-Gold state per CHANDA Inv 1).
+    Raises LoopReadError on permission/IO errors.
+    """
 
-Add to `migrations/20260418_loop_infrastructure.sql` UP section, BEFORE the three CREATE TABLE blocks:
+def load_recent_feedback(conn, limit: int | None = None) -> list[dict]:
+    """Query feedback_ledger for the N most recent rows.
 
-```sql
--- Upgrade signal_queue.id to BIGINT (prevents Phase 2+ integer overflow, matches new FK column types)
-ALTER TABLE signal_queue ALTER COLUMN id TYPE BIGINT;
-ALTER SEQUENCE signal_queue_id_seq AS BIGINT;
+    limit: int override; if None, reads env var KBL_STEP1_LEDGER_LIMIT (default 20).
+    Returns list of dicts with keys: id, created_at, action_type, target_matter,
+        target_path, signal_id, payload, director_note.
+    Returns empty list if table empty (valid zero-Gold state).
+    Raises LoopReadError on DB errors.
+    """
+
+def render_ledger(rows: list[dict]) -> str:
+    """Format ledger rows into prompt-insertable Markdown block.
+
+    Renders one line per row in Director-scannable format:
+        [YYYY-MM-DD] <action_type> <target_matter|target_path>: <director_note or payload-summary>
+    Returns "(no recent Director actions)" if rows is empty.
+    """
 ```
 
-And to the DOWN section (rollback):
+- `LoopReadError` exception class (for IO / DB read failures, distinct from zero-data case)
+- Env var reader with default: `KBL_STEP1_LEDGER_LIMIT=20`
+- Unit tests in `tests/test_loop_helpers.py`:
+  - `load_hot_md`: happy path, missing file returns None, permission error raises `LoopReadError`
+  - `load_recent_feedback`: happy path (mock PG or test DB), empty table returns `[]`, DB error raises `LoopReadError`, `limit` param override works, env-var default works
+  - `render_ledger`: empty list renders placeholder, single row renders correctly, 20 rows render correctly, special chars escaped if any (director_note may contain markdown)
+- Fixture hot.md files in `tests/fixtures/`:
+  - `hot_md_sample.md` (realistic 6-bullet content)
+  - `hot_md_empty.md` (edge case — file exists but zero content)
 
-```sql
--- Downgrade signal_queue.id back to INTEGER (rollback — assumes row count fits in INTEGER)
-ALTER TABLE signal_queue ALTER COLUMN id TYPE INTEGER;
-ALTER SEQUENCE signal_queue_id_seq AS INTEGER;
-```
+**OUT**
+- Writer-side functions (ledger writer is KBL-C territory)
+- Actual Step 1 prompt wiring (KBL-B implementation, separate ticket after §6-13 authoring)
+- Template rendering / prompt assembly (lives in `run_kbl_eval.py` or successor module)
+- Any change to `signal_queue`, `slug_registry`, or other existing modules
 
-Verify the sequence name with `SELECT pg_get_serial_sequence('signal_queue', 'id');` if it differs from the default naming.
+### Dependencies
 
-Keep the new FK columns as `BIGINT` (unchanged from your PR #5).
+- PR #5 (`feedback_ledger` table schema) — merge-pending on B2 review. You can write the helpers + tests against the schema SPEC now; tests use the test DB with migration applied. If PR #5 hasn't merged by the time you push, flag — I'll sequence merge before review of PR #6.
+- `BAKER_VAULT_PATH` env var (already canonical per SLUGS-1)
 
-### CHANDA pre-push
+### CHANDA pre-push self-check
 
-- Q1 Loop Test: schema-only table-type upgrade, no loop-mechanism modification. Pass.
-- Q2 Wish Test: forward-compatibility for Phase 2+ signal volume. Wish-service. Pass.
+- **Q1 Loop Test:** helpers IMPLEMENT Leg 3 reading pattern. This is remedy for Inv 3 non-compliance per B3's CHANDA audit. Director pre-approved amend-now. Cite CHANDA §2 Leg 3 + §5 Q1 amend-now authorization in PR body.
+- **Q2 Wish Test:** pure wish-service. No convenience shortcut.
+- **Inv 1 compliance:** `load_hot_md` returning None when file absent is valid zero-Gold read (not an error). `load_recent_feedback` returning `[]` when table empty is valid zero-Gold read. Both must be tested explicitly.
+- **Inv 10 compliance:** helpers read data. They do NOT rewrite prompts. Inv 10 preserved.
+
+### Branch + PR
+
+- Branch: `loop-helpers-1`
+- Base: `main` (after PR #5 merges; if PR #5 still pending when you finish, base on PR #5's branch and note in PR body)
+- PR title: `LOOP-HELPERS-1: kbl/loop.py — hot.md + feedback_ledger readers`
+- Target PR: #6
+
+### Reviewer
+
+B2 (reviewer-separation).
+
+### Timeline
+
+~45-60 min.
 
 ### Dispatch back
 
-> B1 PR #5 amended — signal_queue.id upgraded to BIGSERIAL, head `<SHA>`, <N>/<N> tests green. Ready for B2 review.
+> B1 LOOP-HELPERS-1 shipped — PR #6 open, branch `loop-helpers-1`, head `<SHA>`, <N>/<N> tests green. Ready for B2 review.
 
 ---
 
-## Task B (after Task A): Amend PR #4 — version int-not-string (S1 from B2 review)
-
-### What to do
-
-On branch `layer0-loader-1`, apply the 3-line patch for S1:
-
-1. In `kbl/layer0_rules.py`, change `version` field validation from `str` to `int` (matching `slug_registry.py` convention and B3's Step 0 draft `version: 1`)
-2. In `tests/fixtures/layer0_rules_valid.yml` and `layer0_rules_malformed.yml`, change `version: "1.0.0"` to `version: 1`
-3. In `tests/test_layer0_rules.py`, update the version-type assertion
-
-Amend commit + force-push to `layer0-loader-1`.
-
-### Why int not string
-
-- Matches `slug_registry.py` convention (`version: 1`)
-- Matches B3's Step 0 draft (`version: 1`) — without this, loader would reject B3's vault commit with `Layer0RulesError`
-- Minimizes coordination cost with B3's parallel vault YAML work
-
-### Dispatch back
-
-> B1 PR #4 S1 amended — version field now int, head `<SHA>`, <N>/<N> tests green. Ready for Director merge.
-
----
-
-## Sequence + timing
-
-- Task A (PR #5 amend): ~10-15 min
-- Task B (PR #4 S1 patch): ~10-15 min
-- Total: ~20-30 min both
-
-Can do either order — your call. PR #5 review by B2 is more time-sensitive (unblocks B3's Step 1 Inv-3 implementation), so A-first is preferred.
-
----
-
-## Work-in-flight note
-
-- PR #4 ready for Director merge as soon as Task B lands + tests re-green
-- PR #5 in B2 queue right after Task A lands
-- B3 is parallel-running Step 1 Inv-3 amendment; their Python-helper impl depends on `feedback_ledger` table existing (your PR #5). Merge order: PR #5 → PR #4 → B3's subsequent KBL-B wiring
-
----
-
-*Posted 2026-04-18 by AI Head. Two small follow-ups to close both PRs in the pipe. PR #5 + S1 fix together unblock Director merges + B3 Step 1 wiring.*
+*Posted 2026-04-18 by AI Head. B3 parallel-running Step 0 Layer 0 rules 6-should-fix application. B2 reviewing PR #5 (your parent schema).*
