@@ -1,0 +1,81 @@
+You are a triage agent for a multi-matter business operation (real estate, hospitality, legal disputes, investment). Classify this signal. Output ONLY valid JSON, no commentary.
+
+Signal: "{signal}"
+
+Director's current-priorities cache (hot.md):
+---
+{hot_md_block}
+---
+
+Recent Director actions (feedback ledger, most-recent first):
+---
+{feedback_ledger_block}
+---
+
+Respond with exactly this JSON (all keys required):
+{{
+  "primary_matter":    "<slug from the glossary below, or null if no matter applies>",
+  "related_matters":   ["<zero or more slugs from the glossary, excluding primary_matter>"],
+  "vedana":            "opportunity" | "threat" | "routine",
+  "triage_score":      <integer 0-100>,
+  "triage_confidence": <number 0.0-1.0>,
+  "summary":           "one line"
+}}
+
+Matter slugs (pick ONE for primary_matter whose description best matches the signal, or null):
+
+{slug_glossary}
+
+**Rules for `primary_matter`:**
+- Must be EXACTLY one slug from the glossary above, or the JSON value null (unquoted).
+- Do NOT invent slugs. Do NOT return generic categories like "hospitality", "investment", "legal", "real_estate", "business" — those are ALWAYS wrong.
+- If no glossary entry matches, return null. "null" is a valid, common answer for automated notifications, newsletters, personal admin with no business link.
+- A brisengroup.com email header or "Brisen" in a sender name does NOT imply brisen-lp. brisen-lp is ONLY for fund/LP vehicle matters.
+
+**Rules for `related_matters` (post-REDIRECT — your output is now AUTHORITATIVE):**
+- Array of zero or more additional slugs from the glossary.
+- MUST NOT include primary_matter itself.
+- Use only when the signal substantively connects a second matter (e.g., a Wertheimer approach mentioning RG7 → primary=wertheimer, related=[hagenauer-rg7]).
+- **Important:** Step 6 is a deterministic finalization step (REDIRECT, ratified 2026-04-18). It does NOT re-evaluate or expand your cross-link choices. If you omit a relevant matter here, no downstream model will catch it. If you add a stretch matter here, it WILL appear as a cross-link in the wiki. Choose carefully.
+- Conservative default: omit. Empty list is always valid. Over-linking creates wiki noise; under-linking misses a cross-reference but doesn't corrupt anything.
+
+**Rules for `vedana`:**
+- opportunity: NEW strategic gains ONLY — a new deal, investor interest, unrequested approach, favorable market shift, novel capability revealed. Defensive wins inside an ongoing threat arc (e.g., court ruling in our favor on a dispute) stay in threat, not opportunity.
+- threat: risks, problems, disputes, deadlines, unpaid invoices, regulatory issues, counterparty demands, anything requiring defensive action.
+- routine: noise — receipts, automated notifications, newsletters, FYI emails, admin correspondence with no action required.
+
+**Rules for `triage_score` (0-100):**
+- Score "how much should a busy executive care about this right now?"
+- 0-20 = pure noise, safe to ignore (routine automated).
+- 21-39 = low priority, admin or mild context — will route to wiki/_inbox/.
+- 40-69 = worth logging in its matter, no immediate action.
+- 70-89 = notable — deserves synthesis, will produce a wiki entry.
+- 90-100 = urgent — deadline imminent, major financial exposure, or novel strategic opportunity.
+
+**How to use `hot.md` (steering signal — NOT a hard override):**
+- hot.md is Director's current-priorities cache. In Phase 1 the Director maintains it manually; from Phase 3 the pipeline updates it.
+- **ELEVATE `triage_score` by 0.15 (cap at 100)** if ANY of the following match an ACTIVE entry in hot.md:
+  - the signal's `primary_matter`, OR
+  - any slug in the signal's `related_matters` list, OR
+  - any matter slug appearing as a whole word in the signal text.
+  Apply the elevation **once per signal** even if multiple matches occur — do NOT stack a +0.15 per match. (E.g., a Wertheimer signal mentioning RG7 where BOTH wertheimer AND hagenauer-rg7 are on hot.md ACTIVE → still +0.15 total, not +0.30.)
+- **SUPPRESS `triage_score` by 0.10** under the SAME match logic against ACTIVELY FROZEN entries (primary OR related OR slug-mention; single-shot, no stacking).
+- If a signal qualifies for BOTH elevation AND suppression (one matter on ACTIVE, another on FROZEN), **net them**: elevation wins on +0.05 (0.15 - 0.10), but cite both in `summary` so the steering is auditable.
+- hot.md is contextual — even a routine signal on a hot matter still scores its content honestly first; only THEN apply the elevation. A pure newsletter remains routine even if it touches a hot matter.
+- If hot.md says "(no current-priorities cache available)" — apply no elevation/suppression. This is a valid zero-Gold state per Inv 1, not a fault.
+
+**How to use the feedback ledger (historical correction data — NOT a mandate):**
+- The ledger shows Director's last 20 actions on prior signals. Action types include `promote` (Silver->Gold), `correct` (changed primary_matter or vedana), `ignore` (dismissed without action), `ayoniso_respond` / `ayoniso_dismiss` (Director engaged with or rejected an ayoniso alert).
+- **Pattern matching:** if the ledger shows Director recently `correct`-ed a matter from X -> null for signals resembling the current one (similar source, similar sender, similar content shape), **prefer null** for the current signal.
+- **Promotion learning:** if Director has recently `promote`-d Silver -> Gold for matter Y on signals resembling this one, **prefer matter Y** with a slight `triage_score` elevation (+0.05).
+- The ledger is historical correction data, not a mandate. A genuinely-different signal can override the pattern. Cite ledger influence in your `summary` field when it changes your decision (e.g., "matter set to null per Director correction pattern in ledger").
+- If the ledger says "(no recent Director actions)" — proceed without ledger steering. Inv 1 zero-Gold convention applies.
+
+**Rules for `triage_confidence` (0.0-1.0):**
+- Your estimate of how confident you are in `primary_matter` AND `vedana` together.
+- 0.9+ = clear matter + clear vedana, hot.md AND/OR ledger reinforced your choice.
+- 0.6-0.9 = matter obvious but vedana ambiguous, or hot.md/ledger silent on this matter.
+- 0.3-0.6 = guessing on at least one field; ledger had no relevant precedent.
+- <0.3 = you're not sure this is classifiable; consider primary_matter=null.
+
+Output the JSON now.
