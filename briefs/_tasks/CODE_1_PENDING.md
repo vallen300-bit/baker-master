@@ -2,91 +2,70 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (terminal instance)
-**Previous:** PR #5 merged at `45c0962`. PR #6 merged at `de7fd6f`. Idle since.
+**Previous:** LAYER0-IMPL shipped as PR #7 at `7342617`. Idle since.
 **Task posted:** 2026-04-18
 **Status:** OPEN
 
 ---
 
-## Task: LAYER0-IMPL — Step 0 Layer 0 Evaluator + Helpers
+## Task: STEP1-TRIAGE-IMPL — Step 1 Gemma Triage Evaluator
 
-**Why now:** Layer 0 rules spec ratified (B2 READY at commit `64d1712`). Loader shipped (PR #4). Schema shipped (PR #5). Now build the evaluator that glues rules + signals together. Production-moving.
+**Why now:** All inputs ratified. Layer 0 PASS emits `awaiting_triage` signals (PR #7). Step 1 consumes them, runs Gemma triage, writes results + routes. Production-moving, unblocks Step 2/3 impl.
 
 ### Scope
 
-**IN — new modules + helpers**
+**IN**
 
-1. **`kbl/layer0.py`** — the evaluator
-   - `evaluate(signal, ruleset=None) -> Layer0Decision` — returns `pass` / `drop(rule_name, detail)`
-   - `_process_layer0(signal, conn) -> Layer0Decision` — wraps `evaluate()` + writes to `kbl_layer0_hash_seen` on PASS + `kbl_layer0_review` on 1-in-50 drop sample
-   - First-match-wins over rules list ordering
-   - Director-sender check runs BEFORE any rule (C2 invariant — never-drop)
-   - VIP-sender soft-fail CLOSED (S4 — treat as VIP during VIP-service downtime)
-   - Short-slug alias-aware topic-override (S3)
-   - Content-hash dedupe (S5) — insert hash on PASS only (not on drop)
-   - Review-queue sampling (S6) — deterministic `signal.id % 50 == 0`, 500-char excerpt
+1. **`kbl/prompts/step1_triage.txt`** — extract the template text from `briefs/_drafts/KBL_B_STEP1_TRIAGE_PROMPT.md` §1.1. Plain-text file with `{signal}`, `{slug_glossary}`, `{hot_md_block}`, `{feedback_ledger_recent}` placeholders. Source of truth for the prompt text going forward.
 
-2. **`baker/director_identity.py`** — `is_director_sender(signal) -> bool`
-   - Normalizes phone via `re.sub(r'\D', '', raw)` to match WAHA serialization `41799605092`
-   - Recognizes emails: `dvallen@brisengroup.com`, `vallen300@gmail.com`, `office.vienna@brisengroup.com`
-   - Recognizes WhatsApp numbers: `41799605092` (after normalization of any format — `+41 79 960 50 92`, `+41799605092`, `41799605092@c.us`, etc.)
-   - Single source of truth — Layer 0 + future Ayoniso + future Gold-promote checks all use this
+2. **`kbl/steps/step1_triage.py`** — the evaluator module:
+   - `build_prompt(signal_text: str, conn) -> str` — assembles the prompt per the template draft §1.1 builder (calls `slug_registry`, `load_hot_md`, `load_recent_feedback`, `render_ledger` from `kbl/loop.py`). Caller owns `conn`.
+   - `parse_gemma_response(raw: str) -> TriageResult` — parses Gemma's structured JSON output. Returns dataclass with: `primary_matter`, `related_matters`, `vedana`, `triage_score`, `triage_confidence`, `summary`. Raises `TriageParseError` on malformed.
+   - `normalize_matter(raw: str | None) -> str | None` — delegates to `slug_registry.normalize()` (handles aliases, returns None for "null"/"none").
+   - `call_ollama(prompt: str, model="gemma2:8b", timeout=30) -> str` — HTTP POST to Ollama `/api/generate`, seed=42, temperature=0, format=json. Returns raw response text.
+   - `triage(signal_id: int, conn) -> TriageResult` — full pipeline: load signal from `signal_queue.id`, build prompt, call Ollama, parse, write results to `signal_queue` columns (`primary_matter`, `related_matters`, `vedana`, `triage_score`, `triage_confidence`, `triage_summary`), write `kbl_cost_ledger` row (`step='triage'`, `model='gemma2:8b'`, tokens from Ollama response if available), advance state.
+   - State transitions: `awaiting_triage` → `triage_running` → `awaiting_resolve` OR `awaiting_inbox_route` (if triage_score < `KBL_PIPELINE_TRIAGE_THRESHOLD`, default 40)
 
-3. **`kbl/layer0_dedupe.py`** — hash-store ops
-   - `normalize_for_hash(content: str) -> str` — lowercase, trim, collapse multi-space, strip trailing whitespace per line, drop standard sig blocks (`\n--\n.*`). Deterministic recipe.
-   - `has_seen_recent(conn, content_hash: str) -> bool` — checks `kbl_layer0_hash_seen` with `ttl_expires_at > now()`
-   - `insert_hash(conn, content_hash, source_signal_id, source_kind, ttl_hours=72)`
-   - `cleanup_expired(conn) -> int` — daily cron callable; returns count of rows purged
+3. **`kbl/exceptions.py`** (if not exists) — `TriageParseError`, `OllamaUnavailableError`
 
-4. **`kbl_layer0_review_insert(conn, signal_id, rule_name, excerpt, source_kind)`** — in `kbl/layer0.py` or separate small module
-   - Column names match PR #5 schema exactly: `signal_id`, `dropped_by_rule`, `signal_excerpt`, `source_kind`, `created_at` (default now())
-   - Note: B2 PR #5 review N1/N2 flagged B3's draft uses `rule_name` / `excerpt` / `sampled_at` in §3.5/§3.6. Schema wins — use PR #5 column names (`dropped_by_rule`, `signal_excerpt`, `created_at`).
-
-**Reconciliations (per B2 Step 0 rereview N1/N2/N4):**
-- Step 0 draft's §3.5/§3.6 column names: writer code uses schema column names; if spec and schema diverge, update the spec in a follow-up docs commit (not in this PR)
-- Phone normalization: `is_director_sender()` normalizes `+41 79 960 50 92` / `+41799605092` / `41799605092@c.us` to canonical `41799605092` before comparison
+4. **Tests** — `tests/test_step1_triage.py`:
+   - `build_prompt` integration: mock signal + mock DB with seeded hot.md + ledger rows → prompt contains expected blocks
+   - `parse_gemma_response` happy path
+   - `parse_gemma_response` malformed → raises
+   - `normalize_matter` alias resolution (e.g., "hagenauer" → "hagenauer-rg7", "lilienmat" → "lilienmatt")
+   - `call_ollama` mocked (don't require live Ollama in CI)
+   - `triage` end-to-end with mocked Ollama: verifies DB writes (columns + cost ledger row + state transition)
+   - Triage-threshold gating: score < 40 → state `awaiting_inbox_route`; score >= 40 → `awaiting_resolve`
 
 **OUT**
-- Rule content in baker-vault (Director / B3 own the YAML)
-- Loader changes (PR #4 already shipped; just call `get_ruleset()`)
-- Pipeline wiring beyond Step 0 (Step 1 onward is separate impl)
-- Review-queue UI (KBL-C)
-
-### Tests (new)
-
-- `tests/test_layer0_eval.py`:
-  - Pass happy path (signal matches no rule)
-  - Drop on each rule name in the fixture ruleset
-  - First-match-wins ordering
-  - Director-sender short-circuits to PASS (C2 invariant)
-  - VIP-sender soft-fail CLOSED (S4) — mock VIP service unreachable, signal still passes
-  - Short-slug alias override (S3) — "Andrey Oskolkov" whole-word matches `ao` only via alias
-- `tests/test_layer0_dedupe.py`:
-  - `normalize_for_hash` deterministic (same input → same output)
-  - `has_seen_recent` returns True when hash present + within TTL
-  - `has_seen_recent` returns False when hash expired
-  - `insert_hash` + `cleanup_expired` round-trip
-- `tests/test_director_identity.py`:
-  - All email variants recognized
-  - WhatsApp number formats all normalize to canonical
-  - Non-Director sender returns False
-  - Edge: malformed phone string doesn't crash
+- Ollama service management (systemd/launchd config) — KBL-A territory
+- Qwen fallback (availability-only per D1; separate ticket when Phase 1 runs into actual availability issue)
+- Step 2 resolver — next ticket
+- Anthropic cost ledger mapping — this step uses Gemma (local, free), ledger row has `cost_usd=0.0`, `input_tokens` + `output_tokens` from Ollama response if exposed
 
 ### CHANDA pre-push
 
-- Q1 Loop Test: Layer 0 is upstream of loop reading. Evaluator doesn't modify Leg 1/2/3 mechanism. Pass.
-- Q2 Wish Test: serves wish (filters noise so loop operates on signal). Pass.
-- Inv 1: all PASS signals flow downstream to Step 1. Zero-match case = PASS. Correct.
-- Inv 4: Director-sender short-circuit enforces author:director authority at signal-intake boundary.
-- Inv 7: Layer 0 ≠ alert. Review queue is audit, not notification. Log-only on drop.
+- **Q1 Loop Test:** This step READS hot.md + feedback_ledger on every call — core Leg 3 behavior. **Loop-compliant by construction.** Cite in PR body. Must not short-circuit the reads (no "if-hot-md-empty-skip"). Zero reads = Inv 1 violation.
+- **Q2 Wish Test:** pure wish-service. Pass.
+- **Inv 1:** gold_context_by_matter is Step 5's concern, not Step 1's. Step 1 reads hot.md + ledger; Inv 1 compliance.
+- **Inv 3:** explicit — `triage()` calls `load_hot_md()` + `load_recent_feedback(conn)` before `call_ollama()`. Test this in the `build_prompt` integration test.
+- **Inv 10:** template is loaded from `kbl/prompts/step1_triage.txt` once per process. No self-modification.
+
+### Dependencies
+
+- `kbl/slug_registry.py` ✓ (PR #2)
+- `kbl/loop.py` ✓ (PR #6)
+- `kbl/layer0.py` emits `awaiting_triage` ✓ (PR #7)
+- `feedback_ledger` schema ✓ (PR #5)
+- `signal_queue` columns: `primary_matter TEXT`, `related_matters TEXT[]`, `vedana TEXT`, `triage_score NUMERIC`, `triage_confidence NUMERIC`, `triage_summary TEXT` — if not all exist in current schema, include ALTER TABLE ADD COLUMN in the migration sub-step; verify against current schema first
+- Triage prompt text @ `briefs/_drafts/KBL_B_STEP1_TRIAGE_PROMPT.md` commit `d7db987`
 
 ### Branch + PR
 
-- Branch: `layer0-impl`
+- Branch: `step1-triage-impl`
 - Base: `main`
-- PR title: `LAYER0-IMPL: kbl/layer0.py + director_identity + dedupe helpers`
-- Target PR: #7
-- PR body: cite rules spec @ `64d1712`, schema @ PR #5, loader @ PR #4; flag N1/N2 docs-update follow-up
+- PR title: `STEP1-TRIAGE-IMPL: kbl/steps/step1_triage.py + kbl/prompts/step1_triage.txt`
+- Target PR: #8
 
 ### Reviewer
 
@@ -94,12 +73,12 @@ B2 (reviewer-separation).
 
 ### Timeline
 
-~90-120 min — largest KBL-B impl unit so far but bounded by the spec.
+~60-90 min.
 
 ### Dispatch back
 
-> B1 LAYER0-IMPL shipped — PR #7 open, branch `layer0-impl`, head `<SHA>`, <N>/<N> tests green. Ready for B2 review.
+> B1 STEP1-TRIAGE-IMPL shipped — PR #8 open, branch `step1-triage-impl`, head `<SHA>`, <N>/<N> tests green. Ready for B2 review.
 
 ---
 
-*Posted 2026-04-18 by AI Head. B3 on micro-fix (env-var typo). B2 CHANDA ack done — awaits REDIRECT fold review task C. Director: Fireflies labeling in separate session (~10 transcripts).*
+*Posted 2026-04-18 by AI Head. B2 reviewing PR #7 in parallel. B3 authoring STEP5-OPUS-PROMPT in parallel. Director: Fireflies labeling in separate session.*
