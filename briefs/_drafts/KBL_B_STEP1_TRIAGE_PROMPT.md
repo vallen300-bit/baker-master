@@ -133,7 +133,7 @@ Step 1 MUST NOT put `primary_matter` inside `related_matters` (would double-coun
 
 | Failure mode | Detection | Recovery |
 |---|---|---|
-| JSON malformed | `json.loads()` raises | Retry once with same prompt (non-determinism is zero at temp=0, but some Gemma builds show rare malformed output). Second failure → write stub with `triage_score=0`, route to inbox, log. |
+| JSON malformed | `json.loads()` raises | Retry once with same prompt — the retry actually protects against transient Ollama/network hiccups (connection reset, buffer underrun, partial response). Under temp=0 + seed=42, Gemma is deterministic — a true JSON bug would repeat identically. Retry succeeding = transient cause; retry failing identically → write stub with `triage_score=0`, route to inbox, log. (B2 review S2 fix, 2026-04-18.) |
 | `primary_matter` is a generic category ("investment") | `slug_registry.normalize()` returns None | Treat as `primary_matter=null`. Route to inbox if `triage_score < 40`; else continue as null-matter signal. Do NOT retry. |
 | `primary_matter` is a well-formed slug not in registry | `slug_registry.normalize()` returns None (same path as generic category) | Same as above. Logged at `level='WARN'` in case a new slug is in flux (e.g., mid-SLUGS-2 split). |
 | `vedana` not in enum | Validate at Python level | Force `vedana='routine'`, `triage_score=20`, log `WARN`. Don't retry — Gemma deviating from enum after v3 rules means something is wrong structurally. |

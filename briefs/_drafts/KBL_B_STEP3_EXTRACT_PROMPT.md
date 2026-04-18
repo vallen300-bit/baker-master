@@ -106,7 +106,9 @@ Signal: "Meeting: Jan 12, 02:33 PM. Duration: 56min. Summary: Court Hearing Focu
 source: meeting; primary_matter: kitzbuhel-six-senses; thread_context: wiki/kitzbuhel-six-senses/2026-01-05_prep.md
 
 Expected output:
-{{"people":[],"orgs":[{{"name":"Steininger family","type":"other"}},{{"name":"Roundshield","type":"investor"}}],"money":[{{"amount":17000000,"currency":"CHF","context":"possible deal"}},{{"amount":800000,"currency":"CHF","context":"frozen escrow, waiver non-compliance"}}],"dates":[{{"date":"2018","event":"share transfer under dispute"}}],"references":[],"action_items":[{{"actor":"Dimitry","action":"negotiate CHF 17M deal with Roundshield counterparty"}}]}}
+{{"people":[],"orgs":[{{"name":"Steininger family","type":"other"}},{{"name":"Roundshield","type":"investor"}}],"money":[{{"amount":17000000,"currency":"CHF","context":"possible deal"}},{{"amount":800000,"currency":"CHF","context":"frozen escrow, waiver non-compliance"}}],"dates":[],"references":[],"action_items":[{{"actor":"Dimitry","action":"negotiate CHF 17M deal with Roundshield counterparty"}}]}}
+
+# Note: the signal mentions a 2018 share transfer context. Year-only references do NOT pass the ISO-8601 rule (YYYY-MM-DD required). Omitted from `dates` to preserve few-shot self-consistency. Year-only temporal context flows to Step 5 via raw_content, not structured dates. (B2 review S1 fix, 2026-04-18.)
 '''
 
 
