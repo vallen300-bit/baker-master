@@ -1,0 +1,21 @@
+version: 1
+updated_at: 2026-04-18
+
+# Shared fixture vault for Layer 0 + Step 1 evaluator tests.
+# - `ao` (2 chars canonical) — short-slug alias-required topic override
+# - `movie` (5 chars canonical) — MO Vienna, aliases for topic override
+# - `gamma` — no aliases; used as negative test + step 1 related-matter tests
+
+matters:
+  - slug: ao
+    status: active
+    description: "Andrey Oskolkov personal matters"
+    aliases: [oskolkov, andrey]
+  - slug: movie
+    status: active
+    description: "MO Vienna hotel operation"
+    aliases: ["mandarin oriental", "mo vienna"]
+  - slug: gamma
+    status: active
+    description: "Gamma test matter"
+    aliases: []
