@@ -88,7 +88,44 @@ Verdict: APPROVE / REDIRECT (list fix items, inline-appliable) / BLOCK
 
 ---
 
-## Task C (queued, fires when AI Head commits REDIRECT fold)
+## Task C (now, new): Review PR #8 — STEP1-TRIAGE-IMPL
+
+**PR:** https://github.com/vallen300-bit/baker-master/pull/8
+**Branch:** `step1-triage-impl`
+**Head:** `4918b52`
+**Tests:** 44/44 new green + 1 live-PG skip; related suite 97 passed
+
+### Scope
+
+**IN**
+- `kbl/prompts/step1_triage.txt` — template extract matches `KBL_B_STEP1_TRIAGE_PROMPT.md` §1.1 (file-based load pattern, Inv 10 compliance)
+- `kbl/steps/step1_triage.py` — `build_prompt` / `parse_gemma_response` / `normalize_matter` / `call_ollama` / `triage` / `TriageResult`
+- `kbl/exceptions.py` — `TriageParseError` + `OllamaUnavailableError`
+- `migrations/20260418_step1_signal_queue_columns.sql` — idempotent ADD COLUMN ×6 for `primary_matter`, `related_matters`, `vedana`, `triage_score`, `triage_confidence`, `triage_summary`
+- **State transition correctness:** `awaiting_triage` → `triage_running` → `awaiting_resolve` or `awaiting_inbox_route` based on threshold
+- **CHANDA Inv 3 compliance:** reads hot.md + feedback_ledger on EVERY call (B1 tested via patched counters across 3 invocations — verify that test)
+- **CHANDA Inv 10 compliance:** template loaded once from file — verify no runtime re-read or mutation
+- **CHANDA Inv 1 compliance:** zero-Gold / zero-hot.md / zero-ledger render fallback strings (not crash)
+- **Cost ledger row:** `step='triage'`, `model='gemma2:8b'`, `cost_usd=0.0`, input/output tokens if Ollama exposes
+- **Parse failure path:** writes kbl_cost_ledger with `success=False` and re-raises — verify
+
+**Specific scrutiny**
+1. `call_ollama` error handling — DB connection lost, Ollama timeout, malformed response — each path covered?
+2. `parse_gemma_response` fields: does the parser accept both exact `null` and string `"null"` for primary_matter? (Gemma inconsistency common)
+3. Triage threshold gating — `KBL_PIPELINE_TRIAGE_THRESHOLD=40` default. Edge case: `triage_score == 40` — inclusive or exclusive of PASS?
+4. Cross-matter elevation (S1 from Step 1 third cycle): does `triage()` implementation correctly consume hot.md to adjust triage_score? Or is that logic deferred to the prompt itself (model decides)?
+5. Env var naming: `KBL_STEP1_LEDGER_LIMIT` (canonical per prior reconciliation) — confirm used consistently.
+
+### Format
+`briefs/_reports/B2_pr8_review_20260418.md`
+Verdict: APPROVE / REDIRECT / BLOCK
+
+### Timeline
+~30-40 min.
+
+---
+
+## Task D (queued, fires when AI Head commits REDIRECT fold)
 
 When `fold(KBL-B): Step 6 REDIRECT` lands in git log, review per prior spec (§2, §3.2, §4.7, §6, §8, §9, §10, §11). File at `briefs/_reports/B2_kbl_b_redirect_fold_review_20260418.md`. ~20-30 min.
 
