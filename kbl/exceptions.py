@@ -1,0 +1,36 @@
+"""Top-level KBL exception hierarchy.
+
+Individual modules may raise more specific subclasses; callers that want
+to catch any KBL pipeline failure can catch ``KblError``.
+"""
+from __future__ import annotations
+
+
+class KblError(RuntimeError):
+    """Base class for KBL pipeline errors."""
+
+
+class TriageParseError(KblError):
+    """Raised when the Step 1 triage model returns output that cannot be
+    parsed into a valid ``TriageResult`` (malformed JSON, missing required
+    keys, enum violation)."""
+
+
+class OllamaUnavailableError(KblError):
+    """Raised when Ollama is unreachable or returns a non-2xx after the
+    configured retry budget is exhausted. Callers may swap to the
+    availability-fallback model per D1 ratification."""
+
+
+class VoyageUnavailableError(KblError):
+    """Raised when the Voyage embedding API is unreachable (5xx / timeout
+    / connection refused). Step 2 transcript + scan resolvers catch this
+    and downgrade to new-arc semantics (empty ``resolved_thread_paths``)
+    rather than failing the signal — see KBL-B §4.3 degraded-mode contract."""
+
+
+class ResolverError(KblError):
+    """Raised by a Step 2 resolver on unrecoverable errors (malformed
+    payload shape the resolver cannot make sense of, etc.). Soft failures
+    — Voyage unreachable, no matches — do NOT raise; they return empty
+    path lists and the dispatcher advances the signal as a new arc."""
