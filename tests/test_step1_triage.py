@@ -564,7 +564,7 @@ def test_triage_routes_low_score_to_inbox() -> None:
     update_rows = [c for c in conn._calls if "update signal_queue set" in c[0].lower() and "primary_matter" in c[0].lower()]
     assert update_rows
     _, params = update_rows[0]
-    assert "awaiting_inbox_route" in params
+    assert "routed_inbox" in params
 
 
 def test_triage_threshold_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -580,8 +580,8 @@ def test_triage_threshold_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
         triage(signal_id=99, conn=conn)
     update_rows = [c for c in conn._calls if "update signal_queue set" in c[0].lower() and "primary_matter" in c[0].lower()]
     _, params = update_rows[0]
-    # 50 < 70 → inbox
-    assert "awaiting_inbox_route" in params
+    # 50 < 70 → terminal inbox state
+    assert "routed_inbox" in params
 
 
 def test_triage_boundary_at_threshold_routes_to_resolve() -> None:
@@ -651,8 +651,8 @@ def test_triage_parse_error_first_attempt_triggers_retry() -> None:
 
 def test_triage_parse_error_retries_exhausted_writes_stub() -> None:
     """§7 row 3 terminal path: both attempts unparseable → stub written,
-    status advances to ``awaiting_inbox_route``, TWO cost rows both
-    success=False. No raise — pipeline keeps flowing."""
+    status routes to the terminal ``routed_inbox`` state, TWO cost rows
+    both success=False. No raise — pipeline keeps flowing."""
     conn = _triage_conn()
     unparseable = {"response": "garbage", "prompt_eval_count": 1000, "eval_count": 40}
 
@@ -678,7 +678,8 @@ def test_triage_parse_error_retries_exhausted_writes_stub() -> None:
     for _, params in cost_rows:
         assert params[-1] is False
 
-    # Exactly ONE result UPDATE — the stub write. Status = inbox route.
+    # Exactly ONE result UPDATE — the stub write. Status = terminal
+    # ``routed_inbox`` (§4.2 canonical name; not a pre-claim hold).
     update_rows = [
         c for c in conn._calls
         if "update signal_queue set" in c[0].lower()
@@ -686,7 +687,7 @@ def test_triage_parse_error_retries_exhausted_writes_stub() -> None:
     ]
     assert len(update_rows) == 1
     _, params = update_rows[0]
-    assert "awaiting_inbox_route" in params
+    assert "routed_inbox" in params
     # The stub values are the row written.
     assert None in params  # primary_matter=None
     assert "parse_failed" in params

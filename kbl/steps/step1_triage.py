@@ -19,9 +19,14 @@ CHANDA compliance:
 
 State transitions (per task contract):
     awaiting_triage  -->  triage_running  -->  awaiting_resolve
-                                        \\->   awaiting_inbox_route
+                                        \\->   routed_inbox (terminal)
                                                   (score < KBL_PIPELINE_TRIAGE_THRESHOLD
                                                    OR retries-exhausted stub)
+
+``routed_inbox`` is a **terminal** state per §4.2 — the signal has
+reached its final resting place. No subsequent pipeline step claims it;
+the Director triages from the inbox surface directly. Contrast with
+``awaiting_*`` states which are pre-claim holds for the next step.
 
 Threshold default: 40. Override via ``KBL_PIPELINE_TRIAGE_THRESHOLD`` env var.
 
@@ -32,8 +37,8 @@ Parse-failure recovery (§7 row 3 — ``R3 retry (pared prompt); 2 failures → 
     retry]`` marker — on the hypothesis that an over-large ledger block is
     the most likely confound. If the retry ALSO fails, ``triage()`` writes
     a stub ``TriageResult`` (``primary_matter=None``, ``vedana=None``,
-    ``summary="parse_failed"``) and advances the signal to
-    ``awaiting_inbox_route`` — Director-visible, pipeline flows. No
+    ``summary="parse_failed"``) and routes the signal to the terminal
+    ``routed_inbox`` state — Director-visible, pipeline flows. No
     ``TriageParseError`` is raised past the retry budget.
 
     Inv 3 preservation: both attempts share the same ``load_hot_md()`` +
@@ -86,11 +91,15 @@ _LEDGER_FALLBACK = "(no recent Director actions)"
 
 # Parse-failure recovery (§7 row 3). One retry after the initial call —
 # 2 total Ollama calls max per signal. On retries-exhausted, ``triage()``
-# writes a stub + advances to the inbox route rather than raising.
+# writes a stub + routes to the terminal ``routed_inbox`` state rather
+# than raising.
 _RETRY_BUDGET = 1
 _LEDGER_PARED_MARKER = "[LEDGER OMITTED — R3 retry]"
 _STUB_SUMMARY = "parse_failed"
-_INBOX_ROUTE_STATE = "awaiting_inbox_route"
+# Terminal inbox state per §4.2. Used for both low-triage-score routing
+# AND retries-exhausted stub routing — both outcomes put the signal on
+# the Director's inbox surface for manual triage.
+_ROUTED_INBOX_STATE = "routed_inbox"
 
 
 # ---------------------------- result dataclass ----------------------------
@@ -495,8 +504,11 @@ def _write_cost_ledger(
 
 
 def _next_state_for(result: TriageResult, threshold: int) -> str:
+    """Low-score → terminal ``routed_inbox``; threshold or above →
+    ``awaiting_resolve`` for Step 2 pickup. Boundary is inclusive
+    (``score == threshold`` routes to resolve)."""
     if result.triage_score < threshold:
-        return "awaiting_inbox_route"
+        return _ROUTED_INBOX_STATE
     return "awaiting_resolve"
 
 
@@ -578,7 +590,8 @@ def _read_prompt_inputs(
 
 def _build_stub_result() -> TriageResult:
     """The retries-exhausted stub. Director-visible via
-    ``triage_summary='parse_failed'`` + inbox route."""
+    ``triage_summary='parse_failed'`` + routing to the terminal
+    ``routed_inbox`` state."""
     return TriageResult(
         primary_matter=None,
         related_matters=(),
@@ -638,8 +651,9 @@ def triage(
             prompt = _build_pared_prompt(signal_text, glossary, hot_md_block)
 
     # Retries exhausted. Each failed attempt already wrote its own
-    # success=False cost row. Write the stub result + advance to inbox
-    # so the Director sees the signal; pipeline keeps flowing.
+    # success=False cost row. Write the stub result + route to the
+    # terminal ``routed_inbox`` state so the Director sees the signal
+    # on the inbox surface; pipeline keeps flowing.
     stub = _build_stub_result()
-    _write_triage_result(conn, signal_id, stub, _INBOX_ROUTE_STATE)
+    _write_triage_result(conn, signal_id, stub, _ROUTED_INBOX_STATE)
     return stub
