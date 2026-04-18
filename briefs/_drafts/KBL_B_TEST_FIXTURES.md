@@ -284,18 +284,35 @@ Use tolerance assertions on ambiguous fields. Tight equality only on determinist
 
 ---
 
-## 5. Open questions for §10 implementer / AI Head
+## 5. Open questions — RESOLVED by AI Head 2026-04-18
 
-1. **Step 2 + Step 3 run for Layer-2-gated signals?** §4.5 places the gate in Step 4, meaning signals labeled for mrci/ao/etc. still pay Step 2 embedding cost + Step 3 extraction latency before discovering they're out-of-scope. This IS consistent with §4.5 text but wasteful. Either (a) move the gate to Step 2 entry-point, or (b) accept the cost in exchange for richer inbox stub metadata (which Fixture #9 leans on). Recommend flagging for AI Head decision.
+| OQ | Question | Resolution |
+|---|---|---|
+| OQ1 | Step 2 + Step 3 run for Layer-2-gated signals? | **Resolved: gate stays at Step 4** (per §4.5). Fixtures #7 and #9 are correct as-is — Step 2 + Step 3 run, Step 4 routes to inbox with rich metadata for Phase 2 promotion readiness. |
+| OQ2 | Wiki entry naming convention | **Resolved: `wiki/<matter>/YYYYMMDD_<short-title>.md` is canonical.** Fixtures stand. |
+| OQ3 | Fixture #10 (Step 5 cost-cap defer) in §10 pytest? | **Resolved: yes, include in §10 end-to-end pytest.** Mock `kbl_cost_ledger` pre-seeding helper required (already specified in §2 of this draft). |
+| OQ4 | (was bundled into OQ3) | Same resolution as OQ3. |
+| OQ5 | Scan-source fixture absence from the 10? | Standing recommendation: separate dedicated test, not in end-to-end. Awaiting AI Head confirmation; not blocking. |
 
-2. **`resolved_thread_paths` for gated signals** — if gate moves to Step 2 entry-point, #7 and #9 fixtures lose their extraction detail. My current fixtures assume gate-at-Step-4 per §4.5.
+## 6. Coverage gap — awaits Director decision
 
-3. **Wiki entry naming.** I've used `wiki/<matter>/YYYYMMDD_<short-title>.md` convention. KBL-B §7 may specify differently — fixtures should align once §7 commit semantics are authored.
+**No Hagenauer transcript exists in the 50-signal eval corpus.** Fixture #6 (Kitzbühel) is the only full-synthesis-transcript candidate, hence the Phase-2-scope workaround. Director must decide whether to:
+- (a) Add a synthetic Hagenauer transcript to the labeled set for Phase 1 testing, OR
+- (b) Accept that Phase 1 has no E2E transcript-full-synthesis test (only the Phase-2 alternate-scope path), OR
+- (c) Capture a real Hagenauer meeting transcript as a future eval-corpus addition.
 
-4. **Fixture #10 synthetic** — should §10 include an integration test for the cost-cap defer path using mocked ledger rows, or is this fixture a specification artifact for a later "cost observability" test suite? Recommend the former (include in §10 end-to-end), since cost-cap is a Phase-1-blocking risk.
+**No B3 action pending until Director rules.**
 
-5. **Scan-source fixture** — deliberately absent from the 10 because scan is guaranteed-pass at Layer 0 and mechanically flows through triage/extract/classify/opus/sonnet with no branching. A separate 1-fixture test for scan is sufficient; would clutter the 10-signal end-to-end without adding path coverage.
+## 7. CHANDA compliance status (added 2026-04-18 post-CHANDA-adoption)
+
+These fixtures **demonstrate mechanical pipeline compliance only** — they do NOT yet verify the Learning Loop legs (Compounding / Capture / Flow-forward, per CHANDA §2). Specifically:
+
+- **Leg 1 (Compounding):** No fixture asserts that Step 5 Opus reads `wiki/<matter>/*.md` Gold before drafting.
+- **Leg 2 (Capture):** No fixture exercises a Director action that triggers a feedback-ledger write.
+- **Leg 3 (Flow-forward):** No fixture asserts Step 1 reads `hot.md` + feedback ledger.
+
+**Awaits:** AI Head dispatch to upgrade fixtures with a "Loop Compliance" row per card. See `briefs/_reports/B3_chanda_ack_20260418.md` §3 for full audit.
 
 ---
 
-*Drafted 2026-04-18 by B3 for AI Head §10 assembly. No Python executed, no evals run — paper fixtures only. Ready for copy-paste into §10 and for Code follow-up dispatch to wire into pytest.*
+*Drafted 2026-04-18 by B3 for AI Head §10 assembly. No Python executed, no evals run — paper fixtures only. Updated 2026-04-18 with AI Head OQ resolutions + CHANDA compliance status. Ready for copy-paste into §10 and for Code follow-up dispatch to wire into pytest.*
