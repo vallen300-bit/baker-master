@@ -24,6 +24,7 @@
 | **NEW:** Leg 3 hot.md elevation behavior | #11 (synthetic) |
 | **NEW:** Leg 3 ledger correction propagation | #12 (synthetic) |
 | **NEW:** Leg 1 zero-Gold-read-AS-zero-Gold | #13 (synthetic, pairs with #5) |
+| **NEW:** Leg 3 cross-matter elevation (primary OUT, related IN of hot.md ACTIVE) | #14 (synthetic, AI Head OQ3 resolution) |
 
 Every required path is covered at least once. #5 carries two paths (new arc + cross-link) — common for real-world signals.
 
@@ -451,9 +452,56 @@ These three fixtures exist specifically to verify Learning Loop legs fire correc
 
 ---
 
+### Fixture #14 — Cross-matter hot.md elevation (Leg 3, AI Head OQ3 resolution)
+
+**Signal:** Re-uses Fixture #5 (`whatsapp:false_41798986876@c.us_AC0C466E0FF0784F45075A6534AB75B4`, Wertheimer SFO approach, line 36). New pre-condition triggers a different path through Step 1.
+**Paths exercised:** Cross-matter elevation rule — primary_matter is OUT of hot.md ACTIVE, but a `related_matters` entry IS on the ACTIVE list. Confirms STEP1-AMEND-S1 (commit `<TBD>`) widened-match rule fires correctly.
+**Pre-condition:** `~/baker-vault/wiki/hot.md` contains:
+```
+- ACTIVE: hagenauer-rg7 — drawdown sequence pre-Schlussabrechnung (this week)
+- ACTIVE: cupial — Hassa response window (Apr 22 deadline)
+```
+**Crucially:** `wertheimer` is NOT on hot.md ACTIVE. Only `hagenauer-rg7` (which appears in the signal's `related_matters[]`) is.
+
+**Why this fixture exists:** the original AI Head OQ6 deferred this case ("ship with primary-only logic for Phase 1; risk of over-elevation noise"). Resolution flipped 2026-04-18 — cross-matter elevation now fires, single-shot (no stacking). Without Fixture #14, the widened rule would ship untested in §10.
+
+| Step | Expected (Phase 2 scope; Phase 1 Layer-2-gates wertheimer) |
+|---|---|
+| 0 layer0 | pass |
+| 1 triage | primary_matter=`wertheimer`, related_matters=`["hagenauer-rg7"]`, vedana=`opportunity`. Base triage_score ≈ 75-80 (substantive opportunity, but wertheimer not currently pressing). **+0.15 cross-matter elevation** because `hagenauer-rg7` ∈ related_matters AND `hagenauer-rg7` is on hot.md ACTIVE → final triage_score ≈ **90-95** (capped at 100). triage_confidence ≥ 0.85. |
+| 2 resolve | `resolved_thread_paths = []` (no prior wertheimer entries) |
+| 3 extract | normal extraction (Wertheimer SFO, Chanel, JP Morgan orgs) |
+| 4 classify | Phase 2: `full_synthesis` + cross-link flag |
+| 5 opus | Phase 2: fires |
+| 6 sonnet | Phase 2: fires |
+| 7 commit | Phase 2: `wiki/wertheimer/20260403_sfo-chanel-approach.md` (NEW file) + cross-link to `wiki/hagenauer-rg7/_links.md` |
+
+**Loop Compliance (CHANDA Inv 1 + Inv 3):**
+
+| Assertion | Expected | Notes |
+|---|---|---|
+| `hot_md_loaded` | **TRUE** | Hard assert |
+| `feedback_ledger_queried` | **TRUE** | Hard assert |
+| `cross_matter_elevation_fired` | **TRUE** | **The critical OQ3-resolution assertion.** Step 1 must apply +0.15 elevation because `hagenauer-rg7` is in `related_matters` AND on hot.md ACTIVE — even though primary_matter (`wertheimer`) is NOT on hot.md. |
+| `elevation_count` | **1** | **Single-shot rule** — even if BOTH wertheimer AND hagenauer-rg7 had been on hot.md ACTIVE, elevation fires once, not twice. Pytest fails if elevation_count ≥ 2 — that would be the over-elevation-noise failure mode AI Head OQ6 originally guarded against. |
+| `triage_score_observed` | between 88 and 100 | Base ≈ 75-80, +15 elevation, capped at 100. Pytest fails if score < 88 (elevation didn't fire) or score < base + 15 cleanly. |
+| `triage_score_summary_cites_cross_matter` | TRUE | Asserts `summary` field cites the cross-matter steering (e.g., "+15 per hot.md hagenauer-rg7 ACTIVE via related_matters"). Auditable steering chain. |
+| `gold_context_by_matter_loaded` | Phase 1: N/A. Phase 2: **TRUE** for wertheimer (zero-Gold case via #13) | Reuses #13's wertheimer-empty-Gold pre-condition under Phase 2 |
+
+**Variant case worth noting (NOT a separate fixture, just a property of #14):** if hot.md were re-shaped so `hagenauer-rg7` is FROZEN and `wertheimer` is ACTIVE, the rule produces +0.15 - 0.10 = +0.05 net (per §1.2 "If a signal qualifies for BOTH elevation AND suppression, net them"). Pytest can parameterize the hot.md fixture with three states (only-related-active, only-primary-active, mixed-frozen-and-active) to cover the matrix. Not required for v1; a §10 future-work item.
+
+**Rationale:** Without Fixture #14, the cross-matter rule ships verified by spec only (Director's OQ3 ratification) — no test exercises the path. Pytest would green even if Step 1 silently kept the primary-only logic. This fixture guards against that regression and proves the OQ6 RESOLVED claim is real, not just documented.
+
+**B2's recommendation accepted:** new fixture #14 over expanding #11. Reasons:
+1. #11 already pins a specific behavior (hot.md elevation by primary). Expanding it would create a multi-purpose fixture that tests two distinct rules — harder to debug when one fails.
+2. New fixture surfaces the cross-matter case as a NAMED test target. Future readers searching for "cross-matter elevation" land here directly.
+3. Reuses Fixture #5's signal so no new corpus material needed — just a different hot.md pre-condition.
+
+---
+
 ## 2. What the §10 pytest harness needs
 
-To make these 13 fixtures runnable end-to-end, §10 implementation needs:
+To make these 14 fixtures runnable end-to-end, §10 implementation needs:
 
 1. **Labeled-set loader fixture** — pytest can load by `(source, signal_id)` tuple into a `SignalRow` object matching `signal_queue` schema.
 2. **Mock Ollama client** — replay recorded v3 eval outputs (from `outputs/kbl_eval_results_20260418.json`) for triage. Deterministic (temp=0, seed=42) means mocking is safe. **For #11, #12:** mock must produce hot-md-aware / ledger-aware outputs (not just replay v3); see Loop Compliance assertions for the model behavior expected.
@@ -481,13 +529,13 @@ Per the CHANDA ack flag #2 (mechanical-compliance-only fixtures), pytest treats 
 | Category | Count | Notes |
 |---|---|---|
 | Real signals from labeled set | 9 | #1-#9 |
-| Synthetic scenarios | 4 | #10 (cost-cap defer), #11 (hot.md elevation), #12 (ledger correction), #13 (zero-Gold) |
+| Synthetic scenarios | 5 | #10 (cost-cap defer), #11 (hot.md elevation primary-match), #12 (ledger correction), #13 (zero-Gold), #14 (cross-matter elevation) |
 | Email source | 5 | #1, #4, #7, #8, #12 |
-| WhatsApp source | 4 | #3, #5, #11 (synthetic), #13 (re-uses #5 signal) |
+| WhatsApp source | 5 | #3, #5, #11 (synthetic), #13 (re-uses #5), #14 (re-uses #5) |
 | Meeting source | 3 | #2, #6, #9 |
 | Scan source | 0 | Deliberately none — scan NEVER drops at Layer 0 per §2 ratified; tested via a separate dedicated test case, not in end-to-end fixture |
 
-Source distribution roughly matches the 50-signal corpus (25 email / 15 whatsapp / 10 meeting) — fixture is representative. Synthetic-fixture proportion (4/13 ≈ 31%) is justified: every synthetic exists to verify a behavior that no real-corpus signal could verify on its own (cost-cap, hot.md-state-dependent steering, ledger-state-dependent propagation, empty-matter-Gold first-signal case).
+Source distribution roughly matches the 50-signal corpus (25 email / 15 whatsapp / 10 meeting) — fixture is representative. Synthetic-fixture proportion (5/14 ≈ 36%) is justified: every synthetic exists to verify a behavior that no real-corpus signal could verify on its own (cost-cap, hot.md-state-dependent steering, ledger-state-dependent propagation, empty-matter-Gold first-signal case, cross-matter-elevation rule).
 
 ---
 
@@ -542,4 +590,5 @@ Previously (commit `742f4a1`): fixtures verified mechanical pipeline compliance 
 
 *Drafted 2026-04-18 by B3 for AI Head §10 assembly. No Python executed, no evals run — paper fixtures only.*
 *Updated 2026-04-18: AI Head OQ1/2/3 resolutions applied + CHANDA compliance status flagged.*
-*Updated 2026-04-18 (this commit): Loop Compliance rows added per fixture (#1-#10) + 3 new Leg-specific fixtures (#11 hot.md, #12 ledger, #13 zero-Gold). §2 harness needs expanded for new fixtures. §3 budget table updated. §7 CHANDA status flipped from gap-flagged to upgraded. Per Task 2 dispatch (commit `3c78f8c`). Ready for B2 review.*
+*Updated 2026-04-18 (commit `f47e9a5`): Loop Compliance rows added per fixture (#1-#10) + 3 new Leg-specific fixtures (#11 hot.md, #12 ledger, #13 zero-Gold). §2 harness needs expanded for new fixtures. §3 budget table updated. §7 CHANDA status flipped from gap-flagged to upgraded. Per Task 2 dispatch (commit `3c78f8c`). Ready for B2 review.*
+*Updated 2026-04-18 (this commit): Fixture #14 added — cross-matter hot.md elevation (AI Head OQ3 resolution from STEP1-AMEND-S1, dispatched at `082d216`). Confirms Step 1's widened-match elevation rule fires when primary_matter is OUT of hot.md ACTIVE but a `related_matters` entry IS on it. Single-shot rule asserted via `elevation_count == 1`. Path-coverage matrix + budget table + harness needs updated.*

@@ -17,17 +17,22 @@
 
 ```python
 from kbl.slug_registry import active_slugs, describe
-from kbl.loop import load_hot_md, load_recent_feedback, render_ledger_block
-# load_hot_md / load_recent_feedback / render_ledger_block live in
-# kbl/loop.py (B1 ticket — implementation tracked in LOOP-SCHEMA-1 PR #5).
-# Signatures spec'd in §1.4 below; B1 owns implementation.
+from kbl.loop import load_hot_md, load_recent_feedback, render_ledger
+# All three helpers live in kbl/loop.py (B1's LOOP-HELPERS-1, PR #6,
+# merged 2026-04-18 at 6c23d36). Stateless reads — no caching. See §1.4
+# for actual signatures (matched verbatim to PR #6 ship).
 
-def build_step1_prompt(signal_text: str) -> str:
+def build_step1_prompt(signal_text: str, conn) -> str:
     """Build the triage prompt with slug list + descriptions pulled live
     from the registry, hot.md from the vault, and the most recent 20
     feedback-ledger rows. CHANDA Inv 3: Step 1 reads hot.md AND the
     feedback ledger on every pipeline run. No caching. Each call is a
     fresh read.
+
+    `conn` is the live psycopg connection passed in by the Step 1
+    pipeline worker. The caller owns the connection lifecycle (per
+    B1's PR #6 design — `kbl/loop.py` does not open or close
+    connections; it just executes the query).
 
     Returns a fully-rendered prompt string ready for the Ollama call.
     Caller must NOT mutate the returned string."""
@@ -38,14 +43,18 @@ def build_step1_prompt(signal_text: str) -> str:
     )
 
     # CHANDA Inv 3 + Inv 1 reads. Both fail-soft per design:
-    #   hot.md absent → "(no current-priorities cache available)"
-    #   ledger empty  → "(no recent Director actions)"
-    # Inv 1: zero Gold is read AS zero Gold — i.e., the read still
-    # happens; the result merely reports nothing. The read MUST occur
-    # to satisfy the invariant; an empty result is a valid Gold state.
-    hot_md_block          = load_hot_md() or "(no current-priorities cache available)"
-    ledger_rows           = load_recent_feedback(limit=20)
-    feedback_ledger_block = render_ledger_block(ledger_rows) or "(no recent Director actions)"
+    #   hot.md missing → load_hot_md returns None → fallback string
+    #   hot.md empty   → load_hot_md returns ""   → fallback string
+    #     (Both are valid zero-Gold states per CHANDA Inv 1; the `not`
+    #      check below catches both — see B1 PR #6 N1 docstring note.)
+    #   ledger empty   → render_ledger returns ""  → fallback string
+    # Inv 1: the read MUST occur on every call to satisfy the invariant;
+    # an empty result is a valid Gold state, not a fault.
+    hot_md_content        = load_hot_md()
+    hot_md_block          = hot_md_content if hot_md_content else "(no current-priorities cache available)"
+    ledger_rows           = load_recent_feedback(conn, limit=20)
+    rendered              = render_ledger(ledger_rows)
+    feedback_ledger_block = rendered if rendered else "(no recent Director actions)"
 
     return _STEP1_TEMPLATE.format(
         signal=signal_text.replace('"', "'")[:3000],
@@ -114,8 +123,13 @@ Matter slugs (pick ONE for primary_matter whose description best matches the sig
 
 **How to use `hot.md` (steering signal — NOT a hard override):**
 - hot.md is Director's current-priorities cache. In Phase 1 the Director maintains it manually; from Phase 3 the pipeline updates it.
-- If the signal's primary_matter appears in hot.md as actively pressing, **ELEVATE `triage_score` by 0.15 (cap at 1.00 / score 100)**.
-- If the signal's primary_matter is marked ACTIVELY FROZEN in hot.md, **SUPPRESS `triage_score` by 0.10**.
+- **ELEVATE `triage_score` by 0.15 (cap at 100)** if ANY of the following match an ACTIVE entry in hot.md:
+  - the signal's `primary_matter`, OR
+  - any slug in the signal's `related_matters` list, OR
+  - any matter slug appearing as a whole word in the signal text.
+  Apply the elevation **once per signal** even if multiple matches occur — do NOT stack a +0.15 per match. (E.g., a Wertheimer signal mentioning RG7 where BOTH wertheimer AND hagenauer-rg7 are on hot.md ACTIVE → still +0.15 total, not +0.30.)
+- **SUPPRESS `triage_score` by 0.10** under the SAME match logic against ACTIVELY FROZEN entries (primary OR related OR slug-mention; single-shot, no stacking).
+- If a signal qualifies for BOTH elevation AND suppression (one matter on ACTIVE, another on FROZEN), **net them**: elevation wins on +0.05 (0.15 − 0.10), but cite both in `summary` so the steering is auditable.
 - hot.md is contextual — even a routine signal on a hot matter still scores its content honestly first; only THEN apply the elevation. A pure newsletter remains routine even if it touches a hot matter.
 - If hot.md says "(no current-priorities cache available)" — apply no elevation/suppression. This is a valid zero-Gold state per Inv 1, not a fault.
 
@@ -145,34 +159,57 @@ Output the JSON now."""
 
 **Q2 Wish Test:** This change serves the wish (compounding judgment via machine throughput → Step 1 must read what Director has decided + currently cares about) AND engineering convenience (it makes Step 1 self-contained / reproducible per signal). Both legs of Q2 satisfied; tradeoff: per-call latency for two file/DB reads (estimated +50-200ms per signal, dominated by ledger query). Latency note: hot.md is small (<10KB), ledger is bounded at 20 rows. Worst case +200ms is acceptable for the loop integrity gain.
 
-### 1.4 Helper signatures (B1's `kbl/loop.py` ticket)
+### 1.4 Helper signatures (B1's `kbl/loop.py` — PR #6 `6c23d36`, merged 2026-04-18)
+
+These are the **actual shipped signatures** from `kbl/loop.py` per LOOP-HELPERS-1. The Step 1 builder above is wired against them verbatim.
 
 ```python
 def load_hot_md(path: str | None = None) -> str | None:
-    """Read $BAKER_VAULT_PATH/wiki/hot.md (or `path` if given). Return
-    the file's text content (no parsing — model reads it raw), or None
-    if the file is absent or empty.
+    """Read $BAKER_VAULT_PATH/wiki/hot.md (or `path` if given). Returns:
+    File contents as str, or None if the file does not exist (valid
+    zero-Gold state per CHANDA Inv 1).
 
-    Inv 1 implication: this function MUST attempt the read on every
-    call. Caching is forbidden — Director may edit hot.md between
-    pipeline ticks and the next signal must see the new state."""
+    Caller note (B2 PR #6 N1): empty-file case returns "" (not None).
+    Both '' and None are valid zero-Gold states — caller should use
+    `if not content:` to capture both, NOT `if content is None:`.
 
-def load_recent_feedback(limit: int = 20) -> list[dict]:
+    Inv 1 implication: this function attempts the read on every call.
+    Caching is forbidden — Director may edit hot.md between pipeline
+    ticks and the next signal must see the new state."""
+
+def load_recent_feedback(conn, limit: int | None = None) -> list[dict]:
     """SELECT * FROM feedback_ledger ORDER BY created_at DESC LIMIT :limit.
-    Returns a list of row dicts (created_at, action, matter, signal_id,
-    detail). Empty list if table is empty or unreachable.
+    Returns list of row dicts (id, created_at, action_type, target_matter,
+    target_path, signal_id, payload, director_note). Empty list if
+    table is empty or unreachable (LoopReadError raised on hard DB error).
 
-    Inv 1 implication: this function MUST attempt the query on every
-    call. Caching is forbidden."""
+    `conn` is a live psycopg connection. Caller owns lifecycle —
+    helper does not open or close. `limit` defaults to None which uses
+    the env-var default (KBL_LEDGER_DEFAULT_LIMIT, set to 20 in
+    production env; explicit limit=20 from Step 1 makes it deterministic
+    regardless of env).
 
-def render_ledger_block(rows: list[dict]) -> str:
+    Inv 1 implication: this function attempts the query on every call.
+    Caching is forbidden."""
+
+def render_ledger(rows: list[dict]) -> str:
     """Format a list of ledger rows for in-prompt rendering. Each row
     becomes a one-line summary like:
        2026-04-17 17:42 | promote | hagenauer-rg7 | sig:abc123… | "EH letter draft → wiki/hagenauer-rg7/2026-02-04..."
-    Returns "" if rows is empty."""
+
+    Returns "" if rows is empty. Multi-line `director_note` values are
+    collapsed to single line via `_collapse()` whitespace normalization.
+    Length not capped (B2 PR #6 N2 — fine for Phase 1 with curated notes;
+    revisit if auto-generated payloads land in the ledger)."""
+
+class LoopReadError(RuntimeError):
+    """Raised on hard DB error during load_recent_feedback. Mirrors
+    SlugRegistryError + Layer0RulesError pattern. Step 1 should treat
+    as availability fallback: log WARN, render '(ledger unreachable)',
+    proceed without ledger steering."""
 ```
 
-**These signatures are illustrative only — implementation lives in B1's `LOOP-SCHEMA-1` PR #5. B3 does not commit `kbl/loop.py`.**
+**These signatures match the merged PR #6 verbatim.** B3 does not commit `kbl/loop.py`. If B1's API drifts in a future PR, this section gets re-amended.
 
 ### 1.5 Worked examples — hot.md + feedback ledger steering in action
 
@@ -291,6 +328,8 @@ All three retained in production prompt.
 | **Added `{hot_md_block}` + `{feedback_ledger_block}` template placeholders + helper-function reads on every call** | **CHANDA Inv 3 compliance.** Step 1 reads `hot.md` + feedback ledger every run. Without this, the Learning Loop's Leg 3 (Flow-forward) is broken — Director's current focus and prior corrections never reach future triage decisions. Authorized under Director's amend-now posture (2026-04-18) following B3 ack flag at `e9eb04e`. Per CHANDA §5 Q1 — explicit Leg 3 modification, pre-approved. |
 | **Added "How to use hot.md" + "How to use the feedback ledger" sections in template body** | Without explicit usage rules, the model would treat the new context blocks as decoration. Rules quantify the elevation/suppression deltas (hot.md ±0.10-0.15) and pattern-recognition behavior (ledger correction propagation). |
 | **Added post-REDIRECT cross-link section in `related_matters` rules** | B2 ratified Step 6 REDIRECT verdict 2026-04-18 — Step 6 becomes deterministic `finalize()`, no LLM. Cross-link reasoning ("should this signal point to another matter?") now lives ONLY in Step 1's `related_matters[]`. The prompt explicitly notes this authority shift so the model treats `related_matters` decisions as final, not provisional. |
+| **(STEP1-AMEND-S1) Cross-matter elevation rule** | hot.md ELEVATE/SUPPRESS rules widened from `primary_matter`-only to `primary_matter OR related_matters OR slug-mention in signal text`. Single-shot, no stacking. AI Head OQ3 resolution. Closes the case where a Wertheimer signal mentioning RG7 fails to elevate even though RG7 is on hot.md ACTIVE. See §1.2 "How to use hot.md" + KBL_B_TEST_FIXTURES.md Fixture #14. |
+| **(STEP1-AMEND-S2) `kbl/loop.py` API alignment** | Builder + §1.4 signatures updated to match B1's PR #6 ship (merged 2026-04-18 at `6c23d36`): `render_ledger` (no `_block` suffix), `load_recent_feedback(conn, limit=None)` (takes `conn` arg, env-var default for limit). `build_step1_prompt(signal_text, conn)` — caller owns connection lifecycle. |
 
 ### 2.3 What's NOT in this prompt
 
@@ -374,9 +413,10 @@ Ledger row: `step='triage'`, `model='ollama_gemma4'`, `input_tokens`, `output_to
 
 5. **Ledger sampling beyond 20 rows.** `load_recent_feedback(limit=20)` is fixed. If Director acts on 50 signals in a busy day, the prompt only sees the last 20 — earlier corrections fall off. Recommend keeping at 20 for Phase 1 (latency control), revisit at Phase 1 close-out if pattern-recognition is sub-optimal. Alternative: weight by recency × matter-relevance (preferentially keep ledger rows touching the same matter as the current signal). Deferred to Phase 2.
 
-6. **`hot.md` cross-matter signals.** If a signal is `wertheimer/opportunity` but mentions RG7 (in `related_matters`), and `hagenauer-rg7` is on hot.md ACTIVE — should the elevation apply? Current prompt rule says elevation triggers on `primary_matter` only. Could expand to "elevate by 0.10 if `primary_matter` OR any `related_matters` is on hot.md ACTIVE." Deferred — risk of over-elevation noise; ship with primary-only logic for Phase 1.
+6. **`hot.md` cross-matter signals** — ~~Deferred~~ **RESOLVED by AI Head 2026-04-18.** A signal is `wertheimer/opportunity` mentioning RG7 (in `related_matters`), and `hagenauer-rg7` is on hot.md ACTIVE → **elevation applies.** Cross-matter elevation rule now spec'd in §1.2 "How to use `hot.md`" — match logic widened from `primary_matter` only to `primary_matter OR related_matters OR slug-mention in signal text`. Over-elevation noise mitigated by **single-shot rule** (apply +0.15 once per signal even if multiple matches occur — no stacking). Same widened-match shape applies to the FROZEN suppression rule. See §1.2 for the exact ratified rule + worked example for the cross-matter case in `KBL_B_TEST_FIXTURES.md` Fixture #14.
 
 ---
 
 *Drafted 2026-04-18 by B3 for AI Head §6 assembly. No evals run (scope guardrail). Ready for copy-paste into KBL-B §6.*
-*Amended 2026-04-18 (commit pending) — Inv 3 compliance: hot.md + feedback ledger reads added to every Step 1 invocation. Post-REDIRECT cross-link weight clarified. Director pre-approved amend-now per CHANDA §5 Q1.*
+*Amended 2026-04-18 — Inv 3 compliance: hot.md + feedback ledger reads added to every Step 1 invocation. Post-REDIRECT cross-link weight clarified. Director pre-approved amend-now per CHANDA §5 Q1.*
+*Amended 2026-04-18 (STEP1-AMEND-S1+S2 dispatched at `082d216`) — (S1) cross-matter elevation rule applied + OQ6 RESOLVED + Fixture #14 cross-linked; (S2) `kbl/loop.py` API alignment to PR #6 (`render_ledger`, `load_recent_feedback(conn, limit)`, `LoopReadError`). Ready for B2 re-review (third cycle on this file).*
