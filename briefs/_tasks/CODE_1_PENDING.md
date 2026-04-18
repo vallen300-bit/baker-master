@@ -2,101 +2,82 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (terminal instance)
-**Previous:** STEP1-TRIAGE-IMPL shipped as PR #8. PR #7 REDIRECT with 1 should-fix (phone trunk prefix).
+**Previous:** PR #7 phone fix + PR #9 LOOP-GOLD-READER-1 shipped. PR #9 merged at `c95db55`. PR #7 awaits B2 phone-delta re-verify. Idle since.
 **Task posted:** 2026-04-18
-**Status:** OPEN — two items in sequence
+**Status:** OPEN
 
 ---
 
-## Task A (small, now): PR #7 Phone Trunk-Prefix Fix
+## Task: STEP2-RESOLVE-IMPL — Source-Specific Thread/Arc Resolver
 
-**Source:** `briefs/_reports/B2_pr7_review_20260418.md` S1
-
-### What
-
-In `baker/director_identity.py`, the digit-only normalizer currently handles `+41 79 960 50 92`, `+41799605092`, `41799605092@c.us` — but misses the `0041` international trunk-prefix form (European dial-convention alternative to `+41`).
-
-**Fix:** after digit extraction, if the result starts with `00` followed by country code, strip the leading `00`. One-line addition. Add parametrized test case `0041799605092` → canonical `41799605092`.
-
-### Branch
-
-Amend the `layer0-impl` branch (PR #7 open), push. B2 re-verifies via 5-min delta.
-
-### Dispatch back
-
-> B1 PR #7 S1 phone trunk-prefix fix applied — head `<SHA>`, <N>/<N> tests green. Ready for B2 re-verify.
-
----
-
-## Task B (medium, after Task A): LOOP-GOLD-READER-1 — `load_gold_context_by_matter` helper
-
-**Why now:** STEP5-OPUS-PROMPT §1.4 (B3 draft at `7ea63c6`) references `load_gold_context_by_matter(matter, vault_path=None)` as an input block. B3 framed as deployment-blocker (not draft-review blocker) per their OQ5. Step 5 can't fire without it. Same SLUGS-1 / LOOP-HELPERS-1 loader-style shape.
+**Why now:** All dependencies ready. Step 1 triage writes `primary_matter` and `related_matters` (PR #8). Layer 0 upstream (PR #7). LOOP-GOLD-READER-1 for downstream Step 5 (PR #9 merged). Step 2 is the next pipeline unit. Spec ratified in KBL-B §4.3.
 
 ### Scope
 
 **IN**
-- New helper in `kbl/loop.py` (extending existing module):
 
-```python
-def load_gold_context_by_matter(matter: str, vault_path: str | None = None) -> str:
-    """Load all Gold wiki entries under baker-vault/wiki/<matter>/ into a single prompt-insertable block.
+1. **`kbl/steps/step2_resolve.py`** — source-dispatched resolver
+   - Strategy pattern: one `Resolver` per source
+   - Public: `resolve(signal_id, conn) -> list[str]` — returns resolved vault-relative paths
+   - State transitions: `awaiting_resolve` → `resolve_running` → `awaiting_extract` (or `resolve_failed`)
+   - Writes: `signal_queue.resolved_thread_paths` (JSONB array)
+   - Degraded-mode behavior: on Voyage API unreachable for transcript/scan sources → log WARN, write empty array (new-thread semantics), advance to `awaiting_extract` (do NOT fail the signal)
 
-    vault_path: override `$BAKER_VAULT_PATH`. Required via env var otherwise.
-    matter: the primary_matter slug (canonical; caller normalizes via slug_registry if needed).
+2. **`kbl/resolvers/email.py`** — metadata resolver
+   - Input: `payload->>'email_message_id'`, `payload->>'in_reply_to'`, `payload->'references'`, `payload->>'subject'`
+   - Walk `in_reply_to` chain via `signal_queue.payload` lookups (same thread = same `in_reply_to`/`references` graph)
+   - Fall back to Subject `Re:` normalization if no header graph match
+   - Output: up to 3 vault paths from `wiki/<primary_matter>/*.md` where matching signals' committed paths exist
 
-    Returns:
-      A concatenated Markdown block with page-break separators:
+3. **`kbl/resolvers/whatsapp.py`** — metadata resolver
+   - Input: `payload->>'chat_id'`, `payload->>'sent_at'`
+   - Same `chat_id` + last-90-day window + same `primary_matter` = same thread
+   - Output: vault paths of most recent N prior committed signals in chat
 
-        <!-- GOLD: wiki/<matter>/2026-04-01_topic.md -->
-        ---
-        <frontmatter>
-        ---
-        <body>
+4. **`kbl/resolvers/transcript.py`** — embedding resolver
+   - Input: `raw_content`, `primary_matter`
+   - Compute Voyage embedding (voyage-3)
+   - Query `wiki/<primary_matter>/*.md` frontmatter-stored embeddings (IF stored — else compute on-the-fly for Phase 1)
+   - Return top-3 with cosine similarity ≥ `KBL_STEP2_RESOLVE_THRESHOLD` (default 0.75, env-configurable)
+   - Degraded-mode: Voyage 500/timeout → empty list, log WARN
 
-        <!-- GOLD: wiki/<matter>/2026-04-03_other.md -->
-        ...
+5. **`kbl/resolvers/scan.py`** — embedding resolver
+   - Same as transcript but scoped to `payload->>'director_context_hint'` if present
 
-      Returns "" (empty string) if the matter directory has no Gold entries.
-      Empty return is Inv 1 compliant: zero Gold is read AS zero Gold.
+6. **`kbl/voyage_client.py`** (if not exists) — HTTP client wrapper for `voyage-3`
+   - Single `embed(text: str) -> list[float]`
+   - Timeout 10s
+   - Raises `VoyageUnavailableError` on 5xx / timeout
+   - Env: `VOYAGE_API_KEY` (already in KBL-A secrets)
 
-    Raises:
-      LoopReadError on IO/permission errors.
+7. **Tests** — `tests/test_step2_resolve.py`:
+   - Email resolver: In-Reply-To graph walk (3-signal chain → 2 prior paths)
+   - Email resolver: no match → `[]`
+   - WhatsApp resolver: same chat_id → prior N paths
+   - Transcript resolver: mocked Voyage client, 3-match happy path
+   - Transcript resolver: Voyage unavailable → degraded mode (empty list + WARN log)
+   - Scan resolver: same as transcript
+   - `resolve()` dispatcher: routes by source correctly
+   - Invariant: `resolved_thread_paths` always array (never None), always vault-relative starting `wiki/`
 
-    Filter: only files with frontmatter `voice: gold`. Silver entries are EXCLUDED.
-    Ordering: sorted by filename (date-prefix convention → chronological).
-    """
-```
+### Cost ledger
 
-- Unit tests in `tests/test_loop_gold_reader.py`:
-  - Happy path: 3 Gold files in matter dir → concatenated with page-breaks, correct order
-  - Zero-Gold case: empty dir → returns `""` (not raise, not None)
-  - Mixed Silver + Gold: Silver filtered out
-  - Missing matter dir (new matter, no dir yet) → returns `""` (zero-Gold equivalent)
-  - Permission error → raises `LoopReadError`
-  - Malformed frontmatter (no `voice:` key) → treated as Silver, excluded
-- Fixture vault layout in `tests/fixtures/gold_reader_vault/`:
-  - `wiki/hagenauer-rg7/2026-04-01_kick_off.md` (voice: gold)
-  - `wiki/hagenauer-rg7/2026-04-03_hassa_reply.md` (voice: gold)
-  - `wiki/hagenauer-rg7/2026-04-05_draft.md` (voice: silver)
-  - `wiki/mo-vie/2026-04-02_egger_sync.md` (voice: gold)
-
-**OUT**
-- Writer side (any Step 5/6 write logic) — separate tickets
-- Caching — Step 5 reads per-call; if profiling shows hot-path cost, add caching in a follow-up
-- Frontmatter schema validation — just look for `voice: gold`; full Pydantic is Step 6 territory
+- Email + WhatsApp: no row (metadata-only, zero cost)
+- Transcript + Scan: one row per call, `step='resolve'`, `model='voyage-3'`, `input_tokens` (approx = chars / 4), `cost_usd ≈ 0.00005`
 
 ### CHANDA pre-push
 
-- **Q1 Loop Test:** This helper IS Leg 1 (Gold-read-by-matter). Creating it is the enabler of Inv 1 compliance in Step 5. Cite in PR body — this is LOOP-CRITICAL infra, treat with the gravity CHANDA §2 gives it.
-- **Q2 Wish Test:** pure wish (Leg 1 pattern realization). Pass.
-- **Inv 1:** zero-Gold → empty string (tested explicitly).
+- **Q1:** Step 2 is downstream of Step 1 reads (Leg 3). It does not touch the reading pattern itself. Pass.
+- **Q2:** serves wish (arc continuity = loop compounding). Pass.
+- **Inv 1:** empty resolved_thread_paths = valid zero-Gold read for new-arc signals. Test explicitly.
+- **Inv 9:** resolver READS baker-vault only. No writes (that's Step 7). Verify.
 
 ### Branch + PR
 
-- Branch: `loop-gold-reader-1`
+- Branch: `step2-resolve-impl`
 - Base: `main`
-- PR title: `LOOP-GOLD-READER-1: kbl/loop.py load_gold_context_by_matter`
-- Target PR: #9
+- PR title: `STEP2-RESOLVE-IMPL: source-specific thread/arc resolver`
+- Target PR: #10
 
 ### Reviewer
 
@@ -104,12 +85,12 @@ B2.
 
 ### Timeline
 
-~30-45 min.
+~75-105 min (4 resolvers + Voyage client wrapper + tests).
 
 ### Dispatch back
 
-> B1 LOOP-GOLD-READER-1 shipped — PR #9 open, branch `loop-gold-reader-1`, head `<SHA>`, <N>/<N> tests green. Ready for B2 review.
+> B1 STEP2-RESOLVE-IMPL shipped — PR #10 open, branch `step2-resolve-impl`, head `<SHA>`, <N>/<N> tests green. Ready for B2 review.
 
 ---
 
-*Posted 2026-04-18 by AI Head. B2 reviewing PR #8. B3 applying STEP5-OPUS S1 rename.*
+*Posted 2026-04-18 by AI Head. B2 on REDIRECT fold review (Task D). B3 idle.*
