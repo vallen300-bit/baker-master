@@ -375,14 +375,15 @@ First record for `hagenauer-rg7` in the wiki. No prior Gold context. This entry 
 **Input blocks:**
 
 ```
-primary_matter:        mo-vie
-matter purpose:        Mandarin Oriental Vienna hotel — Brisen-owned, MOHG-operated
-related_matters:       theailogy
+primary_matter:        mo-vie-am
+matter purpose:        Mandarin Oriental Vienna — Asset Management (hotel ops, F&B,
+                       residences, service, occupancy). Distinct from mo-vie-exit.
+related_matters:       m365
 vedana:                opportunity
 triage_summary:        MOVIE AI platform scoping — elevated per Director's hot.md focus on
-                       mo-vie; integrates with theailogy.
+                       mo-vie-am; intersects with the m365 migration initiative.
 
-resolved_thread_paths: wiki/mo-vie/2026-01-28_ai-platform-scoping.md
+resolved_thread_paths: wiki/mo-vie-am/2026-01-28_ai-platform-scoping.md
 
 extracted_entities:
   people: (none — summary format, no direct attributions)
@@ -394,18 +395,19 @@ extracted_entities:
                 Dimitry: recruit DB architect + programmer
 
 gold_context_block:
-  --- wiki/mo-vie/2026-01-28_ai-platform-scoping.md created 2026-01-28T14:00:00Z ---
+  --- wiki/mo-vie-am/2026-01-28_ai-platform-scoping.md created 2026-01-28T14:00:00Z ---
   # MO Vienna AI/data platform — initial scoping
   ...3 paragraphs of Director-promoted content re initial vendor scan,
   Data Vision dissatisfaction, and intent to build in-house...
 
 hot_md_block:
-  - ACTIVE: mo-vie — AI platform build
-  - ACTIVE: hagenauer-rg7
-  - BACKBURNER: theailogy
+  - ACTIVE: mo-vie-am — Residence #8 offer, residences sales website, AI platform
+  - ACTIVE: hagenauer-rg7 — GC takeover, administrator defence, press containment
+  - ACTIVE: m365 — kick off Microsoft 365 migration
+  - WATCH: mo-vie-exit — start sale process via Laura Wenk + MO
 
 feedback_ledger_block:
-  2026-02-01 11:20 | promote | mo-vie | sig:2101abc | "initial scoping — promoted as-is"
+  2026-02-01 11:20 | promote | mo-vie-am | sig:2101abc | "initial scoping — promoted as-is"
 
 signal_raw_text:       [44min meeting summary, ~2400 chars]
 iso_now:               2026-02-04T18:47:00Z
@@ -420,10 +422,10 @@ voice: silver
 author: pipeline
 created: 2026-02-04T18:47:00Z
 source_id: meeting:01KGMW7QJH530CT89AGFHYGTEE
-primary_matter: mo-vie
-related_matters: [theailogy]
+primary_matter: mo-vie-am
+related_matters: [m365]
 vedana: opportunity
-thread_continues: [wiki/mo-vie/2026-01-28_ai-platform-scoping.md]
+thread_continues: [wiki/mo-vie-am/2026-01-28_ai-platform-scoping.md]
 money_mentioned: [3000 GBP]
 ---
 
@@ -440,16 +442,16 @@ This 44-minute meeting extends the Jan 28 scoping thread. Three additions since 
 - Dimitry: source DB architect + programmer (no deadline stated).
 
 ## Continues
-Extends `wiki/mo-vie/2026-01-28_ai-platform-scoping.md`. The Jan 28 entry introduced dissatisfaction with Data Vision and the intent to build; this entry quantifies the replacement case and names the two hires needed to execute. No contradiction with the prior Gold.
+Extends `wiki/mo-vie-am/2026-01-28_ai-platform-scoping.md`. The Jan 28 entry introduced dissatisfaction with Data Vision and the intent to build; this entry quantifies the replacement case and names the two hires needed to execute. No contradiction with the prior Gold.
 
 **Context**
-Director's current focus on `mo-vie` (hot.md ACTIVE) elevated this meeting's triage — the Feb 1 promotion of the scoping entry confirms the matter is on the Gold track. `theailogy` cross-referenced because the proposed vertical-AI work overlaps the AI playbook initiative.
+Director's current focus on `mo-vie-am` (hot.md ACTIVE) elevated this meeting's triage — the Feb 1 promotion of the scoping entry confirms the matter is on the Gold track. `m365` cross-referenced because the Microsoft 365 migration is the live tech-infrastructure thread in hot.md and the proposed data-platform work runs through the same identity / tenancy stack.
 
 ## Cross-references
-- see wiki/theailogy/ — vertical-AI methodology overlap
+- see wiki/m365/ — M365 migration intersects data-platform identity + tenancy
 ```
 
-**Rationale:** Body explicitly continues prior Gold (`## Continues` section with path). hot.md acknowledgement is one sentence in Context. Ledger `promote` event is acknowledged via "Feb 1 promotion … confirms the matter is on the Gold track" — this is how ledger pattern propagates WITHOUT parroting. `money_mentioned` frontmatter surfaces the £3K figure. `related_matters: [theailogy]` triggers the `## Cross-references` bullet. No contradiction with prior Gold, so no ⚠ line.
+**Rationale:** Body explicitly continues prior Gold (`## Continues` section with path). hot.md acknowledgement is one sentence in Context. Ledger `promote` event is acknowledged via "Feb 1 promotion … confirms the matter is on the Gold track" — this is how ledger pattern propagates WITHOUT parroting. `money_mentioned` frontmatter surfaces the £3K figure. `related_matters: [m365]` triggers the `## Cross-references` bullet. No contradiction with prior Gold, so no ⚠ line. (Cross-link swapped from the retired `theailogy` slug — v9 slugs.yml fold.)
 
 ### Example 3 — Cross-matter WhatsApp (Wertheimer primary, hot.md-linked secondary)
 
@@ -462,11 +464,11 @@ Director's current focus on `mo-vie` (hot.md ACTIVE) elevated this meeting's tri
 ```
 primary_matter:        wertheimer
 matter purpose:        Wertheimer family office — UHNW counterparty, exploratory
-related_matters:       mo-vie, balducci
+related_matters:       mo-vie-am, balducci
 vedana:                opportunity
-triage_summary:        Wertheimer SFO approach; elevated per hot.md (wertheimer ACTIVE) +
-                       slug-mention of RG7 in text (hagenauer-rg7 ACTIVE, cross-matter
-                       single-shot elevation applied per STEP1-S1).
+triage_summary:        Wertheimer SFO approach; elevated per hot.md (wertheimer slug-mention
+                       upstream of signal) + slug-mention of RG7 in text (hagenauer-rg7
+                       ACTIVE, cross-matter single-shot elevation applied per STEP1-S1).
 
 resolved_thread_paths: (none — new thread)
 
@@ -481,9 +483,9 @@ extracted_entities:
 gold_context_block:    (no prior Gold entries for this matter)
 
 hot_md_block:
-  - ACTIVE: wertheimer — ongoing intro cycle
-  - ACTIVE: hagenauer-rg7 — drawdown sequence
-  - BACKBURNER: mo-vie
+  - ACTIVE: hagenauer-rg7 — GC takeover, administrator defence, press containment
+  - ACTIVE: mo-vie-am — Residence #8 offer, residences sales website, AI platform
+  - WATCH: mo-vie-exit — start sale process via Laura Wenk + MO
 
 feedback_ledger_block:
   2026-04-15 17:30 | promote | wertheimer | sig:44aa01 | "first WG message — accepted"
@@ -502,7 +504,7 @@ author: pipeline
 created: 2026-04-17T09:12:00Z
 source_id: whatsapp:false_41798986876@c.us_AC0C466E0FF0784F45075A6534AB75B4
 primary_matter: wertheimer
-related_matters: [mo-vie, balducci]
+related_matters: [mo-vie-am, balducci]
 vedana: opportunity
 ---
 
@@ -518,14 +520,14 @@ An intermediary with a meeting scheduled next week at Wertheimer's family office
 - Dimitry: advise the intermediary on the RG7 framing — what dimension of RG7 (non-flats) is the right positioning for a high-liquidity UHNW buyer.
 
 **Context**
-Director's current focus (`hot.md`: `wertheimer` ACTIVE, `hagenauer-rg7` ACTIVE) elevated the triage — both the primary matter and the RG7 mention in the signal independently qualify for elevation, applied single-shot per the cross-matter rule. This is the opening Gold-track record for `wertheimer`; the Apr 15 promotion of the first Wertheimer message in the ledger confirms the matter is live. No prior Gold context for `wertheimer` — treat as the opening record for strategic framing decisions.
+Director's current focus (`hot.md`: `hagenauer-rg7` ACTIVE, `mo-vie-am` ACTIVE) elevated the triage — the RG7 mention in the signal text qualifies for cross-matter elevation against the hagenauer-rg7 ACTIVE entry, applied single-shot per the rule. This is the opening Gold-track record for `wertheimer`; the Apr 15 promotion of the first Wertheimer message in the ledger confirms the matter is live. No prior Gold context for `wertheimer` — treat as the opening record for strategic framing decisions.
 
 ## Cross-references
-- see wiki/mo-vie/ — SFO would plausibly be introduced to the hotel asset alongside RG7
+- see wiki/mo-vie-am/ — SFO would plausibly be introduced to the hotel asset alongside RG7
 - see wiki/balducci/ — prior intermediary pattern
 ```
 
-**Rationale:** Zero-Gold on `wertheimer` → opening-record tone in Context. hot.md elevation acknowledged, and the cross-matter single-shot rule is referenced by name so the Director can trace the steering. Ledger `promote` event referenced without copying content. `related_matters: [mo-vie, balducci]` from Step 1 is honored verbatim as frontmatter + cross-refs — the prompt does NOT second-guess the Step 1 cross-link choice (post-REDIRECT contract). Note that `hagenauer-rg7` is NOT in `related_matters` despite the RG7 text mention — that's a Step 1 classification decision and Step 5 respects it; the RG7 mention enters the narrative as signal content, not as a cross-matter link.
+**Rationale:** Zero-Gold on `wertheimer` → opening-record tone in Context. hot.md elevation acknowledged, and the cross-matter single-shot rule is referenced by name so the Director can trace the steering. Ledger `promote` event referenced without copying content. `related_matters: [mo-vie-am, balducci]` from Step 1 is honored verbatim as frontmatter + cross-refs — the prompt does NOT second-guess the Step 1 cross-link choice (post-REDIRECT contract). Note that `hagenauer-rg7` is NOT in `related_matters` despite the RG7 text mention — that's a Step 1 classification decision and Step 5 respects it; the RG7 mention enters the narrative as signal content, not as a cross-matter link.
 
 ---
 

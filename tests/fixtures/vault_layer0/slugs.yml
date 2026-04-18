@@ -1,0 +1,21 @@
+version: 1
+updated_at: 2026-04-18
+
+# Fixture for Layer 0 evaluator short-slug tests.
+# - `ao` (2 chars canonical) — must require alias to fire topic override
+# - `movie` (5 chars canonical) — canonical may fire; also has aliases
+# - `gamma` — no aliases; used as negative test
+
+matters:
+  - slug: ao
+    status: active
+    description: "Andrey Oskolkov personal matters"
+    aliases: [oskolkov, andrey]
+  - slug: movie
+    status: active
+    description: "MO Vienna hotel operation"
+    aliases: ["mandarin oriental", "mo vienna"]
+  - slug: gamma
+    status: active
+    description: "Gamma test matter"
+    aliases: []

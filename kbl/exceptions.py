@@ -2,11 +2,6 @@
 
 Individual modules may raise more specific subclasses; callers that want
 to catch any KBL pipeline failure can catch ``KblError``.
-
-PR-coexistence note: this file is written identically across PR #8
-(Step 1), PR #10 (Step 2), and PR #11 (Step 3). Whichever lands first
-provides the baseline; later PRs rebase cleanly because every class here
-is net-additive and declarations are stable.
 """
 from __future__ import annotations
 

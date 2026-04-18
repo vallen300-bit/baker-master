@@ -2,73 +2,65 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (terminal instance)
-**Previous:** STEP2-RESOLVE-IMPL shipped as PR #10 at `d735136`. Idle since.
-**Task posted:** 2026-04-18
-**Status:** OPEN
+**Previous:** PR8-S2-FIX shipped at `067e29c`. B2 review delta pending. Director ratified path (b) on PR #12 S1.
+**Task posted:** 2026-04-18 (late evening)
+**Status:** OPEN — tiny rename amend on existing PR #8 branch
 
 ---
 
-## Task: STEP3-EXTRACT-IMPL — Gemma Structured Entity Extraction
+## Task: PR8-S1-RENAME — `awaiting_inbox_route` → `routed_inbox` canonical
 
-**Why now:** Step 2 shipped (PR #10 pending review). Step 3 is the next pipeline unit. Spec ratified in KBL-B §4.4. Prompt ratified (B3-authored, B2-reviewed READY at `briefs/_drafts/KBL_B_STEP3_EXTRACT_PROMPT.md`).
+**Source:** B2's PR #12 review @ `1feebf7` (S1) + Director ratification of option (b).
+
+### Why
+
+Your PR8-S2-FIX advances low-score triage signals to `'awaiting_inbox_route'`, but the KBL-B brief §4.2 canonical terminal state is `'routed_inbox'`. PR #12 (now MERGED at `68db3568`) includes `routed_inbox` in the CHECK set but NOT `awaiting_inbox_route`. Your choice was a silent spec drift from the brief.
+
+Director ratified option (b): rename PR #8's writes to `'routed_inbox'` instead of adding a 35th CHECK value. Bundles cleanly with B2's pending S2 delta review — single B1 commit closes both S1 (rename) + S2 (already fixed in your PR8-S2-FIX).
 
 ### Scope
 
 **IN**
 
-1. **`kbl/prompts/step3_extract.txt`** — extract template text from `briefs/_drafts/KBL_B_STEP3_EXTRACT_PROMPT.md`. File-based load pattern per Inv 10.
+1. **`kbl/steps/step1_triage.py`** — rename every occurrence of `'awaiting_inbox_route'` (string literal + any constant like `_STATE_INBOX_ROUTE` if you defined one) → `'routed_inbox'`. Semantic note: `routed_inbox` is **terminal** (not `awaiting_*`), so clarify the docstring / comments around the state transition to reflect "signal reaches terminal inbox state" rather than "signal awaits inbox routing."
 
-2. **`kbl/steps/step3_extract.py`** — the evaluator
-   - `build_prompt(signal_text, source, primary_matter, resolved_thread_paths) -> str`
-   - `parse_gemma_response(raw: str) -> ExtractedEntities` — structured dataclass with keys `people`, `orgs`, `money`, `dates`, `references`, `action_items` (all arrays, possibly empty)
-   - `call_ollama(prompt: str, model="gemma2:8b", timeout=30)` — reuse pattern from `step1_triage.py` or lift to shared `kbl/ollama.py` module if not already there
-   - `extract(signal_id: int, conn) -> ExtractedEntities` — full pipeline: load signal, build prompt, call Ollama, parse, write to `signal_queue.extracted_entities JSONB`, write `kbl_cost_ledger` row (`step='extract'`, `model='gemma2:8b'`, `cost_usd=0`), advance state
-   - State transitions: `awaiting_extract` → `extract_running` → `awaiting_classify` OR `extract_failed`
-   - Partial-JSON handling (per §7 error matrix): missing sub-keys → drop from output (not NULL), log WARN, continue
+2. **Tests** — `tests/test_step1_triage.py` — update every assertion that expects `'awaiting_inbox_route'` → `'routed_inbox'`. This should include the new tests you added in PR8-S2-FIX (`test_triage_parse_error_retries_exhausted_writes_stub` + low-score routing tests).
 
-3. **`kbl/exceptions.py`** — add `ExtractParseError` (coexists with existing exceptions per B1's PR #10 pattern)
+3. **Any docstrings / comments referencing "awaiting inbox route"** — update wording to reflect terminal-state semantic.
 
-4. **Tests** — `tests/test_step3_extract.py`:
-   - `build_prompt` integration: mock signal + placeholders filled correctly
-   - `parse_gemma_response` happy path (all 6 keys populated)
-   - `parse_gemma_response` partial JSON (4 of 6 keys) → accepts, missing keys default to `[]`
-   - `parse_gemma_response` unparseable → raises `ExtractParseError`
-   - `call_ollama` mocked (no live Ollama in CI)
-   - `extract` end-to-end: DB writes + cost ledger row + state transition
-   - R3 retry path: first call unparseable, second call valid → final result written
+4. **No migration changes.** PR #12 is merged; `routed_inbox` is already in the CHECK set.
 
 ### CHANDA pre-push
 
-- **Q1 Loop Test:** Step 3 does not read hot.md / ledger / Gold. Not a Leg touch. Pass.
-- **Q2 Wish Test:** serves wish (structured entities feed Step 5 synthesis). Pass.
-- **Inv 10:** prompt loaded once from file; no self-modification. Verify.
-- **Shared ollama client:** if you lift to `kbl/ollama.py`, verify no duplication-drift between Step 1 and Step 3 client code.
-
-### Dependencies
-
-- PR #8 (Step 1 triage) merged or mergeable — provides signal_queue columns your state machine needs
-- Step 3 extract prompt @ `briefs/_drafts/KBL_B_STEP3_EXTRACT_PROMPT.md` (B3-authored, READY)
-- `signal_queue.extracted_entities JSONB` column — verify exists, add migration if missing
+- **Q1 Loop Test:** rename + semantic clarification; no Leg touched. Pass.
+- **Q2 Wish Test:** aligns implementation with brief §4.2 (ratified wish). Pass.
 
 ### Branch + PR
 
-- Branch: `step3-extract-impl`
-- Base: `main`
-- PR title: `STEP3-EXTRACT-IMPL: kbl/steps/step3_extract.py + kbl/prompts/step3_extract.txt`
-- Target PR: #11
+- **Branch:** `step1-triage-impl` (same PR #8 branch).
+- **Amend as an additional commit** on top of `067e29c`. Do NOT open a new PR.
+- **PR #8 head advances to `<new_SHA>`** — B2 will re-review S1 rename + S2 fix together as single APPROVE cycle.
 
 ### Reviewer
 
-B2.
+B2 — combined delta re-review covering both S1 (rename) + S2 (state-leak fix).
 
 ### Timeline
 
-~60-90 min (similar shape to Step 1, smaller because no hot.md/ledger loading).
+~10-15 min (mechanical rename + test-assertion updates + commit).
 
 ### Dispatch back
 
-> B1 STEP3-EXTRACT-IMPL shipped — PR #11 open, branch `step3-extract-impl`, head `<SHA>`, <N>/<N> tests green. Ready for B2 review.
+> B1 PR8-S1-RENAME shipped — PR #8 head advanced to `<SHA>`, `awaiting_inbox_route` → `routed_inbox` across code + tests + docstrings, `<N>`/`<N>` tests green. Ready for B2 combined S1+S2 delta re-review.
 
 ---
 
-*Posted 2026-04-18 by AI Head. B2 reviewing PR #8 + PR #10. B3 idle.*
+## After this task (for context)
+
+1. B2 re-reviews PR #8 combined S1+S2 delta → APPROVE → I auto-merge PR #8.
+2. PR #7 (LAYER0), PR #10 (STEP2-RESOLVE), PR #11 (STEP3-EXTRACT) — I verify each against new main (post PR #12 merge), auto-merge on clean CI. You are not needed for these.
+3. Your next dispatch: **STEP4-CLASSIFY-IMPL** (deterministic classifier, ~30 min) OR **OLLAMA-CLIENT-REFACTOR-1** (lift `call_ollama` into shared `kbl/ollama.py` — PR #11 N1).
+
+---
+
+*Posted 2026-04-18 (late evening) by AI Head. PR #12 merged at `68db3568`. Tiny fold.*
