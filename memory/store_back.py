@@ -6405,13 +6405,36 @@ class SentinelStoreBack:
                 CHECK (triage_confidence IS NULL OR (triage_confidence >= 0 AND triage_confidence <= 1))
             """)
 
-            # Expanded status CHECK: classified-deferred (R1.11), failed-reviewed (DLQ), cost-deferred (D14)
+            # Expanded status CHECK: KBL-A 8 legacy + KBL-B 26 per-step states.
+            # Mirror of migrations/20260418_expand_signal_queue_status_check.sql
+            # — the two MUST stay in sync. Keeps this constraint re-asserted
+            # on every app boot so the migration can't be silently reverted.
             cur.execute("ALTER TABLE signal_queue DROP CONSTRAINT IF EXISTS signal_queue_status_check")
             cur.execute("""
                 ALTER TABLE signal_queue ADD CONSTRAINT signal_queue_status_check
                 CHECK (status IN (
+                    -- KBL-A legacy
                     'pending','processing','done','failed','expired',
-                    'classified-deferred','failed-reviewed','cost-deferred'
+                    'classified-deferred','failed-reviewed','cost-deferred',
+                    -- KBL-B Layer 0
+                    'dropped_layer0',
+                    -- KBL-B Step 1 triage
+                    'awaiting_triage','triage_running','triage_failed','triage_invalid',
+                    'routed_inbox',
+                    -- KBL-B Step 2 resolve
+                    'awaiting_resolve','resolve_running','resolve_failed',
+                    -- KBL-B Step 3 extract
+                    'awaiting_extract','extract_running','extract_failed',
+                    -- KBL-B Step 4 classify
+                    'awaiting_classify','classify_running','classify_failed',
+                    -- KBL-B Step 5 opus
+                    'awaiting_opus','opus_running','opus_failed','paused_cost_cap',
+                    -- KBL-B Step 6 finalize
+                    'awaiting_finalize','finalize_running','finalize_failed',
+                    -- KBL-B Step 7 commit
+                    'awaiting_commit','commit_running','commit_failed',
+                    -- KBL-B terminal
+                    'completed'
                 ))
             """)
 
