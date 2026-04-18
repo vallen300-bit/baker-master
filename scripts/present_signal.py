@@ -18,15 +18,22 @@ UNLABELED = OUT_DIR / f"kbl_eval_set_{DATE}.jsonl"
 MATTERS = [
     ("1", "hagenauer-rg7"),
     ("2", "cupial"),
-    ("3", "mo-vie"),
+    ("3", "mo-vie-am"),
     ("4", "ao"),
     ("5", "mrci"),
-    ("6", "lilienmat"),
+    ("6", "lilienmatt"),
     ("7", "brisen-lp"),
     ("8", "aukera"),
     ("9", "null"),
 ]
-EXTRA_MATTERS_BY_NAME = ("kitzbuhel-six-senses", "kitz-kempinski", "steininger", "wertheimer", "balducci", "constantinos", "franck-muller", "edita-russo", "theailogy", "baker-internal", "personal")
+EXTRA_MATTERS_BY_NAME = (
+    "kitzbuhel-six-senses", "kitz-kempinski", "steininger", "wertheimer",
+    "balducci", "constantinos", "franck-muller", "edita-russo",
+    "baker-internal", "personal",
+    # v9 additions — new actives that show up regularly in hot.md
+    "mo-vie-exit", "annaberg", "m365", "nvidia", "corinthia", "cap-ferrat",
+    "mo-prague", "brisen-pr",
+)
 
 
 def extract_meta(body: str) -> dict:
