@@ -2,65 +2,112 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (terminal instance)
-**Previous:** PR8-S2-FIX shipped at `067e29c`. B2 review delta pending. Director ratified path (b) on PR #12 S1.
+**Previous:** PR #8 STEP1-TRIAGE-IMPL merged at `6382ee50` (final pipeline PR of the 5-way cascade). All 5 KBL-B Phase 1 PRs on main.
 **Task posted:** 2026-04-18 (late evening)
-**Status:** OPEN — tiny rename amend on existing PR #8 branch
+**Status:** OPEN — Director ratified (A) Step 4 classifier next
 
 ---
 
-## Task: PR8-S1-RENAME — `awaiting_inbox_route` → `routed_inbox` canonical
+## Task: STEP4-CLASSIFY-IMPL — Deterministic policy classifier
 
-**Source:** B2's PR #12 review @ `1feebf7` (S1) + Director ratification of option (b).
+**Spec:** KBL-B §4.5 (lines 386-403 of `briefs/_drafts/KBL_B_PIPELINE_CODE_BRIEF.md`).
 
 ### Why
 
-Your PR8-S2-FIX advances low-score triage signals to `'awaiting_inbox_route'`, but the KBL-B brief §4.2 canonical terminal state is `'routed_inbox'`. PR #12 (now MERGED at `68db3568`) includes `routed_inbox` in the CHECK set but NOT `awaiting_inbox_route`. Your choice was a silent spec drift from the brief.
-
-Director ratified option (b): rename PR #8's writes to `'routed_inbox'` instead of adding a 35th CHECK value. Bundles cleanly with B2's pending S2 delta review — single B1 commit closes both S1 (rename) + S2 (already fixed in your PR8-S2-FIX).
+Step 4 is the last deterministic stage before Step 5 (Opus synthesis). It reads 4 columns already populated by Steps 1-3 (`triage_score`, `primary_matter`, `related_matters`, `resolved_thread_paths`) and writes a single decision column (`step_5_decision`) that gates whether Step 5 calls Opus or writes a deterministic stub. No model call, no cost ledger — pure Python policy evaluation.
 
 ### Scope
 
 **IN**
 
-1. **`kbl/steps/step1_triage.py`** — rename every occurrence of `'awaiting_inbox_route'` (string literal + any constant like `_STATE_INBOX_ROUTE` if you defined one) → `'routed_inbox'`. Semantic note: `routed_inbox` is **terminal** (not `awaiting_*`), so clarify the docstring / comments around the state transition to reflect "signal reaches terminal inbox state" rather than "signal awaits inbox routing."
+1. **`migrations/20260418_step4_signal_queue_step5_decision.sql`** — idempotent:
+   ```sql
+   ALTER TABLE signal_queue
+     ADD COLUMN IF NOT EXISTS step_5_decision TEXT;
+   ```
+   No CHECK constraint on this column yet (enum enforced in Python — avoids double-source-of-truth problem you can revisit in Phase 2 with the §5.1 two-track migration).
 
-2. **Tests** — `tests/test_step1_triage.py` — update every assertion that expects `'awaiting_inbox_route'` → `'routed_inbox'`. This should include the new tests you added in PR8-S2-FIX (`test_triage_parse_error_retries_exhausted_writes_stub` + low-score routing tests).
+2. **`kbl/steps/step4_classify.py`** — the classifier:
+   - `ClassifyDecision` enum (`StrEnum` subclass): `FULL_SYNTHESIS`, `STUB_ONLY`, `CROSS_LINK_ONLY`, `SKIP_INBOX`. Note: `CROSS_LINK_ONLY` is in the enum for Phase 2 completeness but **no decision rule currently maps to it** — document this in the enum docstring + flag the unreachable path in the classifier.
+   - `classify(signal_id: int, conn) -> ClassifyDecision` — full pipeline: load row, apply decision table (below), write `step_5_decision`, advance state, return decision.
+   - State transitions: `awaiting_classify` → `classify_running` → `awaiting_opus` (all in CHECK set post-PR-#12).
+   - Failure path: any unexpected condition → `classify_failed` (in CHECK set) + raise `ClassifyError` (new in `kbl/exceptions.py`).
 
-3. **Any docstrings / comments referencing "awaiting inbox route"** — update wording to reflect terminal-state semantic.
+3. **Decision table (§4.5 verbatim):**
 
-4. **No migration changes.** PR #12 is merged; `routed_inbox` is already in the CHECK set.
+   | Order | Condition (Python) | Decision |
+   |---|---|---|
+   | 1 | `primary_matter not in allowed_scope` | `SKIP_INBOX` + Layer 2 INFO log |
+   | 2 | `triage_score < THRESHOLD + NOISE_BAND` (default 40 + 5 = 45) | `STUB_ONLY` |
+   | 3 | `resolved_thread_paths == []` AND `related_matters == []` | `FULL_SYNTHESIS` (new arc) |
+   | 4 | `resolved_thread_paths == []` AND `related_matters != []` | `FULL_SYNTHESIS` + cross-link flag for Step 6 |
+   | 5 | `resolved_thread_paths != []` | `FULL_SYNTHESIS` (continuation) |
+
+   **First-match-wins** — evaluate in this exact order. Rule 6 from brief (`triage_score < THRESHOLD`) is unreachable because Step 1 already routed low-score signals to `routed_inbox`; raise `RuntimeError` if encountered (assertion for pipeline correctness).
+
+4. **Allowed-scope derivation (Director ratification — 2026-04-18):**
+   - `allowed_scope` = union of:
+     - `KBL_MATTER_SCOPE_ALLOWED` env var (comma-separated; optional override)
+     - ACTIVE matters parsed from `~/baker-vault/wiki/hot.md`
+   - **Default behavior when env unset:** derive purely from hot.md ACTIVE block. This is the ratified pattern — NO hardcoded allowlist. Env exists only as an override for edge cases (testing, rollout drills).
+   - Helper: `_load_allowed_scope() -> frozenset[str]` — reads hot.md via `kbl.loop.load_hot_md()` (PR #6), extracts `**<slug>**:` lines from `## Actively pressing` block, unions with env override if set.
+   - Cache per classify() call — not module-level (hot.md may update between invocations; CHANDA Inv 3 applies).
+
+5. **Cross-link flag for Step 6 (Rule 4):** encode as a JSONB hint on `signal_queue` — don't introduce a new column. Use `signal_queue.extracted_entities` JSONB (already exists per PR #11) with a sentinel key, OR add a new small column `cross_link_hint BOOLEAN DEFAULT FALSE`. **Recommendation: new column** — cleaner, queryable, explicit semantic. Migration adds it alongside `step_5_decision`.
+
+6. **Environment variables:**
+   - `KBL_PIPELINE_TRIAGE_THRESHOLD` (already exists from Step 1; default 40) — read same env, don't duplicate
+   - `KBL_STEP4_NOISE_BAND` — default 5; int parse with fallback
+   - `KBL_MATTER_SCOPE_ALLOWED` — optional; empty string = unset = derive from hot.md only
+
+7. **`kbl/exceptions.py`** — add `ClassifyError(KblError)` (net-additive alongside existing errors). Subclass docstring explains it's raised only on unexpected condition (e.g., `triage_score < THRESHOLD` at Step 4 entry, which Step 1 should have prevented).
+
+8. **Logging (§4.5):**
+   - Layer 2 gate block (Rule 1 fires): `INFO`, `component='classify'`, `message=f'layer2_blocked: primary_matter={pm!r} not in allowed={sorted(allowed_scope)}'`.
+   - No other per-call log. Rule 2-5 are expected paths.
+
+9. **Tests** — `tests/test_step4_classify.py`:
+   - **Decision-table coverage:** 5 tests, one per rule (+ the unreachable assertion)
+   - **Allowed-scope derivation:** 4 tests — hot.md only, env override only, union, both empty (everything goes `SKIP_INBOX`)
+   - **Inv 3 compliance:** `_load_allowed_scope` reads hot.md on EVERY classify() call, NOT cached module-level. Explicit `@patch` call-count assertion over 3 successive invocations (mirrors Step 1's `test_triage_invocation_reads_hot_md_and_ledger_once`).
+   - **Cross-link hint:** Rule 4 sets `cross_link_hint=TRUE`, Rule 3 sets it `FALSE`. SQL write verified in test.
+   - **State-machine:** `awaiting_classify` → `classify_running` → `awaiting_opus` on success; `classify_failed` on `ClassifyError`. Verify each status value is in the 34-value CHECK set.
+   - **Env parsing robustness:** `KBL_STEP4_NOISE_BAND=abc` → fallback to 5 with WARN; `KBL_MATTER_SCOPE_ALLOWED=""` → empty override (hot.md is sole source).
+   - `@requires_db` live-PG round-trip: classify against real PG signal row, verify column write + CHECK-constraint compliance end-to-end.
 
 ### CHANDA pre-push
 
-- **Q1 Loop Test:** rename + semantic clarification; no Leg touched. Pass.
-- **Q2 Wish Test:** aligns implementation with brief §4.2 (ratified wish). Pass.
+- **Q1 Loop Test:** Step 4 reads hot.md on every classify() call via `_load_allowed_scope`. **This is a Leg 3 read surface** — same invariant as Step 1. Explicit test asserts fresh-read per invocation. Pass.
+- **Q2 Wish Test:** serves wish — Director's hot.md ACTIVE set is the authoritative filter for which signals cost Opus tokens. Convenience co-aligned (deterministic policy gates the expensive model call). Pass.
+- **Inv 3 preserved:** `_load_allowed_scope()` reads hot.md on each call, not cached.
+- **Inv 6 preserved:** Step 4 always advances; never skips Step 6 downstream.
+- **Inv 10 preserved:** no prompt; enum + table are stable code.
 
 ### Branch + PR
 
-- **Branch:** `step1-triage-impl` (same PR #8 branch).
-- **Amend as an additional commit** on top of `067e29c`. Do NOT open a new PR.
-- **PR #8 head advances to `<new_SHA>`** — B2 will re-review S1 rename + S2 fix together as single APPROVE cycle.
+- Branch: `step4-classify-impl`
+- Base: `main`
+- PR title: `STEP4-CLASSIFY-IMPL: kbl/steps/step4_classify.py + deterministic policy classifier`
+- Target PR: #13 (or next available)
 
 ### Reviewer
 
-B2 — combined delta re-review covering both S1 (rename) + S2 (state-leak fix).
+B2.
 
 ### Timeline
 
-~10-15 min (mechanical rename + test-assertion updates + commit).
+~45-60 min (smaller than Step 1-3 because no Ollama, no Voyage, no prompt template — pure Python policy + hot.md reader + 1 migration + tests).
 
 ### Dispatch back
 
-> B1 PR8-S1-RENAME shipped — PR #8 head advanced to `<SHA>`, `awaiting_inbox_route` → `routed_inbox` across code + tests + docstrings, `<N>`/`<N>` tests green. Ready for B2 combined S1+S2 delta re-review.
+> B1 STEP4-CLASSIFY-IMPL shipped — PR #<N> open, branch `step4-classify-impl`, head `<SHA>`, <N>/<N> tests green. Ready for B2 review.
+
+### After this task
+
+Next dispatch to you: **STEP5-OPUS-IMPL** — the Opus synthesis stage. Large task (~2-3 hours). Spec in KBL-B §4.6 + `briefs/_drafts/KBL_B_STEP5_OPUS_PROMPT.md` (B3-authored, APPROVE'd, slug-v9-folded at `50167a1`). Depends on this PR + `load_gold_context_by_matter` (PR #9 merged).
+
+OR: **OLLAMA-CLIENT-REFACTOR-1** (lift shared helper per PR #11 N1) — optional cleanup, ~20 min.
 
 ---
 
-## After this task (for context)
-
-1. B2 re-reviews PR #8 combined S1+S2 delta → APPROVE → I auto-merge PR #8.
-2. PR #7 (LAYER0), PR #10 (STEP2-RESOLVE), PR #11 (STEP3-EXTRACT) — I verify each against new main (post PR #12 merge), auto-merge on clean CI. You are not needed for these.
-3. Your next dispatch: **STEP4-CLASSIFY-IMPL** (deterministic classifier, ~30 min) OR **OLLAMA-CLIENT-REFACTOR-1** (lift `call_ollama` into shared `kbl/ollama.py` — PR #11 N1).
-
----
-
-*Posted 2026-04-18 (late evening) by AI Head. PR #12 merged at `68db3568`. Tiny fold.*
+*Posted 2026-04-18 (late evening) by AI Head. Director ratified (A). All 5 Phase 1 PRs merged; Step 4 is the last deterministic step before Opus.*
