@@ -1,21 +1,23 @@
 # KBL-B Pipeline — Code Brief (SKELETON / DRAFT)
 
-**Status:** §1-3 **RATIFIED by Director 2026-04-18**. §4+ in progress.
+**Status:** §1-5 **RATIFIED**. §6-13 authoring in progress. REDIRECT fold complete across §1.3, §1.4, §2, §3.2, §4.7, §5.2, §5.5, §6, §8.
 **Author:** AI Head
-**Date:** 2026-04-17 (original), 2026-04-18 (amendments applied)
+**Date:** 2026-04-17 (original), 2026-04-18 (REDIRECT fold + amendments)
 **Purpose of skeleton:** surface architecture decisions early so Director can redirect scope before per-step detail is written.
 
-**Amendments 2026-04-18 (post B2 review at commit `abcae4a`):**
+**Amendments 2026-04-18:**
 
 - §2 Step 2 — resolver is now **source-specific** (email/WA use metadata, transcripts/Scan use embeddings). Removes unnecessary Voyage dependency on email/WA hot path.
 - §2 Step 4 — **no LLM call**. Deterministic policy step derived from Step 1+2 outputs. Step name preserved for `kbl_cost_ledger.step` enum parity; prompt/retry/cost-row collapse to no-op.
 - §2 Step 5 — **cost-cap and circuit-breaker separated**. Per-signal cost-cap defer (`paused_cost_cap`) is distinct from global circuit breaker (KBL-A §1062).
 - §2 Step 4 — Layer 2 enforcement location reconciled: canonical location = inside `_decide_step5_path()` at the Step 4→5 boundary (§1.2's "1-line env check at Step 5 entry" is the implementation shorthand).
+- **§2 Step 6 REDIRECT (per B2 scope-challenge verdict, Director pre-ratified)** — `sonnet_step6` is now `finalize`, deterministic Python, no LLM call. Four jobs: metadata augmentation (code), cross-link stubs (code, decision lives at Step 1), Pydantic frontmatter validation (code; failure → Opus R3 retry, not Sonnet repair), prose polish (DELETED; re-introduce only if Phase-1 burn-in shows >5% "needs editing"). Blast radius: §1.3, §1.4, §2, §3.2, §4.7, §5.2, §5.5, §6, §8 all updated. `sonnet_step6` enum value in `kbl_cost_ledger.step` preserved but unused (preserves option to re-introduce without schema migration).
+- CHANDA fold: §1.3 taxonomy refined (Steps 1/3/5 are LLM; Steps 0/2/4/6/7 are deterministic).
 
-**Deferred from B2 review to §5+ AI Head judgment** (fast-path per Director 2026-04-18):
-- S1 Step 6 Sonnet opt-in flag
-- S3 status-collapse migration spec (will pick two-track per B2's lean in §5)
-- S4 TOAST hygiene on `opus_draft_markdown` / `final_markdown` post-commit
+**Deferred to §5+ AI Head judgment** (fast-path per Director 2026-04-18):
+- ~~S1 Step 6 Sonnet opt-in flag~~ — superseded by REDIRECT (no Sonnet call; `sonnet_step6` enum preserved for future re-introduction per B2's option-preservation note)
+- S3 status-collapse migration spec (two-track applied in §5)
+- S4 TOAST hygiene on `opus_draft_markdown` / `final_markdown` post-commit — applied in §4.9
 
 **Reading time:** ~10 minutes.
 
@@ -40,8 +42,10 @@ This is the largest brief in the Cortex 3T series by code volume and model-call 
 ### 1.3 Canonical 8 steps (from `DECISIONS_PRE_KBL_A_V2.md` §732)
 
 ```
-layer0 → triage → resolve → extract → classify → opus_step5 → sonnet_step6 → claude_harness (commit)
+layer0 → triage → resolve → extract → classify → opus_step5 → finalize → claude_harness (commit)
 ```
+
+**Step 6 REDIRECTED (2026-04-18 per B2 scope-challenge verdict):** `sonnet_step6` is now `finalize` — a deterministic post-Opus finalization step with no LLM call. Taxonomy: Steps 1/3/5 are LLM (Gemma/Gemma/Opus); Steps 0/2/4/6/7 are deterministic Python. The pipeline is 8 steps but 3 of them touch an LLM, not 5.
 
 Plus `ayoniso` (alerts) runs async off Step 6 — **that's KBL-C**, not KBL-B.
 
@@ -53,8 +57,8 @@ Plus `ayoniso` (alerts) runs async off Step 6 — **that's KBL-C**, not KBL-B.
 - **D5:** Serial `claude -p` harness via flock mutex
 - **D14:** Cost tracking via `kbl_cost_ledger` + daily cap `KBL_COST_DAILY_CAP_USD=15` + circuit breaker
 - **D15:** Logging — local rotating + PG WARN+ + alert dedupe + heartbeat
-- **R3:** Retry ladder for Opus Step 5 / Sonnet Step 6 (Anthropic 529/overloaded: temp=0 first retry, pared prompt on second)
-- **Cost ledger enum:** `layer0 | triage | resolve | extract | classify | opus_step5 | sonnet_step6 | claude_harness | ayoniso`
+- **R3:** Retry ladder for Opus Step 5 (Anthropic 529/overloaded: temp=0 first retry, pared prompt on second). Now also carries the frontmatter-validation-failure case (post-REDIRECT Step 6 raises `FinalizationError` on malformed frontmatter → triggers Opus R3 retry on Step 5, not a Sonnet repair pass).
+- **Cost ledger enum:** `layer0 | triage | resolve | extract | classify | opus_step5 | sonnet_step6 | claude_harness | ayoniso` — `sonnet_step6` enum value preserved but unused post-REDIRECT (B2's note: preserves option to re-introduce without schema migration if Phase-1 burn-in reveals Opus drafts need polish).
 - **Triage threshold:** `KBL_PIPELINE_TRIAGE_THRESHOLD=40` gates Step 2+ (below → route to `wiki/_inbox/`)
 
 ---
@@ -187,15 +191,59 @@ Retry ladder (R3) on 529/overloaded within a single signal: temp=0 retry, pared 
 - **Anthropic unavailable (within retry ladder, signal-specific)** → R3 retry ladder; if still failing after 3 tries → `opus_failed`, route to inbox with log (does NOT trip circuit breaker unless pattern repeats across signals)
 - **Output doesn't parse as valid frontmatter + body** → 1 retry (pared prompt), then inbox
 
-### Step 6 — `sonnet_step6` (refine + frontmatter + cross-links)
+### Step 6 — `finalize` (deterministic finalization — NO LLM CALL)
 
-**Purpose:** Sonnet 4.6 (cheaper than Opus) polishes Opus's draft — fixes frontmatter, adds `related_matters[]` cross-links, validates tone/style, adds vault-canonical metadata (source IDs, timestamps, author='pipeline').
+**REDIRECTED 2026-04-18 (per B2 scope-challenge verdict, Director pre-ratified):** Step 6 was originally specified as a Sonnet 4.6 polish pass but analysis showed three of its four jobs (metadata augmentation, cross-link writing, frontmatter schema validation) are pure-deterministic code, and the fourth (prose polish) lacks evidence that Opus 4.7 drafts need it. Collapsing to deterministic code removes one Anthropic dependency surface, saves ~5-10¢/signal on `full_synthesis` signals, and drops Phase 1 ship date.
 
-**Model:** `claude-sonnet-4-6`.
+**Purpose:** Take Opus's draft and produce the vault-canonical form — split frontmatter from body, augment with deterministic metadata, validate via Pydantic, compute target vault path, emit cross-link stubs.
 
-**Why a second pass:** Opus produces content; Sonnet produces vault-canonical form. Splitting keeps Opus focused on reasoning (expensive) and Sonnet on structural polish (cheap).
+**Model:** none. Pure Python.
 
-**Output:** `signal_queue.final_markdown TEXT` + `signal_queue.target_vault_path TEXT` (e.g., `wiki/hagenauer-rg7/2026-04-17_ofenheimer-demand-letter.md`).
+**Cost:** 0 tokens, 0 USD. `kbl_cost_ledger` emits no row for this step.
+
+**Mechanism:**
+
+```python
+def step6_finalize(signal: SignalRow) -> tuple[str, str]:
+    """Returns (final_markdown, target_vault_path). Raises FinalizationError on schema failure."""
+    frontmatter_dict, body = _split_opus_draft(signal.opus_draft_markdown)
+    frontmatter_dict.update({
+        "signal_id": signal.id,
+        "source": signal.source,
+        "primary_matter": signal.primary_matter,
+        "related_matters": signal.related_matters,
+        "vedana": signal.vedana,
+        "triage_score": int(signal.triage_score),
+        "triage_confidence": float(signal.triage_confidence),
+        "created_at": signal.created_at.isoformat(),
+        "source_id": _extract_source_id(signal),
+        "author": "pipeline",
+    })
+    validated = WikiFrontmatter.model_validate(frontmatter_dict)  # raises ValidationError on malformed
+    target_path = _compute_target_vault_path(signal)  # wiki/<matter>/YYYYMMDD_<slug>.md
+    final_markdown = _render(validated, body)
+    _write_cross_link_stubs(signal.related_matters, target_path)  # idempotent per related_matters entry
+    return final_markdown, target_path
+```
+
+**Four jobs — where they actually live:**
+
+| Job | Handler | Note |
+|---|---|---|
+| Metadata (source_id, timestamps, author='pipeline') | deterministic Python | no LLM judgment available |
+| `related_matters[]` cross-links | deterministic writer to `wiki/<matter>/_links.md` | **cross-link decision** lives at Step 1; Step 6 just writes stubs |
+| Frontmatter schema validation | Pydantic `WikiFrontmatter.model_validate()` | on failure → raise `FinalizationError` → upstream triggers Opus R3 retry on Step 5 |
+| Prose polish on Opus body | **DELETED** | no evidence Opus 4.7 drafts need polish; re-introduce only if Phase 1 burn-in shows >5% of wiki entries marked "needs editing" |
+
+**Output:** `signal_queue.final_markdown TEXT` + `signal_queue.target_vault_path TEXT` (e.g., `wiki/hagenauer-rg7/2026-04-17_ofenheimer-demand-letter.md`). Also appends cross-link stubs to `wiki/<matter>/_links.md` for each entry in `related_matters`, idempotent (dedupe by source signal_id within the file).
+
+**Failure modes:**
+- **Malformed frontmatter from Opus** → `FinalizationError`; Step 5 state flips back to `opus_failed`, Opus R3 retry ladder fires (not Sonnet repair). If still malformed after 3 Opus retries → `finalize_failed`, route to inbox.
+- **Cross-link write fails (IO/permission)** → `finalize_failed`, log + alert. No retry — baker-vault write problem needs operator attention.
+
+**Latency:** ~50-200ms (fastest step in the pipeline by 2 orders of magnitude vs Step 5 Opus call).
+
+**Cross-link semantic ownership:** the *decision* "should this signal cross-link to Hagenauer?" is made in Step 1 (Gemma triage, `related_matters[]` output). Step 6 is a templated writer, not a re-evaluator. This is why post-REDIRECT Step 1 prompt carries explicit cross-matter elevation responsibility (see `KBL_B_STEP1_TRIAGE_PROMPT.md` §1.2 post-REDIRECT amend at commit `d7db987`).
 
 ### Step 7 — `claude_harness` (commit)
 
@@ -246,7 +294,7 @@ KBL-A brief §1612 defined the first-tier statuses. KBL-B adds per-step states f
 'awaiting_extract', 'extracting', 'extract_failed',
 'awaiting_classify', 'classifying', 'classify_failed',
 'awaiting_opus', 'opus_running', 'opus_failed', 'paused_cost_cap',
-'awaiting_sonnet', 'sonnet_running', 'sonnet_failed',
+'awaiting_finalize', 'finalize_running', 'finalize_failed',
 'awaiting_commit', 'committing', 'commit_failed',
 'completed', 'dropped_layer0', 'routed_inbox'
 ```
@@ -363,13 +411,15 @@ All sub-keys are arrays (possibly empty). Unparseable fields → drop from outpu
 **Invariant:** exactly one of `opus_draft_markdown IS NOT NULL` OR `state='paused_cost_cap'` OR `state='failed'`.
 **Cost gate:** see §9.
 
-### 4.7 Step 6 — `sonnet_step6`
+### 4.7 Step 6 — `finalize` (deterministic, post-REDIRECT 2026-04-18)
 
-**Reads:** `opus_draft_markdown`, `extracted_entities`, `related_matters`, `resolved_thread_paths`.
+**Reads:** `opus_draft_markdown`, `primary_matter`, `related_matters`, `vedana`, `triage_score`, `triage_confidence`, `created_at`, `source`, `payload` (for source-specific IDs), `step_5_decision`.
 **Writes:** `final_markdown TEXT`, `target_vault_path TEXT`.
-**Ledger:** one row. `step='sonnet_step6'`, `model='claude-sonnet-4-6'`, tokens, `cost_usd`, `latency_ms`.
-**Log:** on retry / malformed frontmatter.
-**Invariant:** `final_markdown` is YAML-frontmatter + Markdown body, parseable. `target_vault_path` starts with `wiki/` and ends `.md`.
+**Side-effects:** appends cross-link stub to `wiki/<m>/_links.md` for each `m in related_matters`, idempotent by source signal_id within the file.
+**Ledger:** no row (no model call).
+**Log:** on Pydantic validation failure (`level='WARN'`, `component='finalize'`, `message=<failed field + reason>`). On cross-link write failure (`level='ERROR'`, `component='finalize'`, `message='cross-link write failed: <path>'`).
+**Invariant:** `final_markdown` is YAML-frontmatter + Markdown body, Pydantic-validated. `target_vault_path` starts with `wiki/` and ends `.md`. `author: pipeline` always (Silver → Director-promoted Gold per Inv 8).
+**Failure path:** `FinalizationError` raised → signal flips to `opus_failed`, Opus R3 retry fires (§8). After 3 failed Opus retries → `finalize_failed`, route to inbox.
 
 ### 4.8 Step 7 — `claude_harness` (commit)
 
@@ -413,7 +463,7 @@ ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS stage TEXT;
 ALTER TABLE signal_queue ADD CONSTRAINT chk_signal_queue_stage
   CHECK (stage IS NULL OR stage IN (
     'layer0', 'triage', 'resolve', 'extract', 'classify',
-    'opus_step5', 'sonnet_step6', 'claude_harness'
+    'opus_step5', 'finalize', 'claude_harness'
   ));
 
 -- State: within a stage, what's happening
@@ -489,8 +539,8 @@ NEXT_STAGE = {
     'resolve': 'extract',
     'extract': 'classify',
     'classify': 'opus_step5',
-    'opus_step5': 'sonnet_step6',
-    'sonnet_step6': 'claude_harness',
+    'opus_step5': 'finalize',
+    'finalize': 'claude_harness',
     'claude_harness': None,  # terminal
 }
 
@@ -534,16 +584,54 @@ Target date: ≥3 months post Phase 1 go-live. At deprecation:
 
 ---
 
-## 6-N. Remaining sections (next AI Head push)
+## 6. Prompt templates
 
-- **§6 Prompt templates** — 4 prompts: triage (wrapper around v3 eval prompt), extract, opus_step5, sonnet_step6 (no prompt for Step 4 — deterministic)
-- **§7 Error matrix** — per-step × per-failure × recovery-action grid with `kbl_log` levels and circuit-breaker vs cost-cap distinctions
-- **§8 Model config + retry ladder** — `ollama` HTTP settings, Anthropic `claude-opus-4-7` / `claude-sonnet-4-6` request shape, R3 retry sequence
-- **§9 Cost-control integration** — pre-call estimate implementation, daily cap behavior, circuit breaker trip/recovery wiring
-- **§10 Testing plan** — per-step unit tests, 10-signal end-to-end fixture, shadow-mode run semantics
-- **§11 Observability** — per-step `kbl_log` row spec, `kbl_pipeline_run` rollup fields, dashboard-ready metrics
-- **§12 Rollout sequence** — shadow mode mechanics (vault `_shadow/` subtree), flag flip to production, Hagenauer-only burn-in procedure
-- **§13 Acceptance criteria** — numerical thresholds for declaring KBL-B done (completion rate, cost/signal p95, latency p95, Director-inbox-review signal)
+Post-REDIRECT, the pipeline has **3 LLM prompts** (not 4). No prompt for Step 4 (deterministic policy) or Step 6 (deterministic finalization).
+
+- **§6.1 Step 1 — `triage`** — Gemma 4 8B. Draft + reviews folded. Canonical source: `briefs/_drafts/KBL_B_STEP1_TRIAGE_PROMPT.md` (B3-authored, three review cycles through B2). Template text extracted to `kbl/prompts/step1_triage.txt` (PR #8).
+- **§6.2 Step 3 — `extract`** — Gemma 4 8B. Canonical source: `briefs/_drafts/KBL_B_STEP3_EXTRACT_PROMPT.md` (B3-authored, B2-reviewed READY).
+- **§6.3 Step 5 — `opus_step5`** — Claude Opus 4.7 (1M). Canonical source: `briefs/_drafts/KBL_B_STEP5_OPUS_PROMPT.md` (B3-authored, B2-reviewed REDIRECT → S1 applied at `02e5063` → pending B2 APPROVE delta). IS Leg 1 — reads `gold_context_by_matter` on every full_synthesis call; zero-Gold = valid first entry per Inv 1.
+- **§6.4 No prompt for Step 6** — deterministic `step6_finalize()` per §4.7 REDIRECT. If Phase-1 burn-in surfaces >5% "needs editing" on Director review, re-introduce a Sonnet polish prompt here (the `sonnet_step6` cost-ledger enum is preserved for that option; B2's note).
+
+## 7. Error matrix
+
+*(Authoring pending)* — per-step × per-failure × recovery-action grid with `kbl_log` levels and circuit-breaker vs cost-cap distinctions. Anchor for §4 failure-mode references.
+
+## 8. Model config + retry ladder
+
+- **Ollama HTTP settings** — Mac Mini local. `POST /api/generate` with `model=gemma2:8b`, `format=json`, `options={"seed": 42, "temperature": 0}`. Timeout 30s. Used by Step 1 + Step 3.
+- **Anthropic Opus** — `claude-opus-4-7` (1M context). Prompt-caching on system prompt + stable context. Used by Step 5 only.
+- ~~Anthropic Sonnet~~ — **NOT USED** post-REDIRECT. `claude-sonnet-4-6` is not called by any KBL-B pipeline step. If reintroduced (per B2 option-preservation), config goes here.
+- **R3 retry ladder** (applies to Opus Step 5):
+  1. First try: normal temp (default), full context
+  2. On 529 / overloaded / RateLimitError → retry with `temperature=0`
+  3. On second failure → retry with pared prompt (drop `gold_context_by_matter` to top-1 Gold entry only)
+  4. Third failure → signal flips to `opus_failed`, routes to inbox
+- **R3 also carries frontmatter-validation-failure (post-REDIRECT):** Step 6 `FinalizationError` triggers Opus R3 retry on Step 5, not a Sonnet repair pass. After 3 Opus retries → `finalize_failed`, route to inbox.
+- **Retry counters** contribute to Anthropic-side circuit-breaker-consecutive-failure count (D14).
+
+## 9. Cost-control integration
+
+*(Authoring pending)* — pre-call estimate implementation, daily cap behavior, circuit breaker trip/recovery wiring. `kbl_cost_ledger` schema per KBL-A. Per-step ledger rows: `triage` (Gemma, cost_usd=0), `extract` (Gemma, cost_usd=0), `resolve` (Voyage for transcripts/scan only), `opus_step5` (Anthropic). No rows for Steps 0/4/6/7 (deterministic).
+
+## 10. Testing plan
+
+- **Per-step unit tests** — tests land alongside impl (see PR #7 LAYER0-IMPL, PR #8 STEP1-TRIAGE-IMPL, PR #9 LOOP-GOLD-READER-1).
+- **End-to-end fixture** — 10 labeled signals + 4 synthetic (fixtures #1-14) per `briefs/_drafts/KBL_B_TEST_FIXTURES.md`. Post-REDIRECT: fixture rows show `step_6_runs: yes, no_llm: true` (not `step_6_sonnet_fires: no`).
+- **Loop-compliance hard assertions** — each fixture asserts `hot_md_loaded`, `feedback_ledger_queried`, `gold_context_by_matter_loaded` (Inv 1). Fixtures #11-#14 exercise elevation / ledger correction / zero-Gold / cross-matter elevation behaviors.
+- **Shadow-mode run semantics** — §12 covers. Pipeline runs with `pipeline_enabled=true` but vault writes go to `wiki/_shadow/` subtree; Director reviews before production flag flip.
+
+## 11. Observability
+
+*(Authoring pending)* — per-step `kbl_log` row spec, `kbl_pipeline_run` rollup fields, dashboard-ready metrics. Post-REDIRECT metrics: drop all Sonnet latency/cost gauges; add `finalize_latency_ms` gauge (expected p95 <200ms — 2 orders of magnitude below Step 5 Opus call).
+
+## 12. Rollout sequence
+
+*(Authoring pending)* — shadow mode mechanics (vault `_shadow/` subtree), flag flip to production, Hagenauer-only burn-in procedure, Phase 2 gate (D1 re-eval on live corpus).
+
+## 13. Acceptance criteria
+
+*(Authoring pending)* — numerical thresholds for declaring KBL-B done (completion rate, cost/signal p95, latency p95, Director-inbox-review signal).
 
 ---
 
