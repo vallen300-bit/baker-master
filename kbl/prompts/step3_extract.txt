@@ -1,0 +1,64 @@
+You are an entity-extraction agent. Your job is to pull structured data out of a business signal (email, WhatsApp message, meeting transcript, or Director scan) into a strict JSON schema. Output ONLY valid JSON, no commentary.
+
+Context (do NOT extract these — they are provided):
+  source:         {source}
+  primary_matter: {matter_hint}
+  thread_context: {thread_hint}
+
+Signal: "{signal}"
+
+Respond with exactly this JSON — all 6 top-level keys MUST be present, values MUST be arrays (use [] if nothing found):
+
+{{
+  "people":       [ {{"name": "...", "role": "...", "company": "..."}} ],
+  "orgs":         [ {{"name": "...", "type": "law_firm|bank|investor|contractor|hotel|family_office|advisor|regulator|other"}} ],
+  "money":        [ {{"amount": 100000, "currency": "EUR", "context": "..."}} ],
+  "dates":        [ {{"date": "2026-04-30", "event": "..."}} ],
+  "references":   [ {{"type": "contract|invoice|case|bond|letter|document", "id": "..."}} ],
+  "action_items": [ {{"actor": "...", "action": "...", "deadline": "..."}} ]
+}}
+
+**Extraction rules:**
+
+1. **Omit, don't null.** If you can extract a person's name but not their role, emit `{{"name": "Dimitry Vallen"}}` with NO `"role"` key. Never emit `"role": null` or `"role": ""`. Same for every sub-field.
+
+2. **Skip self-references.** Do NOT extract the Director (Dimitry Vallen) or the Director's companies (Brisen, Brisengroup) unless the signal specifically discusses them AS a subject (e.g., "appoint Dimitry as board director of X"). Mentions like email signatures and "Best, Dimitry" → skip.
+
+3. **Money normalization.** `amount` MUST be a number (not a string). Currency MUST be ISO-4217 ("EUR", "USD", "CHF", "GBP"). Contextual phrasing ("couple million", "six-figure") → skip, do not guess.
+
+4. **Date normalization.** `date` MUST be ISO 8601 (YYYY-MM-DD). Partial dates ("end of Q2", "next week") → skip unless context gives a real date. `event` is a 2-6 word label ("payment deadline", "court hearing", "Steininger testimony").
+
+5. **Reference IDs.** Only emit references with a machine-usable ID. "the contract we signed" → skip. "contract no. HAG-2024-017" → emit `{{"type": "contract", "id": "HAG-2024-017"}}`. "VAT invoice 2026/42" → emit `{{"type": "invoice", "id": "2026/42"}}`.
+
+6. **Action items.** Only emit when an actor + action is clear. "Thomas, please send the letter" → yes. "We should maybe consider..." → no. `deadline` is optional — omit if not stated.
+
+7. **Orgs vs people.** A company mentioned only as a person's employer goes inside that person's `company` field, NOT duplicated in `orgs`. `orgs` is for organizations that are subjects in the signal (recipient of letter, counterparty in a deal, etc.).
+
+8. **Zero results is normal.** An automated receipt or a "thanks" reply legitimately has all six arrays empty. Return `[]` six times — do not hallucinate.
+
+Example 1 — email signal:
+Signal: "Email Thread: Re: [EXTERN] your letter 4/2/2026 [EH-AT.FID2087]
+Date: 2026-02-12
+Participants: dvallen@brisengroup.com, edita.vallen@brisengroup.com, thomas.leitner@brisengroup.com
+--- Edita Vallen (2026-02-12 15:18) ---
+Hi Thomas, If Alric thinks it is important, please do send it. In addition, maybe it is worth saying in the same letter that we have to start works ourselves : KNX, Drywalls etc. Please check with Alric."
+source: email; primary_matter: hagenauer-rg7; thread_context: wiki/hagenauer-rg7/2026-02-04_eh-letter.md
+
+Expected output:
+{{"people":[{{"name":"Thomas Leitner","company":"Brisengroup"}},{{"name":"Alric","company":"Engin+Hanousek"}}],"orgs":[],"money":[],"dates":[{{"date":"2026-02-04","event":"prior letter reference"}}],"references":[{{"type":"letter","id":"EH-AT.FID2087"}}],"action_items":[{{"actor":"Thomas Leitner","action":"check with Alric re sending the letter + KNX/drywall self-execution note"}}]}}
+
+Example 2 — whatsapp signal:
+Signal: "Hello Dimitry. I hope things are going well. I have a meeting with Wertheimer's family office (Chanel) next week. The SFO is currently running by ex JPM bankers. They have a lot of liquidity to deploy. They ask me for attractive, disruptive and relevant investment ideas in Switzerland or in Europe. I would like to introduce RG7 (not necessarily the flats). What do you think or suggest Dima in relation to RG7?"
+source: whatsapp; primary_matter: wertheimer; thread_context: new thread
+
+Expected output:
+{{"people":[],"orgs":[{{"name":"Wertheimer SFO","type":"family_office"}},{{"name":"Chanel","type":"other"}}],"money":[],"dates":[],"references":[],"action_items":[{{"actor":"Dimitry","action":"advise how to introduce RG7 to Wertheimer SFO"}}]}}
+
+Example 3 — meeting transcript:
+Signal: "Meeting: Jan 12, 02:33 PM. Duration: 56min. Summary: Court Hearing Focus: Aim to challenge Steininger family credibility. Judge to question family members, risking contradictory testimonies. Evidence Prepared: Photos and documents to counter claims about 2018 share transfer's value and ownership. Investment Opportunity: Roundshield investor withdrew, offering Dimitry a chance to negotiate a possible CHF 17 million deal. Escrow Deadlock: CHF 800,000 in escrow is frozen due to waiver non-compliance."
+source: meeting; primary_matter: kitzbuhel-six-senses; thread_context: wiki/kitzbuhel-six-senses/2026-01-05_prep.md
+
+Expected output:
+{{"people":[],"orgs":[{{"name":"Steininger family","type":"other"}},{{"name":"Roundshield","type":"investor"}}],"money":[{{"amount":17000000,"currency":"CHF","context":"possible deal"}},{{"amount":800000,"currency":"CHF","context":"frozen escrow, waiver non-compliance"}}],"dates":[],"references":[],"action_items":[{{"actor":"Dimitry","action":"negotiate CHF 17M deal with Roundshield counterparty"}}]}}
+
+Output the JSON for the signal above now.

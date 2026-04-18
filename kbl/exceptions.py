@@ -1,0 +1,52 @@
+"""Top-level KBL exception hierarchy.
+
+Individual modules may raise more specific subclasses; callers that want
+to catch any KBL pipeline failure can catch ``KblError``.
+
+PR-coexistence note: this file is written identically across PR #8
+(Step 1), PR #10 (Step 2), and PR #11 (Step 3). Whichever lands first
+provides the baseline; later PRs rebase cleanly because every class here
+is net-additive and declarations are stable.
+"""
+from __future__ import annotations
+
+
+class KblError(RuntimeError):
+    """Base class for KBL pipeline errors."""
+
+
+class TriageParseError(KblError):
+    """Raised when the Step 1 triage model returns output that cannot be
+    parsed into a valid ``TriageResult`` (malformed JSON, missing required
+    keys, enum violation)."""
+
+
+class OllamaUnavailableError(KblError):
+    """Raised when Ollama is unreachable or returns a non-2xx after the
+    configured retry budget is exhausted. Callers may swap to the
+    availability-fallback model per D1 ratification."""
+
+
+class VoyageUnavailableError(KblError):
+    """Raised when the Voyage embedding API is unreachable (5xx / timeout
+    / connection refused). Step 2 transcript + scan resolvers catch this
+    and downgrade to new-arc semantics (empty ``resolved_thread_paths``)
+    rather than failing the signal — see KBL-B §4.3 degraded-mode contract."""
+
+
+class ResolverError(KblError):
+    """Raised by a Step 2 resolver on unrecoverable errors (malformed
+    payload shape the resolver cannot make sense of, etc.). Soft failures
+    — Voyage unreachable, no matches — do NOT raise; they return empty
+    path lists and the dispatcher advances the signal as a new arc."""
+
+
+class ExtractParseError(KblError):
+    """Raised when the Step 3 extract model returns top-level JSON that
+    cannot be parsed (malformed JSON, non-object root). Missing sub-keys
+    and sub-field hallucinations are NOT parse errors — the parser handles
+    them by filling empty arrays and dropping bad entries per §7 policy.
+
+    The Step 3 pipeline retries once on this error; the second failure
+    writes an empty-entities stub and advances the signal to continue the
+    pipeline (§7 error matrix, row 1)."""
