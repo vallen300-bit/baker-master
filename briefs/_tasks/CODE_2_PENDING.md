@@ -2,138 +2,134 @@
 
 **From:** AI Head
 **To:** Code Brisen #2 (app instance)
-**Previous report:** [`briefs/_reports/B2_pr1_reverify_20260417.md`](../_reports/B2_pr1_reverify_20260417.md) — KBL-A PR #1 APPROVED, complete
-**Task posted:** 2026-04-17
+**Previous report:** [`briefs/_reports/B2_slugs1_review_20260417.md`](../_reports/B2_slugs1_review_20260417.md) — SLUGS-1 APPROVE, Director merging
+**Task posted:** 2026-04-18
 **Status:** OPEN — awaiting execution
-**Supersedes:** the KBL-A PR #1 re-review task (shipped)
+**Supersedes:** SLUGS-1 review task (shipped)
 
 ---
 
-## Task: SLUGS-1 Independent PR Review (reviewer ≠ implementer)
+## Task: KBL-B Skeleton Structural Review (§1-3 only)
 
-### Context (60-second read)
+### Purpose
 
-B1 implemented SLUGS-1 (matter slug registry, Option A from `briefs/_drafts/SLUG_REGISTRY_DESIGN.md`). Two paired PRs open:
+I wrote the KBL-B pipeline skeleton at `briefs/_drafts/KBL_B_PIPELINE_CODE_BRIEF.md` @ commit `fb334f5`. It covers §1 purpose/scope, §2 8-step flow, §3 schema touches — about 500 lines. Per AI Head's own brief-quality discipline and the established review-then-ratify pattern (you deep-reviewed DECISIONS_PRE_KBL_A_V2 before Director ratified), this skeleton should get independent structural scrutiny before Director ratifies the 4 open asks at §end.
 
-- **baker-master PR #2:** https://github.com/vallen300-bit/baker-master/pull/2 — branch `slugs-1-impl` @ `b24b686` (5 commits code + 1 report)
-- **baker-vault PR #1:** https://github.com/vallen300-bit/baker-vault/pull/1 — branch `slugs-1-vault` @ `367b7de` (the YAML data file)
+**Goal of this review:** catch architectural issues now, before I write §4-13 (~1500 more lines) on top of shaky foundations. The sooner a structural issue surfaces, the cheaper to fix.
 
-B1's report: `briefs/_reports/B1_slugs1_impl_20260417.md` (on the branch — `gh api /repos/vallen300-bit/baker-master/contents/briefs/_reports/B1_slugs1_impl_20260417.md?ref=slugs-1-impl`).
+### Why you, not B1 or B3
 
-B1's self-flagged review hints (§"Re-review hints for B2" in the report) are your starting points — they've pre-enumerated the 5 subtleties worth scrutinizing. Use them but don't be constrained by them: your job is independent verification.
-
-**Why you, not B1:** reviewer-separation discipline. B1 wrote the code + the validator's original `MATTER_ALLOWLIST` that this PR subsumes. You wrote neither. You reviewed KBL-A PR #1 independently and structured the critique that landed cleanly — same posture here.
+- You authored the KBL-A schema draft. You understand what schema shape real-world signal data takes and what `signal_queue` already carries.
+- You reviewed DECISIONS_PRE_KBL_A_V2 — you have the ratified decisions indexed in your head.
+- B1 is busy (pre-install verify + runbook). B3 is busy (D1 v3 eval).
+- Reviewer-separation discipline: I wrote the skeleton; B2 (not me, not B1 the likely implementer) reviews.
 
 ---
 
 ## Scope
 
-**IN**
-1. Line-by-line review of the 5 code commits on `slugs-1-impl` (see SHAs in the PR description)
-2. Review of `baker-vault/slugs.yml` content — 19 slugs + aliases, stale alias fix, description coverage
-3. Verify B1's 5 self-flagged hints (semantics of `score_row` guard, hint coverage expansion, prompt enum sort, seeded `__init__.py` bytes, `sys.path` convention)
-4. Verify the 2 documented deviations (D1 README→CLAUDE.md, D2 seeded `kbl/__init__.py`)
-5. Form a verdict on the 3 residual hardcoded slug sites (`benchmark_ollama_triage.py`, `present_signal.py`, `apply_label.py`) — fold into this PR or defer?
-6. Re-run the tests in a fresh clone to confirm 9/9 green + 50/50 validator parity claim
+**IN — §1, §2, §3 only.** §4-13 are section outlines with empty bodies; no substantive content to review there yet.
+
+- §1 Purpose + scope boundaries
+- §2 8-step flow summaries (one paragraph per step: `layer0 → triage → resolve → extract → classify → opus_step5 → sonnet_step6 → claude_harness`)
+- §3 Schema touches (10 new `signal_queue` columns, proposed stage+state CHECK split, optional `kbl_pipeline_run` table, indexes)
+- The 4 "Asks of Director" at §end
 
 **OUT**
-- Re-opening the 4 design §7 questions (AI Head judgment, ratified by Director — do not relitigate)
-- The D1 eval retry (B3's thread — independent)
-- Auto-merging either PR — Director merges
+- §4-13 empty outlines (nothing to review)
+- The KBL-A brief itself (ratified, don't re-open)
+- The ratified decisions (locked)
+- D1 retry progress (B3's thread — independent)
 
 ---
 
-## Review structure (match KBL-A PR #1 review format)
+## What to scrutinize
 
-File: `briefs/_reports/B2_slugs1_review_20260417.md`
+Think structurally, not nit-level. You're catching category errors, not typos. 5-10 strong critiques > 40 tiny nits.
+
+### §1 Purpose / scope
+
+- Is the IN/OUT split correct? Anything that KBL-B should own but is punted to KBL-C (or vice versa)?
+- Is "KBL-B does NOT implement Layer 2 ALLOWED_MATTERS enforcement" actually true? §1.2 says it's a 1-line env check at Step 5 entry — do you agree, or is it bigger?
+- Is the "~2000-3000 lines of Python across `kbl/steps/*.py`" estimate defensible given what KBL-A took?
+
+### §2 Flow
+
+- Are the 8 steps the right decomposition? In particular:
+  - **Step 2 (resolve) via embeddings** — is this actually the right mechanism, or should it be lexical + metadata first with embeddings as a fallback? Voyage AI costs multiply across every signal.
+  - **Step 3 (extract) separate from Step 1 (triage)** — I argued the split because Layer 0 drops before extract so extract costs less. You've seen real triage prompt JSON fields — would merging actually hurt throughput?
+  - **Step 4 (classify) as a separate model call** — is this its own step, or can it be folded into Step 5's Opus prompt as a preamble section?
+  - **Step 6 (Sonnet polish) separate from Step 5 (Opus)** — legitimate split, or over-engineered? Opus could self-produce vault-canonical frontmatter directly.
+
+- Per-step I/O described at summary level. Any step whose output schema is *obvious* to you but I've left ambiguous?
+
+- Failure modes: Step 5 `status=paused_cost_cap` re-queues for tomorrow. Does that interact correctly with KBL-A's circuit breaker? Or does the circuit breaker handle this case entirely and `paused_cost_cap` is dead state?
+
+### §3 Schema
+
+- **10 new `signal_queue` columns** — is this too much width on a hot queue table? Alternative: separate `signal_queue_step_outputs(signal_id, step, output_json)` keyed by step. What's the trade-off on read path (dashboard queries, resume semantics)?
+- **Stage + state collapse** (§3.2): I proposed replacing a 24-value `status` CHECK with `stage TEXT` + `state TEXT` columns. Good idea or unnecessary churn? What does this do to existing queries that `WHERE status IN (...)`?
+- **`kbl_pipeline_run` observability table** (§3.3): bike-shed — needed in KBL-B or pushable to KBL-C dashboard ticket?
+- **Indexes**: is `GIN` on `resolved_thread_paths JSONB` actually performant for the queries we'd run, or should it be a normalized lookup table?
+- **JSONB vs column**: `extracted_entities JSONB` — do you think some of the fields should be promoted to dedicated columns (e.g., `primary_money_amount NUMERIC`, `primary_deadline TIMESTAMPTZ`)?
+
+### The 4 ratification asks at §end
+
+Give your vote on each (as input to Director, not a deciding vote):
+
+1. §1.2 scope boundary — confirm / redirect
+2. §2 flow — confirm / redirect
+3. §3.2 status collapse — yes / no
+4. §3.3 `kbl_pipeline_run` — include / defer
+
+State your position with one-paragraph reasoning each. Director reads yours + mine, then decides.
+
+---
+
+## Output format
+
+File: `briefs/_reports/B2_kbl_b_skeleton_review_20260418.md`
 
 Sections:
 
-1. **Verdict:** APPROVE / REQUEST CHANGES / REJECT
-2. **Blockers:** issues that must be fixed before merge
-3. **Should-fix:** improvements worth landing in this PR
-4. **Nice-to-have:** follow-up worthy but not merge-blocking
-5. **B1 hints assessment:** per-hint verdict (your read matches / disagree / need more info)
-6. **Deviations assessment:** D1 + D2 acceptable as-is / request adjustment
-7. **Residual hardcoded slugs — verdict:** fold into this PR / follow-up ticket / ignore
-8. **Test re-run evidence:** paste test output from your fresh clone
+1. **Verdict:** READY FOR §4+ / REDIRECT NEEDED
+2. **Blockers:** (category errors — things §4+ would have to unwrite if kept)
+3. **Should-fix:** structural tightenings worth landing before Director ratifies
+4. **Nice-to-have:** minor observations, nits, style
+5. **The 4 ratification asks — your vote + reasoning**
+6. **Open architectural questions:** things §1-3 doesn't address but §4-13 will need to — pre-flag them so AI Head can queue reader context for when those sections get written
 
-Follow the pattern from your `B2_pr1_review_20260417.md` — it was structured, precise, and actionable. Match it.
+Follow the pattern from your `B2_pr1_review_20260417.md` — structured, precise, actionable.
 
 ---
 
-## Specific scrutiny points (on top of B1's hints)
+## Scope guardrails
 
-### Security / robustness
-
-- **`BAKER_VAULT_PATH` missing on deploy:** B1's loader raises `SlugRegistryError` on missing env — is that the right failure mode for first-boot on a fresh Render deploy where the config ordering might load `slug_registry` before `BAKER_VAULT_PATH` is sourced? Check the Render start command sequence against KBL-A's `_ensure_*` pattern.
-- **YAML injection / malformed file:** if `slugs.yml` in baker-vault is later hand-edited and becomes malformed, does the loader fail cleanly without leaking partial state across threads (given the `threading.Lock`)? Eyeball the lock + cache invalidation on exception paths.
-- **Alias case/whitespace normalization at load time:** B1 says aliases are lowercased + whitespace-collapsed. Does `normalize()` apply the same transforms to model outputs before lookup? Unicode? Tab characters? German umlauts on hypothetical future slugs?
-
-### Semantic invariants
-
-- **`score_row` guard preserves pre-refactor invariant:** B1's §"Semantic changes" §2 walks through a worked example. Construct your own counter-example: a label of `None` with a model output of `"Hagenauer"` (valid alias via normalization) — does `matter_ok` go True via the alias path, or False? Is that the right answer? (Yes, it should be True — the model found the slug even though the label is null, so the model is "right in a weird way". But confirm.)
-- **Hint coverage expansion:** is the `sorted()` iteration in `build_eval_seed.py` stable across runs? If two aliases overlap (e.g., both `ao` and `brisen-lp` have keyword `"brisen"`), which slug wins the hint? Document the tiebreak.
-
-### Deploy ordering
-
-- **Deploy-order failure mode:** B1 says baker-master merging first causes `SlugRegistryError` at first call. Is that truly fail-loud and safe, or will the error be swallowed by a bare `except:` somewhere upstream (retry wrappers, sentinels, scheduler)? Trace call sites.
-
-### Fold vs defer — residual scripts
-
-The three residual slug sites B1 flagged:
-
-- `benchmark_ollama_triage.py` — "semi-deprecated benchmark"
-- `present_signal.py` — CLI labeling UI keypress map
-- `apply_label.py` — CLI labeling UI keypress map
-
-Form a verdict. My prior: **defer** (the UI keypress maps are legitimately different from the canonical list — a "1" → slug mapping is input shorthand, not a source of truth). But reasonable people could argue otherwise. State your call with reasoning.
+- **Do NOT** propose specific prompt wordings (that's §6).
+- **Do NOT** draft code (this is a design review, not implementation).
+- **Do NOT** re-open the 15 ratified decisions. If you see conflict between §1-3 and a ratified decision, that's a blocker to report, not a reason to renegotiate the decision.
+- **Do NOT** delay on "I'd need to see the prompt first" — if the architecture is right, the prompt can fit; if the architecture is wrong, no prompt saves it.
 
 ---
 
-## Test re-run procedure
+## Time budget
 
-```bash
-cd /tmp/bm-b2   # or your standard clone
-git fetch origin
-git checkout slugs-1-impl
-git pull
-# Fetch the paired baker-vault branch so BAKER_VAULT_PATH has real data:
-#   (or use the tests/fixtures/ vault for the test suite specifically)
-.venv/bin/python3 -m pytest tests/test_slug_registry.py -v
-# Validator parity claim:
-BAKER_VAULT_PATH=<your baker-vault checkout at slugs-1-vault branch> \
-  .venv/bin/python3 scripts/validate_eval_labels.py outputs/kbl_eval_set_20260417_labeled.jsonl
-```
+~30-45 min:
 
-Report the actual output. If you see anything different from B1's claims, that's a REQUEST CHANGES trigger.
+- 10 min read the skeleton + skim the decisions doc for affected sections
+- 20 min scrutiny pass
+- 10 min report writing
 
----
-
-## Coordination notes
-
-- **B3 D1 retry is in flight** — SLUGS-1 subsumes B3's manual prompt patch + alias fix. If B3 merges first, B1 rebases and takes SLUGS-1's side (structural > tactical). If SLUGS-1 merges first, B3's §2 alias fix becomes a no-op. Either order OK. Don't let B3-coordination paralyze review.
-- **KBL-A PR #1 is still pending Director merge.** B1 seeded `kbl/__init__.py` in SLUGS-1 with KBL-A's exact bytes so the rebase auto-resolves. **Verify the byte-for-byte claim** — one of your scrutiny items.
-
----
-
-## Estimated time
-
-~1.5 hours:
-
-- 45 min code review across 5 commits
-- 15 min test re-run + parity verification
-- 15 min `slugs.yml` content review
-- 15 min writing the report
+If you find yourself >1h in, stop + ship partial. Marginal returns.
 
 ---
 
 ## Dispatch back
 
-Chat one-liner via me:
+Chat one-liner:
 
-> `B2 SLUGS-1 review complete — see briefs/_reports/B2_slugs1_review_20260417.md, commit <SHA>. Verdict: <APPROVE | REQUEST CHANGES | REJECT>.`
+> B2 KBL-B skeleton review done — see `briefs/_reports/B2_kbl_b_skeleton_review_20260418.md`, commit `<SHA>`. Verdict: <READY | REDIRECT>. Votes on 4 asks: <y/y/y/y>.
 
 ---
 
-*Dispatched 2026-04-17 by AI Head. Git identity: `Code Brisen 2` / `dvallen@brisengroup.com`. Fresh clone recommended — don't review on a clone where you've been debugging other branches.*
+*Dispatched 2026-04-18 by AI Head. Git identity: `Code Brisen 2` / `dvallen@brisengroup.com`.*
