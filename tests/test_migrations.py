@@ -106,12 +106,24 @@ def test_loop_infrastructure_migration_file_exists():
 def test_loop_infrastructure_migration_parses_to_up_and_down():
     path = MIGRATIONS_DIR / "20260418_loop_infrastructure.sql"
     sections = _parse_sections(path.read_text(encoding="utf-8"))
+    # signal_queue.id BIGINT upgrade must run BEFORE the new tables.
+    assert "ALTER TABLE signal_queue ALTER COLUMN id TYPE BIGINT" in sections["up"]
+    assert "ALTER SEQUENCE signal_queue_id_seq AS BIGINT" in sections["up"]
+    assert sections["up"].index("ALTER TABLE signal_queue") < sections["up"].index(
+        "CREATE TABLE IF NOT EXISTS feedback_ledger"
+    )
     assert "CREATE TABLE IF NOT EXISTS feedback_ledger" in sections["up"]
     assert "CREATE TABLE IF NOT EXISTS kbl_layer0_hash_seen" in sections["up"]
     assert "CREATE TABLE IF NOT EXISTS kbl_layer0_review" in sections["up"]
+    # DOWN: tables drop BEFORE signal_queue downgrade (reverse of UP).
     assert "DROP TABLE IF EXISTS feedback_ledger" in sections["down"]
     assert "DROP TABLE IF EXISTS kbl_layer0_hash_seen" in sections["down"]
     assert "DROP TABLE IF EXISTS kbl_layer0_review" in sections["down"]
+    assert "ALTER TABLE signal_queue ALTER COLUMN id TYPE INTEGER" in sections["down"]
+    assert "ALTER SEQUENCE signal_queue_id_seq AS INTEGER" in sections["down"]
+    assert sections["down"].index("DROP TABLE IF EXISTS feedback_ledger") < sections[
+        "down"
+    ].index("ALTER TABLE signal_queue")
 
 
 # ------------- live-PG round-trip (skipped without TEST_DATABASE_URL) --------

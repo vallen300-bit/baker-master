@@ -8,18 +8,19 @@
 --
 -- Notes on FK columns referencing signal_queue.id
 -- -----------------------------------------------
--- Task brief specifies `BIGINT` for signal_id / source_signal_id columns.
--- Current schema declares signal_queue.id as SERIAL (INTEGER PRIMARY KEY)
--- per briefs/_drafts/KBL_A_SCHEMA.sql §46. The BIGINT column can hold any
--- INTEGER value (upward-compat), so inserts work; however PostgreSQL will
--- NOT accept a `REFERENCES signal_queue(id)` FK constraint across the
--- INTEGER/BIGINT type boundary without an explicit type match. For that
--- reason we follow the task brief LITERALLY:
---   * BIGINT storage (matches spec)
---   * No REFERENCES clause (matches spec comment wording)
--- If enforced referential integrity is desired post-merge, either upgrade
--- signal_queue.id to BIGSERIAL or switch these columns to INTEGER. Flagged
--- in the PR body.
+-- AI Head ratified (2026-04-18): upgrade signal_queue.id to BIGSERIAL in
+-- this same migration so new FK columns (BIGINT) and the referenced PK
+-- agree on type. Rationale: signal_queue is the primary ingestion table;
+-- INTEGER's 2.1B ceiling is a latent Phase-2+ overflow risk we remove
+-- cheaply now while the table is small. Downgrading FK columns instead
+-- would entrench the limit across all loop infrastructure.
+--
+-- No REFERENCES clauses are emitted. Application-level integrity preserves
+-- ledger immutability per CHANDA Inv 2 atomicity — an unresolvable FK
+-- target at write time would fail the action transactionally, but the
+-- FK *enforcement* cost (cascade planning, locking under concurrent
+-- ingest) outweighs the integrity benefit here. Writer code (KBL-B impl
+-- / KBL-C) validates signal_id existence before insert.
 --
 -- Apply order: manual operator run (no migration framework in repo yet).
 --   BEGIN; \i migrations/20260418_loop_infrastructure.sql ; COMMIT;
@@ -29,6 +30,17 @@
 -- == migrate:up ==
 
 BEGIN;
+
+-- Upgrade signal_queue.id to BIGINT before creating BIGINT FK columns in
+-- the three new tables. Idempotent: ALTER COLUMN TYPE to the same type is
+-- a no-op in Postgres. Default sequence name for `SERIAL PRIMARY KEY` is
+-- `<table>_<column>_seq` per the PG docs; verify with
+--   SELECT pg_get_serial_sequence('signal_queue', 'id');
+-- before applying if any doubt (Neon sometimes rewrites sequences on
+-- branch cloning). If the name differs, substitute below.
+ALTER TABLE signal_queue ALTER COLUMN id TYPE BIGINT;
+ALTER SEQUENCE signal_queue_id_seq AS BIGINT;
+
 
 -- feedback_ledger — CHANDA §2 Leg 2 Capture.
 -- Every Director action (promote, correct, ignore, ayoniso_respond,
@@ -41,7 +53,7 @@ CREATE TABLE IF NOT EXISTS feedback_ledger (
     action_type    TEXT NOT NULL,       -- 'promote' | 'correct' | 'ignore' | 'ayoniso_respond' | 'ayoniso_dismiss'
     target_matter  TEXT,                -- slug from slug_registry, nullable for cross-matter actions
     target_path    TEXT,                -- vault path of affected wiki entry, nullable for non-vault actions
-    signal_id      BIGINT,              -- FK to signal_queue.id (unenforced — see type note at top of file)
+    signal_id      BIGINT,              -- FK to signal_queue.id (unenforced by PG; writer validates — see note at top)
     payload        JSONB NOT NULL DEFAULT '{}'::jsonb,  -- action-specific detail
     director_note  TEXT                 -- free-text rationale, optional
 );
@@ -56,7 +68,7 @@ CREATE TABLE IF NOT EXISTS kbl_layer0_hash_seen (
     content_hash     TEXT PRIMARY KEY,           -- sha256 of normalized content
     first_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     ttl_expires_at   TIMESTAMPTZ NOT NULL,
-    source_signal_id BIGINT,                     -- FK to signal_queue.id (unenforced — see type note)
+    source_signal_id BIGINT,                     -- FK to signal_queue.id (unenforced by PG; writer validates)
     source_kind      TEXT NOT NULL               -- 'email' | 'whatsapp' | 'meeting_transcript' | 'scan_query'
 );
 CREATE INDEX IF NOT EXISTS idx_kbl_layer0_hash_ttl ON kbl_layer0_hash_seen(ttl_expires_at);
@@ -68,7 +80,7 @@ CREATE INDEX IF NOT EXISTS idx_kbl_layer0_hash_ttl ON kbl_layer0_hash_seen(ttl_e
 CREATE TABLE IF NOT EXISTS kbl_layer0_review (
     id              BIGSERIAL PRIMARY KEY,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-    signal_id       BIGINT NOT NULL,             -- FK to signal_queue.id (unenforced — see type note)
+    signal_id       BIGINT NOT NULL,             -- FK to signal_queue.id (unenforced by PG; writer validates)
     dropped_by_rule TEXT NOT NULL,               -- rule name that triggered drop
     signal_excerpt  TEXT NOT NULL,               -- first 500 chars of payload for quick Director scan
     source_kind     TEXT NOT NULL,
@@ -85,6 +97,9 @@ COMMIT;
 -- == migrate:down ==
 -- Disaster recovery only. Not auto-run. Paste into psql when needed.
 -- Ordering: reverse of UP so (unenforced) FK intent is respected.
+-- The signal_queue.id downgrade assumes max(id) fits in INTEGER (≤ 2^31-1).
+-- If the table has grown past that during Phase 2+, drop the downgrade
+-- ALTERs — the loop infrastructure tables can still be dropped cleanly.
 --
 -- BEGIN;
 -- DROP INDEX IF EXISTS idx_kbl_layer0_review_pending;
@@ -94,4 +109,6 @@ COMMIT;
 -- DROP INDEX IF EXISTS idx_feedback_ledger_matter;
 -- DROP INDEX IF EXISTS idx_feedback_ledger_created_at;
 -- DROP TABLE IF EXISTS feedback_ledger;
+-- ALTER SEQUENCE signal_queue_id_seq AS INTEGER;
+-- ALTER TABLE signal_queue ALTER COLUMN id TYPE INTEGER;
 -- COMMIT;
