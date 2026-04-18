@@ -34,3 +34,14 @@ class ResolverError(KblError):
     payload shape the resolver cannot make sense of, etc.). Soft failures
     — Voyage unreachable, no matches — do NOT raise; they return empty
     path lists and the dispatcher advances the signal as a new arc."""
+
+
+class ExtractParseError(KblError):
+    """Raised when the Step 3 extract model returns top-level JSON that
+    cannot be parsed (malformed JSON, non-object root). Missing sub-keys
+    and sub-field hallucinations are NOT parse errors — the parser handles
+    them by filling empty arrays and dropping bad entries per §7 policy.
+
+    The Step 3 pipeline retries once on this error; the second failure
+    writes an empty-entities stub and advances the signal to continue the
+    pipeline (§7 error matrix, row 1)."""
