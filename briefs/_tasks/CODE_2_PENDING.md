@@ -125,6 +125,43 @@ Verdict: APPROVE / REDIRECT / BLOCK
 
 ---
 
+## Task C-delta-phone (fast, ~5 min): PR #7 S1 phone fix delta re-verify
+
+B1 applied S1 at head `4780a40`: `_normalize_phone` strips leading `00` after digit extraction; `0041 79 960 50 92` → canonical `41799605092`. +4 parametrized tests. 88/88 tests green.
+Short APPROVE report or append to `B2_pr7_review_20260418.md`.
+
+---
+
+## Task C-new (medium, ~30-40 min): Review PR #9 — LOOP-GOLD-READER-1
+
+**PR:** https://github.com/vallen300-bit/baker-master/pull/9
+**Branch:** `loop-gold-reader-1`
+**Head:** `88b460a`
+**Tests:** 21 new green; full loop suite 46/46.
+
+### Scope
+
+- `kbl/loop.py` — new `load_gold_context_by_matter(matter, vault_path=None) -> str`
+- Filter: `voice: gold` only (Silver excluded)
+- Sort: filename order (chronological via date-prefix convention)
+- Block format: `<!-- GOLD: wiki/<matter>/<file>.md -->` headers separated by blank lines
+- Zero-Gold cases: missing dir / empty dir / all-Silver / missing-frontmatter → `""` (Inv 1 compliance)
+- `LoopReadError` on IO/permission/env errors
+
+### Specific scrutiny (this is Leg 1 critical infra per CHANDA §2)
+
+1. **Zero-Gold tests exhaustive** — 4 variants tested (missing / empty / all-Silver / malformed). Verify coverage.
+2. **Filename sort correctness** — date-prefix convention (`YYYY-MM-DD_topic.md`) + mixed naming: how does sort handle a non-date-prefix file? Lexicographic bucket behavior.
+3. **Matter slug normalization** — does the helper call `slug_registry.normalize()` or assume caller pre-normalizes? B3's Step 5 prompt calls with `primary_matter` which IS already canonical. Verify expectation.
+4. **Block concatenation** — blank-line separation is fine, but if a Gold body ends mid-line (no trailing newline), does the next block's `<!-- GOLD: ... -->` header get glued? Edge case.
+5. **Performance note** — Step 5 reads this on every `full_synthesis` call. N Gold entries × file IO. For Hagenauer Phase 1, probably <10 entries, negligible. Flag if you see obvious caching opportunity.
+
+### Format
+`briefs/_reports/B2_pr9_review_20260418.md`
+Verdict: APPROVE / REDIRECT / BLOCK
+
+---
+
 ## Task C-delta (fast, ~5 min): STEP5-OPUS S1 delta APPROVE
 
 B3 applied S1 rename at `02e5063` (10 sites total: your 9 + 1 extra for internal consistency). Confirm and close out with short APPROVE report:
