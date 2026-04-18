@@ -2,171 +2,76 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (terminal instance)
-**Runbook:** [`briefs/_runbooks/KBL_A_MERGE_RUNBOOK.md`](../_runbooks/KBL_A_MERGE_RUNBOOK.md)
+**Previous:** Install steps 3+4+5 shipped (`fba1d9b`), SIGPIPE hotfix landed via PR #1 merge (`3f130f1`)
 **Task posted:** 2026-04-18
 **Status:** OPEN — awaiting execution
-**Supersedes:** previous Step-3-only and Render-API variants of this task
 
 ---
 
-## Task: Runbook Steps 3 + 4 + 5 — Install + Secrets + env Config
+## Task: TCC/Desktop Install Fix + DATABASE_URL to 1Password
 
-Director authorized end-to-end. You execute Steps 3, 4, 5. Secrets via 1Password service account (cleanest long-term, aligns with D4 migration target).
+Two quick cleanups from the install session's unresolved items. ~40 min combined.
 
----
+### Deliverable 1 — TCC-safe install script
 
-## Secret access — 1Password service account
+**Problem:** macOS 15 launchd can't execute scripts under `~/Desktop` due to TCC restrictions. Current install bandaged by editing plists on Mac Mini to bypass `/usr/local/bin/` symlinks and point at `~/baker-code/` directly. Anyone running `install_kbl_mac_mini.sh` fresh from a Desktop clone will hit the same failure.
 
-**Service account:** `Baker Automation`
-**Vault:** `Baker API Keys`
-**Access verified 2026-04-18 by AI Head** — service account has read access to the vault, `op vault list` + `op item list` both work.
+**Fix (pick one, document rationale):**
 
-**Director will paste `OP_SERVICE_ACCOUNT_TOKEN` directly in your chat session** when relaying this task. Set it in env only (not disk):
+**(a)** Install script detects clone location at runtime. If `$(git rev-parse --show-toplevel)` is under `~/Desktop/`, script refuses with a clear error + recommends `mv ~/Desktop/baker-code ~/baker-code` then re-run.
 
-```bash
-export OP_SERVICE_ACCOUNT_TOKEN="<paste value from Director's chat message>"
-```
+**(b)** Install script skips `/usr/local/bin/` symlinks entirely. Plists reference the clone path directly (same as the manual fix I applied). Removes root-owned symlinks as an install artifact.
 
-**Do NOT** save the token to disk (`~/.op/`, config files, scripts). **Do NOT** commit the token anywhere. **Do NOT** echo the full token to stdout in logs.
+**(c)** Install script copies the scripts into `~/.local/bin/kbl-*.sh` (user-owned, non-TCC-protected) and plists reference that. Keeps install self-contained under user home.
 
-To retrieve secrets by name:
+AI Head preference: **(b)** — least install surface, no sudo required, plist is the single source of truth for script path. (c) is also good but changes install shape.
 
-```bash
-op item get "API Anthropic" --vault "Baker API Keys" --fields credential --reveal
-op item get "API Voyager"   --vault "Baker API Keys" --fields credential --reveal
-# etc. — by item name per the vault
-```
+Add a short note to the KBL-A brief `§install` section explaining the TCC context for future re-installs.
 
----
+**PR against main.** Branch: `kbl-a-tcc-fix`. B2 reviews before merge.
 
-## Prerequisites check
+### Deliverable 2 — DATABASE_URL to 1Password
 
-On Mac Mini (via `ssh macmini`):
+**Problem:** Render has split `POSTGRES_HOST/PORT/DB/USER/PASSWORD/SSLMODE` env vars. Assembly into a single `DATABASE_URL` required a Python hack (§6.3 of install report). Future automation will repeat.
 
-```bash
-brew install 1password-cli   # if not already installed
-op --version                  # should be >= 2.30
-```
-
-If already installed, skip.
-
----
-
-## Step 3 — Run `install_kbl_mac_mini.sh`
-
-1. `ssh macmini`
-2. `cd` to the baker-master clone (exists per your prereq install)
-3. `git pull --ff-only origin main`
-4. `./scripts/install_kbl_mac_mini.sh 2>&1 | tee /tmp/kbl_install_20260418.log`
-5. Confirm exit 0
-6. Enumerate what was created: `~/.kbl.env` scaffold, LaunchAgent plist, any new directories
-
----
-
-## Step 4 — Populate `~/.kbl.env` via 1Password
-
-**Enumerate the 5 (or N) required secrets from the scaffold:**
-
-```bash
-grep -E "^[A-Z_]+" ~/.kbl.env | grep -v "^#" | head -20
-```
-
-The scaffold defines the authoritative secret list. Your earlier brief's guess was ANTHROPIC_API_KEY / DATABASE_URL / VOYAGE_API_KEY / KBL_VAULT_PATH / (5th TBD) — trust the scaffold's TODO markers over my guess.
-
-**Retrieve each from 1Password by name.** Best guess at mapping (verify against scaffold):
-
-| Scaffold env var | 1Password item name |
-|---|---|
-| `ANTHROPIC_API_KEY` | `API Anthropic` |
-| `VOYAGE_API_KEY` | `API Voyager` |
-| `DATABASE_URL` | pull from Render (item `API Render` has Render API key; use it to read the `DATABASE_URL` value from baker-master service) OR check if vault has a direct `DATABASE_URL` item (search: `op item list --vault 'Baker API Keys' | grep -i database`) |
-| Others | match scaffold names to vault items; flag unmatched in your report |
-
-**If the scaffold requires a secret not obviously in the vault, stop and report** — do not guess. Director adds the missing item first.
-
-**Populate `~/.kbl.env` with restricted perms:**
-
-```bash
-umask 077
-op item get "API Anthropic" --vault "Baker API Keys" --fields credential --reveal > /dev/null  # sanity-check token auth
-# Then edit ~/.kbl.env line by line using $(op item get ...) substitutions
-# Example:
-#   echo "ANTHROPIC_API_KEY=$(op item get 'API Anthropic' --vault 'Baker API Keys' --fields credential --reveal)" >> ~/.kbl.env
-chmod 600 ~/.kbl.env
-```
-
-**Sanity check (not leak):**
-
-```bash
-source ~/.kbl.env && echo "${ANTHROPIC_API_KEY:0:10}..."
-# Should print first 10 chars — confirms populated without exposing full key
-```
-
----
-
-## Step 5 — Commit `config/env.mac-mini.yml` to baker-vault
-
-**Source of truth for values:** `briefs/KBL-A_INFRASTRUCTURE_CODE_BRIEF.md` §452-493 (the full yml example).
-
-**Key sections (use ratified values):**
-
-- `ollama.*` — model, fallback, temp, seed, top_p, keep_alive (per D1 §161)
-- `matter_scope.allowed: ["hagenauer-rg7"]` — Phase 1 scope per D3
-- `matter_scope.layer0_enabled: "true"`
-- `gold_promote.*` — disabled=false, whitelist_wa_id (confirm Director's WA ID from CLAUDE.md: `+41 79 960 50 92`)
-- `pipeline.*` — cron_interval_minutes=2, triage_threshold=40, max_queue_size=10000, qwen_recovery_after_signals=10, qwen_recovery_after_hours=1
-- `cost.daily_cap_usd: "15"`, `max_alerts_per_day: "20"`
-- **`flags.pipeline_enabled: "false"`** — critical, first tick must not run. Director flips later in Step 7.
-- `observability.*` — rsync time `"23:50"`, size warn thresholds
+**Fix:** Add a `DATABASE_URL` item to the 1Password `Baker API Keys` vault. Value = the already-assembled URL with `urllib.parse.quote` applied to special chars. Document the format in the item's notes field.
 
 **Procedure:**
 
-1. Clone baker-vault if not already present in your workspace
-2. Create or update `config/env.mac-mini.yml` with the ratified values
-3. Commit + open PR against baker-vault main
-4. Include PR URL in your report — Director merges
+1. On Mac Mini via `ssh macmini`, `export OP_SERVICE_ACCOUNT_TOKEN=...` (from `/tmp/b1-op.env` if still present, else Director re-provides)
+2. Retrieve split vars via Render API (you know the pattern from §6.3)
+3. Assemble URL
+4. Create new 1P item: `op item create --category 'API Credential' --vault 'Baker API Keys' --title 'DATABASE_URL' credential='<url>'`
+5. Verify: `op item get 'DATABASE_URL' --vault 'Baker API Keys' --fields credential --reveal | head -c 40` (just to confirm retrievable)
+6. Update Mac Mini `~/.kbl.env` to pull from the new item on next rebuild (document in the report, don't re-populate now)
 
-**DO NOT** flip `pipeline_enabled` to `true`. Step 7 is Director's.
+### Report
 
----
+File: `briefs/_reports/B1_tcc_fix_dburl_20260418.md`
 
-## Report structure
+- Deliverable 1: which option (a/b/c) picked + rationale + PR URL
+- Deliverable 2: 1P item created (name only, no value) + verify output (first 40 chars of URL, NOT full value)
 
-File: `briefs/_reports/B1_kbl_a_install_full_20260418.md`
+### Scope guardrails
 
-Sections:
+- **Do NOT** touch the bandaged plist paths on Mac Mini (they're live and working — don't regress Step 6 state)
+- **Do NOT** commit secrets to git in any form
+- Token hygiene: `unset OP_SERVICE_ACCOUNT_TOKEN` at session end
 
-1. **TL;DR** — all clean / partial / blocked
-2. **Step 3 evidence** — install exit + enumerate created artifacts
-3. **Step 4 evidence** — which N secrets populated (names only, never values), `chmod 600` confirmed, sanity-check output
-4. **Step 5 evidence** — baker-vault PR URL + commit SHA
-5. **Open items for Director** — Step 6 verification commands + Step 7 flag-flip procedure
-6. **Issues encountered** — any scaffold secrets not matchable to vault items, any install surprises
+### Dispatch back
 
----
-
-## Security guardrails (STRICT)
-
-- Service account token lives in `OP_SERVICE_ACCOUNT_TOKEN` env var only. `unset` it when done.
-- **Never** commit the token, **never** echo full secret values in logs.
-- **Never** paste secret values into report files — names only.
-- `~/.kbl.env` perms = `600`.
-- Temporary files in `/tmp/` holding any secret must be shredded: `rm -P` or `shred -u` before session end.
-
----
-
-## Dispatch back
-
-Chat one-liner:
-
-> B1 Steps 3+4+5 done — see `briefs/_reports/B1_kbl_a_install_full_20260418.md`, commit `<SHA>`. Baker-vault PR `<URL>`. Director: ready for Step 6 (verify first tick green with pipeline_enabled=false).
+> B1 TCC + DB_URL done — see `briefs/_reports/B1_tcc_fix_dburl_20260418.md`, commit `<SHA>`. PR `<URL>` for TCC fix. Standing by.
 
 ---
 
 ## Est. time
 
-~45 minutes total.
+~40 min:
+
+- 20 min TCC fix (option b) + PR
+- 10 min DATABASE_URL to 1P
+- 10 min report
 
 ---
 
-*Dispatched 2026-04-18 by AI Head. Director relays `OP_SERVICE_ACCOUNT_TOKEN` directly to B1 chat session. Service account is `Baker Automation`, access to `Baker API Keys` vault verified by AI Head 2026-04-18.*
+*Dispatched 2026-04-18 by AI Head.*
