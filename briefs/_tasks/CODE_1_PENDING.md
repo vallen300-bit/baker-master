@@ -1,137 +1,101 @@
 # Code Brisen #1 — Pending Task
 
 **From:** AI Head
-**To:** Code Brisen #1 (terminal instance)
-**Previous:** PR #15 STEP6-FINALIZE-IMPL merged at `4cb47e1a`. 6 of 7 pipeline steps on main.
+**To:** Code Brisen #1 (terminal instance — fresh tab, Terminal was closed post-PR-#16 per memory hygiene)
+**Previous:** PR #16 STEP7-COMMIT-IMPL shipped at `79ad641`. B2 verdict: REDIRECT on one real race bug.
 **Task posted:** 2026-04-19 (afternoon)
-**Status:** OPEN — THE LAST PIPELINE STEP
+**Status:** OPEN — S1 fix on PR #16
 
 ---
 
-## Task: STEP7-COMMIT-IMPL — Vault commit + push under flock mutex
+## Task: PR16-S1-FIX — Move Inv 4 guard inside the flock+pull-rebase window
 
-**Spec:** KBL-B brief §4.8 (lines 424-431) + §4.9 (TOAST cleanup).
+**Source:** B2 review @ `1e4552b`.
 
-### Why — plain English
+### Why — the race
 
-Step 7 is where the pipeline actually writes to the vault. Everything before has been PG columns. Step 7 takes the `final_markdown` + cross-link stubs that Steps 5-6 produced, writes them as real Markdown files under `~/baker-vault/wiki/`, runs `git commit`, and pushes to GitHub. This is where Silver becomes **visible to Director in Obsidian / GitHub / any vault reader**. The loop closes here.
+Current code in `kbl/steps/step7_commit.py:579`:
 
-Because git push is destination-exclusive (only one machine can push cleanly at a time), Step 7 runs on Mac Mini (the always-on agent-writer host per CHANDA Inv 9 clarification). **But the code you write is deploy-agnostic** — same Python can run on your dev Mac for testing or Mac Mini in production. Env var `BAKER_VAULT_PATH` + configurable git remote + `flock` mutex handle the coordination.
+```
+_inv4_guard_target_path(main_abs)   # runs BEFORE the lock + rebase
+with acquire_vault_lock(lock_path, timeout):
+    _git_pull_rebase(cfg)            # pulls in fresh content from origin/main
+    _atomic_write(main_abs, content) # overwrites WHATEVER the pull just brought in
+```
+
+**The race:** Director authors a Gold file on dev Mac + pushes to `origin/main`. Mac Mini's local clone hasn't pulled that commit yet. Step 7 runs:
+
+1. Guard reads local file — doesn't exist yet locally, or has old content without `author: director` → guard **passes**
+2. Lock acquired, pull-rebase fast-forwards Director's new Gold file into the clone
+3. `_atomic_write` overwrites Director's Gold → **Inv 4 silently violated**
+
+B1's existing test `test_commit_inv4_collision_refuses` doesn't catch it because the test seeds the Director file on the local clone before running — no pull-vs-guard ordering tested.
 
 ### Scope
 
 **IN**
 
-1. **`kbl/steps/step7_commit.py`** — the committer:
+1. **`kbl/steps/step7_commit.py`** — one-line fix per B2:
+   - **Move `_inv4_guard_target_path(main_abs)` INSIDE the `with acquire_vault_lock(...)` block, AFTER `_git_pull_rebase(cfg)` returns.**
+   - Order inside the lock becomes: `_git_pull_rebase` → `_inv4_guard_target_path` → atomic writes → git add/commit/push.
+   - No other logic changes.
 
-   - `commit(signal_id: int, conn) -> None` — full pipeline:
-     - Load `final_markdown` + `target_vault_path` from `signal_queue`
-     - Load unrealized cross-link stubs: `SELECT * FROM kbl_cross_link_queue WHERE source_signal_id=%s AND realized_at IS NULL`
-     - Acquire `flock` on `~/baker-vault/.lock` (env var `BAKER_VAULT_LOCK_PATH` override; default `{vault}/.lock`)
-     - Inside lock:
-       - `git pull --rebase origin main` (sync before write)
-       - Write `final_markdown` to `{vault}/{target_vault_path}` via atomic write (`tempfile.NamedTemporaryFile(dir=vault_dir) + os.replace`)
-       - For each cross-link stub: append-or-replace `stub_row` to `{vault}/wiki/{target_slug}/_links.md` via atomic write. Idempotent — if file has a stub line matching `<!-- stub:signal_id={id} -->` already, REPLACE that line; otherwise append sorted by `created` DESC (newest at top).
-       - `git add <target_vault_path> wiki/<slug>/_links.md [...]`
-       - `git commit` with message `Silver: {primary_matter} — {title} (sig:{short_id})` under pipeline identity
-       - `git push origin main` — retry once on rebase conflict (`git pull --rebase && git push`)
-     - On success (lock released): update `signal_queue` row with `state='done'`, `committed_at=NOW()`, `commit_sha=<SHA from HEAD>`; UPDATE `kbl_cross_link_queue` set `realized_at=NOW()` for the processed stubs
-     - Post-commit TOAST cleanup (§4.9): in the same DB transaction, `UPDATE signal_queue SET opus_draft_markdown = NULL, final_markdown = NULL WHERE id = <signal_id> AND state = 'done'`
+2. **`tests/test_step7_commit.py`** — add ONE new test covering the race path:
+   - **Test name:** `test_commit_inv4_collision_after_rebase_refuses` (or similar)
+   - **Setup:** two local git clones of the fixture vault. Clone A is the Mac Mini (Step 7 target). Clone B is a "second writer" simulating Director's dev Mac.
+   - **Steps:**
+     - Start: both clones at same commit, target file does NOT exist locally in A
+     - On Clone B: create `wiki/<matter>/<date>_topic.md` with `author: director` frontmatter, commit, push to origin
+     - On Clone A (our Step 7 target): DO NOT manually pull
+     - Call `commit(signal_id, conn)` on a signal that happens to produce the same `target_vault_path`
+     - Expected: Step 7 acquires lock → pulls-rebases (brings in Clone B's Director file) → guard fires AFTER rebase → raises `CommitError` → state flips to `commit_failed` → nothing overwritten
+   - **Assertions:**
+     - Final file content matches Clone B's Director version (not Step 7's overwrite)
+     - Signal state = `commit_failed`
+     - `CommitError` raised with message referencing `author: director` + `target_vault_path`
+     - `git log` on main still shows Clone B's commit (no Step 7 commit on top)
 
-   - **State transitions:** `awaiting_commit` → `commit_running` → `completed` (success) OR `commit_failed` (hard failure). All in 34-value CHECK set.
+3. **No production code changes besides the one-line reorder.** No other refactors. No nice-to-haves. No S2 fixes.
 
-   - **Failure modes:**
-     - Git push fails twice (rebase retry exhausted) → `commit_failed`, WARN log, signal re-claimable by next tick
-     - Filesystem write fails (disk full, permission denied) → `commit_failed`, ERROR log, do NOT commit or push
-     - `flock` timeout after 60s → `commit_failed`, WARN log (another process holds the lock too long; probably stuck — operator investigates)
-     - Cross-link stub write fails for one target_slug but others succeed: rollback ALL file writes in this lock window, raise `CommitError`, state → `commit_failed`. Atomic-all-or-nothing semantic.
+### Deferred (do NOT apply now)
 
-2. **`kbl/exceptions.py`** — add `CommitError(KblError)` + `VaultLockTimeoutError(KblError)` (subclass of CommitError). Net-additive.
-
-3. **Env vars:**
-   - `BAKER_VAULT_PATH` — required; absolute path to baker-vault clone (dev Mac: `~/baker-vault`; Mac Mini prod: `~/baker-vault`)
-   - `BAKER_VAULT_LOCK_PATH` — optional; default `{BAKER_VAULT_PATH}/.lock`
-   - `BAKER_VAULT_FLOCK_TIMEOUT_SECONDS` — optional; default 60
-   - `BAKER_VAULT_GIT_IDENTITY_NAME` — optional; default `Baker Pipeline`
-   - `BAKER_VAULT_GIT_IDENTITY_EMAIL` — optional; default `pipeline@brisengroup.com`
-   - `BAKER_VAULT_GIT_REMOTE` — optional; default `origin`
-   - Missing required env → `RuntimeError` at module import (fail-fast)
-
-4. **`pipeline_tick.py` wire-up** — extend `_process_signal` one more hop:
-   - `awaiting_commit` → call `commit()` → `completed`
-   - Update tx-boundary docstring to reflect Step 7 presence
-   - The `hasattr` sentinel that B1 wrote in the previous round (per B2's note in PR #14 review) becomes obsolete once Step 7 lands — remove or replace with final-state check.
-
-5. **`flock` helper — `kbl/_flock.py`** (or inline in step7_commit.py):
-   - Cross-platform: POSIX `fcntl.flock` on Mac/Linux. Don't worry about Windows.
-   - Context manager `acquire_vault_lock(lock_path: str, timeout_seconds: int) -> ContextManager[None]`
-   - On timeout: raise `VaultLockTimeoutError`
-   - On exit: release cleanly (even if exception raised inside)
-
-6. **Mock-mode for local testing (critical):**
-   - `BAKER_VAULT_DISABLE_PUSH=true` env var → same code path, but skips `git push origin main`. Commit still happens locally. Useful for dev Mac testing without touching GitHub.
-   - **Default OFF** — on Render/Mac Mini production, push happens.
-
-7. **Tests — `tests/test_step7_commit.py`:**
-   - **Happy path:** single signal with `final_markdown` + 1 cross-link → files written, git commit happens, push mocked → success → state transitions + commit_sha + realized_at + TOAST cleanup all verified. Use a temp git repo as fixture (`tmp_path`).
-   - **No cross-links:** signal with `related_matters=[]` → only main file written, no `_links.md` writes. Verify.
-   - **Cross-link idempotency:** re-run same signal → second run is a no-op (nothing unrealized) OR re-emits stubs if `realized_at=NULL`. Verify.
-   - **Rebase retry:** first `git push` fails (non-fast-forward), rebase retry succeeds. Verify.
-   - **Rebase exhausted:** both push attempts fail → `commit_failed`, WARN log. Verify.
-   - **Flock timeout:** simulated concurrent hold → `VaultLockTimeoutError` raised. Verify.
-   - **Filesystem write failure:** mock `os.replace` to raise `OSError` → `commit_failed`, no partial state. Verify.
-   - **Atomic-all-or-nothing:** main file succeeds, one cross-link fails → all writes rolled back (via temp → rename pattern), nothing committed, state → `commit_failed`.
-   - **TOAST cleanup:** after `state='done'`, verify `opus_draft_markdown` and `final_markdown` are NULL.
-   - **CHANDA Inv 9 positive test:** this is THE step that writes to vault. No assertions of "zero writes" here; instead assert writes go ONLY to `{BAKER_VAULT_PATH}/wiki/**` (never outside the vault).
-   - **Mock-mode:** `BAKER_VAULT_DISABLE_PUSH=true` → push is not called but commit is. Verify.
-
-8. **Extend `tests/test_pipeline_tick.py`:** add a test for the full 7-step happy path through `_process_signal`. End state: `completed`.
+- B2's 2 S2 (rebase-abort before hard-reset, idempotent no-op commit) — track for polish PR
+- B2's 6 N nits (stale pipeline_tick docstring, `_links.md` .gitignore hygiene, regex robustness on quotes/comments, `git clean -fd` scope narrowing, inline ALTER TABLE pattern from PR #15 S2) — track for polish PR
 
 ### CHANDA pre-push
 
-- **Q1 Loop Test:** Step 7 touches **Leg 1** indirectly — the file it writes becomes the Gold-read source for future signals in the same matter. Verify: no Gold-read happens *within* Step 7 (that's Step 5's job). Pass.
-- **Q2 Wish Test:** Step 7 serves wish directly — it closes the loop from Silver-draft to visible-vault-entry. Without it, the pipeline is theater.
-- **Inv 4** (author-director files untouched) — Step 7 MUST NOT overwrite any file where the current content has `author: director`. **Guard test:** if `target_vault_path` exists and has `author: director` frontmatter, raise `CommitError` → `commit_failed`. Operator investigates the collision (likely a signal pointing at a promoted-Gold path — Step 6 slug collision bug upstream).
-- **Inv 6** — Step 7 is terminal. After this, signal is `completed`. Pipeline never skips Step 6 — but Step 6 is upstream, so this is verified by the fact that Step 7 is only called from `_process_signal` AFTER Step 6 succeeds.
-- **Inv 8** — structural enforcement already happened at Step 6 via Pydantic. Step 7 doesn't re-validate.
-- **Inv 9** — Step 7 is THE Mac Mini agent-writer. This is where Inv 9 is OPERATIONALIZED, not violated. Positive test (writes land in vault) + negative test (no writes outside `{BAKER_VAULT_PATH}/wiki/`).
-- **Inv 10** — no prompts.
+- **Q1 Loop Test:** no new Leg surface; just reorder-for-correctness within existing Leg 1 producer. Pass.
+- **Q2 Wish Test:** honors wish — Inv 4 protection must be genuine, not theatrical. Pass.
+- **Inv 4** now genuinely enforced across the pull-rebase window.
 
 ### Branch + PR
 
-- Branch: `step7-commit-impl`
-- Base: `main`
-- PR title: `STEP7-COMMIT-IMPL: kbl/steps/step7_commit.py + vault write + flock + git commit/push`
-- Target PR: #16
-
-### Reviewer
-
-B2.
+- **Branch:** `step7-commit-impl` (same PR #16 branch).
+- **Amend as additional commit** on top of `79ad641`. Do NOT open new PR.
+- **PR #16 head advances** — B2 S1 delta re-review = fast APPROVE.
 
 ### Timeline
 
-~90-120 min. Biggest moving-parts surface (filesystem + git + flock + multi-file atomicity + mock-mode). Flag AI Head if scope exceeds 2 hours.
+~20-30 min (one-line code change + one test with 2-clone fixture + run suite + commit + push).
 
 ### Dispatch back
 
-> B1 STEP7-COMMIT-IMPL shipped — PR #16 open, branch `step7-commit-impl`, head `<SHA>`, <N>/<N> tests green. Mock-mode BAKER_VAULT_DISABLE_PUSH verified. pipeline_tick _process_signal extended to terminal state `completed`. Ready for B2 review.
+> B1 PR16-S1-FIX shipped — PR #16 head advanced to `<SHA>`, `_inv4_guard_target_path` moved inside lock+pull window, `test_commit_inv4_collision_after_rebase_refuses` added, `<N>`/`<N>` tests green. Ready for B2 S1 delta APPROVE.
 
-### After this task
+---
 
-- B2 reviews PR #16 → auto-merge on APPROVE.
-- AI Dennis completes Mac Mini infra prep (items 1-4 from `briefs/_tasks/AI_DENNIS_MAC_MINI_STEP7_PREP.md`; items 5-6 land after your code merges).
-- After PR #16 merges: **7 of 7 pipeline steps on main**. Phase 1 complete. T3 pipeline ships.
-- Next B1 ticket: KBL-C handler implementations (ayoniso dispatcher, WhatsApp reply handler, vault-edit watcher, dashboard feeder) — AI Head authors the KBL-C §4-10 brief + OQs resolution sequence first.
-- Also track: PR #15 S2 (`_increment_retry_count` DDL in hot path) + 4 nice-to-haves (stale docstring, commit-before-raise consistency, `_inbox` special-case) — consolidate into a single Phase-1-polish PR after Step 7 ships. NOT in this dispatch scope.
+## After this task
+
+On B2 APPROVE: I auto-merge PR #16. **7 of 7 pipeline steps on main. Cortex T3 Phase 1 SHIPPED.**
+
+Then: B3 provisions launchd plists (items 5-6 of `AI_DENNIS_MAC_MINI_STEP7_PREP`) against your Step 7 code, and KBL-C handler implementations begin.
 
 ---
 
 ## Working-tree reminder
 
-**Never /tmp/** — use `~/bm-b1` or `~/Desktop/baker-code` (where you were for PR #15). Survives reboots.
-
-**After shipping PR #16: quit your Terminal tab and start fresh** for the next task. Releases Claude Code CLI memory.
+Work in `~/bm-b1` or `~/Desktop/baker-code` (wherever your pre-memory-pressure clone lived). Never `/tmp/`. **After this amend: quit the Terminal tab again** — memory hygiene.
 
 ---
 
-*Posted 2026-04-19 by AI Head. The final pipeline step. Parallel: AI Dennis doing Mac Mini infra. Code is deploy-agnostic — test on your dev Mac, deploys to Mac Mini when ready.*
+*Posted 2026-04-19 by AI Head. Small-but-real race. B2's one-line ordering fix + one test covers it cleanly.*
