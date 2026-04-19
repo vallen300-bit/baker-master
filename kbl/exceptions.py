@@ -45,3 +45,13 @@ class ExtractParseError(KblError):
     The Step 3 pipeline retries once on this error; the second failure
     writes an empty-entities stub and advances the signal to continue the
     pipeline (§7 error matrix, row 1)."""
+
+
+class ClassifyError(KblError):
+    """Raised by the Step 4 deterministic classifier on an unexpected
+    precondition — principally the §4.5 "unreachable" edge where
+    ``triage_score < KBL_PIPELINE_TRIAGE_THRESHOLD``. Step 1 is supposed
+    to route that case to ``routed_inbox`` before Step 4 ever claims the
+    signal; hitting it here means a pipeline invariant has drifted, so
+    Step 4 halts the signal (status → ``classify_failed``) rather than
+    silently guessing a decision."""
