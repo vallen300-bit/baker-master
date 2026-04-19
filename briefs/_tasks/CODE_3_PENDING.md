@@ -2,76 +2,85 @@
 
 **From:** AI Head
 **To:** Code Brisen #3 (fresh terminal tab)
-**Task posted:** 2026-04-19 (late afternoon)
-**Status:** OPEN — infra audit, quick
+**Task posted:** 2026-04-19 (late afternoon, post-audit-ratification)
+**Status:** OPEN — retire dropbox-mirror per Director ratification
 
 ---
 
-## Task: MAC_MINI_LEGACY_PLIST_AUDIT
+## Task: MAC_MINI_DROPBOX_MIRROR_RETIRE
 
 ### Context
 
-During AI Head refresh I ran `ssh macmini 'launchctl list | grep brisen'` and got:
+Your audit (`briefs/_reports/B3_kbl_legacy_plist_audit_20260419.md`) recommended ESCALATE on `com.brisen.kbl.dropbox-mirror` with three options (expand / split / retire). Director ratified **RETIRE** — stated 2026-04-19: *"I do not need Dropbox mirror, by the way. I'm going to get rid of Dropbox sometime in the future."*
 
-```
--  0  com.brisen.baker.heartbeat
--  0  com.brisen.kbl.purge-dedupe
--  0  com.brisen.baker.poller
--  0  com.brisen.kbl.dropbox-mirror
-```
+This is now saved as a durable project memory (`project_dropbox_exit.md`): **no new Dropbox dependencies in future Baker / KBL work.** Your audit surfaced the signal — good catch.
 
-The `baker.*` plists are your `MAC_MINI_LAUNCHD_PROVISION` work — correct. The two `kbl.*` plists (`purge-dedupe`, `dropbox-mirror`) are **KBL-A legacy** and were NOT in the retired set of your earlier surgical cleanup (which retired `pipeline` + `heartbeat` only, renamed to `.retired-2026-04-19`).
-
-Director needs a ratification: **keep or retire.** Pre-shadow-mode go-live this must be clear — a stale agent writing to the vault or the dedupe table while Steps 1-6 churn is a silent-corruption risk.
+`com.brisen.kbl.purge-dedupe` stays KEEP per your (correct) catch that it's load-bearing for the new pipeline. No action on that plist.
 
 ### Scope
 
-**Deliverable:** one report at `briefs/_reports/B3_kbl_legacy_plist_audit_20260419.md` answering these questions per plist:
+Retire `com.brisen.kbl.dropbox-mirror` on Mac Mini using the same pattern as your 2026-04-19 retirement of `com.brisen.kbl.pipeline.plist` + `com.brisen.kbl.heartbeat.plist`:
 
-For **both** `com.brisen.kbl.purge-dedupe.plist` and `com.brisen.kbl.dropbox-mirror.plist`:
+1. **`launchctl unload`** the agent:
+   ```bash
+   ssh macmini 'launchctl unload ~/Library/LaunchAgents/com.brisen.kbl.dropbox-mirror.plist'
+   ```
 
-1. **What does it run?** Paste the plist `ProgramArguments` + wrapper script path. Read the wrapper script + any Python it invokes (`head -100` is enough).
-2. **What does it touch?** Vault path? DB tables? Dropbox paths? Any file writes?
-3. **Does it conflict with Cortex T3?**
-   - Does it write to `signal_queue`, `kbl_cost_ledger`, `kbl_cross_link_queue`, `mac_mini_heartbeat`, `kbl_log`, or `kbl_alert_dedupe`? (Any write = conflict, per Inv 9 — Mac Mini poller is the only vault-writing agent in the new architecture.)
-   - Does it write to `~/baker-vault/`? (Same — only Step 7 via poller.)
-   - Is it still serving a purpose the new pipeline doesn't cover? (Dedupe may be a dedicated maintenance task the pipeline intentionally doesn't handle.)
-4. **Your recommendation per plist:** KEEP (with one-line rationale), RETIRE (rename `.retired-2026-04-19b` in the same pattern as before + `launchctl unload`), or ESCALATE (you need Director design input before acting).
+2. **Rename plist** to the same retired suffix pattern you used before:
+   ```bash
+   ssh macmini 'mv ~/Library/LaunchAgents/com.brisen.kbl.dropbox-mirror.plist ~/Library/LaunchAgents/com.brisen.kbl.dropbox-mirror.plist.retired-2026-04-19'
+   ```
 
-No changes to any plist until Director ratifies. **Audit report only.** Same pre-flight caution you applied correctly in `MAC_MINI_LAUNCHD_PROVISION`.
+3. **Verify unload:**
+   ```bash
+   ssh macmini 'launchctl list | grep brisen'
+   ```
+   Expected output: only `com.brisen.baker.heartbeat`, `com.brisen.baker.poller`, `com.brisen.kbl.purge-dedupe`. `dropbox-mirror` must be absent.
+
+4. **Wrapper + any supporting scripts** — if the plist referenced a `.sh` wrapper in `/Users/dimitry/baker-pipeline/` or equivalent, either:
+   - (a) leave it on disk (orphaned; harmless once plist is gone), OR
+   - (b) rename wrapper with same `.retired-2026-04-19` suffix for consistency.
+
+   Your call — recommend (b) for clean audit trail. Note which you picked in the report.
+
+5. **No vault touches.** Do not touch `~/baker-vault/`. Do not touch `~/.kbl.env`. Do not touch `com.brisen.kbl.purge-dedupe.plist` — it stays.
+
+6. **Short report** at `briefs/_reports/B3_dropbox_mirror_retire_20260419.md`:
+   - The three commands above with their actual output pasted in.
+   - Final `launchctl list | grep brisen` showing 3 agents remaining.
+   - Which option (a / b) you picked for the wrapper + why.
+   - One-line ratification that the mirror content on Dropbox is frozen as-of retirement time (Director can prune manually when he exits Dropbox; that's out of scope here).
 
 ### Hard constraints
 
-- **Read-only.** Do not unload, rename, or stop these agents in this task. Report only.
-- **Do not edit `~/.kbl.env`.** Read only if needed to trace env deps.
-- **Do not touch `~/baker-vault/`.** Ever.
-- **`ssh macmini` is fine for reads.** Mac Mini is on tailnet (confirmed during AI Head refresh).
+- **Inv 9 compliant** — no agent writes to `~/baker-vault/` in this task.
+- **Reversible** — renamed, not deleted. Director can `mv .retired-2026-04-19` back and `launchctl load` to resurrect if he changes his mind.
+- **Atomic step order** — unload FIRST (so launchd isn't mid-cycle when the file moves), THEN rename. If you reverse this, launchd may try to restart the agent before the rename lands.
 
 ### Timeline
 
-~20-30 min. Two plists. Read → trace → recommend.
+~10-15 min. Three commands + verification + short report.
 
 ### Reviewer
 
-B2 — light review, mainly sanity-check the conflict analysis against Inv 9 + Section 2 legs.
+B2 — light review, mainly verify the `launchctl list` output confirms clean retirement + no vault touches.
 
 ### Dispatch back
 
-> B3 MAC_MINI_LEGACY_PLIST_AUDIT shipped — report at `briefs/_reports/B3_kbl_legacy_plist_audit_20260419.md`, commit `<SHA>`. Recommendation: purge-dedupe=<KEEP|RETIRE|ESCALATE>, dropbox-mirror=<KEEP|RETIRE|ESCALATE>. Ready for B2 sanity-check.
+> B3 MAC_MINI_DROPBOX_MIRROR_RETIRE shipped — report at `briefs/_reports/B3_dropbox_mirror_retire_20260419.md`, commit `<SHA>`. `dropbox-mirror` unloaded + renamed. Remaining launchd brisen agents: 3 (baker.heartbeat, baker.poller, kbl.purge-dedupe). Ready for B2 sanity-check.
 
 ### After this task
 
-- B2 sanity-checks the audit (~5 min).
-- AI Head takes recommendations to Director for ratification.
-- If RETIRE on either: B3 follow-up task to rename + unload in the same pattern as the prior retirement.
-- Terminal tab quit per memory-hygiene rule after this report + any follow-up.
+- B2 sanity-checks (~5 min).
+- No further plist work unless Director surfaces new need.
+- Terminal tab quit per memory-hygiene rule.
 
 ---
 
 ## Working-tree reminder
 
-Work in `~/bm-b3` (not `/tmp/`). Quit Terminal tab after this report lands — memory hygiene.
+Work in `~/bm-b3`. Quit tab after this report + B2 sanity-check cycle.
 
 ---
 
-*Posted 2026-04-19 by AI Head. Triggered by ambiguity in prior AI Head's "KBL-A legacy retired" claim — only pipeline + heartbeat plists actually renamed; purge-dedupe + dropbox-mirror remain loaded.*
+*Posted 2026-04-19 by AI Head. Director ratification: RETIRE dropbox-mirror. Related durable signal: project_dropbox_exit.md (no new Dropbox deps).*
