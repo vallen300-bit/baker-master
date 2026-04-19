@@ -234,11 +234,17 @@ launchctl list | grep brisen
 # Expected: two entries, both PID-listed (not just status 0)
 ```
 
-### Director escalations
+### Director escalations — RESOLVED
 
-1. **`DATABASE_URL`** — the Neon connection string. Get from Render env vars or Director's secrets vault. Paste into both plists' `EnvironmentVariables` dict.
-2. **Second SSH key for baker-master clone on Mac Mini?** Director-default key works for the read-only clone; cleaner would be a second deploy key. Flag preference. **Lean: reuse Director's key** (read-only access, no push needed from the pipeline-repo clone).
-3. **`mac_mini_heartbeat` migration** — PR or direct-to-main? It's 10 lines, purely additive, zero-risk. **Lean: AI Head opens as PR #17 with a one-line description, B2 fast-APPROVE, merge.** Structure integrity over speed.
+1. **`DATABASE_URL`** (Director provided 2026-04-19):
+   ```
+   postgresql://neondb_owner:npg_26tjJyupOSfi@ep-summer-sun-aih7ha4h-pooler.c-4.us-east-1.aws.neon.tech:5432/neondb?sslmode=require
+   ```
+   Paste this LITERAL value into both plists' `EnvironmentVariables` → `DATABASE_URL` `<string>...</string>`. **Do NOT use `$DATABASE_URL` reference** — launchd does not source `~/.zshrc`. Verify post-load: `ssh macmini 'psql "$DATABASE_URL" -c "select 1"'`.
+
+2. **SSH key for baker-master clone on Mac Mini:** AI Head ratified — **reuse Director's default `~/.ssh/id_ed25519`** for the read-only clone (no push path needed; the clone's only purpose is importing Step 7 code).
+
+3. **`mac_mini_heartbeat` migration:** AI Head direct-to-main per handover authority ("small infra merges are mine" — migration is 10 lines, additive, zero-risk). **Already applied.** Render's next deploy + Neon picks it up automatically via the existing migration runner. You can `ssh macmini` and verify with `psql "$DATABASE_URL" -c "\d mac_mini_heartbeat"` before loading the heartbeat plist.
 
 ### CHANDA pre-push
 
