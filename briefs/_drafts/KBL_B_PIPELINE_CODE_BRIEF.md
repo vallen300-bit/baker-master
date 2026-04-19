@@ -665,6 +665,17 @@ def _can_fire_step5(conn, signal) -> bool:
 
 Separate from per-signal cost cap. Trips on 3+ consecutive Anthropic-side first-attempt failures across signals (in-signal R3 retries do NOT count). Recovery: probe every 60s; success → reset + flip `anthropic_circuit_open='false'`.
 
+### 9.4 Scheduler wiring env vars (PR #18 — KBL_PIPELINE_SCHEDULER_WIRING)
+
+Render runs `kbl.pipeline_tick.main` via APScheduler (registered in `triggers/embedded_scheduler.py`). Two knobs control when the job fires and whether `main()` does any work.
+
+| Env | Default | Purpose |
+|---|---|---|
+| `KBL_FLAGS_PIPELINE_ENABLED` | `"false"` | Opt-in gate. `main()` returns 0 immediately unless this equals `"true"` (case-insensitive). Any typo keeps the pipeline disabled. Flip on Render to enter shadow mode. |
+| `KBL_PIPELINE_TICK_INTERVAL_SECONDS` | `120` | APScheduler `IntervalTrigger` seconds. `max_instances=1` + `coalesce=True` guarantee no overlap at any interval. Values below 30 s are clamped to 30 s at registration time (log WARN). Malformed value falls back to the 120 s default. |
+
+Mac Mini does NOT read these envs — its `poller.py` imports `kbl.steps.step7_commit.commit` directly and only processes `awaiting_commit` rows. Step 7 / Mac Mini is unaffected by the Render flag.
+
 ## 10. Testing plan
 
 - **Per-step unit tests** — tests land alongside impl (see PR #7 LAYER0-IMPL, PR #8 STEP1-TRIAGE-IMPL, PR #9 LOOP-GOLD-READER-1).

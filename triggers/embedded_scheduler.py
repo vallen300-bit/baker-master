@@ -538,6 +538,48 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: memory_watchdog (every 5 min)")
 
+    # KBL_PIPELINE_SCHEDULER_WIRING: KBL-B Steps 1-6 orchestrator.
+    # Env-gated inside main() on KBL_FLAGS_PIPELINE_ENABLED (default
+    # closed) — safe to register unconditionally. Mac Mini poller owns
+    # Step 7 (CHANDA Inv 9). Default 120 s; override via
+    # KBL_PIPELINE_TICK_INTERVAL_SECONDS.
+    import os as _os
+    try:
+        _kbl_tick_seconds = int(_os.environ.get("KBL_PIPELINE_TICK_INTERVAL_SECONDS", "120"))
+    except (TypeError, ValueError):
+        _kbl_tick_seconds = 120
+    if _kbl_tick_seconds < 30:
+        logger.warning(
+            "KBL_PIPELINE_TICK_INTERVAL_SECONDS=%s below 30s floor; clamping to 30",
+            _kbl_tick_seconds,
+        )
+        _kbl_tick_seconds = 30
+    scheduler.add_job(
+        _kbl_pipeline_tick_job,
+        IntervalTrigger(seconds=_kbl_tick_seconds),
+        id="kbl_pipeline_tick", name="KBL-B pipeline tick (Steps 1-6)",
+        coalesce=True, max_instances=1, replace_existing=True,
+        misfire_grace_time=60,
+    )
+    logger.info(f"Registered: kbl_pipeline_tick (every {_kbl_tick_seconds}s — env-gated)")
+
+
+def _kbl_pipeline_tick_job():
+    """APScheduler wrapper around ``kbl.pipeline_tick.main``.
+
+    Lazy import keeps the `kbl.*` stack out of module-load time. Any
+    non-zero return (ops-visibility signal) is logged at WARN; the
+    job-level listener already handles exceptions.
+    """
+    try:
+        from kbl.pipeline_tick import main as _kbl_main
+        rc = _kbl_main()
+        if rc != 0:
+            logger.warning("kbl_pipeline_tick returned non-zero: %s", rc)
+    except Exception as e:
+        logger.error("kbl_pipeline_tick raised: %s", e, exc_info=True)
+        raise
+
 
 def _run_wiki_lint():
     """CORTEX-PHASE-3: Run wiki lint and log results."""
