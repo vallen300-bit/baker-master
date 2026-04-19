@@ -439,6 +439,42 @@ def test_classify_below_threshold_raises_and_marks_failed() -> None:
     assert not decision_rows
 
 
+def test_classify_cross_link_only_guard_raises_and_marks_failed() -> None:
+    """Phase 2 reserved-decision guard — B2 PR #13 S1.
+
+    No Phase 1 rule currently maps to ``CROSS_LINK_ONLY``; the guard in
+    ``classify()`` catches the case where a future table edit (or a
+    buggy monkeypatch) emits it anyway, then halts the signal the same
+    way as any other pipeline-invariant violation: flip status to
+    ``classify_failed`` BEFORE raising ``ClassifyError``. Without this
+    test the guard is unreachable code that CI can't validate.
+    """
+    conn = _classify_conn(triage_score=80, primary_matter="movie")
+    with _patch_scope("movie"), patch(
+        "kbl.steps.step4_classify._evaluate_rules",
+        return_value=(ClassifyDecision.CROSS_LINK_ONLY, False),
+    ):
+        with pytest.raises(ClassifyError, match="CROSS_LINK_ONLY"):
+            classify(signal_id=77, conn=conn)
+
+    # Status flip happened BEFORE the raise — same pattern as the
+    # below-threshold path in `test_classify_below_threshold_raises_...`.
+    failed_rows = [
+        c for c in conn._calls
+        if "update signal_queue set status = %s" in c[0].lower()
+        and c[1] == ("classify_failed", 77)
+    ]
+    assert failed_rows
+    # Guard fires AFTER _evaluate_rules returns, so no decision row
+    # should be written.
+    decision_rows = [
+        c for c in conn._calls
+        if "update signal_queue set" in c[0].lower()
+        and "step_5_decision" in c[0].lower()
+    ]
+    assert not decision_rows
+
+
 def test_classify_signal_not_found_raises() -> None:
     conn = MagicMock()
     cur = MagicMock()
