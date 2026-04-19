@@ -1,19 +1,38 @@
-"""KBL-A pipeline tick orchestrator + KBL-B per-signal processor.
+"""KBL-B pipeline tick orchestrator + per-signal processors.
 
-Claims one pending signal via FOR UPDATE SKIP LOCKED, runs it through
-Steps 1-5 under the transaction-boundary contract, exits. Steps 6-7 are
-not wired yet — ``_process_signal`` stops at ``awaiting_finalize`` and
-returns, leaving the follow-on Step 6 PR to wire the next hop.
+Two orchestrator variants share the same transaction-boundary contract:
+
+``_process_signal`` (Steps 1-7)
+    Full 7-step pipeline — terminal state ``completed``. Used by tests
+    and any future same-host run (dev Mac, CI, Step 7 on a non-Render
+    host). Not called from Render's tick.
+
+``_process_signal_remote`` (Steps 1-6 only)
+    Step 7 runs on Mac Mini via ``kbl.poller`` (direct import of
+    ``step7_commit.commit``). On Render we stop at ``awaiting_commit``
+    so we never try to open a flock / push without a vault clone
+    (CHANDA Inv 9: Mac Mini is single writer to ``~/baker-vault``).
+    Terminal states this function can leave the signal in:
+
+        ``routed_inbox``     — Step 1 low-score early return
+        ``paused_cost_cap``  — Step 5 cost gate denied
+        ``finalize_failed``  — Step 6 3× Opus retries exhausted
+        ``awaiting_commit``  — success; Mac Mini poller picks up
+
+    Do not call ``_process_signal_remote`` from Mac Mini — the poller
+    already owns Step 7 there, and running this variant would race the
+    poller's claim on ``awaiting_commit``.
 
 Transaction boundary contract (Task K YELLOW remediation, 2026-04-19)
 ---------------------------------------------------------------------
 
-Each step function in ``kbl.steps`` (``layer0.evaluate``,
-``triage.triage``, ``resolve.resolve``, ``extract.extract``,
-``classify.classify``, ``step5_opus.synthesize``) is **caller-owns-commit**:
-the step function performs all its DB writes (state UPDATE + cost_ledger
-INSERT + any column writes) but does NOT call ``conn.commit()``. The
-caller (``_process_signal`` below) is responsible for:
+Each step function in ``kbl.steps`` (``triage.triage``,
+``resolve.resolve``, ``extract.extract``, ``classify.classify``,
+``step5_opus.synthesize``, ``step6_finalize.finalize``,
+``step7_commit.commit``) is **caller-owns-commit**: the step performs
+all its DB writes (state UPDATE + cost_ledger INSERT + any column
+writes) but does NOT call ``conn.commit()``. The caller
+(``_process_signal`` / ``_process_signal_remote``) is responsible for:
 
     1. BEGIN (implicit via psycopg2 default — autocommit=False).
     2. Call the step function.
@@ -21,13 +40,23 @@ caller (``_process_signal`` below) is responsible for:
        writes all land atomically.
     4. On raised exception: ``conn.rollback()`` — no partial writes.
     5. Step functions MAY call ``conn.commit()`` internally ONLY to
-       preserve a write across a subsequent raise (e.g. the
-       ``status='<step>_failed'`` flip in the exception handler of
-       Step 1 triage + Step 4 classify + Step 5 opus). This is
-       explicitly documented in those step docstrings.
+       preserve a write across a subsequent raise (terminal-state flips
+       in Step 1/4/5/6/7 exception handlers).
 
 This closes the Inv 2 integration-layer gap surfaced in Task K burn-in
 audit at ``e300a49``.
+
+Render wiring (APScheduler, 2026-04-19)
+---------------------------------------
+
+``main()`` is the scheduler entrypoint. It is env-gated on
+``KBL_FLAGS_PIPELINE_ENABLED`` — default ``"false"``, so merging this
+module is a no-op until the Director explicitly flips the flag. When
+disabled, ``main()`` returns 0 immediately and does NOT claim a signal.
+When enabled it runs the two circuit-breaker short-circuits, claims one
+pending signal, and hands off to ``_process_signal_remote``. APScheduler
+registers the wrapper at 120 s with ``max_instances=1`` — see
+``triggers/embedded_scheduler.py``.
 
 Heartbeat ownership (R1.S7): this module does NOT write
 ``mac_mini_heartbeat``. The dedicated ``kbl.heartbeat`` LaunchAgent is
@@ -37,6 +66,7 @@ the sole owner of that key.
 from __future__ import annotations
 
 import logging as _stdlib_logging
+import os
 import sys
 from typing import Any
 
@@ -194,12 +224,111 @@ def _process_signal(signal_id: int, conn: Any) -> None:
     # flipped terminal internally). Pipeline is done.
 
 
+def _process_signal_remote(signal_id: int, conn: Any) -> None:
+    """Run one signal through Steps 1-6 under the tx-boundary contract.
+
+    Steps 1-6 only. Step 7 runs on Mac Mini via ``kbl.poller``. Do not
+    call from Mac Mini.
+
+    Mirrors ``_process_signal`` exactly through Step 6, then stops —
+    leaving the signal at ``awaiting_commit`` (success), or at one of
+    the terminal states each step can produce (``routed_inbox``,
+    ``paused_cost_cap``, ``finalize_failed``) via the usual
+    status-gated early returns.
+
+    Transaction contract is identical to ``_process_signal``: one
+    ``conn.commit()`` per successful step, ``conn.rollback()`` on any
+    raise, step-internal commits (terminal-state flips) survive.
+    """
+    # Deferred imports — match ``_process_signal``'s pattern. Step 7 is
+    # deliberately NOT imported here: Render has no vault clone and no
+    # flock target (CHANDA Inv 9).
+    from kbl.steps import step1_triage, step2_resolve, step3_extract
+    from kbl.steps import step4_classify, step5_opus, step6_finalize
+
+    # Step 1 — triage.
+    try:
+        step1_triage.triage(signal_id, conn)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT status FROM signal_queue WHERE id = %s", (signal_id,)
+        )
+        row = cur.fetchone()
+    if row is None or row[0] != "awaiting_resolve":
+        return
+
+    try:
+        step2_resolve.resolve(signal_id, conn)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    try:
+        step3_extract.extract(signal_id, conn)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    try:
+        step4_classify.classify(signal_id, conn)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    try:
+        step5_opus.synthesize(signal_id, conn)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT status FROM signal_queue WHERE id = %s", (signal_id,)
+        )
+        row = cur.fetchone()
+    if row is None or row[0] != "awaiting_finalize":
+        return
+
+    try:
+        step6_finalize.finalize(signal_id, conn)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    # Signal now sits at ``awaiting_commit`` (success — Mac Mini poller
+    # picks up) or ``finalize_failed`` (Step 6 internal terminal flip).
+    # Either way we stop here; Render never touches Step 7.
+
+
 def main() -> int:
+    """Render scheduler entrypoint. Returns 0 on normal exit (including
+    disabled / queue-empty / circuit-open). Non-zero reserved for
+    unexpected crashes. Safe to call repeatedly at the configured
+    interval — ``claim_one_signal`` uses ``FOR UPDATE SKIP LOCKED`` so
+    concurrent ticks (APScheduler + on-demand) cannot double-claim.
+    """
+    # Opt-in gate: default closed. Director flips
+    # KBL_FLAGS_PIPELINE_ENABLED=true on Render to start shadow mode.
+    # Any value other than the literal "true" (case-insensitive) keeps
+    # the pipeline disabled — no surprises from typos.
+    if os.environ.get("KBL_FLAGS_PIPELINE_ENABLED", "false").lower() != "true":
+        _local.info("pipeline disabled via KBL_FLAGS_PIPELINE_ENABLED; skipping tick")
+        return 0
+
     # Circuit-breaker short-circuits (INFO-level messages stay local per
     # R1.S2 — only WARN+ hits PG via emit_log).
     if get_state("anthropic_circuit_open") == "true":
         circuit_msg = "Anthropic circuit open, skipping API calls this tick"
-        # Always log locally; only escalate to PG once per 15-min bucket.
         _local.warning("[pipeline_tick] %s", circuit_msg)
         if check_alert_dedupe("pipeline_tick", circuit_msg, _CIRCUIT_WARN_BUCKET_MIN):
             emit_log("WARN", "pipeline_tick", None, circuit_msg)
@@ -219,24 +348,20 @@ def main() -> int:
         if signal_id is None:
             return 0  # queue empty — normal exit
 
-        # KBL-A stub: log the claim + mark classified-deferred. KBL-B
-        # replaces the body below with real pipeline logic.
-        emit_log(
-            "WARN",
-            "pipeline_tick",
-            signal_id,
-            "KBL-A stub: signal claimed but no pipeline logic yet (awaiting KBL-B)",
-        )
         try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE signal_queue SET status = 'classified-deferred', "
-                    "processed_at = NOW() WHERE id = %s",
-                    (signal_id,),
-                )
-                conn.commit()
-        except Exception:
-            conn.rollback()
+            _process_signal_remote(signal_id, conn)
+        except Exception as e:
+            # Step functions own their own rollback/terminal-flip
+            # semantics (caller-owns-commit contract). Anything that
+            # escapes _process_signal_remote is genuinely unexpected —
+            # log at ERROR and let the exception propagate so
+            # APScheduler sees the failure and its listener logs it.
+            emit_log(
+                "ERROR",
+                "pipeline_tick",
+                signal_id,
+                f"unexpected exception in _process_signal_remote: {e}",
+            )
             raise
 
     return 0

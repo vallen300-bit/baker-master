@@ -458,3 +458,174 @@ def test_process_signal_step7_terminal_flip_internal_commit_then_rollback() -> N
     assert conn.commit.call_count == 7  # 6 orchestrator + 1 step-internal.
     assert conn.rollback.call_count == 1
     mocks["step7"].assert_called_once_with(75, conn)
+
+
+# =====================================================================
+# KBL_PIPELINE_SCHEDULER_WIRING — Steps 1-6 remote variant + main() gate
+# =====================================================================
+
+from kbl.pipeline_tick import _process_signal_remote, main as _pipeline_main
+
+
+def test_process_signal_remote_happy_path_stops_at_awaiting_commit() -> None:
+    """Steps 1-6 run in order, seven commits never happen — six.
+    Step 7 is NOT imported or called. Signal ends at ``awaiting_commit``
+    (Mac Mini poller takes over)."""
+    conn = _mock_conn(
+        post_step1_status="awaiting_resolve",
+        post_step5_status="awaiting_finalize",
+        post_step6_status="awaiting_commit",
+    )
+    call_log: list[str] = []
+
+    with ExitStack() as stack:
+        mocks = _enter_all_steps(stack)
+        for name, mock in mocks.items():
+            mock.side_effect = _tracked_step(call_log, name)
+
+        _process_signal_remote(signal_id=101, conn=conn)
+
+    # 6 commits (Steps 1-6), 0 rollbacks.
+    assert conn.commit.call_count == 6
+    assert conn.rollback.call_count == 0
+    # Step 7 never invoked.
+    assert mocks["step7"].call_count == 0
+    # Steps 1-6 in strict order.
+    assert call_log == ["step1", "step2", "step3", "step4", "step5", "step6"]
+
+
+def test_process_signal_remote_routed_inbox_returns_early() -> None:
+    """Step 1 terminal-routes low-score signal → Steps 2-6 skipped,
+    Step 7 never called."""
+    conn = _mock_conn(post_step1_status="routed_inbox")
+
+    with ExitStack() as stack:
+        mocks = _enter_all_steps(stack)
+        _process_signal_remote(signal_id=102, conn=conn)
+
+    mocks["step1"].assert_called_once_with(102, conn)
+    assert conn.commit.call_count == 1
+    for name in ("step2", "step3", "step4", "step5", "step6", "step7"):
+        assert mocks[name].call_count == 0, f"{name} was called unexpectedly"
+
+
+def test_process_signal_remote_paused_cost_cap_gates_out_step6() -> None:
+    """Step 5 parks at ``paused_cost_cap`` — post-Step-5 status check
+    skips Step 6. Step 7 also never reached."""
+    conn = _mock_conn(
+        post_step1_status="awaiting_resolve",
+        post_step5_status="paused_cost_cap",
+    )
+
+    def _step5_cost_pause(signal_id: int, c: Any) -> None:
+        c.commit()
+        return None
+
+    with ExitStack() as stack:
+        mocks = _enter_all_steps(stack)
+        mocks["step5"].side_effect = _step5_cost_pause
+        _process_signal_remote(signal_id=103, conn=conn)
+
+    # 4 orchestrator (1-4) + 1 step5-internal + 1 orchestrator-post-step5.
+    assert conn.commit.call_count == 6
+    assert conn.rollback.call_count == 0
+    assert mocks["step6"].call_count == 0
+    assert mocks["step7"].call_count == 0
+
+
+def test_main_disabled_returns_zero_without_claim(monkeypatch) -> None:
+    """Default (flag unset) and explicit false both keep main() closed.
+    claim_one_signal MUST NOT be called."""
+    monkeypatch.delenv("KBL_FLAGS_PIPELINE_ENABLED", raising=False)
+
+    with patch("kbl.pipeline_tick.claim_one_signal") as mock_claim, \
+         patch("kbl.pipeline_tick.get_conn") as mock_conn_ctx:
+        rc = _pipeline_main()
+
+    assert rc == 0
+    assert mock_claim.call_count == 0
+    # get_conn must also be untouched — we bail before opening a conn.
+    assert mock_conn_ctx.call_count == 0
+
+    # And an explicit "false" behaves identically.
+    monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "false")
+    with patch("kbl.pipeline_tick.claim_one_signal") as mock_claim2, \
+         patch("kbl.pipeline_tick.get_conn") as mock_conn_ctx2:
+        rc2 = _pipeline_main()
+
+    assert rc2 == 0
+    assert mock_claim2.call_count == 0
+    assert mock_conn_ctx2.call_count == 0
+
+
+def test_main_enabled_calls_process_signal_remote(monkeypatch) -> None:
+    """With the flag on and a claimable signal, main() delegates to
+    _process_signal_remote with the claimed id."""
+    monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "true")
+
+    fake_conn = MagicMock()
+    fake_conn_ctx = MagicMock()
+    fake_conn_ctx.__enter__.return_value = fake_conn
+    fake_conn_ctx.__exit__.return_value = False
+
+    with patch("kbl.pipeline_tick.get_conn", return_value=fake_conn_ctx), \
+         patch("kbl.pipeline_tick.claim_one_signal", return_value=777) as mock_claim, \
+         patch("kbl.pipeline_tick._process_signal_remote") as mock_remote, \
+         patch("kbl.pipeline_tick.get_state", return_value="false"):
+        rc = _pipeline_main()
+
+    assert rc == 0
+    mock_claim.assert_called_once_with(fake_conn)
+    mock_remote.assert_called_once_with(777, fake_conn)
+
+
+def test_main_enabled_queue_empty_returns_zero(monkeypatch) -> None:
+    """Flag on, queue empty → main() returns 0 without calling the
+    remote processor."""
+    monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "true")
+
+    fake_conn = MagicMock()
+    fake_conn_ctx = MagicMock()
+    fake_conn_ctx.__enter__.return_value = fake_conn
+    fake_conn_ctx.__exit__.return_value = False
+
+    with patch("kbl.pipeline_tick.get_conn", return_value=fake_conn_ctx), \
+         patch("kbl.pipeline_tick.claim_one_signal", return_value=None) as mock_claim, \
+         patch("kbl.pipeline_tick._process_signal_remote") as mock_remote, \
+         patch("kbl.pipeline_tick.get_state", return_value="false"):
+        rc = _pipeline_main()
+
+    assert rc == 0
+    assert mock_claim.call_count == 1
+    assert mock_remote.call_count == 0
+
+
+def test_main_respects_anthropic_circuit(monkeypatch) -> None:
+    """Anthropic circuit open → main() returns 0, does NOT claim."""
+    monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "true")
+
+    def _get_state(key):
+        return "true" if key == "anthropic_circuit_open" else "false"
+
+    with patch("kbl.pipeline_tick.get_state", side_effect=_get_state), \
+         patch("kbl.pipeline_tick.claim_one_signal") as mock_claim, \
+         patch("kbl.pipeline_tick.check_alert_dedupe", return_value=False):
+        rc = _pipeline_main()
+
+    assert rc == 0
+    assert mock_claim.call_count == 0
+
+
+def test_main_respects_cost_circuit(monkeypatch) -> None:
+    """Cost circuit open → main() returns 0, does NOT claim."""
+    monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "true")
+
+    def _get_state(key):
+        return "true" if key == "cost_circuit_open" else "false"
+
+    with patch("kbl.pipeline_tick.get_state", side_effect=_get_state), \
+         patch("kbl.pipeline_tick.claim_one_signal") as mock_claim:
+        rc = _pipeline_main()
+
+    assert rc == 0
+    assert mock_claim.call_count == 0
