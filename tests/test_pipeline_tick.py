@@ -32,19 +32,28 @@ from kbl.pipeline_tick import _process_signal
 # --------------------------- mock conn ---------------------------
 
 
-def _mock_conn(post_step1_status: str = "awaiting_resolve") -> MagicMock:
+def _mock_conn(
+    post_step1_status: str = "awaiting_resolve",
+    post_step5_status: str = "awaiting_finalize",
+) -> MagicMock:
     """Build a MagicMock conn.
 
-    Only SQL the orchestrator issues directly is the post-Step-1 status
-    re-check (``SELECT status FROM signal_queue WHERE id = %s``). We return
-    ``(post_step1_status,)`` for that SELECT and ``None`` for anything else.
-    Step function writes happen inside the patched step callables and
-    don't touch this cursor at all.
+    The orchestrator issues two status re-checks:
+      1. After Step 1 — decides whether to run Steps 2-5.
+      2. After Step 5 — decides whether to run Step 6 (skipped on
+         ``paused_cost_cap``).
+
+    Each ``SELECT status FROM signal_queue WHERE id = %s`` returns the
+    next value from the queue built from ``post_step1_status`` +
+    ``post_step5_status``. Any further SELECT returns the final value
+    in the queue (harmless — Step 6 never re-checks).
 
     Commit/rollback counts are auto-tracked by MagicMock — assert on
     ``conn.commit.call_count`` / ``conn.rollback.call_count``.
     """
     conn = MagicMock()
+    status_queue: list[str] = [post_step1_status, post_step5_status]
+    status_iter_state = {"idx": 0}
 
     def _make_cursor() -> MagicMock:
         cur = MagicMock()
@@ -52,7 +61,9 @@ def _mock_conn(post_step1_status: str = "awaiting_resolve") -> MagicMock:
         def _execute(sql: str, params: Any = None) -> None:
             s = sql.lower()
             if "select status from signal_queue" in s:
-                cur.fetchone.return_value = (post_step1_status,)
+                i = min(status_iter_state["idx"], len(status_queue) - 1)
+                cur.fetchone.return_value = (status_queue[i],)
+                status_iter_state["idx"] += 1
             else:
                 cur.fetchone.return_value = None
 
@@ -78,11 +89,12 @@ _STEP_PATHS = [
     ("step3", "kbl.steps.step3_extract.extract"),
     ("step4", "kbl.steps.step4_classify.classify"),
     ("step5", "kbl.steps.step5_opus.synthesize"),
+    ("step6", "kbl.steps.step6_finalize.finalize"),
 ]
 
 
 def _enter_all_steps(stack: ExitStack) -> dict[str, MagicMock]:
-    """Patch all five step functions; return {name: mock}."""
+    """Patch all six step functions; return {name: mock}."""
     mocks: dict[str, MagicMock] = {}
     for name, path in _STEP_PATHS:
         mocks[name] = stack.enter_context(patch(path))
@@ -102,10 +114,13 @@ def _tracked_step(log: list[str], name: str):
 
 
 def test_process_signal_happy_path_commits_once_per_step() -> None:
-    """All 5 steps succeed → orchestrator commits exactly 5 times (one
-    per step), never rolls back, and calls steps in the fixed 1→2→3→4→5
+    """All 6 steps succeed → orchestrator commits exactly 6 times (one
+    per step), never rolls back, and calls steps in the fixed 1→2→3→4→5→6
     order with ``(signal_id, conn)``."""
-    conn = _mock_conn(post_step1_status="awaiting_resolve")
+    conn = _mock_conn(
+        post_step1_status="awaiting_resolve",
+        post_step5_status="awaiting_finalize",
+    )
     call_log: list[str] = []
 
     with ExitStack() as stack:
@@ -115,16 +130,16 @@ def test_process_signal_happy_path_commits_once_per_step() -> None:
 
         _process_signal(signal_id=42, conn=conn)
 
-    # 5 commits (one per step), 0 rollbacks.
-    assert conn.commit.call_count == 5
+    # 6 commits (one per step), 0 rollbacks.
+    assert conn.commit.call_count == 6
     assert conn.rollback.call_count == 0
 
     # Every step invoked with the same (signal_id, conn).
     for name, mock in mocks.items():
         mock.assert_called_once_with(42, conn)
 
-    # Strict 1→5 ordering.
-    assert call_log == ["step1", "step2", "step3", "step4", "step5"]
+    # Strict 1→6 ordering.
+    assert call_log == ["step1", "step2", "step3", "step4", "step5", "step6"]
 
 
 # --------------------------- early return on routed_inbox ---------------------------
@@ -238,13 +253,18 @@ def test_process_signal_step5_r3_exhaust_internal_commit_then_rollback() -> None
 def test_process_signal_step5_cost_cap_pause_returns_normally() -> None:
     """Step 5 parked via cost gate: it internally commits the
     ``paused_cost_cap`` flip and returns normally (no raise). Orchestrator
-    then commits again on successful return. No rollback.
+    then commits again on successful return. The post-Step-5 status check
+    sees ``paused_cost_cap`` (not ``awaiting_finalize``) and skips Step 6.
+    No rollback.
 
     Expected commit count == 6: 4 orchestrator commits (steps 1-4) +
     1 step-internal (paused_cost_cap flip) + 1 orchestrator commit after
-    Step 5 returns.
+    Step 5 returns. Step 6 is gated out by the status check.
     """
-    conn = _mock_conn()
+    conn = _mock_conn(
+        post_step1_status="awaiting_resolve",
+        post_step5_status="paused_cost_cap",
+    )
 
     def _step5_cost_pause(signal_id: int, c: Any) -> None:
         c.commit()  # step-internal paused_cost_cap flip
@@ -260,37 +280,94 @@ def test_process_signal_step5_cost_cap_pause_returns_normally() -> None:
     assert conn.commit.call_count == 6
     assert conn.rollback.call_count == 0
     mocks["step5"].assert_called_once_with(33, conn)
+    # Step 6 gated out by status check — never invoked.
+    assert mocks["step6"].call_count == 0
 
 
-# --------------------------- stops at awaiting_finalize ---------------------------
+# --------------------------- Step 6 happy path ---------------------------
 
 
-def test_process_signal_stops_at_awaiting_finalize_no_step6_or_step7() -> None:
-    """After Step 5 succeeds, orchestrator returns — Step 6/7 wiring
-    does not exist yet, so this test pins the current contract.
-    The only observable check is 'nothing after step5 is imported or
-    invoked'. We verify by attempting to patch non-existent step6/7
-    symbols would raise ImportError/AttributeError — i.e. pinning the
-    fact that they simply aren't referenced."""
-    conn = _mock_conn(post_step1_status="awaiting_resolve")
+def test_process_signal_step6_finalize_happy_path() -> None:
+    """All 6 steps succeed → status progression ``awaiting_resolve`` →
+    ``awaiting_finalize`` → (Step 6) → ``awaiting_commit``. Orchestrator
+    commits 6 times, never rolls back, invokes Step 6 exactly once."""
+    conn = _mock_conn(
+        post_step1_status="awaiting_resolve",
+        post_step5_status="awaiting_finalize",
+    )
 
     with ExitStack() as stack:
         mocks = _enter_all_steps(stack)
-        _process_signal(signal_id=99, conn=conn)
+        _process_signal(signal_id=55, conn=conn)
 
-    # Step 5 was the last thing called and it returned — orchestrator
-    # exits. Future Step 6 PR adds the next hop. Sentinel check: the
-    # kbl.steps namespace does not expose a step6 / step7 module yet.
+    assert conn.commit.call_count == 6
+    assert conn.rollback.call_count == 0
+    mocks["step6"].assert_called_once_with(55, conn)
+
+    # Step 7 is still not wired — sentinel check.
     import kbl.steps as steps_pkg
 
-    assert not hasattr(steps_pkg, "step6_finalize"), (
-        "step6 appeared — update orchestrator wiring + this test"
-    )
     assert not hasattr(steps_pkg, "step7_commit"), (
         "step7 appeared — update orchestrator wiring + this test"
     )
 
-    # And the happy-path contract still holds on this run.
-    assert conn.commit.call_count == 5
-    assert conn.rollback.call_count == 0
-    mocks["step5"].assert_called_once_with(99, conn)
+
+# --------------------------- Step 6 failure ---------------------------
+
+
+def test_process_signal_step6_raises_finalization_error_rolls_back() -> None:
+    """Step 6 raises ``FinalizationError`` on the last boundary →
+    orchestrator rolls back the Step 6 fragment and re-raises. Prior
+    steps' commits are preserved in the PG sense (already sealed);
+    MagicMock shows commit_count=5 (steps 1-5) + rollback_count=1."""
+    from kbl.exceptions import FinalizationError
+
+    conn = _mock_conn(
+        post_step1_status="awaiting_resolve",
+        post_step5_status="awaiting_finalize",
+    )
+
+    with ExitStack() as stack:
+        mocks = _enter_all_steps(stack)
+        mocks["step6"].side_effect = FinalizationError(
+            "signal_id=91: frontmatter validation failed (3 errors)"
+        )
+
+        with pytest.raises(FinalizationError, match="frontmatter"):
+            _process_signal(signal_id=91, conn=conn)
+
+    assert conn.commit.call_count == 5  # Steps 1-5 sealed.
+    assert conn.rollback.call_count == 1  # Step 6 fragment rolled back.
+    mocks["step6"].assert_called_once_with(91, conn)
+
+
+def test_process_signal_step6_terminal_flip_internal_commit_then_rollback() -> None:
+    """Step 6's terminal-state flip (finalize_failed after 3 Opus retries)
+    mirrors Step 1/4/5 — the step commits internally to preserve the
+    state flip, then raises. Orchestrator rollback fires but the sealed
+    state survives.
+
+    Expected: commit_count == 6 = 5 orchestrator (steps 1-5) + 1
+    step-internal (finalize_failed flip). rollback_count == 1.
+    """
+    from kbl.exceptions import FinalizationError
+
+    conn = _mock_conn(
+        post_step1_status="awaiting_resolve",
+        post_step5_status="awaiting_finalize",
+    )
+
+    def _step6_terminal(signal_id: int, c: Any) -> None:
+        c.commit()  # step-internal finalize_failed flip
+        raise FinalizationError("terminal finalize failure after 3 Opus retries")
+
+    with ExitStack() as stack:
+        mocks = _enter_all_steps(stack)
+        mocks["step6"].side_effect = _step6_terminal
+
+        with pytest.raises(FinalizationError, match="terminal"):
+            _process_signal(signal_id=73, conn=conn)
+
+    assert conn.commit.call_count == 6  # 5 orchestrator + 1 step-internal.
+    assert conn.rollback.call_count == 1
+    mocks["step6"].assert_called_once_with(73, conn)

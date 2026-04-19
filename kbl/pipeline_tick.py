@@ -102,7 +102,7 @@ def _process_signal(signal_id: int, conn: Any) -> None:
     # Deferred imports so this module can be imported without loading
     # the full KBL-B stack (heartbeat test harness etc.).
     from kbl.steps import step1_triage, step2_resolve, step3_extract
-    from kbl.steps import step4_classify, step5_opus
+    from kbl.steps import step4_classify, step5_opus, step6_finalize
 
     # Step 1 — triage. Caller-owns-commit boundary.
     try:
@@ -150,8 +150,27 @@ def _process_signal(signal_id: int, conn: Any) -> None:
         conn.rollback()
         raise
 
-    # Signal now sits at ``awaiting_finalize`` (or a terminal state the
-    # step wrote before raising). Step 6 PR picks up from here.
+    # Step 5 may have parked the signal at ``paused_cost_cap`` (cost gate
+    # denied) without raising. In that case synthesize() internally
+    # committed the pause and returned — Step 6 must not run, since the
+    # row's status is no longer ``awaiting_finalize``.
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT status FROM signal_queue WHERE id = %s", (signal_id,)
+        )
+        row = cur.fetchone()
+    if row is None or row[0] != "awaiting_finalize":
+        return
+
+    try:
+        step6_finalize.finalize(signal_id, conn)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    # Signal now sits at ``awaiting_commit`` (or a terminal state Step 6
+    # wrote before raising). Step 7 PR picks up from here.
 
 
 def main() -> int:
