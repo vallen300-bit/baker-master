@@ -101,7 +101,7 @@ def _fake_get_conn(queued):
 @pytest.fixture
 def client(monkeypatch):
     monkeypatch.setenv("BAKER_API_KEY", "test-key")
-    monkeypatch.setenv("KBL_COST_DAILY_CAP_USD", "50.0")
+    monkeypatch.setenv("KBL_COST_DAILY_CAP_EUR", "50.0")
 
     from outputs.dashboard import app, verify_api_key
 
@@ -170,9 +170,9 @@ def test_kbl_cost_rollup_happy_path(client):
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body["cap_usd"] == 50.0
-    assert body["day_total_usd"] == pytest.approx(1.25)
-    assert body["remaining_usd"] == pytest.approx(48.75)
+    assert body["cap_eur"] == 50.0
+    assert body["day_total_eur"] == pytest.approx(1.25)
+    assert body["remaining_eur"] == pytest.approx(48.75)
     assert len(body["rollup"]) == 2
     assert body["rollup"][0]["step"] == "step5_opus"
     assert isinstance(body["rollup"][0]["total_usd"], float)
@@ -187,8 +187,8 @@ def test_kbl_cost_rollup_empty_state(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["rollup"] == []
-    assert body["day_total_usd"] == 0.0
-    assert body["remaining_usd"] == 50.0
+    assert body["day_total_eur"] == 0.0
+    assert body["remaining_eur"] == 50.0
 
 
 # ---------------------------------------------------------------------------

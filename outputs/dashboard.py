@@ -10866,10 +10866,12 @@ async def kbl_signals():
 async def kbl_cost_rollup():
     """Last-24h cost ledger rollup grouped by step+model, plus footer totals."""
     from kbl.db import get_conn
+    # Canonical cap env is KBL_COST_DAILY_CAP_EUR (kbl/cost_gate.py enforces it);
+    # cost_usd ledger column stores EUR values per the same module's contract.
     try:
-        cap_usd = float(os.getenv("KBL_COST_DAILY_CAP_USD", "15.0"))
+        cap_eur = float(os.getenv("KBL_COST_DAILY_CAP_EUR", "50.0"))
     except (TypeError, ValueError):
-        cap_usd = 15.0
+        cap_eur = 50.0
 
     try:
         with get_conn() as conn:
@@ -10903,9 +10905,9 @@ async def kbl_cost_rollup():
 
     return {
         "rollup": rows,
-        "day_total_usd": day_total,
-        "cap_usd": cap_usd,
-        "remaining_usd": max(0.0, cap_usd - day_total),
+        "day_total_eur": day_total,
+        "cap_eur": cap_eur,
+        "remaining_eur": max(0.0, cap_eur - day_total),
     }
 
 

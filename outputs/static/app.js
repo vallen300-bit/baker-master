@@ -9958,10 +9958,10 @@ function kblFmtTime(iso) {
 }
 
 function kblFmtMoney(n) {
-    if (n === null || n === undefined) return '$0.00';
+    if (n === null || n === undefined) return '€0.00';
     var v = Number(n);
-    if (!isFinite(v)) return '$0.00';
-    return '$' + v.toFixed(2);
+    if (!isFinite(v)) return '€0.00';
+    return '€' + v.toFixed(2);
 }
 
 function kblAgeBadge(ageSec) {
@@ -10053,9 +10053,9 @@ async function _loadKBLCost(body) {
         if (!resp.ok) { _kblError(body, 'HTTP ' + resp.status); return; }
         var data = await resp.json();
         var rollup = (data && data.rollup) || [];
-        var dayTotal = Number(data.day_total_usd || 0);
-        var cap = Number(data.cap_usd || 0);
-        var remaining = Number(data.remaining_usd || 0);
+        var dayTotal = Number(data.day_total_eur || 0);
+        var cap = Number(data.cap_eur || 0);
+        var remaining = Number(data.remaining_eur || 0);
 
         if (!rollup.length) {
             _kblEmpty(body, 'No Opus or Voyage calls yet today. Gemma runs locally (zero cost; token counts on first signal).');
