@@ -2,86 +2,119 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (terminal instance)
-**Previous:** PR #14 STEP5-OPUS-IMPL shipped at `8225d0f`. B2 review filed (REDIRECT @ `6c3e833`).
+**Previous:** PR #14 STEP5-OPUS-IMPL merged at `58ed935e`. 6 of 7 pipeline steps on main.
 **Task posted:** 2026-04-19 (afternoon)
-**Status:** OPEN — one S1 test-gap fix on PR #14
+**Status:** OPEN — STEP6-FINALIZE-IMPL, OQs all resolved
 
 ---
 
-## Task: PR14-S1-FIX — Add `tests/test_pipeline_tick.py` for tx-boundary contract
+## Task: STEP6-FINALIZE-IMPL — Deterministic Silver document finalization
 
-**Source:** B2's PR #14 review @ `6c3e833` — S1.
+**Specs (ALL ratified):**
+- `briefs/_drafts/KBL_B_STEP6_FINALIZE_SPEC.md` @ `ffa2a26` — B3's full spec (8 sections, 21 validation rules, 5 Pydantic models, 12-class error matrix, 6-event log spec)
+- `briefs/_drafts/KBL_B_STEP6_OQ_RESOLUTIONS_20260419.md` (this session) — AI Head ratifications of all 8 OQs
+- KBL-B brief §4.7 (anchor)
 
 ### Why
 
-`_process_signal` orchestrator (77 lines in `kbl/pipeline_tick.py`) is the Task K YELLOW remediation — the caller-owns-commit tx-boundary contract made concrete. B2's critical spine verifications all passed (prompt cache, cost derivation, error split, R3 ladder, circuit breaker, etc.) EXCEPT the orchestrator itself has zero test coverage. Dispatch brief point 19 explicitly required MagicMock-conn tests on commit/rollback call counts + order + INSERT/UPDATE sequences. Missing = REDIRECT.
+Step 6 is deterministic (post-REDIRECT 2026-04-18) — no model call, no ledger row. It's the **last quality gate** before vault commit. Pydantic validates Opus's `opus_draft_markdown`, builds `final_markdown`, writes cross-link stubs to `wiki/<m>/_links.md`. If this step accepts broken drafts, broken Silver lands in the vault. If it over-rejects, Opus R3 burns cost on valid-but-marginal drafts.
 
-### Scope
+B3 has authored the spec fully. All 8 OQs are resolved (see table in OQ resolutions doc). **This is a straight implementation against the spec — no design work.**
+
+### Scope — implement per `KBL_B_STEP6_FINALIZE_SPEC.md`
 
 **IN**
 
-1. **`tests/test_pipeline_tick.py`** — new file, ~100-150 lines per B2's inline estimate.
+1. **`kbl/schemas/silver.py`** — all 5 Pydantic models per spec §2:
+   - `MatterSlug` constrained str (regex against v9 canonical form; validator reads `slugs.yml` once at module import, cached — static during process lifetime per spec)
+   - `MoneyMention` model (amount: int, currency: `Literal['EUR', 'USD', 'CHF', 'GBP', 'RUB']`) — per **OQ6**
+   - `SilverFrontmatter` — all required keys from §2 + OQ resolutions:
+     - `source_id: str` (not `sources` — **OQ1**)
+     - `title: str` max 160 chars (**OQ2**)
+     - `voice: Literal['silver']` (Inv 8 enforcement)
+     - `author: Literal['pipeline']` (Inv 8 enforcement)
+     - `created: datetime` (ISO 8601, UTC, tz-aware validator)
+     - `primary_matter: Optional[MatterSlug]` (**OQ7**: null allowed iff `related_matters == []`)
+     - `related_matters: list[MatterSlug]` (unique, != primary_matter)
+     - `vedana: Literal['threat', 'opportunity', 'routine']` (strict 3-value per `memory/vedana_schema.md`)
+     - `triage_score: int` (0-100)
+     - `triage_confidence: float` (0.0-1.0)
+     - `money_mentioned: list[str]` (raw strings emitted by Opus; parser normalizes to `list[MoneyMention]` at validation time per **OQ4**)
+     - `status: Literal['full', 'stub_auto', 'stub_cross_link', 'stub_inbox']` (**OQ5**)
+     - `thread_continues: list[str]` (lenient regex `^wiki/.*\.md$` per **OQ3**)
+   - `SilverDocument` — frontmatter + body (body char bound 1500-4000 per spec §2)
+   - `CrossLinkStub` — per §4
 
-2. **Mirror the `_mock_conn` pattern you already use** in `tests/test_step5_opus.py`. Don't invent a new helper — lift or share what's there.
+2. **`kbl/steps/step6_finalize.py`** — the finalizer:
+   - `finalize(signal_id: int, conn) -> None` — load `opus_draft_markdown` + all prior-step outputs → parse YAML frontmatter + body → validate via `SilverDocument` → build `target_vault_path` per §3.6 → write `final_markdown` + `target_vault_path` → append cross-link stubs per §4 → advance state
+   - State transitions: `awaiting_finalize` → `finalize_running` → `awaiting_commit` (success) OR `opus_failed` (validation fail, triggers Opus R3 per §4.7 brief + spec §5) OR `finalize_failed` (after 3 Opus retries fail OR cross-link IO error after 1 retry)
+   - Error matrix per spec §5 — 12 classes, each maps to state + retry policy
+   - Money parser: `_parse_money_string(raw: str) -> MoneyMention | None` — ~30 lines per OQ4
+   - `FinalizationError(KblError)` net-additive in `kbl/exceptions.py`
 
-3. **Test coverage (~5-8 tests):**
+3. **`target_vault_path` builder** — per spec §3.6. Format: `wiki/<primary_matter>/<yyyy-mm-dd>_<slug_of_title>.md`. Slug-of-title: lowercase, dash-separated, alphanumeric + dashes only, max 60 chars. Collision handling: append `_<source_id_short>` suffix if path exists.
 
-   - **Happy path — all 5 steps succeed:** `_process_signal` calls Step 1 → 2 → 3 → 4 → 5 in order; each step's writes land; final `conn.commit()` fires exactly once at end; `conn.rollback()` NOT called. Assert call order via `mock.call_args_list` or `MagicMock.mock_calls`.
+4. **Cross-link stub writer (`_append_cross_link`)** — per spec §4:
+   - Format: one stub per `related_matter`, appended to `wiki/<m>/_links.md`
+   - Idempotency by `source_signal_id`: grep the file for an existing stub with the same signal ID; REPLACE in place (not append duplicate). Regex: `^<!-- stub:signal_id=<id> -->$`
+   - Atomic write: `tempfile.NamedTemporaryFile(dir=vault_path, delete=False)` + `os.rename()` (POSIX atomic)
+   - Sorted by `created` DESC (newest first at top of file)
 
-   - **Failure at Step 1 (pre-commit):** Step 1 raises `TriageParseError` in the middle; orchestrator catches; `conn.rollback()` fires; no subsequent steps called; no `conn.commit()`. Exception propagates or is swallowed per orchestrator design — verify whichever B1 chose.
+5. **Logging per spec §6:**
+   - Pydantic validation failure: `level='WARN'`, `component='finalize'`, `message=f'{field}: {reason}'`. One log row per failed field.
+   - Cross-link write failure: `level='ERROR'`, `component='finalize'`, `message=f'cross-link write failed: {path}: {reason}'`
+   - Success: no log.
 
-   - **Failure at Step 2:** Step 2 raises `ResolverError`; all-or-nothing — Steps 1's writes must roll back too (single transaction). Assert `rollback()` fires; no commit. Steps 3-5 not called.
+6. **No migration.** Columns `final_markdown TEXT` + `target_vault_path TEXT` already exist (per B1 PR #14 migration OR earlier; if not, B1 adds `ADD COLUMN IF NOT EXISTS` inline). Verify before starting.
 
-   - **Failure at Step 5 with R3 exhaustion:** Step 5 raises `AnthropicUnavailableError` 3 times (R3 exhausted), final state `opus_failed` lands via internal-commit pattern. Orchestrator-level `commit()` should still fire to seal the failure state. Verify this matches the contract's point 5 (step MAY internally commit to preserve failure-state writes).
+7. **`pipeline_tick.py` wire-up** — extend `_process_signal` to call `finalize()` after Step 5's successful return. State progression: `awaiting_opus` → (Step 5) → `awaiting_finalize` → (Step 6) → `awaiting_commit`. Stop at `awaiting_commit` (Step 7 not yet shipped). Tests in `tests/test_pipeline_tick.py` extend to assert Step 6 call.
 
-   - **Cost-cap paused path (Step 5 CostDecision.DAILY_CAP_EXCEEDED):** Step 5 writes `state='paused_cost_cap'` and returns without raising. Orchestrator commits normally. No R3. Signal re-entered next day.
-
-   - **Tx-boundary contract — commit-count invariant:** across all above paths, exactly one `conn.commit()` per `_process_signal` call (modulo the documented step-internal failure-state commits). No orphan commits. Use `_mock_conn.commit.call_count`.
-
-   - **Tx-boundary contract — rollback-count invariant:** on any unhandled exception path, exactly one `conn.rollback()`. No double-rollback, no rollback-after-commit.
-
-   - **Stop at `awaiting_finalize`:** after successful Step 5, orchestrator returns; Step 6/7 not called (they don't exist yet); assert no attempt.
-
-4. **No production code changes.** Only the test file. If you find a tx-boundary bug while writing the test, stop and flag — do NOT quietly fix it in this amend. Integrity of the audit chain.
-
-### Nice-to-haves (DEFER — do NOT apply now)
-
-B2's N1-N5 all deferrable:
-- N1 UTC-symmetric SQL
-- N2 dead CB probe machinery
-- N3 Inv 3 docstring overclaim on stub paths
-- N4 commit-before-raise silent-swallow
-- N5 3 ledger rows on R3 exhaust (B1 deliberate — keep)
-
-Track for a later polish PR. Skip for this amend.
+8. **Tests** — `tests/test_step6_finalize.py` + `tests/test_silver_schema.py`:
+   - Pydantic schema coverage: valid document → parses; each R1-R21 validation rule → triggers expected failure
+   - `target_vault_path` builder: canonical paths, collision handling, slug-of-title edge cases
+   - Cross-link stub: idempotent replacement, atomic write, sorted order
+   - Money parser: `[3000 GBP]` → MoneyMention, `[1200000 EUR, 600000 EUR]` → list of 2, malformed string → None
+   - Error matrix: each of 12 failure classes produces correct state + retry policy
+   - **CHANDA Inv 1** test: zero-Gold signal produces valid Silver (doesn't crash on empty prior-Gold context)
+   - **CHANDA Inv 4** test: Pydantic rejects any Opus draft with `author: director` or `voice: gold` — structural enforcement of Silver→Gold-only-by-Director
+   - **CHANDA Inv 8** test: all emitted Silver has `author: pipeline` + `voice: silver`
+   - Live-PG `@requires_db` round-trip: finalize against real PG row with real `opus_draft_markdown` content
 
 ### CHANDA pre-push
 
-- **Q1 Loop Test:** adding tests only, no Leg touched. Pass.
-- **Q2 Wish Test:** serves wish — tx-boundary contract under explicit test = CI catches orchestrator drift. Pass.
+- **Q1 Loop Test:** Step 6 is deterministic, no Leg touched (reads are DB columns, writes are DB + vault file). Inv 3 Leg 3 not applicable (no hot.md/ledger read). Pass.
+- **Q2 Wish Test:** serves wish — tight schema = Director trusts Silver = faster Silver→Gold velocity. Pass.
+- **Inv 4** (author-director files untouched) — Step 6 reads opus_draft_markdown (created by pipeline, not Director). Cross-link stubs written to `wiki/<m>/_links.md` — these are pipeline files, not Director files. Verify none of the target paths have `author: director` frontmatter.
+- **Inv 6** (never skip Step 6) — this IS Step 6. Its existence satisfies the invariant; no further check.
+- **Inv 8** (Silver→Gold only by Director edit) — enforced at Pydantic layer (`author: Literal['pipeline']` + `voice: Literal['silver']`). Structural impossibility to emit Gold.
+- **Inv 9** (Mac Mini single writer) — cross-link stubs write to `wiki/<m>/_links.md`. **In the current deploy model, Step 6 runs on Render** — but Step 7 (which runs on Mac Mini) is where the commit happens. Cross-link stubs from Step 6 land on Render's local file system, then Step 7 picks them up to commit. **Verify this flow matches brief §4.7 side-effect spec.** If the flow is "Step 6 writes cross-link stubs on Render, Step 7 commits from Mac Mini" — then we need a sync mechanism (probably Step 7 reads both `final_markdown` from PG AND cross-link staging area from a shared path). Flag any ambiguity; ask AI Head before designing around it.
+- **Inv 10** (prompts don't self-modify) — Step 6 has no prompts. Pass.
 
 ### Branch + PR
 
-- **Branch:** `step5-opus-impl` (same PR #14).
-- **Amend as additional commit** on top of `8225d0f`. Do NOT open new PR.
-- **PR #14 head advances** — B2 S1 delta re-review as fast APPROVE.
+- Branch: `step6-finalize-impl`
+- Base: `main`
+- PR title: `STEP6-FINALIZE-IMPL: kbl/steps/step6_finalize.py + kbl/schemas/silver.py`
+- Target PR: #15
+
+### Reviewer
+
+B2.
 
 ### Timeline
 
-~30-45 min (test file + MagicMock wiring + run suite + commit + push).
+~60-90 min. Pure Python, no external calls, tight spec. Focused surface.
 
 ### Dispatch back
 
-> B1 PR14-S1-FIX shipped — PR #14 head advanced to `<SHA>`, tests/test_pipeline_tick.py added with <N> tests covering tx-boundary contract, `<N>`/`<N>` total tests green. Ready for B2 S1 delta APPROVE.
+> B1 STEP6-FINALIZE-IMPL shipped — PR #15 open, branch `step6-finalize-impl`, head `<SHA>`, <N>/<N> tests green. Pydantic schema enforces Inv 4 + Inv 8 structurally. pipeline_tick _process_signal extended through awaiting_commit. Ready for B2 review.
+
+### After this task
+
+- B2 reviews PR #15 → auto-merge on APPROVE
+- I dispatch AI Dennis on **Mac Mini Step 7 prep** (SSH keys + git clone + flock) in parallel with this task shipping, per Director ratification
+- Next B1 ticket: **STEP7-COMMIT-IMPL** per KBL-B §4.8
 
 ---
 
-## After this task
-
-On B2 APPROVE: I auto-merge PR #14.
-
-Next dispatch to you: **STEP6-FINALIZE-IMPL** per B3's spec at `briefs/_drafts/KBL_B_STEP6_FINALIZE_SPEC.md` (AI Head resolves 8 OQs first, then dispatches). ~60 min.
-
----
-
-*Posted 2026-04-19 by AI Head. Tight S1 test-gap fix. N1-N5 nice-to-haves parked for Phase 2 polish.*
+*Posted 2026-04-19 by AI Head. All 8 OQs resolved; B1 implements against the spec directly. Step 6 closes the loop from Opus draft → Pydantic-validated Silver → ready-to-commit.*
