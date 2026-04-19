@@ -10884,7 +10884,7 @@ async def kbl_cost_rollup():
                            COALESCE(SUM(input_tokens), 0) AS in_tok,
                            COALESCE(SUM(output_tokens), 0) AS out_tok
                     FROM kbl_cost_ledger
-                    WHERE created_at > NOW() - INTERVAL '24 hours'
+                    WHERE ts > NOW() - INTERVAL '24 hours'
                     GROUP BY step, model
                     ORDER BY total_usd DESC
                     """
@@ -10894,7 +10894,7 @@ async def kbl_cost_rollup():
                     """
                     SELECT COALESCE(SUM(cost_usd), 0) AS day_total
                     FROM kbl_cost_ledger
-                    WHERE created_at > NOW() - INTERVAL '24 hours'
+                    WHERE ts > NOW() - INTERVAL '24 hours'
                     """
                 )
                 day_row = cur.fetchone()
