@@ -3,81 +3,83 @@
 **From:** AI Head
 **To:** Code Brisen #3 (fresh terminal tab)
 **Task posted:** 2026-04-19 (evening)
-**Status:** OPEN — author polish-PR brief for the root cause of tonight's migration-drift incident
+**Status:** OPEN — fold B2 REDIRECT into MIGRATION_RUNNER_1 brief
 
 ---
 
-## Task: AUTHOR_BRIEF_MIGRATION_RUNNER_1 — spec a startup-hook migration runner
+## Task: MIGRATION_RUNNER_1_BRIEF_V2 — fold B2 REDIRECT items
 
-### Context
+B2 REDIRECT at `briefs/_reports/B2_migration_runner_brief_review_20260419.md` (commit `4a2c6db`). Brief is architecturally sound; three must-fix folds + 4 N-level nits to incorporate. Expected ~15 min.
 
-Shadow-mode go-live tonight exposed a production hole: **no migration runner on Render.** 9 migration files shipped and merged with the KBL-B code (PRs #8 through #16) were never executed against production Neon. Consequence: `signal_queue` had 25 cols instead of the expected 35+, and `kbl_cost_ledger` / `kbl_cross_link_queue` tables were missing. Every pipeline step past Step 1 would have exploded on the first real signal. Discovery path: AI Head hit the dashboard `/api/kbl/cost-rollup` endpoint post-DATABASE_URL-fix and got `relation "kbl_cost_ledger" does not exist`.
+Brief file: `briefs/_drafts/MIGRATION_RUNNER_1_BRIEF.md`.
 
-Immediate fix delegated to B1 (apply missing migrations manually). Root cause = process gap. Your job: spec the brief that closes it.
+---
+
+### Must-fix folds (R1, R2, R3)
+
+**R1 — Concurrency contract.** Brief is silent on what happens if two Render service replicas boot simultaneously and both try to apply the same migration file. Two paths — AI Head recommends path (a):
+
+- **(a) pg_advisory_lock (recommended, 4 LOC).** Wrap the whole migration loop in `pg_try_advisory_lock(<stable int key>)` / `pg_advisory_unlock(<same>)`. If the lock can't be acquired within ~30s, log a WARN and exit startup gracefully (the other replica is mid-apply; we boot after they finish). Add one test: `test_second_instance_blocks_on_advisory_lock` — simulate via two psycopg2 connections, one holds the lock, second one times out cleanly. Pick a constant int key (e.g. `0x42B_A4E_00001` — mnemonic "Baker migrations v1"; document the constant in module docstring).
+- **(b) Explicit single-instance assumption.** Add a §Scope "Concurrency — single-instance assumption" noting Render today runs 1 web service instance; if scale-up ever happens, migration runner must be disabled OR upgraded to path (a). Ship with instance-count check at startup: `os.environ.get("RENDER_INSTANCE_ID")` or equivalent — abort if unexpected value.
+
+**Recommendation: (a).** 4 LOC + 1 test is cheaper than the documented-constraint debt in (b).
+
+**R2 — First-deploy retroactive-claim behavior.** Add a §"First deploy behavior" section naming all 11 migration files that will re-run on the first boot after MIGRATION_RUNNER_1 merges (tracking table starts empty; runner will re-execute every file). Because all migrations are idempotent (`IF NOT EXISTS` throughout) this is safe, but the brief should state this explicitly so B1 knows what to verify during local dry-run. Enumerate:
+
+```
+20260418_expand_signal_queue_status_check.sql
+20260418_loop_infrastructure.sql
+20260418_step1_signal_queue_columns.sql
+20260418_step2_resolved_thread_paths.sql
+20260418_step3_signal_queue_extracted_entities.sql
+20260418_step4_signal_queue_step5_decision.sql
+20260419_mac_mini_heartbeat.sql
+20260419_step5_signal_queue_opus_draft.sql
+20260419_step6_kbl_cross_link_queue.sql
+20260419_step6_signal_queue_final_markdown.sql
+20260419_add_kbl_cost_ledger_and_kbl_log.sql
+```
+
+Commit B1 to a local dry-run idempotency audit: spin up a Neon branch (or local PG), point DATABASE_URL at it, seed with current prod schema, run migration_runner, verify no errors + every file ends up in `schema_migrations` table. Include the dry-run command in brief §5 "Test plan" as test #6.
+
+**R3 — Section-marker convention.** Runner reads files whole today (no UP/DOWN parse). That's fine for now, BUT `tests/test_migrations.py:35-80` already uses a regex that expects `-- == migrate:up ==` markers. Two concrete changes:
+
+1. Grandfather the 2 currently marker-less files (`mac_mini_heartbeat.sql` + `add_kbl_cost_ledger_and_kbl_log.sql`) — runner treats a file without markers as a single UP block (current behavior). Document this in brief as "section markers are optional for the initial 11 files; required going forward".
+2. Require `-- == migrate:up ==` on the first line of every NEW migration file added after MIGRATION_RUNNER_1 ships. Add one test: `test_migration_file_has_up_marker` — scans `migrations/*.sql` EXCLUDING the two grandfathered files, fails CI if any new file is missing the marker. Grandfather list hardcoded + commented with retirement date ("remove grandfather list when the two files are rewritten with markers, no earlier than Phase 2").
+
+The runner itself remains file-level (no section parse); the marker requirement is forward-compatibility hygiene for a future UP/DOWN parser.
+
+---
+
+### N-level folds (N1-N4)
+
+- **N1** — replace AST-check for startup ordering (`ast.parse` on `outputs/dashboard.py` + assertion on call order) with a runtime fixture: mock `start_scheduler` + assert `migration_runner.apply_all()` was called before it. Less fragile; survives refactors. ~8 lines.
+- **N2** — test DB env-gating: use `TEST_DATABASE_URL` env var convention (matches `tests/test_migrations.py` + `tests/test_layer0_dedupe.py`); do NOT use the `testing.postgresql` library the current draft hints at. Consistency with repo test patterns.
+- **N3** — `CREATE INDEX CONCURRENTLY` future-proofing note: if any future migration adds a non-concurrent CREATE INDEX on a large table, it locks the table for writes. Document in brief as a "gotcha to watch for" in §6 "Known limitations". Runner doesn't enforce concurrency (that's migration-author discipline), but brief flags it.
+- **N4** — `schema_migrations` column-drift defense: add a migration at the top of `migrations/` (`20260419_schema_migrations_bootstrap.sql`? — or create inline in the runner with `IF NOT EXISTS` and abort-on-column-mismatch check) that creates the tracking table itself. Include schema version check: if tracking table exists but with different columns than expected, abort with clear message. Prevents "we upgraded the runner but forgot to migrate its own table" failure mode.
+
+---
 
 ### Deliverable
 
-One authored brief at `briefs/_drafts/MIGRATION_RUNNER_1_BRIEF.md`. Reviewer: B2. Implementer (later): B1.
-
-### Spec expectations
-
-Design a startup hook in `app.py` (or sibling bootstrap module) that:
-
-1. On service boot (before scheduler starts, before API accepts requests), opens a connection to `DATABASE_URL`.
-2. Reads a `schema_migrations` tracking table (create if not exists: `CREATE TABLE IF NOT EXISTS schema_migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), sha256 TEXT)`).
-3. Lists `migrations/*.sql` sorted lexicographically.
-4. For each file not yet in `schema_migrations`: open a transaction, execute the file's SQL, INSERT the filename + sha256 into `schema_migrations`, commit. On error: rollback, log structured error, abort startup (fail loud — do not continue with a half-applied schema).
-5. If all migrations applied: log one INFO line per file applied ("migration X applied, sha256 Y"), then return control to service startup.
-6. Idempotency: re-running = no-op (tracking table skips already-applied files).
-
-### Hard constraints to spec
-
-- **sha256 mismatch must abort startup** — if a migration file's content changed after being applied once, that's a bug (migrations are immutable per convention); fail loudly with the filename + stored_sha vs current_sha.
-- **Use psycopg2, not SQLAlchemy** — match Baker proper's style (`config/settings.py` pattern).
-- **Must run BEFORE `kbl/pipeline_tick` registers in APScheduler** — otherwise the pipeline could tick with missing schema.
-- **Mac Mini poller.py behavior** — poller.py is separate and should NOT run this; schema applies happen on Render only. Add a comment explaining why.
-- **Rollback path** — document how a Director or B-code can force-re-apply a migration (e.g., `DELETE FROM schema_migrations WHERE filename='...'` + restart; ratified elsewhere, not in startup code).
-
-### Test expectations to spec
-
-- `test_migration_runner_applies_new_file` — fresh DB, one file present, after runner: table created + schema_migrations row inserted.
-- `test_migration_runner_skips_applied` — schema_migrations pre-populated, no re-apply, no error.
-- `test_migration_runner_aborts_on_sha_mismatch` — stored sha256 ≠ current, startup raises loudly.
-- `test_migration_runner_aborts_on_sql_error` — bad SQL in file, transaction rolls back, startup fails, no partial schema, no schema_migrations row.
-- `test_migration_runner_runs_before_scheduler` — verify order in `app.py` lifespan.
-
-### CHANDA pre-push (spec must include)
-
-- Q1 Loop Test: migration runner is infrastructure; does not touch Legs 1/2/3 directly. However it GUARDS Leg 2 (kbl_feedback_ledger must exist for ledger writes to work). Pass.
-- Q2 Wish Test: serves the wish by preventing "system looks functional while losing reason to exist" (CHANDA §2) — a missing ledger table would silently break Leg 2. Pass.
-- Inv 4/8/9/10: unaffected.
-
-### Sign-posting in the brief
-
-- Timeline estimate for B1 impl: ~60-90 min (~120 lines code + ~150 lines tests).
-- Priority: HIGH — this is a production process fix. But not P0 tonight; park in `briefs/_drafts/` until tonight's go-live stabilizes + Director ratifies immediate impl or defers to polish queue.
-- Parking option: if Director prefers, move to `briefs/_future_optimization/MIGRATION_RUNNER_1_BRIEF.md` per the fanout/ctatedev parking convention (`briefs/_future_optimization/README.md`).
-
-### Deliverable
-
-Short brief (~2-3 pages) at `briefs/_drafts/MIGRATION_RUNNER_1_BRIEF.md`. Commit + push. Dispatch back:
-
-> B3 AUTHOR_BRIEF_MIGRATION_RUNNER_1 shipped — brief at briefs/_drafts/MIGRATION_RUNNER_1_BRIEF.md, commit <SHA>. Ready for B2 brief review + Director ratification of priority (ship-now vs park).
+- Update `briefs/_drafts/MIGRATION_RUNNER_1_BRIEF.md` in-place (no new file).
+- Commit + push. Single commit: "brief(v2): fold B2 R1+R2+R3 + N1-N4 into MIGRATION_RUNNER_1".
+- Dispatch back: `B3 MIGRATION_RUNNER_1_BRIEF_V2 shipped — brief at briefs/_drafts/MIGRATION_RUNNER_1_BRIEF.md head <SHA>. R1 (pg_advisory_lock + test), R2 (first-deploy §, 11 files named, dry-run command in §5), R3 (grandfather + forward marker requirement + test), N1-N4 all folded. Ready for B2 re-review.`
 
 ### Timeline
 
-~30-45 min authoring.
+~15-20 min. Small authoring pass; no new architectural thinking, just turning B2's specific asks into brief prose + test enumeration.
 
 ### Reviewer
 
-B2 — brief review, not PR review.
+B2 — re-review on next cycle (expected APPROVE or single-item wave-through).
 
 ---
 
 ## Working-tree reminder
 
-Work in `~/bm-b3`. Quit tab after brief push — memory hygiene.
+Work in `~/bm-b3`. Quit tab after push — memory hygiene.
 
 ---
 
-*Posted 2026-04-19 by AI Head. Delegated parallel-track to avoid this process gap recurring. The bug that bit us tonight would have been caught automatically with this runner in place.*
+*Posted 2026-04-19 by AI Head. B2's REDIRECT was surgical and well-targeted; folds are mechanical. On B2 APPROVE, AI Head dispatches B1 for the ~90 min impl PR.*
