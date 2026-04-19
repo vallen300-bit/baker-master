@@ -681,9 +681,10 @@ const TAB_VIEW_MAP = {
     'browser': 'viewBrowser',
     'baker-data': 'viewBakerData',
     'ideas': 'viewIdeas',
+    'kbl-pipeline': 'viewKBLPipeline',
 };
 
-const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'person-detail', 'tags', 'search', 'ask-baker', 'ask-specialist', 'ask-client-pm', 'travel', 'media', 'documents', 'dossiers', 'presentations', 'browser', 'baker-data', 'ideas', 'ao-dashboard']);
+const FUNCTIONAL_TABS = new Set(['morning-brief', 'fires', 'matters', 'deadlines', 'people', 'person-detail', 'tags', 'search', 'ask-baker', 'ask-specialist', 'ask-client-pm', 'travel', 'media', 'documents', 'dossiers', 'presentations', 'browser', 'baker-data', 'ideas', 'ao-dashboard', 'kbl-pipeline']);
 
 function switchTab(tabName) {
     document.querySelectorAll('.nav-item[data-tab]').forEach(item => {
@@ -729,6 +730,7 @@ function switchTab(tabName) {
     else if (tabName === 'baker-data') loadBakerData();
     else if (tabName === 'ideas') loadIdeasTab();
     else if (tabName === 'ao-dashboard') loadAOTab();
+    else if (tabName === 'kbl-pipeline') loadKBLPipelineTab();
 }
 
 // ═══ WEEKLY PRIORITIES WIDGET ═══
@@ -9924,3 +9926,274 @@ function _renderCortexTab(tab) {
             '</div>';
     }).join('');
 }
+
+// ═══ KBL PIPELINE TAB — observability for 7-step pipeline (MVP) ═══
+//
+// Four widgets load in parallel via bakerFetch. Manual refresh button
+// re-triggers loadKBLPipelineTab(). Empty states handled per widget.
+// Rendered with safe DOM writes (createElement + textContent) — no
+// innerHTML with untrusted data.
+
+const KBL_TERMINAL_OK = new Set(['completed', 'routed_inbox']);
+const KBL_TERMINAL_FAIL = new Set([
+    'triage_failed', 'resolve_failed', 'extract_failed',
+    'classify_failed', 'opus_failed', 'finalize_failed',
+    'commit_failed', 'paused_cost_cap',
+]);
+
+function kblStatusClass(status) {
+    if (!status) return 'kbl-status-unknown';
+    if (KBL_TERMINAL_OK.has(status)) return 'kbl-status-ok';
+    if (KBL_TERMINAL_FAIL.has(status)) return 'kbl-status-fail';
+    return 'kbl-status-inflight';
+}
+
+function kblFmtTime(iso) {
+    if (!iso) return '—';
+    try {
+        return new Date(iso).toLocaleString('en-GB', {
+            day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+        });
+    } catch (e) { return iso; }
+}
+
+function kblFmtMoney(n) {
+    if (n === null || n === undefined) return '$0.00';
+    var v = Number(n);
+    if (!isFinite(v)) return '$0.00';
+    return '$' + v.toFixed(2);
+}
+
+function kblAgeBadge(ageSec) {
+    // < 2 min green, 2-5 min yellow, > 5 min red
+    if (ageSec === null || ageSec === undefined) return { cls: 'kbl-hb-red', label: 'unknown' };
+    if (ageSec < 120) return { cls: 'kbl-hb-green', label: Math.round(ageSec) + 's ago' };
+    if (ageSec < 300) return { cls: 'kbl-hb-yellow', label: Math.round(ageSec / 60) + 'm ago' };
+    return { cls: 'kbl-hb-red', label: Math.round(ageSec / 60) + 'm ago' };
+}
+
+function _kblWidgetShell(title) {
+    var w = document.createElement('section');
+    w.className = 'kbl-widget';
+    var h = document.createElement('div');
+    h.className = 'kbl-widget-title';
+    h.textContent = title;
+    w.appendChild(h);
+    var body = document.createElement('div');
+    body.className = 'kbl-widget-body';
+    w.appendChild(body);
+    return { root: w, body: body };
+}
+
+function _kblEmpty(body, msg) {
+    var p = document.createElement('div');
+    p.className = 'kbl-empty';
+    p.textContent = msg;
+    body.appendChild(p);
+}
+
+function _kblError(body, err) {
+    var p = document.createElement('div');
+    p.className = 'kbl-error';
+    p.textContent = 'Failed to load: ' + (err && err.message ? err.message : err);
+    body.appendChild(p);
+}
+
+async function _loadKBLSignals(body) {
+    try {
+        var resp = await bakerFetch('/api/kbl/signals', { timeout: 15000 });
+        if (!resp.ok) { _kblError(body, 'HTTP ' + resp.status); return; }
+        var data = await resp.json();
+        var signals = (data && data.signals) || [];
+        if (!signals.length) {
+            _kblEmpty(body, 'No signals yet — ingestion will populate this once shadow mode fires. Heartbeat still live.');
+            return;
+        }
+        var table = document.createElement('table');
+        table.className = 'kbl-table';
+        var thead = document.createElement('thead');
+        var headRow = document.createElement('tr');
+        ['ID', 'Source', 'Matter', 'Status', 'Vedana', 'Triage', 'Created'].forEach(function(h) {
+            var th = document.createElement('th');
+            th.textContent = h;
+            headRow.appendChild(th);
+        });
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+        var tbody = document.createElement('tbody');
+        signals.forEach(function(s) {
+            var tr = document.createElement('tr');
+            var cells = [
+                String(s.id),
+                s.source || '—',
+                s.primary_matter || '—',
+                s.status || '—',
+                s.vedana || '—',
+                s.triage_score === null || s.triage_score === undefined ? '—' : Number(s.triage_score).toFixed(2),
+                kblFmtTime(s.created_at),
+            ];
+            cells.forEach(function(c, i) {
+                var td = document.createElement('td');
+                td.textContent = c;
+                if (i === 3) td.className = kblStatusClass(s.status);
+                tr.appendChild(td);
+            });
+            tbody.appendChild(tr);
+        });
+        table.appendChild(tbody);
+        body.appendChild(table);
+    } catch (e) {
+        _kblError(body, e);
+    }
+}
+
+async function _loadKBLCost(body) {
+    try {
+        var resp = await bakerFetch('/api/kbl/cost-rollup', { timeout: 15000 });
+        if (!resp.ok) { _kblError(body, 'HTTP ' + resp.status); return; }
+        var data = await resp.json();
+        var rollup = (data && data.rollup) || [];
+        var dayTotal = Number(data.day_total_usd || 0);
+        var cap = Number(data.cap_usd || 0);
+        var remaining = Number(data.remaining_usd || 0);
+
+        if (!rollup.length) {
+            _kblEmpty(body, 'No Opus or Voyage calls yet today. Gemma runs locally (zero cost; token counts on first signal).');
+        } else {
+            var table = document.createElement('table');
+            table.className = 'kbl-table';
+            var thead = document.createElement('thead');
+            var headRow = document.createElement('tr');
+            ['Step', 'Model', 'Calls', 'Total', 'In tok', 'Out tok'].forEach(function(h) {
+                var th = document.createElement('th');
+                th.textContent = h;
+                headRow.appendChild(th);
+            });
+            thead.appendChild(headRow);
+            table.appendChild(thead);
+            var tbody = document.createElement('tbody');
+            rollup.forEach(function(r) {
+                var tr = document.createElement('tr');
+                [
+                    r.step || '—',
+                    r.model || '—',
+                    String(r.calls || 0),
+                    kblFmtMoney(r.total_usd),
+                    String(r.in_tok || 0),
+                    String(r.out_tok || 0),
+                ].forEach(function(c) {
+                    var td = document.createElement('td');
+                    td.textContent = c;
+                    tr.appendChild(td);
+                });
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+            body.appendChild(table);
+        }
+
+        var footer = document.createElement('div');
+        footer.className = 'kbl-cost-footer';
+        footer.textContent = kblFmtMoney(dayTotal) + ' of ' + kblFmtMoney(cap) +
+            ' used, ' + kblFmtMoney(remaining) + ' remaining (24h)';
+        body.appendChild(footer);
+    } catch (e) {
+        _kblError(body, e);
+    }
+}
+
+async function _loadKBLSilver(body) {
+    try {
+        var resp = await bakerFetch('/api/kbl/silver-landed', { timeout: 15000 });
+        if (!resp.ok) { _kblError(body, 'HTTP ' + resp.status); return; }
+        var data = await resp.json();
+        var silver = (data && data.silver) || [];
+        if (!silver.length) {
+            _kblEmpty(body, 'No Silver committed yet. First Silver lands once a signal clears Steps 1-7 (shadow or production).');
+            return;
+        }
+        var list = document.createElement('div');
+        list.className = 'kbl-silver-list';
+        silver.forEach(function(s) {
+            var row = document.createElement('div');
+            row.className = 'kbl-silver-row';
+            var time = document.createElement('span');
+            time.className = 'kbl-silver-time';
+            time.textContent = kblFmtTime(s.committed_at);
+            row.appendChild(time);
+            var path = document.createElement('span');
+            path.className = 'kbl-silver-path';
+            path.textContent = s.target_vault_path || ('signal ' + s.id);
+            row.appendChild(path);
+            var sha = document.createElement('span');
+            sha.className = 'kbl-silver-sha';
+            sha.textContent = s.short_sha || '';
+            row.appendChild(sha);
+            list.appendChild(row);
+        });
+        body.appendChild(list);
+    } catch (e) {
+        _kblError(body, e);
+    }
+}
+
+async function _loadKBLMacMini(body) {
+    try {
+        var resp = await bakerFetch('/api/kbl/mac-mini-status', { timeout: 10000 });
+        if (!resp.ok) { _kblError(body, 'HTTP ' + resp.status); return; }
+        var data = await resp.json();
+        var hb = data && data.heartbeat;
+        if (!hb) {
+            _kblEmpty(body, 'Mac Mini heartbeat not received. SSH to macmini and check launchctl list | grep brisen.baker.');
+            return;
+        }
+        var age = kblAgeBadge(hb.age_seconds);
+        var row = document.createElement('div');
+        row.className = 'kbl-heartbeat';
+        var dot = document.createElement('span');
+        dot.className = 'kbl-hb-dot ' + age.cls;
+        row.appendChild(dot);
+        var text = document.createElement('span');
+        text.className = 'kbl-hb-text';
+        text.textContent = (hb.host || 'mac-mini') +
+            (hb.version ? ' · ' + hb.version : '') +
+            ' · last beat ' + age.label;
+        row.appendChild(text);
+        body.appendChild(row);
+    } catch (e) {
+        _kblError(body, e);
+    }
+}
+
+async function loadKBLPipelineTab() {
+    var container = document.getElementById('kblPipelineContent');
+    if (!container) return;
+    container.textContent = '';
+
+    var signalsW = _kblWidgetShell('Recent signals (last 50)');
+    var costW = _kblWidgetShell('Cost rollup (24h)');
+    var silverW = _kblWidgetShell('Silver landed (last 10)');
+    var hbW = _kblWidgetShell('Mac Mini heartbeat');
+
+    [hbW, signalsW, costW, silverW].forEach(function(w) { container.appendChild(w.root); });
+
+    // Load in parallel; each widget handles its own errors.
+    await Promise.all([
+        _loadKBLMacMini(hbW.body),
+        _loadKBLSignals(signalsW.body),
+        _loadKBLCost(costW.body),
+        _loadKBLSilver(silverW.body),
+    ]);
+}
+
+(function _initKBLRefresh() {
+    document.addEventListener('DOMContentLoaded', function() {
+        var btn = document.getElementById('kblRefreshBtn');
+        if (btn) {
+            btn.addEventListener('click', function(e) {
+                e.preventDefault();
+                loadKBLPipelineTab();
+            });
+        }
+    });
+})();

@@ -1540,3 +1540,102 @@ body {
 .cortex-lint-critical { color: var(--fire, #c75050); }
 .cortex-lint-warning { color: var(--amber, #d4a535); }
 .cortex-lint-info { color: var(--text3); }
+
+/* ═══ KBL Pipeline tab — observability widgets ═══ */
+.kbl-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+.kbl-refresh-btn {
+    background: var(--card);
+    color: var(--text1);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 4px);
+    padding: 6px 12px;
+    font-size: 12px;
+    cursor: pointer;
+}
+.kbl-refresh-btn:hover { background: var(--border); }
+.kbl-widget {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 4px);
+    padding: 12px 14px;
+    margin-bottom: 14px;
+}
+.kbl-widget-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text3);
+    font-family: var(--mono, monospace);
+    letter-spacing: 0.3px;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+}
+.kbl-widget-body { font-size: 12px; color: var(--text1); }
+.kbl-empty {
+    color: var(--text3);
+    font-style: italic;
+    padding: 8px 0;
+}
+.kbl-error {
+    color: var(--fire, #c75050);
+    padding: 8px 0;
+}
+.kbl-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+}
+.kbl-table th,
+.kbl-table td {
+    text-align: left;
+    padding: 4px 8px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+}
+.kbl-table th {
+    color: var(--text3);
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 10px;
+}
+.kbl-status-ok { color: var(--green, #34d399); font-weight: 600; }
+.kbl-status-fail { color: var(--fire, #c75050); font-weight: 600; }
+.kbl-status-inflight { color: var(--amber, #d4a535); font-weight: 600; }
+.kbl-status-unknown { color: var(--text3); }
+.kbl-cost-footer {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--text3);
+}
+.kbl-silver-list { display: flex; flex-direction: column; gap: 6px; }
+.kbl-silver-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    font-size: 11px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+}
+.kbl-silver-time { color: var(--text3); min-width: 110px; }
+.kbl-silver-path { flex: 1; color: var(--text1); font-family: var(--mono, monospace); overflow: hidden; text-overflow: ellipsis; }
+.kbl-silver-sha { color: var(--text3); font-family: var(--mono, monospace); font-size: 10px; }
+.kbl-heartbeat { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.kbl-hb-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.kbl-hb-green { background: var(--green, #34d399); }
+.kbl-hb-yellow { background: var(--amber, #d4a535); }
+.kbl-hb-red { background: var(--fire, #c75050); }
+.kbl-hb-text { color: var(--text1); }
+
+/* Mobile viewport — table wraps into scrollable container */
+@media (max-width: 480px) {
+    .kbl-widget { padding: 10px; }
+    .kbl-widget-body { overflow-x: auto; }
+    .kbl-table { min-width: 560px; }
+    .kbl-header { flex-wrap: wrap; gap: 8px; }
+}

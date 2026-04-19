@@ -13,7 +13,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=70">
+    <link rel="stylesheet" href="/static/style.css?v=71">
 </head>
 <body>
 
@@ -127,6 +127,9 @@
         <div class="nav-divider"></div>
         <div class="nav-item" data-tab="baker-data">
             <span class="nav-label">Baker Data</span>
+        </div>
+        <div class="nav-item" data-tab="kbl-pipeline">
+            <span class="nav-label">KBL Pipeline</span>
         </div>
     </nav>
 </div>
@@ -531,6 +534,15 @@
             <div id="bakerDataContent"></div>
         </div>
 
+        <!-- VIEW: KBL Pipeline (observability — 4 widgets) -->
+        <div class="view" id="viewKBLPipeline">
+            <div class="kbl-header">
+                <div class="section-label">KBL Pipeline</div>
+                <button class="kbl-refresh-btn" id="kblRefreshBtn" title="Reload all widgets">&#x21bb; Refresh</button>
+            </div>
+            <div id="kblPipelineContent"></div>
+        </div>
+
         <!-- VIEW: AO Relationship Dashboard -->
         <div class="view" id="viewAO">
             <div class="ao-dash-header" id="aoHeader"></div>
@@ -543,7 +555,7 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=105"></script>
+<script src="/static/app.js?v=106"></script>
 <script>
 // PWA-DESKTOP-1: Register service worker for installability
 if ('serviceWorker' in navigator) {
