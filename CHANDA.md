@@ -3,7 +3,7 @@ title: CHANDA — Architectural Intent
 voice: gold
 author: director
 created: 2026-04-18
-updated: 2026-04-18
+updated: 2026-04-19
 status: promoted
 ---
 
@@ -62,7 +62,7 @@ Non-negotiable. An engineering problem that seems to require breaking one is fla
 6. Pipeline never skips Step 6 (Cross-link).
 7. Ayoniso alerts are prompts, never overrides.
 8. Silver → Gold only by explicit Director frontmatter edit. No auto-promotion.
-9. Mac Mini is the single writer. Render writes only to `wiki_staging`.
+9. Mac Mini is the single **agent** writer to `~/baker-vault`. Director may edit Gold from any machine; human writes are out-of-band and human-paced. Render writes only to `wiki_staging`.
 10. Pipeline prompts do not self-modify. Learning is through data (ledger), not code.
 
 ---
