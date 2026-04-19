@@ -3,61 +3,36 @@
 **From:** AI Head
 **To:** Code Brisen #2 (fresh terminal tab)
 **Task posted:** 2026-04-19 (evening)
-**Status:** OPEN — two queued reviews, run in order
+**Status:** OPEN — MIGRATION_RUNNER_1 brief re-review
 
 ---
 
-## Task 1 (first): MIGRATION_RUNNER_1 brief review
+## Task: MIGRATION_RUNNER_1 brief re-review (post-fold)
 
-B3 authored at `cd0cdfe`. Brief: `briefs/_drafts/MIGRATION_RUNNER_1_BRIEF.md`. Director ratified **ship-now** path (not park). B2 brief review gates B1 implementation.
+B3 folded your R1+R2+R3+N1-N4 REDIRECT items at head `a532a13`. Brief: `briefs/_drafts/MIGRATION_RUNNER_1_BRIEF.md`.
 
-### Verdict focus
+### Specific fold points to spot-check
 
-- **Module location** — `config/migration_runner.py` vs alternatives. Co-located with `settings.py`. Sound?
-- **Connection independence** — runner uses own `psycopg2.connect(DATABASE_URL)`, NOT `_get_store()`. Mirrors `kbl/db.py` rationale (avoid Qdrant/Voyage bootstrap drag). Correct choice?
-- **Integration point** — `outputs/dashboard.py:329 @app.on_event("startup")`, inserted between store-init and `start_scheduler()` call. Order preserved via AST assertion test #5. Sufficient?
-- **Mac Mini excluded by design** — explicit non-goal. Rationale: Render is single schema writer; dual writers could half-apply a file racing on `schema_migrations` inserts. Does the brief state this clearly enough?
-- **sha256 mismatch aborts startup** — fail-loud on modified migration file. Is the "reapply by `DELETE FROM schema_migrations WHERE filename='...'`" rollback path clearly documented?
-- **Inline DDL in `memory/store_back.py` (people_issues, ideas, generated_documents, AND the kbl_cost_ledger + kbl_log now in today's migration) — flagged as follow-up out-of-scope.** Is the scope boundary defensible or should it be in-scope?
-- **Test plan** — 5 tests enumerated. Adequate? Any missing edge case? (e.g., two services starting simultaneously — does the runner handle the race? Brief may need a §5 note.)
-- **CHANDA pre-push** — Q1/Q2 + Inv 4/8/9/10. Correctly reasoned?
-
-### Deliverable
-
-APPROVE or REDIRECT with concrete foldable changes. File at `briefs/_reports/B2_migration_runner_brief_review_20260419.md`.
-
-On APPROVE: AI Head dispatches B1 for PR implementation (~90 min).
-
-### ~20-30 min.
-
----
-
-## Task 2 (second): PR #19 KBL_DASHBOARD_COST_ROLLUP_HOTFIX review (after B1 ships)
-
-B1 amended `outputs/dashboard.py` to rename `created_at` → `ts` in two SQL queries for the `/api/kbl/cost-rollup` endpoint. `kbl_cost_ledger` actual column is `ts` per `memory/store_back.py:6514`. This hotfix is a follow-up to your own sanity-check note.
-
-### Verdict focus
-
-- Both lines renamed correctly (10887 + 10897).
-- No drive-by changes outside those two lines + test update.
-- No OTHER kbl_cost_ledger / kbl_log column-name drift in the file (B1 was asked to grep).
-- Tests cover the fix in a way that would catch future drift.
-- CI green (or trust B1's report given local py3.9 blocker).
+- **R1 (concurrency):** `pg_try_advisory_lock(0x42BA4E00001)` with 30s timeout + graceful degrade. Test #8 `test_second_instance_blocks_on_advisory_lock` enumerated. Confirm wrap scope is the WHOLE migration loop + unlock in `finally` block.
+- **R2 (first-deploy behavior):** new § with all 11 retroactive files listed. Dry-run promoted to automated test #6. Confirm B1 is committed to the dry-run before PR opens.
+- **R3 (marker convention):** grandfather list for the 2 marker-less files (`mac_mini_heartbeat.sql`, `add_kbl_cost_ledger_and_kbl_log.sql`). Forward-requirement enforced by test #7 `test_migration_file_has_up_marker`. Confirm grandfather list is a hardcoded set with retirement-date comment.
+- **N1:** startup-order test moved from AST walk to runtime mock fixture; forces `startup()` refactor into `_init_store` / `_run_migrations` / `_start_scheduler`. Sound?
+- **N2:** `TEST_DATABASE_URL` convention — matches existing `tests/test_migrations.py` / `tests/test_layer0_dedupe.py`.
+- **N3:** `CREATE INDEX CONCURRENTLY` footgun added as corollary to hard-constraint #4. Adequate warning?
+- **N4:** column-drift defense: `information_schema.columns` check after `CREATE TABLE IF NOT EXISTS` in `_ensure_tracking_table`. Catches the "runner upgraded but tracking-table not migrated" failure mode.
 
 ### Verdict
 
-APPROVE or REDIRECT. File at `briefs/_reports/B2_pr19_cost_rollup_hotfix_review_20260419.md`.
+APPROVE or surgical 2nd REDIRECT. File at `briefs/_reports/B2_migration_runner_brief_rereview_20260419.md`. ~5-10 min.
 
-On APPROVE + MERGEABLE: AI Head auto-merges. `/cost-rollup` endpoint live. All 4 KBL Pipeline widgets functional.
-
-### ~10 min.
+On APPROVE: AI Head dispatches B1 for ~110-130 min implementation PR (R1 advisory lock + dry-run test #6 + marker test #7 added to the prior estimate).
 
 ---
 
 ## Working-tree reminder
 
-Work in `~/bm-b2`. **Quit tab after both reviews ship** — memory hygiene.
+Work in `~/bm-b2`. **Quit tab after verdict** — memory hygiene.
 
 ---
 
-*Posted 2026-04-19 by AI Head. Two reviews chain: brief APPROVE unblocks B1 for MIGRATION_RUNNER_1 impl (~90 min task, next queue); PR #19 review = tiny same-branch-style hotfix (~10 min).*
+*Posted 2026-04-19 by AI Head. Last gate before MIGRATION_RUNNER_1 impl PR hits B1.*
