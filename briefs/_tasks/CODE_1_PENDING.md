@@ -1,106 +1,108 @@
 # Code Brisen #1 — Pending Task
 
 **From:** AI Head
-**To:** Code Brisen #1 (terminal instance — fresh tab post-PR-#16-merge)
-**Previous:** PR #16 STEP7-COMMIT-IMPL merged at `20370e7e`. **Phase 1 code complete: 7/7 pipeline steps on main.**
+**To:** Code Brisen #1 (fresh terminal tab post-PR-#17-ship)
 **Task posted:** 2026-04-19 (late afternoon)
-**Status:** OPEN — dashboard MVP before shadow-mode go-live
+**Status:** OPEN — two tasks queued, run in order
 
 ---
 
-## Task: KBL_PIPELINE_DASHBOARD_MVP — Real visibility on the pipeline
+## Task 1 (first): PR #17 same-branch AMEND — cost-cap env + currency fix
 
-### Why
+B2 REDIRECT at `briefs/_reports/B2_pr17_dashboard_review_20260419.md`. One S1, all other audit items clean. ~15 lines across 3 files, one amend commit on branch `kbl-pipeline-dashboard-mvp`.
 
-Phase 1 code is shipped but Director has **zero observability** for the KBL pipeline today. Dashboard has nothing on signal_queue / kbl_cost_ledger / Silver commits. Before shadow-mode flips on tonight, Director needs a browser tab he can refresh to see signals moving. MVP scope — 3 widgets, not a full phase-2 rebuild.
+### What's broken
 
-### Scope
+Dashboard cost widget reads `KBL_COST_DAILY_CAP_USD` (invented env name, default `$15`) — but canonical env is `KBL_COST_DAILY_CAP_EUR` (default `€50`, enforced in `kbl/cost_gate.py:46-47`). Render has `_EUR` set; `_USD` is unset → falls back to $15. Director would see "$12.40 of $15 used, $2.60 remaining" when actual is "€12.40 of €50, €37.60 remaining" — **83% displayed, 25% actual**. Safety-critical misinformation.
 
-**IN**
+Also: `cost_usd` column in `kbl_cost_ledger` holds EUR values ("EUR-treated-as-USD" per `kbl/cost_gate.py:140-147`), so every `$` prefix in the frontend is mis-labeling EUR numbers.
 
-1. **New tab in `outputs/dashboard.py`** (or sibling frontend file — follow existing Cockpit tab patterns):
-   - Tab label: **"KBL Pipeline"**
-   - Tab position: after existing tabs (last position)
-   - Manual refresh button (no auto-poll in MVP — keep simple)
+### Exact changes (from B2's review)
 
-2. **Widget A — Recent signals (state tracker):**
-   - Query: `SELECT id, source, primary_matter, status, vedana, triage_score, created_at FROM signal_queue ORDER BY id DESC LIMIT 50`
-   - Display: table with compact columns. State column color-coded (terminal states green, failed red, in-flight yellow).
-   - Empty state: message "No signals yet — ingestion will populate this once shadow mode fires. Heartbeat still live." Link to Mac Mini heartbeat widget for confirmation.
+**`outputs/dashboard.py`** (cost-rollup endpoint):
 
-3. **Widget B — Today's cost ledger rollup:**
-   - Query: `SELECT step, model, COUNT(*) AS calls, SUM(cost_usd) AS total_usd, SUM(input_tokens) AS in_tok, SUM(output_tokens) AS out_tok FROM kbl_cost_ledger WHERE created_at > NOW() - INTERVAL '24 hours' GROUP BY step, model ORDER BY total_usd DESC`
-   - Display: small table. Footer row: daily total + remaining cap ("€X.XX of €50 used, €Y.YY remaining").
-   - Empty state: "No Opus or Voyage calls yet today. Gemma runs locally (zero cost; token counts on first signal)."
+```python
+try:
+    cap_eur = float(os.getenv("KBL_COST_DAILY_CAP_EUR", "50.0"))
+except (TypeError, ValueError):
+    cap_eur = 50.0
+...
+return {
+    "rollup": rows,
+    "day_total_eur": day_total,
+    "cap_eur": cap_eur,
+    "remaining_eur": max(0.0, cap_eur - day_total),
+}
+```
 
-4. **Widget C — Silver landed (vault commits):**
-   - Query: `SELECT id, primary_matter, target_vault_path, committed_at, substring(commit_sha, 1, 7) AS short_sha FROM signal_queue WHERE state = 'completed' ORDER BY committed_at DESC LIMIT 10`
-   - Display: chronological list with link format `wiki/<matter>/<yyyy-mm-dd>_<slug>.md`.
-   - Empty state: "No Silver committed yet. First Silver lands once a signal clears Steps 1-7 (shadow or production)."
+**`outputs/static/app.js`**:
 
-5. **Widget D — Mac Mini heartbeat (liveness):**
-   - Query: `SELECT host, version, created_at, NOW() - created_at AS age FROM mac_mini_heartbeat ORDER BY id DESC LIMIT 1`
-   - Display: one-line status. Green if age < 2 min, yellow 2-5 min, red >5 min.
-   - Empty state: "Mac Mini heartbeat not received. SSH to macmini and check launchctl list | grep brisen.baker."
+```javascript
+function kblFmtMoney(n) {
+    if (n === null || n === undefined) return '€0.00';
+    var v = Number(n);
+    if (!isFinite(v)) return '€0.00';
+    return '€' + v.toFixed(2);
+}
+// inside _loadKBLCost:
+var dayTotal = Number(data.day_total_eur || 0);
+var cap = Number(data.cap_eur || 0);
+var remaining = Number(data.remaining_eur || 0);
+```
 
-6. **API endpoints** (add to `baker` router or existing dashboard API):
-   - `GET /api/kbl/signals` — returns JSON for widget A
-   - `GET /api/kbl/cost-rollup` — returns JSON for widget B
-   - `GET /api/kbl/silver-landed` — returns JSON for widget C
-   - `GET /api/kbl/mac-mini-status` — returns JSON for widget D
-   - Auth: same pattern as existing dashboard APIs (X-Baker-Key header)
-   - All read-only. No write endpoints.
+**`tests/test_dashboard_kbl_endpoints.py`**:
 
-7. **Tests** — minimal:
-   - `tests/test_dashboard_kbl_endpoints.py` — one test per endpoint. Use fixture data. Assert response shape, not content.
-   - Empty-state rendering: test each widget with zero rows. Must render gracefully.
+- `monkeypatch.setenv("KBL_COST_DAILY_CAP_EUR", "50.0")` (was `_USD`)
+- Assertions: `body["cap_eur"] == 50.0`, `body["day_total_eur"]`, `body["remaining_eur"]`, `body["remaining_eur"] == 50.0` (empty-state test)
 
-### Hard constraints
+### Delivery
 
-- **Read-only dashboard.** No admin controls, no "kill pipeline" buttons, no edit capabilities. Observability only.
-- **No auto-refresh in MVP.** Manual refresh button only. Auto-poll is Phase 2.
-- **No Chart.js / D3 / new libraries.** Use whatever charting already lives in the dashboard codebase. If nothing, use plain HTML tables.
-- **Queries must be fast.** LIMIT 50 on widget A, LIMIT 10 on C — no full-table scans. Use indexes (all relevant columns are indexed per migrations).
+- One amend commit on same branch `kbl-pipeline-dashboard-mvp`. No new PR.
+- Push force-with-lease to the branch (or simple push if no rebase collision).
+- All 8 tests stay green.
+- Dispatch back: `B1 PR #17 amend shipped — head <SHA>, 8/8 green, cost widget now reads KBL_COST_DAILY_CAP_EUR / renders €. Ready for B2 re-review.`
+- ~15 min.
 
-### CHANDA pre-push
+---
 
-- **Q1 Loop Test:** read-only dashboard, no Leg touched. Pass.
-- **Q2 Wish Test:** serves wish — gives Director real visibility into the compounding pipeline. Pass.
-- **Inv 4 / Inv 8 / Inv 9 / Inv 10** — dashboard only reads; no file writes, no schema changes, no prompt mods. All pass by construction.
+## Task 2 (second): KBL_PIPELINE_SCHEDULER_WIRING — PR #18
 
-### Branch + PR
+Brief at `briefs/_drafts/KBL_PIPELINE_SCHEDULER_WIRING_BRIEF.md`. B2 APPROVED at `briefs/_reports/B2_scheduler_wiring_brief_rereview_20260419.md` (head post-§Scope.6-verification-note push; see below).
 
-- Branch: `kbl-pipeline-dashboard-mvp`
-- Base: `main`
-- PR title: `KBL_PIPELINE_DASHBOARD_MVP: signal state + cost rollup + silver landed + mac-mini status`
-- Target PR: #17
+**§Scope.6 Mac Mini verification already run by AI Head (2026-04-19, all three checks pass).** Premise confirmed — Mac Mini poller is Step-7-only. Proceed without blocking.
 
-### Reviewer
+### Summary
 
-B2.
+- Extract `_process_signal_remote(signal_id, conn)` in `kbl/pipeline_tick.py` — Steps 1-6 only, Step 7 skipped (Mac Mini owns Step 7).
+- Rewrite `main()` — drop KBL-A stub, add `KBL_FLAGS_PIPELINE_ENABLED` env gate (default `"false"`), call `_process_signal_remote` on claim.
+- Register `kbl.pipeline_tick.main` in Render's APScheduler (120 s interval, `max_instances=1`, `coalesce=True`, id `kbl_pipeline_tick`).
+- 7 tests per brief §Scope.5.
+- Env var docs for `KBL_FLAGS_PIPELINE_ENABLED` + `KBL_PIPELINE_TICK_INTERVAL_SECONDS`.
+- Branch: `kbl-pipeline-scheduler-wiring`. Target PR: #18. Reviewer: B2.
 
-### Timeline
+### Read the brief end-to-end before starting
 
-~60-90 min. Focused surface: 4 API endpoints + 1 tab + 4 widgets + tests.
+- `briefs/_drafts/KBL_PIPELINE_SCHEDULER_WIRING_BRIEF.md` — full spec + all 7 tests enumerated + CHANDA pre-push + hard constraints.
+- N1-N6 cosmetic nits from B2's v1 review are foldable at your discretion during impl:
+  - N1: drop dead `step7_commit` import from `_process_signal_remote`
+  - N2: module docstring update in-scope
+  - N3: `misfire_grace_time` explicit or documented
+  - N4: `IntervalTrigger(seconds=...)` consistency with `embedded_scheduler.py`
+  - N5: env-gate parsing doc note
+  - N6: `KBL_PIPELINE_TICK_INTERVAL_SECONDS` ValueError guard (already in brief as `int(os.environ.get(...))` — harden with try/except if you want)
 
-### Dispatch back
+### Delivery
 
-> B1 KBL_PIPELINE_DASHBOARD_MVP shipped — PR #17 open, branch `kbl-pipeline-dashboard-mvp`, head `<SHA>`, <N>/<N> tests green. 4 widgets + 4 API endpoints. Manual refresh. Empty states handled. Ready for B2 review.
-
-### After this task
-
-- B2 reviews PR #17 → auto-merge on APPROVE
-- AI Head flips shadow mode on (`KBL_FLAGS_PIPELINE_ENABLED=true` on Render + `BAKER_VAULT_DISABLE_PUSH=true` on Mac Mini)
-- Director opens dashboard, refreshes, watches first real signal flow through 7 steps
-- Next B1 ticket: polish PR (PR #15 S2 + PR #16 2×S2 + ~10 nice-to-haves consolidated)
-- Then: KBL-C handler implementations
+- New PR #18.
+- Dispatch back: `B1 KBL_PIPELINE_SCHEDULER_WIRING shipped — PR #18 open, branch kbl-pipeline-scheduler-wiring, head <SHA>, 7/7 new tests + full regression green. Steps 1-6 wired via _process_signal_remote; main() env-gated on KBL_FLAGS_PIPELINE_ENABLED (default closed); APScheduler job kbl_pipeline_tick registered at 120s. Step 7 unchanged. Ready for B2 review.`
+- ~60-90 min.
 
 ---
 
 ## Working-tree reminder
 
-Work in `~/bm-b1` or `~/Desktop/baker-code` (wherever you were). Never `/tmp/`. **Quit Terminal tab after this amend** — memory hygiene.
+Work in `~/bm-b1`. Quit Terminal tab after Task 2 ships — memory hygiene. (Task 1's amend is small enough that you can run both in the same tab before quitting.)
 
 ---
 
-*Posted 2026-04-19 by AI Head. (iii) parallel path ratified: dashboard builds while I verify shadow-mode activation. Both land within the hour.*
+*Posted 2026-04-19 by AI Head. Two PRs worth of work in one queue. PR #17 amend → auto-merge on B2 APPROVE; PR #18 → B2 PR review after merge.*

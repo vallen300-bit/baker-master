@@ -111,6 +111,13 @@ Rationale vs. alternatives:
 
    **If any check fails:** BLOCK merge immediately. Cut a new prerequisite brief `MAC_MINI_STEP7_POLLER_IMPL` (install a dedicated Step-7-only poller on Mac Mini; <10 lines of Python) and land it BEFORE PR #18 can merge. Signals would otherwise pile at `awaiting_commit` with no driver post-shadow-flip.
 
+   **Verification run 2026-04-19 by AI Head — ALL THREE CHECKS PASS:**
+   - plist `ProgramArguments` → `/bin/bash /Users/dimitry/baker-pipeline/poller-wrapper.sh` ✓ (wrapper, not `python3 -m kbl.pipeline_tick`)
+   - wrapper tail → `exec /usr/bin/python3 "${HOME}/baker-pipeline/poller.py"` ✓ (poller.py)
+   - poller.py imports → `from kbl.steps.step7_commit import commit as step7_commit` + `from kbl.exceptions import CommitError, VaultLockTimeoutError` ✓ (Step 7 only, no pipeline_tick)
+
+   Architecture premise confirmed. Mac Mini's Step-7 poller is isolated and independent of `kbl.pipeline_tick.main`; PR #18 will NOT orphan Step 7. B1 proceeds with confidence.
+
 ### OUT (explicit non-goals)
 
 - **Do NOT touch `_process_signal` (lines 78-194).** The full 1-7 variant stays for tests + local dev. Tests against the full path are assets.
@@ -153,7 +160,7 @@ B2 — full review incl. CHANDA invariants, tx-boundary audit, scheduler-job max
 
 ## Timeline
 
-~60-90 min B1. Focused surface: one new function (~40 lines), `main()` rewrite (~15 lines), one APScheduler registration (~10 lines), 4 tests (~80 lines).
+~60-90 min B1. Focused surface: one new function (~40 lines), `main()` rewrite (~15 lines), one APScheduler registration (~10 lines), 7 tests (~140 lines).
 
 ## Dispatch back (template for B1)
 
