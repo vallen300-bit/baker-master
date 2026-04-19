@@ -53,7 +53,7 @@ Rationale vs. alternatives:
 
 2. **`kbl/pipeline_tick.py` — rewrite `main()`:**
    - Remove the KBL-A stub (lines 220-241: the `emit_log("WARN", ..., "KBL-A stub...")` + `UPDATE status = 'classified-deferred'` block).
-   - Add env gate at top of `main()` (after the two circuit checks):
+   - Add env gate at top of `main()` **BEFORE** the two circuit checks (env → circuit → claim). This deviates from the v1 brief order (circuit → env) and is ratified 2026-04-19 after B2 REDIRECT on PR #18 per B2's Option B: B1 shipped env-first and it is better production hygiene — a disabled pipeline stays silent even when circuits would otherwise emit WARN log. Memory anchor: no active pipeline should produce log noise from state it cannot act on.
      ```python
      if os.environ.get("KBL_FLAGS_PIPELINE_ENABLED", "false").lower() != "true":
          _local.info("pipeline disabled via KBL_FLAGS_PIPELINE_ENABLED; skipping tick")
@@ -88,7 +88,7 @@ Rationale vs. alternatives:
    - `test_main_enabled_claims_and_processes` — with `KBL_FLAGS_PIPELINE_ENABLED="true"`, `main()` calls `_process_signal_remote` with the claimed id. Mock `_process_signal_remote`.
    - `test_remote_variant_stops_at_awaiting_commit` — fixture signal at `awaiting_extract`; run `_process_signal_remote`; assert final status is `awaiting_commit` (not `completed`) and Step 7 mock was NOT called.
    - `test_remote_variant_handles_routed_inbox` — Step 1 low score → `routed_inbox` terminal; `_process_signal_remote` returns without calling Steps 2-6.
-   - `test_main_circuit_breaker_precedes_env_gate` — when `anthropic_circuit_open == "true"` OR `cost_circuit_open == "true"`, `main()` returns 0 even with `KBL_FLAGS_PIPELINE_ENABLED="true"`, AND does NOT call `claim_one_signal`. Asserts circuit checks run before the env-gate (existing order in `main()` lines 197-206) is preserved.
+   - `test_main_disabled_silent_when_circuit_open` — when `KBL_FLAGS_PIPELINE_ENABLED` unset OR `"false"` AND either circuit is open (`anthropic_circuit_open == "true"` OR `cost_circuit_open == "true"`), `main()` returns 0 **silently**: mock `check_alert_dedupe` and `emit_log` and assert `call_count == 0` on both; mock `claim_one_signal` and assert `call_count == 0`. Asserts env gate runs FIRST — a disabled pipeline emits zero log output even when a circuit is open. (This replaces the v1 brief's `test_main_circuit_breaker_precedes_env_gate` after 2026-04-19 order reversal.)
    - `test_remote_variant_stops_at_paused_cost_cap` — fixture signal routed through Step 5 with cost gate denied; `_process_signal_remote` returns cleanly; final signal status is `paused_cost_cap`; Step 6 mock NOT called; no exception raised.
    - `test_remote_variant_stops_at_finalize_failed` — fixture signal routed through Step 6 with 3 retries exhausted (terminal `finalize_failed` flip committed by Step 6 internally per its docstring); `_process_signal_remote` returns cleanly (Step 6 re-raise propagates, but caller-owned rollback leaves the Step-6-internal commit intact); final status stays `finalize_failed`; Step 7 driver (not-in-this-variant) never invoked.
 
