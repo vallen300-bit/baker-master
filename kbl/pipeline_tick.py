@@ -76,11 +76,12 @@ def claim_one_signal(conn) -> int | None:
 
 
 def _process_signal(signal_id: int, conn: Any) -> None:
-    """Run one signal through Steps 1-5 under the tx-boundary contract.
+    """Run one signal through Steps 1-7 under the tx-boundary contract.
 
-    Minimum-viable orchestrator — Steps 6-7 are not wired, so this stops
-    at ``awaiting_finalize`` and returns. The follow-on Step 6 PR wires
-    the next hop.
+    Full 7-step orchestrator. Terminal state is ``completed`` (post
+    vault commit + push). Intermediate status-gated early returns
+    handle each step's ``*_failed`` / ``paused_cost_cap`` /
+    ``routed_inbox`` exits.
 
     Contract:
         - Each step function is called with ``conn``. The step writes
@@ -91,8 +92,9 @@ def _process_signal(signal_id: int, conn: Any) -> None:
           writes.
         - On raised exception we ``conn.rollback()`` — the exception
           then propagates to the caller. The step's pre-raise internal
-          commit (for terminal-state flips — Step 1/4/5) runs outside
-          our rollback because the step already committed that fragment.
+          commit (for terminal-state flips — Step 1/4/5/6/7) runs
+          outside our rollback because the step already committed that
+          fragment.
 
     Status-based dispatch: each step function is responsible for only
     claiming signals in its pre-state (``awaiting_*``). We call the
@@ -103,6 +105,7 @@ def _process_signal(signal_id: int, conn: Any) -> None:
     # the full KBL-B stack (heartbeat test harness etc.).
     from kbl.steps import step1_triage, step2_resolve, step3_extract
     from kbl.steps import step4_classify, step5_opus, step6_finalize
+    from kbl.steps import step7_commit
 
     # Step 1 — triage. Caller-owns-commit boundary.
     try:
@@ -169,8 +172,26 @@ def _process_signal(signal_id: int, conn: Any) -> None:
         conn.rollback()
         raise
 
-    # Signal now sits at ``awaiting_commit`` (or a terminal state Step 6
-    # wrote before raising). Step 7 PR picks up from here.
+    # Step 6 may have parked the signal at ``finalize_failed`` (3 Opus
+    # retries exhausted) before raising. If the status is no longer
+    # ``awaiting_commit``, Step 7 must not run.
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT status FROM signal_queue WHERE id = %s", (signal_id,)
+        )
+        row = cur.fetchone()
+    if row is None or row[0] != "awaiting_commit":
+        return
+
+    try:
+        step7_commit.commit(signal_id, conn)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    # Signal now sits at ``completed`` (or ``commit_failed`` if Step 7
+    # flipped terminal internally). Pipeline is done.
 
 
 def main() -> int:
