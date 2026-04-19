@@ -191,6 +191,42 @@ def test_kbl_cost_rollup_empty_state(client):
     assert body["remaining_eur"] == 50.0
 
 
+def test_kbl_cost_rollup_sql_uses_canonical_ts_column(client):
+    """Drift guard: ``kbl_cost_ledger.ts`` (not ``created_at``) is the
+    canonical timestamp column per ``migrations/20260419_add_kbl_cost_ledger
+    _and_kbl_log.sql``. A fixture-based endpoint test cannot catch column
+    drift — the fake cursor echoes whatever rows are queued regardless of
+    the WHERE clause. This test captures the actual SQL the endpoint issues
+    and asserts it references ``ts`` on the 24h window filter.
+
+    PR #17 shipped with ``WHERE created_at > ...`` because no test exercised
+    the real column. This prevents a regression.
+    """
+    captured_sql: list[str] = []
+
+    original_execute = _FakeCursor.execute
+
+    def _capturing_execute(self, sql, params=None):
+        captured_sql.append(sql)
+        return original_execute(self, sql, params)
+
+    rollup_cols = ["step", "model", "calls", "total_usd", "in_tok", "out_tok"]
+    total_cols = ["day_total"]
+    queued = [(rollup_cols, []), (total_cols, [(0,)])]
+
+    with patch.object(_FakeCursor, "execute", _capturing_execute), \
+         _patch_conn(queued):
+        resp = client.get("/api/kbl/cost-rollup")
+
+    assert resp.status_code == 200
+    # Both queries target kbl_cost_ledger and must filter on ``ts``.
+    cost_queries = [s for s in captured_sql if "kbl_cost_ledger" in s]
+    assert len(cost_queries) >= 2, f"expected 2 cost-ledger queries, got {len(cost_queries)}"
+    for q in cost_queries:
+        assert "WHERE ts" in q, f"cost-rollup query missing canonical `ts` filter:\n{q}"
+        assert "created_at" not in q, f"cost-rollup query still references non-existent `created_at`:\n{q}"
+
+
 # ---------------------------------------------------------------------------
 # /api/kbl/silver-landed
 # ---------------------------------------------------------------------------
