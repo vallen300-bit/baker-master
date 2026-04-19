@@ -83,3 +83,22 @@ class FinalizationError(KblError):
     R3 retry ladder fires (per KBL-B §4.7 + B3 spec §5). After 3
     exhausted Opus retries Step 6 routes the signal to
     ``finalize_failed`` terminal."""
+
+
+class CommitError(KblError):
+    """Raised by Step 7 ``commit()`` when the vault write/commit/push
+    pipeline cannot complete — filesystem write failure, git commit
+    failure, git push retry exhaustion, Inv 4 author=director collision
+    on target path, or unrecoverable state.
+
+    Terminal: signal flips to ``commit_failed``. Operator investigates
+    (local vault may or may not have partial state depending on failure
+    class; cleanup policy documented in :mod:`kbl.steps.step7_commit`)."""
+
+
+class VaultLockTimeoutError(CommitError):
+    """Raised when Step 7 fails to acquire the vault flock within
+    ``BAKER_VAULT_FLOCK_TIMEOUT_SECONDS`` (default 60s). Subclass of
+    :class:`CommitError` — pipeline_tick treats it identically to any
+    other commit failure. Usually indicates another vault writer is
+    stuck; operator should investigate the holder."""
