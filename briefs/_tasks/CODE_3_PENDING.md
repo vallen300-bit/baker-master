@@ -1,269 +1,77 @@
 # Code Brisen #3 — Pending Task
 
 **From:** AI Head
-**To:** Code Brisen #3 (app instance)
-**Previous:** Mac Mini Step 7 prep items 1-4 COMPLETE (deploy key live + remote swapped + flock tested + auth verified). Items 5-6 deferred until B1's Step 7 code merged. **PR #16 merged at `20370e7e` — Step 7 code now on main.**
+**To:** Code Brisen #3 (fresh terminal tab)
 **Task posted:** 2026-04-19 (late afternoon)
-**Status:** OPEN — final Mac Mini infra bolt-on
+**Status:** OPEN — infra audit, quick
 
 ---
 
-## Task: MAC_MINI_LAUNCHD_PROVISION — Items 5-6 from the original prep brief
+## Task: MAC_MINI_LEGACY_PLIST_AUDIT
 
-### Why
+### Context
 
-Step 7 code is merged. `kbl/steps/step7_commit.py` is ready. But Mac Mini needs to:
-- **Poll PG for signals** at `status='awaiting_commit'` + unrealized cross-links → trigger Step 7
-- **Heartbeat** to Neon so Baker can detect when Mac Mini is offline
+During AI Head refresh I ran `ssh macmini 'launchctl list | grep brisen'` and got:
 
-Both run via launchd on Mac Mini. Without them, Step 7 code exists but sits dormant — pipeline doesn't complete on the vault.
+```
+-  0  com.brisen.baker.heartbeat
+-  0  com.brisen.kbl.purge-dedupe
+-  0  com.brisen.baker.poller
+-  0  com.brisen.kbl.dropbox-mirror
+```
+
+The `baker.*` plists are your `MAC_MINI_LAUNCHD_PROVISION` work — correct. The two `kbl.*` plists (`purge-dedupe`, `dropbox-mirror`) are **KBL-A legacy** and were NOT in the retired set of your earlier surgical cleanup (which retired `pipeline` + `heartbeat` only, renamed to `.retired-2026-04-19`).
+
+Director needs a ratification: **keep or retire.** Pre-shadow-mode go-live this must be clear — a stale agent writing to the vault or the dedupe table while Steps 1-6 churn is a silent-corruption risk.
 
 ### Scope
 
-**IN — provision two launchd plists on Mac Mini (via SSH over Tailscale):**
+**Deliverable:** one report at `briefs/_reports/B3_kbl_legacy_plist_audit_20260419.md` answering these questions per plist:
 
-### Item 5 — Poller plist: `com.brisen.baker.poller.plist`
+For **both** `com.brisen.kbl.purge-dedupe.plist` and `com.brisen.kbl.dropbox-mirror.plist`:
 
-**Purpose:** Every 60 seconds, poll Neon for signals in `status='awaiting_commit'` OR unrealized cross-links. For each, invoke Step 7's `commit(signal_id, conn)` or equivalent. Uses the Python `fcntl` in-process lock (B1's Step 7 code already has this) — no external `flock` binary needed.
+1. **What does it run?** Paste the plist `ProgramArguments` + wrapper script path. Read the wrapper script + any Python it invokes (`head -100` is enough).
+2. **What does it touch?** Vault path? DB tables? Dropbox paths? Any file writes?
+3. **Does it conflict with Cortex T3?**
+   - Does it write to `signal_queue`, `kbl_cost_ledger`, `kbl_cross_link_queue`, `mac_mini_heartbeat`, `kbl_log`, or `kbl_alert_dedupe`? (Any write = conflict, per Inv 9 — Mac Mini poller is the only vault-writing agent in the new architecture.)
+   - Does it write to `~/baker-vault/`? (Same — only Step 7 via poller.)
+   - Is it still serving a purpose the new pipeline doesn't cover? (Dedupe may be a dedicated maintenance task the pipeline intentionally doesn't handle.)
+4. **Your recommendation per plist:** KEEP (with one-line rationale), RETIRE (rename `.retired-2026-04-19b` in the same pattern as before + `launchctl unload`), or ESCALATE (you need Director design input before acting).
 
-**Script location:** `~/baker-pipeline/poller.py` on Mac Mini (create the `baker-pipeline` dir).
+No changes to any plist until Director ratifies. **Audit report only.** Same pre-flight caution you applied correctly in `MAC_MINI_LAUNCHD_PROVISION`.
 
-**Script body — thin, calls into the merged Step 7 code:**
+### Hard constraints
 
-```python
-#!/usr/bin/env python3
-"""Mac Mini poller — claims awaiting_commit signals + invokes Step 7."""
-import os
-import sys
-import psycopg2
-from contextlib import closing
-
-# Ensure Step 7 code is on PYTHONPATH — clone of baker-master under ~/baker-pipeline-repo
-sys.path.insert(0, os.path.expanduser("~/baker-pipeline-repo"))
-from kbl.steps.step7_commit import commit as step7_commit
-from kbl.exceptions import CommitError, VaultLockTimeoutError
-
-DATABASE_URL = os.environ["DATABASE_URL"]
-BAKER_VAULT_PATH = os.environ["BAKER_VAULT_PATH"]  # ~/baker-vault on Mac Mini
-BATCH_SIZE = int(os.environ.get("MAC_MINI_POLLER_BATCH", "5"))
-
-def main():
-    with closing(psycopg2.connect(DATABASE_URL)) as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT id FROM signal_queue
-                WHERE status = 'awaiting_commit'
-                ORDER BY id
-                LIMIT %s
-            """, (BATCH_SIZE,))
-            signal_ids = [r[0] for r in cur.fetchall()]
-
-        for sid in signal_ids:
-            try:
-                step7_commit(sid, conn)
-                conn.commit()
-                print(f"[poller] committed sig={sid}")
-            except VaultLockTimeoutError:
-                conn.rollback()
-                print(f"[poller] lock timeout sig={sid}; will retry next tick")
-            except CommitError as e:
-                conn.rollback()
-                print(f"[poller] commit_failed sig={sid}: {e}")
-            except Exception as e:
-                conn.rollback()
-                print(f"[poller] UNEXPECTED sig={sid}: {e}", file=sys.stderr)
-
-if __name__ == "__main__":
-    main()
-```
-
-**Plist path:** `~/Library/LaunchAgents/com.brisen.baker.poller.plist`
-
-**Plist content:**
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>com.brisen.baker.poller</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/usr/bin/python3</string>
-    <string>/Users/dimitry/baker-pipeline/poller.py</string>
-  </array>
-  <key>StartInterval</key>
-  <integer>60</integer>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>DATABASE_URL</key>
-    <string>PLACEHOLDER_SEE_DIRECTOR</string>
-    <key>BAKER_VAULT_PATH</key>
-    <string>/Users/dimitry/baker-vault</string>
-    <key>MAC_MINI_POLLER_BATCH</key>
-    <string>5</string>
-  </dict>
-  <key>StandardOutPath</key>
-  <string>/Users/dimitry/baker-pipeline/poller.log</string>
-  <key>StandardErrorPath</key>
-  <string>/Users/dimitry/baker-pipeline/poller.err.log</string>
-  <key>RunAtLoad</key>
-  <true/>
-</dict>
-</plist>
-```
-
-**Escalation to Director:** need `DATABASE_URL` (Neon connection string) populated. Leave `PLACEHOLDER_SEE_DIRECTOR` until you ask.
-
-**Also required:** clone baker-master at `~/baker-pipeline-repo` so the poller can import Step 7 code:
-```bash
-cd ~
-git clone git@github.com:vallen300-bit/baker-master.git baker-pipeline-repo
-```
-
-(Use Director's default SSH key for this clone; the deploy key is baker-vault-scoped only. OR: configure a second SSH alias `github-baker-master` with another deploy key — flag to Director if you think that's cleaner.)
-
-### Item 6 — Heartbeat plist: `com.brisen.baker.heartbeat.plist`
-
-**Purpose:** Every 60s, INSERT a row into `mac_mini_heartbeat(created_at)` in Neon. Baker's `/health` endpoint exposes the latest row's age. Alert threshold: >5 min WARN, >15 min critical.
-
-**Migration needed first:**
-
-```sql
-CREATE TABLE IF NOT EXISTS mac_mini_heartbeat (
-    id BIGSERIAL PRIMARY KEY,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    host TEXT NOT NULL,
-    version TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_mac_mini_heartbeat_created_at
-    ON mac_mini_heartbeat (created_at DESC);
-```
-
-Add as `migrations/20260419_mac_mini_heartbeat.sql` in the baker-master repo, open a small PR (#17) — B2 reviews, merge, Render applies via existing migration runner. If schema drift is small enough for a direct-to-main commit by AI Head, flag it; otherwise follow the PR route.
-
-**Script location:** `~/baker-pipeline/heartbeat.py` on Mac Mini.
-
-**Script body:**
-
-```python
-#!/usr/bin/env python3
-"""Mac Mini heartbeat — insert row to mac_mini_heartbeat every tick."""
-import os
-import socket
-import psycopg2
-from contextlib import closing
-
-DATABASE_URL = os.environ["DATABASE_URL"]
-
-def main():
-    hostname = socket.gethostname()
-    with closing(psycopg2.connect(DATABASE_URL)) as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO mac_mini_heartbeat (host, version) VALUES (%s, %s)",
-                (hostname, "baker-pipeline-1")
-            )
-        conn.commit()
-
-if __name__ == "__main__":
-    main()
-```
-
-**Plist path:** `~/Library/LaunchAgents/com.brisen.baker.heartbeat.plist`
-
-**Plist content — similar shape:**
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>com.brisen.baker.heartbeat</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/usr/bin/python3</string>
-    <string>/Users/dimitry/baker-pipeline/heartbeat.py</string>
-  </array>
-  <key>StartInterval</key>
-  <integer>60</integer>
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>DATABASE_URL</key>
-    <string>PLACEHOLDER_SEE_DIRECTOR</string>
-  </dict>
-  <key>StandardOutPath</key>
-  <string>/Users/dimitry/baker-pipeline/heartbeat.log</string>
-  <key>StandardErrorPath</key>
-  <string>/Users/dimitry/baker-pipeline/heartbeat.err.log</string>
-  <key>RunAtLoad</key>
-  <true/>
-</dict>
-</plist>
-```
-
-### Sequence on Mac Mini
-
-```bash
-# On Mac Mini via ssh macmini:
-mkdir -p ~/baker-pipeline
-# (clone baker-pipeline-repo with Director's key OR use 2nd deploy key)
-git clone git@github.com:vallen300-bit/baker-master.git ~/baker-pipeline-repo
-
-# Install psycopg2 if absent
-/usr/bin/python3 -m pip install --user psycopg2-binary
-
-# Write scripts
-cat > ~/baker-pipeline/poller.py << 'EOF'
-# ... (contents above)
-EOF
-cat > ~/baker-pipeline/heartbeat.py << 'EOF'
-# ... (contents above)
-EOF
-chmod +x ~/baker-pipeline/*.py
-
-# Write plists (with real DATABASE_URL from Director)
-# Load into launchd
-launchctl load ~/Library/LaunchAgents/com.brisen.baker.poller.plist
-launchctl load ~/Library/LaunchAgents/com.brisen.baker.heartbeat.plist
-
-# Verify
-launchctl list | grep brisen
-# Expected: two entries, both PID-listed (not just status 0)
-```
-
-### Director escalations — RESOLVED
-
-1. **`DATABASE_URL`** (Director provided 2026-04-19):
-   ```
-   postgresql://neondb_owner:npg_26tjJyupOSfi@ep-summer-sun-aih7ha4h-pooler.c-4.us-east-1.aws.neon.tech:5432/neondb?sslmode=require
-   ```
-   Paste this LITERAL value into both plists' `EnvironmentVariables` → `DATABASE_URL` `<string>...</string>`. **Do NOT use `$DATABASE_URL` reference** — launchd does not source `~/.zshrc`. Verify post-load: `ssh macmini 'psql "$DATABASE_URL" -c "select 1"'`.
-
-2. **SSH key for baker-master clone on Mac Mini:** AI Head ratified — **reuse Director's default `~/.ssh/id_ed25519`** for the read-only clone (no push path needed; the clone's only purpose is importing Step 7 code).
-
-3. **`mac_mini_heartbeat` migration:** AI Head direct-to-main per handover authority ("small infra merges are mine" — migration is 10 lines, additive, zero-risk). **Already applied.** Render's next deploy + Neon picks it up automatically via the existing migration runner. You can `ssh macmini` and verify with `psql "$DATABASE_URL" -c "\d mac_mini_heartbeat"` before loading the heartbeat plist.
-
-### CHANDA pre-push
-
-- **Q1 Loop Test:** infrastructure glue, not pipeline logic. No Leg touched. Pass.
-- **Q2 Wish Test:** serves wish — without this, Step 7 code doesn't run on Mac Mini. Pass.
-- **Inv 9:** this is the operational path — Mac Mini polls + writes. Aligned.
+- **Read-only.** Do not unload, rename, or stop these agents in this task. Report only.
+- **Do not edit `~/.kbl.env`.** Read only if needed to trace env deps.
+- **Do not touch `~/baker-vault/`.** Ever.
+- **`ssh macmini` is fine for reads.** Mac Mini is on tailnet (confirmed during AI Head refresh).
 
 ### Timeline
 
-~30-45 min once `DATABASE_URL` + migration answered:
-- ~10 min: write scripts + plists
-- ~5 min: clone baker-pipeline-repo + install psycopg2
-- ~5 min: launchctl load + verify entries
-- ~10 min: smoke test (force an `awaiting_commit` signal through, watch poller log, verify vault commit lands)
+~20-30 min. Two plists. Read → trace → recommend.
+
+### Reviewer
+
+B2 — light review, mainly sanity-check the conflict analysis against Inv 9 + Section 2 legs.
 
 ### Dispatch back
 
-> B3 MAC_MINI_LAUNCHD_PROVISION COMPLETE — com.brisen.baker.poller + com.brisen.baker.heartbeat loaded on Mac Mini, `launchctl list` shows both active. Smoke test: signal ID <N> reached `completed` state after poller tick. Mac Mini fully operational. Phase 1 is live on the vault.
+> B3 MAC_MINI_LEGACY_PLIST_AUDIT shipped — report at `briefs/_reports/B3_kbl_legacy_plist_audit_20260419.md`, commit `<SHA>`. Recommendation: purge-dedupe=<KEEP|RETIRE|ESCALATE>, dropbox-mirror=<KEEP|RETIRE|ESCALATE>. Ready for B2 sanity-check.
+
+### After this task
+
+- B2 sanity-checks the audit (~5 min).
+- AI Head takes recommendations to Director for ratification.
+- If RETIRE on either: B3 follow-up task to rename + unload in the same pattern as the prior retirement.
+- Terminal tab quit per memory-hygiene rule after this report + any follow-up.
 
 ---
 
-*Posted 2026-04-19 by AI Head. After this, Phase 1 Cortex T3 runs end-to-end. New ACTIVE signals begin flowing through the 7-step pipeline on next ingestion.*
+## Working-tree reminder
+
+Work in `~/bm-b3` (not `/tmp/`). Quit Terminal tab after this report lands — memory hygiene.
+
+---
+
+*Posted 2026-04-19 by AI Head. Triggered by ambiguity in prior AI Head's "KBL-A legacy retired" claim — only pipeline + heartbeat plists actually renamed; purge-dedupe + dropbox-mirror remain loaded.*
