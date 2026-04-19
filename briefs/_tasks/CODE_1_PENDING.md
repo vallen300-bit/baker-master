@@ -2,88 +2,140 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (fresh terminal tab)
-**Task posted:** 2026-04-19 (late afternoon, post-B2-redirect)
-**Status:** OPEN — PR #18 same-branch amend per B2 REDIRECT
+**Task posted:** 2026-04-19 (evening)
+**Status:** OPEN — production migration apply, P0 unblocker
 
 ---
 
-## Task: PR #18 amend — one missing test + one order-assertion test swap
+## Task: KBL_MIGRATIONS_APPLY_P1 — apply 9 missing migrations + 3 PR #16 ALTERs to production Neon
 
-B2 REDIRECT at `briefs/_reports/B2_pr18_scheduler_wiring_review_20260419.md`. Two items. Everything else in the PR is clean. ~40 lines total across one test file.
+### Context
 
-Branch: `kbl-pipeline-scheduler-wiring` (same — no new PR). Head: `d7312e8`.
+Shadow mode flipped at ~18:17. AI Head discovered during dashboard verification that the production Neon DB is in **KBL-A schema state**, not KBL-B. 9 migration files in `migrations/` were shipped-but-never-executed on production. Consequence: `signal_queue` has 25 columns (should be ~35+), and critical tables `kbl_cost_ledger`, `kbl_cross_link_queue`, `kbl_log`, `kbl_feedback_ledger` are missing. Every pipeline step past Step 1 would explode on first signal.
 
----
+**No active damage** — signal_queue is empty; pipeline_tick is no-op'ing cleanly. Apply window is wide open.
 
-### Item 1 (S1 must-fix): add `test_remote_variant_stops_at_finalize_failed`
+Director authorized via "yes" at 2026-04-19 evening in response to AI Head's "Shall I apply the 9 migrations + 3 ad-hoc ALTERs?" This is a Tier B action under the bank-model rule (`feedback_ai_head_communication.md`).
 
-Brief §Scope.5 item 7 explicitly required this test. It was missing in your shipped 8 tests. Model it on the existing `test_process_signal_step6_finalize_failed_gates_out_step7` in the same test module.
+### Scope
 
-**What the test asserts:**
+Apply, in this exact order, to production Neon (via `DATABASE_URL` — available on Render env or Mac Mini `~/.kbl.env`; `op` fetch from 1Password also works):
 
-- Fixture signal routed into Step 6 where `finalize` exhausts its 3 retries and commits terminal state `finalize_failed` internally (per Step 6's docstring: internal-commit-then-raise).
-- Call `_process_signal_remote(signal_id, conn)`.
-- Step 6's internal commit of `finalize_failed` survives the caller's rollback (intentional per Step 6 design — R3 retry exhaustion must be durable).
-- Final signal status: `finalize_failed`.
-- Step 7 mock (if imported anywhere in the test module for the full-path variant) NOT called from the remote variant's code path — but since `_process_signal_remote` has no Step 7 call at all, the assertion is simply that the remote variant propagates the Step-6 raise without attempting any further steps.
+1. `migrations/20260418_expand_signal_queue_status_check.sql`
+2. `migrations/20260418_loop_infrastructure.sql`
+3. `migrations/20260418_step1_signal_queue_columns.sql`
+4. `migrations/20260418_step2_resolved_thread_paths.sql`
+5. `migrations/20260418_step3_signal_queue_extracted_entities.sql`
+6. `migrations/20260418_step4_signal_queue_step5_decision.sql`
+7. `migrations/20260419_step5_signal_queue_opus_draft.sql`
+8. `migrations/20260419_step6_kbl_cross_link_queue.sql`
+9. `migrations/20260419_step6_signal_queue_final_markdown.sql`
 
-**Spec:**
+(`20260419_mac_mini_heartbeat.sql` is already applied — do NOT re-run; it IS idempotent, but skip for clarity.)
 
-```python
-def test_remote_variant_stops_at_finalize_failed(...):
-    # Set up signal at awaiting_finalize, Step 6 mock raises after internal
-    # terminal commit flip.
-    # Call _process_signal_remote(signal_id, conn).
-    # Expect Step-6-raised exception to propagate; caller rolls back.
-    # Assert final DB status is 'finalize_failed' (Step-6 internal commit survived).
-    # Assert no post-Step-6 logic ran (Step 7 is not in this variant; assertion
-    # is on call sequence of steps 5→6, with nothing past 6).
+Then apply these 3 ad-hoc `ALTER TABLE` statements that PR #16 Step 7 normally adds at first invocation (`kbl/steps/step7_commit.py:253`). Pre-applying unblocks the dashboard `/silver-landed` endpoint before the first signal reaches Step 7:
+
+```sql
+ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS target_vault_path TEXT;
+ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS commit_sha TEXT;
+ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS committed_at TIMESTAMPTZ;
 ```
 
-~25 lines modeled on `test_process_signal_step6_finalize_failed_gates_out_step7`.
+### Execution pattern
 
----
+```bash
+# Fetch DATABASE_URL from Mac Mini env (cleanest source; or pull from Render API via 1Password):
+DATABASE_URL=$(ssh macmini 'grep "^export DATABASE_URL=" ~/.kbl.env | sed "s/^export DATABASE_URL=//;s/^\"//;s/\"$//"')
 
-### Item 2 (S2 should-fix): swap `test_main_circuit_breaker_precedes_env_gate` for `test_main_disabled_silent_when_circuit_open`
+# Apply each migration with transaction + verification:
+for f in \
+  migrations/20260418_expand_signal_queue_status_check.sql \
+  migrations/20260418_loop_infrastructure.sql \
+  migrations/20260418_step1_signal_queue_columns.sql \
+  migrations/20260418_step2_resolved_thread_paths.sql \
+  migrations/20260418_step3_signal_queue_extracted_entities.sql \
+  migrations/20260418_step4_signal_queue_step5_decision.sql \
+  migrations/20260419_step5_signal_queue_opus_draft.sql \
+  migrations/20260419_step6_kbl_cross_link_queue.sql \
+  migrations/20260419_step6_signal_queue_final_markdown.sql; do
+    echo "=== applying $f ==="
+    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" || { echo "FAILED: $f"; exit 1; }
+done
 
-Brief v3 at commit `60d653b` ratified your env→circuit order (it is better production hygiene than the original circuit→env). The old test (which would have asserted the v1 order) becomes stale. Replace with the new test from updated brief §Scope.5:
+# Apply 3 ad-hoc PR #16 ALTERs:
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS target_vault_path TEXT;
+ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS commit_sha TEXT;
+ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS committed_at TIMESTAMPTZ;
+SQL
+```
 
-- Set `KBL_FLAGS_PIPELINE_ENABLED` unset OR `"false"`.
-- Force both circuits open: `get_state("anthropic_circuit_open") == "true"` OR `get_state("cost_circuit_open") == "true"` (one test per circuit or one parametrized test — your call).
-- Call `main()`.
-- Mock `check_alert_dedupe` and `emit_log` and assert `call_count == 0` on both (silent).
-- Mock `claim_one_signal` and assert `call_count == 0` (gate blocked).
-- Assert `main()` returned `0`.
+### Post-apply verification (paste output into report)
 
-**The key assertion is SILENCE.** Brief's point: when the pipeline is disabled, it should not produce log output for upstream state it is not acting on.
+```sql
+-- All expected KBL tables present?
+SELECT table_name FROM information_schema.tables
+WHERE table_schema='public' AND (table_name LIKE 'kbl_%' OR table_name IN ('signal_queue','mac_mini_heartbeat'))
+ORDER BY table_name;
 
-~15 lines. Replace the two existing `test_main_respects_anthropic_circuit` + `test_main_respects_cost_circuit` substitute tests IF you want one parametrized test — else keep the two, and just add the silent-when-disabled variant as a third. Your judgment on test-file cleanliness.
+-- signal_queue column inventory (should be ~35+)
+SELECT column_name, data_type FROM information_schema.columns
+WHERE table_schema='public' AND table_name='signal_queue'
+ORDER BY ordinal_position;
 
----
+-- kbl_cost_ledger exists + shape
+SELECT column_name, data_type FROM information_schema.columns
+WHERE table_schema='public' AND table_name='kbl_cost_ledger'
+ORDER BY ordinal_position;
 
-### Delivery
+-- kbl_cross_link_queue exists + shape
+SELECT column_name, data_type FROM information_schema.columns
+WHERE table_schema='public' AND table_name='kbl_cross_link_queue'
+ORDER BY ordinal_position;
 
-- Amend commit on `kbl-pipeline-scheduler-wiring` branch. No new PR.
-- Push.
-- All tests green (9 new scheduler-wiring tests minimum; full regression still passes).
-- Dispatch back: `B1 PR #18 amend shipped — head <SHA>, <N>/<N> tests green including new finalize_failed + disabled-silent-on-circuit. Ready for B2 re-review.`
-- ~20-30 min.
+-- CHECK constraint values on signal_queue.status (should be 34)
+SELECT pg_get_constraintdef(oid) FROM pg_constraint
+WHERE conrelid='signal_queue'::regclass AND contype='c';
+```
+
+### Expected tables post-apply
+
+`kbl_alert_dedupe`, `kbl_cost_ledger`, `kbl_cross_link_queue`, `kbl_feedback_ledger` (if in loop_infrastructure), `kbl_log` (if separate), `kbl_runtime_state`, `mac_mini_heartbeat`, `signal_queue`. Report any discrepancy — if loop_infrastructure doesn't create feedback_ledger/log, flag for Director (CHANDA §2 Leg 2 depends on feedback_ledger).
+
+### Hard constraints
+
+- **Read-only on existing data.** Every migration uses `IF NOT EXISTS`; re-runs are no-ops. Zero risk of data loss on existing rows.
+- **Do not touch code** — this is a DB-only operation. No code change, no PR.
+- **Do not push to repo** — report is the deliverable, not a commit.
+- **One script, one transaction per migration** — `-v ON_ERROR_STOP=1` halts on first error. Do NOT batch all 9 into a single transaction; if one fails mid-way we need the prior successes persisted.
+
+### Deliverable
+
+Short report at `briefs/_reports/B1_kbl_migrations_apply_20260419.md` containing:
+- Timestamp of apply.
+- `psql` exit code per file (expect 0 / 0 / 0...).
+- The 5 post-apply verification query results (table list + signal_queue columns + kbl_cost_ledger shape + kbl_cross_link_queue shape + CHECK constraint).
+- Any discrepancies flagged.
+- Dispatch-back one-liner.
+
+### Timeline
+
+~15-25 min. Most of it is pasting verification output.
 
 ### Reviewer
 
-B2 — re-review ~10 min per B2's own estimate.
+B2 — sanity-check schema matches expected (B2's mailbox has the parallel task queued).
 
-### After this task
+### Dispatch back
 
-- On B2 APPROVE: AI Head auto-merges PR #18 (Tier A). §Scope.6 Mac Mini verification already posted as PR comment at https://github.com/vallen300-bit/baker-master/pull/18#issuecomment-4276033003 — no blocker.
-- After merge: shadow-mode flip unlocks. AI Head asks Director for authorization to set `KBL_FLAGS_PIPELINE_ENABLED=true` on Render (Tier B under new bank-model rule).
+> B1 KBL_MIGRATIONS_APPLY_P1 shipped — report at briefs/_reports/B1_kbl_migrations_apply_20260419.md, commit <SHA>. 9 migrations + 3 ALTERs applied, all psql exit 0. signal_queue now has <N> columns, kbl_cost_ledger + kbl_cross_link_queue present, CHECK constraint shows 34 values. Ready for B2 sanity-check.
 
 ---
 
 ## Working-tree reminder
 
-Work in `~/bm-b1`. Quit Terminal tab after amend lands — memory hygiene.
+Work in `~/bm-b1`. Quit tab after apply + report push — memory hygiene.
 
 ---
 
-*Posted 2026-04-19 by AI Head. Brief v3 at 60d653b reflects ratified env→circuit order; amend aligns tests to the new spec + fills the §Scope.5 #7 gap.*
+*Posted 2026-04-19 by AI Head. Discovered during post-flip dashboard verification. Director-authorized Tier B action delegated to B1 per new economize-AI-Head-tokens rule.*

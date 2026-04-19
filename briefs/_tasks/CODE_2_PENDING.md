@@ -2,52 +2,65 @@
 
 **From:** AI Head
 **To:** Code Brisen #2 (fresh terminal tab)
-**Task posted:** 2026-04-19 (late afternoon)
-**Status:** OPEN — PR #18 re-review post-amend
+**Task posted:** 2026-04-19 (evening)
+**Status:** OPEN — post-B1-migration schema sanity-check
 
 ---
 
-## Task: PR #18 re-review post-amend
+## Task: KBL_MIGRATIONS_SANITY_CHECK — verify production Neon schema matches KBL-B expectations
 
-B1 shipped your S1 + S2 fixes at head `27c3db4` on branch `kbl-pipeline-scheduler-wiring`. PR mergeable=MERGEABLE.
+### Context
 
-- 22/22 scheduler-wiring tests green (was 20; +2 = the two new tests).
-- 88/88 across full KBL suite.
-- Brief v3 at `60d653b` already ratifies the env→circuit order (your Option B recommendation).
-- §Scope.6 Mac Mini verification already posted to PR comments (ALL THREE PASS) at https://github.com/vallen300-bit/baker-master/pull/18#issuecomment-4276033003.
+B1 applied 9 migration files + 3 ad-hoc PR #16 ALTERs to production Neon (`briefs/_tasks/CODE_1_PENDING.md` → report at `briefs/_reports/B1_kbl_migrations_apply_20260419.md`). Before we let signals actually flow through the pipeline, AI Head wants independent schema verification against the KBL-B code expectations.
 
-### Verdict focus (per your own ~10 min re-review estimate)
+### Scope
 
-1. **`test_remote_variant_stops_at_finalize_failed` present + correct shape:**
-   - Models on existing `test_process_signal_step6_finalize_failed_gates_out_step7`.
-   - Asserts Step 6 internal-commit-then-raise pattern survives the caller's rollback (final DB status is `finalize_failed`).
-   - Asserts no post-Step-6 logic runs in the remote variant (Step 7 call doesn't exist in `_process_signal_remote`).
+Run the following against production Neon (pull `DATABASE_URL` from Mac Mini `~/.kbl.env` via ssh, or from Render API via 1Password):
 
-2. **`test_main_disabled_silent_when_circuit_open` present + correct semantics:**
-   - With `KBL_FLAGS_PIPELINE_ENABLED` unset OR `"false"` AND either circuit open.
-   - Asserts `check_alert_dedupe.call_count == 0` AND `emit_log.call_count == 0` (SILENT).
-   - Asserts `claim_one_signal.call_count == 0` (gate blocked).
-   - Asserts `main()` returned `0`.
-   - This replaces the old v1 `test_main_circuit_breaker_precedes_env_gate` per brief v3.
+1. **Per-step write column coverage audit.** For each step's `.py` source file, identify every `UPDATE signal_queue SET <col>` + `INSERT INTO signal_queue (<cols>)` + `ALTER TABLE signal_queue` statement. Confirm each referenced column exists in the applied-schema's `signal_queue`. Flag any mismatch.
+   - Steps to audit: `kbl/layer0.py`, `kbl/steps/step1_triage.py`, `step2_resolve.py`, `step3_extract.py`, `step4_classify.py`, `step5_opus.py`, `step6_finalize.py`, `step7_commit.py`.
 
-3. **No drive-by changes** in the amend diff:
-   - `git diff d7312e8..27c3db4 -- tests/test_pipeline_tick.py` should show only test additions + minor restructure.
-   - No changes to `kbl/pipeline_tick.py` (all production-code concerns settled in the original PR).
+2. **kbl_cost_ledger shape vs `kbl/cost_gate.py` writes.** Inspect `INSERT INTO kbl_cost_ledger (...)` calls in `kbl/cost_gate.py`; confirm every column referenced exists in applied schema. Flag mismatch.
 
-4. **Full regression clean** — B1 reports 88/88. Sanity-check your own local collection if you can (may still be blocked by py3.9 extractors.py issue from your prior review; trust B1's number if so).
+3. **kbl_cross_link_queue shape vs `kbl/steps/step6_finalize.py` UPSERTs.** Same audit — `INSERT INTO kbl_cross_link_queue` + any UPSERT ON CONFLICT columns must exist in applied schema.
 
-### Verdict
+4. **kbl_log and kbl_feedback_ledger presence.** Confirm these tables exist post-migration (they should be in `20260418_loop_infrastructure.sql`). If EITHER is missing, that's a CHANDA §2 Leg 2 blocker — flag loudly, do NOT approve.
 
-APPROVE or second REDIRECT with concrete fix. File at `briefs/_reports/B2_pr18_scheduler_wiring_rereview_20260419.md`. ~10 min per your own estimate.
+5. **CHECK constraint on signal_queue.status.** Must list 34 values per PR #12. Paste `pg_get_constraintdef` output in report.
 
-On APPROVE + MERGEABLE: AI Head auto-merges PR #18 (Tier A authority). Then Tier B flow — AI Head asks Director "Shall I set `KBL_FLAGS_PIPELINE_ENABLED=true` on Render?" → Director authorizes → AI Head executes via 1Password + Render API. First signals flow.
+6. **Index coverage on hot paths.**
+   - `signal_queue.committed_at` (silver-landed endpoint query)
+   - `signal_queue.status` (claim_one_signal FOR UPDATE SKIP LOCKED)
+   - `kbl_cost_ledger.created_at` (cost-rollup 24h window)
+   - Flag any missing-but-expected index as N-level (not blocking).
+
+7. **Cross-check against B1's self-report.** B1's report has its own verification queries; compare outputs for drift (e.g., B1 reported column X present, your query shows column X present → match; else flag).
+
+### Deliverable
+
+Verdict at `briefs/_reports/B2_kbl_migrations_sanity_20260419.md`:
+- APPROVE (schema matches code expectations) OR REDIRECT (one or more concrete mismatches).
+- Full query outputs inline.
+- Any N-level observations (missing indexes, naming inconsistencies).
+
+### Timeline
+
+~20-30 min.
+
+### On APPROVE
+
+AI Head flags to Director: shadow mode truly live + functional. First real signal will complete cleanly when it arrives. Standing down until the first signal lands or Director asks.
+
+### On REDIRECT
+
+AI Head takes the mismatch list back to Director for next action (likely another B1 migration/ALTER task).
 
 ---
 
 ## Working-tree reminder
 
-Work in `~/bm-b2`. **Quit tab after verdict lands** — memory hygiene.
+Work in `~/bm-b2`. Quit tab after verdict ships — memory hygiene.
 
 ---
 
-*Posted 2026-04-19 by AI Head. Last B2 cycle before shadow-mode go-live. PR #17 dashboard already merged + live.*
+*Posted 2026-04-19 by AI Head. Parallel to B1's apply — start ~20 min after B1 fires, or read B1's report first if it's already landed.*

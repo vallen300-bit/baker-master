@@ -2,85 +2,82 @@
 
 **From:** AI Head
 **To:** Code Brisen #3 (fresh terminal tab)
-**Task posted:** 2026-04-19 (late afternoon, post-audit-ratification)
-**Status:** OPEN — retire dropbox-mirror per Director ratification
+**Task posted:** 2026-04-19 (evening)
+**Status:** OPEN — author polish-PR brief for the root cause of tonight's migration-drift incident
 
 ---
 
-## Task: MAC_MINI_DROPBOX_MIRROR_RETIRE
+## Task: AUTHOR_BRIEF_MIGRATION_RUNNER_1 — spec a startup-hook migration runner
 
 ### Context
 
-Your audit (`briefs/_reports/B3_kbl_legacy_plist_audit_20260419.md`) recommended ESCALATE on `com.brisen.kbl.dropbox-mirror` with three options (expand / split / retire). Director ratified **RETIRE** — stated 2026-04-19: *"I do not need Dropbox mirror, by the way. I'm going to get rid of Dropbox sometime in the future."*
+Shadow-mode go-live tonight exposed a production hole: **no migration runner on Render.** 9 migration files shipped and merged with the KBL-B code (PRs #8 through #16) were never executed against production Neon. Consequence: `signal_queue` had 25 cols instead of the expected 35+, and `kbl_cost_ledger` / `kbl_cross_link_queue` tables were missing. Every pipeline step past Step 1 would have exploded on the first real signal. Discovery path: AI Head hit the dashboard `/api/kbl/cost-rollup` endpoint post-DATABASE_URL-fix and got `relation "kbl_cost_ledger" does not exist`.
 
-This is now saved as a durable project memory (`project_dropbox_exit.md`): **no new Dropbox dependencies in future Baker / KBL work.** Your audit surfaced the signal — good catch.
+Immediate fix delegated to B1 (apply missing migrations manually). Root cause = process gap. Your job: spec the brief that closes it.
 
-`com.brisen.kbl.purge-dedupe` stays KEEP per your (correct) catch that it's load-bearing for the new pipeline. No action on that plist.
+### Deliverable
 
-### Scope
+One authored brief at `briefs/_drafts/MIGRATION_RUNNER_1_BRIEF.md`. Reviewer: B2. Implementer (later): B1.
 
-Retire `com.brisen.kbl.dropbox-mirror` on Mac Mini using the same pattern as your 2026-04-19 retirement of `com.brisen.kbl.pipeline.plist` + `com.brisen.kbl.heartbeat.plist`:
+### Spec expectations
 
-1. **`launchctl unload`** the agent:
-   ```bash
-   ssh macmini 'launchctl unload ~/Library/LaunchAgents/com.brisen.kbl.dropbox-mirror.plist'
-   ```
+Design a startup hook in `app.py` (or sibling bootstrap module) that:
 
-2. **Rename plist** to the same retired suffix pattern you used before:
-   ```bash
-   ssh macmini 'mv ~/Library/LaunchAgents/com.brisen.kbl.dropbox-mirror.plist ~/Library/LaunchAgents/com.brisen.kbl.dropbox-mirror.plist.retired-2026-04-19'
-   ```
+1. On service boot (before scheduler starts, before API accepts requests), opens a connection to `DATABASE_URL`.
+2. Reads a `schema_migrations` tracking table (create if not exists: `CREATE TABLE IF NOT EXISTS schema_migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), sha256 TEXT)`).
+3. Lists `migrations/*.sql` sorted lexicographically.
+4. For each file not yet in `schema_migrations`: open a transaction, execute the file's SQL, INSERT the filename + sha256 into `schema_migrations`, commit. On error: rollback, log structured error, abort startup (fail loud — do not continue with a half-applied schema).
+5. If all migrations applied: log one INFO line per file applied ("migration X applied, sha256 Y"), then return control to service startup.
+6. Idempotency: re-running = no-op (tracking table skips already-applied files).
 
-3. **Verify unload:**
-   ```bash
-   ssh macmini 'launchctl list | grep brisen'
-   ```
-   Expected output: only `com.brisen.baker.heartbeat`, `com.brisen.baker.poller`, `com.brisen.kbl.purge-dedupe`. `dropbox-mirror` must be absent.
+### Hard constraints to spec
 
-4. **Wrapper + any supporting scripts** — if the plist referenced a `.sh` wrapper in `/Users/dimitry/baker-pipeline/` or equivalent, either:
-   - (a) leave it on disk (orphaned; harmless once plist is gone), OR
-   - (b) rename wrapper with same `.retired-2026-04-19` suffix for consistency.
+- **sha256 mismatch must abort startup** — if a migration file's content changed after being applied once, that's a bug (migrations are immutable per convention); fail loudly with the filename + stored_sha vs current_sha.
+- **Use psycopg2, not SQLAlchemy** — match Baker proper's style (`config/settings.py` pattern).
+- **Must run BEFORE `kbl/pipeline_tick` registers in APScheduler** — otherwise the pipeline could tick with missing schema.
+- **Mac Mini poller.py behavior** — poller.py is separate and should NOT run this; schema applies happen on Render only. Add a comment explaining why.
+- **Rollback path** — document how a Director or B-code can force-re-apply a migration (e.g., `DELETE FROM schema_migrations WHERE filename='...'` + restart; ratified elsewhere, not in startup code).
 
-   Your call — recommend (b) for clean audit trail. Note which you picked in the report.
+### Test expectations to spec
 
-5. **No vault touches.** Do not touch `~/baker-vault/`. Do not touch `~/.kbl.env`. Do not touch `com.brisen.kbl.purge-dedupe.plist` — it stays.
+- `test_migration_runner_applies_new_file` — fresh DB, one file present, after runner: table created + schema_migrations row inserted.
+- `test_migration_runner_skips_applied` — schema_migrations pre-populated, no re-apply, no error.
+- `test_migration_runner_aborts_on_sha_mismatch` — stored sha256 ≠ current, startup raises loudly.
+- `test_migration_runner_aborts_on_sql_error` — bad SQL in file, transaction rolls back, startup fails, no partial schema, no schema_migrations row.
+- `test_migration_runner_runs_before_scheduler` — verify order in `app.py` lifespan.
 
-6. **Short report** at `briefs/_reports/B3_dropbox_mirror_retire_20260419.md`:
-   - The three commands above with their actual output pasted in.
-   - Final `launchctl list | grep brisen` showing 3 agents remaining.
-   - Which option (a / b) you picked for the wrapper + why.
-   - One-line ratification that the mirror content on Dropbox is frozen as-of retirement time (Director can prune manually when he exits Dropbox; that's out of scope here).
+### CHANDA pre-push (spec must include)
 
-### Hard constraints
+- Q1 Loop Test: migration runner is infrastructure; does not touch Legs 1/2/3 directly. However it GUARDS Leg 2 (kbl_feedback_ledger must exist for ledger writes to work). Pass.
+- Q2 Wish Test: serves the wish by preventing "system looks functional while losing reason to exist" (CHANDA §2) — a missing ledger table would silently break Leg 2. Pass.
+- Inv 4/8/9/10: unaffected.
 
-- **Inv 9 compliant** — no agent writes to `~/baker-vault/` in this task.
-- **Reversible** — renamed, not deleted. Director can `mv .retired-2026-04-19` back and `launchctl load` to resurrect if he changes his mind.
-- **Atomic step order** — unload FIRST (so launchd isn't mid-cycle when the file moves), THEN rename. If you reverse this, launchd may try to restart the agent before the rename lands.
+### Sign-posting in the brief
+
+- Timeline estimate for B1 impl: ~60-90 min (~120 lines code + ~150 lines tests).
+- Priority: HIGH — this is a production process fix. But not P0 tonight; park in `briefs/_drafts/` until tonight's go-live stabilizes + Director ratifies immediate impl or defers to polish queue.
+- Parking option: if Director prefers, move to `briefs/_future_optimization/MIGRATION_RUNNER_1_BRIEF.md` per the fanout/ctatedev parking convention (`briefs/_future_optimization/README.md`).
+
+### Deliverable
+
+Short brief (~2-3 pages) at `briefs/_drafts/MIGRATION_RUNNER_1_BRIEF.md`. Commit + push. Dispatch back:
+
+> B3 AUTHOR_BRIEF_MIGRATION_RUNNER_1 shipped — brief at briefs/_drafts/MIGRATION_RUNNER_1_BRIEF.md, commit <SHA>. Ready for B2 brief review + Director ratification of priority (ship-now vs park).
 
 ### Timeline
 
-~10-15 min. Three commands + verification + short report.
+~30-45 min authoring.
 
 ### Reviewer
 
-B2 — light review, mainly verify the `launchctl list` output confirms clean retirement + no vault touches.
-
-### Dispatch back
-
-> B3 MAC_MINI_DROPBOX_MIRROR_RETIRE shipped — report at `briefs/_reports/B3_dropbox_mirror_retire_20260419.md`, commit `<SHA>`. `dropbox-mirror` unloaded + renamed. Remaining launchd brisen agents: 3 (baker.heartbeat, baker.poller, kbl.purge-dedupe). Ready for B2 sanity-check.
-
-### After this task
-
-- B2 sanity-checks (~5 min).
-- No further plist work unless Director surfaces new need.
-- Terminal tab quit per memory-hygiene rule.
+B2 — brief review, not PR review.
 
 ---
 
 ## Working-tree reminder
 
-Work in `~/bm-b3`. Quit tab after this report + B2 sanity-check cycle.
+Work in `~/bm-b3`. Quit tab after brief push — memory hygiene.
 
 ---
 
-*Posted 2026-04-19 by AI Head. Director ratification: RETIRE dropbox-mirror. Related durable signal: project_dropbox_exit.md (no new Dropbox deps).*
+*Posted 2026-04-19 by AI Head. Delegated parallel-track to avoid this process gap recurring. The bug that bit us tonight would have been caught automatically with this runner in place.*
