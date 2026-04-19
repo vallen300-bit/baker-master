@@ -3,108 +3,106 @@
 **From:** AI Head
 **To:** Code Brisen #2 (app instance)
 **Task posted:** 2026-04-19 (morning)
-**Status:** OPEN — PR #13 review
+**Status:** OPEN — 2 tasks in sequence
 
 ---
 
 ## Completed since last dispatch
 
-- Task H — PR #8 combined S1+S2 delta (APPROVE @ `fd67ca3`) ✓ **MERGED `6382ee50`**
-
-All 5 Phase 1 PRs on main. Pipeline 5/5 shipped.
+- Task I — PR #13 STEP4-CLASSIFY-IMPL initial review (REDIRECT @ `dedab68`) ✓
 
 ---
 
-## Task I (NOW): Review PR #13 — STEP4-CLASSIFY-IMPL
+## Task J (NOW, fast): PR #13 S1 delta APPROVE
 
 **PR:** https://github.com/vallen300-bit/baker-master/pull/13
 **Branch:** `step4-classify-impl`
-**Head:** `4d38a44`
-**Tests:** 40/40 new parse-level + 1 live-PG skip; full related suite 304/304 + 4 live-PG skips
-**Spec:** KBL-B §4.5 (deterministic policy classifier).
+**New head:** `315695f` (advanced from `4d38a44` with S1 fix)
+**Change:** B1 added `test_classify_cross_link_only_guard_raises_and_marks_failed` — patches `_evaluate_rules` to return `CROSS_LINK_ONLY`, calls `classify()`, asserts `ClassifyError` raises AND status flips to `classify_failed` BEFORE the raise. Mirror shape of existing below-threshold guard test. No production code change. 41/41 tests green (was 40).
 
 ### Scope
 
-**IN**
-
-1. **`migrations/20260418_step4_signal_queue_step5_decision.sql`** — adds `step_5_decision TEXT` + `cross_link_hint BOOLEAN NOT NULL DEFAULT FALSE`. No DB CHECK on decision (enum enforced in Python).
-
-2. **`kbl/steps/step4_classify.py`** — full classifier:
-   - `ClassifyDecision` str-Enum (Py3.9-compat StrEnum equivalent). Values: `FULL_SYNTHESIS`, `STUB_ONLY`, `CROSS_LINK_ONLY`, `SKIP_INBOX`
-   - `CROSS_LINK_ONLY` reserved for Phase 2; runtime guard fails loud if emitted
-   - `classify(signal_id, conn) -> ClassifyDecision` — load row → apply table → write → advance state
-   - `_load_allowed_scope()` — hot.md + env union, fresh read per classify()
-   - `_evaluate_rules()` — pure, first-match-wins
-   - State transitions: `awaiting_classify` → `classify_running` → `awaiting_opus` or `classify_failed`
-   - `ClassifyError` new in `kbl/exceptions.py` (net-additive)
-
-3. **Decision table (§4.5):**
-   - Rule 0 unreachable: `triage_score < THRESHOLD` → raises `ClassifyError` (Step 1 drift guard)
-   - Rule 1: `primary_matter not in allowed_scope` → `SKIP_INBOX` + Layer 2 INFO log
-   - Rule 2: `triage_score < THRESHOLD + NOISE_BAND` → `STUB_ONLY`
-   - Rule 3: `resolved_thread_paths == [] AND related_matters == []` → `FULL_SYNTHESIS` (new arc)
-   - Rule 4: `resolved_thread_paths == [] AND related_matters != []` → `FULL_SYNTHESIS` + `cross_link_hint=TRUE`
-   - Rule 5: `resolved_thread_paths != []` → `FULL_SYNTHESIS` (continuation)
-
-### Specific scrutiny
-
-1. **Rule ordering correctness** — first-match-wins against §4.5 table. Verify Rule 1 (scope gate) fires BEFORE Rule 2 (threshold gate) — a below-scope signal should `SKIP_INBOX` even if triage_score is high. Verify Rule 2 before Rule 3-5 — a stub-only signal should not advance to full synthesis.
-
-2. **CROSS_LINK_ONLY guard** — B1 says it fails loud if emitted. Verify:
-   - The guard exists (raise on emit, not silent fallback)
-   - No rule path can reach it
-   - Test exists that asserts the guard fires on forced attempt
-
-3. **Inv 3 Leg-3 anchor** — `_load_allowed_scope` reads hot.md on EVERY classify() call. Explicit `@patch` call-count test across 3 successive invocations must pass (mirror Step 1's `test_triage_invocation_reads_hot_md_and_ledger_once`). This is Leg 3 critical — BLOCK default applies if missing.
-
-4. **Hot.md parsing fidelity** — verify parser pulls ONLY from `## Actively pressing` block, NOT `## Watch list` (per Director ratification: ACTIVE matters only). Slugs in `## Watch list` should NOT enter `allowed_scope`.
-
-5. **Env override shape** — `KBL_MATTER_SCOPE_ALLOWED` comma-separated parsing:
-   - Empty/unset → hot.md is sole source
-   - Leading/trailing whitespace stripped
-   - Duplicates collapsed (union semantic)
-   - Invalid slugs (not in `slugs.yml` v9) — does parser reject, warn, or pass-through? Flag the chosen behavior.
-
-6. **State-machine CHECK compliance** — `awaiting_classify`, `classify_running`, `awaiting_opus`, `classify_failed` all in the 34-value set from PR #12. No leftover drift.
-
-7. **`cross_link_hint` write semantic** — Rule 4 sets TRUE, Rule 3 sets FALSE. Verify:
-   - Migration default FALSE (matches Rule 3 behavior on zero-cross-link signals)
-   - Rule 4 explicit TRUE write (not reliance on default)
-   - Step 6 read path (future) will consume this — brief §4.7 docstring or comment references the hint.
-
-8. **Failure-path atomicity** — `ClassifyError` → state flips to `classify_failed` BEFORE exception bubbles. Verify order: status UPDATE commits, then raise. Not: raise, then caller handles status (leak-prone per PR #8 S2 precedent).
-
-9. **Test count** — 40 new tests. Verify coverage of: each rule (5), allowed-scope derivation (4+), Inv 3 fresh-read counter (3+), env parsing edge cases, state transitions, ClassifyError paths, `cross_link_hint` write correctness.
-
-### CHANDA audit
-
-- **Q1 Loop Test:** Step 4 reads hot.md — **Leg 3 surface**. Fresh-read per invocation. Pass if Inv 3 test passes.
-- **Q2 Wish Test:** deterministic policy gates Opus cost on Director's hot.md ACTIVE set. Wish-aligned.
-- **Inv 3** (hot.md + ledger every run) — critical verification point.
-- **Inv 6** (never skip Step 6) — Step 4 always advances; never terminates signal.
-- **Inv 10** (no prompt self-modification) — no prompt; pure Python.
+- Verify the new test exercises the runtime guard (not a trivially-passing assertion that bypasses the guard code path)
+- Verify the exception type + state-flip assertions are both present
+- Verify test naming + location consistency with existing test file
+- Verify your 3 nice-to-haves (N1 docstring, N2 Watch-list exclusion, N3 cross_link_hint consumer pointer) were **deferred** per dispatch — no scope creep
 
 ### Format
 
-`briefs/_reports/B2_pr13_review_20260419.md`
-Verdict: APPROVE / REDIRECT / BLOCK
+Short one-paragraph APPROVE report: `briefs/_reports/B2_pr13_s1_delta_20260419.md`
+Or append to existing `B2_pr13_review_20260419.md` — your preference.
 
 ### Timeline
 
-~25-35 min (pure Python, no external calls, focused surface).
+~5-10 min.
 
 ### Dispatch back
 
-> B2 PR #13 review done — `briefs/_reports/B2_pr13_review_20260419.md`, commit `<SHA>`. Verdict: <...>.
+> B2 PR #13 S1 delta APPROVE — head `315695f`, report at `<path>`, commit `<SHA>`.
 
-On APPROVE: I auto-merge PR #13. That's Step 4 done; Step 5 (Opus synthesis) is B1's next big dispatch.
+On APPROVE I auto-merge PR #13.
+
+---
+
+## Task K (after Task J): Burn-in audit of 5 merged Phase 1 PRs
+
+**Scope:** independent audit of `#7 / #8 / #10 / #11 / #12` against CHANDA.md §3 invariants + §2 three legs. De-risk before Opus starts pumping real signals through the pipeline.
+
+### Why
+
+All 5 Phase 1 PRs landed via cascade merge in one session (~2 hrs). Each got focused review, but cross-PR integration paths weren't audited end-to-end post-merge. Real signal traffic starts once Step 5 ships. Catching invariant drift NOW is cheaper than catching it via a production bug once Opus is charging cost-ledger rows.
+
+### Scope
+
+**IN — per-invariant sweep against current `main` state:**
+
+1. **Inv 1 (zero-Gold safe):** trace a hypothetical signal through Steps 1-4 when `load_gold_context_by_matter` returns `""`. Each step must handle empty-string / empty-list Gold inputs without error. Flag any step that crashes or silently drops the signal.
+
+2. **Inv 2 (atomic ledger writes):** `kbl_cost_ledger` writes across Steps 1-3 — are they inside or outside the same transaction as the step's main state UPDATE? If a step's main UPDATE commits but the ledger INSERT fails (e.g., PG connection drop), does the signal advance without the cost row? Compare to Leg 2 (feedback_ledger): is its atomicity intact? Note: ledger atomicity per B2's PR #10 Inv 2 sub-observation was flagged as documentation-level, not violation — re-confirm or escalate.
+
+3. **Inv 3 (hot.md + ledger every run):** verify Steps 1 AND 4 both read hot.md + feedback_ledger on every invocation (no caching). You already certified this for each step individually in PR review — re-verify across the combined main state (no post-merge regression).
+
+4. **Inv 4 (`author: director` files never modified):** grep for any write surface that touches `/Users/dimitry/baker-vault/wiki/*.md` where the target file's frontmatter has `author: director`. CHANDA.md is the canonical example. Should be zero writes from agents.
+
+5. **Inv 6 (never skip Step 6):** Steps 1-4 all advance to `awaiting_<next>` states — none short-circuit to `done` or `completed` before Step 6. Step 6 itself not yet implemented; skip that sub-check.
+
+6. **Inv 7 (ayoniso alerts are prompts, not overrides):** KBL-C surface; Phase 1 doesn't touch. Note as N/A.
+
+7. **Inv 9 (Mac Mini single writer):** baker-vault write surfaces across merged code. Any step that writes to `/Users/dimitry/baker-vault/wiki/` from Render? Should be zero. Inv 9 vault-write path lives in Step 7 (not yet shipped). Flag any drift.
+
+8. **Inv 10 (pipeline prompts don't self-modify):** grep for any code that writes `kbl/prompts/*.txt`. Should be zero. All template loads should be read-only.
+
+**IN — per-leg sweep:**
+
+9. **Leg 1 (Compounding):** `load_gold_context_by_matter` (PR #9) is the Leg 1 read. Is it called by any Phase 1 code? It should be called by Step 5 (not shipped yet), so Phase 1 has zero Leg 1 reads — which is correct. Confirm.
+
+10. **Leg 2 (Capture):** feedback_ledger write path from Director actions. Phase 1 has no Director-action-capture surface (KBL-C ayoniso/WA handlers ship the writes). Confirm zero Leg 2 writes from Phase 1; flag any accidental write.
+
+11. **Leg 3 (Flow-forward):** Step 1 + Step 4 both read hot.md + feedback_ledger on every call. Verified in individual reviews — re-verify the combined main state.
+
+### Format
+
+`briefs/_reports/B2_phase1_burn_in_audit_20260419.md`
+- Top-line verdict: **GREEN** (no issues) / **YELLOW** (minor drift, documentation-level) / **RED** (should-fix blocker)
+- Per-invariant 1-line status
+- Per-leg 1-line status
+- Drift findings with file:line citations
+- If RED: actionable remediation path
+
+### Timeline
+
+~45-60 min. Read-only audit; no code changes.
+
+### Dispatch back
+
+> B2 Phase 1 burn-in audit done — `briefs/_reports/B2_phase1_burn_in_audit_20260419.md`, commit `<SHA>`. Verdict: <GREEN/YELLOW/RED>. <0-5 line summary>.
 
 ---
 
 ## Working-tree reminder
 
-**Work only inside `/tmp/bm-b2`** (or another `/tmp/*` clone). Never operate on files inside Dropbox paths.
+Work only in `/tmp/bm-b2`. Never Dropbox paths.
 
 ---
 
-*Posted 2026-04-19 by AI Head. PR #13 = last deterministic step before Opus boundary.*
+*Posted 2026-04-19 by AI Head. Task J fast; Task K is defensive spadework while B1 builds Step 5.*

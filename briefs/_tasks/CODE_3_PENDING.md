@@ -2,108 +2,106 @@
 
 **From:** AI Head
 **To:** Code Brisen #3 (app instance)
-**Previous:** SLUGS-V9-FOLD landed at `50167a1` (mo-vie-am + m365 + hot.md v9 sync). Idle since.
+**Previous:** STEP5-WORKED-EXAMPLES-EXPAND landed at `fceb22f` (§3 now 7 examples). Idle since.
 **Task posted:** 2026-04-19 (morning)
-**Status:** OPEN
+**Status:** OPEN — design-doc authoring (no code)
 
 ---
 
-## Task: STEP5-WORKED-EXAMPLES-EXPAND — Grow §3 from 3 → 6-8 examples
+## Task: STEP6-FINALIZE-SCHEMA-SPEC — Author Pydantic schema + validation spec
 
-**File:** `briefs/_drafts/KBL_B_STEP5_OPUS_PROMPT.md` §3.
+**Target file:** `briefs/_drafts/KBL_B_STEP6_FINALIZE_SPEC.md` (new file).
 
 ### Why
 
-Step 5 Opus synthesis is the highest-stakes step in the pipeline — real Opus cost per call, and output quality determines whether Director promotes Silver → Gold or rejects. The current 3 worked examples cover zero-Gold / continuation / cross-matter. **Ship-day accuracy is bottlenecked by few-shot diversity** — more worked examples = better synthesis on edge cases = fewer rejected Silver entries = Director trusts the pipeline sooner.
+Step 6 is **deterministic** (no prompt, no model call) per the post-REDIRECT ratification on 2026-04-18. But it's the last quality gate before the vault commit — it Pydantic-validates Opus's draft output, builds `final_markdown`, writes cross-link stubs. If the schema spec is ambiguous, B1 will have to make judgment calls mid-impl and re-ask Director. Front-loading the exact Pydantic shape + validation rules lets B1 ship Step 6 in one pass after Step 5 lands.
 
-Director ratified expansion to **6-8 worked examples** (not 3, not 20 — target range).
+**KBL-B §4.7 brief text is the starting point; your job is to expand it into a concrete implementation-ready spec.**
 
 ### Scope
 
-**IN**
+**IN — Author `briefs/_drafts/KBL_B_STEP6_FINALIZE_SPEC.md` with these sections:**
 
-Add **3-5 new worked examples** to §3, bringing total to 6-8. Each new example should cover a scenario the current 3 don't. Select from the gap list below based on which have the strongest grounding in labeled data.
+1. **§1. Purpose & §4.7 anchor** — 3-4 sentences. Reference KBL-B §4.7 (lines 414-422 of pipeline brief). State Step 6 is deterministic, no model call, no ledger row.
 
-**Priority gaps (pick 3-5):**
+2. **§2. Pydantic models (exact):**
+   - `SilverFrontmatter` model: all required keys from STEP5-OPUS-PROMPT §1 frontmatter spec (title, voice, author, created, sources, primary_matter, related_matters, vedana, triage_score, triage_confidence, money_mentioned, status, thread_continues). Include optional keys + defaults. Specify exact types (`Literal['silver']`, `Literal['pipeline']`, `datetime | str` with ISO 8601 validator, `list[MatterSlug]` where `MatterSlug` is a constrained str, `Literal['threat', 'opportunity', 'routine']`, etc.).
+   - `SilverDocument` model: `frontmatter: SilverFrontmatter` + `body: str` (length bounds: ~300-800 tokens per §Output format; express as char bound e.g. 1500-4000 chars).
+   - `MatterSlug` constrained str: must match regex for canonical v9 slug (lowercase, dash-separated, 2-30 chars). Cite slugs.yml v9 as authority.
+   - `CrossLinkStub` model: what gets appended to `wiki/<m>/_links.md` per related_matter. Fields: `source_signal_id`, `source_path`, `created`, `vedana`, optional 1-line excerpt.
 
-1. **Threat-vedana signal** — e.g., Hagenauer administrator-claim deadline letter, AO capital-call slippage, Aukera release refusal. Demonstrates `vedana: threat` frontmatter + arc continuation on a threat thread + Director's ledger-capture pattern on threat signals. **High priority** — threat signals are the highest-volume class per the Fireflies index (hagenauer-rg7 concentration 27.5%).
+3. **§3. Validation rules (enumerate precisely):**
+   - `target_vault_path` regex: `^wiki/[a-z0-9-]+/\d{4}-\d{2}-\d{2}_[\w-]+\.md$` (cite §3.5 of Step 5 prompt if it's different, reconcile).
+   - `author` must be `pipeline` (Silver produced). Director promotion flips to `director` later; Step 6 never writes `director`.
+   - `voice` must be `silver`.
+   - `primary_matter` must be in v9 slugs.yml ACTIVE set — validator reads `slugs.yml` once at Step 6 module import (cached OK, slug set is static during a process lifetime).
+   - `related_matters`: each entry also validated against slugs.yml, MUST NOT equal `primary_matter`, deduplicated.
+   - `vedana`: strict 3-value enum per `memory/vedana_schema.md` — no `neutral`, no `other`.
+   - `triage_score`: int 0-100.
+   - `triage_confidence`: float 0.0-1.0.
+   - `created`: ISO 8601 timestamp, timezone-aware, UTC.
+   - `money_mentioned`: string or null. If string, must match a currency-amount pattern (€X, £X, $X, CHF X with optional M/K suffix). No implicit-currency numbers.
+   - `body`: must not contain `author: director` or `voice: gold` (anti-self-promotion — no accidental Gold frontmatter in body).
+   - `body`: must not contain bare Director name without citation (anti-hallucination — full-text contains "Dimitry Vallen" only inside quoted source material).
 
-2. **Opportunity-vedana signal** — e.g., NVIDIA+Corinthia partnership overture, Kitzbüchel-Kempinski asset lead, MO Vienna residence buyer at full ask. Demonstrates `vedana: opportunity` reservation for NEW strategic gains (per `memory/vedana_schema.md`) vs. defensive wins. **High priority** — tests vedana discipline.
+4. **§4. Cross-link stub file format (`wiki/<m>/_links.md`):**
+   - Exact Markdown structure: one row per stub, sorted by `created` DESC.
+   - Idempotency rule: identified by `source_signal_id` — if a stub with that ID already exists in the file, REPLACE in place (not append duplicate). Specify the grep/regex used to detect.
+   - Atomic write pattern: temp file + rename (filesystem-level atomicity).
 
-3. **Contradiction handling** — signal contradicts prior Gold (e.g., counterparty repudiates an earlier commitment). Demonstrates `⚠ CONTRADICTION:` body marker per §1.2 rules. Critical test of Director's trust in the loop — Opus must flag, not silently overwrite.
+5. **§5. Error matrix (Pydantic failure → state transition):**
+   - Missing required frontmatter key → `FinalizationError`, state flips to `opus_failed`, Opus R3 retry
+   - Invalid enum value (vedana, voice, author) → `FinalizationError`, same path
+   - Unknown slug in primary_matter / related_matters → `FinalizationError`, same path
+   - Body too short (<300 chars) or too long (>8000 chars) → `FinalizationError`, same path
+   - `target_vault_path` doesn't match regex → `FinalizationError`, same path
+   - Cross-link write failure (IO error) → `FinalizationError` but state stays at `finalize_running` + retry once, then `finalize_failed` (cross-link is idempotent, safe to retry)
+   - After 3 total Opus retries produce invalid drafts → `finalize_failed` terminal + route to inbox per §4.7 brief
 
-4. **Stub-only boundary case** — `triage_score` in the 40-45 noise band (e.g., 42) where Step 4 classifies as `STUB_ONLY`. Demonstrates deterministic stub output: frontmatter + 2-3 sentence body + `status: stub_auto` marker, NO Opus call (per §4.6 brief). Shows Opus what NOT to generate on stubs.
+6. **§6. Logging spec:**
+   - Pydantic validation failure: `level='WARN'`, `component='finalize'`, `message=f'<field>: <reason>'`. One log row per failed field.
+   - Cross-link write failure: `level='ERROR'`, `component='finalize'`, `message=f'cross-link write failed: {path}: {reason}'`. One row per failed path.
+   - Success: no log.
 
-5. **Long-signal truncation** — signal exceeding 50K chars (e.g., long email thread, Fireflies transcript). Demonstrates `[SIGNAL TRUNCATED @ 50000 chars — see source for full text]` marker + how Opus handles partial context. Preserves audit trail.
+7. **§7. Open questions for AI Head:** any ambiguities you hit while writing. Number them `OQ1`, `OQ2`, etc. so AI Head can resolve before B1 impl.
 
-6. **Director-self-reference strip** — signal where Director is one of the orgs/people. Demonstrates that Step 3 stripped him (per PR #11 pattern) and Opus doesn't re-introduce him as a counterparty.
-
-7. **Multi-source consolidation** — e.g., email + follow-up WhatsApp on same arc, both resolved to same thread. Demonstrates `resolved_thread_paths` with 2+ entries and how Opus weaves them.
-
-8. **Zero-Gold with hot.md elevation** — new matter not yet in Gold but ACTIVE in hot.md. Demonstrates hot.md-driven triage elevation propagating into synthesis framing.
-
-### Source material
-
-- **Labeled corpus:** `outputs/kbl_eval_set_20260417_labeled.jsonl` — 50-entry email/WhatsApp eval set with Director labels. Use for grounding inputs (not direct copies; mask/paraphrase sensitive details).
-- **Fireflies index:** `briefs/_drafts/FIREFLIES_MATTER_INDEX_20260418.md` — 107-transcript directory with matter concentration (hagenauer-rg7, mo-vie-am, claimsmax, nvidia). Pull meeting-scenario inputs from here.
-- **hot.md source of truth:** `/Users/dimitry/baker-vault/wiki/hot.md` — v9 state; every `primary_matter` in your inputs must resolve to a canonical v9 slug.
-- **slugs.yml:** `/Users/dimitry/baker-vault/slugs.yml` v9 — reference for what matters exist.
-
-### Format requirements (must match existing §3 shape)
-
-Each new example must include:
-1. **Header:** `### Example N — <scenario label> (<source type>)`
-2. **Input block** — mirror existing Ex 1-3 structure:
-   - `## Signal raw text (truncated at 50K chars)` — source-shaped content
-   - `## Extracted entities` — JSON object with 6 keys (people/orgs/money/dates/references/action_items)
-   - `## Resolved thread paths` — JSONB array (can be `[]` for zero-Gold)
-   - `## Prior Gold for this matter` — paths + content OR `(none — zero Gold)`
-   - `## Director's current-priorities cache` — v9 hot.md excerpt (accurate for the matter)
-   - `## Recent Director actions` — ledger rows (format: `YYYY-MM-DD HH:MM | <action> | <matter> | sig:<id> | "<one-line>"`)
-3. **Expected output** — full frontmatter + body as Opus should generate it
-4. **Rationale** — 2-4 sentences explaining WHY this output is correct (what rules it demonstrates, what could go wrong, what the self-check catches)
+8. **§8. CHANDA pre-push self-check** — cite §5 Q1 + Q2 by name.
 
 ### Hard constraints
 
-- **v9 slugs only** — no `mo-vie` (use `mo-vie-am`), no `theailogy` (retired), no drift
-- **`author: pipeline`** + **`voice: silver`** always — no `author: tier2`, no `voice: gold`
-- **No fictional people** — use Director's real contacts from `memory/people/` or mask as `[Counterparty]`, `[Advisor]`, etc. Do not invent names.
-- **Realistic money amounts** — draw from actual matter scales (MO Vienna residence €9-11M, Hagenauer claims ~€600K-€1.5M, AO calls €7M, Aukera €3M, Franck-Muller €6M)
-- **Timestamps within last 90 days** — keep in 2026-01 to 2026-04 range
+- **No code.** This is a spec document for B1 to implement against. Pydantic model bodies can be shown as code fences for clarity, but no `.py` file is produced.
+- **Reference the canonical v9 slug set** at `/Users/dimitry/baker-vault/slugs.yml`. Don't invent slugs.
+- **All `author: pipeline` + `voice: silver`** enforced at validation. Spec MUST make self-promotion to Gold impossible at Step 6.
+- **Spec must be reviewable by B2** — so write it in the exact shape a brief like `KBL_B_PIPELINE_CODE_BRIEF.md` uses (numbered sections, tables, inline code fences, explicit invariant citations).
 
 ### CHANDA pre-push
 
-- **Q1 Loop Test:** worked examples are prompt data, not loop mechanics. No Leg touched. Pass.
-- **Q2 Wish Test:** serves wish — better few-shot grounding = Opus produces Silver Director trusts = faster Silver→Gold velocity = loop closes tighter. Pass.
-- **Inv 10 (pipeline prompts don't self-modify):** draft-time authoring, not runtime. Pass.
-- **Inv 4 (author-director files untouched):** you read hot.md + slugs.yml + labeled corpus, you write only to `KBL_B_STEP5_OPUS_PROMPT.md` (pipeline-author file). Pass.
+- **Q1 Loop Test:** spec authoring, no Leg touched. Pass.
+- **Q2 Wish Test:** serves wish — tighter Step 6 schema = fewer rejected Silver drafts = faster Silver→Gold velocity. Pass.
+- **Inv 8** (Silver→Gold only by Director edit) — spec must structurally enforce (no auto-promote).
+- **Inv 10** (prompts don't self-modify) — Step 6 has no prompt, spec is stable.
 
 ### Branch + PR
 
-- **Option A: direct to main** (this is a draft prompt, same pattern as SLUGS-V9-FOLD at `50167a1`). B2 delta review as follow-up if substantive.
-- **Option B: branch + PR #14** if you want structured B2 review.
+- **Option A: direct to main.** Same pattern as SLUGS-V9-FOLD. Commit message lists sections.
+- **Option B: branch + PR for B2 review.** Worth it if the spec is architecturally novel.
 
-**Lean (A).** Prompt draft editing has no CI risk, no live-code dependency. Commit message lists the N new example headers for legibility.
-
-### Reviewer
-
-B2 delta (optional post-commit pass) — flag if any example breaches v9 slug discipline, invariant citations, or frontmatter spec.
+**Lean (A).** Spec docs follow the existing draft pattern. B2 can review inline post-commit as part of Task K or separately.
 
 ### Timeline
 
-~45-60 min for 3 new examples, ~60-90 min for 5. **Target 4 new** (7 total) as the sweet spot unless one of the scenarios is obviously thin — in which case stop at 6 total.
+~60-90 min (~8 sections, each tight but precise).
 
 ### Dispatch back
 
-> B3 STEP5-WORKED-EXAMPLES-EXPAND landed — §3 now has <N> examples (was 3), commit `<SHA>`. New examples: <Ex#> <scenario>, <Ex#> <scenario>, ... Sourced from <labeled corpus / Fireflies / mix>. No CHANDA flags.
+> B3 STEP6-FINALIZE-SCHEMA-SPEC landed — `briefs/_drafts/KBL_B_STEP6_FINALIZE_SPEC.md` at commit `<SHA>`. N sections, M open questions for AI Head. <GREEN/amber/red> CHANDA self-check.
 
 ---
 
 ## After this task
 
-- B2 optional delta review (if any surface is structurally novel)
-- Next dispatch to you (after Step 4 merges + Step 5 impl starts): likely **STEP6-FINALIZE-PROMPT** is NOT applicable (§4.7 REDIRECT made Step 6 deterministic, no prompt). Your next substantive work is either (a) D2 empirical eval once Step 5 is deployed, or (b) Fireflies 15-pending-transcript resumption in the baker-research session.
+Next: Step 7 harness design spec (git-commit path, push-under-mutex, `claude -p` optional) — similar shape, ~45 min. Or if Step 5 Opus has shipped, D2 empirical eval corpus for Step 5 output quality.
 
 ---
 
-*Posted 2026-04-19 by AI Head. Director ratified (B). Step 5 accuracy leverage — every new worked example compounds downstream.*
+*Posted 2026-04-19 by AI Head. Front-loads Step 6 so B1's post-Step-5 ramp is zero-wait.*
