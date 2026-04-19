@@ -629,3 +629,90 @@ def test_main_respects_cost_circuit(monkeypatch) -> None:
 
     assert rc == 0
     assert mock_claim.call_count == 0
+
+
+def test_remote_variant_stops_at_finalize_failed() -> None:
+    """Step 6 R3-exhaust path under ``_process_signal_remote``: Step 6
+    internally commits the ``finalize_failed`` flip, then raises
+    ``FinalizationError``. The remote variant's try/except rolls back
+    the Step-6 fragment, but the step-internal commit has already sealed
+    the terminal-state flip. The raise propagates out of the remote
+    variant — Step 7 is not imported and cannot be invoked.
+
+    Expected: commit_count == 6 = 5 orchestrator (steps 1-5) + 1
+    step-internal (finalize_failed flip). rollback_count == 1. Step 7
+    mock never called (brief §Scope.5 item 7 explicit assertion).
+    """
+    from kbl.exceptions import FinalizationError
+
+    conn = _mock_conn(
+        post_step1_status="awaiting_resolve",
+        post_step5_status="awaiting_finalize",
+    )
+
+    def _step6_terminal(signal_id: int, c: Any) -> None:
+        c.commit()  # step-internal finalize_failed flip
+        raise FinalizationError("terminal finalize failure after 3 Opus retries")
+
+    with ExitStack() as stack:
+        mocks = _enter_all_steps(stack)
+        mocks["step6"].side_effect = _step6_terminal
+
+        with pytest.raises(FinalizationError, match="terminal"):
+            _process_signal_remote(signal_id=201, conn=conn)
+
+    assert conn.commit.call_count == 6  # 5 orchestrator + 1 step-internal.
+    assert conn.rollback.call_count == 1
+    mocks["step6"].assert_called_once_with(201, conn)
+    # Remote variant never touches Step 7 — the step-internal commit
+    # leaves the row at ``finalize_failed``; there is no Step-7 path here
+    # to gate out or to call.
+    assert mocks["step7"].call_count == 0
+
+
+def test_main_disabled_silent_when_circuit_open(monkeypatch) -> None:
+    """Brief v3 §Scope.5: env→circuit order means a disabled tick is
+    silent even when the Anthropic / cost circuits are open. The env
+    short-circuit returns before either ``get_state`` check fires, so
+    ``check_alert_dedupe`` and ``emit_log`` are never invoked and no
+    signal is claimed. The pipeline stays out of the way of whatever
+    upstream state it is not acting on.
+    """
+    monkeypatch.delenv("KBL_FLAGS_PIPELINE_ENABLED", raising=False)
+
+    # Force both circuits open — but env gate should short-circuit
+    # before either ``get_state`` is read.
+    def _get_state(key):
+        if key in ("anthropic_circuit_open", "cost_circuit_open"):
+            return "true"
+        return "false"
+
+    with patch("kbl.pipeline_tick.get_state", side_effect=_get_state) as mock_state, \
+         patch("kbl.pipeline_tick.check_alert_dedupe") as mock_dedupe, \
+         patch("kbl.pipeline_tick.emit_log") as mock_emit, \
+         patch("kbl.pipeline_tick.claim_one_signal") as mock_claim, \
+         patch("kbl.pipeline_tick.get_conn") as mock_conn_ctx:
+        rc = _pipeline_main()
+
+    assert rc == 0
+    # Silence — no WARN dedupe, no emit_log.
+    assert mock_dedupe.call_count == 0
+    assert mock_emit.call_count == 0
+    # Gate blocked — no claim, no connection opened, no circuit read.
+    assert mock_claim.call_count == 0
+    assert mock_conn_ctx.call_count == 0
+    assert mock_state.call_count == 0
+
+    # Explicit "false" behaves identically to unset.
+    monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "false")
+    with patch("kbl.pipeline_tick.get_state", side_effect=_get_state) as mock_state2, \
+         patch("kbl.pipeline_tick.check_alert_dedupe") as mock_dedupe2, \
+         patch("kbl.pipeline_tick.emit_log") as mock_emit2, \
+         patch("kbl.pipeline_tick.claim_one_signal") as mock_claim2:
+        rc2 = _pipeline_main()
+
+    assert rc2 == 0
+    assert mock_dedupe2.call_count == 0
+    assert mock_emit2.call_count == 0
+    assert mock_claim2.call_count == 0
+    assert mock_state2.call_count == 0
