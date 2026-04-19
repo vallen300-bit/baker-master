@@ -1,0 +1,37 @@
+## Signal triage output
+
+primary_matter:  {primary_matter}
+matter purpose:  {primary_matter_desc}
+related_matters: {related_matters}
+vedana:          {vedana}
+triage_summary:  {triage_summary}
+
+## Resolved thread paths (Step 2 output — may be empty)
+
+{resolved_thread_paths}
+
+## Extracted entities (Step 3 output)
+
+{extracted_entities}
+
+## Prior Gold for this matter (Leg 1 compounding — CHANDA Inv 1)
+
+{gold_context_block}
+
+## Director's current-priorities cache (hot.md — CHANDA Inv 3 Leg 3)
+
+{hot_md_block}
+
+## Recent Director actions (feedback ledger — CHANDA Inv 3 Leg 3)
+
+{feedback_ledger_block}
+
+## Signal raw text (truncated at 50K chars)
+
+{signal_raw_text}
+
+## Timestamp for frontmatter `created` field
+
+{iso_now}
+
+Emit the Markdown document now. Frontmatter first, then body. No preamble.

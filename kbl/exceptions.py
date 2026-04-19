@@ -55,3 +55,18 @@ class ClassifyError(KblError):
     signal; hitting it here means a pipeline invariant has drifted, so
     Step 4 halts the signal (status → ``classify_failed``) rather than
     silently guessing a decision."""
+
+
+class AnthropicUnavailableError(KblError):
+    """Raised when the Anthropic API is unreachable or returns a retryable
+    transport failure (HTTP 5xx, 429 rate limit, connection timeout).
+    Step 5 ``synthesize()`` catches this and advances the R3 retry ladder
+    (§8 of KBL-B brief); after the budget is exhausted the signal is
+    routed to ``opus_failed`` for pipeline_tick to inbox-route per §7."""
+
+
+class OpusRequestError(KblError):
+    """Raised when the Anthropic API returns a 4xx user error (malformed
+    request, invalid model, auth) — distinct from ``AnthropicUnavailableError``
+    in that retrying the same prompt CANNOT recover. Step 5 bypasses the R3
+    retry ladder on this error and goes straight to ``opus_failed``."""
