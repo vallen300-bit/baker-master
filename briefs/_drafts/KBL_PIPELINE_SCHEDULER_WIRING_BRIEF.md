@@ -83,11 +83,33 @@ Rationale vs. alternatives:
    - Add `KBL_FLAGS_PIPELINE_ENABLED` + `KBL_PIPELINE_TICK_INTERVAL_SECONDS` to whatever env-docs exist (e.g. `README.md` env section, `.env.example`, or `briefs/_drafts/KBL_B_PIPELINE_CODE_BRIEF.md` §9.x — whichever is canonical; B1 pick based on where other KBL envs live).
    - `KBL_FLAGS_PIPELINE_ENABLED` must default to `"false"` for ALL environments. Opt-in only.
 
-5. **Tests** — `tests/test_pipeline_tick.py`:
+5. **Tests** — `tests/test_pipeline_tick.py` (7 total, per B2 S2):
    - `test_main_disabled_returns_zero_without_claim` — with `KBL_FLAGS_PIPELINE_ENABLED` unset OR `"false"`, `main()` returns 0 and does NOT call `claim_one_signal`. Mock `claim_one_signal` and assert `call_count == 0`.
    - `test_main_enabled_claims_and_processes` — with `KBL_FLAGS_PIPELINE_ENABLED="true"`, `main()` calls `_process_signal_remote` with the claimed id. Mock `_process_signal_remote`.
    - `test_remote_variant_stops_at_awaiting_commit` — fixture signal at `awaiting_extract`; run `_process_signal_remote`; assert final status is `awaiting_commit` (not `completed`) and Step 7 mock was NOT called.
    - `test_remote_variant_handles_routed_inbox` — Step 1 low score → `routed_inbox` terminal; `_process_signal_remote` returns without calling Steps 2-6.
+   - `test_main_circuit_breaker_precedes_env_gate` — when `anthropic_circuit_open == "true"` OR `cost_circuit_open == "true"`, `main()` returns 0 even with `KBL_FLAGS_PIPELINE_ENABLED="true"`, AND does NOT call `claim_one_signal`. Asserts circuit checks run before the env-gate (existing order in `main()` lines 197-206) is preserved.
+   - `test_remote_variant_stops_at_paused_cost_cap` — fixture signal routed through Step 5 with cost gate denied; `_process_signal_remote` returns cleanly; final signal status is `paused_cost_cap`; Step 6 mock NOT called; no exception raised.
+   - `test_remote_variant_stops_at_finalize_failed` — fixture signal routed through Step 6 with 3 retries exhausted (terminal `finalize_failed` flip committed by Step 6 internally per its docstring); `_process_signal_remote` returns cleanly (Step 6 re-raise propagates, but caller-owned rollback leaves the Step-6-internal commit intact); final status stays `finalize_failed`; Step 7 driver (not-in-this-variant) never invoked.
+
+6. **Pre-merge Mac Mini verification** — mandatory gate before B2 APPROVES or AI Head merges PR #18 (per B2 S1):
+
+   The brief's architectural premise is that Mac Mini's `com.brisen.baker.poller` invokes a Step-7-only loop (`/Users/dimitry/baker-pipeline/poller.py` importing `kbl.steps.step7_commit.commit` directly), NOT `python3 -m kbl.pipeline_tick`. That script lives on Mac Mini disk only and is not tracked in the repo, so the claim must be verified against live state before merge.
+
+   Run (AI Head or B1, paste output into PR #18 comments):
+
+   ```bash
+   ssh macmini 'cat ~/Library/LaunchAgents/com.brisen.baker.poller.plist | grep -A3 ProgramArguments'
+   ssh macmini 'cat /Users/dimitry/baker-pipeline/poller-wrapper.sh'
+   ssh macmini 'grep -nE "from kbl|import kbl" /Users/dimitry/baker-pipeline/poller.py'
+   ```
+
+   **Required outputs:**
+   - plist `ProgramArguments` → `poller-wrapper.sh` (not `python3 -m kbl.pipeline_tick`).
+   - `poller-wrapper.sh` → `exec /usr/bin/python3 ${HOME}/baker-pipeline/poller.py` (not pipeline_tick module).
+   - `poller.py` imports → `from kbl.steps.step7_commit import commit` AND `from kbl.exceptions import CommitError, VaultLockTimeoutError` (NOT `from kbl.pipeline_tick import ...`).
+
+   **If any check fails:** BLOCK merge immediately. Cut a new prerequisite brief `MAC_MINI_STEP7_POLLER_IMPL` (install a dedicated Step-7-only poller on Mac Mini; <10 lines of Python) and land it BEFORE PR #18 can merge. Signals would otherwise pile at `awaiting_commit` with no driver post-shadow-flip.
 
 ### OUT (explicit non-goals)
 
