@@ -1,3 +1,4 @@
+-- == migrate:up ==
 -- STEP4-CLASSIFY-IMPL: signal_queue columns for Step 4 output
 -- Ticket: briefs/_tasks/CODE_1_PENDING.md STEP4-CLASSIFY-IMPL (2026-04-18)
 -- Additive, idempotent. ADD COLUMN IF NOT EXISTS throughout.

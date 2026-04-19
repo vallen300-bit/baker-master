@@ -1,3 +1,4 @@
+-- == migrate:up ==
 -- STEP1-TRIAGE-IMPL: signal_queue columns for Step 1 output
 -- Ticket: briefs/_tasks/CODE_1_PENDING.md STEP1-TRIAGE-IMPL (2026-04-18)
 -- Additive, idempotent. ADD COLUMN IF NOT EXISTS throughout.

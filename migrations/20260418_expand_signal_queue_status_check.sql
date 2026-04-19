@@ -1,3 +1,4 @@
+-- == migrate:up ==
 -- STATUS-CHECK-EXPAND-1: expand signal_queue.status CHECK for KBL-B per-step states
 -- Ticket: briefs/_tasks/CODE_1_PENDING.md STATUS-CHECK-EXPAND-1 (2026-04-18)
 -- Director-ratified path (b) from B2 PR #10 S1.

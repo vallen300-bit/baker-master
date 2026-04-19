@@ -1,3 +1,4 @@
+-- == migrate:up ==
 -- STEP2-RESOLVE-IMPL: signal_queue.resolved_thread_paths column.
 -- Ticket: briefs/_tasks/CODE_1_PENDING.md STEP2-RESOLVE-IMPL (2026-04-18).
 -- KBL-B §3 / §4.3: resolved_thread_paths is JSONB, NOT NULL, default []::jsonb.
