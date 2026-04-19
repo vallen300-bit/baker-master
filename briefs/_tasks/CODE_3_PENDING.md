@@ -2,106 +2,262 @@
 
 **From:** AI Head
 **To:** Code Brisen #3 (app instance)
-**Previous:** STEP5-WORKED-EXAMPLES-EXPAND landed at `fceb22f` (§3 now 7 examples). Idle since.
-**Task posted:** 2026-04-19 (morning)
-**Status:** OPEN — design-doc authoring (no code)
+**Previous:** Mac Mini Step 7 prep items 1-4 COMPLETE (deploy key live + remote swapped + flock tested + auth verified). Items 5-6 deferred until B1's Step 7 code merged. **PR #16 merged at `20370e7e` — Step 7 code now on main.**
+**Task posted:** 2026-04-19 (late afternoon)
+**Status:** OPEN — final Mac Mini infra bolt-on
 
 ---
 
-## Task: STEP6-FINALIZE-SCHEMA-SPEC — Author Pydantic schema + validation spec
-
-**Target file:** `briefs/_drafts/KBL_B_STEP6_FINALIZE_SPEC.md` (new file).
+## Task: MAC_MINI_LAUNCHD_PROVISION — Items 5-6 from the original prep brief
 
 ### Why
 
-Step 6 is **deterministic** (no prompt, no model call) per the post-REDIRECT ratification on 2026-04-18. But it's the last quality gate before the vault commit — it Pydantic-validates Opus's draft output, builds `final_markdown`, writes cross-link stubs. If the schema spec is ambiguous, B1 will have to make judgment calls mid-impl and re-ask Director. Front-loading the exact Pydantic shape + validation rules lets B1 ship Step 6 in one pass after Step 5 lands.
+Step 7 code is merged. `kbl/steps/step7_commit.py` is ready. But Mac Mini needs to:
+- **Poll PG for signals** at `status='awaiting_commit'` + unrealized cross-links → trigger Step 7
+- **Heartbeat** to Neon so Baker can detect when Mac Mini is offline
 
-**KBL-B §4.7 brief text is the starting point; your job is to expand it into a concrete implementation-ready spec.**
+Both run via launchd on Mac Mini. Without them, Step 7 code exists but sits dormant — pipeline doesn't complete on the vault.
 
 ### Scope
 
-**IN — Author `briefs/_drafts/KBL_B_STEP6_FINALIZE_SPEC.md` with these sections:**
+**IN — provision two launchd plists on Mac Mini (via SSH over Tailscale):**
 
-1. **§1. Purpose & §4.7 anchor** — 3-4 sentences. Reference KBL-B §4.7 (lines 414-422 of pipeline brief). State Step 6 is deterministic, no model call, no ledger row.
+### Item 5 — Poller plist: `com.brisen.baker.poller.plist`
 
-2. **§2. Pydantic models (exact):**
-   - `SilverFrontmatter` model: all required keys from STEP5-OPUS-PROMPT §1 frontmatter spec (title, voice, author, created, sources, primary_matter, related_matters, vedana, triage_score, triage_confidence, money_mentioned, status, thread_continues). Include optional keys + defaults. Specify exact types (`Literal['silver']`, `Literal['pipeline']`, `datetime | str` with ISO 8601 validator, `list[MatterSlug]` where `MatterSlug` is a constrained str, `Literal['threat', 'opportunity', 'routine']`, etc.).
-   - `SilverDocument` model: `frontmatter: SilverFrontmatter` + `body: str` (length bounds: ~300-800 tokens per §Output format; express as char bound e.g. 1500-4000 chars).
-   - `MatterSlug` constrained str: must match regex for canonical v9 slug (lowercase, dash-separated, 2-30 chars). Cite slugs.yml v9 as authority.
-   - `CrossLinkStub` model: what gets appended to `wiki/<m>/_links.md` per related_matter. Fields: `source_signal_id`, `source_path`, `created`, `vedana`, optional 1-line excerpt.
+**Purpose:** Every 60 seconds, poll Neon for signals in `status='awaiting_commit'` OR unrealized cross-links. For each, invoke Step 7's `commit(signal_id, conn)` or equivalent. Uses the Python `fcntl` in-process lock (B1's Step 7 code already has this) — no external `flock` binary needed.
 
-3. **§3. Validation rules (enumerate precisely):**
-   - `target_vault_path` regex: `^wiki/[a-z0-9-]+/\d{4}-\d{2}-\d{2}_[\w-]+\.md$` (cite §3.5 of Step 5 prompt if it's different, reconcile).
-   - `author` must be `pipeline` (Silver produced). Director promotion flips to `director` later; Step 6 never writes `director`.
-   - `voice` must be `silver`.
-   - `primary_matter` must be in v9 slugs.yml ACTIVE set — validator reads `slugs.yml` once at Step 6 module import (cached OK, slug set is static during a process lifetime).
-   - `related_matters`: each entry also validated against slugs.yml, MUST NOT equal `primary_matter`, deduplicated.
-   - `vedana`: strict 3-value enum per `memory/vedana_schema.md` — no `neutral`, no `other`.
-   - `triage_score`: int 0-100.
-   - `triage_confidence`: float 0.0-1.0.
-   - `created`: ISO 8601 timestamp, timezone-aware, UTC.
-   - `money_mentioned`: string or null. If string, must match a currency-amount pattern (€X, £X, $X, CHF X with optional M/K suffix). No implicit-currency numbers.
-   - `body`: must not contain `author: director` or `voice: gold` (anti-self-promotion — no accidental Gold frontmatter in body).
-   - `body`: must not contain bare Director name without citation (anti-hallucination — full-text contains "Dimitry Vallen" only inside quoted source material).
+**Script location:** `~/baker-pipeline/poller.py` on Mac Mini (create the `baker-pipeline` dir).
 
-4. **§4. Cross-link stub file format (`wiki/<m>/_links.md`):**
-   - Exact Markdown structure: one row per stub, sorted by `created` DESC.
-   - Idempotency rule: identified by `source_signal_id` — if a stub with that ID already exists in the file, REPLACE in place (not append duplicate). Specify the grep/regex used to detect.
-   - Atomic write pattern: temp file + rename (filesystem-level atomicity).
+**Script body — thin, calls into the merged Step 7 code:**
 
-5. **§5. Error matrix (Pydantic failure → state transition):**
-   - Missing required frontmatter key → `FinalizationError`, state flips to `opus_failed`, Opus R3 retry
-   - Invalid enum value (vedana, voice, author) → `FinalizationError`, same path
-   - Unknown slug in primary_matter / related_matters → `FinalizationError`, same path
-   - Body too short (<300 chars) or too long (>8000 chars) → `FinalizationError`, same path
-   - `target_vault_path` doesn't match regex → `FinalizationError`, same path
-   - Cross-link write failure (IO error) → `FinalizationError` but state stays at `finalize_running` + retry once, then `finalize_failed` (cross-link is idempotent, safe to retry)
-   - After 3 total Opus retries produce invalid drafts → `finalize_failed` terminal + route to inbox per §4.7 brief
+```python
+#!/usr/bin/env python3
+"""Mac Mini poller — claims awaiting_commit signals + invokes Step 7."""
+import os
+import sys
+import psycopg2
+from contextlib import closing
 
-6. **§6. Logging spec:**
-   - Pydantic validation failure: `level='WARN'`, `component='finalize'`, `message=f'<field>: <reason>'`. One log row per failed field.
-   - Cross-link write failure: `level='ERROR'`, `component='finalize'`, `message=f'cross-link write failed: {path}: {reason}'`. One row per failed path.
-   - Success: no log.
+# Ensure Step 7 code is on PYTHONPATH — clone of baker-master under ~/baker-pipeline-repo
+sys.path.insert(0, os.path.expanduser("~/baker-pipeline-repo"))
+from kbl.steps.step7_commit import commit as step7_commit
+from kbl.exceptions import CommitError, VaultLockTimeoutError
 
-7. **§7. Open questions for AI Head:** any ambiguities you hit while writing. Number them `OQ1`, `OQ2`, etc. so AI Head can resolve before B1 impl.
+DATABASE_URL = os.environ["DATABASE_URL"]
+BAKER_VAULT_PATH = os.environ["BAKER_VAULT_PATH"]  # ~/baker-vault on Mac Mini
+BATCH_SIZE = int(os.environ.get("MAC_MINI_POLLER_BATCH", "5"))
 
-8. **§8. CHANDA pre-push self-check** — cite §5 Q1 + Q2 by name.
+def main():
+    with closing(psycopg2.connect(DATABASE_URL)) as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT id FROM signal_queue
+                WHERE status = 'awaiting_commit'
+                ORDER BY id
+                LIMIT %s
+            """, (BATCH_SIZE,))
+            signal_ids = [r[0] for r in cur.fetchall()]
 
-### Hard constraints
+        for sid in signal_ids:
+            try:
+                step7_commit(sid, conn)
+                conn.commit()
+                print(f"[poller] committed sig={sid}")
+            except VaultLockTimeoutError:
+                conn.rollback()
+                print(f"[poller] lock timeout sig={sid}; will retry next tick")
+            except CommitError as e:
+                conn.rollback()
+                print(f"[poller] commit_failed sig={sid}: {e}")
+            except Exception as e:
+                conn.rollback()
+                print(f"[poller] UNEXPECTED sig={sid}: {e}", file=sys.stderr)
 
-- **No code.** This is a spec document for B1 to implement against. Pydantic model bodies can be shown as code fences for clarity, but no `.py` file is produced.
-- **Reference the canonical v9 slug set** at `/Users/dimitry/baker-vault/slugs.yml`. Don't invent slugs.
-- **All `author: pipeline` + `voice: silver`** enforced at validation. Spec MUST make self-promotion to Gold impossible at Step 6.
-- **Spec must be reviewable by B2** — so write it in the exact shape a brief like `KBL_B_PIPELINE_CODE_BRIEF.md` uses (numbered sections, tables, inline code fences, explicit invariant citations).
+if __name__ == "__main__":
+    main()
+```
+
+**Plist path:** `~/Library/LaunchAgents/com.brisen.baker.poller.plist`
+
+**Plist content:**
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.brisen.baker.poller</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/dimitry/baker-pipeline/poller.py</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DATABASE_URL</key>
+    <string>PLACEHOLDER_SEE_DIRECTOR</string>
+    <key>BAKER_VAULT_PATH</key>
+    <string>/Users/dimitry/baker-vault</string>
+    <key>MAC_MINI_POLLER_BATCH</key>
+    <string>5</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/dimitry/baker-pipeline/poller.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/dimitry/baker-pipeline/poller.err.log</string>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>
+```
+
+**Escalation to Director:** need `DATABASE_URL` (Neon connection string) populated. Leave `PLACEHOLDER_SEE_DIRECTOR` until you ask.
+
+**Also required:** clone baker-master at `~/baker-pipeline-repo` so the poller can import Step 7 code:
+```bash
+cd ~
+git clone git@github.com:vallen300-bit/baker-master.git baker-pipeline-repo
+```
+
+(Use Director's default SSH key for this clone; the deploy key is baker-vault-scoped only. OR: configure a second SSH alias `github-baker-master` with another deploy key — flag to Director if you think that's cleaner.)
+
+### Item 6 — Heartbeat plist: `com.brisen.baker.heartbeat.plist`
+
+**Purpose:** Every 60s, INSERT a row into `mac_mini_heartbeat(created_at)` in Neon. Baker's `/health` endpoint exposes the latest row's age. Alert threshold: >5 min WARN, >15 min critical.
+
+**Migration needed first:**
+
+```sql
+CREATE TABLE IF NOT EXISTS mac_mini_heartbeat (
+    id BIGSERIAL PRIMARY KEY,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    host TEXT NOT NULL,
+    version TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mac_mini_heartbeat_created_at
+    ON mac_mini_heartbeat (created_at DESC);
+```
+
+Add as `migrations/20260419_mac_mini_heartbeat.sql` in the baker-master repo, open a small PR (#17) — B2 reviews, merge, Render applies via existing migration runner. If schema drift is small enough for a direct-to-main commit by AI Head, flag it; otherwise follow the PR route.
+
+**Script location:** `~/baker-pipeline/heartbeat.py` on Mac Mini.
+
+**Script body:**
+
+```python
+#!/usr/bin/env python3
+"""Mac Mini heartbeat — insert row to mac_mini_heartbeat every tick."""
+import os
+import socket
+import psycopg2
+from contextlib import closing
+
+DATABASE_URL = os.environ["DATABASE_URL"]
+
+def main():
+    hostname = socket.gethostname()
+    with closing(psycopg2.connect(DATABASE_URL)) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO mac_mini_heartbeat (host, version) VALUES (%s, %s)",
+                (hostname, "baker-pipeline-1")
+            )
+        conn.commit()
+
+if __name__ == "__main__":
+    main()
+```
+
+**Plist path:** `~/Library/LaunchAgents/com.brisen.baker.heartbeat.plist`
+
+**Plist content — similar shape:**
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.brisen.baker.heartbeat</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/python3</string>
+    <string>/Users/dimitry/baker-pipeline/heartbeat.py</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>DATABASE_URL</key>
+    <string>PLACEHOLDER_SEE_DIRECTOR</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/dimitry/baker-pipeline/heartbeat.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/dimitry/baker-pipeline/heartbeat.err.log</string>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>
+```
+
+### Sequence on Mac Mini
+
+```bash
+# On Mac Mini via ssh macmini:
+mkdir -p ~/baker-pipeline
+# (clone baker-pipeline-repo with Director's key OR use 2nd deploy key)
+git clone git@github.com:vallen300-bit/baker-master.git ~/baker-pipeline-repo
+
+# Install psycopg2 if absent
+/usr/bin/python3 -m pip install --user psycopg2-binary
+
+# Write scripts
+cat > ~/baker-pipeline/poller.py << 'EOF'
+# ... (contents above)
+EOF
+cat > ~/baker-pipeline/heartbeat.py << 'EOF'
+# ... (contents above)
+EOF
+chmod +x ~/baker-pipeline/*.py
+
+# Write plists (with real DATABASE_URL from Director)
+# Load into launchd
+launchctl load ~/Library/LaunchAgents/com.brisen.baker.poller.plist
+launchctl load ~/Library/LaunchAgents/com.brisen.baker.heartbeat.plist
+
+# Verify
+launchctl list | grep brisen
+# Expected: two entries, both PID-listed (not just status 0)
+```
+
+### Director escalations
+
+1. **`DATABASE_URL`** — the Neon connection string. Get from Render env vars or Director's secrets vault. Paste into both plists' `EnvironmentVariables` dict.
+2. **Second SSH key for baker-master clone on Mac Mini?** Director-default key works for the read-only clone; cleaner would be a second deploy key. Flag preference. **Lean: reuse Director's key** (read-only access, no push needed from the pipeline-repo clone).
+3. **`mac_mini_heartbeat` migration** — PR or direct-to-main? It's 10 lines, purely additive, zero-risk. **Lean: AI Head opens as PR #17 with a one-line description, B2 fast-APPROVE, merge.** Structure integrity over speed.
 
 ### CHANDA pre-push
 
-- **Q1 Loop Test:** spec authoring, no Leg touched. Pass.
-- **Q2 Wish Test:** serves wish — tighter Step 6 schema = fewer rejected Silver drafts = faster Silver→Gold velocity. Pass.
-- **Inv 8** (Silver→Gold only by Director edit) — spec must structurally enforce (no auto-promote).
-- **Inv 10** (prompts don't self-modify) — Step 6 has no prompt, spec is stable.
-
-### Branch + PR
-
-- **Option A: direct to main.** Same pattern as SLUGS-V9-FOLD. Commit message lists sections.
-- **Option B: branch + PR for B2 review.** Worth it if the spec is architecturally novel.
-
-**Lean (A).** Spec docs follow the existing draft pattern. B2 can review inline post-commit as part of Task K or separately.
+- **Q1 Loop Test:** infrastructure glue, not pipeline logic. No Leg touched. Pass.
+- **Q2 Wish Test:** serves wish — without this, Step 7 code doesn't run on Mac Mini. Pass.
+- **Inv 9:** this is the operational path — Mac Mini polls + writes. Aligned.
 
 ### Timeline
 
-~60-90 min (~8 sections, each tight but precise).
+~30-45 min once `DATABASE_URL` + migration answered:
+- ~10 min: write scripts + plists
+- ~5 min: clone baker-pipeline-repo + install psycopg2
+- ~5 min: launchctl load + verify entries
+- ~10 min: smoke test (force an `awaiting_commit` signal through, watch poller log, verify vault commit lands)
 
 ### Dispatch back
 
-> B3 STEP6-FINALIZE-SCHEMA-SPEC landed — `briefs/_drafts/KBL_B_STEP6_FINALIZE_SPEC.md` at commit `<SHA>`. N sections, M open questions for AI Head. <GREEN/amber/red> CHANDA self-check.
+> B3 MAC_MINI_LAUNCHD_PROVISION COMPLETE — com.brisen.baker.poller + com.brisen.baker.heartbeat loaded on Mac Mini, `launchctl list` shows both active. Smoke test: signal ID <N> reached `completed` state after poller tick. Mac Mini fully operational. Phase 1 is live on the vault.
 
 ---
 
-## After this task
-
-Next: Step 7 harness design spec (git-commit path, push-under-mutex, `claude -p` optional) — similar shape, ~45 min. Or if Step 5 Opus has shipped, D2 empirical eval corpus for Step 5 output quality.
-
----
-
-*Posted 2026-04-19 by AI Head. Front-loads Step 6 so B1's post-Step-5 ramp is zero-wait.*
+*Posted 2026-04-19 by AI Head. After this, Phase 1 Cortex T3 runs end-to-end. New ACTIVE signals begin flowing through the 7-step pipeline on next ingestion.*
