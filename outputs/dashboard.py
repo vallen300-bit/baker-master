@@ -6,6 +6,7 @@ Serves static frontend from outputs/static/.
 Includes /api/scan SSE endpoint for interactive Baker chat.
 """
 import asyncio
+import decimal as _decimal
 import json
 import logging
 import os
@@ -10810,6 +10811,161 @@ async def get_ao_dashboard():
         "pending_insights": pending_insights,
         "view_files": view_files,
     }
+
+
+# ============================================================
+# KBL Pipeline — observability endpoints (read-only)
+#
+# Four endpoints feed the "KBL Pipeline" tab in the Cockpit. All
+# read-only. Same X-Baker-Key auth pattern as the rest of the dashboard.
+# ============================================================
+
+
+def _kbl_rows_to_dicts(cur, rows):
+    """Convert psycopg2 tuples into dicts using cursor.description."""
+    cols = [c.name for c in cur.description]
+    out = []
+    for r in rows:
+        d = {}
+        for i, col in enumerate(cols):
+            v = r[i]
+            if hasattr(v, "isoformat"):
+                v = v.isoformat()
+            elif isinstance(v, _decimal.Decimal):
+                v = float(v)
+            d[col] = v
+        out.append(d)
+    return out
+
+
+@app.get("/api/kbl/signals", tags=["kbl-pipeline"], dependencies=[Depends(verify_api_key)])
+async def kbl_signals():
+    """Recent signals (state tracker). Most-recent 50, newest first."""
+    from kbl.db import get_conn
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, source, primary_matter, status, vedana,
+                           triage_score, created_at
+                    FROM signal_queue
+                    ORDER BY id DESC
+                    LIMIT 50
+                    """
+                )
+                rows = cur.fetchall()
+                signals = _kbl_rows_to_dicts(cur, rows)
+    except Exception as e:
+        logger.exception("kbl_signals query failed")
+        raise HTTPException(status_code=500, detail=f"kbl_signals failed: {e}")
+    return {"signals": signals}
+
+
+@app.get("/api/kbl/cost-rollup", tags=["kbl-pipeline"], dependencies=[Depends(verify_api_key)])
+async def kbl_cost_rollup():
+    """Last-24h cost ledger rollup grouped by step+model, plus footer totals."""
+    from kbl.db import get_conn
+    # Canonical cap env is KBL_COST_DAILY_CAP_EUR (kbl/cost_gate.py enforces it);
+    # cost_usd ledger column stores EUR values per the same module's contract.
+    try:
+        cap_eur = float(os.getenv("KBL_COST_DAILY_CAP_EUR", "50.0"))
+    except (TypeError, ValueError):
+        cap_eur = 50.0
+
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT step, model,
+                           COUNT(*) AS calls,
+                           COALESCE(SUM(cost_usd), 0) AS total_usd,
+                           COALESCE(SUM(input_tokens), 0) AS in_tok,
+                           COALESCE(SUM(output_tokens), 0) AS out_tok
+                    FROM kbl_cost_ledger
+                    WHERE created_at > NOW() - INTERVAL '24 hours'
+                    GROUP BY step, model
+                    ORDER BY total_usd DESC
+                    """
+                )
+                rows = _kbl_rows_to_dicts(cur, cur.fetchall())
+                cur.execute(
+                    """
+                    SELECT COALESCE(SUM(cost_usd), 0) AS day_total
+                    FROM kbl_cost_ledger
+                    WHERE created_at > NOW() - INTERVAL '24 hours'
+                    """
+                )
+                day_row = cur.fetchone()
+                day_total = float(day_row[0]) if day_row and day_row[0] is not None else 0.0
+    except Exception as e:
+        logger.exception("kbl_cost_rollup query failed")
+        raise HTTPException(status_code=500, detail=f"kbl_cost_rollup failed: {e}")
+
+    return {
+        "rollup": rows,
+        "day_total_eur": day_total,
+        "cap_eur": cap_eur,
+        "remaining_eur": max(0.0, cap_eur - day_total),
+    }
+
+
+@app.get("/api/kbl/silver-landed", tags=["kbl-pipeline"], dependencies=[Depends(verify_api_key)])
+async def kbl_silver_landed():
+    """Last 10 signals that reached status='completed' (Silver committed to vault)."""
+    from kbl.db import get_conn
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, primary_matter, target_vault_path, committed_at,
+                           substring(commit_sha, 1, 7) AS short_sha
+                    FROM signal_queue
+                    WHERE status = 'completed'
+                    ORDER BY committed_at DESC NULLS LAST
+                    LIMIT 10
+                    """
+                )
+                rows = _kbl_rows_to_dicts(cur, cur.fetchall())
+    except Exception as e:
+        logger.exception("kbl_silver_landed query failed")
+        raise HTTPException(status_code=500, detail=f"kbl_silver_landed failed: {e}")
+    return {"silver": rows}
+
+
+@app.get("/api/kbl/mac-mini-status", tags=["kbl-pipeline"], dependencies=[Depends(verify_api_key)])
+async def kbl_mac_mini_status():
+    """Latest Mac Mini heartbeat + age in seconds. Empty when no rows."""
+    from kbl.db import get_conn
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT host, version, created_at,
+                           EXTRACT(EPOCH FROM (NOW() - created_at)) AS age_seconds
+                    FROM mac_mini_heartbeat
+                    ORDER BY id DESC
+                    LIMIT 1
+                    """
+                )
+                row = cur.fetchone()
+                if not row:
+                    return {"heartbeat": None}
+                host, version, created_at, age_seconds = row
+                return {
+                    "heartbeat": {
+                        "host": host,
+                        "version": version,
+                        "created_at": created_at.isoformat() if created_at else None,
+                        "age_seconds": float(age_seconds) if age_seconds is not None else None,
+                    }
+                }
+    except Exception as e:
+        logger.exception("kbl_mac_mini_status query failed")
+        raise HTTPException(status_code=500, detail=f"kbl_mac_mini_status failed: {e}")
 
 
 # ============================================================
