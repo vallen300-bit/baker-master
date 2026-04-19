@@ -600,6 +600,91 @@ def test_commit_inv4_collision_refuses(vault) -> None:
         commit(signal_id=100, conn=conn)
 
 
+def test_commit_inv4_collision_after_rebase_refuses(
+    vault, tmp_path: Path
+) -> None:
+    """Race: Director pushes a Gold file to origin between our last sync
+    and Step 7's pull. The guard must fire AFTER pull-rebase so it sees
+    the freshly-pulled Director commit and refuses — not before, when
+    our local clone still looks empty at that path.
+
+    Setup: 2 clones of the same bare remote. Clone A = Mac Mini (the
+    Step 7 target). Clone B = Director's dev Mac. Clone B writes +
+    pushes while Clone A is still at the old HEAD.
+    """
+    vault_dir, remote_dir = vault
+    target_rel = "wiki/ao/2026-04-19_race.md"
+
+    # Confirm Clone A has no local copy of the target yet.
+    assert not (vault_dir / target_rel).exists()
+
+    # Clone B: second working clone pointing at the same bare remote.
+    clone_b = tmp_path / "clone_b"
+    subprocess.run(
+        ["git", "clone", str(remote_dir), str(clone_b)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    _git(clone_b, "checkout", "main")
+
+    director_abs = clone_b / target_rel
+    director_abs.parent.mkdir(parents=True, exist_ok=True)
+    director_body = (
+        "---\n"
+        "title: Director race note\n"
+        "author: director\n"
+        "voice: gold\n"
+        "---\n"
+        "\nDirector body content.\n"
+    )
+    director_abs.write_text(director_body, encoding="utf-8")
+    _git(clone_b, "add", target_rel)
+    _git(
+        clone_b,
+        "-c",
+        "user.email=director@test",
+        "-c",
+        "user.name=Director",
+        "commit",
+        "-m",
+        "director: race file",
+    )
+    _git(clone_b, "push", "origin", "main")
+
+    # Clone A still at seed locally; target file still absent locally.
+    assert not (vault_dir / target_rel).exists()
+
+    # Step 7 runs on Clone A and happens to target the same path.
+    conn = _mock_conn(
+        final_markdown=_final_markdown(title="Pipeline race try"),
+        target_vault_path=target_rel,
+        stubs=[],
+    )
+
+    with pytest.raises(CommitError, match="Director-authored"):
+        commit(signal_id=130, conn=conn)
+
+    # Guard fired AFTER pull-rebase: Director's file is now present on
+    # Clone A and was NOT overwritten by Step 7's silver content.
+    final = (vault_dir / target_rel).read_text(encoding="utf-8")
+    assert "author: director" in final
+    assert "Director body content." in final
+    assert "voice: silver" not in final
+
+    # State flipped to commit_failed.
+    failed = [
+        c for c in conn._calls
+        if c[1] and len(c[1]) == 2 and c[1][0] == "commit_failed"
+    ]
+    assert failed, "commit_failed state flip missing"
+
+    # Local log on Clone A: Director's commit on top of seed — no
+    # Step 7 commit was added.
+    log = _git(vault_dir, "log", "--pretty=%s").stdout.strip().splitlines()
+    assert log == ["director: race file", "seed"]
+
+
 def test_commit_mock_mode_does_not_push(vault, monkeypatch: pytest.MonkeyPatch) -> None:
     """``BAKER_VAULT_DISABLE_PUSH=true`` skips push; commit still lands
     locally."""

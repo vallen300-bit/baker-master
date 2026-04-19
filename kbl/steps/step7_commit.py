@@ -576,7 +576,6 @@ def commit(signal_id: int, conn: Any) -> None:
     # Build absolute paths + Inv 9 containment check.
     main_abs = (cfg.vault_path / row.target_vault_path).resolve()
     _assert_path_inside_vault(main_abs, cfg.vault_path)
-    _inv4_guard_target_path(main_abs)
 
     stub_abs_paths: List[Path] = []
     for s in stubs:
@@ -587,6 +586,12 @@ def commit(signal_id: int, conn: Any) -> None:
     try:
         with acquire_vault_lock(cfg.lock_path, cfg.flock_timeout):
             _git_pull_rebase(cfg)
+
+            # Inv 4 guard runs AFTER pull-rebase so any Director-authored
+            # Gold file pushed to origin between our last sync and now is
+            # visible locally before we check it. Guard BEFORE the pull
+            # would race — a fresh Director commit would slip through.
+            _inv4_guard_target_path(main_abs)
 
             try:
                 _atomic_write(main_abs, row.final_markdown)
