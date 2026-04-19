@@ -529,6 +529,360 @@ Director's current focus (`hot.md`: `hagenauer-rg7` ACTIVE, `mo-vie-am` ACTIVE) 
 
 **Rationale:** Zero-Gold on `wertheimer` → opening-record tone in Context. hot.md elevation acknowledged, and the cross-matter single-shot rule is referenced by name so the Director can trace the steering. Ledger `promote` event referenced without copying content. `related_matters: [mo-vie-am, balducci]` from Step 1 is honored verbatim as frontmatter + cross-refs — the prompt does NOT second-guess the Step 1 cross-link choice (post-REDIRECT contract). Note that `hagenauer-rg7` is NOT in `related_matters` despite the RG7 text mention — that's a Step 1 classification decision and Step 5 respects it; the RG7 mention enters the narrative as signal content, not as a cross-matter link.
 
+### Example 4 — Threat-vedana continuation (Hagenauer administrator claim)
+
+**Why this example:** Exercises `vedana: threat` on a continuing arc with multiple prior Gold entries, deadline frontmatter propagation, and the ledger-pattern recognition of prior Director corrections on the same matter. Threat is the highest-volume vedana class in production (hagenauer-rg7 concentration ~27.5% per FIREFLIES_MATTER_INDEX_20260418.md), so few-shot coverage matters.
+
+**Source signal:** constructed from the hot.md entry "Defend against Hagenauer administrator claims on Brisen" + the Mar 30 Fireflies session `01KMZA958DZDZX6YF969P3F4JQ` (2.5h Hagenauer bankruptcy fallout). Email from Hagenauer insolvency administrator to Brisen demanding unpaid contract variations.
+
+**Input blocks:**
+
+```
+primary_matter:        hagenauer-rg7
+matter purpose:        RG7 final-account dispute, Baden bei Wien (insolvency Mar 2026)
+related_matters:       (none)
+vedana:                threat
+triage_summary:        Hagenauer insolvency administrator formal demand — €1.2M in alleged
+                       unpaid contract variations, 14-day response deadline; elevated per
+                       hot.md ACTIVE "Defend against Hagenauer administrator claims" +
+                       recent Director promotions in ledger on adjacent Hagenauer signals.
+
+resolved_thread_paths: wiki/hagenauer-rg7/2026-03-28_insolvency-walkthrough.md,
+                       wiki/hagenauer-rg7/2026-03-30_bankruptcy-fallout-session.md
+
+extracted_entities:
+  people: [Counterparty Administrator] (Hagenauer insolvency trustee, court-appointed),
+          Alric Ofenheimer (E+H, Brisen lawyer)
+  orgs: Hagenauer (via administrator), Engin+Hanousek
+  money: 1200000 EUR (claimed unpaid variations), 600000 EUR (Brisen disputed portion)
+  dates: 2026-04-13 (14-day response deadline)
+  references: EH-AT.FID2087, Admin-Case-HAG-2026-047
+  action_items: Ofenheimer: draft response within 14 days; Thomas Leitner: reconcile
+                variation ledger against administrator's line items
+
+gold_context_block:
+  --- wiki/hagenauer-rg7/2026-03-02_ofenheimer-first-letter.md created 2026-03-02T18:43:00Z ---
+  # Ofenheimer first letter to Hagenauer — Aufschlüsselung request
+  ...Brisen requested breakdown of Hagenauer's Sicherstellungsbegehren; buys time
+  pre-TCA-termination...
+
+  --- wiki/hagenauer-rg7/2026-03-28_insolvency-walkthrough.md created 2026-03-28T14:02:00Z ---
+  # Hagenauer insolvency walkthrough
+  ...receiver appointed; creditor claims inventoried; Brisen's position as owed-party
+  vs. Hagenauer's position as general-contractor-in-insolvency mapped...
+
+  --- wiki/hagenauer-rg7/2026-03-30_bankruptcy-fallout-session.md created 2026-03-30T14:07:00Z ---
+  # Stable Brisen assets vs unstable construction business
+  ...2.5h session; Brisen strategy is to ring-fence MOV + RG7 completion work from
+  Hagenauer's liquidation estate; any administrator claims against Brisen must be
+  rebutted with variation-ledger evidence...
+
+hot_md_block:
+  - ACTIVE: hagenauer-rg7 — GC takeover, administrator defence, press containment
+  - ACTIVE: mo-vie-am — Residence #8 offer, residences sales website, AI platform
+  - ACTIVE: ao — €7M call over Apr/May/Jun
+  - WATCH: brisen-pr — Sandra Luger article material
+
+feedback_ledger_block:
+  2026-04-01 09:14 | promote  | hagenauer-rg7 | sig:3d11aa | "insolvency walkthrough — Gold as-is"
+  2026-04-01 09:15 | promote  | hagenauer-rg7 | sig:3d12bb | "bankruptcy fallout — Gold with minor edits"
+  2026-03-29 16:40 | correct  | hagenauer-rg7 → hagenauer-rg7 | sig:3c09aa | "vedana was opportunity; should be threat — insolvency fallout is defensive"
+
+signal_raw_text:       [administrator letter + internal Brisen email thread ~3800 chars]
+iso_now:               2026-03-30T11:20:00Z
+```
+
+**Expected Opus output:**
+
+```markdown
+---
+title: Hagenauer administrator — €1.2M variation claim against Brisen
+voice: silver
+author: pipeline
+created: 2026-03-30T11:20:00Z
+source_id: email:19d0ff2c87b4ffee
+primary_matter: hagenauer-rg7
+related_matters: []
+vedana: threat
+thread_continues: [wiki/hagenauer-rg7/2026-03-28_insolvency-walkthrough.md, wiki/hagenauer-rg7/2026-03-30_bankruptcy-fallout-session.md]
+deadline: 2026-04-13
+money_mentioned: [1200000 EUR, 600000 EUR]
+---
+
+Hagenauer's court-appointed insolvency administrator has formally demanded €1.2M from Brisen for alleged unpaid contract variations on RG7, with a 14-day response window (expires 2026-04-13). The demand maps directly onto the ring-fence-and-rebut strategy crystallized in the Mar 30 session — this is the first concrete filing the administrator has made against Brisen, not a generic creditor announcement. Brisen's internal read: roughly half the claimed amount (~€600K) is genuinely disputed; the remaining €600K matches line items already logged in the variation ledger and will need reconciled treatment, not blanket denial.
+
+**Key facts**
+- Demand: €1.2M claimed unpaid variations. Brisen disputed: ~€600K. Potentially payable: ~€600K (subject to Ofenheimer review).
+- Sender: Hagenauer insolvency administrator, court-appointed; reference `Admin-Case-HAG-2026-047`.
+- Response deadline: 2026-04-13 (14-day statutory window).
+- E+H file: `EH-AT.FID2087` (same file as Mar 2 Aufschlüsselung exchange).
+
+**Decisions / pending actions**
+- Ofenheimer: draft response before 2026-04-13 — line-by-line variation-ledger reconciliation, not blanket rebuttal.
+- Thomas Leitner: pull variation ledger from project records, cross-tie to administrator's line items.
+- Brisen: decide whether to settle the ~€600K matched portion or hold for court arithmetic. (Strategy call needed before 2026-04-10 to leave Ofenheimer drafting room.)
+
+## Continues
+Extends `wiki/hagenauer-rg7/2026-03-28_insolvency-walkthrough.md` (receiver-control mechanics) and `wiki/hagenauer-rg7/2026-03-30_bankruptcy-fallout-session.md` (ring-fence strategy). Neither prior Gold anticipated a specific administrator demand this early; this entry is the first concrete test of the ring-fence posture.
+
+**Context**
+Director's current focus on `hagenauer-rg7` (hot.md ACTIVE — "Defend against Hagenauer administrator claims") elevated this signal's triage, consistent with the matter's dominant position across the last three Gold promotions (ledger: three promote events in the 48 hours preceding this signal). The Mar 29 ledger correction ("vedana was opportunity; should be threat — insolvency fallout is defensive") directly shapes this entry's framing — defensive containment, not strategic reframing. No contradiction with prior Gold; this signal is the predicted next step in the administrator arc.
+```
+
+**Rationale:** Threat continuation with three prior Gold entries read + honored. `deadline: 2026-04-13` propagates from the 14-day statutory window — this is the pattern for every deadline-bearing threat signal. The ledger correction ("vedana was opportunity; should be threat — insolvency fallout is defensive") is explicitly referenced in Context — demonstrating how the vedana-discipline pattern propagates from ledger into framing, not just into the frontmatter field. Money amounts surface in `money_mentioned` (up to 3, per §1.2). No `⚠ CONTRADICTION:` because the signal extends the arc rather than contradicting it.
+
+### Example 5 — Opportunity-vedana discipline (NVIDIA + Corinthia strategic overture)
+
+**Why this example:** Exercises `vedana: opportunity` discipline — per `memory/vedana_schema.md`, opportunity is reserved for NEW strategic gains, not defensive wins inside ongoing arcs. The NVIDIA+Corinthia thread is a genuinely new partnership overture (hot.md ACTIVE "Proposal to NVIDIA + Corinthia — deliver early this week"), making it the canonical opportunity example. Also exercises zero-Gold on `corinthia` with a related matter (`nvidia`) that does have Gold.
+
+**Source signal:** constructed from the Mar 17 Fireflies session `01KKYTW7Y73ZFN19266JB9MYC2` (Robotics in hotel ops — Corinthia tech-partnership MOU context) + the Apr 9 session `01KNSK7HEQ6ZXFWPQ88XH87JHC` (NVIDIA-led value-proposition crafting). Email-level overture from Corinthia side agreeing to formal MOU and requesting Brisen positioning paper.
+
+**Input blocks:**
+
+```
+primary_matter:        corinthia
+matter purpose:        Corinthia Hotels — tech-partnership MOU context
+related_matters:       nvidia, mo-vie-am
+vedana:                opportunity
+triage_summary:        Corinthia CTO agrees to formal tech-partnership MOU with NVIDIA-backed
+                       AI pilot; requests Brisen positioning paper by 2026-04-22. Elevated per
+                       hot.md ACTIVE "nvidia + corinthia: Proposal to NVIDIA + Corinthia —
+                       deliver early this week" + slug-mention of mo-vie-am as reference asset.
+
+resolved_thread_paths: (none — first formal Corinthia commitment; prior Gold is on nvidia, not
+                       corinthia)
+
+extracted_entities:
+  people: [Corinthia CTO], [NVIDIA BD contact]
+  orgs: Corinthia Hotels, NVIDIA
+  money: (none — positioning stage, no term sheet)
+  dates: 2026-04-22 (positioning paper due), 2026-05-15 (pilot kickoff target)
+  references: (none — MOU draft not attached yet)
+  action_items: Dimitry: draft positioning paper by 2026-04-22
+                Dimitry: align NVIDIA BD on Corinthia pilot scope before paper lands
+
+gold_context_block:    (no prior Gold entries for this matter)
+
+hot_md_block:
+  - ACTIVE: nvidia + corinthia — Proposal to NVIDIA + Corinthia, deliver early this week
+  - ACTIVE: hagenauer-rg7 — GC takeover, administrator defence, press containment
+  - ACTIVE: mo-vie-am — Residence #8 offer, residences sales website, AI platform
+  - ACTIVE: m365 — kick off Microsoft 365 migration
+
+feedback_ledger_block:
+  2026-04-10 14:22 | promote  | nvidia   | sig:41aa11 | "NVIDIA value-prop session — Gold as-is"
+  2026-04-08 11:30 | promote  | nvidia   | sig:40bb22 | "GPU credit negotiation + claimsmax infra — Gold"
+  2026-04-05 09:14 | correct  | corinthia → corinthia | sig:3f22cc | "was labeled mo-vie-am primary; should be corinthia primary w/ mo-vie-am in related"
+
+signal_raw_text:       [Corinthia CTO email + thread header ~2200 chars]
+iso_now:               2026-04-17T10:05:00Z
+```
+
+**Expected Opus output:**
+
+```markdown
+---
+title: Corinthia CTO — formal MOU commitment, positioning paper requested
+voice: silver
+author: pipeline
+created: 2026-04-17T10:05:00Z
+source_id: email:19e4a2b5c1e3ffaa
+primary_matter: corinthia
+related_matters: [nvidia, mo-vie-am]
+vedana: opportunity
+deadline: 2026-04-22
+---
+
+Corinthia's CTO has converted the informal tech-partnership thread into a formal MOU commitment: Brisen to deliver a positioning paper by 2026-04-22, pilot kickoff targeted 2026-05-15. The overture is genuinely new strategic territory — prior Gold for `nvidia` covered compute and value-proposition crafting, but no Gold entry existed for `corinthia` as a committed counterparty. This is the opening record.
+
+**Key facts**
+- Counterparty: Corinthia Hotels, CTO-level sponsor.
+- Partner: NVIDIA (BD contact engaged via Apr 9 value-proposition session).
+- Commitment: formal MOU (draft not yet attached); positioning paper due 2026-04-22.
+- Pilot target: 2026-05-15 kickoff.
+- Reference asset signalled: `mo-vie-am` — Corinthia side referenced MOV as the comparable luxury-hospitality property where AI + robotics have been scoped.
+
+**Decisions / pending actions**
+- Dimitry: draft positioning paper by 2026-04-22 (7-day window from this signal).
+- Dimitry: align NVIDIA BD on Corinthia pilot scope before paper lands — ensure the positioning doesn't commit to NVIDIA compute terms the BD team hasn't agreed to.
+
+**Context**
+First record for `corinthia` in the wiki. Prior Gold on `nvidia` (two entries in the last 10 days: value-prop session + GPU-credit negotiation) establishes the compute-side narrative this signal plugs into, but the commercial opening is new. Director's current focus on the combined `nvidia + corinthia` track (hot.md ACTIVE entry explicitly pairs them) elevated triage. Ledger correction on 2026-04-05 — reclassifying a prior signal from `mo-vie-am` primary to `corinthia` primary — set the precedent this entry follows: Corinthia commitments are `corinthia`-primary even when MOV is mentioned as reference.
+
+Vedana: `opportunity` is correct per the vedana schema — this is a NEW strategic gain (first formal commitment from a new counterparty), not a defensive win inside an ongoing threat arc.
+
+## Cross-references
+- see wiki/nvidia/ — compute / partnership counterpart
+- see wiki/mo-vie-am/ — reference asset Corinthia cited in the overture
+```
+
+**Rationale:** Opportunity-vedana discipline explicitly cited in body Context ("NEW strategic gain, not a defensive win") — demonstrates the prompt honoring the vedana schema rather than defaulting to "positive-sounding = opportunity." Zero-Gold on `corinthia` with non-zero Gold on `nvidia` (related matter) tests the case where the prompt must NOT paraphrase `nvidia` Gold into the body as if it were `corinthia` history. Ledger correction explicitly referenced as the precedent this entry follows — demonstrates ledger pattern propagation on taxonomy (not just content). `deadline: 2026-04-22` surfaces from the signal's hard date.
+
+### Example 6 — Contradiction handling (counterparty repudiates prior commitment)
+
+**Why this example:** Exercises the `⚠ CONTRADICTION:` body marker per §1.2 rule G1. Contradictions are the highest-stakes loop event: Opus silently overwriting prior Gold breaks Director's trust in the wiki — a single failure can cost weeks of loop-integrity recovery. This example is the canonical test that the prompt flags + stops, never resolves.
+
+**Source signal:** constructed from the hot.md entry "ao: €7M call to Oskolkov over Apr/May/Jun — dispatch via Constantinos + transfer schedule. Paper prepared." + the Mar 21 Fireflies session `01KM83CE3MP1P7AP1C22HHG77V` (3.3h CRM with AO, Traube Tonbach). Scenario: AO's advisor walks back the Apr/May/Jun tranching committed at Tonbach.
+
+**Input blocks:**
+
+```
+primary_matter:        ao
+matter purpose:        Andrey Oskolkov — principal investor (Aelio Holding Ltd)
+related_matters:       constantinos, capital-call
+vedana:                threat
+triage_summary:        AO's advisor signals preference for Jun/Jul/Aug split on the €7M call,
+                       not the Apr/May/Jun commitment captured in prior Gold. Defensive — a
+                       commitment unwind, not a new gain.
+
+resolved_thread_paths: wiki/ao/2026-03-21_tonbach-capital-call-commit.md
+
+extracted_entities:
+  people: Constantinos ([Counterparty Advisor]), Dimitry Vallen
+  orgs: Aelio Holding Ltd
+  money: 7000000 EUR (full call amount — unchanged)
+  dates: 2026-06-01 (proposed new first tranche), 2026-04-30 (original first tranche)
+  references: (none — verbal conversation relay via Constantinos)
+  action_items: Dimitry: decide whether to accept June-start or hold to April commitment;
+                Constantinos: book follow-up call with AO to confirm
+
+gold_context_block:
+  --- wiki/ao/2026-03-21_tonbach-capital-call-commit.md created 2026-03-21T17:45:00Z ---
+  # AO capital-call commitment at Traube Tonbach
+  During the 3.3h relationship meeting at Traube Tonbach on 2026-03-21, Oskolkov
+  verbally committed to a €7M capital call tranched across April / May / June 2026,
+  €2.33M per month, first transfer by 2026-04-30. Constantinos to handle transfer
+  mechanics; Brisen to prepare the capital-call paper (status: prepared, per 2026-03-24
+  finance update). Commitment verbal — not yet papered on AO side. Director read:
+  "firm handshake; expect paper within 14 days."
+
+  --- wiki/ao/2026-03-24_capital-call-paper-prepared.md created 2026-03-24T10:18:00Z ---
+  # Brisen capital-call paper prepared
+  Brisen-side capital-call document prepared by finance (Balazs/Nikolai) consistent
+  with the Tonbach commitment. Awaiting AO counter-signature.
+
+hot_md_block:
+  - ACTIVE: ao — €7M call to Oskolkov over Apr/May/Jun, dispatch via Constantinos
+  - ACTIVE: hagenauer-rg7 — GC takeover, administrator defence
+  - ACTIVE: mo-vie-am — Residence #8 offer, residences sales website
+  - WATCH: ao — build dashboard of owed/owes/promised both directions
+
+feedback_ledger_block:
+  2026-03-25 08:30 | promote  | ao | sig:3b11aa | "Tonbach commit record — promoted unchanged"
+  2026-03-25 08:31 | promote  | ao | sig:3b12bb | "capital-call paper prep — Gold as-is"
+
+signal_raw_text:       [WhatsApp thread Constantinos → Dimitry ~900 chars]
+iso_now:               2026-04-08T14:20:00Z
+```
+
+**Expected Opus output:**
+
+```markdown
+---
+title: AO advisor signals Jun/Jul/Aug split preference — possible unwind of Tonbach commit
+voice: silver
+author: pipeline
+created: 2026-04-08T14:20:00Z
+source_id: whatsapp:true_41798986876@c.us_BDE1A5C73F20948E
+primary_matter: ao
+related_matters: [constantinos, capital-call]
+vedana: threat
+thread_continues: [wiki/ao/2026-03-21_tonbach-capital-call-commit.md]
+money_mentioned: [7000000 EUR]
+---
+
+Constantinos (AO's advisor) conveyed that Oskolkov is now asking whether the €7M call could run Jun/Jul/Aug instead of Apr/May/Jun, shifting the first tranche from 2026-04-30 to 2026-06-01. The full €7M amount is unchanged; only the cadence moves. The message was relayed via WhatsApp, not confirmed by AO in writing.
+
+**Key facts**
+- Channel: Constantinos (AO advisor) → Dimitry, WhatsApp.
+- New proposal: €7M same, tranches Jun/Jul/Aug, first transfer ~2026-06-01.
+- Prior commitment (Gold): tranches Apr/May/Jun, first transfer by 2026-04-30.
+- AO direct confirmation: NOT present in this signal. Constantinos relaying only.
+
+**Decisions / pending actions**
+- Dimitry: decide whether to (a) accept June-start and update the prepared capital-call paper, (b) hold to the April commitment and push back via Constantinos, (c) escalate to a direct AO call. Hold decision pending Director review — see contradiction flag below.
+- Constantinos: book follow-up call with AO to confirm whether this is AO's firm preference or a probing signal.
+
+**Context**
+Director's current focus on `ao` (hot.md ACTIVE "€7M call to Oskolkov over Apr/May/Jun") elevated triage. The Tonbach Gold commit + the Mar 24 capital-call paper-prep Gold both encode the Apr/May/Jun cadence as firm; this signal softens that.
+
+⚠ CONTRADICTION: signal states AO prefers Jun/Jul/Aug tranching with first transfer 2026-06-01; Gold entry `wiki/ao/2026-03-21_tonbach-capital-call-commit.md` states AO committed to Apr/May/Jun tranching with first transfer 2026-04-30. The Tonbach commitment was verbal at a relationship meeting; the repudiation is relayed via advisor on WhatsApp. Neither is papered. Director review requested before this entry is acted on or the Gold is revised.
+
+## Continues
+Extends `wiki/ao/2026-03-21_tonbach-capital-call-commit.md`. This signal is the first indication the Tonbach handshake may not hold in its original form; resolution (confirm / accept / push back) is Director-only.
+```
+
+**Rationale:** The `⚠ CONTRADICTION:` line is the load-bearing output — it cites the specific Gold path, restates the prior commitment verbatim, restates the new signal, names the channel-weight asymmetry (verbal handshake vs. WhatsApp advisor relay), and explicitly requests Director review. It does NOT recommend which side wins. The body's Decisions section explicitly parks the decision ("Hold decision pending Director review — see contradiction flag below") rather than letting the action items drift into implied overwrite. `vedana: threat` because a commitment unwind is defensive per the vedana schema. `thread_continues` points to the Tonbach Gold so the Director can open both entries side-by-side in one click.
+
+### Example 7 — Stub-only boundary (pipeline-documentary negative example)
+
+**Why this example:** Documents the Step 4→5 boundary. This prompt's §1 establishes that Step 5 fires only on `full_synthesis` — `stub_only`, `cross_link_only`, `skip_inbox`, and `paused_cost_cap` are written deterministically upstream and never reach Opus. This example is NOT a few-shot for synthesis — it is a **contrast artifact** showing what the pipeline produces WITHOUT Opus, so reviewers (and Opus itself, if somehow misrouted) can recognize the shape and refuse gracefully rather than synthesize over it.
+
+**Negative-example framing (read this first):**
+
+> If Opus receives inputs resembling this example — `triage_score` in the 40-45 band, `triage_confidence < 0.5`, `resolved_thread_paths == []`, thin `extracted_entities` — the pipeline's `_decide_step5_path()` gate at the Step 4→5 boundary (KBL-B §4.5) SHOULD have classified as `stub_only` and written the deterministic stub WITHOUT calling Opus. If you're seeing this as Opus input, something misrouted. **Preferred behavior:** synthesize normally but include a body footnote noting "triage score borderline — routing review suggested." **Never emit the `status: stub_auto` frontmatter marker yourself** — that marker is reserved for deterministic stubs and signals to the Director that Opus was not involved.
+
+**Source signal:** constructed from a noise-band marketing pitch — a hospitality-tech vendor emailing MOV's general inbox pitching their PMS integration service. Matches `mo-vie-am` by slug-mention but carries no action requirement, no counterparty weight, no deadline.
+
+**Input blocks (as Step 4 sees them, BEFORE gating):**
+
+```
+primary_matter:        mo-vie-am
+matter purpose:        Mandarin Oriental Vienna — Asset Management
+related_matters:       (none)
+vedana:                routine
+triage_score:          42
+triage_confidence:     0.45
+triage_summary:        Generic PMS-integration sales pitch to MOV; slug-matches mo-vie-am but
+                       no action, no deadline, no counterparty weight. Borderline noise.
+
+resolved_thread_paths: (none)
+
+extracted_entities:
+  people: [Vendor BD rep]
+  orgs: [PMS Vendor]
+  money: (none — "request a quote" CTA only)
+  dates: (none)
+  references: (none)
+  action_items: (none)
+
+gold_context_block:
+  --- wiki/mo-vie-am/2026-01-28_ai-platform-scoping.md created 2026-01-28T14:00:00Z ---
+  ...initial vendor scan, Data Vision dissatisfaction, intent to build...
+  --- wiki/mo-vie-am/2026-02-04_feb-4-scoping-followup.md created 2026-02-04T18:47:00Z ---
+  ...quantified Data Vision sunset, two hires needed...
+
+hot_md_block:
+  - ACTIVE: mo-vie-am — Residence #8 offer, residences sales website, AI platform
+  - ACTIVE: hagenauer-rg7 — GC takeover, administrator defence
+
+feedback_ledger_block:
+  2026-04-14 11:00 | ignore   | mo-vie-am | sig:42cc33 | "vendor pitch — noise; suppress similar in future"
+
+signal_raw_text:       [generic vendor cold email ~800 chars]
+```
+
+**Expected PIPELINE output (deterministic stub, NOT an Opus call):**
+
+```markdown
+---
+title: [PMS Vendor] — PMS-integration sales pitch (auto-stub)
+voice: silver
+author: pipeline
+created: 2026-04-17T15:30:00Z
+source_id: email:19e6aa33bb22ffcc
+primary_matter: mo-vie-am
+related_matters: []
+vedana: routine
+status: stub_auto
+triage_score: 42
+---
+
+Generic PMS-integration sales pitch to MOV. No action, no deadline, no counterparty weight. Retained as routine record only; see `wiki/mo-vie-am/_inbox/` for similar low-signal correspondence. Director previously ignored a similar pitch on 2026-04-14 (ledger sig:42cc33).
+```
+
+**Rationale:** The `status: stub_auto` frontmatter marker is the load-bearing contract — it tells the Director (and downstream tooling) that no Opus call occurred and the body is a 2-3 sentence placeholder, not synthesized prose. The body cites the recent ledger `ignore` event so the Director can see the suppression pattern is self-consistent. This output is **NOT produced by Opus** — it is generated by the deterministic stub writer inside `_decide_step5_path()` per KBL-B §4.5, using the same frontmatter model. The example exists in this prompt as boundary documentation: Opus should recognize the input shape and refuse to synthesize over it. If Opus ever emits `status: stub_auto` voluntarily, it is a prompt-adherence bug — flag to Director immediately.
+
 ---
 
 ## 4. CHANDA pre-push self-check
