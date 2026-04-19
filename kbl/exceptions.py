@@ -70,3 +70,16 @@ class OpusRequestError(KblError):
     request, invalid model, auth) — distinct from ``AnthropicUnavailableError``
     in that retrying the same prompt CANNOT recover. Step 5 bypasses the R3
     retry ladder on this error and goes straight to ``opus_failed``."""
+
+
+class FinalizationError(KblError):
+    """Raised by Step 6 ``finalize()`` when the Opus draft cannot be
+    validated into a canonical Silver document — Pydantic validation
+    failure, status-provenance gate mismatch (§3.7), target_vault_path
+    regex violation (R20), or a malformed ``opus_draft_markdown``
+    frontmatter/body split.
+
+    On first raise the signal flips to ``opus_failed`` and Step 5's
+    R3 retry ladder fires (per KBL-B §4.7 + B3 spec §5). After 3
+    exhausted Opus retries Step 6 routes the signal to
+    ``finalize_failed`` terminal."""
