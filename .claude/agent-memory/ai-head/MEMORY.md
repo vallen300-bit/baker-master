@@ -24,4 +24,4 @@
 
 - 3,188 existing documents in ingestion_log (need backfill to new documents table)
 - capability_sets: 11 domain + 2 meta, 6 have use_thinking=TRUE
-- sentinel_health: 10 sentinels tracked, Todoist/Whoop were down (credential issues)
+- sentinel_health: 9 sentinels tracked (Whoop retired 2026-04-20, Feedly retired 2026-04-20)

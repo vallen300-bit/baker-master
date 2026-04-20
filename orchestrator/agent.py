@@ -628,7 +628,7 @@ TOOL_DEFINITIONS = [
         "name": "browse_website",
         "description": (
             "Browse a website using Chrome on the Director's machine. "
-            "Chrome has authenticated sessions (logged into WhatsApp, Gmail, Dropbox, WHOOP, etc.). "
+            "Chrome has authenticated sessions (logged into WhatsApp, Gmail, Dropbox, etc.). "
             "Use this to:\n"
             "- Read authenticated pages the Director is logged into\n"
             "- Check order status, account info, prices\n"
@@ -642,7 +642,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "url": {
                     "type": "string",
-                    "description": "Full URL to navigate to (e.g. 'https://shop.whoop.com/us/en/products/')",
+                    "description": "Full URL to navigate to (e.g. 'https://example.com/products/')",
                 },
                 "wait_seconds": {
                     "type": "integer",
@@ -692,7 +692,7 @@ TOOL_DEFINITIONS = [
                 "description": {
                     "type": "string",
                     "description": "Human-readable description of what this action does (shown to Director for confirmation). "
-                                   "E.g. 'Click Add to Cart for WHOOP 4.0 Band ($49)'",
+                                   "E.g. 'Click Add to Cart for Item Name ($49)'",
                 },
             },
             "required": ["action_type", "description"],

@@ -55,7 +55,7 @@ _DEEP_FORCE = re.compile(
     r"\b(?:summarize|summary|timeline|history|overview|assessment|evaluation)\b"
     r"|"
     # Product/website names (common shopping)
-    r"\b(?:amazon|whoop|rode|microphone|product|website)\b"
+    r"\b(?:amazon|rode|microphone|product|website)\b"
     r")",
     re.IGNORECASE,
 )
