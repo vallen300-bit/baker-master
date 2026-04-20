@@ -158,7 +158,7 @@ def test_kbl_signals_empty_state(client):
 
 
 def test_kbl_cost_rollup_happy_path(client):
-    rollup_cols = ["step", "model", "calls", "total_usd", "in_tok", "out_tok"]
+    rollup_cols = ["step", "model", "calls", "total_eur", "in_tok", "out_tok"]
     rollup_rows = [
         ("step5_opus", "claude-opus-4-6", 3, 1.25, 12000, 2400),
         ("step1_triage", "gemma-3-4b", 12, 0.0, 48000, 6400),
@@ -175,11 +175,11 @@ def test_kbl_cost_rollup_happy_path(client):
     assert body["remaining_eur"] == pytest.approx(48.75)
     assert len(body["rollup"]) == 2
     assert body["rollup"][0]["step"] == "step5_opus"
-    assert isinstance(body["rollup"][0]["total_usd"], float)
+    assert isinstance(body["rollup"][0]["total_eur"], float)
 
 
 def test_kbl_cost_rollup_empty_state(client):
-    rollup_cols = ["step", "model", "calls", "total_usd", "in_tok", "out_tok"]
+    rollup_cols = ["step", "model", "calls", "total_eur", "in_tok", "out_tok"]
     total_cols = ["day_total"]
     with _patch_conn([(rollup_cols, []), (total_cols, [(0,)])]):
         resp = client.get("/api/kbl/cost-rollup")
@@ -210,7 +210,7 @@ def test_kbl_cost_rollup_sql_uses_canonical_ts_column(client):
         captured_sql.append(sql)
         return original_execute(self, sql, params)
 
-    rollup_cols = ["step", "model", "calls", "total_usd", "in_tok", "out_tok"]
+    rollup_cols = ["step", "model", "calls", "total_eur", "in_tok", "out_tok"]
     total_cols = ["day_total"]
     queued = [(rollup_cols, []), (total_cols, [(0,)])]
 

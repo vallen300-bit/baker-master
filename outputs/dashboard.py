@@ -10923,13 +10923,13 @@ async def kbl_cost_rollup():
                     """
                     SELECT step, model,
                            COUNT(*) AS calls,
-                           COALESCE(SUM(cost_usd), 0) AS total_usd,
+                           COALESCE(SUM(cost_usd), 0) AS total_eur,
                            COALESCE(SUM(input_tokens), 0) AS in_tok,
                            COALESCE(SUM(output_tokens), 0) AS out_tok
                     FROM kbl_cost_ledger
                     WHERE ts > NOW() - INTERVAL '24 hours'
                     GROUP BY step, model
-                    ORDER BY total_usd DESC
+                    ORDER BY total_eur DESC
                     """
                 )
                 rows = _kbl_rows_to_dicts(cur, cur.fetchall())

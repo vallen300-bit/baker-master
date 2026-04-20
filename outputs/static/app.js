@@ -10078,7 +10078,7 @@ async function _loadKBLCost(body) {
                     r.step || '—',
                     r.model || '—',
                     String(r.calls || 0),
-                    kblFmtMoney(r.total_usd),
+                    kblFmtMoney(r.total_eur),
                     String(r.in_tok || 0),
                     String(r.out_tok || 0),
                 ].forEach(function(c) {
