@@ -2,50 +2,58 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (fresh terminal tab)
-**Task posted:** 2026-04-20 (afternoon, post-bridge-merge + post-Phase-B-symlink-flip)
-**Status:** OPEN — SOT Phase D (vault-read MCP tools for Cowork)
+**Task posted:** 2026-04-20 (afternoon, post-B3-review)
+**Status:** OPEN — Phase D recall (2 critical fixes + 4 new tests)
 
 ---
 
-## Task: SOT_OBSIDIAN_1_PHASE_D_VAULT_READ — equip Cowork-side AI Dennis from the vault
+## Task: Fix S1a + S1b on baker-master PR #28
 
-Brief: `briefs/BRIEF_SOT_OBSIDIAN_1_PHASE_D_VAULT_READ.md` (this commit). Read end-to-end — self-contained spec with mirror strategy, tool shapes, safety constraints, tests, and Day 1 protocol.
+B3's review identified two stacking critical defects that would silently break the mirror on first Render deploy. Both are small deltas but load-bearing. Fix both, add 4 new tests, push to the same branch.
 
-**Target PR:** against `baker-master`. Branch: `sot-obsidian-1-phase-d-vault-read`. Base: `main`. Reviewer: B2.
+**B3 review report:** `briefs/_reports/B3_pr28_phase_d_master_review_20260420.md` on baker-master at head `4be92c9`. Read that first — it has exact file/line pointers + failure-mode reasoning.
 
-### Why this matters now
+**Branch:** `sot-obsidian-1-phase-d-vault-read` (same as before). Do NOT rebase onto main — push fixes on top; B3 will re-review the delta.
 
-Phase B completed earlier today — local Claude App (Director's Mac) now reads AI Dennis's skill + memory from the canonical vault copy via symlink. But Cowork runs cloud-side, has no local filesystem, and can't see the symlink. Today she's still reading a cloud-delivered registry copy that will drift from the vault over time.
+---
 
-The existing Baker MCP at `https://baker-master.onrender.com/mcp` is already registered with Cowork. Adding two small tools (`baker_vault_read`, `baker_vault_list`) to it is the simplest transport — no new server, no new auth, no new client config.
+## S1a — Remove the wrapper's `try/except Exception` in `outputs/dashboard.py::_ensure_vault_mirror`
 
-### Scope summary (full detail in brief)
+**Problem:** wrapper catches `Exception` and swallows the `RuntimeError` that `ensure_mirror()` raises on first-clone failure. Brief §1 + your own ship report both promise "fatal on first-clone" — this wrapper defeats both.
 
-- Vault mirror at `/opt/render/project/src/baker-vault-mirror/` populated at startup (git clone) and refreshed every 5 min (APScheduler job `vault_sync_tick`, env `VAULT_SYNC_INTERVAL_SECONDS` default 300, floor 60).
-- Two new MCP tools registered on existing Baker MCP: `baker_vault_list(prefix)` + `baker_vault_read(path)`. Both scoped to `_ops/**`, `.md` + registry files only, 128KB cap, path-traversal safe.
-- `/health` extended with `vault_mirror_last_pull` + `vault_mirror_commit_sha`.
-- Tests: happy path + traversal + out-of-scope + nonexistent + binary + list. Integration via `needs_vault_mirror` fixture (local temp git repo).
-- Append Cowork-consumption section to `_ops/agents/ai-dennis/OPERATING.md` (part of this PR) documenting the new call pattern.
+**Fix:** delete the `try/except` block entirely. Let the `RuntimeError` propagate up through FastAPI's startup hook so the service fails to boot (as designed). The pull path (subsequent ticks) should still be non-fatal — verify that distinction remains intact.
 
-### Key constraints
+**Test to add:** `test_startup_call_order.py` (or equivalent): first-clone failure raises at startup → FastAPI lifespan raises → `TestClient(app)` construction fails. Confirm the error propagates, not swallowed.
 
-- **Mirror is read-only.** Never `git push` from Render. Pull only.
-- **Path safety is load-bearing.** Traversal regression = arbitrary file read on Render container. Tests must cover.
-- **No secrets in vault.** Audit `grep -r -iE "(api[_-]?key|password|token|secret)" baker-vault/_ops/` — zero hits or docs-only. Flag to B2 if surprising.
-- **No schema changes.** DB untouched.
+---
 
-### Paper trail
+## S1b — Inject `GITHUB_TOKEN` into clone URL in `vault_mirror.py::_remote_url`
 
-- Baker decision already stored upstream: SOT parent brief at `11922`. This sub-brief ratified in chat; commit it + log a decision via `mcp__baker__baker_store_decision` in your ship report.
-- Commit message cites `SOT_OBSIDIAN_1_PHASE_D_VAULT_READ` + `Co-Authored-By: AI Head <ai-head@brisengroup.com>` + your own line.
+**Problem:** baker-vault is a PRIVATE repo (verified by B3: `gh repo view baker-vault --json visibility` → PRIVATE). Current `_remote_url` returns `https://github.com/vallen300-bit/baker-vault.git` with no auth. First clone on Render will fail with a 403/auth error.
 
-Report to `briefs/_reports/B1_sot_phase_d_ship_<YYYYMMDD>.md` on baker-master when shipped. B2 reviews per normal flow. AI Head auto-merges on APPROVE per Tier A.
+**Fix:** when `GITHUB_TOKEN` env is set (Render always sets this for baker-master), rewrite the URL to `https://x-access-token:${GITHUB_TOKEN}@github.com/vallen300-bit/baker-vault.git`. When unset, return the plain URL (local dev / test). Do NOT log the tokenized URL — only the host.
 
-### After this (Day 1 protocol)
+**Tests to add:**
+1. `test_token_injection`: with `GITHUB_TOKEN=fake`, `_remote_url()` returns the tokenized form.
+2. `test_override_wins`: if `VAULT_REMOTE_URL` env is also set (future override hook), that wins over token injection.
+3. `test_symlink_escape`: symlink inside `_ops/` pointing to `/etc/passwd` — `baker_vault_read` rejects (closes B3's nit on path-safety test 6/6).
 
-Once merged + Render redeploys:
-1. AI Head tests both new tools from a Cowork-invoked AI Dennis session.
-2. Confirms Cowork can read her own canonical files through the MCP.
-3. If verification succeeds, Phase D done; Phase E (CHANDA Inv 9 refinement) is the final SOT piece — Tier B, Director auth required before you touch CHANDA.md.
+Total: 4 new tests (S1a fatality + 3 above).
 
-Close tab after ship.
+---
+
+## Commit shape
+
+Single commit on top of existing branch. Message: `fix(D): S1a fatal-propagation + S1b GITHUB_TOKEN injection + 4 new tests`. Cite B3's review report in the body.
+
+Push to `sot-obsidian-1-phase-d-vault-read`. Do NOT force-push. B3 will re-review the delta (he's closed the tab — AI Head will re-dispatch him after you push).
+
+## Estimated effort
+
+~20 min per B3's estimate. If it takes more than 45 min, flag.
+
+## baker-vault PR #6 (Cowork doc)
+
+No changes needed there. B3 approved-hold. Master PR #28 must re-approve first, then AI Head merges both together.
+
+Close tab after push.
