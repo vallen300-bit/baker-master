@@ -438,15 +438,14 @@ def _start_scheduler() -> None:
 def _ensure_vault_mirror() -> None:
     """SOT_OBSIDIAN_1_PHASE_D: clone/pull baker-vault mirror on startup.
 
-    Non-fatal on pull failure (transient — next ``vault_sync_tick``
-    retries) but fatal on initial-clone failure so a missing mirror
-    can't go unnoticed. See ``vault_mirror.py`` for scope invariants.
+    ``ensure_mirror()`` already distinguishes the two cases internally —
+    WARN-logs pull failures (non-fatal, next tick retries), raises
+    ``RuntimeError`` only on initial-clone failure. Propagate so
+    FastAPI's lifespan aborts startup per brief §1 — a missing mirror
+    must not go unnoticed. B3 review S1a (2026-04-20).
     """
-    try:
-        from vault_mirror import ensure_mirror
-        ensure_mirror()
-    except Exception as e:
-        logger.error("vault_mirror: ensure_mirror failed on startup: %s", e)
+    from vault_mirror import ensure_mirror
+    ensure_mirror()
 
 
 @app.on_event("startup")

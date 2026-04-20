@@ -330,3 +330,102 @@ def test_mcp_dispatch_baker_vault_list_returns_json(vault_mirror_repo):
     parsed = json.loads(output)
     assert parsed["prefix"] == "_ops/agents/"
     assert "_ops/agents/ai-dennis/OPERATING.md" in parsed["paths"]
+
+
+# --------------------------------------------------------------------------
+# B3 recall (2026-04-20) — S1a fatal propagation + S1b token injection +
+# N2 symlink escape
+# --------------------------------------------------------------------------
+
+
+def test_ensure_vault_mirror_reraises_first_clone_failure(tmp_path, monkeypatch):
+    """S1a contract: initial-clone failure must abort FastAPI startup.
+
+    ``ensure_mirror`` raises ``RuntimeError`` on clone failure; the
+    ``outputs.dashboard._ensure_vault_mirror`` wrapper must NOT swallow
+    it. A swallowed exception means the service boots with an empty
+    mirror and Cowork's vault-read tools return errors silently —
+    exactly the failure mode B3 caught at review time.
+    """
+    monkeypatch.setenv("VAULT_MIRROR_PATH", str(tmp_path / "does-not-exist"))
+    monkeypatch.setenv(
+        "VAULT_MIRROR_REMOTE", "https://invalid.example.test/nope.git"
+    )
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    import vault_mirror
+    importlib.reload(vault_mirror)
+
+    from outputs.dashboard import _ensure_vault_mirror
+    with pytest.raises(RuntimeError, match="initial clone failed"):
+        _ensure_vault_mirror()
+
+
+def test_remote_url_injects_github_token_when_set(monkeypatch):
+    """S1b contract: ``GITHUB_TOKEN`` becomes the clone credential.
+
+    Baker-vault is a PRIVATE repo on GitHub. On Render, GITHUB_TOKEN
+    is auto-injected; _remote_url must use it so the first-deploy
+    clone authenticates. x-access-token is the GitHub-blessed form for
+    HTTPS token auth (works for both PATs and Render's own token).
+    """
+    monkeypatch.delenv("VAULT_MIRROR_REMOTE", raising=False)
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_test_token")
+    import vault_mirror
+    importlib.reload(vault_mirror)
+
+    url = vault_mirror._remote_url()
+    assert url.startswith("https://x-access-token:ghp_test_token@")
+    assert url.endswith("/vallen300-bit/baker-vault.git")
+
+
+def test_remote_url_override_wins_over_token(monkeypatch):
+    """S1b: ``VAULT_MIRROR_REMOTE`` override takes precedence over token.
+
+    Lets tests + future ops-level overrides (e.g. a fork on a different
+    host) bypass the token-injection path without touching the
+    tokenized default.
+    """
+    monkeypatch.setenv("VAULT_MIRROR_REMOTE", "file:///tmp/fake-vault")
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_should_be_ignored")
+    import vault_mirror
+    importlib.reload(vault_mirror)
+
+    assert vault_mirror._remote_url() == "file:///tmp/fake-vault"
+
+
+def test_remote_url_plain_when_no_token_and_no_override(monkeypatch):
+    """Local-dev fallback: no token + no override = plain public URL."""
+    monkeypatch.delenv("VAULT_MIRROR_REMOTE", raising=False)
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    import vault_mirror
+    importlib.reload(vault_mirror)
+
+    assert vault_mirror._remote_url() == vault_mirror.DEFAULT_REMOTE
+
+
+def test_read_rejects_symlink_escape_outside_ops(vault_mirror_repo, tmp_path):
+    """B3 N2: symlink inside _ops/ pointing outside the mirror is rejected.
+
+    Path-safety defense lives in ``_normalize_and_resolve``'s
+    ``realpath`` check, which folds symlink targets before the
+    containment assertion. This test proves the defense is wired end
+    to end (a traversal regression that bypassed only the string-prefix
+    check would still fail this).
+    """
+    vm = vault_mirror_repo["module"]
+    mirror = vault_mirror_repo["mirror_path"]
+    outside = tmp_path / "outside-secrets.md"
+    outside.write_text("SECRET\n")
+
+    evil = mirror / "_ops" / "skills" / "it-manager" / "EVIL.md"
+    os.symlink(str(outside), str(evil))
+
+    # The symlink target is outside _ops/; realpath-resolution must catch this.
+    with pytest.raises(vm.VaultPathError):
+        vm.read_ops_file("_ops/skills/it-manager/EVIL.md")
+
+    # And the listing must not include the symlink either — `rglob` follows
+    # it when reading stat, but the re-resolve inside list_ops_files skips
+    # any entry whose realpath escapes _ops/.
+    paths = vm.list_ops_files("_ops/")
+    assert "_ops/skills/it-manager/EVIL.md" not in paths

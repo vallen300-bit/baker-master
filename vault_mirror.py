@@ -25,6 +25,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
 import subprocess
 import threading
 from datetime import datetime, timezone
@@ -60,8 +61,43 @@ def mirror_path() -> Path:
     return Path(os.environ.get("VAULT_MIRROR_PATH", DEFAULT_MIRROR_PATH)).resolve()
 
 
+_TOKEN_URL_RE = re.compile(r"https://x-access-token:[^@\s]+@")
+
+
+def _redact(text) -> str:
+    """Strip tokenized URLs from text before logging.
+
+    Git subprocess errors often echo the URL they tried to reach; that
+    URL carries our ``GITHUB_TOKEN`` when private-repo auth is used.
+    B3 review S1b: never write the token to Render's log stream.
+    """
+    if text is None:
+        return ""
+    return _TOKEN_URL_RE.sub("https://x-access-token:REDACTED@", str(text))
+
+
 def _remote_url() -> str:
-    return os.environ.get("VAULT_MIRROR_REMOTE", DEFAULT_REMOTE)
+    """Resolve the clone URL. Override env wins, then token, then plain default.
+
+    ``VAULT_MIRROR_REMOTE`` is the test/ops override (local path or a
+    pre-authed URL). When absent and ``GITHUB_TOKEN`` is set — which is
+    true on Render for baker-master via the auto-deploy wiring — rewrite
+    to the ``x-access-token`` form so a private-repo clone authenticates.
+    Falls back to the plain default only for local dev against a public
+    mirror. B3 review S1b (2026-04-20).
+
+    The tokenized URL is NEVER logged; callers log the host only.
+    """
+    override = os.environ.get("VAULT_MIRROR_REMOTE")
+    if override:
+        return override
+    token = os.environ.get("GITHUB_TOKEN")
+    if token:
+        return (
+            f"https://x-access-token:{token}"
+            f"@github.com/vallen300-bit/baker-vault.git"
+        )
+    return DEFAULT_REMOTE
 
 
 def sync_interval_seconds() -> int:
@@ -131,7 +167,7 @@ def ensure_mirror() -> None:
             except subprocess.CalledProcessError as e:
                 logger.warning(
                     "vault_mirror: pull failed (non-fatal on startup): %s",
-                    e.stderr or e,
+                    _redact(e.stderr or e),
                 )
             return
 
@@ -142,7 +178,7 @@ def ensure_mirror() -> None:
             logger.info("vault_mirror: cloned to %s", path)
         except subprocess.CalledProcessError as e:
             raise RuntimeError(
-                f"vault_mirror: initial clone failed: {e.stderr or e}"
+                f"vault_mirror: initial clone failed: {_redact(e.stderr or e)}"
             ) from e
 
 
@@ -168,14 +204,14 @@ def sync_tick() -> None:
                 logger.info("vault_mirror: sync_tick re-clone succeeded")
             except subprocess.CalledProcessError as e:
                 logger.warning(
-                    "vault_mirror: sync_tick re-clone failed: %s", e.stderr or e
+                    "vault_mirror: sync_tick re-clone failed: %s", _redact(e.stderr or e)
                 )
             return
         try:
             _run_git(["pull", "--ff-only", "origin", "main"], cwd=path)
             _record_pull()
         except subprocess.CalledProcessError as e:
-            logger.warning("vault_mirror: sync_tick pull failed: %s", e.stderr or e)
+            logger.warning("vault_mirror: sync_tick pull failed: %s", _redact(e.stderr or e))
 
 
 def _record_pull() -> None:
