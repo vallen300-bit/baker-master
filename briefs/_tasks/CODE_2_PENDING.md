@@ -2,136 +2,53 @@
 
 **From:** AI Head
 **To:** Code Brisen #2 (fresh terminal tab)
-**Task posted:** 2026-04-20 (morning, post-handover refresh)
-**Status:** OPEN — STORE_BACK_DEAD_CODE_AND_DB_ENV_FALLBACK polish
+**Task posted:** 2026-04-20 (morning)
+**Status:** OPEN — PR #21 review, then queued PR #23 review
 
 ---
 
-## Task: STORE_BACK_DEAD_CODE_AND_DB_ENV_FALLBACK — two small Python cleanups
+## Task 1 (NOW): PR #21 DASHBOARD_COST_ALIAS_RENAME review
 
-Polish queue items #4 + #5 from AI Head handover 2026-04-20. Target PR: TBD. Branch: `store-back-dead-code-and-db-env-fallback`. Base: `main`. Reviewer: B1.
+B1 shipped at `6198feb` on branch `dashboard-cost-alias-rename`. Scope = rename SQL alias `total_usd` → `total_eur` in `/api/kbl/cost-rollup` endpoint of `outputs/dashboard.py` (around line 10926) + `ORDER BY` + downstream Python consumer + `app.js` consumer + 3 test fixture refs + 1 assertion. Column name `cost_usd` unchanged.
 
-### Why
+**PR URL:** https://github.com/vallen300-bit/baker-master/pull/21
 
-Two independent leftovers from the MIGRATION_RUNNER_1 + cost_ledger shipping cycle. Both are lesson #36 (DATABASE_URL vs POSTGRES_* env drift) / #37 (DDL embedded in `_ensure_*` never runs on Render) countermeasures. Close them while the context is fresh.
+### Verdict focus
 
----
+- `grep -n 'total_usd' outputs/dashboard.py` inside the cost-rollup endpoint: zero matches post-change. Other endpoints left alone.
+- JS consumer in `outputs/templates/` (or wherever the frontend reads the JSON) updated — no `data.total_usd` references left that feed the cost widget.
+- 3 test fixture refs + 1 assertion update present — verify assertions actually key on the new `total_eur` name.
+- `pytest tests/test_dashboard_kbl_endpoints.py -xvs` reported green by B1 (9/9). Re-run locally.
+- Header still says `€` in the frontend template — cosmetic guard against accidentally flipping the currency label.
+- Schema untouched.
 
-### Part A — Delete dead `_ensure_kbl_cost_ledger` + `_ensure_kbl_log` from `memory/store_back.py`
+Report to `briefs/_reports/B2_pr21_review_<YYYYMMDD>.md` — APPROVE / REDIRECT / REQUEST_CHANGES. If APPROVE, AI Head auto-merges.
 
-**Files:**
-- `memory/store_back.py`
-
-**Current state (verified by AI Head against tip of main):**
-- Line 193: `self._ensure_kbl_cost_ledger()` (caller)
-- Line 194: `self._ensure_kbl_log()` (caller)
-- Line 6505: `def _ensure_kbl_cost_ledger(self):` (definition with bare `((ts::date))` immutability bug — lesson #38)
-- Line 6552: `def _ensure_kbl_log(self):` (definition with same bug)
-- Line 6379: comment `MUST run before _ensure_kbl_cost_ledger / _ensure_kbl_log because …`
-
-**Why dead:** DDL for both tables now lives in `migrations/20260419_add_kbl_cost_ledger_and_kbl_log.sql` (grandfathered in runner). The `_ensure_*` methods never ran on Render (wrong code path — lesson #37), only on Mac Mini. Mac Mini schema matches Render after MIGRATION_RUNNER_1. No remaining caller needs them.
-
-**Actions:**
-
-1. Delete both method definitions (around lines 6505-6551 and 6552-~6600 — find exact ranges).
-2. Delete both call sites (lines 193-194).
-3. Delete the precedence comment at line 6379 (it references methods that will no longer exist).
-4. Grep the full repo for `_ensure_kbl_cost_ledger` and `_ensure_kbl_log` after deletion — should return zero matches.
-
-**Non-negotiable:** DO NOT touch any other `_ensure_*` method in the file — several ARE still live (e.g. Qdrant collection ensures). Scope is exactly these two.
-
-**Acceptance:**
-- `grep -rn "_ensure_kbl_cost_ledger\|_ensure_kbl_log" .` returns zero matches (including tests).
-- `pytest tests/test_1m_storeback_verify.py -xvs` green. If a test calls either method, DELETE the test (it's also dead).
-- `pytest tests/ -xvs` full suite green.
+Expected: 10-15 min.
 
 ---
 
-### Part B — Add `POSTGRES_*` split env fallback to `kbl/db.py`
+## Task 2 (QUEUED, do after Task 1 + after B3 reports CI-workflow-drop on PR #23 branch): PR #23 CONFTEST_NEON_EPHEMERAL_FIXTURE review
 
-**File:** `kbl/db.py` (currently ~32 lines; short module).
+B3 shipped at `c7f1381` on branch `conftest-neon-ephemeral-fixture`. Scope = new `tests/conftest.py` with `ephemeral_neon_db` (session, urllib-only) + `needs_live_pg` (function) fixtures; 4 test files migrated off raw `TEST_DATABASE_URL` skipif. Brief: `briefs/_tasks/CODE_3_PENDING.md` head commit.
 
-**Current state:**
-```python
-conn = psycopg2.connect(os.environ["DATABASE_URL"])
-```
+**PR URL:** https://github.com/vallen300-bit/baker-master/pull/23
 
-Fails hard if only the split form (`POSTGRES_HOST` / `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` / `POSTGRES_PORT`) is set. Render uses `DATABASE_URL`; Mac Mini's `~/.kbl.env` uses split form. Env-convention drift has already burned us once (lesson #36, PR #19 hotfix).
+### Important — DO NOT start this review until:
 
-**Change:**
+1. Task 1 (PR #21 review) complete.
+2. B3 has pushed a follow-up commit to the same branch dropping `.github/workflows/pytest.yml` (the workflow scope was too wide — fires entire test suite against no-secrets CI; 40s failure on first run). AI Head dispatched B3 separately for this drop. You'll see a new commit on top of `c7f1381` authored by B3 before this task becomes actionable.
+3. The branch's latest CI run is absent (workflow file deleted) or green.
 
-```python
-def _build_dsn() -> str:
-    url = os.environ.get("DATABASE_URL")
-    if url:
-        return url
-    required = ("POSTGRES_HOST", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB")
-    missing = [k for k in required if not os.environ.get(k)]
-    if missing:
-        raise RuntimeError(
-            f"neither DATABASE_URL nor POSTGRES_* fallback available; missing: {missing}"
-        )
-    host = os.environ["POSTGRES_HOST"]
-    user = os.environ["POSTGRES_USER"]
-    pw = os.environ["POSTGRES_PASSWORD"]
-    db = os.environ["POSTGRES_DB"]
-    port = os.environ.get("POSTGRES_PORT", "5432")
-    return f"postgresql://{user}:{pw}@{host}:{port}/{db}"
-```
+### Verdict focus (once unblocked)
 
-Then `get_conn()` calls `psycopg2.connect(_build_dsn())`.
+- `tests/conftest.py` has two fixtures: `ephemeral_neon_db` session-scoped with `NEON_API_KEY` + `NEON_PROJECT_ID` check yielding `None` when absent (no raise); `needs_live_pg` function-scoped returning `TEST_DATABASE_URL` > ephemeral URL > skip.
+- Neon REST API calls use `urllib.request` only — no new dependency added.
+- Branch creation `POST /api/v2/projects/{id}/branches`, poll until `primary_endpoint.current_state == "active"` with ≤60s deadline + 2s interval, teardown `DELETE` is idempotent (404/410 logged as WARN not ERROR).
+- 4 test files migrated: `test_migration_runner.py`, `test_layer0_dedupe.py`, `test_migrations.py`, `test_status_check_expand_migration.py`. The raw `TEST_DATABASE_URL` skipif pattern is GONE from all 4. Each now uses `needs_live_pg`.
+- Local `pytest tests/` reported 43 passed, 5 skipped by B3 with unified skip message — verify one of the 5 skips emits the expected "no live-PG connection available" text (not the old raw "TEST_DATABASE_URL unset" text).
+- The `.github/workflows/pytest.yml` file is ABSENT from the final branch head (verify with `git ls-tree HEAD .github/workflows/`).
 
-**URL-quote the password** (use `urllib.parse.quote_plus`) to handle special chars. Add one unit test for `_build_dsn()` covering: (a) DATABASE_URL wins when both are set, (b) split form builds expected URL, (c) missing split var raises clear error.
+Report to `briefs/_reports/B2_pr23_review_<YYYYMMDD>.md`. APPROVE / REDIRECT / REQUEST_CHANGES.
 
-**Acceptance:**
-- New file (or addition to existing) `tests/test_kbl_db.py` with the three cases above.
-- Existing KBL tests still green.
-- No runtime behavior change on Render (where DATABASE_URL is set).
-
----
-
-### Out of scope for this PR
-
-- Any `kbl_cost_ledger` or `kbl_log` schema change.
-- Migrating other modules to the fallback pattern (separate PR per module to keep review cycles small).
-- Rotating / adding env vars on Render or Mac Mini.
-
-### PR message template
-
-```
-STORE_BACK_DEAD_CODE_AND_DB_ENV_FALLBACK: remove two dead _ensure_* methods + add POSTGRES_* fallback to kbl/db.py
-
-Part A: DDL for kbl_cost_ledger + kbl_log now lives in the migration file
-(grandfathered in MIGRATION_RUNNER_1). The `_ensure_*` methods were dead path
-(lesson #37). Delete both + their callers + dependent tests.
-
-Part B: kbl/db.py hard-required DATABASE_URL. Add POSTGRES_* split-form
-fallback so Mac Mini dev envs work without DATABASE_URL re-export (lesson #36).
-URL-quotes password. Three-case unit test added.
-
-No schema changes. No env changes on Render.
-
-Co-Authored-By: AI Head <ai-head@brisengroup.com>
-```
-
-Expected time: 30-45 min. Ping B1 for review when CI green.
-
----
-
-## Queued next: review PR #21 (B1's DASHBOARD_COST_ALIAS_RENAME)
-
-**Immediately after you ship your own PR**, review PR #21:
-
-- URL: https://github.com/vallen300-bit/baker-master/pull/21
-- Head: `6198feb`, branch `dashboard-cost-alias-rename`
-- 7 lines added / 7 lines deleted. CLEAN + MERGEABLE.
-- Scope: SQL alias + `ORDER BY` + app.js consumer + 3 test fixture refs + 1 assertion. Column name unchanged.
-- B1 self-reported 9/9 `tests/test_dashboard_kbl_endpoints.py` green on py3.12.
-
-**Verdict focus:**
-- No other `total_usd` consumers missed (grep `outputs/` + `tests/` + any JS).
-- No regressions to sibling cost endpoints (`_usd` alias on a different endpoint that truly holds USD, if any, must stay).
-- Frontend `€` label still intact (lesson: alias rename should not flip header currency).
-
-Post APPROVE in `briefs/_reports/B2_pr21_review_<YYYYMMDD>.md` then AI Head auto-merges per Tier A protocol. No Director intervention needed on routine polish merge.
-
+Expected: 20-30 min.

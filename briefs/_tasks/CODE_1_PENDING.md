@@ -2,61 +2,42 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (fresh terminal tab)
-**Task posted:** 2026-04-20 (morning, post-handover refresh)
-**Status:** OPEN — DASHBOARD_COST_ALIAS_RENAME polish
+**Task posted:** 2026-04-20 (morning)
+**Status:** OPEN — PR #22 STORE_BACK_DEAD_CODE_AND_DB_ENV_FALLBACK review
 
 ---
 
-## Task: DASHBOARD_COST_ALIAS_RENAME — rename `total_usd` → `total_eur` in dashboard cost-rollup
+## Task: PR #22 review
 
-Polish queue item #6 from AI Head handover 2026-04-20. Target PR: TBD. Branch: `dashboard-cost-alias-rename`. Base: `main`. Reviewer: B2.
+B2 shipped at `84f15db` on branch `store-back-dead-code-and-db-env-fallback`. Scope = Part A delete dead `_ensure_kbl_cost_ledger` + `_ensure_kbl_log` + callers + precedence comment; Part B `kbl/db.py` `_build_dsn()` with `DATABASE_URL` precedence + `POSTGRES_*` fallback + `quote_plus` on user/password. Brief: `briefs/_tasks/CODE_2_PENDING.md` head commit.
 
-### Why
+**PR URL:** https://github.com/vallen300-bit/baker-master/pull/22
 
-`outputs/dashboard.py:10926` aliases `COALESCE(SUM(cost_usd), 0) AS total_usd` in the `/api/kbl/cost-rollup` endpoint, but **`cost_usd` ledger column stores EUR values per the same module's contract** (see comment at line 10913). Frontend formats the number with €. The `_usd` suffix is a cosmetic drift left over from pre-cost_ledger code and invites future misreads. Align the alias name with the actual currency so whoever reads the SQL next doesn't misinterpret it.
+### Verdict focus
 
-**Scope is the ALIAS only — not the column name.** `cost_usd` is a schema column across multiple modules; renaming the column is out of scope for this PR.
+**Part A — dead code removal:**
 
-### Scope
+- `grep -rn "_ensure_kbl_cost_ledger\|_ensure_kbl_log" .` returns zero matches post-change (incl. tests).
+- No OTHER `_ensure_*` method touched. Qdrant-collection ensures + signal_queue additions ensure etc. must still be intact.
+- Precedence comment at ex-line 6379 removed (it named methods that no longer exist).
+- Callers at ex-lines 193-194 removed from `__init__` or wherever they were called — no dangling `self.` reference.
 
-**In scope:**
+**Part B — `kbl/db.py` env fallback:**
 
-1. `outputs/dashboard.py` — change `AS total_usd` to `AS total_eur` on the SQL alias (around line 10926).
-2. Same query (around line 10932): `ORDER BY total_usd DESC` → `ORDER BY total_eur DESC`.
-3. Downstream Python reader: any `row["total_usd"]` / `row.get("total_usd")` / dict-access in the same function that consumed the alias must be updated to `total_eur`.
-4. Frontend consumer: if any JS in `outputs/templates/` or equivalent reads `total_usd` from the JSON response for the `/api/kbl/cost-rollup` endpoint, update to `total_eur`.
+- `_build_dsn()` correctly prefers `DATABASE_URL` when set; falls back to `POSTGRES_*` split form only when `DATABASE_URL` is absent.
+- Missing required `POSTGRES_*` var (HOST/USER/PASSWORD/DB) raises `RuntimeError` with clear message naming the missing keys. NOT a bare `KeyError`.
+- `urllib.parse.quote_plus` applied to BOTH user and password fields — not just password. Passwords with `@`, `/`, `:`, `?` are common in cloud Postgres.
+- `POSTGRES_PORT` defaults to `5432` when absent.
+- Unit tests in `tests/test_kbl_db.py` cover at least: (a) DATABASE_URL wins, (b) split form builds expected URL with quote_plus applied, (c) missing required var raises clear error. B2 added a 4th default-port case — verify it's not over-fitting.
 
-**Out of scope:**
+**Cross-cutting:**
 
-- Renaming `cost_usd` ledger column (schema change — separate migration, Tier B).
-- Renaming any OTHER `total_usd` aliases (grep the file; if they exist in different endpoints, scope is this endpoint only unless they also store EUR per the contract comment).
-- Touching `kbl_cost_ledger` migration.
+- No schema changes.
+- No Render env changes required to deploy.
+- `pytest tests/` full suite: B2 flagged 10 failures in `tools/ingest/extractors.py` path as pre-existing py3.9 PEP-604 landmine, confirmed on pre-change tree. Spot-check one or two of those failures — confirm they are py3.9-only and unrelated to this PR.
 
-### Acceptance criteria
+### Output
 
-1. `grep -n 'total_usd' outputs/dashboard.py` inside the cost-rollup endpoint returns zero matches after the change. (Matches outside cost-rollup are fine if they truly refer to USD values — which they shouldn't, per the contract, but scope is one endpoint.)
-2. Manual smoke: `curl -sS https://baker-master.onrender.com/api/kbl/cost-rollup -H "X-Baker-Key: ..."` returns shape with `total_eur` key (not `total_usd`). Test against local preview if you have one; otherwise rely on B2 review + post-merge verification.
-3. `pytest tests/test_dashboard_kbl_endpoints.py -xvs` green. If a test asserts on `total_usd` key, update the assertion in the same PR.
-4. No schema changes. No migration file added.
+Report to `briefs/_reports/B1_pr22_review_<YYYYMMDD>.md` — APPROVE / REDIRECT / REQUEST_CHANGES with inline citations to the PR head SHA. If APPROVE, AI Head auto-merges per Tier A protocol.
 
-### Trust markers (lesson #40)
-
-- **What in production would reveal a bug:** frontend cost widget either breaks (key not found) or silently misreports in the wrong currency label. Post-merge verification: open the dashboard cost widget and confirm the number still renders AND the header still says €.
-- **Risk of silent breakage:** medium. Any consumer reading `total_usd` that we miss will KeyError on next request.
-
-### PR message template
-
-```
-DASHBOARD_COST_ALIAS_RENAME: align cost-rollup SQL alias with actual EUR currency
-
-The `cost_usd` ledger column stores EUR (contract comment at line 10913). The
-`AS total_usd` alias was cosmetic drift inviting future misreads. Rename the
-alias and all downstream consumers within this endpoint to `total_eur`.
-
-Scope limited to one endpoint + its Python + frontend consumers. Column name
-`cost_usd` stays — schema rename is Tier B and separate.
-
-Co-Authored-By: AI Head <ai-head@brisengroup.com>
-```
-
-Expected time: 20-30 min including verification. Ping B2 for review when CI green.
+Expected time: 15-20 min.
