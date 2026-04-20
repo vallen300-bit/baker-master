@@ -1,0 +1,43 @@
+name: pytest
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # CONFTEST_NEON_EPHEMERAL_FIXTURE: set NEON_API_KEY + NEON_PROJECT_ID
+      # as GitHub repo secrets to unlock live-PG tests in CI. Without them,
+      # tests in tests/test_migration_runner.py (#6, #8), tests/test_migrations.py,
+      # tests/test_layer0_dedupe.py, and tests/test_status_check_expand_migration.py
+      # skip with the same message as an unset TEST_DATABASE_URL.
+      #
+      # Only secrets.* are referenced here — no untrusted event fields — so
+      # this env block is not a workflow-injection surface.
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      NEON_PROJECT_ID: ${{ secrets.NEON_PROJECT_ID }}
+      NEON_DATABASE_NAME: ${{ secrets.NEON_DATABASE_NAME }}
+      NEON_ROLE_NAME: ${{ secrets.NEON_ROLE_NAME }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run pytest
+        run: pytest tests/ -v
