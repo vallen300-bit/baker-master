@@ -563,6 +563,31 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info(f"Registered: kbl_pipeline_tick (every {_kbl_tick_seconds}s — env-gated)")
 
+    # ALERTS_TO_SIGNAL_QUEUE_BRIDGE_1: Producer for signal_queue.
+    # Reads new alerts → applies 4-axis filter + stop-list → maps to
+    # signal_queue rows so kbl_pipeline_tick has something to claim.
+    # Default 60 s; override via BRIDGE_TICK_INTERVAL_SECONDS. 30 s floor
+    # matches kbl_pipeline_tick to keep the producer/consumer cadence
+    # similar (bridge fires twice per consumer tick at default).
+    try:
+        _bridge_tick_seconds = int(_os.environ.get("BRIDGE_TICK_INTERVAL_SECONDS", "60"))
+    except (TypeError, ValueError):
+        _bridge_tick_seconds = 60
+    if _bridge_tick_seconds < 30:
+        logger.warning(
+            "BRIDGE_TICK_INTERVAL_SECONDS=%s below 30s floor; clamping to 30",
+            _bridge_tick_seconds,
+        )
+        _bridge_tick_seconds = 30
+    scheduler.add_job(
+        _kbl_bridge_tick_job,
+        IntervalTrigger(seconds=_bridge_tick_seconds),
+        id="kbl_bridge_tick", name="KBL bridge: alerts → signal_queue",
+        coalesce=True, max_instances=1, replace_existing=True,
+        misfire_grace_time=30,
+    )
+    logger.info(f"Registered: kbl_bridge_tick (every {_bridge_tick_seconds}s)")
+
 
 def _kbl_pipeline_tick_job():
     """APScheduler wrapper around ``kbl.pipeline_tick.main``.
@@ -578,6 +603,22 @@ def _kbl_pipeline_tick_job():
             logger.warning("kbl_pipeline_tick returned non-zero: %s", rc)
     except Exception as e:
         logger.error("kbl_pipeline_tick raised: %s", e, exc_info=True)
+        raise
+
+
+def _kbl_bridge_tick_job():
+    """APScheduler wrapper around ``kbl.bridge.alerts_to_signal.run_bridge_tick``.
+
+    Lazy import mirrors ``_kbl_pipeline_tick_job``. Counts dict goes
+    to logger at INFO; any raise propagates so APScheduler's listener
+    surfaces the failure.
+    """
+    try:
+        from kbl.bridge.alerts_to_signal import run_bridge_tick
+        counts = run_bridge_tick()
+        logger.info("kbl_bridge_tick: %s", counts)
+    except Exception as e:
+        logger.error("kbl_bridge_tick raised: %s", e, exc_info=True)
         raise
 
 
