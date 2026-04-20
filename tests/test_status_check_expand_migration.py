@@ -4,16 +4,16 @@ Two tiers:
     1. Parse-level checks (always run) — UP/DOWN sections present, all
        34 status values declared, Python writer in ``memory/store_back.py``
        stays in sync with the SQL migration.
-    2. Live-PG round-trip (gated on ``TEST_DATABASE_URL``) — applies UP,
-       INSERTs one row per legal status + asserts a bogus status raises
-       ``CheckViolation``; applies DOWN and re-verifies.
+    2. Live-PG round-trip (gated via ``tests/conftest.py::needs_live_pg``,
+       which resolves ``TEST_DATABASE_URL`` or an ephemeral Neon branch)
+       — applies UP, INSERTs one row per legal status + asserts a bogus
+       status raises ``CheckViolation``; applies DOWN and re-verifies.
 
 Matches the pattern in ``tests/test_migrations.py`` — separate module so
 a migration-specific failure localizes to this ticket.
 """
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 
@@ -27,12 +27,6 @@ MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
 MIGRATION_PATH = MIGRATIONS_DIR / "20260418_expand_signal_queue_status_check.sql"
 STORE_BACK_PATH = (
     Path(__file__).resolve().parent.parent / "memory" / "store_back.py"
-)
-TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
-
-requires_db = pytest.mark.skipif(
-    not TEST_DB_URL,
-    reason="TEST_DATABASE_URL unset — skipping live-PG migration check",
 )
 
 
@@ -240,11 +234,10 @@ def test_all_per_step_states_have_awaiting_running_failed_triple() -> None:
     assert not missing, f"per-step states missing from set: {missing}"
 
 
-# -------------------- live-PG round-trip (gated on DATABASE_URL) --------------------
+# --------- live-PG round-trip (gated via conftest.py::needs_live_pg) ---------
 
 
-@requires_db
-def test_check_constraint_round_trip() -> None:
+def test_check_constraint_round_trip(needs_live_pg) -> None:
     """Apply UP, INSERT one signal with each legal status (should succeed),
     INSERT with a bogus status (should raise CheckViolation), apply DOWN,
     re-verify the KBL-B-only statuses now fail.
@@ -255,7 +248,7 @@ def test_check_constraint_round_trip() -> None:
     """
     sections = _parse_sections(MIGRATION_PATH.read_text(encoding="utf-8"))
 
-    conn = psycopg2.connect(TEST_DB_URL)
+    conn = psycopg2.connect(needs_live_pg)
     try:
         with conn.cursor() as cur:
             # UP — idempotent; safe even if a prior run left the widened

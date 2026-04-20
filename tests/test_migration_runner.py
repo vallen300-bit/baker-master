@@ -7,13 +7,14 @@ Covers (per B2-APPROVED brief v2 at ``briefs/_drafts/MIGRATION_RUNNER_1_BRIEF.md
 #3 ``test_apply_all_aborts_on_sha_mismatch``    — pure mock.
 #4 ``test_apply_all_aborts_on_sql_error_no_partial`` — pure mock.
 #5 ``test_startup_call_order``                  — runtime Mock manager (N1 — NOT AST).
-#6 ``test_first_deploy_idempotency_dry_run``    — TEST_DATABASE_URL-gated, real Neon.
+#6 ``test_first_deploy_idempotency_dry_run``    — live-PG via ``needs_live_pg``.
 #7 ``test_migration_file_has_up_marker``        — pure file scan.
-#8 ``test_second_instance_blocks_on_advisory_lock`` — TEST_DATABASE_URL-gated.
+#8 ``test_second_instance_blocks_on_advisory_lock`` — live-PG via ``needs_live_pg``.
 
-Tests #1-5, #7 run unconditionally. Tests #6, #8 skip when ``TEST_DATABASE_URL``
-is unset, matching the convention from ``tests/test_migrations.py`` and
-``tests/test_layer0_dedupe.py`` (brief N2).
+Tests #1-5, #7 run unconditionally. Tests #6, #8 use the shared
+``needs_live_pg`` fixture (see ``tests/conftest.py``) which resolves a live
+PG URL from ``TEST_DATABASE_URL`` or an ephemeral Neon branch; skips
+otherwise. Brief N2 + CONFTEST_NEON_EPHEMERAL_FIXTURE.
 """
 from __future__ import annotations
 
@@ -299,18 +300,12 @@ def test_migration_file_has_up_marker():
 
 
 # ===========================================================================
-# Tests #6, #8: TEST_DATABASE_URL-gated real-PG tests
+# Tests #6, #8: live-PG tests via ``needs_live_pg`` fixture
+# (see ``tests/conftest.py`` — TEST_DATABASE_URL or ephemeral Neon branch)
 # ===========================================================================
 
 
-TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
-_gate = pytest.mark.skipif(
-    not TEST_DB_URL, reason="TEST_DATABASE_URL not set (real-PG test)"
-)
-
-
-@_gate
-def test_first_deploy_idempotency_dry_run():
+def test_first_deploy_idempotency_dry_run(needs_live_pg):
     """R2 dry-run: seeded-to-current-prod Neon branch + empty
     ``schema_migrations`` must re-apply all 11 files cleanly with zero
     errors. Each file's ``IF NOT EXISTS`` / ``IF EXISTS`` / ``ON CONFLICT
@@ -329,27 +324,26 @@ def test_first_deploy_idempotency_dry_run():
     )
 
     # Pre-clean: drop schema_migrations so we exercise the first-deploy path.
-    with psycopg2.connect(TEST_DB_URL) as conn:
+    with psycopg2.connect(needs_live_pg) as conn:
         with conn.cursor() as cur:
             cur.execute("DROP TABLE IF EXISTS schema_migrations")
         conn.commit()
 
-    applied = run_pending_migrations(TEST_DB_URL, migrations_dir=repo_mig_dir)
+    applied = run_pending_migrations(needs_live_pg, migrations_dir=repo_mig_dir)
     assert sorted(applied) == expected_files, (
         f"retroactive claim drift: applied={sorted(applied)} vs "
         f"expected={expected_files}"
     )
 
     # Verify tracking table now has exactly those rows.
-    with psycopg2.connect(TEST_DB_URL) as conn:
+    with psycopg2.connect(needs_live_pg) as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT filename FROM schema_migrations ORDER BY filename")
             rows = [r[0] for r in cur.fetchall()]
     assert rows == expected_files
 
 
-@_gate
-def test_second_instance_blocks_on_advisory_lock():
+def test_second_instance_blocks_on_advisory_lock(needs_live_pg):
     """R1 concurrency contract: sidecar connection holds the advisory lock,
     runner's ``pg_try_advisory_lock`` path times out, graceful
     ``return []`` fires, no DDL runs, no tracking-table writes."""
@@ -364,7 +358,7 @@ def test_second_instance_blocks_on_advisory_lock():
     files = (("001_advisory.sql", sql_body),)
 
     # Pre-clean tracking table row for this test fixture.
-    with psycopg2.connect(TEST_DB_URL) as conn:
+    with psycopg2.connect(needs_live_pg) as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "DELETE FROM schema_migrations WHERE filename = %s",
@@ -372,7 +366,7 @@ def test_second_instance_blocks_on_advisory_lock():
             )
         conn.commit()
 
-    blocker = psycopg2.connect(TEST_DB_URL)
+    blocker = psycopg2.connect(needs_live_pg)
     blocker.autocommit = True
     try:
         with blocker.cursor() as cur:
@@ -380,12 +374,12 @@ def test_second_instance_blocks_on_advisory_lock():
 
         with _fixture_migrations(*files) as mig_dir, \
              patch("config.migration_runner._LOCK_TIMEOUT_SECONDS", 2.0):
-            result = run_pending_migrations(TEST_DB_URL, migrations_dir=mig_dir)
+            result = run_pending_migrations(needs_live_pg, migrations_dir=mig_dir)
 
         assert result == [], f"expected graceful empty result, got {result}"
 
         # Verify no tracking row landed for the fixture file.
-        with psycopg2.connect(TEST_DB_URL) as conn:
+        with psycopg2.connect(needs_live_pg) as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     "SELECT 1 FROM schema_migrations WHERE filename = %s",

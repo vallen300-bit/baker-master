@@ -28,11 +28,10 @@ psycopg2 = pytest.importorskip(
     "psycopg2", reason="psycopg2 required — live-PG tests skipped without it"
 )
 
-TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
 MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
-requires_db = pytest.mark.skipif(
-    not TEST_DB_URL, reason="TEST_DATABASE_URL unset — skipping live-PG round trip"
-)
+# Live-PG round-trip gate moved to ``tests/conftest.py::needs_live_pg``
+# (CONFTEST_NEON_EPHEMERAL_FIXTURE). Tests that need a real DB take
+# ``needs_live_pg`` as a function parameter.
 
 
 # ----------------------------- normalize_for_hash -----------------------------
@@ -293,11 +292,10 @@ def test_review_insert_rejects_empty_rule_name() -> None:
 
 
 # ============================== live-PG round trip ==============================
-# Exercises the SQL against a throwaway DB when TEST_DATABASE_URL is set.
+# Exercises the SQL against a throwaway DB via ``needs_live_pg`` fixture.
 
 
-@requires_db
-def test_hash_store_round_trip_against_live_pg() -> None:
+def test_hash_store_round_trip_against_live_pg(needs_live_pg) -> None:
     """insert_hash → has_seen_recent → (advance clock via manual TTL) →
     cleanup_expired. Tables created via the loop-infrastructure migration."""
     import re as _re
@@ -313,7 +311,7 @@ def test_hash_store_round_trip_against_live_pg() -> None:
         for line in down_commented.splitlines()
     )
 
-    conn = psycopg2.connect(TEST_DB_URL)
+    conn = psycopg2.connect(needs_live_pg)
     try:
         with conn.cursor() as cur:
             cur.execute(down)  # defensive cleanup

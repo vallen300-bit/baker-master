@@ -2,20 +2,19 @@
 
 Strategy — gated live-PostgreSQL test. Runs the UP migration against a test
 database, verifies each expected table + index exists, runs the DOWN
-migration, verifies cleanup. Skips entirely when TEST_DATABASE_URL is unset
-so local unit runs and CI (no DB) don't fail.
+migration, verifies cleanup. Skips when no live PG is available
+(``tests/conftest.py::needs_live_pg`` resolves ``TEST_DATABASE_URL`` or
+an ephemeral Neon branch, otherwise calls ``pytest.skip``).
 
-Set TEST_DATABASE_URL to a throwaway branch/schema — NOT production. The
-test wraps each migration in its own transaction and drops tables at the
-end even if assertions fail, but cross-test contamination is only fully
-guaranteed when the URL points at an ephemeral DB.
+Set ``TEST_DATABASE_URL`` to a throwaway branch/schema — NOT production.
+In CI, ``NEON_API_KEY`` + ``NEON_PROJECT_ID`` drive session-scoped branch
+provisioning; see ``CONFTEST_NEON_EPHEMERAL_FIXTURE``.
 
 Discovery: migration files under migrations/ get a dedicated test module
 each (one module per migration ticket) so a failure localizes to a ticket.
 """
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 
@@ -24,12 +23,6 @@ import pytest
 psycopg2 = pytest.importorskip("psycopg2", reason="psycopg2 required for migration tests")
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
-TEST_DB_URL = os.environ.get("TEST_DATABASE_URL")
-
-requires_db = pytest.mark.skipif(
-    not TEST_DB_URL,
-    reason="TEST_DATABASE_URL unset — skipping live-PG migration check",
-)
 
 
 _SECTION_RE = re.compile(
@@ -126,11 +119,10 @@ def test_loop_infrastructure_migration_parses_to_up_and_down():
     ].index("ALTER TABLE signal_queue")
 
 
-# ------------- live-PG round-trip (skipped without TEST_DATABASE_URL) --------
+# --------- live-PG round-trip (gated via conftest.py::needs_live_pg) ---------
 
 
-@requires_db
-def test_loop_infrastructure_up_down_round_trip():
+def test_loop_infrastructure_up_down_round_trip(needs_live_pg):
     path = MIGRATIONS_DIR / "20260418_loop_infrastructure.sql"
     sections = _parse_sections(path.read_text(encoding="utf-8"))
 
@@ -142,7 +134,7 @@ def test_loop_infrastructure_up_down_round_trip():
         "idx_kbl_layer0_review_pending",
     )
 
-    conn = psycopg2.connect(TEST_DB_URL)
+    conn = psycopg2.connect(needs_live_pg)
     try:
         with conn.cursor() as cur:
             # Defensive cleanup in case a prior failed run left residue.
