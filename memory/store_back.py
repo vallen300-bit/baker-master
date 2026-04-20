@@ -184,14 +184,12 @@ class SentinelStoreBack:
         self._ensure_cortex_obligations_collection()
 
         # KBL-A: infrastructure schema (§5 of KBL-A brief).
-        # Order is load-bearing: signal_queue must exist (and have KBL-A columns)
-        # BEFORE kbl_cost_ledger / kbl_log because their inline FKs reference
-        # signal_queue(id). See briefs/_drafts/KBL_A_SCHEMA.sql header.
+        # DDL for kbl_cost_ledger / kbl_log lives in
+        # migrations/20260419_add_kbl_cost_ledger_and_kbl_log.sql — no longer
+        # ensured from Python (lesson #37).
         self._ensure_signal_queue_base()
         self._ensure_signal_queue_additions()
         self._ensure_kbl_runtime_state()
-        self._ensure_kbl_cost_ledger()
-        self._ensure_kbl_log()
         self._ensure_kbl_alert_dedupe()
         self._ensure_gold_promote_queue()
 
@@ -6374,11 +6372,7 @@ class SentinelStoreBack:
             self._put_conn(conn)
 
     def _ensure_signal_queue_additions(self):
-        """KBL-A §5: additive columns + expanded CHECK + 3 indexes on signal_queue.
-
-        MUST run before _ensure_kbl_cost_ledger / _ensure_kbl_log because
-        their inline FKs reference signal_queue(id).
-        """
+        """KBL-A §5: additive columns + expanded CHECK + 3 indexes on signal_queue."""
         conn = self._get_conn()
         if not conn:
             return
@@ -6499,94 +6493,6 @@ class SentinelStoreBack:
             except Exception:
                 pass
             logger.warning(f"Could not ensure kbl_runtime_state table: {e}")
-        finally:
-            self._put_conn(conn)
-
-    def _ensure_kbl_cost_ledger(self):
-        """KBL-A §5 / D14: per-call cost tracking. FK to signal_queue with
-        ON DELETE SET NULL so cost rows survive the 30-day signal purge."""
-        conn = self._get_conn()
-        if not conn:
-            return
-        try:
-            cur = conn.cursor()
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS kbl_cost_ledger (
-                    id             BIGSERIAL PRIMARY KEY,
-                    ts             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    signal_id      INTEGER REFERENCES signal_queue(id) ON DELETE SET NULL,
-                    step           TEXT NOT NULL,
-                    model          TEXT,
-                    input_tokens   INT,
-                    output_tokens  INT,
-                    latency_ms     INT,
-                    cost_usd       NUMERIC(10,6) NOT NULL DEFAULT 0,
-                    success        BOOLEAN NOT NULL DEFAULT TRUE,
-                    metadata       JSONB
-                )
-            """)
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_cost_ledger_day
-                    ON kbl_cost_ledger ((ts::date))
-            """)
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_cost_ledger_signal
-                    ON kbl_cost_ledger (signal_id, ts) WHERE signal_id IS NOT NULL
-            """)
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_cost_ledger_step_day
-                    ON kbl_cost_ledger (step, (ts::date))
-            """)
-            conn.commit()
-            cur.close()
-            logger.info("kbl_cost_ledger table verified (FK signal_id → signal_queue)")
-        except Exception as e:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            logger.warning(f"Could not ensure kbl_cost_ledger table: {e}")
-        finally:
-            self._put_conn(conn)
-
-    def _ensure_kbl_log(self):
-        """KBL-A §5 / D15: WARN+ central log. R1.S2/S12: INFO dropped from
-        CHECK (INFO routed to local rotating files only). FK to signal_queue
-        with ON DELETE SET NULL."""
-        conn = self._get_conn()
-        if not conn:
-            return
-        try:
-            cur = conn.cursor()
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS kbl_log (
-                    id         BIGSERIAL PRIMARY KEY,
-                    ts         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                    level      TEXT NOT NULL
-                               CHECK (level IN ('WARN','ERROR','CRITICAL')),
-                    component  TEXT NOT NULL,
-                    signal_id  INTEGER REFERENCES signal_queue(id) ON DELETE SET NULL,
-                    message    TEXT NOT NULL,
-                    metadata   JSONB
-                )
-            """)
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_kbl_log_day_level
-                    ON kbl_log ((ts::date), level)
-            """)
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_kbl_log_component
-                    ON kbl_log (component, ts)
-            """)
-            conn.commit()
-            cur.close()
-            logger.info("kbl_log table verified (WARN+ only; FK signal_id → signal_queue)")
-        except Exception as e:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            logger.warning(f"Could not ensure kbl_log table: {e}")
         finally:
             self._put_conn(conn)
 
