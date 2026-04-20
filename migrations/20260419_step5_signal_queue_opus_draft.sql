@@ -1,3 +1,4 @@
+-- == migrate:up ==
 -- STEP5-OPUS-IMPL: signal_queue + circuit-breaker state for Step 5 Opus synthesis
 -- Ticket: briefs/_tasks/CODE_1_PENDING.md STEP5-OPUS-IMPL (2026-04-19)
 -- Additive, idempotent. ADD COLUMN IF NOT EXISTS + CREATE TABLE IF NOT EXISTS.

@@ -1,3 +1,4 @@
+-- == migrate:up ==
 -- STEP6-FINALIZE-IMPL: cross-link staging queue (Option C)
 -- Ticket: briefs/_tasks/CODE_1_PENDING.md STEP6-FINALIZE-IMPL (2026-04-19)
 -- Director-ratified design: Render (Step 6) performs zero vault FS writes;

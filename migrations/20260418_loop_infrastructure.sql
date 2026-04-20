@@ -1,3 +1,4 @@
+-- == migrate:up ==
 -- LOOP-SCHEMA-1: Learning Loop infrastructure tables
 -- Ticket: briefs/_tasks/CODE_1_PENDING.md LOOP-SCHEMA-1 (2026-04-18)
 -- CHANDA §2 Leg 2 (Capture) + Leg 3 (Flow-forward) storage layer.

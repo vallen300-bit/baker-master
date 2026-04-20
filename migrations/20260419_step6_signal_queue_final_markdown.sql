@@ -1,3 +1,4 @@
+-- == migrate:up ==
 -- STEP6-FINALIZE-IMPL: signal_queue columns for Pydantic-validated Silver output
 -- Ticket: briefs/_tasks/CODE_1_PENDING.md STEP6-FINALIZE-IMPL (2026-04-19)
 -- Additive, idempotent.

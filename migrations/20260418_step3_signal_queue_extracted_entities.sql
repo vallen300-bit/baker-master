@@ -1,3 +1,4 @@
+-- == migrate:up ==
 -- STEP3-EXTRACT-IMPL: signal_queue column for Step 3 output
 -- Ticket: briefs/_tasks/CODE_1_PENDING.md STEP3-EXTRACT-IMPL (2026-04-18)
 -- Additive, idempotent. ADD COLUMN IF NOT EXISTS + CREATE INDEX IF NOT EXISTS.

@@ -326,11 +326,15 @@ def _serialize(obj: dict) -> dict:
 # Startup
 # ============================================================
 
-@app.on_event("startup")
-async def startup():
-    """Initialize shared resources on server start."""
-    logger.info("Baker Dashboard starting...")
-    # Pre-warm the store connection
+def _init_store() -> None:
+    """Pre-warm the PostgreSQL store and apply the legacy inline DDL block.
+
+    Warn-and-continue semantics on cold-start failure: a flaky PG cold start
+    is transient and the scheduler can retry. This is DELIBERATELY different
+    from ``_run_migrations`` which raises loud on any failure — migration
+    drift is a permanent state bug, not a transient retry (P2 of the
+    MIGRATION_RUNNER_1 brief's polish list).
+    """
     try:
         store = _get_store()
         logger.info("PostgreSQL store initialized")
@@ -400,12 +404,51 @@ async def startup():
     except Exception as e:
         logger.warning(f"PostgreSQL connection failed on startup (will retry): {e}")
 
-    # Start Sentinel trigger scheduler (BackgroundScheduler)
+
+def _run_migrations() -> None:
+    """Apply ``migrations/*.sql`` before any scheduler job registers.
+
+    Raise-loud on any failure — caller is the FastAPI startup lifespan,
+    which must refuse to finish starting on a half-applied schema. See
+    ``config/migration_runner.py`` module docstring for rationale.
+    """
+    from config.migration_runner import run_pending_migrations, MigrationError
+
+    try:
+        applied = run_pending_migrations(os.environ["DATABASE_URL"])
+        if applied:
+            for f in applied:
+                logger.info("migration applied: %s", f)
+        else:
+            logger.info("migrations: all up-to-date")
+    except MigrationError as me:
+        logger.error("migration runner failed; aborting startup: %s", me)
+        raise
+
+
+def _start_scheduler() -> None:
+    """Start the Sentinel BackgroundScheduler (KBL pipeline tick, triggers)."""
     try:
         start_scheduler()
         logger.info("Sentinel scheduler started (BackgroundScheduler)")
     except Exception as e:
         logger.error(f"Scheduler failed to start: {e}")
+
+
+@app.on_event("startup")
+async def startup():
+    """Initialize shared resources on server start.
+
+    Ordering is load-bearing: ``_run_migrations`` must run BEFORE
+    ``_start_scheduler`` so ``kbl_pipeline_tick`` never ticks against a
+    partial schema. Enforced by ``tests/test_migration_runner.py::
+    test_migration_runner_runs_before_scheduler`` via Mock manager
+    ``mock_calls`` assertion (N1 — runtime fixture, not AST).
+    """
+    logger.info("Baker Dashboard starting...")
+    _init_store()
+    _run_migrations()
+    _start_scheduler()
 
     # Backfills in background threads — delayed 60s to let scheduler stabilize (OOM fix)
     import threading
