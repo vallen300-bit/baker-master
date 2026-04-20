@@ -2,30 +2,57 @@
 
 **From:** AI Head
 **To:** Code Brisen #2 (fresh terminal tab)
-**Task posted:** 2026-04-20 (morning, post-B1 FEEDLY_WHOOP_KILL ship)
-**Status:** OPEN — PR #24 FEEDLY_WHOOP_KILL review
+**Task posted:** 2026-04-20 (midday, post-SOT Phase A dispatch)
+**Status:** QUEUED — waiting on B1 to ship Phase A PR
 
 ---
 
-## Task: PR #24 review
+## Task: Review SOT_OBSIDIAN_UNIFICATION_1 Phase A PR (when it lands)
 
-B1 shipped at `9600168` on branch `feedly-whoop-kill`. Scope = retire two dead sensors (Whoop + Feedly): delete `_ensure_whoop_tables` + `upsert_whoop_record` from `memory/store_back.py` (zero callers), scrub Whoop examples from `orchestrator/agent.py` (3 string edits), drop `whoop` from `orchestrator/complexity_router.py` regex, remove phantom `whoop_trigger.py` line from `.claude/agents/ai-head.md`, update `.claude/agents/baker-it.md` + ai-head `MEMORY.md` sentinel count, generalize one Feedly docstring in `triggers/rss_client.py`.
+B1 is executing Phase A of SOT_OBSIDIAN_UNIFICATION_1 against `baker-vault` repo (not baker-master). Brief at `briefs/BRIEF_SOT_OBSIDIAN_UNIFICATION_1.md` in baker-master at commit `4596383` — read the whole brief end-to-end before reviewing, especially §Fix/Feature 1 (Phase A).
 
-Brief: `briefs/_tasks/CODE_1_PENDING.md` at `418110b`.
+### When the PR lands
 
-**PR URL:** https://github.com/vallen300-bit/baker-master/pull/24
+B1 will open a PR against `vallen300-bit/baker-vault` main (branch `sot-obsidian-1-phase-a`). You review. One-time setup on your side:
+
+```bash
+cd ~
+[ -d bv-b2 ] || git clone https://github.com/vallen300-bit/baker-vault.git bv-b2
+cd bv-b2
+git fetch origin sot-obsidian-1-phase-a
+git checkout sot-obsidian-1-phase-a
+```
 
 ### Verdict focus
 
-- `grep -ri "whoop" . --exclude-dir={.git,node_modules}` → zero matches (except potentially historical files like `tasks/lessons.md`, `briefs/_handovers/`, `briefs/_reports/` which are archive/frozen and out of scope).
-- `grep -ri "feedly" . --exclude-dir={.git,node_modules}` → zero matches (same archive carve-out).
-- `whoop_records` table NOT dropped (schema preserved per brief).
-- `rss_feeds` / `rss_articles` tables NOT touched (direct RSS continues).
-- No regressions: `pytest tests/` count matches main baseline (B1 reports 16/596 same as `main@34a9648`).
-- No schema changes. No migration file added.
-- Other `_ensure_*` methods in `store_back.py` (Qdrant collection ensures, signal_queue ensures, etc.) MUST remain intact. Spot-check.
-- The 3 Tier B items B1 flagged in the PR description (Render env-var scan, `trigger_watermarks` row delete SQL, CLAUDE.md Dropbox edit) are AI Head's post-merge responsibilities — DO NOT execute them as part of this review.
+**Scaffold completeness (brief §Fix/Feature 1):**
+- `_ops/` tree has exactly 4 subdirs: `skills/`, `briefs/`, `agents/`, `processes/`.
+- `_install/` exists with `sync_skills.sh` (executable, skeleton only).
+- 6 markdown files landed: `_ops/INDEX.md`, `_ops/skills/INDEX.md`, `_ops/briefs/INDEX.md`, `_ops/briefs/TEMPLATE.md`, `_ops/agents/INDEX.md`, `_ops/processes/INDEX.md`, `_ops/processes/writer-contract.md` (7 files total — count INDEXes).
+- All markdown files have frontmatter `type: ops` + `ignore_by_pipeline: true`.
+- `writer-contract.md` text matches brief §1.7 verbatim (or equivalently clear — small wording variations OK as long as semantics preserved).
+- `TEMPLATE.md` contains the `/write-brief` protocol text (8000+ LOC from `~/.claude/skills/write-brief/SKILL.md`) + frontmatter block.
 
-Report to `briefs/_reports/B2_pr24_review_<YYYYMMDD>.md`. APPROVE / REDIRECT / REQUEST_CHANGES. If APPROVE, AI Head auto-merges per Tier A protocol.
+**Guardrails respected:**
+- `wiki/` UNTOUCHED (confirm via `git diff origin/main HEAD -- wiki/` → empty output).
+- `CHANDA.md` UNTOUCHED.
+- `slugs.yml`, `config/`, `schema/`, `raw/` all UNTOUCHED.
+- No migration of real content — this phase is additive only.
+- `_install/sync_skills.sh` is Phase A skeleton (just echoes "Phase A skeleton", exits 0 — does NOT touch `~/.claude/skills/`).
+
+**Safety check on sync script skeleton:**
+- No `rm`, no `ln`, no file writes in `sync_skills.sh`. Literally just echoes + `exit 0`.
+- If you see any actual filesystem mutation in the Phase A sync script, REQUEST_CHANGES — that belongs in Phase B.
+
+**Commit message quality:**
+- References "SOT_OBSIDIAN_UNIFICATION_1 Phase A" in the subject.
+- Cites Director authorization 2026-04-20.
+- Co-Authored-By line present.
+
+### Output
+
+Report to `~/bv-b2/_reports/B2_sot_phase_a_review_<YYYYMMDD>.md` (or the equivalent location B1 chooses — may need to create `_reports/` in baker-vault or stick with pattern from baker-master). APPROVE / REDIRECT / REQUEST_CHANGES.
+
+If APPROVE, AI Head auto-merges per Tier A protocol.
 
 Expected time: 15-20 min.

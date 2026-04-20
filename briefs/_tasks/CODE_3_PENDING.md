@@ -2,56 +2,21 @@
 
 **From:** AI Head
 **To:** Code Brisen #3 (fresh terminal tab)
-**Task posted:** 2026-04-20 (morning)
-**Status:** OPEN — drop CI workflow from PR #23
+**Task posted:** 2026-04-20 (midday)
+**Status:** IDLE — standing by
 
 ---
 
-## Task: PR23_DROP_WORKFLOW — remove `.github/workflows/pytest.yml` from your own PR #23
+## Status: no active task
 
-Director-authorized 2026-04-20 *(plain English: "I agree with your recommendations")*.
+B1 is on SOT_OBSIDIAN_UNIFICATION_1 Phase A (brief at `briefs/BRIEF_SOT_OBSIDIAN_UNIFICATION_1.md`, commit `4596383` in baker-master).
+B2 is queued for Phase A review.
 
-### Context
+**Your turn is next.** Likely candidates:
 
-Your PR #23 ran its first CI pass 01:58 UTC and failed in 40s — the workflow `pytest tests/ -v` runs the full test suite, but a big fraction of those tests need real DB / Qdrant / external API secrets that GitHub Actions doesn't have. Not a fixture bug; workflow scope is too aggressive for a first CI pass.
+- **SOT Phase B** — migrate AI Dennis (3 copies → 1 symlink), split memory into 3 files per skill v3 spec, populate skill/process registries. Brief §Fix/Feature 2. Estimated 2-3h. Depends on Phase A merge.
+- **RSS source list bulk import** — once Director finishes working with his research agent in the other window, he'll hand back a list of ~34 verified RSS sources with cluster assignments. Task = bulk INSERT into `rss_feeds` table + re-enable feeds. Estimated 30-45 min.
 
-**Decision:** drop the workflow file from PR #23 entirely and ship just the conftest fixture. CI scope becomes a separate design question we take up post-production-flip.
+Close your tab per memory-hygiene rule §8. AI Head will update this mailbox when either task is ready to dispatch and ping Director with a fenced paste block.
 
-### Scope
-
-On branch `conftest-neon-ephemeral-fixture`:
-
-```bash
-cd ~/bm-b3
-git checkout conftest-neon-ephemeral-fixture
-git pull
-git rm .github/workflows/pytest.yml
-# If .github/workflows/ is now empty, also remove the dir:
-rmdir -p .github/workflows .github 2>/dev/null || true
-git commit -m "CONFTEST_NEON_EPHEMERAL_FIXTURE: drop premature CI workflow
-
-First run failed 40s — workflow scope covered the full test suite which
-needs DB/Qdrant/API secrets not set in GHA. Decision per AI Head / Director
-2026-04-20: ship the conftest fixture alone; defer CI scope design to a
-separate brief post-production-flip.
-
-Fixture is still useful: local pytest already unifies on needs_live_pg +
-ephemeral_neon_db, and any future CI workflow can pick up the fixture
-without further changes here.
-
-Co-Authored-By: Code Brisen 3 <code-brisen-3@brisengroup.com>"
-git push origin conftest-neon-ephemeral-fixture
-```
-
-### Acceptance
-
-1. `git ls-tree origin/conftest-neon-ephemeral-fixture .github/` returns empty (or `.github/` absent entirely).
-2. No new CI run fires (the workflow file is gone).
-3. `pytest tests/ -xvs` still green on your machine — fixture itself untouched.
-4. `gh pr view 23 --json mergeStateStatus` returns `CLEAN` (no failing required-check bubble).
-
-### Output
-
-Ping AI Head once pushed. AI Head updates B2's mailbox to unblock PR #23 review.
-
-Expected: 5-10 min.
+Expected wait: 1-2 hours depending on B1 pace.
