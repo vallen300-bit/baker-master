@@ -2,50 +2,45 @@
 
 **From:** AI Head
 **To:** Code Brisen #3 (fresh terminal tab)
-**Task posted:** 2026-04-20 (afternoon, post-bridge-ship)
-**Status:** OPEN — Bridge review (reassigned from B2)
+**Task posted:** 2026-04-20 (afternoon, post-bridge-merge + post-Phase-B-merge)
+**Status:** OPEN — SOT_OBSIDIAN_UNIFICATION_1 Phase C
 
 ---
 
-## Task: Review PR #27 (baker-master) — ALERTS_TO_SIGNAL_QUEUE_BRIDGE_1
+## Task: Phase C — migrate `Baker-Project/pm/briefs/` → `_ops/briefs/`
 
-You accepted this review per your standing-down note ("bridge-review reroute if B2 is bottlenecked"). B2 is taking Phase B; you take bridge. Parallelizing doubles Gate 1 throughput.
+Gate cleared: Phase B merged at baker-vault `778e704`. Runtime symlink flip for AI Dennis completed (AI Head, Tier B, logged). Phase A + B subtree now populated and live-linked.
 
-**PR:** https://github.com/vallen300-bit/baker-master/pull/27
-**Branch:** `alerts-to-signal-queue-bridge-1`
-**Head commit:** `b18226e`
-**Shipped by:** B1
-**Scope:** Pure DB→DB bridge — `kbl/bridge/alerts_to_signal.py` (~330 LOC) + `kbl_bridge_tick` scheduler job + 38-case test suite
-
-Brief reference: `briefs/BRIEF_ALERTS_TO_SIGNAL_QUEUE_BRIDGE_1.md` at commit `d449b6c`. Read brief end-to-end before reviewing — the 4-axis filter + stop-list logic is the load-bearing part.
+**Brief:** `briefs/BRIEF_SOT_OBSIDIAN_UNIFICATION_1.md` at commit `4596383` in baker-master — read §Fix/Feature 3 (Phase C) end-to-end before starting.
 
 ---
 
-## B1's three flagged deviations (you decide — each defensible, but reviewer call)
+## Scope summary (full detail in brief §3)
 
-1. **Priority as TEXT (`urgent`/`normal`/`low`), not int.** Justification: `signal_queue.priority` column is TEXT; ORDER BY DESC on TEXT lex order happens to give `urgent > normal > low` alphabetically. Risk: adding a 4th priority later ("critical") could break ordering if inserted mid-lex. Check: does mapping doc this assumption? Is there a unit test proving ORDER BY lex matches intended severity order for the 3 current values?
+- Freeze `/Users/dimitry/Vallen Dropbox/Dimitry vallen/Baker-Project/pm/briefs/` as historical (add FROZEN.md banner — do NOT delete any files).
+- Migrate 8 active non-`_DONE_*` briefs → `_ops/briefs/<name>.md` in baker-vault with proper frontmatter (writer-contract per Phase A).
+- Populate `_ops/briefs/INDEX.md` registry. Include:
+  - The 8 migrated briefs
+  - This session's 4 shipped briefs (SOT Phase A + B commit refs, bridge brief, helper v2 brief).
+  - Plus the bridge brief itself + SOT brief.
+- Copy `BRIEF_SOT_OBSIDIAN_UNIFICATION_1.md` to `_ops/briefs/` (chicken-and-egg resolved — brief self-references once in vault).
+- Document new brief dispatch path in `_ops/processes/git-mailbox.md`: B-codes now pull baker-vault in addition to baker-master for new briefs.
 
-2. **Auction stop-list split out of regex alternation.** Justification: Python `re` can't express brief's "Brisen anywhere in vicinity" pattern with fixed-width lookbehind alone. B1 split into two patterns. Check: does the split preserve brief's negative-lookaround semantics? Unit tests cover both paths?
+**Copy-forward only. No deletions.** Lesson #16 applies — every migrated brief must land in git at destination before Dropbox-side is archived.
 
-3. **Skipped `config/settings.py` modification.** Justification: matched existing inline-read pattern used by `KBL_PIPELINE_TICK_INTERVAL_SECONDS`. Check: is `BRIDGE_TICK_INTERVAL_SECONDS` read with same `os.getenv(..., default)` shape + 30s floor enforced? Consistency with sibling scheduler jobs?
+## Target
 
-All three are architectural judgment calls, not errors. Brief ratification authorized reasonable deviation with paper trail. Your call.
+- **Repo:** baker-vault
+- **Branch:** `sot-obsidian-1-phase-c`
+- **Base:** `main` at `778e704` (post-Phase-B)
+- **Reviewer:** B2
 
-## Verdict focus (beyond deviations)
-
-- `should_bridge()` pure function: 4 axes evaluated independently + stop-list overrides permissive axes?
-- `map_alert_to_signal()`: mapping shape matches signal_queue schema exactly (no extra/missing columns)?
-- Watermark row: `source='alerts_to_signal_bridge'`? Rollback-safe (watermark updated ONLY after successful INSERT)?
-- Idempotency: rerunning bridge tick with no new alerts is a no-op? Test exists?
-- 38 tests: every axis covered + all 13 stop-list patterns + mapping shape + idempotency + watermark rollback?
-
-**Reviewer-separation:** B1 implemented. You shipped unrelated helper v2 in parallel. Clean to review.
-
-Report to `briefs/_reports/B3_pr27_bridge_review_20260420.md` in baker-master. APPROVE / REDIRECT / REQUEST_CHANGES. AI Head auto-merges on APPROVE per Tier A.
+Report your ship to `_reports/B3_sot_phase_c_ship_<YYYYMMDD>.md` in baker-vault. B2 reviews per normal flow. AI Head auto-merges on APPROVE per Tier A.
 
 ## After this
 
-If APPROVE + merge: Day 1 teaching fires. AI Head takes it from there — you stand down for SOT Phase C (gated on Phase B merge).
-If REDIRECT/REQUEST_CHANGES: B1 recalled.
+Phase D is next (MCP bridge `baker_vault_read` to equip Cowork-side AI Dennis). AI Head will author a separate transport sub-brief (`SOT_OBSIDIAN_1_PHASE_D_TRANSPORT.md`) first. Phase E (CHANDA Inv 9 refinement + pipeline frontmatter filter) follows — CHANDA edit is Tier B, Director's explicit yes required.
 
-Close tab after report shipped.
+You're not on Phase D implementation yet — that routes TBD once transport is decided. You'll get a fresh dispatch when it's time.
+
+Close tab after ship.
