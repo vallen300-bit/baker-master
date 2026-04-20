@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Baker System Architecture — Role Division</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d27;
+    --card-hover: #222633;
+    --border: #2a2e3d;
+    --accent-baker: #4f8cff;
+    --accent-cowork: #a78bfa;
+    --accent-director: #f59e42;
+    --accent-world: #34d399;
+    --text: #e2e4ea;
+    --text-dim: #8b8fa3;
+    --text-bright: #ffffff;
+    --flow-line: #3a3f52;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    min-height: 100vh;
+  }
+  .container { max-width: 1200px; margin: 0 auto; }
+
+  /* Header */
+  .header {
+    text-align: center;
+    margin-bottom: 3rem;
+    padding-bottom: 2rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .header h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-bright);
+    letter-spacing: -0.02em;
+  }
+  .header .sub {
+    color: var(--text-dim);
+    font-size: 0.95rem;
+    margin-top: 0.5rem;
+  }
+  .header .version {
+    display: inline-block;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.2rem 0.7rem;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin-top: 0.75rem;
+  }
+
+  /* Three Actors */
+  .actors {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+    margin-bottom: 3rem;
+  }
+  .actor-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.75rem;
+    transition: border-color 0.2s, transform 0.15s;
+    position: relative;
+    overflow: hidden;
+  }
+  .actor-card:hover {
+    transform: translateY(-2px);
+    background: var(--card-hover);
+  }
+  .actor-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+  }
+  .actor-card.baker::before { background: var(--accent-baker); }
+  .actor-card.cowork::before { background: var(--accent-cowork); }
+  .actor-card.director::before { background: var(--accent-director); }
+  .actor-card:hover.baker { border-color: var(--accent-baker); }
+  .actor-card:hover.cowork { border-color: var(--accent-cowork); }
+  .actor-card:hover.director { border-color: var(--accent-director); }
+
+  .actor-icon {
+    width: 48px; height: 48px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+  }
+  .baker .actor-icon { background: rgba(79,140,255,0.15); }
+  .cowork .actor-icon { background: rgba(167,139,250,0.15); }
+  .director .actor-icon { background: rgba(245,158,66,0.15); }
+
+  .actor-card h2 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin-bottom: 0.25rem;
+  }
+  .actor-role {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.75rem;
+  }
+  .baker .actor-role { color: var(--accent-baker); }
+  .cowork .actor-role { color: var(--accent-cowork); }
+  .director .actor-role { color: var(--accent-director); }
+
+  .actor-metaphor {
+    font-style: italic;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .does, .doesnt {
+    font-size: 0.85rem;
+    margin-bottom: 0.75rem;
+  }
+  .does strong, .doesnt strong {
+    display: block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.35rem;
+  }
+  .does strong { color: var(--accent-world); }
+  .doesnt strong { color: #ef4444; }
+  .doesnt { color: var(--text-dim); }
+
+  /* Section headers */
+  .section-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin-bottom: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* Flow Table */
+  .flow-section { margin-bottom: 3rem; }
+  .flow-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 0.85rem;
+  }
+  .flow-table th {
+    background: var(--card);
+    color: var(--text-dim);
+    font-weight: 600;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 0.75rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  .flow-table th:first-child { border-radius: 8px 0 0 0; }
+  .flow-table th:last-child { border-radius: 0 8px 0 0; }
+  .flow-table td {
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .flow-table tr:last-child td { border-bottom: none; }
+  .flow-table tr:last-child td:first-child { border-radius: 0 0 0 8px; }
+  .flow-table tr:last-child td:last-child { border-radius: 0 0 8px 0; }
+  .flow-table tbody tr {
+    background: var(--card);
+    transition: background 0.15s;
+  }
+  .flow-table tbody tr:hover { background: var(--card-hover); }
+
+  .tag {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  .tag-baker { background: rgba(79,140,255,0.15); color: var(--accent-baker); }
+  .tag-cowork { background: rgba(167,139,250,0.15); color: var(--accent-cowork); }
+  .tag-director { background: rgba(245,158,66,0.15); color: var(--accent-director); }
+  .tag-world { background: rgba(52,211,153,0.15); color: var(--accent-world); }
+
+  .direction-tag {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    background: rgba(255,255,255,0.05);
+    color: var(--text-dim);
+  }
+
+  .via-cell { color: var(--text-dim); }
+
+  /* Memory Cycle */
+  .cycle-section { margin-bottom: 3rem; }
+  .cycle {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2rem;
+    position: relative;
+  }
+  .cycle-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+    position: relative;
+  }
+  .cycle-step:last-child { margin-bottom: 0; }
+  .cycle-num {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
+  }
+  .cycle-step:not(:last-child) .cycle-num::after {
+    content: '';
+    position: absolute;
+    top: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 2px;
+    height: calc(100% + 0.6rem);
+    background: var(--border);
+  }
+  .cycle-step:nth-child(1) .cycle-num { background: rgba(52,211,153,0.2); color: var(--accent-world); }
+  .cycle-step:nth-child(2) .cycle-num { background: rgba(79,140,255,0.2); color: var(--accent-baker); }
+  .cycle-step:nth-child(3) .cycle-num { background: rgba(167,139,250,0.2); color: var(--accent-cowork); }
+  .cycle-step:nth-child(4) .cycle-num { background: rgba(167,139,250,0.2); color: var(--accent-cowork); }
+  .cycle-step:nth-child(5) .cycle-num { background: rgba(79,140,255,0.2); color: var(--accent-baker); }
+  .cycle-step:nth-child(6) .cycle-num { background: rgba(52,211,153,0.2); color: var(--accent-world); }
+
+  .cycle-content {
+    padding-top: 0.25rem;
+  }
+  .cycle-content .label {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--text-bright);
+  }
+  .cycle-content .desc {
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    margin-top: 0.15rem;
+  }
+
+  /* Principle */
+  .principle {
+    background: linear-gradient(135deg, rgba(79,140,255,0.08), rgba(167,139,250,0.08));
+    border: 1px solid rgba(167,139,250,0.2);
+    border-radius: 12px;
+    padding: 1.5rem 2rem;
+    text-align: center;
+    margin-bottom: 3rem;
+  }
+  .principle .quote {
+    font-size: 1.1rem;
+    font-weight: 500;
+    color: var(--text-bright);
+    font-style: italic;
+  }
+  .principle .attr {
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    margin-top: 0.5rem;
+  }
+
+  /* Tech Stack */
+  .stack-section { margin-bottom: 3rem; }
+  .stack-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0.75rem;
+  }
+  .stack-item {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    transition: background 0.15s;
+  }
+  .stack-item:hover { background: var(--card-hover); }
+  .stack-icon {
+    width: 36px; height: 36px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1rem;
+    background: rgba(255,255,255,0.05);
+    flex-shrink: 0;
+  }
+  .stack-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-bright);
+  }
+  .stack-detail {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+  }
+
+  /* Triggers list */
+  .triggers-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+  .trigger-chip {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.78rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: background 0.15s;
+  }
+  .trigger-chip:hover { background: var(--card-hover); }
+  .trigger-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent-world);
+    flex-shrink: 0;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  /* Footer */
+  .footer {
+    text-align: center;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 0.75rem;
+  }
+
+  /* MCP Tools */
+  .mcp-section { margin-bottom: 3rem; }
+  .mcp-intro {
+    color: var(--text-dim);
+    font-size: 0.88rem;
+    margin-bottom: 1.5rem;
+    max-width: 700px;
+  }
+  .mcp-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .mcp-panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    position: relative;
+    overflow: hidden;
+  }
+  .mcp-panel::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+  }
+  .mcp-panel.read::before { background: var(--accent-baker); }
+  .mcp-panel.write::before { background: var(--accent-cowork); }
+  .mcp-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+  .mcp-panel-header h3 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-bright);
+  }
+  .mcp-count {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+  }
+  .mcp-panel.read .mcp-count { background: rgba(79,140,255,0.15); color: var(--accent-baker); }
+  .mcp-panel.write .mcp-count { background: rgba(167,139,250,0.15); color: var(--accent-cowork); }
+  .mcp-tool {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.55rem 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    font-size: 0.8rem;
+  }
+  .mcp-tool:last-child { border-bottom: none; }
+  .mcp-tool-name {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.72rem;
+    font-weight: 600;
+    white-space: nowrap;
+    min-width: 170px;
+    flex-shrink: 0;
+  }
+  .mcp-panel.read .mcp-tool-name { color: var(--accent-baker); }
+  .mcp-panel.write .mcp-tool-name { color: var(--accent-cowork); }
+  .mcp-tool-desc {
+    color: var(--text-dim);
+    font-size: 0.78rem;
+  }
+  .mcp-arrow-label {
+    text-align: center;
+    padding: 0.75rem;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    font-style: italic;
+  }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .actors { grid-template-columns: 1fr; }
+    body { padding: 1rem; }
+  }
+  @media (max-width: 600px) {
+    .stack-grid { grid-template-columns: 1fr; }
+    .triggers-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <h1>Baker System Architecture</h1>
+    <div class="sub">Three actors, three jobs — one memory</div>
+    <div class="version">v5.1 — March 2026 — 18 MCP tools live</div>
+  </div>
+
+  <!-- Three Actors -->
+  <div class="section-title">The Three Actors</div>
+  <div class="actors">
+
+    <div class="actor-card baker">
+      <div class="actor-icon">🛡️</div>
+      <h2>Baker (Sentinel)</h2>
+      <div class="actor-role">Chief of Staff</div>
+      <div class="actor-metaphor">"The assistant who never sleeps"</div>
+      <div class="does">
+        <strong>✓ What it does</strong>
+        Monitors all channels — email, WhatsApp, meetings, ClickUp, RSS. Stores everything in memory. Acts on routine tasks: draft emails, update ClickUp, surface deadlines. Answers questions via Scan. Always on guard.
+      </div>
+      <div class="doesnt">
+        <strong>✗ What it doesn't do</strong>
+        Think deeply. Analyze documents. Brainstorm. Create strategy. Make decisions.
+      </div>
+    </div>
+
+    <div class="actor-card cowork">
+      <div class="actor-icon">🧠</div>
+      <h2>Cowork + MCP</h2>
+      <div class="actor-role">The Thinker & Creator</div>
+      <div class="actor-metaphor">"The working session at the Director's desk"</div>
+      <div class="does">
+        <strong>✓ What it does</strong>
+        Deep analysis of legal docs, financial tables, negotiations. Cross-references Baker's memory with new material. Brainstorms solutions. Prepares decisions. Creates documents.
+      </div>
+      <div class="doesnt">
+        <strong>✗ What it doesn't do</strong>
+        Monitor channels. Run 24/7. Act autonomously.
+      </div>
+    </div>
+
+    <div class="actor-card director">
+      <div class="actor-icon">👔</div>
+      <h2>Director (Dimitry)</h2>
+      <div class="actor-role">Final Authority</div>
+      <div class="actor-metaphor">"The Chairman"</div>
+      <div class="does">
+        <strong>✓ What it does</strong>
+        Decides. Approves. Directs both Baker and Cowork.
+      </div>
+      <div class="doesnt">
+        <strong>✗ What it doesn't do</strong>
+        Everything else — that's what Baker and Cowork are for.
+      </div>
+    </div>
+
+  </div>
+
+  <!-- How They Connect -->
+  <div class="flow-section">
+    <div class="section-title">How They Connect</div>
+    <table class="flow-table">
+      <thead>
+        <tr>
+          <th>From</th>
+          <th>To</th>
+          <th>Via</th>
+          <th>Direction</th>
+          <th>What Flows</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="tag tag-world">World</span></td>
+          <td><span class="tag tag-baker">Baker</span></td>
+          <td class="via-cell">Triggers — Gmail, WhatsApp, Fireflies, ClickUp, RSS, Whoop, Dropbox</td>
+          <td><span class="direction-tag">→ Inbound</span></td>
+          <td>Raw data: emails, messages, transcripts, tasks, articles, health</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-baker">Baker</span></td>
+          <td><span class="tag tag-baker">Baker</span></td>
+          <td class="via-cell">Pipeline — Classify → Retrieve → Augment → Generate → Store</td>
+          <td><span class="direction-tag">↻ Internal</span></td>
+          <td>Processed intelligence: embeddings, structured records, briefings</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-baker">Baker</span></td>
+          <td><span class="tag tag-director">Director</span></td>
+          <td class="via-cell">CEO Cockpit (Scan) + WhatsApp</td>
+          <td><span class="direction-tag">→ Outbound</span></td>
+          <td>Briefings, answers, alerts, draft emails</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-director">Director</span></td>
+          <td><span class="tag tag-baker">Baker</span></td>
+          <td class="via-cell">Scan chat + WhatsApp</td>
+          <td><span class="direction-tag">← Inbound</span></td>
+          <td>Questions, approvals, commands</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-baker">Baker</span></td>
+          <td><span class="tag tag-cowork">Cowork</span></td>
+          <td class="via-cell">MCP Server — 14 read tools + raw SQL</td>
+          <td><span class="direction-tag">→ Read</span></td>
+          <td>Memory: deadlines, emails, contacts, tasks, meetings, conversations, health, RSS, analyses</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-cowork">Cowork</span></td>
+          <td><span class="tag tag-baker">Baker</span></td>
+          <td class="via-cell">MCP Server — 4 write tools (live)</td>
+          <td><span class="direction-tag">← Write-back</span></td>
+          <td>Decisions, deadlines, VIP contacts, analysis reports</td>
+        </tr>
+        <tr>
+          <td><span class="tag tag-cowork">Cowork</span></td>
+          <td><span class="tag tag-director">Director</span></td>
+          <td class="via-cell">Session output — handover files, documents</td>
+          <td><span class="direction-tag">→ Outbound</span></td>
+          <td>Analysis, strategies, prepared decisions</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Memory Cycle -->
+  <div class="cycle-section">
+    <div class="section-title">The Memory Cycle</div>
+    <div class="cycle">
+      <div class="cycle-step">
+        <div class="cycle-num">1</div>
+        <div class="cycle-content">
+          <div class="label">World → Baker ingests → Baker remembers</div>
+          <div class="desc">All channels feed raw data into Sentinel's memory stores (PostgreSQL + Qdrant)</div>
+        </div>
+      </div>
+      <div class="cycle-step">
+        <div class="cycle-num">2</div>
+        <div class="cycle-content">
+          <div class="label">Director opens Cowork → MCP reads Baker's memory</div>
+          <div class="desc">14 read tools surface deadlines, emails, contacts, tasks, meetings, conversations</div>
+        </div>
+      </div>
+      <div class="cycle-step">
+        <div class="cycle-num">3</div>
+        <div class="cycle-content">
+          <div class="label">Director + Cowork think together → reach decision</div>
+          <div class="desc">Deep analysis, cross-referencing, brainstorming — the working session</div>
+        </div>
+      </div>
+      <div class="cycle-step">
+        <div class="cycle-num">4</div>
+        <div class="cycle-content">
+          <div class="label">Cowork writes back to Baker via MCP</div>
+          <div class="desc">Decisions, notes, analysis conclusions flow back into Baker's memory</div>
+        </div>
+      </div>
+      <div class="cycle-step">
+        <div class="cycle-num">5</div>
+        <div class="cycle-content">
+          <div class="label">Baker remembers the decision</div>
+          <div class="desc">Stored in structured DB + vector memory — available to all future queries</div>
+        </div>
+      </div>
+      <div class="cycle-step">
+        <div class="cycle-num">6</div>
+        <div class="cycle-content">
+          <div class="label">Baker acts on it → World</div>
+          <div class="desc">Next trigger cycle picks up the decision — emails sent, tasks updated, alerts fired</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Key Principle -->
+  <div class="principle">
+    <div class="quote">"Baker never forgets, Cowork never stops thinking.<br>The MCP bridge makes them one system."</div>
+    <div class="attr">System Design Principle</div>
+  </div>
+
+  <!-- MCP Bridge: 18 Tools -->
+  <div class="mcp-section">
+    <div class="section-title">The MCP Bridge — 18 Tools</div>
+    <div class="mcp-intro">
+      The direct connection between Cowork (thinking sessions) and Baker (24/7 memory). Cowork reads everything Baker knows and writes back what the Director decides.
+    </div>
+    <div class="mcp-grid">
+
+      <div class="mcp-panel read">
+        <div class="mcp-panel-header">
+          <h3>Read Tools</h3>
+          <span class="mcp-count">14 TOOLS</span>
+        </div>
+        <div class="mcp-tool"><span class="mcp-tool-name">baker_deadlines</span><span class="mcp-tool-desc">Active deadlines — due dates, priority, confidence</span></div>
+        <div class="mcp-tool"><span class="mcp-tool-name">baker_vip_contacts</span><span class="mcp-tool-desc">Key people — name, role, email, notes</span></div>
+        <div class="mcp-tool"><span class="mcp-tool-name">baker_sent_emails</span><span class="mcp-tool-desc">Emails sent on your behalf + reply status</span></div>
+        <div class="mcp-tool"><span class="mcp-tool-name">baker_actions</span><span class="mcp-tool-desc">Baker's action log — what he did and when</span></div>
+        <div class="mcp-tool"><span class="mcp-tool-name">baker_clickup_tasks</span><span class="mcp-tool-desc">Tasks across all 6 ClickUp workspaces</span></div>
+        <div class="mcp-tool"><span class="mcp-tool-name">baker_todoist_tasks</span><span class="mcp-tool-desc">Todoist tasks by project, priority, status</span></div>
+        <div class="mcp-tool"><span class="mcp-tool-name">baker_whoop</span><span class="mcp-tool-desc">Health data — recovery, sleep, strain, HRV</span></div>
+        <div class="mcp-tool"><span class="mcp-tool-name">baker_rss_feeds</span><span class="mcp-tool-desc">Which news feeds Baker monitors</span></div>
+        <div class="mcp-tool"><span class="mcp-tool-name">baker_rss_articles</span><span class="mcp-tool-desc">Recent articles ingested from feeds</span></div>
+        <div class="mcp-tool"><span class="mcp-tool-name">baker_deep_analyses</span><span class="mcp-tool-desc">Past deep analysis reports (full text)</span></div>
+        <div class="mcp-tool"><span class="mcp-tool-name">baker_briefing_queue</span><span class="mcp-tool-desc">Items queued for next daily briefing</span></div>
+        <div class="mcp-tool"><span class="mcp-tool-name">baker_watermarks</span><span class="mcp-tool-desc">Last poll time for each data source</span></div>
+        <div class="mcp-tool"><span class="mcp-tool-name">baker_conversation_memory</span><span class="mcp-tool-desc">Past Scan Q&amp;A with full answers</span></div>
+        <div class="mcp-tool"><span class="mcp-tool-name">baker_raw_query</span><span class="mcp-tool-desc">Escape hatch — any custom SELECT against Baker's DB</span></div>
+      </div>
+
+      <div class="mcp-panel write">
+        <div class="mcp-panel-header">
+          <h3>Write Tools</h3>
+          <span class="mcp-count">4 TOOLS</span>
+        </div>
+        <div class="mcp-tool"><span class="mcp-tool-name">baker_store_decision</span><span class="mcp-tool-desc">Store a decision, insight, or conclusion → decisions table</span></div>
+        <div class="mcp-tool"><span class="mcp-tool-name">baker_add_deadline</span><span class="mcp-tool-desc">Add a date that matters → Baker will track and remind</span></div>
+        <div class="mcp-tool"><span class="mcp-tool-name">baker_upsert_vip</span><span class="mcp-tool-desc">Add or update a person to track → vip_contacts table</span></div>
+        <div class="mcp-tool"><span class="mcp-tool-name">baker_store_analysis</span><span class="mcp-tool-desc">Store a full analysis output → deep_analyses table</span></div>
+        <div style="height: 1.5rem"></div>
+        <div class="mcp-arrow-label">↑ Cowork pushes conclusions back so Baker remembers permanently</div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Tech Stack -->
+  <div class="stack-section">
+    <div class="section-title">Tech Stack</div>
+    <div class="stack-grid">
+      <div class="stack-item">
+        <div class="stack-icon">⚡</div>
+        <div><div class="stack-label">FastAPI</div><div class="stack-detail">Backend — port 8080</div></div>
+      </div>
+      <div class="stack-item">
+        <div class="stack-icon">🐘</div>
+        <div><div class="stack-label">PostgreSQL</div><div class="stack-detail">Neon — structured data</div></div>
+      </div>
+      <div class="stack-item">
+        <div class="stack-icon">🔮</div>
+        <div><div class="stack-label">Qdrant Cloud</div><div class="stack-detail">Vectors — Voyage AI 1024d</div></div>
+      </div>
+      <div class="stack-item">
+        <div class="stack-icon">🤖</div>
+        <div><div class="stack-label">Claude Opus 4.6</div><div class="stack-detail">LLM — 1M context</div></div>
+      </div>
+      <div class="stack-item">
+        <div class="stack-icon">🚀</div>
+        <div><div class="stack-label">Render</div><div class="stack-detail">Auto-deploy from main</div></div>
+      </div>
+      <div class="stack-item">
+        <div class="stack-icon">🔗</div>
+        <div><div class="stack-label">MCP Server</div><div class="stack-detail">14 read + 4 write = 18 tools</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Inbound Triggers -->
+  <div class="stack-section">
+    <div class="section-title">Inbound Triggers (Baker's Ears)</div>
+    <div class="triggers-grid">
+      <div class="trigger-chip"><div class="trigger-dot"></div> Gmail (5 min)</div>
+      <div class="trigger-chip"><div class="trigger-dot"></div> WhatsApp (push)</div>
+      <div class="trigger-chip"><div class="trigger-dot"></div> ClickUp (5 min)</div>
+      <div class="trigger-chip"><div class="trigger-dot"></div> Fireflies</div>
+      <div class="trigger-chip"><div class="trigger-dot"></div> Todoist</div>
+      <div class="trigger-chip"><div class="trigger-dot"></div> RSS Feeds</div>
+      <div class="trigger-chip"><div class="trigger-dot"></div> Whoop Health</div>
+      <div class="trigger-chip"><div class="trigger-dot"></div> Dropbox Watch</div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    Baker System v5.1 — Brisengroup — Last updated March 2, 2026 — 18 MCP tools live
+  </div>
+
+</div>
+</body>
+</html>
