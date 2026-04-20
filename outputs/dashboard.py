@@ -435,6 +435,20 @@ def _start_scheduler() -> None:
         logger.error(f"Scheduler failed to start: {e}")
 
 
+def _ensure_vault_mirror() -> None:
+    """SOT_OBSIDIAN_1_PHASE_D: clone/pull baker-vault mirror on startup.
+
+    Non-fatal on pull failure (transient — next ``vault_sync_tick``
+    retries) but fatal on initial-clone failure so a missing mirror
+    can't go unnoticed. See ``vault_mirror.py`` for scope invariants.
+    """
+    try:
+        from vault_mirror import ensure_mirror
+        ensure_mirror()
+    except Exception as e:
+        logger.error("vault_mirror: ensure_mirror failed on startup: %s", e)
+
+
 @app.on_event("startup")
 async def startup():
     """Initialize shared resources on server start.
@@ -448,6 +462,7 @@ async def startup():
     logger.info("Baker Dashboard starting...")
     _init_store()
     _run_migrations()
+    _ensure_vault_mirror()
     _start_scheduler()
 
     # Backfills in background threads — delayed 60s to let scheduler stabilize (OOM fix)
@@ -1261,6 +1276,13 @@ async def health_check():
     except Exception:
         pass
 
+    vault_mirror_status = {"vault_mirror_last_pull": None, "vault_mirror_commit_sha": None}
+    try:
+        from vault_mirror import mirror_status
+        vault_mirror_status = mirror_status()
+    except Exception:
+        pass
+
     status = "healthy"
     if not db_ok or not scheduler_ok or sentinels_down > 0:
         status = "degraded"
@@ -1272,6 +1294,8 @@ async def health_check():
         "sentinels_healthy": sentinels_healthy,
         "sentinels_down": sentinels_down,
         "sentinels_down_list": sentinels_down_list,
+        "vault_mirror_last_pull": vault_mirror_status["vault_mirror_last_pull"],
+        "vault_mirror_commit_sha": vault_mirror_status["vault_mirror_commit_sha"],
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 

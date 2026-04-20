@@ -259,15 +259,19 @@ def test_startup_call_order():
     manager = Mock()
     with patch("outputs.dashboard._init_store") as m_init, \
          patch("outputs.dashboard._run_migrations") as m_migrate, \
+         patch("outputs.dashboard._ensure_vault_mirror") as m_vault, \
          patch("outputs.dashboard._start_scheduler") as m_start:
         manager.attach_mock(m_init, "init")
         manager.attach_mock(m_migrate, "migrate")
+        manager.attach_mock(m_vault, "vault")
         manager.attach_mock(m_start, "start")
 
         from outputs.dashboard import startup
         asyncio.run(startup())
 
-    assert manager.mock_calls == [call.init(), call.migrate(), call.start()]
+    assert manager.mock_calls == [
+        call.init(), call.migrate(), call.vault(), call.start(),
+    ]
 
 
 # ===========================================================================
