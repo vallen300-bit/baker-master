@@ -115,3 +115,23 @@ Co-Authored-By: AI Head <ai-head@brisengroup.com>
 ```
 
 Expected time: 30-45 min. Ping B1 for review when CI green.
+
+---
+
+## Queued next: review PR #21 (B1's DASHBOARD_COST_ALIAS_RENAME)
+
+**Immediately after you ship your own PR**, review PR #21:
+
+- URL: https://github.com/vallen300-bit/baker-master/pull/21
+- Head: `6198feb`, branch `dashboard-cost-alias-rename`
+- 7 lines added / 7 lines deleted. CLEAN + MERGEABLE.
+- Scope: SQL alias + `ORDER BY` + app.js consumer + 3 test fixture refs + 1 assertion. Column name unchanged.
+- B1 self-reported 9/9 `tests/test_dashboard_kbl_endpoints.py` green on py3.12.
+
+**Verdict focus:**
+- No other `total_usd` consumers missed (grep `outputs/` + `tests/` + any JS).
+- No regressions to sibling cost endpoints (`_usd` alias on a different endpoint that truly holds USD, if any, must stay).
+- Frontend `€` label still intact (lesson: alias rename should not flip header currency).
+
+Post APPROVE in `briefs/_reports/B2_pr21_review_<YYYYMMDD>.md` then AI Head auto-merges per Tier A protocol. No Director intervention needed on routine polish merge.
+
