@@ -2,58 +2,66 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (fresh terminal tab)
-**Task posted:** 2026-04-20 (afternoon, post-B3-review)
-**Status:** OPEN — Phase D recall (2 critical fixes + 4 new tests)
+**Task posted:** 2026-04-20 (evening, post-Phase-D-merge)
+**Status:** OPEN — BRIDGE_HOT_MD_AND_TUNING_1
 
 ---
 
-## Task: Fix S1a + S1b on baker-master PR #28
+## Task: Implement BRIDGE_HOT_MD_AND_TUNING_1
 
-B3's review identified two stacking critical defects that would silently break the mirror on first Render deploy. Both are small deltas but load-bearing. Fix both, add 4 new tests, push to the same branch.
+Brief: `briefs/BRIEF_BRIDGE_HOT_MD_AND_TUNING_1.md` (this commit). Self-contained — read end-to-end. Bundles 4 fixes + 1 new feature, all in the bridge codepath.
 
-**B3 review report:** `briefs/_reports/B3_pr28_phase_d_master_review_20260420.md` on baker-master at head `4be92c9`. Read that first — it has exact file/line pointers + failure-mode reasoning.
-
-**Branch:** `sot-obsidian-1-phase-d-vault-read` (same as before). Do NOT rebase onto main — push fixes on top; B3 will re-review the delta.
+**Why combined:** all touch `kbl/bridge/alerts_to_signal.py` + one new scheduler job + one Director-curated file. One PR pair, one deploy, one review cycle.
 
 ---
 
-## S1a — Remove the wrapper's `try/except Exception` in `outputs/dashboard.py::_ensure_vault_mirror`
+## Scope (full detail in brief)
 
-**Problem:** wrapper catches `Exception` and swallows the `RuntimeError` that `ensure_mirror()` raises on first-clone failure. Brief §1 + your own ship report both promise "fatal on first-clone" — this wrapper defeats both.
+1. **hot.md integration** — 5th axis in `should_bridge()`, populates existing `signal_queue.hot_md_match` column. Reads `baker-vault/_ops/hot.md` via the vault mirror Phase D just deployed.
+2. **Stop-list patterns** from Day 1 Batch #1 noise (cigar, phone scams, fuel policy, retail turnover).
+3. **Idempotency race fix** — Postgres advisory lock around the tick cycle. Alternative fallback (APScheduler `max_instances=1 + coalesce`) documented; **recommendation: advisory lock** (DB-enforced, survives scheduler restart + horizontal scale).
+4. **Saturday morning hot.md nudge** — new `hot_md_weekly_nudge` APScheduler job, cron `0 6 * * SAT`, sends WhatsApp to Director via WAHA. Substrate-push per §9 of operating model.
+5. **Schema migration** — `signal_queue.hot_md_match TEXT NULL`. Applied by MIGRATION_RUNNER_1 on deploy.
 
-**Fix:** delete the `try/except` block entirely. Let the `RuntimeError` propagate up through FastAPI's startup hook so the service fails to boot (as designed). The pull path (subsequent ticks) should still be non-fatal — verify that distinction remains intact.
+**baker-vault PR:** seed `_ops/hot.md` scaffold with header + comment block explaining usage. Initial priorities section blank; Director overwrites Saturday morning.
 
-**Test to add:** `test_startup_call_order.py` (or equivalent): first-clone failure raises at startup → FastAPI lifespan raises → `TestClient(app)` construction fails. Confirm the error propagates, not swallowed.
-
----
-
-## S1b — Inject `GITHUB_TOKEN` into clone URL in `vault_mirror.py::_remote_url`
-
-**Problem:** baker-vault is a PRIVATE repo (verified by B3: `gh repo view baker-vault --json visibility` → PRIVATE). Current `_remote_url` returns `https://github.com/vallen300-bit/baker-vault.git` with no auth. First clone on Render will fail with a 403/auth error.
-
-**Fix:** when `GITHUB_TOKEN` env is set (Render always sets this for baker-master), rewrite the URL to `https://x-access-token:${GITHUB_TOKEN}@github.com/vallen300-bit/baker-vault.git`. When unset, return the plain URL (local dev / test). Do NOT log the tokenized URL — only the host.
-
-**Tests to add:**
-1. `test_token_injection`: with `GITHUB_TOKEN=fake`, `_remote_url()` returns the tokenized form.
-2. `test_override_wins`: if `VAULT_REMOTE_URL` env is also set (future override hook), that wins over token injection.
-3. `test_symlink_escape`: symlink inside `_ops/` pointing to `/etc/passwd` — `baker_vault_read` rejects (closes B3's nit on path-safety test 6/6).
-
-Total: 4 new tests (S1a fatality + 3 above).
+**Reviewer:** B3 (familiar with bridge internals from Phase D review that just cleared).
 
 ---
 
-## Commit shape
+## Key constraints (from brief)
 
-Single commit on top of existing branch. Message: `fix(D): S1a fatal-propagation + S1b GITHUB_TOKEN injection + 4 new tests`. Cite B3's review report in the body.
+- Director-curated only — no code path writes hot.md.
+- Stop-list additions are additive. Don't remove existing patterns.
+- Advisory lock key must be stable (`hashtext(...)` or int constant — not mutable string).
+- Short-pattern floor: 4-char minimum on hot.md entries (prevents "EU" matching everything).
 
-Push to `sot-obsidian-1-phase-d-vault-read`. Do NOT force-push. B3 will re-review the delta (he's closed the tab — AI Head will re-dispatch him after you push).
+---
 
-## Estimated effort
+## Pre-merge verification (NEW — per B3's N3 nit from Phase D)
 
-~20 min per B3's estimate. If it takes more than 45 min, flag.
+Your ship report MUST include:
+1. Migration applied cleanly on fresh TEST_DATABASE_URL (no duplicate-column errors).
+2. Local dry-run: bridge tick against staging alerts with a sample `_ops/hot.md` → expected promote pattern + `hot_md_match` populated.
+3. Advisory-lock proof: concurrent-tick test green.
+4. `hot_md_weekly_nudge` job registered in APScheduler with correct cron.
 
-## baker-vault PR #6 (Cowork doc)
+AI Head will retroactively add a §Pre-merge verification block to the brief template after this ships.
 
-No changes needed there. B3 approved-hold. Master PR #28 must re-approve first, then AI Head merges both together.
+---
 
-Close tab after push.
+## Paper trail
+
+- Commit message: `feat(bridge): BRIDGE_HOT_MD_AND_TUNING_1 — hot.md axis + stop-list + dedup race + Saturday nudge`
+- Co-Authored-By: your line + `AI Head <ai-head@brisengroup.com>`
+- Ship report: `briefs/_reports/B1_bridge_hot_md_ship_<YYYYMMDD>.md` on baker-master
+- Decision already stored: check with `mcp__baker__baker_raw_query` for `trigger_type='architectural_decision'` around 2026-04-20 evening if you want to see Director's ratification; AI Head will store a fresh decision post-merge.
+
+## After this
+
+Day 2 teaching fires immediately post-merge:
+1. AI Head adds a test line to `_ops/hot.md`, verifies bridge sees it within 5 min.
+2. AI Head generates Batch #2 (pre-flagged — Director confirms/overrides only) as soon as 5-10 new signals land.
+3. Stop-list and hot.md iterate every ~12h for the convergence window.
+
+Close tab after ship.
