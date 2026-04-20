@@ -457,6 +457,39 @@ TOOLS = [
             },
         },
     ),
+    # ------------------------------------------------------------------
+    # VAULT-READ TOOLS (SOT_OBSIDIAN_1_PHASE_D) — Cowork reads her own
+    # canonical skill + memory files from the Render-side baker-vault
+    # mirror. Read-only; scoped to `_ops/` subtree only.
+    # ------------------------------------------------------------------
+    Tool(
+        name="baker_vault_list",
+        description="List files in the baker-vault mirror under a given prefix (scoped to `_ops/` — skills, agents, processes, briefs, registries). Use this to discover what canonical files are available. Returns sorted relative paths for `.md`, `.yml`, `.yaml`, `.txt` files only.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "prefix": {
+                    "type": "string",
+                    "description": "Path prefix to list under. Must start with `_ops/`. Default `_ops/`.",
+                    "default": "_ops/",
+                },
+            },
+        },
+    ),
+    Tool(
+        name="baker_vault_read",
+        description="Read a canonical file from the baker-vault mirror (your single source of truth for AI Dennis's skill + memory, write-brief skill, bank-model, etc.). Scoped to `_ops/**` with path-traversal protection. 128 KB cap — oversize files return metadata only. Returns `{path, content_utf8, sha256, bytes, last_commit_sha, truncated}`.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Relative path, e.g. `_ops/skills/it-manager/SKILL.md`. Must start with `_ops/`. Only .md / .yml / .yaml / .txt allowed.",
+                },
+            },
+            "required": ["path"],
+        },
+    ),
 ]
 
 
@@ -961,6 +994,34 @@ def _dispatch(name: str, args: dict) -> str:
             kw = ", ".join(row.get("keywords", []) or [])
             return f"Matter {action} (id={row['id']}): {row['matter_name']}\n  Description: {row.get('description', '')}\n  People: {ppl}\n  Keywords: {kw}"
         return f"Error: failed to save matter '{matter_name}'"
+
+    # ------------------------------------------------------------------
+    # VAULT-READ TOOL HANDLERS (SOT_OBSIDIAN_1_PHASE_D)
+    # ------------------------------------------------------------------
+
+    elif name == "baker_vault_list":
+        from vault_mirror import list_ops_files, VaultPathError
+
+        prefix = args.get("prefix", "_ops/")
+        try:
+            paths = list_ops_files(prefix)
+        except VaultPathError as e:
+            return f"Error: {e}"
+        if not paths:
+            return f"No files found under prefix: {prefix}"
+        return json.dumps({"prefix": prefix, "paths": paths}, indent=2)
+
+    elif name == "baker_vault_read":
+        from vault_mirror import read_ops_file, VaultPathError
+
+        path = args.get("path")
+        if not path:
+            return "Error: 'path' argument is required"
+        try:
+            result = read_ops_file(path)
+        except VaultPathError as e:
+            return f"Error: {e}"
+        return json.dumps(result, indent=2)
 
     else:
         return f"Unknown tool: {name}"

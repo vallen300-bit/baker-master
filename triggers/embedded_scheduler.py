@@ -588,6 +588,23 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info(f"Registered: kbl_bridge_tick (every {_bridge_tick_seconds}s)")
 
+    # SOT_OBSIDIAN_1_PHASE_D: pull the baker-vault mirror so Cowork's
+    # MCP vault-read tools stay fresh. Default 300 s, floor 60 s
+    # enforced inside ``vault_mirror.sync_interval_seconds``.
+    try:
+        from vault_mirror import sync_interval_seconds as _vault_interval
+        _vault_sync_seconds = _vault_interval()
+    except Exception:
+        _vault_sync_seconds = 300
+    scheduler.add_job(
+        _vault_sync_tick_job,
+        IntervalTrigger(seconds=_vault_sync_seconds),
+        id="vault_sync_tick", name="Vault mirror pull (baker-vault _ops/)",
+        coalesce=True, max_instances=1, replace_existing=True,
+        misfire_grace_time=120,
+    )
+    logger.info(f"Registered: vault_sync_tick (every {_vault_sync_seconds}s)")
+
 
 def _kbl_pipeline_tick_job():
     """APScheduler wrapper around ``kbl.pipeline_tick.main``.
@@ -619,6 +636,21 @@ def _kbl_bridge_tick_job():
         logger.info("kbl_bridge_tick: %s", counts)
     except Exception as e:
         logger.error("kbl_bridge_tick raised: %s", e, exc_info=True)
+        raise
+
+
+def _vault_sync_tick_job():
+    """APScheduler wrapper around ``vault_mirror.sync_tick``.
+
+    ``sync_tick`` already swallows pull failures as WARN; any raise
+    here is genuinely unexpected (git binary missing, disk full, etc.)
+    — let APScheduler's listener surface it.
+    """
+    try:
+        from vault_mirror import sync_tick
+        sync_tick()
+    except Exception as e:
+        logger.error("vault_sync_tick raised: %s", e, exc_info=True)
         raise
 
 
