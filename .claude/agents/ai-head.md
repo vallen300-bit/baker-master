@@ -42,13 +42,12 @@ baker-code/
 │   ├── retriever.py        — Qdrant vector search + PostgreSQL structured queries
 │   └── store_back.py       — PostgreSQL writes + Qdrant embeddings + all table migrations
 │
-├── triggers/               ← Data ingestion (10 sentinels)
+├── triggers/               ← Data ingestion (9 sentinels)
 │   ├── email_trigger.py    — Gmail (5 min)
 │   ├── slack_trigger.py    — Slack polling (5 min)
 │   ├── clickup_trigger.py  — ClickUp (5 min, 6 workspaces)
 │   ├── rss_trigger.py      — RSS feeds (60 min)
 │   ├── todoist_trigger.py  — Todoist sync (30 min)
-│   ├── whoop_trigger.py    — Health data (24h)
 │   ├── dropbox_trigger.py  — File watcher (30 min)
 │   ├── fireflies_trigger.py — Meeting transcripts (2h)
 │   ├── calendar_trigger.py — Google Calendar (15 min)

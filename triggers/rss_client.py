@@ -51,7 +51,7 @@ class RssClient:
         """Parse OPML XML string into a list of feed dicts.
 
         Returns list of {url, title, category, html_url}.
-        Handles nested <outline> elements (Feedly exports nest feeds under categories).
+        Handles nested <outline> elements (OPML exports often nest feeds under categories).
         """
         feeds = []
         try:
