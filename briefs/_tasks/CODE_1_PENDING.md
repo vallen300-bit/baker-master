@@ -2,80 +2,65 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (fresh terminal tab)
-**Task posted:** 2026-04-20 (midday, post-Phase-A merge)
-**Status:** OPEN — SOT_OBSIDIAN_UNIFICATION_1 Phase B
+**Task posted:** 2026-04-20 (midday, post-SOT-Phase-B ship)
+**Status:** OPEN — ALERTS_TO_SIGNAL_QUEUE_BRIDGE_1 implementation
 
 ---
 
-## Task: SOT_OBSIDIAN_UNIFICATION_1 Phase B — migrate AI Dennis + populate registries + wire sync_skills.sh
+## Task: ALERTS_TO_SIGNAL_QUEUE_BRIDGE_1 — Implement the alerts → signal_queue bridge
 
-Phase A merged at 12:15 UTC on baker-vault (squash merge of PR #3). `_ops/` scaffold is live.
+Brief: `briefs/BRIEF_ALERTS_TO_SIGNAL_QUEUE_BRIDGE_1.md` at commit `d449b6c` in baker-master. Read end-to-end before starting — the brief is self-contained with all 4-axis filter logic, stop-list patterns, mapping shape, verification SQL, and Day 1 teaching protocol.
 
-Brief: `briefs/BRIEF_SOT_OBSIDIAN_UNIFICATION_1.md` at commit `4596383` in baker-master. Execute **Phase B** per §Fix/Feature 2 — steps 2.1 through 2.10 verbatim.
+**Target PR:** against `baker-master`. Branch: `alerts-to-signal-queue-bridge-1`. Base: `main`. Reviewer: B2.
 
-**Target PR:** against `baker-vault`. Branch: `sot-obsidian-1-phase-b`. Base: `main`. Reviewer: B2.
+### Why this matters now
 
-### Continuing in `~/bv-b1/`
+Cortex T3 shadow mode went live 2026-04-20 at ~04:00 UTC. Scheduler running, pipeline_tick registered, dashboard clean. But `signal_queue` has stayed empty ever since — no producer code path creates rows from raw sentinel data. `kbl_pipeline_tick` wakes every 120s, finds nothing, exits.
 
-```bash
-cd ~/bv-b1
-git checkout main && git pull --ff-only origin main
-git checkout -b sot-obsidian-1-phase-b
-```
+This brief closes the seam. **Gate 1 of production-flip (≥5-10 clean signals through Steps 1-7) cannot move until this ships.** It is the single highest-leverage piece of work in the Cortex T3 queue right now.
 
-### Scope (exact steps from brief §Fix/Feature 2)
+### Scope summary (full detail in brief)
 
-Follow brief steps **2.1 through 2.10 verbatim**. Summary:
+- New module `kbl/bridge/alerts_to_signal.py` with `run_bridge_tick()` entrypoint
+- Pure-function `should_bridge()` — 4-axis selector (tier + matter + VIP + promote-type) + stop-list
+- Pure-function `map_alert_to_signal()` — project alerts row into signal_queue shape
+- Watermark row in `trigger_watermarks` (`source='alerts_to_signal_bridge'`)
+- APScheduler job `kbl_bridge_tick` registered in `triggers/embedded_scheduler.py` at 60s default (env: `BRIDGE_TICK_INTERVAL_SECONDS`)
+- Unit tests `tests/test_bridge_alerts_to_signal.py` — 8 cases covering each axis, stop-list override, idempotency, watermark safety, mapping shape
+- Integration test (TEST_DATABASE_URL-gated via existing `needs_live_pg` fixture)
+- Zero LLM calls. Zero cost-gate interaction. Pure DB → DB.
 
-1. **2.1** — Canonicalize AI Dennis skill (copy Baker-Project source → `_ops/skills/it-manager/SKILL.md`). Verify zero diff against `~/.claude/skills/it-manager/SKILL.md`. Abort + escalate if diff non-zero.
-2. **2.2** — Split AI Dennis memory per v3 spec: `OPERATING.md` (<80 lines), `LONGTERM.md` (<200 lines), `ARCHIVE.md` (append-only). Seed content from legacy `AI_DENNIS_MEMORY.md`.
-3. **2.3** — Update `_ops/skills/INDEX.md` with the it-manager row.
-4. **2.4** — Update `_ops/agents/INDEX.md` with AI Dennis canonical pointers.
-5. **2.5** — Replace `_install/sync_skills.sh` Phase A skeleton with real symlink logic per brief. **Safety non-negotiable:** never delete non-symlink non-empty dir; skip + log instead.
-6. **2.6** — Create three process docs: `_ops/processes/write-brief.md` (copy body of `~/.claude/skills/write-brief/SKILL.md`), `_ops/processes/bank-model.md` (from `feedback_ai_head_communication.md` in Director's memory), `_ops/processes/git-mailbox.md` (from current `_handovers/AI_HEAD_20260420.md`).
-7. **2.7** — Update `_ops/processes/INDEX.md` — all rows now have real file links.
-8. **2.8** — Retire 2 duplicate copies: rename `Baker-Project/pm/ai-operations/it-manager/AI_DENNIS_SKILL.md` → `.retired-2026-04-20` (and same for `Dropbox/.skills/skills/it-manager/SKILL.md`). **Do NOT `rm`.**
-9. **2.9** — Execute `_install/sync_skills.sh` against `~/.claude/skills/` in dry-run mode first (add `--dry-run` flag if not in brief — implement if missing). Verify expected output. Then run for real. Verify symlink via `readlink ~/.claude/skills/it-manager`.
-10. **2.10** — Commit + push per brief.
+### Hard constraints (from brief §Key Constraints)
 
-### Hard constraints
+- **DO NOT** modify `kbl/pipeline_tick.py` or any `kbl/steps/step*.py`. Pipeline is correct; bridge is upstream.
+- **DO NOT** invoke any LLM from the bridge. Filter + map. Nothing else.
+- **DO NOT** duplicate-bridge — `NOT EXISTS` check on `payload->>'alert_source_id'` belt-and-suspenders against watermark drift.
+- **Watermark advances ONLY after full batch commits.** Partial-batch rollback mandatory.
+- **Stop-list is conservative.** Any pattern that could plausibly match a real Director commitment stays OUT. Easier to widen from real dismissals than to undo a false positive.
 
-- **Symlink direction:** vault = source, runtime = target. `ln -s /vault/path /runtime/path`. Never the other way. The brief has this explicit — obey.
-- **Do NOT `rm` any file.** Rename to `.retired-*` only. Destructive deletion is Director-authorized only after 7+ days of burn-in (brief §Key Constraints).
-- **TEMPLATE.md in _ops/briefs/ carries write-brief protocol.** Phase B's new `_ops/processes/write-brief.md` is the CANONICAL version going forward; TEMPLATE.md becomes a pointer to it. Update TEMPLATE.md accordingly — brief doesn't specify this explicitly but it's the clean separation.
-- Bank-model doc source: `/Users/dimitry/.claude/projects/-Users-dimitry-Vallen-Dropbox-Dimitry-vallen-Baker-Project/memory/feedback_ai_head_communication.md`. Git-mailbox doc source: the "Workflow patterns" section of `briefs/_handovers/AI_HEAD_20260420.md` in baker-master.
+### Acceptance criteria (from brief §Quality Checkpoints)
 
-### Acceptance criteria (from brief §Verification)
+1. All unit tests green (`pytest tests/test_bridge_alerts_to_signal.py -xvs`)
+2. First production tick logs `{read, kept, bridged, skipped_filter, skipped_stoplist, errors}` with `errors=0`
+3. `SELECT COUNT(*) FROM signal_queue WHERE source='legacy_alert'` non-zero within 2 minutes of deploy
+4. `kbl_pipeline_tick` picks up bridged signals within 120s (status flips from `pending` through pipeline stages)
+5. No duplicate signals — verification SQL in brief
+6. Watermark advances monotonically (3 checks over 30 min)
 
-```bash
-diff ~/bv-b1/_ops/skills/it-manager/SKILL.md ~/.claude/skills/it-manager/SKILL.md
-# Expected: zero output (identical because one IS the other via symlink)
+### Trust markers (brief §Trust markers)
 
-readlink ~/.claude/skills/it-manager
-# Expected: /Users/dimitry/baker-vault/_ops/skills/it-manager
+Three failure modes. Code in a way each is spottable:
 
-ls ~/bv-b1/_ops/agents/ai-dennis/
-# Expected: OPERATING.md LONGTERM.md ARCHIVE.md
+1. Watermark jam (silently skips alerts) — spot via daily `MAX(alerts.created_at)` vs `trigger_watermarks.last_seen` diff
+2. Stop-list false positive (real commitment dropped) — Day 1 teaching catches it
+3. Mapping shape drift (missing payload field breaks Step 2) — `kbl_log` errors surface immediately
 
-wc -l ~/bv-b1/_ops/agents/ai-dennis/OPERATING.md
-# Expected: ≤80 lines
+### Day 1 teaching protocol
 
-wc -l ~/bv-b1/_ops/agents/ai-dennis/LONGTERM.md
-# Expected: ≤200 lines
+**The bridge is not done when it merges** — it's done after Director reviews 20-30 Silver files and the filter is tuned at least once from that data. See brief §Day 1 Teaching Protocol. AI Head owns the batch-review + stop-list-tuning cadence post-merge; your scope ends at merge.
 
-ls ~/bv-b1/_ops/processes/
-# Expected: INDEX.md write-brief.md bank-model.md git-mailbox.md writer-contract.md
+### Output
 
-ls "/Users/dimitry/Vallen Dropbox/Dimitry vallen/Baker-Project/pm/ai-operations/it-manager/"
-# Expected: AI_DENNIS_SKILL.md.retired-2026-04-20 (still present under original name? NO — renamed)
-```
+Ship PR, ping B2 for review. AI Head auto-merges on APPROVE. Expected 6-8h.
 
-### Coordination note
-
-B3 is in parallel working on lessons-grep-helper v2 (addressing B2's N1+N2 nits from Phase A review). No conflict — different files, different repo. Both PRs can ship independently.
-
-### Trust marker
-
-**What in production would reveal a bug:** open a fresh Claude App session after symlink-in-place and verify AI Dennis skill still triggers on "start Dennis" / "IT session" prompts. If the symlink breaks skill loading, the AI Dennis invocation will fail — easy to spot within 30 seconds of a fresh session.
-
-Expected time: 2-2.5 hours. Don't rush step 2.2 (memory split) — content seeding matters for AI Dennis's next live invocation. Ping B2 for review when done.
+**After merge:** you're off this work. SOT Phase D (MCP bridge for Cowork — brief §Fix/Feature 4) will need a sub-brief from AI Head first before it dispatches. You stand down until that sub-brief lands.

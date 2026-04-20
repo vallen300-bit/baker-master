@@ -2,78 +2,41 @@
 
 **From:** AI Head
 **To:** Code Brisen #3 (fresh terminal tab)
-**Task posted:** 2026-04-20 (midday, post-Phase-A merge + B2 review nits)
-**Status:** OPEN — lessons-grep-helper v2 (address B2's N1 + N2 from Phase A review)
+**Task posted:** 2026-04-20 (midday, post-helper-v2 ship)
+**Status:** QUEUED — SOT_OBSIDIAN_UNIFICATION_1 Phase C, gated on Phase B merge
 
 ---
 
-## Task: LESSONS_GREP_HELPER_V2 — fix two nits from first-use drift data
+## Status
 
-B2 used the helper on baker-vault PR #3 (first real-world use) and flagged two non-blocking nits. Both worth fixing before Phase B lands — Phase B will be a bigger, mixed-content review where helper quality matters more.
+Your LESSONS_GREP_HELPER_V2 (PR #26) is queued for B2 review. Two flagged deviations documented in your PR body — B2 decides, AI Head auto-merges on APPROVE. No action from you on that.
 
-Brief review source: `_reports/B2_sot_phase_a_review_20260420.md` on baker-vault main (commit `bc0ba5d`).
+**Next task (queued):** SOT_OBSIDIAN_UNIFICATION_1 Phase C — migrate `pm/briefs/` → `_ops/briefs/`.
 
-**Target PR:** `baker-master` repo. Branch: `lessons-grep-helper-v2`. Base: `main`. Reviewer: B2.
+**Gate:** Phase B PR #4 on baker-vault must merge first. B1 shipped it; B2 is queued to review. Once B2 approves and AI Head auto-merges, this task unblocks.
 
-### Scope
+### Why gated
 
-**Fix 1 — Cross-repo support (B2's N1):**
+Phase C populates the `_ops/briefs/` registry that Phase B creates the INDEX + TEMPLATE for. Starting Phase C before Phase B merges = rebase conflict on shared INDEX.md and potential lost content.
 
-Helper currently breaks when reviewing a PR on a DIFFERENT repo than the one holding `tasks/lessons.md`. B2 had to pipe manually for the Phase A review (baker-master helper, baker-vault PR).
+### What Phase C covers (full detail in brief at baker-master commit `d449b6c` → `BRIEF_SOT_OBSIDIAN_UNIFICATION_1.md` §Fix/Feature 3)
 
-- Add optional `--repo <owner>/<name>` flag passed through to `gh pr diff` and `gh pr view`. Default = current repo detected via `gh repo view`.
-- Add optional `LESSONS_FILE=<path>` env override so the lessons file location is configurable (helper today hardcodes `<repo_root>/tasks/lessons.md`; with `--repo` the helper may run inside a baker-vault clone but needs to read `tasks/lessons.md` from baker-master).
-- Usage examples in script header:
-  ```
-  bash lessons-grep-helper.sh 3 --repo vallen300-bit/baker-vault
-  LESSONS_FILE=/path/to/baker-master/tasks/lessons.md bash lessons-grep-helper.sh sot-obsidian-1-phase-b --repo vallen300-bit/baker-vault
-  ```
+- Freeze `Baker-Project/pm/briefs/` as historical (add FROZEN.md)
+- Migrate 8 active non-`_DONE_*` briefs → `_ops/briefs/<name>.md` with frontmatter
+- Populate `_ops/briefs/INDEX.md` registry (8 migrated + this session's 4 shipped + this bridge brief + SOT brief)
+- Copy `BRIEF_SOT_OBSIDIAN_UNIFICATION_1.md` itself to `_ops/briefs/` (chicken-and-egg resolved in Step 3.4 of brief)
+- Document new brief dispatch path in `_ops/processes/git-mailbox.md` (B-codes pull baker-vault in addition to baker-master for new briefs)
 
-**Fix 2 — Doc-heavy PR false-positive suppression (B2's N2):**
+**No deletions.** Copy-forward only. Lesson #16 applies — every migrated brief gets git-tracked at destination.
 
-On Phase A (pure-scaffold / pure-markdown PR), helper returned top-5 with scores 28-42 but ZERO were actually relevant — all false positives triggered by common words in docs body vs lesson "Mistake:" paragraphs.
+### Expected timing
 
-Three-part fix:
-
-1. **Filter to `+`-added lines only.** Helper today tokenizes the full diff output (including `-` removed lines, file paths, context). Change to: `grep '^+' | grep -v '^+++'` before tokenizing. Added content is what the PR is adding — the only thing lessons should score against.
-
-2. **IDF-weight tokens.** A token that appears in 30 of 42 lessons is near-useless signal. A token that appears in 2 lessons is strong signal. Compute IDF = `log(total_lessons / lessons_containing_token)` during ranking; score = sum of IDF for intersecting tokens, not raw count. Keep the 6+ char noise filter.
-
-3. **Canned "all-false-positive" output when top-5 scores are bunched low.** If the highest score is < 2× the lowest (i.e., no real signal), replace the top-5 block with:
-   ```
-   [lessons-grep] No strongly-ranked lessons for PR #<N>.
-   Likely reason: PR is docs-only / scaffold-only / scope below lessons' resolution.
-   Fall back to manual sweep of lessons #34-42 (most recent) if PR touches production code.
-   ```
-
-### Verification
-
-1. **Reproduce the false-positive case.** Run v1 (current main) against PR #3 on baker-vault: `bash briefs/_templates/lessons-grep-helper.sh 3 --repo vallen300-bit/baker-vault` — confirm current behavior is broken (the `--repo` flag errors out or is ignored). Document before-state.
-
-2. **Run v2 against the same PR.** Expect the "no strongly-ranked lessons" fallback block (Phase A is pure scaffold docs — no real lesson applies).
-
-3. **Regression check on B2's original smoke tests** (from PR #25 description):
-   - PR #21 (alias rename) → #42 still ranked in top-5 after IDF weighting ✅
-   - PR #22 (dead code + env fallback) → #37 still ranked #1 or #2 ✅
-   - PR #24 (FEEDLY_WHOOP_KILL) → #37 + #39 both in top-5 ✅
-   
-   If IDF weighting drops any of these below top-5, v2 is worse than v1 — iterate until all three land correctly.
-
-4. **Unit-test-esque:** add 2-3 synthetic test cases as comments at the top of the script or in a sibling `lessons-grep-helper.tests.sh` showing expected-input / expected-output pairs. Don't need pytest — bash is fine.
-
-### Hard constraints
-
-- **Do NOT touch `tasks/lessons.md` itself.** Content stays stable; helper gets smarter.
-- **Do NOT break existing B2 template references** to the helper output format (`#<N> (score <S>) — <title>`). The template parses this; if you change format, template must update in same PR.
-- **Keep the script < 80 LOC total.** If you need more, something's wrong. IDF can be computed in a single awk pass across the lessons file.
-- **No new deps.** `gh`, `git`, `grep`, `awk`, `sort`, `comm` only.
+~1.5-2h once unblocked. You'll see a "ready-to-go" signal when Phase B merges — check mailbox again then.
 
 ### Coordination note
 
-B1 is in parallel working on SOT_OBSIDIAN_UNIFICATION_1 Phase B. No conflict — different files (helper lives in baker-master, Phase B is baker-vault). Both PRs can ship independently.
+B1 is implementing ALERTS_TO_SIGNAL_QUEUE_BRIDGE_1 in baker-master (new bridge code — highest-leverage piece in Cortex T3 queue). Zero conflict with your Phase C (different repo, different subtree). If Phase B hasn't merged by the time B1 ships the bridge, AI Head may route bridge-review to you so B2 isn't bottlenecked. Watch mailbox for update.
 
-### Output
+### Standing down
 
-Ship PR, ping B2 for review when ready. Brief PR body mentions the three smoke-test regression checks from B2's original PR #25 description.
-
-Expected time: 30-45 min. The IDF weighting is the substantive piece; --repo + false-positive fallback are mechanical.
+Close tab per memory-hygiene rule §8. AI Head will update this mailbox when Phase B merges or a reroute is needed.
