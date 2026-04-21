@@ -2,66 +2,71 @@
 
 **From:** AI Head
 **To:** Code Brisen #1 (fresh terminal tab)
-**Task posted:** 2026-04-20 (evening, post-Phase-D-merge)
-**Status:** OPEN — BRIDGE_HOT_MD_AND_TUNING_1
+**Task posted:** 2026-04-21 (post-B2-diagnostic)
+**Status:** OPEN — STEP_CONSUMERS_SIGNAL_CONTENT_SOURCE_FIX_1
 
 ---
 
-## Task: Implement BRIDGE_HOT_MD_AND_TUNING_1
+## Task: Implement STEP_CONSUMERS_SIGNAL_CONTENT_SOURCE_FIX_1
 
-Brief: `briefs/BRIEF_BRIDGE_HOT_MD_AND_TUNING_1.md` (this commit). Self-contained — read end-to-end. Bundles 4 fixes + 1 new feature, all in the bridge codepath.
+Brief: `briefs/BRIEF_STEP_CONSUMERS_SIGNAL_CONTENT_SOURCE_FIX_1.md` (this commit). Self-contained. Read end-to-end — small but load-bearing.
 
-**Why combined:** all touch `kbl/bridge/alerts_to_signal.py` + one new scheduler job + one Director-curated file. One PR pair, one deploy, one review cycle.
+**Why you:** you wrote the bridge that produces the `payload->>'alert_body'` shape. Best positioned to align the Step 1-5 consumers against that canonical source.
 
----
-
-## Scope (full detail in brief)
-
-1. **hot.md integration** — 5th axis in `should_bridge()`, populates existing `signal_queue.hot_md_match` column. Reads `baker-vault/_ops/hot.md` via the vault mirror Phase D just deployed.
-2. **Stop-list patterns** from Day 1 Batch #1 noise (cigar, phone scams, fuel policy, retail turnover).
-3. **Idempotency race fix** — Postgres advisory lock around the tick cycle. Alternative fallback (APScheduler `max_instances=1 + coalesce`) documented; **recommendation: advisory lock** (DB-enforced, survives scheduler restart + horizontal scale).
-4. **Saturday morning hot.md nudge** — new `hot_md_weekly_nudge` APScheduler job, cron `0 6 * * SAT`, sends WhatsApp to Director via WAHA. Substrate-push per §9 of operating model.
-5. **Schema migration** — `signal_queue.hot_md_match TEXT NULL`. Applied by MIGRATION_RUNNER_1 on deploy.
-
-**baker-vault PR:** seed `_ops/hot.md` scaffold with header + comment block explaining usage. Initial priorities section blank; Director overwrites Saturday morning.
-
-**Reviewer:** B3 (familiar with bridge internals from Phase D review that just cleared).
+**Brief reference for context:**
+- B2's diagnostic: `briefs/_reports/B2_pipeline_diagnostic_20260421.md` (commit `1ac8ed0`)
+- Your bridge implementation: `kbl/bridge/alerts_to_signal.py` (merged at commit `2ca3865`, enhanced with hot.md at PR #29 merge)
 
 ---
 
-## Key constraints (from brief)
+## Scope summary (full detail in brief)
 
-- Director-curated only — no code path writes hot.md.
-- Stop-list additions are additive. Don't remove existing patterns.
-- Advisory lock key must be stable (`hashtext(...)` or int constant — not mutable string).
-- Short-pattern floor: 4-char minimum on hot.md entries (prevents "EU" matching everything).
+1. **Redirect all step readers from `raw_content` to `COALESCE(payload->>'alert_body', summary, '') AS raw_content`** in 4 step consumer files (verify exact file list via grep before editing). Alias preserved so downstream code doesn't need refactoring.
+2. **Fix test fixtures** in 5 affected test modules. Create shared `tests/fixtures/signal_queue.py::insert_test_signal()` helper if none exists.
+3. **NEW integration test** at `tests/test_bridge_pipeline_integration.py` — uses `alerts_to_signal.map_alert_to_signal` to produce a live-shape row, then calls pipeline tick, asserts advance past triage. Uses `needs_live_pg`.
+4. **Recovery UPDATE** for 15 stranded rows — SQL in brief §Fix 4. Include verbatim in your ship report. **AI Head runs it Tier B, post-merge, with Director's explicit "yes."** You do NOT run it.
 
 ---
 
-## Pre-merge verification (NEW — per B3's N3 nit from Phase D)
+## Critical constraints (from brief)
+
+- **Do NOT touch `pipeline_tick.py:359-365` emit_log block.** B2 called out that diagnostic-friendliness (surfacing exact SQL on failure) saved this investigation. Preserve it.
+- **No schema changes.** Code fix only. Do not add a `raw_content` generated column.
+- **Fallback is a safety net, not a cover-up.** COALESCE documented with a comment at each site explaining intent: future producers writing to a new column should surface as errors, not silent empty-string degradations.
+- **No force push.** Same branch if amending, new branch if starting fresh.
+
+---
+
+## Pre-merge verification (per B3's N3 lesson)
 
 Your ship report MUST include:
-1. Migration applied cleanly on fresh TEST_DATABASE_URL (no duplicate-column errors).
-2. Local dry-run: bridge tick against staging alerts with a sample `_ops/hot.md` → expected promote pattern + `hot_md_match` populated.
-3. Advisory-lock proof: concurrent-tick test green.
-4. `hot_md_weekly_nudge` job registered in APScheduler with correct cron.
-
-AI Head will retroactively add a §Pre-merge verification block to the brief template after this ships.
+1. Grep output confirming all `SELECT raw_content` references in `kbl/steps/` are redirected (zero remaining).
+2. All affected step unit tests green.
+3. New bridge → Step-1 integration test green.
+4. Recovery UPDATE SQL verbatim in the report.
+5. Confirmation `emit_log` at `pipeline_tick.py:359-365` is untouched.
 
 ---
 
-## Paper trail
+## Deliverable
 
-- Commit message: `feat(bridge): BRIDGE_HOT_MD_AND_TUNING_1 — hot.md axis + stop-list + dedup race + Saturday nudge`
-- Co-Authored-By: your line + `AI Head <ai-head@brisengroup.com>`
-- Ship report: `briefs/_reports/B1_bridge_hot_md_ship_<YYYYMMDD>.md` on baker-master
-- Decision already stored: check with `mcp__baker__baker_raw_query` for `trigger_type='architectural_decision'` around 2026-04-20 evening if you want to see Director's ratification; AI Head will store a fresh decision post-merge.
+**PR on baker-master.** Branch: `step-consumers-signal-content-source-fix-1`. Base: `main`. Reviewer: **B3** (fresh from PR #29 review, familiar with both bridge + pipeline).
+
+Ship report: `briefs/_reports/B1_step_consumers_fix_ship_20260421.md` on baker-master.
+
+Commit message: `fix(pipeline): STEP_CONSUMERS_SIGNAL_CONTENT_SOURCE_FIX_1 — align step readers with bridge payload shape`
+
+## Expected duration
+
+S — 1-4h per B2's estimate. Flag if > 5h (means scope is bigger than the diagnostic anticipated).
 
 ## After this
 
-Day 2 teaching fires immediately post-merge:
-1. AI Head adds a test line to `_ops/hot.md`, verifies bridge sees it within 5 min.
-2. AI Head generates Batch #2 (pre-flagged — Director confirms/overrides only) as soon as 5-10 new signals land.
-3. Stop-list and hot.md iterate every ~12h for the convergence window.
+AI Head auto-merges on B3 APPROVE per Tier A. Then:
+1. Wait for Render deploy (~3 min).
+2. Director authorizes recovery UPDATE → AI Head runs it.
+3. Wait one pipeline tick cycle (~120s).
+4. Verify signals advance past triage + kbl_cost_ledger gets rows.
+5. **Gate 1 unblocks.** 5-10 end-to-end signals close it.
 
 Close tab after ship.
