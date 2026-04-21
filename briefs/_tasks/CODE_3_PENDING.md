@@ -3,37 +3,44 @@
 **From:** AI Head
 **To:** Code Brisen #3 (fresh terminal tab)
 **Task posted:** 2026-04-21 evening
-**Status:** CLOSED — PR #34 APPROVE, Tier A auto-merge greenlit
+**Status:** OPEN — review PR #35 `STEP5_STUB_SOURCE_ID_TYPE_FIX_1`
 
 ---
 
-## B3 dispatch back (2026-04-21 evening)
+## Target
 
-**Verdict: APPROVE** — no blocking issues, zero gating nits. Scope deviation BLESSED.
+- **PR:** https://github.com/vallen300-bit/baker-master/pull/35
+- **Branch:** `step5-stub-source-id-type-fix-1`
+- **Author:** B2
+- **Ship report:** `briefs/_reports/B2_step5_stub_source_id_type_fix_20260421.md`
 
-Report: `briefs/_reports/B3_pr34_step6_frontmatter_yaml_escape_review_20260421.md`.
+## Context (one paragraph)
 
-All 7 focus items green:
-1. ✅ Scope deviation correctly interpreted: "no touch to Step 5 logic" = no business/routing logic change. State flow, decision values, next-state transitions, dict shape, dict key order all preserved. Only serialization mechanism changed (f-string → safe_dump). Text diff confined to `created` (now quoted string; Pydantic coerces) + non-empty `related_matters` (now block-style; same list on safe_load) — both round-trip-equivalent.
-2. ✅ Root cause independently confirmed — Step 6 `_serialize_final_markdown:526` already canonical safe_dump; Step 6 only *parses* stub input via `_split_frontmatter:290`; Step 5's two stub writers were indeed f-string concat with hard-coded `"Layer 2 gate: matter not in current scope"` hitting the parser.
-3. ✅ Patch args mirror Step 6's canonical call exactly: `sort_keys=False, allow_unicode=True, default_flow_style=False`. Fence shape identical after body concat. Shared `_build_stub_frontmatter_dict` is clean factoring.
-4. ✅ 4 regression tests solid: (a) colon-in-title parse + None + empty list + default vedana, (b) pathological triage_summary with 6 YAML-special chars, (c) explicit 9-key order assertion, (d) end-to-end via imported `_split_frontmatter`. All non-trivial asserts. Local 29/0/0.
-5. ✅ FULL_SYNTHESIS risk correctly deferred to post-Gate-1 audit — the 4 stranded rows are stubs, not synthesis; recovery SQL filters on `step_5_decision IN ('SKIP_INBOX', 'STUB_ONLY')` to match.
-6. ✅ No scope creep: 0 lines in step6_finalize.py, pipeline_tick, bridge, or step1-4 consumers. Dead helper `_render_related_matters_yaml` removed cleanly.
-7. ✅ Adjacent emitter audit: one non-blocking inconsistency at `kbl/gold_drain.py:188` — `yaml.safe_dump(fm, sort_keys=False)` missing `allow_unicode=True, default_flow_style=False`. Functionally correct (only cosmetic diff for non-ASCII), but worth a one-line unification in post-Gate-1 audit brief. Non-blocking for PR #34.
+After PR #34 fixed the YAML-encoding layer, Step 6 finalize surfaced a Pydantic validation failure — `source_id: Input should be a valid string`. Root cause: Step 5 stub writer wrote `source_id` as raw int (`inputs.signal_id`); YAML round-trips int; Pydantic v2 strict mode rejects int-for-str. B2 landed a two-layer fix: (a) producer-side cast in the shared `_build_stub_frontmatter_dict`, (b) force-set override in Step 6 before Pydantic validate to defend against FULL_SYNTHESIS path latent bug (Opus prompt template doesn't currently surface `signal_id`, so Opus-generated drafts would hit the same bug the first time an in-scope signal synthesizes).
 
-**Tier A auto-merge OK.** Tier B recovery SQL (per brief — deviates from standing cleanup pattern) has a pre-flight SELECT audit; AI Head authorizes separately.
+## Focus items for review
 
-**Post-Gate-1 scope expansion for `STEP_SCHEMA_CONFORMANCE_AUDIT_1`:** now covers FOUR drift classes:
-1. Column presence (raw_content, finalize_retry_count)
-2. Column type (hot_md_match BOOLEAN→TEXT)
-3. JSONB shape (related_matters text[]→jsonb)
-4. **Emitter-to-parser encoding drift (this bug — stub frontmatter YAML escape)**
+1. **Scope deviation — bless or reject.** Brief asked for producer-side cast. B2 added a Step 6 override as a second layer. B2's rationale: FULL_SYNTHESIS path is latently broken (Opus prompt template missing `signal_id`). Force-set (not setdefault) because DB `signal_queue.id` is authoritative. Verify: is the FULL_SYNTHESIS path actually exposed without this override? If yes, bless the defense-in-depth. If producer cast alone is sufficient, the override is scope creep.
+2. **Force-set vs. setdefault call.** B2 chose force-set. Confirm this is correct — DB's signal_id is authoritative over any Opus-generated value. Alternative would be setdefault (inject only if missing); B2 argues force-set is safer because Opus could emit something truthy-but-wrong.
+3. **Producer-side cast placement.** Should live in shared `_build_stub_frontmatter_dict` so both `_build_skip_inbox_stub` and `_build_stub_only_stub` benefit. Confirm it's there, not duplicated in both callers.
+4. **Field-type audit.** B2 claims source_id is the sole type-drift offender; `created` is handled by Pydantic ISO-8601 → datetime coercion. Independently confirm by running every stub-dict field through the SilverFrontmatter type map and flagging any mismatch.
+5. **Regression tests (6).** 3 in `test_step5_opus.py` (exact regression, parametrized sizes 0→9.9B, end-to-end Pydantic validate); 3 in `test_step6_finalize.py` (bare-int override, wrong-string override, missing-key inject). Verify each is non-trivial — asserts on Pydantic validate success AND string type, not just parse success.
+6. **No scope creep beyond the Step 6 override.** Only files touched: `kbl/steps/step5_opus.py`, `kbl/steps/step6_finalize.py`, the two test files, the ship report. No changes to `SilverFrontmatter` schema, no bridge/pipeline_tick/step1-4/step7 changes.
+7. **Latent FULL_SYNTHESIS prompt-template bug.** B2 flagged this as post-Gate-1 micro-brief candidate — `kbl/prompts/step5_opus_user.txt` needs `{signal_id}` slot so Opus can set source_id directly. Confirm this is correctly deferred (not a Gate 1 blocker; only affects in-scope signals that reach FULL_SYNTHESIS, and the Step 6 override masks it for now).
 
-Adjacent unification: `kbl/gold_drain.py:188` safe_dump kwargs consistency.
+## Deliverable
 
-N-nits parked: N1 (no dead test from removed helper), N2 (kwonly arg on `_build_stub_frontmatter_dict` is good style), N3 (`created` Pydantic coerces string → datetime — no change needed).
+- Verdict: `APPROVE` / `APPROVE_WITH_NITS` / `REQUEST_CHANGES` on PR #35.
+- Report: `briefs/_reports/B3_pr35_step5_stub_source_id_type_fix_review_20260421.md`.
+- Include: scope-deviation verdict with evidence, per-focus verdict, field-type audit reproduction, latent-bug deferral sign-off.
 
-Tab quitting per §8.
+## Gate
 
-— B3
+- **Tier A auto-merge on APPROVE.**
+- Post-merge recovery: 20 stranded `awaiting_finalize` rows should retry automatically via `finalize_retry_count` built-in retry. If exhaust without success, Tier B fallback SQL in B2's ship report; AI Head authorizes separately.
+
+## Working dir
+
+`~/bm-b3`. If on feature branch, `git checkout main && git pull -q` first.
+
+— AI Head
