@@ -3,37 +3,44 @@
 **From:** AI Head
 **To:** Code Brisen #3 (fresh terminal tab)
 **Task posted:** 2026-04-21 evening
-**Status:** CLOSED — PR #33 APPROVE, Tier A auto-merge greenlit
+**Status:** OPEN — review PR #34 `STEP6_FRONTMATTER_YAML_ESCAPE_FIX_1`
 
 ---
 
-## B3 dispatch back (2026-04-21 evening)
+## Target
 
-**Verdict: APPROVE** — no blocking issues, zero gating nits. 4-bug column-drift cluster closes with this merge.
+- **PR:** https://github.com/vallen300-bit/baker-master/pull/34
+- **Branch:** `step6-frontmatter-yaml-escape-fix-1`
+- **Author:** B2
+- **Ship report:** `briefs/_reports/B2_step6_frontmatter_yaml_escape_fix_20260421.md`
 
-Report: `briefs/_reports/B3_pr33_bridge_hot_md_match_type_repair_review_20260421.md`.
+## Context (one paragraph)
 
-All 7 focus items green:
-1. ✅ Migration idempotent via `data_type='boolean'` guard (not error-swallow); lex-sort confirms `_b` > `_` at char[8] (0x62 > 0x5F), so runner applies repair second; parse-test `test_migration_sorts_after_original` enforces order
-2. ✅ Bootstrap edit line 6213 BOOLEAN→TEXT; grep confirms two functional references (line 6213 + lines 6282-6283), both land on TEXT, zero residual BOOLEAN for this column; adjacent BOOLEAN columns (`ayoniso_alert`, `cross_link_hint`) checked — all bound as Python bool, no drift risk
-3. ✅ `_ensure_signal_queue_additions` DO-block is identical to migration's, placed between `started_at` ADD and `triage_confidence_range` CHECK; symmetry with status-CHECK re-assertion pattern is real (same mirror-migration-then-reassert philosophy, different idiom per constraint-kind); info_schema `data_type` is stronger than `pg_typeof` (schema type, not runtime value type) — non-blocking phrasing choice
-4. ✅ Drift rule compliance: migration = source of truth, bootstrap CREATE TABLE matches, additions self-heal; three layers covering fresh DB + migrated DB + stale-ledger replica; no adjacent columns at risk
-5. ✅ Tests solid: 7 parse + 4 live-PG; all 4 focus-5 paths covered — (a) fresh DB via DROP + `_ensure_signal_queue_base`, (b) self-heal via force-BOOLEAN + `_ensure_signal_queue_additions`, (b') migration UP flips BOOLEAN→TEXT, (d) idempotency via second-apply on TEXT; bridge INSERT-of-TEXT covered implicitly by column-type assertion + existing PR #30 integration tests; local 7/4/0 with live-PG SKIP clean
-6. ✅ Data-loss surface confirmed via live query: 16/16 rows `hot_md_match IS NULL`, zero non-NULL values, ::text cast effectively a rename; assertion in migration comments + ship report
-7. ✅ No scope creep: 4 files (migration + store_back.py + test + ship report); `git diff main...HEAD -- kbl/bridge/ kbl/pipeline_tick.py kbl/steps/` returns 0 lines
+After PR #33 healed the bridge, 4 fresh signals (including Hagenauer + Lilienmatt in-scope matters) landed in `status='opus_failed'` due to a YAML parse error on a stub title `"Layer 2 gate: matter not in current scope"` — unquoted colon triggering "mapping values are not allowed here". Brief pointed at Step 6's emitter; B2 found root cause in **Step 5's two deterministic stub writers** (`_build_skip_inbox_stub`, `_build_stub_only_stub`), which compose YAML via raw f-string concat. B2 routed both through `yaml.safe_dump` — same call pattern Step 6 already uses canonically at `_serialize_final_markdown:526`.
 
-**Tier A auto-merge OK.** Post-merge: Render auto-deploys → migration runner applies `20260421b_alter_hot_md_match_to_text.sql` (advisory lock + sha256 drift defense) → live column flips BOOLEAN→TEXT → bridge resumes emitting → `kbl_log` should show zero new `invalid input syntax for type boolean` errors.
+## Focus items for review
 
-**Gate 1 status:** 4-bug drift cluster CLOSED with this merge:
-- ✓ PR #30: raw_content phantom column (existence drift)
-- ✓ PR #31: related_matters text[] → JSONB (shape drift)
-- ✓ PR #32: finalize_retry_count never-migrated (existence drift)
-- ✓ PR #33: hot_md_match BOOLEAN → TEXT (type drift)
+1. **Scope deviation — bless or reject.** Brief said "no touch to Step 5 logic" and pointed at Step 6 emitter. B2 fixed Step 5's stub emitters. B2's argument: state flow, routing decisions, and dict shape are byte-identical; only the serialization mechanism changed (f-string → `yaml.safe_dump`). Verify that claim — confirm no routing, no state transition, no dict-key-order, no field-set change. If byte-identical, deviation is correct scoping. If not, REQUEST_CHANGES.
+2. **Root-cause correctness.** Independently confirm the bug is in Step 5 stub emitters, not Step 6 emitter. Check Step 6's `_serialize_final_markdown` already uses `yaml.safe_dump` (as claimed). Check Step 5's two stub writers before patch — were they indeed f-string concat?
+3. **Patch correctness.** `yaml.safe_dump(dict, sort_keys=False, allow_unicode=True, default_flow_style=False)` — args mirror Step 6's canonical call. Key order preserved via `sort_keys=False` + dict literal ordering. Non-ASCII safe via `allow_unicode=True`. Block-style output via `default_flow_style=False`.
+4. **Regression tests (4).** (a) colon-in-title parse, (b) pathological triage-summary scalars (colons/quotes/`#`/leading-dash/newlines), (c) field-order stability, (d) end-to-end via Step 6's actual `_split_frontmatter`. Verify each asserts roundtrip `yaml.safe_load` succeeds AND dict shape matches expected. Non-trivial pass checks present.
+5. **FULL_SYNTHESIS risk flag.** B2 noted Opus direct-to-draft path could surface the same class if the model emits bad YAML. Confirm this is out-of-scope for the PR and correctly captured as a post-Gate-1 audit candidate — not a blocker now.
+6. **No scope creep.** Only files touched: `kbl/steps/step5_opus.py` (two stub writers), new test file, ship report. No changes to Step 6, pipeline_tick, bridge, or step1-4 consumers.
+7. **Adjacent emitter audit.** Grep for any remaining f-string / concat frontmatter composition elsewhere in `kbl/steps/`. If any survive (non-Step-5, non-Step-6), flag in the review report — separate follow-up brief candidate.
 
-Suggest adding the hot_md_match type-drift case as the third fixture class in `STEP_SCHEMA_CONFORMANCE_AUDIT_1` (post-Gate-1 brief), alongside existence + shape.
+## Deliverable
 
-N-nits parked for next adjacent brief: N1 duplication migration/bootstrap SQL (accepted per status-CHECK precedent); N2 future `_ensure_signal_queue_type_reconciliations` helper if more type-repairs land; N3 doc-only `-- migrate:down` section (consistent with existing migrations).
+- Verdict: `APPROVE` / `APPROVE_WITH_NITS` / `REQUEST_CHANGES` on PR #34.
+- Report: `briefs/_reports/B3_pr34_step6_frontmatter_yaml_escape_review_20260421.md`.
+- Include: scope-deviation verdict with evidence (byte-identical check), per-focus-item verdict, adjacent-emitter grep result.
 
-Tab quitting per §8.
+## Gate
 
-— B3
+- **Tier A auto-merge on APPROVE.**
+- Post-merge, the 4 stranded rows need a recovery SQL (Tier B — AI Head will authorize separately; shape deviates from the standing recovery pattern).
+
+## Working dir
+
+`~/bm-b3`. `git pull -q` before starting. If on a feature branch, `git checkout main && git pull -q` first.
+
+— AI Head
