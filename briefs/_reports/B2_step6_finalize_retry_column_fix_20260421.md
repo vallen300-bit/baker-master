@@ -2,7 +2,7 @@
 role: B2
 kind: ship
 brief: step6_finalize_retry_column_fix
-pr: (populated after `gh pr create`)
+pr: https://github.com/vallen300-bit/baker-master/pull/32
 branch: step6-finalize-retry-column-fix-1
 base: main
 verdict: SHIPPED_READY_FOR_REVIEW
