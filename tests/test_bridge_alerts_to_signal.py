@@ -134,6 +134,7 @@ def test_map_alert_to_signal_shape_matches_signal_queue_columns():
     expected_keys = {
         "source", "signal_type", "matter", "primary_matter",
         "summary", "priority", "status", "stage", "payload",
+        "hot_md_match",  # BRIDGE_HOT_MD_AND_TUNING_1
     }
     assert set(row.keys()) == expected_keys
 
@@ -238,6 +239,13 @@ class _FakeCursor:
 
     def execute(self, sql, params=None):
         self.executes.append((sql, params))
+        # BRIDGE_HOT_MD_AND_TUNING_1: advisory lock is sprinkled through
+        # every run_bridge_tick call. Default to "acquired" here so the
+        # existing tests keep their asserted call flow; the dedicated
+        # idempotency-race test overrides this on a per-cursor basis.
+        if "pg_try_advisory_xact_lock" in sql:
+            self._next = (True,)
+            return
         for needle, response in self._handlers:
             if needle in sql:
                 self._next = response
@@ -302,6 +310,7 @@ def test_run_bridge_tick_advances_watermark_only_after_full_commit(monkeypatch):
     now = datetime(2026, 4, 20, 12, 0, tzinfo=timezone.utc)
     older = now - timedelta(hours=1)
 
+    lock_cursor = _FakeCursor([])
     setup_cursor = _FakeCursor([
         ("FROM trigger_watermarks", (older,)),
         ("FROM vip_contacts", []),
@@ -312,7 +321,7 @@ def test_run_bridge_tick_advances_watermark_only_after_full_commit(monkeypatch):
         ("INSERT INTO signal_queue", (123,)),
         ("INSERT INTO trigger_watermarks", None),
     ])
-    conn = _FakeConn([setup_cursor, write_cursor])
+    conn = _FakeConn([lock_cursor, setup_cursor, write_cursor])
     _bridge_with_fake_conn(monkeypatch, conn)
 
     counts = bridge.run_bridge_tick()
@@ -339,6 +348,7 @@ def test_run_bridge_tick_rolls_back_on_insert_failure(monkeypatch):
                 raise RuntimeError("simulated insert failure")
             super().execute(sql, params)
 
+    lock_cursor = _FakeCursor([])
     setup_cursor = _FakeCursor([
         ("FROM trigger_watermarks", (now - timedelta(hours=1),)),
         ("FROM vip_contacts", []),
@@ -346,7 +356,7 @@ def test_run_bridge_tick_rolls_back_on_insert_failure(monkeypatch):
                           None, None, None, now)]),
     ])
     write_cursor = _RaisingCursor([])
-    conn = _FakeConn([setup_cursor, write_cursor])
+    conn = _FakeConn([lock_cursor, setup_cursor, write_cursor])
     _bridge_with_fake_conn(monkeypatch, conn)
 
     with pytest.raises(RuntimeError, match="simulated insert failure"):
@@ -357,22 +367,27 @@ def test_run_bridge_tick_rolls_back_on_insert_failure(monkeypatch):
 
 
 def test_run_bridge_tick_empty_alert_set_short_circuits(monkeypatch):
-    """No alerts since watermark = no-op tick, no commit, counts all zero."""
+    """No alerts since watermark = no-op tick, no-op-but-commit (xact lock release), counts all zero."""
     now = datetime(2026, 4, 20, 12, 0, tzinfo=timezone.utc)
+    lock_cursor = _FakeCursor([])
     setup_cursor = _FakeCursor([
         ("FROM trigger_watermarks", (now - timedelta(hours=1),)),
         ("FROM vip_contacts", []),
         ("FROM alerts", []),
     ])
-    conn = _FakeConn([setup_cursor])
+    conn = _FakeConn([lock_cursor, setup_cursor])
     _bridge_with_fake_conn(monkeypatch, conn)
 
     counts = bridge.run_bridge_tick()
     assert counts == {
         "read": 0, "kept": 0, "bridged": 0,
         "skipped_filter": 0, "skipped_stoplist": 0, "errors": 0,
+        "skipped_locked": 0,
     }
-    assert conn.committed is False
+    # xact-scoped lock is released on COMMIT; the empty-alert branch still
+    # commits deliberately so sibling ticks aren't starved on a held lock
+    # held across connection close.
+    assert conn.committed is True
 
 
 def test_run_bridge_tick_idempotent_when_insert_returns_no_id(monkeypatch):
@@ -383,6 +398,7 @@ def test_run_bridge_tick_idempotent_when_insert_returns_no_id(monkeypatch):
     so the INSERT...SELECT...WHERE NOT EXISTS yields zero rows.
     """
     now = datetime(2026, 4, 20, 12, 0, tzinfo=timezone.utc)
+    lock_cursor = _FakeCursor([])
     setup_cursor = _FakeCursor([
         ("FROM trigger_watermarks", (now - timedelta(hours=1),)),
         ("FROM vip_contacts", []),
@@ -393,7 +409,7 @@ def test_run_bridge_tick_idempotent_when_insert_returns_no_id(monkeypatch):
         ("INSERT INTO signal_queue", None),  # fetchone returns None = duplicate
         ("INSERT INTO trigger_watermarks", None),
     ])
-    conn = _FakeConn([setup_cursor, write_cursor])
+    conn = _FakeConn([lock_cursor, setup_cursor, write_cursor])
     _bridge_with_fake_conn(monkeypatch, conn)
 
     counts = bridge.run_bridge_tick()

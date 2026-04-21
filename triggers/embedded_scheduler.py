@@ -588,6 +588,29 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info(f"Registered: kbl_bridge_tick (every {_bridge_tick_seconds}s)")
 
+    # BRIDGE_HOT_MD_AND_TUNING_1: Saturday morning hot.md nudge.
+    # Fires once weekly (Sat 06:00 UTC / 07:00 CET / 08:00 CEST). Sends a
+    # short, action-oriented WhatsApp via the existing
+    # ``outputs/whatsapp_sender.py`` helper (§9 rule #4 — alerts rare +
+    # earned, not chatty). Env gate ``HOT_MD_NUDGE_ENABLED`` (default
+    # ``true``) allows quick disable without redeploy. Fire-and-forget —
+    # WAHA-down is swallowed by the wrapper per substrate-push contract.
+    # Retires when ``BRIEF_MORNING_DIGEST_FANOUT_1`` consolidates
+    # Saturday substrate pushes into the morning digest.
+    _nudge_enabled = _os.environ.get("HOT_MD_NUDGE_ENABLED", "true").lower()
+    if _nudge_enabled not in ("false", "0", "no", "off"):
+        scheduler.add_job(
+            _hot_md_weekly_nudge_job,
+            CronTrigger(day_of_week="sat", hour=6, minute=0),
+            id="hot_md_weekly_nudge",
+            name="Hot.md weekly nudge (Saturday 06:00 UTC)",
+            coalesce=True, max_instances=1, replace_existing=True,
+            misfire_grace_time=3600,
+        )
+        logger.info("Registered: hot_md_weekly_nudge (Sat 06:00 UTC)")
+    else:
+        logger.info("Skipped: hot_md_weekly_nudge (HOT_MD_NUDGE_ENABLED=false)")
+
     # SOT_OBSIDIAN_1_PHASE_D: pull the baker-vault mirror so Cowork's
     # MCP vault-read tools stay fresh. Default 300 s, floor 60 s
     # enforced inside ``vault_mirror.sync_interval_seconds``.
@@ -637,6 +660,42 @@ def _kbl_bridge_tick_job():
     except Exception as e:
         logger.error("kbl_bridge_tick raised: %s", e, exc_info=True)
         raise
+
+
+HOT_MD_NUDGE_TEXT = (
+    "Saturday hot.md refresh.\n\n"
+    "Edit baker-vault/_ops/hot.md with this week's focus areas. "
+    "Baker syncs within 5 min; matches boost signal priority through the bridge."
+)
+
+
+def _hot_md_weekly_nudge_job():
+    """APScheduler wrapper: Saturday hot.md nudge to Director.
+
+    Uses the existing ``outputs/whatsapp_sender.py`` helper — deliberately
+    not a parallel WAHA caller (brief §5). Fire-and-forget: if WAHA is
+    down, the helper returns ``False`` and we log + swallow per the
+    substrate-push contract (brief §5: "don't block on delivery").
+    """
+    try:
+        from outputs.whatsapp_sender import send_whatsapp
+    except Exception as e:
+        logger.error("hot_md_weekly_nudge: whatsapp_sender import failed: %s", e)
+        return
+
+    try:
+        ok = send_whatsapp(HOT_MD_NUDGE_TEXT)
+    except Exception as e:
+        # Defensive: send_whatsapp already has its own try/except, but a
+        # config-level blow-up (e.g., module init on an imported constant)
+        # shouldn't propagate out of a scheduler job.
+        logger.warning("hot_md_weekly_nudge: send_whatsapp raised: %s", e)
+        return
+
+    if ok:
+        logger.info("hot_md_weekly_nudge: delivered")
+    else:
+        logger.warning("hot_md_weekly_nudge: send_whatsapp returned False (WAHA down?)")
 
 
 def _vault_sync_tick_job():
