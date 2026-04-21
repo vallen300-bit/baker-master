@@ -3,44 +3,37 @@
 **From:** AI Head
 **To:** Code Brisen #3 (fresh terminal tab)
 **Task posted:** 2026-04-21 evening
-**Status:** OPEN — review PR #34 `STEP6_FRONTMATTER_YAML_ESCAPE_FIX_1`
+**Status:** CLOSED — PR #34 APPROVE, Tier A auto-merge greenlit
 
 ---
 
-## Target
+## B3 dispatch back (2026-04-21 evening)
 
-- **PR:** https://github.com/vallen300-bit/baker-master/pull/34
-- **Branch:** `step6-frontmatter-yaml-escape-fix-1`
-- **Author:** B2
-- **Ship report:** `briefs/_reports/B2_step6_frontmatter_yaml_escape_fix_20260421.md`
+**Verdict: APPROVE** — no blocking issues, zero gating nits. Scope deviation BLESSED.
 
-## Context (one paragraph)
+Report: `briefs/_reports/B3_pr34_step6_frontmatter_yaml_escape_review_20260421.md`.
 
-After PR #33 healed the bridge, 4 fresh signals (including Hagenauer + Lilienmatt in-scope matters) landed in `status='opus_failed'` due to a YAML parse error on a stub title `"Layer 2 gate: matter not in current scope"` — unquoted colon triggering "mapping values are not allowed here". Brief pointed at Step 6's emitter; B2 found root cause in **Step 5's two deterministic stub writers** (`_build_skip_inbox_stub`, `_build_stub_only_stub`), which compose YAML via raw f-string concat. B2 routed both through `yaml.safe_dump` — same call pattern Step 6 already uses canonically at `_serialize_final_markdown:526`.
+All 7 focus items green:
+1. ✅ Scope deviation correctly interpreted: "no touch to Step 5 logic" = no business/routing logic change. State flow, decision values, next-state transitions, dict shape, dict key order all preserved. Only serialization mechanism changed (f-string → safe_dump). Text diff confined to `created` (now quoted string; Pydantic coerces) + non-empty `related_matters` (now block-style; same list on safe_load) — both round-trip-equivalent.
+2. ✅ Root cause independently confirmed — Step 6 `_serialize_final_markdown:526` already canonical safe_dump; Step 6 only *parses* stub input via `_split_frontmatter:290`; Step 5's two stub writers were indeed f-string concat with hard-coded `"Layer 2 gate: matter not in current scope"` hitting the parser.
+3. ✅ Patch args mirror Step 6's canonical call exactly: `sort_keys=False, allow_unicode=True, default_flow_style=False`. Fence shape identical after body concat. Shared `_build_stub_frontmatter_dict` is clean factoring.
+4. ✅ 4 regression tests solid: (a) colon-in-title parse + None + empty list + default vedana, (b) pathological triage_summary with 6 YAML-special chars, (c) explicit 9-key order assertion, (d) end-to-end via imported `_split_frontmatter`. All non-trivial asserts. Local 29/0/0.
+5. ✅ FULL_SYNTHESIS risk correctly deferred to post-Gate-1 audit — the 4 stranded rows are stubs, not synthesis; recovery SQL filters on `step_5_decision IN ('SKIP_INBOX', 'STUB_ONLY')` to match.
+6. ✅ No scope creep: 0 lines in step6_finalize.py, pipeline_tick, bridge, or step1-4 consumers. Dead helper `_render_related_matters_yaml` removed cleanly.
+7. ✅ Adjacent emitter audit: one non-blocking inconsistency at `kbl/gold_drain.py:188` — `yaml.safe_dump(fm, sort_keys=False)` missing `allow_unicode=True, default_flow_style=False`. Functionally correct (only cosmetic diff for non-ASCII), but worth a one-line unification in post-Gate-1 audit brief. Non-blocking for PR #34.
 
-## Focus items for review
+**Tier A auto-merge OK.** Tier B recovery SQL (per brief — deviates from standing cleanup pattern) has a pre-flight SELECT audit; AI Head authorizes separately.
 
-1. **Scope deviation — bless or reject.** Brief said "no touch to Step 5 logic" and pointed at Step 6 emitter. B2 fixed Step 5's stub emitters. B2's argument: state flow, routing decisions, and dict shape are byte-identical; only the serialization mechanism changed (f-string → `yaml.safe_dump`). Verify that claim — confirm no routing, no state transition, no dict-key-order, no field-set change. If byte-identical, deviation is correct scoping. If not, REQUEST_CHANGES.
-2. **Root-cause correctness.** Independently confirm the bug is in Step 5 stub emitters, not Step 6 emitter. Check Step 6's `_serialize_final_markdown` already uses `yaml.safe_dump` (as claimed). Check Step 5's two stub writers before patch — were they indeed f-string concat?
-3. **Patch correctness.** `yaml.safe_dump(dict, sort_keys=False, allow_unicode=True, default_flow_style=False)` — args mirror Step 6's canonical call. Key order preserved via `sort_keys=False` + dict literal ordering. Non-ASCII safe via `allow_unicode=True`. Block-style output via `default_flow_style=False`.
-4. **Regression tests (4).** (a) colon-in-title parse, (b) pathological triage-summary scalars (colons/quotes/`#`/leading-dash/newlines), (c) field-order stability, (d) end-to-end via Step 6's actual `_split_frontmatter`. Verify each asserts roundtrip `yaml.safe_load` succeeds AND dict shape matches expected. Non-trivial pass checks present.
-5. **FULL_SYNTHESIS risk flag.** B2 noted Opus direct-to-draft path could surface the same class if the model emits bad YAML. Confirm this is out-of-scope for the PR and correctly captured as a post-Gate-1 audit candidate — not a blocker now.
-6. **No scope creep.** Only files touched: `kbl/steps/step5_opus.py` (two stub writers), new test file, ship report. No changes to Step 6, pipeline_tick, bridge, or step1-4 consumers.
-7. **Adjacent emitter audit.** Grep for any remaining f-string / concat frontmatter composition elsewhere in `kbl/steps/`. If any survive (non-Step-5, non-Step-6), flag in the review report — separate follow-up brief candidate.
+**Post-Gate-1 scope expansion for `STEP_SCHEMA_CONFORMANCE_AUDIT_1`:** now covers FOUR drift classes:
+1. Column presence (raw_content, finalize_retry_count)
+2. Column type (hot_md_match BOOLEAN→TEXT)
+3. JSONB shape (related_matters text[]→jsonb)
+4. **Emitter-to-parser encoding drift (this bug — stub frontmatter YAML escape)**
 
-## Deliverable
+Adjacent unification: `kbl/gold_drain.py:188` safe_dump kwargs consistency.
 
-- Verdict: `APPROVE` / `APPROVE_WITH_NITS` / `REQUEST_CHANGES` on PR #34.
-- Report: `briefs/_reports/B3_pr34_step6_frontmatter_yaml_escape_review_20260421.md`.
-- Include: scope-deviation verdict with evidence (byte-identical check), per-focus-item verdict, adjacent-emitter grep result.
+N-nits parked: N1 (no dead test from removed helper), N2 (kwonly arg on `_build_stub_frontmatter_dict` is good style), N3 (`created` Pydantic coerces string → datetime — no change needed).
 
-## Gate
+Tab quitting per §8.
 
-- **Tier A auto-merge on APPROVE.**
-- Post-merge, the 4 stranded rows need a recovery SQL (Tier B — AI Head will authorize separately; shape deviates from the standing recovery pattern).
-
-## Working dir
-
-`~/bm-b3`. `git pull -q` before starting. If on a feature branch, `git checkout main && git pull -q` first.
-
-— AI Head
+— B3
