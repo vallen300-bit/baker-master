@@ -269,8 +269,10 @@ def test_skip_inbox_stub_frontmatter_parses_cleanly_despite_colon_in_title() -> 
     assert fm["related_matters"] == []
     # Default vedana when inputs.vedana is None.
     assert fm["vedana"] == "routine"
-    # source_id is the signal_id int (Pydantic coerces downstream).
-    assert fm["source_id"] == 42
+    # source_id is the signal_id cast to str (SilverFrontmatter.source_id: str;
+    # producer-side cast per STEP5_STUB_SOURCE_ID_TYPE_FIX_1 — Pydantic v2
+    # does NOT coerce int → str, so this assertion was stale from PR #34).
+    assert fm["source_id"] == "42"
     # Body still present, not swallowed by frontmatter.
     assert "Layer 2 scope gate blocked this signal" in body
 

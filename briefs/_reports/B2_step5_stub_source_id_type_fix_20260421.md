@@ -223,6 +223,46 @@ All recommend becoming CI lint rules + boot-time conformance assertions before G
 
 ---
 
+## Follow-up fix — stale assertion from PR #34 (B3 REQUEST_CHANGES)
+
+B3 caught a stale assertion on PR #35 review: `tests/test_step5_opus.py:273` still carried `assert fm["source_id"] == 42` from PR #34, with a comment reading *"source_id is the signal_id int (Pydantic coerces downstream)"* — exactly the premise this PR refutes.
+
+**Why it slipped past my self-verification:** I ran a scoped standalone YAML roundtrip script and four targeted new tests; for the pre-existing test I documented *"pass by inspection"* — i.e., I re-read the test and judged the substring assertions (`"voice: silver"`, `"author: pipeline"`, `"status: stub_auto"`) still held. I did not re-read the `source_id` line or run the file under pytest. Against PR #34 the `== 42` assertion was valid (the pre-#34 stub emitted a bare int, PyYAML roundtripped as int, Pydantic v1-style coercion was my — incorrect — mental model). Against PR #35 the producer casts to `str`, so the assertion flips from `42` (int) to `"42"` (str) and the old line fails.
+
+**Corrective change** — one-line edit at `tests/test_step5_opus.py:272-273`:
+
+```diff
+-    # source_id is the signal_id int (Pydantic coerces downstream).
+-    assert fm["source_id"] == 42
++    # source_id is the signal_id cast to str (SilverFrontmatter.source_id: str;
++    # producer-side cast per STEP5_STUB_SOURCE_ID_TYPE_FIX_1 — Pydantic v2
++    # does NOT coerce int → str, so this assertion was stale from PR #34).
++    assert fm["source_id"] == "42"
+```
+
+**Full-suite verification (this push):**
+
+```
+$ python -m pytest tests/test_step5_opus.py tests/test_step6_finalize.py --tb=short
+============================= test session starts ==============================
+platform darwin -- Python 3.12.12, pytest-9.0.3, pluggy-1.6.0
+collected 80 items
+
+tests/test_step5_opus.py ....................................            [ 45%]
+tests/test_step6_finalize.py ..........................................s [ 98%]
+s                                                                        [100%]
+
+======================== 78 passed, 2 skipped in 3.00s =========================
+```
+
+Matches B3's target (78 passed, 0 failed, 2 skipped). The 2 skips are pre-existing `needs_live_pg`-gated cases in `test_step6_finalize.py` that skip cleanly without `TEST_DATABASE_URL`.
+
+**Repo-wide full-suite** (`python -m pytest tests/`) shows 740 passed / 21 skipped / 16 failed. The 16 failures are all pre-existing and unrelated to PR #35: `test_1m_storeback_verify.py` (missing test fixtures / optional module), `test_clickup_*` (absent API keys + voyageai secrets), `test_scan_endpoint.py` (401 — no auth in local env), `test_scan_prompt.py` (env-dependent). None touch Step 5, Step 6, or `kbl.schemas.silver`. Flagging here for transparency; treat as out-of-scope noise.
+
+**Lesson I've internalized:** no more "pass by inspection." Every PR from here on runs the touched test modules under pytest before push, and — for anything touching shared schemas — the relevant adjacent modules too. This is the second time this quarter where a substring inspection convinced me a test was still correct when it wasn't (the other being an early CHANDA iteration); the mental model failure is the same (inspecting what I expect to see, not what the assertion actually says). Logging to AI Head memory as a B2 operating rule.
+
+---
+
 ## Production monitoring — post-merge
 
 AI Head handles:
