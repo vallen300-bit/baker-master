@@ -1,69 +1,79 @@
 # Code Brisen #2 — Pending Task
 
 **From:** AI Head
-**To:** Code Brisen #2 (fresh terminal tab)
-**Task posted:** 2026-04-21 (post-BRIDGE_HOT_MD_AND_TUNING_1 merge + hot.md seed)
-**Status:** OPEN — pipeline diagnostic (Steps 2-7 frozen)
-
----
-
-## Task: Diagnose why signal_queue rows freeze at `stage=triage, status=processing`
-
-**This is a DIAGNOSTIC, not a fix.** Read the existing pipeline code, trace what happens after a row is inserted into `signal_queue`, identify where the 15 current rows got stuck, report findings. A fix will be a separate brief once we know what's broken.
+**To:** Code Brisen #2
+**Task posted:** 2026-04-21 (post PR #31 merge — first Gate 1 flow partially working)
+**Status:** OPEN — STEP6_FINALIZE_RETRY_COLUMN_FIX_1
 
 ---
 
 ## Context
 
-The bridge (merged 2026-04-20, now enhanced with hot.md axis merged 2026-04-21) is producing rows into `signal_queue`. As of handover: **15 rows present, 0 advanced past `stage=triage, status=processing`.** Every downstream column (triage_score, triage_summary, triage_confidence, enriched_summary, step_5_decision, target_vault_path, commit_sha) is NULL.
+Pipeline is now flowing for the first time today. PR #30 (step consumers) + PR #31 (JSONB cast) are live. 2 signals successfully triaged at Step 1, 4 Ollama calls landed in kbl_cost_ledger. Mechanics work.
 
-Which means Step 1 works, Steps 2-7 aren't running — OR they ran briefly and errored silently.
+Next blocker surfaced at Step 6 (finalize):
 
-**Cortex T3 Gate 1 requires ≥5-10 signals through Steps 1-7 end-to-end.** This diagnostic unblocks that gate. It is the single highest-leverage investigation we have open right now.
+```
+unexpected exception in _process_signal_remote:
+column "finalize_retry_count" does not exist
+LINE 1: ... triage_score, triage_confidence, ...
+```
 
----
+## Root cause (my initial read — verify)
 
-## Scope
+`kbl/steps/step6_finalize.py:356` SELECTs `COALESCE(finalize_retry_count, 0)` on signal_queue. Column doesn't exist in production.
 
-1. **Find the pipeline tick entry point.** Start at `triggers/embedded_scheduler.py` — look for `kbl_pipeline_tick` or similar APScheduler job. Trace what function it calls.
-2. **Trace the state machine.** `signal_queue.stage` and `signal_queue.status` columns drive it. Map the intended transitions: what stage follows triage? What moves a row from `status=processing` to `status=completed`?
-3. **Identify the blocking step.** Is it:
-   - (a) Pipeline tick not firing at all (check `/health` for the job; check logs for tick heartbeats)
-   - (b) Pipeline tick firing but finding nothing to do (e.g., reads from wrong stage/status)
-   - (c) Pipeline tick attempting Step 2+ but erroring silently (swallowed exception, no log)
-   - (d) Step 2+ code doesn't exist yet — pipeline was shadow-mode only
-4. **Check live data.** Use `mcp__baker__baker_raw_query` to inspect the 15 rows' `result`, `processed_at`, `started_at`, `stage`, `status` + any extracted fields. Compare with any error log around the tick time.
-5. **Report the root cause** — which of (a)–(d), or something else — with evidence (code path, log line, SQL result).
+There IS a self-healing `ADD COLUMN IF NOT EXISTS finalize_retry_count` at line 426 — but it's inside `_bump_retry`, which only runs AFTER a Step 6 call already failed with unrelated conditions. The initial SELECT aborts before `_bump_retry` is ever reached. Chicken-and-egg.
 
----
+Same pattern family as this afternoon's hot_md_match drift (`memory/feedback_migration_bootstrap_drift.md`). Step 6 assumes a column that was never migrated or bootstrapped into live DB.
 
-## Key files to read (start here)
+## Scope — DIAGNOSTIC THEN FIX (go straight to PR if clear)
 
-- `triggers/embedded_scheduler.py` — APScheduler job registration. Find `kbl_pipeline_tick`.
-- `kbl/pipeline/` or `kbl/triage/` — likely home of the state-machine code. Grep for `stage=` and `status=` in UPDATE statements.
-- `outputs/dashboard.py` line ~448+ — FastAPI startup hook registers the scheduler. Verify `kbl_pipeline_tick` is in the registered list (not just the bridge tick).
-- Render logs: grep for "pipeline_tick" or "triage" around last tick timestamps to see what it's doing.
+1. **Confirm:** query `information_schema.columns` via `mcp__baker__baker_raw_query` — does `signal_queue.finalize_retry_count` exist in live DB? Expected: no.
 
-## Read-only scope
+2. **Check bootstrap DDL:** grep `memory/store_back.py::_ensure_signal_queue_base` + any `kbl/db/migrations/*` for `finalize_retry_count`. Determine where it SHOULD have been declared.
 
-Do NOT write fixes. Do NOT modify pipeline code. ONE-line stop-gap exceptions (e.g., "add a logger.warning where a swallow was silent") should be flagged in the report as recommendations, not shipped.
+3. **Fix direction (pick the cleanest):**
+   - **(a)** Move the self-healing `ADD COLUMN IF NOT EXISTS` from `_bump_retry` to a module-level init function (called at import or first Step 6 invocation, before any SELECT).
+   - **(b)** Add a formal migration file `migrations/NNN_add_finalize_retry_count.sql`.
+   - **(c)** Add the column to the `_ensure_signal_queue_base` bootstrap.
+   
+   Match whatever pattern the codebase already uses for other runtime-added columns. Probably (a) + (c) to prevent future drift — check step 7's approach (it has a similar self-healing ALTER per line 250 comment).
 
----
+4. **Grep for other un-migrated columns** Step 6/7/other-stage writers reference. Silent drift like hot_md_match + finalize_retry_count tends to cluster. Document findings in the ship report (follow-up brief if pattern is systemic).
+
+5. **Regression test** at `tests/test_step6_finalize.py` — live-PG test that drops the column, calls Step 6, asserts it self-heals AND completes without error.
+
+## Recovery (AI Head handles post-merge)
+
+- Recovery UPDATE flips 16 stranded rows back to pending → Tier A standing auth.
+- Then watch kbl_cost_ledger + signal_queue for signals advancing all the way to `stage='committed'`.
+- Gate 1 closes when ≥5-10 signals reach terminal stage with `target_vault_path` + `commit_sha` populated.
 
 ## Deliverable
 
-File: `briefs/_reports/B2_pipeline_diagnostic_20260421.md` on baker-master.
+- PR on baker-master branch `step6-finalize-retry-column-fix-1`, reviewer B3.
+- Ship report at `briefs/_reports/B2_step6_finalize_retry_column_fix_20260421.md`.
+- Include: root-cause explanation, grep of other un-migrated columns (NONE / list), regression test output.
 
-Structure:
-- **Root cause:** one sentence
-- **Evidence:** code references + log excerpts + SQL results
-- **Unblock effort estimate:** XS (< 1h) / S (1-4h) / M (half-day) / L (> day)
-- **Proposed next brief:** one-line description of what needs to ship to close Gate 1
+## Cross-reference
 
-Tag AI Head in the commit message. AI Head writes the follow-up brief based on your report.
+Today's three adjacent drift bugs now form a cluster:
+- `raw_content` (phantom column read by steps) — PR #30
+- `hot_md_match` (wrong type in live DB vs migration intent) — bug open, fix deferred
+- `related_matters` (JSONB write without cast) — PR #31
+- `finalize_retry_count` (column never migrated) — this brief
 
-## Expected duration
+B3 endorsed `STEP_WRITERS_JSONB_SHAPE_AUDIT_1` as a post-Gate-1 brief. Consider expanding scope to also cover column-existence drift — single audit covering both classes.
 
-~1-2 hours for the diagnostic. If it takes more than 3 hours, ping — likely means scope is bigger than expected (e.g., code doesn't exist vs. has a bug).
+## Constraints
 
-Close tab after report shipped.
+- **XS effort (<1h).** If you hit >1h, surface to AI Head.
+- **No schema changes to columns other than finalize_retry_count.**
+- **No touch to pipeline_tick.py or step consumers.**
+- **Timebox: 45 min.**
+
+## Working dir
+`~/bm-b2`. `git pull -q` before starting.
+
+— AI Head
