@@ -218,6 +218,154 @@ def test_build_stub_only_stub_emits_review_marker() -> None:
     assert "author: pipeline" in stub
 
 
+# ------------------- frontmatter YAML roundtrip (STEP6_FRONTMATTER_YAML_ESCAPE_FIX_1) -------------------
+
+
+def _split_fm_body(stub: str) -> tuple[dict, str]:
+    """Mirror Step 6's ``_split_frontmatter`` (simplified) for test use."""
+    import yaml as _yaml
+
+    assert stub.startswith("---\n"), "stub missing opening fence"
+    after_open = stub[len("---\n") :]
+    close_idx = after_open.find("\n---")
+    assert close_idx >= 0, "stub missing closing fence"
+    fm_text = after_open[:close_idx]
+    body = after_open[close_idx + len("\n---") :].lstrip("\n")
+    return _yaml.safe_load(fm_text), body
+
+
+def test_skip_inbox_stub_frontmatter_parses_cleanly_despite_colon_in_title() -> None:
+    """Regression: pre-fix, the literal title
+    ``"Layer 2 gate: matter not in current scope"`` broke YAML parse
+    with "mapping values are not allowed here" because the f-string
+    concat emitter left the colon unquoted. Post-fix, safe_dump
+    auto-quotes and the roundtrip succeeds."""
+    inputs = _SignalInputs(
+        signal_id=42,
+        raw_content="x",
+        source="email",
+        primary_matter=None,
+        related_matters=[],
+        vedana=None,
+        triage_summary="",
+        resolved_thread_paths=[],
+        extracted_entities={},
+        step_5_decision=ClassifyDecision.SKIP_INBOX.value,
+    )
+    stub = _build_skip_inbox_stub(inputs)
+
+    fm, body = _split_fm_body(stub)
+
+    # Round-tripped title survives the colon verbatim.
+    assert fm["title"] == "Layer 2 gate: matter not in current scope"
+    # Inv 8 structural fields survive the refactor.
+    assert fm["voice"] == "silver"
+    assert fm["author"] == "pipeline"
+    assert fm["status"] == "stub_auto"
+    # None-safe primary_matter round-trips as Python None (YAML null),
+    # matching pre-fix ``primary_matter: null`` literal semantics.
+    assert fm["primary_matter"] is None
+    # Empty list round-trips as empty list, not "[]" string.
+    assert fm["related_matters"] == []
+    # Default vedana when inputs.vedana is None.
+    assert fm["vedana"] == "routine"
+    # source_id is the signal_id int (Pydantic coerces downstream).
+    assert fm["source_id"] == 42
+    # Body still present, not swallowed by frontmatter.
+    assert "Layer 2 scope gate blocked this signal" in body
+
+
+def test_stub_only_stub_frontmatter_survives_pathological_triage_summary() -> None:
+    """Triage summaries are free-form and can contain colons, ``#``
+    hashes, leading dashes, newlines, quote characters — every such
+    char broke the pre-fix f-string concat. safe_dump handles all."""
+    hostile = 'RE: meeting @ 14:00 — "urgent" #priority\n- item'
+    inputs = _SignalInputs(
+        signal_id=99,
+        raw_content="x",
+        source="email",
+        primary_matter=_VALID_SLUG,
+        related_matters=[_VALID_SLUG, "mo_vie"],
+        vedana="threat",
+        triage_summary=hostile,
+        resolved_thread_paths=[],
+        extracted_entities={},
+        step_5_decision=ClassifyDecision.STUB_ONLY.value,
+    )
+    stub = _build_stub_only_stub(inputs)
+
+    fm, body = _split_fm_body(stub)
+
+    # Title is triage_summary[:60] — first 60 chars of hostile string.
+    assert fm["title"] == hostile[:60]
+    assert fm["related_matters"] == [_VALID_SLUG, "mo_vie"]
+    assert fm["vedana"] == "threat"
+    assert fm["status"] == "stub_auto"
+    # Body preserved.
+    assert "low-confidence triage" in body
+    assert hostile in body  # full triage_summary in body text
+
+
+def test_stub_frontmatter_field_order_is_stable() -> None:
+    """Step 6 + Director eye both rely on stable key order. The refactor
+    preserves the pre-fix sequence exactly."""
+    inputs = _SignalInputs(
+        signal_id=1,
+        raw_content="x",
+        source="email",
+        primary_matter=_VALID_SLUG,
+        related_matters=[],
+        vedana="routine",
+        triage_summary="short",
+        resolved_thread_paths=[],
+        extracted_entities={},
+        step_5_decision=ClassifyDecision.STUB_ONLY.value,
+    )
+    stub = _build_stub_only_stub(inputs)
+    fm, _ = _split_fm_body(stub)
+
+    expected_order = [
+        "title",
+        "voice",
+        "author",
+        "created",
+        "source_id",
+        "primary_matter",
+        "related_matters",
+        "vedana",
+        "status",
+    ]
+    assert list(fm.keys()) == expected_order
+
+
+def test_stub_parses_through_step6_split_frontmatter() -> None:
+    """End-to-end: Step 5 stub -> Step 6's actual ``_split_frontmatter``.
+    Guards the exact failure mode reported in the field (4 rows stranded
+    at ``status='opus_failed'`` with "mapping values are not allowed
+    here")."""
+    from kbl.steps.step6_finalize import _split_frontmatter
+
+    inputs = _SignalInputs(
+        signal_id=500,
+        raw_content="x",
+        source="email",
+        primary_matter=None,
+        related_matters=[],
+        vedana=None,
+        triage_summary="",
+        resolved_thread_paths=[],
+        extracted_entities={},
+        step_5_decision=ClassifyDecision.SKIP_INBOX.value,
+    )
+    stub = _build_skip_inbox_stub(inputs)
+
+    fm_dict, body = _split_frontmatter(stub)
+
+    assert fm_dict["title"] == "Layer 2 gate: matter not in current scope"
+    assert fm_dict["status"] == "stub_auto"
+    assert body.startswith("Layer 2 scope gate blocked this signal")
+
+
 # --------------------------- synthesize — routing ---------------------------
 
 

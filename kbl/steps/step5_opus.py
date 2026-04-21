@@ -87,6 +87,8 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Optional
 
+import yaml
+
 from kbl import slug_registry
 from kbl.anthropic_client import OpusResponse, call_opus
 from kbl.cost_gate import (
@@ -377,56 +379,93 @@ def _iso_utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _render_related_matters_yaml(matters: list[str]) -> str:
-    """``[slug, slug]`` or ``[]`` — YAML array literal."""
-    if not matters:
-        return "[]"
-    return "[" + ", ".join(matters) + "]"
+def _dump_stub_frontmatter(fm: dict[str, Any]) -> str:
+    """Serialize a stub-frontmatter mapping to a ``---``-fenced YAML block.
+
+    Uses ``yaml.safe_dump`` so scalars with YAML-special characters
+    (``:``, ``#``, leading ``-``, leading ``!``, newlines, quotes, etc.)
+    are auto-quoted. The raw f-string concat previously used here
+    produced malformed YAML whenever any field contained a colon —
+    e.g. ``title: Layer 2 gate: matter not in current scope`` was
+    parsed as a mapping-inside-a-mapping and Step 6's
+    ``_split_frontmatter`` raised ``FinalizationError`` with "mapping
+    values are not allowed here" (STEP6_FRONTMATTER_YAML_ESCAPE_FIX_1,
+    2026-04-21).
+
+    Field order is load-bearing and must match the f-string concat
+    that shipped pre-fix — Step 6 / Director eye / snapshot tests all
+    rely on the sequence (``title`` → ``voice`` → ``author`` →
+    ``created`` → ``source_id`` → ``primary_matter`` →
+    ``related_matters`` → ``vedana`` → ``status``). ``sort_keys=False``
+    enforces it.
+    """
+    yaml_text = yaml.safe_dump(
+        fm,
+        sort_keys=False,
+        allow_unicode=True,
+        default_flow_style=False,
+    ).strip()
+    return f"---\n{yaml_text}\n---\n"
+
+
+def _build_stub_frontmatter_dict(
+    inputs: _SignalInputs, *, title: str
+) -> dict[str, Any]:
+    """Assemble the ordered dict shared by both deterministic stubs.
+
+    ``primary_matter`` stays ``None`` (safe_dump emits YAML ``null``)
+    when unset — matches the pre-fix ``'null'`` literal on round-trip
+    parse.
+    """
+    return {
+        "title": title,
+        "voice": "silver",
+        "author": "pipeline",
+        "created": _iso_utc_now(),
+        "source_id": inputs.signal_id,
+        "primary_matter": inputs.primary_matter,
+        "related_matters": list(inputs.related_matters),
+        "vedana": inputs.vedana or "routine",
+        "status": "stub_auto",
+    }
 
 
 def _build_skip_inbox_stub(inputs: _SignalInputs) -> str:
     """Deterministic stub for Rule 1 (Layer 2 gate) rows. ``status:
     stub_auto`` frontmatter flag tells Director this is auto-generated,
-    not Opus output."""
+    not Opus output.
+
+    Frontmatter is emitted via ``yaml.safe_dump`` (see
+    ``_dump_stub_frontmatter``) — the literal title contains a colon
+    so raw f-string concat would have produced malformed YAML.
+    """
     title = "Layer 2 gate: matter not in current scope"
-    return (
-        f"---\n"
-        f"title: {title}\n"
-        f"voice: silver\n"
-        f"author: pipeline\n"
-        f"created: {_iso_utc_now()}\n"
-        f"source_id: {inputs.signal_id}\n"
-        f"primary_matter: {inputs.primary_matter or 'null'}\n"
-        f"related_matters: {_render_related_matters_yaml(inputs.related_matters)}\n"
-        f"vedana: {inputs.vedana or 'routine'}\n"
-        f"status: stub_auto\n"
-        f"---\n\n"
+    fm = _build_stub_frontmatter_dict(inputs, title=title)
+    body = (
         f"Layer 2 scope gate blocked this signal — `primary_matter="
         f"{inputs.primary_matter!r}` is not in the current allowed scope "
         f"(Director's `hot.md` ACTIVE set + `KBL_MATTER_SCOPE_ALLOWED` "
         f"override). Pipeline routed to skip stub; no Opus synthesis.\n"
     )
+    return f"{_dump_stub_frontmatter(fm)}\n{body}"
 
 
 def _build_stub_only_stub(inputs: _SignalInputs) -> str:
     """Deterministic stub for low-confidence / noise-band rows. Director-
-    visible so the Director can promote for review or leave to archive."""
+    visible so the Director can promote for review or leave to archive.
+
+    ``title_hint`` is ``inputs.triage_summary[:60]`` — the triage writer
+    is free-form and routinely contains colons, timestamps, email-like
+    tokens. Always routes through ``yaml.safe_dump`` so any scalar is
+    quoted as needed.
+    """
     title_hint = inputs.triage_summary[:60] or "triage noise-band signal"
-    return (
-        f"---\n"
-        f"title: {title_hint}\n"
-        f"voice: silver\n"
-        f"author: pipeline\n"
-        f"created: {_iso_utc_now()}\n"
-        f"source_id: {inputs.signal_id}\n"
-        f"primary_matter: {inputs.primary_matter or 'null'}\n"
-        f"related_matters: {_render_related_matters_yaml(inputs.related_matters)}\n"
-        f"vedana: {inputs.vedana or 'routine'}\n"
-        f"status: stub_auto\n"
-        f"---\n\n"
+    fm = _build_stub_frontmatter_dict(inputs, title=title_hint)
+    body = (
         f"# [stub — low-confidence triage, Director review for promote/ignore]\n\n"
         f"Triage summary: {inputs.triage_summary}\n"
     )
+    return f"{_dump_stub_frontmatter(fm)}\n{body}"
 
 
 # ---------------------------- prompt builder ----------------------------
