@@ -2,7 +2,7 @@
 role: B2
 kind: ship
 brief: step5_stub_source_id_type_fix
-pr: (pending push)
+pr: https://github.com/vallen300-bit/baker-master/pull/35
 branch: step5-stub-source-id-type-fix-1
 base: main
 verdict: SHIPPED_READY_FOR_REVIEW
