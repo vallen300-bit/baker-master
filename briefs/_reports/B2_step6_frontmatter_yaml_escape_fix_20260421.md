@@ -2,7 +2,7 @@
 role: B2
 kind: ship
 brief: step6_frontmatter_yaml_escape_fix
-pr: (pending push)
+pr: https://github.com/vallen300-bit/baker-master/pull/34
 branch: step6-frontmatter-yaml-escape-fix-1
 base: main
 verdict: SHIPPED_READY_FOR_REVIEW
