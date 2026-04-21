@@ -759,3 +759,158 @@ def test_module_public_surface() -> None:
         "TriageResult",
     ):
         assert hasattr(step1_triage, name)
+
+
+# ----- live-PG round-trip: JSONB cast on related_matters (regression gate) -----
+#
+# STEP1_TRIAGE_JSONB_CAST_FIX_1 regression gate. Before the fix,
+# ``_write_triage_result`` bound a raw Python list to ``related_matters``
+# without a ``::jsonb`` cast, producing ``text[]`` at the SQL layer and
+# failing with "column ... is of type jsonb but expression is of type text[]".
+# The transaction rolled back and the claim-time ``status='processing'``
+# commit (from ``pipeline_tick.claim_one_signal``) stranded the row forever.
+#
+# This test exercises ``_write_triage_result`` end-to-end against a real
+# PG connection, asserts the write succeeds, and asserts the column reads
+# back as a JSONB array whose elements round-trip intact. The test
+# guards the wire format, not the LLM hop, so no Ollama mock is needed.
+
+def test_write_triage_result_persists_related_matters_as_jsonb_array(
+    needs_live_pg,
+) -> None:
+    """Regression gate: ``_write_triage_result`` must write JSONB, not text[]."""
+    import psycopg2
+
+    from kbl.steps.step1_triage import TriageResult, _write_triage_result
+    from tests.fixtures.signal_queue import insert_test_signal
+
+    conn = psycopg2.connect(needs_live_pg)
+    signal_id: int | None = None
+    try:
+        signal_id = insert_test_signal(
+            conn,
+            body="JSONB round-trip — Step 1 triage write test.",
+            matter="movie",
+            source="email",
+        )
+        conn.commit()
+
+        result = TriageResult(
+            primary_matter="movie",
+            # Non-empty list is load-bearing: the bug only fires when
+            # psycopg2 actually has list elements to adapt as text[].
+            related_matters=("hagenauer_rg7", "cupial_handover"),
+            vedana="threat",
+            triage_score=62,
+            triage_confidence=0.8,
+            summary="test-triage-summary",
+        )
+        # The actual fix point: BEFORE this change, the next line
+        # raised psycopg2.errors.DatatypeMismatch on related_matters.
+        _write_triage_result(conn, signal_id, result, "awaiting_resolve")
+        conn.commit()
+
+        with conn.cursor() as cur:
+            # jsonb_typeof confirms the column stored a JSON array (not a
+            # text[] coerced by any upstream adapter). jsonb_array_length
+            # confirms the elements round-tripped.
+            cur.execute(
+                "SELECT "
+                "  jsonb_typeof(related_matters), "
+                "  jsonb_array_length(related_matters), "
+                "  related_matters, "
+                "  primary_matter, vedana, triage_score, "
+                "  triage_confidence, triage_summary, status "
+                "FROM signal_queue WHERE id = %s",
+                (signal_id,),
+            )
+            row = cur.fetchone()
+        assert row is not None
+        jtype, jlen, related_out, primary, vedana, score, conf, summ, status = row
+        assert jtype == "array", f"expected jsonb array, got {jtype!r}"
+        assert jlen == 2, f"expected 2 related_matters elements, got {jlen}"
+        assert list(related_out) == ["hagenauer_rg7", "cupial_handover"]
+        assert primary == "movie"
+        assert vedana == "threat"
+        assert int(score) == 62
+        assert float(conf) == 0.8
+        assert summ == "test-triage-summary"
+        assert status == "awaiting_resolve"
+    finally:
+        if signal_id is not None:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM kbl_cost_ledger WHERE signal_id = %s",
+                    (signal_id,),
+                )
+                cur.execute(
+                    "DELETE FROM kbl_log WHERE signal_id = %s",
+                    (signal_id,),
+                )
+                cur.execute(
+                    "DELETE FROM signal_queue WHERE id = %s", (signal_id,)
+                )
+            conn.commit()
+        conn.close()
+
+
+def test_write_triage_result_persists_empty_related_matters_as_jsonb_array(
+    needs_live_pg,
+) -> None:
+    """Empty-list edge case: ``[]`` must still land as JSONB, not NULL
+    or text[]. Protects the common-case triage output where Gemma
+    classifies a signal with a single primary matter and no cross-links.
+    """
+    import psycopg2
+
+    from kbl.steps.step1_triage import TriageResult, _write_triage_result
+    from tests.fixtures.signal_queue import insert_test_signal
+
+    conn = psycopg2.connect(needs_live_pg)
+    signal_id: int | None = None
+    try:
+        signal_id = insert_test_signal(
+            conn,
+            body="JSONB round-trip — empty related_matters edge case.",
+            matter="movie",
+            source="email",
+        )
+        conn.commit()
+
+        result = TriageResult(
+            primary_matter="movie",
+            related_matters=(),  # empty — common in practice
+            vedana="routine",
+            triage_score=50,
+            triage_confidence=0.6,
+            summary="empty-related-matters-case",
+        )
+        _write_triage_result(conn, signal_id, result, "awaiting_resolve")
+        conn.commit()
+
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT jsonb_typeof(related_matters), "
+                "       jsonb_array_length(related_matters) "
+                "FROM signal_queue WHERE id = %s",
+                (signal_id,),
+            )
+            jtype, jlen = cur.fetchone()
+        assert jtype == "array"
+        assert jlen == 0
+    finally:
+        if signal_id is not None:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM kbl_cost_ledger WHERE signal_id = %s",
+                    (signal_id,),
+                )
+                cur.execute(
+                    "DELETE FROM kbl_log WHERE signal_id = %s",
+                    (signal_id,),
+                )
+                cur.execute(
+                    "DELETE FROM signal_queue WHERE id = %s", (signal_id,)
+                )
+            conn.commit()
+        conn.close()
