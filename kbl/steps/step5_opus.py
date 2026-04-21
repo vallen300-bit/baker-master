@@ -416,13 +416,25 @@ def _build_stub_frontmatter_dict(
     ``primary_matter`` stays ``None`` (safe_dump emits YAML ``null``)
     when unset — matches the pre-fix ``'null'`` literal on round-trip
     parse.
+
+    ``source_id`` is cast to ``str`` to match
+    ``SilverFrontmatter.source_id: str`` in ``kbl/schemas/silver.py``.
+    Pydantic v2 default mode does not coerce ``int → str``; prior to
+    STEP5_STUB_SOURCE_ID_TYPE_FIX_1 (2026-04-21 evening) the stub wrote
+    ``inputs.signal_id`` as raw ``int`` which serialized as unquoted
+    YAML ``17`` and parsed back as Python ``int``, triggering
+    ``ValidationError: source_id: Input should be a valid string`` at
+    Step 6 Pydantic validation. Defense-in-depth: Step 6's ``finalize()``
+    also force-sets ``fm_dict['source_id'] = str(row.signal_id)`` before
+    validation so any future producer that forgets the cast still
+    advances.
     """
     return {
         "title": title,
         "voice": "silver",
         "author": "pipeline",
         "created": _iso_utc_now(),
-        "source_id": inputs.signal_id,
+        "source_id": str(inputs.signal_id),
         "primary_matter": inputs.primary_matter,
         "related_matters": list(inputs.related_matters),
         "vedana": inputs.vedana or "routine",

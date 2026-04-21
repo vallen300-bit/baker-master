@@ -366,6 +366,114 @@ def test_stub_parses_through_step6_split_frontmatter() -> None:
     assert body.startswith("Layer 2 scope gate blocked this signal")
 
 
+# ------------------- source_id type (STEP5_STUB_SOURCE_ID_TYPE_FIX_1) -------------------
+
+
+def test_stub_frontmatter_emits_source_id_as_string() -> None:
+    """Regression: pre-fix, ``source_id: inputs.signal_id`` wrote a raw
+    int; ``yaml.safe_dump({'source_id': 17})`` emits ``source_id: 17``
+    (unquoted); ``yaml.safe_load`` returns Python ``int``; Pydantic v2
+    ``source_id: str`` rejects with "Input should be a valid string".
+
+    Post-fix, the producer casts via ``str(inputs.signal_id)`` so the
+    round-tripped value is a string."""
+    import yaml
+
+    inputs = _SignalInputs(
+        signal_id=17,
+        raw_content="x",
+        source="email",
+        primary_matter=None,
+        related_matters=[],
+        vedana=None,
+        triage_summary="",
+        resolved_thread_paths=[],
+        extracted_entities={},
+        step_5_decision=ClassifyDecision.SKIP_INBOX.value,
+    )
+    stub = _build_skip_inbox_stub(inputs)
+    after_open = stub[len("---\n") :]
+    close_idx = after_open.find("\n---")
+    fm = yaml.safe_load(after_open[:close_idx])
+
+    assert isinstance(fm["source_id"], str), (
+        f"source_id type drift: {type(fm['source_id']).__name__} "
+        f"value={fm['source_id']!r}"
+    )
+    assert fm["source_id"] == "17"
+
+
+@pytest.mark.parametrize("signal_id", [1, 0, 17, 2_147_483_647, 9_999_999_999])
+def test_stub_source_id_is_string_across_id_sizes(signal_id: int) -> None:
+    """Property-style: every plausible ``signal_id`` (incl. 0 and
+    >32-bit ids) must serialize as a YAML string."""
+    import yaml
+
+    inputs = _SignalInputs(
+        signal_id=signal_id,
+        raw_content="x",
+        source="email",
+        primary_matter=None,
+        related_matters=[],
+        vedana="routine",
+        triage_summary="noise",
+        resolved_thread_paths=[],
+        extracted_entities={},
+        step_5_decision=ClassifyDecision.STUB_ONLY.value,
+    )
+    stub = _build_stub_only_stub(inputs)
+    after_open = stub[len("---\n") :]
+    close_idx = after_open.find("\n---")
+    fm = yaml.safe_load(after_open[:close_idx])
+
+    assert isinstance(fm["source_id"], str)
+    assert fm["source_id"] == str(signal_id)
+
+
+def test_stub_validates_against_silver_frontmatter_schema() -> None:
+    """End-to-end: Step 5 stub -> YAML roundtrip -> Step 6 injects
+    telemetry -> ``SilverFrontmatter(**fm_dict)`` accepts.
+
+    Guards the composite contract: colon-safe YAML + str-typed
+    source_id + stub_auto status + slug in active set + datetime-coercible
+    ``created``. Pre-PR-#34 this failed at YAML parse; pre-this-PR it
+    failed at Pydantic ``source_id: str``; post-this-PR it passes."""
+    import yaml
+    from kbl.schemas.silver import SilverFrontmatter
+
+    inputs = _SignalInputs(
+        signal_id=42,
+        raw_content="x",
+        source="email",
+        primary_matter=_VALID_SLUG,  # 'ao' — registered ACTIVE fixture slug
+        related_matters=[],
+        vedana="routine",
+        triage_summary="triage note",
+        resolved_thread_paths=[],
+        extracted_entities={},
+        step_5_decision=ClassifyDecision.STUB_ONLY.value,
+    )
+    stub = _build_stub_only_stub(inputs)
+    after_open = stub[len("---\n") :]
+    close_idx = after_open.find("\n---")
+    fm_dict = yaml.safe_load(after_open[:close_idx])
+
+    # Step 6 injects triage telemetry before Pydantic validate (see
+    # finalize() ~line 615). Mirror that so this is a truthful contract
+    # test of the producer + injection chain.
+    fm_dict.setdefault("triage_score", 5)
+    fm_dict.setdefault("triage_confidence", 0.1)
+    fm_dict["source_id"] = str(inputs.signal_id)  # mirrors Step 6 force-set
+
+    fm = SilverFrontmatter(**fm_dict)
+
+    assert fm.source_id == "42"
+    assert fm.voice == "silver"
+    assert fm.author == "pipeline"
+    assert fm.primary_matter == _VALID_SLUG
+    assert fm.status == "stub_auto"
+
+
 # --------------------------- synthesize — routing ---------------------------
 
 

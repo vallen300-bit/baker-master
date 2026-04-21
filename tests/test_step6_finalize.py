@@ -461,6 +461,96 @@ def test_finalize_null_opus_draft_raises() -> None:
         finalize(signal_id=15, conn=conn)
 
 
+# ---------------- source_id authoritative override (STEP5_STUB_SOURCE_ID_TYPE_FIX_1) ----------------
+
+
+def _draft_with_raw_source_id(raw_source_id_yaml: str) -> str:
+    """Build a stub draft whose ``source_id`` YAML line is given
+    verbatim — exercises the Step 6 inject against producer-emitted
+    values of any shape (bare int, quoted int, wrong string, missing)."""
+    yaml_lines = [
+        "---",
+        "title: noise band triage stub",
+        "voice: silver",
+        "author: pipeline",
+        "created: 2026-04-21T12:00:00+00:00",
+    ]
+    if raw_source_id_yaml is not None:
+        yaml_lines.append(raw_source_id_yaml)
+    yaml_lines.extend(
+        [
+            f"primary_matter: {_VALID_SLUG}",
+            "related_matters: []",
+            "vedana: routine",
+            "status: stub_auto",
+            "---",
+        ]
+    )
+    body = ("Short stub body — noise-band triage result. " * 7)[:450]
+    return "\n".join(yaml_lines) + "\n\n" + body
+
+
+def test_finalize_overrides_bare_int_source_id_with_db_authoritative_str() -> None:
+    """Pre-fix, Step 5 stub writers emitted ``source_id: 17`` (bare int
+    from ``inputs.signal_id``); YAML parsed as int; Pydantic
+    ``source_id: str`` rejected with "Input should be a valid string".
+
+    Post-fix, Step 6 force-sets ``fm_dict['source_id'] = str(row.signal_id)``
+    before Pydantic validation, so even if a producer forgets the cast
+    (or future FULL_SYNTHESIS Opus output omits it) the finalize chain
+    still advances with the DB-authoritative string form."""
+    draft = _draft_with_raw_source_id("source_id: 17")
+    conn = _mock_conn(opus_draft=draft, step_5_decision="stub_only")
+
+    result = finalize(signal_id=17, conn=conn)
+
+    assert result.terminal_state == "awaiting_commit"
+    # final_markdown UPDATE captured — extract the rendered markdown and
+    # confirm the serializer emitted source_id as a string.
+    writes = _sql_calls(conn, "final_markdown")
+    assert writes, "expected final_markdown UPDATE"
+    update_sql, params = writes[0]
+    final_markdown = params[0]
+    # yaml.safe_dump on str values emits ``source_id: '17'`` (quoted);
+    # bare ``source_id: 17`` would round-trip as int and fail.
+    assert "source_id: '17'" in final_markdown, (
+        f"expected quoted str form; got:\n{final_markdown[:400]}"
+    )
+
+
+def test_finalize_overrides_wrong_string_source_id_with_signal_id() -> None:
+    """If a producer wrote a stale or stochastic source_id (e.g. Opus
+    hallucinated ``email:abc999`` with wrong digits), Step 6 overrides
+    with the DB-authoritative ``str(row.signal_id)``."""
+    draft = _draft_with_raw_source_id("source_id: email:stale999")
+    conn = _mock_conn(opus_draft=draft, step_5_decision="stub_only")
+
+    result = finalize(signal_id=42, conn=conn)
+
+    assert result.terminal_state == "awaiting_commit"
+    writes = _sql_calls(conn, "final_markdown")
+    final_markdown = writes[0][1][0]
+    # Authoritative override: final markdown shows 42, not stale999.
+    assert "source_id: '42'" in final_markdown
+    assert "stale999" not in final_markdown
+
+
+def test_finalize_injects_missing_source_id() -> None:
+    """If the producer omits ``source_id`` entirely (e.g. FULL_SYNTHESIS
+    where Opus's user prompt does not currently surface signal_id and
+    the model may skip the key), Step 6's force-set supplies it so
+    Pydantic validation passes."""
+    draft = _draft_with_raw_source_id(raw_source_id_yaml=None)
+    conn = _mock_conn(opus_draft=draft, step_5_decision="stub_only")
+
+    result = finalize(signal_id=99, conn=conn)
+
+    assert result.terminal_state == "awaiting_commit"
+    writes = _sql_calls(conn, "final_markdown")
+    final_markdown = writes[0][1][0]
+    assert "source_id: '99'" in final_markdown
+
+
 # --------------------------- cross-link UPSERT idempotency ---------------------------
 
 

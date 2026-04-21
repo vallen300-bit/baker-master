@@ -616,6 +616,16 @@ def finalize(signal_id: int, conn: Any) -> FinalizeResult:
         fm_dict.setdefault("triage_score", row.triage_score)
     if row.triage_confidence is not None:
         fm_dict.setdefault("triage_confidence", row.triage_confidence)
+    # STEP5_STUB_SOURCE_ID_TYPE_FIX_1 (2026-04-21 evening): source_id is
+    # DB-authoritative (signal_queue.id is SERIAL). Force-overwrite any
+    # producer-emitted value with ``str(row.signal_id)`` so (a) Step 5
+    # stubs that forgot the ``str()`` cast still pass Pydantic's
+    # ``source_id: str`` and (b) the FULL_SYNTHESIS path — where the
+    # Opus user prompt does NOT currently surface signal_id to the model
+    # (see ``kbl/prompts/step5_opus_user.txt``) — can never diverge
+    # from the ground truth. Defense in depth alongside producer-side
+    # fix in ``step5_opus._build_stub_frontmatter_dict``.
+    fm_dict["source_id"] = str(row.signal_id)
 
     try:
         _normalize_money_list(fm_dict)
