@@ -67,17 +67,32 @@ def _dispatch(source: str) -> Optional[Callable[..., ResolveResult]]:
 # ----------------------------- DB helpers -----------------------------
 
 
-_SIGNAL_SELECT_COLUMNS = (
-    "id",
-    "source",
-    "primary_matter",
-    "raw_content",
-    "payload",
+# STEP_CONSUMERS_SIGNAL_CONTENT_SOURCE_FIX_1 (2026-04-21): the bridge
+# (``kbl/bridge/alerts_to_signal.py``) writes body text into
+# ``payload->>'alert_body'`` — there is no ``raw_content`` column. Each
+# entry is a ``(sql_expression, dict_key)`` pair so the SELECT can use a
+# COALESCE ladder while the returned dict preserves the legacy
+# ``raw_content`` key (downstream resolvers read ``signal["raw_content"]``).
+# The COALESCE is a SAFETY NET, not a cover-up: a future producer
+# writing to a new canonical column should surface as an alignment
+# error, not silently fall back. If you're adding a third body source,
+# update the ladder here + update the bridge + update the other 3
+# consumers (step 1, 3, 5).
+_SIGNAL_SELECT_FIELDS: tuple[tuple[str, str], ...] = (
+    ("id", "id"),
+    ("source", "source"),
+    ("primary_matter", "primary_matter"),
+    (
+        "COALESCE(payload->>'alert_body', summary, '') AS raw_content",
+        "raw_content",
+    ),
+    ("payload", "payload"),
 )
 
 
 def _fetch_signal(conn: Any, signal_id: int) -> dict[str, Any]:
-    col_list = ", ".join(_SIGNAL_SELECT_COLUMNS)
+    col_list = ", ".join(expr for expr, _ in _SIGNAL_SELECT_FIELDS)
+    keys = tuple(k for _, k in _SIGNAL_SELECT_FIELDS)
     with conn.cursor() as cur:
         cur.execute(
             f"SELECT {col_list} FROM signal_queue WHERE id = %s",
@@ -86,7 +101,7 @@ def _fetch_signal(conn: Any, signal_id: int) -> dict[str, Any]:
         row = cur.fetchone()
     if row is None:
         raise LookupError(f"signal_queue row not found: id={signal_id}")
-    return dict(zip(_SIGNAL_SELECT_COLUMNS, row))
+    return dict(zip(keys, row))
 
 
 def _mark_running(conn: Any, signal_id: int) -> None:

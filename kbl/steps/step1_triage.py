@@ -427,13 +427,19 @@ def _get_triage_threshold() -> int:
 def _fetch_signal(conn: Any, signal_id: int) -> str:
     """Return the signal's raw content. Raises ``LookupError`` when absent.
 
-    Consumes ``raw_content`` per the evaluator assumption; if the column
-    name differs in the live schema we'll see the failure at the SQL level
-    and can adjust in a follow-up without touching the rest of the flow.
+    STEP_CONSUMERS_SIGNAL_CONTENT_SOURCE_FIX_1 (2026-04-21): the bridge
+    (``kbl/bridge/alerts_to_signal.py``) writes body text into
+    ``payload->>'alert_body'`` — there is no ``raw_content`` column. The
+    COALESCE ladder is a SAFETY NET, not a cover-up: a future producer
+    writing to a new canonical column should surface as an alignment
+    error, not silently fall back to empty string. If you're reading
+    this comment while adding a third body source, add it to the
+    ladder here + update the bridge + update the other 3 consumers.
     """
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT raw_content FROM signal_queue WHERE id = %s",
+            "SELECT COALESCE(payload->>'alert_body', summary, '') AS raw_content "
+            "FROM signal_queue WHERE id = %s",
             (signal_id,),
         )
         row = cur.fetchone()

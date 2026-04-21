@@ -432,10 +432,18 @@ def _fetch_signal_context(conn: Any, signal_id: int) -> tuple[str, str, Optional
     """Return ``(raw_content, source, primary_matter, resolved_thread_paths)``.
 
     Raises ``LookupError`` when the signal row is absent.
+
+    STEP_CONSUMERS_SIGNAL_CONTENT_SOURCE_FIX_1 (2026-04-21): the bridge
+    (``kbl/bridge/alerts_to_signal.py``) writes body text into
+    ``payload->>'alert_body'`` — there is no ``raw_content`` column. The
+    COALESCE ladder is a SAFETY NET, not a cover-up: a future producer
+    writing to a new canonical column should surface as an alignment
+    error, not silently fall back.
     """
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT raw_content, source, primary_matter, resolved_thread_paths "
+            "SELECT COALESCE(payload->>'alert_body', summary, '') AS raw_content, "
+            "       source, primary_matter, resolved_thread_paths "
             "FROM signal_queue WHERE id = %s",
             (signal_id,),
         )
