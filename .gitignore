@@ -32,3 +32,8 @@ outputs/share-site/
 
 # Claude Code worktrees (parallel sessions)
 .claude/worktrees/
+
+# Python venv (local dev only — CI and Render create their own)
+.venv*/
+venv/
+
