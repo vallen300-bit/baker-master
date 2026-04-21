@@ -248,10 +248,18 @@ def _fetch_signal_inputs(conn: Any, signal_id: int) -> _SignalInputs:
     Raises ``LookupError`` on missing row — pipeline_tick catches and
     routes. Missing individual fields (nulls) stay as Python None and
     the prompt builder substitutes sentinels.
+
+    STEP_CONSUMERS_SIGNAL_CONTENT_SOURCE_FIX_1 (2026-04-21): the bridge
+    (``kbl/bridge/alerts_to_signal.py``) writes body text into
+    ``payload->>'alert_body'`` — there is no ``raw_content`` column. The
+    COALESCE ladder is a SAFETY NET, not a cover-up: a future producer
+    writing to a new canonical column should surface as an alignment
+    error, not silently fall back.
     """
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT raw_content, source, primary_matter, related_matters, "
+            "SELECT COALESCE(payload->>'alert_body', summary, '') AS raw_content, "
+            "       source, primary_matter, related_matters, "
             "       vedana, triage_summary, resolved_thread_paths, "
             "       extracted_entities, step_5_decision "
             "FROM signal_queue WHERE id = %s",

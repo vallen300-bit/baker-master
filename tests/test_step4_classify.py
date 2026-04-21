@@ -607,10 +607,18 @@ def test_classify_live_pg_round_trip(monkeypatch: pytest.MonkeyPatch) -> None:
             cur.execute(up_sql)
             conn.commit()
             cur.execute(
+                # STEP_CONSUMERS_SIGNAL_CONTENT_SOURCE_FIX_1 (2026-04-21):
+                # ``raw_content`` is not a real column — the bridge writes
+                # body text into ``payload->>'alert_body'``. Step 4 does
+                # not read the body at all, so a minimal payload with the
+                # ``alert_body`` key suffices to keep the row structurally
+                # realistic for future re-reads.
                 "INSERT INTO signal_queue "
-                "(source, raw_content, status, triage_score, primary_matter, "
+                "(source, payload, status, triage_score, primary_matter, "
                 " related_matters, resolved_thread_paths) "
-                "VALUES ('step4_live_test', 'content', 'awaiting_classify', "
+                "VALUES ('step4_live_test', "
+                "        '{\"alert_body\": \"content\"}'::jsonb, "
+                "        'awaiting_classify', "
                 "        75, 'movie', ARRAY[]::TEXT[], '[]'::jsonb) "
                 "RETURNING id",
             )

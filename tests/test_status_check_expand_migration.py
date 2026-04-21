@@ -272,7 +272,14 @@ def test_check_constraint_round_trip(needs_live_pg) -> None:
                 cur.execute("SAVEPOINT sp_ok")
                 try:
                     cur.execute(
-                        "INSERT INTO signal_queue (source, raw_content, status) "
+                        # STEP_CONSUMERS_SIGNAL_CONTENT_SOURCE_FIX_1
+                        # (2026-04-21): ``raw_content`` is not a real
+                        # signal_queue column — the bridge writes body
+                        # text into ``payload->>'alert_body'``. The body
+                        # text is irrelevant to the status-CHECK test
+                        # assertion (only ``status`` matters), so use
+                        # ``summary`` — a real TEXT column — instead.
+                        "INSERT INTO signal_queue (source, summary, status) "
                         "VALUES ('migration_test', %s, %s) RETURNING id",
                         (f"status-check-expand-1 probe: {status}", status),
                     )
@@ -292,7 +299,7 @@ def test_check_constraint_round_trip(needs_live_pg) -> None:
             try:
                 with pytest.raises(pg_errors.CheckViolation):
                     cur.execute(
-                        "INSERT INTO signal_queue (source, raw_content, status) "
+                        "INSERT INTO signal_queue (source, summary, status) "
                         "VALUES ('migration_test', 'probe', 'garbage_state')"
                     )
             finally:
@@ -310,7 +317,7 @@ def test_check_constraint_round_trip(needs_live_pg) -> None:
             try:
                 with pytest.raises(pg_errors.CheckViolation):
                     cur.execute(
-                        "INSERT INTO signal_queue (source, raw_content, status) "
+                        "INSERT INTO signal_queue (source, summary, status) "
                         "VALUES ('migration_test', 'probe', 'awaiting_triage')"
                     )
             finally:
