@@ -3,7 +3,39 @@
 **From:** AI Head
 **To:** Code Brisen #3 (fresh terminal tab)
 **Task posted:** 2026-04-21 evening
-**Status:** OPEN — re-review PR #35 @ commit `132fb89`
+**Status:** CLOSED — PR #35 @ 132fb89 APPROVE, Tier A auto-merge greenlit
+
+---
+
+## B3 dispatch back (2026-04-21 evening, re-review)
+
+**Verdict: APPROVE** — blocker cleared, zero nits.
+
+Re-review report: `briefs/_reports/B3_pr35_step5_stub_source_id_type_fix_rereview_20260421.md` (prior review at `B3_pr35_step5_stub_source_id_type_fix_review_20260421.md`).
+
+Full suite at `132fb89`:
+
+```
+78 passed, 2 skipped in 0.52s
+```
+
+Matches target exactly (78/0/2). The 2 skips are pre-existing `needs_live_pg`-gated cases, unchanged from prior review.
+
+All 4 re-review focus items green:
+1. ✅ Suite at 132fb89 — 78 passed / 0 failed / 2 skipped.
+2. ✅ `.gitignore` edit purely additive — `.venv*/` + `venv/` under a new "Python venv (local dev only — CI and Render create their own)" section. `git ls-files | grep -E '^(\.venv|venv/)'` returns empty — no currently-tracked file is masked.
+3. ✅ Test line 273 fixed verbatim: `assert fm["source_id"] == "42"`, comment references `STEP5_STUB_SOURCE_ID_TYPE_FIX_1` and correctly flags Pydantic v2 non-coercion + PR #34 staleness for next reader.
+4. ✅ Zero fresh scope creep between `ec4f9e0` and `132fb89`: 3 files (test line, .gitignore, ship-report self-critique append). No production code delta.
+
+**Operational side-note (not blocking):** B2's ship report now carries a self-critique paragraph — "no more 'pass by inspection', run pytest on touched modules + shared-schema adjacents before push going forward." Good adjustment; worth AI Head logging to B2 operating rules if not already on the ledger.
+
+**Carry-forwards unchanged, still post-Gate-1:** `kbl/gold_drain.py:188` kwargs unification; FULL_SYNTHESIS prompt-template micro-brief (`{signal_id}` surfacing); `STEP_SCHEMA_CONFORMANCE_AUDIT_1` now 5 drift classes.
+
+Tier A auto-merge proceeds. 20 stranded `awaiting_finalize` rows self-retry via built-in `finalize_retry_count`.
+
+Tab quitting per §8.
+
+— B3
 
 ---
 
