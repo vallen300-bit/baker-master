@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, Optional
 
 from kbl.db import get_conn
 from kbl.logging import emit_log
@@ -42,6 +42,20 @@ WATERMARK_SOURCE = "alerts_to_signal_bridge"
 
 # Cold-start floor: read at most 2h of history on the first tick.
 COLD_START_LOOKBACK_HOURS = 2
+
+# BRIDGE_HOT_MD_AND_TUNING_1: Postgres advisory lock serializes concurrent
+# ticks (APScheduler retries / multi-pod deploys) so the NOT EXISTS guard
+# can't be raced. Stable hardcoded 64-bit int — mnemonic sibling of
+# ``_MIGRATION_LOCK_KEY`` in config/migration_runner.py (0x42BA4E00001).
+# Transaction-scoped form (``_xact_lock``) means the lock releases at the
+# next COMMIT or ROLLBACK — no explicit unlock required.
+_BRIDGE_ADVISORY_LOCK_KEY: int = 0x42BA4E00002
+
+# BRIDGE_HOT_MD_AND_TUNING_1: Director-curated signals. Path is read via
+# the vault mirror (Phase D MCP substrate), not a local disk path —
+# vault_mirror ensures freshness (5-min pull) and scope safety.
+HOT_MD_VAULT_PATH = "_ops/hot.md"
+HOT_MD_MIN_PATTERN_LENGTH = 4
 
 
 # --------------------------------------------------------------------------
@@ -94,6 +108,18 @@ STOPLIST_TITLE_PATTERNS = (
     r"\bForbes Under 30\b",
     r"\bwine o'clock\b",
     r"\bTAKEITOUTSIDE\b",
+    # BRIDGE_HOT_MD_AND_TUNING_1: additions from Day 1 Batch #1 dismissals.
+    # Each pattern is additive — the audit trail below lets a future brief
+    # retire any line if the matter-tag classifier tunes away the mis-match.
+    r"\bcigar\s+(?:market|news|review|lounge|industry)\b",  # Batch #1 #9: Austrian Tax mis-match
+    r"\bluxury\s+cigar\b",                                  # Batch #1 #9: Austrian Tax mis-match
+    r"\bphone\s+scam(?:s)?\b",                              # Batch #1 #10: Financing mis-match
+    r"\bscam(?:s)?\b",                                       # Batch #1 #10: generic-scam copy
+    r"\bfuel\s+(?:price|tax|duty)\b",                       # Batch #1 #5/#7: energy policy noise
+    r"\benergy\s+policy\b",                                  # Batch #1 #7: Austrian Tax mis-match
+    r"\bretail\s+market\s+update\b",                        # Batch #1 #6: German Property Tax mis-match
+    r"\bretail[-\s]+chain\s+turnover\b",                    # Batch #1 #6: retail-chain copy
+    r"\bTK\s*Maxx\b",                                        # Batch #1 #6: discount-retail mis-match
 )
 
 # Compile once at import. ``_STOPLIST_RE.search(title)`` returns truthy on first match.
@@ -133,6 +159,79 @@ def _is_stoplist_noise(alert: dict) -> bool:
     if _AUCTION_RE.search(title) and not _BRISEN_RE.search(title):
         return True
     return False
+
+
+def load_hot_md_patterns() -> list[str]:
+    """Read ``_ops/hot.md`` via the vault mirror; return parsed pattern list.
+
+    Parse rules (brief §1):
+      * lines starting with ``#`` → comment, ignored
+      * blank lines → ignored
+      * leading ``-`` or ``*`` bullet markers stripped
+      * remaining text shorter than ``HOT_MD_MIN_PATTERN_LENGTH`` ignored
+        (prevents ``"EU"`` matching every real-estate email)
+
+    Any failure to read the mirror (missing file, import error, truncated
+    oversize response) returns an empty list — the hot.md axis simply
+    doesn't fire that tick and the other 4 axes carry on unchanged.
+    Loud-fail is inappropriate here: a missing hot.md is a normal state
+    (first-deploy before Director seeds it, or transient clone miss).
+    """
+    try:
+        from vault_mirror import read_ops_file, VaultPathError
+    except Exception as e:  # pragma: no cover - defensive
+        _local.debug("hot.md: vault_mirror import failed: %s", e)
+        return []
+
+    try:
+        record = read_ops_file(HOT_MD_VAULT_PATH)
+    except VaultPathError:
+        return []
+    except Exception as e:
+        _local.warning("hot.md: read_ops_file raised: %s", e)
+        return []
+
+    if record.get("error") or record.get("truncated"):
+        return []
+
+    content = record.get("content_utf8") or ""
+    patterns: list[str] = []
+    for raw in content.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        # Strip a single leading bullet marker (``-`` or ``*``) and any
+        # whitespace that follows. Multi-byte/multi-char markers (e.g.
+        # ``--``) are intentionally left alone to avoid silently eating
+        # Director-typed content.
+        if stripped[0] in ("-", "*"):
+            stripped = stripped[1:].lstrip()
+        if len(stripped) < HOT_MD_MIN_PATTERN_LENGTH:
+            continue
+        patterns.append(stripped)
+    return patterns
+
+
+def hot_md_match(alert: dict, patterns: list[str]) -> Optional[str]:
+    """Return the first hot.md pattern that matches alert title+body, else None.
+
+    Case-insensitive substring search. Patterns are checked in the order
+    they appear in the file so Director's implicit weekly priority order
+    is preserved in the attributed match (top-of-file wins a tie).
+    """
+    if not patterns:
+        return None
+    haystack = " ".join(
+        [alert.get("title") or "", alert.get("body") or ""]
+    ).lower()
+    if not haystack.strip():
+        return None
+    for pattern in patterns:
+        if len(pattern) < HOT_MD_MIN_PATTERN_LENGTH:
+            continue
+        if pattern.lower() in haystack:
+            return pattern
+    return None
 
 
 def _has_promote_type(alert: dict) -> bool:
@@ -182,12 +281,18 @@ def _has_promote_type(alert: dict) -> bool:
 def _passes_filter_axes(
     alert: dict, vip_ids: set[str], vip_emails: set[str]
 ) -> bool:
-    """Return True if any of the 4 inclusive-OR axes match.
+    """Return True if any of the 5 inclusive-OR axes match.
 
     1. Tier 1 or 2 (high-priority on the Baker classifier output).
     2. matter_slug populated (any active matter).
     3. contact_id resolves to a VIP (or sender email is a VIP email).
     4. tags / structured_actions / title match a promote-type.
+    5. hot.md match — Director-curated weekly priority (BRIDGE_HOT_MD_AND_TUNING_1).
+
+    Axis 5 expects the caller (``run_bridge_tick``) to have pre-populated
+    ``alert["hot_md_match"]`` with a hit or left it absent/None. Keeping
+    the match computation outside this pure function lets the tick load
+    hot.md patterns once per batch instead of once per alert.
 
     Stop-list is checked separately by callers. Keeping the two
     concerns split keeps the test matrix legible and lets callers
@@ -212,6 +317,9 @@ def _passes_filter_axes(
         return True
 
     if _has_promote_type(alert):
+        return True
+
+    if alert.get("hot_md_match"):
         return True
 
     return False
@@ -303,6 +411,9 @@ def map_alert_to_signal(alert: dict) -> dict:
         "status": "pending",
         "stage": "triage",
         "payload": payload,
+        # BRIDGE_HOT_MD_AND_TUNING_1: Director-curated axis-5 attribution.
+        # NULL when another axis fired; the matched line verbatim otherwise.
+        "hot_md_match": alert.get("hot_md_match"),
     }
 
 
@@ -383,9 +494,9 @@ def _insert_signal_if_new(cur, signal_row: dict) -> bool:
         """
         INSERT INTO signal_queue (
             source, signal_type, matter, primary_matter,
-            summary, priority, status, stage, payload
+            summary, priority, status, stage, payload, hot_md_match
         )
-        SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb
+        SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s
         WHERE NOT EXISTS (
             SELECT 1 FROM signal_queue
             WHERE source = 'legacy_alert'
@@ -409,6 +520,7 @@ def _insert_signal_if_new(cur, signal_row: dict) -> bool:
             signal_row["status"],
             signal_row["stage"],
             payload_json,
+            signal_row.get("hot_md_match"),
             str(alert_id) if alert_id is not None else "",
             alert_source_id,
             alert_source_id,
@@ -439,15 +551,23 @@ def run_bridge_tick(max_bridge_per_tick: int = 50) -> dict:
 
     Returns a counts dict with keys:
         read              - alerts read since watermark
-        kept              - alerts that passed both stop-list + 4-axis filter
+        kept              - alerts that passed both stop-list + 5-axis filter
         bridged           - rows actually INSERTed (idempotency may drop dups)
-        skipped_filter    - failed all 4 axes (and not stop-listed)
+        skipped_filter    - failed all 5 axes (and not stop-listed)
         skipped_stoplist  - matched the stop-list
         errors            - 1 if the tick raised; 0 otherwise
+        skipped_locked    - lock held by sibling tick; no-op (BRIDGE_HOT_MD_AND_TUNING_1)
 
     Single transaction. If anything in the batch raises, the whole
     tick rolls back (including the watermark) and APScheduler retries
     on the next tick — no half-advance.
+
+    BRIDGE_HOT_MD_AND_TUNING_1: wrapped in a Postgres transaction-scoped
+    advisory lock. Two ticks firing 625ms apart previously both read the
+    same alert + both passed NOT EXISTS + both inserted (Batch #1 dup).
+    ``pg_try_advisory_xact_lock`` is non-blocking: the second caller
+    receives ``False``, rolls back its (empty) transaction, and no-ops.
+    Lock releases automatically at COMMIT/ROLLBACK — no manual unlock.
     """
     counts = {
         "read": 0,
@@ -456,11 +576,31 @@ def run_bridge_tick(max_bridge_per_tick: int = 50) -> dict:
         "skipped_filter": 0,
         "skipped_stoplist": 0,
         "errors": 0,
+        "skipped_locked": 0,
     }
 
     try:
         with get_conn() as conn:
             try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT pg_try_advisory_xact_lock(%s)",
+                        (_BRIDGE_ADVISORY_LOCK_KEY,),
+                    )
+                    row = cur.fetchone()
+                    lock_acquired = bool(row and row[0])
+
+                if not lock_acquired:
+                    # Sibling tick in-flight. Roll back our empty txn so
+                    # the lock-contention attempt doesn't linger, and
+                    # skip cleanly. APScheduler's next tick retries.
+                    conn.rollback()
+                    counts["skipped_locked"] = 1
+                    _local.info(
+                        "bridge_tick: advisory lock held by sibling tick; skipping"
+                    )
+                    return counts
+
                 with conn.cursor() as cur:
                     watermark = _get_watermark_or_cold_start(cur)
                     vip_ids, vip_emails = _load_vip_sets(cur)
@@ -468,7 +608,16 @@ def run_bridge_tick(max_bridge_per_tick: int = 50) -> dict:
 
                 counts["read"] = len(alerts)
                 if not alerts:
+                    # Still commit so the xact-scoped lock is released
+                    # (rather than relying on conn close). Cheap no-op.
+                    conn.commit()
                     return counts
+
+                # Loaded once per batch — not once per alert. A hot.md edit
+                # mid-tick is visible on the next tick (<=60 s), which
+                # matches the brief's "5 min freshness" guarantee plus
+                # the scheduler cadence floor.
+                hot_md_patterns = load_hot_md_patterns()
 
                 max_created_at = watermark
                 with conn.cursor() as cur:
@@ -480,6 +629,10 @@ def run_bridge_tick(max_bridge_per_tick: int = 50) -> dict:
                         if _is_stoplist_noise(alert):
                             counts["skipped_stoplist"] += 1
                             continue
+
+                        alert["hot_md_match"] = hot_md_match(
+                            alert, hot_md_patterns
+                        )
 
                         if not _passes_filter_axes(alert, vip_ids, vip_emails):
                             counts["skipped_filter"] += 1
