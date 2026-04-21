@@ -348,8 +348,22 @@ def _normalize_money_list(fm_dict: Dict[str, Any]) -> None:
 
 def _fetch_signal_row(conn: Any, signal_id: int) -> _SignalRow:
     """One SELECT pulls every column Step 6 needs. Raises ``LookupError``
-    on missing row — pipeline_tick catches and routes to inbox."""
+    on missing row — pipeline_tick catches and routes to inbox.
+
+    ``finalize_retry_count`` was intentionally NOT part of a formal
+    migration (see ``_increment_retry_count`` docstring for the R3
+    rationale). Live DBs booted before Step 6 ever ran are missing the
+    column, which used to abort this SELECT before the self-healing
+    ALTER in ``_increment_retry_count`` could ever execute. Run the
+    defensive ALTER here — matches Step 7's inline
+    ``_mark_completed`` pattern (lines 247-258): ADD COLUMN first,
+    SELECT/UPDATE second, one transaction, idempotent.
+    """
     with conn.cursor() as cur:
+        cur.execute(
+            "ALTER TABLE signal_queue "
+            "ADD COLUMN IF NOT EXISTS finalize_retry_count INT NOT NULL DEFAULT 0"
+        )
         cur.execute(
             "SELECT opus_draft_markdown, step_5_decision, "
             "       triage_score, triage_confidence, "

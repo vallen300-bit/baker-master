@@ -652,3 +652,191 @@ def test_serialize_final_markdown_ordered_keys() -> None:
     assert "triage_score: 50" in md
     assert "money_mentioned" in md
     assert md.endswith("\n")
+
+
+# ----- live-PG round-trip: finalize_retry_count self-healing ALTER -----
+#
+# STEP6_FINALIZE_RETRY_COLUMN_FIX_1 regression gate. Before the fix,
+# ``_fetch_signal_row`` SELECTed ``COALESCE(finalize_retry_count, 0)``
+# with no upfront ALTER — on a DB where the column didn't exist, the
+# SELECT raised ``UndefinedColumn`` and the whole Step 6 invocation
+# aborted before the self-healing ALTER in ``_increment_retry_count``
+# could ever run. Rows stranded at ``stage=finalize, status=processing``
+# under the usual claim-transactionality path.
+#
+# This test drops the column (if present), then calls ``_fetch_signal_row``
+# against a real signal_queue row, and asserts: (a) the call succeeds
+# without raising, (b) the column now exists in the live schema, (c) the
+# returned ``finalize_retry_count`` is 0 (COALESCE on the freshly-created
+# DEFAULT 0 column).
+
+def test_fetch_signal_row_self_heals_missing_finalize_retry_count(
+    needs_live_pg,
+) -> None:
+    """Regression gate: ``_fetch_signal_row`` must run the defensive
+    ADD COLUMN IF NOT EXISTS before the SELECT so a DB missing
+    ``finalize_retry_count`` self-heals instead of stranding the row.
+    """
+    import psycopg2
+
+    from kbl.steps.step6_finalize import _fetch_signal_row
+    from tests.fixtures.signal_queue import insert_test_signal
+
+    conn = psycopg2.connect(needs_live_pg)
+    signal_id: Optional[int] = None
+    try:
+        # Drop the column if present to exercise the recovery path.
+        # IF EXISTS keeps this idempotent across environments where the
+        # column has already been created by a prior Step 6 invocation.
+        with conn.cursor() as cur:
+            cur.execute(
+                "ALTER TABLE signal_queue "
+                "DROP COLUMN IF EXISTS finalize_retry_count"
+            )
+        conn.commit()
+
+        # Confirm the column is actually gone before the test call.
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT 1 FROM information_schema.columns "
+                "WHERE table_name = 'signal_queue' "
+                "  AND column_name = 'finalize_retry_count'"
+            )
+            assert cur.fetchone() is None, "column should be dropped pre-test"
+
+        # Seed a signal with a non-empty opus_draft_markdown so
+        # ``_fetch_signal_row`` doesn't bail on the NULL-draft guard.
+        signal_id = insert_test_signal(
+            conn,
+            body="Step 6 self-heal test body.",
+            matter="movie",
+            source="email",
+        )
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE signal_queue SET "
+                "  opus_draft_markdown = %s, "
+                "  step_5_decision = %s, "
+                "  triage_score = %s, "
+                "  triage_confidence = %s "
+                "WHERE id = %s",
+                ("---\ntitle: seed\n---\nbody", "full_synthesis", 55, 0.7, signal_id),
+            )
+        conn.commit()
+
+        # The actual fix point: BEFORE this change, the next call
+        # raised psycopg2.errors.UndefinedColumn on finalize_retry_count.
+        row = _fetch_signal_row(conn, signal_id)
+        conn.commit()
+
+        # (a) call succeeded (no exception to this point).
+        # (b) column now exists in live schema.
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT data_type FROM information_schema.columns "
+                "WHERE table_name = 'signal_queue' "
+                "  AND column_name = 'finalize_retry_count'"
+            )
+            got = cur.fetchone()
+        assert got is not None, "finalize_retry_count must exist post-_fetch_signal_row"
+        assert got[0] == "integer"
+
+        # (c) retry count defaults to 0 via COALESCE + column default.
+        assert row.finalize_retry_count == 0
+        assert row.triage_score == 55
+        assert abs(float(row.triage_confidence or 0) - 0.7) < 1e-9
+        assert row.step_5_decision == "full_synthesis"
+    finally:
+        if signal_id is not None:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM kbl_cost_ledger WHERE signal_id = %s",
+                    (signal_id,),
+                )
+                cur.execute(
+                    "DELETE FROM kbl_log WHERE signal_id = %s",
+                    (signal_id,),
+                )
+                cur.execute(
+                    "DELETE FROM signal_queue WHERE id = %s", (signal_id,)
+                )
+            conn.commit()
+        conn.close()
+
+
+def test_fetch_signal_row_idempotent_when_column_already_exists(
+    needs_live_pg,
+) -> None:
+    """Second-invocation guard: once the ALTER has landed, subsequent
+    ``_fetch_signal_row`` calls must not raise and must still return the
+    correct retry_count. Protects against an accidental future
+    non-idempotent change to the ALTER (e.g. dropping the IF NOT EXISTS).
+    """
+    import psycopg2
+
+    from kbl.steps.step6_finalize import _fetch_signal_row
+    from tests.fixtures.signal_queue import insert_test_signal
+
+    conn = psycopg2.connect(needs_live_pg)
+    signal_id: Optional[int] = None
+    try:
+        # Ensure column exists (previous test may have dropped-and-recreated).
+        with conn.cursor() as cur:
+            cur.execute(
+                "ALTER TABLE signal_queue "
+                "ADD COLUMN IF NOT EXISTS finalize_retry_count "
+                "INT NOT NULL DEFAULT 0"
+            )
+        conn.commit()
+
+        signal_id = insert_test_signal(
+            conn,
+            body="Step 6 idempotency test body.",
+            matter="movie",
+            source="email",
+        )
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE signal_queue SET "
+                "  opus_draft_markdown = %s, "
+                "  step_5_decision = %s, "
+                "  triage_score = %s, "
+                "  triage_confidence = %s, "
+                "  finalize_retry_count = %s "
+                "WHERE id = %s",
+                (
+                    "---\ntitle: seed\n---\nbody",
+                    "full_synthesis",
+                    70,
+                    0.85,
+                    2,  # pre-set to exercise COALESCE with a non-zero value
+                    signal_id,
+                ),
+            )
+        conn.commit()
+
+        # Two back-to-back calls — ALTER IF NOT EXISTS must be a no-op
+        # on the second one, and both must return the same row.
+        row1 = _fetch_signal_row(conn, signal_id)
+        row2 = _fetch_signal_row(conn, signal_id)
+        conn.commit()
+
+        assert row1.finalize_retry_count == 2
+        assert row2.finalize_retry_count == 2
+        assert row1.triage_score == 70
+    finally:
+        if signal_id is not None:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM kbl_cost_ledger WHERE signal_id = %s",
+                    (signal_id,),
+                )
+                cur.execute(
+                    "DELETE FROM kbl_log WHERE signal_id = %s",
+                    (signal_id,),
+                )
+                cur.execute(
+                    "DELETE FROM signal_queue WHERE id = %s", (signal_id,)
+                )
+            conn.commit()
+        conn.close()
