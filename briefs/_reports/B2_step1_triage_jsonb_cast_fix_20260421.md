@@ -2,7 +2,7 @@
 role: B2
 kind: ship
 brief: step1_triage_jsonb_cast_fix
-pr: (populated after `gh pr create`)
+pr: https://github.com/vallen300-bit/baker-master/pull/31
 branch: step1-triage-jsonb-cast-fix-1
 base: main
 verdict: SHIPPED_READY_FOR_REVIEW
