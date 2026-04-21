@@ -2,7 +2,7 @@
 role: B2
 kind: ship
 brief: bridge_hot_md_match_type_repair
-pr: (populated after `gh pr create`)
+pr: https://github.com/vallen300-bit/baker-master/pull/33
 branch: bridge-hot-md-match-type-repair-1
 base: main
 verdict: SHIPPED_READY_FOR_REVIEW
