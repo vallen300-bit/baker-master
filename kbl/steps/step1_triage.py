@@ -459,11 +459,19 @@ def _mark_running(conn: Any, signal_id: int) -> None:
 def _write_triage_result(
     conn: Any, signal_id: int, result: TriageResult, next_state: str
 ) -> None:
+    # ``related_matters`` is JSONB in the live schema. psycopg2 adapts a
+    # raw Python list to PG ``text[]``, and PostgreSQL has no implicit
+    # cast from ``text[]`` to ``jsonb`` (ARRAY['a','b']::jsonb errors
+    # with "cannot cast type text[] to jsonb"). The proven pattern in
+    # sibling steps (``step2_resolve._write_result`` line 126,
+    # ``step3_extract._write_extraction_result`` line 486) is to
+    # serialize the Python collection via ``json.dumps`` and cast the
+    # resulting TEXT to JSONB server-side. Mirror that pattern here.
     with conn.cursor() as cur:
         cur.execute(
             "UPDATE signal_queue SET "
             "  primary_matter = %s, "
-            "  related_matters = %s, "
+            "  related_matters = %s::jsonb, "
             "  vedana = %s, "
             "  triage_score = %s, "
             "  triage_confidence = %s, "
@@ -472,7 +480,7 @@ def _write_triage_result(
             "WHERE id = %s",
             (
                 result.primary_matter,
-                list(result.related_matters),
+                json.dumps(list(result.related_matters)),
                 result.vedana,
                 result.triage_score,
                 result.triage_confidence,
