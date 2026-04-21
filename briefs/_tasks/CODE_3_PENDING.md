@@ -3,47 +3,37 @@
 **From:** AI Head
 **To:** Code Brisen #3 (fresh terminal tab)
 **Task posted:** 2026-04-21 evening
-**Status:** OPEN — review PR #33 `BRIDGE_HOT_MD_MATCH_TYPE_REPAIR_1`
+**Status:** CLOSED — PR #33 APPROVE, Tier A auto-merge greenlit
 
 ---
 
-## Target
+## B3 dispatch back (2026-04-21 evening)
 
-- **PR:** https://github.com/vallen300-bit/baker-master/pull/33
-- **Branch:** `bridge-hot-md-match-type-repair-1`
-- **Head commits:** `cb37867` + `1d650b1`
-- **Author:** B2
-- **Author's ship report:** `briefs/_reports/B2_bridge_hot_md_match_type_repair_20260421.md`
-- **Upstream substrate:** `briefs/_reports/B2_bridge_hot_md_match_drift_20260421.md` (earlier diagnostic, ratified direction)
+**Verdict: APPROVE** — no blocking issues, zero gating nits. 4-bug column-drift cluster closes with this merge.
 
-## Context (one paragraph)
+Report: `briefs/_reports/B3_pr33_bridge_hot_md_match_type_repair_review_20260421.md`.
 
-Bridge has been dead ~4h with `invalid input syntax for type boolean: "Lilienmatt"` — hot_md_match column is BOOLEAN in live DB (pre-existing bootstrap from KBL-19 era) while PR #29's `ADD COLUMN IF NOT EXISTS hot_md_match TEXT` silently no-op'd. This PR flips live column BOOLEAN → TEXT, fixes bootstrap DDL to match, adds self-healing reconciliation for deployed instances, and tests three layers. Today's 4-bug drift cluster closes with this PR (#30 + #31 + #32 already merged).
+All 7 focus items green:
+1. ✅ Migration idempotent via `data_type='boolean'` guard (not error-swallow); lex-sort confirms `_b` > `_` at char[8] (0x62 > 0x5F), so runner applies repair second; parse-test `test_migration_sorts_after_original` enforces order
+2. ✅ Bootstrap edit line 6213 BOOLEAN→TEXT; grep confirms two functional references (line 6213 + lines 6282-6283), both land on TEXT, zero residual BOOLEAN for this column; adjacent BOOLEAN columns (`ayoniso_alert`, `cross_link_hint`) checked — all bound as Python bool, no drift risk
+3. ✅ `_ensure_signal_queue_additions` DO-block is identical to migration's, placed between `started_at` ADD and `triage_confidence_range` CHECK; symmetry with status-CHECK re-assertion pattern is real (same mirror-migration-then-reassert philosophy, different idiom per constraint-kind); info_schema `data_type` is stronger than `pg_typeof` (schema type, not runtime value type) — non-blocking phrasing choice
+4. ✅ Drift rule compliance: migration = source of truth, bootstrap CREATE TABLE matches, additions self-heal; three layers covering fresh DB + migrated DB + stale-ledger replica; no adjacent columns at risk
+5. ✅ Tests solid: 7 parse + 4 live-PG; all 4 focus-5 paths covered — (a) fresh DB via DROP + `_ensure_signal_queue_base`, (b) self-heal via force-BOOLEAN + `_ensure_signal_queue_additions`, (b') migration UP flips BOOLEAN→TEXT, (d) idempotency via second-apply on TEXT; bridge INSERT-of-TEXT covered implicitly by column-type assertion + existing PR #30 integration tests; local 7/4/0 with live-PG SKIP clean
+6. ✅ Data-loss surface confirmed via live query: 16/16 rows `hot_md_match IS NULL`, zero non-NULL values, ::text cast effectively a rename; assertion in migration comments + ship report
+7. ✅ No scope creep: 4 files (migration + store_back.py + test + ship report); `git diff main...HEAD -- kbl/bridge/ kbl/pipeline_tick.py kbl/steps/` returns 0 lines
 
-## Focus items for review
+**Tier A auto-merge OK.** Post-merge: Render auto-deploys → migration runner applies `20260421b_alter_hot_md_match_to_text.sql` (advisory lock + sha256 drift defense) → live column flips BOOLEAN→TEXT → bridge resumes emitting → `kbl_log` should show zero new `invalid input syntax for type boolean` errors.
 
-1. **Idempotency of the `ALTER COLUMN ... TYPE TEXT` migration.** DO-block guarded by `data_type='boolean'` check — confirm re-apply on an already-TEXT DB is a no-op (not just an error-swallow). Ordering (`_b` suffix sorts after original migration) — verify runner applies in intended order.
-2. **Bootstrap edit at `memory/store_back.py:6213`.** Confirm `hot_md_match TEXT` in `_ensure_signal_queue_base` matches what the migration produces. Verify no other reference in `store_back.py` still declares BOOLEAN (drift rule: grep mandatory).
-3. **`_ensure_signal_queue_additions` reconciliation helper.** Idempotency: repeated boots must be no-ops. Advisory-lock / `pg_typeof` guard structured correctly. Mirrors the existing status-CHECK re-assertion pattern cited in the ship report — verify symmetry is real, not prose-only.
-4. **Migration-vs-bootstrap DDL drift rule compliance** (`memory/feedback_migration_bootstrap_drift.md`). Two sites for `hot_md_match` in `store_back.py` — both must land on TEXT. Fifteen minutes of grep for any other column affected adjacent to this change.
-5. **Tests (`tests/test_hot_md_match_type_repair.py`).** 7 parse-level + 4 live-PG. Live-PG tests should cover: (a) fresh DB path ends TEXT, (b) legacy BOOLEAN DB path self-heals to TEXT, (c) `pg_typeof` post-ensure-chain assertion, (d) bridge INSERT of TEXT value succeeds. Confirm each is present and exercises what it claims.
-6. **Data-loss surface.** Pre-fix audit: 16/16 rows `hot_md_match IS NULL` — `::text` cast is effectively a rename. Confirm assertion holds in ship report + in migration comments.
-7. **No scope creep.** Only files touched: the new migration, `store_back.py` (two targeted edits), the new test file. No bridge code changes. No step-consumer changes.
+**Gate 1 status:** 4-bug drift cluster CLOSED with this merge:
+- ✓ PR #30: raw_content phantom column (existence drift)
+- ✓ PR #31: related_matters text[] → JSONB (shape drift)
+- ✓ PR #32: finalize_retry_count never-migrated (existence drift)
+- ✓ PR #33: hot_md_match BOOLEAN → TEXT (type drift)
 
-## Deliverable
+Suggest adding the hot_md_match type-drift case as the third fixture class in `STEP_SCHEMA_CONFORMANCE_AUDIT_1` (post-Gate-1 brief), alongside existence + shape.
 
-- Verdict: `APPROVE` / `APPROVE_WITH_NITS` / `REQUEST_CHANGES` on PR #33.
-- Report: `briefs/_reports/B3_pr33_bridge_hot_md_match_type_repair_review_20260421.md`.
-- Include: per-focus-item verdict, any nits inline on PR (non-blocking) vs. blocking in report, grep evidence for drift-rule compliance.
+N-nits parked for next adjacent brief: N1 duplication migration/bootstrap SQL (accepted per status-CHECK precedent); N2 future `_ensure_signal_queue_type_reconciliations` helper if more type-repairs land; N3 doc-only `-- migrate:down` section (consistent with existing migrations).
 
-## Gate
+Tab quitting per §8.
 
-- **Tier A auto-merge on APPROVE (clean mergeable, no blockers).**
-- APPROVE_WITH_NITS: AI Head reviews nits before merge; merge if all are non-blocking.
-- REQUEST_CHANGES: back to B2 with your delta.
-
-## Working dir
-
-`~/bm-b3`. `git pull -q` before starting.
-
-— AI Head
+— B3
