@@ -2,54 +2,62 @@
 
 **From:** AI Head
 **To:** Code Brisen #2
-**Task posted:** 2026-04-21 evening (post PR #32 merge — critical path to Gate 1)
-**Status:** OPEN — BRIDGE_HOT_MD_MATCH_TYPE_REPAIR_1
+**Task posted:** 2026-04-21 evening (post PR #33 merge — bridge healed, new Step 6 blocker)
+**Status:** OPEN — STEP6_FRONTMATTER_YAML_ESCAPE_FIX_1
 
 ---
 
 ## Context
 
-PR #32 merged. Step consumers 1-6 healthy + deployed. Bridge still broken: `alerts_to_signal_bridge` failing every tick with `invalid input syntax for type boolean: "Lilienmatt"`. 15+ alerts backed up waiting to land in signal_queue. Bridge-fix is the one remaining blocker on Gate 1 — existing 16 signals are all destined for `routed_inbox` (Opus out-of-scope), so Gate 1 needs fresh in-scope signals to flow.
+PR #33 deployed. Bridge healed — `hot_md_match` live column is TEXT, zero bridge errors in last 3 min, 19 fresh signals landed in `signal_queue`. Critical-path working as designed — until Step 6.
 
-Full diagnostic by you earlier today — no re-investigation needed.
+**New Step 6 blocker (4 rows in `status='opus_failed'`, including Hagenauer + Lilienmatt in-scope matters).** Pipeline tick error:
 
-## Substrate (YOURS — read first)
+```
+unexpected exception in _process_signal_remote: frontmatter YAML parse failed:
+mapping values are not allowed here
+  in "<unicode string>", line 1, column 20:
+    title: Layer 2 gate: matter not in current scope
+                       ^
+```
 
-`briefs/_reports/B2_bridge_hot_md_match_drift_20260421.md` (commit e3a4ad8).
+Unquoted colon in the title string breaks YAML parse. Every out-of-scope signal hits this because Step 5's deterministic stub emits the same title.
 
-Everything required to ship is in §"Fix direction — TEXT" and §"Proposed next brief". No decisions left — direction ratified.
+## Root-cause pointer (for you to verify)
 
-## Scope — ship the fix
+`kbl/steps/step5_opus.py:391`:
 
-Ratified direction: live column BOOLEAN → TEXT; match bootstrap DDL; add type-reconciliation helper so already-booted instances self-heal where `ADD COLUMN IF NOT EXISTS` silently no-op'd.
+```python
+title = "Layer 2 gate: matter not in current scope"
+```
 
-Sequence (from your report §"Proposed next brief"):
+This string is written into frontmatter downstream (probably Step 6's finalize emitter), and the emitter is building YAML via string concat / `f"title: {title}\n"` rather than `yaml.safe_dump`. Any unquoted colon in title or other scalar fields triggers the "mapping values not allowed" error.
 
-1. Write migration `migrations/NNN_alter_hot_md_match_to_text.sql` — `ALTER COLUMN ... TYPE TEXT USING hot_md_match::text`. Wire into the migration runner.
-2. Add a boot-time type-reconciliation helper in `_ensure_signal_queue_additions` (or equivalent) so existing deployments self-heal even when the migration ledger says "already applied". Idempotent — `pg_typeof` guard or advisory-lock'd DO block.
-3. Fix `memory/store_back.py:6213` — change `hot_md_match BOOLEAN` to `hot_md_match TEXT` in `_ensure_signal_queue_base` so fresh-DB boots are correct from minute zero.
-4. Regression test: boot a fresh DB + boot an old DB (legacy BOOLEAN), assert both end TEXT. Assert `pg_typeof(hot_md_match) = 'text'` after full ensure-chain.
-5. Follow migration-vs-bootstrap DDL drift rule (`memory/feedback_migration_bootstrap_drift.md`) — grep `store_back.py` for any bootstrap DDL touching columns this migration references, verify type alignment before landing.
+## Scope
+
+1. **Locate emitter:** grep repo for where frontmatter is composed from Step 5's `title` field. Most likely `kbl/steps/step6_finalize.py` — frontmatter assembly before commit write.
+2. **Fix direction:** switch the emitter to `yaml.safe_dump({...}, default_flow_style=False)` so scalars are quoted when required. OR, narrower fix: force-quote the title via `json.dumps(title)` or `yaml.dump` on the title scalar. Prefer the structured `safe_dump` path — any future frontmatter field gets proper escaping for free.
+3. **Recovery:** 4 opus_failed rows need to be re-attempted on the fix landing. Not a Tier A pattern — surface the recovery SQL in your ship report and AI Head will authorize before running.
+4. **Regression test:** frontmatter emitter unit test with title containing colon + backslash + newline; assert roundtrip parse via `yaml.safe_load` succeeds.
+5. **Migration-vs-bootstrap rule:** N/A — no DB columns touched.
+6. **Audit adjacent frontmatter fields:** primary_matter, signal_type, summary, etc. — any field that can contain a colon or other YAML-special character MUST flow through the structured emitter. List any at-risk fields in the ship report.
 
 ## Deliverable
 
-- PR on baker-master, branch `bridge-hot-md-match-type-repair-1`, reviewer B3.
-- Ship report at `briefs/_reports/B2_bridge_hot_md_match_type_repair_20260421.md`.
-- Include: migration + bootstrap edits summary, regression test output, type-conformance check.
+- PR on baker-master, branch `step6-frontmatter-yaml-escape-fix-1`, reviewer B3.
+- Ship report at `briefs/_reports/B2_step6_frontmatter_yaml_escape_fix_20260421.md`.
+- Include: emitter location, before/after snippet, regression test output, recovery SQL for the 4 stranded `opus_failed` rows (AI Head runs post-merge).
 
-## Recovery (AI Head handles post-merge)
+## Cross-reference
 
-- No rows to reset — 15 stalled alerts drain automatically on first successful bridge tick post-deploy.
-- Watch `kbl_log` for bridge errors clearing.
-- Fresh signals → in-scope ones reach Step 6 → Mac Mini Step 7 commits → Gate 1 closes.
+Today's 4-bug drift cluster (all column-drift) closed with PR #33. This is a distinct bug class — encoding/escape drift between producer and parser. Worth flagging in the ship report that the post-Gate-1 `STEP_SCHEMA_CONFORMANCE_AUDIT_1` should expand scope to cover emitter-to-parser roundtrip fuzz tests, not just schema type/existence drift.
 
 ## Constraints
 
-- **XS effort (<1h)** per your own estimate.
-- No touch to bridge code (`kbl/bridge/alerts_to_signal.py`) — already correct.
-- No touch to step consumers.
-- Migration-vs-bootstrap DDL drift check is mandatory (rule ratified today).
-- **Timebox: 60 min.**
+- **XS effort (<1h).**
+- No touch to Step 5 logic — only the emitter that consumes its output.
+- No touch to bridge, pipeline_tick, or step1-5 consumers.
+- **Timebox: 45 min.**
 
 ## Working dir
 
