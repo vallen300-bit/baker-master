@@ -6210,7 +6210,7 @@ class SentinelStoreBack:
                     summary           TEXT,
                     triage_score      INT,
                     vedana            TEXT,
-                    hot_md_match      BOOLEAN,
+                    hot_md_match      TEXT,
                     payload           JSONB,
                     priority          TEXT DEFAULT 'normal',
                     status            TEXT DEFAULT 'pending',
@@ -6255,6 +6255,36 @@ class SentinelStoreBack:
             )
             # R1.B1: started_at for claim-time latency metrics
             cur.execute("ALTER TABLE signal_queue ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ")
+
+            # BRIDGE_HOT_MD_MATCH_TYPE_REPAIR_1 (2026-04-21 evening):
+            # Reconcile hot_md_match type if a legacy bootstrap DDL
+            # created it as BOOLEAN. BRIDGE_HOT_MD_AND_TUNING_1 semantics
+            # require TEXT (the verbatim matched pattern line), but the
+            # pre-existing BOOLEAN declaration in `_ensure_signal_queue_base`
+            # caused `ADD COLUMN IF NOT EXISTS hot_md_match TEXT` in
+            # 20260421_signal_queue_hot_md_match.sql to silently no-op.
+            # Defense-in-depth layer on top of the
+            # 20260421b_alter_hot_md_match_to_text.sql migration: even if
+            # the migration ledger is stale for whatever reason, the
+            # bootstrap self-heals the live column to TEXT on every boot.
+            # Idempotent: no-op when already TEXT.
+            cur.execute(
+                """
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.columns
+                         WHERE table_name = 'signal_queue'
+                           AND column_name = 'hot_md_match'
+                           AND data_type  = 'boolean'
+                    ) THEN
+                        ALTER TABLE signal_queue
+                            ALTER COLUMN hot_md_match TYPE TEXT
+                            USING hot_md_match::text;
+                    END IF;
+                END $$;
+                """
+            )
 
             # triage_confidence range CHECK
             cur.execute(
