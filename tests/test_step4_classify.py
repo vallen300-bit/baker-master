@@ -91,6 +91,104 @@ def test_parse_hot_md_stops_at_next_h2() -> None:
     assert _parse_hot_md_active(hot) == frozenset({"movie"})
 
 
+# ---- STEP4_HOT_MD_PARSER_FIX_1 regression set (2026-04-22) ----
+#
+# Before the fix: the live hot.md header carried a parenthetical suffix
+# (`## Actively pressing (elevate — deadline/decision this week)`) and
+# the section regex anchored on `\s*$` immediately after "pressing" — so
+# the section match returned `None`, every scope lookup returned an empty
+# set, and Rule 1 rejected every signal as out-of-scope. Combo bullets
+# (`**lilienmatt + annaberg + aukera**:`) were also invisible because the
+# slug regex rejected whitespace and `+` inside the `**...**` fences.
+#
+# These 5 tests lock the fix in: parenthetical headers parse, bare headers
+# still parse (backward compat), single-slug bullets still parse, combo
+# bullets tokenize into their component slugs, and mixed bodies yield the
+# correct union.
+
+
+def test_parse_hot_md_live_parenthetical_header() -> None:
+    """Live hot.md heading shape — parenthetical suffix must not kill the
+    section match. Prior behavior: returned empty set."""
+    hot = (
+        "## Actively pressing (elevate — deadline/decision this week)\n"
+        "- **hagenauer-rg7**: GC takeover\n"
+        "- **ao**: capital call\n"
+    )
+    assert _parse_hot_md_active(hot) == frozenset({"hagenauer-rg7", "ao"})
+
+
+def test_parse_hot_md_bare_header_still_parses() -> None:
+    """Backward compat — the prior-shape header (no parenthetical)
+    continues to parse identically post-fix."""
+    hot = (
+        "## Actively pressing\n"
+        "- **hagenauer-rg7**: GC takeover\n"
+        "- **ao**: capital call\n"
+    )
+    assert _parse_hot_md_active(hot) == frozenset({"hagenauer-rg7", "ao"})
+
+
+def test_parse_hot_md_single_slug_bullet_backward_compat() -> None:
+    """Single-slug bullets across a mix of dash/underscore slugs must
+    round-trip unchanged — the combo-bullet split on `+` must not alter
+    slugs that don't contain a `+`."""
+    hot = (
+        "## Actively pressing\n"
+        "- **hagenauer-rg7**: live\n"
+        "- **mo-vie-am**: live\n"
+        "- **ao_holding**: live\n"
+    )
+    assert _parse_hot_md_active(hot) == frozenset(
+        {"hagenauer-rg7", "mo-vie-am", "ao_holding"}
+    )
+
+
+def test_parse_hot_md_multi_slug_combo_bullet() -> None:
+    """Hot.md line 13 documents `slug1 + slug2` as an intentional combo
+    bullet format — this is the format in live use for `lilienmatt +
+    annaberg + aukera`, `nvidia + corinthia`, `aukera + mo-vie-am`. The
+    parser must tokenize on `+` and yield each slug individually."""
+    hot = (
+        "## Actively pressing\n"
+        "- **lilienmatt + annaberg + aukera**: restructure\n"
+    )
+    assert _parse_hot_md_active(hot) == frozenset(
+        {"lilienmatt", "annaberg", "aukera"}
+    )
+
+
+def test_parse_hot_md_mixed_single_and_multi_slug_bullets() -> None:
+    """Live hot.md body shape — single + combo bullets interleaved, with
+    the live parenthetical header. Union of all tokens across bullet
+    shapes, next-H2 boundary honored."""
+    hot = (
+        "## Actively pressing (elevate — deadline/decision this week)\n"
+        "- **hagenauer-rg7**: GC takeover\n"
+        "- **ao**: capital call\n"
+        "- **nvidia + corinthia**: proposal\n"
+        "- **mo-vie-am**: residence offer\n"
+        "- **lilienmatt + annaberg + aukera**: restructure\n"
+        "- **cap-ferrat**: BDO questions\n"
+        "\n"
+        "## Watch list (elevate on any mention)\n"
+        "- **leak_slug**: must not appear\n"
+    )
+    assert _parse_hot_md_active(hot) == frozenset(
+        {
+            "hagenauer-rg7",
+            "ao",
+            "nvidia",
+            "corinthia",
+            "mo-vie-am",
+            "lilienmatt",
+            "annaberg",
+            "aukera",
+            "cap-ferrat",
+        }
+    )
+
+
 # --------------------------- _load_allowed_scope ---------------------------
 
 
