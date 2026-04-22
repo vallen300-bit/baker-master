@@ -3,7 +3,55 @@
 **From:** AI Head
 **To:** Code Brisen #3
 **Task posted:** 2026-04-22 (post-B1 ship of PR #38)
-**Status:** OPEN — review PR #38 CLAIM_LOOP_OPUS_FAILED_RECLAIM_1 (production-hardening)
+**Status:** CLOSED — PR #38 APPROVE, Tier A auto-merge greenlit, R3-reclaim loop closed (recovery-#7 class retired)
+
+---
+
+## B3 dispatch back (2026-04-22)
+
+**Verdict: APPROVE** — all 8 focus items green, zero gating nits. Full-suite regression delta reproduced locally with cmp-confirmed identical 16-failure set.
+
+Report: `briefs/_reports/B3_pr38_claim_loop_opus_failed_reclaim_review_20260422.md`.
+
+### Regression delta (focus 8) — reproduced locally
+
+```
+main baseline:       16 failed / 774 passed / 21 skipped / 19 warnings  (11.59s)
+pr38 head 0bfb6ee:   16 failed / 782 passed / 21 skipped / 19 warnings  (12.61s)
+Delta:               +8 passed, 0 regressions, 0 new errors
+```
+
+`+8 passed` = exactly the 8 new test functions added. Pre-existing failure SET identical (`cmp -s` → exit 0).
+
+### Per focus verdict
+
+1. ✅ **`claim_one_opus_failed` correctness.** SELECT filter `status='opus_failed' AND COALESCE(finalize_retry_count,0) < %s` with param `(_MAX_OPUS_REFLIPS,)`; `ORDER BY priority DESC, created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED`; flips to `awaiting_opus` (correct Step 5 pre-state, NOT `processing`); commit-before-return matches `claim_one_signal:104` contract; `_MAX_OPUS_REFLIPS=3` imported from Step 6, single source of truth.
+
+2. ✅ **Dispatch path.** Primary `claim_one_signal` runs first; if returns id → `_process_signal_remote` then `return 0` (reclaim NEVER consulted). If primary returns None → `claim_one_opus_failed`; if reclaim returns None → `return 0`; if returns id → `_process_signal_reclaim_remote` (the new function, not `_process_signal_remote`). Strict sequential fallback.
+
+3. ✅ **Reclaim runs Steps 5+6 only.** Function only imports `step5_opus` + `step6_finalize`; zero references to step1-4 or step7. Verified independently: `kbl/steps/step5_opus.py:326-336` `_write_draft_and_advance` issues unconditional `UPDATE ... SET opus_draft_markdown = %s` — stale first-attempt draft always replaced. Status check between Step 5 and Step 6 correctly skips Step 6 if Step 5 parked at `paused_cost_cap` / `opus_failed`.
+
+4. ✅ **Budget exhaustion.** Step 6's existing `_route_validation_failure` (`step6_finalize.py:750-782`) unchanged: `new_count >= _MAX_OPUS_REFLIPS` → `finalize_failed` terminal. Zero diff on `step6_finalize.py`. `claim_one_opus_failed`'s `< %s` filter is defense-in-depth for the race where Step 6's terminal flip somehow missed.
+
+5. ✅ **8 tests, all non-trivial.** 3 claim-function (SQL-text inspection, budget filter param, ALTER idempotency) + 2 reclaim-dispatch (exact-order `call_log == ["step5","step6"]`, steps 1-4+7 `call_count==0`, commit/rollback counts) + 3 main-dispatch (primary-skips-reclaim, fallback-to-reclaim, both-empty). `_enter_all_steps` patches all 7 step paths (`_STEP_PATHS` at line 93-101) so "Steps 1-4 never called" is structurally enforced by the mock scaffold.
+
+6. ✅ **Scope.** 2 files, no schema migration (existing `finalize_retry_count` reused via idempotent `ALTER IF NOT EXISTS`), no new env vars, no `claim_one_signal` changes, no Mac Mini poller touch, `_MAX_OPUS_REFLIPS` not redefined.
+
+7. ✅ **Concurrency.** `FOR UPDATE SKIP LOCKED` on secondary claim; disjoint states (`pending` vs `opus_failed`) prevent primary/secondary double-claim; `main()` dispatches sequentially (not concurrently).
+
+8. ✅ **No ship-by-inspection.** Full pytest output in ship report §test-results; `feedback_no_ship_by_inspection.md` honored; baseline reproduced independently.
+
+### N-nits parked (non-blocking)
+
+- **N1:** `_mock_conn(post_step1_status="awaiting_finalize", post_step5_status="__unused__", ...)` fixture repurposing in tests #4/#5. Inline NOTE comments acknowledge. Works; clarity nit only.
+- **N2:** `ALTER TABLE IF NOT EXISTS` runs on every `claim_one_opus_failed` invocation (one extra roundtrip per tick). Matches Step 6's self-heal pattern; <1ms cost.
+- **N3:** Deferred import of `_MAX_OPUS_REFLIPS` inside claim function. No actual circular-import risk; could hoist to module-level. Defensible as-is.
+
+Tier A auto-merge proceeds. Post-deploy: stranded 1 `opus_failed` row picked up organically by new secondary claim — no manual recovery needed. Recovery-#7 class structurally retired.
+
+Tab quitting per §on-APPROVE.
+
+— B3
 
 ---
 
