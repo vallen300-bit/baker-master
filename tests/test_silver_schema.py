@@ -231,6 +231,62 @@ def test_r13_deadline_malformed_rejected() -> None:
             SilverFrontmatter(**_base_fm_dict(deadline=bad))
 
 
+# --------------------------- STEP6_VALIDATION_HOTFIX_1: YAML scalar coercion ---------------------------
+# Rationale: YAML 1.1 auto-parses unquoted ISO-date scalars as ``datetime.date``
+# and bare-digit scalars as ``int``. ``SilverFrontmatter`` types both fields
+# as ``str`` and Pydantic v2 does NOT coerce int/date→str. Without the
+# ``mode='before'`` coercion validators, ~54% of finalize validation failures
+# observed in prod kbl_log (48h window, 65/121 warns) hit this class.
+
+from datetime import date as _date  # noqa: E402  — local import by design
+
+
+def test_deadline_accepts_str_yyyy_mm_dd() -> None:
+    """String input (already correctly quoted in YAML) passes through."""
+    fm = SilverFrontmatter(**_base_fm_dict(deadline="2026-05-01"))
+    assert fm.deadline == "2026-05-01"
+
+
+def test_deadline_accepts_date_object() -> None:
+    """YAML 1.1 ``deadline: 2026-05-01`` (unquoted) → ``datetime.date``
+    → coerced back to ISO-8601 str by ``_deadline_coerce_to_str``."""
+    fm = SilverFrontmatter(**_base_fm_dict(deadline=_date(2026, 5, 1)))
+    assert fm.deadline == "2026-05-01"
+
+
+def test_deadline_accepts_datetime_object() -> None:
+    """Rare but possible: YAML 1.1 parses ``2026-05-01T12:00:00Z`` as
+    ``datetime``. Coerce to date portion only (deadline has no time)."""
+    fm = SilverFrontmatter(
+        **_base_fm_dict(
+            deadline=datetime(2026, 5, 1, 12, 0, 0, tzinfo=timezone.utc)
+        )
+    )
+    assert fm.deadline == "2026-05-01"
+
+
+def test_source_id_accepts_str() -> None:
+    """Producer side (Step 5 stub writers + step6 override) already casts
+    to str; verify the already-str path still passes cleanly."""
+    fm = SilverFrontmatter(**_base_fm_dict(source_id="68"))
+    assert fm.source_id == "68"
+
+
+def test_source_id_coerces_int() -> None:
+    """YAML 1.1 ``source_id: 68`` (unquoted) → Python ``int`` →
+    coerced to str by ``_source_id_coerce_to_str``. Defense-in-depth for
+    any producer that forgets the str cast."""
+    fm = SilverFrontmatter(**_base_fm_dict(source_id=68))
+    assert fm.source_id == "68"
+
+
+def test_source_id_coerces_large_int() -> None:
+    """Large signal_ids (post-SERIAL-exhaustion / bigint column) still
+    stringify cleanly — no scientific notation, no truncation."""
+    fm = SilverFrontmatter(**_base_fm_dict(source_id=9_999_999_999))
+    assert fm.source_id == "9999999999"
+
+
 # --------------------------- R14: money cap ---------------------------
 
 
