@@ -144,6 +144,9 @@ class SentinelStoreBack:
         self._ensure_doc_pipeline_jobs_table()
         self._ensure_baker_insights_table()
 
+        # BRIEF_AI_HEAD_WEEKLY_AUDIT_1: Weekly AI Head self-audit records
+        self._ensure_ai_head_audits_table()
+
         # CORRECTION-MEMORY-1: Learned corrections from Director feedback
         self._ensure_baker_corrections_table()
 
@@ -493,6 +496,45 @@ class SentinelStoreBack:
             except Exception:
                 pass
             logger.warning(f"Could not ensure baker_insights table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_ai_head_audits_table(self):
+        """BRIEF_AI_HEAD_WEEKLY_AUDIT_1: Weekly self-audit records for AI Head.
+
+        Populated by the embedded_scheduler _ai_head_weekly_audit_job.
+        One row per audit run (Mondays 09:00 UTC).
+        """
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ai_head_audits (
+                    id SERIAL PRIMARY KEY,
+                    ran_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    drift_items JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    lesson_patterns JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    summary_text TEXT NOT NULL,
+                    slack_cockpit_ok BOOLEAN NOT NULL DEFAULT FALSE,
+                    slack_dm_ok BOOLEAN NOT NULL DEFAULT FALSE,
+                    mirror_last_pull_at TIMESTAMPTZ,
+                    mirror_head_sha TEXT
+                )
+            """)
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_ai_head_audits_ran_at "
+                "ON ai_head_audits(ran_at DESC)"
+            )
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure ai_head_audits table: {e}")
         finally:
             self._put_conn(conn)
 
