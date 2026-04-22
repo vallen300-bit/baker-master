@@ -39,17 +39,27 @@ MAX_CORRECTIONS_PER_PROMPT = 3
 # ─────────────────────────────────────────────────
 # PM Factory — Generic PM Configuration Registry
 # ─────────────────────────────────────────────────
-PM_REGISTRY_VERSION = 1  # Cowork #2: bump when registry schema changes
+PM_REGISTRY_VERSION = 2  # Cowork #2: bump when registry schema changes
+# v2 (BRIEF_AO_PM_EXTENSION_1): ao_pm view_dir flipped to baker-vault
+# (wiki/matters/oskolkov), hyphenated filenames, ftc-table-explanations added.
 
 PM_REGISTRY = {
     "ao_pm": {
-        "registry_version": 1,
+        "registry_version": 2,
         "name": "AO Project Manager",
-        "view_dir": "data/ao_pm",
+        "view_dir": "wiki/matters/oskolkov",
         "view_file_order": [
-            "SCHEMA.md", "psychology.md", "investment_channels.md",
-            "financing_to_completion.md",
-            "sensitive_issues.md", "communication_rules.md", "agenda.md",
+            "_index.md",
+            "_overview.md",
+            "psychology.md",
+            "investment-channels.md",
+            "financing-to-completion.md",
+            "ftc-table-explanations.md",
+            "agenda.md",
+            "sensitive-issues.md",
+            "communication-rules.md",
+            "red-flags.md",
+            "financial-facts.md",
         ],
         "state_label": "AO PM",
         "briefing_priority": 10,
@@ -82,9 +92,9 @@ PM_REGISTRY = {
             r"oskolkov|andrey\s*o",
         ],
         "extraction_view_files": [
-            "psychology.md", "investment_channels.md",
-            "financing_to_completion.md",
-            "sensitive_issues.md", "communication_rules.md", "agenda.md",
+            "psychology.md", "investment-channels.md",
+            "financing-to-completion.md",
+            "sensitive-issues.md", "communication-rules.md", "agenda.md",
         ],
         "extraction_system": (
             "Extract structured state updates AND wiki-worthy insights from "
@@ -1286,14 +1296,49 @@ class CapabilityRunner:
     # AO-PM-1: AO Project Manager helpers
     # ─────────────────────────────────────────────────
 
+    def _resolve_view_dir(self, view_dir_config: str) -> str:
+        """Resolve PM view_dir config to an absolute filesystem path.
+
+        If view_dir starts with 'wiki/', resolve against BAKER_VAULT_PATH env var.
+        Otherwise resolve against baker-code repo root (legacy behavior).
+
+        BRIEF_AO_PM_EXTENSION_1: enables PM_REGISTRY to point at baker-vault
+        paths without coupling code repo layout to vault layout.
+        """
+        import os
+        if view_dir_config.startswith("wiki/"):
+            vault_path = os.environ.get("BAKER_VAULT_PATH")
+            if not vault_path:
+                logger.warning(
+                    "BAKER_VAULT_PATH not set; cannot resolve %s — legacy fallback",
+                    view_dir_config,
+                )
+                return os.path.join(
+                    os.path.dirname(os.path.dirname(__file__)), view_dir_config
+                )
+            return os.path.join(vault_path, view_dir_config)
+        return os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), view_dir_config
+        )
+
     def _load_pm_view_files(self, pm_slug: str) -> str:
-        """PM-FACTORY: Load view files for any PM from data/{pm_slug}/ directory."""
+        """PM-FACTORY: Load view files for any PM from its configured view_dir.
+
+        view_dir may live under baker-code (legacy, e.g. 'data/movie_am') or
+        under baker-vault (e.g. 'wiki/matters/oskolkov'). Resolution handled
+        by _resolve_view_dir.
+
+        BRIEF_AO_PM_EXTENSION_1: appends sub-matter files on demand when
+        pm_project_state.state_json.sub_matters flags them active. Bounds
+        prompt growth — parked sub-matters stay readable in Obsidian but
+        don't bloat the prompt.
+        """
         import os
         config = PM_REGISTRY.get(pm_slug)
         if not config:
             logger.warning("PM %s not in PM_REGISTRY — cannot load view files", pm_slug)
             return ""
-        view_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), config["view_dir"])
+        view_dir = self._resolve_view_dir(config["view_dir"])
         if not os.path.isdir(view_dir):
             logger.warning("PM %s view directory not found: %s", pm_slug, view_dir)
             return ""
@@ -1308,6 +1353,30 @@ class CapabilityRunner:
                     parts.append(f"## VIEW FILE: {fname}\n{content}")
                 except Exception as e:
                     logger.warning("Failed to read PM view file %s/%s: %s", pm_slug, fname, e)
+
+        # Sub-matters: load only active ones per pm_project_state
+        try:
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            state = store.get_pm_project_state(pm_slug) or {}
+            sub_matters = (state.get("state_json") or {}).get("sub_matters") or {}
+            active_slugs = [k for k, v in sub_matters.items() if v]
+            sub_dir = os.path.join(view_dir, "sub-matters")
+            if os.path.isdir(sub_dir) and active_slugs:
+                for slug in active_slugs:
+                    fname = f"{slug.replace('_', '-')}.md"
+                    fpath = os.path.join(sub_dir, fname)
+                    if os.path.isfile(fpath):
+                        try:
+                            with open(fpath, "r", encoding="utf-8") as f:
+                                content = f.read()
+                            parts.append(f"## SUB-MATTER VIEW: {fname}\n{content}")
+                        except Exception as e:
+                            logger.warning(
+                                "Failed to read sub-matter %s/%s: %s", pm_slug, fname, e
+                            )
+        except Exception as e:
+            logger.warning("Sub-matter loading failed for %s: %s", pm_slug, e)
 
         return "\n\n---\n\n".join(parts) if parts else ""
 
