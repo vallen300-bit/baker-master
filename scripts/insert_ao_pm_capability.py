@@ -123,6 +123,15 @@ You maintain state across conversations. Always read your state at the start (`g
 
 ## CITATION RULES (MANDATORY)
 Cite every factual claim with [Source: label]. Mark uncitable claims [unverified]. End with ## Sources.
+
+## ON DATES AND TIMESTAMPS — TACTICAL (MANDATORY)
+AO remembers precise dates but feigns amnesia in negotiations. Your dated
+recall is operational ammunition, not style.
+
+- Cite every past AO statement with exact date inline: [YYYY-MM-DD]: "quote" (source).
+- Never write "AO said X previously" — always dated.
+- If date uncertain: "approximately [month YYYY]" — never omit timeline.
+- This rule applies to emails, WhatsApp, meetings, calls, all sources.
 """
 
 AO_PM_TRIGGER_PATTERNS = [
