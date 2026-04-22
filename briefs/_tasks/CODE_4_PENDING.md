@@ -7,7 +7,20 @@
 
 ---
 
-## GO/NO-GO signal from AI Head — 2026-04-22 ~11:55 UTC
+## CLOSE-OUT signal from AI Head — 2026-04-22 ~12:20 UTC
+
+**QC 11 + QC 13 both PASSED.** All 14 Quality Checkpoints closed.
+
+- QC 13: Render logs confirm `Registered: ao_pm_lint (Sunday 06:00 UTC)` at 11:55:53Z + 12:00:16Z (both instances picked it up).
+- QC 11: Director smoke test green — AO capital-call scan surfaced dated citations throughout (11/12/9/3 April, plus today's Thomas Leitner CF update), vault content reachable (Rule Zero 10-day flag zone framing straight from `communication-rules.md`), Part C tactical applied.
+
+**Proceed to cleanup + ship report (item 6 + 7):**
+6. `cd ~/bm-b4/01_build && git rm -r data/ao_pm/` → commit → push.
+7. Write `briefs/_reports/B4_AO_PM_EXTENSION_1_20260422.md` — all 5 deliverables + QC 1-14 pass/fail + `data/ao_pm/` deletion commit SHA + any residual work recommendations + the schema-correction note (email_messages uses `sender_email`/`full_body`/`received_date`; whatsapp_messages uses `timestamp`).
+
+---
+
+## GO/NO-GO signal from AI Head — 2026-04-22 ~11:55 UTC (historical)
 
 **Verdict: GO on Deliverable 2.**
 
