@@ -738,3 +738,138 @@ def test_chanda_inv9_writes_land_only_under_vault_wiki(vault) -> None:
     assert changed, "expected at least one changed file"
     for f in changed:
         assert f.startswith("wiki/"), f"write escaped vault/wiki: {f}"
+
+
+# =====================================================================
+# OBSERVABILITY_STEP7_PLUS_POLLER_DOC_1 — Step 7 happy-path emit_log
+# =====================================================================
+
+
+def _info_messages(mock_emit_log) -> List[str]:
+    """Collect the ``message`` (4th arg) of each INFO emit_log call."""
+    out: List[str] = []
+    for call in mock_emit_log.call_args_list:
+        args, _kw = call.args, call.kwargs
+        if args and args[0] == "INFO":
+            out.append(args[3] if len(args) >= 4 else _kw.get("message", ""))
+    return out
+
+
+def test_step7_happy_path_logs_entry_with_target_path(vault) -> None:
+    """Happy-path Step 7 fires an INFO emit_log at entry with
+    ``target=<target_vault_path>`` + ``primary_matter`` + ``stub_count``.
+    This is the single-line anchor for every Step 7 trail in kbl_log.
+
+    No vault state changes under the test (we already have 27 existing
+    tests for that). Only the emit_log side is asserted."""
+    vault_dir, _ = vault
+    conn = _mock_conn(
+        final_markdown=_final_markdown(),
+        target_vault_path="wiki/ao/2026-04-19_observability.md",
+        stubs=[],
+    )
+
+    with patch("kbl.steps.step7_commit.emit_log") as m_emit:
+        commit(signal_id=701, conn=conn)
+
+    info_msgs = _info_messages(m_emit)
+    entry_msgs = [m for m in info_msgs if m.startswith("step7 entry:")]
+    assert len(entry_msgs) == 1, f"expected one step7 entry log, got {entry_msgs}"
+    entry = entry_msgs[0]
+    assert "target=wiki/ao/2026-04-19_observability.md" in entry
+    assert "primary_matter='ao'" in entry
+    assert "stub_count=0" in entry
+
+    # Component tag + signal_id routed correctly.
+    entry_call = next(
+        c for c in m_emit.call_args_list
+        if c.args[0] == "INFO" and c.args[3].startswith("step7 entry:")
+    )
+    assert entry_call.args[1] == "step7_commit"
+    assert entry_call.args[2] == 701
+
+    # No WARN/ERROR on the happy path.
+    for c in m_emit.call_args_list:
+        assert c.args[0] not in ("WARN", "ERROR"), (
+            f"happy path emitted {c.args[0]}: {c.args}"
+        )
+
+
+def test_step7_happy_path_push_success_fires_info(
+    vault, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With ``BAKER_VAULT_DISABLE_PUSH=false`` (push enabled), a
+    successful Step 7 emits the ``git push success`` INFO AND does NOT
+    emit the shadow-mode INFO. Validates the ``else`` branch of the
+    push gate."""
+    monkeypatch.setenv("BAKER_VAULT_DISABLE_PUSH", "false")
+
+    conn = _mock_conn(
+        final_markdown=_final_markdown(),
+        target_vault_path="wiki/ao/2026-04-19_pushsuccess.md",
+        stubs=[],
+    )
+
+    with patch("kbl.steps.step7_commit.emit_log") as m_emit:
+        commit(signal_id=702, conn=conn)
+
+    info_msgs = _info_messages(m_emit)
+
+    # Push-success fired exactly once.
+    push_msgs = [m for m in info_msgs if m.startswith("git push success:")]
+    assert len(push_msgs) == 1, f"expected one push-success log, got {push_msgs}"
+    assert "sha=" in push_msgs[0]
+    assert "branch=main" in push_msgs[0]
+
+    # Shadow-mode INFO NOT emitted on the push-enabled path.
+    shadow_msgs = [m for m in info_msgs if m.startswith("shadow-mode:")]
+    assert shadow_msgs == [], (
+        f"unexpected shadow-mode log on push-enabled path: {shadow_msgs}"
+    )
+
+    # Terminal signal-completed INFO fires post-push.
+    completed_msgs = [m for m in info_msgs if m.startswith("signal completed:")]
+    assert len(completed_msgs) == 1
+
+
+def test_step7_shadow_mode_fires_info_not_warn(vault) -> None:
+    """With ``BAKER_VAULT_DISABLE_PUSH=true`` (the fixture default), a
+    successful Step 7 emits an INFO-level ``shadow-mode: skipping git
+    push`` line that mirrors the existing ``logger.info`` trace into
+    kbl_log, AND does NOT emit a WARN/ERROR (happy path, not failure).
+
+    Before this brief, shadow-mode commits left no kbl_log breadcrumb —
+    the fix mirrors logger.info into emit_log."""
+    conn = _mock_conn(
+        final_markdown=_final_markdown(),
+        target_vault_path="wiki/ao/2026-04-19_shadow.md",
+        stubs=[],
+    )
+
+    with patch("kbl.steps.step7_commit.emit_log") as m_emit:
+        commit(signal_id=703, conn=conn)
+
+    info_msgs = _info_messages(m_emit)
+    shadow_msgs = [m for m in info_msgs if m.startswith("shadow-mode:")]
+    assert len(shadow_msgs) == 1, (
+        f"expected one shadow-mode INFO, got {shadow_msgs}"
+    )
+    assert "BAKER_VAULT_DISABLE_PUSH=true" in shadow_msgs[0]
+    assert "sha=" in shadow_msgs[0]
+
+    # Push-success INFO NOT emitted on the shadow-mode path.
+    push_msgs = [m for m in info_msgs if m.startswith("git push success:")]
+    assert push_msgs == [], (
+        f"unexpected push-success log on shadow-mode path: {push_msgs}"
+    )
+
+    # No WARN/ERROR (the brief's explicit contract on the happy path).
+    for c in m_emit.call_args_list:
+        assert c.args[0] not in ("WARN", "ERROR"), (
+            f"shadow-mode happy path emitted {c.args[0]}: {c.args}"
+        )
+
+    # Terminal signal-completed INFO still fires (advance to completed
+    # happens regardless of push/shadow).
+    completed_msgs = [m for m in info_msgs if m.startswith("signal completed:")]
+    assert len(completed_msgs) == 1
