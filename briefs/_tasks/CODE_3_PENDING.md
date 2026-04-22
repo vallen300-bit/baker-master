@@ -3,7 +3,57 @@
 **From:** AI Head
 **To:** Code Brisen #3
 **Task posted:** 2026-04-22 (post-B1 ship of PR #41)
-**Status:** OPEN — review PR #41 `CLAIM_LOOP_RUNNING_STATES_3`
+**Status:** CLOSED — PR #41 APPROVE, Tier A auto-merge greenlit, `*_running` mid-step crash orphan class structurally retired
+
+---
+
+## B3 dispatch back (2026-04-22)
+
+**APPROVE PR #41** — all 9 focus items green, zero gating nits. Closes my own PR #39 N3 nit. Full-suite regression delta reproduced locally with cmp-confirmed identical 16-failure set. `805 + 7 = 812` math matches B1 exactly.
+
+Report: `briefs/_reports/B3_pr41_claim_loop_running_states_3_review_20260422.md`.
+
+### Regression delta (focus 7) — reproduced locally
+
+```
+main baseline:       16 failed / 805 passed / 21 skipped / 19 warnings  (12.01s)
+pr41 head 5e4e253:   16 failed / 812 passed / 21 skipped / 19 warnings  (12.62s)
+Delta:               +7 passed, 0 regressions, 0 new errors
+```
+
+`+7 passed` = exactly the 7 new tests. cmp-confirmed identical 16-failure SET.
+
+### Per focus verdict
+
+1. ✅ **`reset_stale_running_orphans`.** Single atomic UPDATE with `CASE status WHEN 'X_running' THEN 'awaiting_X' END` for all 3 states, `WHERE status IN (...)` + staleness guard, `RETURNING id, status` (present but unused, harmless), `cur.rowcount → n`, one commit. No `FOR UPDATE SKIP LOCKED` needed (single statement, atomic). No race with PR #39 claims (filter sets disjoint: `*_running` vs `awaiting_*`).
+
+2. ✅ **`main()` wire-in.** Unconditional call to reset BEFORE claim chain (line 791-794); `if n_reset:` gate suppresses log noise when N=0; same `conn` shared across reset + claim chain so reset's commit is visible to same-tick claims.
+
+3. ✅ **CASE-WHEN completeness.** All 3 states covered. No ELSE clause — safe because `WHERE status IN (...)` constrains input to the 3 enumerated values. Test #3 explicitly asserts the full WHERE clause.
+
+4. ✅ **15-min staleness.** Module constant `_RUNNING_ORPHAN_STALE_INTERVAL = "15 minutes"`, separate from PR #39's constant per spec. 5× margin over Step 5 R3 (~180s) rationale documented in comment.
+
+5. ✅ **Same-tick reset→claim integration.** `test_main_reset_and_reclaim_in_same_tick` pins the full `call_log` through reset → primary → opus_failed → awaiting_classify → awaiting_opus (hit, returns 777) → `_process_signal_opus_remote(777, conn)`. `awaiting_finalize` `call_count==0` (stopped at first hit). Proves reset commit lands before claim reads in the SAME tick.
+
+6. ✅ **7 tests, all non-trivial.** 3 per-state SQL-text inspection (exact `WHEN 'X' THEN 'Y'` substrings + WHERE IN clause) + 2 zero-rowcount (idempotent commit) + 1 pre-chain call-order (`call_log == ["reset", "primary"]`) + 1 full same-tick integration. pipeline_tick.py total: 47 + 7 = 54 (matches B1's claim).
+
+7. ✅ **Regression delta.** +7 passed, 0 regressions, identical failure set.
+
+8. ✅ **Scope.** 2 files, no schema, no env vars, no step-module changes, no changes to PR #39 claim functions or their dispatchers.
+
+9. ✅ **No ship-by-inspection.** Literal counts (16/812/21) + enumerated FAILED rows. "by inspection" phrase absent (grep confirmed).
+
+### N-nits parked (non-blocking)
+
+- **N1:** CASE has no ELSE clause. Safe today because WHERE IN matches the 3 WHEN branches exactly. If a 4th state is added to WHERE IN without matching WHEN, CASE→NULL and UPDATE would NULL the status. Cheap mitigation: add `ELSE status` or a coupling comment. Current code is correct.
+- **N2:** Tests #4 + #5 are functionally identical at mock boundary (both rowcount=0). Honest acknowledgement present in docstring. Same pattern as PR #38/#39 boundary tests.
+- **N3:** `RETURNING id, status` unused — PG evaluates lazily, no cost. Could be wired to structured-log affected signal_ids in a future follow-up.
+
+Tier A auto-merge proceeds. Combined with PRs #38 + #39, full crash-recovery surface now covered: opus_failed retry (#38) + awaiting_* between-steps (#39) + *_running during-steps (#41). Only remaining non-terminal class is `paused_cost_cap` which is a deliberate hold, not a crash — out of scope for this track.
+
+Tab quitting per §Decision.
+
+— B3
 
 ---
 
