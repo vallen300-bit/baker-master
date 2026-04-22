@@ -167,6 +167,153 @@ def claim_one_opus_failed(conn) -> int | None:
         return signal_id
 
 
+# Staleness guard for the awaiting_* crash-recovery reclaim paths.
+# Interval is expressed as a bare SQL literal because psycopg2 does not
+# parametrize INTERVAL literals; the value is module-constant so there is
+# no injection surface. Value rationale: Step 5's Opus call is the slowest
+# step at ~60s; with the R3 retry ladder a single Step 5 run can span up
+# to ~180s (3 × 60s). APScheduler's `max_instances=1` already prevents
+# overlapping ticks; 15 minutes is a safe margin against any stuck/hung
+# primary tick that hasn't yet crashed + been observed. Short enough that
+# operator lag is bounded at one sub-hour window, long enough that no
+# legitimate mid-flight row ever gets double-claimed.
+_AWAITING_ORPHAN_STALE_INTERVAL = "15 minutes"
+
+
+def claim_one_awaiting_classify(conn) -> int | None:
+    """Claim the next ``awaiting_classify`` orphan. Returns signal_id or None.
+
+    Crash-recovery reclaim for Step 3's ``_STATE_NEXT``. A row lands at
+    ``awaiting_classify`` when Step 3 successfully committed its extraction
+    result but the tick crashed (or Render scaled / restarted) before
+    Step 4's ``classify`` ran. Before this function existed, such rows sat
+    permanently orphaned — only ``claim_one_signal`` picked anything up,
+    and it only considers ``status='pending'``.
+
+    Staleness guard: ``started_at < NOW() - INTERVAL '15 minutes'`` — see
+    ``_AWAITING_ORPHAN_STALE_INTERVAL`` for rationale. Prevents claiming a
+    row that is legitimately mid-flight inside the primary tick.
+
+    On claim: flips status to ``classify_running`` (Step 4's
+    ``_STATE_RUNNING`` lineage). Step 4 itself calls ``_mark_running`` again
+    at the top of ``classify()`` — idempotent same-state UPDATE, harmless.
+
+    No budget counter: unlike ``opus_failed`` (a retry state), this is a
+    crash-recovery state. Normal pipeline advances forward within one tick;
+    only crashes orphan rows here. Reclaim always attempts continuation.
+
+    ``FOR UPDATE SKIP LOCKED`` keeps concurrent ticks safe.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT id FROM signal_queue
+            WHERE status = 'awaiting_classify'
+              AND started_at < NOW() - INTERVAL '{_AWAITING_ORPHAN_STALE_INTERVAL}'
+            ORDER BY priority DESC, created_at ASC
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+            """
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        signal_id = row[0]
+        cur.execute(
+            "UPDATE signal_queue SET status = 'classify_running' WHERE id = %s",
+            (signal_id,),
+        )
+        conn.commit()
+        return signal_id
+
+
+def claim_one_awaiting_opus(conn) -> int | None:
+    """Claim the next ``awaiting_opus`` orphan. Returns signal_id or None.
+
+    Crash-recovery reclaim for Step 4's ``_STATE_NEXT``. A row lands at
+    ``awaiting_opus`` when Step 4 successfully committed its classification
+    decision but the tick crashed before Step 5's ``synthesize`` ran.
+
+    Distinct from ``claim_one_opus_failed``: that one handles the
+    ``opus_failed`` retry state (produced by Step 6 validation failure)
+    and flips ``opus_failed → awaiting_opus``. This one handles the
+    ``awaiting_opus`` crash-orphan state (produced by Step 4 success +
+    tick crash) and flips ``awaiting_opus → opus_running``. Both can
+    coexist; they claim different rows.
+
+    Staleness guard: ``started_at < NOW() - INTERVAL '15 minutes'`` — see
+    ``_AWAITING_ORPHAN_STALE_INTERVAL``. Prevents the race where Step 4
+    has just committed and Step 5 is about to start in the same tick.
+
+    On claim: flips to ``opus_running`` (Step 5's ``_STATE_RUNNING``).
+    Step 5's ``_mark_running`` is an idempotent same-state UPDATE.
+
+    No budget counter — this is a crash-recovery state, not a retry.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT id FROM signal_queue
+            WHERE status = 'awaiting_opus'
+              AND started_at < NOW() - INTERVAL '{_AWAITING_ORPHAN_STALE_INTERVAL}'
+            ORDER BY priority DESC, created_at ASC
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+            """
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        signal_id = row[0]
+        cur.execute(
+            "UPDATE signal_queue SET status = 'opus_running' WHERE id = %s",
+            (signal_id,),
+        )
+        conn.commit()
+        return signal_id
+
+
+def claim_one_awaiting_finalize(conn) -> int | None:
+    """Claim the next ``awaiting_finalize`` orphan. Returns signal_id or None.
+
+    Crash-recovery reclaim for Step 5's ``_STATE_NEXT``. A row lands at
+    ``awaiting_finalize`` when Step 5 successfully committed its Opus draft
+    but the tick crashed before Step 6's ``finalize`` ran. This is the
+    state AI Head has been manually recovering via ad-hoc UPDATE in
+    multiple sessions — PR #38 pattern extended here closes the loop
+    programmatically.
+
+    Staleness guard: ``started_at < NOW() - INTERVAL '15 minutes'`` — see
+    ``_AWAITING_ORPHAN_STALE_INTERVAL``.
+
+    On claim: flips to ``finalize_running`` (Step 6's ``_STATE_RUNNING``).
+    Step 6's ``_mark_running`` is an idempotent same-state UPDATE.
+
+    No budget counter — this is a crash-recovery state, not a retry.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            f"""
+            SELECT id FROM signal_queue
+            WHERE status = 'awaiting_finalize'
+              AND started_at < NOW() - INTERVAL '{_AWAITING_ORPHAN_STALE_INTERVAL}'
+            ORDER BY priority DESC, created_at ASC
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+            """
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        signal_id = row[0]
+        cur.execute(
+            "UPDATE signal_queue SET status = 'finalize_running' WHERE id = %s",
+            (signal_id,),
+        )
+        conn.commit()
+        return signal_id
+
+
 def _process_signal(signal_id: int, conn: Any) -> None:
     """Run one signal through Steps 1-7 under the tx-boundary contract.
 
@@ -426,6 +573,130 @@ def _process_signal_reclaim_remote(signal_id: int, conn: Any) -> None:
     # exhausted) or ``opus_failed`` (Step 6 re-routed under budget).
 
 
+def _process_signal_classify_remote(signal_id: int, conn: Any) -> None:
+    """Run Steps 4-5-6 on a reclaimed ``awaiting_classify`` orphan.
+
+    Companion to ``_process_signal_remote``. Entered when
+    ``claim_one_awaiting_classify`` has already flipped the row to
+    ``classify_running`` — Step 4 therefore starts from a valid
+    ``_STATE_RUNNING`` (and its own ``_mark_running`` is an idempotent
+    same-state re-set).
+
+    Steps 1-3 are NOT re-run: ``triage_score``, ``primary_matter``,
+    ``related_matters``, and the Step 3 extraction columns are already
+    populated on the row — running them again would waste LLM tokens and
+    risk non-deterministic drift (Step 1 Flash classification is not
+    byte-stable across runs).
+
+    Step 7 is NOT run — Render never touches the vault (CHANDA Inv 9).
+
+    Transaction contract mirrors ``_process_signal_remote``: one
+    ``conn.commit()`` per successful step, ``conn.rollback()`` on raise,
+    step-internal terminal-state commits (Step 4's ``classify_failed``
+    flip, Step 5's ``opus_failed`` / ``paused_cost_cap`` flips, Step 6's
+    ``finalize_failed`` flip) survive the outer rollback.
+    """
+    from kbl.steps import step4_classify, step5_opus, step6_finalize
+
+    try:
+        step4_classify.classify(signal_id, conn)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    try:
+        step5_opus.synthesize(signal_id, conn)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    # Step 5 may have parked the signal at ``paused_cost_cap`` or
+    # ``opus_failed``. If the row is no longer ``awaiting_finalize``,
+    # Step 6 must not run.
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT status FROM signal_queue WHERE id = %s", (signal_id,)
+        )
+        row = cur.fetchone()
+    if row is None or row[0] != "awaiting_finalize":
+        return
+
+    try:
+        step6_finalize.finalize(signal_id, conn)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _process_signal_opus_remote(signal_id: int, conn: Any) -> None:
+    """Run Steps 5-6 on a reclaimed ``awaiting_opus`` crash orphan.
+
+    Shape mirrors ``_process_signal_reclaim_remote`` (Steps 5-6) but
+    serves a DIFFERENT class of rows: crash orphans from Step 4's
+    success commit, not Step 6 validation failures. The on-claim state
+    is ``opus_running`` (via ``claim_one_awaiting_opus``), not
+    ``awaiting_opus`` (which was the reclaim pre-flip in PR #38's path).
+
+    Transaction contract: one ``conn.commit()`` per successful step,
+    ``conn.rollback()`` on raise, step-internal terminal flips survive.
+
+    No Step 7; no Steps 1-4 re-run.
+    """
+    from kbl.steps import step5_opus, step6_finalize
+
+    try:
+        step5_opus.synthesize(signal_id, conn)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT status FROM signal_queue WHERE id = %s", (signal_id,)
+        )
+        row = cur.fetchone()
+    if row is None or row[0] != "awaiting_finalize":
+        return
+
+    try:
+        step6_finalize.finalize(signal_id, conn)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def _process_signal_finalize_remote(signal_id: int, conn: Any) -> None:
+    """Run Step 6 only on a reclaimed ``awaiting_finalize`` crash orphan.
+
+    The narrowest dispatch shape. Step 5 has already committed the
+    ``opus_draft_markdown`` that Step 6 needs — re-running Step 5 would
+    waste a fresh Opus call. Step 6 picks up its stored draft, validates,
+    and either advances to ``awaiting_commit`` (Mac Mini poller picks up)
+    or routes back to ``opus_failed`` / ``finalize_failed`` via its usual
+    retry-ladder logic.
+
+    Transaction contract: single ``conn.commit()`` on success,
+    ``conn.rollback()`` on raise, step-internal terminal flips survive.
+
+    On-claim state is ``finalize_running`` (via
+    ``claim_one_awaiting_finalize``). Step 6's ``_mark_running`` is an
+    idempotent same-state UPDATE.
+    """
+    from kbl.steps import step6_finalize
+
+    try:
+        step6_finalize.finalize(signal_id, conn)
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
 def main() -> int:
     """Render scheduler entrypoint. Returns 0 on normal exit (including
     disabled / queue-empty / circuit-open). Non-zero reserved for
@@ -490,17 +761,81 @@ def main() -> int:
             conn.rollback()
             raise
 
-        if reclaim_id is None:
-            return 0  # both queues empty — normal exit
+        if reclaim_id is not None:
+            try:
+                _process_signal_reclaim_remote(reclaim_id, conn)
+            except Exception as e:
+                emit_log(
+                    "ERROR",
+                    "pipeline_tick",
+                    reclaim_id,
+                    f"unexpected exception in _process_signal_reclaim_remote: {e}",
+                )
+                raise
+            return 0
+
+        # Crash-recovery reclaim chain: awaiting_classify / awaiting_opus /
+        # awaiting_finalize. Ordered by how early in the pipeline the
+        # crash happened — earlier-stage orphans get priority so the row
+        # advances stage-by-stage across subsequent ticks rather than
+        # leapfrogging. Each dispatch is gated by a 15-min staleness guard
+        # on ``started_at`` inside the claim function, so no race with
+        # the primary tick.
+        try:
+            classify_id = claim_one_awaiting_classify(conn)
+        except Exception:
+            conn.rollback()
+            raise
+
+        if classify_id is not None:
+            try:
+                _process_signal_classify_remote(classify_id, conn)
+            except Exception as e:
+                emit_log(
+                    "ERROR",
+                    "pipeline_tick",
+                    classify_id,
+                    f"unexpected exception in _process_signal_classify_remote: {e}",
+                )
+                raise
+            return 0
 
         try:
-            _process_signal_reclaim_remote(reclaim_id, conn)
+            opus_id = claim_one_awaiting_opus(conn)
+        except Exception:
+            conn.rollback()
+            raise
+
+        if opus_id is not None:
+            try:
+                _process_signal_opus_remote(opus_id, conn)
+            except Exception as e:
+                emit_log(
+                    "ERROR",
+                    "pipeline_tick",
+                    opus_id,
+                    f"unexpected exception in _process_signal_opus_remote: {e}",
+                )
+                raise
+            return 0
+
+        try:
+            finalize_id = claim_one_awaiting_finalize(conn)
+        except Exception:
+            conn.rollback()
+            raise
+
+        if finalize_id is None:
+            return 0  # all queues empty — normal exit
+
+        try:
+            _process_signal_finalize_remote(finalize_id, conn)
         except Exception as e:
             emit_log(
                 "ERROR",
                 "pipeline_tick",
-                reclaim_id,
-                f"unexpected exception in _process_signal_reclaim_remote: {e}",
+                finalize_id,
+                f"unexpected exception in _process_signal_finalize_remote: {e}",
             )
             raise
 
