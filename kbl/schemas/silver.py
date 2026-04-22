@@ -30,8 +30,8 @@ body-smuggled variants as a backup.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Annotated, List, Literal, Optional
+from datetime import date, datetime, timezone
+from typing import Annotated, Any, List, Literal, Optional
 
 from pydantic import (
     AfterValidator,
@@ -175,6 +175,40 @@ class SilverFrontmatter(BaseModel):
         if v.utcoffset() != timezone.utc.utcoffset(None):
             raise ValueError("created must be UTC (found offset != 00:00)")
         return v
+
+    @field_validator("source_id", mode="before")
+    @classmethod
+    def _source_id_coerce_to_str(cls, v: Any) -> Any:
+        """YAML 1.1 auto-parses bare-digit scalars (``source_id: 68``) as
+        ``int`` before Pydantic v2 sees them; Pydantic v2 does NOT coerce
+        int→str even in non-strict mode. Stringify non-string inputs here
+        so the typed field accepts them. ``None`` passes through so
+        required-field absence raises its own clear error rather than the
+        opaque ``'NoneType' object is not iterable``-class mutation."""
+        if v is None or isinstance(v, str):
+            return v
+        return str(v)
+
+    @field_validator("deadline", mode="before")
+    @classmethod
+    def _deadline_coerce_to_str(cls, v: Any) -> Optional[str]:
+        """YAML 1.1 auto-parses unquoted ISO-date scalars (``deadline:
+        2026-05-01``) as ``datetime.date`` before Pydantic v2 sees them.
+        Coerce ``date`` / ``datetime`` back to ISO-8601 ``YYYY-MM-DD``
+        strings so the downstream str-level :meth:`_deadline_iso_date`
+        validator applies uniformly. Strings and ``None`` pass through;
+        any other type raises ``TypeError`` (rather than silently
+        stringifying, which would produce junk like
+        ``"<object ... at 0x...>"``)."""
+        if v is None or isinstance(v, str):
+            return v
+        if isinstance(v, datetime):
+            return v.date().isoformat()
+        if isinstance(v, date):
+            return v.isoformat()
+        raise TypeError(
+            f"deadline: expected str/date/datetime/None, got {type(v).__name__}"
+        )
 
     @field_validator("deadline")
     @classmethod
