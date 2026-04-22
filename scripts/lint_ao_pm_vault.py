@@ -53,7 +53,7 @@ def main():
 def _check_frontmatter(matter_dir: Path) -> list:
     violations = []
     for md in matter_dir.rglob("*.md"):
-        if md.name == "_lint-report.md":
+        if md.name in ("_lint-report.md", "README.md"):
             continue
         txt = md.read_text(encoding="utf-8")
         if not txt.startswith("---"):
