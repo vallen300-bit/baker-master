@@ -61,16 +61,25 @@ _STATE_NEXT = "awaiting_opus"
 _STATE_FAILED = "classify_failed"
 
 # hot.md parse targets. Matches the `## Actively pressing` section then
-# pulls slug tokens from each `**<slug>**:` line that follows, up to the
-# next H2 heading. Tolerant of surrounding whitespace and Unicode dashes.
+# pulls slug tokens from each `**<slug>**:` line (or `**<slug1> + <slug2>**:`
+# multi-slug bullet) that follows, up to the next H2 heading. Tolerant of
+# surrounding whitespace, Unicode dashes, and author-added suffixes on the
+# section header (e.g. `## Actively pressing (elevate — deadline/decision
+# this week)` — STEP4_HOT_MD_PARSER_FIX_1, 2026-04-22).
 _ACTIVE_SECTION_RE = re.compile(
-    r"^##\s+Actively\s+pressing\s*$(?P<body>.*?)(?=^##\s|\Z)",
+    r"^##\s+Actively\s+pressing\b[^\n]*\n(?P<body>.*?)(?=^##\s|\Z)",
     re.IGNORECASE | re.MULTILINE | re.DOTALL,
 )
+# Inner is whatever sits between the `**...**` fences on a bullet line. Kept
+# permissive (`[^*\n]+`) so combo bullets like `**lilienmatt + annaberg +
+# aukera**:` survive — tokenization into individual slugs happens in
+# `_parse_hot_md_active` via `_SLUG_TOKEN_RE`. Anything that isn't a clean
+# slug token after splitting on `+` is dropped silently.
 _ACTIVE_SLUG_LINE_RE = re.compile(
-    r"^\s*[-*]?\s*\*\*(?P<slug>[A-Za-z0-9_\-]+)\*\*\s*:",
+    r"^\s*[-*]?\s*\*\*(?P<inner>[^*\n]+)\*\*\s*:",
     re.MULTILINE,
 )
+_SLUG_TOKEN_RE = re.compile(r"^[A-Za-z0-9_\-]+$")
 
 
 # ---------------------------- decision enum ----------------------------
@@ -141,20 +150,36 @@ def _get_scope_env_override() -> frozenset[str]:
 
 
 def _parse_hot_md_active(hot_md_content: Optional[str]) -> frozenset[str]:
-    """Extract ``**<slug>**:`` tokens from the ``## Actively pressing``
-    section of ``hot.md``. Returns empty set when the file / section is
-    missing (valid zero-Gold state per Inv 1 — every signal then fails
-    Rule 1 and routes to ``SKIP_INBOX``, which is the documented default
-    when the Director hasn't declared priorities)."""
+    """Extract slug tokens from the ``## Actively pressing`` section of
+    ``hot.md``. Returns empty set when the file / section is missing
+    (valid zero-Gold state per Inv 1 — every signal then fails Rule 1
+    and routes to ``SKIP_INBOX``, which is the documented default when
+    the Director hasn't declared priorities).
+
+    Bullet formats accepted (STEP4_HOT_MD_PARSER_FIX_1, 2026-04-22):
+
+    * Single-slug — ``- **hagenauer-rg7**: ...`` → ``{"hagenauer-rg7"}``
+    * Multi-slug combo — ``- **lilienmatt + annaberg + aukera**: ...``
+      → ``{"lilienmatt", "annaberg", "aukera"}``
+
+    Anything between the ``**...**`` fences that does not survive a
+    ``split("+") → strip → _SLUG_TOKEN_RE.match`` round-trip is silently
+    dropped — tolerant to author-side punctuation, case, and stray
+    whitespace without opening a YAML-injection surface.
+    """
     if not hot_md_content:
         return frozenset()
     section = _ACTIVE_SECTION_RE.search(hot_md_content)
     if not section:
         return frozenset()
-    return frozenset(
-        m.group("slug").lower().strip()
-        for m in _ACTIVE_SLUG_LINE_RE.finditer(section.group("body"))
-    )
+    slugs: set[str] = set()
+    for bullet in _ACTIVE_SLUG_LINE_RE.finditer(section.group("body")):
+        inner = bullet.group("inner")
+        for raw_token in inner.split("+"):
+            token = raw_token.strip().lower()
+            if token and _SLUG_TOKEN_RE.match(token):
+                slugs.add(token)
+    return frozenset(slugs)
 
 
 def _load_allowed_scope() -> frozenset[str]:
