@@ -61,6 +61,13 @@ Optional frontmatter keys (include when applicable):
 - `deadline: <YYYY-MM-DD>` — if the signal has a hard deadline
 - `money_mentioned: [<amount> <ccy>, ...]` — up to 3 most material figures
 
+### Frontmatter cross-field invariants (these cause Step 6 to reject the draft)
+
+- **Null primary ⇒ empty related.** If `primary_matter` is `null`, `related_matters` MUST be `[]`. A null-matter signal cannot carry cross-links (Step 6 §4.2 invariant).
+- **Primary not in related.** `related_matters` MUST NOT contain `primary_matter`. List the related matters as the OTHER matters the signal touches, never the primary itself.
+- **Title shape.** `title` must be ≤160 chars, non-empty after whitespace trim, and MUST NOT end with a period.
+- **`source_id` is the signal_id value.** Emit the `signal_id` from the input block verbatim as a STRING (wrap it in quotes — Pydantic rejects unquoted integers). Step 6 will override with the DB-authoritative value as belt-and-suspenders, but emit it correctly here too.
+
 ### Body structure
 
 1. **One-paragraph summary** — 2-4 sentences. What is this signal, why does it matter, what changed.

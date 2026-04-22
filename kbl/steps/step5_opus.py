@@ -156,6 +156,21 @@ _DECISION_FULL = ClassifyDecision.FULL_SYNTHESIS.value
 _DECISION_STUB = ClassifyDecision.STUB_ONLY.value
 _DECISION_SKIP = ClassifyDecision.SKIP_INBOX.value
 
+# Schema conformance bounds for stub bodies (STEP5_STUB_SCHEMA_CONFORMANCE_AUDIT_1).
+# SilverDocument._body_length: 300 ≤ len(body) ≤ 8000.
+# SilverDocument._stub_status_matches_shape: status set ⇒ body ≤ 600.
+# Stub writers enforce the tighter 300-600 envelope structurally.
+_STUB_BODY_MIN_CHARS = 300
+_STUB_BODY_MAX_CHARS = 600
+
+# Valid vedana values per SilverFrontmatter (kbl/schemas/silver.py Vedana).
+# Step 4 is supposed to write one of these into signal_queue.vedana; if it
+# drifts (e.g. "neutral" from an older step4 build, or NULL from a
+# pre-classified row the stub path processed), stub writers coerce to
+# "routine" rather than emit a pydantic-invalid stub that would trigger
+# an unhelpful R3 retry ladder (R3 can't recover deterministic data drift).
+_VALID_VEDANA = {"threat", "opportunity", "routine"}
+
 
 # ---------------------------- result dataclass ----------------------------
 
@@ -408,14 +423,131 @@ def _dump_stub_frontmatter(fm: dict[str, Any]) -> str:
     return f"---\n{yaml_text}\n---\n"
 
 
+def _normalize_stub_inputs(
+    inputs: _SignalInputs,
+) -> tuple[Optional[str], list[str], str]:
+    """Coerce producer-side drift into schema-conformant values.
+
+    STEP5_STUB_SCHEMA_CONFORMANCE_AUDIT_1 (2026-04-22): stubs are the
+    deterministic last line of defense before Step 6 Pydantic validation.
+    They must emit frontmatter that ALWAYS validates, so every
+    ``SilverFrontmatter`` cross-field invariant gets enforced here:
+
+    * **Slug registry membership** — filter ``primary_matter`` and
+      ``related_matters`` to the ACTIVE set. A slug retired between Step
+      1 and Step 5 (or written in error by a prior-step drift) would
+      fail ``MatterSlug`` validation; demoting to ``None`` / dropping
+      from related is strictly better than stranding the row.
+    * **Invariant §4.2** (null-primary ⇒ empty-related) — if primary
+      drops to ``None`` (unset or retired), force ``related=[]``.
+    * **Invariant no-primary-in-related** — dedupe + order-preserving.
+    * **Vedana Literal** — coerce anything outside the canonical set
+      to ``"routine"`` so the stub still emits.
+
+    Returns ``(primary, related, vedana)``. Callers use these; no other
+    producer-side normalization happens in the stub writers.
+    """
+    from kbl import slug_registry as _reg
+
+    active = _reg.active_slugs()
+
+    primary = inputs.primary_matter
+    if primary is not None and primary not in active:
+        primary = None
+
+    related = [s for s in inputs.related_matters if s in active]
+    # Invariant §4.2.
+    if primary is None:
+        related = []
+    # no-primary-in-related + order-preserving dedupe.
+    seen: set[str] = set()
+    if primary is not None:
+        seen.add(primary)
+    deduped: list[str] = []
+    for slug in related:
+        if slug in seen:
+            continue
+        seen.add(slug)
+        deduped.append(slug)
+    related = deduped
+
+    vedana = inputs.vedana if inputs.vedana in _VALID_VEDANA else "routine"
+
+    return primary, related, vedana
+
+
+def _normalize_stub_title(raw_title: str, *, fallback: str) -> str:
+    """Coerce a candidate title into the SilverFrontmatter._title_shape envelope.
+
+    Strip whitespace, trim trailing periods (the validator rejects
+    period-terminal titles), cap at 160 chars (schema max), fall back
+    to ``fallback`` when empty after normalization. Does NOT enforce
+    YAML-safe escaping — ``yaml.safe_dump`` handles that at emit time.
+    """
+    trimmed = raw_title.strip().rstrip(". \t")
+    if not trimmed:
+        return fallback
+    if len(trimmed) > 160:
+        trimmed = trimmed[:160].rstrip(". \t")
+        if not trimmed:
+            return fallback
+    return trimmed
+
+
+def _pad_stub_body(body: str, filler: str) -> str:
+    """Pad ``body`` so ``len(body) >= _STUB_BODY_MIN_CHARS``.
+
+    The filler is appended verbatim (separated by ``\\n\\n``) until the
+    300-char floor is met. Both stubs ship with filler prose that's
+    Director-visible context (not lorem ipsum) — see the stub body
+    constants. Returns the padded body; never truncates here (the cap
+    is applied by ``_cap_stub_body``).
+    """
+    if len(body) >= _STUB_BODY_MIN_CHARS:
+        return body
+    needed = _STUB_BODY_MIN_CHARS - len(body)
+    # Append filler once; if still short, repeat (belt-and-suspenders
+    # against a zero-length filler edit).
+    padded = body.rstrip() + "\n\n" + filler.strip()
+    while len(padded) < _STUB_BODY_MIN_CHARS and filler.strip():
+        padded += " " + filler.strip()
+    del needed
+    return padded
+
+
+def _cap_stub_body(body: str) -> str:
+    """Cap a stub body at ``_STUB_BODY_MAX_CHARS`` per SilverDocument
+    ``_stub_status_matches_shape`` (status set ⇒ body ≤ 600).
+
+    Trims on a word boundary when possible so the cut doesn't slice a
+    token; ellipsis is appended only if the body was actually trimmed.
+    """
+    if len(body) <= _STUB_BODY_MAX_CHARS:
+        return body
+    # Reserve 3 chars for the trailing ellipsis marker so the final
+    # string still fits under _STUB_BODY_MAX_CHARS.
+    budget = _STUB_BODY_MAX_CHARS - 3
+    cut = body[:budget]
+    last_space = cut.rfind(" ")
+    if last_space > budget - 80:  # don't cut on a word boundary more than 80 chars back
+        cut = cut[:last_space]
+    return cut.rstrip() + "..."
+
+
 def _build_stub_frontmatter_dict(
-    inputs: _SignalInputs, *, title: str
+    inputs: _SignalInputs,
+    *,
+    title: str,
+    primary: Optional[str],
+    related: list[str],
+    vedana: str,
 ) -> dict[str, Any]:
     """Assemble the ordered dict shared by both deterministic stubs.
 
-    ``primary_matter`` stays ``None`` (safe_dump emits YAML ``null``)
-    when unset — matches the pre-fix ``'null'`` literal on round-trip
-    parse.
+    ``primary``/``related``/``vedana`` come pre-normalized from
+    :func:`_normalize_stub_inputs` — the stub writers do NOT pass raw
+    ``inputs.*`` fields here. This centralizes the invariant-enforcement
+    contract at a single point (test once, trust everywhere).
 
     ``source_id`` is cast to ``str`` to match
     ``SilverFrontmatter.source_id: str`` in ``kbl/schemas/silver.py``.
@@ -435,11 +567,38 @@ def _build_stub_frontmatter_dict(
         "author": "pipeline",
         "created": _iso_utc_now(),
         "source_id": str(inputs.signal_id),
-        "primary_matter": inputs.primary_matter,
-        "related_matters": list(inputs.related_matters),
-        "vedana": inputs.vedana or "routine",
+        "primary_matter": primary,
+        "related_matters": list(related),
+        "vedana": vedana,
         "status": "stub_auto",
     }
+
+
+# IMPORTANT: stub filler text must not contain the literal strings
+# ``voice: gold`` or ``author: director`` — ``SilverDocument._no_gold_self_promotion``
+# (R18 body validator) rejects any body that does, which would cascade
+# the stub right back into the ``opus_failed`` route we're trying to
+# avoid. Phrased with neutral descriptions of the promotion action instead.
+_SKIP_INBOX_BODY_FILLER = (
+    "No Opus synthesis was performed on this signal because the matter "
+    "slug falls outside the Director's current working set. To route "
+    "this into the pipeline proper, add the matter to `hot.md` ACTIVE "
+    "or to the `KBL_MATTER_SCOPE_ALLOWED` env override and re-queue the "
+    "signal. The raw signal text is preserved in `signal_queue.payload` "
+    "for audit. This is a deterministic stub, not an LLM output — any "
+    "promotion to canonical status requires an explicit Director edit "
+    "to the frontmatter `voice`/`author` fields."
+)
+
+_STUB_ONLY_BODY_FILLER = (
+    "This signal landed in the triage noise band — above the hard "
+    "skip threshold but below the Opus-worthy bar. Rather than burn "
+    "Anthropic spend on a low-signal synthesis, Step 5 emitted this "
+    "deterministic stub for Director review. Promotion is an explicit "
+    "frontmatter edit to the canonical `voice`/`author` fields; leave "
+    "untouched to archive. No cross-link writes were queued. The raw "
+    "signal text lives in `signal_queue.payload` for audit."
+)
 
 
 def _build_skip_inbox_stub(inputs: _SignalInputs) -> str:
@@ -450,34 +609,73 @@ def _build_skip_inbox_stub(inputs: _SignalInputs) -> str:
     Frontmatter is emitted via ``yaml.safe_dump`` (see
     ``_dump_stub_frontmatter``) — the literal title contains a colon
     so raw f-string concat would have produced malformed YAML.
+
+    STEP5_STUB_SCHEMA_CONFORMANCE_AUDIT_1 (2026-04-22): inputs are
+    normalized via :func:`_normalize_stub_inputs` so §4.2 + slug
+    registry invariants are enforced structurally. Body is padded to
+    the 300-char floor required by ``SilverDocument._body_length`` and
+    capped at the 600-char ceiling required by
+    ``_stub_status_matches_shape``.
     """
-    title = "Layer 2 gate: matter not in current scope"
-    fm = _build_stub_frontmatter_dict(inputs, title=title)
+    primary, related, vedana = _normalize_stub_inputs(inputs)
+    title = _normalize_stub_title(
+        "Layer 2 gate: matter not in current scope",
+        fallback="Layer 2 gate: matter not in current scope",
+    )
+    fm = _build_stub_frontmatter_dict(
+        inputs,
+        title=title,
+        primary=primary,
+        related=related,
+        vedana=vedana,
+    )
+    shown_matter = inputs.primary_matter if inputs.primary_matter else "null"
     body = (
         f"Layer 2 scope gate blocked this signal — `primary_matter="
-        f"{inputs.primary_matter!r}` is not in the current allowed scope "
+        f"{shown_matter!r}` is not in the current allowed scope "
         f"(Director's `hot.md` ACTIVE set + `KBL_MATTER_SCOPE_ALLOWED` "
-        f"override). Pipeline routed to skip stub; no Opus synthesis.\n"
+        f"override). Pipeline routed to skip stub; no Opus synthesis."
     )
-    return f"{_dump_stub_frontmatter(fm)}\n{body}"
+    body = _pad_stub_body(body, _SKIP_INBOX_BODY_FILLER)
+    body = _cap_stub_body(body)
+    return f"{_dump_stub_frontmatter(fm)}\n{body}\n"
 
 
 def _build_stub_only_stub(inputs: _SignalInputs) -> str:
     """Deterministic stub for low-confidence / noise-band rows. Director-
     visible so the Director can promote for review or leave to archive.
 
-    ``title_hint`` is ``inputs.triage_summary[:60]`` — the triage writer
-    is free-form and routinely contains colons, timestamps, email-like
-    tokens. Always routes through ``yaml.safe_dump`` so any scalar is
+    ``title_hint`` is derived from ``inputs.triage_summary[:60]`` — the
+    triage writer is free-form and routinely contains colons,
+    timestamps, email-like tokens. Always routes through
+    :func:`_normalize_stub_title` so trailing periods / whitespace are
+    stripped (the Pydantic ``_title_shape`` validator rejects titles
+    ending in ``.``) and through ``yaml.safe_dump`` so any scalar is
     quoted as needed.
+
+    STEP5_STUB_SCHEMA_CONFORMANCE_AUDIT_1 (2026-04-22): inputs are
+    normalized via :func:`_normalize_stub_inputs` so §4.2 + slug
+    registry invariants are enforced. Body floor/ceiling enforced
+    via pad + cap helpers.
     """
-    title_hint = inputs.triage_summary[:60] or "triage noise-band signal"
-    fm = _build_stub_frontmatter_dict(inputs, title=title_hint)
+    primary, related, vedana = _normalize_stub_inputs(inputs)
+    title = _normalize_stub_title(
+        inputs.triage_summary[:60], fallback="triage noise-band signal"
+    )
+    fm = _build_stub_frontmatter_dict(
+        inputs,
+        title=title,
+        primary=primary,
+        related=related,
+        vedana=vedana,
+    )
     body = (
         f"# [stub — low-confidence triage, Director review for promote/ignore]\n\n"
-        f"Triage summary: {inputs.triage_summary}\n"
+        f"Triage summary: {inputs.triage_summary}"
     )
-    return f"{_dump_stub_frontmatter(fm)}\n{body}"
+    body = _pad_stub_body(body, _STUB_ONLY_BODY_FILLER)
+    body = _cap_stub_body(body)
+    return f"{_dump_stub_frontmatter(fm)}\n{body}\n"
 
 
 # ---------------------------- prompt builder ----------------------------
@@ -584,6 +782,7 @@ def _build_user_prompt(
         ledger = _LEDGER_HOT_OMITTED_MARKER
 
     return template.format(
+        signal_id=inputs.signal_id,
         primary_matter=inputs.primary_matter or "null",
         primary_matter_desc=_matter_description(inputs.primary_matter),
         related_matters=_render_related_matters_block(inputs.related_matters),
