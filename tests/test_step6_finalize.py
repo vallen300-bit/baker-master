@@ -126,6 +126,32 @@ def _sql_calls(conn: MagicMock, needle: str) -> List[Tuple[str, Any]]:
     return [c for c in conn._calls if n in c[0].lower()]
 
 
+def _patch_get_conn_to(conn: MagicMock):
+    """Return a ``patch`` object that makes ``step6_finalize.get_conn()``
+    yield the same ``conn`` mock.
+
+    STEP5_STUB_SCHEMA_CONFORMANCE_AUDIT_1: ``_route_validation_failure``
+    now opens a fresh short-lived connection via
+    :func:`kbl.db.get_conn` so error accounting is isolated from the
+    pipeline conn (which may be dead after a long Step 5 Opus call, or
+    poisoned by a prior failed SQL). For tests that want to assert on
+    the error-path writes using the single ``_mock_conn`` tracking mock,
+    this patch routes the fresh connection back to the same mock — the
+    old assertions (``conn.commit.call_count``, ``conn._calls``) keep
+    working exactly as before.
+
+    Tests that want to exercise the "primary dead, fresh OK" behavior
+    should use their own patch with a SEPARATE mock for the fresh path.
+    """
+    from contextlib import contextmanager
+
+    @contextmanager
+    def _cm():
+        yield conn
+
+    return patch("kbl.steps.step6_finalize.get_conn", side_effect=_cm)
+
+
 # --------------------------- _title_to_slug ---------------------------
 
 
@@ -400,10 +426,14 @@ def test_finalize_invalid_vedana_routes_to_opus_failed_with_retry_bump() -> None
     )
     conn = _mock_conn(opus_draft=draft, finalize_retry_count=0)
 
-    with pytest.raises(FinalizationError, match="validation failed"):
+    with _patch_get_conn_to(conn), pytest.raises(
+        FinalizationError, match="validation failed"
+    ):
         finalize(signal_id=12, conn=conn)
 
     # Retry bump happened; state went to opus_failed (retry 1 < max 3).
+    # Post-audit: error accounting runs on a fresh conn — patched back to
+    # the tracking mock, so _calls + commit.call_count still see it.
     assert conn.commit.call_count == 1
     opus_failed = [c for c in conn._calls if c[1] == ("opus_failed", 12)]
     assert opus_failed
@@ -416,7 +446,7 @@ def test_finalize_retry_exhaustion_routes_to_finalize_failed() -> None:
     )
     conn = _mock_conn(opus_draft=draft, finalize_retry_count=2)
 
-    with pytest.raises(FinalizationError):
+    with _patch_get_conn_to(conn), pytest.raises(FinalizationError):
         finalize(signal_id=13, conn=conn)
 
     assert conn.commit.call_count == 1
@@ -427,7 +457,9 @@ def test_finalize_retry_exhaustion_routes_to_finalize_failed() -> None:
 def test_finalize_missing_frontmatter_fence_routes_to_opus_failed() -> None:
     conn = _mock_conn(opus_draft="no frontmatter here at all")
 
-    with pytest.raises(FinalizationError, match="frontmatter fence"):
+    with _patch_get_conn_to(conn), pytest.raises(
+        FinalizationError, match="frontmatter fence"
+    ):
         finalize(signal_id=14, conn=conn)
 
     assert conn.commit.call_count == 1
@@ -708,10 +740,12 @@ def test_finalize_error_routing_commits_before_raise() -> None:
     )
     conn = _mock_conn(opus_draft=draft)
 
-    with pytest.raises(FinalizationError):
+    with _patch_get_conn_to(conn), pytest.raises(FinalizationError):
         finalize(signal_id=71, conn=conn)
 
-    # Terminal state flip committed before raise (mirrors Step 5 pattern).
+    # Terminal state flip committed before raise. Post-audit the commit
+    # lands on a fresh conn opened via get_conn() — patched here to the
+    # same tracking mock so commit.call_count continues to see it.
     assert conn.commit.call_count == 1
 
 

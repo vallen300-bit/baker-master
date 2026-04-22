@@ -1,5 +1,6 @@
 ## Signal triage output
 
+signal_id:       {signal_id}
 primary_matter:  {primary_matter}
 matter purpose:  {primary_matter_desc}
 related_matters: {related_matters}

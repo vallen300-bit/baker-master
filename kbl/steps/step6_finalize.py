@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import logging as _stdlib_logging
 import re
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -58,6 +59,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import yaml
 from pydantic import ValidationError
 
+from kbl.db import get_conn
 from kbl.exceptions import FinalizationError, KblError
 from kbl.logging import emit_log
 from kbl.schemas.silver import (
@@ -607,7 +609,7 @@ def finalize(signal_id: int, conn: Any) -> FinalizeResult:
     try:
         fm_dict, body = _split_frontmatter(row.opus_draft_markdown)
     except FinalizationError:
-        _route_validation_failure(conn, row, error_count=1)
+        _route_validation_failure(row, error_count=1)
         raise
 
     # Inject pipeline telemetry + parse money strings BEFORE Pydantic
@@ -630,14 +632,14 @@ def finalize(signal_id: int, conn: Any) -> FinalizeResult:
     try:
         _normalize_money_list(fm_dict)
     except FinalizationError:
-        _route_validation_failure(conn, row, error_count=1)
+        _route_validation_failure(row, error_count=1)
         raise
 
     try:
         fm = SilverFrontmatter(**fm_dict)
     except ValidationError as e:
         _emit_validation_failures(conn, signal_id, e)
-        _route_validation_failure(conn, row, error_count=len(e.errors()))
+        _route_validation_failure(row, error_count=len(e.errors()))
         raise FinalizationError(
             f"signal_id={signal_id}: frontmatter validation failed "
             f"({len(e.errors())} errors)"
@@ -658,7 +660,7 @@ def finalize(signal_id: int, conn: Any) -> FinalizeResult:
         doc = SilverDocument(frontmatter=fm, body=body)
     except ValidationError as e:
         _emit_validation_failures(conn, signal_id, e)
-        _route_validation_failure(conn, row, error_count=len(e.errors()))
+        _route_validation_failure(row, error_count=len(e.errors()))
         raise FinalizationError(
             f"signal_id={signal_id}: body validation failed "
             f"({len(e.errors())} errors)"
@@ -716,20 +718,67 @@ def _build_excerpt(title: str, body: str) -> Optional[str]:
 
 
 def _route_validation_failure(
-    conn: Any, row: _SignalRow, *, error_count: int
+    row: _SignalRow, *, error_count: int
 ) -> None:
-    """Flip state + commit according to the retry ladder.
+    """Record + route a Step-6 validation failure on a FRESH connection.
 
-    After ``_MAX_OPUS_REFLIPS`` Opus retries fail finalization, the
-    signal goes to ``finalize_failed`` terminal. Before that it flips to
-    ``opus_failed`` so Step 5's R3 ladder gets another crack.
+    STEP5_STUB_SCHEMA_CONFORMANCE_AUDIT_1 (2026-04-22) — Axis 3
+    robustness fix. The pre-fix path used the pipeline ``conn`` passed
+    into ``finalize()`` for the error-recording ALTER + UPDATE + retry
+    bump. Two failure modes cascaded:
 
-    ``emit_log`` is called at the point of raise; this helper only
-    handles the state transition + commit-before-raise contract.
+    1. **Neon idle reap during Step 5 Opus call.** Step 5's R3 ladder
+       can sit on the connection for 10-30 s per attempt while the HTTP
+       round-trip to Anthropic is in flight. Neon's pooler occasionally
+       silently resets long-idle SSL connections, so by the time Step 6
+       hits ``_increment_retry_count`` the connection raised
+       ``psycopg2.OperationalError: SSL connection has been closed
+       unexpectedly`` followed by ``InterfaceError: connection already
+       closed``. The row stranded at ``finalize_running`` silently.
+
+    2. **Poisoned transaction.** Any prior failed SQL on the pipeline
+       ``conn`` leaves the transaction in ``INFAILEDSQLTRANSACTION`` state
+       and the retry-bump UPDATE raises ``InFailedSqlTransaction``. The
+       error handler itself became the failure.
+
+    Fix: error accounting uses a short-lived connection opened via
+    ``kbl.db.get_conn()``. That connection is independent of the
+    pipeline ``conn`` — whatever happened to the outer transaction, the
+    fresh one is clean. The retry-count UPDATE and the terminal-state
+    flip both land on the fresh connection and commit together.
+
+    Fault-tolerant envelope: the fresh-connection block catches any
+    exception so error accounting can't mask the underlying
+    ``ValidationError`` the caller is about to re-raise. Stderr log
+    preserves visibility for the operator (matches ``emit_log``'s own
+    fault-tolerance pattern).
     """
-    new_count = _increment_retry_count(conn, row.signal_id)
-    if new_count >= _MAX_OPUS_REFLIPS:
-        _mark_terminal(conn, row.signal_id, _STATE_FINALIZE_FAILED)
+    new_count = 0
+    target_state = _STATE_OPUS_FAILED
+    try:
+        with get_conn() as fresh_conn:
+            try:
+                new_count = _increment_retry_count(fresh_conn, row.signal_id)
+                if new_count >= _MAX_OPUS_REFLIPS:
+                    target_state = _STATE_FINALIZE_FAILED
+                _mark_terminal(fresh_conn, row.signal_id, target_state)
+                fresh_conn.commit()
+            except Exception:
+                try:
+                    fresh_conn.rollback()
+                except Exception:
+                    pass
+                raise
+    except Exception as e:
+        # Belt-and-suspenders: error accounting must never mask the
+        # root cause the caller is about to re-raise. Log + swallow.
+        sys.stderr.write(
+            f"[step6_finalize] _route_validation_failure fresh-conn write "
+            f"failed for signal_id={row.signal_id}: {e}\n"
+        )
+        return
+
+    if target_state == _STATE_FINALIZE_FAILED:
         emit_log(
             "ERROR",
             "finalize",
@@ -737,6 +786,3 @@ def _route_validation_failure(
             f"terminal finalize failure after {new_count} Opus retries; "
             f"routed to {_STATE_FINALIZE_FAILED}",
         )
-    else:
-        _mark_terminal(conn, row.signal_id, _STATE_OPUS_FAILED)
-    conn.commit()

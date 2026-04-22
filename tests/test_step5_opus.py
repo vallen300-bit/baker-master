@@ -282,12 +282,19 @@ def test_stub_only_stub_frontmatter_survives_pathological_triage_summary() -> No
     hashes, leading dashes, newlines, quote characters — every such
     char broke the pre-fix f-string concat. safe_dump handles all."""
     hostile = 'RE: meeting @ 14:00 — "urgent" #priority\n- item'
+    # Use "movie" as the related slug — active in the fixture registry.
+    # STEP5_STUB_SCHEMA_CONFORMANCE_AUDIT_1: _normalize_stub_inputs
+    # now filters related_matters against the active slug registry and
+    # dedupes the primary out — the pre-fix [_VALID_SLUG, "mo_vie"]
+    # input was pathological on both counts (primary-in-related + a
+    # non-active typo'd slug) and would have failed Step 6 Pydantic
+    # validation. Replaced with a legitimate cross-link shape.
     inputs = _SignalInputs(
         signal_id=99,
         raw_content="x",
         source="email",
         primary_matter=_VALID_SLUG,
-        related_matters=[_VALID_SLUG, "mo_vie"],
+        related_matters=[_VALID_SLUG, "movie"],
         vedana="threat",
         triage_summary=hostile,
         resolved_thread_paths=[],
@@ -298,9 +305,10 @@ def test_stub_only_stub_frontmatter_survives_pathological_triage_summary() -> No
 
     fm, body = _split_fm_body(stub)
 
-    # Title is triage_summary[:60] — first 60 chars of hostile string.
-    assert fm["title"] == hostile[:60]
-    assert fm["related_matters"] == [_VALID_SLUG, "mo_vie"]
+    # Title is triage_summary[:60] normalized (rstrip period/whitespace).
+    assert fm["title"] == hostile[:60].rstrip(". \t")
+    # Normalization: primary 'ao' de-duped out of related; 'movie' kept.
+    assert fm["related_matters"] == ["movie"]
     assert fm["vedana"] == "threat"
     assert fm["status"] == "stub_auto"
     # Body preserved.
