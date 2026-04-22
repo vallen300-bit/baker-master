@@ -1,148 +1,82 @@
 # Code Brisen #2 — Pending Task
 
-**From:** AI Head
+**From:** AI Head (ai-head-term-2026-04-22)
 **To:** Code Brisen #2
-**Task posted:** 2026-04-22 (post PR #39 merge)
-**Status:** OPEN — `STEP6_VALIDATION_HOTFIX_1` (Cortex-launch-blocking; Director explicit "proceed autonomously, launch Cortex")
+**Task posted:** 2026-04-22 (post PR #40 merge)
+**Status:** OPEN — BRIEF_AO_PM_EXTENSION_1 (full 5-deliverable scope, `/write-brief` formalized)
 
 ---
 
-## Brief-route note (charter §6A)
+## Task
 
-Freehand hot-fix dispatch. Director skipped the `/write-brief` 6-step and said "proceed as you think fit — launch Cortex." The queue is blocked: every reclaimed row from PR #39 is exhausting Step 6 R3 on the same Pydantic field and landing at `finalize_failed`. This is a production-incident fix, not a feature.
+Read and execute `briefs/BRIEF_AO_PM_EXTENSION_1.md`. Full scope; ~6h; Medium complexity. No tonight deadline — take the time to do it right.
 
----
+### Order of work
 
-## Context — what AI Head already audited
+1. **Deliverable 1 — Vault migration** (`baker-vault/wiki/matters/oskolkov/`). 8 files `cp`/rename + frontmatter, 7 new scaffolds, 3 Gold shells, `ao_pm_lessons.md` (Deliverable 4 folded in here), `interactions/README.md` stub. Commit in the vault repo. Do NOT delete `data/ao_pm/` yet.
 
-Full `kbl_log` WARN scan for `component='finalize'`, last 48h, **121 validation failures across 58 signals**:
+2. **Deliverable 3 — System prompt Part C addendum.** Edit `AO_PM_SYSTEM_PROMPT` literal in `scripts/insert_ao_pm_capability.py` to append the `ON DATES AND TIMESTAMPS — TACTICAL (MANDATORY)` block. Rerun the script against prod. Verify via SQL. No code deploy needed; DB-only update.
 
-| Pattern | Count | % |
-|---|---|---|
-| `deadline: Input should be a valid string` | 42 | 35% |
-| `body: Value error, body too short (… chars; min 300)` | 52 | 43% |
-| `source_id: Input should be a valid string` | 23 | 19% |
-| `primary_matter=null with non-empty related_matters` | 2 | 2% |
-| `vedana: Input should be 'threat', 'opportunity' or 'routine'` | 2 | 2% |
+3. **BLOCKING GATE — Pre-deploy staleness diagnostic** (30 min). Run the 4 SQL queries (A, B, C, D) in the brief. File `briefs/_reports/B2_AO_ROUTING_DIAGNOSTIC_20260422.md` with the inputs-vs-fires delta and a verdict per the 3-branch decision tree (routing works / routing broken / quiet matter). Report **must exist before Deliverable 2 deploys**.
 
-**Root cause of `deadline`/`source_id` class (54%):** YAML 1.1 auto-coerces unquoted scalars — `2026-05-01` parses as `datetime.date`, bare digits parse as `int`. `SilverFrontmatter` types both as `str`. Pydantic rejects before the existing str-level validators fire. Step 6's existing `fm_dict["source_id"] = str(row.signal_id)` override (step6_finalize.py:614) fixes source_id going forward, but `deadline` has no such guard.
+4. **Deliverable 2 — Runtime wiring.** `_resolve_view_dir` helper + `_load_pm_view_files` call site + `PM_REGISTRY["ao_pm"]` path flip + hyphenated filenames + sub-matter on-demand loader + `PM_REGISTRY_VERSION` bump to 2. Add `scripts/ingest_vault_matter.py` (new). Ship the code deploy. Then **immediately run `python3 scripts/ingest_vault_matter.py oskolkov` once on Render** — mandatory. Without ingest, `wiki_pages` serves stale 8-row content and the migration is silent no-op.
 
-**Root cause of `body too short` class (43%):** unclear — needs a diagnostic query. May be a Step 5 prompt issue (Opus producing thin synthesis on ambiguous matter-routing) or a floor-too-aggressive issue. Out of scope for this brief — investigate only.
+5. **Deliverable 5 — Weekly vault lint + scheduler wiring.** `scripts/lint_ao_pm_vault.py` (new) + `_run_ao_pm_lint` helper + APScheduler job in `triggers/embedded_scheduler.py` (Sunday 06:00 UTC, piggyback the pattern at line 221 `wiki_lint`).
 
-## Scope (2 parts — do BOTH)
+6. **Cleanup.** After Deliverable 2 Quality Checkpoint 11 passes in production (AO PM invocation reads vault content), `git rm -r data/ao_pm/`.
 
-### Part A — SHIP: `deadline` coercion fix in `kbl/schemas/silver.py`
+### Deployment order and rollback paths are in the brief (§"Deployment Order" + §"Rollback").
 
-Add a `mode='before'` validator that stringifies non-string scalars into `YYYY-MM-DD` form, then the existing `_deadline_iso_date` validator runs as today.
+## Deliverable
 
-**Exact location:** `kbl/schemas/silver.py`, between the `deadline: Optional[str] = None` field declaration (line 148) and the existing `_deadline_iso_date` validator (line 179).
+- Ship report: `briefs/_reports/B2_AO_PM_EXTENSION_1_20260422.md` — covering all 5 deliverables + Quality Checkpoint 1-14 + `data/ao_pm/` deletion timestamp + any residual work recommendations.
+- Routing diagnostic report: `briefs/_reports/B2_AO_ROUTING_DIAGNOSTIC_20260422.md` — separate file, written before Deliverable 2 ships.
+- Vault repo commit (Deliverables 1 + 4, folded into one commit per brief).
+- baker-code repo commits (Deliverables 2, 3, 5 — separate commits OK for review readability).
 
-**Shape (exemplar — you tune the signature):**
+## Pass criteria
 
-```python
-@field_validator("deadline", mode="before")
-@classmethod
-def _deadline_coerce_to_str(cls, v: Any) -> Optional[str]:
-    """YAML 1.1 auto-parses unquoted ``2026-05-01`` as ``datetime.date``
-    before Pydantic sees it. Coerce back to ISO-8601 string so the
-    downstream ``_deadline_iso_date`` str-level validator applies.
-    Accept ``date`` and ``datetime`` inputs; leave strings and None
-    untouched; any other type raises."""
-    if v is None or isinstance(v, str):
-        return v
-    if isinstance(v, datetime):
-        return v.date().isoformat()
-    if isinstance(v, date):
-        return v.isoformat()
-    raise TypeError(f"deadline: expected str/date/datetime, got {type(v).__name__}")
+- All 14 Quality Checkpoints in the brief pass.
+- Routing diagnostic verdict recorded and honored (if "routing broken" → Deliverables 2 + 5 held; ship D1 + D3 + D4 only and flag AI Head).
+- `capability_sets.system_prompt` for `ao_pm` contains `'ON DATES AND TIMESTAMPS'`.
+- `wiki_pages` rows for `agent_owner='ao_pm'` match vault file count after ingest. Slugs follow `{pm_slug}/{base}` convention per `_seed_wiki_from_view_files` (see brief §Key Constraints on Deliverable 2).
+- Post-deploy AO PM invocation surfaces dated citations per Part C format (informal smoke test by Director; escalate to AI Head if it doesn't).
+
+## Key corrections from `/write-brief` exploration + REVIEW passes (don't re-discover)
+
+- **Table name:** `baker_corrections`, NOT `capability_corrections`. The v3 ideas file has the wrong name; brief uses the real name (`memory/store_back.py:508`).
+- **Slug convention:** `{pm_slug}/{base}` where base is lowercased with `_`→`-`, `_index` or `schema` → `index`. Per `_seed_wiki_from_view_files` at `memory/store_back.py:2544-2547`. `_load_wiki_context` orders by `slug LIKE '%%/index'` — hitting that is load-bearing.
+- **`wiki_pages` schema:** columns are `slug, title, content, agent_owner, page_type, matter_slugs (TEXT[]), backlinks, generation, updated_at, updated_by`. Ingest sets `matter_slugs=['ao','hagenauer']` for ao_pm + `updated_by='ingest_vault_matter'`.
+- **Decomposer logging:** there is no `decomposer_decisions` table. Decomposer runs land in `capability_runs` WHERE `capability_slug='decomposer'`. Routing diagnostic Query D is corrected in the brief.
+- **`data/ao_pm/` has 8 files, not 7.** `ftc-table-explanations.md` is on disk but was missing from PM_REGISTRY's `view_file_order`. Brief adds it.
+- **`wiki_pages` (Postgres) wins over filesystem** when `cortex_config.wiki_context_enabled='true'` (`orchestrator/capability_runner.py:844-859`). That's the current prod state. Ingest is mandatory.
+- **APScheduler pattern** for Deliverable 5: copy the existing `wiki_lint` pattern at `triggers/embedded_scheduler.py:221` — do not invent a new scheduler style.
+- **`baker-vault` and `baker-code` are separate git repos.** Vault commits in `~/baker-vault`; code commits in your baker-code working copy.
+
+## Do NOT
+
+- Do NOT modify `orchestrator/pm_signal_detector.py` — routing patterns already correct for AO PM.
+- Do NOT modify `_load_wiki_context` priority logic (line 844-859). Dual-run stays; ingest handles staleness.
+- Do NOT change `cortex_config.wiki_context_enabled` flag.
+- Do NOT touch MOVIE AM (`PM_REGISTRY["movie_am"]` or `data/movie_am/`) — separate brief.
+- Do NOT delete `data/ao_pm/` until Deliverable 2 Quality Checkpoint 11 passes in production.
+- Do NOT skip the BLOCKING GATE. Diagnostic report filed first.
+
+## Lessons to apply (from `tasks/lessons.md`)
+
+- **#2 / #3:** verify DB schema + column names — the brief already did the legwork; trust the brief over any stale reference doc. If you hit an unknown table/column anyway, `SELECT column_name FROM information_schema.columns WHERE table_name='X'` first.
+- **#17:** verify function signatures before adding code. The brief's code snippets are grep-verified; if you extend them, grep again.
+- **#12:** push before declaring done. Local edits mean nothing until Render deploys.
+- **#16:** `git add briefs/` after writing or finishing. This dispatch is tracked via commit a4e540c (brief).
+- **#13 / #15:** three-way LLM match — N/A, this brief adds zero LLM call sites.
+
+## Working dir
+
+`~/bm-b2` (or wherever your baker-code checkout lives). Before starting:
+
+```bash
+cd ~/bm-b2 && git pull -q
+cd ~/baker-vault && git pull -q
 ```
 
-`Any` needs `from typing import Any` (check imports). `date` needs `from datetime import date` (already imports `datetime` — add `date` or verify).
-
-**Don't touch** the existing `_deadline_iso_date` validator. The new one runs first (`mode='before'` runs before typed field validation), produces a string, the existing one then asserts `YYYY-MM-DD`.
-
-**Also add the same pattern for `source_id`** — even though step6_finalize.py:614 overwrites it, the defense-in-depth principle is the whole reason that override exists. Mirror the same `mode='before'` coercion in `SilverFrontmatter` on `source_id`:
-
-```python
-@field_validator("source_id", mode="before")
-@classmethod
-def _source_id_coerce_to_str(cls, v: Any) -> str:
-    """YAML may auto-parse numeric source_id as int. Force-string."""
-    if isinstance(v, str):
-        return v
-    return str(v)
-```
-
-### Part B — REPORT only: `body too short` diagnostic
-
-Run this query (do not modify body floor logic):
-
-```sql
-SELECT sq.id, sq.step_5_decision, sq.primary_matter, sq.finalize_retry_count,
-       LENGTH(COALESCE(sq.opus_draft_markdown, '')) AS draft_len,
-       LEFT(sq.opus_draft_markdown, 400) AS draft_head
-  FROM signal_queue sq
-  JOIN kbl_log kl ON kl.signal_id = sq.id
- WHERE kl.component='finalize'
-   AND kl.level='WARN'
-   AND kl.message LIKE 'body: Value error, body too short%'
-   AND kl.ts > NOW() - INTERVAL '48 hours'
- GROUP BY sq.id
- ORDER BY sq.id DESC
- LIMIT 20;
-```
-
-Include the result in your ship report. Answer in plain English:
-
-- Is the too-short class correlated with `step_5_decision='skip_inbox'` (expected — stub bodies are intentionally short) vs `'full_synthesis'` (real problem)?
-- Median `draft_len` for the too-short class?
-- Any smoking gun in the first 400 chars of the drafts (e.g., Opus truncating, producing only frontmatter, empty body, etc.)?
-
-No code changes for Part B. One paragraph of diagnosis, data-backed. AI Head decides next brief based on your findings.
-
-## Tests
-
-### Regression tests in `tests/schemas/test_silver.py` (or nearest existing schema test file)
-
-Add 6 new tests (3 per coerced field):
-
-1. `test_deadline_accepts_str_yyyy_mm_dd` — `"2026-05-01"` → passes.
-2. `test_deadline_accepts_date_object` — `date(2026,5,1)` → coerced to `"2026-05-01"`, passes.
-3. `test_deadline_accepts_datetime_object` — `datetime(2026,5,1,tzinfo=UTC)` → coerced to `"2026-05-01"`, passes.
-4. `test_source_id_accepts_str` — `"68"` → passes.
-5. `test_source_id_coerces_int` — `68` → coerced to `"68"`, passes.
-6. `test_source_id_coerces_large_int` — `9_999_999_999` → coerced to `"9999999999"`, passes.
-
-Plus regression: the existing `_deadline_iso_date` test file (if any) still passes — don't regress the YYYY-MM-DD format assertion.
-
-### Full pytest (no-ship-by-inspection gate)
-
-Run the full suite. Report `X passed, Y failed, Z skipped`. Expected baseline (per PR #37/#38/#39): `16 failed, 799+N passed, 21 skipped` where N = new tests added. Any NEW failure → REQUEST_CHANGES on yourself; don't ship.
-
-## Out of scope (explicit)
-
-- **Body length floor.** Do NOT modify `_body_length` validator. That's the diagnostic output's job to frame.
-- **Step 5 prompt.** Cortex Design §4 #11 — Director territory.
-- **vedana / primary_matter edge cases.** 4 rows total; fix-after-cortex-launch.
-- **opus_draft_markdown re-generation for already-failed rows.** Those stay terminal — not this brief.
-
-## Ship shape
-
-- PR title: `STEP6_VALIDATION_HOTFIX_1: coerce deadline/source_id YAML scalars to str`
-- Branch: `step6-validation-hotfix-1`
-- Files changed: `kbl/schemas/silver.py` + new/existing test file. 2 files total.
-- Commit style: match PR #38/#39 (one clean commit).
-- Ship report path: `briefs/_reports/B2_step6_validation_hotfix_1_<YYYYMMDD>.md`. Include:
-  - §before/after for `kbl/schemas/silver.py` (line numbers + diff excerpt)
-  - Full pytest log head+tail (no "by inspection")
-  - Part B diagnostic paragraph
-  - Open-PR link for AI Head routing to B3
-
-**Timebox:** 90 min. If Part A tests fail unexpectedly, ship partial with diagnosis; do NOT chase the body-short issue with code.
-
-**On approve:** Tier A auto-merge. The 9 existing `finalize_failed` rows stay terminal (handled by a separate future brief or manual UPDATE). Go-forward rows clear Step 6 R3 on deadline.
-
----
-
-**Dispatch timestamp:** 2026-04-22 ~10:20 UTC (AI Head autonomous, post-PR-39 drain observed)
-**Working dir:** `~/bm-b2`
+— AI Head (ai-head-term-2026-04-22)

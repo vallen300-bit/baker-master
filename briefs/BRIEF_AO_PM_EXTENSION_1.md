@@ -69,13 +69,22 @@ FROM capability_runs
 WHERE capability_slug = 'ao_pm' AND created_at > NOW() - INTERVAL '21 days'
 LIMIT 1;
 
--- (D) Decomposer spot-check (confirm ao_pm appears in chosen_slugs
---     for AO-laden inputs). If table name differs, grep orchestrator/ first.
-SELECT created_at, input_text, chosen_slugs
-FROM decomposer_decisions
-WHERE input_text ILIKE '%oskolkov%' OR input_text ILIKE '%aelio%' OR input_text ILIKE '%andrey%'
+-- (D) Decomposer spot-check — did decomposer ever route to ao_pm on AO-laden inputs?
+--     Decomposer runs land in `capability_runs` WHERE capability_slug='decomposer'.
+--     The `answer` / `sub_task` text contains its routing output.
+SELECT created_at, capability_slug, sub_task, LEFT(answer, 300) AS answer_head
+FROM capability_runs
+WHERE capability_slug = 'decomposer'
+  AND (sub_task ILIKE '%oskolkov%' OR sub_task ILIKE '%aelio%' OR sub_task ILIKE '%andrey%'
+       OR answer ILIKE '%oskolkov%' OR answer ILIKE '%aelio%' OR answer ILIKE '%andrey%')
 ORDER BY created_at DESC
 LIMIT 20;
+-- Correlate: how many of those answers contain the string 'ao_pm'?
+SELECT COUNT(*) AS ao_pm_routed
+FROM capability_runs
+WHERE capability_slug = 'decomposer' AND created_at > NOW() - INTERVAL '21 days'
+  AND (answer ILIKE '%ao_pm%' OR sub_task ILIKE '%ao_pm%')
+LIMIT 1;
 ```
 
 Write the report to `briefs/_reports/B2_AO_ROUTING_DIAGNOSTIC_<YYYYMMDD>.md` with:
@@ -331,12 +340,16 @@ except Exception as e:
 
 Bounds context growth — parked sub-matters stay readable in Obsidian but don't bloat the prompt.
 
-**Step 2.5 — `scripts/ingest_vault_matter.py`** (new, ~100 lines) — matter-generic, wipes existing `wiki_pages` rows for the PM slug and re-inserts from vault:
+**Step 2.5 — `scripts/ingest_vault_matter.py`** (new, ~120 lines) — matter-generic, matches existing `wiki_pages` conventions from `memory/store_back.py:_seed_wiki_from_view_files` (slug `{pm_slug}/{base}`, `matter_slugs` array, `updated_by` audit):
 
 ```python
 """Ingest a vault matter folder into wiki_pages.
 
 Wipes existing rows for agent_owner=<pm_slug> and re-inserts from vault.
+Slug convention matches memory/store_back.py:_seed_wiki_from_view_files
+(line 2544-2547): {pm_slug}/{base}, where base is filename stem lowercased
+with underscores → hyphens, and `_index.md` → `{pm_slug}/index`.
+
 Usage: python3 scripts/ingest_vault_matter.py oskolkov
 """
 import os
@@ -347,9 +360,11 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-MATTER_TO_PM = {
-    "oskolkov": "ao_pm",
-    "movie":    "movie_am",
+# matter_slug → (pm_slug, matter_slugs array). matter_slugs mirrors existing
+# seed convention (store_back.py:2515, 2523).
+MATTER_CONFIG = {
+    "oskolkov": {"pm_slug": "ao_pm",    "matter_slugs": ["ao", "hagenauer"]},
+    "movie":    {"pm_slug": "movie_am", "matter_slugs": ["movie", "rg7"]},
 }
 
 
@@ -360,9 +375,11 @@ def main(matter_slug: str):
     matter_dir = Path(vault_path) / "wiki" / "matters" / matter_slug
     if not matter_dir.is_dir():
         raise RuntimeError(f"Matter dir not found: {matter_dir}")
-    pm_slug = MATTER_TO_PM.get(matter_slug)
-    if not pm_slug:
+    cfg = MATTER_CONFIG.get(matter_slug)
+    if not cfg:
         raise RuntimeError(f"Unknown matter: {matter_slug}")
+    pm_slug = cfg["pm_slug"]
+    matter_slugs = cfg["matter_slugs"]
 
     from memory.store_back import SentinelStoreBack
     store = SentinelStoreBack._get_global_instance()
@@ -378,30 +395,39 @@ def main(matter_slug: str):
         logger.info("Deleted %d stale rows for %s", cur.rowcount, pm_slug)
 
         inserted = 0
+        # Top-level files
         for path in sorted(matter_dir.glob("*.md")):
-            if path.name == "_lint-report.md":
+            if path.name in ("_lint-report.md", "_schema-legacy.md"):
                 continue
             content = path.read_text(encoding="utf-8")
-            title = _extract_title(content) or path.stem
+            title = _extract_title(content) or _default_title(path.stem)
+            slug = _make_slug(pm_slug, path.stem)
             cur.execute(
                 """
-                INSERT INTO wiki_pages (slug, title, content, agent_owner, page_type)
-                VALUES (%s, %s, %s, %s, 'agent_knowledge')
+                INSERT INTO wiki_pages
+                    (slug, title, content, agent_owner, page_type,
+                     matter_slugs, updated_by)
+                VALUES (%s, %s, %s, %s, 'agent_knowledge', %s, 'ingest_vault_matter')
                 """,
-                (path.stem, title, content, pm_slug),
+                (slug, title, content, pm_slug, matter_slugs),
             )
             inserted += 1
+
+        # Sub-matters
         sub_dir = matter_dir / "sub-matters"
         if sub_dir.is_dir():
             for path in sorted(sub_dir.glob("*.md")):
                 content = path.read_text(encoding="utf-8")
-                title = _extract_title(content) or path.stem
+                title = _extract_title(content) or _default_title(path.stem)
+                slug = f"{pm_slug}/sub-matters/{path.stem.lower().replace('_', '-')}"
                 cur.execute(
                     """
-                    INSERT INTO wiki_pages (slug, title, content, agent_owner, page_type)
-                    VALUES (%s, %s, %s, %s, 'agent_knowledge')
+                    INSERT INTO wiki_pages
+                        (slug, title, content, agent_owner, page_type,
+                         matter_slugs, updated_by)
+                    VALUES (%s, %s, %s, %s, 'agent_knowledge', %s, 'ingest_vault_matter')
                     """,
-                    (f"sub-matters/{path.stem}", title, content, pm_slug),
+                    (slug, title, content, pm_slug, matter_slugs),
                 )
                 inserted += 1
 
@@ -414,6 +440,25 @@ def main(matter_slug: str):
     finally:
         cur.close()
         store._put_conn(conn)
+
+
+def _make_slug(pm_slug: str, stem: str) -> str:
+    """Match _seed_wiki_from_view_files convention at store_back.py:2544-2547.
+
+    Lowercase, underscores → hyphens. `_index` (leading underscore) and bare
+    `schema` both map to `{pm_slug}/index` (legacy SCHEMA.md convention).
+    `_overview` → `{pm_slug}/overview` (drop leading underscore for URL hygiene).
+    """
+    base = stem.lower().replace("_", "-").replace(" ", "-")
+    if base in ("-index", "schema"):
+        base = "index"
+    elif base.startswith("-"):
+        base = base.lstrip("-")
+    return f"{pm_slug}/{base}"
+
+
+def _default_title(stem: str) -> str:
+    return stem.replace("_", " ").replace("-", " ").title()
 
 
 def _extract_title(content: str) -> str | None:
@@ -442,10 +487,14 @@ python3 scripts/ingest_vault_matter.py oskolkov
 
 ### Key constraints
 - **Ingest is mandatory, not optional.** Without it, `_load_wiki_context` keeps serving the stale 8 rows and the migration does nothing.
+- **Slug format must match `_seed_wiki_from_view_files`** (`memory/store_back.py:2544-2547`): `{pm_slug}/{base}` where base is lowercased, `_`→`-`, `_index` or `schema`→`index`. `_load_wiki_context` orders by `CASE WHEN slug LIKE '%%/index' THEN 0 ELSE 1 END` (line 1339) — hitting that ordering is load-bearing.
+- **`matter_slugs` array** must be populated (`["ao", "hagenauer"]` for ao_pm) — existing downstream queries filter by this column.
+- **`updated_by = 'ingest_vault_matter'`** for audit trail (distinguishes from `'auto_seed'`).
 - If `BAKER_VAULT_PATH` is unset on Render, `_resolve_view_dir` falls back to legacy resolution (which will 404 because `data/ao_pm/` still exists as pre-cleanup safety net — but filesystem fallback is rarely hit when wiki_context is on). Verify env var before deploy.
 - `_load_wiki_context` priority logic at line 844-859 is **not changed** — dual-run stays.
 - `wiki_pages` DELETE is matter-scoped (`agent_owner = %s`) — bounded, not a full-table wipe. `conn.rollback()` in except.
-- Sub-matter loader filename normalization: `_` → `-` to match vault convention.
+- Sub-matter loader filename normalization in `capability_runner.py`: `_` → `-` to match vault convention.
+- `slug` column has a UNIQUE constraint. Prefixing with `{pm_slug}/` prevents cross-agent collisions (e.g. another capability using bare `psychology`).
 
 ### Verification
 ```bash
@@ -976,11 +1025,24 @@ Must contain:
 ## Brief authoring notes
 
 - **Table name correction** applied: v3 doc referenced `capability_corrections`, actual is `baker_corrections` (verified `memory/store_back.py:508`).
+- **Slug format corrected** during `/write-brief` REVIEW pass: initial ingest draft used bare stems (`psychology`), real convention is `{pm_slug}/{base}` per `_seed_wiki_from_view_files` at `memory/store_back.py:2544-2547`. Also added `matter_slugs` array and `updated_by` per the same reference. `_load_wiki_context` orders by `slug LIKE '%%/index'` (line 1339) — ingest must produce `ao_pm/index` for the lead page.
+- **Routing diagnostic Query D corrected** during REVIEW: `decomposer_decisions` table doesn't exist. Replaced with `capability_runs` filtered on `capability_slug='decomposer'` plus AO keyword match on `sub_task`/`answer`.
 - **`data/ao_pm/` contains 8 files, not 7**: `ftc-table-explanations.md` exists on disk but was absent from PM_REGISTRY's `view_file_order`. Brief adds it to the order.
 - **`wiki_pages` priority over filesystem** (v3 did not surface): `wiki_context_enabled=True` in prod + 8 `ao_pm` rows means the ingest step is mandatory. Without it, migration is silent no-op.
 - **Scheduler wiring** uses APScheduler CronTrigger matching existing `wiki_lint` job in `triggers/embedded_scheduler.py:221` for consistency.
 - **Substrate push + Memory-tool pilot** (v3 §A3 + §B2): deferred to a successor brief. Scope discipline per `/write-brief` Step 4.
 - **No tonight deadline.** Queue normally behind PR #40 (STEP6_VALIDATION_HOTFIX_1). B2 dispatch once free; no preempt.
+
+## `/write-brief` trail (Charter §6A)
+
+This brief passed the 6-step skill formally 2026-04-22 after Director's `/write-brief pls` instruction.
+
+- **Step 1 EXPLORE:** read `capability_runner.py:44-167,833-878,1289-1368` (PM_REGISTRY, `_load_wiki_context` priority, `_load_pm_view_files`); `memory/store_back.py:499-628` (`baker_corrections`), `2460-2562` (`wiki_pages` schema + `_seed_wiki_from_view_files`), `2721-2760` (`capability_runs`); `orchestrator/pm_signal_detector.py`; `scripts/insert_ao_pm_capability.py`; `triggers/embedded_scheduler.py:195-228,716-728`. Checked `tasks/lessons.md` (215 lines) — Lessons #2, #3, #17, #12, #16 directly applicable.
+- **Step 2 PLAN:** 5 deliverables + blocking staleness gate + deployment order — see top of brief.
+- **Step 3 WRITE:** brief content above.
+- **Step 4 REVIEW:** caught 3 gaps (decomposer table, slug format, matter_slugs/updated_by). All patched in-place.
+- **Step 5 PRESENT:** summary posted to Director chat; trigger line surfaced for B2 dispatch once mailbox clears.
+- **Step 6 CAPTURE LESSONS:** deferred until after B2 ships — note time-vs-estimate, any brief gaps B2 had to improvise around.
 
 ## Reference trail
 
