@@ -23,9 +23,9 @@ ls /opt/render/project/src/baker-vault-mirror/wiki/matters/oskolkov/ | head
 
 If mirror is stale at ingest time, wait for next sync or investigate the mirror-update mechanism before inserting stale rows into `wiki_pages`.
 
-## Follow-up flag (post-D2, non-blocking)
+## Follow-up flag — RETIRED 2026-04-22 ~12:00 UTC
 
-Your diagnostic also surfaced: 14 ao_pm runs all happened before Apr 12 (10-day silence since). That's within the 21d case-(d) window but anomalous. Don't investigate mid-D2 — note in the Ship Report as a post-ship monitoring item. D2 shipping doesn't depend on resolving this; D2 changes content storage location, not routing triggers.
+The 10-day ao_pm silence since Apr 12 was flagged in an earlier draft of this signal. Director confirmed: **expected, not an anomaly.** No post-ship investigation needed. Drop from the Ship Report.
 
 ## Schema corrections you flagged
 
