@@ -3,7 +3,49 @@
 **From:** AI Head
 **To:** Code Brisen #3
 **Task posted:** 2026-04-22 (post-B1 ship)
-**Status:** OPEN — review PR #37 STEP4_HOT_MD_PARSER_FIX_1 (Gate 2 unlock)
+**Status:** CLOSED — PR #37 APPROVE, Tier A auto-merge greenlit, Gate 2 blocker structurally cleared
+
+---
+
+## B3 dispatch back (2026-04-22)
+
+**Verdict: APPROVE** — all 6 focus items green, zero gating nits. Full-suite regression delta reproduced locally with cmp-confirmed identical failure set.
+
+Report: `briefs/_reports/B3_pr37_step4_hot_md_parser_fix_review_20260422.md`.
+
+### Regression delta (focus 4) — reproduced locally
+
+```
+main baseline:       16 failed / 769 passed / 21 skipped / 19 warnings (11.69s)
+pr37 head df13283:   16 failed / 774 passed / 21 skipped / 20 warnings (19.50s)
+Delta:               +5 passed, 0 regressions, 0 new errors
+```
+
+Pre-existing failure SET identical (`cmp -s /tmp/b3-main-failures.txt /tmp/b3-pr37-failures.txt` → exit 0). My absolute counts differ from B1's 13-failure claim by +3 `test_clickup_integration.py` (missing `VOYAGE_API_KEY` in my venv) — pure local-env artifact, same 3 fail on both main AND pr37, delta unaffected.
+
+### Per focus verdict
+
+1. ✅ **Section-header regex.** `^##\s+Actively\s+pressing\b[^\n]*\n` matches live parenthetical header, bare backward-compat header, blocks `pressings` extension via `\b`, terminates body at next `##`. Linear-time; 100KB pathological input scanned in 0.7ms.
+
+2. ✅ **Slug-line regex + tokenizer.** `[^*\n]+` inner is permissive; downstream `split("+") → strip → lower → _SLUG_TOKEN_RE.match` pipeline at `step4_classify.py:176-181` is auditable. Empirically verified: single-slug backward compat, combo split, garbage tolerance (`bar (note)` dropped), newline-injection refusal, embedded-star refusal, case-folding, empty-token drop. 100KB inner scanned in 2.4ms.
+
+3. ✅ **Test-matrix quality.** 5 new tests, all `== frozenset({...})` exact-set equality — pins both leak failures AND missing-slug failures with one assertion. Next-H2 leak-check in test #5 catches body-capture leak via `leak_slug` absence. No presence-only asserts.
+
+4. ✅ **No ship-by-inspection.** Full-suite baseline reproduced myself per gate. `feedback_no_ship_by_inspection.md` honored in ship report §test-results.
+
+5. ✅ **Scope discipline.** 2 files, zero new imports, zero env vars, zero migrations, zero new deps. `_SLUG_TOKEN_RE` is `_`-prefixed private const.
+
+6. ✅ **Security / hardening.** No ReDoS surface (both regexes linear). `[^*\n]+` refuses newlines → YAML/frontmatter injection neutralized at regex layer. `_SLUG_TOKEN_RE` is strict allowlist `^[A-Za-z0-9_\-]+$`. `.lower()` applied pre-filter for set canonicalization.
+
+### N-nits parked (non-blocking)
+
+- **N1:** No explicit test for `**123 + invalid slug + ok**:`-style malformed-middle-token bullet. Empirically the filter handles it; worth a 6th test row in a future tidy-up, not gating.
+
+Tier A auto-merge proceeds. Tier B post-merge UPDATE (53 in-scope rows rewound to `awaiting_classify`) is AI Head ↔ Director out-of-band per §on-APPROVE.
+
+Tab quitting per §on-APPROVE.
+
+— B3
 
 ---
 
