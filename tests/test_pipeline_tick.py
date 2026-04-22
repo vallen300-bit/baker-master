@@ -580,13 +580,14 @@ def test_main_enabled_calls_process_signal_remote(monkeypatch) -> None:
 
 
 def test_main_enabled_queue_empty_returns_zero(monkeypatch) -> None:
-    """Flag on, BOTH queues empty (primary pending + opus_failed reclaim)
-    → main() returns 0 without calling either processor.
+    """Flag on, ALL FIVE queues empty (primary pending + opus_failed
+    reclaim + three awaiting_* crash-recovery reclaims) → main() returns
+    0 without calling any processor.
 
-    Contract updated for CLAIM_LOOP_OPUS_FAILED_RECLAIM_1: primary-empty
-    is no longer sufficient to bail; the tick now also consults
-    ``claim_one_opus_failed`` before returning. Test patches both so
-    this stays a unit test (no live DB).
+    Contract updated for CLAIM_LOOP_ORPHAN_STATES_2: primary-empty is no
+    longer sufficient to bail; the tick now consults the full 5-step
+    claim chain before returning. Test patches all five so this stays a
+    unit test (no live DB).
     """
     monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "true")
 
@@ -598,16 +599,28 @@ def test_main_enabled_queue_empty_returns_zero(monkeypatch) -> None:
     with patch("kbl.pipeline_tick.get_conn", return_value=fake_conn_ctx), \
          patch("kbl.pipeline_tick.claim_one_signal", return_value=None) as mock_claim, \
          patch("kbl.pipeline_tick.claim_one_opus_failed", return_value=None) as mock_reclaim, \
+         patch("kbl.pipeline_tick.claim_one_awaiting_classify", return_value=None) as mock_cls, \
+         patch("kbl.pipeline_tick.claim_one_awaiting_opus", return_value=None) as mock_opus, \
+         patch("kbl.pipeline_tick.claim_one_awaiting_finalize", return_value=None) as mock_fin, \
          patch("kbl.pipeline_tick._process_signal_remote") as mock_remote, \
          patch("kbl.pipeline_tick._process_signal_reclaim_remote") as mock_reclaim_fn, \
+         patch("kbl.pipeline_tick._process_signal_classify_remote") as mock_cls_fn, \
+         patch("kbl.pipeline_tick._process_signal_opus_remote") as mock_opus_fn, \
+         patch("kbl.pipeline_tick._process_signal_finalize_remote") as mock_fin_fn, \
          patch("kbl.pipeline_tick.get_state", return_value="false"):
         rc = _pipeline_main()
 
     assert rc == 0
     assert mock_claim.call_count == 1
     assert mock_reclaim.call_count == 1
+    assert mock_cls.call_count == 1
+    assert mock_opus.call_count == 1
+    assert mock_fin.call_count == 1
     assert mock_remote.call_count == 0
     assert mock_reclaim_fn.call_count == 0
+    assert mock_cls_fn.call_count == 0
+    assert mock_opus_fn.call_count == 0
+    assert mock_fin_fn.call_count == 0
 
 
 def test_main_respects_anthropic_circuit(monkeypatch) -> None:
@@ -976,8 +989,9 @@ def test_main_falls_back_to_reclaim_when_primary_empty(monkeypatch) -> None:
 
 
 def test_main_both_queues_empty_returns_zero(monkeypatch) -> None:
-    """Primary + reclaim both empty → main() returns 0 without
-    dispatching to either processor. Flag on, both circuits closed."""
+    """Primary + opus_failed reclaim + three awaiting_* reclaims all
+    empty → main() returns 0 without dispatching to any processor. Flag
+    on, both circuits closed."""
     monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "true")
 
     fake_conn = MagicMock()
@@ -988,16 +1002,28 @@ def test_main_both_queues_empty_returns_zero(monkeypatch) -> None:
     with patch("kbl.pipeline_tick.get_conn", return_value=fake_conn_ctx), \
          patch("kbl.pipeline_tick.claim_one_signal", return_value=None) as mock_primary, \
          patch("kbl.pipeline_tick.claim_one_opus_failed", return_value=None) as mock_reclaim, \
+         patch("kbl.pipeline_tick.claim_one_awaiting_classify", return_value=None) as mock_cls, \
+         patch("kbl.pipeline_tick.claim_one_awaiting_opus", return_value=None) as mock_opus, \
+         patch("kbl.pipeline_tick.claim_one_awaiting_finalize", return_value=None) as mock_fin, \
          patch("kbl.pipeline_tick._process_signal_remote") as mock_remote, \
          patch("kbl.pipeline_tick._process_signal_reclaim_remote") as mock_reclaim_fn, \
+         patch("kbl.pipeline_tick._process_signal_classify_remote") as mock_cls_fn, \
+         patch("kbl.pipeline_tick._process_signal_opus_remote") as mock_opus_fn, \
+         patch("kbl.pipeline_tick._process_signal_finalize_remote") as mock_fin_fn, \
          patch("kbl.pipeline_tick.get_state", return_value="false"):
         rc = _pipeline_main()
 
     assert rc == 0
     assert mock_primary.call_count == 1
     assert mock_reclaim.call_count == 1
+    assert mock_cls.call_count == 1
+    assert mock_opus.call_count == 1
+    assert mock_fin.call_count == 1
     assert mock_remote.call_count == 0
     assert mock_reclaim_fn.call_count == 0
+    assert mock_cls_fn.call_count == 0
+    assert mock_opus_fn.call_count == 0
+    assert mock_fin_fn.call_count == 0
 
 
 def test_main_primary_claim_skips_reclaim(monkeypatch) -> None:
@@ -1026,3 +1052,462 @@ def test_main_primary_claim_skips_reclaim(monkeypatch) -> None:
     # Reclaim NEVER consulted when primary had work.
     assert mock_reclaim.call_count == 0
     assert mock_reclaim_fn.call_count == 0
+
+
+# =====================================================================
+# CLAIM_LOOP_ORPHAN_STATES_2 — awaiting_* crash-recovery reclaim chain
+# =====================================================================
+
+from kbl.pipeline_tick import (
+    _AWAITING_ORPHAN_STALE_INTERVAL,
+    _process_signal_classify_remote,
+    _process_signal_finalize_remote,
+    _process_signal_opus_remote,
+    claim_one_awaiting_classify,
+    claim_one_awaiting_finalize,
+    claim_one_awaiting_opus,
+)
+
+
+# --------------------------- claim-function tests ---------------------------
+
+
+def test_claim_one_awaiting_classify_returns_eligible_row() -> None:
+    """Stale awaiting_classify row (started_at > 15 min ago) → claim
+    returns its id, flips it to ``classify_running``, commits once.
+
+    Staleness SQL must include the 15-minute interval; the SELECT filters
+    on ``status='awaiting_classify'``. No budget counter (crash-recovery,
+    not a retry state)."""
+    conn, executed = _claim_conn(select_returns=(811,))
+
+    claimed = claim_one_awaiting_classify(conn)
+
+    assert claimed == 811
+    assert conn.commit.call_count == 1
+    assert conn.rollback.call_count == 0
+
+    select_sql = next(
+        (sql, p) for sql, p in executed if "select id from signal_queue" in sql
+    )
+    assert "status = 'awaiting_classify'" in select_sql[0]
+    assert _AWAITING_ORPHAN_STALE_INTERVAL in select_sql[0]
+    assert "for update skip locked" in select_sql[0]
+    # No budget param (unlike claim_one_opus_failed); SELECT takes no params.
+    assert select_sql[1] is None
+
+    update_sql = next(
+        (sql, p) for sql, p in executed if sql.startswith("update signal_queue")
+    )
+    assert "status = 'classify_running'" in update_sql[0]
+    assert update_sql[1] == (811,)
+
+    # No ALTER — unlike claim_one_opus_failed, this function reuses the
+    # existing ``started_at`` column which predates the module.
+    assert not any(sql.startswith("alter table") for sql, _ in executed)
+
+
+def test_claim_one_awaiting_classify_skips_fresh_rows() -> None:
+    """Fresh awaiting_classify row (started_at within 15 min) must be
+    skipped by the staleness guard. Simulated here by returning None from
+    the claim SELECT — the live ``started_at < NOW() - INTERVAL '15 minutes'``
+    filter screens the mid-flight row out of the result set. No UPDATE,
+    no commit when the SELECT is empty."""
+    conn, executed = _claim_conn(select_returns=None)
+
+    claimed = claim_one_awaiting_classify(conn)
+
+    assert claimed is None
+    assert conn.commit.call_count == 0
+    assert conn.rollback.call_count == 0
+    assert not any(sql.startswith("update") for sql, _ in executed)
+    # Guard clause is in the SELECT, and the SELECT still ran.
+    select_sql = next(
+        (sql, _) for sql, _ in executed if "select id from signal_queue" in sql
+    )
+    assert _AWAITING_ORPHAN_STALE_INTERVAL in select_sql[0]
+
+
+def test_claim_one_awaiting_classify_returns_none_when_empty() -> None:
+    """No eligible rows at all → claim returns None, no side effects."""
+    conn, executed = _claim_conn(select_returns=None)
+
+    claimed = claim_one_awaiting_classify(conn)
+
+    assert claimed is None
+    assert conn.commit.call_count == 0
+    assert conn.rollback.call_count == 0
+    assert not any(sql.startswith("update") for sql, _ in executed)
+
+
+def test_claim_one_awaiting_opus_returns_eligible_row() -> None:
+    """Stale awaiting_opus row → claim returns id, flips to
+    ``opus_running``, commits once. Distinct from ``claim_one_opus_failed``
+    which flips ``opus_failed → awaiting_opus``; this one flips
+    ``awaiting_opus → opus_running``."""
+    conn, executed = _claim_conn(select_returns=(822,))
+
+    claimed = claim_one_awaiting_opus(conn)
+
+    assert claimed == 822
+    assert conn.commit.call_count == 1
+    assert conn.rollback.call_count == 0
+
+    select_sql = next(
+        (sql, p) for sql, p in executed if "select id from signal_queue" in sql
+    )
+    assert "status = 'awaiting_opus'" in select_sql[0]
+    assert _AWAITING_ORPHAN_STALE_INTERVAL in select_sql[0]
+    assert "for update skip locked" in select_sql[0]
+    assert select_sql[1] is None
+
+    update_sql = next(
+        (sql, p) for sql, p in executed if sql.startswith("update signal_queue")
+    )
+    assert "status = 'opus_running'" in update_sql[0]
+    assert update_sql[1] == (822,)
+
+
+def test_claim_one_awaiting_opus_skips_fresh_rows() -> None:
+    """Fresh awaiting_opus row must be skipped by staleness guard."""
+    conn, executed = _claim_conn(select_returns=None)
+
+    claimed = claim_one_awaiting_opus(conn)
+
+    assert claimed is None
+    assert conn.commit.call_count == 0
+    assert not any(sql.startswith("update") for sql, _ in executed)
+    select_sql = next(
+        (sql, _) for sql, _ in executed if "select id from signal_queue" in sql
+    )
+    assert _AWAITING_ORPHAN_STALE_INTERVAL in select_sql[0]
+
+
+def test_claim_one_awaiting_opus_returns_none_when_empty() -> None:
+    """No eligible rows → None, no side effects."""
+    conn, executed = _claim_conn(select_returns=None)
+
+    claimed = claim_one_awaiting_opus(conn)
+
+    assert claimed is None
+    assert conn.commit.call_count == 0
+    assert not any(sql.startswith("update") for sql, _ in executed)
+
+
+def test_claim_one_awaiting_finalize_returns_eligible_row() -> None:
+    """Stale awaiting_finalize row → claim returns id, flips to
+    ``finalize_running``, commits once. This is the state AI Head has
+    been manually recovering in multiple sessions."""
+    conn, executed = _claim_conn(select_returns=(833,))
+
+    claimed = claim_one_awaiting_finalize(conn)
+
+    assert claimed == 833
+    assert conn.commit.call_count == 1
+    assert conn.rollback.call_count == 0
+
+    select_sql = next(
+        (sql, p) for sql, p in executed if "select id from signal_queue" in sql
+    )
+    assert "status = 'awaiting_finalize'" in select_sql[0]
+    assert _AWAITING_ORPHAN_STALE_INTERVAL in select_sql[0]
+    assert "for update skip locked" in select_sql[0]
+    assert select_sql[1] is None
+
+    update_sql = next(
+        (sql, p) for sql, p in executed if sql.startswith("update signal_queue")
+    )
+    assert "status = 'finalize_running'" in update_sql[0]
+    assert update_sql[1] == (833,)
+
+
+def test_claim_one_awaiting_finalize_skips_fresh_rows() -> None:
+    """Fresh awaiting_finalize row must be skipped by staleness guard."""
+    conn, executed = _claim_conn(select_returns=None)
+
+    claimed = claim_one_awaiting_finalize(conn)
+
+    assert claimed is None
+    assert conn.commit.call_count == 0
+    assert not any(sql.startswith("update") for sql, _ in executed)
+    select_sql = next(
+        (sql, _) for sql, _ in executed if "select id from signal_queue" in sql
+    )
+    assert _AWAITING_ORPHAN_STALE_INTERVAL in select_sql[0]
+
+
+def test_claim_one_awaiting_finalize_returns_none_when_empty() -> None:
+    """No eligible rows → None, no side effects."""
+    conn, executed = _claim_conn(select_returns=None)
+
+    claimed = claim_one_awaiting_finalize(conn)
+
+    assert claimed is None
+    assert conn.commit.call_count == 0
+    assert not any(sql.startswith("update") for sql, _ in executed)
+
+
+# --------------------------- dispatch-function tests ---------------------------
+
+
+def test_classify_dispatch_runs_4_5_6_not_1_3_or_7() -> None:
+    """_process_signal_classify_remote runs only Steps 4 + 5 + 6. Steps
+    1-3 (triage, resolve, extract) are never called — the reclaim entry
+    trusts the upstream columns. Step 7 is never called — Render has no
+    vault (CHANDA Inv 9).
+
+    3 orchestrator commits (one per step), 0 rollbacks."""
+    # The orchestrator performs ONE status check between Step 5 and
+    # Step 6, reading queue[0] (post_step1_status slot).
+    conn = _mock_conn(
+        post_step1_status="awaiting_finalize",
+        post_step5_status="__unused__",
+        post_step6_status="__unused__",
+    )
+    call_log: list[str] = []
+
+    with ExitStack() as stack:
+        mocks = _enter_all_steps(stack)
+        for name, mock in mocks.items():
+            mock.side_effect = _tracked_step(call_log, name)
+
+        _process_signal_classify_remote(signal_id=401, conn=conn)
+
+    assert call_log == ["step4", "step5", "step6"]
+    mocks["step4"].assert_called_once_with(401, conn)
+    mocks["step5"].assert_called_once_with(401, conn)
+    mocks["step6"].assert_called_once_with(401, conn)
+    for name in ("step1", "step2", "step3", "step7"):
+        assert mocks[name].call_count == 0, f"{name} ran on classify-reclaim path"
+
+    assert conn.commit.call_count == 3
+    assert conn.rollback.call_count == 0
+
+
+def test_opus_dispatch_runs_5_6_not_1_4_or_7() -> None:
+    """_process_signal_opus_remote runs only Steps 5 + 6. Same shape as
+    PR #38's reclaim path but entered from ``opus_running`` (not a pre-flip
+    to ``awaiting_opus``). Steps 1-4 and Step 7 never called."""
+    conn = _mock_conn(
+        post_step1_status="awaiting_finalize",
+        post_step5_status="__unused__",
+        post_step6_status="__unused__",
+    )
+    call_log: list[str] = []
+
+    with ExitStack() as stack:
+        mocks = _enter_all_steps(stack)
+        for name, mock in mocks.items():
+            mock.side_effect = _tracked_step(call_log, name)
+
+        _process_signal_opus_remote(signal_id=501, conn=conn)
+
+    assert call_log == ["step5", "step6"]
+    mocks["step5"].assert_called_once_with(501, conn)
+    mocks["step6"].assert_called_once_with(501, conn)
+    for name in ("step1", "step2", "step3", "step4", "step7"):
+        assert mocks[name].call_count == 0, f"{name} ran on opus-reclaim path"
+
+    assert conn.commit.call_count == 2
+    assert conn.rollback.call_count == 0
+
+
+def test_finalize_dispatch_runs_6_not_others() -> None:
+    """_process_signal_finalize_remote runs only Step 6. Steps 1-5 and
+    Step 7 never called. 1 orchestrator commit, 0 rollbacks."""
+    conn = MagicMock()
+    call_log: list[str] = []
+
+    with ExitStack() as stack:
+        mocks = _enter_all_steps(stack)
+        for name, mock in mocks.items():
+            mock.side_effect = _tracked_step(call_log, name)
+
+        _process_signal_finalize_remote(signal_id=601, conn=conn)
+
+    assert call_log == ["step6"]
+    mocks["step6"].assert_called_once_with(601, conn)
+    for name in ("step1", "step2", "step3", "step4", "step5", "step7"):
+        assert mocks[name].call_count == 0, f"{name} ran on finalize-reclaim path"
+
+    assert conn.commit.call_count == 1
+    assert conn.rollback.call_count == 0
+
+
+# --------------------------- main() integration tests ---------------------------
+
+
+def test_main_falls_back_to_classify_reclaim_when_earlier_queues_empty(monkeypatch) -> None:
+    """Primary empty, opus_failed empty → main() consults
+    claim_one_awaiting_classify next. When that returns a row, dispatch
+    goes to ``_process_signal_classify_remote``."""
+    monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "true")
+
+    fake_conn = MagicMock()
+    fake_conn_ctx = MagicMock()
+    fake_conn_ctx.__enter__.return_value = fake_conn
+    fake_conn_ctx.__exit__.return_value = False
+
+    with patch("kbl.pipeline_tick.get_conn", return_value=fake_conn_ctx), \
+         patch("kbl.pipeline_tick.claim_one_signal", return_value=None) as m_primary, \
+         patch("kbl.pipeline_tick.claim_one_opus_failed", return_value=None) as m_opusf, \
+         patch("kbl.pipeline_tick.claim_one_awaiting_classify", return_value=811) as m_cls, \
+         patch("kbl.pipeline_tick.claim_one_awaiting_opus") as m_opus, \
+         patch("kbl.pipeline_tick.claim_one_awaiting_finalize") as m_fin, \
+         patch("kbl.pipeline_tick._process_signal_remote") as m_remote, \
+         patch("kbl.pipeline_tick._process_signal_reclaim_remote") as m_reclaim, \
+         patch("kbl.pipeline_tick._process_signal_classify_remote") as m_cls_fn, \
+         patch("kbl.pipeline_tick._process_signal_opus_remote") as m_opus_fn, \
+         patch("kbl.pipeline_tick._process_signal_finalize_remote") as m_fin_fn, \
+         patch("kbl.pipeline_tick.get_state", return_value="false"):
+        rc = _pipeline_main()
+
+    assert rc == 0
+    m_primary.assert_called_once_with(fake_conn)
+    m_opusf.assert_called_once_with(fake_conn)
+    m_cls.assert_called_once_with(fake_conn)
+    # Later reclaims NOT consulted — stop at first hit.
+    assert m_opus.call_count == 0
+    assert m_fin.call_count == 0
+
+    # Primary + opus_failed processors not invoked. Classify reclaim DID run.
+    assert m_remote.call_count == 0
+    assert m_reclaim.call_count == 0
+    m_cls_fn.assert_called_once_with(811, fake_conn)
+    assert m_opus_fn.call_count == 0
+    assert m_fin_fn.call_count == 0
+
+
+def test_main_falls_back_to_opus_reclaim_when_earlier_queues_empty(monkeypatch) -> None:
+    """Primary + opus_failed + awaiting_classify empty → consult
+    claim_one_awaiting_opus. Dispatch to ``_process_signal_opus_remote``."""
+    monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "true")
+
+    fake_conn = MagicMock()
+    fake_conn_ctx = MagicMock()
+    fake_conn_ctx.__enter__.return_value = fake_conn
+    fake_conn_ctx.__exit__.return_value = False
+
+    with patch("kbl.pipeline_tick.get_conn", return_value=fake_conn_ctx), \
+         patch("kbl.pipeline_tick.claim_one_signal", return_value=None), \
+         patch("kbl.pipeline_tick.claim_one_opus_failed", return_value=None), \
+         patch("kbl.pipeline_tick.claim_one_awaiting_classify", return_value=None) as m_cls, \
+         patch("kbl.pipeline_tick.claim_one_awaiting_opus", return_value=822) as m_opus, \
+         patch("kbl.pipeline_tick.claim_one_awaiting_finalize") as m_fin, \
+         patch("kbl.pipeline_tick._process_signal_remote") as m_remote, \
+         patch("kbl.pipeline_tick._process_signal_reclaim_remote") as m_reclaim, \
+         patch("kbl.pipeline_tick._process_signal_classify_remote") as m_cls_fn, \
+         patch("kbl.pipeline_tick._process_signal_opus_remote") as m_opus_fn, \
+         patch("kbl.pipeline_tick._process_signal_finalize_remote") as m_fin_fn, \
+         patch("kbl.pipeline_tick.get_state", return_value="false"):
+        rc = _pipeline_main()
+
+    assert rc == 0
+    m_cls.assert_called_once_with(fake_conn)
+    m_opus.assert_called_once_with(fake_conn)
+    # awaiting_finalize NOT consulted — stopped at awaiting_opus hit.
+    assert m_fin.call_count == 0
+
+    assert m_remote.call_count == 0
+    assert m_reclaim.call_count == 0
+    assert m_cls_fn.call_count == 0
+    m_opus_fn.assert_called_once_with(822, fake_conn)
+    assert m_fin_fn.call_count == 0
+
+
+def test_main_falls_back_to_finalize_reclaim_when_earlier_queues_empty(monkeypatch) -> None:
+    """All earlier queues empty → consult claim_one_awaiting_finalize.
+    Dispatch to ``_process_signal_finalize_remote``."""
+    monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "true")
+
+    fake_conn = MagicMock()
+    fake_conn_ctx = MagicMock()
+    fake_conn_ctx.__enter__.return_value = fake_conn
+    fake_conn_ctx.__exit__.return_value = False
+
+    with patch("kbl.pipeline_tick.get_conn", return_value=fake_conn_ctx), \
+         patch("kbl.pipeline_tick.claim_one_signal", return_value=None), \
+         patch("kbl.pipeline_tick.claim_one_opus_failed", return_value=None), \
+         patch("kbl.pipeline_tick.claim_one_awaiting_classify", return_value=None), \
+         patch("kbl.pipeline_tick.claim_one_awaiting_opus", return_value=None) as m_opus, \
+         patch("kbl.pipeline_tick.claim_one_awaiting_finalize", return_value=833) as m_fin, \
+         patch("kbl.pipeline_tick._process_signal_remote") as m_remote, \
+         patch("kbl.pipeline_tick._process_signal_reclaim_remote") as m_reclaim, \
+         patch("kbl.pipeline_tick._process_signal_classify_remote") as m_cls_fn, \
+         patch("kbl.pipeline_tick._process_signal_opus_remote") as m_opus_fn, \
+         patch("kbl.pipeline_tick._process_signal_finalize_remote") as m_fin_fn, \
+         patch("kbl.pipeline_tick.get_state", return_value="false"):
+        rc = _pipeline_main()
+
+    assert rc == 0
+    m_opus.assert_called_once_with(fake_conn)
+    m_fin.assert_called_once_with(fake_conn)
+
+    assert m_remote.call_count == 0
+    assert m_reclaim.call_count == 0
+    assert m_cls_fn.call_count == 0
+    assert m_opus_fn.call_count == 0
+    m_fin_fn.assert_called_once_with(833, fake_conn)
+
+
+def test_main_all_queues_empty_returns_zero_without_any_dispatch(monkeypatch) -> None:
+    """All five claim functions return None → main() returns 0, no
+    dispatch function is called. This is the quiet-tick contract on an
+    idle pipeline."""
+    monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "true")
+
+    fake_conn = MagicMock()
+    fake_conn_ctx = MagicMock()
+    fake_conn_ctx.__enter__.return_value = fake_conn
+    fake_conn_ctx.__exit__.return_value = False
+
+    with patch("kbl.pipeline_tick.get_conn", return_value=fake_conn_ctx), \
+         patch("kbl.pipeline_tick.claim_one_signal", return_value=None) as m1, \
+         patch("kbl.pipeline_tick.claim_one_opus_failed", return_value=None) as m2, \
+         patch("kbl.pipeline_tick.claim_one_awaiting_classify", return_value=None) as m3, \
+         patch("kbl.pipeline_tick.claim_one_awaiting_opus", return_value=None) as m4, \
+         patch("kbl.pipeline_tick.claim_one_awaiting_finalize", return_value=None) as m5, \
+         patch("kbl.pipeline_tick._process_signal_remote") as d1, \
+         patch("kbl.pipeline_tick._process_signal_reclaim_remote") as d2, \
+         patch("kbl.pipeline_tick._process_signal_classify_remote") as d3, \
+         patch("kbl.pipeline_tick._process_signal_opus_remote") as d4, \
+         patch("kbl.pipeline_tick._process_signal_finalize_remote") as d5, \
+         patch("kbl.pipeline_tick.get_state", return_value="false"):
+        rc = _pipeline_main()
+
+    assert rc == 0
+    # All 5 claim functions consulted in order.
+    for m in (m1, m2, m3, m4, m5):
+        assert m.call_count == 1
+    # No dispatch function called.
+    for d in (d1, d2, d3, d4, d5):
+        assert d.call_count == 0
+
+
+def test_main_primary_hit_skips_all_reclaims(monkeypatch) -> None:
+    """Primary claim returns an id → main() dispatches and returns 0
+    without consulting ANY of the four reclaim claim functions.
+    Primary pending work has strict priority every tick."""
+    monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "true")
+
+    fake_conn = MagicMock()
+    fake_conn_ctx = MagicMock()
+    fake_conn_ctx.__enter__.return_value = fake_conn
+    fake_conn_ctx.__exit__.return_value = False
+
+    with patch("kbl.pipeline_tick.get_conn", return_value=fake_conn_ctx), \
+         patch("kbl.pipeline_tick.claim_one_signal", return_value=444) as m_primary, \
+         patch("kbl.pipeline_tick.claim_one_opus_failed") as m_opusf, \
+         patch("kbl.pipeline_tick.claim_one_awaiting_classify") as m_cls, \
+         patch("kbl.pipeline_tick.claim_one_awaiting_opus") as m_opus, \
+         patch("kbl.pipeline_tick.claim_one_awaiting_finalize") as m_fin, \
+         patch("kbl.pipeline_tick._process_signal_remote") as m_remote, \
+         patch("kbl.pipeline_tick.get_state", return_value="false"):
+        rc = _pipeline_main()
+
+    assert rc == 0
+    m_primary.assert_called_once_with(fake_conn)
+    m_remote.assert_called_once_with(444, fake_conn)
+    # None of the four reclaim functions was consulted.
+    for m in (m_opusf, m_cls, m_opus, m_fin):
+        assert m.call_count == 0
