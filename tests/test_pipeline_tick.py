@@ -1511,3 +1511,252 @@ def test_main_primary_hit_skips_all_reclaims(monkeypatch) -> None:
     # None of the four reclaim functions was consulted.
     for m in (m_opusf, m_cls, m_opus, m_fin):
         assert m.call_count == 0
+
+
+# =====================================================================
+# CLAIM_LOOP_RUNNING_STATES_3 — reset stale *_running rows for organic
+# reclaim by PR #39's awaiting_* chain.
+# =====================================================================
+
+from kbl.pipeline_tick import (
+    _RUNNING_ORPHAN_STALE_INTERVAL,
+    reset_stale_running_orphans,
+)
+
+
+def _reset_conn(rowcount: int) -> tuple[MagicMock, list[tuple[str, Any]]]:
+    """Mock conn for ``reset_stale_running_orphans`` tests.
+
+    Cursor records every executed SQL (lowercased) + params into
+    ``executed``. ``cur.rowcount`` is seeded from the ``rowcount`` arg so
+    the reset function returns the expected count. commit/rollback are
+    auto-tracked by MagicMock.
+    """
+    conn = MagicMock()
+    executed: list[tuple[str, Any]] = []
+
+    def _make_cursor() -> MagicMock:
+        cur = MagicMock()
+        cur.rowcount = rowcount
+
+        def _execute(sql: str, params: Any = None) -> None:
+            executed.append((sql.lower(), params))
+
+        cur.execute.side_effect = _execute
+        return cur
+
+    def _cursor() -> MagicMock:
+        ctx = MagicMock()
+        ctx.__enter__.return_value = _make_cursor()
+        ctx.__exit__.return_value = False
+        return ctx
+
+    conn.cursor.side_effect = _cursor
+    return conn, executed
+
+
+def test_reset_stale_running_orphans_flips_classify_running() -> None:
+    """Stale ``classify_running`` orphan → flipped to ``awaiting_classify``
+    via the CASE-WHEN mapping. Single UPDATE + commit. Returned count
+    equals cursor rowcount (mock: 1)."""
+    conn, executed = _reset_conn(rowcount=1)
+
+    n = reset_stale_running_orphans(conn)
+
+    assert n == 1
+    assert conn.commit.call_count == 1
+    assert conn.rollback.call_count == 0
+
+    # Single UPDATE issued.
+    updates = [sql for sql, _ in executed if sql.strip().startswith("update signal_queue")]
+    assert len(updates) == 1
+    update_sql = updates[0]
+
+    # CASE mapping for classify_running → awaiting_classify is present.
+    assert "when 'classify_running' then 'awaiting_classify'" in update_sql
+    # Staleness guard is present on the expected column + interval.
+    assert _RUNNING_ORPHAN_STALE_INTERVAL in update_sql
+    assert "started_at" in update_sql
+    assert "now() - interval" in update_sql
+
+
+def test_reset_stale_running_orphans_flips_opus_running() -> None:
+    """Stale ``opus_running`` orphan → ``awaiting_opus`` via the CASE
+    mapping. Same single-UPDATE shape."""
+    conn, executed = _reset_conn(rowcount=1)
+
+    n = reset_stale_running_orphans(conn)
+
+    assert n == 1
+    assert conn.commit.call_count == 1
+
+    update_sql = next(
+        sql for sql, _ in executed if sql.strip().startswith("update signal_queue")
+    )
+    assert "when 'opus_running'" in update_sql
+    assert "then 'awaiting_opus'" in update_sql
+
+
+def test_reset_stale_running_orphans_flips_finalize_running() -> None:
+    """Stale ``finalize_running`` orphan → ``awaiting_finalize`` via the
+    CASE mapping. Same single-UPDATE shape."""
+    conn, executed = _reset_conn(rowcount=1)
+
+    n = reset_stale_running_orphans(conn)
+
+    assert n == 1
+    assert conn.commit.call_count == 1
+
+    update_sql = next(
+        sql for sql, _ in executed if sql.strip().startswith("update signal_queue")
+    )
+    assert "when 'finalize_running'" in update_sql
+    assert "then 'awaiting_finalize'" in update_sql
+    # All three states filtered by the WHERE clause.
+    assert "status in ('classify_running', 'opus_running', 'finalize_running')" in update_sql
+
+
+def test_reset_stale_running_orphans_skips_fresh_rows() -> None:
+    """Fresh ``*_running`` rows (started_at within 15 min) are filtered
+    by the staleness guard — simulated here by mock rowcount=0. The
+    function still issues the UPDATE (PG reports affected rows=0) and
+    commits; returned count is 0."""
+    conn, executed = _reset_conn(rowcount=0)
+
+    n = reset_stale_running_orphans(conn)
+
+    assert n == 0
+    # UPDATE did fire (single statement, always runs); PG just matched no
+    # rows because the staleness guard filtered them.
+    updates = [sql for sql, _ in executed if sql.strip().startswith("update signal_queue")]
+    assert len(updates) == 1
+    # Commit still fires — idempotent.
+    assert conn.commit.call_count == 1
+    assert conn.rollback.call_count == 0
+    # Guard clause was present.
+    assert _RUNNING_ORPHAN_STALE_INTERVAL in updates[0]
+
+
+def test_reset_stale_running_orphans_returns_zero_when_empty() -> None:
+    """No ``*_running`` rows at all → rowcount=0, returns 0. Same
+    behavior as the skips-fresh case at the function boundary (mock
+    cannot distinguish "guarded out" from "no rows exist" — both surface
+    as rowcount=0, which is the point of the staleness guard)."""
+    conn, executed = _reset_conn(rowcount=0)
+
+    n = reset_stale_running_orphans(conn)
+
+    assert n == 0
+    assert conn.commit.call_count == 1
+    assert conn.rollback.call_count == 0
+
+
+def test_main_calls_reset_before_claim_chain(monkeypatch) -> None:
+    """Call ordering contract: ``reset_stale_running_orphans`` must fire
+    BEFORE ``claim_one_signal`` so rows flipped in this tick are eligible
+    for PR #39's chain on the same connection. Asserts via a shared
+    call_log side-effect."""
+    monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "true")
+
+    fake_conn = MagicMock()
+    fake_conn_ctx = MagicMock()
+    fake_conn_ctx.__enter__.return_value = fake_conn
+    fake_conn_ctx.__exit__.return_value = False
+
+    call_log: list[str] = []
+
+    def _record_reset(c):
+        call_log.append("reset")
+        return 0
+
+    def _record_primary(c):
+        call_log.append("primary")
+        return None
+
+    with patch("kbl.pipeline_tick.get_conn", return_value=fake_conn_ctx), \
+         patch("kbl.pipeline_tick.reset_stale_running_orphans", side_effect=_record_reset) as m_reset, \
+         patch("kbl.pipeline_tick.claim_one_signal", side_effect=_record_primary) as m_primary, \
+         patch("kbl.pipeline_tick.claim_one_opus_failed", return_value=None), \
+         patch("kbl.pipeline_tick.claim_one_awaiting_classify", return_value=None), \
+         patch("kbl.pipeline_tick.claim_one_awaiting_opus", return_value=None), \
+         patch("kbl.pipeline_tick.claim_one_awaiting_finalize", return_value=None), \
+         patch("kbl.pipeline_tick.get_state", return_value="false"):
+        rc = _pipeline_main()
+
+    assert rc == 0
+    # Reset fires once, before the claim chain starts.
+    assert m_reset.call_count == 1
+    assert m_primary.call_count == 1
+    assert call_log == ["reset", "primary"]
+
+
+def test_main_reset_and_reclaim_in_same_tick(monkeypatch) -> None:
+    """Same-tick reset→reclaim integration: a stale ``opus_running`` row
+    is reset to ``awaiting_opus`` by ``reset_stale_running_orphans``, then
+    claimed by ``claim_one_awaiting_opus`` in the SAME tick (primary +
+    opus_failed + awaiting_classify all empty), and dispatched to
+    ``_process_signal_opus_remote``.
+
+    This proves the reset commits on its own connection before the claim
+    chain runs, so no "wait for next tick" is required for organic
+    reclaim — the reset-claim-dispatch loop closes within one tick."""
+    monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "true")
+
+    fake_conn = MagicMock()
+    fake_conn_ctx = MagicMock()
+    fake_conn_ctx.__enter__.return_value = fake_conn
+    fake_conn_ctx.__exit__.return_value = False
+
+    call_log: list[str] = []
+
+    def _reset(c):
+        call_log.append("reset")
+        return 1  # one orphan reset (the stale opus_running row)
+
+    def _primary(c):
+        call_log.append("primary")
+        return None
+
+    def _opusf(c):
+        call_log.append("opus_failed")
+        return None
+
+    def _cls(c):
+        call_log.append("awaiting_classify")
+        return None
+
+    def _opus(c):
+        call_log.append("awaiting_opus")
+        return 777  # claim the just-reset row
+
+    def _fin(c):
+        call_log.append("awaiting_finalize")
+        return None  # should NOT be called (stopped at awaiting_opus)
+
+    def _dispatch_opus(sid, c):
+        call_log.append(f"dispatch_opus:{sid}")
+
+    with patch("kbl.pipeline_tick.get_conn", return_value=fake_conn_ctx), \
+         patch("kbl.pipeline_tick.reset_stale_running_orphans", side_effect=_reset), \
+         patch("kbl.pipeline_tick.claim_one_signal", side_effect=_primary), \
+         patch("kbl.pipeline_tick.claim_one_opus_failed", side_effect=_opusf), \
+         patch("kbl.pipeline_tick.claim_one_awaiting_classify", side_effect=_cls), \
+         patch("kbl.pipeline_tick.claim_one_awaiting_opus", side_effect=_opus), \
+         patch("kbl.pipeline_tick.claim_one_awaiting_finalize", side_effect=_fin) as m_fin, \
+         patch("kbl.pipeline_tick._process_signal_opus_remote", side_effect=_dispatch_opus) as m_dispatch, \
+         patch("kbl.pipeline_tick.get_state", return_value="false"):
+        rc = _pipeline_main()
+
+    assert rc == 0
+    # Full ordering: reset → primary → opus_failed → awaiting_classify →
+    # awaiting_opus (hit) → dispatch. awaiting_finalize never consulted.
+    assert call_log == [
+        "reset",
+        "primary",
+        "opus_failed",
+        "awaiting_classify",
+        "awaiting_opus",
+        "dispatch_opus:777",
+    ]
+    assert m_fin.call_count == 0
+    m_dispatch.assert_called_once_with(777, fake_conn)

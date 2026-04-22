@@ -180,6 +180,71 @@ def claim_one_opus_failed(conn) -> int | None:
 _AWAITING_ORPHAN_STALE_INTERVAL = "15 minutes"
 
 
+# Staleness guard for the ``*_running`` crash-recovery reset path. Uses
+# the same 15-minute interval rationale as ``_AWAITING_ORPHAN_STALE_INTERVAL``:
+# the slowest legitimately-running step is Step 5's Opus R3 ladder at
+# ~180s worst case; 15 min is ~5× safety margin. A row sitting at
+# ``*_running`` for more than 15 min must have had its worker crash
+# mid-step — the scheduler's ``max_instances=1`` prevents overlap, so
+# no legitimate tick is still holding the row.
+_RUNNING_ORPHAN_STALE_INTERVAL = "15 minutes"
+
+# One SQL statement flips all three ``*_running`` orphan classes back to
+# their prior ``awaiting_*`` state in a single pass. PR #39's claim chain
+# then picks them up organically on the next tick (or later in the same
+# tick if the reset commits before the claim chain runs — see
+# ``main()``). Interval is a bare SQL literal; it's a module constant
+# with no injection surface. RETURNING clause is present so the caller
+# can log affected rows if needed; we rely on ``cur.rowcount`` for the
+# count.
+_RUNNING_RESET_SQL = f"""
+UPDATE signal_queue
+   SET status = CASE status
+     WHEN 'classify_running' THEN 'awaiting_classify'
+     WHEN 'opus_running'     THEN 'awaiting_opus'
+     WHEN 'finalize_running' THEN 'awaiting_finalize'
+   END
+ WHERE status IN ('classify_running', 'opus_running', 'finalize_running')
+   AND started_at < NOW() - INTERVAL '{_RUNNING_ORPHAN_STALE_INTERVAL}'
+RETURNING id, status
+"""
+
+
+def reset_stale_running_orphans(conn) -> int:
+    """Flip stale ``*_running`` rows back to the corresponding
+    ``awaiting_*`` state. Returns the number of rows reset.
+
+    Crash-recovery companion to PR #39's claim chain. Where PR #39 handles
+    crashes BETWEEN steps (row at ``awaiting_*``), this function handles
+    crashes DURING a step (row at ``*_running``). The shape deliberately
+    differs from PR #39: instead of per-state claim + dispatch, one SQL
+    statement flips all three classes at once, and the reclaimed rows are
+    picked up by PR #39's existing ``claim_one_awaiting_*`` chain on the
+    same or next tick — no new dispatchers needed.
+
+    Mapping:
+        classify_running  → awaiting_classify
+        opus_running      → awaiting_opus
+        finalize_running  → awaiting_finalize
+
+    Staleness guard: ``started_at < NOW() - INTERVAL '15 minutes'`` — see
+    ``_RUNNING_ORPHAN_STALE_INTERVAL`` for rationale. Rows legitimately
+    mid-flight inside another tick are filtered out.
+
+    Commit semantics: one commit on success. Caller (``main()``) invokes
+    this BEFORE the claim chain so the reset is durable regardless of
+    what happens later in the tick — an orphaned row that was just
+    reset to ``awaiting_opus`` can be claimed by the same tick's
+    ``claim_one_awaiting_opus`` call because the reset has already
+    committed.
+    """
+    with conn.cursor() as cur:
+        cur.execute(_RUNNING_RESET_SQL)
+        n = cur.rowcount
+    conn.commit()
+    return n
+
+
 def claim_one_awaiting_classify(conn) -> int | None:
     """Claim the next ``awaiting_classify`` orphan. Returns signal_id or None.
 
@@ -726,6 +791,21 @@ def main() -> int:
         return 0
 
     with get_conn() as conn:
+        # Crash-recovery reset: flip stale ``*_running`` rows back to
+        # ``awaiting_*`` so PR #39's chain can pick them up. This commits
+        # before the claim chain runs — a row reset on this pass becomes
+        # eligible for ``claim_one_awaiting_*`` in the same tick.
+        try:
+            n_reset = reset_stale_running_orphans(conn)
+        except Exception:
+            conn.rollback()
+            raise
+        if n_reset:
+            _local.info(
+                "[pipeline_tick] reset %d stale *_running orphan(s) to awaiting_*",
+                n_reset,
+            )
+
         try:
             signal_id = claim_one_signal(conn)
         except Exception:
