@@ -623,6 +623,26 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info("Skipped: hot_md_weekly_nudge (HOT_MD_NUDGE_ENABLED=false)")
 
+    # BRIEF_AI_HEAD_WEEKLY_AUDIT_1: Monday morning AI Head self-audit.
+    # Scans baker-vault/_ops/agents/ai-head/ triplet for drift; reviews
+    # past-week ARCHIVE Lessons blocks for patterns; writes to PG
+    # ai_head_audits table; pushes plain-English summary to #cockpit
+    # + Director DM (D0AFY28N030). Fires Mon 09:00 UTC (10:00 CET /
+    # 11:00 CEST). Env gate ``AI_HEAD_AUDIT_ENABLED`` (default ``true``).
+    _audit_enabled = _os.environ.get("AI_HEAD_AUDIT_ENABLED", "true").lower()
+    if _audit_enabled not in ("false", "0", "no", "off"):
+        scheduler.add_job(
+            _ai_head_weekly_audit_job,
+            CronTrigger(day_of_week="mon", hour=9, minute=0, timezone="UTC"),
+            id="ai_head_weekly_audit",
+            name="AI Head weekly self-audit (Monday 09:00 UTC)",
+            coalesce=True, max_instances=1, replace_existing=True,
+            misfire_grace_time=3600,
+        )
+        logger.info("Registered: ai_head_weekly_audit (Mon 09:00 UTC)")
+    else:
+        logger.info("Skipped: ai_head_weekly_audit (AI_HEAD_AUDIT_ENABLED=false)")
+
     # SOT_OBSIDIAN_1_PHASE_D: pull the baker-vault mirror so Cowork's
     # MCP vault-read tools stay fresh. Default 300 s, floor 60 s
     # enforced inside ``vault_mirror.sync_interval_seconds``.
@@ -708,6 +728,27 @@ def _hot_md_weekly_nudge_job():
         logger.info("hot_md_weekly_nudge: delivered")
     else:
         logger.warning("hot_md_weekly_nudge: send_whatsapp returned False (WAHA down?)")
+
+
+def _ai_head_weekly_audit_job():
+    """APScheduler wrapper: Monday AI Head self-audit.
+
+    BRIEF_AI_HEAD_WEEKLY_AUDIT_1. Lazy-imports the audit module; swallows
+    top-level exceptions as WARN so a single bad week doesn't knock out
+    the scheduler. ``run_weekly_audit`` is already non-fatal per step,
+    so reaching the outer except here genuinely indicates module-load
+    or config failure.
+    """
+    try:
+        from triggers.ai_head_audit import run_weekly_audit
+    except Exception as e:
+        logger.error("ai_head_weekly_audit: import failed: %s", e)
+        return
+    try:
+        result = run_weekly_audit()
+        logger.info("ai_head_weekly_audit: %s", result)
+    except Exception as e:
+        logger.warning("ai_head_weekly_audit: run raised: %s", e)
 
 
 def _vault_sync_tick_job():

@@ -108,6 +108,42 @@ def _get_webclient():
     return WebClient(token=config.outputs.slack_bot_token)
 
 
+def post_to_channel(channel_id: str, text: str) -> bool:
+    """Post plain text to an arbitrary Slack channel (DMs included).
+
+    BRIEF_AI_HEAD_WEEKLY_AUDIT_1: used by the weekly self-audit job to
+    post to Director's DM (D0AFY28N030) alongside #cockpit. Uses the
+    existing ``_get_webclient`` lazy factory; returns ``False`` on any
+    failure (non-fatal — matches SlackNotifier invariant).
+
+    Args:
+        channel_id: Slack channel ID (C… for channels, D… for DMs).
+        text: Plain text body. Max 3000 chars recommended for push
+              notifications; not Block Kit — caller ensures no markdown
+              surprises on mobile.
+    Returns:
+        True on Slack API ok=true; False otherwise.
+    """
+    if not config.outputs.slack_bot_token:
+        logger.warning("post_to_channel skipped: SLACK_BOT_TOKEN not configured")
+        return False
+    try:
+        client = _get_webclient()
+        resp = client.chat_postMessage(
+            channel=channel_id,
+            text=text[:3000],
+        )
+        if resp.get("ok"):
+            return True
+        logger.warning(
+            f"post_to_channel failed ({channel_id}): {resp.get('error')}"
+        )
+        return False
+    except Exception as e:
+        logger.warning(f"post_to_channel raised ({channel_id}): {e}")
+        return False
+
+
 class SlackNotifier:
     """
     Slack delivery engine.
