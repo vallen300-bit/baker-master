@@ -945,3 +945,147 @@ def test_synthesize_r3_exhaust_commits_before_raise() -> None:
             synthesize(signal_id=21, conn=conn)
 
     assert conn.commit.call_count == 1
+
+
+# --------------------------- STEP5_EMPTY_DRAFT_INVESTIGATION_1: emit_log observability ---------------------------
+# Prior to this brief, kbl/steps/step5_opus.py did not import emit_log at
+# all (PR #40 Part B Q4 finding: 0 rows with component='step5_opus' over
+# 48h). These tests lock in the trace points that let a future brief
+# bisect the 3 branches of the empty-draft class (transient error / Opus
+# 200 empty content / capture bug).
+
+
+def _emit_log_messages_at_level(
+    m_emit: MagicMock, level: str
+) -> list[tuple[str, int, str]]:
+    """Flatten ``emit_log.call_args_list`` to ``(component, sid, message)``
+    tuples for the given level."""
+    out: list[tuple[str, int, str]] = []
+    for call in m_emit.call_args_list:
+        args = call.args
+        if len(args) >= 4 and args[0] == level:
+            out.append((args[1], args[2], args[3]))
+    return out
+
+
+def test_emit_log_skip_inbox_logs_entry_and_stub_written() -> None:
+    """SKIP_INBOX path emits the ``step5 entry`` + ``stub draft written``
+    INFO pair, and does NOT emit any WARN/ERROR."""
+    row = _default_row(decision=ClassifyDecision.SKIP_INBOX.value)
+    conn = _mock_conn(row=row)
+
+    with patch("kbl.steps.step5_opus.emit_log") as m_emit, patch(
+        "kbl.steps.step5_opus.call_opus"
+    ):
+        synthesize(signal_id=101, conn=conn)
+
+    infos = _emit_log_messages_at_level(m_emit, "INFO")
+    entry = [t for t in infos if t[2].startswith("step5 entry:")]
+    stub_written = [t for t in infos if t[2].startswith("stub draft written:")]
+    assert len(entry) == 1, f"expected 1 entry log, got {entry}"
+    assert entry[0][0] == "step5_opus"
+    assert entry[0][1] == 101
+    assert "decision='skip_inbox'" in entry[0][2]
+    assert len(stub_written) == 1, f"expected 1 stub_written log, got {stub_written}"
+    assert "decision=skip_inbox" in stub_written[0][2]
+    assert "draft_len=" in stub_written[0][2]
+    # No WARN/ERROR on happy stub path.
+    assert _emit_log_messages_at_level(m_emit, "WARN") == []
+    assert _emit_log_messages_at_level(m_emit, "ERROR") == []
+
+
+def test_emit_log_full_synthesis_happy_path_logs_trace_points() -> None:
+    """FULL_SYNTHESIS happy path emits entry + opus call start + opus
+    call return + draft written (all INFO). The opus-call-start log
+    anchors attempt=0; opus-call-return carries stop_reason + output
+    tokens for cost/behavior correlation."""
+    row = _default_row(decision=ClassifyDecision.FULL_SYNTHESIS.value)
+    conn = _mock_conn(row=row)
+
+    with patch(
+        "kbl.steps.step5_opus.call_opus",
+        return_value=_make_opus_response(text="real-draft-body", output_tokens=42),
+    ), patch(
+        "kbl.steps.step5_opus.load_hot_md", return_value=None
+    ), patch(
+        "kbl.steps.step5_opus.load_recent_feedback", return_value=[]
+    ), patch(
+        "kbl.steps.step5_opus.load_gold_context_by_matter", return_value=""
+    ), patch("kbl.steps.step5_opus.emit_log") as m_emit:
+        synthesize(signal_id=202, conn=conn)
+
+    infos = _emit_log_messages_at_level(m_emit, "INFO")
+    prefixes = {t[2].split(":", 1)[0] for t in infos}
+    # All four critical INFO anchors present.
+    assert "step5 entry" in prefixes
+    assert "opus call start" in prefixes
+    assert "opus call return" in prefixes
+    assert "draft written" in prefixes
+    # All four carry signal_id=202 + component='step5_opus'.
+    for comp, sid, _msg in infos:
+        assert comp == "step5_opus"
+        assert sid == 202
+    # opus-call-return log includes stop_reason + output_tokens so a
+    # future diagnostic can correlate with api_cost_log.
+    ret_log = [t for t in infos if t[2].startswith("opus call return:")][0]
+    assert "stop_reason='end_turn'" in ret_log[2]
+    assert "output_tokens=42" in ret_log[2]
+    # draft-written log carries the real length (no WARN because len > 0).
+    written_log = [t for t in infos if t[2].startswith("draft written:")][0]
+    assert "draft_len=" in written_log[2]
+    assert _emit_log_messages_at_level(m_emit, "WARN") == []
+
+
+def test_emit_log_full_synthesis_empty_response_warns_with_bisection_signal() -> None:
+    """The CRITICAL test for the empty-draft class.
+
+    When Opus returns 200 with empty ``content[0].text`` (content-filter,
+    thinking-only block, etc.), Step 5 currently still writes ``''`` to
+    ``opus_draft_markdown`` and advances to ``awaiting_finalize`` — Step 6
+    then exhausts its retry ladder on ``body too short`` and the row
+    lands at ``finalize_failed`` with content-lost state. Fixing that
+    routing is out of scope for this brief (STEP5_EMPTY_DRAFT_INVESTIGATION_1
+    is observability-only); but the log trace must surface the empty
+    response at two points so a future brief can diagnose from kbl_log
+    alone:
+
+    1. WARN ``empty draft from Opus 200`` inside ``_fire_opus_with_r3``
+       — exposes whether the Opus SDK returned a 200 with blank text.
+    2. WARN ``wrote empty draft (draft_len=0)`` after the write — the
+       explicit smoking-gun line the brief asked for.
+    """
+    row = _default_row(decision=ClassifyDecision.FULL_SYNTHESIS.value)
+    conn = _mock_conn(row=row)
+
+    with patch(
+        "kbl.steps.step5_opus.call_opus",
+        return_value=_make_opus_response(text="", output_tokens=0),
+    ), patch(
+        "kbl.steps.step5_opus.load_hot_md", return_value=None
+    ), patch(
+        "kbl.steps.step5_opus.load_recent_feedback", return_value=[]
+    ), patch(
+        "kbl.steps.step5_opus.load_gold_context_by_matter", return_value=""
+    ), patch("kbl.steps.step5_opus.emit_log") as m_emit:
+        result = synthesize(signal_id=303, conn=conn)
+
+    # Pipeline advances (this is the bug — but out of scope to fix here).
+    assert result.terminal_state == "awaiting_finalize"
+    assert result.opus_response is not None
+    assert result.opus_response.text == ""
+
+    warns = _emit_log_messages_at_level(m_emit, "WARN")
+    warn_prefixes = [t[2].split(":", 1)[0] for t in warns]
+    # Both smoking-gun WARN lines present.
+    assert "empty draft from Opus 200" in warn_prefixes
+    assert "wrote empty draft (draft_len=0)" in warn_prefixes
+    # Smoking-gun line carries stop_reason + output_tokens so a
+    # replay-from-logs brief can bisect without re-running Opus.
+    smoking = [
+        t for t in warns
+        if t[2].startswith("wrote empty draft (draft_len=0)")
+    ][0]
+    assert "stop_reason=" in smoking[2]
+    assert "output_tokens=0" in smoking[2]
+    assert smoking[0] == "step5_opus"
+    assert smoking[1] == 303
