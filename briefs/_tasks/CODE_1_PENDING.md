@@ -2,142 +2,121 @@
 
 **From:** AI Head
 **To:** Code Brisen #1
-**Task posted:** 2026-04-22 ~11:50 UTC
-**Status:** OPEN — `CLAIM_LOOP_RUNNING_STATES_3` (continuation of PR #39; B3's N3 nit)
+**Task posted:** 2026-04-22 ~12:55 UTC (post PR #41 merge + 13-row recovery)
+**Status:** OPEN — `OBSERVABILITY_STEP7_PLUS_POLLER_DOC_1` (closes out B2's observability gaps #2 + #3)
 
 ---
 
 ## Brief-route note (charter §6A)
 
-Freehand dispatch. Continuation-of-work after your PR #39 (CLAIM_LOOP_ORPHAN_STATES_2). B3's review of PR #39 flagged N3: "Orphan scope does not cover `*_running` mid-step crashes. Pre-existing gap; out of scope per brief. Candidate `CLAIM_LOOP_RUNNING_STATES_3`." This is that brief.
+Freehand continuation-of-work. Closes the final two items from B2's CORTEX_GATE2 report (observability gaps #2 + #3) that Director cleared under "lets do all outstanding." B1 gets this because you just shipped PR #41 in the `pipeline_tick.py` space and have the surrounding code fresh.
 
-Director cleared "all outstanding" at 2026-04-22 ~11:48 UTC. Dispatching in parallel with B2's STEP5 investigation.
+Small brief. 60-90 min. One PR.
 
 ---
 
-## Context — what PR #39 did NOT cover
+## Context — what B2's CORTEX_GATE2 diagnostic flagged
 
-PR #39's 5-deep claim chain handles `awaiting_classify` / `awaiting_opus` / `awaiting_finalize` (crash BEFORE a step started). But if a tick dies WHILE a step is executing, the row lands in the corresponding `*_running` state:
+After finding the `BAKER_VAULT_DISABLE_PUSH=true` shadow-mode root cause, B2 noted three observability gaps that let the issue fester unseen for 3+ days:
 
-- `classify_running` — Step 4 was mid-flight when the worker crashed.
-- `opus_running` — Step 5 was mid-flight (Opus API call in progress, R3 ladder mid-cycle, etc.).
-- `finalize_running` — Step 6 was mid-flight (Pydantic validation mid-stream, vault write mid-commit, etc.).
+1. **Step 5 log-silent** — CLOSED by B2's PR #42 (10 `emit_log` calls added to `step5_opus.py`).
+2. **Step 7 happy-path silent** — `step7_commit.py` only logs on failure; successful commits leave no `kbl_log` trace. **OPEN — this brief.**
+3. **`kbl/poller.py` off-tree** — `pipeline_tick.py` docstring references a `kbl/poller.py` module that does not exist in the repo. The actual Mac Mini Step 7 runner lives at `/Users/dimitry/baker-pipeline/poller.py` on Mac Mini — outside the baker-master repo. **OPEN — this brief.**
 
-These rows are INVISIBLE to PR #39's chain. They sit `*_running` with stale `started_at` and never get re-claimed. Only manual `UPDATE signal_queue` recovers them — exactly the pattern PR #38 + #39 retired for the `awaiting_*` class.
+## Scope — 2 parts, ship together as one PR
 
-Current queue snapshot shows ONE row actively `finalize_running` — that's legitimate mid-flight, not an orphan. But orphans of this class have appeared in prior recoveries; a future crash will produce more.
+### Part A — Step 7 happy-path observability in `kbl/steps/step7_commit.py`
 
-## Scope — ONE reset function covering all three running states
+Match `step5_opus.py` (PR #42) and `step6_finalize.py` patterns. Minimum log points:
 
-**Design decision (AI Head):** do NOT mirror PR #39's pattern of per-state dispatchers. Simpler shape — one reset function that flips `*_running` rows back to the corresponding `awaiting_*` state when `started_at` is stale. PR #39's chain then picks them up naturally on the next tick.
+1. **Entry** — `INFO` on Step 7 entry: `emit_log("INFO", "step7_commit", signal_id, f"step7 entry: target={target_vault_path}")`. Use the same module-constant pattern: `_LOG_COMPONENT = "step7_commit"`.
+2. **Vault lock acquired** — `INFO` with `lock_path` + wait time.
+3. **Pre-commit guard pass** — `INFO` confirming `_inv4_guard_target_path` passed (Gold file protection).
+4. **Files written** — `INFO` with count: main + N stub-link files.
+5. **Commit created** — `INFO` with `commit_sha` (short 7-char) + commit message.
+6. **Push result** — INFO on push success OR `shadow-mode: skipping git push` INFO if `cfg.disable_push=True`. The existing `logger.info("step7 mock-mode: …")` line (around line 622-627) should be MIRRORED as an `emit_log` so the kbl_log table sees it too. Keep both logs; don't replace `logger.info`.
+7. **Row advanced to `awaiting_commit`** — `INFO` with the new status.
 
-### 1. New function in `kbl/pipeline_tick.py`
+Don't over-log. Aim 6-8 call sites. Ship report lists each with file:line.
 
-**`reset_stale_running_orphans(conn) -> int`** — returns the number of rows reset.
+**Signature:** `emit_log(level, component, signal_id, message)` — match `step6_finalize.py:568-584`.
 
-Single SQL statement. For each of the three `*_running` states, UPDATE back to the prior `awaiting_*` state when `started_at < NOW() - _RUNNING_ORPHAN_STALE_INTERVAL`. Keep `FOR UPDATE SKIP LOCKED` semantics to be safe with concurrent ticks.
+**ADD-ONLY.** Zero logic change. Do NOT touch:
+- `_git_add_commit`, `_git_push_with_retry`, `_atomic_write`, `_append_or_replace_stub`
+- The `UPDATE signal_queue SET opus_draft_markdown = NULL, final_markdown = NULL, ...` row at line 260-268
+- The `disable_push` branch logic
+- Any lock / git-pull-rebase / vault-lock semantics
 
-**Staleness guard:** pick **15 minutes** — same as PR #39's `_AWAITING_ORPHAN_STALE_INTERVAL`. Rationale:
-- `finalize_running` max legit duration: seconds (Pydantic + YAML serialize, then Mac Mini takeover).
-- `opus_running` max legit duration: ~180s (Step 5 R3 ladder × 60s Opus call).
-- `classify_running` max legit duration: seconds (Step 4 is local).
-- 15 min is ≥5× the slowest. Safe margin.
+### Part B — Fix the stale `kbl/poller.py` reference in `pipeline_tick.py`
 
-**Shape (exemplar — you refine):**
-
-```python
-_RUNNING_ORPHAN_STALE_INTERVAL = "15 minutes"
-
-_RUNNING_RESET_SQL = """
-UPDATE signal_queue
-   SET status = CASE status
-     WHEN 'classify_running' THEN 'awaiting_classify'
-     WHEN 'opus_running'     THEN 'awaiting_opus'
-     WHEN 'finalize_running' THEN 'awaiting_finalize'
-   END
- WHERE status IN ('classify_running', 'opus_running', 'finalize_running')
-   AND started_at < NOW() - INTERVAL '15 minutes'
- RETURNING id, status
-"""
-
-
-def reset_stale_running_orphans(conn: Any) -> int:
-    """Flip stale *_running rows back to awaiting_* so PR #39's chain
-    can reclaim them on the next tick. Called once per tick before the
-    claim chain."""
-    with conn.cursor() as cur:
-        cur.execute(_RUNNING_RESET_SQL)
-        n = cur.rowcount
-    conn.commit()
-    return n
+**Scout first:**
+```bash
+rg "kbl/poller\.py|from kbl\.poller|kbl\.poller" kbl/pipeline_tick.py
 ```
 
-Module-level constant for the interval (same style as `_AWAITING_ORPHAN_STALE_INTERVAL`). Bare SQL interval literal — no injection surface.
+You'll find a docstring reference claiming `kbl/poller.py` handles Mac Mini Step 7 reclaim. The file doesn't exist in this repo — the actual runner lives off-tree at `/Users/dimitry/baker-pipeline/poller.py` on Mac Mini.
 
-### 2. Wire into `main()` BEFORE the claim chain
+**Fix:** rewrite the docstring to say something like:
 
-```python
-def main():
-    ...
-    n_reset = reset_stale_running_orphans(conn)
-    if n_reset:
-        logger.info(f"reset {n_reset} stale running orphans")
-    # then the PR #39 chain:
-    if signal_id := claim_one_signal(conn):
-        ...
+```
+# Mac Mini Step 7 reclaim runs via the off-tree poller at
+# /Users/dimitry/baker-pipeline/poller.py on Mac Mini
+# (LaunchAgent com.brisen.baker.poller, 60s StartInterval).
+# That runner calls step7_commit.finalize_one() for awaiting_commit rows.
+# The poller is intentionally off-tree because it's Mac-Mini-specific
+# infra code, not pipeline logic.
 ```
 
-One call per tick, before claim attempts. No dispatch; just state reset. PR #39's chain handles the advancement.
+Use the exact path + LaunchAgent label above — AI Head verified via SSH earlier today:
+- Path: `/Users/dimitry/baker-pipeline/poller.py`
+- LaunchAgent: `com.brisen.baker.poller`
+- Wrapper: `~/baker-pipeline/poller-wrapper.sh`
+- Env source: `~/.kbl.env`
+- Interval: 60s (`StartInterval` in `com.brisen.baker.poller.plist`)
 
-### 3. NO new dispatch functions
+No code changes for Part B — docstring/comment only.
 
-Deliberately. The reset is pure state; advancement is PR #39's job. This keeps the brief small and preserves the "one responsibility per function" shape of your PR #39.
+## Tests
 
-## Tests — 6 in `tests/test_pipeline_tick.py`
+### Part A tests — `tests/test_step7_commit.py` (or nearest existing test)
 
-1. `test_reset_stale_running_orphans_flips_classify_running` — stale row → awaiting_classify, returns 1.
-2. `test_reset_stale_running_orphans_flips_opus_running` — stale row → awaiting_opus, returns 1.
-3. `test_reset_stale_running_orphans_flips_finalize_running` — stale row → awaiting_finalize, returns 1.
-4. `test_reset_stale_running_orphans_skips_fresh_rows` — fresh started_at on any `*_running` row → NOT flipped, returns 0.
-5. `test_reset_stale_running_orphans_returns_zero_when_empty` — no eligible rows → returns 0.
-6. `test_main_calls_reset_before_claim_chain` — mock `reset_stale_running_orphans` + `claim_one_signal`; assert call order (reset FIRST).
+3 tests minimum. Mock `emit_log`, run a happy-path commit through a fixture, assert `call_args_list` contains the expected tuples:
+1. Entry INFO fires with `target_vault_path` in message.
+2. Push-success INFO fires when `cfg.disable_push=False`.
+3. Shadow-mode INFO fires when `cfg.disable_push=True` AND `emit_log` WARN NOT called (happy path, not failure).
 
-## Integration — regression against PR #39 chain
+If no Step 7 test scaffold exists, add one minimal fixture. Don't retrofit a full test suite — out of scope.
 
-One extra test at the `main()` level: a stale `opus_running` row should be:
-- Reset to `awaiting_opus` by `reset_stale_running_orphans`.
-- Claimed by `claim_one_awaiting_opus` in the SAME tick (NOT the next tick — reset commits before claim runs, same connection).
-- Dispatched to `_process_signal_opus_remote` for Step 5-6 continuation.
+### Full pytest gate
 
-Name: `test_main_reset_and_reclaim_in_same_tick`. Mocks Steps 5+6 to succeed; asserts the stale `opus_running` row ends up at `awaiting_commit` (or whatever the successful terminal of Step 6 is in the mock).
+Run `pytest tests/`. Baseline post PR #42: `16 failed, 812+3=815 passed, 21 skipped` (wait — actually PR #42 added 3 tests on a branch pre-PR-41, and merged post-PR-41; check current main's post-merge test count yourself via `pytest tests/ 2>&1 | tail -3`).
 
-## Full pytest gate
-
-Run `pytest tests/` full suite. Expected baseline: `16 failed, 805 passed, 21 skipped` (post PR #40). Your additions: +7 tests = `16 failed, 812 passed, 21 skipped`. Any new failure → REQUEST_CHANGES on yourself.
+Expected: your additions = +3 → `16 failed, 818 passed, 21 skipped` (or whatever current baseline + 3 is). Zero new failures.
 
 ## Out of scope (explicit)
 
-- **No changes to PR #39 chain.** Pure extension.
-- **No changes to step modules** (`step4_classify.py`, `step5_opus.py`, `step6_finalize.py`).
-- **No schema changes.** Reuses `status` + `started_at` columns.
-- **No cleanup of existing orphans.** This brief only prevents future ones. If any `*_running` row is currently orphaned, next tick after deploy will reset + reclaim it organically.
+- **No commit / push logic changes.** Observability-only.
+- **No schema changes.**
+- **No bringing `kbl/poller.py` into the repo.** The off-tree location is intentional and Director-ratified.
+- **No Step 7 happy-path logic tweaks.** Only `emit_log` additions.
+- **No changes to `disable_push` default.** Director flipped that on Mac Mini's `~/.kbl.env` at 11:33 UTC; code default stays the same.
 
 ## Ship shape
 
-- PR title: `CLAIM_LOOP_RUNNING_STATES_3: reset stale *_running rows for organic reclaim`
-- Branch: `claim-loop-running-states-3`
-- Files: `kbl/pipeline_tick.py` + `tests/test_pipeline_tick.py`. 2 files.
-- Commit style: one clean commit (match PR #38/#39/#40).
-- Ship report path: `briefs/_reports/B1_claim_loop_running_states_3_20260422.md`. Include:
-  - §before/after in `kbl/pipeline_tick.py` (line numbers + diff excerpt)
+- PR title: `OBSERVABILITY_STEP7_PLUS_POLLER_DOC_1: Step 7 happy-path logging + poller docstring fix`
+- Branch: `observability-step7-plus-poller-doc-1`
+- Files: `kbl/steps/step7_commit.py` + `kbl/pipeline_tick.py` (docstring) + new/existing step7 test file + ship report. 3-4 files.
+- Commit style: one clean commit (match PR #38/#39/#40/#41/#42).
+- Ship report path: `briefs/_reports/B1_observability_step7_plus_poller_doc_1_20260422.md`. Include:
+  - Part A §before/after (line numbers + 6-8 log call-site listing)
+  - Part B §before/after (docstring diff excerpt)
   - Full pytest log head+tail (no "by inspection")
-  - Open-PR link for AI Head routing to B3
 - Tier A auto-merge on B3 APPROVE.
 
-**Timebox:** 2.5h. Smaller than PR #39 — one function, one SQL statement, 7 tests.
+**Timebox:** 90 min.
 
 **Working dir:** `~/bm-b1`.
 
 ---
 
-**Dispatch timestamp:** 2026-04-22 ~11:52 UTC (parallel with B2 STEP5_EMPTY_DRAFT)
+**Dispatch timestamp:** 2026-04-22 ~12:56 UTC (parallel-safe with any B2 work; independent of PR #42 deploy)
