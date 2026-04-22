@@ -3,7 +3,61 @@
 **From:** AI Head
 **To:** Code Brisen #3
 **Task posted:** 2026-04-22 (post-B1 ship of PR #43)
-**Status:** OPEN — review PR #43 `OBSERVABILITY_STEP7_PLUS_POLLER_DOC_1`
+**Status:** CLOSED — PR #43 APPROVE, Tier A auto-merge greenlit, last review in today's wave; Cortex-launch surface clean post-merge
+
+---
+
+## B3 dispatch back (2026-04-22)
+
+**APPROVE PR #43** — all 8 focus items green, zero gating nits. Full-suite regression delta reproduced locally with cmp-confirmed identical 16-failure set. `815 + 3 = 818` math matches B1 exactly.
+
+Report: `briefs/_reports/B3_pr43_observability_step7_plus_poller_doc_review_20260422.md`.
+
+### Regression delta (focus 7) — reproduced locally
+
+```
+main baseline:       16 failed / 815 passed / 21 skipped / 19 warnings  (12.25s)
+pr43 head be5b714:   16 failed / 818 passed / 21 skipped / 19 warnings  (13.98s)
+Delta:               +3 passed (= 3 new tests), 0 regressions
+```
+
+### Per focus verdict
+
+1. ✅ **7 bisection points, 8 emit_log calls** (dispatch said "7 sites"; [6] has 2 sub-branches for shadow/push-success — same pattern as PR #42's [6] and [8b], informational). All INFO level, `_LOG_COMPONENT = "step7_commit"` at line 103 matches PR #42 pattern. Positional signature verified against `kbl/logging.py:59-62`.
+
+2. ✅ **`logger.info("step7 mock-mode...")` preserved** at line 680 alongside new `emit_log(INFO, "shadow-mode: ...")` at line 686. Dual logging deliberate (stdout for ops, kbl_log for joinability) per dispatch.
+
+3. ✅ **ADD-ONLY in step7_commit.py.** `git diff | grep '^-' | grep -v '^---'` returned zero lines. Zero changes to `_git_add_commit`, `_git_push_with_retry`, `_atomic_write`, `_inv4_guard_target_path`, `_append_or_replace_stub`, `_mark_completed`, lock semantics, pull-rebase.
+
+4. ✅ **Failure-path WARN preserved.** `_mark_commit_failed(conn, signal_id, reason)` at line 283-296 unchanged; still emits `emit_log("WARN", "commit", signal_id, f"commit_failed: {reason}")`. All 3 failure entry points (VaultLockTimeoutError, CommitError, Exception) at lines 725/728/731 unchanged.
+
+5. ✅ **pipeline_tick docstring fix.** 30 added, 10 deleted — **all deletions are docstring replacement, zero code changes**. New docstring cites `/Users/dimitry/baker-pipeline/poller.py` + LaunchAgent `com.brisen.baker.poller` + 60s StartInterval + wrapper `~/baker-pipeline/poller-wrapper.sh` + env `~/.kbl.env` + explicit "no `kbl/poller.py` module exists" correction. Second docstring at line 512 (`_process_signal_remote`) also updated with summary + pointer.
+
+6. ✅ **3 tests via `call_args_list`.** All use `_info_messages` helper + positional-arg inspection. Test #1 pins entry message substrings + component + signal_id. Tests #2/#3 pin branch exclusivity (`shadow-mode:` NOT emitted on push-enabled path, and vice versa). 27 + 3 = 30 test_step7_commit.py total.
+
+7. ✅ **Regression delta.** +3 passed, 0 regressions, cmp-identical 16-failure set.
+
+8. ✅ **No ship-by-inspection.** Literal counts (16/818/21) + focused `30 passed` + per-failure triage. "by inspection" phrase absent.
+
+### N-nits parked (non-blocking)
+
+- **N1 — component-tag split in step7_commit.py.** Pre-existing failure WARN uses `component="commit"`, new INFO calls use `component="step7_commit"`. kbl_log queries on `component='step7_commit'` miss failure events. Pre-existing split; out of scope per brief (ADD-ONLY observability). Future tidy: unify to `"step7_commit"`.
+- **N2 — "7 sites" claim vs 8 actual calls.** Informational; same accounting pattern as PR #42.
+- **N3 — dual `logger.info` + `emit_log` at shadow-mode.** Defensible; same N-nit pattern as PR #42's cost-gate.
+
+### Cortex-launch surface post-merge (clean)
+
+- ✅ Full crash-recovery (PRs #38 + #39 + #41)
+- ✅ YAML coercion live (PR #40)
+- ✅ Step 5 observable (PR #42)
+- ✅ Step 7 observable + poller docstring corrected (PR #43)
+- ✅ 13 signals draining via standing Tier A (per dispatch note: 4 complete, 8 in flight, 0 re-failures)
+
+Ready for Cortex T3 production cut.
+
+Tab quitting per §Decision.
+
+— B3
 
 ---
 
