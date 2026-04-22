@@ -102,6 +102,7 @@ from kbl.exceptions import (
     KblError,
     OpusRequestError,
 )
+from kbl.logging import emit_log
 from kbl.loop import (
     load_gold_context_by_matter,
     load_hot_md,
@@ -122,6 +123,13 @@ _STATE_RUNNING = "opus_running"
 _STATE_NEXT = "awaiting_finalize"
 _STATE_FAILED = "opus_failed"
 _STATE_PAUSED = "paused_cost_cap"
+
+# kbl_log component tag — mirrors step6's ``"finalize"`` pattern
+# (step6_finalize.py:573). Added STEP5_EMPTY_DRAFT_INVESTIGATION_1 so
+# the 48h SQL scan against ``component='step5_opus'`` starts returning
+# rows — prior to this brief the module imported nothing from
+# ``kbl.logging`` and was observationally dark.
+_LOG_COMPONENT = "step5_opus"
 
 _MAX_SIGNAL_CHARS = 50_000
 _SIGNAL_TRUNC_MARKER = (
@@ -839,12 +847,29 @@ def _fire_opus_with_r3(
 
     for attempt in range(_R3_MAX_ATTEMPTS):
         user = _build_user_prompt(inputs, prompt_inputs, attempt=attempt)
+        # [5] Opus call start. user_len helps correlate with the R3
+        # ladder shrinkage across attempts (identical → pared → minimal).
+        emit_log(
+            "INFO",
+            _LOG_COMPONENT,
+            inputs.signal_id,
+            f"opus call start: attempt={attempt}/{_R3_MAX_ATTEMPTS - 1} "
+            f"max_tokens={max_tokens} user_len={len(user)}",
+        )
         try:
             response = call_opus(system=system, user=user, max_tokens=max_tokens)
         except OpusRequestError as e:
             # 4xx — won't recover on retry. Record zero-token ledger row
             # (we don't have a usage object) and break.
             last_error = e
+            # [7] Opus 4xx — terminal for this call, no R3 retry.
+            emit_log(
+                "ERROR",
+                _LOG_COMPONENT,
+                inputs.signal_id,
+                f"opus 4xx (no retry): attempt={attempt} "
+                f"{type(e).__name__}: {str(e)[:160]}",
+            )
             _write_cost_ledger(
                 conn,
                 signal_id=inputs.signal_id,
@@ -858,6 +883,16 @@ def _fire_opus_with_r3(
             break
         except AnthropicUnavailableError as e:
             last_error = e
+            # [4] R3 reflip. Last attempt (attempt == MAX-1) still logs
+            # here; the _STATE_FAILED flip happens in synthesize() once
+            # the loop returns response=None.
+            emit_log(
+                "WARN",
+                _LOG_COMPONENT,
+                inputs.signal_id,
+                f"r3 reflip {attempt + 1}/{_R3_MAX_ATTEMPTS}: "
+                f"{type(e).__name__}: {str(e)[:160]}",
+            )
             _write_cost_ledger(
                 conn,
                 signal_id=inputs.signal_id,
@@ -869,6 +904,32 @@ def _fire_opus_with_r3(
                 success=False,
             )
             continue
+        # [6] Opus call return (success path). response.text may still
+        # be empty — the empty-content branch is the critical signal for
+        # STEP5_EMPTY_DRAFT_INVESTIGATION_1. Log stop_reason + token
+        # counts + text length on every success.
+        resp_len = len(response.text or "")
+        if resp_len == 0:
+            emit_log(
+                "WARN",
+                _LOG_COMPONENT,
+                inputs.signal_id,
+                f"empty draft from Opus 200: attempt={attempt} "
+                f"stop_reason={response.stop_reason!r} "
+                f"input_tokens={response.input_tokens} "
+                f"output_tokens={response.output_tokens}",
+            )
+        else:
+            emit_log(
+                "INFO",
+                _LOG_COMPONENT,
+                inputs.signal_id,
+                f"opus call return: attempt={attempt} "
+                f"stop_reason={response.stop_reason!r} "
+                f"input_tokens={response.input_tokens} "
+                f"output_tokens={response.output_tokens} "
+                f"text_len={resp_len}",
+            )
         total_cost += response.cost_usd
         _write_cost_ledger(
             conn,
@@ -919,6 +980,18 @@ def synthesize(signal_id: int, conn: Any) -> SynthesisResult:
         KblError: parent class for other pipeline-level failures.
     """
     inputs = _fetch_signal_inputs(conn, signal_id)
+    # [1] Entry. Logs decision + routing-useful inputs so every log trail
+    # starts with a single anchor line. raw_content_len matters because
+    # Step 5 truncates at _MAX_SIGNAL_CHARS; empty-draft rows that had
+    # unusually small inputs are a separate hypothesis to rule out.
+    emit_log(
+        "INFO",
+        _LOG_COMPONENT,
+        signal_id,
+        f"step5 entry: decision={inputs.step_5_decision!r} "
+        f"primary_matter={inputs.primary_matter!r} "
+        f"raw_content_len={len(inputs.raw_content)}",
+    )
     _mark_running(conn, signal_id)
 
     decision_str = inputs.step_5_decision
@@ -929,6 +1002,14 @@ def synthesize(signal_id: int, conn: Any) -> SynthesisResult:
             else _build_stub_only_stub(inputs)
         )
         _write_draft_and_advance(conn, signal_id, stub, _STATE_NEXT)
+        # [8a] Stub draft written. Stub writers structurally enforce
+        # 300-600 chars so a WARN here would indicate a stub-writer bug.
+        emit_log(
+            "INFO",
+            _LOG_COMPONENT,
+            signal_id,
+            f"stub draft written: decision={decision_str} draft_len={len(stub)}",
+        )
         return SynthesisResult(
             decision=decision_str,
             terminal_state=_STATE_NEXT,
@@ -941,6 +1022,13 @@ def synthesize(signal_id: int, conn: Any) -> SynthesisResult:
         # — Step 4 should have written one of the four enum values.
         # Commit-before-raise so the operator sees the halt.
         _mark_terminal(conn, signal_id, _STATE_FAILED)
+        # [3] Invalid decision. Step 4 wrote something outside the enum.
+        emit_log(
+            "ERROR",
+            _LOG_COMPONENT,
+            signal_id,
+            f"invalid step_5_decision={decision_str!r}: flipping to {_STATE_FAILED}",
+        )
         try:
             conn.commit()
         except Exception:
@@ -971,6 +1059,15 @@ def synthesize(signal_id: int, conn: Any) -> SynthesisResult:
         # clears the breaker. Commit-before-return so the park state
         # survives a rollback in the caller.
         _mark_terminal(conn, signal_id, _STATE_PAUSED)
+        # [2] Cost gate denial. Parallels the existing logger.warning
+        # below (kept for stdout trace); emit_log surfaces into kbl_log
+        # for joinability with the retry ladder and api_cost_log.
+        emit_log(
+            "INFO",
+            _LOG_COMPONENT,
+            signal_id,
+            f"paused_cost_cap: gate={gate_decision.value}",
+        )
         try:
             conn.commit()
         except Exception:
@@ -1000,6 +1097,20 @@ def synthesize(signal_id: int, conn: Any) -> SynthesisResult:
         # the operator sees the halt, then propagate the last error.
         record_opus_failure(conn)
         _mark_terminal(conn, signal_id, _STATE_FAILED)
+        # [8] R3 exhausted. last_error may be None if the loop exited
+        # via the `break` on OpusRequestError (4xx) without a retry.
+        last_err_summary = (
+            f"{type(last_error).__name__}: {str(last_error)[:160]}"
+            if last_error is not None
+            else "no retry attempted"
+        )
+        emit_log(
+            "ERROR",
+            _LOG_COMPONENT,
+            signal_id,
+            f"r3 exhausted: flipping to {_STATE_FAILED}; "
+            f"last_error={last_err_summary}",
+        )
         try:
             conn.commit()
         except Exception:
@@ -1011,6 +1122,31 @@ def synthesize(signal_id: int, conn: Any) -> SynthesisResult:
     # Happy path: record success (resets circuit), write draft, advance.
     record_opus_success(conn)
     _write_draft_and_advance(conn, signal_id, response.text, _STATE_NEXT)
+    # [8b] Draft written (FULL_SYNTHESIS). The single most-important line
+    # for bisecting the empty-draft class: if draft_len == 0 here, the
+    # producer is correctly propagating Opus's empty content (branch 2
+    # in the PR #40 Part B diagnosis) rather than dropping content in
+    # the capture path (branch 3). Step 6's _body_length then rejects
+    # and the row cycles through finalize_retry_count=3 → finalize_failed.
+    draft_len = len(response.text or "")
+    if draft_len == 0:
+        emit_log(
+            "WARN",
+            _LOG_COMPONENT,
+            signal_id,
+            f"wrote empty draft (draft_len=0): Step 6 will reject; "
+            f"stop_reason={response.stop_reason!r} "
+            f"output_tokens={response.output_tokens}",
+        )
+    else:
+        emit_log(
+            "INFO",
+            _LOG_COMPONENT,
+            signal_id,
+            f"draft written: draft_len={draft_len} "
+            f"stop_reason={response.stop_reason!r} "
+            f"output_tokens={response.output_tokens}",
+        )
     return SynthesisResult(
         decision=_DECISION_FULL,
         terminal_state=_STATE_NEXT,
