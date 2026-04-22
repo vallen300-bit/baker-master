@@ -3,7 +3,54 @@
 **From:** AI Head
 **To:** Code Brisen #3
 **Task posted:** 2026-04-22 (post-B1 ship of PR #39)
-**Status:** OPEN — review PR #39 `CLAIM_LOOP_ORPHAN_STATES_2`
+**Status:** CLOSED — PR #39 APPROVE, Tier A auto-merge greenlit, 3 crash-recovery reclaim paths shipped
+
+---
+
+## B3 dispatch back (2026-04-22)
+
+**APPROVE PR #39** — all 7 focus items green, zero gating nits. Full-suite regression delta reproduced locally with cmp-confirmed identical failure set.
+
+Report: `briefs/_reports/B3_pr39_claim_loop_orphan_states_2_review_20260422.md`.
+
+### Regression delta (focus 7) — reproduced locally
+
+```
+main baseline:       16 failed / 782 passed / 21 skipped / 19 warnings  (12.36s)
+pr39 head 810c20b:   16 failed / 799 passed / 21 skipped / 19 warnings  (12.94s)
+Delta:               +17 passed, 0 regressions, 0 new errors
+```
+
+`+17 passed` matches the 17 new test functions (spec said 15 — B1 added 2 extra main-chain integration tests). Pre-existing failure SET identical (`cmp -s` → exit 0). Absolute counts match B1's claim exactly.
+
+### Per focus verdict
+
+1. ✅ **3 claim functions.** Each: `SELECT ... WHERE status='awaiting_X' AND started_at < NOW() - INTERVAL '{_AWAITING_ORPHAN_STALE_INTERVAL}' ... FOR UPDATE SKIP LOCKED`; UPDATE flips to correct `_STATE_RUNNING` (`classify_running` / `opus_running` / `finalize_running` — verified against each step's module constant); `conn.commit()` before return. `_AWAITING_ORPHAN_STALE_INTERVAL = "15 minutes"` is module const, no user input reaches it (grep-audited), f-string embedding is psycopg2-safe. `started_at` is only written by `claim_one_signal:101` (primary); staleness semantics = "primary-claimed >15min ago."
+
+2. ✅ **3 sub-chain dispatchers.** `_process_signal_classify_remote` (4→5→6), `_process_signal_opus_remote` (5→6), `_process_signal_finalize_remote` (6 only). Each imports only its own step modules. Inline `SELECT status` check between Step 5 and Step 6 in the first two skips Step 6 if Step 5 parks at `paused_cost_cap`/`opus_failed`. Tx contract: 1 commit per step, rollback-on-raise.
+
+3. ✅ **`main()` claim-chain ordering.** Strict sequential: primary → opus_failed → awaiting_classify → awaiting_opus → awaiting_finalize. Each stage that returns an id dispatches and `return 0` — later stages NEVER consulted on a hit. Primary has absolute priority. `test_main_primary_hit_skips_all_reclaims` pins all 4 reclaim mocks to `call_count==0`.
+
+4. ✅ **No leapfrog.** Inline 4-5-6 advancement within one tick per orphan. Step 4 always writes `_STATE_NEXT='awaiting_opus'` regardless of decision (SKIP_INBOX/STUB_ONLY/FULL_SYNTHESIS all land at awaiting_opus — verified at step4_classify.py:389). No "Step 4 produces state Step 5 can't consume" risk.
+
+5. ✅ **17 tests, all non-trivial.** 9 claim (3 states × 3 shapes) with SQL-text substring inspection and exact-value assertions + 3 dispatch with exact `call_log` ordering and `call_count==0` exclusions for out-of-scope steps + 5 main-chain (3 fallback hits + both-empty + primary-skips-all). `_enter_all_steps` covers all 7 step paths so exclusion invariants are structurally enforced.
+
+6. ✅ **Scope.** 2 files, no schema migration (reuses `started_at`), no new env vars, no new deps, no changes to `claim_one_signal` or `claim_one_opus_failed`, no Mac Mini poller touch.
+
+7. ✅ **No ship-by-inspection.** Ship report captures `/tmp/b1-pytest-full.log` head+tail; baseline reproduced independently.
+
+### N-nits parked (non-blocking)
+
+- **N1:** `_process_signal_classify_remote` docstring overstates Step 4 terminal survival — `_mark_failed` uses caller's conn and is rolled back on raise. **Code behavior unchanged from pre-existing `_process_signal_remote`**; docstring accuracy only. Future tidy-up: move Step 4's `_mark_failed` to `get_conn()` fresh-conn pattern.
+- **N2:** No explicit negative test for Step 5 → `paused_cost_cap` / `opus_failed` parking inside `_process_signal_classify_remote` (status-check-skips-Step-6 branch). Same gap exists in PR #38; carry-over. Logic walked manually; correct.
+- **N3:** Orphan scope does not cover `*_running` mid-step crashes. Pre-existing gap; out of scope per brief. Candidate `CLAIM_LOOP_RUNNING_STATES_3`.
+- **N4:** Dispatch said 15 tests, actual is 17 (2 extra main-chain integration tests). Informational.
+
+Tier A auto-merge proceeds. Post-deploy: any `awaiting_classify`/`awaiting_opus`/`awaiting_finalize` rows with `started_at > 15min` picked up organically. Recovery-#7-class manual UPDATEs structurally retired for these 3 orphan states.
+
+Tab quitting per §Decision.
+
+— B3
 
 ---
 
