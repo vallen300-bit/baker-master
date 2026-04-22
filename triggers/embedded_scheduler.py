@@ -226,6 +226,18 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: wiki_lint (daily 06:30 UTC)")
 
+    # AO PM matter lint — weekly Sunday 06:00 UTC (BRIEF_AO_PM_EXTENSION_1 §5)
+    scheduler.add_job(
+        _run_ao_pm_lint,
+        CronTrigger(day_of_week="sun", hour=6, minute=0, timezone="UTC"),
+        id="ao_pm_lint",
+        name="ao_pm_lint",
+        coalesce=True,
+        max_instances=1,
+        replace_existing=True,
+    )
+    logger.info("Registered: ao_pm_lint (Sunday 06:00 UTC)")
+
     # ALERT-DEDUP-1: Alert digest flush DISABLED.
     # Was sending ~48 digest emails/day. Slack (with dedup) + daily briefing email
     # now cover all alerting. Re-enable by uncommenting.
@@ -727,6 +739,26 @@ def _run_wiki_lint():
                 pass
     except Exception as e:
         logger.error("wiki_lint scheduler failed: %s", e)
+
+
+def _run_ao_pm_lint():
+    """BRIEF_AO_PM_EXTENSION_1: Run AO PM vault lint and log results."""
+    try:
+        from scripts.lint_ao_pm_vault import main as _ao_lint_main
+        _ao_lint_main()
+        logger.info("ao_pm_lint: completed")
+        try:
+            from triggers.sentinel_health import report_success
+            report_success("ao_pm_lint", {})
+        except Exception:
+            pass
+    except Exception as e:
+        logger.error("ao_pm_lint failed: %s", e)
+        try:
+            from triggers.sentinel_health import report_failure
+            report_failure("ao_pm_lint", str(e))
+        except Exception:
+            pass
 
 
 def _expire_browser_actions():
