@@ -8,20 +8,28 @@ Two orchestrator variants share the same transaction-boundary contract:
     host). Not called from Render's tick.
 
 ``_process_signal_remote`` (Steps 1-6 only)
-    Step 7 runs on Mac Mini via ``kbl.poller`` (direct import of
-    ``step7_commit.commit``). On Render we stop at ``awaiting_commit``
-    so we never try to open a flock / push without a vault clone
-    (CHANDA Inv 9: Mac Mini is single writer to ``~/baker-vault``).
-    Terminal states this function can leave the signal in:
+    Step 7 runs on Mac Mini via the off-tree poller at
+    ``/Users/dimitry/baker-pipeline/poller.py`` (LaunchAgent
+    ``com.brisen.baker.poller``, 60s ``StartInterval``; wrapper at
+    ``~/baker-pipeline/poller-wrapper.sh``, env source ``~/.kbl.env``).
+    That runner imports ``kbl.steps.step7_commit.commit`` directly and
+    processes ``awaiting_commit`` rows for the vault. The poller is
+    intentionally off-tree because it is Mac-Mini-specific infra code,
+    not pipeline logic — no ``kbl/poller.py`` module exists in this repo.
+
+    On Render we stop at ``awaiting_commit`` so we never try to open a
+    flock / push without a vault clone (CHANDA Inv 9: Mac Mini is single
+    writer to ``~/baker-vault``). Terminal states this function can leave
+    the signal in:
 
         ``routed_inbox``     — Step 1 low-score early return
         ``paused_cost_cap``  — Step 5 cost gate denied
         ``finalize_failed``  — Step 6 3× Opus retries exhausted
         ``awaiting_commit``  — success; Mac Mini poller picks up
 
-    Do not call ``_process_signal_remote`` from Mac Mini — the poller
-    already owns Step 7 there, and running this variant would race the
-    poller's claim on ``awaiting_commit``.
+    Do not call ``_process_signal_remote`` from Mac Mini — the off-tree
+    poller already owns Step 7 there, and running this variant would
+    race its claim on ``awaiting_commit``.
 
 Transaction boundary contract (Task K YELLOW remediation, 2026-04-19)
 ---------------------------------------------------------------------
@@ -501,8 +509,10 @@ def _process_signal(signal_id: int, conn: Any) -> None:
 def _process_signal_remote(signal_id: int, conn: Any) -> None:
     """Run one signal through Steps 1-6 under the tx-boundary contract.
 
-    Steps 1-6 only. Step 7 runs on Mac Mini via ``kbl.poller``. Do not
-    call from Mac Mini.
+    Steps 1-6 only. Step 7 runs on Mac Mini via the off-tree poller at
+    ``/Users/dimitry/baker-pipeline/poller.py`` (LaunchAgent
+    ``com.brisen.baker.poller``) — see module docstring for details.
+    Do not call from Mac Mini.
 
     Mirrors ``_process_signal`` exactly through Step 6, then stops —
     leaving the signal at ``awaiting_commit`` (success), or at one of

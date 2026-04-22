@@ -100,6 +100,10 @@ _STATE_RUNNING = "commit_running"
 _STATE_DONE = "completed"
 _STATE_FAILED = "commit_failed"
 
+# Matches ``step5_opus._LOG_COMPONENT`` / ``step6_finalize`` component-tag
+# pattern so kbl_log queries can filter by step with a single predicate.
+_LOG_COMPONENT = "step7_commit"
+
 
 def _env_config() -> "_VaultConfig":
     """Resolve env vars at each commit() call. BAKER_VAULT_PATH is
@@ -570,6 +574,16 @@ def commit(signal_id: int, conn: Any) -> None:
     row = _fetch_signal_row(conn, signal_id)
     stubs = _fetch_unrealized_stubs(conn, signal_id)
 
+    # [1] Entry. Anchors every Step 7 trail so kbl_log filters by
+    # component=step7_commit give a single-line start marker per signal.
+    emit_log(
+        "INFO",
+        _LOG_COMPONENT,
+        signal_id,
+        f"step7 entry: target={row.target_vault_path} "
+        f"primary_matter={row.primary_matter!r} stub_count={len(stubs)}",
+    )
+
     # Claim + internal commit.
     _mark_running(conn, signal_id)
 
@@ -585,6 +599,18 @@ def commit(signal_id: int, conn: Any) -> None:
 
     try:
         with acquire_vault_lock(cfg.lock_path, cfg.flock_timeout):
+            # [2] Vault lock acquired. Wait-time isn't tracked by the
+            # flock helper, so we log the lock path + timeout envelope;
+            # a long gap between [1] and [2] in kbl_log signals
+            # contention even without a per-wait metric.
+            emit_log(
+                "INFO",
+                _LOG_COMPONENT,
+                signal_id,
+                f"vault lock acquired: path={cfg.lock_path} "
+                f"timeout={cfg.flock_timeout}s",
+            )
+
             _git_pull_rebase(cfg)
 
             # Inv 4 guard runs AFTER pull-rebase so any Director-authored
@@ -592,6 +618,16 @@ def commit(signal_id: int, conn: Any) -> None:
             # visible locally before we check it. Guard BEFORE the pull
             # would race — a fresh Director commit would slip through.
             _inv4_guard_target_path(main_abs)
+            # [3] Inv 4 guard pass. Failed guards raise and route to
+            # _mark_commit_failed's existing WARN, so this INFO fires
+            # only on the happy path.
+            emit_log(
+                "INFO",
+                _LOG_COMPONENT,
+                signal_id,
+                f"inv4 guard pass: target={row.target_vault_path} "
+                "(not Director-authored)",
+            )
 
             try:
                 _atomic_write(main_abs, row.final_markdown)
@@ -601,6 +637,17 @@ def commit(signal_id: int, conn: Any) -> None:
                 # Any write failure → undo all writes via git then fail.
                 _git_checkout_discard(cfg)
                 raise CommitError(f"vault write failed: {e}") from e
+
+            # [4] Files written. Count = main (1) + stubs. Draft length
+            # helps tie kbl_log back to Step 5 output sizes if a
+            # small-draft anomaly recurs.
+            emit_log(
+                "INFO",
+                _LOG_COMPONENT,
+                signal_id,
+                f"files written: main=1 stubs={len(stubs)} "
+                f"final_markdown_len={len(row.final_markdown)}",
+            )
 
             # Build the git-add path list: main + every touched _links.md.
             rel_main = str(main_abs.relative_to(cfg.vault_path))
@@ -618,12 +665,30 @@ def commit(signal_id: int, conn: Any) -> None:
                 _git_checkout_discard(cfg)
                 raise
 
+            # [5] Commit created. Short SHA + subject line to aid ad-hoc
+            # `git log --oneline | grep` lookups from kbl_log entries.
+            emit_log(
+                "INFO",
+                _LOG_COMPONENT,
+                signal_id,
+                f"commit created: sha={commit_sha[:7]} message={message!r}",
+            )
+
             if cfg.disable_push:
+                # [6a] Shadow-mode: mirror the existing logger.info into
+                # kbl_log per brief. logger.info kept for stdout trace.
                 logger.info(
                     "step7 mock-mode: BAKER_VAULT_DISABLE_PUSH=true, "
                     "skipping git push (signal_id=%s, sha=%s)",
                     signal_id,
                     commit_sha,
+                )
+                emit_log(
+                    "INFO",
+                    _LOG_COMPONENT,
+                    signal_id,
+                    f"shadow-mode: skipping git push "
+                    f"(BAKER_VAULT_DISABLE_PUSH=true, sha={commit_sha[:7]})",
                 )
             else:
                 try:
@@ -631,10 +696,30 @@ def commit(signal_id: int, conn: Any) -> None:
                 except CommitError:
                     _git_hard_reset_one(cfg)
                     raise
+                # [6b] Push success. Routes the push event into kbl_log
+                # — before this, only push failures had a kbl_log trail,
+                # leaving successful deploys invisible to observability.
+                emit_log(
+                    "INFO",
+                    _LOG_COMPONENT,
+                    signal_id,
+                    f"git push success: sha={commit_sha[:7]} "
+                    f"remote={cfg.git_remote} branch={_GIT_BRANCH}",
+                )
 
         # Flock released. DB finalize — caller-owns-commit after return.
         realized_slugs = [s.target_slug for s in stubs]
         _mark_completed(conn, signal_id, commit_sha, realized_slugs)
+        # [7] Row advanced to the terminal ``completed`` state. Closes
+        # the per-signal step7 trail so operators can grep kbl_log for
+        # "signal completed" to audit post-deploy.
+        emit_log(
+            "INFO",
+            _LOG_COMPONENT,
+            signal_id,
+            f"signal completed: sha={commit_sha[:7]} "
+            f"realized_stubs={len(realized_slugs)}",
+        )
 
     except VaultLockTimeoutError as e:
         _mark_commit_failed(conn, signal_id, str(e))
