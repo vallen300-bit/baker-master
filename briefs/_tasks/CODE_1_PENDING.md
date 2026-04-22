@@ -2,107 +2,111 @@
 
 **From:** AI Head
 **To:** Code Brisen #1
-**Task posted:** 2026-04-22 (post Gate-2 close)
-**Status:** OPEN — CLAIM_LOOP_OPUS_FAILED_RECLAIM_1 (production-hardening)
+**Task posted:** 2026-04-22 (post PR #38 merge)
+**Status:** OPEN — CLAIM_LOOP_ORPHAN_STATES_2 (production-hardening, follow-up to PR #38)
+
+---
+
+## Brief-route note (charter §6A)
+
+This brief is **continuation-of-work** following PR #38's pattern, so it's dispatched in the existing freehand shape rather than going through the full `/write-brief` 6-step route. The PR #38 structure is already proven and this fix is a near-mirror of it applied to 3 additional orphan states.
+
+Future unrelated briefs follow `/write-brief` per charter §6A.
 
 ---
 
 ## Context
 
-PR #37 merged. Gate 2 closed mechanically (14 real vault files with `step_5_decision='full_synthesis'` as of 05:35 UTC). But production has a chronic recurring orphan — **every row that fails Step 6 validation lands at `status='opus_failed'` and stays stuck forever**. Recovery #7 flipped 16 rows manually; as the remaining 44 pending drain through Step 6, more will orphan the same way.
+PR #38 (CLAIM_LOOP_OPUS_FAILED_RECLAIM_1) closed the `opus_failed` orphan class with a secondary claim function in `kbl/pipeline_tick.py`. Production self-heals that specific state now — confirmed in prod tonight (`awaiting_opus` count > 0, first time ever).
 
-### Root cause (investigated during recovery #7)
+But three more orphan states exist on the Render side with the same root cause (claim loop only picks `pending`):
 
-Step 6 validation failure flips the row to `status='opus_failed'` and raises. Step 6 docstring at `kbl/steps/step6_finalize.py:25` explicitly says:
+- **`awaiting_classify`** — Step 3's `_STATE_NEXT` (flipped at `step3_extract.py:93`). If `_process_signal_remote` crashes between Step 3 commit and Step 4 call, the row orphans here. Also Step 3's `success=False` path routes here (`step3_extract.py:534`).
+- **`awaiting_opus`** (pure orphan, not from opus_failed) — Step 4's `_STATE_NEXT` (flipped at `step4_classify.py:60`). Step 4 commits success → awaiting_opus, tick crashes before Step 5 runs. PR #38's `claim_one_opus_failed` only filters `status='opus_failed'` — pure awaiting_opus orphans stay stranded.
+- **`awaiting_finalize`** — Step 5's `_STATE_NEXT` (flipped at `step5_opus.py:122`). Step 5 commits success → awaiting_finalize, tick crashes before Step 6 runs. AI Head manually recovered 55 of these in recovery #4 post-PR #36 tonight.
 
-> ``opus_failed``. pipeline_tick re-queues into Step 5 for the R3
+Out of scope:
+- **`awaiting_commit`** — Step 6's `_STATE_NEXT`. Mac Mini poller's claim domain (see `kbl/poller.py`). A separate brief covers Mac-Mini-side reclaim if needed.
 
-— but **that reclaim path was never implemented**. `kbl/pipeline_tick.py:84-105` `claim_one_signal()` only selects `status='pending'`. An `opus_failed` row with `finalize_retry_count=1` sits orphaned; the design intent (bump counter → Step 5 regens → Step 6 re-validates, up to 3 reflips) never fires.
+## Scope — extend the secondary claim chain
 
-Same bug-class surfaced earlier this session for `awaiting_classify` (recovery #6) and `awaiting_finalize` (recoveries #3 + #4). This brief fixes the highest-frequency case: `opus_failed`.
+### 1. Three new claim functions in `kbl/pipeline_tick.py`
 
-### Recovery log anchor
+Mirror PR #38's `claim_one_opus_failed` pattern for each of the three states. All use `FOR UPDATE SKIP LOCKED`, commit-before-return, flip to the corresponding `_STATE_RUNNING`:
 
-`memory/actions_log.md` — recoveries #3, #4, #6, #7. All four cost Tier B recovery UPDATEs tonight alone. Each signal that hits opus_failed produces one manual-intervention event. Not sustainable.
+- **`claim_one_awaiting_classify(conn) -> int | None`** — selects `status='awaiting_classify'`, flips to `classify_running` (Step 4's `_STATE_RUNNING`).
+- **`claim_one_awaiting_opus(conn) -> int | None`** — selects `status='awaiting_opus'`, flips to `opus_running` (Step 5's `_STATE_RUNNING`). Note: this is DIFFERENT from PR #38's `claim_one_opus_failed` — that one selects `status='opus_failed'` and flips to `awaiting_opus`. This one handles pure awaiting_opus orphans.
+- **`claim_one_awaiting_finalize(conn) -> int | None`** — selects `status='awaiting_finalize'`, flips to `finalize_running` (Step 6's `_STATE_RUNNING`).
 
----
+**Staleness guard:** each claim filters on `started_at < NOW() - INTERVAL '15 minutes'` (or similar — pick a value safely larger than the longest-running step, Step 5 Opus call is the slowest at ~60s). This prevents claiming a row that's legitimately mid-flight in another tick. B1 to pick the exact interval based on observed Step 5 runtime in prod.
 
-## Scope — ship the secondary claim path
+**No budget counter for these** — unlike `opus_failed`, these are crash-recovery states, not retry states. Normal pipeline advances them forward within one tick; only crashes orphan them. Reclaim always attempts continuation.
 
-### 1. New function in `kbl/pipeline_tick.py`
+### 2. Three new dispatch functions
 
-Add a secondary claim function that picks up `opus_failed` rows with `finalize_retry_count < _MAX_OPUS_REFLIPS` (3; import the constant from `step6_finalize`):
+- **`_process_signal_classify_remote(signal_id, conn)`** — runs Steps 4 → 5 → 6. Imports `step4_classify`, `step5_opus`, `step6_finalize`. NOT Steps 1-3 (already done), NOT Step 7 (Mac Mini).
+- **`_process_signal_opus_remote(signal_id, conn)`** — runs Steps 5 → 6. Same signature as PR #38's `_process_signal_reclaim_remote` but entered from `awaiting_opus` directly (no pre-flip to awaiting_opus needed, already there).
+- **`_process_signal_finalize_remote(signal_id, conn)`** — runs Step 6 only.
 
-```python
-def claim_one_opus_failed(conn) -> int | None:
-    """Claim the next opus_failed row within retry budget. Returns signal_id or None.
-    Complements claim_one_signal — the implementation of the R3 reclaim
-    contract documented in step6_finalize.finalize() docstring.
-    """
-    ...SELECT ... WHERE status='opus_failed' AND finalize_retry_count < _MAX_OPUS_REFLIPS
-    ORDER BY priority DESC, created_at ASC
-    LIMIT 1
-    FOR UPDATE SKIP LOCKED
-```
+Each preserves the tx-boundary contract from PR #38: one `conn.commit()` per successful step, `conn.rollback()` on raise, step-internal commits (terminal-state flips) survive.
 
-On claim: flip to `awaiting_opus` (Step 5's pre-state — see `kbl/steps/step5_opus.py:49`). Step 5 then runs its internal R3 ladder (IDENTICAL→PARED→MINIMAL within one call), produces a fresh draft, Step 6 re-validates. If Step 6 fails again, the existing Step 6 code path increments `finalize_retry_count` and flips back to `opus_failed` (budget-guarded by this brief's claim function).
+### 3. Dispatch order in `pipeline_tick.main()`
 
-### 2. Dispatch path in `pipeline_tick.main()`
+Primary claim chain:
+1. `claim_one_signal` (pending) → `_process_signal_remote` — unchanged.
+2. `claim_one_opus_failed` (PR #38) → `_process_signal_reclaim_remote` — unchanged.
+3. **NEW:** `claim_one_awaiting_classify` → `_process_signal_classify_remote`.
+4. **NEW:** `claim_one_awaiting_opus` → `_process_signal_opus_remote`.
+5. **NEW:** `claim_one_awaiting_finalize` → `_process_signal_finalize_remote`.
+6. Empty queue → return 0.
 
-Primary claim remains first. If `claim_one_signal` returns None, try `claim_one_opus_failed`. If that returns a row, call a new `_process_signal_reclaim_remote` that starts at Step 5 (skip Steps 1-4 — primary_matter, triage_score, opus_draft_markdown from prior run are still valid; Step 5 overwrites opus_draft_markdown).
+Primary (`pending`) keeps priority — reclaim chain only runs when no new signals are waiting. Same philosophy as PR #38.
 
-**Important:** do NOT call full `_process_signal_remote` on reclaim — Step 1 would re-triage, overwrite `primary_matter` (wasted LLM + matter-shift risk). The reclaim path is narrow: Steps 5 → 6 only (Step 7 remains Mac Mini's poller domain).
+### 4. Regression tests (12+ in `tests/test_pipeline_tick.py`)
 
-### 3. Step-5 idempotency on reclaim
+Mirror PR #38's test scaffold. 3 claim-function tests × 3 states = 9, plus 3 dispatch tests (one per new `_process_signal_*_remote`):
 
-Step 5 `synthesize()` needs to run cleanly when called on an `awaiting_opus` row that already has non-null `opus_draft_markdown` from a prior attempt. Walk the current Step 5 logic and confirm it overwrites `opus_draft_markdown` unconditionally on success. If not, add the overwrite + a small test.
+Per claim function:
+- `test_claim_one_<state>_returns_eligible_row` — fixture at target status, old started_at → returns id, flips to RUNNING.
+- `test_claim_one_<state>_skips_fresh_rows` — fixture at target status, started_at within 15 min → NOT claimed.
+- `test_claim_one_<state>_returns_none_when_empty` — no eligible rows → None.
 
-### 4. Regression tests (5 minimum)
+Per dispatch function:
+- `test_classify_dispatch_runs_4_5_6_not_1_3_or_7` — mock all 7 step paths, assert call_log == ["step4", "step5", "step6"].
+- `test_opus_dispatch_runs_5_6_not_1_4_or_7` — call_log == ["step5", "step6"].
+- `test_finalize_dispatch_runs_6_not_others` — call_log == ["step6"].
 
-Add to `tests/test_pipeline_tick.py` (or create if missing):
+Reuse PR #38's `_enter_all_steps` / `_STEP_PATHS` scaffold for mock patching.
 
-1. `test_claim_one_opus_failed_returns_eligible_row` — fixture row at `status='opus_failed'`, `finalize_retry_count=1`, function returns its id, flips it to `awaiting_opus`.
-2. `test_claim_one_opus_failed_skips_budget_exhausted` — row at `finalize_retry_count=3` is not claimed, stays at `opus_failed`.
-3. `test_claim_one_opus_failed_returns_none_when_empty` — no eligible rows → returns None.
-4. `test_reclaim_runs_steps_5_6_not_1_4` — mock Step 5 + Step 6, assert primary_matter untouched on reclaim path (or equivalent: Step 1 never called).
-5. `test_reclaim_budget_exhaustion_routes_to_finalize_failed` — 3rd reflip hits `_MAX_OPUS_REFLIPS`, Step 6's existing logic promotes to `finalize_failed` terminal.
+### 5. Scope discipline
 
-### 5. No-scope-creep
-
-- No schema changes (use existing `finalize_retry_count`).
+- Only `kbl/pipeline_tick.py` + `tests/test_pipeline_tick.py`. Zero other files.
+- No schema changes. Reuse existing `started_at` column.
 - No new env vars.
-- No changes to `claim_one_signal` — add new sibling function.
-- No changes to Mac Mini poller (`kbl/poller.py` — awaiting_commit reclaim is a different brief).
-- Do not touch `awaiting_classify` / `awaiting_finalize` / `awaiting_commit` orphan-state reclaim — that's a follow-up (`CLAIM_LOOP_ORPHAN_STATES_2`), not this brief.
+- No changes to existing `claim_one_signal` / `claim_one_opus_failed` / their dispatch functions.
+- No Mac Mini poller changes (separate brief if needed).
+- No changes to step1-7 internals.
 
-### 6. Mandatory gates
+### 6. No-ship-by-inspection gate
 
-- `memory/feedback_no_ship_by_inspection.md` — full `pytest tests/` log in ship report.
-- `memory/feedback_migration_bootstrap_drift.md` — N/A (no columns).
-
----
+Full `pytest tests/` log in ship report. Reproduce the 16-failure pre-existing baseline on main (same as PR #37/#38 verification). Any new failure → REQUEST_CHANGES territory.
 
 ## Deliverable
 
-- PR on baker-master, branch `claim-loop-opus-failed-reclaim-1`, reviewer B3.
-- Ship report at `briefs/_reports/B1_claim_loop_opus_failed_reclaim_20260422.md`.
-- Report sections:
-  - §before/after (pipeline_tick.main + new claim function)
-  - §reclaim-semantics (which steps run, which fields get overwritten, budget guard)
-  - §test-matrix (5 regressions above, plus any you add)
-  - §full pytest output (no-ship-by-inspection gate)
-  - §production-impact: after merge + deploy, AI Head does NOT need recovery #7-style manual UPDATEs on opus_failed rows anymore — the claim loop handles it automatically within the 3-reflip budget. Recovery #6 / awaiting_classify orphaning is NOT fixed by this brief.
+- PR on baker-master, branch `claim-loop-orphan-states-2`, reviewer B3.
+- Ship report at `briefs/_reports/B1_claim_loop_orphan_states_2_{YYYYMMDD}.md`.
+- Sections: §before/after, §claim-functions, §dispatch-functions, §staleness-guard (chosen interval + rationale), §test-matrix (12 tests), §full pytest output, §production-impact (after merge: no more manual recovery UPDATEs on awaiting_classify / awaiting_opus / awaiting_finalize).
 
 ## Constraints
 
-- **Effort: S-M (~60-90 min).**
-- Timebox: 2 hours.
+- **Effort: M (~90-120 min).** Three near-identical mirrors of PR #38, plus ~12 tests.
+- Timebox: 3 hours.
 - Working dir: `~/bm-b1`. `git checkout main && git pull -q` first.
 
-## Why now (Director-level context)
+## Why now
 
-Production just opened. 44 pending signals are draining; each Step 6 failure = one permanent orphan without this fix. AI Head has been running manual recovery UPDATEs all night — not sustainable path to steady-state. This brief closes the loop on the highest-frequency case. Director directive: "task is production ASAP."
+AI Head has run 3 recoveries on awaiting_* states this session already (#3, #4, #6). Each one manual UPDATE. The pattern keeps recurring because these orphan states have no automatic reclaim. PR #38 proved the reclaim pattern works. Extending it to the remaining 3 states closes the entire claim-loop orphan class on the Render side.
 
-On APPROVE, AI Head auto-merges (Tier A) and deploys.
+On APPROVE, AI Head auto-merges (Tier A) and Render redeploys. Production-hardening complete for the Render side of the pipeline.
 
 — AI Head
