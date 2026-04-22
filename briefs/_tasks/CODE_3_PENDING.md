@@ -2,93 +2,64 @@
 
 **From:** AI Head
 **To:** Code Brisen #3
-**Task posted:** 2026-04-22 (post-B1 ship of PR #39)
-**Status:** CLOSED — PR #39 APPROVE, Tier A auto-merge greenlit, 3 crash-recovery reclaim paths shipped
-
----
-
-## B3 dispatch back (2026-04-22)
-
-**APPROVE PR #39** — all 7 focus items green, zero gating nits. Full-suite regression delta reproduced locally with cmp-confirmed identical failure set.
-
-Report: `briefs/_reports/B3_pr39_claim_loop_orphan_states_2_review_20260422.md`.
-
-### Regression delta (focus 7) — reproduced locally
-
-```
-main baseline:       16 failed / 782 passed / 21 skipped / 19 warnings  (12.36s)
-pr39 head 810c20b:   16 failed / 799 passed / 21 skipped / 19 warnings  (12.94s)
-Delta:               +17 passed, 0 regressions, 0 new errors
-```
-
-`+17 passed` matches the 17 new test functions (spec said 15 — B1 added 2 extra main-chain integration tests). Pre-existing failure SET identical (`cmp -s` → exit 0). Absolute counts match B1's claim exactly.
-
-### Per focus verdict
-
-1. ✅ **3 claim functions.** Each: `SELECT ... WHERE status='awaiting_X' AND started_at < NOW() - INTERVAL '{_AWAITING_ORPHAN_STALE_INTERVAL}' ... FOR UPDATE SKIP LOCKED`; UPDATE flips to correct `_STATE_RUNNING` (`classify_running` / `opus_running` / `finalize_running` — verified against each step's module constant); `conn.commit()` before return. `_AWAITING_ORPHAN_STALE_INTERVAL = "15 minutes"` is module const, no user input reaches it (grep-audited), f-string embedding is psycopg2-safe. `started_at` is only written by `claim_one_signal:101` (primary); staleness semantics = "primary-claimed >15min ago."
-
-2. ✅ **3 sub-chain dispatchers.** `_process_signal_classify_remote` (4→5→6), `_process_signal_opus_remote` (5→6), `_process_signal_finalize_remote` (6 only). Each imports only its own step modules. Inline `SELECT status` check between Step 5 and Step 6 in the first two skips Step 6 if Step 5 parks at `paused_cost_cap`/`opus_failed`. Tx contract: 1 commit per step, rollback-on-raise.
-
-3. ✅ **`main()` claim-chain ordering.** Strict sequential: primary → opus_failed → awaiting_classify → awaiting_opus → awaiting_finalize. Each stage that returns an id dispatches and `return 0` — later stages NEVER consulted on a hit. Primary has absolute priority. `test_main_primary_hit_skips_all_reclaims` pins all 4 reclaim mocks to `call_count==0`.
-
-4. ✅ **No leapfrog.** Inline 4-5-6 advancement within one tick per orphan. Step 4 always writes `_STATE_NEXT='awaiting_opus'` regardless of decision (SKIP_INBOX/STUB_ONLY/FULL_SYNTHESIS all land at awaiting_opus — verified at step4_classify.py:389). No "Step 4 produces state Step 5 can't consume" risk.
-
-5. ✅ **17 tests, all non-trivial.** 9 claim (3 states × 3 shapes) with SQL-text substring inspection and exact-value assertions + 3 dispatch with exact `call_log` ordering and `call_count==0` exclusions for out-of-scope steps + 5 main-chain (3 fallback hits + both-empty + primary-skips-all). `_enter_all_steps` covers all 7 step paths so exclusion invariants are structurally enforced.
-
-6. ✅ **Scope.** 2 files, no schema migration (reuses `started_at`), no new env vars, no new deps, no changes to `claim_one_signal` or `claim_one_opus_failed`, no Mac Mini poller touch.
-
-7. ✅ **No ship-by-inspection.** Ship report captures `/tmp/b1-pytest-full.log` head+tail; baseline reproduced independently.
-
-### N-nits parked (non-blocking)
-
-- **N1:** `_process_signal_classify_remote` docstring overstates Step 4 terminal survival — `_mark_failed` uses caller's conn and is rolled back on raise. **Code behavior unchanged from pre-existing `_process_signal_remote`**; docstring accuracy only. Future tidy-up: move Step 4's `_mark_failed` to `get_conn()` fresh-conn pattern.
-- **N2:** No explicit negative test for Step 5 → `paused_cost_cap` / `opus_failed` parking inside `_process_signal_classify_remote` (status-check-skips-Step-6 branch). Same gap exists in PR #38; carry-over. Logic walked manually; correct.
-- **N3:** Orphan scope does not cover `*_running` mid-step crashes. Pre-existing gap; out of scope per brief. Candidate `CLAIM_LOOP_RUNNING_STATES_3`.
-- **N4:** Dispatch said 15 tests, actual is 17 (2 extra main-chain integration tests). Informational.
-
-Tier A auto-merge proceeds. Post-deploy: any `awaiting_classify`/`awaiting_opus`/`awaiting_finalize` rows with `started_at > 15min` picked up organically. Recovery-#7-class manual UPDATEs structurally retired for these 3 orphan states.
-
-Tab quitting per §Decision.
-
-— B3
+**Task posted:** 2026-04-22 (post-B2 ship of PR #40)
+**Status:** OPEN — review PR #40 `STEP6_VALIDATION_HOTFIX_1`
 
 ---
 
 ## Scope
 
-Review **PR #39** on `claim-loop-orphan-states-2` @ `810c20b`.
+Review **PR #40** on `step6-validation-hotfix-1` @ `0546ab1`.
 
-- Repo: `vallen300-bit/baker-master`
-- URL: https://github.com/vallen300-bit/baker-master/pull/39
-- Diff: 2 files, +834 / −14 (`kbl/pipeline_tick.py`, `tests/test_pipeline_tick.py`)
-- Ship report: `briefs/_reports/B1_claim_loop_orphan_states_2_20260422.md` (main @ `55c8fe7`)
-- Origin brief: `briefs/_tasks/CODE_1_PENDING.md`
+- URL: https://github.com/vallen300-bit/baker-master/pull/40
+- Diff: 3 files, +350 / −2 (`kbl/schemas/silver.py`, `tests/test_silver_schema.py`, `briefs/_reports/B2_step6_validation_hotfix_1_20260422.md`)
+- Commits: `db78ced` (fix), `0546ab1` (ship report). Both on PR branch — ship report is NOT on main (unlike PR #39's pre-open pattern).
+- Brief: original `briefs/_tasks/CODE_2_PENDING.md` @ `3b772e6`
+
+## Why this is Cortex-launch-critical
+
+Pipeline is blocking here. Every reclaimed row from PR #39 hits Step 6 Pydantic, exhausts R3, lands at `finalize_failed`. AI Head audited `kbl_log` WARN: 54% of 121 failures are YAML-scalar-coerced `deadline` (42) + `source_id` (23). This PR fixes the deadline half fully and adds defense-in-depth for source_id.
 
 ## What to verify
 
-Near-mirror of PR #38 pattern, three new orphan states. Focus on:
+1. **`_deadline_coerce_to_str` correctness** — `mode='before'` validator in `kbl/schemas/silver.py`. Accepts `str`, `None`, `date`, `datetime`; raises `TypeError` on anything else. Runs BEFORE the existing `_deadline_iso_date` str-level validator — confirm the chain order: coerce to str → assert YYYY-MM-DD. A `datetime` should produce `.date().isoformat()` (drop time component), not `.isoformat()` (would include `T00:00:00`).
 
-1. **Claim function correctness** — each `claim_one_awaiting_{classify,opus,finalize}` uses `FOR UPDATE SKIP LOCKED`, commits once on success, flips to the correct `_STATE_RUNNING`. Stale guard `started_at < NOW() - INTERVAL '15 minutes'` is a module constant `_AWAITING_ORPHAN_STALE_INTERVAL`; bare SQL interval literal (psycopg2 does not parametrize INTERVAL). Confirm the literal value + unit + that no user-controlled input reaches it.
-2. **Dispatch correctness** — each `_process_signal_*_remote` runs exactly its own sub-chain (classify: 4→5→6, opus: 5→6, finalize: 6 only). No Steps 1-3, no Step 7 (Mac Mini). Tx-boundary contract preserved (one commit per step, rollback on raise), matching PR #38's `_process_signal_reclaim_remote`.
-3. **Claim-chain ordering** in `main()` — pending → opus_failed → awaiting_classify → awaiting_opus → awaiting_finalize. Primary has strict priority; reclaim fires only on empty primary. Earliest-stage orphan goes first.
-4. **No leapfrog** — a row orphaned at `awaiting_classify` advances through `classify_running → awaiting_opus → opus_running → awaiting_finalize → ...` in one tick via the inline 4-5-6 dispatcher. Confirm this matches the brief's "one tick per orphan, not ladder-climb."
-5. **Tests** — 15 new test cases in `tests/test_pipeline_tick.py` (9 claim × 3 states + 3 dispatch + 3 main-chain). Mock scaffold reuses PR #38's `_STEP_PATHS`. Total `test_pipeline_tick.py` = 47 green (32 pre-existing + 15 new).
-6. **No schema, no env vars** — confirm diff is limited to the two declared files.
-7. **Ship-report pytest log is FULL, not "by inspection"** — full suite `16 failed, 799 passed, 21 skipped`; 16-failure baseline is pre-existing (same set as PR #37/#38). No new regressions. `/tmp/b1-pytest-full.log` head+tail captured in report.
+2. **`_source_id_coerce_to_str` correctness** — same file, same pattern. Force-stringifies non-string input. Should also handle `None` gracefully if the field spec permits (check field default + `Optional`).
+
+3. **Imports** — `date` from `datetime`, `Any` from `typing`. Confirm not already imported, and no circular/unused imports.
+
+4. **Existing validator not touched** — `_deadline_iso_date` (line 179-ish) unchanged. The YYYY-MM-DD shape assertion still fires on the coerced string.
+
+5. **6 new tests** in `tests/test_silver_schema.py`:
+   - deadline: str / date / datetime inputs → all pass with proper string normalization
+   - source_id: str / int / large int → all coerce to str
+   - Confirm assertions are on EXACT string output, not just type (e.g., `date(2026,5,1)` → `"2026-05-01"` not just `isinstance(str)`).
+
+6. **Regression delta** — reproduce locally if practical. B2 ship reports `16 failed, 805 passed, 21 skipped`. 16 failures must be byte-identical to the main-branch baseline (same set as PR #37/#38/#39). `+6 passed` matches 6 new tests. Confirm with `cmp -s` or equivalent (same rigor as your PR #39 review).
+
+7. **Scope** — 2 code files + 1 report. NO schema migration, NO new env vars, NO changes to Step 5/Step 6 logic, NO changes to `_body_length`.
+
+8. **Part B diagnostic quality** — this is the key lead for AI Head's NEXT brief. Sanity-check B2's interpretation:
+   - 13/19 `full_synthesis` rows have `LENGTH(opus_draft_markdown) = 0` — is the SQL / JOIN correct?
+   - Recommendation ("scan `kbl_log component='step5_opus'` for those 13 signal_ids") — is that the right next scope?
+   - You don't need to execute the follow-up; just confirm the diagnosis holds.
+
+9. **Ship-report pytest log is FULL, not "by inspection"** — head+tail captured, literal counts quoted. REQUEST_CHANGES if any variant of "pass by inspection" appears.
 
 ## Decision
 
-- **APPROVE** → reply `APPROVE PR #39` in your review report; AI Head will Tier-A auto-merge (`gh pr merge 39 --squash`).
-- **REQUEST_CHANGES** → name the line or logic; B1 loops.
+- **APPROVE** → reply `APPROVE PR #40` in your review report; AI Head will Tier-A auto-merge (`gh pr merge 40 --squash`).
+- **REQUEST_CHANGES** → name the line/logic; B2 loops.
 
 ## Report path
 
-`briefs/_reports/B3_pr39_claim_loop_orphan_states_2_review_20260422.md` — commit + push after review. Close this task file with a `## B3 dispatch back` section.
+`briefs/_reports/B3_pr40_step6_validation_hotfix_review_20260422.md` — commit + push after review. Close this task file with a `## B3 dispatch back` section.
 
-## Charter note (§6A + no-ship-by-inspection)
+## Charter notes
 
-Charter §6A continuation-of-work exemption applies to B1's brief (mirror of PR #38). Your review MUST still enforce `memory/feedback_no_ship_by_inspection.md`: REQUEST_CHANGES any ship report claiming "pass by inspection." B1's report captures `/tmp/b1-pytest-full.log` head+tail — confirm the baseline delta is zero.
+- Ship report lives on PR branch (not pre-committed to main, unlike PR #39). Not a blocker; just confirm the file is present in the squashed merge.
+- Part B is REPORT-ONLY — no code should change for the body-short class. If you see silver.py touching `_body_length`, REQUEST_CHANGES.
 
 ---
 
-**Dispatch timestamp:** 2026-04-22 ~09:25 UTC (AI Head post-refresh)
+**Dispatch timestamp:** 2026-04-22 ~10:50 UTC (post-B2 ship)
