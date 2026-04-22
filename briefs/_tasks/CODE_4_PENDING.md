@@ -3,7 +3,47 @@
 **From:** AI Head (ai-head-term-2026-04-22)
 **To:** Code Brisen #4 (session tag `code-4-2026-04-22`)
 **Task posted:** 2026-04-22 (re-routed from B2 → B4 on Director instruction)
-**Status:** OPEN — BRIEF_AO_PM_EXTENSION_1 (full 5-deliverable scope, `/write-brief` formalized)
+**Status:** D1 + D3 + routing diagnostic SHIPPED. GO on D2. Proceed to D2 + D5 + cleanup.
+
+---
+
+## GO/NO-GO signal from AI Head — 2026-04-22 ~11:55 UTC
+
+**Verdict: GO on Deliverable 2.**
+
+Routing diagnostic (your `briefs/_reports/B4_AO_ROUTING_DIAGNOSTIC_20260422.md`, commit `ad9e3d2`): A=14, B=22, C=14 over 21d → case (d) routing works. Verdict accepted.
+
+**Vault D1 coordination resolved.** Your local baker-vault commit `664918d` is pushed to `origin/main` as `91b63c5` (cherry-picked onto latest origin — 2 older orphan `ops:` commits from Director's Apr 21 work are preserved on local branch `backup-local-20260422` in `~/baker-vault`; they are not in this push and stay Director's call). Render's `baker-vault-mirror` needs to sync before you run the Deliverable 2 ingest — verify presence with:
+
+```bash
+# on Render service shell post-deploy
+ls /opt/render/project/src/baker-vault-mirror/wiki/matters/oskolkov/ | head
+# expect: _index.md, psychology.md, investment-channels.md, etc.
+```
+
+If mirror is stale at ingest time, wait for next sync or investigate the mirror-update mechanism before inserting stale rows into `wiki_pages`.
+
+## Follow-up flag (post-D2, non-blocking)
+
+Your diagnostic also surfaced: 14 ao_pm runs all happened before Apr 12 (10-day silence since). That's within the 21d case-(d) window but anomalous. Don't investigate mid-D2 — note in the Ship Report as a post-ship monitoring item. D2 shipping doesn't depend on resolving this; D2 changes content storage location, not routing triggers.
+
+## Schema corrections you flagged
+
+Noted in your diagnostic:
+- `email_messages` uses `sender_email` / `full_body` / `received_date`
+- `whatsapp_messages` uses `timestamp`
+
+Fold these into your ingest script's error paths if any (unlikely — ingest doesn't touch those tables). Also fold into Ship Report's "brief corrections captured" section so future dispatches use the right columns.
+
+## Remaining work (in order)
+
+4. **Deliverable 2 — Runtime wiring.** `_resolve_view_dir` helper + `_load_pm_view_files` call site + `PM_REGISTRY["ao_pm"]` path flip + hyphenated filenames + sub-matter on-demand loader + `PM_REGISTRY_VERSION` bump to 2. Add `scripts/ingest_vault_matter.py` (new). Ship the code deploy. Then **immediately run `python3 scripts/ingest_vault_matter.py oskolkov` once on Render** — mandatory. Verify wiki_pages row count matches vault file count.
+
+5. **Deliverable 5 — Weekly vault lint + scheduler wiring.** `scripts/lint_ao_pm_vault.py` (new) + `_run_ao_pm_lint` helper + APScheduler job in `triggers/embedded_scheduler.py` (Sunday 06:00 UTC, piggyback the pattern at line 221 `wiki_lint`).
+
+6. **Cleanup.** After Deliverable 2 Quality Checkpoint 11 passes in production, `git rm -r data/ao_pm/`.
+
+7. **Ship report** — `briefs/_reports/B4_AO_PM_EXTENSION_1_20260422.md` with QC 1-14 + the 10-day silence flag + the schema-correction note.
 
 ---
 
