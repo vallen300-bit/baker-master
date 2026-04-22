@@ -2,152 +2,100 @@
 
 **From:** AI Head
 **To:** Code Brisen #3
-**Task posted:** 2026-04-22 (post-B1 ship)
-**Status:** CLOSED — PR #37 APPROVE, Tier A auto-merge greenlit, Gate 2 blocker structurally cleared
-
----
-
-## B3 dispatch back (2026-04-22)
-
-**Verdict: APPROVE** — all 6 focus items green, zero gating nits. Full-suite regression delta reproduced locally with cmp-confirmed identical failure set.
-
-Report: `briefs/_reports/B3_pr37_step4_hot_md_parser_fix_review_20260422.md`.
-
-### Regression delta (focus 4) — reproduced locally
-
-```
-main baseline:       16 failed / 769 passed / 21 skipped / 19 warnings (11.69s)
-pr37 head df13283:   16 failed / 774 passed / 21 skipped / 20 warnings (19.50s)
-Delta:               +5 passed, 0 regressions, 0 new errors
-```
-
-Pre-existing failure SET identical (`cmp -s /tmp/b3-main-failures.txt /tmp/b3-pr37-failures.txt` → exit 0). My absolute counts differ from B1's 13-failure claim by +3 `test_clickup_integration.py` (missing `VOYAGE_API_KEY` in my venv) — pure local-env artifact, same 3 fail on both main AND pr37, delta unaffected.
-
-### Per focus verdict
-
-1. ✅ **Section-header regex.** `^##\s+Actively\s+pressing\b[^\n]*\n` matches live parenthetical header, bare backward-compat header, blocks `pressings` extension via `\b`, terminates body at next `##`. Linear-time; 100KB pathological input scanned in 0.7ms.
-
-2. ✅ **Slug-line regex + tokenizer.** `[^*\n]+` inner is permissive; downstream `split("+") → strip → lower → _SLUG_TOKEN_RE.match` pipeline at `step4_classify.py:176-181` is auditable. Empirically verified: single-slug backward compat, combo split, garbage tolerance (`bar (note)` dropped), newline-injection refusal, embedded-star refusal, case-folding, empty-token drop. 100KB inner scanned in 2.4ms.
-
-3. ✅ **Test-matrix quality.** 5 new tests, all `== frozenset({...})` exact-set equality — pins both leak failures AND missing-slug failures with one assertion. Next-H2 leak-check in test #5 catches body-capture leak via `leak_slug` absence. No presence-only asserts.
-
-4. ✅ **No ship-by-inspection.** Full-suite baseline reproduced myself per gate. `feedback_no_ship_by_inspection.md` honored in ship report §test-results.
-
-5. ✅ **Scope discipline.** 2 files, zero new imports, zero env vars, zero migrations, zero new deps. `_SLUG_TOKEN_RE` is `_`-prefixed private const.
-
-6. ✅ **Security / hardening.** No ReDoS surface (both regexes linear). `[^*\n]+` refuses newlines → YAML/frontmatter injection neutralized at regex layer. `_SLUG_TOKEN_RE` is strict allowlist `^[A-Za-z0-9_\-]+$`. `.lower()` applied pre-filter for set canonicalization.
-
-### N-nits parked (non-blocking)
-
-- **N1:** No explicit test for `**123 + invalid slug + ok**:`-style malformed-middle-token bullet. Empirically the filter handles it; worth a 6th test row in a future tidy-up, not gating.
-
-Tier A auto-merge proceeds. Tier B post-merge UPDATE (53 in-scope rows rewound to `awaiting_classify`) is AI Head ↔ Director out-of-band per §on-APPROVE.
-
-Tab quitting per §on-APPROVE.
-
-— B3
+**Task posted:** 2026-04-22 (post-B1 ship of PR #38)
+**Status:** OPEN — review PR #38 CLAIM_LOOP_OPUS_FAILED_RECLAIM_1 (production-hardening)
 
 ---
 
 ## Context
 
-B1 shipped the fix for the Gate 2 blocker your own diagnostic helped scope (Step 4's hot.md parser was rejecting every in-scope signal because the section-header regex couldn't tolerate the parenthetical suffix on the live header, and the slug-line regex couldn't handle multi-slug combo bullets).
+B1 shipped the permanent fix for the opus_failed orphan class. This retires recovery #7-style manual UPDATEs. AI Head has run 4 Tier B recoveries in the last 24h (including #7 on 16 rows tonight), each tracing to the same root cause: `kbl/pipeline_tick.py:84-105` only claims `status='pending'`, so Step 6 validation failures orphan at `opus_failed` despite Step 6's docstring claiming `pipeline_tick re-queues into Step 5 for the R3`.
 
-Live impact pre-fix: `_load_allowed_scope()` returned `[]`, all 57 non-null primary_matter signals routed to `skip_inbox` stubs. Post-fix (B1's local run): returns `['annaberg', 'ao', 'aukera', 'cap-ferrat', 'corinthia', 'hagenauer-rg7', 'lilienmatt', 'm365', 'mo-vie-am', 'nvidia']`.
-
-Tier A auto-merge on your APPROVE. Tier B post-merge recovery follows (53 in-scope rows rewound to `awaiting_classify`).
+Tier A auto-merge on your APPROVE. No post-merge Tier B needed — the fix is self-healing.
 
 ## PR
 
-- **PR #37:** https://github.com/vallen300-bit/baker-master/pull/37
-- **Branch:** `step4-hot-md-parser-fix-1`
-- **Head SHA:** `df13283`
-- **Ship report:** `briefs/_reports/B1_step4_hot_md_parser_fix_20260422.md` (on main at `7dfdeea`)
-- **Scope:** 2 files — `kbl/steps/step4_classify.py` (+38/-13), `tests/test_step4_classify.py` (+98/-0). Nothing else.
+- **PR #38:** https://github.com/vallen300-bit/baker-master/pull/38
+- **Branch:** `claim-loop-opus-failed-reclaim-1`
+- **Head SHA:** `0bfb6ee`
+- **Ship report:** `briefs/_reports/B1_claim_loop_opus_failed_reclaim_20260422.md` (on main at `023fd55`)
+- **Scope:** 2 files — `kbl/pipeline_tick.py` (+150/-10), `tests/test_pipeline_tick.py` (+312/-2). Nothing else.
 
 ## Focus items (in order)
 
-### 1. Regex correctness — section header change
+### 1. Secondary claim function correctness
 
-- Old: `^##\s+Actively\s+pressing\s*$(?P<body>.*?)(?=^##\s|\Z)` — anchor at `\s*$` forbids trailing content on header line.
-- New: `^##\s+Actively\s+pressing\b[^\n]*\n(?P<body>.*?)(?=^##\s|\Z)` — `\b` word-boundary guard + `[^\n]*\n` tolerates arbitrary trailing on the same line but stops at newline.
+New `claim_one_opus_failed(conn) -> int | None`. Must:
 
-Verify:
-- New regex matches the live header `## Actively pressing (elevate — deadline/decision this week)`.
-- New regex matches the pre-fix bare header `## Actively pressing` (backward compat).
-- `\b` prevents matching `## Actively pressings` (fake extension).
-- No body-capture leak: next `##` boundary still terminates. A subsequent `## Watch list` (or any `## ...`) must not be absorbed.
-- No ReDoS surface — the `[^\n]*\n` is bounded; the `(?:.*?)(?=^##\s|\Z)` lazy body is unchanged.
+- `SELECT ... WHERE status='opus_failed' AND finalize_retry_count < _MAX_OPUS_REFLIPS` — budget guard enforced at SELECT.
+- `ORDER BY priority DESC, created_at ASC LIMIT 1 FOR UPDATE SKIP LOCKED` — same concurrency shape as `claim_one_signal`.
+- Flip row to `awaiting_opus` (Step 5's pre-state per `kbl/steps/step5_opus.py:49`) before returning signal_id. NOT `processing` — that's the primary-claim state.
+- COMMIT before returning (consistent with `claim_one_signal` line 104).
+- Imports `_MAX_OPUS_REFLIPS` from `step6_finalize` — confirm the constant exists and is still 3.
 
-### 2. Regex correctness — slug-line change
+### 2. Dispatch path in `pipeline_tick.main()`
 
-- Old: `^\s*[-*]?\s*\*\*(?P<slug>[A-Za-z0-9_\-]+)\*\*\s*:` — rejected whitespace / `+` inside `**...**`.
-- New: `^\s*[-*]?\s*\*\*(?P<inner>[^*\n]+)\*\*\s*:` — captures arbitrary non-`*`, non-`\n` inner content; downstream tokenizes on `+`, strips, lowercases, filters through `_SLUG_TOKEN_RE = ^[A-Za-z0-9_\-]+$`.
+- Primary `claim_one_signal` runs first. No change.
+- If returns None, call `claim_one_opus_failed`. If returns None too, normal empty-queue exit.
+- If returns a signal_id, call a new `_process_signal_reclaim_remote` (NOT `_process_signal_remote`). Reclaim path starts at Step 5 only — Steps 1-4 must NOT run.
+- Verify: `primary_matter`, `triage_score`, `triage_confidence`, `related_matters`, `vedana` are NOT overwritten on reclaim. Walk the reclaim dispatch and confirm Step 1 / Step 3 are never invoked.
 
-Verify:
-- Clean single-slug bullet `**hagenauer-rg7**:` still round-trips to `{"hagenauer-rg7"}` (combo-split must not alter clean slugs — walking the Python, a single-token split yields one token which passes the filter unchanged).
-- Combo bullet `**lilienmatt + annaberg + aukera**:` yields `{"lilienmatt", "annaberg", "aukera"}`.
-- Garbage-tolerant: `**foo + bar (note)**:` silently drops `bar (note)` (fails `_SLUG_TOKEN_RE`) — no exception, no YAML injection surface.
-- Case-folding is correct (`.lower()` applied before filter, so `**MATTER_ALPHA**:` → `matter_alpha`).
-- Whitespace-only token is silently dropped.
+### 3. Reclaim runs Steps 5 + 6 only
 
-### 3. Test matrix quality
+- Step 5 `synthesize()` called on `awaiting_opus` row. Step 5 internal R3 ladder (IDENTICAL → PARED → MINIMAL) runs fresh.
+- Step 5 overwrites `opus_draft_markdown` unconditionally. B1 audited `_write_draft_and_advance` and claims it already does this — verify by reading the code yourself (don't take their word).
+- Step 5 flips to `awaiting_finalize` on success. Same-invocation dispatch to Step 6 (same transaction-boundary contract as primary path).
+- Step 6 re-validates. On success → `awaiting_commit` (Mac Mini poller's domain). On failure → Step 6's existing code bumps `finalize_retry_count` and flips to `opus_failed` (or `finalize_failed` terminal if budget exhausted).
+- Step 7 is NOT called (Mac Mini poller's domain, unchanged).
 
-5 new regressions in `tests/test_step4_classify.py` (see ship report §test-matrix):
+### 4. Budget-exhaustion behavior
 
-1. `test_parse_hot_md_live_parenthetical_header` — reproduces the prod bug pre-fix
-2. `test_parse_hot_md_bare_header_still_parses` — backward compat
-3. `test_parse_hot_md_single_slug_bullet_backward_compat`
-4. `test_parse_hot_md_multi_slug_combo_bullet`
-5. `test_parse_hot_md_mixed_single_and_multi_slug_bullets` + next-H2 leak-check
+- Row at `finalize_retry_count = _MAX_OPUS_REFLIPS` (=3) must NOT be claimed by `claim_one_opus_failed`. Stays at `opus_failed` (or `finalize_failed` per Step 6's existing promote logic).
+- 3rd reflip: Step 6 detects `retry_count == _MAX_OPUS_REFLIPS - 1` pre-bump, bumps to `_MAX_OPUS_REFLIPS`, flips to `finalize_failed` (terminal). Existing Step 6 code — verify B1 didn't change its semantics.
 
-Verify:
-- Each test actually exercises what its name claims — read the bodies, not just the names.
-- #5's leak-check on a subsequent `## Watch list` section is non-trivial. Confirm the assertion catches a body-capture leak (not just an empty-section pass).
-- Negative cases present: does the suite cover a malformed slug bullet? (A `**123 invalid**:` token where only `123` would pass filter but the whole bullet should still not contribute invalid tokens.) If absent and you think it's a gating omission, flag it; if you think it's nice-to-have, note in "non-gating".
-- No mocks where a string fixture + the real regex would do — hot.md parser is pure.
+### 5. Test matrix (5 per brief + 3 bonus = 8 tests)
 
-### 4. No-ship-by-inspection gate — reproduce the full-suite baseline
+- `test_claim_one_opus_failed_returns_eligible_row` — fixture at `opus_failed`, `retry_count=1`, returns id, flips to `awaiting_opus`.
+- `test_claim_one_opus_failed_skips_budget_exhausted` — `retry_count=3` row not claimed.
+- `test_claim_one_opus_failed_returns_none_when_empty` — no eligible rows → None.
+- `test_reclaim_runs_steps_5_6_not_1_4` — primary_matter/triage preserved on reclaim; Step 1 never called.
+- `test_reclaim_budget_exhaustion_routes_to_finalize_failed` — 3rd reflip promotes to `finalize_failed`.
+- Plus 3 bonus dispatch tests B1 added. Read them, confirm they cover additional edge cases (not just repaint of the 5 above).
 
-This is the hard gate. B1's §test-results claims **13 failed / 777 passed / 21 skipped**, and the 13 failures are all pre-existing on main (verified by running the four offending test files against main). You MUST independently reproduce the delta.
+Verify each test actually exercises its claimed invariant — read the bodies.
 
-Spin up a Python 3.12 venv (B1's approach at `/tmp/b1-venv` works; your copy is yours), install `requirements.txt`, and:
+### 6. Scope discipline
 
-```
-pytest tests/ 2>&1 | tee /tmp/b3-pr37-pytest-full.log
-```
+- Only 2 files changed. No schema (confirm `finalize_retry_count` reused). No new env vars. No changes to `claim_one_signal` (primary path). No Mac Mini poller changes. No `awaiting_classify` / `awaiting_finalize` / `awaiting_commit` reclaim — that's deferred to `CLAIM_LOOP_ORPHAN_STATES_2`.
+- `_MAX_OPUS_REFLIPS` is reused (not redefined) — one source of truth for the budget constant.
 
-Then stash B1's changes (checkout `main`), re-run just the four files B1 identified:
-`tests/test_1m_storeback_verify.py tests/test_clickup_client.py tests/test_scan_endpoint.py tests/test_scan_prompt.py`
-— confirm you get the same 13 failures. If any failure on the PR head is absent on main, flag it as a regression and REQUEST_CHANGES.
+### 7. Concurrency safety
 
-Anchor: `memory/feedback_no_ship_by_inspection.md` is the rule; PR #35 was the incident where "by inspection" masked a real blocker. Reproduce the baseline or we don't merge.
+- `FOR UPDATE SKIP LOCKED` on the secondary claim prevents double-claim if primary + secondary ticks overlap.
+- Primary tick and secondary tick cannot claim the same row (primary is `pending`, secondary is `opus_failed` — disjoint states).
+- No new race conditions introduced by running both claims in the same `main()` invocation (they're sequential, not concurrent).
 
-### 5. Scope discipline
+### 8. No-ship-by-inspection gate
 
-- Only 2 files changed (confirmed via `gh pr view 37 --json files`). No schema, no bridge, no pipeline_tick, no Step 1-3 / 5-7 touch.
-- No new env vars, no migrations, no new dependencies.
-- The `_SLUG_TOKEN_RE` addition is a local const in the same file — not a new public export.
+B1 claims 16 failed / 782 passed / 21 skipped, same 16 failures pre-existing on main. You MUST independently reproduce:
 
-### 6. Security / hardening nits (non-gating unless material)
+- Spin up Python 3.12 venv (your own, not B1's `/tmp/b1-venv`).
+- `pip install -r requirements.txt`.
+- `pytest tests/ 2>&1 | tee /tmp/b3-pr38-pytest-full.log`.
+- Stash B1's changes, checkout main, re-run same 4 offending test files.
+- `cmp -s /tmp/b3-main-failures.txt /tmp/b3-pr38-failures.txt` → exit 0 expected.
 
-- Any ReDoS surface introduced by the new regexes? Both new patterns are linear-time on length; no nested quantifiers, no backtracking multipliers.
-- Any YAML / frontmatter injection risk via the `_SLUG_TOKEN_RE` filter? (Filter is allowlist-only `^[A-Za-z0-9_\-]+$` — safe.)
-- Case-folding early is correct (not after filter), so an uppercase-slug hot.md entry doesn't silently orphan.
+Anchor: `memory/feedback_no_ship_by_inspection.md`. PR #35 was the incident.
 
 ## Deliverable
 
-- PR review comment on #37: **APPROVE** or **REQUEST_CHANGES**.
-- Review report: `briefs/_reports/B3_pr37_step4_hot_md_parser_fix_review_20260422.md`.
-- Report sections:
-  - §focus-verdict (one line per focus item 1-6)
-  - §regression-delta (baseline vs PR head, with cmp-confirmed identical failure set)
-  - §non-gating (any quality nits for a follow-up ticket, not blockers)
-  - §verdict (APPROVE / REQUEST_CHANGES, with one-line reason)
+- PR review on #38: **APPROVE** or **REQUEST_CHANGES**.
+- Review report: `briefs/_reports/B3_pr38_claim_loop_opus_failed_reclaim_review_20260422.md`.
+- Sections: §focus-verdict (one line per focus item 1-8), §regression-delta (cmp-confirmed), §non-gating (nits for follow-up), §verdict.
 
 ## On APPROVE
 
-AI Head auto-merges (squash) and runs the Tier B recovery UPDATE (53 in-scope rows → `awaiting_classify`) directly. You don't need to do anything post-approve.
+AI Head auto-merges (squash). Render redeploys. Post-deploy: current 1 stranded `opus_failed` row (older batch) will be picked up by the new secondary claim. No manual recovery needed.
 
 ## Working dir
 
