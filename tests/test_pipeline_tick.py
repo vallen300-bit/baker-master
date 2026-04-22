@@ -580,8 +580,14 @@ def test_main_enabled_calls_process_signal_remote(monkeypatch) -> None:
 
 
 def test_main_enabled_queue_empty_returns_zero(monkeypatch) -> None:
-    """Flag on, queue empty → main() returns 0 without calling the
-    remote processor."""
+    """Flag on, BOTH queues empty (primary pending + opus_failed reclaim)
+    → main() returns 0 without calling either processor.
+
+    Contract updated for CLAIM_LOOP_OPUS_FAILED_RECLAIM_1: primary-empty
+    is no longer sufficient to bail; the tick now also consults
+    ``claim_one_opus_failed`` before returning. Test patches both so
+    this stays a unit test (no live DB).
+    """
     monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "true")
 
     fake_conn = MagicMock()
@@ -591,13 +597,17 @@ def test_main_enabled_queue_empty_returns_zero(monkeypatch) -> None:
 
     with patch("kbl.pipeline_tick.get_conn", return_value=fake_conn_ctx), \
          patch("kbl.pipeline_tick.claim_one_signal", return_value=None) as mock_claim, \
+         patch("kbl.pipeline_tick.claim_one_opus_failed", return_value=None) as mock_reclaim, \
          patch("kbl.pipeline_tick._process_signal_remote") as mock_remote, \
+         patch("kbl.pipeline_tick._process_signal_reclaim_remote") as mock_reclaim_fn, \
          patch("kbl.pipeline_tick.get_state", return_value="false"):
         rc = _pipeline_main()
 
     assert rc == 0
     assert mock_claim.call_count == 1
+    assert mock_reclaim.call_count == 1
     assert mock_remote.call_count == 0
+    assert mock_reclaim_fn.call_count == 0
 
 
 def test_main_respects_anthropic_circuit(monkeypatch) -> None:
@@ -716,3 +726,303 @@ def test_main_disabled_silent_when_circuit_open(monkeypatch) -> None:
     assert mock_emit2.call_count == 0
     assert mock_claim2.call_count == 0
     assert mock_state2.call_count == 0
+
+
+# =====================================================================
+# CLAIM_LOOP_OPUS_FAILED_RECLAIM_1 — secondary claim + reclaim orchestrator
+# =====================================================================
+
+from kbl.pipeline_tick import (
+    _process_signal_reclaim_remote,
+    claim_one_opus_failed,
+)
+from kbl.steps.step6_finalize import _MAX_OPUS_REFLIPS
+
+
+def _claim_conn(select_returns: Any) -> tuple[MagicMock, list[tuple[str, Any]]]:
+    """Mock conn for claim_one_opus_failed tests.
+
+    ``select_returns`` is what ``fetchone()`` returns for the claim
+    SELECT. All other SQL (ALTER, UPDATE) is observed via the captured
+    ``executed`` list of ``(sql_lowercased, params)``.
+    """
+    conn = MagicMock()
+    executed: list[tuple[str, Any]] = []
+
+    def _make_cursor() -> MagicMock:
+        cur = MagicMock()
+
+        def _execute(sql: str, params: Any = None) -> None:
+            executed.append((sql.lower(), params))
+            s = sql.lower()
+            if "select id from signal_queue" in s:
+                cur.fetchone.return_value = select_returns
+            else:
+                cur.fetchone.return_value = None
+
+        cur.execute.side_effect = _execute
+        return cur
+
+    def _cursor() -> MagicMock:
+        ctx = MagicMock()
+        ctx.__enter__.return_value = _make_cursor()
+        ctx.__exit__.return_value = False
+        return ctx
+
+    conn.cursor.side_effect = _cursor
+    return conn, executed
+
+
+def test_claim_one_opus_failed_returns_eligible_row() -> None:
+    """Eligible row (status=opus_failed, finalize_retry_count < budget) →
+    claim returns its id, flips it to awaiting_opus, commits once.
+
+    The SELECT must filter on ``status='opus_failed'`` AND
+    ``finalize_retry_count < _MAX_OPUS_REFLIPS`` — verified by inspecting
+    the captured SQL + params.
+    """
+    conn, executed = _claim_conn(select_returns=(42,))
+
+    claimed = claim_one_opus_failed(conn)
+
+    assert claimed == 42
+    assert conn.commit.call_count == 1
+    assert conn.rollback.call_count == 0
+
+    # Budget guard landed in the SELECT.
+    select_sql = next(
+        (sql, p) for sql, p in executed if "select id from signal_queue" in sql
+    )
+    assert "status = 'opus_failed'" in select_sql[0]
+    assert "finalize_retry_count" in select_sql[0]
+    assert "for update skip locked" in select_sql[0]
+    assert select_sql[1] == (_MAX_OPUS_REFLIPS,)
+
+    # Post-claim UPDATE flips to awaiting_opus with the claimed id.
+    update_sql = next(
+        (sql, p) for sql, p in executed if sql.startswith("update signal_queue")
+    )
+    assert "status = 'awaiting_opus'" in update_sql[0]
+    assert update_sql[1] == (42,)
+
+    # Defensive ALTER ran once (idempotent on already-migrated DBs).
+    alter_matches = [sql for sql, _ in executed if sql.startswith("alter table")]
+    assert len(alter_matches) == 1
+    assert "finalize_retry_count" in alter_matches[0]
+
+
+def test_claim_one_opus_failed_skips_budget_exhausted() -> None:
+    """Row at finalize_retry_count == _MAX_OPUS_REFLIPS must not be
+    claimed — the SELECT's ``< %s`` filter excludes it.
+
+    Simulated here by returning None from the claim SELECT (the live
+    filter would screen the cap-exhausted row out of the result set).
+    No UPDATE and no commit fire when the SELECT is empty.
+    """
+    conn, executed = _claim_conn(select_returns=None)
+
+    claimed = claim_one_opus_failed(conn)
+
+    assert claimed is None
+    # No flip to awaiting_opus.
+    updates = [sql for sql, _ in executed if sql.startswith("update signal_queue")]
+    assert updates == []
+    # No commit — the SELECT returned None, function returned early.
+    assert conn.commit.call_count == 0
+    assert conn.rollback.call_count == 0
+    # The SELECT's budget param is still _MAX_OPUS_REFLIPS — the filter
+    # is what excludes cap-exhausted rows in the live DB.
+    select_sql = next(
+        (sql, p) for sql, p in executed if "select id from signal_queue" in sql
+    )
+    assert select_sql[1] == (_MAX_OPUS_REFLIPS,)
+
+
+def test_claim_one_opus_failed_returns_none_when_empty() -> None:
+    """No eligible rows (SELECT returns None) → claim returns None with
+    no flip, no commit. Indistinguishable from the budget-exhausted case
+    at the function boundary — both are ``fetchone() is None``."""
+    conn, executed = _claim_conn(select_returns=None)
+
+    claimed = claim_one_opus_failed(conn)
+
+    assert claimed is None
+    assert conn.commit.call_count == 0
+    assert conn.rollback.call_count == 0
+    # No UPDATE issued.
+    assert not any(sql.startswith("update") for sql, _ in executed)
+
+
+def test_reclaim_runs_steps_5_6_not_1_4() -> None:
+    """_process_signal_reclaim_remote runs only Steps 5 + 6. Steps 1-4
+    (triage, resolve, extract, classify) are never imported or called —
+    the reclaim path trusts the upstream primary_matter / triage_score /
+    related_matters written by the first attempt and lets Step 5 overwrite
+    ``opus_draft_markdown``.
+
+    Step 7 is also NOT called — reclaim mirrors ``_process_signal_remote``
+    in stopping at Step 6's terminal state (awaiting_commit).
+    """
+    # NOTE: _mock_conn's status queue is consumed in SELECT order. The
+    # reclaim path does one ``SELECT status`` — after Step 5, before
+    # Step 6 — so it reads queue[0]. Set post_step1_status to the value
+    # that check expects (``awaiting_finalize``); the other slots are
+    # unused by this orchestrator variant.
+    conn = _mock_conn(
+        post_step1_status="awaiting_finalize",
+        post_step5_status="__unused__",
+        post_step6_status="__unused__",
+    )
+    call_log: list[str] = []
+
+    with ExitStack() as stack:
+        mocks = _enter_all_steps(stack)
+        for name, mock in mocks.items():
+            mock.side_effect = _tracked_step(call_log, name)
+
+        _process_signal_reclaim_remote(signal_id=301, conn=conn)
+
+    # Only Step 5 + Step 6 fire.
+    assert call_log == ["step5", "step6"]
+    mocks["step5"].assert_called_once_with(301, conn)
+    mocks["step6"].assert_called_once_with(301, conn)
+    # Steps 1-4 and Step 7 never touched.
+    for name in ("step1", "step2", "step3", "step4", "step7"):
+        assert mocks[name].call_count == 0, f"{name} ran on reclaim path"
+
+    # 2 commits (one per step), 0 rollbacks.
+    assert conn.commit.call_count == 2
+    assert conn.rollback.call_count == 0
+
+
+def test_reclaim_budget_exhaustion_routes_to_finalize_failed() -> None:
+    """On the 3rd reflip (``finalize_retry_count`` hits
+    ``_MAX_OPUS_REFLIPS``), Step 6's existing ``_route_validation_failure``
+    promotes the row to ``finalize_failed`` terminal instead of flipping
+    back to ``opus_failed``.
+
+    Under the reclaim orchestrator this surfaces as: Step 6's internal
+    commit-before-raise seals the ``finalize_failed`` state; the outer
+    ``_process_signal_reclaim_remote`` rolls back its own Step-6 fragment
+    and re-raises. Step 7 is never reached (not imported). Critically,
+    the orchestrator does NOT loop or re-queue — the terminal state is
+    durable and the next tick's ``claim_one_opus_failed`` skips this row
+    because ``finalize_retry_count >= _MAX_OPUS_REFLIPS`` (and status
+    is no longer ``opus_failed`` anyway).
+    """
+    from kbl.exceptions import FinalizationError
+
+    # NOTE: _mock_conn's status queue is consumed in SELECT order. The
+    # reclaim path does one ``SELECT status`` — after Step 5, before
+    # Step 6 — so it reads queue[0]. Set post_step1_status to the value
+    # that check expects (``awaiting_finalize``); the other slots are
+    # unused by this orchestrator variant.
+    conn = _mock_conn(
+        post_step1_status="awaiting_finalize",
+        post_step5_status="__unused__",
+        post_step6_status="__unused__",
+    )
+
+    def _step6_terminal(signal_id: int, c: Any) -> None:
+        c.commit()  # Step 6's fresh-conn terminal flip (simulated)
+        raise FinalizationError(
+            "terminal finalize failure after 3 Opus retries; routed to finalize_failed"
+        )
+
+    with ExitStack() as stack:
+        mocks = _enter_all_steps(stack)
+        mocks["step6"].side_effect = _step6_terminal
+
+        with pytest.raises(FinalizationError, match="terminal finalize failure"):
+            _process_signal_reclaim_remote(signal_id=302, conn=conn)
+
+    # Step 5 sealed (1 orchestrator commit) + Step 6 internal commit (1) = 2.
+    # Orchestrator rolled back the Step-6 fragment.
+    assert conn.commit.call_count == 2
+    assert conn.rollback.call_count == 1
+    mocks["step5"].assert_called_once_with(302, conn)
+    mocks["step6"].assert_called_once_with(302, conn)
+    # Reclaim path never imports or calls Step 7.
+    assert mocks["step7"].call_count == 0
+
+
+def test_main_falls_back_to_reclaim_when_primary_empty(monkeypatch) -> None:
+    """Primary claim returns None → main() tries claim_one_opus_failed.
+    When that returns a row, dispatch goes to
+    ``_process_signal_reclaim_remote``. This is the closed-loop path
+    the brief introduces: no more orphaned opus_failed rows."""
+    monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "true")
+
+    fake_conn = MagicMock()
+    fake_conn_ctx = MagicMock()
+    fake_conn_ctx.__enter__.return_value = fake_conn
+    fake_conn_ctx.__exit__.return_value = False
+
+    with patch("kbl.pipeline_tick.get_conn", return_value=fake_conn_ctx), \
+         patch("kbl.pipeline_tick.claim_one_signal", return_value=None) as mock_primary, \
+         patch("kbl.pipeline_tick.claim_one_opus_failed", return_value=909) as mock_reclaim, \
+         patch("kbl.pipeline_tick._process_signal_remote") as mock_remote, \
+         patch("kbl.pipeline_tick._process_signal_reclaim_remote") as mock_reclaim_fn, \
+         patch("kbl.pipeline_tick.get_state", return_value="false"):
+        rc = _pipeline_main()
+
+    assert rc == 0
+    mock_primary.assert_called_once_with(fake_conn)
+    mock_reclaim.assert_called_once_with(fake_conn)
+    # Primary processor NOT invoked (primary claim was empty).
+    assert mock_remote.call_count == 0
+    # Reclaim processor DID run with the reclaim id.
+    mock_reclaim_fn.assert_called_once_with(909, fake_conn)
+
+
+def test_main_both_queues_empty_returns_zero(monkeypatch) -> None:
+    """Primary + reclaim both empty → main() returns 0 without
+    dispatching to either processor. Flag on, both circuits closed."""
+    monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "true")
+
+    fake_conn = MagicMock()
+    fake_conn_ctx = MagicMock()
+    fake_conn_ctx.__enter__.return_value = fake_conn
+    fake_conn_ctx.__exit__.return_value = False
+
+    with patch("kbl.pipeline_tick.get_conn", return_value=fake_conn_ctx), \
+         patch("kbl.pipeline_tick.claim_one_signal", return_value=None) as mock_primary, \
+         patch("kbl.pipeline_tick.claim_one_opus_failed", return_value=None) as mock_reclaim, \
+         patch("kbl.pipeline_tick._process_signal_remote") as mock_remote, \
+         patch("kbl.pipeline_tick._process_signal_reclaim_remote") as mock_reclaim_fn, \
+         patch("kbl.pipeline_tick.get_state", return_value="false"):
+        rc = _pipeline_main()
+
+    assert rc == 0
+    assert mock_primary.call_count == 1
+    assert mock_reclaim.call_count == 1
+    assert mock_remote.call_count == 0
+    assert mock_reclaim_fn.call_count == 0
+
+
+def test_main_primary_claim_skips_reclaim(monkeypatch) -> None:
+    """Primary claim returns an id → main() runs ``_process_signal_remote``
+    and does NOT call ``claim_one_opus_failed`` on this tick. Reclaim is
+    strictly a fallback; primary pending work gets first priority on
+    every tick."""
+    monkeypatch.setenv("KBL_FLAGS_PIPELINE_ENABLED", "true")
+
+    fake_conn = MagicMock()
+    fake_conn_ctx = MagicMock()
+    fake_conn_ctx.__enter__.return_value = fake_conn
+    fake_conn_ctx.__exit__.return_value = False
+
+    with patch("kbl.pipeline_tick.get_conn", return_value=fake_conn_ctx), \
+         patch("kbl.pipeline_tick.claim_one_signal", return_value=555) as mock_primary, \
+         patch("kbl.pipeline_tick.claim_one_opus_failed") as mock_reclaim, \
+         patch("kbl.pipeline_tick._process_signal_remote") as mock_remote, \
+         patch("kbl.pipeline_tick._process_signal_reclaim_remote") as mock_reclaim_fn, \
+         patch("kbl.pipeline_tick.get_state", return_value="false"):
+        rc = _pipeline_main()
+
+    assert rc == 0
+    mock_primary.assert_called_once_with(fake_conn)
+    mock_remote.assert_called_once_with(555, fake_conn)
+    # Reclaim NEVER consulted when primary had work.
+    assert mock_reclaim.call_count == 0
+    assert mock_reclaim_fn.call_count == 0
