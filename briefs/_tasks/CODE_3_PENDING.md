@@ -1,166 +1,178 @@
-# CODE_3_PENDING — B3 REVIEW: PR #48 AUDIT_SENTINEL_1 — 2026-04-23
+# CODE_3_PENDING — B3 REVIEW: PR #49 AUTHOR_DIRECTOR_GUARD_1 — 2026-04-23
 
 **Dispatcher:** AI Head (Team 1 — Meta/Persistence)
 **Working dir:** `~/bm-b3`
-**Target PR:** https://github.com/vallen300-bit/baker-master/pull/48
-**Branch:** `audit-sentinel-1` → ship commit on branch per B1 report
-**Brief:** `briefs/BRIEF_AUDIT_SENTINEL_1.md` (shipped in commit `14a5ef6`)
-**Ship report:** `briefs/_reports/B1_audit_sentinel_1_20260423.md` (commit `a277dca`)
-**Hard deadline:** Sun 2026-04-26 23:59 UTC (3.5d margin, first-fire Mon 09:00 UTC)
-**Status:** CLOSED — **APPROVE PR #48**, Tier A auto-merge greenlit. Report at `briefs/_reports/B3_pr48_audit_sentinel_1_review_20260423.md`.
+**Target PR:** https://github.com/vallen300-bit/baker-master/pull/49
+**Branch:** `author-director-guard-1`
+**Brief:** `briefs/BRIEF_AUTHOR_DIRECTOR_GUARD_1.md` (shipped in commit `29b165e`)
+**Ship report:** `briefs/_reports/B1_author_director_guard_1_20260423.md` (commit `76d2daa`)
 
-**Supersedes:** prior `CHANDA_ENFORCEMENT_1` B3 review task — APPROVE landed; PR #45 merged `3b60b0d`. Mailbox cleared.
-
----
-
-## B3 dispatch back (2026-04-23)
-
-**APPROVE PR #48** — 8/8 checks green. Full report: `briefs/_reports/B3_pr48_audit_sentinel_1_review_20260423.md`.
-
-### 1-line summary per check
-
-1. **ADD-ONLY listener** ✅ — single deletion is a docstring (replaced with longer version); zero logic deletions; new DB-write block pure addition below preserved `logger.error/info`.
-2. **Singleton hook** ✅ — `scripts/check_singletons.sh` → `OK: No singleton violations found` (exit=0). Both new call sites use `_get_global_instance()`.
-3. **DDL drift** ✅ — `scheduler_executions` bootstrap exists only in `_ensure_scheduler_executions_table` (store_back.py:544); all other hits are expected INSERT/SELECT usage.
-4. **Fault-tolerance** ✅ — listener: 2 levels (outer catch-all + inner execute) + `finally` for conn return. sentinel: 3 levels (main SELECT + Slack post + dedupe-anchor INSERT), rollback + `_put_conn` always.
-5. **Tests** ✅ — 6/6 pass, names match brief spec exactly (executed_row, error_row, db_unavailable, clean_path, miss_alerts, deduped).
-6. **Regression delta** ✅ — branch `19f/808p/19e` vs main `19f/807p/19e` = +1 pass, 0 new fail/err. Math reconciled: main advanced with PR #47 (+5 tests); branch = 14a5ef6 + PR#48 (+6 tests); net delta +1. B1's baseline math (+6 vs 14a5ef6) confirmed.
-7. **Cron** ✅ — `CronTrigger(day_of_week="mon", hour=10, minute=0, timezone="UTC")` exact. 1h offset from `ai_head_weekly_audit` (09:00 UTC) preserved.
-8. **Scope** ✅ — exactly 4 files touched per brief. No `outputs/slack_notifier.py`, `triggers/ai_head_audit.py`, `scripts/check_singletons.sh` drift.
-
-Tier A auto-merge greenlit. Hard-deadline Sun 2026-04-26 23:59 UTC preserved with ~3.5d margin.
-
-Tab closing after commit + push.
-
-— B3
+**Supersedes:** prior `AUDIT_SENTINEL_1` B3 review — APPROVE landed; PR #48 merged `5831c77`. Mailbox cleared.
 
 ---
 
 ## What this PR does
 
-Phase 1 first-fire observability for `ai_head_weekly_audit`. 4 files, +458/-1 LOC:
+Ships CHANDA detector #4 (pre-commit hook) + §7 amendment-log entry. 3 files, +274/-0 LOC:
 
-- `memory/store_back.py` — adds `_ensure_scheduler_executions_table` + wires in `__init__`
-- `triggers/embedded_scheduler.py` — extends `_job_listener` (ADD-ONLY: keeps existing log behavior, adds DB write) + registers new cron `ai_head_audit_sentinel` + adds `_ai_head_audit_sentinel_job` wrapper
-- NEW `triggers/audit_sentinel.py` — `run_sentinel_check()` logic with dedupe
-- NEW `tests/test_audit_sentinel.py` — 6 tests
+- NEW `invariant_checks/author_director_guard.sh` (executable, `100755`) — grep+awk-driven shell script; scans staged diff for `author: director` YAML frontmatter hits (staged + HEAD pre-version); rejects commit if hit AND no `Director-signed:` marker in commit message.
+- NEW `tests/test_author_director_guard.py` — 6 scenarios via real git + subprocess (no mocks).
+- MODIFIED `CHANDA_enforcement.md` — +1 row in §7 amendment log documenting intent-based enforcement refinement.
 
-B1 reported: 4/4 py_compile clean, singleton hook PASS, 6/6 new tests green, full-suite delta clean (+6 passes / 0 regressions).
+B1 reported: 8/8 ship gate PASS, pytest delta +6 passes / 0 regressions, 55 min build (well within 1.5–2h target).
 
 ---
 
 ## Your review job (charter §3 — B3 routes; Tier A auto-merge on APPROVE)
 
-### 1. Verify listener extension is ADD-ONLY
+### 1. Executable bit locked in git
 
-B1's claim: existing log behavior at `triggers/embedded_scheduler.py:23-31` preserved; DB write is an additive second code block inside `_job_listener`. Confirm:
-
-```bash
-cd ~/bm-b3 && git fetch && git checkout audit-sentinel-1
-# The pre-existing log lines should still produce identical behavior:
-git diff main...audit-sentinel-1 -- triggers/embedded_scheduler.py | grep -E "^-" | grep -v "^---"
-```
-
-Expected: zero or near-zero `-` lines in the `_job_listener` function itself (DB-write code is pure additions; existing `logger.error` / `logger.info` lines stay). Any meaningful deletion in the existing log path = REDIRECT.
-
-### 2. Verify singleton-rule compliance (PR #46 hook gate)
-
-Brief requires `SentinelStoreBack._get_global_instance()` everywhere, NOT `SentinelStoreBack()` direct. Pre-push hook enforces. Re-run independently:
+Brief mandated `100755` permission on the shell script. Verify independently:
 
 ```bash
-bash scripts/check_singletons.sh
+cd ~/bm-b3 && git fetch && git checkout author-director-guard-1
+git ls-files --stage invariant_checks/author_director_guard.sh
 ```
 
-Expected: PASS. Any FAIL = REDIRECT (brief dictates the pattern; hook would have blocked push anyway — confirming it didn't get bypassed).
+Expected first token: `100755`. Any other (e.g., `100644`) = REDIRECT — shell script won't be directly executable via git-hook symlink on Mac Mini install.
 
-### 3. DDL drift trap re-check (per MEMORY.md)
-
-Confirm `scheduler_executions` bootstrap is the ONLY definition in the repo:
+### 2. Shell syntax + shellcheck if available
 
 ```bash
-grep -rn "scheduler_executions" ~/bm-b3 --include="*.py" --include="*.sql" | grep -v test_audit_sentinel | grep -v ".pyc"
+bash -n invariant_checks/author_director_guard.sh
+command -v shellcheck >/dev/null && shellcheck invariant_checks/author_director_guard.sh || echo "(shellcheck not installed — skip)"
 ```
 
-Expected hits: only in `memory/store_back.py` (bootstrap method + `__init__` wire) and `triggers/audit_sentinel.py` (SELECT/INSERT usage). Any other bootstrap / migration hit = DDL drift trap; REDIRECT.
+Expected: zero output on `bash -n`. shellcheck warnings non-blocking (note but don't REDIRECT).
 
-### 4. Fault-tolerance audit
+### 3. Frontmatter-detection correctness
 
-The brief requires the extended listener and the sentinel to NEVER crash the scheduler on DB/Slack failure. Verify both paths are wrapped:
+The hook uses an awk one-liner anchored to the first `---` block. Verify the logic handles the 3 key cases:
 
 ```bash
-grep -n "try:\|except" triggers/embedded_scheduler.py | head -30
-grep -n "try:\|except" triggers/audit_sentinel.py | head -30
+# Case A: standard frontmatter — should HIT
+printf -- '---\nauthor: director\n---\nbody\n' | \
+  awk '/^---[[:space:]]*$/{ctr++; next} ctr==1 && /^author:[[:space:]]*director[[:space:]]*$/{print "HIT"; exit}'
+
+# Case B: body-only reference (code block) — should NOT HIT
+printf -- '---\nauthor: agent\n---\nbody\n```yaml\nauthor: director\n```\n' | \
+  awk '/^---[[:space:]]*$/{ctr++; next} ctr==1 && /^author:[[:space:]]*director[[:space:]]*$/{print "HIT"; exit}'
+
+# Case C: whitespace tolerance — should HIT
+printf -- '---\nauthor:   director  \n---\nbody\n' | \
+  awk '/^---[[:space:]]*$/{ctr++; next} ctr==1 && /^author:[[:space:]]*director[[:space:]]*$/{print "HIT"; exit}'
 ```
 
-Key checks:
-- `_job_listener`: outer try/except around the DB block + inner try/except around the cursor.execute + finally returning conn (two levels). REDIRECT if missing.
-- `run_sentinel_check`: try/except around the main SELECT block; try/except around the Slack post; try/except around the dedupe-anchor INSERT. Three levels. REDIRECT if missing.
+Expected: Case A HIT, Case B no output, Case C HIT. Any drift = REDIRECT.
 
-### 5. Test quality re-run
-
-B1 reported 6/6 tests green. Re-run them:
+### 4. Marker-detection correctness
 
 ```bash
-pytest tests/test_audit_sentinel.py -v
+# Should match (valid Director-signed)
+printf 'commit body\n\nDirector-signed: "quote here"\n' | \
+  grep -E '^Director-signed:[[:space:]]*"'
+
+# Should NOT match (case-mangled)
+printf 'commit body\n\ndirector-signed: "quote"\n' | \
+  grep -E '^Director-signed:[[:space:]]*"' || echo "(not matched — expected)"
+
+# Should NOT match (missing quote)
+printf 'commit body\n\nDirector-signed: no-quote\n' | \
+  grep -E '^Director-signed:[[:space:]]*"' || echo "(not matched — expected)"
 ```
 
-Expected: 6 passed. Verify the 6 test names match the brief §Quality Checkpoints spec:
-- `test_listener_writes_executed_row`
-- `test_listener_writes_error_row`
-- `test_listener_survives_db_unavailable`
-- `test_sentinel_clean_path`
-- `test_sentinel_miss_alerts`
-- `test_sentinel_deduped`
+Expected: only the first regex matches. Case-sensitivity and strict opening-quote are features, not bugs.
 
-Missing or renamed tests = possible scope slip; dig into what B1 did and why.
+### 5. Two-sided check (staged + pre-version)
 
-### 6. Full-suite regression delta
-
-Brief baseline at dispatch was `19f/802p/19e` on main post PR #46 hotfix. B1's ship report says branch = `19f/808p/19e` = +6 passes.
+Verify the script reads BOTH `git show :$f` (staged) AND `git show HEAD:$f` (pre-version). Grep the script:
 
 ```bash
-pytest tests/ 2>&1 | tail -3   # on audit-sentinel-1
-git checkout main && pytest tests/ 2>&1 | tail -3   # on main
+grep -E 'git show ["][:]|git show ["]HEAD' invariant_checks/author_director_guard.sh
 ```
 
-Expected: branch − main = +6 passes (the new tests), 0 new failures, 0 new errors. Any drift = diagnose.
+Expected: 2+ hits (both staged-version and HEAD-version reads present). Missing one = REDIRECT (frontmatter-toggle bypass would not be caught).
 
-### 7. Cron semantics spot-check
-
-Sentinel must fire **Mon 10:00 UTC** (exactly 1h after `ai_head_weekly_audit` at 09:00 UTC):
+### 6. Test file quality — 6 scenarios match brief spec exactly
 
 ```bash
-grep -A 5 "ai_head_audit_sentinel" triggers/embedded_scheduler.py | head -20
+grep -E "^def test_" tests/test_author_director_guard.py
 ```
 
-Verify `CronTrigger(day_of_week="mon", hour=10, minute=0, timezone="UTC")`. Any drift from 10:00 UTC Mon = REDIRECT (misses the 1h offset).
+Expected 6 names:
+- `test_non_md_file_passes`
+- `test_unprotected_md_passes`
+- `test_protected_md_without_marker_rejects`
+- `test_protected_md_with_marker_allows`
+- `test_frontmatter_toggle_bypass_blocked`
+- `test_body_false_positive_ignored`
 
-### 8. Out-of-scope creep check
+Missing/renamed = dig into what B1 did and why (possible scope slip).
+
+### 7. Test runs use real git, not mocks
+
+Brief constraint: no mocks. Verify:
 
 ```bash
-gh pr diff 48 --repo vallen300-bit/baker-master --name-only
+grep -n "mock\|Mock\|patch" tests/test_author_director_guard.py | head
 ```
 
-Expected 4 files only: `memory/store_back.py`, `triggers/embedded_scheduler.py`, `triggers/audit_sentinel.py`, `tests/test_audit_sentinel.py`. Any other file = REDIRECT (especially `outputs/slack_notifier.py`, `triggers/ai_head_audit.py`, `scripts/check_singletons.sh` — all marked Do-NOT-Touch).
+Expected: zero hits. Any mock/patch usage = REDIRECT (brief intent was honest shell-out testing).
+
+### 8. Full-suite regression delta
+
+```bash
+pytest tests/ 2>&1 | tail -3       # on branch
+git checkout main && git pull -q
+pytest tests/ 2>&1 | tail -3       # on main
+```
+
+B1 reported: main `19f/813p/19e` → branch `19f/819p/19e` = +6 passes, 0 regressions.
+
+Expected: your reproduction matches (modulo timing-flaky tests — re-run if uncertain).
+
+### 9. CHANDA amendment-log entry
+
+```bash
+grep -c "^| 2026-04" CHANDA_enforcement.md     # expect 2
+grep "Director-signed" CHANDA_enforcement.md    # expect >=1 hit
+tail -1 CHANDA_enforcement.md                   # 2026-04-23 row
+grep -c "§8\|^## §8" CHANDA_enforcement.md      # expect 0 — file still ends at §7
+```
+
+Expected: 2 amendment rows, Director-signed marker documented, new 2026-04-23 row at tail, still zero §8 section.
+
+### 10. Out-of-scope creep check
+
+```bash
+gh pr diff 49 --repo vallen300-bit/baker-master --name-only
+```
+
+Expected exactly 3 files:
+- `invariant_checks/author_director_guard.sh` (new)
+- `tests/test_author_director_guard.py` (new)
+- `CHANDA_enforcement.md` (modified)
+
+Any other file = REDIRECT (especially `.git/hooks/*`, `scripts/check_singletons.sh`, `CHANDA.md`, `.github/workflows/` — all marked Do-NOT-Touch).
 
 ## Ship shape (your output)
 
-- Report path: `briefs/_reports/B3_pr48_audit_sentinel_1_review_20260423.md`
+- Report path: `briefs/_reports/B3_pr49_author_director_guard_1_review_20260423.md`
 - Commit + push your report
 - Message me with APPROVE / REDIRECT + 1-line summary per check
 
 ## Decision tree
 
-- **8/8 checks clean + test delta matches + cron at 10:00 UTC Mon** → APPROVE → AI Head auto-merges (Tier A, standing).
-- **ADD-ONLY violation in listener** OR **singleton hook FAIL** OR **DDL drift hit** OR **cron off 10:00 UTC Mon** OR **out-of-scope file touched** → REDIRECT with specifics.
-- **Fault-tolerance wrapping gap** → REDIRECT with specifics (scheduler must not crash).
+- **10/10 checks clean** → APPROVE → AI Head auto-merges (Tier A, standing).
+- **Exec bit wrong** OR **frontmatter/marker regex off** OR **one-sided check** OR **mocks used** OR **out-of-scope file touched** → REDIRECT with specifics.
+- **shellcheck warnings only** → note, do not block.
 
 ## Timebox
 
-30–45 min. Most time is re-running tests on both main and branch for the regression delta; the structural checks are fast.
+30–45 min. Structural checks fast; regex manual tests + regression delta are the bulk.
 
 ---
 
-**Dispatch timestamp:** 2026-04-23 (Team 1, post-B1-ship of PR #48)
+**Dispatch timestamp:** 2026-04-23 (Team 1, post-B1-ship of PR #49)
 **Team:** Team 1 — Meta/Persistence
-**Deadline urgency:** Sun 2026-04-26 23:59 UTC for merge + Render deploy. 3.5d margin.
+**Next in M0 row 2b:** `LEDGER_ATOMIC_1` (CHANDA detector #2) — queued for next dispatch post PR #49 merge.
