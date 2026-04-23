@@ -75,3 +75,4 @@ Append-only. Every change to this file gets a row. Director signs via commit.
 |---|---|---|---|
 | 2026-04-21 | all | Initial creation from CHANDA rewrite session | "yes" (2026-04-21) |
 | 2026-04-23 | §4 row #4 + §6 | Enforcement refined to intent-based: agent commits to `author: director` files allowed only when commit message carries `Director-signed:` quote marker. Row #4 text unchanged; detector script at `invariant_checks/author_director_guard.sh` implements the check (AUTHOR_DIRECTOR_GUARD_1, PR TBD). | Director workflow definition 2026-04-23 ("To change any files I write to you AI Head in plain English") |
+| 2026-04-23 | §4 row #2 + §6 | Detector #2 shipped: `invariant_checks/ledger_atomic.py` context manager binds Director-action primary write and `baker_actions` ledger row into one DB transaction. First caller: `cortex.publish_event()` (LEDGER_ATOMIC_1, PR TBD). Follow-on briefs migrate remaining call sites. | "default recom is fine" (2026-04-21) |
