@@ -1,204 +1,185 @@
-# CODE_3_PENDING — B3 REVIEW: PR #49 AUTHOR_DIRECTOR_GUARD_1 — 2026-04-23
+# CODE_3_PENDING — B3 REVIEW: PR #51 LEDGER_ATOMIC_1 — 2026-04-23
 
 **Dispatcher:** AI Head (Team 1 — Meta/Persistence)
 **Working dir:** `~/bm-b3`
-**Target PR:** https://github.com/vallen300-bit/baker-master/pull/49
-**Branch:** `author-director-guard-1`
-**Brief:** `briefs/BRIEF_AUTHOR_DIRECTOR_GUARD_1.md` (shipped in commit `29b165e`)
-**Ship report:** `briefs/_reports/B1_author_director_guard_1_20260423.md` (commit `76d2daa`)
-**Status:** CLOSED — **APPROVE PR #49**, Tier A auto-merge greenlit. Report at `briefs/_reports/B3_pr49_author_director_guard_1_review_20260423.md`.
+**Target PR:** https://github.com/vallen300-bit/baker-master/pull/51
+**Branch:** `ledger-atomic-1`
+**Brief:** `briefs/BRIEF_LEDGER_ATOMIC_1.md` (shipped in commit `3349c20`)
+**Ship report:** `briefs/_reports/B1_ledger_atomic_1_20260423.md` (commit `4596bd2`)
 
-**Supersedes:** prior `AUDIT_SENTINEL_1` B3 review — APPROVE landed; PR #48 merged `5831c77`. Mailbox cleared.
-
----
-
-## B3 dispatch back (2026-04-23)
-
-**APPROVE PR #49** — 10/10 checks green. Full report: `briefs/_reports/B3_pr49_author_director_guard_1_review_20260423.md`.
-
-### 1-line summary per check
-
-1. **Exec bit** ✅ — `100755` locked in git.
-2. **Shell syntax** ✅ — `bash -n` clean. shellcheck not installed (per policy non-blocking).
-3. **Frontmatter regex** ✅ — Case A/C HIT, Case B (body-only in fenced block) correctly ignored. awk `ctr==1` anchored.
-4. **Marker regex** ✅ — `^Director-signed:\s*"` strict. Valid matches, case-mangled + missing-quote rejected.
-5. **Two-sided check** ✅ — both `git show ":$f"` (STAGED_HIT) and `git show "HEAD:$f"` (PRE_HIT) present. Toggle-bypass caught.
-6. **Test names** ✅ — all 6 match brief spec exactly (non_md / unprotected / without_marker / with_marker / toggle_bypass / body_false_positive).
-7. **No mocks** ✅ — only hit is docstring line asserting "No mocks — real git, real script". Tests shell-out via subprocess.
-8. **Regression delta** ✅ — branch `19f/819p/19e` vs main `19f/813p/19e` = +6 passes, 0 regressions. Exact match to B1.
-9. **CHANDA log** ✅ — 2 amendment rows, Director-signed documented, 2026-04-23 tail row cites Director quote, still §7-capped (zero §8 drift).
-10. **Scope** ✅ — exactly 3 files. No `.git/hooks/`, `scripts/check_singletons.sh`, `CHANDA.md`, or `.github/workflows/` drift.
-
-Tier A auto-merge greenlit. Ready for `LEDGER_ATOMIC_1` (CHANDA detector #2) dispatch post-merge.
-
-Tab closing after commit + push.
-
-— B3
+**Supersedes:** prior `AUTHOR_DIRECTOR_GUARD_1` B3 review — APPROVE landed; PR #49 merged `679a684`. Mailbox cleared.
 
 ---
 
 ## What this PR does
 
-Ships CHANDA detector #4 (pre-commit hook) + §7 amendment-log entry. 3 files, +274/-0 LOC:
+Ships CHANDA detector #2 (runtime DB txn wrapper) + §7 amendment-log entry. 4 files:
 
-- NEW `invariant_checks/author_director_guard.sh` (executable, `100755`) — grep+awk-driven shell script; scans staged diff for `author: director` YAML frontmatter hits (staged + HEAD pre-version); rejects commit if hit AND no `Director-signed:` marker in commit message.
-- NEW `tests/test_author_director_guard.py` — 6 scenarios via real git + subprocess (no mocks).
-- MODIFIED `CHANDA_enforcement.md` — +1 row in §7 amendment log documenting intent-based enforcement refinement.
+- NEW `invariant_checks/ledger_atomic.py` (148 LOC) — `@contextmanager atomic_director_action(conn, ...)`. Binds caller's primary write and `baker_actions` ledger row into ONE transaction on the same cursor. Rollback on any exception.
+- NEW `tests/test_ledger_atomic.py` (225 LOC) — 6 hermetic sqlite3 scenarios: happy path, primary raises, ledger raises (fault injection via cm swap), conn=None, payload JSON, multi-write.
+- MODIFIED `models/cortex.py` (771 → 738 = -33 net) — `publish_event()` rewritten around `atomic_director_action`; dead `_audit_to_baker_actions` function deleted.
+- MODIFIED `CHANDA_enforcement.md` — +1 row in §7 amendment log.
 
-B1 reported: 8/8 ship gate PASS, pytest delta +6 passes / 0 regressions, 55 min build (well within 1.5–2h target).
+B1 reported: 10/10 ship gate PASS, pytest delta +6 passes / 0 regressions (main 19f/819p → branch 19f/825p), 1h25 build (within 2–2.5h target).
 
 ---
 
 ## Your review job (charter §3 — B3 routes; Tier A auto-merge on APPROVE)
 
-### 1. Executable bit locked in git
-
-Brief mandated `100755` permission on the shell script. Verify independently:
+### 1. Scope lock — exactly 4 files
 
 ```bash
-cd ~/bm-b3 && git fetch && git checkout author-director-guard-1
-git ls-files --stage invariant_checks/author_director_guard.sh
+cd ~/bm-b3 && git fetch && git checkout ledger-atomic-1 && git pull -q
+git diff --name-only main...HEAD
 ```
 
-Expected first token: `100755`. Any other (e.g., `100644`) = REDIRECT — shell script won't be directly executable via git-hook symlink on Mac Mini install.
+Expect exactly these 4 paths, nothing else:
 
-### 2. Shell syntax + shellcheck if available
+```
+CHANDA_enforcement.md
+invariant_checks/ledger_atomic.py
+models/cortex.py
+tests/test_ledger_atomic.py
+```
+
+**Reject if:** `clickup_client.py`, `memory/store_back.py`, `CHANDA.md`, `triggers/embedded_scheduler.py`, or `_log_dedup_event` region of `cortex.py` touched. Those are explicit Do-NOT-Touch per brief.
+
+### 2. Python syntax green on all 4 files
 
 ```bash
-bash -n invariant_checks/author_director_guard.sh
-command -v shellcheck >/dev/null && shellcheck invariant_checks/author_director_guard.sh || echo "(shellcheck not installed — skip)"
+python3 -c "import py_compile; py_compile.compile('invariant_checks/ledger_atomic.py', doraise=True)"
+python3 -c "import py_compile; py_compile.compile('models/cortex.py', doraise=True)"
+python3 -c "import py_compile; py_compile.compile('tests/test_ledger_atomic.py', doraise=True)"
+python3 -c "from invariant_checks.ledger_atomic import atomic_director_action; assert callable(atomic_director_action)"
 ```
 
-Expected: zero output on `bash -n`. shellcheck warnings non-blocking (note but don't REDIRECT).
+All four return zero output, zero error.
 
-### 3. Frontmatter-detection correctness
-
-The hook uses an awk one-liner anchored to the first `---` block. Verify the logic handles the 3 key cases:
+### 3. Dead code fully removed
 
 ```bash
-# Case A: standard frontmatter — should HIT
-printf -- '---\nauthor: director\n---\nbody\n' | \
-  awk '/^---[[:space:]]*$/{ctr++; next} ctr==1 && /^author:[[:space:]]*director[[:space:]]*$/{print "HIT"; exit}'
-
-# Case B: body-only reference (code block) — should NOT HIT
-printf -- '---\nauthor: agent\n---\nbody\n```yaml\nauthor: director\n```\n' | \
-  awk '/^---[[:space:]]*$/{ctr++; next} ctr==1 && /^author:[[:space:]]*director[[:space:]]*$/{print "HIT"; exit}'
-
-# Case C: whitespace tolerance — should HIT
-printf -- '---\nauthor:   director  \n---\nbody\n' | \
-  awk '/^---[[:space:]]*$/{ctr++; next} ctr==1 && /^author:[[:space:]]*director[[:space:]]*$/{print "HIT"; exit}'
+grep -n "_audit_to_baker_actions" models/cortex.py
 ```
 
-Expected: Case A HIT, Case B no output, Case C HIT. Any drift = REDIRECT.
+**Expect: zero matches.** The function (lines 337-371 pre-merge) and its single call site (line 278 pre-merge) must both be gone. A leftover call would re-open the non-atomic path.
 
-### 4. Marker-detection correctness
+Also verify the `# ─── Audit Trail ───` section header comment was removed along with the function.
+
+### 4. Helper referenced exactly 2× in cortex.py
 
 ```bash
-# Should match (valid Director-signed)
-printf 'commit body\n\nDirector-signed: "quote here"\n' | \
-  grep -E '^Director-signed:[[:space:]]*"'
-
-# Should NOT match (case-mangled)
-printf 'commit body\n\ndirector-signed: "quote"\n' | \
-  grep -E '^Director-signed:[[:space:]]*"' || echo "(not matched — expected)"
-
-# Should NOT match (missing quote)
-printf 'commit body\n\nDirector-signed: no-quote\n' | \
-  grep -E '^Director-signed:[[:space:]]*"' || echo "(not matched — expected)"
+grep -n "atomic_director_action" models/cortex.py
 ```
 
-Expected: only the first regex matches. Case-sensitivity and strict opening-quote are features, not bugs.
+**Expect exactly 2 matches:** the inline `from invariant_checks.ledger_atomic import atomic_director_action` and the `with atomic_director_action(...) as cur:` block. More than 2 = helper used in unintended site. Zero or one = migration incomplete.
 
-### 5. Two-sided check (staged + pre-version)
-
-Verify the script reads BOTH `git show :$f` (staged) AND `git show HEAD:$f` (pre-version). Grep the script:
+### 5. Dedup gate untouched
 
 ```bash
-grep -E 'git show ["][:]|git show ["]HEAD' invariant_checks/author_director_guard.sh
+git diff main...HEAD models/cortex.py | grep -E "^[-+].*(check_dedup|auto_merge_enabled|would_merge|review_needed|_log_dedup_event)"
 ```
 
-Expected: 2+ hits (both staged-version and HEAD-version reads present). Missing one = REDIRECT (frontmatter-toggle bypass would not be caught).
+**Expect zero hits.** The dedup-gate block (lines 189-236 pre-merge) and `_log_dedup_event` (299-334 pre-merge) must be pristine — those are informational shadow-mode logs, not Director-action writes.
 
-### 6. Test file quality — 6 scenarios match brief spec exactly
+### 6. `_put_conn(conn)` runs exactly once on every path
+
+Read the new `publish_event()` body in `models/cortex.py`. Trace both branches:
+
+- **Success path:** atomic block succeeds → post-write side-effects (vector upsert + insights queue) → return event_id → `finally: _put_conn(conn)`.
+- **Failure path:** atomic block raises → logger.error + `_put_conn(conn)` + return None.
+
+**Reject if:** `_put_conn` is called twice on the same conn (double-return to pool), or missed on any branch.
+
+### 7. Atomicity proof is honest — no mocks
+
+Open `tests/test_ledger_atomic.py`. Verify:
+
+- Fixture `conn` creates real sqlite3 `:memory:` conn with real `baker_actions` + `cortex_events` schemas.
+- `test_ledger_raises_primary_rolled_back` uses **real transaction rollback** (conn.rollback inside except), not a mock. The swap substitutes a fail-on-exit context manager variant; primary INSERT actually executes and is actually rolled back.
+- `test_primary_raises_both_rows_rolled_back` uses a **syntactically invalid SQL** (e.g. `INSERT INTO cortex_events (no_such_column)`) to force a real sqlite exception — not patched.
 
 ```bash
-grep -E "^def test_" tests/test_author_director_guard.py
+grep -cE "mock|Mock|patch\(" tests/test_ledger_atomic.py
 ```
 
-Expected 6 names:
-- `test_non_md_file_passes`
-- `test_unprotected_md_passes`
-- `test_protected_md_without_marker_rejects`
-- `test_protected_md_with_marker_allows`
-- `test_frontmatter_toggle_bypass_blocked`
-- `test_body_false_positive_ignored`
+**Expect 0** (unless an inline docstring / comment hit — allow up to 1 if it's a comment).
 
-Missing/renamed = dig into what B1 did and why (possible scope slip).
-
-### 7. Test runs use real git, not mocks
-
-Brief constraint: no mocks. Verify:
+### 8. All 6 new tests pass, names match brief spec
 
 ```bash
-grep -n "mock\|Mock\|patch" tests/test_author_director_guard.py | head
+pytest tests/test_ledger_atomic.py -v 2>&1 | tail -15
 ```
 
-Expected: zero hits. Any mock/patch usage = REDIRECT (brief intent was honest shell-out testing).
+Expect `6 passed` and the 6 function names verbatim from the brief:
 
-### 8. Full-suite regression delta
+- `test_happy_path_both_rows_land`
+- `test_primary_raises_both_rows_rolled_back`
+- `test_ledger_raises_primary_rolled_back`
+- `test_no_conn_raises_runtime_error`
+- `test_payload_serialized_as_json`
+- `test_multiple_writes_each_atomic`
+
+### 9. Regression delta reconciles
 
 ```bash
-pytest tests/ 2>&1 | tail -3       # on branch
-git checkout main && git pull -q
-pytest tests/ 2>&1 | tail -3       # on main
+pytest tests/ 2>&1 | tail -3
 ```
 
-B1 reported: main `19f/813p/19e` → branch `19f/819p/19e` = +6 passes, 0 regressions.
+Expect `19 failed, 825 passed, 19 errors` (or whatever B1's branch-counts were). Compare to main baseline `19f/819p/19e` → delta = +6 passes, 0 new failures, 0 new errors.
 
-Expected: your reproduction matches (modulo timing-flaky tests — re-run if uncertain).
+If numbers don't reconcile (e.g. branch shows fewer passes than main+6, or new errors), **reject**.
 
-### 9. CHANDA amendment-log entry
+### 10. CHANDA §7 amendment correct
 
 ```bash
-grep -c "^| 2026-04" CHANDA_enforcement.md     # expect 2
-grep "Director-signed" CHANDA_enforcement.md    # expect >=1 hit
-tail -1 CHANDA_enforcement.md                   # 2026-04-23 row
-grep -c "§8\|^## §8" CHANDA_enforcement.md      # expect 0 — file still ends at §7
+grep -c "^| 2026-04" CHANDA_enforcement.md          # 3
+grep "ledger_atomic.py" CHANDA_enforcement.md       # >=1 hit
+tail -1 CHANDA_enforcement.md                       # the new 2026-04-23 #2 row
 ```
 
-Expected: 2 amendment rows, Director-signed marker documented, new 2026-04-23 row at tail, still zero §8 section.
+Verify:
+- Exactly 3 dated rows (2026-04-21 initial, 2026-04-23 #4 from PR #49, 2026-04-23 #2 from this PR).
+- Row text references `invariant_checks/ledger_atomic.py` and `cortex.publish_event()`.
+- File ends with amendment-log table (no §8 added).
 
-### 10. Out-of-scope creep check
+### 11. Singleton hook still green
 
 ```bash
-gh pr diff 49 --repo vallen300-bit/baker-master --name-only
+bash scripts/check_singletons.sh
 ```
 
-Expected exactly 3 files:
-- `invariant_checks/author_director_guard.sh` (new)
-- `tests/test_author_director_guard.py` (new)
-- `CHANDA_enforcement.md` (modified)
+Expect `OK: No singleton violations found.` The new helper uses no singleton pattern; `cortex.py` still uses lazy SentinelStoreBack import (unchanged).
 
-Any other file = REDIRECT (especially `.git/hooks/*`, `scripts/check_singletons.sh`, `CHANDA.md`, `.github/workflows/` — all marked Do-NOT-Touch).
+### 12. Row 4 frontmatter semantics preserved (CHANDA #4 cross-check)
 
-## Ship shape (your output)
+The PR touches `CHANDA_enforcement.md`. In baker-vault, this file has `author: director` — but in **baker-master** the file is a mirror (no CHANDA #4 hook installed on Director's laptop yet). Verify the commit message on the branch carries a `Director-signed:` marker for paper-trail continuity when AI Head later SSH-mirrors to vault:
 
-- Report path: `briefs/_reports/B3_pr49_author_director_guard_1_review_20260423.md`
-- Commit + push your report
-- Message me with APPROVE / REDIRECT + 1-line summary per check
+```bash
+git log --format=%B -1 ledger-atomic-1
+```
 
-## Decision tree
-
-- **10/10 checks clean** → APPROVE → AI Head auto-merges (Tier A, standing).
-- **Exec bit wrong** OR **frontmatter/marker regex off** OR **one-sided check** OR **mocks used** OR **out-of-scope file touched** → REDIRECT with specifics.
-- **shellcheck warnings only** → note, do not block.
-
-## Timebox
-
-30–45 min. Structural checks fast; regex manual tests + regression delta are the bulk.
+Look for `Director-signed:` line. If absent, **flag for AI Head in the ship report** (not reject — baker-master main doesn't enforce the hook yet; this is a continuity concern, not a block).
 
 ---
 
-**Dispatch timestamp:** 2026-04-23 (Team 1, post-B1-ship of PR #49)
+## If 12/12 green
+
+Post APPROVE comment on PR #51. Tier A auto-merge on APPROVE (standing per charter §3). Write ship report to `briefs/_reports/B3_pr51_ledger_atomic_1_review_20260423.md`.
+
+Overwrite this file with a "B3 dispatch back" summary section (replacing the review-job content), commit + push on main.
+
+## If any check fails
+
+Use `gh pr review --request-changes` with a specific list of what needs fixing. Route back to B1 with the delta in a new CODE_1_PENDING.md task. Do NOT merge.
+
+---
+
+## Timebox
+
+**~30–45 min.** 12 checks are mechanical; this is a focused review, not a re-implementation.
+
+---
+
+**Dispatch timestamp:** 2026-04-23 post-PR-51-ship (Team 1, M0 quintet row 2b B3 review)
 **Team:** Team 1 — Meta/Persistence
-**Next in M0 row 2b:** `LEDGER_ATOMIC_1` (CHANDA detector #2) — queued for next dispatch post PR #49 merge.
+**Sequence:** ENFORCEMENT_1 (#45) → GUARD_1 (#49) → **LEDGER_ATOMIC_1 (#51, this review)** → KBL_SCHEMA_1 (queued) / MAC_MINI_WRITER_AUDIT_1 (docs, last)
