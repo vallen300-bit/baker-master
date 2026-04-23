@@ -147,6 +147,9 @@ class SentinelStoreBack:
         # BRIEF_AI_HEAD_WEEKLY_AUDIT_1: Weekly AI Head self-audit records
         self._ensure_ai_head_audits_table()
 
+        # BRIEF_AUDIT_SENTINEL_1: Persistent APScheduler job execution log
+        self._ensure_scheduler_executions_table()
+
         # CORRECTION-MEMORY-1: Learned corrections from Director feedback
         self._ensure_baker_corrections_table()
 
@@ -535,6 +538,46 @@ class SentinelStoreBack:
             except Exception:
                 pass
             logger.warning(f"Could not ensure ai_head_audits table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_scheduler_executions_table(self):
+        """BRIEF_AUDIT_SENTINEL_1: Persistent log of APScheduler job executions.
+
+        Populated by the extended embedded_scheduler._job_listener on every
+        EVENT_JOB_EXECUTED / EVENT_JOB_ERROR. One row per fire. Used by
+        ai_head_audit_sentinel (Mon 10:00 UTC) to verify weekly audit fired.
+
+        Retention: 90-day delete in nightly cleanup (Phase 2 brief; not this one).
+        """
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS scheduler_executions (
+                    id SERIAL PRIMARY KEY,
+                    job_id TEXT NOT NULL,
+                    fired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    completed_at TIMESTAMPTZ,
+                    status TEXT NOT NULL,
+                    error_msg TEXT,
+                    outputs_summary JSONB NOT NULL DEFAULT '{}'::jsonb
+                )
+            """)
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_scheduler_executions_job_fired "
+                "ON scheduler_executions(job_id, fired_at DESC)"
+            )
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure scheduler_executions table: {e}")
         finally:
             self._put_conn(conn)
 
