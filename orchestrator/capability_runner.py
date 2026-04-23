@@ -185,6 +185,79 @@ PM_REGISTRY = {
 }
 
 
+def _robust_json_parse_object(text: str) -> "dict | None":
+    """Parse a JSON object from LLM response text.
+
+    Cascade:
+      1. Direct json.loads
+      2. Strip markdown code fence + json.loads
+      3. Regex-extract first {...} span + json.loads
+      4. Apply two repair passes (add quotes to unquoted keys,
+         strip trailing commas) + json.loads
+      5. Return None (caller logs at warning level with raw sample)
+
+    Mirrors orchestrator/extraction_engine.py:554 _parse_json_object with an
+    added Pass-4 repair for Opus's two most common real-world malformations
+    (unquoted property names, trailing commas). Returns None on total
+    failure (NOT {}) so callers can distinguish empty-state from parse-fail.
+
+    BRIEF_PM_EXTRACTION_JSON_ROBUSTNESS_1 D2.
+    """
+    import json as _json
+    import re as _re
+
+    if not text:
+        return None
+
+    # Pass 1 — direct
+    try:
+        result = _json.loads(text)
+        if isinstance(result, dict):
+            return result
+    except _json.JSONDecodeError:
+        pass
+
+    # Pass 2 — strip markdown fence
+    stripped = text
+    if stripped.startswith("```"):
+        stripped = "\n".join(stripped.split("\n")[1:-1])
+    if stripped != text:
+        try:
+            result = _json.loads(stripped)
+            if isinstance(result, dict):
+                return result
+        except _json.JSONDecodeError:
+            pass
+
+    # Pass 3 — extract first {...} span (greedy, DOTALL)
+    match = _re.search(r"\{.*\}", stripped, _re.DOTALL)
+    if match:
+        candidate = match.group(0)
+        try:
+            result = _json.loads(candidate)
+            if isinstance(result, dict):
+                return result
+        except _json.JSONDecodeError:
+            # Pass 4 — repair unquoted keys + trailing commas, then retry
+            repaired = candidate
+            # Unquoted property names: quote bare identifiers preceded by { or ,
+            repaired = _re.sub(
+                r"([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)(\s*:)",
+                r'\1"\2"\3',
+                repaired,
+            )
+            # Trailing commas before } or ]
+            repaired = _re.sub(r",(\s*[}\]])", r"\1", repaired)
+            try:
+                result = _json.loads(repaired)
+                if isinstance(result, dict):
+                    return result
+            except _json.JSONDecodeError:
+                pass
+
+    return None
+
+
 def extract_and_update_pm_state(
     pm_slug: str,
     question: str,
@@ -202,9 +275,8 @@ def extract_and_update_pm_state(
 
     BRIEF_PM_SIDEBAR_STATE_WRITE_1 D1. CROSS-PM-SIGNALS block mirrored verbatim
     from the prior CapabilityRunner._auto_update_pm_state (PM-FACTORY v3).
+    JSON parse hardened per BRIEF_PM_EXTRACTION_JSON_ROBUSTNESS_1 D1+D3.
     """
-    import json as _json
-
     cfg = PM_REGISTRY.get(pm_slug)
     if not cfg:
         return None
@@ -233,7 +305,7 @@ def extract_and_update_pm_state(
         claude = anthropic.Anthropic(api_key=config.claude.api_key)
         resp = claude.messages.create(
             model="claude-opus-4-6",
-            max_tokens=700,
+            max_tokens=1500,
             system=extraction_system,
             messages=[{"role": "user", "content": (
                 f"Extract state updates from this {label} interaction.\n\n"
@@ -261,9 +333,13 @@ def extract_and_update_pm_state(
             )}],
         )
         raw = resp.content[0].text.strip()
-        if raw.startswith("```"):
-            raw = "\n".join(raw.split("\n")[1:-1])
-        updates = _json.loads(raw)
+        updates = _robust_json_parse_object(raw)
+        if updates is None:
+            logger.warning(
+                f"Opus extraction JSON parse failed [{pm_slug}][{mutation_source}]: "
+                f"raw length={len(raw)}, preview={raw[:200]!r}"
+            )
+            return None
 
         wiki_insights = updates.pop("wiki_insights", [])
         summary = updates.pop("summary", f"{label} interaction")
@@ -312,8 +388,9 @@ def extract_and_update_pm_state(
             "mutation_source": mutation_source,
         }
     except Exception as e:
-        logger.debug(
-            f"extract_and_update_pm_state failed [{pm_slug}][{mutation_source}]: {e}"
+        logger.warning(
+            f"extract_and_update_pm_state failed [{pm_slug}][{mutation_source}] "
+            f"[error_class={type(e).__name__}]: {e}"
         )
         return None
 
@@ -405,7 +482,10 @@ def extract_correction_from_feedback(task: dict):
         )
 
     except Exception as e:
-        logger.debug(f"Correction extraction failed (non-fatal): {e}")
+        logger.warning(
+            f"Correction extraction failed (non-fatal) "
+            f"[error_class={type(e).__name__}]: {e}"
+        )
 
 
 class CapabilityRunner:
@@ -1323,7 +1403,10 @@ class CapabilityRunner:
                 store._put_conn(conn)
 
         except Exception as e:
-            logger.debug(f"Auto-insight extraction failed (non-fatal): {e}")
+            logger.warning(
+                f"Auto-insight extraction failed (non-fatal) "
+                f"[error_class={type(e).__name__}]: {e}"
+            )
 
     def _store_russo_document(self, capability, question: str, answer: str):
         """RUSSO-MEMORY-1: Save Russo AI specialist output as a document for Edita."""
