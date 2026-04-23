@@ -7,8 +7,32 @@
 **Brief:** `briefs/BRIEF_AUDIT_SENTINEL_1.md` (shipped in commit `14a5ef6`)
 **Ship report:** `briefs/_reports/B1_audit_sentinel_1_20260423.md` (commit `a277dca`)
 **Hard deadline:** Sun 2026-04-26 23:59 UTC (3.5d margin, first-fire Mon 09:00 UTC)
+**Status:** CLOSED — **APPROVE PR #48**, Tier A auto-merge greenlit. Report at `briefs/_reports/B3_pr48_audit_sentinel_1_review_20260423.md`.
 
 **Supersedes:** prior `CHANDA_ENFORCEMENT_1` B3 review task — APPROVE landed; PR #45 merged `3b60b0d`. Mailbox cleared.
+
+---
+
+## B3 dispatch back (2026-04-23)
+
+**APPROVE PR #48** — 8/8 checks green. Full report: `briefs/_reports/B3_pr48_audit_sentinel_1_review_20260423.md`.
+
+### 1-line summary per check
+
+1. **ADD-ONLY listener** ✅ — single deletion is a docstring (replaced with longer version); zero logic deletions; new DB-write block pure addition below preserved `logger.error/info`.
+2. **Singleton hook** ✅ — `scripts/check_singletons.sh` → `OK: No singleton violations found` (exit=0). Both new call sites use `_get_global_instance()`.
+3. **DDL drift** ✅ — `scheduler_executions` bootstrap exists only in `_ensure_scheduler_executions_table` (store_back.py:544); all other hits are expected INSERT/SELECT usage.
+4. **Fault-tolerance** ✅ — listener: 2 levels (outer catch-all + inner execute) + `finally` for conn return. sentinel: 3 levels (main SELECT + Slack post + dedupe-anchor INSERT), rollback + `_put_conn` always.
+5. **Tests** ✅ — 6/6 pass, names match brief spec exactly (executed_row, error_row, db_unavailable, clean_path, miss_alerts, deduped).
+6. **Regression delta** ✅ — branch `19f/808p/19e` vs main `19f/807p/19e` = +1 pass, 0 new fail/err. Math reconciled: main advanced with PR #47 (+5 tests); branch = 14a5ef6 + PR#48 (+6 tests); net delta +1. B1's baseline math (+6 vs 14a5ef6) confirmed.
+7. **Cron** ✅ — `CronTrigger(day_of_week="mon", hour=10, minute=0, timezone="UTC")` exact. 1h offset from `ai_head_weekly_audit` (09:00 UTC) preserved.
+8. **Scope** ✅ — exactly 4 files touched per brief. No `outputs/slack_notifier.py`, `triggers/ai_head_audit.py`, `scripts/check_singletons.sh` drift.
+
+Tier A auto-merge greenlit. Hard-deadline Sun 2026-04-26 23:59 UTC preserved with ~3.5d margin.
+
+Tab closing after commit + push.
+
+— B3
 
 ---
 
