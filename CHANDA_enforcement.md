@@ -30,7 +30,7 @@ Breach response is per-tier, not per-invariant. Predictable.
 | 1b | Cold-start (zero Gold) handling | critical | runtime gate | if `gold_count < N` → flag confidence-lowered; continue. N deferred. |
 | 2 | Ledger write atomic with Director action | critical | runtime DB txn | wrap ratify + ledger in same transaction |
 | 3 | Step 1 reads hot.md AND ledger every run | critical | runtime assert | log both file opens; verify at pipeline end |
-| 4 | `author: director` files untouched by agents | critical | pre-commit hook | scan diff for frontmatter `author: director`; reject |
+| 4 | `author: director` files untouched by agents | critical | commit-msg hook | scan diff for frontmatter `author: director`; reject |
 | 5 | Every wiki file has frontmatter | warn | static scan | quarantine un-frontmattered files; warn, don't halt |
 | 6 | Pipeline never skips Step 6 (Cross-link) | critical | runtime assert | Step 6 counter check at pipeline end |
 | 7 | Automated alerts are suggestions, never overrides | policy | architectural | alerts enter a queue; PR review checks no actuator path |
@@ -62,7 +62,7 @@ Detectors live under `/15_Baker_Master/01_build/invariant_checks/`.
 | Invariant | Detector script | Method | Integration point |
 |---|---|---|---|
 | #2 Ledger atomicity | `invariant_checks/ledger_atomic.py` | runtime DB txn wrapper | all Director-action handlers |
-| #4 Author:director files | `invariant_checks/author_director_guard.sh` | pre-commit hook | git hook + CI |
+| #4 Author:director files | `invariant_checks/author_director_guard.sh` | commit-msg hook | git hook + CI |
 | #9 Mac Mini single writer | *(infra config — no script)* | Render deploy manifest: no push creds | Render dashboard + deploy YAML |
 
 Remaining 13 detectors (KBL 1, 1b, 3, 5, 6, 7, 8, 10 + S1–S5) deferred to subsequent briefs after top-3 ship stably for 30 days.
@@ -76,3 +76,4 @@ Append-only. Every change to this file gets a row. Director signs via commit.
 | 2026-04-21 | all | Initial creation from CHANDA rewrite session | "yes" (2026-04-21) |
 | 2026-04-23 | §4 row #4 + §6 | Enforcement refined to intent-based: agent commits to `author: director` files allowed only when commit message carries `Director-signed:` quote marker. Row #4 text unchanged; detector script at `invariant_checks/author_director_guard.sh` implements the check (AUTHOR_DIRECTOR_GUARD_1, PR TBD). | Director workflow definition 2026-04-23 ("To change any files I write to you AI Head in plain English") |
 | 2026-04-23 | §4 row #2 + §6 | Detector #2 shipped: `invariant_checks/ledger_atomic.py` context manager binds Director-action primary write and `baker_actions` ledger row into one DB transaction. First caller: `cortex.publish_event()` (LEDGER_ATOMIC_1, PR TBD). Follow-on briefs migrate remaining call sites. | "default recom is fine" (2026-04-21) |
+| 2026-04-23 | §6 detector #4 | Stage corrected: `pre-commit` → `commit-msg`. pre-commit fires BEFORE `-F`/`-m` message is written to `.git/COMMIT_EDITMSG`, making marker check unreliable. commit-msg receives message-file path as `$1` (which the existing script already handles via `${1:-.git/COMMIT_EDITMSG}` fallback — no script change required). (MAC_MINI_WRITER_AUDIT_1, PR TBD) | Hook-bug surfaced during KBL_SCHEMA_1 vault mirror 2026-04-23 |

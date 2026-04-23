@@ -181,3 +181,56 @@ def test_body_false_positive_ignored(tmp_path: Path):
     _stage(repo, "doc.md")
     result = _run_hook(repo, "docs: add example")
     assert result.returncode == 0, result.stderr + result.stdout
+
+
+def test_hook_works_as_commit_msg_stage_via_git_commit(tmp_path: Path):
+    """Scenario 7: install the hook as .git/hooks/commit-msg and verify
+    the full git-commit flow (end-to-end, no direct-arg invocation).
+
+    This documents that the existing script is commit-msg-stage
+    compatible, supporting the MAC_MINI_WRITER_AUDIT_1 install change.
+    """
+    repo = _init_repo(tmp_path)
+    _write(repo / "hot.md", textwrap.dedent("""
+        ---
+        author: director
+        ---
+        seed body
+    """).lstrip())
+    _stage(repo, "hot.md")
+    _commit_clean(repo, "seed hot.md")
+
+    # Install script as commit-msg hook.
+    hook_dst = repo / ".git" / "hooks" / "commit-msg"
+    hook_dst.write_text(HOOK_SCRIPT.read_text())
+    hook_dst.chmod(0o755)
+
+    # Attempt commit WITHOUT marker — expect hook reject.
+    _write(repo / "hot.md", textwrap.dedent("""
+        ---
+        author: director
+        ---
+        modified without marker
+    """).lstrip())
+    _stage(repo, "hot.md")
+    result = subprocess.run(
+        ["git", "commit", "-m", "no marker"],
+        cwd=repo, capture_output=True, text=True,
+    )
+    assert result.returncode != 0
+    assert "CHANDA invariant #4" in (result.stdout + result.stderr)
+
+    # Attempt commit WITH marker — expect success.
+    _write(repo / "hot.md", textwrap.dedent("""
+        ---
+        author: director
+        ---
+        modified with marker
+    """).lstrip())
+    _stage(repo, "hot.md")
+    msg = 'wiki(hot.md): tweak\n\nDirector-signed: "commit-msg stage test"\n'
+    result = subprocess.run(
+        ["git", "commit", "-m", msg],
+        cwd=repo, capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
