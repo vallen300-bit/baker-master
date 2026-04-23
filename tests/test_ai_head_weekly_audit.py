@@ -119,7 +119,8 @@ def test_run_weekly_audit_is_non_fatal_on_slack_failure():
     conn_mock.cursor.return_value = cur_mock
     store_instance._get_conn.return_value = conn_mock
     store_instance._put_conn = MagicMock()
-    store_class_mock = MagicMock(return_value=store_instance)
+    store_class_mock = MagicMock()
+    store_class_mock._get_global_instance.return_value = store_instance
     store_back_mock = MagicMock()
     store_back_mock.SentinelStoreBack = store_class_mock
     sys.modules["memory.store_back"] = store_back_mock
