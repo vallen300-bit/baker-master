@@ -358,7 +358,7 @@ def _write_audit_record(
     """Insert one row; return id, or None on failure."""
     try:
         from memory.store_back import SentinelStoreBack
-        store = SentinelStoreBack()
+        store = SentinelStoreBack._get_global_instance()
         conn = store._get_conn()
         if not conn:
             return None
@@ -409,7 +409,7 @@ def _update_slack_outcomes(
         return
     try:
         from memory.store_back import SentinelStoreBack
-        store = SentinelStoreBack()
+        store = SentinelStoreBack._get_global_instance()
         conn = store._get_conn()
         if not conn:
             return
