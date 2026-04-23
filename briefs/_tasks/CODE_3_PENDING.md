@@ -1,46 +1,96 @@
-# CODE_3_PENDING — BRIEF_AI_HEAD_WEEKLY_AUDIT_1 — 2026-04-22
+# CODE_3_PENDING — B3 REVIEW: PR #45 CHANDA_ENFORCEMENT_1 — 2026-04-23
 
-**Dispatcher:** AI Head
-**Working dir:** ~/bm-b3
-**Brief:** briefs/BRIEF_AI_HEAD_WEEKLY_AUDIT_1.md (commit 1c276d7)
-**Working branch:** feature/ai-head-weekly-audit-1
-**Pre-requisites:** none (clean dispatch; no dependencies on in-flight work)
+**Dispatcher:** AI Head (Team 1 — Meta/Persistence)
+**Working dir:** `~/bm-b3`
+**Target PR:** https://github.com/vallen300-bit/baker-master/pull/45
+**Branch:** `chanda-enforcement-1` → commit `ed8938c`
+**Brief:** `briefs/BRIEF_CHANDA_ENFORCEMENT_1.md` (shipped in commit `12afa9f`)
+**Ship report:** `briefs/_reports/B1_chanda_enforcement_1_20260423.md` (commit `d66ddbd`)
 
-## Scope (5 files)
-
-- `memory/store_back.py` — add `_ensure_ai_head_audits_table` + wire init call
-- `outputs/slack_notifier.py` — add module-level `post_to_channel(channel_id, text)`
-- `triggers/embedded_scheduler.py` — add `_ai_head_weekly_audit_job` + scheduler registration (Mon 9am UTC, env gate `AI_HEAD_AUDIT_ENABLED`)
-- NEW `triggers/ai_head_audit.py` — audit logic module
-- NEW `tests/test_ai_head_weekly_audit.py` — 6-test ship gate
-
-## Ship gate (literal output required in CODE_3_RETURN.md)
-
-```
-pytest tests/test_ai_head_weekly_audit.py -v  # expect 6 passed
-python3 -c "import py_compile; py_compile.compile('triggers/ai_head_audit.py', doraise=True)"
-python3 -c "import py_compile; py_compile.compile('triggers/embedded_scheduler.py', doraise=True)"
-python3 -c "import py_compile; py_compile.compile('outputs/slack_notifier.py', doraise=True)"
-python3 -c "import py_compile; py_compile.compile('memory/store_back.py', doraise=True)"
-```
-
-**No "pass by inspection."** Paste the literal `pytest -v` output.
-
-## Handoff
-
-**Open PR when green.** B2 reviews. On APPROVE + green CI, AI Head merges (Tier A).
-
-## Post-merge sequence (AI Head side)
-
-1. After Render deploys, read logs for `Registered: ai_head_weekly_audit (Mon 09:00 UTC)` → capture APScheduler job ID (APScheduler job IDs are string-based; the registration uses `id="ai_head_weekly_audit"`) + compute next-fire timestamp (next Monday 09:00 UTC).
-2. Record both in `_ops/agents/ai-head/OPERATING.md` "Verification" section.
-3. Re-dispatch Step 10 to B4 with real trigger ID in sentence 2 of the DM body.
-4. On B4 confirmation, append ARCHIVE 2026-04-22 session block, commit vault, close deploy.
-
-## Timeline
-
-Estimated: ~2-3h B3 implementation → B2 review 15-30 min → merge → Render deploy ~5 min → AI Head side 15 min → B4 DM ~5 min. Total ~3-4h window from dispatch.
+**Supersedes:** prior `BRIEF_AI_HEAD_WEEKLY_AUDIT_1` B3 review task — shipped as PR #44, merged `63af5b1` 2026-04-22. Mailbox cleared.
 
 ---
 
-**Dispatch timestamp:** 2026-04-22 (post-PR #43 merge)
+## What this PR does
+
+Pure-insert markdown file. Creates `CHANDA_enforcement.md` (76 lines, 4822 bytes) at repo root with verbatim §1–§7 from Research Agent's 2026-04-21 engineering-matrix artifact — 11 KBL + 5 Surface invariants, 3 severity tiers, top-3 detector pointers, amendment log.
+
+Scope boundary: paired CHANDA.md rewrite is a **separate brief** (`CHANDA_PLAIN_ENGLISH_REWRITE_1`, not yet drafted). Do NOT flag "CHANDA.md still has old invariants" as a defect — that's scope.
+
+## Your review job (charter §3 — B3 routes; Tier A auto-merge on APPROVE)
+
+### 1. Verify byte-perfect match vs source artifact
+
+Source: `/Users/dimitry/baker-vault/_ops/ideas/2026-04-21-chanda-engineering-matrix.md` lines 37–110 (§1–§7 body) + H1 `# CHANDA Enforcement — engineering matrix` (source line 12).
+
+B1 reported diff clean. Re-run it independently:
+
+```bash
+cd ~/bm-b3 && git fetch && git checkout chanda-enforcement-1
+(echo "# CHANDA Enforcement — engineering matrix"; echo ""; sed -n '37,110p' /Users/dimitry/baker-vault/_ops/ideas/2026-04-21-chanda-engineering-matrix.md) | diff - CHANDA_enforcement.md
+echo "exit=$?"
+```
+
+Expected: diff empty, exit=0. Any diff = REDIRECT.
+
+### 2. Re-run B1's 8 Verification checks
+
+Brief §Verification lists 8 structural checks. Reproduce each. Flag any that now fail.
+
+1. File exists
+2. First line exactly `# CHANDA Enforcement — engineering matrix`
+3. Section-heading count `grep -c '^## §' CHANDA_enforcement.md` → exactly 7
+4. Last line is the amendment log row starting `| 2026-04-21 | all |`
+5. Table-row count approximate (≥20 rows; exact number not load-bearing)
+6. Line count 70–80 range
+7. `git status --short` shows only the new file (no stray edits to CHANDA.md or elsewhere in the PR diff)
+8. `grep -c "§8" CHANDA_enforcement.md` → 0
+
+### 3. Out-of-scope creep check
+
+Brief §Do NOT Touch lists 4 anti-scope zones. Diff the PR against main:
+
+```bash
+gh pr diff 45 --repo vallen300-bit/baker-master | head -5
+# Should show only: +++ b/CHANDA_enforcement.md (and no "---" entries for deletions)
+```
+
+Any other file touched = REDIRECT.
+
+### 4. Regression delta
+
+Brief says pytest baseline should be unchanged (markdown-only change, orthogonal to test suite).
+
+```bash
+pytest tests/ 2>&1 | tail -3
+```
+
+Main baseline from PR #43 merge: `16 failed / 818 passed / 21 skipped`.
+B1 ship report says branch shows: `20 failed / 801 passed / 21 skipped / 19 errors`.
+
+**⚠️ Investigate the delta.** B1's numbers don't match PR #43 baseline — 4 new failures, 17 fewer passes, 19 errors where there were 0. Two hypotheses to test:
+
+- **(a) Flaky / pre-existing.** Run pytest on `main` in a clean clone and on `chanda-enforcement-1` branch. If both show the new numbers, the delta predates this PR (main itself shifted between PR #43 and now — possible if other commits landed). Not this PR's fault. APPROVE.
+- **(b) Markdown file actually broke something.** Unlikely for a pure .md add, but possible if a test reads markdown files and does structural validation. Grep: `grep -r "CHANDA_enforcement\|\.md" tests/` → any hits suggest test coupling. If confirmed, REDIRECT with diagnosis.
+
+Report your conclusion with the literal `pytest tail -3` from both main and branch.
+
+## Ship shape (your output)
+
+- Report path: `briefs/_reports/B3_pr45_chanda_enforcement_1_review_20260423.md`
+- Commit + push your report (same pattern as prior B3 reviews — see `briefs/_reports/B3_pr43_observability_step7_plus_poller_doc_review_20260422.md` for template)
+- Message me with APPROVE / REDIRECT + the regression-delta diagnosis
+
+## Decision tree
+
+- **Diff clean + 8/8 checks pass + regression-delta diagnosed as pre-existing** → APPROVE → AI Head auto-merges (Tier A).
+- **Diff drift OR check fail OR new failures caused by this PR** → REDIRECT with specifics.
+
+## Timebox
+
+30 min. Most of that is running the regression-delta diagnosis; the diff + structural checks are fast.
+
+---
+
+**Dispatch timestamp:** 2026-04-23 (Team 1, post-B1-ship of PR #45)
+**Team:** Team 1 — Meta/Persistence
