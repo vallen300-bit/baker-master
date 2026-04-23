@@ -6,8 +6,34 @@
 **Branch:** `author-director-guard-1`
 **Brief:** `briefs/BRIEF_AUTHOR_DIRECTOR_GUARD_1.md` (shipped in commit `29b165e`)
 **Ship report:** `briefs/_reports/B1_author_director_guard_1_20260423.md` (commit `76d2daa`)
+**Status:** CLOSED — **APPROVE PR #49**, Tier A auto-merge greenlit. Report at `briefs/_reports/B3_pr49_author_director_guard_1_review_20260423.md`.
 
 **Supersedes:** prior `AUDIT_SENTINEL_1` B3 review — APPROVE landed; PR #48 merged `5831c77`. Mailbox cleared.
+
+---
+
+## B3 dispatch back (2026-04-23)
+
+**APPROVE PR #49** — 10/10 checks green. Full report: `briefs/_reports/B3_pr49_author_director_guard_1_review_20260423.md`.
+
+### 1-line summary per check
+
+1. **Exec bit** ✅ — `100755` locked in git.
+2. **Shell syntax** ✅ — `bash -n` clean. shellcheck not installed (per policy non-blocking).
+3. **Frontmatter regex** ✅ — Case A/C HIT, Case B (body-only in fenced block) correctly ignored. awk `ctr==1` anchored.
+4. **Marker regex** ✅ — `^Director-signed:\s*"` strict. Valid matches, case-mangled + missing-quote rejected.
+5. **Two-sided check** ✅ — both `git show ":$f"` (STAGED_HIT) and `git show "HEAD:$f"` (PRE_HIT) present. Toggle-bypass caught.
+6. **Test names** ✅ — all 6 match brief spec exactly (non_md / unprotected / without_marker / with_marker / toggle_bypass / body_false_positive).
+7. **No mocks** ✅ — only hit is docstring line asserting "No mocks — real git, real script". Tests shell-out via subprocess.
+8. **Regression delta** ✅ — branch `19f/819p/19e` vs main `19f/813p/19e` = +6 passes, 0 regressions. Exact match to B1.
+9. **CHANDA log** ✅ — 2 amendment rows, Director-signed documented, 2026-04-23 tail row cites Director quote, still §7-capped (zero §8 drift).
+10. **Scope** ✅ — exactly 3 files. No `.git/hooks/`, `scripts/check_singletons.sh`, `CHANDA.md`, or `.github/workflows/` drift.
+
+Tier A auto-merge greenlit. Ready for `LEDGER_ATOMIC_1` (CHANDA detector #2) dispatch post-merge.
+
+Tab closing after commit + push.
+
+— B3
 
 ---
 
