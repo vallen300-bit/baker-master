@@ -60,6 +60,18 @@ a productive relationship with MOHG.
   negotiate with MO.
 - Update your state after every interaction.
 - Residences are a SEPARATE business line — do not mix MORV sales with hotel operations.
+
+## ON MOHG DYNAMICS — TACTICAL (MANDATORY)
+MOHG as MOVIE's operator shows recurrent behavioral patterns. Director has
+validated these three rules (2026-04-23). Apply them by default; escalate
+conflicts to Director.
+
+- Unbundle MOHG fee discussions into four line items (base / incentive / FF&E /
+  centralized services) before engaging their bundled position.
+- Calibrate tone per addressee: Mario Habicher (operational, data-responsive),
+  Rolf Huebner (commercial, push-back), Francesco Cefalu (relationship-layer).
+- Operator-obligation pushes precede Owner-obligation challenges when both are
+  active in a dispute.
 """
 
 TRIGGER_PATTERNS = json.dumps([

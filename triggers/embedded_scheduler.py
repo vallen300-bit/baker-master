@@ -643,6 +643,25 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info("Skipped: ai_head_weekly_audit (AI_HEAD_AUDIT_ENABLED=false)")
 
+    # BRIEF_MOVIE_AM_RETROFIT_1 D5: weekly MOVIE AM vault lint.
+    # Sunday 06:05 UTC — offset 5 min from ao_pm_lint to avoid vault-mirror
+    # contention. Env gate ``MOVIE_AM_LINT_ENABLED`` (default ``true``)
+    # allows kill-switch without redeploy. Separate job from ao_pm_lint so
+    # a failure on one doesn't mask the other.
+    _movie_lint_enabled = _os.environ.get("MOVIE_AM_LINT_ENABLED", "true").lower()
+    if _movie_lint_enabled not in ("false", "0", "no", "off"):
+        scheduler.add_job(
+            _run_movie_am_lint,
+            CronTrigger(day_of_week="sun", hour=6, minute=5, timezone="UTC"),
+            id="movie_am_lint",
+            name="MOVIE AM weekly vault lint (Sunday 06:05 UTC)",
+            coalesce=True, max_instances=1, replace_existing=True,
+            misfire_grace_time=3600,
+        )
+        logger.info("Registered: movie_am_lint (Sun 06:05 UTC)")
+    else:
+        logger.info("Skipped: movie_am_lint (MOVIE_AM_LINT_ENABLED=false)")
+
     # SOT_OBSIDIAN_1_PHASE_D: pull the baker-vault mirror so Cowork's
     # MCP vault-read tools stay fresh. Default 300 s, floor 60 s
     # enforced inside ``vault_mirror.sync_interval_seconds``.
@@ -798,6 +817,26 @@ def _run_ao_pm_lint():
         try:
             from triggers.sentinel_health import report_failure
             report_failure("ao_pm_lint", str(e))
+        except Exception:
+            pass
+
+
+def _run_movie_am_lint():
+    """BRIEF_MOVIE_AM_RETROFIT_1 D5: Run MOVIE AM vault lint and log results."""
+    try:
+        from scripts.lint_movie_am_vault import main as _movie_lint_main
+        _movie_lint_main()
+        logger.info("movie_am_lint: completed")
+        try:
+            from triggers.sentinel_health import report_success
+            report_success("movie_am_lint", {})
+        except Exception:
+            pass
+    except Exception as e:
+        logger.error("movie_am_lint failed: %s", e)
+        try:
+            from triggers.sentinel_health import report_failure
+            report_failure("movie_am_lint", str(e))
         except Exception:
             pass
 
