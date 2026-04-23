@@ -235,32 +235,49 @@ def publish_event(
                              dedup_result, "review_needed")
             # Fall through to normal insert (Director reviews later)
 
-    # Insert the event
+    # Insert the event — atomic with baker_actions ledger row (CHANDA inv #2).
+    from invariant_checks.ledger_atomic import atomic_director_action
+
     conn = _get_conn()
     if not conn:
         logger.error("cortex.publish_event: no DB connection")
         return None
+
+    event_id: Optional[int] = None
     try:
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO cortex_events
-                (event_type, category, source_agent, source_type,
-                 source_ref, payload, canonical_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            RETURNING id
-        """, (
-            event_type, category, source_agent, source_type,
-            source_ref, json.dumps(payload), canonical_id,
-        ))
-        event_id = cur.fetchone()[0]
-        conn.commit()
-        cur.close()
+        with atomic_director_action(
+            conn,
+            action_type=f"cortex:{event_type}:{category}",
+            payload={
+                "source_agent": source_agent,
+                "summary": str(payload.get("description", payload.get("decision", "")))[:200],
+            },
+            trigger_source=source_agent,
+        ) as cur:
+            cur.execute("""
+                INSERT INTO cortex_events
+                    (event_type, category, source_agent, source_type,
+                     source_ref, payload, canonical_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (
+                event_type, category, source_agent, source_type,
+                source_ref, json.dumps(payload), canonical_id,
+            ))
+            event_id = cur.fetchone()[0]
+
         logger.info(
             "cortex event #%d: %s/%s by %s (canonical=%s)",
             event_id, event_type, category, source_agent, canonical_id
         )
+    except Exception as e:
+        logger.error("cortex.publish_event atomic block failed: %s", e)
+        _put_conn(conn)
+        return None
 
-        # Post-write: upsert vector (so future writes can dedup against this one)
+    # Post-write side-effects (non-blocking — cortex_events + baker_actions
+    # already atomically committed above; these are best-effort enrichments).
+    try:
         if dedup_category and canonical_id:
             try:
                 upsert_obligation_vector(
@@ -273,25 +290,12 @@ def publish_event(
             except Exception as e:
                 logger.warning("Post-write vector upsert failed (non-fatal): %s", e)
 
-        # Existing post-write hooks (non-blocking)
-        try:
-            _audit_to_baker_actions(event_type, category, source_agent, payload, event_id)
-        except Exception as e:
-            logger.warning("cortex audit failed (non-fatal): %s", e)
-
         try:
             _auto_queue_insights(category, source_agent, payload, canonical_id)
         except Exception as e:
             logger.warning("cortex insights queue failed (non-fatal): %s", e)
 
         return event_id
-    except Exception as e:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-        logger.error("cortex.publish_event failed: %s", e)
-        return None
     finally:
         _put_conn(conn)
 
@@ -330,43 +334,6 @@ def _log_dedup_event(
         except Exception:
             pass
         logger.warning("_log_dedup_event failed: %s", e)
-    finally:
-        _put_conn(conn)
-
-
-# ─── Audit Trail ───
-
-def _audit_to_baker_actions(
-    event_type: str, category: str, source_agent: str,
-    payload: dict, event_id: int,
-):
-    """Log every Cortex event to baker_actions for audit trail."""
-    conn = _get_conn()
-    if not conn:
-        return
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO baker_actions
-                (action_type, payload, trigger_source, success)
-            VALUES (%s, %s, %s, TRUE)
-        """, (
-            f"cortex:{event_type}:{category}",
-            json.dumps({
-                "event_id": event_id,
-                "source_agent": source_agent,
-                "summary": str(payload.get("description", payload.get("decision", "")))[:200],
-            }),
-            source_agent,
-        ))
-        conn.commit()
-        cur.close()
-    except Exception as e:
-        try:
-            conn.rollback()
-        except Exception:
-            pass
-        logger.warning("_audit_to_baker_actions failed: %s", e)
     finally:
         _put_conn(conn)
 
