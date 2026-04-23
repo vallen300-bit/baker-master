@@ -21,7 +21,17 @@ _scheduler: Optional[BackgroundScheduler] = None
 
 
 def _job_listener(event):
-    """Log job execution results."""
+    """Log job execution results AND persist to scheduler_executions.
+
+    BRIEF_AUDIT_SENTINEL_1: every EVENT_JOB_EXECUTED / EVENT_JOB_ERROR
+    writes a row to scheduler_executions. The sentinel uses this table
+    to verify ai_head_weekly_audit (and, Phase 2, every other job) fired
+    in its expected window.
+
+    DB write is wrapped in try/except — scheduler must never crash on
+    observability side-effect. Silent log + continue on DB unavailable.
+    """
+    # Existing log behavior — KEEP as-is
     if event.exception:
         logger.error(
             f"Job {event.job_id} failed: {event.exception}",
@@ -29,6 +39,40 @@ def _job_listener(event):
         )
     else:
         logger.info(f"Job {event.job_id} completed successfully")
+
+    # New: persist to scheduler_executions (fault-tolerant)
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            status = "error" if event.exception else "executed"
+            error_msg = str(event.exception)[:1000] if event.exception else None
+            cur.execute(
+                """
+                INSERT INTO scheduler_executions
+                    (job_id, fired_at, completed_at, status, error_msg)
+                VALUES (%s, %s, NOW(), %s, %s)
+                """,
+                (event.job_id, event.scheduled_run_time, status, error_msg),
+            )
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"scheduler_executions write failed for {event.job_id}: {e}")
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        # Catastrophic failure (import, singleton, etc.) — log and continue.
+        # Scheduler must not crash because of observability.
+        logger.warning(f"_job_listener DB path failed ({event.job_id}): {e}")
 
 
 def _register_jobs(scheduler: BackgroundScheduler):
@@ -662,6 +706,28 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info("Skipped: movie_am_lint (MOVIE_AM_LINT_ENABLED=false)")
 
+    # BRIEF_AUDIT_SENTINEL_1: sentinel for ai_head_weekly_audit first-fire
+    # observability. Fires Mon 10:00 UTC (1h after audit). Verifies that
+    # (a) a row landed in ai_head_audits today, and (b) a row landed in
+    # scheduler_executions for job_id='ai_head_weekly_audit'. Either
+    # missing → Slack DM to D0AFY28N030. Env gate AI_HEAD_AUDIT_SENTINEL_ENABLED
+    # (default true).
+    _sentinel_enabled = _os.environ.get(
+        "AI_HEAD_AUDIT_SENTINEL_ENABLED", "true"
+    ).lower()
+    if _sentinel_enabled not in ("false", "0", "no", "off"):
+        scheduler.add_job(
+            _ai_head_audit_sentinel_job,
+            CronTrigger(day_of_week="mon", hour=10, minute=0, timezone="UTC"),
+            id="ai_head_audit_sentinel",
+            name="AI Head weekly audit sentinel (Monday 10:00 UTC)",
+            coalesce=True, max_instances=1, replace_existing=True,
+            misfire_grace_time=3600,
+        )
+        logger.info("Registered: ai_head_audit_sentinel (Mon 10:00 UTC)")
+    else:
+        logger.info("Skipped: ai_head_audit_sentinel (AI_HEAD_AUDIT_SENTINEL_ENABLED=false)")
+
     # SOT_OBSIDIAN_1_PHASE_D: pull the baker-vault mirror so Cowork's
     # MCP vault-read tools stay fresh. Default 300 s, floor 60 s
     # enforced inside ``vault_mirror.sync_interval_seconds``.
@@ -768,6 +834,26 @@ def _ai_head_weekly_audit_job():
         logger.info("ai_head_weekly_audit: %s", result)
     except Exception as e:
         logger.warning("ai_head_weekly_audit: run raised: %s", e)
+
+
+def _ai_head_audit_sentinel_job():
+    """APScheduler wrapper: Monday 10:00 UTC sentinel for ai_head_weekly_audit.
+
+    BRIEF_AUDIT_SENTINEL_1. Runs the sentinel check logic; swallows top-
+    level exceptions as WARN so a single bad week doesn't knock out the
+    scheduler. Dedupe: checks scheduler_executions for prior 'alerted'
+    row in last 24h for this sentinel's own job_id before posting again.
+    """
+    try:
+        from triggers.audit_sentinel import run_sentinel_check
+    except Exception as e:
+        logger.error("ai_head_audit_sentinel: import failed: %s", e)
+        return
+    try:
+        result = run_sentinel_check()
+        logger.info("ai_head_audit_sentinel: %s", result)
+    except Exception as e:
+        logger.warning("ai_head_audit_sentinel: run raised: %s", e)
 
 
 def _vault_sync_tick_job():
