@@ -1,0 +1,33 @@
+# Baker people registry — single source of truth for natural persons.
+#
+# Consumers (future, not in this brief):
+#   kbl/people_registry.py                  (validator + alias index)
+#   scripts/check_wiki_links.py             (resolve [[wiki/people/<slug>]])
+#   Step-1 classifier + Step-5 scope filter (2-way cross-ref with matters)
+#
+# Schema: mirrors slugs.yml. Loaded by future kbl/people_registry.py with
+# load-time validation failing loudly on any duplicate slug / alias.
+#
+# Slug format (VAULT.md §3.2):
+#   firstname-lastname, lowercase, kebab-case, ASCII-stripped diacritics.
+#   Collision: append middle-initial, then institution.
+#
+# Lifecycle (same as slugs.yml):
+#   active  — offered to model in prompts, accepted by validator, routed
+#   retired — NOT offered, still accepted (historical signals), not routed
+#   draft   — NOT offered, NOT accepted (in-session candidates only)
+#
+# Version bumps on any non-cosmetic change.
+version: 1
+updated_at: 2026-04-23
+
+people:
+  - slug: dimitry-vallen
+    status: active
+    description: "Director of Brisen Group. Owner + principal decision-maker."
+    aliases: [director, dimitry, "dimitry vallen"]
+
+  - slug: andrey-oskolkov
+    status: active
+    description: "Principal investor (Aelio Holding Ltd). 22-year relationship with Director. Matter: ao."
+    aliases: [ao, oskolkov, andrey, eli]
