@@ -6,8 +6,59 @@
 **Branch:** `chanda-enforcement-1` → commit `ed8938c`
 **Brief:** `briefs/BRIEF_CHANDA_ENFORCEMENT_1.md` (shipped in commit `12afa9f`)
 **Ship report:** `briefs/_reports/B1_chanda_enforcement_1_20260423.md` (commit `d66ddbd`)
+**Status:** CLOSED — **APPROVE PR #45**, Tier A auto-merge greenlit. Report at `briefs/_reports/B3_pr45_chanda_enforcement_1_review_20260423.md`.
 
 **Supersedes:** prior `BRIEF_AI_HEAD_WEEKLY_AUDIT_1` B3 review task — shipped as PR #44, merged `63af5b1` 2026-04-22. Mailbox cleared.
+
+---
+
+## B3 dispatch back (2026-04-23)
+
+**APPROVE PR #45** — diff clean, 8/8 structural checks pass, out-of-scope check clean, regression delta diagnosed as **pre-existing on main**.
+
+Full report: `briefs/_reports/B3_pr45_chanda_enforcement_1_review_20260423.md`.
+
+### Byte-perfect match
+`(echo ...; sed -n '37,110p' ...) | diff - CHANDA_enforcement.md` → exit=0. Empty diff.
+
+### 8 structural checks — all green
+File 4822 bytes / H1 match / 7 `## §` headings / amendment-log tail / 33 table rows / 76 lines / clean `git status` / 0 `§8` mentions.
+
+### Out-of-scope creep — clean
+`gh pr diff 45 --name-only` → `CHANDA_enforcement.md` only. New-file add. Zero deletion lines.
+
+### Regression delta — PRE-EXISTING (not PR #45)
+
+```
+=== BRANCH chanda-enforcement-1 @ ed8938c ===
+20 failed, 801 passed, 21 skipped, 19 errors in 17.11s
+=== MAIN @ 27cdeaa ===
+20 failed, 801 passed, 21 skipped, 19 errors in 10.96s
+=== PARENT OF PR #44 @ 1c276d7 ===
+16 failed, 818 passed, 21 skipped, 19 warnings in 12.44s
+```
+
+Branch == main (PR #45 is .md-only). Main vs PR #44 parent: −17 pass / +4 fail / +19 err / −19 warn. **PR #44 (`63af5b1`) is the regression source, not PR #45.**
+
+### ⚠️ Side-flag for AI Head — PR #44 regression
+
+- `tests/test_mcp_vault_tools.py` passes `26/26` in isolation but errors in full suite → global import side-effect leakage from a PR #44-touched module (`memory/store_back.py` or `outputs/slack_notifier.py` most likely).
+- New failures also in `test_scan_endpoint.py` (3), `test_scan_prompt.py` (1), `test_clickup_*.py` (6), `test_1m_storeback_verify.py` (4 — ModuleNotFoundError).
+- PR #44's own tests (`test_ai_head_weekly_audit.py`) pass 6/6 in isolation.
+
+**Recommendation:** separate brief `BRIEF_POST_PR44_TEST_REGRESSION_1` for cleanup. Does not block PR #45.
+
+### Cortex-launch surface post-merge
+- ✅ Full crash-recovery (PRs #38 + #39 + #41)
+- ✅ YAML coercion (PR #40)
+- ✅ Step 5 + 7 observability (PRs #42 + #43)
+- ✅ AI Head weekly audit job registered (PR #44)
+- ✅ CHANDA enforcement matrix live at root (PR #45)
+- ⚠️ Test-suite regression from PR #44 needs cleanup — flagged above
+
+Tab closing after commit + push.
+
+— B3
 
 ---
 
