@@ -7994,7 +7994,7 @@ def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
     import json as _json
 
     from orchestrator.capability_router import CapabilityRouter, RoutingPlan
-    from orchestrator.capability_runner import CapabilityRunner
+    from orchestrator.capability_runner import CapabilityRunner, PM_REGISTRY
 
     # Build routing plan
     plan = intent_or_plan.get("plan") if isinstance(intent_or_plan, dict) else None
@@ -8011,6 +8011,26 @@ def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
 
     cap_slugs = [c.slug for c in plan.capabilities]
     logger.info(f"Capability routing: mode={plan.mode}, capabilities={cap_slugs}")
+
+    # PM-SIDEBAR-STATE-WRITE-1 D3: tag conversation_memory with capability_slug
+    # when a client_pm capability handles the scan, so the backfill script and
+    # downstream queries can isolate PM history from other sidebar traffic.
+    if (plan.mode == "fast" and len(plan.capabilities) == 1
+            and plan.capabilities[0].slug in PM_REGISTRY):
+        try:
+            req.project = plan.capabilities[0].slug
+        except Exception:
+            # ScanRequest is pydantic — mutation allowed. SpecialistScanRequest
+            # (converted to ScanRequest upstream at :5491) may be frozen in rare
+            # cases; swallow to preserve existing behavior.
+            pass
+    elif plan.mode == "delegate":
+        _pm_in_plan = [s for s in cap_slugs if s in PM_REGISTRY]
+        if _pm_in_plan:
+            try:
+                req.project = _pm_in_plan[0]
+            except Exception:
+                pass
 
     # Update baker_task with capability info
     try:
@@ -8120,6 +8140,30 @@ def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
                 except Exception as _e:
                     logger.warning(f"Capability run logging failed (non-fatal): {_e}")
 
+            # PM-SIDEBAR-STATE-WRITE-1 D2: fire-and-forget PM state extraction
+            # for client_pm capabilities on the fast path. Same Opus pipeline as
+            # CapabilityRunner._auto_update_pm_state, tagged mutation_source=
+            # 'sidebar' per Amendment H §H4 surface attribution.
+            if ar and ar.answer and cap.slug in PM_REGISTRY:
+                def _sidebar_state_write():
+                    try:
+                        from orchestrator.capability_runner import (
+                            extract_and_update_pm_state,
+                        )
+                        extract_and_update_pm_state(
+                            pm_slug=cap.slug,
+                            question=req.question,
+                            answer=ar.answer,
+                            mutation_source="sidebar",
+                        )
+                    except Exception as _e:
+                        logger.warning(
+                            f"Sidebar state-write failed [{cap.slug}] (non-fatal): {_e}"
+                        )
+
+                import threading as _threading
+                _threading.Thread(target=_sidebar_state_write, daemon=True).start()
+
             # A8: Extract actionable tasks from specialist output (background, non-blocking)
             if ar and ar.answer and len(ar.answer) >= 200 and cap.slug not in ("decomposer", "synthesizer"):
                 try:
@@ -8184,6 +8228,36 @@ def _scan_chat_capability(req, start: float, intent_or_plan: dict = None,
                     )
             except Exception as _e:
                 logger.warning(f"Delegate logging failed (non-fatal): {_e}")
+
+            # PM-SIDEBAR-STATE-WRITE-1 D2: delegate-path state-write. Runs the
+            # same Opus extraction for every client_pm capability referenced by
+            # the decomposer's plan. Tagged mutation_source='decomposer' per
+            # Amendment H §H4 — a distinct surface from 'sidebar' even though
+            # both are served from this dashboard route.
+            try:
+                pm_slugs_in_plan = [s for s in cap_slugs if s in PM_REGISTRY]
+                if result and result.answer and pm_slugs_in_plan:
+                    def _delegate_state_write():
+                        try:
+                            from orchestrator.capability_runner import (
+                                extract_and_update_pm_state,
+                            )
+                            for _slug in pm_slugs_in_plan:
+                                extract_and_update_pm_state(
+                                    pm_slug=_slug,
+                                    question=req.question,
+                                    answer=result.answer,
+                                    mutation_source="decomposer",
+                                )
+                        except Exception as _e:
+                            logger.warning(
+                                f"Delegate state-write failed (non-fatal): {_e}"
+                            )
+                    import threading as _threading
+                    _threading.Thread(target=_delegate_state_write, daemon=True).start()
+            except Exception:
+                pass
+
             yield "data: [DONE]\n\n"
 
         return StreamingResponse(_delegate_stream(), media_type="text/event-stream")

@@ -361,6 +361,25 @@ def check_new_plaud_recordings():
             except Exception as _e:
                 logger.warning(f"Failed to store Plaud transcript {source_id} in PostgreSQL (non-fatal): {_e}")
 
+            # BRIEF_PM_SIDEBAR_STATE_WRITE_1 D6: relevance-on-ingest sentinel.
+            try:
+                from orchestrator.pm_signal_detector import (
+                    detect_relevant_pms_meeting, flag_pm_signal,
+                )
+                _title = metadata.get("meeting_title", "") or ""
+                _participants = metadata.get("participants", "") or ""
+                for _pm_slug in detect_relevant_pms_meeting(
+                    title=_title, participants=_participants,
+                ):
+                    flag_pm_signal(
+                        _pm_slug, "meeting",
+                        source=f"plaud: {_title[:120]}",
+                        summary=(formatted.get("text") or "")[:280],
+                        push_slack=True,
+                    )
+            except Exception as _pm_e:
+                logger.debug(f"meeting signal detection failed (non-fatal): {_pm_e}")
+
             # Record contact interactions from participants
             try:
                 from memory.store_back import SentinelStoreBack
@@ -529,6 +548,26 @@ def backfill_plaud():
             )
             trigger_state.mark_processed("meeting", source_id)
             ingested += 1
+
+            # BRIEF_PM_SIDEBAR_STATE_WRITE_1 D6: relevance-on-ingest sentinel
+            # (backfill path — regex-only, no LLM; Lesson #25 respected).
+            try:
+                from orchestrator.pm_signal_detector import (
+                    detect_relevant_pms_meeting, flag_pm_signal,
+                )
+                _title = metadata.get("meeting_title", "") or ""
+                _participants = metadata.get("participants", "") or ""
+                for _pm_slug in detect_relevant_pms_meeting(
+                    title=_title, participants=_participants,
+                ):
+                    flag_pm_signal(
+                        _pm_slug, "meeting",
+                        source=f"plaud: {_title[:120]}",
+                        summary=(formatted.get("text") or "")[:280],
+                        push_slack=True,
+                    )
+            except Exception as _pm_e:
+                logger.debug(f"meeting signal detection failed (non-fatal): {_pm_e}")
 
             # Deadline extraction is cheap (no LLM) — safe for backfill
             try:

@@ -185,6 +185,139 @@ PM_REGISTRY = {
 }
 
 
+def extract_and_update_pm_state(
+    pm_slug: str,
+    question: str,
+    answer: str,
+    mutation_source: str = "auto",
+    conversation_id: "int | None" = None,
+) -> "dict | None":
+    """PM-FACTORY: Extract state + wiki insights from a Q/A pair and persist.
+
+    Public entry point for sidebar state-write (mutation_source='sidebar'),
+    backfill script (mutation_source='backfill_YYYY-MM-DD'), decomposer
+    delegate path (mutation_source='decomposer'), and the capability runner
+    internal loop (mutation_source='opus_auto'). Non-fatal — logs warning on
+    any error and returns None.
+
+    BRIEF_PM_SIDEBAR_STATE_WRITE_1 D1. CROSS-PM-SIGNALS block mirrored verbatim
+    from the prior CapabilityRunner._auto_update_pm_state (PM-FACTORY v3).
+    """
+    import json as _json
+
+    cfg = PM_REGISTRY.get(pm_slug)
+    if not cfg:
+        return None
+
+    try:
+        extraction_files = cfg.get("extraction_view_files", [])
+        view_file_list = ", ".join(extraction_files) if extraction_files else "view files"
+        label = cfg.get("state_label", pm_slug)
+        extraction_system = cfg.get(
+            "extraction_system",
+            f"Extract structured state updates AND wiki-worthy insights from "
+            f"this {label} interaction. Return valid JSON only. No markdown fences."
+        )
+        state_schema = cfg.get(
+            "extraction_state_schema",
+            "State updates: {\"sub_matters\": {}, \"open_actions\": [], "
+            "\"red_flags\": [], \"relationship_state\": {}, \"summary\": \"...\"}"
+        )
+
+        # Dedup context + pending-insight persistence are instance helpers on
+        # CapabilityRunner. Call via a throwaway runner — they're safe without
+        # full run_streaming state.
+        _runner = CapabilityRunner()
+        existing_context = _runner._get_extraction_dedup_context(pm_slug)
+
+        claude = anthropic.Anthropic(api_key=config.claude.api_key)
+        resp = claude.messages.create(
+            model="claude-opus-4-6",
+            max_tokens=700,
+            system=extraction_system,
+            messages=[{"role": "user", "content": (
+                f"Extract state updates from this {label} interaction.\n\n"
+                f"Question: {question[:500]}\n\nAnswer: {answer[:3000]}\n\n"
+                f"Return JSON with TWO sections:\n"
+                f"1. {state_schema}\n"
+                f"2. Wiki insights — facts or rules discovered that should become PERMANENT "
+                f"knowledge in the view files. Only include if:\n"
+                f"   - It's a confirmed fact, not speculation\n"
+                f"   - It would be useful in future PM invocations\n"
+                f"   - It's not already obvious from the question context\n"
+                f"   - It's >50 characters (no trivial observations)\n\n"
+                f"Confidence levels:\n"
+                f"   - high = directly stated by Director OR confirmed by document\n"
+                f"   - medium = inferred from Q&A pattern with supporting evidence\n"
+                f"   - low = speculative or single-instance observation (will be dropped)\n\n"
+                f"Available view files: {view_file_list}\n\n"
+                f"{existing_context}"
+                f"Return: {{\"sub_matters\": {{}}, \"open_actions\": [], \"red_flags\": [], "
+                f"\"relationship_state\": {{}}, \"summary\": \"...\", "
+                f"\"wiki_insights\": [{{\"insight\": \"...\", \"target_file\": \"...\", "
+                f"\"target_section\": \"...\", \"confidence\": \"high|medium\"}}]}}\n"
+                f"Return empty wiki_insights array if nothing wiki-worthy.\n"
+                f"Only include fields with NEW information. Be concise."
+            )}],
+        )
+        raw = resp.content[0].text.strip()
+        if raw.startswith("```"):
+            raw = "\n".join(raw.split("\n")[1:-1])
+        updates = _json.loads(raw)
+
+        wiki_insights = updates.pop("wiki_insights", [])
+        summary = updates.pop("summary", f"{label} interaction")
+
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        store.update_pm_project_state(
+            pm_slug, updates, summary, question[:500],
+            mutation_source=mutation_source,
+        )
+        logger.info(
+            f"PM state ({pm_slug}) updated [{mutation_source}]: {summary[:80]}"
+        )
+
+        if wiki_insights and isinstance(wiki_insights, list):
+            _runner._store_pending_insights(pm_slug, wiki_insights, question, summary)
+
+        # CROSS-PM-SIGNALS: Auto-signal peer PMs on new red flags
+        # (preserved verbatim from _auto_update_pm_state:1715-1736).
+        import re as _re
+        peer_pms = cfg.get("peer_pms", [])
+        new_flags = updates.get("red_flags", [])
+        if peer_pms and new_flags:
+            signal_count = 0
+            for peer in peer_pms:
+                peer_kw = PM_REGISTRY.get(peer, {}).get("signal_keyword_patterns", [])
+                for flag in new_flags:
+                    if signal_count >= 3:
+                        break
+                    flag_str = str(flag)
+                    for pattern in peer_kw:
+                        if _re.search(pattern, flag_str, _re.IGNORECASE):
+                            store.create_cross_pm_signal(
+                                source_pm=pm_slug, target_pm=peer,
+                                signal_type="red_flag",
+                                signal_text=flag_str[:500],
+                                context=f"Auto-detected from {label} state update",
+                            )
+                            signal_count += 1
+                            break  # one signal per flag per peer
+
+        return {
+            "updates": updates,
+            "summary": summary,
+            "wiki_insights_count": len(wiki_insights),
+            "mutation_source": mutation_source,
+        }
+    except Exception as e:
+        logger.debug(
+            f"extract_and_update_pm_state failed [{pm_slug}][{mutation_source}]: {e}"
+        )
+        return None
+
+
 def extract_correction_from_feedback(task: dict):
     """CORRECTION-MEMORY-1: Extract a learned rule from Director feedback.
     Called async (fire-and-forget) when Director rejects/revises a task with a comment.
@@ -1639,104 +1772,16 @@ class CapabilityRunner:
 
     def _auto_update_pm_state(self, pm_slug: str, question: str, answer: str):
         """PM-FACTORY: Auto-update PM state after each run via Anthropic Opus.
-        PM-KNOWLEDGE-ARCH-1: Also extract wiki-worthy insights for pending review."""
-        try:
-            import json
-            config = PM_REGISTRY.get(pm_slug)
-            if not config:
-                return
+        PM-KNOWLEDGE-ARCH-1: Also extract wiki-worthy insights for pending review.
 
-            existing_context = self._get_extraction_dedup_context(pm_slug)
-
-            extraction_files = config.get("extraction_view_files", [])
-            view_file_list = ", ".join(extraction_files) if extraction_files else "view files"
-            label = config.get("state_label", pm_slug)
-
-            extraction_system = config.get(
-                "extraction_system",
-                f"Extract structured state updates AND wiki-worthy insights from "
-                f"this {label} interaction. Return valid JSON only. No markdown fences."
-            )
-            state_schema = config.get(
-                "extraction_state_schema",
-                "State updates: {\"sub_matters\": {}, \"open_actions\": [], "
-                "\"red_flags\": [], \"relationship_state\": {}, \"summary\": \"...\"}"
-            )
-
-            resp = self.claude.messages.create(
-                model="claude-opus-4-6",
-                max_tokens=700,
-                system=extraction_system,
-                messages=[{"role": "user", "content": (
-                    f"Extract state updates from this {label} interaction.\n\n"
-                    f"Question: {question[:500]}\n\nAnswer: {answer[:3000]}\n\n"
-                    f"Return JSON with TWO sections:\n"
-                    f"1. {state_schema}\n"
-                    f"2. Wiki insights — facts or rules discovered that should become PERMANENT "
-                    f"knowledge in the view files. Only include if:\n"
-                    f"   - It's a confirmed fact, not speculation\n"
-                    f"   - It would be useful in future PM invocations\n"
-                    f"   - It's not already obvious from the question context\n"
-                    f"   - It's >50 characters (no trivial observations)\n\n"
-                    f"Confidence levels:\n"
-                    f"   - high = directly stated by Director OR confirmed by document\n"
-                    f"   - medium = inferred from Q&A pattern with supporting evidence\n"
-                    f"   - low = speculative or single-instance observation (will be dropped)\n\n"
-                    f"Available view files: {view_file_list}\n\n"
-                    f"{existing_context}"
-                    f"Return: {{\"sub_matters\": {{}}, \"open_actions\": [], \"red_flags\": [], "
-                    f"\"relationship_state\": {{}}, \"summary\": \"...\", "
-                    f"\"wiki_insights\": [{{\"insight\": \"...\", \"target_file\": \"...\", "
-                    f"\"target_section\": \"...\", \"confidence\": \"high|medium\"}}]}}\n"
-                    f"Return empty wiki_insights array if nothing wiki-worthy.\n"
-                    f"Only include fields with NEW information. Be concise."
-                )}],
-            )
-            raw = resp.content[0].text.strip()
-            if raw.startswith("```"):
-                raw = "\n".join(raw.split("\n")[1:-1])
-            updates = json.loads(raw)
-
-            # CRITICAL: Pop wiki insights BEFORE state update
-            wiki_insights = updates.pop("wiki_insights", [])
-            summary = updates.pop("summary", f"{label} interaction")
-
-            # State update
-            from memory.store_back import SentinelStoreBack
-            store = SentinelStoreBack._get_global_instance()
-            store.update_pm_project_state(pm_slug, updates, summary, question[:500],
-                                          mutation_source="opus_auto")
-            logger.info(f"PM state ({pm_slug}) auto-updated (Opus): {summary}")
-
-            # Store wiki insights as pending
-            if wiki_insights and isinstance(wiki_insights, list):
-                self._store_pending_insights(pm_slug, wiki_insights, question, summary)
-
-            # CROSS-PM-SIGNALS: Auto-signal peer PMs on new red flags
-            import re as _re
-            peer_pms = config.get("peer_pms", [])
-            new_flags = updates.get("red_flags", [])
-            if peer_pms and new_flags:
-                signal_count = 0
-                for peer in peer_pms:
-                    peer_kw = PM_REGISTRY.get(peer, {}).get("signal_keyword_patterns", [])
-                    for flag in new_flags:
-                        if signal_count >= 3:
-                            break
-                        flag_str = str(flag)
-                        for pattern in peer_kw:
-                            if _re.search(pattern, flag_str, _re.IGNORECASE):
-                                store.create_cross_pm_signal(
-                                    source_pm=pm_slug, target_pm=peer,
-                                    signal_type="red_flag",
-                                    signal_text=flag_str[:500],
-                                    context=f"Auto-detected from {label} state update",
-                                )
-                                signal_count += 1
-                                break  # one signal per flag per peer
-
-        except Exception as e:
-            logger.debug(f"PM state ({pm_slug}) auto-update failed (non-fatal): {e}")
+        BRIEF_PM_SIDEBAR_STATE_WRITE_1 D1: body moved to the module-level
+        ``extract_and_update_pm_state`` so sidebar + backfill can reuse it.
+        Thin wrapper preserves the historical call site in run_streaming.
+        """
+        extract_and_update_pm_state(
+            pm_slug=pm_slug, question=question, answer=answer,
+            mutation_source="opus_auto",
+        )
 
     def _get_extraction_dedup_context(self, pm_slug: str) -> str:
         """PM-KNOWLEDGE-ARCH-1: Build dedup + rejection context for Opus extraction.

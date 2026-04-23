@@ -234,6 +234,23 @@ def ingest_youtube_video(video_id: str, title: str = "", requested_by: str = "di
     except Exception as e:
         logger.warning(f"Failed to store YouTube transcript {source_id}: {e}")
 
+    # BRIEF_PM_SIDEBAR_STATE_WRITE_1 D6: relevance-on-ingest sentinel.
+    try:
+        from orchestrator.pm_signal_detector import (
+            detect_relevant_pms_meeting, flag_pm_signal,
+        )
+        for _pm_slug in detect_relevant_pms_meeting(
+            title=title or "", participants="",
+        ):
+            flag_pm_signal(
+                _pm_slug, "meeting",
+                source=f"youtube: {(title or '')[:120]}",
+                summary=(summary or "")[:280],
+                push_slack=True,
+            )
+    except Exception as _pm_e:
+        logger.debug(f"meeting signal detection failed (non-fatal): {_pm_e}")
+
     # 6. Mark processed (dedup)
     try:
         from triggers.state import trigger_state

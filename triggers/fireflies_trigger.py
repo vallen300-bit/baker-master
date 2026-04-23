@@ -340,6 +340,26 @@ def check_new_transcripts():
             except Exception as _e:
                 logger.warning(f"Failed to store transcript {source_id} in PostgreSQL (non-fatal): {_e}")
 
+            # BRIEF_PM_SIDEBAR_STATE_WRITE_1 D6: relevance-on-ingest sentinel.
+            # Regex-only detection + Slack DM to Director on PM match.
+            try:
+                from orchestrator.pm_signal_detector import (
+                    detect_relevant_pms_meeting, flag_pm_signal,
+                )
+                _title = metadata.get("meeting_title", "") or ""
+                _participants = metadata.get("participants", "") or ""
+                for _pm_slug in detect_relevant_pms_meeting(
+                    title=_title, participants=_participants,
+                ):
+                    flag_pm_signal(
+                        _pm_slug, "meeting",
+                        source=f"fireflies: {_title[:120]}",
+                        summary=(transcript.get("text") or "")[:280],
+                        push_slack=True,
+                    )
+            except Exception as _pm_e:
+                logger.debug(f"meeting signal detection failed (non-fatal): {_pm_e}")
+
             # INTERACTION-PIPELINE-1: Record contact interactions from meeting participants
             try:
                 from memory.store_back import SentinelStoreBack
@@ -523,6 +543,26 @@ def backfill_fireflies():
             except Exception as _e:
                 logger.warning(f"Backfill: failed to store transcript {source_id} in PostgreSQL (non-fatal): {_e}")
 
+            # BRIEF_PM_SIDEBAR_STATE_WRITE_1 D6: relevance-on-ingest sentinel
+            # (backfill route — same regex+Slack behavior as the live poll).
+            try:
+                from orchestrator.pm_signal_detector import (
+                    detect_relevant_pms_meeting, flag_pm_signal,
+                )
+                _title = metadata.get("meeting_title", "") or ""
+                _participants = metadata.get("participants", "") or ""
+                for _pm_slug in detect_relevant_pms_meeting(
+                    title=_title, participants=_participants,
+                ):
+                    flag_pm_signal(
+                        _pm_slug, "meeting",
+                        source=f"fireflies: {_title[:120]}",
+                        summary=(formatted.get("text") or "")[:280],
+                        push_slack=True,
+                    )
+            except Exception as _pm_e:
+                logger.debug(f"meeting signal detection failed (non-fatal): {_pm_e}")
+
             # OOM-FIX: Skip pipeline.run() for backfill transcripts.
             # Month-old meetings don't need real-time Claude/Gemini analysis.
             # New transcripts get full pipeline via 15-min check_new_transcripts() poll.
@@ -618,6 +658,26 @@ def backfill_transcripts_only():
             )
             if success:
                 stored += 1
+
+            # BRIEF_PM_SIDEBAR_STATE_WRITE_1 D6: relevance-on-ingest sentinel
+            # (one-shot backfill route).
+            try:
+                from orchestrator.pm_signal_detector import (
+                    detect_relevant_pms_meeting, flag_pm_signal,
+                )
+                _title = metadata.get("meeting_title", "") or ""
+                _participants = metadata.get("participants", "") or ""
+                for _pm_slug in detect_relevant_pms_meeting(
+                    title=_title, participants=_participants,
+                ):
+                    flag_pm_signal(
+                        _pm_slug, "meeting",
+                        source=f"fireflies: {_title[:120]}",
+                        summary=(formatted.get("text") or "")[:280],
+                        push_slack=True,
+                    )
+            except Exception as _pm_e:
+                logger.debug(f"meeting signal detection failed (non-fatal): {_pm_e}")
 
         logger.info(f"Transcript backfill complete: {stored} of {len(raw)} transcripts stored to PostgreSQL")
 

@@ -150,6 +150,9 @@ class SentinelStoreBack:
         # BRIEF_AUDIT_SENTINEL_1: Persistent APScheduler job execution log
         self._ensure_scheduler_executions_table()
 
+        # BRIEF_PM_SIDEBAR_STATE_WRITE_1 D4: backfill idempotency guard
+        self._ensure_pm_backfill_processed_table()
+
         # CORRECTION-MEMORY-1: Learned corrections from Director feedback
         self._ensure_baker_corrections_table()
 
@@ -578,6 +581,45 @@ class SentinelStoreBack:
             except Exception:
                 pass
             logger.warning(f"Could not ensure scheduler_executions table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_pm_backfill_processed_table(self):
+        """BRIEF_PM_SIDEBAR_STATE_WRITE_1 D4: idempotency guard for
+        scripts/backfill_pm_state.py.
+
+        Tracks which (pm_slug, conversation_id) pairs have been processed so
+        repeat runs of the backfill script are no-ops. PK enforces the
+        uniqueness; ON CONFLICT DO NOTHING on insert avoids races when two
+        backfill runs overlap.
+        """
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS pm_backfill_processed (
+                    pm_slug TEXT NOT NULL,
+                    conversation_id INTEGER NOT NULL,
+                    processed_at TIMESTAMPTZ DEFAULT NOW(),
+                    mutation_source TEXT,
+                    PRIMARY KEY (pm_slug, conversation_id)
+                )
+            """)
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_pm_backfill_processed_pm "
+                "ON pm_backfill_processed(pm_slug)"
+            )
+            conn.commit()
+            cur.close()
+            logger.info("pm_backfill_processed table verified")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure pm_backfill_processed table: {e}")
         finally:
             self._put_conn(conn)
 

@@ -115,8 +115,21 @@ def detect_relevant_pms_outbound(text: str) -> list:
     return hits
 
 
-def flag_pm_signal(pm_slug: str, channel: str, source: str, summary: str, timestamp=None):
-    """Update pm_project_state with an inbound signal. Non-fatal."""
+def flag_pm_signal(
+    pm_slug: str,
+    channel: str,
+    source: str,
+    summary: str,
+    timestamp=None,
+    push_slack: bool = False,
+):
+    """Update pm_project_state with an inbound signal. Non-fatal.
+
+    BRIEF_PM_SIDEBAR_STATE_WRITE_1 D6: accepts ``push_slack`` to optionally
+    DM the Director (channel D0AFY28N030) when the signal fires. Defaults to
+    False to preserve existing email/WhatsApp signal flow volume; only new
+    meeting-ingest wiring passes True.
+    """
     try:
         from memory.store_back import SentinelStoreBack
         store = SentinelStoreBack._get_global_instance()
@@ -140,5 +153,20 @@ def flag_pm_signal(pm_slug: str, channel: str, source: str, summary: str, timest
             mutation_source=f"pm_signal_{channel}",
         )
         logger.info(f"PM signal flagged [{pm_slug}][{channel}]: {source}")
+
+        if push_slack:
+            try:
+                from outputs.slack_notifier import post_to_channel
+                label = pm_slug.upper().replace("_", " ")
+                text = (
+                    f"*{label}*: new {channel} ingest relevant to active thread.\n"
+                    f"Source: {source[:160]}\n"
+                    f"Summary: {summary[:280]}"
+                )
+                post_to_channel(channel_id="D0AFY28N030", text=text)
+            except Exception as _slack_e:
+                logger.warning(
+                    f"PM signal Slack push failed [{pm_slug}][{channel}]: {_slack_e}"
+                )
     except Exception as e:
         logger.warning(f"PM signal flag failed [{pm_slug}]: {e}")
