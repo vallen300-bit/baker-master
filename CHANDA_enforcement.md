@@ -30,7 +30,7 @@ Breach response is per-tier, not per-invariant. Predictable.
 | 1b | Cold-start (zero Gold) handling | critical | runtime gate | if `gold_count < N` → flag confidence-lowered; continue. N deferred. |
 | 2 | Ledger write atomic with Director action | critical | runtime DB txn | wrap ratify + ledger in same transaction |
 | 3 | Step 1 reads hot.md AND ledger every run | critical | runtime assert | log both file opens; verify at pipeline end |
-| 4 | `author: director` files untouched by agents | critical | pre-commit hook | scan diff for frontmatter `author: director`; reject |
+| 4 | `author: director` files untouched by agents | critical | commit-msg hook | scan diff for frontmatter `author: director`; reject |
 | 5 | Every wiki file has frontmatter | warn | static scan | quarantine un-frontmattered files; warn, don't halt |
 | 6 | Pipeline never skips Step 6 (Cross-link) | critical | runtime assert | Step 6 counter check at pipeline end |
 | 7 | Automated alerts are suggestions, never overrides | policy | architectural | alerts enter a queue; PR review checks no actuator path |
