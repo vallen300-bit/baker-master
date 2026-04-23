@@ -1,0 +1,35 @@
+# Baker entities registry — single source of truth for legal/corporate actors.
+#
+# Consumers (future, not in this brief):
+#   kbl/entity_registry.py                  (validator + alias index)
+#   scripts/check_wiki_links.py             (resolve [[wiki/entities/<slug>]])
+#   Step-1 classifier + Step-5 scope filter (cross-ref with matters + people)
+#
+# Schema: mirrors slugs.yml.
+#
+# Slug format (VAULT.md §3.3):
+#   Short canonical form preferred (aelio, aukera, mohg).
+#   Long-form acceptable for disambiguation (brisen-capital-sa vs brisen-development-gmbh).
+#
+# Lifecycle (same as slugs.yml):
+#   active | retired | draft
+#
+# Version bumps on any non-cosmetic change.
+version: 1
+updated_at: 2026-04-23
+
+entities:
+  - slug: brisen-capital-sa
+    status: active
+    description: "Brisen Capital SA — Geneva holding company, Brisen Group parent."
+    aliases: [brisen-capital, bcsa]
+
+  - slug: brisen-development-gmbh
+    status: active
+    description: "Brisen Development GmbH — Vienna operating company, real estate development."
+    aliases: [brisen-development, bdgmbh]
+
+  - slug: aelio-holding-ltd
+    status: active
+    description: "Aelio Holding Ltd — Cyprus-based investment vehicle linked to Andrey Oskolkov."
+    aliases: [aelio, aelios]
