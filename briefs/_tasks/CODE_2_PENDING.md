@@ -1,121 +1,133 @@
-# CODE_2_PENDING — CAPABILITY_THREADS_1 fix-back — 2026-04-24
+# CODE_2_PENDING — PROACTIVE_PM_SENTINEL_1 — 2026-04-24
 
 **Dispatcher:** AI Head #2 (Team 2)
 **Working dir:** `~/bm-b2`
-**Target branch:** `capability-threads-1` (continue, DO NOT reset)
-**Parent PR:** https://github.com/vallen300-bit/baker-master/pull/57 (HOLD — security-review finding below)
-**Complexity:** Trivial (~5 min — 3-line patch)
+**Brief:** `briefs/BRIEF_PROACTIVE_PM_SENTINEL_1.md` (1507 lines — read end-to-end before implementing)
+**Target branch:** `proactive-pm-sentinel-1`
+**Complexity:** Medium–High (~11–17h)
 
-**Context:** PR #57 passed ship gate + regression but failed `/security-review`. Three new `@app.*` decorators were registered bare. Fix on same branch, same PR, single atomic commit. No new brief — this mailbox IS the brief.
+**Supersedes:** prior `CAPABILITY_THREADS_1` + fix-back task (shipped as PR #57, merged squash `a7a437c` 2026-04-24 09:00 UTC, deploy verified green). Mailbox reset.
 
----
-
-## Finding (HIGH × 3, same root cause)
-
-The three new `/api/pm/threads/*` endpoints you added in `outputs/dashboard.py` omit `dependencies=[Depends(verify_api_key)]`. Every other `/api/*` route in the file enforces it (line 62 `verify_api_key` helper; siblings at 646, 1017, 1058, 1118, 1154, 1209 …). The endpoints are reachable unauthenticated on `baker-master.onrender.com`.
-
-Impact:
-- `GET /api/pm/threads/{pm_slug}` — leaks `topic_summary` (verbatim Q+A preview) for any PM in `PM_REGISTRY`.
-- `GET /api/pm/threads/{pm_slug}/{thread_id}/turns` — leaks full `question`/`answer` text, 50 turns per request.
-- `POST /api/pm/threads/re-thread` — unauthenticated WRITE; mutates `capability_turns.thread_id` + `stitch_decision` JSONB; can create new `capability_threads` rows via `force_new=True` path. Corrupts the H4 audit-attribution lineage.
+**Context fit rationale (Director call):** B2 has fresh context on `capability_threads` + `capability_turns` + `pm_state_history` — the exact tables this brief reads from. Phase 3 is the downstream consumer of the Phase 2 schema B2 just built. "Just shipped" is advantage, not liability. Fallback B-code: B5 (dormant, would need fresh context).
 
 ---
 
-## Patch
+## ⚠️ B1 SITUATIONAL REVIEW REQUIRED
 
-**File:** `outputs/dashboard.py`
-**Lines to change:** 11161, 11198, 11232 (the three new decorators).
+Per the ratified B1 trigger rule (`memory/feedback_ai_head_b1_review_triggers.md` + `_ops/ideas/2026-04-24-b1-situational-review-trigger.md`), this PR hits **two** triggers:
 
-Current (verified on `origin/capability-threads-1`):
+- **§2.1 Authentication** — new `@app.post("/api/sentinel/feedback")` route with `dependencies=[Depends(verify_api_key)]`; new client-side auth-header handling through `bakerFetch()` wrapper; integration with Phase 2's auth-gated `/api/pm/threads/re-thread`.
+- **§2.2 Database migrations** — new `migrations/<YYYYMMDD>_sentinel_schema.sql` adds `capability_threads.sla_hours` + `alerts.dismiss_reason` + one partial index. Touches `capability_threads` which has >0 rows post-Phase-2.
 
-```python
-# line 11161
-@app.get("/api/pm/threads/{pm_slug}")
-async def get_pm_threads(pm_slug: str, limit: int = 20):
-
-# line 11198
-@app.get("/api/pm/threads/{pm_slug}/{thread_id}/turns")
-async def get_pm_thread_turns(pm_slug: str, thread_id: str, limit: int = 50):
-
-# line 11232
-@app.post("/api/pm/threads/re-thread")
-async def re_thread(req: Request):
-```
-
-After patch (match sibling convention — keep `tags=` if you prefer consistency with e.g. `tags=["capabilities"]` at 1209; not required):
-
-```python
-@app.get("/api/pm/threads/{pm_slug}", dependencies=[Depends(verify_api_key)])
-async def get_pm_threads(pm_slug: str, limit: int = 20):
-
-@app.get("/api/pm/threads/{pm_slug}/{thread_id}/turns", dependencies=[Depends(verify_api_key)])
-async def get_pm_thread_turns(pm_slug: str, thread_id: str, limit: int = 50):
-
-@app.post("/api/pm/threads/re-thread", dependencies=[Depends(verify_api_key)])
-async def re_thread(req: Request):
-```
-
-`Depends` + `verify_api_key` are already imported at module top (used by every other route — verify: `grep -n "from fastapi import" outputs/dashboard.py` and `grep -n "^async def verify_api_key" outputs/dashboard.py`). No new imports needed.
+**Flow:** B2 ships → AI Head #2 runs `/security-review` → **B1 second-pair-of-eyes review** (triggers §2.1 + §2.2) → merge only on BOTH green. Fix-backs route to B2 (implementation lane), never to B1.
 
 ---
 
-## Ship gate (condensed)
+## Why this brief
+
+Phase 3 of the **AO PM Continuity Program** (ratified 2026-04-23; source `/Users/dimitry/baker-vault/_ops/ideas/2026-04-23-ao-pm-continuity-program.md` §7, §10 Q7). Adds the *proactive voice* — AO PM speaks without being asked — plus a **smart triage surface** that turns every Director click into tuning signal via `baker_corrections`.
+
+**Program sequence:**
+- Phase 0 Amendment H — canonical 2026-04-23.
+- Phase 1 — shipped PR #50/#54/#56.
+- Phase 2 — shipped PR #57 (squash `a7a437c`) + deployed 2026-04-24 09:05 UTC. Deploy gate CP1-4 + H4 surface CP13 GREEN. CP5-8 organic observation in progress (doesn't block Phase 3 dispatch per Director 2026-04-24).
+- **Phase 3 (this brief)** — dispatch gate now open.
+- Trigger 2 (Gmail draft-lint) deferred to Monday audit scratch §D1.
+
+**Director ratifications (all 3 stand as designed):**
+1. Feature 1 SLA default — `sla_hours INTEGER DEFAULT NULL`; PM-level defaults hard-coded in `DEFAULT_SLA_HOURS` Python dict at Feature 2 (brief line ~173).
+2. Feature 5 Dismiss enum — 6 presets (`waiting_for_counterparty / offline / low_priority / wrong_thread / not_actionable / other`). `wrong_thread` chains into Phase 2's `POST /api/pm/threads/re-thread`.
+3. Reject verdict → `baker_corrections.correction_type='sentinel_false_positive'` with 5-cap + 90-day expiry; 14-day pattern surface (Upgrade 2) reads these rows.
+
+---
+
+## Working-tree setup (B2)
 
 ```bash
-# 1. Syntax
-python3 -c "import py_compile; py_compile.compile('outputs/dashboard.py', doraise=True); print('OK')"
-
-# 2. Confirm exactly 3 sites patched (before commit)
-grep -n '@app\.\(get\|post\)("/api/pm/threads' outputs/dashboard.py
-# Expect each line to end with: dependencies=[Depends(verify_api_key)])
-
-# 3. Count all /api/* routes with dependency — must be +3 vs pre-patch
-grep -c 'dependencies=\[Depends(verify_api_key)\]' outputs/dashboard.py
+cd ~/bm-b2 && git fetch origin && git pull --rebase origin main
+git checkout -b proactive-pm-sentinel-1
 ```
 
-Skip full-suite regression — 3-line scope, no logic change. Just syntax + grep.
-
----
-
-## Frontend note
-
-`outputs/static/app.js` `loadPMThreads()` currently fetches these endpoints without any header. That's fine pre-merge because the UI is feature-flagged off by default (`localStorage['baker.threads.ui_enabled'] === '1'`). Browser-side auth is a separate follow-up (out of scope for this fix-back — Director will decide wiring when enabling the UI). **Do NOT modify `app.js` in this patch.**
-
----
-
-## Commit
+Pre-merge verification (paste outputs into PR body per lesson #40). The brief at §"Pre-merge verification" (line ~1411) has the full checklist; highlights:
 
 ```bash
-git add outputs/dashboard.py
-git commit -m "CAPABILITY_THREADS_1 fix-back: enforce X-Baker-Key on 3 new endpoints
+# 1. Phase 2 tables live (hard dependency)
+curl -s -X POST "https://baker-master.onrender.com/mcp?key=bakerbhavanga" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"baker_raw_query","arguments":{"sql":"SELECT COUNT(*) FROM capability_threads; SELECT COUNT(*) FROM capability_turns"}}}'
+# Expected: both queries return rows (may be 0 — tables exist is what matters)
 
-Security-review (AI Head #2, 2026-04-24) flagged 3 HIGH findings — same
-root cause: new /api/pm/threads/* decorators omitted
-dependencies=[Depends(verify_api_key)]. Every other /api/* route in this
-file enforces it (line 62 helper + sibling pattern). Adds the dependency
-to the three decorators at lines 11161 / 11198 / 11232.
+# 2. Phase 2 endpoint live + auth-gated
+curl -s -o /dev/null -w "HTTP:%{http_code}\n" https://baker-master.onrender.com/api/pm/threads/ao_pm
+# Expected: 401 (auth enforced post-PR #57 fix-back)
 
-PR #57 kept open; merges only after /security-review re-run green.
+# 3. alerts.snoozed_until already present (no DDL needed for Upgrade 1)
+curl -s -X POST "https://baker-master.onrender.com/mcp?key=bakerbhavanga" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"baker_raw_query","arguments":{"sql":"SELECT column_name FROM information_schema.columns WHERE table_name='"'"'alerts'"'"' AND column_name IN ('"'"'snoozed_until'"'"','"'"'dismiss_reason'"'"','"'"'exit_reason'"'"')"}}}'
+# Expected: snoozed_until + exit_reason present; dismiss_reason ABSENT pre-merge.
 
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
-git push origin capability-threads-1
+# 4. baker_corrections table + store_correction signature
+grep -n "^def store_correction\|class SentinelStoreBack\|^    def store_correction" memory/store_back.py | head -5
+# Expected: store_correction signature at memory/store_back.py:664 (per brief citation)
+
+# 5. No duplicate /api/sentinel/feedback endpoint
+grep -n '/api/sentinel/feedback' outputs/dashboard.py
+# Expected: 0 pre-existing
+
+# 6. Singleton check hook
+bash scripts/check_singletons.sh
+# Expected: pass
+
+# 7. JSONResponse import (lesson #18 spot-check)
+sed -n '23p' outputs/dashboard.py
+# Expected: 'JSONResponse' appears
+```
+
+---
+
+## Acceptance criteria
+
+- All 12 Quality Checkpoints (brief §Quality Checkpoints, line ~1375) verifiably pass
+- §H5 cross-surface continuity test **green** (brief §Part H / Feature 6 — triage-roundtrip integration test with `needs_live_pg` fixture)
+- Literal `pytest` output pasted into PR body — no "pass by inspection"
+- `/api/sentinel/feedback` decorator carries `dependencies=[Depends(verify_api_key)]` (Feature 4, brief line ~618)
+- Feature 5 JS uses `bakerFetch()` wrapper on both `/api/sentinel/feedback` and `/api/pm/threads/re-thread` (brief lines ~906 + ~943)
+- Migration file name sort-orders AFTER `20260424_capability_threads.sql`
+- All 16 lessons pre-applied (brief line ~1468) verified via the pre-merge grep checks
+
+---
+
+## Ship gate (local, before push)
+
+```bash
+# Syntax + singletons
+python3 -c "import py_compile
+for f in ['orchestrator/proactive_pm_sentinel.py','triggers/embedded_scheduler.py','outputs/dashboard.py','outputs/static/app.js' if False else '/dev/null']:
+    if f != '/dev/null': py_compile.compile(f, doraise=True)
+print('OK')"
+
+bash scripts/check_singletons.sh
+
+# Dedicated test suite (literal pytest; no pass-by-inspection)
+python3 -m pytest tests/test_proactive_pm_sentinel.py tests/test_proactive_pm_sentinel_h5.py -v
+
+# Full-suite regression delta vs main baseline (same pattern as PR #57)
+# capture +N passes, 0 new failures
 ```
 
 ---
 
 ## Ship report
 
-Append a short `## 9. Fix-back (2026-04-24)` section to `briefs/_reports/CODE_2_RETURN.md` with:
-- literal grep output showing the 3 decorators now carry the dependency,
-- syntax-check OK line,
-- confirmation that `app.js` / endpoint bodies / SQL unchanged.
-
-Push the report commit with the patch (single commit OK; two sequential commits OK — either way).
+Append new entry to `briefs/_reports/CODE_2_RETURN.md` (keep the fix-back §9 from PR #57 intact as history; add `## PROACTIVE_PM_SENTINEL_1 ship report — <date>`). Same 8-check format as PR #57 ship report (`ba4f114`): literal ship-gate output, full-suite regression delta, per-feature summary, Files Modified cross-check, Do NOT Touch verified, SKILL rule compliance, pre-merge verification outputs, non-blocking observations.
 
 ---
 
-## Standing by
+## Handoff
 
-AI Head #2 re-runs `/security-review` on your push. On PASS → Tier A merge → Render deploy → Quality Checkpoints 1–13 + verification SQL (per brief §Post-merge sequence).
+PR link → AI Head #2 on push + ship report.
+AI Head #2 runs `/security-review` → on PASS, forwards PR link + trigger reasons (§2.1 + §2.2) to B1 for second-pair-of-eyes → merge only on both green.
+Fix-backs (if any) route to B2 (implementation lane), never to B1.
 
 — AI Head #2
