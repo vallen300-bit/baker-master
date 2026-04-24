@@ -13,7 +13,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=EB+Garamond:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=71">
+    <link rel="stylesheet" href="/static/style.css?v=72">
 </head>
 <body>
 
@@ -555,7 +555,22 @@
 
 </div><!-- /app-wrap -->
 
-<script src="/static/app.js?v=106"></script>
+<!-- BRIEF_CAPABILITY_THREADS_1: feature-flagged thread panel (hidden by default).
+     Activate via: localStorage.setItem('baker.threads.ui_enabled','1'); location.reload(); -->
+<div id="pm-threads-panel" class="pm-threads-panel" style="display:none"></div>
+<div id="pm-thread-replay" class="pm-thread-replay" style="display:none"></div>
+<script>
+  (function _pmThreadsFlagInit() {
+    if (localStorage.getItem('baker.threads.ui_enabled') === '1') {
+      var p = document.getElementById('pm-threads-panel');
+      var r = document.getElementById('pm-thread-replay');
+      if (p) p.style.display = 'block';
+      if (r) r.style.display = 'block';
+    }
+  })();
+</script>
+
+<script src="/static/app.js?v=107"></script>
 <script>
 // PWA-DESKTOP-1: Register service worker for installability
 if ('serviceWorker' in navigator) {

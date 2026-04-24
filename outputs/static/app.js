@@ -10197,3 +10197,85 @@ async function loadKBLPipelineTab() {
         }
     });
 })();
+
+// ============================================================
+// BRIEF_CAPABILITY_THREADS_1 — feature-flagged thread panel
+// Activate: localStorage.setItem('baker.threads.ui_enabled','1'); location.reload();
+// Pure-DOM only — no innerHTML with user content (security rule).
+// ============================================================
+
+function _pmThreadsEnabled() {
+    return localStorage.getItem('baker.threads.ui_enabled') === '1';
+}
+
+function _pmThreadsClear(el) {
+    while (el && el.firstChild) el.removeChild(el.firstChild);
+}
+
+function _pmThreadsTextDiv(className, text) {
+    var el = document.createElement('div');
+    el.className = className;
+    el.textContent = text;
+    return el;
+}
+
+async function loadPMThreads(pmSlug) {
+    if (!_pmThreadsEnabled()) return;
+    var panel = document.getElementById('pm-threads-panel');
+    if (!panel) return;
+    _pmThreadsClear(panel);
+    panel.appendChild(_pmThreadsTextDiv('pm-threads-loading', 'Loading threads…'));
+    try {
+        var res = await fetch('/api/pm/threads/' + encodeURIComponent(pmSlug));
+        if (!res.ok) throw new Error('http_' + res.status);
+        var data = await res.json();
+        renderPMThreadList(panel, data.threads || [], pmSlug);
+    } catch (e) {
+        _pmThreadsClear(panel);  // fail silent
+    }
+}
+
+function renderPMThreadList(panel, threads, pmSlug) {
+    _pmThreadsClear(panel);
+    if (!threads.length) {
+        panel.appendChild(_pmThreadsTextDiv('pm-threads-empty', 'No threads yet'));
+        return;
+    }
+    panel.appendChild(_pmThreadsTextDiv('pm-threads-header',
+        'Threads for ' + pmSlug + ' (' + threads.length + ')'));
+    threads.forEach(function(t) {
+        var row = document.createElement('div');
+        row.className = 'pm-thread-row';
+        row.dataset.threadId = t.thread_id;
+        row.appendChild(_pmThreadsTextDiv('pm-thread-topic',
+            (t.topic_summary || '(no summary)').slice(0, 120)));
+        row.appendChild(_pmThreadsTextDiv('pm-thread-meta',
+            (t.status || '') + ' · ' + (t.turn_count || 0) + ' turns · ' + (t.last_turn_at || '')));
+        row.addEventListener('click', function() { openPMThreadReplay(pmSlug, t.thread_id); });
+        panel.appendChild(row);
+    });
+}
+
+async function openPMThreadReplay(pmSlug, threadId) {
+    var replayBox = document.getElementById('pm-thread-replay');
+    if (!replayBox) return;
+    try {
+        var res = await fetch('/api/pm/threads/' + encodeURIComponent(pmSlug) +
+                              '/' + encodeURIComponent(threadId) + '/turns');
+        if (!res.ok) return;
+        var data = await res.json();
+        _pmThreadsClear(replayBox);
+        (data.turns || []).forEach(function(turn) {
+            var el = document.createElement('div');
+            el.className = 'pm-turn';
+            el.appendChild(_pmThreadsTextDiv('pm-turn-q',
+                '[' + (turn.surface || '?') + '] Q: ' + (turn.question || '').slice(0, 400)));
+            el.appendChild(_pmThreadsTextDiv('pm-turn-a',
+                'A: ' + (turn.answer || '').slice(0, 800)));
+            replayBox.appendChild(el);
+        });
+        replayBox.style.display = 'block';
+    } catch (e) {
+        // fail silent
+    }
+}

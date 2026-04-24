@@ -5227,13 +5227,24 @@ class SentinelStoreBack:
 
     def update_pm_project_state(self, pm_slug: str, updates: dict, summary: str = "",
                                 question: str = "",
-                                mutation_source: str = "auto"):
-        """PM-FACTORY: Upsert PM project state with audit trail + optimistic locking."""
+                                mutation_source: str = "auto",
+                                thread_id: Optional[str] = None):
+        """PM-FACTORY: Upsert PM project state with audit trail + optimistic locking.
+
+        BRIEF_CAPABILITY_THREADS_1: optional ``thread_id`` threaded into
+        pm_state_history INSERT so state snapshots link to the originating thread.
+        Callers that don't care about threads pass ``thread_id=None`` (default);
+        existing rows stay NULL — zero impact on legacy behaviour.
+
+        Returns ``pm_state_history.id`` of the newly-inserted audit row on success,
+        or ``None`` on first-ever insert (no history row is created for the
+        initial pm_project_state insert) or on any error.
+        """
         max_retries = 3
         for attempt in range(max_retries):
             conn = self._get_conn()
             if not conn:
-                return
+                return None
             try:
                 cur = conn.cursor()
                 cur.execute(
@@ -5249,10 +5260,13 @@ class SentinelStoreBack:
                     # Audit trail: snapshot before mutation
                     cur.execute("""
                         INSERT INTO pm_state_history
-                            (pm_slug, version, state_json_before, mutation_source, mutation_summary)
-                        VALUES (%s, %s, %s, %s, %s)
+                            (pm_slug, version, state_json_before, mutation_source,
+                             mutation_summary, thread_id)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        RETURNING id
                     """, (pm_slug, current_version, json.dumps(existing, default=str),
-                          mutation_source, summary[:500]))
+                          mutation_source, summary[:500], thread_id))
+                    history_row_id = cur.fetchone()[0]
 
                     # Merge updates into fresh read
                     for k, v in updates.items():
@@ -5282,23 +5296,26 @@ class SentinelStoreBack:
                             continue
                         else:
                             logger.error(f"PM state ({pm_slug}) update failed after max retries")
-                            return
+                            return None
+                    conn.commit()
+                    cur.close()
+                    return history_row_id  # success with audit row
                 else:
                     cur.execute("""
                         INSERT INTO pm_project_state (pm_slug, state_key, state_json, version,
                             last_run_at, run_count, last_question, last_answer_summary)
                         VALUES (%s, 'current', %s, 1, NOW(), 1, %s, %s)
                     """, (pm_slug, json.dumps(updates, default=str), question[:500], summary[:500]))
-                conn.commit()
-                cur.close()
-                return  # success
+                    conn.commit()
+                    cur.close()
+                    return None  # first-ever insert — no history row
             except Exception as e:
                 try:
                     conn.rollback()
                 except Exception:
                     pass
                 logger.warning(f"update_pm_project_state({pm_slug}) failed: {e}")
-                return
+                return None
             finally:
                 self._put_conn(conn)
 
