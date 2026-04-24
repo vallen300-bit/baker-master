@@ -11158,7 +11158,7 @@ async def kbl_mac_mini_status():
 # blast radius is gated entirely by the UI flag.
 # ============================================================
 
-@app.get("/api/pm/threads/{pm_slug}")
+@app.get("/api/pm/threads/{pm_slug}", dependencies=[Depends(verify_api_key)])
 async def get_pm_threads(pm_slug: str, limit: int = 20):
     """BRIEF_CAPABILITY_THREADS_1: list recent threads for a PM (sidebar UI)."""
     from orchestrator.capability_runner import PM_REGISTRY
@@ -11195,7 +11195,7 @@ async def get_pm_threads(pm_slug: str, limit: int = 20):
         store._put_conn(conn)
 
 
-@app.get("/api/pm/threads/{pm_slug}/{thread_id}/turns")
+@app.get("/api/pm/threads/{pm_slug}/{thread_id}/turns", dependencies=[Depends(verify_api_key)])
 async def get_pm_thread_turns(pm_slug: str, thread_id: str, limit: int = 50):
     """BRIEF_CAPABILITY_THREADS_1: list turns for a specific thread (replay)."""
     import psycopg2.extras
@@ -11229,7 +11229,7 @@ async def get_pm_thread_turns(pm_slug: str, thread_id: str, limit: int = 50):
         store._put_conn(conn)
 
 
-@app.post("/api/pm/threads/re-thread")
+@app.post("/api/pm/threads/re-thread", dependencies=[Depends(verify_api_key)])
 async def re_thread(req: Request):
     """BRIEF_CAPABILITY_THREADS_1: Director explicit override — move a turn to a
     different thread (or spawn a new one when ``new_thread_id`` is null)."""
