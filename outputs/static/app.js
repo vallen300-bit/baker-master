@@ -10279,3 +10279,227 @@ async function openPMThreadReplay(pmSlug, threadId) {
         // fail silent
     }
 }
+
+// ═══ BRIEF_PROACTIVE_PM_SENTINEL_1 — sentinel alert triage surface ═══
+// Pure-DOM throughout (no innerHTML with user-derived content).
+// All network calls go through bakerFetch() so the auth header is attached —
+// both /api/sentinel/feedback AND /api/pm/threads/re-thread (Phase 2) are
+// auth-gated as of PR #57 fix-back.
+
+var SENTINEL_DISMISS_REASONS = [
+    { key: 'waiting_for_counterparty', label: 'Waiting for counterparty' },
+    { key: 'already_handled_offline', label: 'Already handled offline' },
+    { key: 'low_priority',             label: 'Low priority' },
+    { key: 'wrong_thread',             label: 'Wrong thread (re-thread)' },
+];
+
+function renderSentinelAlert(alertRow) {
+    var wrap = document.createElement('div');
+    wrap.className = 'sentinel-alert';
+    wrap.dataset.alertId = String(alertRow.id);
+    wrap.dataset.matterSlug = alertRow.matter_slug || '';
+
+    var title = document.createElement('div');
+    title.className = 'sentinel-alert-title';
+    title.textContent = alertRow.title || '(no title)';
+    wrap.appendChild(title);
+
+    var body = document.createElement('div');
+    body.className = 'sentinel-alert-body';
+    body.textContent = (alertRow.body || '').slice(0, 800);
+    wrap.appendChild(body);
+
+    var btnRow = document.createElement('div');
+    btnRow.className = 'sentinel-alert-buttons';
+    btnRow.appendChild(_sentinelMakeButton('Accept', 'accept',
+        function() { sendSentinelFeedback(alertRow, 'accept'); }));
+    btnRow.appendChild(_sentinelMakeSnoozeButton(alertRow));
+    btnRow.appendChild(_sentinelMakeDismissButton(alertRow));
+    btnRow.appendChild(_sentinelMakeButton('Reject + teach', 'reject',
+        function() { _sentinelHandleReject(alertRow); }));
+    wrap.appendChild(btnRow);
+
+    // Mobile kebab overflow (lesson #18). Plain ellipsis char — pure DOM.
+    var kebab = document.createElement('div');
+    kebab.className = 'sentinel-alert-kebab';
+    kebab.dataset.forAlertId = String(alertRow.id);
+    kebab.setAttribute('aria-label', 'More triage options');
+    kebab.textContent = '⋯';
+    kebab.addEventListener('click', function() { _sentinelToggleKebab(alertRow.id); });
+    wrap.appendChild(kebab);
+
+    return wrap;
+}
+
+function _sentinelMakeButton(label, verdictClass, onClick) {
+    var b = document.createElement('button');
+    b.className = 'sentinel-btn sentinel-btn-' + verdictClass;
+    b.textContent = label;
+    b.addEventListener('click', onClick);
+    return b;
+}
+
+function _sentinelMakeSnoozeButton(alertRow) {
+    var wrap = document.createElement('div');
+    wrap.className = 'sentinel-snooze-wrap';
+    var b = document.createElement('button');
+    b.className = 'sentinel-btn sentinel-btn-snooze';
+    b.textContent = 'Snooze…';
+    b.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        var open = wrap.querySelector('.sentinel-snooze-input');
+        if (open) { open.remove(); return; }
+        var input = document.createElement('input');
+        input.className = 'sentinel-snooze-input';
+        input.type = 'number';
+        input.min = '1';
+        input.max = '720';
+        input.value = '24';
+        input.setAttribute('aria-label', 'Snooze hours');
+        var go = document.createElement('button');
+        go.className = 'sentinel-btn sentinel-btn-snooze-confirm';
+        go.textContent = 'OK';
+        go.addEventListener('click', function() {
+            var hours = Math.max(1, Math.min(720, parseInt(input.value || '24', 10)));
+            sendSentinelFeedback(alertRow, 'snooze', { snooze_hours: hours });
+            input.remove(); go.remove();
+        });
+        wrap.appendChild(input);
+        wrap.appendChild(go);
+        input.focus();
+    });
+    wrap.appendChild(b);
+    return wrap;
+}
+
+function _sentinelMakeDismissButton(alertRow) {
+    var wrap = document.createElement('div');
+    wrap.className = 'sentinel-dismiss-wrap';
+    var b = document.createElement('button');
+    b.className = 'sentinel-btn sentinel-btn-dismiss';
+    b.textContent = 'Dismiss because…';
+    b.addEventListener('click', function(ev) {
+        ev.stopPropagation();
+        var existing = wrap.querySelector('.sentinel-dismiss-menu');
+        if (existing) { existing.remove(); return; }
+        var menu = document.createElement('div');
+        menu.className = 'sentinel-dismiss-menu';
+        SENTINEL_DISMISS_REASONS.forEach(function(r) {
+            var item = document.createElement('div');
+            item.className = 'sentinel-dismiss-item';
+            item.textContent = r.label;
+            item.dataset.reason = r.key;
+            item.addEventListener('click', function() {
+                sendSentinelFeedback(alertRow, 'dismiss', { dismiss_reason: r.key });
+                menu.remove();
+            });
+            menu.appendChild(item);
+        });
+        wrap.appendChild(menu);
+    });
+    wrap.appendChild(b);
+    return wrap;
+}
+
+function _sentinelHandleReject(alertRow) {
+    var comment = window.prompt('Why was this a false positive?');
+    if (!comment) return;
+    var rule = window.prompt('One-line rule to avoid this in future:');
+    if (!rule) return;
+    sendSentinelFeedback(alertRow, 'reject',
+        { director_comment: comment, learned_rule: rule });
+}
+
+async function sendSentinelFeedback(alertRow, verdict, extra) {
+    var body = Object.assign({ alert_id: alertRow.id, verdict: verdict }, extra || {});
+    try {
+        var res = await bakerFetch('/api/sentinel/feedback', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+            console.warn('sentinel feedback failed', res.status);
+            return;
+        }
+        var data = await res.json();
+
+        if (verdict === 'dismiss'
+            && extra && extra.dismiss_reason === 'wrong_thread'
+            && data.rethread_hint) {
+            _sentinelOpenRethreadFor(data.rethread_hint);
+        }
+
+        var el = document.querySelector(
+            '.sentinel-alert[data-alert-id="' + String(alertRow.id) + '"]');
+        if (verdict !== 'snooze') {
+            if (el && el.parentNode) el.parentNode.removeChild(el);
+        } else if (el) {
+            el.classList.add('sentinel-alert-snoozed');
+        }
+    } catch (e) {
+        console.warn('sentinel feedback network error', e);
+    }
+}
+
+function _sentinelOpenRethreadFor(hint) {
+    if (typeof window.openThreadReThread === 'function') {
+        window.openThreadReThread(hint);
+        return;
+    }
+    var newThreadId = window.prompt(
+        'Re-thread: enter new thread_id (leave blank to create a fresh thread):',
+        ''
+    );
+    // Phase 2 endpoint is auth-gated (PR #57 fix-back). bakerFetch adds header.
+    bakerFetch('/api/pm/threads/re-thread', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            turn_id: hint.turn_id_hint,
+            new_thread_id: newThreadId || null,
+        }),
+    }).catch(function(e) { console.warn('rethread network error', e); });
+}
+
+function _sentinelToggleKebab(alertId) {
+    var wrap = document.querySelector(
+        '.sentinel-alert[data-alert-id="' + String(alertId) + '"]');
+    if (!wrap) return;
+    var existing = wrap.querySelector('.sentinel-alert-kebab-menu');
+    if (existing) { existing.remove(); return; }
+    var menu = document.createElement('div');
+    menu.className = 'sentinel-alert-kebab-menu';
+    var labels = [
+        'Accept', 'Snooze 24h',
+        'Dismiss: waiting', 'Dismiss: offline',
+        'Dismiss: low prio', 'Dismiss: wrong thread',
+        'Reject + teach',
+    ];
+    labels.forEach(function(label) {
+        var item = document.createElement('div');
+        item.className = 'sentinel-alert-kebab-item';
+        item.textContent = label;
+        item.addEventListener('click', function() {
+            _sentinelDispatchKebabLabel(alertId, label);
+        });
+        menu.appendChild(item);
+    });
+    wrap.appendChild(menu);
+}
+
+function _sentinelDispatchKebabLabel(alertId, label) {
+    var alertRow = { id: alertId };
+    if (label === 'Accept') return sendSentinelFeedback(alertRow, 'accept');
+    if (label === 'Snooze 24h')
+        return sendSentinelFeedback(alertRow, 'snooze', { snooze_hours: 24 });
+    if (label === 'Reject + teach') return _sentinelHandleReject(alertRow);
+    var reasonMap = {
+        'Dismiss: waiting':      'waiting_for_counterparty',
+        'Dismiss: offline':      'already_handled_offline',
+        'Dismiss: low prio':     'low_priority',
+        'Dismiss: wrong thread': 'wrong_thread',
+    };
+    if (reasonMap[label])
+        return sendSentinelFeedback(alertRow, 'dismiss', { dismiss_reason: reasonMap[label] });
+}

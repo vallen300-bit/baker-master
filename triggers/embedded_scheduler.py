@@ -745,6 +745,34 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info(f"Registered: vault_sync_tick (every {_vault_sync_seconds}s)")
 
+    # BRIEF_PROACTIVE_PM_SENTINEL_1: proactive sentinels (env-gated kill-switch).
+    # Default enabled; set PROACTIVE_SENTINEL_ENABLED=false to disable both jobs.
+    import os as _os
+    if _os.environ.get("PROACTIVE_SENTINEL_ENABLED", "true").lower() not in ("0", "false", "off"):
+        # Upgrade 1 + core: quiet-thread detection (respects alerts.snoozed_until)
+        from orchestrator.proactive_pm_sentinel import detect_quiet_threads as _sentinel_quiet
+        scheduler.add_job(
+            _sentinel_quiet,
+            IntervalTrigger(minutes=30),
+            id="sentinel_quiet_thread",
+            name="Proactive sentinel — quiet-thread detection",
+            coalesce=True, max_instances=1, replace_existing=True,
+        )
+        logger.info("Registered: sentinel_quiet_thread (every 30 minutes)")
+
+        # Upgrade 2: dismiss-pattern surface (14-day rolling aggregation)
+        from orchestrator.proactive_pm_sentinel import detect_dismiss_patterns as _sentinel_dismiss_patterns
+        scheduler.add_job(
+            _sentinel_dismiss_patterns,
+            IntervalTrigger(hours=6),
+            id="sentinel_dismiss_patterns",
+            name="Proactive sentinel — dismiss pattern surface",
+            coalesce=True, max_instances=1, replace_existing=True,
+        )
+        logger.info("Registered: sentinel_dismiss_patterns (every 6 hours)")
+    else:
+        logger.info("Proactive sentinels DISABLED (PROACTIVE_SENTINEL_ENABLED=false)")
+
 
 def _kbl_pipeline_tick_job():
     """APScheduler wrapper around ``kbl.pipeline_tick.main``.
