@@ -38,9 +38,20 @@ def test_extract_and_update_pm_state_tags_mutation_source(monkeypatch):
 
     class _FakeStore:
         def update_pm_project_state(self, pm_slug, updates, summary, question,
-                                    mutation_source):
+                                    mutation_source, thread_id=None):
+            # BRIEF_CAPABILITY_THREADS_1: thread_id kwarg added to the real
+            # signature; accept-and-ignore here so this ship-gate test for
+            # BRIEF_PM_SIDEBAR_STATE_WRITE_1 still pins mutation_source flow.
             captured["pm_slug"] = pm_slug
             captured["mutation_source"] = mutation_source
+            captured["thread_id"] = thread_id
+            return None  # history_row_id; not relevant to this test
+
+        def _get_conn(self):
+            return None  # stitcher's store helpers degrade to no-op
+
+        def _put_conn(self, conn):
+            pass
 
         def create_cross_pm_signal(self, **kwargs):  # noqa: D401
             pass

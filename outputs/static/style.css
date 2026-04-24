@@ -1639,3 +1639,54 @@ body {
     .kbl-table { min-width: 560px; }
     .kbl-header { flex-wrap: wrap; gap: 8px; }
 }
+
+/* BRIEF_CAPABILITY_THREADS_1 — feature-flagged thread panel styles.
+   Containers default to display:none in index.html; JS toggles visibility
+   only when localStorage['baker.threads.ui_enabled'] === '1'. */
+.pm-threads-panel,
+.pm-thread-replay {
+    position: fixed;
+    right: 16px;
+    width: 360px;
+    max-height: 40vh;
+    overflow-y: auto;
+    background: var(--bg1, #0D0F14);
+    border: 1px solid var(--line, #2a2f3a);
+    border-radius: 8px;
+    padding: 12px;
+    z-index: 900;
+    font-size: 12px;
+    color: var(--text1, #e6e7ea);
+}
+.pm-threads-panel { bottom: calc(42vh + 28px); }
+.pm-thread-replay { bottom: 16px; }
+.pm-threads-header {
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.02em;
+    color: var(--text2, #9aa0ab);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+}
+.pm-threads-loading,
+.pm-threads-empty { color: var(--text2, #9aa0ab); font-style: italic; }
+.pm-thread-row {
+    padding: 6px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--line, #2a2f3a);
+}
+.pm-thread-row:hover { background: var(--bg2, #151922); }
+.pm-thread-topic { font-weight: 500; margin-bottom: 2px; }
+.pm-thread-meta { font-size: 10px; color: var(--text2, #9aa0ab); }
+.pm-turn { padding: 6px 0; border-bottom: 1px dotted var(--line, #2a2f3a); }
+.pm-turn-q { font-weight: 500; margin-bottom: 3px; }
+.pm-turn-a { color: var(--text2, #9aa0ab); }
+@media (max-width: 480px) {
+    .pm-threads-panel, .pm-thread-replay {
+        position: static;
+        width: auto;
+        max-height: none;
+        margin: 8px;
+    }
+}

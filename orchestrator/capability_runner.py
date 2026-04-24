@@ -357,13 +357,58 @@ def extract_and_update_pm_state(
 
         from memory.store_back import SentinelStoreBack
         store = SentinelStoreBack._get_global_instance()
-        store.update_pm_project_state(
+
+        # BRIEF_CAPABILITY_THREADS_1: stitch BEFORE write so thread_id propagates
+        # into pm_state_history. Non-fatal: stitcher failure must not block the
+        # state-write, which is the load-bearing path.
+        thread_id = None
+        stitch_decision: dict = {}
+        _surface = "other"
+        try:
+            from orchestrator.capability_threads import (
+                stitch_or_create_thread,
+                surface_from_mutation_source,
+            )
+            _surface = surface_from_mutation_source(mutation_source)
+            thread_id, stitch_decision = stitch_or_create_thread(
+                pm_slug=pm_slug,
+                question=question,
+                answer=answer,
+                topic_summary_hint=summary,
+                surface=_surface,
+            )
+        except Exception as _stitch_e:
+            logger.warning(
+                f"Thread stitch failed [{pm_slug}][{mutation_source}] "
+                f"(non-fatal, state-write continues): {_stitch_e}"
+            )
+
+        history_row_id = store.update_pm_project_state(
             pm_slug, updates, summary, question[:500],
             mutation_source=mutation_source,
+            thread_id=thread_id,
         )
         logger.info(
             f"PM state ({pm_slug}) updated [{mutation_source}]: {summary[:80]}"
         )
+
+        # BRIEF_CAPABILITY_THREADS_1: persist the turn AFTER state-write so
+        # pm_state_history_id can link back. Non-fatal.
+        if thread_id:
+            try:
+                from orchestrator.capability_threads import persist_turn
+                persist_turn(
+                    pm_slug=pm_slug, thread_id=thread_id,
+                    surface=_surface,
+                    mutation_source=mutation_source,
+                    question=question, answer=answer,
+                    state_updates=updates, stitch_decision=stitch_decision,
+                    pm_state_history_id=history_row_id,
+                )
+            except Exception as _persist_e:
+                logger.warning(
+                    f"persist_turn failed [{pm_slug}][{thread_id}] (non-fatal): {_persist_e}"
+                )
 
         if wiki_insights and isinstance(wiki_insights, list):
             _runner._store_pending_insights(pm_slug, wiki_insights, question, summary)
@@ -1103,6 +1148,10 @@ class CapabilityRunner:
                     state_ctx = self._get_pm_project_state_context(pm_slug)
                     if state_ctx:
                         prompt += f"\n\n# LIVE STATE (from PostgreSQL)\n{state_ctx}\n"
+                    # BRIEF_CAPABILITY_THREADS_1: Layer 1.5 — recent thread context
+                    thread_ctx = self._get_pm_thread_context(pm_slug)
+                    if thread_ctx:
+                        prompt += f"\n\n# RECENT THREAD CONTEXT\n{thread_ctx}\n"
                     # PM-KNOWLEDGE-ARCH-1: Pending insights
                     pending_ctx = self._get_pending_insights_context(pm_slug)
                     if pending_ctx:
@@ -1719,6 +1768,72 @@ class CapabilityRunner:
                     parts.append(cross_matter)
 
             return "\n".join(parts)
+        except Exception:
+            return ""
+
+    def _get_pm_thread_context(self, pm_slug: str, thread_id_hint: Optional[str] = None,
+                               max_turns: int = 5) -> str:
+        """BRIEF_CAPABILITY_THREADS_1: Layer 1.5 — recent thread turns.
+
+        Returns empty string if no threads exist or retrieval fails (non-fatal).
+        If ``thread_id_hint`` provided → that thread's last N turns. Otherwise →
+        most-recently-active thread's last N turns.
+        """
+        try:
+            import psycopg2.extras
+            from memory.store_back import SentinelStoreBack
+            store = SentinelStoreBack._get_global_instance()
+            conn = store._get_conn()
+            if not conn:
+                return ""
+            try:
+                cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+                if thread_id_hint:
+                    tid = thread_id_hint
+                else:
+                    cur.execute(
+                        """
+                        SELECT thread_id FROM capability_threads
+                        WHERE pm_slug = %s AND status = 'active'
+                        ORDER BY last_turn_at DESC LIMIT 1
+                        """,
+                        (pm_slug,),
+                    )
+                    row = cur.fetchone()
+                    if not row:
+                        return ""
+                    tid = row["thread_id"]
+                cur.execute(
+                    """
+                    SELECT surface, turn_order, question, answer, created_at
+                    FROM capability_turns
+                    WHERE thread_id = %s
+                    ORDER BY turn_order DESC LIMIT %s
+                    """,
+                    (tid, max_turns),
+                )
+                turns = [dict(r) for r in cur.fetchall()]
+                cur.close()
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                logger.warning(f"_get_pm_thread_context({pm_slug}) failed: {e}")
+                return ""
+            finally:
+                store._put_conn(conn)
+
+            if not turns:
+                return ""
+            turns.reverse()  # chronological
+            lines = [f"Thread {tid} — last {len(turns)} turns:"]
+            for t in turns:
+                q = (t["question"] or "")[:200].replace("\n", " ")
+                a = (t["answer"] or "")[:400].replace("\n", " ")
+                lines.append(f"  [{t['surface']}] Q: {q}")
+                lines.append(f"  A: {a}")
+            return "\n".join(lines)
         except Exception:
             return ""
 

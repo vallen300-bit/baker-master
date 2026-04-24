@@ -2022,13 +2022,24 @@ class ToolExecutor:
         return json.dumps(state, default=str)
 
     def _update_pm_state(self, inp: dict) -> str:
-        """PM-FACTORY: Update persistent PM project state."""
+        """PM-FACTORY: Update persistent PM project state.
+
+        BRIEF_CAPABILITY_THREADS_1 §H4: closes the Amendment H mutation_source
+        gap flagged in PR #50 ship report. Agent-tool writes now carry
+        ``mutation_source='agent_tool'`` for audit attribution; thread-stitching
+        itself is deferred to a follow-up (tag closure alone satisfies H4).
+        """
         pm_slug = inp.get("pm_slug", "ao_pm")
         from memory.store_back import SentinelStoreBack
         store = SentinelStoreBack._get_global_instance()
         updates = inp.get("updates", {})
         summary = inp.get("summary", "")
-        store.update_pm_project_state(pm_slug, updates, summary)
+        question = inp.get("question", "")
+        store.update_pm_project_state(
+            pm_slug, updates, summary,
+            question=question,
+            mutation_source="agent_tool",
+        )
         return f"{pm_slug} project state updated successfully."
 
     def _delegate_to_capability(self, inp: dict) -> str:

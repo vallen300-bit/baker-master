@@ -11152,6 +11152,134 @@ async def kbl_mac_mini_status():
 
 
 # ============================================================
+# BRIEF_CAPABILITY_THREADS_1 — sidebar thread UI endpoints
+# Feature-flagged in the frontend via localStorage['baker.threads.ui_enabled']='1'.
+# Endpoints themselves are always live (read-only list/turns + Director override);
+# blast radius is gated entirely by the UI flag.
+# ============================================================
+
+@app.get("/api/pm/threads/{pm_slug}", dependencies=[Depends(verify_api_key)])
+async def get_pm_threads(pm_slug: str, limit: int = 20):
+    """BRIEF_CAPABILITY_THREADS_1: list recent threads for a PM (sidebar UI)."""
+    from orchestrator.capability_runner import PM_REGISTRY
+    if pm_slug not in PM_REGISTRY:
+        return JSONResponse({"error": f"unknown pm_slug: {pm_slug}"}, status_code=404)
+    import psycopg2.extras
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        return JSONResponse({"threads": []}, status_code=200)
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT thread_id, topic_summary, status, last_turn_at, turn_count
+            FROM capability_threads
+            WHERE pm_slug = %s
+            ORDER BY last_turn_at DESC
+            LIMIT %s
+        """, (pm_slug, limit))
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        for r in rows:
+            r["thread_id"] = str(r["thread_id"])
+            r["last_turn_at"] = r["last_turn_at"].isoformat() if r["last_turn_at"] else None
+        return JSONResponse({"threads": rows})
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(f"/api/pm/threads/{pm_slug} failed: {e}")
+        return JSONResponse({"threads": [], "error": "retrieval_failed"}, status_code=200)
+    finally:
+        store._put_conn(conn)
+
+
+@app.get("/api/pm/threads/{pm_slug}/{thread_id}/turns", dependencies=[Depends(verify_api_key)])
+async def get_pm_thread_turns(pm_slug: str, thread_id: str, limit: int = 50):
+    """BRIEF_CAPABILITY_THREADS_1: list turns for a specific thread (replay)."""
+    import psycopg2.extras
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        return JSONResponse({"turns": []}, status_code=200)
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute("""
+            SELECT turn_id, surface, turn_order, question, answer, created_at
+            FROM capability_turns
+            WHERE thread_id = %s AND pm_slug = %s
+            ORDER BY turn_order ASC
+            LIMIT %s
+        """, (thread_id, pm_slug, limit))
+        rows = [dict(r) for r in cur.fetchall()]
+        cur.close()
+        for r in rows:
+            r["turn_id"] = str(r["turn_id"])
+            r["created_at"] = r["created_at"].isoformat() if r["created_at"] else None
+        return JSONResponse({"turns": rows})
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(f"/api/pm/threads/{pm_slug}/{thread_id}/turns failed: {e}")
+        return JSONResponse({"turns": [], "error": "retrieval_failed"}, status_code=200)
+    finally:
+        store._put_conn(conn)
+
+
+@app.post("/api/pm/threads/re-thread", dependencies=[Depends(verify_api_key)])
+async def re_thread(req: Request):
+    """BRIEF_CAPABILITY_THREADS_1: Director explicit override — move a turn to a
+    different thread (or spawn a new one when ``new_thread_id`` is null)."""
+    import json as _json
+    from datetime import datetime, timezone
+    body = await req.json()
+    turn_id = body.get("turn_id")
+    new_thread_id = body.get("new_thread_id")  # None → start a fresh thread
+    if not turn_id:
+        return JSONResponse({"error": "turn_id required"}, status_code=400)
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        return JSONResponse({"error": "db unavailable"}, status_code=503)
+    try:
+        cur = conn.cursor()
+        if new_thread_id is None:
+            cur.execute("""
+                SELECT pm_slug, question, answer FROM capability_turns WHERE turn_id = %s
+            """, (turn_id,))
+            row = cur.fetchone()
+            if not row:
+                return JSONResponse({"error": "turn not found"}, status_code=404)
+            from orchestrator.capability_threads import stitch_or_create_thread
+            new_thread_id, _ = stitch_or_create_thread(
+                pm_slug=row[0], question=row[1] or "", answer=row[2] or "",
+                surface="sidebar", force_new=True,
+            )
+        cur.execute("""
+            UPDATE capability_turns
+            SET thread_id = %s, stitch_decision = stitch_decision || %s::jsonb
+            WHERE turn_id = %s
+        """, (new_thread_id,
+              _json.dumps({"director_override_at": datetime.now(timezone.utc).isoformat()}),
+              turn_id))
+        conn.commit()
+        cur.close()
+        return JSONResponse({"new_thread_id": str(new_thread_id)})
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(f"/api/pm/threads/re-thread failed: {e}")
+        return JSONResponse({"error": "re-thread_failed"}, status_code=500)
+    finally:
+        store._put_conn(conn)
+
+
+# ============================================================
 # CLI runner
 # ============================================================
 

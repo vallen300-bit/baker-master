@@ -154,6 +154,35 @@ def flag_pm_signal(
         )
         logger.info(f"PM signal flagged [{pm_slug}][{channel}]: {source}")
 
+        # BRIEF_CAPABILITY_THREADS_1: attribute the signal to its thread.
+        # Known partial attribution (Part H §H2): signal turn carries thread_id,
+        # but pm_state_history.thread_id stays NULL for this surface — full
+        # closure would require refactoring flag_pm_signal's call sequence and
+        # is deliberately out of scope (documented in brief §H2 table).
+        try:
+            from orchestrator.capability_threads import (
+                stitch_or_create_thread, persist_turn,
+            )
+            _q = f"[signal {channel}] {source}"
+            thread_id, stitch_decision = stitch_or_create_thread(
+                pm_slug=pm_slug,
+                question=_q,
+                answer=summary,
+                topic_summary_hint=f"{channel}: {source} — {summary[:200]}",
+                surface="signal",
+            )
+            persist_turn(
+                pm_slug=pm_slug, thread_id=thread_id, surface="signal",
+                mutation_source=f"pm_signal_{channel}",
+                question=_q, answer=summary,
+                state_updates=signal_data, stitch_decision=stitch_decision,
+            )
+        except Exception as _thread_e:
+            logger.warning(
+                f"Thread attribution for signal [{pm_slug}][{channel}] failed "
+                f"(non-fatal): {_thread_e}"
+            )
+
         if push_slack:
             try:
                 from outputs.slack_notifier import post_to_channel
