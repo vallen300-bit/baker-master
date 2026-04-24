@@ -11337,6 +11337,7 @@ async def sentinel_feedback(req: Request):
 
     row = None
     new_status = None
+    latest_turn_id = None
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
         cur.execute(
@@ -11397,6 +11398,32 @@ async def sentinel_feedback(req: Request):
             )
             new_status = "resolved"
 
+        # Upgrade 2 chain: wrong_thread dismiss → look up most-recent turn in
+        # the thread while the cursor is still open. Phase 2 re-thread endpoint
+        # operates on turn_id (not thread_id); sentinel's source_id is the
+        # thread_id. Non-fatal — on lookup failure fall back to None and let
+        # the JS guard surface a user-facing message.
+        if verdict == "dismiss" and dismiss_reason == "wrong_thread":
+            try:
+                cur.execute(
+                    """
+                    SELECT turn_id FROM capability_turns
+                    WHERE thread_id = %s
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """,
+                    (row.get("source_id"),),
+                )
+                latest = cur.fetchone()
+                if latest:
+                    latest_turn_id = str(latest[0] if not isinstance(latest, dict) else latest["turn_id"])
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                logger.warning(f"rethread_hint turn lookup failed: {e}")
+
         conn.commit()
         cur.close()
     except Exception as e:
@@ -11434,9 +11461,12 @@ async def sentinel_feedback(req: Request):
 
     # Upgrade 2 chain: wrong_thread dismiss → hint client to call re-thread UI.
     # alerts.source_id for a quiet-thread alert is the thread_id (UUID str).
+    # latest_turn_id was looked up inside the main try (cursor still open).
+    # If the thread has no turns (edge case), latest_turn_id stays None and the
+    # JS guard surfaces a user-facing message instead of firing a silent 400.
     if verdict == "dismiss" and dismiss_reason == "wrong_thread":
         response["rethread_hint"] = {
-            "turn_id_hint": None,
+            "turn_id_hint": latest_turn_id,
             "thread_id": row.get("source_id"),
             "pm_slug": row.get("matter_slug"),
             "rethread_endpoint": "/api/pm/threads/re-thread",

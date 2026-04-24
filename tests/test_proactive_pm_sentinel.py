@@ -7,12 +7,39 @@ Unit tests (no DB):
   * suggestion rule branches
   * snooze-count / cooldown helper SQL shape (FakeCursor)
 
+Endpoint tests (TestClient, auth-bypassed):
+  * wrong_thread rethread_hint server-side turn lookup — added 2026-04-24
+    fix-back. Skip gracefully if ``outputs.dashboard`` cannot be imported
+    (pre-existing Python 3.9 / PEP-604 incompat in the import chain; passes
+    on CI 3.10+ same as the other TestClient suites in this repo).
+
 Integration tests (require live PG via ``needs_live_pg`` — skip cleanly when
 TEST_DATABASE_URL + NEON_API_KEY both absent):
   * DDL smoke — capability_threads.sla_hours + alerts.dismiss_reason +
     idx_alerts_sentinel_dismiss_pattern all present.
 """
 from __future__ import annotations
+
+import pytest
+
+
+def _dashboard_importable() -> bool:
+    """Return True iff outputs.dashboard imports cleanly in the current env.
+    Pre-existing Python 3.9 / PEP-604 fail in tools/ingest/extractors.py:275
+    breaks local-dev import; CI (3.10+) clears it.
+    """
+    try:
+        import outputs.dashboard  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+_skip_without_dashboard = pytest.mark.skipif(
+    not _dashboard_importable(),
+    reason="outputs.dashboard unimportable in this env (Python 3.9 PEP-604 "
+           "issue in tools/ingest/extractors.py:275 — pre-existing, clears on 3.10+)",
+)
 
 
 # ─── Unit: constants ───
@@ -173,6 +200,189 @@ def test_pattern_already_surfaced_uses_pattern_prefix():
     assert "source_id = %s" in q
     assert params[0] == "pattern::ao_pm::waiting_for_counterparty"
     assert params[1] == "14"
+
+
+# ─── Endpoint: wrong_thread rethread_hint server-side turn lookup ───
+# Added 2026-04-24 fix-back after PR #58: sentinel alert's source_id is a
+# thread_id but Phase 2 re-thread endpoint operates on a turn_id. The endpoint
+# now looks up the most-recent turn while the cursor is still open.
+
+class _EndpointFakeCursor:
+    """Multi-query cursor with queued responses.
+
+    _queue is a list of ("SELECT"|"UPDATE", rows-or-None) entries consumed in
+    order. SELECT responses populate fetchone(); UPDATE entries just advance.
+    """
+
+    def __init__(self, queue):
+        self._queue = list(queue)
+        self._pending = None
+
+    def execute(self, sql, params=None):
+        if not self._queue:
+            raise AssertionError(f"Unexpected query: {sql[:80]}...")
+        _kind, payload = self._queue.pop(0)
+        self._pending = payload
+
+    def fetchone(self):
+        out = self._pending
+        self._pending = None
+        return out
+
+    def close(self):
+        pass
+
+
+class _EndpointFakeConn:
+    def __init__(self, queue):
+        self._queue = queue
+        self.rolled_back = False
+        self.committed = False
+
+    def cursor(self, *a, **kw):
+        return _EndpointFakeCursor(self._queue)
+
+    def commit(self):
+        self.committed = True
+
+    def rollback(self):
+        self.rolled_back = True
+
+
+class _EndpointFakeStore:
+    def __init__(self, queue):
+        self._queue = queue
+        self.store_correction_calls = []
+
+    def _get_conn(self):
+        return _EndpointFakeConn(self._queue)
+
+    def _put_conn(self, c):
+        pass
+
+    def store_correction(self, **kw):
+        self.store_correction_calls.append(kw)
+        return True
+
+
+def _endpoint_client(monkeypatch, queue):
+    """Wire up TestClient with BAKER_API_KEY + fake store override."""
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("BAKER_API_KEY", "test-key")
+
+    from outputs import dashboard as _dash
+    from outputs.dashboard import app, verify_api_key
+
+    fake = _EndpointFakeStore(queue)
+    monkeypatch.setattr(_dash, "_get_store", lambda: fake)
+    app.dependency_overrides[verify_api_key] = lambda: None
+    return TestClient(app), fake
+
+
+def test_wrong_thread_rethread_hint_source_wires_latest_turn_id():
+    """Local-runnable source assertion: the fix-back landed correctly.
+
+    Verifies the rethread_hint block in outputs/dashboard.py both:
+      (a) queries capability_turns for the latest turn_id, AND
+      (b) propagates the captured local `latest_turn_id` into the hint
+          (NOT hardcoded None).
+
+    Complements the TestClient tests below which skip on Python 3.9 due
+    to a pre-existing PEP-604 import bug unrelated to this fix-back.
+    """
+    from pathlib import Path
+    src = Path("outputs/dashboard.py").read_text()
+
+    # The lookup SQL must be present
+    assert "SELECT turn_id FROM capability_turns" in src
+    assert 'ORDER BY created_at DESC' in src
+    assert 'LIMIT 1' in src
+
+    # The rethread_hint must carry the looked-up value (NOT hardcoded None)
+    # The fix-back replaces the literal "turn_id_hint": None placement.
+    assert '"turn_id_hint": latest_turn_id,' in src
+
+    # Guardrail: old hardcoded-None placement should not remain in the
+    # rethread_hint block. The only remaining "turn_id_hint": None allowed is
+    # the JS-side absent-hint comment, never the server-side response.
+    rethread_hint_block_idx = src.find('"rethread_endpoint": "/api/pm/threads/re-thread"')
+    assert rethread_hint_block_idx > 0
+    # Walk back ~300 chars and confirm the correct wiring sits nearby
+    block_window = src[max(0, rethread_hint_block_idx - 400):rethread_hint_block_idx + 200]
+    assert '"turn_id_hint": latest_turn_id,' in block_window
+    assert '"turn_id_hint": None,' not in block_window
+
+
+@_skip_without_dashboard
+def test_wrong_thread_rethread_hint_populates_latest_turn_id(monkeypatch):
+    """wrong_thread dismiss should carry the most-recent turn_id in the thread."""
+    # DictCursor rows support dict-style access; a plain dict with the right
+    # keys is enough for the endpoint which reads row["matter_slug"] etc.
+    alert_row = {
+        "id": 42,
+        "source": "proactive_pm_sentinel",
+        "source_id": "thread-uuid-abc",
+        "matter_slug": "ao_pm",
+        "structured_actions": {},
+    }
+    # Latest-turn lookup hits `cur.fetchone()[0]` — return a tuple-ish row.
+    latest_turn_row = ("turn-uuid-LATEST",)
+    queue = [
+        ("SELECT", alert_row),        # alert lookup
+        ("UPDATE", None),              # dismiss UPDATE
+        ("SELECT", latest_turn_row),  # wrong_thread turn lookup
+    ]
+    client, _fake = _endpoint_client(monkeypatch, queue)
+    try:
+        resp = client.post(
+            "/api/sentinel/feedback",
+            json={"alert_id": 42, "verdict": "dismiss", "dismiss_reason": "wrong_thread"},
+        )
+    finally:
+        from outputs.dashboard import app, verify_api_key
+        app.dependency_overrides.pop(verify_api_key, None)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["verdict"] == "dismiss"
+    assert body["status"] == "dismissed"
+    assert "rethread_hint" in body
+    assert body["rethread_hint"]["turn_id_hint"] == "turn-uuid-LATEST"
+    assert body["rethread_hint"]["thread_id"] == "thread-uuid-abc"
+    assert body["rethread_hint"]["pm_slug"] == "ao_pm"
+    assert body["rethread_hint"]["rethread_endpoint"] == "/api/pm/threads/re-thread"
+
+
+@_skip_without_dashboard
+def test_wrong_thread_rethread_hint_null_when_no_turns(monkeypatch):
+    """Empty thread → turn_id_hint is None, response still 200."""
+    alert_row = {
+        "id": 43,
+        "source": "proactive_pm_sentinel",
+        "source_id": "thread-empty",
+        "matter_slug": "ao_pm",
+        "structured_actions": {},
+    }
+    queue = [
+        ("SELECT", alert_row),  # alert lookup
+        ("UPDATE", None),        # dismiss UPDATE
+        ("SELECT", None),        # no turn rows
+    ]
+    client, _fake = _endpoint_client(monkeypatch, queue)
+    try:
+        resp = client.post(
+            "/api/sentinel/feedback",
+            json={"alert_id": 43, "verdict": "dismiss", "dismiss_reason": "wrong_thread"},
+        )
+    finally:
+        from outputs.dashboard import app, verify_api_key
+        app.dependency_overrides.pop(verify_api_key, None)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["rethread_hint"]["turn_id_hint"] is None
+    assert body["rethread_hint"]["thread_id"] == "thread-empty"
 
 
 # ─── Integration: DDL smoke (lesson #42 — fixture-only can miss schema drift) ───
