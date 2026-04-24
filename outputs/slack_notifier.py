@@ -144,6 +144,74 @@ def post_to_channel(channel_id: str, text: str) -> bool:
         return False
 
 
+def post_scan_with_citations(
+    channel: str,
+    question: str,
+    answer_text: str,
+    extracted_citations,
+    thread_ts: Optional[str] = None,
+) -> dict:
+    """Post a Scan answer to Slack with inline citation footer blocks.
+
+    CITATIONS_API_SCAN_1 — Slack substrate rendering for Anthropic Citations
+    (Director 2026-04-21 "4th block" cross-application). Answer text renders
+    as a section; the numbered citation list renders as a divider + section
+    + context block via kbl.citations.render_citations_slack_blocks. Degrades
+    gracefully when extracted_citations has no citations_flat — answer still
+    posts without the footer.
+
+    Args:
+        channel: Slack channel ID (C… or D…).
+        question: The Director's question (rendered as a prefix header).
+        answer_text: The Scan response body. Truncated at 2900 chars to leave
+                     Block Kit mrkdwn headroom (3000-char cap).
+        extracted_citations: kbl.citations.ExtractedResponse instance.
+        thread_ts: Optional thread timestamp for reply-in-thread.
+
+    Returns:
+        The Slack API response dict. On config / client failure returns
+        ``{"ok": False, "error": str(reason)}`` (non-fatal, matches the
+        SlackNotifier invariant).
+    """
+    from kbl.citations import render_citations_slack_blocks
+
+    if not config.outputs.slack_bot_token:
+        logger.warning(
+            "post_scan_with_citations skipped: SLACK_BOT_TOKEN not configured",
+        )
+        return {"ok": False, "error": "SLACK_BOT_TOKEN not configured"}
+
+    blocks = [
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*Question:* {question[:2800]}"},
+        },
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": (answer_text or "")[:2900]},
+        },
+    ]
+    blocks.extend(render_citations_slack_blocks(extracted_citations))
+
+    try:
+        client = _get_webclient()
+        resp = client.chat_postMessage(
+            channel=channel,
+            blocks=blocks,
+            text=(answer_text or "")[:500],  # mobile push fallback
+            thread_ts=thread_ts,
+        )
+        if resp.get("ok"):
+            return resp.data if hasattr(resp, "data") else dict(resp)
+        logger.warning(
+            f"post_scan_with_citations failed ({channel}): {resp.get('error')}",
+        )
+        return dict(resp) if hasattr(resp, "get") else {"ok": False}
+    except Exception as e:
+        logger.warning(f"post_scan_with_citations raised ({channel}): {e}")
+        return {"ok": False, "error": str(e)}
+
+
 class SlackNotifier:
     """
     Slack delivery engine.
