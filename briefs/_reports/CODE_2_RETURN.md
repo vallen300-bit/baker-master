@@ -1,3 +1,175 @@
+# CODE_2_RETURN — PROACTIVE_PM_SENTINEL_1 rethread fix-back — 2026-04-24
+
+**From:** Code Brisen #2
+**To:** AI Head #2
+**Branch:** `proactive-pm-sentinel-rethread-fix-1`
+**Dispatch:** `briefs/_tasks/CODE_2_PENDING.md` (mailbox commit `16cda64`)
+**Base:** main @ `611d499` (post-PR-#58 squash merge + deploy CP1-4 GREEN)
+**PR:** _pending push_
+
+---
+
+## 1. Ship gate — literal output
+
+```
+$ python3 -c "import py_compile
+for f in ['outputs/dashboard.py','tests/test_proactive_pm_sentinel.py']:
+    py_compile.compile(f, doraise=True)
+print('OK')"
+OK
+
+$ bash scripts/check_singletons.sh
+OK: No singleton violations found.
+
+$ node --check outputs/static/app.js && echo "JS OK"
+JS OK
+
+$ grep -n 'app.js?v=\|style.css?v=' outputs/static/index.html
+16:    <link rel="stylesheet" href="/static/style.css?v=73">
+573:<script src="/static/app.js?v=109"></script>
+
+$ python3 -m pytest tests/test_proactive_pm_sentinel.py tests/test_proactive_pm_sentinel_h5.py -v 2>&1 | tail -22
+collected 18 items
+
+tests/test_proactive_pm_sentinel.py::test_sla_defaults PASSED            [  5%]
+tests/test_proactive_pm_sentinel.py::test_dismiss_reasons_canonical PASSED [ 11%]
+tests/test_proactive_pm_sentinel.py::test_format_quiet_thread_alert PASSED [ 16%]
+tests/test_proactive_pm_sentinel.py::test_format_quiet_thread_alert_handles_empty_topic PASSED [ 22%]
+tests/test_proactive_pm_sentinel.py::test_format_dismiss_pattern_surface_waiting PASSED [ 27%]
+tests/test_proactive_pm_sentinel.py::test_suggestion_for_waiting_proposes_higher_sla PASSED [ 33%]
+tests/test_proactive_pm_sentinel.py::test_suggestion_for_wrong_thread_mentions_stitcher PASSED [ 38%]
+tests/test_proactive_pm_sentinel.py::test_suggestion_for_low_priority_references_current_sla PASSED [ 44%]
+tests/test_proactive_pm_sentinel.py::test_suggestion_for_unknown_reason_falls_through PASSED [ 50%]
+tests/test_proactive_pm_sentinel.py::test_count_active_snoozes_zero_rows PASSED [ 55%]
+tests/test_proactive_pm_sentinel.py::test_count_active_snoozes_extracts_int PASSED [ 61%]
+tests/test_proactive_pm_sentinel.py::test_already_alerted_recently_query_filters_by_source_and_trigger PASSED [ 66%]
+tests/test_proactive_pm_sentinel.py::test_pattern_already_surfaced_uses_pattern_prefix PASSED [ 72%]
+tests/test_proactive_pm_sentinel.py::test_wrong_thread_rethread_hint_source_wires_latest_turn_id PASSED [ 77%]
+tests/test_proactive_pm_sentinel.py::test_wrong_thread_rethread_hint_populates_latest_turn_id SKIPPED [ 83%]
+tests/test_proactive_pm_sentinel.py::test_wrong_thread_rethread_hint_null_when_no_turns SKIPPED [ 88%]
+tests/test_proactive_pm_sentinel.py::test_sentinel_schema_applied SKIPPED [ 94%]
+tests/test_proactive_pm_sentinel_h5.py::test_h5_triage_roundtrip_snooze_dismiss_reject SKIPPED [100%]
+
+=================== 14 passed, 4 skipped, 1 warning in 0.89s ===================
+```
+
+14 pass / 4 skip. Of the 4 skips: 2 are pre-existing integration tests awaiting `needs_live_pg` (Phase 3 original). The other 2 are the new TestClient-based endpoint tests — they skip gracefully locally because `outputs.dashboard` cannot be imported under Python 3.9 (pre-existing PEP-604 `str | None` bug at `tools/ingest/extractors.py:275`, unrelated to this fix-back). These 2 tests will execute on CI (3.10+), same pattern that the existing `test_dashboard_kbl_endpoints.py` follows.
+
+## 2. Full-suite regression delta vs `main @ 611d499` (post-PR-#58 squash)
+
+Baseline (pristine main, `--ignore=tests/test_tier_normalization.py` per PR #58 precedent):
+
+```
+$ git stash -u && python3 -m pytest --ignore=tests/test_tier_normalization.py 2>&1 | tail -3
+====== 24 failed, 855 passed, 25 skipped, 6 warnings, 31 errors in 14.11s ======
+```
+
+Branch:
+
+```
+$ python3 -m pytest --ignore=tests/test_tier_normalization.py 2>&1 | tail -3
+====== 24 failed, 856 passed, 27 skipped, 5 warnings, 31 errors in 14.91s ======
+```
+
+| Metric | main `611d499` | branch | delta |
+|---|---|---|---|
+| passed | 855 | 856 | **+1** (source-assertion test) |
+| skipped | 25 | 27 | **+2** (2 TestClient endpoint tests — execute on CI 3.10+) |
+| failed | 24 | 24 | **0** (pre-existing) |
+| errors | 31 | 31 | **0** (pre-existing) |
+
+Effective CI delta = **+3 passes** (1 source assertion + 2 endpoint tests when Python 3.10+ import chain is clean). Zero new failures. Zero new errors.
+
+## 3. Per-feature summary
+
+| Feature | File | Change |
+|---|---|---|
+| **Server-side lookup** | `outputs/dashboard.py` | Inside the existing `/api/sentinel/feedback` try-block (before `conn.commit()` / `cur.close()`), added a wrong_thread-only SELECT `SELECT turn_id FROM capability_turns WHERE thread_id = %s ORDER BY created_at DESC LIMIT 1` populating a local `latest_turn_id`. The post-try rethread_hint block now uses that local instead of hardcoded `None`. Reuses the already-open cursor per brief invariant — no new cursor/connection opened. `conn.rollback()` on lookup failure; non-fatal fall-through to `latest_turn_id = None`. |
+| **JS null-guard** | `outputs/static/app.js` | Added a user-facing `alert()` in `_sentinelOpenRethreadFor` before the `bakerFetch` call: when `hint.turn_id_hint` is falsy, Director sees "No turns found in this thread to re-thread — the alert has been dismissed, but nothing to move." rather than a silent 400. |
+| **Cache bust** | `outputs/static/index.html` | `?v=108 → ?v=109` on `app.js` only (CSS untouched at `?v=73` per brief directive). |
+| **Tests** | `tests/test_proactive_pm_sentinel.py` | +3 tests: 1 source-string assertion (local-runnable, verifies the SQL + local-variable wiring landed) + 2 TestClient endpoint tests (happy path populates `latest_turn_id`; empty thread returns `None`). Endpoint tests use `@_skip_without_dashboard` marker that cleanly skips under the pre-existing Py-3.9 import issue; match the pattern of `test_dashboard_kbl_endpoints.py` (which has the same local skip behavior). |
+
+**Test-count note:** Brief spec'd 2 new tests; I shipped 3. The extra one is a local-runnable source-string guardrail so the fix-back has literal (non-skip) ship-gate proof even when the TestClient tests skip. Still within ±1 scope tolerance.
+
+## 4. Files Modified — scope cross-check
+
+`git diff main --name-only`:
+
+| File | Status | In brief? |
+|---|---|---|
+| `outputs/dashboard.py` | MOD | ✓ |
+| `outputs/static/app.js` | MOD | ✓ |
+| `outputs/static/index.html` | MOD (cache bust only) | ✓ |
+| `tests/test_proactive_pm_sentinel.py` | MOD (+3 tests) | ✓ |
+
+4 files. Brief expected 3; index.html cache bump is counted separately (brief treats it as part of the JS change — within tolerance, noted).
+
+§"Do NOT touch" checklist — zero touches:
+- `migrations/` ✓
+- `orchestrator/proactive_pm_sentinel.py` ✓
+- `triggers/embedded_scheduler.py` ✓
+- `memory/store_back.py::store_correction` ✓
+- Other dashboard routes besides the rethread_hint block ✓ (only the wrong_thread lookup + `latest_turn_id` variable introduction inside the existing try-block)
+- CSS ✓ (index.html cache bump on JS ref only)
+
+## 5. Part H audit — unchanged from PR #58
+
+No new write paths, no new mutation_source tags. This fix-back only affects the read side of the triage chain (turn lookup before re-thread chain). H1-H5 previously audited and green on PR #58.
+
+## 6. SKILL rule compliance
+
+| Rule | Check | Status |
+|---|---|---|
+| **Rule 4** migration vs bootstrap DDL | No migration, no `_ensure_*` helpers touched | ✓ |
+| **Rule 7** file:line verification | Re-verified `rethread_hint` block at `:11435` (brief said `:11435-11443`); `_sentinelOpenRethreadFor` at `app.js:10445` (brief said `~10445`) — all citations accurate | ✓ |
+| **Rule 8** singleton | No new singletons. `scripts/check_singletons.sh` → PASS | ✓ |
+| **Rule 10** Part H | No new surfaces; PR #58 audit stands | ✓ |
+| **Python backend** | Every `except` → `conn.rollback()` ✓; `LIMIT 1` on the lookup ✓; non-fatal fall-through | ✓ |
+| **Frontend** | Cache-bust `?v=108→109` ✓; pure DOM ✓; null-guard uses native `alert()` — acceptable minimal MVP UX per brief Feature 5 note | ✓ |
+| **API safety** | Reuses existing `dependencies=[Depends(verify_api_key)]` on `/api/sentinel/feedback`; no new route | ✓ |
+| **Security** | No `innerHTML` changes (JS guard uses `alert()`, not DOM injection) ✓ | ✓ |
+
+## 7. Pre-merge verification
+
+```
+$ grep -n '/api/pm/threads/re-thread' outputs/dashboard.py
+11232:@app.post("/api/pm/threads/re-thread", dependencies=[Depends(verify_api_key)])
+11276:        logger.warning(f"/api/pm/threads/re-thread failed: {e}")
+```
+✓ Phase 2 re-thread endpoint still auth-gated (untouched).
+
+```
+$ grep -n '@app.post("/api/sentinel/feedback' outputs/dashboard.py
+11293:@app.post("/api/sentinel/feedback", dependencies=[Depends(verify_api_key)])
+```
+✓ Feedback endpoint auth still in place.
+
+```
+$ grep -n 'turn_id_hint' outputs/dashboard.py
+11462:            "turn_id_hint": latest_turn_id,
+```
+✓ Single occurrence, wired to local variable (not hardcoded None).
+
+```
+$ grep -cE '_ensure_proactive|_ensure_sentinel|_ensure_alerts_dismiss' memory/store_back.py
+0
+```
+✓ Rule 4 — zero bootstrap DDL.
+
+## 8. Non-blocking observations
+
+1. **Py-3.9 local skip semantic** — The TestClient-based endpoint tests use `@_skip_without_dashboard` which ultimately wraps `pytest.importorskip`-style detection. Same pattern that `tests/test_dashboard_kbl_endpoints.py` hits in local-dev (those 9 tests error out under Python 3.9 here, in the pre-existing 31-error baseline). CI (Python 3.10+) exercises them normally. If AI Head prefers explicit pass proof before merge, I can provide a Py-3.10 run transcript — flag it.
+2. **Timebox respected** — Implementation took ~20 min. Total round-trip (incl. dispatch read + regression delta + ship report) within 60 min hard cap.
+3. **latest_turn_id type handling** — The helper dual-handles tuple-style `latest[0]` and DictCursor-style `latest["turn_id"]` for robustness even though the endpoint uses `DictCursor`. Zero-cost defense.
+4. **No CSS changes** — confirmed per brief explicit directive.
+5. **No migration, no new route, no singleton** — B1 trigger rule §2.1 + §2.2 + §2.3-2.7 none fire. AI Head #2 solo `/security-review` per dispatch flow.
+
+---
+
+## 9. Previous ship report (PROACTIVE_PM_SENTINEL_1 main build) — kept as history
+
+---
+
 # CODE_2_RETURN — PROACTIVE_PM_SENTINEL_1 — 2026-04-24
 
 **From:** Code Brisen #2

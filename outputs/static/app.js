@@ -10447,6 +10447,10 @@ function _sentinelOpenRethreadFor(hint) {
         window.openThreadReThread(hint);
         return;
     }
+    if (!hint.turn_id_hint) {
+        alert('No turns found in this thread to re-thread — the alert has been dismissed, but nothing to move.');
+        return;
+    }
     var newThreadId = window.prompt(
         'Re-thread: enter new thread_id (leave blank to create a fresh thread):',
         ''
