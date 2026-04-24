@@ -993,6 +993,13 @@ class MatterUpdateRequest(BaseModel):
     status: Optional[str] = None
 
 
+class KBLIngestRequest(BaseModel):
+    """POST /api/kbl/ingest body. See kbl.ingest_endpoint.ingest() for semantics."""
+    frontmatter: dict
+    body: str
+    trigger_source: Optional[str] = "kbl_ingest_endpoint"
+
+
 class PreferenceRequest(BaseModel):
     category: str = Field(..., min_length=1, max_length=100)
     key: str = Field(..., min_length=1, max_length=200)
@@ -1101,6 +1108,42 @@ async def update_matter_endpoint(matter_id: int, req: MatterUpdateRequest):
         raise
     except Exception as e:
         logger.error(f"PUT /api/matters/{matter_id} failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
+# KBL_INGEST_ENDPOINT_1: Single chokepoint for wiki writes
+# ============================================================
+
+@app.post("/api/kbl/ingest", tags=["kbl"], dependencies=[Depends(verify_api_key)])
+async def kbl_ingest_endpoint(req: KBLIngestRequest):
+    """Single chokepoint for wiki writes.
+
+    Enforces VAULT.md §2 frontmatter schema, slug registry check
+    (matters — via slugs.yml), atomic wiki_pages + baker_actions write
+    (CHANDA #2), Qdrant upsert, and Gold mirror staging when voice=gold.
+    """
+    from kbl.ingest_endpoint import ingest, KBLIngestError
+    try:
+        result = ingest(
+            frontmatter=req.frontmatter,
+            body=req.body,
+            trigger_source=req.trigger_source or "kbl_ingest_endpoint",
+        )
+        return {
+            "status": "ingested",
+            "wiki_page_id": result.wiki_page_id,
+            "slug": result.slug,
+            "qdrant_point_id": result.qdrant_point_id,
+            "gold_mirrored": result.gold_mirrored,
+            "mirror_path": result.mirror_path,
+        }
+    except KBLIngestError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"POST /api/kbl/ingest failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
