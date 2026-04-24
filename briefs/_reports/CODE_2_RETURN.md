@@ -1,11 +1,11 @@
-# CODE_2_RETURN — PM_EXTRACTION_JSON_ROBUSTNESS_1 — 2026-04-23
+# CODE_2_RETURN — PM_EXTRACTION_MAX_TOKENS_2 — 2026-04-24
 
 **From:** Code Brisen #2
 **To:** AI Head #2
-**Branch:** `hotfix/pm-extraction-json-robustness-1`
-**Brief:** `briefs/BRIEF_PM_EXTRACTION_JSON_ROBUSTNESS_1.md`
-**Dispatch:** `briefs/_tasks/CODE_2_PENDING.md` (mailbox commit `1cd2480`)
-**Base:** main @ `f054da7` (13 commits ahead of PR #50 merge `596f1861`, all unrelated to the extractor path)
+**Branch:** `hotfix/pm-extraction-max-tokens-2`
+**Brief:** `briefs/BRIEF_PM_EXTRACTION_MAX_TOKENS_2.md`
+**Dispatch:** `briefs/_tasks/CODE_2_PENDING.md` (mailbox commit `03d02db`)
+**Base:** main @ `03d02db` (4 commits ahead of PR #54 merge `ca75e372`, all unrelated to the extractor path)
 
 ---
 
@@ -21,98 +21,100 @@ $ bash scripts/check_singletons.sh
 OK: No singleton violations found.
 
 $ python3 -m pytest tests/test_pm_extraction_robustness.py -v
-collected 5 items
+collected 6 items
 
-tests/test_pm_extraction_robustness.py::test_parse_well_formed_json_object PASSED [ 20%]
-tests/test_pm_extraction_robustness.py::test_parse_json_in_markdown_fence PASSED [ 40%]
-tests/test_pm_extraction_robustness.py::test_parse_unquoted_property_names PASSED [ 60%]
-tests/test_pm_extraction_robustness.py::test_parse_trailing_comma PASSED [ 80%]
-tests/test_pm_extraction_robustness.py::test_parse_unparseable_returns_none PASSED [100%]
+tests/test_pm_extraction_robustness.py::test_parse_well_formed_json_object PASSED [ 16%]
+tests/test_pm_extraction_robustness.py::test_parse_json_in_markdown_fence PASSED [ 33%]
+tests/test_pm_extraction_robustness.py::test_parse_unquoted_property_names PASSED [ 50%]
+tests/test_pm_extraction_robustness.py::test_parse_trailing_comma PASSED [ 66%]
+tests/test_pm_extraction_robustness.py::test_parse_unparseable_returns_none PASSED [ 83%]
+tests/test_pm_extraction_robustness.py::test_extract_logs_output_tokens_on_success PASSED [100%]
 
-============================== 5 passed in 0.17s ===============================
+============================== 6 passed in 0.23s ===============================
 ```
 
 ### 2. Full-suite regression delta
 
 ```
-Baseline (main @ f054da7, excluding tests/test_tier_normalization.py collection-only TypeError bug):
-  810 passed, 24 failed, 21 skipped, 31 errors
+Baseline (main @ 03d02db, excluding tests/test_tier_normalization.py collection-only TypeError bug):
+  816 passed, 24 failed, 21 skipped, 31 errors
 
-Branch (hotfix/pm-extraction-json-robustness-1):
-  815 passed, 24 failed, 21 skipped, 31 errors
+Branch (hotfix/pm-extraction-max-tokens-2):
+  817 passed, 24 failed, 21 skipped, 31 errors
 
-Delta: +5 passes = 5 new tests in tests/test_pm_extraction_robustness.py.
+Delta: +1 pass = 1 new test (test_extract_logs_output_tokens_on_success).
 Failures: 24 == 24 (zero regressions).
 Errors:   31 == 31 (zero regressions).
 ```
 
-Measurement method: `git stash -u` the branch's working tree, ran pytest on main HEAD files, captured baseline, then `git stash pop` and re-ran ship gate on the restored branch state. Re-verified new-test green count post-restore.
+Measurement method: `git stash -u` branch, ran pytest on pristine main, captured baseline, `git stash pop`, re-verified ship gate on restored branch.
 
 ### 3. Per-deliverable summary
 
 | Deliverable | File | Change |
 |---|---|---|
-| D0 | `briefs/_reports/EXCEPT_DEBUG_AUDIT_20260423.md` (NEW) | Grep audit table covering `orchestrator/`, `triggers/`, `outputs/`, `memory/`. 3 Bucket A in `capability_runner.py` (all in D4); 9 additional Bucket A overflow (trigger layer) queued for `LOGGER_LEVEL_PROMOTE_TRIGGERS_1` follow-up per brief §D4 rule (`>5 total → overflow`). Bucket B / C untouched. |
-| D1 | `orchestrator/capability_runner.py` | Single-token change `max_tokens=700` → `max_tokens=1500` in `extract_and_update_pm_state` claude.messages.create call (current line 309). `_auto_update_pm_state` delegator untouched (it has no API call — it forwards to the extractor). |
-| D2 | `orchestrator/capability_runner.py` | New module-level helper `_robust_json_parse_object(text) -> dict \| None` inserted immediately before `extract_and_update_pm_state`. 4-pass cascade: direct / fence-strip / `{...}` regex / Pass-4 repair (quote unquoted keys + strip trailing commas). Returns `None` on total failure, NOT `{}`. Mirrors `orchestrator/extraction_engine.py:554` style. Uses `re.IGNORECASE`-free repair regex (no inline flags). Zero new pip deps. |
-| D3 | `orchestrator/capability_runner.py` | Replaced `updates = _json.loads(raw)` with `updates = _robust_json_parse_object(raw)` + `if updates is None: logger.warning(...); return None`. Deleted the now-redundant `if raw.startswith("```"): raw = "\n".join(raw.split("\n")[1:-1])` — the helper handles fences. Deleted the now-unused function-level `import json as _json`. Outer try/except preserved. |
-| D4 | `orchestrator/capability_runner.py` | 3 Bucket-A sites promoted `logger.debug` → `logger.warning` with `[error_class={type(e).__name__}]` forensic anchor: (i) `extract_and_update_pm_state` outer catch, (ii) `extract_correction_from_feedback` outer catch, (iii) `CapabilityRunner._maybe_store_insight` outer catch. Bucket B (Russo document store, pending-insight storage) + Bucket C (decomposition logging) left at `debug` per brief rule. |
-| D5 | `tests/test_pm_extraction_robustness.py` (NEW) | 5 tests per brief §D5 — well-formed / markdown-fence / unquoted keys / trailing comma / unparseable-returns-None. All 5 green in 0.17s. |
+| **D1** | `orchestrator/capability_runner.py:308` | Literal integer `max_tokens=1500` → `max_tokens=3000`. Only this one site changed; the other 8 `max_tokens=` sites in the file (line 445 correction extraction = 300; line 1352 Russo extraction = 500; 6 `_force_synthesis` pass-throughs) were not touched. |
+| **D2** | `orchestrator/capability_runner.py` | Inserted 10-line telemetry block immediately after the `resp = claude.messages.create(...)` close-paren and BEFORE `raw = resp.content[0].text.strip()`. Uses defensive `getattr(getattr(resp, "usage", None), "output_tokens", None)` + `getattr(resp, "stop_reason", None)` chain. Wrapped in `try: ... except Exception: pass` so telemetry never breaks extraction. Log format: `PM extraction tokens [{pm_slug}][{mutation_source}]: output_tokens={_ot}, stop_reason={_stop}`. Emitted at `logger.info` so production tail-f sees it without filter. |
+| **D3** | `tests/test_pm_extraction_robustness.py` | Added `test_extract_logs_output_tokens_on_success` as 6th test. 5 existing tests untouched. New test uses `caplog.at_level(logging.INFO, logger="baker.capability_runner")` + `monkeypatch.setattr(capability_runner, "anthropic", ...)` with a fake `_FakeResp` carrying `usage.output_tokens=1234` + `stop_reason="end_turn"`. Asserts the log record contains both anchor substrings. `memory.store_back` injected via `sys.modules` fake to sidestep the PEP-604 `int \| None` annotation in `create_cross_pm_signal` that breaks type evaluation on the test runner's Python 3.9. `CapabilityRunner.__init__` stubbed to no-op per the existing pattern in `tests/test_pm_state_write.py`. |
 
 ### 4. Files modified vs Files Modified list
 
 | Brief §Files Modified entry | This PR? | Notes |
 |---|---|---|
-| `orchestrator/capability_runner.py` | ✅ | D1 + D2 + D3 + D4 |
-| `tests/test_pm_extraction_robustness.py` (NEW) | ✅ | D5 |
-| `briefs/_reports/EXCEPT_DEBUG_AUDIT_20260423.md` (NEW) | ✅ | D0 |
+| `orchestrator/capability_runner.py` | ✅ | D1 + D2 |
+| `tests/test_pm_extraction_robustness.py` | ✅ | D3 (append-only) |
 
-Zero other files touched.
+```
+$ git diff main..HEAD --name-only | wc -l
+2
+```
+
+Exactly 2 files. Brief §Scope discipline satisfied.
 
 ### 5. Do NOT Touch — verified untouched
 
-```
-$ git diff main..hotfix/pm-extraction-json-robustness-1 -- \
-    scripts/backfill_pm_state.py outputs/dashboard.py \
-    orchestrator/extraction_engine.py memory/store_back.py | wc -l
-0
-```
-
-`_auto_update_pm_state` 11-line delegator wrapper: confirmed unchanged (it
-forwards to `extract_and_update_pm_state` and carries no `max_tokens`
-literal of its own). PM_REGISTRY, schema, Anthropic SDK version: all
-untouched.
+- `scripts/backfill_pm_state.py` — 0 diff
+- `outputs/dashboard.py` sidebar hooks — 0 diff
+- PM_REGISTRY — 0 diff
+- `_robust_json_parse_object` — 0 diff (brief explicitly excludes)
+- `_auto_update_pm_state` 11-line delegator — 0 diff
+- Every other `max_tokens=` call site (8 total, lines 445 / 569 / 599 / 712 / 768 / 804 / 925 / 1352) — 0 diff
+- 5 existing parser tests — 0 semantic change (only docstring header updated to reflect new 6-test count)
 
 ### 6. Rule compliance (SKILL Rules 7 / 8 / 10 / python-backend)
 
-- **Rule 7 (file:line verify).** Every cited line verified pre-edit:
-  - `orchestrator/extraction_engine.py:554` style mirror confirmed ✓ (cascade shape + `re.DOTALL` + graceful fall-through)
-  - `capability_runner.py` current-state anchors confirmed: `extract_and_update_pm_state` at line 188 (post-PR-50) ✓; claude.messages.create `max_tokens=700` at line 236 ✓; outer except at line 314-318 ✓; `extract_correction_from_feedback` outer except at 407-408 ✓; `_maybe_store_insight` outer except at 1325-1326 ✓
-  - Seed list from brief §D0 `911 / 1326 / 1356 / 1900` all confirmed + classified ✓
-- **Rule 8 (singleton).** `bash scripts/check_singletons.sh` green. No new `SentinelStoreBack()` constructs; the existing `_get_global_instance()` path inside `extract_and_update_pm_state` is untouched.
-- **Rule 10 (Part H).** Invocation path unchanged from PR #50 — same 6 callers, same `mutation_source` tags. PR body cites PR #50's Part H audit by reference per brief instruction.
-- **Python regex (python-backend.md).** Both Pass-4 repair regexes use the Python `flags=` arg (`_re.DOTALL`) or no flags; no inline `(?i)` used. Forensic-anchor messages include `type(e).__name__` — the grep token the brief specified.
+- **Rule 7 (file:line verify).** Pre-edit grep confirmed exactly one `max_tokens=1500` at `orchestrator/capability_runner.py:308`:
+  ```
+  $ grep -n "max_tokens=" orchestrator/capability_runner.py | grep 1500
+  308:            max_tokens=1500,
+  ```
+  Post-edit confirmed it's now `max_tokens=3000` on the same line with no other numeric literal touched.
+- **Rule 8 (singleton).** `bash scripts/check_singletons.sh` green. No new `SentinelStoreBack()` calls; the test's `_NoopStoreClass._get_global_instance` is a classmethod-shaped fake via `sys.modules` injection — preserves the singleton contract.
+- **Rule 10 (Part H).** Invocation path unchanged from PR #50 + PR #54 — same 6 callers, same `mutation_source` tags, zero new paths. PR body cites both prior audits by reference.
+- **Python rules.** `re.IGNORECASE` not used (no regex added). `except Exception: pass` in D2 is telemetry-only (wraps log emission) — acceptable under the brief's `python-backend.md` §"Fault-tolerant writes" standard. Syntax check green.
 
 ### 7. Python-backend quality checks
 
-- **No new SQL.** D0 audit is read-only; D1-D4 edit Python only.
-- **No `conn.rollback()` changes needed.** Bucket B state-write sites (Russo + pending-insight) were left at `debug` per brief scope rule; the inner DB try/excepts there already rollback.
-- **Parser returns `None`, not `{}`** — verified by `test_parse_unparseable_returns_none`. Callers can distinguish "Opus emitted empty state" from "parse failed."
-- **Model-client-response triple preserved** (Lesson #13): `claude-opus-4-6` + `anthropic.Anthropic(...).messages.create(...)` + `resp.content[0].text`. Only `max_tokens` literal changed.
-- **No new pip deps.** `_robust_json_parse_object` uses stdlib only (`json`, `re`).
+- **No new SQL.** D1-D3 are Python-only.
+- **No `conn.rollback()` changes.** No DB code touched.
+- **Model-client-response triple preserved** (Lesson #13): `claude-opus-4-6` + `anthropic.Anthropic(...).messages.create(...)` + `resp.content[0].text`. Only the `max_tokens` literal changed and a telemetry `getattr` chain was added after the call — the call itself is intact.
+- **Telemetry emits on both success and failure paths.** D2 block is positioned before `raw = resp.content[0].text.strip()`, which is before `_robust_json_parse_object(raw)`. So `stop_reason=max_tokens` cases (the ones that motivated this hot-fix) log on their way to parse-failure too. This is the empirical data point the brief wants.
+- **Cost impact.** Worst-case 2× output tokens; current traffic ~5 sidebar-scans/day × ~$0.0003/call ≈ $0.0015/day. Negligible per brief §D1 math.
 
 ### 8. Observations for follow-up (non-blocking)
 
-- **9 trigger-layer Bucket-A silencers queued** for a follow-up brief `LOGGER_LEVEL_PROMOTE_TRIGGERS_1` — catalogued in `EXCEPT_DEBUG_AUDIT_20260423.md` §Overflow. Covers Plaud deadline/commitment/Director-commitment extraction, ClickUp deadline extraction, YouTube meeting signal detection, dashboard duplicate correction silencer. Promoting them all here would have pushed scope past the brief's ≤5-site threshold and mixed the PM-state-extraction failure class with the trigger-ingest failure class.
-- **`orchestrator/agent.py:2031`** still calls `store.update_pm_project_state(pm_slug, updates, summary)` without `mutation_source=` kwarg (carryover from PR #50 B2 return). Not this brief's scope. Queue for `TEMPLATE_H_COMPLIANCE_1` if Director wants it sorted before Phase 2.
-- **Baseline** has 24 pre-existing failing tests + 31 collection errors + `tests/test_tier_normalization.py` TypeError. Unchanged by this hot-fix. Zero regressions introduced.
+- **Python-version note on D3.** The fake for `memory.store_back` is injected via `sys.modules` rather than `from memory import store_back` because the real module's `create_cross_pm_signal` signature uses PEP-604 `int | None` which fails runtime type evaluation on Python 3.9. This follows the existing pattern in `tests/test_pm_state_write.py`. If the project ever standardizes to a newer minimum Python, the test could be simplified to a direct `monkeypatch.setattr(store_back.SentinelStoreBack, "_get_global_instance", ...)`. Not this brief's scope.
+- **Carryover:** `orchestrator/agent.py:2031` still calls `update_pm_project_state(...)` without `mutation_source=`. Still queued for a `TEMPLATE_H_COMPLIANCE_1` follow-up. Unchanged.
+- **Carryover:** 9 trigger-layer Bucket-A `logger.debug` silencers documented in `briefs/_reports/EXCEPT_DEBUG_AUDIT_20260423.md` still queued for `LOGGER_LEVEL_PROMOTE_TRIGGERS_1`. Unchanged.
+- **Baseline** carries 24 pre-existing failing tests + 31 collection errors + the `tests/test_tier_normalization.py` TypeError. Unchanged.
 
 ---
 
-**Handoff:** `@ai-head-2 ready for review`. Tier A: AI Head #2 runs
-`/security-review`, merges on APPROVE + green ship gate, then executes the
-post-merge sequence per brief §"Post-merge sequence" — **critically, the
-Phase 2 unlock depends on the backfill re-running and extracting ≥3 rows
-for ao_pm**, which validates the fix end-to-end against live Opus output.
+**Handoff:** `@ai-head-2 ready for review`. Tier A post-merge sequence
+per brief §Post-merge sequence: `/security-review` → merge on APPROVE +
+green ship gate → re-run backfill → count `ao_pm` rows. Phase 2 unlock
+signal **only if `COUNT(*) ≥ 3`** per Director's literal directive. If
+`< 3`, report-only — do not auto-escalate (structural design question
+deferred by Director 2026-04-24).
 
 — B2

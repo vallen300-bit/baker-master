@@ -305,7 +305,7 @@ def extract_and_update_pm_state(
         claude = anthropic.Anthropic(api_key=config.claude.api_key)
         resp = claude.messages.create(
             model="claude-opus-4-6",
-            max_tokens=1500,
+            max_tokens=3000,
             system=extraction_system,
             messages=[{"role": "user", "content": (
                 f"Extract state updates from this {label} interaction.\n\n"
@@ -332,6 +332,17 @@ def extract_and_update_pm_state(
                 f"Only include fields with NEW information. Be concise."
             )}],
         )
+        # BRIEF_PM_EXTRACTION_MAX_TOKENS_2 D2: empirical output-token sizing.
+        # Emit BEFORE parse so truncations (stop_reason=max_tokens) also log.
+        try:
+            _ot = getattr(getattr(resp, "usage", None), "output_tokens", None)
+            _stop = getattr(resp, "stop_reason", None)
+            logger.info(
+                f"PM extraction tokens [{pm_slug}][{mutation_source}]: "
+                f"output_tokens={_ot}, stop_reason={_stop}"
+            )
+        except Exception:
+            pass  # telemetry only — never break extraction on log failure
         raw = resp.content[0].text.strip()
         updates = _robust_json_parse_object(raw)
         if updates is None:
