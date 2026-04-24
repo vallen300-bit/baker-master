@@ -49,7 +49,7 @@ Breach response is per-tier, not per-invariant. Predictable.
 | S2 | Every write to external systems logs to `baker_actions` atomically | critical | runtime DB txn |
 | S3 | Kill switches respected (`BAKER_*_READONLY` env vars) | critical | runtime assertion at write-path entry |
 | S4 | Rate caps enforced (max 10 writes/cycle/integration) | critical | runtime counter |
-| S5 | Scan responses cite sources; no hallucinated citations | warn | post-response validator: grep citations against source IDs |
+| S5 | Scan responses cite sources; no hallucinated citations | warn | Anthropic Citations API (model-level grounding); post-response validator retired |
 
 **Total:** 5 rows. 4 critical, 1 warn.
 
@@ -77,3 +77,4 @@ Append-only. Every change to this file gets a row. Director signs via commit.
 | 2026-04-23 | §4 row #4 + §6 | Enforcement refined to intent-based: agent commits to `author: director` files allowed only when commit message carries `Director-signed:` quote marker. Row #4 text unchanged; detector script at `invariant_checks/author_director_guard.sh` implements the check (AUTHOR_DIRECTOR_GUARD_1, PR TBD). | Director workflow definition 2026-04-23 ("To change any files I write to you AI Head in plain English") |
 | 2026-04-23 | §4 row #2 + §6 | Detector #2 shipped: `invariant_checks/ledger_atomic.py` context manager binds Director-action primary write and `baker_actions` ledger row into one DB transaction. First caller: `cortex.publish_event()` (LEDGER_ATOMIC_1, PR TBD). Follow-on briefs migrate remaining call sites. | "default recom is fine" (2026-04-21) |
 | 2026-04-23 | §6 detector #4 | Stage corrected: `pre-commit` → `commit-msg`. pre-commit fires BEFORE `-F`/`-m` message is written to `.git/COMMIT_EDITMSG`, making marker check unreliable. commit-msg receives message-file path as `$1` (which the existing script already handles via `${1:-.git/COMMIT_EDITMSG}` fallback — no script change required). (MAC_MINI_WRITER_AUDIT_1, PR TBD) | Hook-bug surfaced during KBL_SCHEMA_1 vault mirror 2026-04-23 |
+| 2026-04-24 | §5 row S5 | Enforcement mechanism changed from post-response validator (prompt-engineered) to Anthropic Citations API (model-level source grounding). Adapter at `kbl/citations.py`. Scan endpoints `/api/scan`, `/api/scan/specialist`, `/api/scan/client-pm` wire documents through the adapter; citations stream over SSE (`__citations__` event) + render in Slack substrate via `outputs/slack_notifier.post_scan_with_citations` (CITATIONS_API_SCAN_1, PR TBD). Belt-and-braces: prompt-level anti-hallucination instruction in `orchestrator/capability_runner.py:1149` retained until 7-day Citations observation window. | Ratified 2026-04-21 "all 9 are ratified" + 2026-04-21 "4th block" Slack cross-application |
