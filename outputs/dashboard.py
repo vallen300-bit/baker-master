@@ -45,6 +45,30 @@ def _llm_call(model: str, messages: list, max_tokens: int = 2000, system: str = 
         return GeminiResponse(resp.content[0].text, resp.usage.input_tokens, resp.usage.output_tokens)
 from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT
 from orchestrator import action_handler as _ah
+from kbl.cache_telemetry import log_cache_usage
+
+
+def _split_scan_system_for_cache(system_prompt: str) -> list:
+    """PROMPT_CACHE_AUDIT_1: split Scan system prompt into
+    [stable_cached_block, dynamic_block] form so the stable 1.9k-token
+    SCAN_SYSTEM_PROMPT prefix is prompt-cacheable across calls.
+
+    Dynamic suffix (time / deadlines / retrieval / mode / prefs) stays
+    uncached in a second block."""
+    stable = SCAN_SYSTEM_PROMPT
+    if system_prompt.startswith(stable):
+        dynamic = system_prompt[len(stable):]
+    else:
+        # Fallback: whole prompt is dynamic, nothing to cache this call.
+        return [{"type": "text", "text": system_prompt}]
+    blocks: list = [
+        {"type": "text", "text": stable,
+         "cache_control": {"type": "ephemeral"}},
+    ]
+    if dynamic.strip():
+        blocks.append({"type": "text", "text": dynamic})
+    return blocks
+
 from tools.ingest.pipeline import ingest_file
 from tools.ingest.extractors import SUPPORTED_EXTENSIONS
 from tools.ingest.classifier import VALID_COLLECTIONS
@@ -8579,12 +8603,20 @@ async def _scan_chat_legacy_stream(req, start: float, domain_context: str = "",
         claude = anthropic.Anthropic(api_key=config.claude.api_key)
         with claude.messages.stream(
             model=config.claude.model, max_tokens=4096,
-            system=system_prompt, messages=messages,
+            system=_split_scan_system_for_cache(system_prompt),
+            messages=messages,
         ) as stream:
             for text in stream.text_stream:
                 full_response += text
                 payload = json.dumps({"token": text})
                 yield f"data: {payload}\n\n"
+            try:
+                final_msg = stream.get_final_message()
+                log_cache_usage(final_msg.usage,
+                                call_site="outputs.dashboard.scan_chat",
+                                model=config.claude.model)
+            except Exception:
+                pass
     except Exception as e:
         logger.error(f"Scan stream error: {e}")
         err_payload = json.dumps({"error": str(e)})
@@ -8692,7 +8724,7 @@ def _scan_chat_legacy(req, start: float, domain_context: str = "",
             with claude.messages.stream(
                 model=config.claude.model,
                 max_tokens=4096,
-                system=system_prompt,
+                system=_split_scan_system_for_cache(system_prompt),
                 messages=messages,
             ) as stream:
                 for text in stream.text_stream:
@@ -8700,6 +8732,13 @@ def _scan_chat_legacy(req, start: float, domain_context: str = "",
                     # SSE format: data: <json>\n\n
                     payload = json.dumps({"token": text})
                     yield f"data: {payload}\n\n"
+                try:
+                    final_msg = stream.get_final_message()
+                    log_cache_usage(final_msg.usage,
+                                    call_site="outputs.dashboard.scan_chat_legacy",
+                                    model=config.claude.model)
+                except Exception:
+                    pass
         except Exception as e:
             logger.error(f"Scan stream error: {e}")
             err_payload = json.dumps({"error": str(e)})

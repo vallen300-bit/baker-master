@@ -201,13 +201,27 @@ def call_baker_rag(retrieved_context, query, max_output_tokens=8192):
 
     start_time = time.time()
 
+    # PROMPT_CACHE_AUDIT_1: BAKER_SYSTEM_PROMPT is ~265 tokens, below
+    # Anthropic's 1024-token cache minimum — the API ignores cache_control
+    # on sub-threshold blocks. Tag kept so caching engages automatically
+    # if the prompt grows past threshold (ship report documents the skip).
     response = client.messages.create(
         model=config.claude.model,
         max_tokens=max_output_tokens,
-        system=BAKER_SYSTEM_PROMPT,
+        system=[{
+            "type": "text",
+            "text": BAKER_SYSTEM_PROMPT,
+            "cache_control": {"type": "ephemeral"},
+        }],
         messages=[{"role": "user", "content": user_message}],
         extra_headers={"anthropic-beta": config.claude.beta_header},
     )
+    try:
+        from kbl.cache_telemetry import log_cache_usage
+        log_cache_usage(response.usage, call_site="baker_rag.call_baker_rag",
+                        model=config.claude.model)
+    except Exception:
+        pass
 
     elapsed = time.time() - start_time
 

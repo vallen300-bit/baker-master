@@ -27,8 +27,18 @@ from orchestrator.agent import (
 from orchestrator.capability_registry import CapabilityDef
 from orchestrator.capability_router import RoutingPlan
 from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT, build_mode_aware_prompt
+from kbl.cache_telemetry import log_cache_usage
 
 logger = logging.getLogger("baker.capability_runner")
+
+
+def _cache_wrap(system_str: str) -> list:
+    """PROMPT_CACHE_AUDIT_1: wrap a capability system prompt as a single
+    ephemeral cache_control block. Caches when the capability's system
+    text is stable across calls (most PM + domain capabilities);
+    misses harmlessly when dynamic bits vary."""
+    return [{"type": "text", "text": system_str,
+             "cache_control": {"type": "ephemeral"}}]
 
 # Max sub-tasks in delegate path (safety bound)
 MAX_SUB_TASKS = 4
@@ -666,7 +676,7 @@ class CapabilityRunner:
             api_params = {
                 "model": _model,
                 "max_tokens": _max_tokens,
-                "system": system,
+                "system": _cache_wrap(system),
                 "messages": messages,
                 "tools": tools,
             }
@@ -677,6 +687,10 @@ class CapabilityRunner:
             response = self.claude.messages.create(**api_params)
             total_in += response.usage.input_tokens
             total_out += response.usage.output_tokens
+
+            log_cache_usage(response.usage,
+                            call_site="orchestrator.capability_runner.run",
+                            model=_model)
 
             # PHASE-4A: Log API cost (includes thinking tokens if present)
             self._log_api_cost(_model, response.usage.input_tokens,
@@ -876,7 +890,7 @@ class CapabilityRunner:
             api_params = {
                 "model": _model,
                 "max_tokens": _max_tokens,
-                "system": system,
+                "system": _cache_wrap(system),
                 "messages": messages,
                 "tools": tools,
             }
@@ -887,6 +901,10 @@ class CapabilityRunner:
             response = self.claude.messages.create(**api_params)
             total_in += response.usage.input_tokens
             total_out += response.usage.output_tokens
+
+            log_cache_usage(response.usage,
+                            call_site="orchestrator.capability_runner.run_streaming",
+                            model=_model)
 
             # PHASE-4A: Log API cost (includes thinking tokens if present)
             self._log_api_cost(_model, response.usage.input_tokens,
