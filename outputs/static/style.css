@@ -1690,3 +1690,39 @@ body {
         margin: 8px;
     }
 }
+
+/* ═══ BRIEF_PROACTIVE_PM_SENTINEL_1 — sentinel triage surface ═══ */
+.sentinel-alert {
+    padding: 12px; margin: 8px 0;
+    border-left: 4px solid #d97706;
+    position: relative;
+}
+.sentinel-alert.sentinel-alert-snoozed { opacity: 0.55; }
+.sentinel-alert-title { font-weight: 600; margin-bottom: 4px; }
+.sentinel-alert-body { font-size: 0.9em; color: var(--text2, #555); margin-bottom: 6px; white-space: pre-wrap; }
+.sentinel-alert-buttons { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+.sentinel-btn { padding: 6px 12px; border: 1px solid #444; background: #fafafa; cursor: pointer; font-size: 0.9em; }
+.sentinel-btn:hover { background: #f0f0f0; }
+.sentinel-snooze-wrap, .sentinel-dismiss-wrap { position: relative; display: inline-flex; gap: 4px; }
+.sentinel-snooze-input { width: 60px; margin-left: 4px; padding: 4px; }
+.sentinel-dismiss-menu, .sentinel-alert-kebab-menu {
+    position: absolute; top: 100%; left: 0;
+    background: #fff; border: 1px solid #888;
+    box-shadow: 0 4px 12px rgba(0,0,0,.15);
+    min-width: 200px; z-index: 100;
+}
+.sentinel-dismiss-item, .sentinel-alert-kebab-item {
+    padding: 8px 12px; cursor: pointer;
+}
+.sentinel-dismiss-item:hover, .sentinel-alert-kebab-item:hover { background: #f0f0f0; }
+.sentinel-alert-kebab {
+    display: none; position: absolute; top: 8px; right: 8px;
+    font-size: 20px; cursor: pointer; padding: 4px 8px;
+    user-select: none;
+}
+
+/* Mobile (lesson #18): hide button row, show kebab overflow */
+@media (max-width: 640px) {
+    .sentinel-alert-buttons { display: none; }
+    .sentinel-alert-kebab { display: inline-block; }
+}

@@ -11280,6 +11280,172 @@ async def re_thread(req: Request):
 
 
 # ============================================================
+# BRIEF_PROACTIVE_PM_SENTINEL_1 — Director triage surface
+# Four-verdict endpoint: accept / snooze / dismiss / reject.
+# Auth-gated (B1 §2.1 trigger + PR #57 anchor incident).
+# ============================================================
+
+@app.post("/api/sentinel/feedback", dependencies=[Depends(verify_api_key)])
+async def sentinel_feedback(req: Request):
+    """BRIEF_PROACTIVE_PM_SENTINEL_1: Director triage surface.
+
+    Body shape:
+      {"alert_id": int, "verdict": "accept"|"snooze"|"dismiss"|"reject",
+       "snooze_hours": int?,        # when verdict=snooze (default 24, max 720)
+       "dismiss_reason": str?,       # when verdict=dismiss (must be in DISMISS_REASONS)
+       "director_comment": str?,
+       "learned_rule": str?}         # required when verdict=reject
+
+    Returns:
+      - standard feedback response dict
+      - for dismiss_reason='wrong_thread': additional `rethread_hint` so the
+        client can POST /api/pm/threads/re-thread (Phase 2 chain).
+    """
+    import psycopg2.extras
+    body = await req.json()
+    alert_id = body.get("alert_id")
+    verdict = (body.get("verdict") or "").lower()
+    if not alert_id or verdict not in ("accept", "snooze", "dismiss", "reject"):
+        return JSONResponse(
+            {"error": "alert_id and verdict in {accept,snooze,dismiss,reject} required"},
+            status_code=400,
+        )
+
+    from orchestrator.proactive_pm_sentinel import DISMISS_REASONS
+
+    snooze_hours = 24
+    dismiss_reason = None
+    if verdict == "snooze":
+        try:
+            snooze_hours = int(body.get("snooze_hours") or 24)
+        except (TypeError, ValueError):
+            return JSONResponse({"error": "snooze_hours must be integer"}, status_code=400)
+        if snooze_hours < 1 or snooze_hours > 720:
+            return JSONResponse({"error": "snooze_hours out of range [1, 720]"}, status_code=400)
+    elif verdict == "dismiss":
+        dismiss_reason = (body.get("dismiss_reason") or "").strip().lower()
+        if dismiss_reason not in DISMISS_REASONS:
+            return JSONResponse(
+                {"error": f"dismiss_reason must be one of {sorted(DISMISS_REASONS)}"},
+                status_code=400,
+            )
+
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        return JSONResponse({"error": "db unavailable"}, status_code=503)
+
+    row = None
+    new_status = None
+    try:
+        cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+        cur.execute(
+            """
+            SELECT id, source, source_id, matter_slug, structured_actions
+            FROM alerts WHERE id = %s AND source = 'proactive_pm_sentinel' LIMIT 1
+            """,
+            (alert_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            cur.close()
+            return JSONResponse({"error": "alert not found"}, status_code=404)
+        row = dict(row)
+
+        verdict_meta = {
+            "director_verdict": verdict,
+            "director_comment": (body.get("director_comment") or "")[:2000],
+            "verdict_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        if verdict == "snooze":
+            # snooze_hours is already int-coerced and range-checked — safe to
+            # inline into the INTERVAL literal.
+            cur.execute(
+                f"""
+                UPDATE alerts
+                SET status = 'pending',
+                    snoozed_until = NOW() + INTERVAL '{snooze_hours} hours',
+                    structured_actions = COALESCE(structured_actions, '{{}}'::jsonb) || %s::jsonb
+                WHERE id = %s
+                """,
+                (json.dumps({**verdict_meta, "snooze_hours": snooze_hours}), alert_id),
+            )
+            new_status = "snoozed"
+        elif verdict == "dismiss":
+            cur.execute(
+                """
+                UPDATE alerts
+                SET status = 'dismissed',
+                    dismiss_reason = %s,
+                    resolved_at = NOW(),
+                    structured_actions = COALESCE(structured_actions, '{}'::jsonb) || %s::jsonb
+                WHERE id = %s
+                """,
+                (dismiss_reason, json.dumps(verdict_meta), alert_id),
+            )
+            new_status = "dismissed"
+        else:  # accept or reject — both resolve
+            cur.execute(
+                """
+                UPDATE alerts
+                SET status = 'resolved', resolved_at = NOW(),
+                    structured_actions = COALESCE(structured_actions, '{}'::jsonb) || %s::jsonb
+                WHERE id = %s
+                """,
+                (json.dumps(verdict_meta), alert_id),
+            )
+            new_status = "resolved"
+
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(f"/api/sentinel/feedback update failed: {e}")
+        return JSONResponse({"error": "feedback_failed"}, status_code=500)
+    finally:
+        store._put_conn(conn)
+
+    response = {"alert_id": alert_id, "status": new_status, "verdict": verdict}
+
+    # Reject verdict → store learned rule into baker_corrections
+    if verdict == "reject":
+        learned_rule = (body.get("learned_rule") or "").strip()
+        director_comment = (body.get("director_comment") or "").strip()
+        if not learned_rule:
+            response["warning"] = "reject without learned_rule — no correction stored"
+        else:
+            try:
+                store.store_correction(
+                    baker_task_id=int(alert_id),
+                    capability_slug=row.get("matter_slug") or "ao_pm",
+                    correction_type="sentinel_false_positive",
+                    director_comment=director_comment,
+                    learned_rule=learned_rule,
+                    matter_slug=row.get("matter_slug"),
+                    applies_to="capability",
+                )
+            except Exception as e:
+                logger.warning(f"store_correction failed: {e}")
+                response["warning"] = f"correction_store_failed: {type(e).__name__}"
+
+    # Upgrade 2 chain: wrong_thread dismiss → hint client to call re-thread UI.
+    # alerts.source_id for a quiet-thread alert is the thread_id (UUID str).
+    if verdict == "dismiss" and dismiss_reason == "wrong_thread":
+        response["rethread_hint"] = {
+            "turn_id_hint": None,
+            "thread_id": row.get("source_id"),
+            "pm_slug": row.get("matter_slug"),
+            "rethread_endpoint": "/api/pm/threads/re-thread",
+        }
+
+    return JSONResponse(response)
+
+
+# ============================================================
 # CLI runner
 # ============================================================
 
