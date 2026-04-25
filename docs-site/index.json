@@ -1,11 +1,17 @@
 {
   "version": 1,
-  "updated_at": "2026-04-20",
+  "updated_at": "2026-04-25",
   "folders": [
     {
       "name": "ARCHITECTURE",
       "slug": "architecture",
       "presentations": [
+        {
+          "title": "Cortex-3T \u2014 Canonical Production Roadmap",
+          "file": "cortex3t-roadmap.html",
+          "created": "2026-04-25",
+          "matter": "baker"
+        },
         {
           "title": "Baker System Architecture v5 \u2014 Legacy Baker (pre-Cortex T3)",
           "file": "baker-v5.html",

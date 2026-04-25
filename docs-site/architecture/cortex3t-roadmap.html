@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cortex-3T — Canonical Production Roadmap</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  :root {
+    --bg: #f7f5f0;
+    --surface: #ffffff;
+    --surface-alt: #faf8f3;
+    --ink: #1a1a1a;
+    --ink-soft: #4a4a4a;
+    --ink-mute: #8a8a8a;
+    --rule: #e0dcd3;
+    --rule-soft: #efebe2;
+    --brisen: #0a6fdb;
+    --brisen-soft: rgba(10,111,219,0.08);
+    --gold: #b8923f;
+    --green: #2d7a4f;
+    --red: #b03030;
+    --amber: #c87a17;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Inter', -apple-system, sans-serif;
+    line-height: 1.6;
+    font-size: 14px;
+  }
+
+  .container {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 48px 32px 80px;
+  }
+
+  /* === HEADER === */
+  header {
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 24px;
+    margin-bottom: 40px;
+  }
+  .eyebrow {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--brisen);
+    margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    margin-bottom: 12px;
+  }
+  .meta {
+    color: var(--ink-mute);
+    font-size: 0.85rem;
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .meta strong { color: var(--ink-soft); font-weight: 500; }
+
+  /* === BOTTOM LINE === */
+  .bottom-line {
+    background: var(--surface);
+    border-left: 4px solid var(--brisen);
+    padding: 20px 24px;
+    margin-bottom: 48px;
+  }
+  .bottom-line .label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--brisen);
+    margin-bottom: 8px;
+  }
+  .bottom-line p {
+    font-size: 1.05rem;
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  /* === SECTIONS === */
+  section { margin-bottom: 56px; }
+  h2 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin-bottom: 4px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--rule);
+  }
+  h2 .num {
+    color: var(--brisen);
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    margin-right: 12px;
+    font-size: 0.95rem;
+  }
+  h2 + .sub {
+    font-size: 0.85rem;
+    color: var(--ink-mute);
+    margin-bottom: 20px;
+  }
+  h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 24px 0 12px;
+    color: var(--ink-soft);
+  }
+  p { margin-bottom: 12px; color: var(--ink-soft); }
+
+  /* === FRAME GRID (4 input categories) === */
+  .frame-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 28px;
+  }
+  .frame-card {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-top: 3px solid var(--brisen);
+    padding: 16px;
+  }
+  .frame-card .lbl {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--brisen);
+    margin-bottom: 6px;
+  }
+  .frame-card .name { font-weight: 600; margin-bottom: 4px; font-size: 0.95rem; }
+  .frame-card .desc { font-size: 0.8rem; color: var(--ink-mute); }
+
+  /* === MILESTONE CARDS === */
+  .milestones {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+  .ms {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 4px solid var(--rule);
+    padding: 22px 24px;
+    position: relative;
+  }
+  .ms.done { border-left-color: var(--green); }
+  .ms.flight { border-left-color: var(--amber); }
+  .ms.planned { border-left-color: var(--brisen); }
+  .ms.gating { border-left-color: var(--gold); }
+  .ms-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .ms-id {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    color: var(--brisen);
+    font-weight: 600;
+    letter-spacing: 1px;
+  }
+  .ms-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    flex: 1;
+  }
+  .ms-status {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 3px;
+    background: var(--rule-soft);
+    color: var(--ink-soft);
+  }
+  .ms-status.done { background: rgba(45,122,79,0.12); color: var(--green); }
+  .ms-status.flight { background: rgba(200,122,23,0.14); color: var(--amber); }
+  .ms-status.planned { background: rgba(10,111,219,0.10); color: var(--brisen); }
+  .ms-status.gating { background: rgba(184,146,63,0.14); color: var(--gold); }
+  .ms-scope {
+    font-size: 0.88rem;
+    color: var(--ink-soft);
+    margin-bottom: 14px;
+  }
+  .ms-effort {
+    font-size: 0.75rem;
+    color: var(--ink-mute);
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--rule);
+  }
+  .ms-effort strong { color: var(--ink); font-weight: 600; }
+
+  /* === TABLES === */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--surface);
+    font-size: 0.83rem;
+  }
+  th {
+    text-align: left;
+    padding: 10px 12px;
+    background: var(--surface-alt);
+    border-bottom: 2px solid var(--ink);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    vertical-align: bottom;
+  }
+  td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  td code, td .ref {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.76rem;
+    color: var(--ink);
+  }
+  td.tag {
+    font-weight: 600;
+    color: var(--brisen);
+    font-size: 0.72rem;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    background: var(--rule-soft);
+    color: var(--ink-soft);
+  }
+  .badge.done { background: rgba(45,122,79,0.12); color: var(--green); }
+  .badge.flight { background: rgba(200,122,23,0.14); color: var(--amber); }
+  .badge.planned { background: rgba(10,111,219,0.10); color: var(--brisen); }
+  .badge.named { background: var(--rule-soft); color: var(--ink-mute); }
+  .badge.parked { background: rgba(176,48,48,0.08); color: var(--red); }
+
+  /* === RISK / COUNTER LIST === */
+  .risk-list { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .risk-item {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--gold);
+    padding: 14px 18px;
+  }
+  .risk-item .num {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    color: var(--gold);
+    margin-right: 8px;
+  }
+  .risk-item .head { font-weight: 600; margin-bottom: 4px; font-size: 0.92rem; }
+  .risk-item .body { font-size: 0.85rem; color: var(--ink-soft); }
+  .risk-item .mit { font-size: 0.78rem; color: var(--ink-mute); margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--rule); }
+  .risk-item .mit strong { color: var(--green); font-weight: 600; }
+
+  /* === Q LIST === */
+  .qlist { display: grid; gap: 10px; }
+  .qitem {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--brisen);
+    padding: 14px 18px;
+  }
+  .qitem .qhead { font-weight: 600; margin-bottom: 4px; font-size: 0.9rem; }
+  .qitem .qrec { font-size: 0.82rem; color: var(--green); font-weight: 500; }
+  .qitem .qrec strong { letter-spacing: 1px; text-transform: uppercase; font-size: 0.7rem; margin-right: 6px; }
+  .qitem.done { border-left-color: var(--green); }
+  .qitem.done .qrec { color: var(--ink-mute); }
+
+  /* === FOOTER === */
+  footer {
+    margin-top: 60px;
+    padding-top: 24px;
+    border-top: 1px solid var(--rule);
+    font-size: 0.78rem;
+    color: var(--ink-mute);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  footer code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.74rem;
+    background: var(--rule-soft);
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+
+  /* === STREAM TAGS === */
+  .stream-tag {
+    display: inline-block;
+    font-size: 0.65rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 3px;
+    margin-left: 6px;
+  }
+  .stream-tag.wiki { background: rgba(184,146,63,0.14); color: var(--gold); }
+  .stream-tag.cortex { background: rgba(10,111,219,0.10); color: var(--brisen); }
+  .stream-tag.cross { background: var(--rule-soft); color: var(--ink-soft); }
+
+  @media (max-width: 900px) {
+    .frame-grid { grid-template-columns: repeat(2, 1fr); }
+    h1 { font-size: 1.6rem; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <div class="eyebrow">Brisen AI · Architecture · Canonical</div>
+  <h1>Cortex-3T — Production Roadmap</h1>
+  <div class="meta">
+    <span><strong>Status:</strong> M0 closed · M1 dispatching</span>
+    <span><strong>Ratified:</strong> 2026-04-25 (Director)</span>
+    <span><strong>Scope:</strong> 6 milestones · ~14–20 weeks</span>
+    <span><strong>First matter:</strong> Hagenauer RG7</span>
+  </div>
+</header>
+
+<div class="bottom-line">
+  <div class="label">Bottom line</div>
+  <p>Cortex-3T is Brisen's reasoning loop on a single matter. It reads Baker's wiki + sense data, produces structured Tier A / Tier B proposals, captures Director Gold feedback, and improves over time. M0 foundations shipped 2026-04-25 (5 briefs, no rollback). Two parallel streams open: <strong>Wiki</strong> (M1) and <strong>Cortex</strong> (M2). First real cycles run on Hagenauer at M3.</p>
+</div>
+
+<section>
+  <h2><span class="num">§1</span>Strategic frame</h2>
+  <div class="sub">Two parallel streams after M0; one matter; high-stakes integration at M3.</div>
+
+  <h3>Input model — 4 categories (ratified 2026-04-21)</h3>
+  <div class="frame-grid">
+    <div class="frame-card">
+      <div class="lbl">Static</div>
+      <div class="name">KBL canonical wiki</div>
+      <div class="desc">Templates, people.yml, entities.yml. Director-curated. Lintable.</div>
+    </div>
+    <div class="frame-card">
+      <div class="lbl">Sense</div>
+      <div class="name">Email · WhatsApp · meetings · calendar</div>
+      <div class="desc">Sentinel-populated. Phase-1 read path of the cycle.</div>
+    </div>
+    <div class="frame-card">
+      <div class="lbl">Director</div>
+      <div class="name">Gold + Cortex Design</div>
+      <div class="desc">Inline Gold comments + 13 named prerogatives in autonomy charter §4.</div>
+    </div>
+    <div class="frame-card">
+      <div class="lbl">Working</div>
+      <div class="name">cortex_state</div>
+      <div class="desc">Agent's own scratch. Schema downstream of M2 Memory pilot.</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2><span class="num">§2</span>Milestones</h2>
+  <div class="sub">Status legend · ✅ DONE · 🟡 IN FLIGHT · ⬜ PLANNED · ⏸ PARKED</div>
+
+  <div class="milestones">
+
+    <!-- M0 -->
+    <div class="ms done">
+      <div class="ms-head">
+        <span class="ms-id">M0</span>
+        <span class="ms-title">Foundations</span>
+        <span class="ms-status done">✓ Done · 2026-04-25</span>
+      </div>
+      <div class="ms-scope">5 briefs shipped over ~5 days. Cache + Citations API moved into M0 deterministic infra (Option C, 4.7-timing decision). Closed at 03:26 UTC after PROMPT_CACHE_AUDIT_1 merged.</div>
+      <table>
+        <thead>
+          <tr><th>Brief</th><th>PR</th><th>Stream</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>KBL_SCHEMA_1 — vault schema v1</td><td><code>#52</code></td><td><span class="stream-tag wiki">Wiki</span></td></tr>
+          <tr><td>CHANDA_DETECTORS_TOP3 — invariants #2 ledger · #4 author · #9 mac-mini-writer</td><td><code>#51 · #49 · #53</code></td><td><span class="stream-tag cross">Cross</span></td></tr>
+          <tr><td>KBL_INGEST_ENDPOINT_1 — POST /api/kbl/ingest single chokepoint</td><td><code>#55</code></td><td><span class="stream-tag wiki">Wiki</span></td></tr>
+          <tr><td>PROMPT_CACHE_AUDIT_1 — top-3 cache_control + 24h hit-rate telemetry</td><td><code>#61</code></td><td><span class="stream-tag cortex">Cortex prep</span></td></tr>
+          <tr><td>CITATIONS_API_SCAN_1 — Anthropic Citations adapter + 3 endpoints + Slack substrate</td><td><code>#59</code></td><td><span class="stream-tag cortex">Cortex prep</span></td></tr>
+        </tbody>
+      </table>
+      <div class="ms-effort"><strong>Supporting infra also live in window:</strong> AI Head consolidation (#44) · AUDIT_SENTINEL_1 (#48) · AO PM Continuity Phases 1–3 (#50, #57, #58, #60) · MOVIE_AM_RETROFIT_1 (#47) · PM_EXTRACTION_JSON_ROBUSTNESS_1 (#54) · MAX_TOKENS_2 (#56).</div>
+    </div>
+
+    <!-- M1 -->
+    <div class="ms flight">
+      <div class="ms-head">
+        <span class="ms-id">M1</span>
+        <span class="ms-title">Wiki stream foundation</span>
+        <span class="ms-status flight">In flight · planned</span>
+      </div>
+      <div class="ms-scope">Harden the KBL ingest pipeline beyond the chokepoint. Make wiki writes safe, lintable, drift-detectable before Cortex starts reading from them.</div>
+      <table>
+        <thead><tr><th>Brief</th><th>Source</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td><strong>BRIEF_HAGENAUER_WIKI_BOOTSTRAP_1</strong> — populate Hagenauer canonical wiki via M0 ingest endpoint</td><td>AI Head A critique 2026-04-25 (M1.1 blocker)</td><td><span class="badge planned">Added</span></td></tr>
+          <tr><td>BRIEF_WIKI_LINT_1 — Karpathy-style weekly audit</td><td>Idea 2026-04-19</td><td><span class="badge named">Drafted as idea</span></td></tr>
+          <tr><td>BRIEF_KBL_SCHEMA_DRIFT_DETECTOR — semantic poisoning detection</td><td>Pre-mortem cluster 9</td><td><span class="badge named">Named</span></td></tr>
+          <tr><td>BRIEF_KBL_PIPE_INVARIANTS — extend CHANDA detectors to KBL ingest path</td><td>M0 cross-cutting</td><td><span class="badge named">Named</span></td></tr>
+          <tr><td>BRIEF_PEOPLE_ENTITIES_HARDENING — people.yml + entities.yml lint + version</td><td>KBL_SCHEMA_1 follow-up</td><td><span class="badge named">Named</span></td></tr>
+        </tbody>
+      </table>
+      <div class="ms-effort"><strong>Close criteria:</strong> weekly lint without false positives · drift detection catches injected entries · ingest endpoint enforces invariants on every write. <strong>Effort:</strong> 1–2 weeks.</div>
+    </div>
+
+    <!-- M2 -->
+    <div class="ms planned">
+      <div class="ms-head">
+        <span class="ms-id">M2</span>
+        <span class="ms-title">Cortex stream foundation</span>
+        <span class="ms-status planned">Planned</span>
+      </div>
+      <div class="ms-scope">Stand up the reasoning-loop scaffolding. cortex_state schema, 6-phase cycle, Gold workflow, memory integration. <strong>No matter scope yet — pure infra.</strong> Memory pilot moved to <em>first</em> position per AI Head A critique (M2.1 blocker) — pilot outcome decides schema shape.</div>
+      <table>
+        <thead><tr><th>#</th><th>Brief</th><th>Source</th></tr></thead>
+        <tbody>
+          <tr><td><code>1</code></td><td><strong>BRIEF_ANTHROPIC_MEMORY_PILOT</strong> — foundational gate; outcome shapes schema</td><td>AI Head A critique (M2.1)</td></tr>
+          <tr><td><code>2</code></td><td>BRIEF_CORTEX_STATE_SCHEMA — cortex_state · cortex_cycles · cortex_proposals</td><td>Reasoning loop spec</td></tr>
+          <tr><td><code>3</code></td><td><strong>BRIEF_CORTEX_SENSE_FANIN_1</strong> — defines read path from sentinel tables to Phase 1</td><td>AI Head A critique (M2.4)</td></tr>
+          <tr><td><code>4</code></td><td>BRIEF_CORTEX_REASONING_LOOP — 6-phase cycle (sense → load → reason → propose → act → archive)</td><td>Idea 2026-04-21</td></tr>
+          <tr><td><code>5</code></td><td>BRIEF_GOLD_COMMENT_WORKFLOW — hybrid C: matter+global, DV-only initials, newer-wins</td><td>Spec 2026-04-21</td></tr>
+          <tr><td><code>6</code></td><td>BRIEF_TIER_B_BUDGET — quota enforcement on Tier B human-loop <em>(lifted from M3)</em></td><td>Pre-mortem M3-blocker 1</td></tr>
+          <tr><td><code>7</code></td><td>BRIEF_S5_RUNTIME — Phase 5 (act) runtime gating <em>(lifted from M3)</em></td><td>Pre-mortem M3-blocker 2</td></tr>
+        </tbody>
+      </table>
+      <div class="ms-effort"><strong>Close criteria:</strong> schema migrated · loop runs end-to-end on stub · Gold workflow accepts comments · Tier B budget enforced. <strong>Effort:</strong> 2–3 weeks.</div>
+    </div>
+
+    <!-- M3 -->
+    <div class="ms planned">
+      <div class="ms-head">
+        <span class="ms-id">M3</span>
+        <span class="ms-title">Cortex-3T MVP — Hagenauer</span>
+        <span class="ms-status planned">Planned · pre-mortem ratified</span>
+      </div>
+      <div class="ms-scope">First real Cortex-3T cycles on Hagenauer RG7. Combine M1 wiki + M2 cortex on one matter. <strong>High-stakes integration milestone</strong> — pre-mortem flagged as heaviest lift; expect 2× estimate.</div>
+      <table>
+        <thead><tr><th>Brief</th><th>Source</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>BRIEF_CORTEX3T_MVP_HAGENAUER_1</td><td>Pre-mortem core</td><td><span class="badge planned">Drafting</span></td></tr>
+          <tr><td>BRIEF_CORTEX3T_CACHE_KEY_1 — cache key thrash mitigation</td><td>Cluster 3</td><td><span class="badge named">Named</span></td></tr>
+          <tr><td>BRIEF_CORTEX3T_HUMANLOOP_1 — Tier B flood mitigation</td><td>Cluster 1</td><td><span class="badge named">Named</span></td></tr>
+          <tr><td>BRIEF_HAGENAUER_KBL_INGEST — load Hagenauer canonical wiki</td><td>M3 wiki prep</td><td><span class="badge named">Named</span></td></tr>
+          <tr><td>Pre-mortem re-run at M3 dispatch gate</td><td>RA Charter §6B</td><td><span class="badge planned">Triggered on dispatch</span></td></tr>
+        </tbody>
+      </table>
+      <div class="ms-effort"><strong>Close criteria:</strong> 5+ Cortex cycles · zero hallucinated citations · cache hit-rate ≥60% · Gold parsed without drift · ≥1 extended-thinking demonstration on real settlement-math. <strong>Effort:</strong> planned 2–3 weeks · <strong>plan double (4–6 weeks)</strong> per pre-mortem.</div>
+    </div>
+
+    <!-- M4 -->
+    <div class="ms planned">
+      <div class="ms-head">
+        <span class="ms-id">M4</span>
+        <span class="ms-title">Eval gate + 4.7 model bump</span>
+        <span class="ms-status planned">Planned</span>
+      </div>
+      <div class="ms-scope">Mature eval suite + swap claude-opus-4-6 → 4-7 with rollback gate. Per 4.7 timing decision Option C: cache + Citations went to M0; model bump stays here, eval-gated.</div>
+      <table>
+        <thead><tr><th>Brief</th><th>Source</th></tr></thead>
+        <tbody>
+          <tr><td>BRIEF_CORTEX_EVAL_SUITE — golden set for Hagenauer cycles</td><td>Eval-design</td></tr>
+          <tr><td>BRIEF_47_MODEL_BUMP — 4.6 → 4.7 with feature-flag rollback</td><td>4.7 timing decision</td></tr>
+          <tr><td>BRIEF_CORTEX3T_TRUST_AUDIT_1 — standing-auth creep + trust calibration</td><td>Cluster 7</td></tr>
+          <tr><td>BRIEF_CORTEX3T_QDRANT_DEGRADED_1 — degraded-mode chaos eval</td><td>Cluster 8</td></tr>
+          <tr><td>BRIEF_CORTEX3T_RETENTION_1 — cortex_cycles unbounded growth</td><td>Cluster 6</td></tr>
+        </tbody>
+      </table>
+      <div class="ms-effort"><strong>Close criteria:</strong> eval passes consistently on 4.6 · 4.7 swap matches+faster OR rollback fires · trust audit completed · Qdrant degraded tested. <strong>Effort:</strong> 2 weeks.</div>
+    </div>
+
+    <!-- M5 -->
+    <div class="ms gating">
+      <div class="ms-head">
+        <span class="ms-id">M5</span>
+        <span class="ms-title">Fanout-readiness gating</span>
+        <span class="ms-status gating">Gated · no new code</span>
+      </div>
+      <div class="ms-scope">2-week observation window. <strong>Three gating criteria — all must hold for 2 consecutive weeks:</strong></div>
+      <ol style="margin: 0 0 16px 18px; color: var(--ink-soft); font-size: 0.9rem;">
+        <li>Zero critical-tier invariant breach</li>
+        <li>&lt;10 Tier B items/day sustained average</li>
+        <li>Director review-rate &gt;80% on Tier B items</li>
+      </ol>
+      <table>
+        <thead><tr><th>Item</th><th>Type</th></tr></thead>
+        <tbody>
+          <tr><td>BRIEF_CORTEX3T_GOLD_PARSER_1 — Gold format drift detection</td><td>New brief</td></tr>
+          <tr><td>Weekly gating report</td><td>RA exercise</td></tr>
+          <tr><td>Pre-mortem re-run at M5 close</td><td>RA exercise</td></tr>
+        </tbody>
+      </table>
+      <div class="ms-effort"><strong>Close criteria:</strong> 2 consecutive weeks meeting all 3 criteria → unblocks M6. <strong>Effort:</strong> 2+ weeks (gated).</div>
+    </div>
+
+    <!-- M6 -->
+    <div class="ms planned">
+      <div class="ms-head">
+        <span class="ms-id">M6</span>
+        <span class="ms-title">Fanout — second matter</span>
+        <span class="ms-status planned">Planned · matter pick deferred</span>
+      </div>
+      <div class="ms-scope">Second matter onboarded into Cortex-3T. Multi-matter routing. Beginning of generalisation. <strong>Director picks second matter at M5 close</strong> per Q3 ratification.</div>
+      <table>
+        <thead><tr><th>Brief</th><th>Source</th></tr></thead>
+        <tbody>
+          <tr><td>BRIEF_CORTEX3T_SECOND_MATTER — Cupial / AO / Director picks</td><td>Fanout planning</td></tr>
+          <tr><td>BRIEF_MULTI_MATTER_ROUTING — cycle dispatch by matter scope</td><td>Cortex stream extension</td></tr>
+          <tr><td>Pre-mortem re-run at M6 fanout gate</td><td>Pre-mortem Q4</td></tr>
+        </tbody>
+      </table>
+      <div class="ms-effort"><strong>Close criteria:</strong> two matters running concurrently · per-matter eval suite passing · Gold workflow unambiguous across matters. <strong>Effort:</strong> 3–4 weeks.</div>
+    </div>
+
+  </div>
+</section>
+
+<section>
+  <h2><span class="num">§3</span>Cross-cutting risks</h2>
+  <div class="sub">9 clusters from the 2026-04-23 Cortex-3T pre-mortem · each routed to the milestone that mitigates.</div>
+  <table>
+    <thead><tr><th>#</th><th>Cluster</th><th>Risk</th><th>Mitigation milestone</th></tr></thead>
+    <tbody>
+      <tr><td><code>1</code></td><td>Tier B flood</td><td>Director drowns in human-loop; cycles stall</td><td>M2 (BUDGET) + M3 (HUMANLOOP_1)</td></tr>
+      <tr><td><code>2</code></td><td>Hallucinated citations</td><td>Citations API + Qdrant misaligned</td><td>M3 (KBL_INGEST + M0 Citations adapter)</td></tr>
+      <tr><td><code>3</code></td><td>Cache thrash</td><td>Prompt cache key drift wastes cost</td><td>M3 (CACHE_KEY_1)</td></tr>
+      <tr><td><code>4</code></td><td>cortex_state drift</td><td>Working state desyncs from wiki</td><td>M2 (schema invariants) + M5 gating</td></tr>
+      <tr><td><code>5</code></td><td>M3 underestimate</td><td>2–3w slips to 6w</td><td>Plan double; M5 gates fanout</td></tr>
+      <tr><td><code>6</code></td><td>cortex_cycles unbounded</td><td>Storage explosion</td><td>M4 (RETENTION_1)</td></tr>
+      <tr><td><code>7</code></td><td>Standing auth creep</td><td>Tier A widens silently</td><td>M4 (TRUST_AUDIT_1) + M5 (GOLD_PARSER)</td></tr>
+      <tr><td><code>8</code></td><td>Qdrant degraded mode</td><td>Vector retrieval quietly degrades</td><td>M4 (QDRANT_DEGRADED_1)</td></tr>
+      <tr><td><code>9</code></td><td>Static memory poisoning</td><td>Bad wiki write corrupts retrieval</td><td>M1 (DRIFT_DETECTOR + invariants)</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><span class="num">§4</span>Counter-case — devil's advocate</h2>
+  <div class="sub">Auto-fired on every roadmap. 25+ briefs is a lot of forward planning before first cycle ships. Three failure modes:</div>
+  <div class="risk-list">
+    <div class="risk-item">
+      <div class="head"><span class="num">1.</span>Roadmap-as-ceremony</div>
+      <div class="body">M0's success doesn't predict M2-M6. Those involve genuinely novel reasoning-loop integration. Risk: weeks on M1/M2 polish before learning M3 is wrong.</div>
+      <div class="mit"><strong>Mitigation:</strong> keep M2 minimal. Prefer M3 dispatch on stub matter early to surface integration issues before scaffolding hardens.</div>
+    </div>
+    <div class="risk-item">
+      <div class="head"><span class="num">2.</span>Wiki + Cortex stream divergence</div>
+      <div class="body">Two parallel streams can drift. M1 ships wiki without knowing what cortex actually needs to read; M2 ships cortex assuming wiki shape that isn't there.</div>
+      <div class="mit"><strong>Mitigation:</strong> every M1/M2 brief must cite which M3 capability it enables. If unclear, defer the brief.</div>
+    </div>
+    <div class="risk-item">
+      <div class="head"><span class="num">3.</span>Hagenauer pick</div>
+      <div class="body">First real Cortex-3T cycle on a live €600K dispute is high-stakes for a brand-new system. If Cortex misadvises, real money moves wrong.</div>
+      <div class="mit"><strong>Mitigation:</strong> M3 first cycles MUST be Tier B (Director-gated). No Tier A on Hagenauer until M5 gating closes.</div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2><span class="num">§5</span>AI Head A critique addressed</h2>
+  <div class="sub">3 blockers from <code>SCRATCH_M1_M2_M5_CRITIQUE_20260425.md</code> folded before ratification. Other 13 findings iterate post-ratification.</div>
+  <table>
+    <thead><tr><th>ID</th><th>Blocker</th><th>Action taken</th></tr></thead>
+    <tbody>
+      <tr><td><code>M1.1</code></td><td>Without Hagenauer wiki populated, M3 boots into empty wiki</td><td>Added <code>BRIEF_HAGENAUER_WIKI_BOOTSTRAP_1</code> to M1</td></tr>
+      <tr><td><code>M2.1</code></td><td>cortex_state schema must be downstream of Memory pilot, not upstream</td><td>Moved <code>BRIEF_ANTHROPIC_MEMORY_PILOT</code> to first position in M2</td></tr>
+      <tr><td><code>M2.4</code></td><td>Cortex has no defined sense input until fan-in is specified</td><td>Added <code>BRIEF_CORTEX_SENSE_FANIN_1</code> to M2</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section>
+  <h2><span class="num">§6</span>Open ratification questions</h2>
+  <div class="sub">All 4 questions ratified by Director 2026-04-25.</div>
+  <div class="qlist">
+    <div class="qitem done">
+      <div class="qhead">Q1 · M1 / M2 / M5 scope as updated above — accept, adjust, or scrap?</div>
+      <div class="qrec"><strong>Status:</strong> Accepted (with 3 AI Head A blockers folded).</div>
+    </div>
+    <div class="qitem done">
+      <div class="qhead">Q2 · Lift TIER_B_BUDGET + S5_RUNTIME from M3 fold to M2 standalone?</div>
+      <div class="qrec"><strong>Status:</strong> Yes. Pre-mortem framed them as M3 scope — lifting earlier reduces M3 creep, gives 2 weeks of telemetry before M3 dispatch.</div>
+    </div>
+    <div class="qitem done">
+      <div class="qhead">Q3 · M6 second matter — Cupial, AO, or Director picks at M5 close?</div>
+      <div class="qrec"><strong>Status:</strong> Defer to M5 close so empirical evidence informs pick.</div>
+    </div>
+    <div class="qitem done">
+      <div class="qhead">Q4 · Cadence — M1 dispatch this week, or wait through Business empirical loop?</div>
+      <div class="qrec"><strong>Status:</strong> M1 dispatch in parallel with Business — wiki hardening, no Director-time cost beyond brief ratification.</div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <span><strong>Source:</strong> <code>_ops/processes/cortex3t-roadmap.md</code></span>
+  <span><strong>Idea:</strong> <code>_ops/ideas/2026-04-25-cortex3t-roadmap-canonical.md</code></span>
+  <span>Brisen AI · 2026 · Confidential</span>
+</footer>
+
+</div>
+</body>
+</html>
