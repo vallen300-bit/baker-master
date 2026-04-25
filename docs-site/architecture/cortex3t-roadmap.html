@@ -347,7 +347,7 @@
   <h1>Cortex-3T — Production Roadmap</h1>
   <div class="meta">
     <span><strong>Status:</strong> M0 closed · M1 dispatching</span>
-    <span><strong>Ratified:</strong> 2026-04-25 (Director)</span>
+    <span><strong>Ratified:</strong> 2026-04-25 · Amendment 2026-04-25b</span>
     <span><strong>Scope:</strong> 6 milestones · ~14–20 weeks</span>
     <span><strong>First matter:</strong> Hagenauer RG7</span>
   </div>
@@ -355,7 +355,7 @@
 
 <div class="bottom-line">
   <div class="label">Bottom line</div>
-  <p>Cortex-3T is Brisen's reasoning loop on a single matter. It reads Baker's wiki + sense data, produces structured Tier A / Tier B proposals, captures Director Gold feedback, and improves over time. M0 foundations shipped 2026-04-25 (5 briefs, no rollback). Two parallel streams open: <strong>Wiki</strong> (M1) and <strong>Cortex</strong> (M2). First real cycles run on Hagenauer at M3.</p>
+  <p>Cortex-3T is Brisen's reasoning loop on a single matter. It reads Baker's wiki + sense data, produces structured Tier A / Tier B proposals, captures Director Gold feedback, and improves over time. M0 foundations shipped 2026-04-25 (5 briefs, no rollback). Two parallel streams open: <strong>Wiki</strong> (M1) and <strong>Cortex</strong> (M2). First real cycles run on Hagenauer at M3. <strong>Game Theory promoted into Cortex-3T scope (Amendment 2026-04-25b)</strong> — universal across all Brisen agents, validated on Hagenauer subcontractor negotiations at M3.</p>
 </div>
 
 <section>
@@ -432,9 +432,11 @@
           <tr><td>BRIEF_KBL_SCHEMA_DRIFT_DETECTOR — semantic poisoning detection</td><td>Pre-mortem cluster 9</td><td><span class="badge named">Named</span></td></tr>
           <tr><td>BRIEF_KBL_PIPE_INVARIANTS — extend CHANDA detectors to KBL ingest path</td><td>M0 cross-cutting</td><td><span class="badge named">Named</span></td></tr>
           <tr><td>BRIEF_PEOPLE_ENTITIES_HARDENING — people.yml + entities.yml lint + version</td><td>KBL_SCHEMA_1 follow-up</td><td><span class="badge named">Named</span></td></tr>
+          <tr><td><strong>BRIEF_COUNTERPARTY_PROFILE_SCHEMA_1</strong> — wiki YAML template <code>counterparty_game_profile</code> (8 fields per playbook §8) + lint + Director-curated baseline counterparty list</td><td>Director 2026-04-25 Game Theory promotion</td><td><span class="badge planned">Added · GT</span></td></tr>
+          <tr><td><strong>BRIEF_HAGENAUER_SUBCONTRACTOR_PROFILES_1</strong> — load Hagenauer subcontractor profiles (Heidenauer + others) via M0 ingest</td><td>Director 2026-04-25 Game Theory promotion</td><td><span class="badge planned">Added · GT</span></td></tr>
         </tbody>
       </table>
-      <div class="ms-effort"><strong>Close criteria:</strong> weekly lint without false positives · drift detection catches injected entries · ingest endpoint enforces invariants on every write. <strong>Effort:</strong> 1–2 weeks.</div>
+      <div class="ms-effort"><strong>Close criteria:</strong> weekly lint without false positives · drift detection catches injected entries · ingest endpoint enforces invariants on every write. <strong>Effort:</strong> 1–2 weeks (now 6 briefs incl. Game Theory schema + Hagenauer subcontractor profiles).</div>
     </div>
 
     <!-- M2 -->
@@ -455,9 +457,11 @@
           <tr><td><code>5</code></td><td>BRIEF_GOLD_COMMENT_WORKFLOW — hybrid C: matter+global, DV-only initials, newer-wins</td><td>Spec 2026-04-21</td></tr>
           <tr><td><code>6</code></td><td>BRIEF_TIER_B_BUDGET — quota enforcement on Tier B human-loop <em>(lifted from M3)</em></td><td>Pre-mortem M3-blocker 1</td></tr>
           <tr><td><code>7</code></td><td>BRIEF_S5_RUNTIME — Phase 5 (act) runtime gating <em>(lifted from M3)</em></td><td>Pre-mortem M3-blocker 2</td></tr>
+          <tr><td><code>8</code></td><td><strong>BRIEF_GAME_THEORY_UNIVERSAL_INJECTION_1</strong> — extend AO PM + MOVIE AM injection (2026-04-24 work) to all 22 capabilities + future CEO AI. Single parameterised pattern.</td><td>Director 2026-04-25 Game Theory promotion</td></tr>
+          <tr><td><code>9</code></td><td><strong>BRIEF_COUNTERPARTY_GAME_ADVISOR_1</strong> — dedicated specialist capability per playbook §8 (8-field data model + 7 heuristics). Game-theory frame on demand.</td><td>Promoted from parked seed (idea 2026-04-19)</td></tr>
         </tbody>
       </table>
-      <div class="ms-effort"><strong>Close criteria:</strong> schema migrated · loop runs end-to-end on stub · Gold workflow accepts comments · Tier B budget enforced. <strong>Effort:</strong> 2–3 weeks.</div>
+      <div class="ms-effort"><strong>Close criteria:</strong> schema migrated · loop runs end-to-end on stub · Gold workflow accepts comments · Tier B budget enforced · Game Theory universal injection live across all capabilities. <strong>Effort:</strong> 2–3 weeks (now 9 briefs — includes Game Theory universal + advisor capability).</div>
     </div>
 
     <!-- M3 -->
@@ -475,10 +479,11 @@
           <tr><td>BRIEF_CORTEX3T_CACHE_KEY_1 — cache key thrash mitigation</td><td>Cluster 3</td><td><span class="badge named">Named</span></td></tr>
           <tr><td>BRIEF_CORTEX3T_HUMANLOOP_1 — Tier B flood mitigation</td><td>Cluster 1</td><td><span class="badge named">Named</span></td></tr>
           <tr><td>BRIEF_HAGENAUER_KBL_INGEST — load Hagenauer canonical wiki</td><td>M3 wiki prep</td><td><span class="badge named">Named</span></td></tr>
-          <tr><td>Pre-mortem re-run at M3 dispatch gate</td><td>RA Charter §6B</td><td><span class="badge planned">Triggered on dispatch</span></td></tr>
+          <tr><td><strong>Game Theory validation — Hagenauer subcontractor negotiation</strong></td><td>Director 2026-04-25 Game Theory promotion</td><td><span class="badge planned">Added · GT</span></td></tr>
+          <tr><td>Pre-mortem re-run at M3 dispatch gate (now incl. Game Theory failure modes)</td><td>RA Charter §6B</td><td><span class="badge planned">Triggered on dispatch</span></td></tr>
         </tbody>
       </table>
-      <div class="ms-effort"><strong>Close criteria:</strong> 5+ Cortex cycles · zero hallucinated citations · cache hit-rate ≥60% · Gold parsed without drift · ≥1 extended-thinking demonstration on real settlement-math. <strong>Effort:</strong> planned 2–3 weeks · <strong>plan double (4–6 weeks)</strong> per pre-mortem.</div>
+      <div class="ms-effort"><strong>Close criteria:</strong> 5+ Cortex cycles · zero hallucinated citations · cache hit-rate ≥60% · Gold parsed without drift · ≥1 extended-thinking demonstration on real settlement-math · <strong>Game Theory frame validated on real Hagenauer subcontractor negotiation</strong>. <strong>Effort:</strong> planned 2–3 weeks · <strong>plan double (4–6 weeks)</strong> per pre-mortem.</div>
     </div>
 
     <!-- M4 -->
@@ -549,7 +554,45 @@
 </section>
 
 <section>
-  <h2><span class="num">§3</span>Cross-cutting risks</h2>
+  <h2><span class="num">§3</span>Game Theory track — universal counterparty discipline</h2>
+  <div class="sub">Promoted to Cortex-3T scope 2026-04-25 (Amendment 2026-04-25b). Was parked post-Cortex-3T per 2026-04-19 — re-scoped because Hagenauer subcontractor negotiations need it on M3 timeline + universal coverage required across all Brisen agents (not just AO PM + MOVIE AM).</div>
+
+  <div class="bottom-line" style="margin-bottom: 28px; border-left-color: var(--gold);">
+    <div class="label" style="color: var(--gold);">Director rationale · 2026-04-25</div>
+    <p>"I need game theory fully operational and not only for AO PM, but for other Brisen agents as well — MOVIE AM, CEO AI etc. It's needed for Hagenauer as well, to deal with subcontractor negotiations. Why wait post-M of Cortex?"</p>
+  </div>
+
+  <h3>Done</h3>
+  <table>
+    <thead><tr><th>Item</th><th>Date</th><th>Surface</th></tr></thead>
+    <tbody>
+      <tr><td>Game Theory playbook v1 + v2 — 9 sections incl. counterparty heat map, Axelrod / Nowak heuristics, trust as economic input</td><td>2026-04-19</td><td><code>_01_INBOX_FROM_CLAUDE/Game_Theory_for_Brisen_Portal*.html</code></td></tr>
+      <tr><td>Section 8 of playbook — <code>counterparty_game_profile</code> 8-field data model + 7 decision heuristics + COUNTERPARTY_GAME_ADVISOR_1 seed spec</td><td>2026-04-19</td><td>Same</td></tr>
+      <tr><td>Tier B game-theory injection into AO PM + MOVIE AM system prompts</td><td>2026-04-24</td><td>Capability registry rows</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Outstanding (mapped to milestones)</h3>
+  <table>
+    <thead><tr><th>MS</th><th>Brief</th><th>Scope</th></tr></thead>
+    <tbody>
+      <tr><td><span class="stream-tag wiki">M1</span></td><td>BRIEF_COUNTERPARTY_PROFILE_SCHEMA_1</td><td>Wiki YAML template + lint + Director-curated baseline counterparty list</td></tr>
+      <tr><td><span class="stream-tag wiki">M1</span></td><td>BRIEF_HAGENAUER_SUBCONTRACTOR_PROFILES_1</td><td>Load Heidenauer + other subcontractor profiles via M0 ingest endpoint</td></tr>
+      <tr><td><span class="stream-tag cortex">M2</span></td><td>BRIEF_GAME_THEORY_UNIVERSAL_INJECTION_1</td><td>Extend AO PM + MOVIE AM injection pattern to all 22 capabilities + future CEO AI. Single parameterised pattern.</td></tr>
+      <tr><td><span class="stream-tag cortex">M2</span></td><td>BRIEF_COUNTERPARTY_GAME_ADVISOR_1</td><td>Dedicated specialist capability per playbook §8. Produces game-theory frame on demand for any named counterparty. (Promoted from parked seed.)</td></tr>
+      <tr><td><span class="stream-tag cross">M3</span></td><td>Validation use case — Hagenauer subcontractor negotiation</td><td>Director uses Cortex's game-theory frame in real subcontractor meeting; reports whether it sharpened the decision</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Counterparty-horizon coverage</h3>
+  <p style="font-size: 0.9rem;">Per playbook §1 heat map: <strong>AO · Aukera · MO · Cupials · Hagenauer admin + subcontractors · UBM · Wertheimer · Franck Muller · Lilienmatt/MRCI · Sandra Luger.</strong> M1/M2 builds the substrate (schema + universal injection + advisor capability); M3 validates on Hagenauer subcontractors first; subsequent counterparty profiles are Director-authored as wiki content via the ingest endpoint — no new code per profile.</p>
+
+  <h3>Why universal injection over per-capability custom prompts</h3>
+  <p style="font-size: 0.9rem;">Game theory is a <strong>discipline, not a niche feature</strong>. Any capability advising on a counterparty (legal, finance, sales, communications, profiling, asset management, the matter PMs) needs the discipline in scope. Single-pattern parameterised injection avoids drift across the 22 capability prompts and auto-applies to future CEO AI when added.</p>
+</section>
+
+<section>
+  <h2><span class="num">§4</span>Cross-cutting risks</h2>
   <div class="sub">9 clusters from the 2026-04-23 Cortex-3T pre-mortem · each routed to the milestone that mitigates.</div>
   <table>
     <thead><tr><th>#</th><th>Cluster</th><th>Risk</th><th>Mitigation milestone</th></tr></thead>
@@ -568,7 +611,7 @@
 </section>
 
 <section>
-  <h2><span class="num">§4</span>Counter-case — devil's advocate</h2>
+  <h2><span class="num">§5</span>Counter-case — devil's advocate</h2>
   <div class="sub">Auto-fired on every roadmap. 25+ briefs is a lot of forward planning before first cycle ships. Three failure modes:</div>
   <div class="risk-list">
     <div class="risk-item">
@@ -590,7 +633,7 @@
 </section>
 
 <section>
-  <h2><span class="num">§5</span>AI Head A critique addressed</h2>
+  <h2><span class="num">§6</span>AI Head A critique addressed</h2>
   <div class="sub">3 blockers from <code>SCRATCH_M1_M2_M5_CRITIQUE_20260425.md</code> folded before ratification. Other 13 findings iterate post-ratification.</div>
   <table>
     <thead><tr><th>ID</th><th>Blocker</th><th>Action taken</th></tr></thead>
@@ -603,8 +646,8 @@
 </section>
 
 <section>
-  <h2><span class="num">§6</span>Open ratification questions</h2>
-  <div class="sub">All 4 questions ratified by Director 2026-04-25.</div>
+  <h2><span class="num">§7</span>Open ratification questions</h2>
+  <div class="sub">All 4 original questions ratified by Director 2026-04-25. Amendment 2026-04-25b (Game Theory promotion) ratified same day.</div>
   <div class="qlist">
     <div class="qitem done">
       <div class="qhead">Q1 · M1 / M2 / M5 scope as updated above — accept, adjust, or scrap?</div>
@@ -621,6 +664,10 @@
     <div class="qitem done">
       <div class="qhead">Q4 · Cadence — M1 dispatch this week, or wait through Business empirical loop?</div>
       <div class="qrec"><strong>Status:</strong> M1 dispatch in parallel with Business — wiki hardening, no Director-time cost beyond brief ratification.</div>
+    </div>
+    <div class="qitem done" style="border-left-color: var(--gold);">
+      <div class="qhead">Amendment 2026-04-25b · Game Theory promotion — promote from post-Cortex-3T parked into Cortex-3T scope?</div>
+      <div class="qrec" style="color: var(--gold);"><strong>Status:</strong> Ratified 2026-04-25 (Director). 4 briefs added across M1/M2 + Hagenauer subcontractor validation use case at M3. Universal injection across all 22 capabilities + future CEO AI.</div>
     </div>
   </div>
 </section>
