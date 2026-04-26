@@ -1,65 +1,106 @@
-# CODE_2_PENDING — B2: WIKI_LINT_1 — 2026-04-26
+# CODE_2_PENDING — B2: GOLD_COMMENT_WORKFLOW_1 — 2026-04-26 (re-routed from B3)
 
-**Dispatcher:** AI Head A (Build-lead)
+**Dispatcher:** AI Head A (Build-lead, re-routing on Director instruction "b3 is busy, pls instruct b2, he is idle")
+**Original dispatcher:** AI Head B (M2 lane) — wrote the brief + B3 mailbox
 **Working dir:** `~/bm-b2`
-**Branch:** `wiki-lint-1` (create from main; B2 currently parked on stale `proactive-pm-sentinel-rethread-fix-1` post-merge — checkout main + pull first; untracked review report files in worktree are leftover from earlier session, leave alone).
-**Brief:** `briefs/BRIEF_WIKI_LINT_1.md`
+**Branch:** `gold-comment-workflow-1` (create from main; B2 worktree may have stale `wiki-lint-1` checkout — `git checkout main && git pull -q` resolves)
+**Brief:** `briefs/BRIEF_GOLD_COMMENT_WORKFLOW_1.md`
 **Status:** OPEN
-**Reviewer on PR:** AI Head B (cross-team)
-
-**§2 pre-dispatch busy-check** (per `_ops/processes/b-code-dispatch-coordination.md`):
-- Mailbox prior state: `COMPLETE — dispatch retired 2026-04-25` (PROMPT_CACHE_AUDIT_1 second-pair was duplicate; B2 never woken). Idle.
-- Branch prior state: `proactive-pm-sentinel-rethread-fix-1` (old, merged remotely). Pre-execution `git checkout main && git pull -q` resolves.
-- Other B-codes: B1 ← HAGENAUER_WIKI_BOOTSTRAP_1 (in flight, dispatched cd6cabf). B3 ← KBL_PEOPLE_ENTITY_LOADERS_1 (in flight, dispatched cd6cabf). No file overlap with B2 (see §6C note in brief).
-
-**Dispatch authorisation:** Director cleared M1 parallel-3 in handover at 14:00 UTC 2026-04-25; B2 was held pending RA spec; RA delivered spec 2026-04-26; AI Head A drafted brief + dispatched same day; **Director resolved 3 open Qs same day** (LLM choice → Gemini 2.5 Pro overriding RA's Haiku-4.5; checkboxes → V1 no; thresholds → defaults stand). Brief updated to reflect Director's Q1 override.
+**Trigger class:** **MEDIUM** (DB migration + cross-capability state writes) → **B1 second-pair-of-eyes review required pre-merge** per `_ops/ideas/2026-04-24-b1-situational-review-trigger.md`. Builder ≠ B1 (you're B2 — confirmed eligible).
 
 ---
 
+## §2 pre-dispatch busy-check (Director-confirmed)
+
+- **B2 status:** idle per Director 2026-04-26 ~17:00 UTC. WIKI_LINT_1 prior dispatch superseded by this re-routing.
+- **B3 status:** busy with other work (Director-flagged); GOLD re-routed away to avoid collision.
+- **Other B-codes:** B1 idle. B5 → CHANDA rewrite (no overlap). B4 idle.
+- **No file overlap** with any in-flight B-code work.
+- **Lesson #47 redundancy check:** verified existing `kbl/gold_drain.py` (WhatsApp queue drain — different lane), `kbl/loop.py:342 load_gold_context_by_matter` (Cortex Leg 1 read — different consumer), `_ensure_gold_promote_queue` (different table). No overlap with the 4 modules + audit job + hook this brief introduces.
+
+**Dispatch authorisation:** Director RA-21 2026-04-26 PM "Proceed with Gold Comment" (original auth) + Director re-route 2026-04-26 ~17:00 UTC ("b3 is busy, pls instruct b2"). Q1–Q4 all RATIFIED (see brief §Context).
+
 ## Brief route (charter §6A)
 
-`/write-brief` 6 steps applied:
-1. EXPLORE — done by AI Head A:
-   - Read RA spec (`_ops/ideas/2026-04-26-wiki-lint-1-spec.md`)
-   - Verified `claude-haiku-4-5` referenced in `kbl/retry.py:105` + `kbl/cost.py:43-64` (Haiku live in stack)
-   - Verified `_DEFAULT_MODEL = "claude-opus-4-7"` in `kbl/anthropic_client.py:51` (no haiku helper exists — brief adds `call_haiku()`)
-   - Inspected `triggers/embedded_scheduler.py:679` `_ai_head_weekly_audit_job` registration pattern (mirror for `_wiki_lint_weekly_job`)
-   - Confirmed `baker-vault/lint/` does NOT exist; CHANDA #9 carve-out documented as V1/V2 split
-   - Confirmed slugs.yml retired entries at line 209+ (per spec check 1)
-2. PLAN — embedded in brief.
-3. WRITE — full brief at `briefs/BRIEF_WIKI_LINT_1.md`.
-4. TRACK — this mailbox.
-5. DOCUMENT — PR description MUST include V1/V2 carve-out + V2 question for Director ratification.
-6. CAPTURE LESSONS — apply LONGTERM.md DDL-drift check; verify no DB write paths in lint module.
+`/write-brief` 6 steps applied (per SKILL Rule 0 mandatory). Brief at `briefs/BRIEF_GOLD_COMMENT_WORKFLOW_1.md`. EXPLORE phase (by AI Head B) verified `kbl/gold_drain.py` distinct lane; `_ai_head_weekly_audit_job` pattern at `triggers/embedded_scheduler.py:719` confirmed as APScheduler mirror; `_ensure_ai_head_audits_table` at `memory/store_back.py:511` confirmed as schema mirror (uses `_get_conn()` + `cur.close()`, NOT context manager); `_safe_post_dm` at `triggers/ai_head_audit.py:452` confirmed as canonical Slack DM helper.
 
-## 3 Open Qs — Director-resolved 2026-04-26
+## Action
 
-| Q | RA recommendation | Director decision | Note |
-|---|---|---|---|
-| Q1 LLM choice | Haiku 4.5 | **Gemini 2.5 Pro** via `orchestrator.gemini_client.call_pro` | Production-wired in `email_trigger.py:362`. Zero integration cost. Overrides RA. |
-| Q2 Action checkboxes | V1 = no | **V1 = no** | V2 brief later for auto-fix sentinels. |
-| Q3 Threshold defaults | 60d/14d/90d, env-overridable | **Defaults stand** | Review at week 4. |
+Read brief end-to-end. Implement 7 components:
 
-Q1 implication for B2: do **NOT** add `call_haiku()` to `kbl/anthropic_client.py`. Use `from orchestrator.gemini_client import call_pro` directly in checks 5+6, with injectable stub for tests.
+1. `kbl/gold_writer.py` — programmatic Tier B write path (caller-stack guard rejects cortex callers)
+2. `kbl/gold_proposer.py` — Cortex agent-drafted proposed-gold writes (parallel module)
+3. `kbl/gold_drift_detector.py` — pre-write `validate_entry()` + full-corpus `audit_all()`
+4. `kbl/gold_parser.py` — read + audit aggregator (returns dict for `gold_audits.payload_jsonb`)
+5. `migrations/20260426_gold_audits.sql` + matching `_ensure_gold_audits_table()` + `_ensure_gold_write_failures_table()` in `memory/store_back.py` (mirror exact pattern of `_ensure_ai_head_audits_table` at line 511)
+6. `orchestrator/gold_audit_job.py` + scheduler registration in `triggers/embedded_scheduler.py` (Mon 09:30 UTC, `GOLD_AUDIT_ENABLED` kill-switch)
+7. `baker-vault/.githooks/gold_drift_check.sh` — commit-msg-stage hook (NOT pre-commit; per `feedback_chanda_4_hook_stage_bug.md`)
 
-## Code Brief Standards compliance
+Plus tests: `tests/test_gold_writer.py`, `test_gold_proposer.py`, `test_gold_parser.py`, `test_gold_drift_detector.py` (≥20 cases total per Quality Checkpoint #2).
 
-- API version: Anthropic Messages API + `claude-haiku-4-5` (verified active 2026-04-26 via existing references in repo).
-- Deprecation check date: 2026-04-26 (no deprecation expected within M1 window).
-- Fallback: `WIKI_LINT_ENABLED=false` default keeps scheduler dormant; flip after dry-run clean.
-- DDL drift: zero DB writes; grep verification mandated in brief.
-- Literal pytest output: required; ≥40 tests across 8 test files.
+Plus process doc: `baker-vault/_ops/processes/gold-comment-workflow.md` (canonical process; back-refs from cortex3t-roadmap.md + MEMORY.md + agent triplets resolve here once landed).
 
-## Verification before shipping
+## Ship gate (literal output required)
 
-Brief §"Verification criteria" (1-8 items). Items 4 (Hagenauer-first acceptance) and 7 (V1/V2 carve-out in PR) are non-negotiable.
+```bash
+cd ~/bm-b2 && git checkout main && git pull -q
+git checkout -b gold-comment-workflow-1
+# ... implement ...
+bash scripts/check_singletons.sh                          # OK: No singleton violations
+python3 -m pytest tests/test_gold_writer.py tests/test_gold_proposer.py tests/test_gold_parser.py tests/test_gold_drift_detector.py -v
+# expect: ≥20 cases all passing
+python3 -m pytest tests/ 2>&1 | tail -3
+# expect: full-suite no regressions
+# Migration-vs-bootstrap diff (Standard #4):
+diff <(grep -A 10 "CREATE TABLE.*gold_audits" migrations/20260426_gold_audits.sql) \
+     <(grep -A 10 "CREATE TABLE.*gold_audits" memory/store_back.py)
+diff <(grep -A 10 "CREATE TABLE.*gold_write_failures" migrations/20260426_gold_audits.sql) \
+     <(grep -A 10 "CREATE TABLE.*gold_write_failures" memory/store_back.py)
+# Both diffs empty modulo whitespace
+grep "gold_audit_sentinel" triggers/embedded_scheduler.py | head -5
+# expect: ≥3 matches (registration + name + log)
+git diff --name-only main...HEAD
+git diff --stat
+```
 
-## Ship report path
+**No "by inspection"** (per `feedback_no_ship_by_inspection.md`).
 
-`briefs/_reports/B2_wiki_lint_1_<YYYYMMDD>.md`
+## Ship-report shape
 
-## Cross-stream dependency
+- **Path:** `briefs/_reports/B2_gold_comment_workflow_1_20260426.md`
+- **Contents:** all literal outputs above + acceptance test results from §Quality Checkpoints (synthetic conflict + caller-stack rejection + DV-only check + backfill validation of existing 2 entries) + commit-msg hook install verification on baker-vault clone.
+- **PR title:** `GOLD_COMMENT_WORKFLOW_1: 4 modules + audit sentinel + commit-msg hook (Hybrid C ratified)`
+- **Branch:** `gold-comment-workflow-1`
 
-Brief is parallel-safe with B1 + B3. Acceptance test (item 4) depends on B1 having shipped HAGENAUER_WIKI_BOOTSTRAP_1, but graceful path documented: today's flat-pattern `wiki/hagenauer-rg7/` triggers grandfather-clause warn (NOT error) on check 2. B2 can ship before B1.
+## After PR open
 
-If B1 ships first AND its skeleton triggers errors on lint checks 1+2, that's a B1 problem (per spec §"Hagenauer-first acceptance test": "If the bootstrap output triggers errors on checks 1 or 2 (post-grandfather), bootstrap blocks merge"). AI Head A reviews B1 ship report against this gate.
+PR will be opened against `main`. **Do NOT auto-merge** — trigger-class MEDIUM requires B1 review. B1 dispatch fires from AI Head B (or AI Head A) once B2 ship-report posted.
+
+## Mailbox hygiene (§3)
+
+After PR merged (post B1 APPROVE), overwrite this file:
+```
+COMPLETE — GOLD_COMMENT_WORKFLOW_1 merged as <commit-sha> on 2026-04-2X by AI Head B (B1 review APPROVE). §3 hygiene per b-code-dispatch-coordination.
+```
+
+## Timebox
+
+**~6–8h.** 4 modules + 4 test files + migration + scheduler + hook + process doc. If approaching 10h, stop and flag — split-into-phases option exists (Phase 1: writer + drift + migration + tests; Phase 2: proposer + parser + audit job + hook).
+
+## Note on prior WIKI_LINT_1 dispatch
+
+Prior CODE_2_PENDING.md dispatched B2 to WIKI_LINT_1 (commit `ec25c38`). Director re-route to GOLD supersedes WIKI_LINT_1. If you have local in-flight WIKI_LINT_1 work, preserve in a feature branch (`wiki-lint-1`) and switch to `gold-comment-workflow-1`. WIKI_LINT_1 may resume on a future B-code dispatch — discard nothing.
+
+## Out of scope (explicit)
+
+- NO modifications to `kbl/gold_drain.py` (distinct lane)
+- NO modifications to `kbl/loop.py:load_gold_context_by_matter` (different consumer)
+- NO writes to existing `_ops/director-gold-global.md` content (validate via parser; never overwrite)
+- NO `cortex_*` module changes (M2 not landed; gold_proposer prepares contract)
+- NO LLM-assisted topic-key extraction (V2)
+- NO auto-promotion of Proposed Gold (V2; Director hand-mediates)
+
+---
+
+**Dispatch timestamp:** 2026-04-26 ~17:00 UTC (re-route from B3 to B2)
+**Authority chain:** Director RA-21 "Proceed with Gold Comment" → RA-21 spec (vault `e3465ab`) → AI Head B `/write-brief` skill draft (Rule 0 compliant) → B3 dispatch → Director re-route ("b3 busy, instruct b2") → AI Head A re-write to B2 mailbox → B2 build → B1 review (situational-review trigger) → AI Head A or B merge.
