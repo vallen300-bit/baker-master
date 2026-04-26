@@ -13,6 +13,12 @@
           "matter": "baker"
         },
         {
+          "title": "Baker Team Setup \u2014 Lab / Build / Business + Worktree Map",
+          "file": "baker-team-setup.html",
+          "created": "2026-04-25",
+          "matter": "baker"
+        },
+        {
           "title": "Baker System Architecture v5 \u2014 Legacy Baker (pre-Cortex T3)",
           "file": "baker-v5.html",
           "created": "2026-04-20",

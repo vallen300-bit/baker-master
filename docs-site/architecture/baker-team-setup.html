@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Baker — Team Setup (3 Workstreams)</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  :root {
+    --bg: #f7f5f0;
+    --surface: #ffffff;
+    --surface-alt: #faf8f3;
+    --ink: #1a1a1a;
+    --ink-soft: #4a4a4a;
+    --ink-mute: #8a8a8a;
+    --rule: #e0dcd3;
+    --rule-soft: #efebe2;
+    --brisen: #0a6fdb;
+    --brisen-soft: rgba(10,111,219,0.08);
+    --gold: #b8923f;
+    --green: #2d7a4f;
+    --red: #b03030;
+    --amber: #c87a17;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Inter', -apple-system, sans-serif;
+    line-height: 1.6;
+    font-size: 14px;
+  }
+
+  .container {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 48px 32px 80px;
+  }
+
+  /* === HEADER === */
+  header {
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 24px;
+    margin-bottom: 40px;
+  }
+  .eyebrow {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--brisen);
+    margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    margin-bottom: 12px;
+  }
+  .meta {
+    color: var(--ink-mute);
+    font-size: 0.85rem;
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .meta strong { color: var(--ink-soft); font-weight: 500; }
+
+  /* === BOTTOM LINE BOX === */
+  .bottom-line {
+    background: var(--surface);
+    border-left: 4px solid var(--brisen);
+    padding: 20px 24px;
+    margin-bottom: 48px;
+  }
+  .bottom-line .label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--brisen);
+    margin-bottom: 8px;
+  }
+  .bottom-line p {
+    font-size: 1.05rem;
+    color: var(--ink);
+    font-weight: 500;
+  }
+
+  /* === SECTIONS === */
+  section { margin-bottom: 56px; }
+  h2 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin-bottom: 4px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--rule);
+  }
+  h2 .num {
+    color: var(--brisen);
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+    margin-right: 12px;
+    font-size: 0.95rem;
+  }
+  h2 + .sub {
+    font-size: 0.85rem;
+    color: var(--ink-mute);
+    margin-bottom: 20px;
+  }
+  h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 24px 0 12px;
+    color: var(--ink-soft);
+  }
+
+  /* === TEAM CARDS === */
+  .teams {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  .team-card {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-top: 3px solid var(--brisen);
+    padding: 20px;
+  }
+  .team-card.lab { border-top-color: var(--gold); }
+  .team-card.build { border-top-color: var(--brisen); }
+  .team-card.business { border-top-color: var(--green); }
+  .team-name {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .team-mode {
+    font-size: 0.75rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-bottom: 14px;
+  }
+  .team-card p {
+    font-size: 0.88rem;
+    color: var(--ink-soft);
+    margin-bottom: 12px;
+  }
+  .team-card .members {
+    font-size: 0.78rem;
+    color: var(--ink-mute);
+    border-top: 1px dashed var(--rule);
+    padding-top: 10px;
+  }
+  .team-card .members strong { color: var(--ink); font-weight: 600; }
+
+  /* === LAYOUT DIAGRAM === */
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-bottom: 24px;
+  }
+  .screen {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 20px;
+  }
+  .screen-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--ink-mute);
+    margin-bottom: 14px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--rule);
+  }
+  .pane-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .pane {
+    background: var(--surface-alt);
+    padding: 14px 12px;
+    font-size: 0.82rem;
+    border-left: 3px solid var(--rule);
+    min-height: 88px;
+  }
+  .pane strong { display: block; font-weight: 700; margin-bottom: 4px; font-size: 0.88rem; }
+  .pane .role { color: var(--ink-mute); font-size: 0.75rem; }
+  .pane.ra { border-left-color: var(--gold); }
+  .pane.aih { border-left-color: var(--brisen); }
+  .pane.rotate { border-left-color: var(--green); border-left-style: dashed; }
+  .pane.b1 { border-left-color: var(--red); }
+  .pane.b2 { border-left-color: var(--green); }
+  .pane.b3 { border-left-color: var(--brisen); }
+  .pane.b4 { border-left-color: var(--amber); }
+
+  /* === TABLES === */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--surface);
+    font-size: 0.83rem;
+  }
+  th {
+    text-align: left;
+    padding: 10px 12px;
+    background: var(--surface-alt);
+    border-bottom: 2px solid var(--ink);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    vertical-align: bottom;
+  }
+  td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--rule);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  td.team-tag {
+    font-weight: 600;
+    color: var(--brisen);
+    font-size: 0.72rem;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  td.team-tag.lab { color: var(--gold); }
+  td.team-tag.build { color: var(--brisen); }
+  td.team-tag.biz { color: var(--green); }
+  td.team-tag.all { color: var(--ink-soft); }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: var(--rule-soft);
+    color: var(--ink-soft);
+  }
+  .badge.ok { background: rgba(45,122,79,0.12); color: var(--green); }
+  .badge.no { background: rgba(176,48,48,0.10); color: var(--red); }
+  .badge.wip { background: rgba(200,122,23,0.12); color: var(--amber); }
+
+  /* === CODE BLOCKS === */
+  pre, code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+  }
+  pre {
+    background: #1a1a1a;
+    color: #e8e6f0;
+    padding: 14px 16px;
+    border-radius: 4px;
+    overflow-x: auto;
+    margin: 8px 0 16px;
+    line-height: 1.5;
+  }
+  pre .comment { color: #8a8a8a; }
+  pre .keyword { color: #d4a853; }
+  pre .string  { color: #a0c8b0; }
+  code.inline {
+    background: var(--rule-soft);
+    color: var(--ink);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 0.78rem;
+  }
+
+  /* === LAUNCH BLOCKS === */
+  .launch {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 18px 20px;
+    margin-bottom: 14px;
+  }
+  .launch h4 {
+    font-size: 0.95rem;
+    font-weight: 700;
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .launch h4 .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+    display: inline-block;
+  }
+  .launch .where {
+    font-size: 0.75rem;
+    color: var(--ink-mute);
+    margin-bottom: 10px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .launch .step {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--brisen);
+    margin: 12px 0 4px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  /* === MEMORY === */
+  .mem-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  .mem-card {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 14px 16px;
+    font-size: 0.85rem;
+  }
+  .mem-card strong { display: block; margin-bottom: 4px; }
+  .mem-card .where { color: var(--ink-mute); font-size: 0.75rem; font-family: 'JetBrains Mono', monospace; word-break: break-all; }
+
+  /* === FOOTER === */
+  footer {
+    margin-top: 64px;
+    padding-top: 24px;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-mute);
+    font-size: 0.78rem;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  @media print {
+    body { background: white; font-size: 11px; }
+    .container { padding: 16px; }
+    pre { background: #f0f0f0; color: #1a1a1a; }
+  }
+  @media (max-width: 900px) {
+    .teams, .layout, .mem-grid { grid-template-columns: 1fr; }
+    .pane-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <div class="eyebrow">Brisen / Baker — Internal Ops</div>
+  <h1>Three Teams. Three Workstreams. One Director.</h1>
+  <div class="meta">
+    <span><strong>Date:</strong> 2026-04-25</span>
+    <span><strong>Author:</strong> Research Agent</span>
+    <span><strong>Ratified by:</strong> Director (Lab/Build/Business naming, 4-pane layout, AI Head consolidation)</span>
+    <span><strong>Status:</strong> Live</span>
+  </div>
+</header>
+
+<div class="bottom-line">
+  <div class="label">Bottom line</div>
+  <p>Code App (4 panes) hosts persistent personas: Research Agent, two AI Head instances, one rotating slot for AO PM / MOVIE AM / AI Dennis. Terminal CLI (4 panes) hosts ephemeral B-coders: B1–B4. All three teams run in parallel. Director time is the only true bottleneck.</p>
+</div>
+
+<!-- ====================== 1. THE THREE TEAMS ====================== -->
+<section>
+  <h2><span class="num">01</span>The three teams</h2>
+  <div class="sub">Each team has a distinct mode, distinct output, distinct rhythm.</div>
+
+  <div class="teams">
+    <div class="team-card lab">
+      <div class="team-name">Lab</div>
+      <div class="team-mode">Design Pass</div>
+      <p>Sketches new capabilities before code is written. Output is a ratified brief. Hours-pace. Higher unknowns.</p>
+      <div class="members"><strong>Members:</strong> Research Agent (lead) · Director (ratifier)</div>
+    </div>
+    <div class="team-card build">
+      <div class="team-name">Build</div>
+      <div class="team-mode">Ship Code</div>
+      <p>Cortex-3T M1+. Brief → dispatch → implement → review → merge → deploy. Days-pace. Runs autonomously per AI Head charter.</p>
+      <div class="members"><strong>Members:</strong> AI Head A (lead) · AI Head B (reviewer) · B1–B4 (build) · Research Agent (briefs)</div>
+    </div>
+    <div class="team-card business">
+      <div class="team-name">Business</div>
+      <div class="team-mode">Real Brisen Use</div>
+      <p>Director uses Baker on actual matters (Hagenauer, Cupial, MO VIE, AO, MRCI/Lilienmat). Live-pace. Failures are free data.</p>
+      <div class="members"><strong>Members:</strong> Director (lead) · AO PM · MOVIE AM · AI Dennis · Research Agent (observation)</div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== 2. PHYSICAL LAYOUT ====================== -->
+<section>
+  <h2><span class="num">02</span>Physical layout — two screens, eight panes</h2>
+  <div class="sub">Code App on left screen for personas with memory. Terminal CLI on right screen for ephemeral coders. Both at 4-pane split.</div>
+
+  <div class="layout">
+    <div class="screen">
+      <div class="screen-title">Left screen — Code App (chat UI · Opus 4.7 1M · Extra-High effort)</div>
+      <div class="pane-grid">
+        <div class="pane ra">
+          <strong>Pane 1 — Research Agent</strong>
+          <span class="role">Orchestrator across all 3 teams</span>
+        </div>
+        <div class="pane aih">
+          <strong>Pane 2 — AI Head A</strong>
+          <span class="role">Build lead: brief drafting + dispatch + merge</span>
+        </div>
+        <div class="pane aih">
+          <strong>Pane 3 — AI Head B</strong>
+          <span class="role">Build reviewer: /security-review + B-trigger second-pair</span>
+        </div>
+        <div class="pane rotate">
+          <strong>Pane 4 — Rotating</strong>
+          <span class="role">AO PM · MOVIE AM · AI Dennis · future CEO AI</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="screen">
+      <div class="screen-title">Right screen — Terminal CLI (Claude Code · refresh @ 15%)</div>
+      <div class="pane-grid">
+        <div class="pane b1">
+          <strong>Tab b1 — B1 Builder</strong>
+          <span class="role">Red · ~/bm-b1 worktree</span>
+        </div>
+        <div class="pane b2">
+          <strong>Tab b2 — B2 Builder</strong>
+          <span class="role">Green · ~/bm-b2 worktree</span>
+        </div>
+        <div class="pane b3">
+          <strong>Tab b3 — B3 Builder</strong>
+          <span class="role">Blue · ~/bm-b3 worktree</span>
+        </div>
+        <div class="pane b4">
+          <strong>Tab b4 — B4 Builder</strong>
+          <span class="role">Amber · ~/bm-b4 worktree (NEW)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== 3. FULL TEAM TABLE ====================== -->
+<section>
+  <h2><span class="num">03</span>Full team table — function · skills · who · where</h2>
+  <div class="sub">All roles across all three teams. "Skills missing" feeds into the parallel research subagent dispatch.</div>
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:7%">Team</th>
+        <th style="width:14%">Function</th>
+        <th style="width:11%">Performer</th>
+        <th style="width:14%">Where lives</th>
+        <th style="width:14%">Repo / surface</th>
+        <th style="width:9%">Persistent memory</th>
+        <th style="width:15%">Skills loaded</th>
+        <th style="width:16%">Skills missing (research)</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="team-tag all">All 3</td>
+        <td>Orchestration · brief drafting · charter steward · observation capture</td>
+        <td><strong>Research Agent</strong></td>
+        <td>Code App pane 1</td>
+        <td>Cowork session → <code class="inline">baker-vault/_ops/ideas/</code></td>
+        <td><span class="badge wip">Promote now</span></td>
+        <td>20 brainstorming skills (12 business + 8 AI-dev)</td>
+        <td>Multi-agent orchestration patterns; long-context summarization</td>
+      </tr>
+      <tr>
+        <td class="team-tag build">Build</td>
+        <td>Lead AI Head — brief drafting, dispatch, merge</td>
+        <td><strong>AI Head A</strong></td>
+        <td>Code App pane 2</td>
+        <td><code class="inline">15_Baker_Master/01_build</code></td>
+        <td><span class="badge ok">Shared 3-file</span></td>
+        <td>/write-brief · /security-review · autonomy charter · dispatch coord</td>
+        <td>Tier-B budget enforcer; auto-rebase patterns; cross-AI-Head coord</td>
+      </tr>
+      <tr>
+        <td class="team-tag build">Build</td>
+        <td>Reviewer AI Head — /security-review, second-pair routing</td>
+        <td><strong>AI Head B</strong></td>
+        <td>Code App pane 3</td>
+        <td>Same repo, review-only surface</td>
+        <td><span class="badge ok">Same triplet</span></td>
+        <td>/security-review · B1 trigger rule</td>
+        <td>Dedicated review-checklist library</td>
+      </tr>
+      <tr>
+        <td class="team-tag build">Build</td>
+        <td>Implementation — code, tests, ship</td>
+        <td><strong>B1 / B2 / B3 / B4</strong></td>
+        <td>Terminal CLI tabs <code class="inline">b1</code>–<code class="inline">b4</code></td>
+        <td><code class="inline">~/bm-b{N}</code> worktrees</td>
+        <td><span class="badge no">By design</span></td>
+        <td>Repo CLAUDE.md · /write-brief · code-architect/explorer/reviewer</td>
+        <td>TDD discipline; defensive-coverage; regression-delta-check</td>
+      </tr>
+      <tr>
+        <td class="team-tag lab">Lab</td>
+        <td>Design pass lead — generates briefs from blank</td>
+        <td>Research Agent (same)</td>
+        <td>Code App pane 1</td>
+        <td><code class="inline">_ops/ideas/</code></td>
+        <td>(same)</td>
+        <td>Same 20 RA skills</td>
+        <td>Architecture-review tuned for novel capabilities</td>
+      </tr>
+      <tr>
+        <td class="team-tag lab">Lab</td>
+        <td>Ratifier on Cortex Design prerogatives</td>
+        <td><strong>Director</strong></td>
+        <td>Code App pane 1 (chat with RA)</td>
+        <td>This session</td>
+        <td>Director's own context</td>
+        <td>—</td>
+        <td>—</td>
+      </tr>
+      <tr>
+        <td class="team-tag biz">Business</td>
+        <td>Real-life decision-maker</td>
+        <td><strong>Director</strong></td>
+        <td>Code App + reality</td>
+        <td>Calendar · email · WhatsApp · matters</td>
+        <td>Director's own context</td>
+        <td>All Brisen skills (Hagenauer · Cupial · MO VIE · AO · MRCI/Lilienmat)</td>
+        <td>Live-decision logging; "Baker-vs-manual" empirical capture</td>
+      </tr>
+      <tr>
+        <td class="team-tag biz">Business</td>
+        <td>AO contract matter PM</td>
+        <td><strong>AO PM</strong></td>
+        <td>Code App pane 4 (rotating)</td>
+        <td>Capability runner + Postgres + AO Obsidian folder</td>
+        <td><span class="badge ok">Postgres</span></td>
+        <td>AO PM system prompt · counterparty-model · 3-layer SOT · capability_threads</td>
+        <td>Counterparty mirror; deadline-warning; meeting-prep</td>
+      </tr>
+      <tr>
+        <td class="team-tag biz">Business</td>
+        <td>MO Vienna asset matter AM</td>
+        <td><strong>MOVIE AM</strong></td>
+        <td>Code App pane 4 (rotating)</td>
+        <td>Capability runner + Postgres + MOVIE Obsidian folder</td>
+        <td><span class="badge ok">Postgres</span></td>
+        <td>MOVIE AM system prompt · MOHG counterparty (placeholder Part C) · weekly lint</td>
+        <td>Hospitality-KPI; insurance-renewal; capex-planning</td>
+      </tr>
+      <tr>
+        <td class="team-tag biz">Business</td>
+        <td>IT shadow — M365 migration, vendor mgmt</td>
+        <td><strong>AI Dennis</strong></td>
+        <td>Code App pane 4 (rotating)</td>
+        <td><code class="inline">AI project managers/</code></td>
+        <td><span class="badge ok">3-file Dropbox</span></td>
+        <td>IT manager skill · M365 context</td>
+        <td>BCOMM tracker; tenant-cutover runbook</td>
+      </tr>
+      <tr>
+        <td class="team-tag biz">Business</td>
+        <td>Inventory + observation capture</td>
+        <td>Research Agent (same)</td>
+        <td>Code App pane 1</td>
+        <td><code class="inline">_ops/observations-{date}.md</code> (new)</td>
+        <td>(same)</td>
+        <td>Same 20 RA skills</td>
+        <td>Director-feedback-capture skill (what worked / what broke / why)</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ====================== 4. PERSISTENT MEMORY ====================== -->
+<section>
+  <h2><span class="num">04</span>Persistent memory roster</h2>
+  <div class="sub">Who remembers what. By design, B-coders forget on every refresh — they read briefs and git on wake.</div>
+
+  <div class="mem-grid">
+    <div class="mem-card">
+      <strong>AI Head <span class="badge ok">Live</span></strong>
+      Three-file triplet (OPERATING / LONGTERM / ARCHIVE) + APScheduler weekly self-audit.
+      <div class="where">_ops/agents/ai-head/</div>
+    </div>
+    <div class="mem-card">
+      <strong>Research Agent <span class="badge wip">Promote now</span></strong>
+      Drafted at <code class="inline">_ops/ideas/2026-04-24-research-agent-memory-triplet.md</code> as "low priority". 4-pane reality bumps it to today.
+      <div class="where">_ops/agents/research-agent/ (creating)</div>
+    </div>
+    <div class="mem-card">
+      <strong>AO PM <span class="badge ok">Live</span></strong>
+      DB-backed: ao_project_state + capability_threads + capability_turns. Phase 3 just shipped.
+      <div class="where">Postgres tables</div>
+    </div>
+    <div class="mem-card">
+      <strong>MOVIE AM <span class="badge ok">Live</span></strong>
+      DB-backed analogue of AO PM. Retrofit shipped 2026-04-23 (PR #47).
+      <div class="where">Postgres tables</div>
+    </div>
+    <div class="mem-card">
+      <strong>AI Dennis <span class="badge ok">Live</span></strong>
+      Three-file shadow agent memory in Dropbox.
+      <div class="where">AI project managers/AI_DENNIS_*.md</div>
+    </div>
+    <div class="mem-card">
+      <strong>B-codes (B1–B4) <span class="badge no">Stateless</span></strong>
+      Brief mailbox + git pull on wake. Refresh every 15% context.
+      <div class="where">briefs/_tasks/CODE_{N}_PENDING.md</div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== 5. OPENING LINES ====================== -->
+<section>
+  <h2><span class="num">05</span>Opening lines — how to launch each team member</h2>
+  <div class="sub">Two layers: terminal launch (sets tab title) + first paste (agent identifies + loads memory).</div>
+
+  <h3>Step A — update <code class="inline">~/.zshrc</code> functions (one-time)</h3>
+  <p style="font-size: 0.85rem; color: var(--ink-soft); margin-bottom: 8px;">Add <code class="inline">b4</code> + bake in <code class="inline">cd</code> to working directory. Run <code class="inline">source ~/.zshrc</code> after.</p>
+
+<pre><span class="comment"># ~/.zshrc — Baker terminal launchers</span>
+function aihead1() { cd ~/Desktop/baker-code && printf <span class="string">"\033]0;AI Head A — Build Lead\007"</span>; claude <span class="string">"$@"</span>; }
+function aihead2() { cd ~/Desktop/baker-code && printf <span class="string">"\033]0;AI Head B — Build Reviewer\007"</span>; claude <span class="string">"$@"</span>; }
+function b1() { cd ~/bm-b1 && printf <span class="string">"\033]0;B1 Builder (red)\007"</span>; claude <span class="string">"$@"</span>; }
+function b2() { cd ~/bm-b2 && printf <span class="string">"\033]0;B2 Builder (green)\007"</span>; claude <span class="string">"$@"</span>; }
+function b3() { cd ~/bm-b3 && printf <span class="string">"\033]0;B3 Builder (blue)\007"</span>; claude <span class="string">"$@"</span>; }
+function b4() { cd ~/bm-b4 && printf <span class="string">"\033]0;B4 Builder (amber)\007"</span>; claude <span class="string">"$@"</span>; }</pre>
+
+  <p style="font-size: 0.8rem; color: var(--ink-mute); margin-bottom: 24px;"><em>Note: Terminal.app per-tab color is set via Profiles (one profile per role, set background color, locked title). The title strings above are visible in the tab bar regardless. Color suffixes <code class="inline">(red/green/blue/amber)</code> serve as text-anchor when profiles aren't yet wired.</em></p>
+
+  <h3>Step B — first paste after launch (sets identity + loads memory)</h3>
+
+  <div class="launch">
+    <h4><span class="dot" style="background: var(--brisen);"></span>aihead1 — AI Head A (Build Lead)</h4>
+    <div class="where">Terminal: cd ~/Desktop/baker-code && aihead1</div>
+    <div class="step">First message paste</div>
+<pre>AI Head, resume Build-lead instance.
+Load: _ops/agents/ai-head/{OPERATING,LONGTERM,ARCHIVE}.md
+Charter: _ops/processes/ai-head-autonomy-charter.md (canonical)
+Standing rule: bank-model. Tier B = autonomous; Cortex Design prerogatives only to Director.
+Standing by for brief draft + B-code dispatch.</pre>
+  </div>
+
+  <div class="launch">
+    <h4><span class="dot" style="background: var(--brisen);"></span>aihead2 — AI Head B (Build Reviewer)</h4>
+    <div class="where">Terminal: cd ~/Desktop/baker-code && aihead2</div>
+    <div class="step">First message paste</div>
+<pre>AI Head, resume Build-reviewer instance.
+Load: _ops/agents/ai-head/{OPERATING,LONGTERM,ARCHIVE}.md (shared with Build-lead — same persona)
+Role: /security-review primary on every PR + B1 trigger rule second-pair routing.
+Standing by for review request.</pre>
+  </div>
+
+  <div class="launch">
+    <h4><span class="dot" style="background: var(--red);"></span>b1 — B1 Builder</h4>
+    <div class="where">Terminal: b1</div>
+    <div class="step">First message paste</div>
+<pre>You are B1, Code Brisen Builder #1.
+Repo: ~/bm-b1 (independent worktree).
+Read: briefs/_tasks/CODE_1_PENDING.md
+If status = OPEN: follow /write-brief 6-step protocol on the brief named there.
+If status = COMPLETE or no task: stand by silent until next dispatch.
+On ship: PR + ship report to mailbox + mark COMPLETE.</pre>
+  </div>
+
+  <div class="launch">
+    <h4><span class="dot" style="background: var(--green);"></span>b2 — B2 Builder</h4>
+    <div class="where">Terminal: b2</div>
+    <div class="step">First message paste</div>
+<pre>You are B2, Code Brisen Builder #2.
+Repo: ~/bm-b2.
+Read: briefs/_tasks/CODE_2_PENDING.md
+Same protocol as B1. Independent context — no coordination with other B-codes; AI Head dispatches by mailbox.</pre>
+  </div>
+
+  <div class="launch">
+    <h4><span class="dot" style="background: var(--brisen);"></span>b3 — B3 Builder</h4>
+    <div class="where">Terminal: b3</div>
+    <div class="step">First message paste</div>
+<pre>You are B3, Code Brisen Builder #3.
+Repo: ~/bm-b3.
+Read: briefs/_tasks/CODE_3_PENDING.md
+Same protocol as B1.</pre>
+  </div>
+
+  <div class="launch">
+    <h4><span class="dot" style="background: var(--amber);"></span>b4 — B4 Builder (NEW)</h4>
+    <div class="where">Terminal: b4 — requires worktree clone first: <code class="inline">git clone https://github.com/vallen300-bit/baker-master.git ~/bm-b4</code></div>
+    <div class="step">First message paste</div>
+<pre>You are B4, Code Brisen Builder #4.
+Repo: ~/bm-b4.
+Read: briefs/_tasks/CODE_4_PENDING.md
+Same protocol as B1. New build slot added 2026-04-25 to expand parallel ship capacity.</pre>
+  </div>
+
+  <h3 style="margin-top: 32px;">Step C — Code App personas (chat UI — no terminal)</h3>
+  <p style="font-size: 0.85rem; color: var(--ink-soft); margin-bottom: 12px;">Pinned persona sessions in Code App resume automatically. Wake message only needed after refresh / compaction.</p>
+
+  <div class="launch">
+    <h4><span class="dot" style="background: var(--gold);"></span>Research Agent (this session — pane 1)</h4>
+    <div class="step">Wake message after compact</div>
+<pre>Research Agent, resume session — build mode (charter §6B/§6C active).
+Load: MEMORY.md + _ops/processes/research-agent-charter.md + _ops/ideas/INDEX.md.
+Standing by for Director directive.</pre>
+  </div>
+
+  <div class="launch">
+    <h4><span class="dot" style="background: var(--green);"></span>AO PM (rotating pane 4)</h4>
+    <div class="step">Wake message</div>
+<pre>AO PM, load state from ao_project_state + capability_threads.
+Apply CAPABILITY_EXTENSION_TEMPLATE Part B–G + Part H invocation audit.
+Standing by for matter query.</pre>
+  </div>
+
+  <div class="launch">
+    <h4><span class="dot" style="background: var(--green);"></span>MOVIE AM (rotating pane 4)</h4>
+    <div class="step">Wake message</div>
+<pre>MOVIE AM, load state.
+Apply CAPABILITY_EXTENSION_TEMPLATE — note Part C (MOHG counterparty) still placeholder.
+Standing by for matter query.</pre>
+  </div>
+
+  <div class="launch">
+    <h4><span class="dot" style="background: var(--green);"></span>AI Dennis (rotating pane 4)</h4>
+    <div class="step">Wake message</div>
+<pre>AI Dennis, resume IT shadow session.
+Load: AI project managers/AI_DENNIS_OPERATING.md + AI_DENNIS_LONGTERM.md
+Standing by for IT directive.</pre>
+  </div>
+</section>
+
+<!-- ====================== 6. PARALLELISM RULES ====================== -->
+<section>
+  <h2><span class="num">06</span>Parallelism rules — how all 3 teams run without colliding</h2>
+  <div class="sub">From the §6C orchestration-mode amendment + dispatch coordination rule (both ratified 2026-04-24).</div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Pair</th>
+        <th>Conflict surface</th>
+        <th>Rule</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Lab × Build</strong></td>
+        <td>Research Agent in both</td>
+        <td>Cheap context-switch. Lab pauses if Build dispatch interrupts.</td>
+      </tr>
+      <tr>
+        <td><strong>Lab × Business</strong></td>
+        <td>Director time only</td>
+        <td>Business takes priority. Lab uses residual.</td>
+      </tr>
+      <tr>
+        <td><strong>Build × Business</strong></td>
+        <td>Capability state (AO PM tables modified by Build PRs)</td>
+        <td>Build deploys are silent (no Director relay) unless they break Business surface. Auth + migration + cross-cap state writes = trigger-class second-pair review.</td>
+      </tr>
+      <tr>
+        <td><strong>AI Head A × AI Head B</strong></td>
+        <td>Shared OPERATING.md + B-code mailboxes</td>
+        <td>Newer-wins on file with git history preservation. Pre-dispatch busy-check on mailbox + branch state.</td>
+      </tr>
+      <tr>
+        <td><strong>B-codes among themselves</strong></td>
+        <td>Independent worktrees — no shared state</td>
+        <td>Zero coordination. AI Head dispatches by capacity.</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<footer>
+  <span>Brisen / Baker — Internal Ops Doc</span>
+  <span>Generated by Research Agent · 2026-04-25</span>
+</footer>
+
+</div>
+</body>
+</html>
