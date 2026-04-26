@@ -12,7 +12,7 @@
 - Branch prior state: `proactive-pm-sentinel-rethread-fix-1` (old, merged remotely). Pre-execution `git checkout main && git pull -q` resolves.
 - Other B-codes: B1 ← HAGENAUER_WIKI_BOOTSTRAP_1 (in flight, dispatched cd6cabf). B3 ← KBL_PEOPLE_ENTITY_LOADERS_1 (in flight, dispatched cd6cabf). No file overlap with B2 (see §6C note in brief).
 
-**Dispatch authorisation:** Director cleared M1 parallel-3 in handover at 14:00 UTC 2026-04-25; B2 was held pending RA spec; RA delivered spec at `_ops/ideas/2026-04-26-wiki-lint-1-spec.md` 2026-04-26; AI Head A drafted brief + dispatched same day.
+**Dispatch authorisation:** Director cleared M1 parallel-3 in handover at 14:00 UTC 2026-04-25; B2 was held pending RA spec; RA delivered spec 2026-04-26; AI Head A drafted brief + dispatched same day; **Director resolved 3 open Qs same day** (LLM choice → Gemini 2.5 Pro overriding RA's Haiku-4.5; checkboxes → V1 no; thresholds → defaults stand). Brief updated to reflect Director's Q1 override.
 
 ---
 
@@ -32,15 +32,15 @@
 5. DOCUMENT — PR description MUST include V1/V2 carve-out + V2 question for Director ratification.
 6. CAPTURE LESSONS — apply LONGTERM.md DDL-drift check; verify no DB write paths in lint module.
 
-## RA's 3 Open Qs — decisions adopted by AI Head A
+## 3 Open Qs — Director-resolved 2026-04-26
 
-| Q | RA recommendation | AI Head A decision | Reasoning |
+| Q | RA recommendation | Director decision | Note |
 |---|---|---|---|
-| Q1 LLM choice | Haiku 4.5 | **Haiku 4.5 ratified** | Stack consistency. `claude-haiku-4-5` already cited in retry + cost. Vendor diversification not in scope. |
-| Q2 Action checkboxes | V1 = no | **V1 = no, ratified** | Simpler ship; auto-fix sentinels are V2 brief. |
-| Q3 Threshold defaults | 60d/14d/90d, env-overridable | **Defaults ratified** | Spec aligns with M3 expectation (90d signal window for orphan = M3 cycle freshness). All overridable via env. |
+| Q1 LLM choice | Haiku 4.5 | **Gemini 2.5 Pro** via `orchestrator.gemini_client.call_pro` | Production-wired in `email_trigger.py:362`. Zero integration cost. Overrides RA. |
+| Q2 Action checkboxes | V1 = no | **V1 = no** | V2 brief later for auto-fix sentinels. |
+| Q3 Threshold defaults | 60d/14d/90d, env-overridable | **Defaults stand** | Review at week 4. |
 
-These are §4-AI-Head-autonomy decisions per autonomy charter (parameter tuning + UX scoping + helper additions, not Cortex Design prerogatives). Director can override if needed.
+Q1 implication for B2: do **NOT** add `call_haiku()` to `kbl/anthropic_client.py`. Use `from orchestrator.gemini_client import call_pro` directly in checks 5+6, with injectable stub for tests.
 
 ## Code Brief Standards compliance
 

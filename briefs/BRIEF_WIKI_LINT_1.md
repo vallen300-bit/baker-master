@@ -18,10 +18,10 @@ Two wiki patterns coexist (per spec §"Two coexisting wiki patterns"):
 
 Both must pass lint. Per-matter pattern detection.
 
-**RA recommendations adopted as decisions** (spec §"Open questions for AI Head /write-brief"):
-- Q1 LLM choice: **Haiku 4.5** (consistency with stack; `kbl/retry.py:105` already references `claude-haiku-4-5`).
-- Q2 Action checkboxes in report: **V1 = no, manual.** V2 brief later if Director wants auto-fix follow-up sentinel.
-- Q3 Threshold defaults: 60d stale, 14d inbox, 90d orphan. Adjustable via env vars.
+**Director-resolved decisions** (spec §"Open questions" → Director ratified 2026-04-26):
+- Q1 LLM choice: **Gemini 2.5 Pro** via existing `orchestrator.gemini_client.call_pro()`. Already production-wired (referenced in `email_trigger.py:362`). Zero integration cost. Overrides RA's Haiku-4.5 recommendation.
+- Q2 Action checkboxes in report: **V1 = no, manual.** Auto-fix is a separate V2 brief.
+- Q3 Threshold defaults: 60d stale, 14d inbox, 90d orphan. Env-var tunable. Review at week 4.
 
 ---
 
@@ -38,6 +38,8 @@ Build a single-entrypoint lint runner `kbl/wiki_lint.py` that:
 4. Aggregates into a markdown report (V1 location: `outputs/lint/YYYY-MM-DD.md` in baker-master + Slack summary post — see "Output path V1/V2 carve-out" below).
 5. Schedules weekly via APScheduler in `triggers/embedded_scheduler.py`, mirroring the `_ai_head_weekly_audit_job` pattern (Mon 05:00 UTC per spec).
 
+**LLM helper:** Checks 5 + 6 use `orchestrator.gemini_client.call_pro()` directly (signature `call_pro(messages: list, max_tokens: int = 2000, system: str = None) -> GeminiResponse`, defined at `orchestrator/gemini_client.py:140`). No new helper needed — production-wired already.
+
 ### Output path V1/V2 carve-out (architectural decision, log in PR description)
 
 Spec §"Output" says `baker-vault/lint/YYYY-MM-DD.md`. CHANDA #9 prohibits Baker writing to `baker-vault/` directly. Two paths:
@@ -45,13 +47,6 @@ Spec §"Output" says `baker-vault/lint/YYYY-MM-DD.md`. CHANDA #9 prohibits Baker
 - **V2 (separate brief, post-V1 stable):** Mirror to `baker-vault/lint/YYYY-MM-DD.md` via Mac Mini SSH-mirror from `vault_scaffolding/live_mirror/v1/lint/`. Requires Mac Mini script extension to pick up `lint/` subpath.
 
 V1 ships first to validate check correctness without committing to the mirror plumbing.
-
-### LLM helper addition
-
-`kbl/anthropic_client.py` currently has `call_opus()` only (default `claude-opus-4-7`). Checks 5 + 6 need Haiku 4.5. Add:
-- `call_haiku(prompt, system=None, max_tokens=1024) -> HaikuResponse` — mirror `call_opus()` signature.
-- Default model: `claude-haiku-4-5`. Env override: `CLAUDE_HAIKU_MODEL`.
-- Cost telemetry via existing `_compute_cost_usd` (cost map in `kbl/cost.py:43` already has `claude-haiku-4` row).
 
 ### 7 checks (per spec §"7 checks")
 
@@ -64,13 +59,15 @@ kbl/lint_checks/
   missing_required_files.py     # check 2
   orphan_matter_dir.py          # check 3
   one_way_cross_ref.py          # check 4
-  stale_active_matter.py        # check 5 (Haiku)
-  contradiction_within_matter.py # check 6 (Haiku)
+  stale_active_matter.py        # check 5 (Gemini Pro)
+  contradiction_within_matter.py # check 6 (Gemini Pro)
   inbox_overdue.py              # check 7
   _common.py                    # LintHit dataclass, severity enum, pattern detector
 ```
 
 Each check is a pure function `run(vault_path: Path, registries: dict) -> list[LintHit]`. No I/O outside the supplied path. Tests use fixture vault at `tests/fixtures/wiki_lint/`.
+
+LLM-dependent checks (5+6) accept an injectable `llm_caller: Callable` defaulting to `orchestrator.gemini_client.call_pro`. Tests inject a stub returning fixed responses (no live API calls in pytest).
 
 ### Severity gating
 
@@ -110,7 +107,6 @@ PR ship gate: pytest passes + dry-run on real `BAKER_VAULT_PATH` produces 0 erro
 - `outputs/lint/.gitkeep` (output dir placeholder)
 
 **Modify:**
-- `kbl/anthropic_client.py` — add `call_haiku()` mirroring `call_opus()`. Do NOT change `_DEFAULT_MODEL`.
 - `triggers/embedded_scheduler.py` — register `_wiki_lint_weekly_job` (Mon 05:00 UTC) behind env flag `WIKI_LINT_ENABLED` (default `false` for first ship; flip to `true` once dry-run is clean).
 
 ## Files NOT to touch
@@ -118,14 +114,14 @@ PR ship gate: pytest passes + dry-run on real `BAKER_VAULT_PATH` produces 0 erro
 - `kbl/ingest_endpoint.py` (out of scope; lint reads, doesn't ingest).
 - `kbl/slug_registry.py` (read-only consumer for retired slugs).
 - `baker-vault/` directly (CHANDA #9; V2 brief handles vault mirror).
-- `kbl/cost.py` cost map (already has Haiku row; no changes needed).
-- `_DEFAULT_MODEL` in `anthropic_client.py` — Haiku is an additive helper, not a default flip.
+- `orchestrator/gemini_client.py` (use `call_pro` as-is; do NOT modify the helper).
+- `kbl/anthropic_client.py` (no Haiku helper added — Director chose Gemini Pro).
 
 ## Risks
 
 - **DDL drift:** None — no Postgres writes. Lint reads `email_messages.primary_matter`, `meeting_transcripts.primary_matter`, `whatsapp_messages.primary_matter` (verify columns exist before brief execution; LONGTERM.md DDL drift rule). Grep verification: `grep -E "INSERT|UPDATE|DELETE|CREATE TABLE|ALTER" kbl/wiki_lint.py kbl/lint_checks/` returns 0 lines.
-- **Haiku cost runaway:** Spec estimates ~$0.40/run. Add hard ceiling: if total Haiku tokens > 100K in a run, abort + Slack alert. Cost telemetry via existing `kbl/cost.py` path.
-- **LLM determinism:** Checks 5+6 are non-deterministic. Tests use a Haiku stub returning fixed responses. Real-vault dry-run verified manually before flag flip.
+- **Gemini Pro cost runaway:** Hard ceiling: if total Gemini Pro tokens > 200K in a run, abort + Slack alert. (Spec estimated ~$0.40/run for Haiku at 25 matters × 20K tokens; Gemini 2.5 Pro is more expensive per token but Director chose it for stack consistency with email_trigger production path. Real cost will be measured during week-1 dry-run; revisit ceiling at week 4.)
+- **LLM determinism:** Checks 5+6 are non-deterministic. Tests inject a stub callable for `call_pro` returning fixed `GeminiResponse`-shaped objects. Real-vault dry-run verified manually before flag flip.
 - **CHANDA #9 ambiguity:** V1 carve-out documented above. PR description must surface the V2 question for Director ratification before V2 brief is drafted.
 - **Slack channel hard-coding:** Verify `sb-inbox` is the right channel before hard-coding. Use env var `WIKI_LINT_SLACK_CHANNEL` with default fallback.
 - **BAKER_VAULT_PATH absent on Render:** If env var unset, lint job logs warning + skips run (does NOT crash scheduler — `_ai_head_weekly_audit_job` pattern handles this gracefully; mirror the pattern).
@@ -135,8 +131,8 @@ PR ship gate: pytest passes + dry-run on real `BAKER_VAULT_PATH` produces 0 erro
 
 ## Code Brief Standards (mandatory)
 
-- **API version:** Anthropic Messages API. `claude-haiku-4-5` model ID. Verified active 2026-04-26 (referenced in `kbl/retry.py:105` and `kbl/cost.py:43-64`). Anthropic SDK already pinned in requirements.txt; no new external API.
-- **Deprecation check date:** Haiku 4.5 confirmed active in cost map last touched 2026-04-21 (PROMPT_CACHE_AUDIT_1 didn't change this). No deprecation expected within M1 window.
+- **API version:** Google Gemini API via `orchestrator.gemini_client.call_pro()` (`gemini-2.5-pro`). Production-wired in `email_trigger.py:362`; client at `orchestrator/gemini_client.py:140`. Last touched in M0 cycle, confirmed active 2026-04-26.
+- **Deprecation check date:** Gemini 2.5 Pro confirmed active 2026-04-26 (production path live). No deprecation expected within M1 window.
 - **Fallback:** `WIKI_LINT_ENABLED=false` (default) keeps scheduler dormant. Code ships, doesn't auto-run. Director flips after first dry-run.
 - **DDL drift check:** Zero DDL. Verify per grep above.
 - **Literal pytest output mandatory:** Ship report MUST include literal `pytest tests/test_wiki_lint.py tests/test_lint_check_*.py -v` stdout. ≥40 tests expected (7 checks × ~5 cases each + entrypoint coverage). No "passes by inspection" — explicit memory rule (`feedback_no_ship_by_inspection.md`).
@@ -150,7 +146,7 @@ PR ship gate: pytest passes + dry-run on real `BAKER_VAULT_PATH` produces 0 erro
 5. Slack post fires on dry-run with summary line + report file path. (Test in dev with `WIKI_LINT_SLACK_DRY=true` env var if needed to avoid noise.)
 6. `python -c "import py_compile; py_compile.compile('kbl/wiki_lint.py', doraise=True); py_compile.compile('kbl/anthropic_client.py', doraise=True); py_compile.compile('triggers/embedded_scheduler.py', doraise=True)"` exits 0.
 7. PR description includes V1/V2 carve-out + V2 question surface for Director ratification.
-8. Hard ceiling on Haiku cost: simulate 200K-token run in test → lint aborts + Slack alert.
+8. Hard ceiling on Gemini Pro tokens: simulate 200K-token run in test → lint aborts + Slack alert.
 
 ## Out of scope
 
@@ -172,11 +168,11 @@ PR ship gate: pytest passes + dry-run on real `BAKER_VAULT_PATH` produces 0 erro
 ## §6C orchestration note (B-code dispatch coordination)
 
 WIKI_LINT_1 is parallel-safe with B1 (HAGENAUER_WIKI_BOOTSTRAP_1) and B3 (KBL_PEOPLE_ENTITY_LOADERS_1):
-- B1 touches `scripts/` + `tests/` only.
-- B3 touches `kbl/people_registry.py` + `kbl/entity_registry.py` + `kbl/ingest_endpoint.py` + `tests/`.
-- B2 (this brief) touches `kbl/wiki_lint.py` + `kbl/lint_checks/*` + `kbl/anthropic_client.py` (additive helper) + `triggers/embedded_scheduler.py` + `tests/`.
+- B1 touches `scripts/` + `tests/` only. **Shipped as PR #63.**
+- B3 touches `kbl/people_registry.py` + `kbl/entity_registry.py` + `kbl/ingest_endpoint.py` + `tests/`. **Shipped as PR #62.**
+- B2 (this brief) touches `kbl/wiki_lint.py` + `kbl/lint_checks/*` + `triggers/embedded_scheduler.py` + `tests/`.
 
-`kbl/anthropic_client.py` is the only potential collision. B3 doesn't touch it. B2 adds `call_haiku()` (additive). No conflict expected.
+Zero file overlap. `kbl/ingest_endpoint.py` is touched by B3 but B2 only imports `validate_frontmatter` from it (no edits). `orchestrator/gemini_client.py` used as-is (no edits).
 
 **Hagenauer-first acceptance** in this brief depends on B1 having shipped its skeleton, OR runs against today's flat-pattern wiki. B2 can ship before B1; verification step 4 explicitly accepts grandfather-clause warn for the flat pattern.
 
