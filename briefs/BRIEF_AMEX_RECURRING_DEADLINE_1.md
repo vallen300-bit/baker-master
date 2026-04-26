@@ -3,9 +3,9 @@
 **Date:** 2026-04-26
 **Source spec:** `_ops/ideas/2026-04-26-amex-recurring-deadline-1.md`
 **Author:** AI Head Build-reviewer (promoting from RA spec)
-**Director defaults:** Q1/Q2/Q3/Q4 all defaulted to RA recommendations 2026-04-26 ("Your 3 question — you default. I skip")
+**Director defaults:** Q1/Q3 defaulted to RA recommendations 2026-04-26 ("Your 3 question — you default. I skip"). **Q2 RESOLVED 2026-04-26 PM (RA-21): anchor_date = 3rd of every month.** Q4 remains open — defer to acceptance-test phase, not pre-build.
 **Trigger class:** **MEDIUM (DB migration)** → B1 second-pair-of-eyes review required pre-merge per `_ops/ideas/2026-04-24-b1-situational-review-trigger.md`. Builder must NOT be B1.
-**Dispatch status:** **DEFERRED** — pool currently has only B1 (idle) + B3 (about to take BRANCH_HYGIENE_1). AMEX waits for B3 ship OR B4 idle confirmation.
+**Dispatch status:** **DISPATCH-READY** — trigger when B1 or B3 frees from current ships (DEADLINE_EXTRACTOR_QUALITY_1 / BRANCH_HYGIENE_1).
 
 ---
 
@@ -48,9 +48,9 @@ Schema migration on `deadlines` table:
 | Q | Default applied |
 |---|---|
 | Q1: Recurrence values? | **First 4 only (monthly / weekly / quarterly / annual). Cron expressions in V2.** |
-| Q2: AmEx anchor date? | **10th of month** (RA assumption — Director skipped). Override on dashboard if wrong. |
+| Q2: AmEx anchor date? | **3rd of every month** (Director resolved 2026-04-26 PM via RA-21 — supersedes RA's prior 10th-of-month assumption). |
 | Q3: UX for marking recurring vs one-shot? | **Both — checkbox at deadline creation + dashboard "make recurring" action on existing rows** |
-| Q4: Other recurring candidates? | **Director surveys current deadlines once during AmEx setup; one-shot conversion batch.** Build phase will surface candidates to Director via Triaga. |
+| Q4: Other recurring candidates? | **DEFER TO ACCEPTANCE-TEST PHASE** (Director RA-21 2026-04-26 PM: not pre-build). After AmEx (#1438) acceptance-test passes, B-code emits Triaga HTML of current one-shot deadlines that look recurring — Director surveys + ticks; B-code applies one-shot conversion batch. Q4 NOT a build-time blocker. |
 
 ## 5. Code Brief Standards
 
@@ -77,7 +77,8 @@ Schema migration on `deadlines` table:
 - [ ] Idempotency: respawn checks for existing child with same anchor before creating
 - [ ] Cap respawn rate at 1/day per parent (silent infinite loop guard); alert Director on cap hit
 - [ ] Dashboard UI: checkbox at deadline creation + "make recurring" action on existing rows
-- [ ] AmEx (#1438) explicitly converted to monthly recurrence as acceptance test
+- [ ] AmEx (#1438) explicitly converted to monthly recurrence with `recurrence_anchor_date = 2026-05-03` (3rd of next month per Director Q2 resolution) as acceptance test
+- [ ] **Post-acceptance:** Triaga HTML of remaining one-shot deadlines that look recurring (per Q4 deferred resolution) → Director surveys + ticks → batch conversion applied
 - [ ] Documentation: `deadline_manager` README section on recurrence behavior
 - [ ] Slack push on respawn failures via `deadline_recurrence_failures` table
 
@@ -122,10 +123,12 @@ Smoke acceptance:
 | Silent infinite loop (misconfigured anchor) | Cap respawn rate 1/day per parent; alert Director on cap hit |
 | Director dismisses recurring expecting full stop | Dismiss UX explicitly asks "this instance" vs "stop recurrence" |
 | Schema migration drift (migration-vs-bootstrap trap) | §5 #4 mandatory verification before merge |
-| AmEx anchor day wrong (10th assumed) | Dashboard override on `recurrence_anchor_date` |
+| AmEx anchor day wrong (3rd resolved 2026-04-26 PM by Director) | Dashboard override on `recurrence_anchor_date` if Director later corrects |
 
 ## 11. Authority chain
 
 - Director ratification: 2026-04-26 "C" (Cat 6 close) + default-fallback ("you default. I skip"). Originating note on deadline #1438: "has to be a cron job every month to avoid missing payment."
+- Director Q2 resolution 2026-04-26 PM (via RA-21): `anchor_date = 3rd of every month`.
+- Director Q4 deferral 2026-04-26 PM (via RA-21): "defer to acceptance-test phase, not pre-build."
 - RA-19 spec: `_ops/ideas/2026-04-26-amex-recurring-deadline-1.md`
-- AI Head Tier B: this brief + dispatch (deferred).
+- AI Head Tier B: this brief + dispatch (DISPATCH-READY, awaiting B1 or B3 to free).
