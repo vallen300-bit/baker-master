@@ -1,0 +1,11 @@
+version: 1
+people:
+  - slug: dup-one
+    status: active
+    description: "first"
+    aliases: []
+
+  - slug: dup-one
+    status: active
+    description: "second"
+    aliases: []

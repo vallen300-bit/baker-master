@@ -1,0 +1,18 @@
+version: 1
+updated_at: 2026-04-26
+
+people:
+  - slug: dimitry-vallen
+    status: active
+    description: "Director."
+    aliases: [director, dimitry]
+
+  - slug: andrey-oskolkov
+    status: active
+    description: "Principal."
+    aliases: [ao, oskolkov]
+
+  - slug: jane-doe
+    status: retired
+    description: "Historical."
+    aliases: []

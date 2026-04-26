@@ -94,20 +94,56 @@ def validate_frontmatter(fm: dict) -> None:
         raise KBLIngestError(f"voice (optional) must be one of {sorted(VALID_VOICES)}, got {voice!r}")
 
 
+def _registry_strict() -> bool:
+    """KBL_REGISTRY_STRICT env flag. Default off for backward compat."""
+    import os
+    return os.environ.get("KBL_REGISTRY_STRICT", "false").lower() in {"1", "true", "yes"}
+
+
 def validate_slug_in_registry(fm: dict) -> None:
     """For type=matter, slug must be canonical in slugs.yml.
 
-    For type=person/entity, format-only validation (registry loader not yet
-    shipped — see KBL_PEOPLE_ENTITY_LOADERS_1 follow-on).
+    For type=person/entity, registry check runs only when
+    KBL_REGISTRY_STRICT=true (KBL_PEOPLE_ENTITY_LOADERS_1). When the flag is
+    off, would-be-rejections emit a warn-log so telemetry can be observed
+    before flag-flip.
     """
-    if fm["type"] == "matter":
+    t = fm["type"]
+    slug = fm["slug"]
+
+    if t == "matter":
         from kbl.slug_registry import is_canonical
-        if not is_canonical(fm["slug"]):
+        if not is_canonical(slug):
             raise KBLIngestError(
-                f"matter slug {fm['slug']!r} not in slugs.yml registry"
+                f"matter slug {slug!r} not in slugs.yml registry"
             )
-    # type=person / entity: format already validated in validate_frontmatter.
-    # Registry check pending KBL_PEOPLE_ENTITY_LOADERS_1.
+        return
+
+    if t == "person":
+        from kbl import people_registry
+        if not people_registry.is_canonical(slug):
+            if _registry_strict():
+                raise KBLIngestError(
+                    f"person slug {slug!r} not in people.yml registry"
+                )
+            logger.warning(
+                "kbl.ingest: would-reject person slug %r (KBL_REGISTRY_STRICT=off)",
+                slug,
+            )
+        return
+
+    if t == "entity":
+        from kbl import entity_registry
+        if not entity_registry.is_canonical(slug):
+            if _registry_strict():
+                raise KBLIngestError(
+                    f"entity slug {slug!r} not in entities.yml registry"
+                )
+            logger.warning(
+                "kbl.ingest: would-reject entity slug %r (KBL_REGISTRY_STRICT=off)",
+                slug,
+            )
+        return
 
 
 def ingest(

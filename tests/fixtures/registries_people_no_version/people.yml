@@ -1,0 +1,5 @@
+people:
+  - slug: only-one
+    status: active
+    description: "no version field above"
+    aliases: []

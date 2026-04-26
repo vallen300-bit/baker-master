@@ -1,0 +1,11 @@
+version: 1
+entities:
+  - slug: dup-co
+    status: active
+    description: "first"
+    aliases: []
+
+  - slug: dup-co
+    status: active
+    description: "second"
+    aliases: []

@@ -1,0 +1,11 @@
+version: 1
+people:
+  - slug: alpha-person
+    status: active
+    description: "first"
+    aliases: [shared]
+
+  - slug: beta-person
+    status: active
+    description: "second"
+    aliases: [shared]
