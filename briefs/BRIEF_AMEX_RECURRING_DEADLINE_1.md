@@ -33,8 +33,16 @@ Schema migration on `deadlines` table:
 | `parent_deadline_id` | INT | NULL | FK to original deadline (chain traceability) |
 
 **Behavior:**
-- On `mark_completed` for deadline with `recurrence != null` → spawn new row with `due_date = compute_next_due(recurrence, recurrence_anchor_date)`, copy description/priority/slug, increment `recurrence_count`, link `parent_deadline_id`.
-- On `mark_dismissed` for recurring → ask Director "dismiss this instance only or stop recurrence?" (default: this instance only).
+- On `complete_deadline` for deadline with `recurrence != null` → spawn new row with `due_date = compute_next_due(recurrence, recurrence_anchor_date)`, copy description/priority/slug, increment `recurrence_count`, link `parent_deadline_id`.
+- On `dismiss_deadline` for recurring → ask Director "dismiss this instance only or stop recurrence?" (default: this instance only).
+- Auto-dismiss path (`_auto_dismiss_overdue_deadlines` line 672, `_auto_dismiss_soft_deadlines` line 706): MUST skip rows where `recurrence IS NOT NULL` AND `is_critical IS NOT TRUE` to avoid race between Director's manual completion and respawn (3-day overdue window). Add `AND recurrence IS NULL` clause to the WHERE filter.
+
+**Amendment H invocation-path audit (post-EXPLORE 2026-04-26 amendment):** the "deadline marked complete" surface has **3 entry points** (verified via grep):
+1. `orchestrator.deadline_manager.complete_deadline(search_text)` line 796 — Scan / WhatsApp `/done` path → routes through helper. **Recurrence respawn hooks here.**
+2. `triggers.clickup_trigger.py:535` raw `UPDATE deadlines SET status='completed'` — ClickUp mark-done sync path. **Add respawn call** after the UPDATE: route through `_maybe_respawn_recurring(deadline_id)` helper (new, see §3.x).
+3. `models.deadlines.py:387` raw `UPDATE deadlines SET is_critical=FALSE, status='completed'` — model-level helper. **Add respawn call** at same position.
+
+Without all 3 paths wired, ClickUp / model-level completions silently skip respawn. **Blocker per Amendment H — every door either calls `_maybe_respawn_recurring(...)` OR is explicitly marked "read-only surface (intentional)" with reason.**
 
 **Compute logic:**
 - monthly: `+1 month from anchor_date` via `dateutil.relativedelta` (handle Feb edge cases)
@@ -55,7 +63,8 @@ Schema migration on `deadlines` table:
 ## 5. Code Brief Standards
 
 1. **API version:** N/A — internal Baker schema work.
-2. **Deprecation check:** confirm `deadline_manager.extract_deadlines()` + `mark_completed()` + `mark_dismissed()` signatures stable at build start.
+2. **Deprecation check:** confirm `deadline_manager.extract_deadlines()` (line 52) + `complete_deadline()` (line 796) + `dismiss_deadline()` (line 774) + `confirm_deadline()` (line 816) signatures stable at build start. Plus 2 raw-SQL completion paths at `triggers/clickup_trigger.py:535` + `models/deadlines.py:387` (Amendment H).
+**2a. Dependency add:** `python-dateutil` MUST be added to `requirements.txt` — currently absent (verified `python3 -c "import dateutil"` → ModuleNotFoundError 2026-04-26). `croniter` deferred V2 per Q1.
 3. **Fallback note:** if recurrence respawn fails (DB error), log to `deadline_recurrence_failures` table; alert Director via Slack push.
 4. **DDL drift check (CRITICAL):** schema migration adds 4 columns to `deadlines`. **Grep `store_back.py` for any `_ensure_deadlines_base` or similar bootstrap.** Migration-vs-bootstrap drift trap (MEMORY.md feedback_migration_bootstrap_drift). Verify column types match between migration + any pre-existing bootstrap. **Block merge until verified.**
 5. **Ship gate:** literal `pytest` output. Edge cases mandatory:
@@ -67,13 +76,23 @@ Schema migration on `deadlines` table:
 7. **file:line citations:** verify every `deadline_manager.py:N` cite by opening file at line N. Brief-document line ≠ source line.
 8. **Singleton pattern:** if any singleton class touched (e.g., `SentinelStoreBack`), use `._get_global_instance()` factory.
 9. **Post-merge handoff:** schema migration applied via `python3 -m scripts.migrate` (or equivalent). If a backfill script runs against existing deadlines, handoff must include `git pull --rebase origin main` immediately before script invocation.
-10. **Invocation-path audit (Amendment H):** N/A — no Pattern-2 capability touched (deadline_manager is infra, not a `client_pm`/`domain`/`meta` capability).
+10. **Invocation-path audit (Amendment H) — RAISED via 2026-04-26 EXPLORE pass (replaces prior "N/A" annotation).** Deadline-completion surface has 3 entry points; respawn helper (`_maybe_respawn_recurring`) MUST be wired on all 3. Per-door audit:
+    - `complete_deadline()` line 796 — wired via direct call (writer-managed).
+    - `clickup_trigger.py:535` — wired via inline call after raw UPDATE.
+    - `models/deadlines.py:387` — wired via inline call after raw UPDATE.
+    - Auto-dismiss paths (`_auto_dismiss_overdue_deadlines` line 672 + `_auto_dismiss_soft_deadlines` line 706) — explicitly **read-only surface (intentional)**: recurring deadlines must not auto-dismiss; WHERE clause excludes via `AND recurrence IS NULL`. Reason: prevents 3-day-overdue race against Director's manual completion + child respawn cycle.
+    Divergence between callers = blocker per Amendment H; this amendment captures all 3 write-doors + 2 read-only doors.
 
 ## 6. Definition of done
 
 - [ ] Schema migration applied (4 new columns on `deadlines`); migration-vs-bootstrap verified
 - [ ] `compute_next_due()` helper in `deadline_manager.py` with unit tests covering edge cases above
-- [ ] `mark_completed` + `mark_dismissed` updated for recurrence respawn / stop logic
+- [ ] `complete_deadline` + `dismiss_deadline` updated for recurrence respawn / stop logic
+- [ ] `_maybe_respawn_recurring(deadline_id)` helper extracted in `orchestrator/deadline_manager.py` (idempotent: checks for existing child with same anchor before spawning)
+- [ ] `triggers/clickup_trigger.py:535` raw UPDATE wired with `_maybe_respawn_recurring()` call
+- [ ] `models/deadlines.py:387` raw UPDATE wired with `_maybe_respawn_recurring()` call
+- [ ] `_auto_dismiss_overdue_deadlines` + `_auto_dismiss_soft_deadlines` skip recurring rows (`AND recurrence IS NULL`)
+- [ ] `python-dateutil` added to `requirements.txt`
 - [ ] Idempotency: respawn checks for existing child with same anchor before creating
 - [ ] Cap respawn rate at 1/day per parent (silent infinite loop guard); alert Director on cap hit
 - [ ] Dashboard UI: checkbox at deadline creation + "make recurring" action on existing rows
@@ -95,7 +114,7 @@ Smoke acceptance:
 ```
 # 1. Apply migration
 # 2. Mark AmEx #1438 recurrence=monthly, anchor_date=2026-05-10
-# 3. Call mark_completed on a test recurring deadline
+# 3. Call complete_deadline (and separately the raw-UPDATE paths in clickup_trigger + models/deadlines) on a test recurring deadline; verify all 3 paths spawn child
 # 4. SELECT * FROM deadlines WHERE parent_deadline_id = <test_id>;
 # expect: new row, due_date = anchor + 1 month, recurrence_count = 1
 ```
@@ -131,4 +150,5 @@ Smoke acceptance:
 - Director Q2 resolution 2026-04-26 PM (via RA-21): `anchor_date = 3rd of every month`.
 - Director Q4 deferral 2026-04-26 PM (via RA-21): "defer to acceptance-test phase, not pre-build."
 - RA-19 spec: `_ops/ideas/2026-04-26-amex-recurring-deadline-1.md`
-- AI Head Tier B: this brief + dispatch (DISPATCH-READY, awaiting B1 or B3 to free).
+- AI Head B brief amendment 2026-04-26 PM (post-PR #66 merge `95d99f3`): EXPLORE pass surfaced 3 defects in initial draft (wrong integration point names `mark_completed`/`mark_dismissed` → actual `complete_deadline`/`dismiss_deadline`/`confirm_deadline`; missing `python-dateutil` dep; auto-dismiss race window). Amendments captured throughout brief. Brief now Rule-0 compliant retroactively.
+- AI Head Tier B: this brief + dispatch (DISPATCH-READY post-amendment, B3 takes next).
