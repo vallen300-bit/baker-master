@@ -1,48 +1,76 @@
-# CODE_3_PENDING — HOLD: PLAUD_SENTINEL_1 dispatched against shipped sentinel
+# CODE_3_PENDING — B3: BRANCH_HYGIENE_1 — 2026-04-26
 
-**Status:** 🛑 HOLD pending Director re-decision (2026-04-26)
-**Dispatch superseded:** the eb68dca dispatch is **stale** — do NOT proceed with the brief as written.
+**Dispatcher:** AI Head B (Build-reviewer)
+**Working dir:** `~/bm-b3`
+**Branch:** `branch-hygiene-1` (create from main)
+**Brief:** `briefs/BRIEF_BRANCH_HYGIENE_1.md`
+**Status:** OPEN — supersedes prior HOLD (PLAUD_SENTINEL_1 redundant per lesson #47)
+**Trigger class:** LOW (touches GitHub external API but no auth/DB-migration/secrets/financial) → AI Head solo merge
 
 ---
 
-## Why hold
+## §2 pre-dispatch busy-check
 
-B3's pre-build codebase audit caught a gap that AI Head A's §2 busy-check missed:
+- **Mailbox prior:** `HOLD — PLAUD_SENTINEL_1 redundant against shipped sentinel`. Worker free; mailbox cleared by this dispatch.
+- **Branch state:** main; `git checkout main && git pull` first. (Worker may have stale `plaud-sentinel-1` checkout — discard.)
+- **Other B-codes:** B1 → DEADLINE_EXTRACTOR_QUALITY_1 in flight (no overlap). B2 → WIKI_LINT_1 (no overlap). B5 → CHANDA rewrite (no overlap).
+- **Lesson #47 redundancy check:** branch-hygiene script — no shipped equivalent; spec confirms 75 stale branches.
 
-- **`triggers/plaud_trigger.py` (599 LOC) already shipped** at commit `2f5675c` (PLAUD-INGESTION-1).
-- Earlier brief archived at `briefs/archive/BRIEF_PLAUD_INGESTION_1.md`.
-- Endpoints already discovered: `/file/simple/web` + `/file/detail/{file_id}`.
-- Storage: writes to `meeting_transcripts` with `source="plaud"` (NOT a separate table).
-- Scheduler: `plaud_scan` job at 15 min, gated on `config.plaud.api_token` (`triggers/embedded_scheduler.py:111-122`).
-- Config: `PlaudConfig` already in `config/settings.py:139-141` with `PLAUD_TOKEN`, `PLAUD_API_DOMAIN`, `PLAUD_SCAN_INTERVAL`.
-- Backfill: `backfill_plaud()` with PG advisory lock 867532 already runs at scheduler startup.
-- Pipeline integration: PM signal detection, contact interactions, deadlines, commitments, meeting_pipeline async — already wired.
+**Dispatch authorisation:** Director default-fallback 2026-04-26 ("Your 3 question — you default. I skip") + Cat 7 close "C" ratification. Q2 default = **delete the 8-branch mobile UI cluster.**
 
-PLAUD_SENTINEL_1 brief Q3 ratification ("new plaud_notes table") was made without knowledge of the existing `meeting_transcripts` design.
+## Brief route (charter §6A)
 
-## What B3 should do (until Director re-decides)
+`/write-brief` 6 steps applied. Brief at `briefs/BRIEF_BRANCH_HYGIENE_1.md`. Q1/Q2/Q3 defaulted (see brief §4).
 
-1. **Do NOT create branch `plaud-sentinel-1`.**
-2. **Do NOT modify any plaud-related file.**
-3. Stay on main, idle.
-4. Optional: prepare option-3 delta brief mentally if Director chooses that path (it's the recommended option).
+## Action
 
-## Awaiting Director on three paths
+Read brief end-to-end. Implement `scripts/branch_hygiene.py` with L1+L2+L3 logic + audit log + APScheduler weekly job registration.
 
-| Option | Effort | Trade-off |
-|---|---|---|
-| 1. Refactor: split `meeting_transcripts source=plaud` into new `plaud_notes` table; deprecate `triggers/plaud_trigger.py`; rebuild | ~12–18h | redoes shipped work; data migration brittle |
-| 2. Layer: keep existing; add `baker-plaud` Qdrant collection + `plaud_search` Scan route on top | ~3–5h | violates Q3 ratification; vector-only differentiation |
-| 3. **Cancel + delta brief: close PLAUD_SENTINEL_1; write tight follow-up covering only the actual deltas Director wants on top of PLAUD_INGESTION_1** | depends on deltas | recommended by B3 + AI Head A; surfaces real Director intent |
+First-run priority: clear backlog of ~50 squash-merged branches via L1 + flag 21 L2 candidates + delete 8 mobile-UI cluster (Q2 default = delete: `feat/mobile-*`, `feat/ios-shortcuts-1`, `feat/document-browser-1`, `feat/networking-phase1`).
 
-AI Head A endorses **Option 3** — Director's Q3 ratification was made on incomplete info; redoing shipped work for an answer that may itself be wrong is the trap.
+Triaga HTML for L2 candidates → Director review pre-L3 batch delete.
 
-## Rollback log for AI Head A
+## Ship gate (literal output required)
 
-- Brief at `briefs/BRIEF_PLAUD_SENTINEL_1.md` retained for now (decision log; revisit after Director re-decision).
-- This mailbox supersedes eb68dca dispatch authority.
-- Lesson capture pending — see Director response on §2 busy-check upgrade (codebase grep + `briefs/archive/` scan should be mandatory steps).
+```
+pytest tests/test_branch_hygiene.py -v
+# ≥6 tests: L1 squash detection + L2 staleness flag + L3 delete (mocked) + whitelist (main + protected) + log row creation
+pytest tests/ 2>&1 | tail -3
+bash scripts/check_singletons.sh
+python3 scripts/branch_hygiene.py --dry-run
+# expect: ~50 L1 candidates / 21 L2 flagged / 0 actual deletions in dry-run
+git diff --name-only main...HEAD
+git diff --stat
+```
 
-## Cross-stream
+**No "by inspection"** (per `feedback_no_ship_by_inspection.md`).
 
-B3 idle. B2 still in flight on WIKI_LINT_1 (no impact). B1, B4 idle.
+## Ship-report shape
+
+- **Path:** `briefs/_reports/B3_branch_hygiene_1_20260426.md`
+- **Contents:** all literal outputs above + dry-run output + Triaga HTML link + APScheduler job registration evidence (`grep branch_hygiene_weekly triggers/embedded_scheduler.py`).
+- **PR title:** `BRANCH_HYGIENE_1: auto-prune stale branches L1/L2/L3 + audit log + weekly cron`
+- **Branch:** `branch-hygiene-1`
+
+## Mailbox hygiene (§3)
+
+After PR merged, overwrite this file:
+```
+COMPLETE — BRANCH_HYGIENE_1 merged as <commit-sha> on 2026-04-26 by AI Head B. §3 hygiene per b-code-dispatch-coordination.
+```
+
+## Timebox
+
+**~3–4h.** Includes script + tests + audit-log table + APScheduler job + Triaga HTML.
+
+## Out of scope (explicit)
+
+- NO local-clone branch cleanup (Director's local concern)
+- NO worktree cleanup (`Desktop/baker-code/00_WORKTREES.md` separate)
+- NO PR auto-close on stale branch (orthogonal)
+- NO physical deletion of 30–90d cluster beyond mobile UI without Director Triaga tick
+
+---
+
+**Dispatch timestamp:** 2026-04-26 ~07:00 UTC.
+**Authority chain:** Director default-fallback → RA-19 spec → AI Head B brief promotion + dispatch → B3 execution.
