@@ -209,6 +209,9 @@ class SentinelStoreBack:
         self._ensure_gold_audits_table()
         self._ensure_gold_write_failures_table()
 
+        # AMEX_RECURRING_DEADLINE_1: deadlines.recurrence + 3 sibling columns
+        self._ensure_deadlines_recurrence_columns()
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -614,6 +617,40 @@ class SentinelStoreBack:
             except Exception:
                 pass
             logger.warning(f"Could not ensure gold_write_failures table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_deadlines_recurrence_columns(self):
+        """AMEX_RECURRING_DEADLINE_1: extend deadlines table with recurrence columns.
+
+        Mirrors migrations/20260426_amex_recurrence.sql. Migration-vs-bootstrap
+        diff must be empty per Code Brief Standard #4.
+        """
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("ALTER TABLE deadlines ADD COLUMN IF NOT EXISTS recurrence TEXT")
+            cur.execute("ALTER TABLE deadlines ADD COLUMN IF NOT EXISTS recurrence_anchor_date DATE")
+            cur.execute("ALTER TABLE deadlines ADD COLUMN IF NOT EXISTS recurrence_count INT NOT NULL DEFAULT 0")
+            cur.execute("ALTER TABLE deadlines ADD COLUMN IF NOT EXISTS parent_deadline_id INT")
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_deadlines_recurrence "
+                "ON deadlines(recurrence) WHERE recurrence IS NOT NULL"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_deadlines_parent "
+                "ON deadlines(parent_deadline_id) WHERE parent_deadline_id IS NOT NULL"
+            )
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure deadlines recurrence columns: {e}")
         finally:
             self._put_conn(conn)
 

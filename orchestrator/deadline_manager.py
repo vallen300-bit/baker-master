@@ -14,7 +14,7 @@ Components:
 """
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 
@@ -25,6 +25,9 @@ logger = logging.getLogger("baker.deadline_manager")
 DIRECTOR_EMAIL = "dvallen@brisengroup.com"
 DIRECTOR_WHATSAPP = "41799605092@c.us"
 DIRECTOR_SPEAKER_LABELS = {"dimitry", "dimitry vallen", "director"}
+
+# AMEX_RECURRING_DEADLINE_1: recurrence types accepted on the deadlines.recurrence column.
+RECURRENCE_VALUES = {"monthly", "weekly", "quarterly", "annual"}
 
 
 # ---------------------------------------------------------------------------
@@ -689,6 +692,7 @@ def _auto_dismiss_overdue_deadlines() -> int:
             WHERE status = 'active'
               AND due_date < %s
               AND (is_critical IS NOT TRUE)
+              AND recurrence IS NULL
         """, (cutoff,))
         dismissed = cur.rowcount
         conn.commit()
@@ -719,6 +723,7 @@ def _auto_dismiss_soft_deadlines() -> int:
             WHERE status = 'pending_confirm'
               AND created_at < %s
               AND (is_critical IS NOT TRUE)
+              AND recurrence IS NULL
         """, (cutoff,))
         dismissed = cur.rowcount
         conn.commit()
@@ -771,26 +776,87 @@ def _auto_dismiss_undated_soft() -> int:
 # Management actions (called from action_handler.py)
 # ---------------------------------------------------------------------------
 
-def dismiss_deadline(search_text: str) -> str:
+def dismiss_deadline(search_text: str, scope: str = "instance") -> str:
     """
     Dismiss a deadline matching the search text.
-    Returns a confirmation message for the Director.
+
+    AMEX_RECURRING_DEADLINE_1: For recurring deadlines, scope distinguishes
+    "this instance only" (default) from "stop the entire recurrence chain".
+
+    Args:
+        search_text: free-text search.
+        scope: 'instance' (default — dismiss this row, recurrence keeps respawning),
+               'recurrence' (dismiss this row AND null out recurrence to halt the chain).
+
+    Returns confirmation message; if recurring + scope unset, asks Director to choose.
     """
     deadline = _find_deadline_by_text(search_text)
     if not deadline:
         return f"I couldn't find an active deadline matching \"{search_text}\". Try being more specific."
 
     from models.deadlines import update_deadline
+    is_recurring = bool(deadline.get("recurrence"))
+    due_str = deadline["due_date"].strftime("%B %-d") if deadline.get("due_date") else "TBD"
+
+    if is_recurring and scope == "recurrence":
+        # Halt recurrence on the chain root + this row.
+        root_id = deadline.get("parent_deadline_id") or deadline["id"]
+        _halt_recurrence_chain(root_id)
+        update_deadline(
+            deadline["id"],
+            status="dismissed",
+            dismissed_reason="Director dismissed (stop recurrence)",
+        )
+        return (
+            f"\u2705 Recurrence stopped + deadline dismissed: "
+            f"\"{deadline['description']}\" (was due {due_str})"
+        )
+
     update_deadline(
         deadline["id"],
         status="dismissed",
         dismissed_reason="Director dismissed",
     )
-    due_str = deadline["due_date"].strftime("%B %-d") if deadline.get("due_date") else "TBD"
+    if is_recurring:
+        return (
+            f"\u2705 Deadline dismissed: \"{deadline['description']}\" "
+            f"(was due {due_str}). Recurrence kept active — next instance will respawn. "
+            f"Reply with `dismiss \"{search_text}\" stop` to halt the entire recurrence."
+        )
     return (
         f"\u2705 Deadline dismissed: \"{deadline['description']}\" "
         f"(was due {due_str})"
     )
+
+
+def _halt_recurrence_chain(root_id: int) -> bool:
+    """AMEX_RECURRING_DEADLINE_1: null recurrence on root + active children."""
+    from models.deadlines import get_conn, put_conn
+    conn = get_conn()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """UPDATE deadlines
+               SET recurrence = NULL, updated_at = NOW()
+               WHERE (id = %s OR parent_deadline_id = %s)
+                 AND recurrence IS NOT NULL""",
+            (root_id, root_id),
+        )
+        conn.commit()
+        cur.close()
+        logger.info(f"recurrence chain halted on root #{root_id}")
+        return True
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"_halt_recurrence_chain failed for #{root_id}: {e}")
+        return False
+    finally:
+        put_conn(conn)
 
 
 def complete_deadline(search_text: str) -> str:
@@ -808,6 +874,8 @@ def complete_deadline(search_text: str) -> str:
         status="completed",
         dismissed_reason="Director confirmed completion",
     )
+    # AMEX_RECURRING_DEADLINE_1: spawn next instance if recurring (Amendment H path 1/3).
+    _maybe_respawn_recurring(deadline["id"])
     return (
         f"\u2705 Deadline completed: \"{deadline['description']}\""
     )
@@ -897,3 +965,184 @@ def _find_deadline_by_text(search_text: str) -> Optional[dict]:
             best = dl
 
     return best if best_score >= 1 else None
+
+
+# ---------------------------------------------------------------------------
+# AMEX_RECURRING_DEADLINE_1: recurrence helpers
+# ---------------------------------------------------------------------------
+
+def compute_next_due(recurrence: str, anchor: date) -> date:
+    """Return the next due date for a recurring deadline.
+
+    monthly  → +1 month   (relativedelta clamps Jan 31 → Feb 28/29 → Mar 31)
+    weekly   → +7 days
+    quarterly→ +3 months
+    annual   → +1 year    (Feb 29 of leap year → Feb 28 next year via relativedelta)
+
+    Raises ValueError on unknown recurrence string.
+    """
+    from dateutil.relativedelta import relativedelta
+
+    if recurrence not in RECURRENCE_VALUES:
+        raise ValueError(
+            f"compute_next_due: unknown recurrence {recurrence!r} "
+            f"(allowed: {sorted(RECURRENCE_VALUES)})"
+        )
+    if isinstance(anchor, datetime):
+        anchor = anchor.date()
+    if recurrence == "weekly":
+        return anchor + timedelta(days=7)
+    if recurrence == "monthly":
+        return anchor + relativedelta(months=+1)
+    if recurrence == "quarterly":
+        return anchor + relativedelta(months=+3)
+    if recurrence == "annual":
+        return anchor + relativedelta(years=+1)
+    raise ValueError(recurrence)  # unreachable
+
+
+def _maybe_respawn_recurring(
+    deadline_id: int,
+    *,
+    conn=None,
+) -> Optional[int]:
+    """Spawn next instance of a recurring deadline. Idempotent + capped.
+
+    Behaviour:
+      - If the row's `recurrence` is NULL → no-op, return None.
+      - Compute next anchor via `compute_next_due()`.
+      - Idempotency: if a child with same root + same anchor already exists, return its id.
+      - Cap-rate: if any child of this root was created in the last 24h, log a
+        warning, push a Slack DM to Director, and return None (silent loop guard).
+      - Otherwise INSERT new row copying description/priority/source_type, link
+        parent_deadline_id to the chain root, increment recurrence_count, return new id.
+
+    Args:
+        deadline_id: the deadline that was just completed.
+        conn: optional psycopg2 connection (for tests).
+
+    Returns:
+        New child deadline id, OR existing child id (idempotent), OR None.
+    """
+    from models.deadlines import get_conn, put_conn
+
+    own_conn = conn is None
+    if own_conn:
+        conn = get_conn()
+        if conn is None:
+            return None
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """SELECT id, description, priority, source_type, source_snippet,
+                      recurrence, recurrence_anchor_date, recurrence_count,
+                      parent_deadline_id, severity, matter_slug
+               FROM deadlines WHERE id = %s""",
+            (deadline_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            cur.close()
+            return None
+        (parent_id, description, priority, source_type, source_snippet,
+         recurrence, anchor, count, parent_deadline_id, severity, matter_slug) = row
+
+        if not recurrence:
+            cur.close()
+            return None
+        if recurrence not in RECURRENCE_VALUES:
+            logger.warning(
+                f"_maybe_respawn_recurring: deadline #{parent_id} has unknown "
+                f"recurrence {recurrence!r} — skipping"
+            )
+            cur.close()
+            return None
+        if anchor is None:
+            logger.warning(
+                f"_maybe_respawn_recurring: deadline #{parent_id} has "
+                f"recurrence={recurrence!r} but no recurrence_anchor_date — skipping"
+            )
+            cur.close()
+            return None
+
+        root_id = parent_deadline_id or parent_id
+        next_anchor = compute_next_due(recurrence, anchor)
+
+        # Idempotency: child with same root + same anchor already exists.
+        cur.execute(
+            """SELECT id FROM deadlines
+               WHERE parent_deadline_id = %s
+                 AND recurrence_anchor_date = %s
+               LIMIT 1""",
+            (root_id, next_anchor),
+        )
+        existing = cur.fetchone()
+        if existing:
+            cur.close()
+            return existing[0]
+
+        # Cap-rate: any child of this root in last 24h → silent-loop guard.
+        cur.execute(
+            """SELECT COUNT(*) FROM deadlines
+               WHERE parent_deadline_id = %s
+                 AND created_at > NOW() - INTERVAL '1 day'""",
+            (root_id,),
+        )
+        recent = cur.fetchone()[0]
+        if recent > 0:
+            cur.close()
+            _alert_respawn_cap_hit(parent_id, root_id, recurrence)
+            return None
+
+        next_due = datetime.combine(next_anchor, datetime.min.time(), tzinfo=timezone.utc)
+        cur.execute(
+            """INSERT INTO deadlines
+                 (description, due_date, source_type, source_id, source_snippet,
+                  confidence, priority, status, severity, matter_slug,
+                  recurrence, recurrence_anchor_date, recurrence_count, parent_deadline_id)
+               VALUES (%s, %s, %s, %s, %s, 'hard', %s, 'active', %s, %s,
+                       %s, %s, %s, %s)
+               RETURNING id""",
+            (
+                description, next_due, source_type or "recurrence",
+                f"recurrence_parent:{root_id}",
+                (source_snippet or "")[:4000],
+                priority or "normal",
+                severity or "firm",
+                matter_slug,
+                recurrence, next_anchor, (count or 0) + 1, root_id,
+            ),
+        )
+        new_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        logger.info(
+            f"recurrence respawn: deadline #{parent_id} ({recurrence}) → #{new_id} "
+            f"due {next_anchor} (root #{root_id}, count {(count or 0) + 1})"
+        )
+        return new_id
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"_maybe_respawn_recurring failed for #{deadline_id}: {e}")
+        return None
+    finally:
+        if own_conn:
+            put_conn(conn)
+
+
+def _alert_respawn_cap_hit(deadline_id: int, root_id: int, recurrence: str) -> None:
+    """Cap-rate alert: silent-infinite-loop guard fired. Push to Director Slack DM."""
+    msg = (
+        f":rotating_light: Deadline recurrence cap hit on root #{root_id} "
+        f"(triggered by completion of #{deadline_id}, recurrence={recurrence}). "
+        f"Respawn skipped — investigate misconfigured anchor."
+    )
+    logger.warning(f"recurrence cap-rate hit: deadline #{deadline_id} root #{root_id}")
+    try:
+        from triggers.ai_head_audit import _safe_post_dm
+        _safe_post_dm(msg)
+    except Exception as e:
+        logger.warning(f"recurrence cap-rate alert: Slack DM failed (non-fatal): {e}")
