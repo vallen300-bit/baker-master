@@ -57,6 +57,7 @@ def extract_deadlines(
     sender_email: str = "",
     sender_whatsapp: str = "",
     source_agent: str = "",
+    subject: str = "",
 ) -> int:
     """
     Extract deadlines from ingested content using Claude Haiku.
@@ -67,6 +68,32 @@ def extract_deadlines(
     """
     if not content or len(content.strip()) < 20:
         return 0
+
+    # DEADLINE_EXTRACTOR_QUALITY_1 — for source_type='email', gate the LLM
+    # call behind a deterministic L1 (sender) + L2 (keyword) noise filter.
+    # Drops are recorded in deadline_extractor_suppressions for tuning.
+    _filter_action = "allow"
+    try:
+        if source_type == "email":
+            from orchestrator.deadline_extractor_filter import classify, log_suppression
+            _f_result = classify(sender_email or "", subject or "", content)
+            if _f_result.action != "allow":
+                log_suppression(
+                    sender_email=sender_email or "",
+                    subject=subject or "",
+                    result=_f_result,
+                    source_id=source_id,
+                    source_type=source_type,
+                )
+                logger.info(
+                    f"deadline_extractor_filter [{_f_result.layer}/{_f_result.action}] "
+                    f"sender={sender_email!r} reason={_f_result.reason[:120]}"
+                )
+                if _f_result.action == "drop":
+                    return 0
+                _filter_action = _f_result.action  # 'downgrade'
+    except Exception as _fe:
+        logger.warning(f"deadline_extractor_filter: classify-error (non-fatal): {_fe}")
 
     try:
         from orchestrator.gemini_client import call_flash
@@ -144,6 +171,12 @@ def extract_deadlines(
             sender_whatsapp=sender_whatsapp,
             source_type=source_type,
         )
+
+        # DEADLINE_EXTRACTOR_QUALITY_1 — L2 mid-score → force priority='low'
+        # so Director sees it once but it doesn't enter the cadence engine
+        # at normal/high tier.
+        if _filter_action == "downgrade" and priority not in ("critical", "high"):
+            priority = "low"
 
         snippet = content
 
