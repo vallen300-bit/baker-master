@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Branch Hygiene — Triaga (L2 Review)</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 960px; margin: 2em auto; padding: 0 1em; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: .4em .6em; border-bottom: 1px solid #ddd; text-align: left; vertical-align: top; }
+    th { background: #f5f5f5; }
+    code { font-family: ui-monospace, Menlo, monospace; font-size: .92em; }
+    .meta { color: #666; font-size: .9em; }
+  </style>
+</head>
+<body>
+  <h1>Branch Hygiene — L2 Review</h1>
+  <p class="meta">Generated 2026-04-26T15:07:15.339150+00:00. Tick branches to delete; save the ticked names into a file (one per line) and feed back via <code>scripts/branch_hygiene.py --l3 &lt;file&gt;</code>.</p>
+  <form>
+    <table>
+      <thead>
+        <tr><th>Delete</th><th>Branch</th><th>Age (d)</th><th>SHA</th><th>Reason</th></tr>
+      </thead>
+      <tbody>
+    <tr>
+      <td><input type="checkbox" name="delete" value="feat/pipeline-dedup-hardening-1"></td>
+      <td><code>feat/pipeline-dedup-hardening-1</code></td>
+      <td>38</td>
+      <td><code>13c51349</code></td>
+      <td>stale 38d, ahead_by=1</td>
+    </tr>
+      </tbody>
+    </table>
+  </form>
+</body>
+</html>
