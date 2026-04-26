@@ -48,8 +48,8 @@ One Python module + one bash dispatcher (folding existing GOLD hook + new drift 
 | `.githooks/kbl_schema_drift.sh` | `baker-vault/.githooks/kbl_schema_drift.sh` | Bash wrapper invoking the Python module. Hard-fails commit on any error-tier violation. |
 | `.githooks/commit_msg_dispatcher.sh` | `baker-vault/.githooks/commit_msg_dispatcher.sh` | New small dispatcher. Replaces current `commit-msg → gold_drift_check.sh` symlink. Calls each sub-check in sequence; any failure aborts. |
 | `.githooks/author_director_guard.sh` | `baker-vault/.githooks/author_director_guard.sh` | **Migrated** from `15_Baker_Master/01_build/invariant_checks/author_director_guard.sh`. Re-targeted to commit-msg stage. Logic preserved (Director-signed: marker check on `author: director` md edits). |
-| `orchestrator/kbl_drift_audit_job.py` | `15_Baker_Master/01_build/orchestrator/kbl_drift_audit_job.py` | APScheduler weekly job (Mon 09:15 UTC, between AI Head 09:00 audit and Gold 09:30 audit). Runs full drift scan, writes `kbl_drift_audits` row, Slack-DM AI Head on warn-tier. |
-| Migration | `15_Baker_Master/01_build/migrations/00NN_kbl_drift_audits.sql` | New tables: `kbl_drift_audits` + `kbl_drift_hook_failures`. |
+| `orchestrator/kbl_drift_audit_job.py` | `15_Baker_Master/01_build/orchestrator/kbl_drift_audit_job.py` | APScheduler weekly job body, function `_kbl_drift_audit_sentinel_job()`. Mirrors `orchestrator/gold_audit_job.py::_gold_audit_sentinel_job` shape. Mon 09:15 UTC, between AI Head 09:00 audit and Gold 09:30 audit. Runs full drift scan, writes `kbl_drift_audits` row, Slack-DM AI Head on warn-tier via `triggers.ai_head_audit._safe_post_dm`. |
+| Migration | `15_Baker_Master/01_build/migrations/20260427_kbl_drift_audits.sql` | New tables: `kbl_drift_audits` + `kbl_drift_hook_failures`. (Date-prefixed format per `migrations/` convention, e.g. `20260426_gold_audits.sql`.) |
 
 ### 7 checks (severity-tiered, per spec §2)
 
@@ -77,12 +77,12 @@ Emergency Director write: `--no-verify` bypass available, logged to `kbl_drift_a
 
 ## Files to modify
 
-- **Create:** `kbl/schema_drift_detector.py` (pure-Python checker, 7 checks)
+- **Create:** `kbl/schema_drift_detector.py` (pure-Python checker, 7 checks; export `audit_all(vault_root: Path) -> list[Violation]` mirroring `kbl/gold_drift_detector.py:99`)
 - **Create:** `tests/test_schema_drift_detector.py` (8 tests: 1 valid + 7 synthetic-bad)
-- **Create:** `orchestrator/kbl_drift_audit_job.py` (APScheduler weekly job)
-- **Create:** `migrations/00NN_kbl_drift_audits.sql` (two new tables)
-- **Modify:** `orchestrator/scheduler.py` (register `kbl_drift_audit_sentinel`)
-- **Modify:** `tests/test_scheduler.py` (assert new job registered)
+- **Create:** `orchestrator/kbl_drift_audit_job.py` (APScheduler weekly job body; function `_kbl_drift_audit_sentinel_job()`)
+- **Create:** `migrations/20260427_kbl_drift_audits.sql` (two new tables; date-prefixed per `migrations/` convention)
+- **Modify:** `triggers/embedded_scheduler.py` (register `kbl_drift_audit_sentinel` mirroring gold_audit block at lines ~735–747; gate behind `KBL_DRIFT_AUDIT_ENABLED` env flag, default `true`; CronTrigger `day_of_week="mon", hour=9, minute=15, timezone="UTC"`)
+- **Create:** `tests/test_kbl_drift_audit.py` (pattern: `tests/test_audit_sentinel.py` — assert job registered, exercises `_kbl_drift_audit_sentinel_job` against fixture vault)
 - **Vault — create:** `baker-vault/.githooks/kbl_schema_drift.sh` (bash wrapper invoking Python module)
 - **Vault — create:** `baker-vault/.githooks/commit_msg_dispatcher.sh` (sequence: author_director_guard → gold_drift_check → kbl_schema_drift; any non-zero aborts)
 - **Vault — migrate:** `baker-vault/.githooks/author_director_guard.sh` (copy from `15_Baker_Master/01_build/invariant_checks/`; preserve logic; verify it works at commit-msg stage)
@@ -119,7 +119,7 @@ Emergency Director write: `--no-verify` bypass available, logged to `kbl_drift_a
 ## Verification criteria
 
 1. `pytest tests/test_schema_drift_detector.py -v` — 8 tests pass (1 valid baseline + 7 synthetic-bad, one per check).
-2. `pytest tests/test_scheduler.py -v -k drift` — new `kbl_drift_audit_sentinel` job registered, fires Mon 09:15 UTC.
+2. `pytest tests/test_kbl_drift_audit.py -v` — new `kbl_drift_audit_sentinel` job registered (pattern: `tests/test_audit_sentinel.py`), fires Mon 09:15 UTC, gated by `KBL_DRIFT_AUDIT_ENABLED` env flag (default `true`).
 3. `python -c "import py_compile; py_compile.compile('kbl/schema_drift_detector.py', doraise=True); py_compile.compile('orchestrator/kbl_drift_audit_job.py', doraise=True)"` exits 0.
 4. **Hook smoke tests** (run from a sandbox vault clone, NOT main vault):
    - `git commit -m 'test: noop'` on a commit touching no protected paths → dispatcher exits 0 fast.
@@ -154,6 +154,14 @@ Emergency Director write: `--no-verify` bypass available, logged to `kbl_drift_a
 ## /write-brief 6-step compliance
 
 1. **EXPLORE** — done. `kbl/people_registry.py` + `kbl/slug_registry.py` import shapes verified (PR #62 `5ae6545`). `gold_drift_check.sh` reviewed at `baker-vault/.githooks/gold_drift_check.sh` for hook architecture pattern. `author_director_guard.sh` located at `15_Baker_Master/01_build/invariant_checks/author_director_guard.sh` (NOT in vault — flag-worthy). `core.hooksPath = .githooks` confirmed in vault. `memory/store_back.py` grepped for `_ensure_kbl_drift_*` — zero hits (clean for migration). Lesson #47 redundancy sweep on `git log --grep`, `briefs/archive/`, and codebase grep — zero shipped feature under names `schema_drift|drift_detector|kbl_drift|drift_audit`. New territory.
+
+   **EXPLORE addendum (Step 4 REVIEW gap-fill, 2026-04-27):**
+   - **Migration filename format** verified — `migrations/` uses date-prefix `YYYYMMDD_*.sql` (latest example `20260426_gold_audits.sql`), NOT `00NN_*` numbering. Brief corrected.
+   - **Scheduler file path** verified — APScheduler jobs register in `triggers/embedded_scheduler.py` (NOT `orchestrator/scheduler.py` which doesn't exist). Gold pattern at lines ~735–747; brief mirrors that block.
+   - **`audit_all()` signature** verified — `kbl/gold_drift_detector.py:99` declares `def audit_all(vault_root: Path) -> list[DriftIssue]`. New module follows same shape with `Violation` return type.
+   - **Test pattern** verified — no `tests/test_scheduler.py` exists; precedent files are `tests/test_audit_sentinel.py` + `tests/test_ai_head_weekly_audit.py`. Brief redirected to `tests/test_kbl_drift_audit.py`.
+   - **Table existence** verified via Baker MCP `information_schema.tables` query — zero hits for `kbl_drift_audits` / `kbl_drift_hook_failures`. Clean to create.
+   - **Env-gate pattern** added — `KBL_DRIFT_AUDIT_ENABLED` (default `true`) mirrors `GOLD_AUDIT_ENABLED` for kill-switch parity.
 2. **PLAN** — embedded in this brief (Architecture, Files-to-modify, Files-NOT-to-touch, Verification, Risks). Q1–Q4 from spec §4 ratified by Director per spec §10.
 3. **WRITE** — this file.
 4. **TRACK** — mailbox `briefs/_tasks/CODE_<N>_PENDING.md` written at dispatch time. **Dispatch gated on PR #67 merge** per RA-22 + Director.
