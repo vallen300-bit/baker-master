@@ -922,6 +922,7 @@ def _process_email_threads(new_threads: list):
         trigger = pipeline.classify_trigger(trigger)
 
         # DEADLINE-SYSTEM-1: Extract deadlines from email content
+        # DEADLINE_EXTRACTOR_QUALITY_1: subject threaded for L2 keyword scorer.
         try:
             from orchestrator.deadline_manager import extract_deadlines
             extract_deadlines(
@@ -931,6 +932,7 @@ def _process_email_threads(new_threads: list):
                 sender_name=metadata.get("primary_sender", ""),
                 sender_email=metadata.get("primary_sender_email", ""),
                 source_agent="email_pipeline",
+                subject=metadata.get("subject", ""),
             )
         except Exception as _e:
             logger.debug(f"Deadline extraction failed for email {message_id}: {_e}")
