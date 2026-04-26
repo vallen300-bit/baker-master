@@ -3,9 +3,9 @@
 **Type:** Sentinel integration (out-of-milestone Tier B; parallel to M1/M2 work)
 **Source spec:** `baker-vault/_ops/ideas/2026-04-26-plaud-sentinel-integration.md` (RA-drafted, 2026-04-26)
 **Director authorization:** *"ok, pls give a task to AI Head to integrate Plaud now"* (Director, late afternoon Sunday 2026-04-26)
-**Estimated time:** ~6–10h (1–2 sessions per RA estimate)
-**Complexity:** Medium (API integration + new table + scheduler + Qdrant collection — all established patterns)
-**Prerequisites:** `BAKER_PLAUD_API_TOKEN` provisioned in 1Password (Director gate; B-code must NOT start until confirmed).
+**Estimated time:** ~8–12h (1–2 sessions; +endpoint reverse-engineering overhead — see §Token findings)
+**Complexity:** Medium-High (API integration + new table + scheduler + Qdrant collection + **undocumented API endpoint discovery**)
+**Prerequisites:** ✅ Token provisioned. `op://Baker API Keys/Plaud API Token/credential` (verified by AI Head A 2026-04-26 — auth header accepted by `https://api-euc1.plaud.ai`).
 
 ---
 
@@ -19,11 +19,30 @@ Sister artifact `baker-vault/_ops/shadow-org/sentinels.md` lists Plaud as #9, st
 
 ## Director-resolved §4 questions (defaults adopted)
 
-| Q | Default | Director ratification |
-|---|---|---|
-| Q1 Product/tier | Pro tier with API access | **Adopted** (per dispatch message: "Pro tier with API access"). If only personal tier provisioned, brief downgrades to "manual export pipeline" — surface as blocker, do NOT silently scope down. |
-| Q2 Capture scope | Ingest ALL recordings | **Adopted** ("ingest ALL recordings"). Filter at retrieval if Director wants narrower scope later. |
-| Q3 Storage destination | New `plaud_notes` table | **Adopted** ("new plaud_notes table"). Different signal class from meetings; clean schema; per-source retention. |
+| Q | Resolution |
+|---|---|
+| Q1 Product/tier | **Reframed.** Plaud has no formal "API tier"; the token in 1Password is a **web JWT scraped from `web.plaud.ai` localStorage** (per 1Password notes: *"Regenerate from web.plaud.ai → DevTools → localStorage → tokenstr"*). Treat as informal/internal API. Endpoint discovery is part of build (see §Token findings). |
+| Q2 Capture scope | **Ingest ALL recordings.** Filter at retrieval if Director wants narrower scope later. |
+| Q3 Storage destination | **New `plaud_notes` table.** Different signal class from meetings; clean schema; per-source retention. |
+
+## Token findings (AI Head A probe, 2026-04-26)
+
+**Provisioned:** ✅ `op://Baker API Keys/Plaud API Token/credential`
+**Endpoint base:** `https://api-euc1.plaud.ai` (EU Central 1, Frankfurt region)
+**Token type:** Bearer JWT, expires ~Apr 2027 (per 1Password notes — `expires` field populated)
+**Env var name:** `PLAUD_TOKEN` (per 1Password notes — used by Baker on Render)
+**Auth verified:** Bearer header accepted (404 on unknown paths, NOT 401 — auth layer passing).
+**Endpoint discovery:** ❌ NO PUBLIC API DOCS. AI Head A probed 18 common paths (`/api/v1/files`, `/v1/files`, `/recordings`, `/api/v1/note/list`, `/api/v1/audios`, `/api/v1/dashboard`, `/api/v1/user`, etc.) — all 404. **Real endpoints must be discovered by reverse-engineering `web.plaud.ai` DevTools network traffic.**
+
+**Implication for Code:**
+- Step 1 of build: open `web.plaud.ai` (Director's browser session) → DevTools Network tab → filter XHR/fetch → capture actual endpoint paths used by the recordings list, transcript fetch, summary fetch.
+- Document captured endpoints + request/response shape in `briefs/_reports/B3_plaud_sentinel_1_<YYYYMMDD>.md` Appendix A.
+- If endpoint reverse-engineering blocks for >30 min, surface to AI Head A — Director can paste sample DevTools captures.
+
+**Brittleness ack:** This is NOT a stable public API. Endpoints may change without notice. Mitigations:
+- Wrap all Plaud calls in try/except with explicit endpoint version logging.
+- Per-endpoint failure metric in `baker_actions` (separate from rate-limit metric).
+- Slack alert on >3 consecutive endpoint failures (likely shape drift, not transient).
 
 ---
 
@@ -59,7 +78,7 @@ Build sentinel #9 mirroring Todoist + Fireflies pattern:
 ### Control plane
 - **Polling:** APScheduler job `plaud_poll`, every 30 min (mirror `todoist_poll` cadence).
 - **Watermark:** `plaud_poll` row in `trigger_watermarks` (`last_poll_at`, `last_seen_id`).
-- **Auth:** `BAKER_PLAUD_API_TOKEN` fetched at runtime via `op` CLI per `reference_1password_secrets` memory. **Token MUST be provisioned in 1Password before B-code dispatch** (Director gate).
+- **Auth:** Bearer token at `op://Baker API Keys/Plaud API Token/credential` fetched at runtime via `op` CLI per `reference_1password_secrets` memory. **Render env var: `PLAUD_TOKEN`** (per 1Password entry notes — match this name on Render, not `BAKER_PLAUD_API_TOKEN`).
 - **Backoff:** exponential on 429/5xx; mirror Todoist pattern. Log to `email_429_backoff`-style watermark.
 
 ### Retrieval plane
