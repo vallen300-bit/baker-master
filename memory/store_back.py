@@ -127,6 +127,9 @@ class SentinelStoreBack:
         self._ensure_director_preferences_table()
         self._ensure_vip_profile_columns()
 
+        # BRANCH_HYGIENE_1: audit log for stale-branch deletions
+        self._ensure_branch_hygiene_log_table()
+
         # AGENT-FRAMEWORK-1: Ensure capability framework tables
         self._ensure_capability_sets_table()
         self._ensure_capability_runs_table()
@@ -839,6 +842,54 @@ class SentinelStoreBack:
     # -------------------------------------------------------
     # Todoist table initialization
     # -------------------------------------------------------
+
+    def _ensure_branch_hygiene_log_table(self):
+        """Create branch_hygiene_log table if it doesn't exist.
+
+        Mirrors migrations/20260426_branch_hygiene_log.sql column-for-column.
+        Used by scripts/branch_hygiene.py for L1/L2/L3 audit trail.
+        """
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — cannot ensure branch_hygiene_log")
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS branch_hygiene_log (
+                    id              BIGSERIAL PRIMARY KEY,
+                    branch_name     TEXT        NOT NULL,
+                    last_commit_sha TEXT        NOT NULL,
+                    deleted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    layer           TEXT        NOT NULL,
+                    reason          TEXT        NOT NULL DEFAULT '',
+                    age_days        INT         NOT NULL DEFAULT 0,
+                    actor           TEXT        NOT NULL DEFAULT 'branch_hygiene'
+                )
+            """)
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_branch_hygiene_log_deleted_at "
+                "ON branch_hygiene_log (deleted_at DESC)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_branch_hygiene_log_layer "
+                "ON branch_hygiene_log (layer)"
+            )
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_branch_hygiene_log_branch_name "
+                "ON branch_hygiene_log (branch_name)"
+            )
+            conn.commit()
+            cur.close()
+            logger.info("branch_hygiene_log table verified")
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure branch_hygiene_log table: {e}")
+        finally:
+            self._put_conn(conn)
 
     def _ensure_todoist_tables(self):
         """Create todoist_tasks table if it doesn't exist."""
