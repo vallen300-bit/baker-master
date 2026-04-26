@@ -1,0 +1,8 @@
+version: 1
+updated_at: 2026-04-26
+
+people:
+  - slug: dimitry-vallen
+    status: active
+    description: "Director."
+    aliases: []

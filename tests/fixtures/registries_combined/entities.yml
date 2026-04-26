@@ -1,0 +1,8 @@
+version: 1
+updated_at: 2026-04-26
+
+entities:
+  - slug: aelio-holding-ltd
+    status: active
+    description: "Cyprus."
+    aliases: []

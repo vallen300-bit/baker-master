@@ -1,0 +1,5 @@
+entities:
+  - slug: only-co
+    status: active
+    description: "no version field"
+    aliases: []
