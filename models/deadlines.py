@@ -389,6 +389,12 @@ def complete_critical(deadline_id: int) -> bool:
         )
         conn.commit()
         cur.close()
+        # AMEX_RECURRING_DEADLINE_1: spawn next instance if recurring (Amendment H path 3/3).
+        try:
+            from orchestrator.deadline_manager import _maybe_respawn_recurring
+            _maybe_respawn_recurring(deadline_id)
+        except Exception as _re:
+            logger.warning(f"complete_critical recurrence respawn failed (non-fatal): {_re}")
         return True
     except Exception as e:
         conn.rollback()

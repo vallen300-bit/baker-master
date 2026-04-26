@@ -534,6 +534,12 @@ def _sync_clickup_deadline(task_id, task_name, due_date, list_name, space_name, 
             if is_done and current_status == 'active':
                 cur.execute("UPDATE deadlines SET status = 'completed', updated_at = NOW() WHERE id = %s", (deadline_id,))
                 logger.info(f"ClickUp deadline completed: {task_name}")
+                # AMEX_RECURRING_DEADLINE_1: spawn next instance if recurring (Amendment H path 2/3).
+                try:
+                    from orchestrator.deadline_manager import _maybe_respawn_recurring
+                    _maybe_respawn_recurring(deadline_id, conn=conn)
+                except Exception as _re:
+                    logger.warning(f"ClickUp recurrence respawn failed (non-fatal): {_re}")
             elif not is_done:
                 cur.execute("UPDATE deadlines SET due_date = %s, updated_at = NOW() WHERE id = %s AND due_date != %s",
                            (due_date, deadline_id, due_date))
