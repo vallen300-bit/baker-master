@@ -768,6 +768,27 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info("Skipped: ai_head_audit_sentinel (AI_HEAD_AUDIT_SENTINEL_ENABLED=false)")
 
+    # WIKI_LINT_1: Karpathy-style weekly wiki health check.
+    # 7 checks (4 deterministic, 1 hybrid filesystem+Postgres, 2 LLM-assisted
+    # via Gemini 2.5 Pro). Mon 05:00 UTC per spec. Default OFF — first ship
+    # is dormant until Director flips ``WIKI_LINT_ENABLED=true`` after a
+    # clean dry-run. When BAKER_VAULT_PATH is unset on the host, the runner
+    # logs + skips (does not crash the scheduler — mirrors the
+    # ``_ai_head_weekly_audit_job`` pattern).
+    _wiki_lint_enabled = _os.environ.get("WIKI_LINT_ENABLED", "false").lower()
+    if _wiki_lint_enabled in ("true", "1", "yes", "on"):
+        scheduler.add_job(
+            _wiki_lint_weekly_job,
+            CronTrigger(day_of_week="mon", hour=5, minute=0, timezone="UTC"),
+            id="wiki_lint_weekly",
+            name="Wiki lint weekly (Monday 05:00 UTC)",
+            coalesce=True, max_instances=1, replace_existing=True,
+            misfire_grace_time=3600,
+        )
+        logger.info("Registered: wiki_lint_weekly (Mon 05:00 UTC)")
+    else:
+        logger.info("Skipped: wiki_lint_weekly (WIKI_LINT_ENABLED=false)")
+
     # SOT_OBSIDIAN_1_PHASE_D: pull the baker-vault mirror so Cowork's
     # MCP vault-read tools stay fresh. Default 300 s, floor 60 s
     # enforced inside ``vault_mirror.sync_interval_seconds``.
@@ -922,6 +943,26 @@ def _ai_head_audit_sentinel_job():
         logger.info("ai_head_audit_sentinel: %s", result)
     except Exception as e:
         logger.warning("ai_head_audit_sentinel: run raised: %s", e)
+
+
+def _wiki_lint_weekly_job():
+    """APScheduler wrapper: Monday 05:00 UTC weekly wiki lint.
+
+    WIKI_LINT_1. Lazy-imports the runner; swallows top-level exceptions
+    so a single bad week doesn't knock out the scheduler. The runner
+    itself is non-fatal per check and gracefully no-ops when
+    ``BAKER_VAULT_PATH`` is unset.
+    """
+    try:
+        from kbl.wiki_lint import run as run_wiki_lint
+    except Exception as e:
+        logger.error("wiki_lint_weekly: import failed: %s", e)
+        return
+    try:
+        result = run_wiki_lint()
+        logger.info("wiki_lint_weekly: %s", result)
+    except Exception as e:
+        logger.warning("wiki_lint_weekly: run raised: %s", e)
 
 
 def _vault_sync_tick_job():
