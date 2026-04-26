@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>MO Vienna AI Atelier — Concept Brief v2</title>
+<style>
+:root {
+  --primary: #1B3A5C;
+  --accent: #2C5F8A;
+  --danger: #C0392B;
+  --success: #27AE60;
+  --warning: #E67E22;
+  --bg: #F7F8FA;
+  --card: #FFFFFF;
+  --text: #333333;
+  --meta: #666666;
+  --border: #E0E4E8;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: Arial, Helvetica, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.55;
+}
+
+.sidebar {
+  position: fixed;
+  top: 0; left: 0;
+  width: 260px;
+  height: 100vh;
+  background: var(--primary);
+  color: #fff;
+  padding: 24px 18px;
+  overflow-y: auto;
+}
+
+.sidebar-header h1 {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  margin-bottom: 8px;
+}
+.sidebar-header .subtitle {
+  font-size: 11px;
+  font-weight: 400;
+  color: rgba(255,255,255,0.70);
+  line-height: 1.45;
+  margin-bottom: 12px;
+}
+.conf-badge {
+  display: inline-block;
+  background: var(--danger);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-radius: 2px;
+  margin-bottom: 18px;
+}
+
+.sidebar-meta {
+  font-size: 11px;
+  color: rgba(255,255,255,0.60);
+  line-height: 1.6;
+  padding-bottom: 18px;
+  border-bottom: 1px solid rgba(255,255,255,0.15);
+  margin-bottom: 18px;
+}
+
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav-group {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: rgba(255,255,255,0.45);
+  padding: 14px 8px 6px;
+}
+.nav a {
+  display: block;
+  font-size: 12px;
+  color: rgba(255,255,255,0.80);
+  text-decoration: none;
+  padding: 7px 8px;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.nav a:hover { color: #fff; border-left-color: rgba(255,255,255,0.4); }
+.nav a.active { color: #fff; border-left-color: #fff; background: rgba(255,255,255,0.06); }
+.nav-num {
+  display: inline-block;
+  width: 20px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.60);
+}
+
+.attribution {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255,255,255,0.15);
+  font-size: 10px;
+  color: rgba(255,255,255,0.50);
+  line-height: 1.5;
+}
+
+.main {
+  margin-left: 260px;
+  padding: 40px;
+  max-width: 1220px;
+}
+.section { display: none; max-width: 960px; }
+.section.active { display: block; }
+
+h2 {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--primary);
+  border-bottom: 2px solid var(--primary);
+  padding-bottom: 10px;
+  margin-bottom: 20px;
+}
+h3 { font-size: 16px; font-weight: 700; color: var(--primary); margin: 24px 0 10px; }
+h4 { font-size: 14px; font-weight: 700; color: var(--accent); margin: 18px 0 8px; }
+
+p { margin-bottom: 12px; }
+ul, ol { margin: 8px 0 14px 24px; }
+li { margin-bottom: 6px; }
+
+.topic-ref {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--accent);
+  margin-bottom: 6px;
+}
+.source-line {
+  color: var(--meta);
+  font-size: 12px;
+  margin-bottom: 18px;
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(27,58,92,0.04);
+}
+.card-accent { border-left: 4px solid var(--accent); }
+.card-danger { border-left: 4px solid var(--danger); }
+.card-success { border-left: 4px solid var(--success); }
+.card-warning { border-left: 4px solid var(--warning); }
+
+.card-header {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--primary);
+  margin-bottom: 10px;
+}
+
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.badge-danger { background: #fbe9e7; color: var(--danger); }
+.badge-warning { background: #fef0e3; color: var(--warning); }
+.badge-success { background: #e8f5ec; color: var(--success); }
+.badge-info { background: #e3edf5; color: var(--accent); }
+.badge-neutral { background: #ececec; color: #666; }
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0 18px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+th {
+  background: var(--primary);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 10px 12px;
+  text-align: left;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+td {
+  font-size: 13px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: #f0f4f8; }
+
+.risk-box {
+  background: #fbe9e7;
+  border-left: 4px solid var(--danger);
+  padding: 14px 18px;
+  margin: 12px 0;
+  border-radius: 0 4px 4px 0;
+}
+.risk-box-label { font-weight: 700; color: var(--danger); display: block; margin-bottom: 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+.opp-box {
+  background: #e8f5ec;
+  border-left: 4px solid var(--success);
+  padding: 14px 18px;
+  margin: 12px 0;
+  border-radius: 0 4px 4px 0;
+}
+.opp-box-label { font-weight: 700; color: var(--success); display: block; margin-bottom: 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+.ask-box {
+  background: #fef0e3;
+  border: 2px solid var(--warning);
+  padding: 16px 20px;
+  margin: 12px 0;
+  border-radius: 4px;
+}
+.ask-label {
+  display: block;
+  font-weight: 700;
+  color: var(--warning);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 6px;
+}
+
+.red-line {
+  background: #fbe9e7;
+  border-left: 4px solid var(--danger);
+  padding: 12px 16px;
+  margin: 10px 0;
+  font-size: 13px;
+}
+.red-line strong { color: var(--danger); }
+
+blockquote {
+  background: #f0f4f8;
+  border-left: 4px solid var(--accent);
+  padding: 14px 20px;
+  margin: 14px 0;
+  font-style: italic;
+  color: #444;
+  font-size: 14px;
+  border-radius: 0 4px 4px 0;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin: 18px 0 24px;
+}
+.stat-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 18px 14px;
+  text-align: center;
+}
+.stat-num {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--primary);
+  line-height: 1.1;
+}
+.stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--meta);
+  margin-top: 6px;
+}
+
+.key-msg { background: var(--card); border: 1px solid var(--border); border-radius: 6px; padding: 16px 18px; margin-bottom: 12px; }
+.key-msg-num { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--accent); font-weight: 700; margin-bottom: 6px; }
+
+.timeline { position: relative; padding-left: 24px; margin: 18px 0; }
+.timeline::before { content: ''; position: absolute; top: 0; bottom: 0; left: 6px; width: 2px; background: var(--accent); }
+.timeline-item { position: relative; padding-bottom: 18px; }
+.timeline-item::before { content: ''; position: absolute; left: -24px; top: 4px; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 3px solid var(--bg); }
+.timeline-item.critical::before { background: var(--danger); }
+.timeline-item.success::before { background: var(--success); }
+.timeline-date { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--accent); font-weight: 700; margin-bottom: 3px; }
+.timeline-text { font-size: 14px; color: var(--text); }
+.timeline-note { font-size: 12px; font-style: italic; color: var(--meta); margin-top: 3px; }
+
+@media print {
+  .sidebar { display: none; }
+  .main { margin-left: 0; padding: 24px; }
+  .section { display: block !important; page-break-inside: avoid; margin-bottom: 36px; }
+  .section h2 { page-break-after: avoid; }
+}
+@media (max-width: 768px) {
+  .sidebar { width: 200px; min-width: 200px; }
+  .main { margin-left: 200px; padding: 20px; }
+  .summary-grid { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<nav class="sidebar">
+  <div class="sidebar-header">
+    <h1>BRISEN GROUP</h1>
+    <div class="subtitle">MO Vienna AI Atelier<br>Concept Brief v2</div>
+    <div class="conf-badge">STRICTLY CONFIDENTIAL</div>
+  </div>
+  <div class="sidebar-meta">
+    26 April 2026<br>
+    Version 2.0 — Internal Draft<br>
+    Author: Dimitry Vallen<br>
+    First reader: Edita Vallen
+  </div>
+  <div class="nav">
+    <div class="nav-group">Frame</div>
+    <a onclick="show('bottom-line')" class="active"><span class="nav-num">1.</span> Bottom Line</a>
+    <a onclick="show('reframe')"><span class="nav-num">2.</span> The Reframe</a>
+    <a onclick="show('concept')"><span class="nav-num">3.</span> The Concept</a>
+    <a onclick="show('why-now')"><span class="nav-num">4.</span> Why Now</a>
+
+    <div class="nav-group">Build</div>
+    <a onclick="show('makers')"><span class="nav-num">5.</span> The Five Makers</a>
+    <a onclick="show('ai-role')"><span class="nav-num">6.</span> The AI Role</a>
+    <a onclick="show('passport')"><span class="nav-num">7.</span> The Heirloom Passport</a>
+    <a onclick="show('tiers')"><span class="nav-num">8.</span> Three Tiers</a>
+    <a onclick="show('funnel')"><span class="nav-num">9.</span> The MO Bar Funnel</a>
+
+    <div class="nav-group">Decide</div>
+    <a onclick="show('risks')"><span class="nav-num">10.</span> Risks &amp; Mitigations</a>
+    <a onclick="show('path')"><span class="nav-num">11.</span> 90-Day Path</a>
+    <a onclick="show('asks')"><span class="nav-num">12.</span> Asks of Edita</a>
+  </div>
+  <div class="attribution">
+    Prepared by: Brisen Group<br>
+    Strategic Intelligence Unit<br>
+    Internal — not for external circulation
+  </div>
+</nav>
+
+<main class="main">
+
+<!-- 1. BOTTOM LINE -->
+<section class="section active" id="bottom-line">
+  <div class="topic-ref">Frame · Section 1</div>
+  <h2>Bottom Line</h2>
+  <p class="source-line">Replaces v1 memo of 26 April 2026 (AI Residence Showroom). Three subagent analyses ratified; external sources confirm.</p>
+
+  <div class="card card-accent">
+    <div class="card-header">In one paragraph</div>
+    <p>Convert the empty 160 sqm ground-floor shop adjacent to the Mandarin Oriental Vienna entrance into <strong>AUFTRAG</strong> — a Wiener Werkstätte AI Atelier reviving the Hoffmann-Loos-Klimt-era commission tradition. Visitors commission bespoke pieces from five surviving Viennese heritage makers (Lobmeyr, Augarten, Mühlbauer, Knize, Backhausen). The AI is invisible — it draws live through a pen plotter, never speaks, never has a face. The human master craftsperson is the front-stage protagonist. Every commission carries an embedded NFC-backed digital passport. Three concentric tiers of access (walk-in / atelier hours / private MO suite) feed three different funnels into the MO bar.</p>
+  </div>
+
+  <div class="summary-grid">
+    <div class="stat-card">
+      <div class="stat-num">160</div>
+      <div class="stat-label">sqm Ground Floor</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num">5</div>
+      <div class="stat-label">Heritage Makers</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num">€600K</div>
+      <div class="stat-label">Year-1 Capex</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-num">18 mo</div>
+      <div class="stat-label">Press Window</div>
+    </div>
+  </div>
+
+  <h3>Section map</h3>
+  <table>
+    <thead>
+      <tr><th>#</th><th>Topic</th><th>What it answers</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>2</td><td>The Reframe</td><td>What changed since v1, and why the residence-showroom premise is dead</td></tr>
+      <tr><td>3</td><td>The Concept</td><td>AUFTRAG in plain language — what visitors do, what they take home</td></tr>
+      <tr><td>4</td><td>Why Now</td><td>Press-window timing, white-space confirmation, Cognizant first-mover argument</td></tr>
+      <tr><td>5</td><td>The Five Makers</td><td>Lobmeyr, Augarten, Mühlbauer, Knize, Backhausen — partnership feasibility</td></tr>
+      <tr><td>6</td><td>The AI Role</td><td>Backstage-only doctrine: no voice, no face, no name. The pen-plotter rule</td></tr>
+      <tr><td>7</td><td>The Heirloom Passport</td><td>NFC-backed digital lineage page — every commission becomes a perpetual story-asset</td></tr>
+      <tr><td>8</td><td>Three Tiers</td><td>Walk-in / atelier hours / private MO suite — concentric intimacy</td></tr>
+      <tr><td>9</td><td>The MO Bar Funnel</td><td>Mechanics, conversion estimates, residence-conversation byproduct</td></tr>
+      <tr><td>10</td><td>Risks &amp; Mitigations</td><td>MOHG, regulatory, partnership, novelty decay — honest assessment</td></tr>
+      <tr><td>11</td><td>90-Day Path</td><td>Family alignment → Anna Egger temperature check → feasibility study</td></tr>
+      <tr><td>12</td><td>Asks of Edita</td><td>What I need from you to move forward</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Priority heat map</h3>
+  <table>
+    <thead>
+      <tr><th>Decision item</th><th>Status</th><th>Risk</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Family alignment with concept direction</td><td><span class="badge badge-warning">PENDING</span></td><td><span class="badge badge-info">LOW</span></td></tr>
+      <tr><td>Lobmeyr + Augarten anchor partnership signed by end June 2026</td><td><span class="badge badge-warning">NOT STARTED</span></td><td><span class="badge badge-danger">CRITICAL</span></td></tr>
+      <tr><td>MOHG (Anna Egger) informal temperature check</td><td><span class="badge badge-warning">NOT STARTED</span></td><td><span class="badge badge-danger">CRITICAL</span></td></tr>
+      <tr><td>Buchwalder review on EU AI Act disclosure regime</td><td><span class="badge badge-warning">NOT STARTED</span></td><td><span class="badge badge-warning">MEDIUM</span></td></tr>
+      <tr><td>Press embargo commitments (FT, Monocle, AD)</td><td><span class="badge badge-neutral">DOWNSTREAM</span></td><td><span class="badge badge-warning">MEDIUM</span></td></tr>
+      <tr><td>Building/permit feasibility for 160 sqm conversion</td><td><span class="badge badge-neutral">DOWNSTREAM</span></td><td><span class="badge badge-info">LOW</span></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- 2. REFRAME -->
+<section class="section" id="reframe">
+  <div class="topic-ref">Frame · Section 2</div>
+  <h2>The Reframe</h2>
+  <p class="source-line">What changed between v1 (this morning) and v2 (now), and why.</p>
+
+  <h3>What v1 proposed</h3>
+  <p>Use the empty shop as the world's first AI-run <strong>luxury residence showroom</strong> for the MO Residences Vienna, fronted by an AI agent named "Mira" or "Aria" qualifying buyers and walking them through floorplans on an interactive wall. Press hook: a Vienna analogue to Andon Market in San Francisco.</p>
+
+  <h3>Why v1 was wrong</h3>
+  <ol>
+    <li><strong>The Vienna UHNW residence buyer pool is too small to justify a dedicated retail surface.</strong> A handful of qualified buyers per year cannot anchor a 160 sqm shop economics. The shop would be empty 95% of the time.</li>
+    <li><strong>AI is not a credible closer at €5–15M ticket.</strong> UHNW residence buyers do not buy from a screen. They buy from Anna Egger over a private dinner, or from a private broker. An AI showroom risks <em>cheapening</em> the very residences it is supposed to sell.</li>
+    <li><strong>The Andon Market precedent is a trap, not a tailwind.</strong> Andon is a Cow Hollow corner store selling granola, candles, and store-branded sweatshirts. NBC's headline: <em>"AI runs this store. It's lied, surveilled workers and tried to hire someone in Afghanistan."</em> That is the opposite of the press tone Mandarin Oriental will tolerate in its building.</li>
+  </ol>
+
+  <h3>What v2 proposes instead</h3>
+  <div class="card card-success">
+    <div class="card-header">The reframed brief — three jobs in priority order</div>
+    <ol>
+      <li><strong>Job 1:</strong> The shop is a <strong>destination footfall driver into the MO Vienna bar</strong>. Every visitor — buyer or not — leaves having had a reason to walk into the hotel.</li>
+      <li><strong>Job 2:</strong> The shop generates <strong>tier-1 press</strong> as among the first AI-led retail concepts in European heritage luxury. It claims a category that is currently empty.</li>
+      <li><strong>Job 3:</strong> The shop <strong>sells real product</strong> at viable margins (€150–€3,000 ticket band).</li>
+    </ol>
+    <p style="margin-top:12px;"><strong>Residence sales are not a job of this shop.</strong> They become a downstream byproduct of the Tier-3 private suite consultations (Section 7), not the purpose.</p>
+  </div>
+</section>
+
+<!-- 3. CONCEPT -->
+<section class="section" id="concept">
+  <div class="topic-ref">Frame · Section 3</div>
+  <h2>The Concept — AUFTRAG</h2>
+  <p class="source-line">Working name: AUFTRAG (German for "the commission"). Backup: MAKER 1010.</p>
+
+  <h3>One paragraph</h3>
+  <p>Vienna invented the modern commission economy. Between 1903 and 1932, the Wiener Werkstätte under Josef Hoffmann, Adolf Loos, Koloman Moser, and Gustav Klimt operated a model where clients commissioned bespoke objects directly from masters. AUFTRAG revives that model with an AI as the designer-on-call. The visitor describes an occasion, a memory, or a person. The AI proposes designs — Hoffmann grids, Klimt florals, modernist restraint à la Loos — drawn live in ink by a pen plotter at the centre of the room. The visitor refines. The order is routed to the appropriate maker — Lobmeyr for crystal, Augarten for porcelain, Mühlbauer for hats, Knize for accessories, Backhausen for textiles. Some pieces are engraved live on-site. Others are produced by the maker's atelier in two to six weeks and shipped. Every piece carries an embedded NFC chip linked to a private digital lineage page.</p>
+
+  <h3>What the visitor takes home</h3>
+  <ul>
+    <li>A one-of-one heritage object made by a Viennese master (the physical commission)</li>
+    <li>The original ink design proposal drawn by the plotter, signed and dated (the artefact of the conversation)</li>
+    <li>A digital passport linked to the piece: design lineage, maker's signature, firing/blowing/cutting timeline, personal note from the master</li>
+    <li>A complimentary visit to the MO Vienna bar (the host gift)</li>
+  </ul>
+
+  <h3>What the visitor does <em>not</em> get</h3>
+  <ul>
+    <li>An AI that talks to them in a chirpy voice</li>
+    <li>A glowing screen the size of a wall</li>
+    <li>An "AI assistant" with a name like Mira or Aria</li>
+    <li>The feeling of being in a tech showroom</li>
+  </ul>
+
+  <blockquote>
+    "While Silicon Valley puts AI at the till, Vienna puts AI in the workshop."
+    <br><span style="font-size:11px;font-style:normal;color:var(--meta);">— Working press line, to be tested with PRCO</span>
+  </blockquote>
+</section>
+
+<!-- 4. WHY NOW -->
+<section class="section" id="why-now">
+  <div class="topic-ref">Frame · Section 4</div>
+  <h2>Why Now</h2>
+  <p class="source-line">Three timing arguments — press, white-space, first-mover — converge on a 12-18 month window.</p>
+
+  <h3>1. The press window closes by late 2027</h3>
+  <p>The "AI in physical luxury retail" story is currently uncrowded but will not stay that way. Cognizant's 2026 luxury retail outlook explicitly warns that the first-mover gap, once opened, will become too wide to close. Anthropic, Google, and Microsoft have all announced retail-AI tooling in Q1 2026. By late 2027 the novelty value of any AI-fronted retail concept will be heavily diluted. Our window is 12–18 months from now.</p>
+
+  <h3>2. AI x physical luxury is genuinely empty white space</h3>
+  <p>External research confirms: every named luxury-AI deployment to date is a clienteling tool, an e-commerce assistant, or a back-office system. Examples: LVMH + Google Cloud (advisor empowerment), Swarovski Digital Flagship (online), Ralph Lauren AI Stylist (online), Burberry AI clienteling (back-end). <strong>No major luxury house has put an AI agent at the centre of a physical store experience.</strong> Andon Market in San Francisco is the only physical AI-run shop in the world — and it sells granola.</p>
+
+  <h3>3. AI-perfume is already saturated. Heritage craft is not.</h3>
+  <p>An earlier candidate concept — bespoke AI perfume — was killed during research. The slot is full:</p>
+  <ul>
+    <li>Jo Malone Scent Advisor (December 2025)</li>
+    <li>Margiela Scentsorium (April 2026)</li>
+    <li>Generation by Osmo (2025)</li>
+    <li>Estée Lauder Paris Fragrance Atelier (2025)</li>
+  </ul>
+  <p>By contrast, no AI x Wiener Werkstätte concept exists anywhere. The five Vienna heritage makers are family-controlled, taking commissions today, and unencumbered by exclusivity deals. <strong>This is the only AI luxury concept Vienna can defensibly own.</strong></p>
+
+  <div class="opp-box">
+    <span class="opp-box-label">Opportunity</span>
+    The window to claim "AI x European heritage craft" as a press category is open and uncontested. It will not be open in 18 months.
+  </div>
+</section>
+
+<!-- 5. FIVE MAKERS -->
+<section class="section" id="makers">
+  <div class="topic-ref">Build · Section 5</div>
+  <h2>The Five Makers</h2>
+  <p class="source-line">All five are real, family-controlled, take bespoke commissions today, and trace lineage to the Wiener Werkstätte (1903–1932).</p>
+
+  <table>
+    <thead>
+      <tr><th>Maker</th><th>Founded</th><th>Discipline</th><th>Status today</th><th>First contact</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>J. &amp; L. Lobmeyr</strong></td><td>1823</td><td>Crystal &amp; lighting</td><td>6th-gen Rath family. Hoffmann B-series glassware still in production. Anchor partner — non-negotiable.</td><td>Andreas Rath / Leonid Rath</td></tr>
+      <tr><td><strong>Augarten</strong></td><td>1718 (Imperial)</td><td>Porcelain</td><td>Hoffmann "Melonenservice" still produced. Operates flagship at Stock-im-Eisen-Platz. Anchor partner.</td><td>Mag. Erwin Stoiber (CEO)</td></tr>
+      <tr><td><strong>Mühlbauer</strong></td><td>1903</td><td>Hats &amp; headwear</td><td>4th-gen Mühlbauer family. Brad Pitt, Madonna, Yoko Ono among clients. Bespoke is core business.</td><td>Klaus Mühlbauer</td></tr>
+      <tr><td><strong>Knize</strong></td><td>1858</td><td>Tailoring &amp; accessories</td><td>Adolf Loos-designed Graben shop (1913) — Vienna's most architecturally significant retail space. Niedersüß family.</td><td>Rudolf Niedersüß</td></tr>
+      <tr><td><strong>Backhausen</strong></td><td>1849</td><td>Textiles &amp; weaving</td><td>Wiener Werkstätte archive (Hoffmann patterns) under the Kiesling-era license. Status to be re-confirmed via Firmenbuch.</td><td>Pending verification</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Partnership shape</h3>
+  <p>Each maker contributes a signature piece-set to AUFTRAG (e.g. Lobmeyr engraved drinking glasses; Augarten coffee service; Mühlbauer hats; Knize ties and pocket squares; Backhausen cushions). Each maintains full IP. AUFTRAG receives:</p>
+  <ul>
+    <li>Right of first call on bespoke commissions originated through the shop</li>
+    <li>Multi-year first-look exclusivity for AI-mediated commissions in Vienna</li>
+    <li>Wholesale or commission-share terms (to be negotiated maker by maker)</li>
+  </ul>
+  <p>Each maker remains the visible signatory of every commission. The piece is signed by the master, never by Brisen, never by the AI.</p>
+
+  <div class="risk-box">
+    <span class="risk-box-label">Critical dependency</span>
+    Without Lobmeyr <strong>and</strong> Augarten signed as anchors by end of June 2026, AUFTRAG collapses to a curated multi-brand boutique with an iPad. These two conviction-test meetings are the precondition for any further capex commitment.
+  </div>
+</section>
+
+<!-- 6. AI ROLE -->
+<section class="section" id="ai-role">
+  <div class="topic-ref">Build · Section 6</div>
+  <h2>The AI Role — Backstage Doctrine</h2>
+  <p class="source-line">The single design rule that separates AUFTRAG from every gimmick AI shop already attempted.</p>
+
+  <h3>The doctrine in one line</h3>
+  <div class="card card-accent">
+    <div class="card-header">Front-stage humans. Backstage AI. No exceptions.</div>
+    <p>Cognizant's 2026 research is unambiguous: in luxury, AI succeeds when it empowers the human host invisibly, and fails when it replaces them visibly. We hold this as a hard rule. The AI never has a voice. The AI never has a face. The AI never has a name. The AI is never quoted in press, never named in marketing, never anthropomorphised.</p>
+  </div>
+
+  <h3>How the AI shows up physically</h3>
+  <p>The AI's only outputs are <strong>physical</strong>. There are no screens larger than a tablet anywhere visible in the customer-facing space.</p>
+  <ul>
+    <li><strong>The pen plotter.</strong> A precision ink plotter sits on a heavy oak table at the centre of the room. As the customer describes what they want, the plotter draws design proposals live in ink on rag paper. The AI generates the path; the plotter executes it. The drawings are signed, dated, and given to the customer at the end of the session — whether or not they commission a piece.</li>
+    <li><strong>The engraver.</strong> A computer-controlled engraver sits at the Lobmeyr station. The AI generates the path. The engraver executes it on the customer's chosen blank. The customer watches.</li>
+    <li><strong>The kiln-bound order.</strong> For Augarten, Mühlbauer, Backhausen, Knize: the AI generates a production specification, signed off by the customer and the on-rotation master, and transmitted to the maker's atelier for production.</li>
+  </ul>
+
+  <h3>Front-stage: the human master on rotation</h3>
+  <p>Each weekday, one of the five makers contributes a senior craftsperson to AUFTRAG for the day. They are the visible host. They authenticate, they advise, they sign each commission. Indicative rotation:</p>
+  <ul>
+    <li>Monday — Lobmeyr</li>
+    <li>Tuesday — Augarten</li>
+    <li>Wednesday — Mühlbauer</li>
+    <li>Thursday — Knize</li>
+    <li>Friday/Saturday — Backhausen, alternating</li>
+  </ul>
+  <p>This is not theatre. The masters are running their own commission books inside our space. We are providing them new clients.</p>
+
+  <div class="red-line">
+    <strong>RED LINE.</strong> The AI is never given a name in any external-facing material. No "Mira," no "Aria," no "Sofia." No press release attributes any quote to "the AI." Press refers to AUFTRAG as <em>the atelier</em>, never <em>her</em> or <em>it</em>.
+  </div>
+</section>
+
+<!-- 7. PASSPORT -->
+<section class="section" id="passport">
+  <div class="topic-ref">Build · Section 7</div>
+  <h2>The Heirloom Passport</h2>
+  <p class="source-line">Every commission ships with an embedded NFC chip linked to a private digital lineage page. The third evolution.</p>
+
+  <h3>The premise in one paragraph</h3>
+  <p>Cognizant's 2026 luxury retail outlook flagged scannable digital product passports (NFC / QR / RFID) as a structural pattern for high-end goods this decade — driven by EU Digital Product Passport regulation, the resale-authentication market, and the brand-storytelling opportunity at scale. AUFTRAG applies it natively. Every piece commissioned through the atelier carries a discreet NFC chip embedded in the base, the hatband, the seam, or the foot of the object. A tap of an iPhone opens a private digital page that lives forever. The chip is invisible. The story is unlimited.</p>
+
+  <h3>What the passport contains</h3>
+  <div class="card card-accent">
+    <div class="card-header">Three layers of provenance, one per page section</div>
+    <ol>
+      <li><strong>Origin</strong> — the design conversation summary, the AI's design rationale, the lineage motif (which Hoffmann grid, which Klimt floral, which Loos restraint principle), the original ink plotter drawing.</li>
+      <li><strong>Provenance</strong> — the maker's signature, the master craftsperson's name, atelier metadata, photographs from the firing/blowing/cutting/sewing process, dated and timestamped.</li>
+      <li><strong>Personal</strong> — a handwritten note from the master, a dedication if the piece is gifted, an unlock-code mechanism so the giver controls when the page opens to the recipient.</li>
+    </ol>
+  </div>
+
+  <h3>Why this is more than a feature</h3>
+  <ul>
+    <li><strong>It is a press hook on its own.</strong> "The AI heirloom that knows its own story." A photograph of a hand tapping a phone against a Lobmeyr glass and watching its lineage unfold is shareable in a way no other AI-luxury concept has produced. This is the social-media moment.</li>
+    <li><strong>It is authentication infrastructure.</strong> The NFC chip is signed cryptographically. Every passport is verifiable. This becomes the foundation for an eventual Tier-4 offering: AUFTRAG-authenticated resale of pieces commissioned through the atelier. Cognizant flags the global luxury resale market at $360B by 2030.</li>
+    <li><strong>It is a perpetual brand asset.</strong> The piece passes through generations. Each new owner taps the chip. The maker's signature, the AUFTRAG provenance, the MO Vienna address — all live forever on the object. We are not selling a product; we are creating an heirloom that documents itself.</li>
+    <li><strong>It is the channel for re-engagement.</strong> The passport URL is the canonical relationship surface — anniversary reminders, refresh-piece prompts, new-collection invitations. No email database is needed; the object itself is the contact point.</li>
+  </ul>
+
+  <h3>Operational shape</h3>
+  <table>
+    <thead>
+      <tr><th>Element</th><th>Specification</th><th>Cost / risk</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>NFC chip</td><td>Encrypted NTAG 424 DNA, ~€2-4 unit cost</td><td>Negligible incremental cost</td></tr>
+      <tr><td>Digital page hosting</td><td>Static page per piece, hosted on AUFTRAG infrastructure (Render or Cloudflare Pages)</td><td>Trivial — €100s/month at scale</td></tr>
+      <tr><td>Cryptographic signing</td><td>Each chip signed with AUFTRAG master key; verifies authenticity on resale</td><td>One-time setup, ~€20K</td></tr>
+      <tr><td>Maker integration</td><td>Each maker accepts a chip placement spec for their object class (base of glass, hatband lining, etc.)</td><td>Negotiation effort — to be tested in conviction meetings</td></tr>
+      <tr><td>Customer privacy</td><td>Page is unlisted by default; owner controls visibility; option to "open the page to a giftee"</td><td>GDPR-compliant by design</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:12px;color:var(--meta);">Total incremental capex versus base concept: ~€30-40K for the chip-signing infrastructure plus ~€2-4 per unit thereafter. Indicative.</p>
+
+  <div class="opp-box">
+    <span class="opp-box-label">Strategic note</span>
+    The passport is the single feature that compounds across all three jobs of the shop. It strengthens the press story (Job 2), becomes the Tier-1 walk-in's social-share moment (Job 1 → MO bar funnel), and lifts the perceived value of every commission well above its raw materials cost (Job 3). It is the highest-leverage €30K in the concept.
+  </div>
+</section>
+
+<!-- 8. TIERS -->
+<section class="section" id="tiers">
+  <div class="topic-ref">Build · Section 8</div>
+  <h2>Three Tiers — Concentric Intimacy</h2>
+  <p class="source-line">One physical space. Three concentric layers of access, each feeding the MO Vienna bar/restaurant/suites differently.</p>
+
+  <table>
+    <thead>
+      <tr><th>Tier</th><th>Access</th><th>Ticket band</th><th>What you commission</th><th>Time</th><th>MO funnel</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>1. Walk-in</strong></td>
+        <td>Open hours, no appointment</td>
+        <td>€150–€500</td>
+        <td>Engraved Lobmeyr glass, Mühlbauer ribbon, small Augarten plate, Backhausen cushion-square</td>
+        <td>30–60 min</td>
+        <td>Wiener Melange voucher; engraving wait time at MO bar</td>
+      </tr>
+      <tr>
+        <td><strong>2. Atelier Hours</strong></td>
+        <td>By appointment</td>
+        <td>€500–€3,000</td>
+        <td>Multi-piece sets — coffee service, hat collection, set of crystal, custom-pattern cushion run</td>
+        <td>90 min</td>
+        <td>MO bar lunch included, served while production specs are drawn</td>
+      </tr>
+      <tr>
+        <td><strong>3. Private Suite</strong></td>
+        <td>By appointment, in-suite</td>
+        <td>€3,000–€15,000+</td>
+        <td>Full multi-maker commissions — wedding sets, corporate gifts, residence furnishing</td>
+        <td>Multi-day</td>
+        <td>MO suite booking; restaurant reservations; concierge package</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Why three tiers, not one</h3>
+  <ul>
+    <li><strong>Tier 1</strong> generates the foot traffic and the press photography. Volume drives the bar funnel and the social media reach.</li>
+    <li><strong>Tier 2</strong> generates the unit economics. Atelier-hours conversion at €1,500 average ticket × 4 sessions/day × 200 days = ~€1.2M annual.</li>
+    <li><strong>Tier 3</strong> reopens the residence conversation that v1 tried to force. UHNW commissioning a €12K Wiener Werkstätte set in their MO suite is a far better residence-sales touchpoint than an AI showroom would have been. The conversation about a residence becomes <em>natural</em>, not transactional.</li>
+  </ul>
+
+  <div class="opp-box">
+    <span class="opp-box-label">Strategic note</span>
+    Tier 3 is where the v1 premise (residence sales) gets resurrected — but as a hospitality byproduct of a craft conversation, not the purpose of the shop. This is materially better positioning for the residences themselves.
+  </div>
+</section>
+
+<!-- 8. MO BAR FUNNEL -->
+<section class="section" id="funnel">
+  <div class="topic-ref">Build · Section 9</div>
+  <h2>The MO Bar Funnel</h2>
+  <p class="source-line">How AUFTRAG specifically routes walk-ins and clients into the Mandarin Oriental Vienna bar, restaurant, and suites.</p>
+
+  <h3>Mechanics by tier</h3>
+  <div class="card card-accent">
+    <div class="card-header">Tier 1 — Walk-in funnel</div>
+    <p>Every visitor — purchaser or not — leaves with a complimentary Wiener Melange voucher redeemable at the MO bar within 24 hours. Engraving wait time (15–30 min) is reframed as <em>"settle in next door"</em>: the master walks the visitor to the MO bar, the engraving is delivered to the bar table when finished. The bar becomes the natural sequel to the shop visit.</p>
+    <p style="margin-top:8px;"><strong>Estimated conversion:</strong> 55–70% of walk-ins → MO bar within 48 hours. Source: baker-marketing modelling.</p>
+  </div>
+
+  <div class="card card-accent">
+    <div class="card-header">Tier 2 — Atelier Hours funnel</div>
+    <p>Atelier appointments include a complimentary lunch at the MO bar restaurant during the design-development phase (the AI is generating production specs while the visitor eats). Lunch is part of the commission price, not a discount. The MO restaurant becomes the <em>workspace</em> of the commission.</p>
+    <p style="margin-top:8px;"><strong>Estimated conversion:</strong> 100% of Tier-2 appointments → MO bar/restaurant.</p>
+  </div>
+
+  <div class="card card-accent">
+    <div class="card-header">Tier 3 — Private Suite funnel</div>
+    <p>The master craftsperson and the AI plotter come to the MO suite. Multi-day consultation, multi-piece commission. The MO suite booking <em>is</em> the access mechanism. The hotel becomes the venue of the commission, not the venue of the shop.</p>
+    <p style="margin-top:8px;"><strong>Estimated conversion:</strong> Tier-3 clients are by definition MO suite guests.</p>
+  </div>
+
+  <h3>Modelled annual MO bar incremental traffic</h3>
+  <table>
+    <thead>
+      <tr><th>Tier</th><th>Visits/year</th><th>MO bar conversion</th><th>Incremental bar visits</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Tier 1 (walk-in)</td><td>~12,000</td><td>~62%</td><td>~7,400</td></tr>
+      <tr><td>Tier 2 (atelier)</td><td>~800</td><td>~100%</td><td>~800</td></tr>
+      <tr><td>Tier 3 (suite)</td><td>~50</td><td>~100%</td><td>~50 (already MO guests)</td></tr>
+      <tr><td><strong>Total</strong></td><td><strong>~12,850</strong></td><td>—</td><td><strong>~8,200 incremental MO bar visits/year</strong></td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:12px;color:var(--meta);">Modelled estimates per baker-marketing analysis. Tier 1 walk-in volume assumes ~33 visits/day across open hours. To be pressure-tested with baker-deal-analyst.</p>
+</section>
+
+<!-- 9. RISKS -->
+<section class="section" id="risks">
+  <div class="topic-ref">Decide · Section 10</div>
+  <h2>Risks &amp; Mitigations</h2>
+  <p class="source-line">Honest assessment. Where data is thin, this section says so explicitly.</p>
+
+  <div class="card card-danger">
+    <div class="card-header">Risk 1 — MOHG brand fit (HIGH)</div>
+    <p>Mandarin Oriental's brand is built on discreet human service and restrained interiors. Any AI-fronted concept in their building risks reading as a brand violation. The risk is most acute at the launch press moment, when our tone of voice is hardest to control.</p>
+    <p><strong>Mitigation:</strong></p>
+    <ul>
+      <li>The backstage-AI doctrine (Section 6) is the primary mitigation. AI is invisible; the human master is the host.</li>
+      <li>Brand architecture: AUFTRAG is an independent house, "at Mandarin Oriental, Vienna" appears only as address, never on the wordmark.</li>
+      <li>Pre-publication review by MOHG for the first 12 months of press coverage.</li>
+      <li>Informal Anna Egger temperature check <em>before</em> any feasibility spend (Section 10).</li>
+    </ul>
+  </div>
+
+  <div class="card card-warning">
+    <div class="card-header">Risk 2 — Maker partnership timing (CRITICAL)</div>
+    <p>Without Lobmeyr and Augarten signed as anchors by end of June 2026, AUFTRAG collapses. Family-run heritage makers move slowly. They will want to see Brisen's seriousness before agreeing to multi-year exclusivity.</p>
+    <p><strong>Mitigation:</strong> Director-led conviction meetings with Andreas/Leonid Rath (Lobmeyr) and Erwin Stoiber (Augarten) in May 2026. Partnership terms drafted by Buchwalder. Maker IP and signatory rights protected explicitly.</p>
+  </div>
+
+  <div class="card card-warning">
+    <div class="card-header">Risk 3 — Austrian / EU regulatory regime (MEDIUM)</div>
+    <p>The EU AI Act provisions taking effect 2 August 2026 require explicit disclosure when customers interact with an AI system. Article 50 is directly relevant. Risk of being classified as "high-risk AI" is low (we are not in scope of the high-risk annex), but transparency obligations apply. GDPR applies to any visitor profiling.</p>
+    <p><strong>Mitigation:</strong> Buchwalder review of disclosure architecture before launch. Visible "this commission is co-designed with an AI system" signage at the entry to the atelier. No covert AI use.</p>
+  </div>
+
+  <div class="card card-warning">
+    <div class="card-header">Risk 4 — AI novelty press decay (MEDIUM)</div>
+    <p>The "AI in luxury retail" press story has a half-life of ~18 months. By late 2027, the novelty is gone and we need a durable narrative.</p>
+    <p><strong>Mitigation:</strong> Lock the heritage-craft revival angle as the durable narrative from the start. AI is the delivery mechanism, not the headline. The story we want in 2028 is "the shop that revived Vienna's commission economy" — not "the shop with the AI."</p>
+  </div>
+
+  <div class="card card-accent">
+    <div class="card-header">Risk 5 — Foot traffic shortfall on Riemergasse (LOW–MEDIUM)</div>
+    <p>Riemergasse is a calm cross-street, not a Stephansplatz-density walk-by. Tier 1 walk-in volume of 33/day is a working assumption, not a measured number.</p>
+    <p><strong>Mitigation:</strong> Pre-launch concierge agreements with competing Vienna luxury hotels (Sacher, Bristol, Park Hyatt) to send their guests. PRCO press launch generates initial destination traffic. To be pressure-tested by baker-deal-analyst against actual Vienna luxury retail benchmarks.</p>
+  </div>
+</section>
+
+<!-- 10. PATH -->
+<section class="section" id="path">
+  <div class="topic-ref">Decide · Section 11</div>
+  <h2>90-Day Path</h2>
+  <p class="source-line">Sequencing inverted from v1. MOHG informal check now precedes feasibility spend.</p>
+
+  <div class="timeline">
+    <div class="timeline-item">
+      <div class="timeline-date">Days 1–7 — This week</div>
+      <div class="timeline-text"><strong>Family alignment.</strong> Edita reads this brief, reacts. Adjust as needed. Sign-off on direction before any external conversation.</div>
+      <div class="timeline-note">Gate 1 — nothing moves outside the family without this.</div>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-date">Days 8–21 — Weeks 2–3</div>
+      <div class="timeline-text"><strong>Anna Egger informal temperature check.</strong> 30-minute coffee, no concept doc, no commitment. Test MOHG's gut reaction before any feasibility spend. Director-led.</div>
+      <div class="timeline-note">Gate 2 — if Anna flinches, the rest is sunk cost. Risk-inverted vs v1.</div>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-date">Days 22–35 — Weeks 4–5</div>
+      <div class="timeline-text"><strong>Maker conviction meetings.</strong> Lobmeyr (Andreas/Leonid Rath) + Augarten (Erwin Stoiber). Test maker appetite for anchor partnership. Director-led.</div>
+      <div class="timeline-note">Gate 3 — without both anchors, concept collapses to multi-brand boutique. Decline gracefully if no.</div>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-date">Days 36–63 — Weeks 6–9</div>
+      <div class="timeline-text"><strong>Internal feasibility study.</strong> Balazs (financial model), Mykola (Vienna operations and permits), Buchwalder (legal regime). Brief baker-deal-analyst on partnership economics, baker-asset-mgmt on retail conversion, baker-it on AI delivery architecture.</div>
+      <div class="timeline-note">Two-week feasibility envelope. Output: budget, timeline, partnership terms.</div>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-date">Days 64–84 — Weeks 10–12</div>
+      <div class="timeline-text"><strong>Formal MOHG concept presentation.</strong> Polished proposal to Anna Egger and Mario Habicher. Press strategy with Robert Lyle (PRCO). Embargo conversations with FT, Monocle, AD.</div>
+      <div class="timeline-note">Gate 4 — formal MOHG approval before any capex.</div>
+    </div>
+    <div class="timeline-item success">
+      <div class="timeline-date">Day 90+</div>
+      <div class="timeline-text"><strong>Decision point.</strong> Build, defer, or kill. All four gates passed → green-light Phase 1 build for opening Q4 2026 / Q1 2027.</div>
+    </div>
+  </div>
+</section>
+
+<!-- 11. ASKS -->
+<section class="section" id="asks">
+  <div class="topic-ref">Decide · Section 12</div>
+  <h2>Asks of Edita</h2>
+  <p class="source-line">What I need from you to move forward, in order of dependency.</p>
+
+  <div class="ask-box">
+    <span class="ask-label">Ask 1 — Reaction to direction</span>
+    <p>Read this brief. Tell me whether the AUFTRAG concept — Wiener Werkstätte AI Atelier, backstage-AI doctrine, three-tier access, MO bar funnel — feels right. Push back where it doesn't. There is no v3 unless v2 is wrong.</p>
+  </div>
+
+  <div class="ask-box">
+    <span class="ask-label">Ask 2 — Permission for the Anna Egger temperature check</span>
+    <p>Once you are aligned on direction, give me your blessing to take a 30-minute informal coffee with Anna Egger (and possibly Mario Habicher) within the next two weeks. No concept doc, no commitment — only a gut-check. If MOHG cannot live with the concept, we kill it before any feasibility spend.</p>
+  </div>
+
+  <div class="ask-box">
+    <span class="ask-label">Ask 3 — Budget envelope for the 90-day path</span>
+    <p>The 90-day path requires modest spend (advisory time, travel for maker meetings, a small Buchwalder consultation). Indicative: under €25K through Day 90. Capex (~€600K Year-1) is a separate Day-90+ decision.</p>
+  </div>
+
+  <div class="ask-box">
+    <span class="ask-label">Ask 4 — Naming preference</span>
+    <p>Working name AUFTRAG (German, "the commission"). Backup MAKER 1010 (1010 = Vienna 1st district postcode). Both are placeholders until we engage a brand consultancy. Your instinct on either, or your alternative, would help frame the next conversation.</p>
+  </div>
+
+  <div class="ask-box">
+    <span class="ask-label">Ask 5 — Internal advisor circle</span>
+    <p>Confirm the internal team for the feasibility phase: Balazs (financial model), Mykola (Vienna ops), Buchwalder (legal). Add or substitute as you prefer. Kept tight — this stays inside the family until Gate 4.</p>
+  </div>
+
+  <div class="card card-accent" style="margin-top:24px;">
+    <div class="card-header">A note on what changed since v1</div>
+    <p>v1 asked you to react to a concept (AI residence showroom) that was internally inconsistent: too narrow an audience, wrong sales channel for the product, and a press precedent that backfires. v2 has been cross-tested by three independent analysts and external research. The concept is sharper, the sequencing is risk-inverted, and the asks are smaller. I am asking for your judgement, not your sign-off on a budget.</p>
+  </div>
+</section>
+
+</main>
+
+<script>
+function show(id) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav a').forEach(a => a.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  event.target.closest('a').classList.add('active');
+  window.scrollTo(0, 0);
+}
+</script>
+
+</body>
+</html>
