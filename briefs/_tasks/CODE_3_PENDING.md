@@ -1,81 +1,48 @@
-# CODE_3_PENDING — B3: PLAUD_SENTINEL_1 — 2026-04-26
+# CODE_3_PENDING — HOLD: PLAUD_SENTINEL_1 dispatched against shipped sentinel
 
-**Dispatcher:** AI Head A (Build-lead)
-**Working dir:** `~/bm-b3`
-**Branch:** `plaud-sentinel-1` (create from main; B3 currently on main but may need pull).
-**Brief:** `briefs/BRIEF_PLAUD_SENTINEL_1.md`
-**Tier B task entry:** `briefs/_tasks/PLAUD_SENTINEL_1.md`
-**Status:** OPEN — first M1-out-of-band Tier B sentinel build
-**Reviewer on PR:** AI Head B (cross-team) + **B1 situational review** (3 trigger classes: secrets / external API / cross-cap state writes)
-
-**§2 pre-dispatch busy-check** (per `_ops/processes/b-code-dispatch-coordination.md`):
-- Mailbox prior state: `COMPLETE — PR #62 KBL_PEOPLE_ENTITY_LOADERS_1 merged as 5ae6545`. Idle. **This dispatch supersedes.**
-- Branch prior state: main, post-#62 merge. Pre-execution `git checkout main && git pull -q` resolves.
-- B1: idle, mailbox COMPLETE, on main behind 5. Available for situational review at PR time.
-- B2: in flight on WIKI_LINT_1 (dispatched ec25c38). No file overlap with B3 PLAUD work.
-- B4: reserved for fix-backs.
-- No file overlap with B2 (different `triggers/` files; different scheduler job; different table/collection).
-
-**Dispatch authorisation:** Director 2026-04-26: *"ok, pls give a task to AI Head to integrate Plaud now"*; AI Head A confirmed token provisioned + auth working at `op://Baker API Keys/Plaud API Token/credential` against `https://api-euc1.plaud.ai` (returns 404 on unknown paths, NOT 401 — auth layer passes).
+**Status:** 🛑 HOLD pending Director re-decision (2026-04-26)
+**Dispatch superseded:** the eb68dca dispatch is **stale** — do NOT proceed with the brief as written.
 
 ---
 
-## Critical pre-build heads-up
+## Why hold
 
-**Plaud has no public API.** The token is a web JWT scraped from `web.plaud.ai` localStorage. Endpoint paths must be reverse-engineered from DevTools network capture. Director's browser session is the source. See brief §"Token findings" for context.
+B3's pre-build codebase audit caught a gap that AI Head A's §2 busy-check missed:
 
-**Step 0 of your build (BEFORE writing any sentinel code):**
-1. `op read "op://Baker API Keys/Plaud API Token/credential"` — confirm fetch works in your worktree.
-2. Smoke-test bearer auth against `https://api-euc1.plaud.ai/<some-path>` — confirm 404 (not 401) before proceeding.
-3. **Endpoint discovery:** if AI Head A's probe set didn't find the recordings-list path, ask AI Head A to relay a DevTools capture from Director. Do NOT brute-force probe production for >30 min — surface the block.
-4. Document discovered endpoints in `briefs/_reports/B3_plaud_sentinel_1_<YYYYMMDD>.md` Appendix A (literal request + response shape).
+- **`triggers/plaud_trigger.py` (599 LOC) already shipped** at commit `2f5675c` (PLAUD-INGESTION-1).
+- Earlier brief archived at `briefs/archive/BRIEF_PLAUD_INGESTION_1.md`.
+- Endpoints already discovered: `/file/simple/web` + `/file/detail/{file_id}`.
+- Storage: writes to `meeting_transcripts` with `source="plaud"` (NOT a separate table).
+- Scheduler: `plaud_scan` job at 15 min, gated on `config.plaud.api_token` (`triggers/embedded_scheduler.py:111-122`).
+- Config: `PlaudConfig` already in `config/settings.py:139-141` with `PLAUD_TOKEN`, `PLAUD_API_DOMAIN`, `PLAUD_SCAN_INTERVAL`.
+- Backfill: `backfill_plaud()` with PG advisory lock 867532 already runs at scheduler startup.
+- Pipeline integration: PM signal detection, contact interactions, deadlines, commitments, meeting_pipeline async — already wired.
 
-## Brief route (charter §6A)
+PLAUD_SENTINEL_1 brief Q3 ratification ("new plaud_notes table") was made without knowledge of the existing `meeting_transcripts` design.
 
-`/write-brief` 6 steps applied:
-1. EXPLORE — done by AI Head A:
-   - Read RA spec (`baker-vault/_ops/ideas/2026-04-26-plaud-sentinel-integration.md`)
-   - Verified token in 1Password — entry exists, token authenticates, region EU-Central-1
-   - Probed 18 common API paths — all 404 (auth passes, paths unknown)
-   - Inspected Todoist + Fireflies sentinel patterns (`triggers/*` modules) for mirror
-   - Confirmed migration-vs-bootstrap drift trap (LONGTERM.md feedback) applies — `_ensure_plaud_notes_base()` MUST match migration column types
-2. PLAN — embedded in brief (data plane / control plane / retrieval plane).
-3. WRITE — full brief at `briefs/BRIEF_PLAUD_SENTINEL_1.md`.
-4. TRACK — this mailbox + Tier B task entry at `briefs/_tasks/PLAUD_SENTINEL_1.md`.
-5. DOCUMENT — PR description MUST include:
-   - Discovered Plaud endpoints (Appendix A)
-   - Migration-vs-bootstrap drift check output (literal grep)
-   - Render env var confirmation (`PLAUD_TOKEN`, not `BAKER_PLAUD_API_TOKEN`)
-6. CAPTURE LESSONS — surface any reverse-engineering pain to `tasks/lessons.md`.
+## What B3 should do (until Director re-decides)
 
-## Code Brief Standards compliance
+1. **Do NOT create branch `plaud-sentinel-1`.**
+2. **Do NOT modify any plaud-related file.**
+3. Stay on main, idle.
+4. Optional: prepare option-3 delta brief mentally if Director chooses that path (it's the recommended option).
 
-- **API version:** Plaud internal API (no public version). Token type: Bearer JWT, region EU-Central-1 (`https://api-euc1.plaud.ai`).
-- **Deprecation check date:** B-code logs probe timestamp + token-fetch-from-op timestamp in commit body.
-- **Fallback:** `PLAUD_SENTINEL_ENABLED=false` (default) keeps scheduler dormant. 401/403/410: log + watermark + Slack alert; never crash scheduler.
-- **DDL drift:** `_ensure_plaud_notes_base()` in `memory/store_back.py` MUST match `migrations/NNN_add_plaud_notes.sql` column types EXACTLY. Test asserts type-alignment. Pre-commit grep: `grep -n "plaud" memory/store_back.py` → verify no pre-existing bootstrap with type drift.
-- **Literal pytest output:** ≥20 tests across 4 test files. NO "passes by inspection".
+## Awaiting Director on three paths
 
-## Verification before shipping
+| Option | Effort | Trade-off |
+|---|---|---|
+| 1. Refactor: split `meeting_transcripts source=plaud` into new `plaud_notes` table; deprecate `triggers/plaud_trigger.py`; rebuild | ~12–18h | redoes shipped work; data migration brittle |
+| 2. Layer: keep existing; add `baker-plaud` Qdrant collection + `plaud_search` Scan route on top | ~3–5h | violates Q3 ratification; vector-only differentiation |
+| 3. **Cancel + delta brief: close PLAUD_SENTINEL_1; write tight follow-up covering only the actual deltas Director wants on top of PLAUD_INGESTION_1** | depends on deltas | recommended by B3 + AI Head A; surfaces real Director intent |
 
-Brief §"Verification criteria" (1-6 items). Items 5 (PR docs: endpoint Appendix + migration grep + env var) and 6 (sentinels.md update — AI Head A handles, NOT B3) are non-negotiable PR-description items.
+AI Head A endorses **Option 3** — Director's Q3 ratification was made on incomplete info; redoing shipped work for an answer that may itself be wrong is the trap.
 
-## Ship report path
+## Rollback log for AI Head A
 
-`briefs/_reports/B3_plaud_sentinel_1_<YYYYMMDD>.md`
-
-Must include Appendix A (discovered Plaud endpoints with literal curl outputs).
-
-## Trigger classes hit (B1 situational review)
-
-3 of 7 trigger classes hit per `_ops/ideas/2026-04-24-b1-situational-review-trigger.md`:
-1. Secrets handling (Plaud token fetch via op CLI)
-2. External API (new Plaud cloud integration)
-3. Cross-capability state writes (new table + Qdrant collection + scheduler job)
-
-→ B1 reviews PR before AI Head A runs `/security-review` + merges.
+- Brief at `briefs/BRIEF_PLAUD_SENTINEL_1.md` retained for now (decision log; revisit after Director re-decision).
+- This mailbox supersedes eb68dca dispatch authority.
+- Lesson capture pending — see Director response on §2 busy-check upgrade (codebase grep + `briefs/archive/` scan should be mandatory steps).
 
 ## Cross-stream
 
-- Parallel-safe with B2 (WIKI_LINT_1) — zero file overlap.
-- Parallel-safe with future RA spec deliveries for M1.3 + GOLD + M1.4.
+B3 idle. B2 still in flight on WIKI_LINT_1 (no impact). B1, B4 idle.
