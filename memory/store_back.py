@@ -205,6 +205,10 @@ class SentinelStoreBack:
         self._ensure_kbl_alert_dedupe()
         self._ensure_gold_promote_queue()
 
+        # GOLD_COMMENT_WORKFLOW_1: weekly audit + write-failure tables
+        self._ensure_gold_audits_table()
+        self._ensure_gold_write_failures_table()
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -544,6 +548,72 @@ class SentinelStoreBack:
             except Exception:
                 pass
             logger.warning(f"Could not ensure ai_head_audits table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_gold_audits_table(self):
+        """GOLD_COMMENT_WORKFLOW_1: weekly Gold corpus audit records.
+
+        Populated by orchestrator/gold_audit_job._gold_audit_sentinel_job.
+        One row per audit run (Mondays 09:30 UTC).
+        """
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS gold_audits (
+                    id            SERIAL PRIMARY KEY,
+                    ran_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    issues_count  INT NOT NULL DEFAULT 0,
+                    payload_jsonb JSONB NOT NULL DEFAULT '{}'::jsonb
+                )
+            """)
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_gold_audits_ran_at "
+                "ON gold_audits(ran_at DESC)"
+            )
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure gold_audits table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_gold_write_failures_table(self):
+        """GOLD_COMMENT_WORKFLOW_1: failure log for gold_writer.append guards."""
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS gold_write_failures (
+                    id            SERIAL PRIMARY KEY,
+                    attempted_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    target_path   TEXT NOT NULL,
+                    error         TEXT NOT NULL,
+                    caller_stack  TEXT,
+                    payload_jsonb JSONB DEFAULT '{}'::jsonb
+                )
+            """)
+            cur.execute(
+                "CREATE INDEX IF NOT EXISTS idx_gold_write_failures_attempted_at "
+                "ON gold_write_failures(attempted_at DESC)"
+            )
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure gold_write_failures table: {e}")
         finally:
             self._put_conn(conn)
 

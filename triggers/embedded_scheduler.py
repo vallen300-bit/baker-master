@@ -727,6 +727,25 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info("Skipped: ai_head_weekly_audit (AI_HEAD_AUDIT_ENABLED=false)")
 
+    # GOLD_COMMENT_WORKFLOW_1 D6: weekly Gold corpus audit.
+    # Mon 09:30 UTC — slot between ai_head_weekly_audit (09:00) +
+    # ai_head_audit_sentinel (10:00). Env gate ``GOLD_AUDIT_ENABLED``
+    # (default ``true``).
+    _gold_audit_enabled = _os.environ.get("GOLD_AUDIT_ENABLED", "true").lower()
+    if _gold_audit_enabled not in ("false", "0", "no", "off"):
+        from orchestrator.gold_audit_job import _gold_audit_sentinel_job
+        scheduler.add_job(
+            _gold_audit_sentinel_job,
+            CronTrigger(day_of_week="mon", hour=9, minute=30, timezone="UTC"),
+            id="gold_audit_sentinel",
+            name="Gold corpus weekly audit (Monday 09:30 UTC)",
+            coalesce=True, max_instances=1, replace_existing=True,
+            misfire_grace_time=3600,
+        )
+        logger.info("Registered: gold_audit_sentinel (Mon 09:30 UTC)")
+    else:
+        logger.info("Skipped: gold_audit_sentinel (GOLD_AUDIT_ENABLED=false)")
+
     # BRIEF_MOVIE_AM_RETROFIT_1 D5: weekly MOVIE AM vault lint.
     # Sunday 06:05 UTC — offset 5 min from ao_pm_lint to avoid vault-mirror
     # contention. Env gate ``MOVIE_AM_LINT_ENABLED`` (default ``true``)
