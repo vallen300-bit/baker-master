@@ -282,6 +282,46 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: ao_pm_lint (Sunday 06:00 UTC)")
 
+    # BRANCH_HYGIENE_1: weekly remote-branch prune — Mon 10:30 UTC
+    def _run_branch_hygiene_weekly():
+        try:
+            from scripts.branch_hygiene import (
+                run_classification, execute_deletions, DEFAULT_REPO,
+                DEFAULT_BASE, DEFAULT_STALENESS_DAYS, DEFAULT_PROTECT_PATTERNS,
+            )
+            buckets = run_classification(
+                repo=DEFAULT_REPO,
+                base=DEFAULT_BASE,
+                staleness_days=DEFAULT_STALENESS_DAYS,
+                protect_patterns=DEFAULT_PROTECT_PATTERNS,
+            )
+            execute_deletions(
+                buckets.get("L1", []),
+                repo=DEFAULT_REPO,
+                layer="L1",
+                dry_run=False,
+            )
+            logger.info(
+                "branch_hygiene_weekly: L1=%d MOBILE=%d L2_FLAGGED=%d KEEP=%d",
+                len(buckets.get("L1", [])),
+                len(buckets.get("MOBILE_CLUSTER", [])),
+                len(buckets.get("L2_FLAGGED", [])),
+                len(buckets.get("KEEP", [])),
+            )
+        except Exception as e:
+            logger.warning("branch_hygiene_weekly failed (non-fatal): %s", e)
+
+    scheduler.add_job(
+        _run_branch_hygiene_weekly,
+        CronTrigger(day_of_week="mon", hour=10, minute=30, timezone="UTC"),
+        id="branch_hygiene_weekly",
+        name="branch_hygiene_weekly",
+        coalesce=True,
+        max_instances=1,
+        replace_existing=True,
+    )
+    logger.info("Registered: branch_hygiene_weekly (Monday 10:30 UTC)")
+
     # ALERT-DEDUP-1: Alert digest flush DISABLED.
     # Was sending ~48 digest emails/day. Slack (with dedup) + daily briefing email
     # now cover all alerting. Re-enable by uncommenting.
