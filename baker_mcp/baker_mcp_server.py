@@ -24,12 +24,15 @@ Usage:
 import json
 import logging
 import os
+import pathlib
 import sys
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse, parse_qs
 
+import httpx
 import psycopg2
 import psycopg2.extras
 
@@ -490,6 +493,126 @@ TOOLS = [
             "required": ["path"],
         },
     ),
+    Tool(
+        name="baker_scan",
+        description=(
+            "Run a Baker Scan — interactive Q&A across Baker's memory (emails, meetings, "
+            "WhatsApp, ClickUp, contacts, deadlines). If `capability_slug` is provided, "
+            "routes to the named client-PM or domain capability (e.g. `ao_pm` for "
+            "Andrey Oskolkov, `movie_am` for Mandarin Vienna asset management); "
+            "otherwise auto-routes via Baker's intent classifier. Returns the final "
+            "answer text (SSE stream collected into one string)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The question to ask Baker.",
+                    "minLength": 1,
+                    "maxLength": 4000,
+                },
+                "capability_slug": {
+                    "type": "string",
+                    "description": (
+                        "Optional. Route to a specific capability instead of auto-classify. "
+                        "Examples: ao_pm, movie_am, finance, legal, sales, asset_management."
+                    ),
+                },
+                "history": {
+                    "type": "array",
+                    "description": "Optional prior turns: [{role, content}, ...]",
+                    "default": [],
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Optional scope: rg7, hagenauer, movie-hotel-asset-management.",
+                },
+                "role": {
+                    "type": "string",
+                    "description": "Optional scope: chairman, network, private, travel.",
+                },
+            },
+            "required": ["query"],
+        },
+    ),
+    Tool(
+        name="baker_search",
+        description=(
+            "Semantic search across all Baker memory (emails, meetings, WhatsApp, "
+            "documents, contacts, deadlines). Returns top-N matching items with "
+            "relevance scores. Use for fact-finding queries; use baker_scan for "
+            "conversational answers."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Natural-language search query.",
+                    "minLength": 1,
+                    "maxLength": 500,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max results (default 20, max 50).",
+                    "default": 20,
+                    "maximum": 50,
+                },
+            },
+            "required": ["query"],
+        },
+    ),
+    Tool(
+        name="baker_ingest_text",
+        description=(
+            "Ingest a text document into Baker's knowledge base. Use for memos, "
+            "notes, transcripts, or any text content. For binary files (PDFs, "
+            "images), upload via the dashboard UI instead."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Filename for the document (e.g. 'it-memo-2026-04-26.md').",
+                    "minLength": 1,
+                    "maxLength": 200,
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Text body to ingest.",
+                    "minLength": 1,
+                    "maxLength": 100000,
+                },
+                "collection": {
+                    "type": "string",
+                    "description": "Optional Qdrant collection override.",
+                },
+                "project": {
+                    "type": "string",
+                    "description": "Optional project tag: rg7, hagenauer, movie-hotel-asset-management.",
+                },
+                "role": {
+                    "type": "string",
+                    "description": "Optional role tag: chairman, network, private, travel.",
+                },
+            },
+            "required": ["title", "content"],
+        },
+    ),
+    Tool(
+        name="baker_health",
+        description=(
+            "Get Baker system health: database connectivity, scheduler status, "
+            "active sentinels, vault mirror state, last update timestamps. Returns "
+            "a structured health summary for monitoring or pre-flight checks."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {},
+        },
+    ),
 ]
 
 
@@ -506,6 +629,222 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     except Exception as e:
         logger.error(f"Tool {name} failed: {e}")
         return [TextContent(type="text", text=f"Error: {e}")]
+
+
+# ---------------------------------------------------------------------------
+# Loopback helpers for live REST endpoints (BAKER_MCP_EXTENSION_1)
+# ---------------------------------------------------------------------------
+
+def _internal_base_url() -> str:
+    """Loopback URL for in-process MCP calls; override via BAKER_INTERNAL_URL env."""
+    return os.getenv("BAKER_INTERNAL_URL", "http://localhost:8080")
+
+
+def _internal_api_key() -> str:
+    """API key for X-Baker-Key header (same as dashboard)."""
+    return os.getenv("BAKER_API_KEY", "")
+
+
+def _baker_scan_via_loopback(args: dict) -> str:
+    """Route to /api/scan or /api/scan/client-pm based on capability_slug presence.
+
+    Collects the SSE stream into a single text string. Canonical content key is
+    `token` (verified at outputs/dashboard.py:8240 for the capability path and
+    :7441/8343 elsewhere). Other event types — status / capabilities / tool_call /
+    screenshot / task_id / error / __citations__ prefix — are metadata and skipped.
+    """
+    query = (args.get("query") or "").strip()
+    if not query:
+        return "Error: query is required"
+    capability_slug = args.get("capability_slug")
+    history = args.get("history") or []
+
+    base = _internal_base_url()
+    headers = {"X-Baker-Key": _internal_api_key(), "Accept": "text/event-stream"}
+
+    if capability_slug:
+        url = f"{base}/api/scan/client-pm"
+        payload = {"question": query, "capability_slug": capability_slug, "history": history}
+    else:
+        url = f"{base}/api/scan"
+        payload = {
+            "question": query,
+            "history": history,
+            "project": args.get("project"),
+            "role": args.get("role"),
+        }
+
+    chunks: list[str] = []
+    try:
+        with httpx.Client(timeout=httpx.Timeout(60.0, connect=10.0)) as client:
+            with client.stream(
+                "POST",
+                url,
+                json={k: v for k, v in payload.items() if v is not None},
+                headers=headers,
+            ) as resp:
+                if resp.status_code != 200:
+                    body = resp.read().decode("utf-8", errors="replace")
+                    return f"Error: scan returned HTTP {resp.status_code}: {body[:300]}"
+                for line in resp.iter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+                    payload_str = line[6:]
+                    # [DONE] sentinel and __citations__ markers are not JSON.
+                    if payload_str.startswith("__citations__") or payload_str == "[DONE]":
+                        continue
+                    try:
+                        evt = json.loads(payload_str)
+                    except Exception:
+                        continue
+                    if isinstance(evt, dict):
+                        token = evt.get("token")
+                        if token and isinstance(token, str):
+                            chunks.append(token)
+                        err = evt.get("error")
+                        if err and isinstance(err, str):
+                            return f"Error from scan: {err}"
+    except httpx.TimeoutException:
+        return "Error: scan timed out after 60s"
+    except Exception as e:
+        return f"Error: scan failed: {e}"
+
+    if not chunks:
+        return "(empty response — check capability_slug or query)"
+    return "".join(chunks).strip()
+
+
+def _baker_search_via_loopback(args: dict) -> str:
+    query = (args.get("query") or "").strip()
+    if not query:
+        return "Error: query is required"
+    try:
+        limit = int(args.get("limit", 20))
+    except (TypeError, ValueError):
+        limit = 20
+    limit = max(1, min(limit, 50))
+
+    url = f"{_internal_base_url()}/api/search/unified"
+    headers = {"X-Baker-Key": _internal_api_key()}
+    params = {"q": query, "limit": limit}
+
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get(url, params=params, headers=headers)
+            if resp.status_code != 200:
+                return f"Error: search returned HTTP {resp.status_code}: {resp.text[:300]}"
+            data = resp.json()
+    except httpx.TimeoutException:
+        return "Error: search timed out after 15s"
+    except Exception as e:
+        return f"Error: search failed: {e}"
+
+    items = data.get("results") or data.get("items") or []
+    if not items:
+        return f"No results for: {query}"
+    total = data.get("total", len(items))
+    lines = [f"Search results for: {query} ({len(items)} of {total} hits)\n{'=' * 60}"]
+    for r in items:
+        if isinstance(r, dict):
+            parts = [f"  {k}: {v}" for k, v in r.items() if v is not None]
+            lines.append("\n".join(parts))
+        else:
+            lines.append(f"  {r}")
+    return "\n---\n".join(lines)
+
+
+def _baker_ingest_text_via_loopback(args: dict) -> str:
+    title = (args.get("title") or "").strip()
+    content = args.get("content") or ""
+    if not title or not content:
+        return "Error: title and content are required"
+
+    if not any(title.lower().endswith(ext) for ext in (".md", ".txt", ".markdown")):
+        title = title + ".md"
+
+    url = f"{_internal_base_url()}/api/ingest"
+    headers = {"X-Baker-Key": _internal_api_key()}
+
+    form_data: dict = {}
+    if args.get("project"):
+        form_data["project"] = args["project"]
+    if args.get("role"):
+        form_data["role"] = args["role"]
+    params: dict = {}
+    if args.get("collection"):
+        params["collection"] = args["collection"]
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=pathlib.Path(title).suffix,
+            delete=False,
+            encoding="utf-8",
+        ) as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        with open(tmp_path, "rb") as fh:
+            files = {"file": (title, fh, "text/plain")}
+            with httpx.Client(timeout=60.0) as client:
+                resp = client.post(
+                    url, headers=headers, params=params, data=form_data, files=files,
+                )
+                if resp.status_code != 200:
+                    return (
+                        f"Error: ingest returned HTTP {resp.status_code}: "
+                        f"{resp.text[:300]}"
+                    )
+                result = resp.json()
+                return (
+                    f"Ingested: {result.get('filename', title)}\n"
+                    f"Status: {result.get('status', 'unknown')}\n"
+                    f"Collection: {result.get('collection', '')}\n"
+                    f"Chunks: {result.get('chunks', 0)}\n"
+                    f"Dedup: {result.get('dedup', False)}"
+                )
+    except httpx.TimeoutException:
+        return "Error: ingest timed out after 60s"
+    except Exception as e:
+        return f"Error: ingest failed: {e}"
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+
+def _baker_health_via_loopback() -> str:
+    url = f"{_internal_base_url()}/health"  # public path; no auth required
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(url)
+            if resp.status_code != 200:
+                return f"Error: health returned HTTP {resp.status_code}: {resp.text[:300]}"
+            data = resp.json()
+    except httpx.TimeoutException:
+        return "Error: health probe timed out after 10s"
+    except Exception as e:
+        return f"Error: health probe failed: {e}"
+
+    parts = [
+        f"Status: {data.get('status', 'unknown')}",
+        f"Database: {data.get('database', '?')}",
+        f"Scheduler: {data.get('scheduler', '?')}",
+        f"Scheduled jobs: {data.get('scheduled_jobs', '?')}",
+        f"Sentinels healthy: {data.get('sentinels_healthy', '?')}",
+        f"Sentinels down: {data.get('sentinels_down', 0)}",
+    ]
+    if data.get("sentinels_down_list"):
+        parts.append(f"  ↳ down: {', '.join(data['sentinels_down_list'])}")
+    if data.get("vault_mirror_last_pull"):
+        parts.append(f"Vault mirror last pull: {data['vault_mirror_last_pull']}")
+    if data.get("vault_mirror_commit_sha"):
+        parts.append(f"Vault mirror sha: {str(data['vault_mirror_commit_sha'])[:12]}")
+    parts.append(f"Timestamp: {data.get('timestamp', '?')}")
+    return "\n".join(parts)
 
 
 def _dispatch(name: str, args: dict) -> str:
@@ -1022,6 +1361,18 @@ def _dispatch(name: str, args: dict) -> str:
         except VaultPathError as e:
             return f"Error: {e}"
         return json.dumps(result, indent=2)
+
+    elif name == "baker_scan":
+        return _baker_scan_via_loopback(args)
+
+    elif name == "baker_search":
+        return _baker_search_via_loopback(args)
+
+    elif name == "baker_ingest_text":
+        return _baker_ingest_text_via_loopback(args)
+
+    elif name == "baker_health":
+        return _baker_health_via_loopback()
 
     else:
         return f"Unknown tool: {name}"
