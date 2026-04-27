@@ -1,4 +1,18 @@
+---
+status: parked
+parked_at: 2026-04-28
+parked_by: AI Head A (RA-22 disposition relay 2026-04-28)
+promotion_trigger: "first observed drift event in production"
+director_ratification: "simplify and start learning fromm production events" (RA-22 2026-04-27)
+ratification_anchor: _ops/processes/cortex3t-roadmap-simplified.md (Stage 1 simplified — RA-22 ratified)
+spec_source: baker-vault/_ops/ideas/2026-04-26-kbl-schema-drift-detector-1-spec.md
+---
+
 # BRIEF: KBL_SCHEMA_DRIFT_DETECTOR_1 — Per-write registry-yaml drift guard + weekly audit
+
+> **PARKED 2026-04-28** per RA-22 Stage 1 simplification. Brief stays in tree (high-quality draft, ~6–8h scope). Resurrects when first observed drift event in production warrants. Three architectural decisions surfaced at draft (commit-msg dispatcher consolidation, `author_director_guard.sh` migration, Q5/Q6/Q7 off-by-one) are all parked alongside; the underlying CHANDA #4 hook-stage bug is tracked separately as a candidate `MAC_MINI_WRITER_AUDIT_FOLLOWUP_1` if it bites Tier B writes.
+
+
 
 **Milestone:** M1 (Wiki stream foundation), row M1.3
 **Roadmap source:** `_ops/processes/cortex3t-roadmap.md` §M1
