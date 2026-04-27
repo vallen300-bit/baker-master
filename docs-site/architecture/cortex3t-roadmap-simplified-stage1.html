@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cortex-3T — Simplified Stage 1 (Memory + First Cycle)</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+  :root {
+    --bg: #f7f5f0;
+    --surface: #ffffff;
+    --surface-alt: #faf8f3;
+    --ink: #1a1a1a;
+    --ink-soft: #4a4a4a;
+    --ink-mute: #8a8a8a;
+    --rule: #e0dcd3;
+    --rule-soft: #efebe2;
+    --brisen: #0a6fdb;
+    --brisen-soft: rgba(10,111,219,0.08);
+    --gold: #b8923f;
+    --green: #2d7a4f;
+    --red: #b03030;
+    --amber: #c87a17;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Inter', -apple-system, sans-serif;
+    line-height: 1.6;
+    font-size: 14px;
+  }
+
+  .container {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 48px 32px 80px;
+  }
+
+  header {
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 24px;
+    margin-bottom: 40px;
+  }
+  .eyebrow {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--brisen);
+    margin-bottom: 8px;
+  }
+  h1 {
+    font-size: 2.2rem;
+    font-weight: 700;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    margin-bottom: 12px;
+  }
+  .meta {
+    color: var(--ink-mute);
+    font-size: 0.85rem;
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .meta strong { color: var(--ink-soft); font-weight: 500; }
+
+  .stage-badge {
+    display: inline-block;
+    background: var(--brisen);
+    color: white;
+    padding: 4px 12px;
+    border-radius: 3px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 1px;
+    margin-bottom: 16px;
+  }
+
+  .bottom-line {
+    background: var(--surface);
+    border-left: 4px solid var(--brisen);
+    padding: 20px 24px;
+    margin-bottom: 48px;
+  }
+  .bottom-line .label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--brisen);
+    margin-bottom: 8px;
+  }
+  .bottom-line p {
+    font-size: 1.05rem;
+    color: var(--ink-soft);
+  }
+
+  h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin-top: 56px;
+    margin-bottom: 20px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-top: 32px;
+    margin-bottom: 12px;
+    color: var(--ink);
+  }
+
+  p { margin-bottom: 14px; color: var(--ink-soft); }
+
+  .principle {
+    background: var(--surface-alt);
+    padding: 20px 24px;
+    border-left: 3px solid var(--gold);
+    margin: 24px 0;
+    font-style: italic;
+    color: var(--ink-soft);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0 28px;
+    background: var(--surface);
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 14px;
+    font-size: 0.88rem;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+  }
+  th {
+    background: var(--surface-alt);
+    font-weight: 600;
+    color: var(--ink);
+    font-size: 0.8rem;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+  }
+  td code, th code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82em;
+    background: var(--brisen-soft);
+    padding: 1px 6px;
+    border-radius: 2px;
+    color: var(--brisen);
+  }
+
+  .layer-grid {
+    display: grid;
+    grid-template-columns: 60px 1fr 2fr;
+    gap: 0;
+    margin: 24px 0;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+  }
+  .layer-grid > div {
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .layer-grid .layer-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    color: var(--brisen);
+    background: var(--surface-alt);
+  }
+  .layer-grid .layer-q {
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .layer-grid .layer-find {
+    color: var(--ink-soft);
+  }
+
+  .phase-card {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 18px 22px;
+    margin: 12px 0;
+  }
+  .phase-card .phase-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    color: var(--brisen);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .phase-card .phase-title {
+    font-size: 1.02rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  .phase-card .phase-existing {
+    font-size: 0.85rem;
+    color: var(--ink-mute);
+    font-style: italic;
+  }
+
+  .schema-block {
+    background: #1a1a1a;
+    color: #e8e6df;
+    padding: 18px 22px;
+    border-radius: 3px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    line-height: 1.65;
+    overflow-x: auto;
+    margin: 16px 0 24px;
+  }
+  .schema-block .kw { color: #82aaff; }
+  .schema-block .type { color: #c792ea; }
+  .schema-block .comment { color: #6a737d; font-style: italic; }
+  .schema-block .str { color: #c3e88d; }
+
+  .card-mockup {
+    background: var(--surface);
+    border: 2px solid var(--rule);
+    padding: 22px 26px;
+    margin: 20px 0;
+    max-width: 540px;
+    border-radius: 4px;
+  }
+  .card-mockup .card-eyebrow {
+    color: var(--amber);
+    font-size: 0.78rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    letter-spacing: 1px;
+  }
+  .card-mockup .card-title {
+    font-weight: 600;
+    margin-bottom: 12px;
+    font-size: 1rem;
+  }
+  .card-mockup .card-row {
+    font-size: 0.85rem;
+    color: var(--ink-soft);
+    margin-bottom: 6px;
+  }
+  .card-mockup .card-row strong { color: var(--ink); font-weight: 600; }
+  .card-mockup .card-draft {
+    background: var(--surface-alt);
+    padding: 12px 14px;
+    margin: 12px 0;
+    font-style: italic;
+    border-left: 3px solid var(--brisen);
+    font-size: 0.88rem;
+    line-height: 1.5;
+  }
+  .card-mockup .card-buttons {
+    display: flex;
+    gap: 8px;
+    margin: 16px 0 6px;
+    flex-wrap: wrap;
+  }
+  .card-mockup .btn {
+    display: inline-block;
+    padding: 6px 14px;
+    border-radius: 3px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: white;
+  }
+  .card-mockup .btn-approve { background: var(--green); }
+  .card-mockup .btn-edit { background: var(--ink-soft); }
+  .card-mockup .btn-refresh { background: var(--brisen); }
+  .card-mockup .btn-reject { background: var(--red); }
+  .card-mockup .card-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--ink-mute);
+    border-top: 1px solid var(--rule-soft);
+    padding-top: 8px;
+    margin-top: 8px;
+  }
+
+  .deferred-list {
+    background: var(--surface-alt);
+    padding: 18px 22px;
+    margin: 16px 0;
+    border-left: 3px solid var(--ink-mute);
+  }
+  .deferred-list ul { padding-left: 20px; }
+  .deferred-list li { margin-bottom: 6px; color: var(--ink-soft); font-size: 0.9rem; }
+
+  footer {
+    margin-top: 80px;
+    padding-top: 24px;
+    border-top: 1px solid var(--rule);
+    color: var(--ink-mute);
+    font-size: 0.82rem;
+    line-height: 1.7;
+  }
+  footer code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85em;
+    color: var(--brisen);
+  }
+  .ratification {
+    font-style: italic;
+    color: var(--ink-soft);
+    border-left: 3px solid var(--gold);
+    padding: 8px 14px;
+    margin: 16px 0;
+    background: var(--surface-alt);
+    font-size: 0.88rem;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <div class="eyebrow">Cortex-3T · Roadmap</div>
+  <span class="stage-badge">STAGE 1 · SIMPLIFIED</span>
+  <h1>Memory Architecture &amp; First Cortex Cycle</h1>
+  <div class="meta">
+    <span><strong>Ratified:</strong> 2026-04-27 (RA-22)</span>
+    <span><strong>Scope:</strong> Memory layer + first cycle on AO matter</span>
+    <span><strong>Effort:</strong> ~30 hours / ~4 days</span>
+    <span><strong>To first real cycle:</strong> ~10–14 days</span>
+  </div>
+</header>
+
+<div class="bottom-line">
+  <div class="label">Bottom line</div>
+  <p>Brisen already has ~85–90% of Cortex-3T built — it just hasn't been called Cortex. <code style="font-family: 'JetBrains Mono', monospace; background: var(--brisen-soft); padding: 1px 6px; border-radius: 2px; color: var(--brisen); font-size: 0.85em;">chain_runner.py</code> implements the 6-phase pipeline. <code style="font-family: 'JetBrains Mono', monospace; background: var(--brisen-soft); padding: 1px 6px; border-radius: 2px; color: var(--brisen); font-size: 0.85em;">capability_runner.py</code> has 25+ context-loading methods. The conversational memory layer (capability_threads + feedback_ledger) is live. Stage 1 = formalize what exists + 2 small tables + the 4-button proposal card. ~4 days, one B-code, one PR.</p>
+</div>
+
+<div class="ratification">
+  <strong>Director ratification (2026-04-27 RA-22):</strong> "Lock in the simplified approach new design as we now discussed it (we discussed only memory issues and found a solution through proper research and planning)."
+</div>
+
+<h2>How we got here — 5 layers of research</h2>
+
+<div class="layer-grid">
+  <div class="layer-num">L1</div>
+  <div class="layer-q">Are other companies using Anthropic Memory?</div>
+  <div class="layer-find">Real adopters (Netflix, Rakuten, Wisedocs, Ando) — but enterprise pilot scope, very recent (April 2026 public beta), partly the Managed Agents version we wouldn't use.</div>
+
+  <div class="layer-num">L2</div>
+  <div class="layer-q">What are the alternatives?</div>
+  <div class="layer-find">Mem0 / Letta / Zep-Graphiti / Cognee / pgvector DIY. Brisen profile (few entities, deep history, audit-grade) fits Zep-Graphiti or DIY-Postgres best.</div>
+
+  <div class="layer-num">L3</div>
+  <div class="layer-q">What does Brisen already have?</div>
+  <div class="layer-find">~70% of cortex_state already built: capability_threads + capability_turns + feedback_ledger + signal_queue + ao_project_state + Citations API + autonomy_level routing.</div>
+
+  <div class="layer-num">L4</div>
+  <div class="layer-q">What does the orchestrator code already do?</div>
+  <div class="layer-find">chain_runner.py implements 6-step pipeline (qualify → plan → execute → verify → log → report) mapping almost 1-to-1 onto Cortex phases. Reframe: Cortex-3T = chain_runner + persistence + named formalization.</div>
+
+  <div class="layer-num">L5</div>
+  <div class="layer-q">What does one cycle on a real AO signal actually do?</div>
+  <div class="layer-find">Concrete simulation on alert #15725 ("В мае штраф 3 миллиона") — ~50 sec total, ~$0.08, 6 phases, full Citations API trail, Tier B-gated proposal in Director's hand within ~1 minute.</div>
+</div>
+
+<div class="principle">
+  Plus Director's design pivot: refresh-driven by Director, not by scheduler. Removes polling/auto-re-fire scope; replaced with single 🔄 Refresh button on the proposal card. Director-led freshness, production-data-led automation.
+</div>
+
+<h2>The 6-phase Cortex cycle (mapped onto existing Brisen code)</h2>
+
+<div class="phase-card">
+  <div class="phase-name">PHASE 1 · SENSE</div>
+  <div class="phase-title">Pull triggering signal + correlate with related signals (last 30d)</div>
+  <div class="phase-existing">Reuses: <code>signal_queue</code>, existing pipeline.py</div>
+</div>
+
+<div class="phase-card">
+  <div class="phase-name">PHASE 2 · LOAD</div>
+  <div class="phase-title">Load matter state + wiki + threads + recent activity</div>
+  <div class="phase-existing">Reuses: capability_runner.py 25+ loaders. <strong>NEW:</strong> 3 SQL queries pulling Director outbound + named-entity inbound + baker_actions (last 14d) — situational awareness extension.</div>
+</div>
+
+<div class="phase-card">
+  <div class="phase-name">PHASE 3 · REASON</div>
+  <div class="phase-title">Claude Opus call with cached context, hypothesis ranking, draft response</div>
+  <div class="phase-existing">Reuses: chain_runner._generate_plan, prompt cache (M0 PROMPT_CACHE_AUDIT_1). <strong>NEW prompt clause:</strong> "Check recent activity before proposing duplicates."</div>
+</div>
+
+<div class="phase-card">
+  <div class="phase-name">PHASE 4 · PROPOSE</div>
+  <div class="phase-title">Generate Tier-B proposal package: hypothesis + draft + actions + citations</div>
+  <div class="phase-existing">Reuses: Citations API (M0 PR #59). <strong>NEW:</strong> 4-button proposal card model.</div>
+</div>
+
+<div class="phase-card">
+  <div class="phase-name">PHASE 5 · ACT</div>
+  <div class="phase-title">Wait for Director Gold; on Approve, send response + execute internal actions</div>
+  <div class="phase-existing">Reuses: chain_runner._execute_plan, _notify_director, baker_actions audit. <strong>NEW:</strong> final freshness check on Approve.</div>
+</div>
+
+<div class="phase-card">
+  <div class="phase-name">PHASE 6 · ARCHIVE</div>
+  <div class="phase-title">Persist cycle, write feedback_ledger, update matter state</div>
+  <div class="phase-existing">Reuses: feedback_ledger (CHANDA §2 Leg 2), GOLD workflow (PR #66), ao_project_state, capability_threads.</div>
+</div>
+
+<h2>The two new Postgres tables</h2>
+
+<p>Additive, idempotent, follow existing migration patterns. UUID primary keys. JSONB payloads. CASCADE delete on parent reference. ~2 hours of migration work.</p>
+
+<div class="schema-block"><span class="comment">-- cortex_cycles: one row per Cortex reasoning cycle</span>
+<span class="kw">CREATE TABLE IF NOT EXISTS</span> cortex_cycles (
+  cycle_id           <span class="type">UUID</span> <span class="kw">PRIMARY KEY DEFAULT</span> uuid_generate_v4(),
+  matter_slug        <span class="type">TEXT</span> <span class="kw">NOT NULL</span>,
+  triggered_by       <span class="type">TEXT</span> <span class="kw">NOT NULL</span>,    <span class="comment">-- 'signal' / 'director' / 'refresh' / ...</span>
+  trigger_signal_id  <span class="type">BIGINT</span>,
+  started_at         <span class="type">TIMESTAMPTZ</span> <span class="kw">NOT NULL DEFAULT</span> NOW(),
+  completed_at       <span class="type">TIMESTAMPTZ</span>,
+  last_loaded_at     <span class="type">TIMESTAMPTZ</span> <span class="kw">NOT NULL DEFAULT</span> NOW(),
+  current_phase      <span class="type">TEXT</span> <span class="kw">NOT NULL DEFAULT</span> <span class="str">'sense'</span>,
+  status             <span class="type">TEXT</span> <span class="kw">NOT NULL DEFAULT</span> <span class="str">'in_flight'</span>,
+  proposal_id        <span class="type">UUID</span>,
+  director_action    <span class="type">TEXT</span>,                 <span class="comment">-- 'gold_approved' / ...</span>
+  feedback_ledger_id <span class="type">BIGINT</span>,
+  cost_tokens        <span class="type">INTEGER</span> <span class="kw">DEFAULT</span> <span class="str">0</span>,
+  cost_dollars       <span class="type">NUMERIC</span>(<span class="str">10</span>,<span class="str">4</span>) <span class="kw">DEFAULT</span> <span class="str">0</span>
+);
+
+<span class="comment">-- cortex_phase_outputs: per-phase artifacts within a cycle</span>
+<span class="kw">CREATE TABLE IF NOT EXISTS</span> cortex_phase_outputs (
+  output_id      <span class="type">UUID</span> <span class="kw">PRIMARY KEY DEFAULT</span> uuid_generate_v4(),
+  cycle_id       <span class="type">UUID</span> <span class="kw">NOT NULL REFERENCES</span> cortex_cycles(cycle_id) <span class="kw">ON DELETE CASCADE</span>,
+  phase          <span class="type">TEXT</span> <span class="kw">NOT NULL</span>,        <span class="comment">-- 'sense' / 'load' / 'reason' / ...</span>
+  phase_order    <span class="type">INT</span> <span class="kw">NOT NULL</span>,
+  artifact_type  <span class="type">TEXT</span> <span class="kw">NOT NULL</span>,
+  payload        <span class="type">JSONB</span> <span class="kw">NOT NULL</span>,
+  citations      <span class="type">JSONB</span> <span class="kw">DEFAULT</span> <span class="str">'[]'</span>::<span class="type">jsonb</span>,
+  created_at     <span class="type">TIMESTAMPTZ</span> <span class="kw">NOT NULL DEFAULT</span> NOW()
+);</div>
+
+<h2>The 4-button proposal card (V1 = Slack, later = Dashboard)</h2>
+
+<p>Same card model in every surface. Slack today via Block Kit. Email fallback via magic links. Dashboard tomorrow via native UI. Single endpoint <code>/cortex/cycle/{cycle_id}/action</code> handles all 4 actions.</p>
+
+<div class="card-mockup">
+  <div class="card-eyebrow">🟡 CORTEX PROPOSAL</div>
+  <div class="card-title">AO #15725 — Lilienmatt 2024 tax filing risk</div>
+  <div class="card-row"><strong>Confidence:</strong> 87% · <strong>Window:</strong> 5 business days</div>
+  <div class="card-row"><strong>Hypothesis:</strong> May 3M fine = late German 2024 filing penalty for Lilienmatt</div>
+  <div class="card-draft">Andrey, спасибо за heads-up — поднял Constantinos и Balazs в тот же день. Constantinos прислал Q1-Q3 FS уже сегодня утром, Q4 + tax docs до 29-го. До 30-го всё закроем.</div>
+  <div class="card-row"><strong>Internal actions:</strong> 3 queued · <strong>Citations:</strong> 5</div>
+  <div class="card-buttons">
+    <span class="btn btn-approve">✅ Approve</span>
+    <span class="btn btn-edit">✏️ Edit</span>
+    <span class="btn btn-refresh">🔄 Refresh</span>
+    <span class="btn btn-reject">❌ Reject</span>
+  </div>
+  <div class="card-meta">cycle_id: cyc_a4b... · cost: $0.08 · Tier B</div>
+</div>
+
+<table>
+  <tr><th>Button</th><th>Action</th></tr>
+  <tr><td>✅ Approve</td><td>Final freshness check (1s scan of last 30 min activity); if clean → execute Phase 5; else show warning</td></tr>
+  <tr><td>✏️ Edit</td><td>Open editor on draft; save edits; re-render card; cycle stays tier_b_pending</td></tr>
+  <tr><td>🔄 Refresh</td><td>Re-run Phase 2 + 3 with fresh data; replace card in place; update last_loaded_at</td></tr>
+  <tr><td>❌ Reject</td><td>Archive cycle status=rejected; capture optional reason; write feedback_ledger</td></tr>
+</table>
+
+<h2>What gets built — effort breakdown</h2>
+
+<table>
+  <tr><th>Component</th><th>Hours</th></tr>
+  <tr><td>cortex_cycles + cortex_phase_outputs migration</td><td>2</td></tr>
+  <tr><td>orchestrator/cortex_runner.py — formalize chain_runner phases + persistence</td><td>6</td></tr>
+  <tr><td>Phase 2 recent-activity loaders (3 SQL + prompt clause)</td><td>2</td></tr>
+  <tr><td>cortex_config table verify/create</td><td>2</td></tr>
+  <tr><td>Connect propose-phase → GOLD workflow (PR #66)</td><td>3</td></tr>
+  <tr><td>Tier B routing per cycle via capability_sets.autonomy_level</td><td>2</td></tr>
+  <tr><td>4-button proposal card + Slack Block Kit rendering</td><td>3</td></tr>
+  <tr><td>/cortex/cycle/{id}/action endpoint + handlers</td><td>2</td></tr>
+  <tr><td>Final freshness check on Approve</td><td>1</td></tr>
+  <tr><td>Director refresh-command pathway</td><td>1</td></tr>
+  <tr><td>Wire AO matter as first scope (sense source binding)</td><td>2</td></tr>
+  <tr><td>Tests on stub matter</td><td>4</td></tr>
+  <tr><td><strong>Total</strong></td><td><strong>~30 hours / ~4 days</strong></td></tr>
+</table>
+
+<h2>What is explicitly NOT in Stage 1</h2>
+
+<p>The following items remain open for Stage 2 and were NOT ratified in this session. Stage 2 design happens after Stage 1 ships and produces real production data.</p>
+
+<div class="deferred-list">
+  <ul>
+    <li><strong>Other matters beyond AO</strong> (MOVIE AM / NVIDIA / Corinthia / Hagenauer ingestion) — open question</li>
+    <li><strong>Model B integration</strong> (Cortex-3T running above existing Pattern-2 capabilities like AO PM) — open question</li>
+    <li><strong>Repair + Cortex optimization lanes</strong> in M2' — open question</li>
+    <li><strong>Polling / scheduled re-evaluation</strong> — Director-driven refresh proven sufficient for V1</li>
+    <li><strong>Auto re-fire on new related signal</strong> — replaced by manual refresh button</li>
+    <li><strong>Eval suite, model bumps, retention, trust audit</strong> — production data tells us what's needed</li>
+    <li><strong>Game Theory injection / Counterparty Game Advisor</strong> — AO+MOVIE manual injection already running</li>
+    <li><strong>Graphiti adoption</strong> (temporal knowledge graph layer) — evaluated later if production needs surface</li>
+    <li><strong>Anthropic Memory tool integration</strong> — Brisen has equivalent built; no value-add</li>
+    <li><strong>Dashboard UI for proposal cards</strong> — Slack rendering for V1; same model surfaces in Dashboard later with zero rewrite</li>
+  </ul>
+</div>
+
+<h2>To first real Cortex cycle on AO — calendar</h2>
+
+<table>
+  <tr><th>Window</th><th>What happens</th></tr>
+  <tr><td>Mon–Tue 2026-04-27 / 28</td><td>PR #67 WIKI_LINT_1 ships clean (B reviewing). AI Head A drafts BRIEF_CORTEX_3T_FORMALIZE_1 via /write-brief.</td></tr>
+  <tr><td>Wed 2026-04-29</td><td>Brief dispatch to B-code. Migration + cortex_runner.py begin.</td></tr>
+  <tr><td>Thu–Fri 2026-04-30 / 05-01</td><td>Phase 2 loaders + 4-button card + endpoint. Tests on stub matter.</td></tr>
+  <tr><td>Mon 2026-05-04</td><td>PR review + /security-review + merge.</td></tr>
+  <tr><td>Tue–Thu 2026-05-05 → 07</td><td>Wire AO matter scope. Run first cycle on signal #15725 (or fresh equivalent).</td></tr>
+  <tr><td>Fri 2026-05-08 (target)</td><td><strong>First real Cortex proposal lands in Director's Slack.</strong></td></tr>
+</table>
+
+<footer>
+  <p><strong>Sibling:</strong> <code>cortex3t-roadmap.html</code> (full 6-milestone canonical, 2026-04-25) — preserved for historical reference.</p>
+  <p><strong>Source spec:</strong> <code>baker-vault/_ops/ideas/2026-04-27-cortex-3t-formalize-spec.md</code></p>
+  <p><strong>Brief location (post-/write-brief):</strong> <code>15_Baker_Master/01_build/briefs/BRIEF_CORTEX_3T_FORMALIZE_1.md</code></p>
+  <p><strong>Session:</strong> RA-22 · 2026-04-27 · 5 layers of research, 1 ratified design.</p>
+</footer>
+
+</div>
+</body>
+</html>
