@@ -1,11 +1,17 @@
 {
   "version": 1,
-  "updated_at": "2026-04-25",
+  "updated_at": "2026-04-27",
   "folders": [
     {
       "name": "ARCHITECTURE",
       "slug": "architecture",
       "presentations": [
+        {
+          "title": "Cortex-3T \u2014 Stage 1 Simplified (Memory + First Cycle)",
+          "file": "cortex3t-roadmap-simplified-stage1.html",
+          "created": "2026-04-27",
+          "matter": "baker"
+        },
         {
           "title": "Cortex-3T \u2014 Canonical Production Roadmap",
           "file": "cortex3t-roadmap.html",
