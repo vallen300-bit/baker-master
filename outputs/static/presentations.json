@@ -1,19 +1,49 @@
 {
   "version": 1,
-  "updated_at": "2026-04-10",
+  "updated_at": "2026-04-27",
   "folders": [
+    {
+      "name": "ARCHITECTURE",
+      "slug": "architecture",
+      "presentations": [
+        {
+          "title": "Cortex-3T — Stage 1 Simplified (Memory + First Cycle)",
+          "file": "cortex3t-roadmap-simplified-stage1.html",
+          "created": "2026-04-27",
+          "matter": "baker"
+        },
+        {
+          "title": "Cortex-3T — Canonical Production Roadmap",
+          "file": "cortex3t-roadmap.html",
+          "created": "2026-04-25",
+          "matter": "baker"
+        },
+        {
+          "title": "Baker Team Setup — Lab / Build / Business + Worktree Map",
+          "file": "baker-team-setup.html",
+          "created": "2026-04-25",
+          "matter": "baker"
+        },
+        {
+          "title": "Baker System Architecture v5 — Legacy Baker (pre-Cortex T3)",
+          "file": "baker-v5.html",
+          "created": "2026-04-20",
+          "matter": "baker"
+        }
+      ]
+    },
     {
       "name": "AO",
       "slug": "ao",
       "presentations": [
         {
-          "title": "Hotel Stabilization \u2014 How Long Does It Take?",
+          "title": "Hotel Stabilization — How Long Does It Take?",
           "file": "hotel-stabilization.html",
           "created": "2026-04-10",
           "matter": "oskolkov"
         },
         {
-          "title": "\u0421\u0442\u0430\u0431\u0438\u043b\u0438\u0437\u0430\u0446\u0438\u044f \u043e\u0442\u0435\u043b\u044f \u2014 \u0421\u043a\u043e\u043b\u044c\u043a\u043e \u0432\u0440\u0435\u043c\u0435\u043d\u0438 \u043d\u0443\u0436\u043d\u043e? (\u0420\u0423\u0421)",
+          "title": "Стабилизация отеля — Сколько времени нужно? (РУС)",
           "file": "hotel-stabilization-ru.html",
           "created": "2026-04-10",
           "matter": "oskolkov"
@@ -25,13 +55,13 @@
       "slug": "nvidia",
       "presentations": [
         {
-          "title": "Brisen AI x NVIDIA x Corinthia \u2014 Partnership Strategy",
+          "title": "Brisen AI x NVIDIA x Corinthia — Partnership Strategy",
           "file": "partnership.html",
           "created": "2026-04-05",
           "matter": "nvidia"
         },
         {
-          "title": "VERTEX \u2014 The First NVIDIA Hotel Concept",
+          "title": "VERTEX — The First NVIDIA Hotel Concept",
           "file": "vertex-hotel.html",
           "created": "2026-04-05",
           "matter": "nvidia"
@@ -43,10 +73,22 @@
       "slug": "corinthia",
       "presentations": [
         {
-          "title": "Brisen Group x Corinthia \u2014 Partnership Proposal",
+          "title": "Brisen Group x Corinthia — Partnership Proposal",
           "file": "partnership.html",
           "created": "2026-04-08",
           "matter": "corinthia"
+        }
+      ]
+    },
+    {
+      "name": "MO VIENNA",
+      "slug": "mo-vienna",
+      "presentations": [
+        {
+          "title": "AUFTRAG — Wiener Werkstätte AI Atelier (Concept Brief v2)",
+          "file": "auftrag-concept-brief.html",
+          "created": "2026-04-26",
+          "matter": "movie"
         }
       ]
     }
