@@ -10,6 +10,22 @@
 
 ---
 
+## ⚠️ Amendment A1 (AI Head A cross-lane catch, 2026-04-28)
+
+**Defect:** original 1C draft has Phase 5 (act) call `gold_writer.append()` from cortex Phase 5 code. This will fail at runtime because `kbl/gold_writer.py:49 _check_caller_authorized()` walks the call stack with `inspect.stack()` and raises `CallerNotAuthorized` on any frame whose `__name__` starts with `cortex_*` or `kbl.cortex` — `orchestrator.cortex_runner` matches and trips the guard on EVERY Director Approve. The guard is intentional defense-in-depth (acknowledged at "Files NOT to touch" line 789) and Hybrid C V1 design (PR #66) — Cortex agent-drafted entries land in `## Proposed Gold (agent-drafted)` section via `kbl.gold_proposer.propose(ProposedGoldEntry)`, not via `gold_writer.append`.
+
+**Fix applied below:**
+- §"Solution" Phase 5 description (line 30) — `gold_writer.append()` → `gold_proposer.propose(ProposedGoldEntry)`
+- §"Implementation" `_write_gold_entries` (lines 535-562) — switch import + call shape; `ProposedGoldEntry` dataclass already includes `cortex_cycle_id: Optional[str]` field — clean linkage.
+- §"Function-signature verification" (line 803) — point B-code to `gold_proposer.propose` signature, not `gold_writer.append`.
+- §"Quality Checkpoints" #7 (line 829) — strengthen: `gold_proposer.propose` is the only authorized cortex-side write path; `gold_writer.append` always rejects from cortex modules (not "some test contexts").
+
+**Authority:** AI Head A 2026-04-28, salvaged from now-superseded `BRIEF_CORTEX_3T_FORMALIZE_1.md` EXPLORE pass at `kbl/gold_writer.py:49` ([Lesson #45 chained-endpoint contract](tasks/lessons.md) + [Lesson #51 Rule 0 retroactive validation](tasks/lessons.md)).
+
+**Director ratification stand:** Item 5 ratification of `_check_caller_authorized` as defense-in-depth (line 789) is the procedural sister to this fix — they're complementary, not conflicting. Procedural rule (cortex uses `gold_proposer`) + in-code guard (`gold_writer` rejects cortex) = Hybrid C V1 boundary preserved.
+
+---
+
 ## Context
 
 Sub-brief **1C of 3** — the interface + ops layer. 1A landed cycle persistence + Phase 1/2/6. 1B landed Phase 3 reasoning. 1C completes the cycle: Phase 4 produces a 4-button Slack proposal card with per-file Gold checkboxes; Phase 5 acts on Director's choice + propagates GOLD to curated knowledge files; APScheduler weekly matter-config drift job goes live; Step 29 DRY_RUN flag for log-only first cycle; Step 33 rollback script committed BEFORE Step 34-35 decommission of `ao_signal_detector` + `ao_project_state` (Director-consult cutover, not in this brief).
@@ -27,7 +43,7 @@ After 1A+1B, Cortex cycles complete to status='proposed' but produce nothing vis
 Six pieces:
 1. Phase 4 (propose) — render Slack Block Kit message with 4 action buttons (✅ Approve / ✏️ Edit / 🔄 Refresh / ❌ Reject) + per-file Gold checkboxes (per RA-23 Q2 ratification).
 2. New endpoint `POST /cortex/cycle/{id}/action` — receives Slack interactivity webhook, dispatches to button handlers.
-3. Phase 5 (act) — on Approve: final-freshness check + execute structured_actions + write GOLD entries via `gold_writer.append()` + propagate staged curated files to canonical wiki location via Mac Mini SSH-mirror.
+3. Phase 5 (act) — on Approve: final-freshness check + execute structured_actions + write GOLD **proposals** via `kbl.gold_proposer.propose(ProposedGoldEntry)` (NOT `gold_writer.append` — caller-authorized rejects cortex; see Amendment A1) + propagate staged curated files to canonical wiki location via Mac Mini SSH-mirror.
 4. APScheduler `_matter_config_drift_weekly_job` — Mon 11:00 UTC, mirrors `ai_head_weekly_audit_job` pattern, flags configs not updated >30d.
 5. Step 29 DRY_RUN flag — env var `CORTEX_DRY_RUN=true` causes Phase 5 to log-only (no Slack post, no GOLD writes, no curated propagation, no structured_actions execution); cycle row tagged `dry_run=true`. First production cycle on AO matter ships under DRY_RUN.
 6. Step 33 rollback script — `scripts/cortex_rollback_v1.sh` committed BEFORE Step 34-35 decommission. Restores `ao_signal_detector` direct trigger + `ao_project_state` Postgres reads. Director-only manual fire, <5min RTO target.
@@ -365,9 +381,9 @@ async def cortex_approve(*, cycle_id: str, body: dict) -> dict:
     for a in actions:
         logger.info(f"Cortex action [logged-only V1]: {a}")
 
-    # Write Gold entries (per-file checkbox respect)
+    # Write Gold proposals (per-file checkbox respect; via gold_proposer per Amendment A1)
     selected = body.get("selected_gold_files") or []
-    await _write_gold_entries(cycle_id=cycle_id, selected_files=selected)
+    await _write_gold_proposals(cycle_id=cycle_id, selected_files=selected)
 
     # Propagate staged curated → wiki/matters/<slug>/curated/ via Mac Mini SSH-mirror
     await _propagate_curated_via_macmini(cycle_id=cycle_id, matter_slug=cycle_data["matter_slug"])
@@ -532,34 +548,38 @@ async def _load_cycle(cycle_id: str) -> dict:
         store._put_conn(conn)
 
 
-async def _write_gold_entries(*, cycle_id: str, selected_files: list[str]) -> None:
-    """For each selected_file, build a GoldEntry + call gold_writer.append.
+async def _write_gold_proposals(*, cycle_id: str, selected_files: list[str]) -> None:
+    """For each selected_file, build a ProposedGoldEntry + call gold_proposer.propose.
 
-    EXPLORE: B-code MUST verify gold_writer.append signature (subagent map line 79).
-    GoldEntry fields: iso_date, topic, ratification_quote, background, resolution,
-    authority_chain, carry_forward (default 'none'), matter (Optional[str]).
+    Per Amendment A1: cortex_runner CANNOT call gold_writer.append — `_check_caller_authorized`
+    walks `inspect.stack()` and rejects any `cortex_*` / `kbl.cortex` frame. Use
+    `kbl.gold_proposer.propose(ProposedGoldEntry, matter=...)` which writes to the
+    `## Proposed Gold (agent-drafted)` section at the bottom of the Gold file.
+    Director ratifies by manually moving entries up — Hybrid C V1 design (PR #66).
+
+    EXPLORE: B-code MUST verify gold_proposer.propose signature at kbl/gold_proposer.py:32.
+    ProposedGoldEntry fields: iso_date, topic, proposed_resolution,
+    proposer (default 'cortex-3t'), cortex_cycle_id (Optional[str]), confidence (float).
     """
-    from kbl.gold_writer import GoldEntry, append
+    from kbl.gold_proposer import ProposedGoldEntry, propose
     cycle = await _load_cycle(cycle_id)
     matter_slug = cycle.get("matter_slug")
     today = datetime.now(timezone.utc).date().isoformat()
     for filename in selected_files:
-        # B-code: build GoldEntry from cycle.proposal_text + filename context
-        # V1: skeleton entry; LLM-extracted topic/resolution can be added in V2
-        entry = GoldEntry(
+        # B-code: build ProposedGoldEntry from cycle.proposal_text + filename context.
+        # V1: skeleton entry; LLM-extracted topic/proposed_resolution can be added in V2.
+        entry = ProposedGoldEntry(
             iso_date=today,
             topic=f"Cortex cycle {cycle_id[:8]} — {filename}",
-            ratification_quote="(Director approved via Cortex Phase 5 button)",
-            background="See cortex_phase_outputs for full proposal text.",
-            resolution=f"See {filename} for capability output.",
-            authority_chain=f"Director GOLD via Cortex cycle {cycle_id}",
-            carry_forward="none",
-            matter=matter_slug,
+            proposed_resolution=f"See {filename} for capability output. Director approved via Cortex Phase 5 button.",
+            proposer="cortex-3t",
+            cortex_cycle_id=cycle_id,
+            confidence=cycle.get("synthesis_confidence", 0.0),
         )
         try:
-            append(entry)
+            propose(entry, matter=matter_slug)
         except Exception as e:
-            logger.error(f"gold_writer.append failed for {filename}: {e}")
+            logger.error(f"gold_proposer.propose failed for {filename}: {e}")
 
 
 async def _propagate_curated_via_macmini(*, cycle_id: str, matter_slug: str) -> None:
@@ -800,7 +820,7 @@ EXPLORE: B-code MUST verify exact `op://` paths with Director or `op item list` 
 - **Literal pytest output mandatory:** Ship report MUST include literal `pytest tests/test_cortex_phase4_*.py tests/test_cortex_phase5_*.py tests/test_cortex_drift_audit.py -v` stdout. ≥35 tests. NO "by inspection."
 - **Function-signature verification (Lesson #44):** B-code MUST grep before coding:
   - `_safe_post_dm` in `triggers/ai_head_audit.py` (canonical Slack DM helper)
-  - `gold_writer.append` signature (subagent map line 79; verify `GoldEntry` fields)
+  - `gold_proposer.propose` signature at `kbl/gold_proposer.py:32` (verify `ProposedGoldEntry` fields: iso_date, topic, proposed_resolution, proposer, cortex_cycle_id, confidence). **DO NOT use `gold_writer.append`** — caller-authorized guard rejects cortex modules per Amendment A1.
   - `feedback_ledger` columns via `information_schema.columns`
   - `_register_jobs` in `triggers/embedded_scheduler.py:78` (mirror cron pattern)
   - `op://` paths (Director or `op item list` confirmation before committing rollback script)
@@ -826,7 +846,7 @@ EXPLORE: B-code MUST verify exact `op://` paths with Director or `op item list` 
 4. DRY_RUN flag respected in BOTH Phase 4 (no Slack post) AND Phase 5 (no execute/write)
 5. Rollback script has `set -euo pipefail` + explicit `confirm` arg requirement
 6. Rollback script has 4 explicit timestamps (start, env-update, redeploy, end)
-7. `gold_writer.append` calls wrap in try/except (caller-stack-guard may reject in some test contexts)
+7. `gold_proposer.propose` is the ONLY authorized cortex-side write path (per Amendment A1). `gold_writer.append` ALWAYS rejects cortex modules — never wrap-and-retry; if a frame deep in the stack hits `CallerNotAuthorized`, the boundary is correctly working and the call site is wrong. Wrap `gold_proposer.propose` in try/except for vault I/O errors only (file system, not authorization).
 8. Refresh button does NOT replicate cycle_id — same cycle, new proposal_id (track via cortex_phase_outputs rows)
 9. Slack interactivity HMAC verified before dispatching to handlers (or rely on `verify_api_key` if internal-only)
 10. Mac Mini SSH propagation has 30s subprocess timeout
