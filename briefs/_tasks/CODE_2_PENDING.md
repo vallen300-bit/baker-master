@@ -1,12 +1,18 @@
 ---
-status: IN_PROGRESS
+status: COMPLETE
 brief: briefs/BRIEF_CORTEX_PRE_REVIEW_GATE_2_HARDEN.md
+closed_at: 2026-04-29T02:05:00Z
+merged_pr: 80
+merge_commit: e910670f1e02906d389ae2f8398959c7fd471521
+verdict: PASS
+b1_review: "PASS 10/10 (PR #80 base, pre-harden)"
+ai_head_security_review: "1 MEDIUM race + 1 HIGH unfurl found pre-harden; both closed in commit 3d988e4a"
 trigger_class: HIGH
 dispatched_at: 2026-04-29T01:55:00Z
 dispatched_by: ai-head-a
-director_authorization: "A" (gate path) — A surfaced 2 blockers from /security-review + post-review analysis: (1) TOCTOU race in idempotency, (2) Slack unfurler GETs signed URLs on post → side-fire without Director tap
+director_authorization: "A" (gate path)
 predecessor_pr: 80
-predecessor_state: "PR #80 B1 PASS 10/10 + 7/7 tests + regression 35/35. /security-review found 1 MEDIUM (race, conf 9). A-additional finding: Slack auto-unfurl will GET the signed Yes/Skip URLs and fire record_decision + cycle without Director tapping — fire-on-post bug."
+predecessor_state: "Closed both blockers."
 goal: "Two surgical patches on top of cortex-pre-review-gate-1 branch, then re-clear /security-review and merge: (1) atomic conditional INSERT in record_decision, return bool, endpoint only fires BackgroundTask if claimed; (2) extend post_to_channel with unfurl_links/unfurl_media kwargs and have post_gate pass False/False."
 scope_summary:
   - "MOD triggers/cortex_pre_review_gate.py — record_decision returns bool, atomic INSERT WHERE NOT EXISTS, post_gate passes unfurl flags"
