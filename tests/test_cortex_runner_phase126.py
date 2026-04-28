@@ -96,6 +96,50 @@ def stub_phase2_loader(monkeypatch):
     return _stub
 
 
+@pytest.fixture(autouse=True)
+def _stub_phase3(monkeypatch, request):
+    """1B autouse: stub the 3 Phase-3 entry points + their store helpers.
+
+    Without this, the 1A-scope tests would hit the real anthropic client
+    + the real SentinelStoreBack (which transitively tries to init voyageai
+    in CI). We replace the entry points with deterministic no-ops so the
+    runner-level tests can verify Phase 6 archive + status transitions
+    without needing to re-test the inner Phase 3 modules.
+    """
+    # Skip if test explicitly opts out (none in this file currently)
+    if "no_phase3_stub" in request.keywords:
+        yield
+        return
+
+    from types import SimpleNamespace
+
+    async def _3a(**kw):
+        return SimpleNamespace(
+            summary="", signal_classification="other",
+            capabilities_to_invoke=[], reasoning_notes="",
+            cost_tokens=0, cost_dollars=0.0,
+        )
+
+    async def _3b(**kw):
+        return SimpleNamespace(
+            outputs=[], total_cost_tokens=0, total_cost_dollars=0.0,
+        )
+
+    async def _3c(**kw):
+        return SimpleNamespace(
+            proposal_text="", structured_actions=[],
+            cost_tokens=0, cost_dollars=0.0,
+        )
+
+    monkeypatch.setattr(
+        "orchestrator.cortex_phase3_reasoner.run_phase3a_meta_reason", _3a)
+    monkeypatch.setattr(
+        "orchestrator.cortex_phase3_invoker.run_phase3b_invocations", _3b)
+    monkeypatch.setattr(
+        "orchestrator.cortex_phase3_synthesizer.run_phase3c_synthesize", _3c)
+    yield
+
+
 def _all_sql(store: _FakeStore) -> str:
     """Concatenate every SQL string captured across every conn into one blob."""
     return " | ".join(q[0] for c in store.conns for q in c.cur.queries)
@@ -127,12 +171,16 @@ def test_cycle_id_is_uuid(fake_store, stub_phase2_loader):
     assert cycle.triggered_by == "director"
 
 
-def test_status_terminates_at_awaiting_reason_in_1a_scope(fake_store, stub_phase2_loader):
-    """1A: Phase 3-5 stubbed — status should land on 'awaiting_reason'."""
+def test_status_terminates_at_proposed_in_1b_scope(fake_store, stub_phase2_loader):
+    """1B: Phase 3 runs — status flips to 'proposed' after 3c synthesis.
+
+    Was 'awaiting_reason' under 1A; with 1B's reasoning Phase wired in,
+    the cycle now reaches 'proposed' (or 'failed' on Phase 3 exception).
+    """
     cycle = asyncio.run(
         runner.maybe_run_cycle(matter_slug="movie", triggered_by="cron")
     )
-    assert cycle.status == "awaiting_reason"
+    assert cycle.status == "proposed"
     assert cycle.current_phase == "archive"  # final phase before return
 
 
