@@ -1,18 +1,19 @@
 ---
-status: OPEN
+status: IN_PROGRESS
 brief: briefs/BRIEF_CORTEX_PHASE5_IDEMPOTENCY_1.md
 trigger_class: MEDIUM
-dispatched_at: 2026-04-28T14:50:00Z
+dispatched_at: 2026-04-28 14:50:00+00:00
 dispatched_by: ai-head-a
 prerequisite_pr: 74
 prerequisite_state: MERGED 2026-04-28T14:45:05Z (squash 97f26b1)
-claimed_at: null
-claimed_by: null
+claimed_at: '2026-04-28T14:52:00.560410+00:00'
+claimed_by: b2
 last_heartbeat: null
 blocker_question: null
 ship_report: null
 autopoll_eligible: false
-context_note: builder=b2 (App, fresh post-triage); reviewer=b3 (hottest Phase 5 context); blind-spot diversification per Director RA 2026-04-28T14:35Z
+context_note: builder=b2 (App, fresh post-triage); reviewer=b3 (hottest Phase 5 context);
+  blind-spot diversification per Director RA 2026-04-28T14:35Z
 ---
 
 # CODE_2_PENDING — B2 (App): CORTEX_PHASE5_IDEMPOTENCY_1 — 2026-04-28
