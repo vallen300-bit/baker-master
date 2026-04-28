@@ -1,104 +1,110 @@
 ---
 status: OPEN
-brief: briefs/BRIEF_CORTEX_3T_FORMALIZE_1B.md
+brief: briefs/BRIEF_CORTEX_3T_FORMALIZE_1C.md
 trigger_class: MEDIUM
-dispatched_at: 2026-04-28T07:15:00Z
+dispatched_at: 2026-04-28T07:55:00Z
 dispatched_by: ai-head-a
-prerequisite_pr: 71
-prerequisite_state: MERGED 2026-04-28T07:13:08Z (squash 1709483)
+prerequisite_pr: 72
+prerequisite_state: MERGED 2026-04-28T07:50:48Z (squash 8757ef7)
 claimed_at: null
 claimed_by: null
 last_heartbeat: null
 blocker_question: null
 ship_report: null
 autopoll_eligible: false
+routing_note: re-routed to b3 from original b2 plan (b2 in flight on AI Head B's lane)
 ---
 
-# CODE_3_PENDING — B3: CORTEX_3T_FORMALIZE_1B (Phase 3a/3b/3c) — 2026-04-28
+# CODE_3_PENDING — B3: CORTEX_3T_FORMALIZE_1C (Phase 4/5 + scheduler + dry-run + rollback) — 2026-04-28
 
-**Dispatcher:** AI Head A (sole orchestrator post-RA-retirement 2026-04-28)
+**Dispatcher:** AI Head A (sole orchestrator)
 **Working dir:** `~/bm-b3`
-**Brief:** [`briefs/BRIEF_CORTEX_3T_FORMALIZE_1B.md`](../BRIEF_CORTEX_3T_FORMALIZE_1B.md) (817 lines)
-**Branch:** `cortex-3t-formalize-1b` (cut from `main` post PR #71 merge `1709483`)
-**Estimated time:** ~12h
-**Trigger class:** MEDIUM (LLM API calls + cross-capability coordination + token-cost writes) → B1 second-pair-review pre-merge
+**Brief:** [`briefs/BRIEF_CORTEX_3T_FORMALIZE_1C.md`](../BRIEF_CORTEX_3T_FORMALIZE_1C.md) (914 lines, **Amendment A1 + A2 applied** — read both at top of brief)
+**Branch:** `cortex-3t-formalize-1c` (cut from `main` post PR #72 merge `8757ef7`)
+**Estimated time:** ~14h
+**Trigger class:** MEDIUM (new endpoint + Slack interactive + APScheduler + cross-capability state writes + decommission rollback) → B1 second-pair-review pre-merge
 
 ## §2 pre-dispatch busy-check (AI Head A verified)
 
-- **B3 mailbox prior state:** COMPLETE — PR #70 (BAKER_MCP_EXTENSION_1) merged `91d565fb`, PR #71 (CORTEX_3T_FORMALIZE_1A) merged `1709483`. IDLE.
+- **B3 mailbox prior state:** COMPLETE — PR #72 (CORTEX_3T_FORMALIZE_1B) merged `8757ef7` 2026-04-28T07:50:48Z. IDLE.
 - **Other B-codes:**
-  - B1: COMPLETE — PR #71 review APPROVE shipped (`27f800a` merged into main). IDLE.
-  - B2: in-flight on AUTOPOLL_PATCH_1 (B's lane, ~30-45min since dispatch); hands-off until B notifies A or B merges.
+  - B1: COMPLETE — PR #72 review APPROVE shipped (`bed8626` merged into main). IDLE.
+  - B2: in flight on AI Head B's lane (Director-confirmed Claude App opened); hands-off.
 - **Lesson #50 review-in-flight pre-check:** N/A (this is build, not review).
-- **Self-review block:** B3 cannot self-review own build → B1 second-pair-review on PR #71B per b1-trigger-class (MEDIUM).
+
+## Routing rationale (Director-accepted recommendation 2026-04-28T07:48Z)
+
+Original session plan was 1C → b2. b2 indefinitely on AI Head B's lane per Director update. Re-routed 1C → b3:
+- b3 has just-written context on Cortex internals (1A foundation + 1B reasoning) — exactly the layer 1C wires to.
+- Zero idle time vs queueing for b2.
+- b1 stays the independent reviewer regardless of builder.
 
 ## What you're building
 
-Sub-brief 1B of 3 (Cortex Stage 2 V1) per Director-ratified split 2026-04-28. 1A landed cycle persistence + Phase 1/2/6. **1B fills Phase 3 (the brain)** — 3a meta-reasoning + 3b specialist invocation + 3c synthesis. 1C will land Phase 4/5 + scheduler + dry-run + rollback.
+Sub-brief 1C of 3 (Cortex Stage 2 V1) — the interface + ops layer. Six pieces:
 
-3 new modules:
+1. **Phase 4 (propose)** — Slack Block Kit proposal card with 4 buttons (✅ ✏️ 🔄 ❌) + per-file Gold checkboxes (RA-23 Q2)
+2. **`POST /cortex/cycle/{id}/action`** new endpoint — Slack interactivity webhook → button handlers (signature verification mandatory)
+3. **Phase 5 (act)** — final-freshness check + execute structured_actions + GOLD via `kbl.gold_proposer.propose(ProposedGoldEntry)` (Amendment A1 — NOT `gold_writer.append`) + propagate curated files to wiki via Mac Mini SSH-mirror
+4. **APScheduler `_matter_config_drift_weekly_job`** — Mon 11:00 UTC, mirrors `ai_head_weekly_audit_job`, flags configs not updated >30d
+5. **DRY_RUN flag** — `CORTEX_DRY_RUN=true` → log-only first cycle (no Slack post, no GOLD, no propagation, no actions); `dry_run=true` on cycle row
+6. **Rollback script** — `scripts/cortex_rollback_v1.sh` committed BEFORE any decommission of `ao_signal_detector` / `ao_project_state`. <5min RTO target.
 
-1. `orchestrator/cortex_phase3_reasoner.py` (~200 LOC) — Phase 3a meta-reasoning + cap-5 enforcement (RA-23 Q4)
-2. `orchestrator/cortex_phase3_invoker.py` — Phase 3b specialist invocation (60s timeout / 2 retries / fail-forward per RA-23 Q5)
-3. `orchestrator/cortex_phase3_synthesizer.py` — Phase 3c synthesis → unified proposal text + cycle status `proposed`
+**Plus Amendment A2 in-scope** (folded from PR #71 B1 review Obs #1, Director RA accepted):
+- Wire `triggers/cortex_pipeline.maybe_dispatch(signal_id, matter_slug)` after the `signal_queue` INSERT commits at `kbl/bridge/alerts_to_signal.py:495`.
+- Env-flag-gated: `CORTEX_PIPELINE_ENABLED=true` (default false until DRY_RUN passes).
+- Try/except wrap: dispatch failures must NOT block `alerts_to_signal` write path.
+- Add `tests/test_alerts_to_signal_cortex_dispatch.py` — 2 minimum tests (flag-off no-op, flag-on dispatch failure no-block).
 
-Plus modify `orchestrator/cortex_runner.py` to replace 1A's Phase 3 stub with real 3a→3b→3c calls. Cost metric (`cost_tokens`/`cost_dollars`) accumulates across phases; persisted at Phase 6 archive (column already wired by 1A).
+## NOT in scope (PR #72 advisory observations — backlog)
 
-**Anthropic Memory dead per Director 2026-04-28** — uses Claude Opus 4.7 + existing `orchestrator.gemini_client.call_pro()` only.
+B1's PR #72 review surfaced 3 advisory observations; **all 3 backlogged per Director RA expected** — do NOT fold into 1C scope:
+1. Structured-extra logging upgrade (`logger.error(..., extra={cycle_id, phase, error_class})` vs current f-string) — folded into parked Slack alerting brief in vault `_ops/ideas/2026-04-28-cortex-archive-failure-alerting.md`. Don't touch in 1C.
+2. Brief-language clarification (status vs current_phase QC#9 wording) — note-only, no code change. Don't touch in 1C.
+3. 3a/3c bypass canonical Anthropic-helper layer — parked separately for post-V1 refactor brief. Don't touch in 1C.
 
-## Anchors from PR #71 (1A) shipped state
+## Files Modified (per brief §"Files Modified")
 
-- `orchestrator/cortex_runner.py` Phase 3 stub: status `awaiting_reason` after Phase 2; this is your handoff point.
-- `orchestrator/cortex_phase2_loaders.py` returns `phase2_load_context` dict — your Phase 3a input.
-- `cortex_cycles` row exists per cycle (created Phase 1); `cortex_phase_outputs` rows persist per phase.
-- B3's EXPLORE corrections (Lesson #44 anchor): `kbl/bridge/alerts_to_signal.py:495` is the real INSERT; `email_messages.primary_matter` doesn't exist (JOIN through `signal_queue`); `sent_emails.body` doesn't exist (use `body_preview`); `_ensure_*_table` signature is `(self)` not `(self, cur)`.
+- `orchestrator/cortex_phase4_proposal.py` — new
+- `orchestrator/cortex_phase5_act.py` — new
+- `orchestrator/cortex_runner.py` — wire Phase 4/5 calls + Amendment A2 wire-up at alerts_to_signal.py
+- `dashboard.py` (or new `endpoints/cortex_action.py`) — `POST /cortex/cycle/{id}/action`
+- `kbl/bridge/alerts_to_signal.py` — Amendment A2 call-site wire
+- `triggers/cortex_pipeline.py` — Amendment A2 dispatch logic
+- `scripts/cortex_rollback_v1.sh` — new
+- New scheduler job + tests
 
-## B1 advisory observations from PR #71 review (read before starting)
+## Files NOT to Touch
 
-Three non-blocking observations B1 surfaced; **#3 is in-scope for 1B**, others are forwarded for context:
-
-1. **Obs #1 (1C scope)** — `triggers/cortex_pipeline.py` exists but call-site at `kbl/bridge/alerts_to_signal.py:495` is not wired. **NOT 1B scope** — flagged for 1C explicit checklist.
-2. **Obs #2 (1B + 1C)** — Phase 6 archive errors are swallowed; if Phase 1/2 fails AND Phase 6 also fails, cycle row keeps stale `in_flight` status. **For 1B:** when wiring Phase 3 → cycle status updates, ensure structured logging (logger.error with `cycle_id`, `phase`, `error_class`) on archive-self-failure path. Do NOT attempt to add Slack alerts in 1B (deferred to ops sentinel).
-3. **Obs #3 (1B in-scope)** — Phase 1 INSERT pre-generates `cycle_id` in Python, bypassing migration's `DEFAULT uuid_generate_v4()`. **For 1B:** use the cycle_id passed in (already-generated by Phase 1) — do NOT re-generate or rely on DB default. Conceptual cleanup deferred to backlog.
+Per brief §"Files NOT to touch" — `kbl/gold_writer.py` (caller-authorized boundary, defense-in-depth), 1B Phase 3 modules (cortex_phase3_*), 1A migrations + bootstrap, Phase 6 archive code, sentinel / dispatch coordination, 7 backlog-noted obs (see "NOT in scope" above).
 
 ## Ship gate (literal pytest mandatory — Lesson #47)
 
 ```bash
 cd ~/bm-b3
-pytest tests/test_cortex_phase3_reasoner.py tests/test_cortex_phase3_invoker.py tests/test_cortex_phase3_synthesizer.py tests/test_cortex_runner_phase3.py -v 2>&1 | tail -50
+pytest tests/test_cortex_phase4_proposal.py tests/test_cortex_phase5_act.py tests/test_cortex_action_endpoint.py tests/test_alerts_to_signal_cortex_dispatch.py tests/test_cortex_rollback.py -v 2>&1 | tail -50
+pytest tests/test_cortex_*.py tests/test_alerts_to_signal*.py -v 2>&1 | tail -10  # full regression
 ```
 
-Paste literal stdout into ship report. **All new tests must pass + 1A's 31/31 must still pass** (run full `pytest tests/test_cortex_*.py` to confirm no regression). NO "by inspection" (Lesson #47).
+Paste literal stdout into ship report. **All new tests must pass + 1A's 31/31 + 1B's 48/48 must still pass** (full cortex regression). NO "by inspection" (Lesson #47).
 
 ## /security-review (Lesson #52 mandatory)
 
-After B1 approves your PR, AI Head A runs `/security-review` skill in parallel before Tier-A merge. Both verdicts (B1 + AI Head A) gate the merge.
+After B1 approves your PR, AI Head A runs `/security-review` skill in parallel. Both verdicts (B1 + AI Head A) gate the merge. Trigger class MEDIUM = B1 second-pair-review per `_ops/ideas/2026-04-24-b1-situational-review-trigger.md`. **Note:** new endpoint + Slack signature verification = security-sensitive surface; A will scrutinize hard.
 
 ## Self-PR rule reminder
 
-This branch is on `vallen300-bit/baker-master` (not a fork). Same canonical pattern as PR #67/#69/#70/#71: open PR, post `/security-review` verdict as PR comment (formal APPROVE blocked by self-PR rule), AI Head A Tier-A direct squash-merge after B1 + A both clear.
-
-## Files Modified (per brief §"Files Modified")
-
-- `orchestrator/cortex_phase3_reasoner.py` — new (Phase 3a)
-- `orchestrator/cortex_phase3_invoker.py` — new (Phase 3b)
-- `orchestrator/cortex_phase3_synthesizer.py` — new (Phase 3c)
-- `orchestrator/cortex_runner.py` — replace Phase 3 stub from 1A
-- `tests/test_cortex_phase3_*.py` — new test files
-
-## Files NOT to Touch
-
-Per brief §"Files NOT to touch" — `kbl/gold_writer.py`, `kbl/gold_proposer.py` (1C scope), `kbl/bridge/alerts_to_signal.py` (1C scope per Obs #1), `triggers/cortex_pipeline.py` call-site activation (1C scope), all production capability_sets / sentinel / dispatch coordination code.
+Same canonical pattern as PR #67/#69/#70/#71/#72: open PR, post `/security-review` verdict as PR comment (formal APPROVE blocked by self-PR rule), AI Head A Tier-A direct squash-merge after B1 + A both clear.
 
 ## Process
 
 Per brief §"Process" + canonical PR pattern:
 1. `git checkout main && git pull -q`
-2. `git checkout -b cortex-3t-formalize-1b`
-3. Build per Fix/Feature 1-4
-4. Run literal pytest, capture stdout
-5. Push branch, open PR with title `CORTEX_3T_FORMALIZE_1B: Phase 3a/3b/3c (reason / invoke / synthesize)`
-6. Write ship report at `briefs/_reports/B3_pr<N>_cortex_3t_formalize_1b_20260428.md`
+2. `git checkout -b cortex-3t-formalize-1c`
+3. Build per Fix/Feature 1-6 + Amendment A2
+4. Run literal pytest (new + regression), capture stdout
+5. Push branch, open PR with title `CORTEX_3T_FORMALIZE_1C: Phase 4/5 + scheduler + dry-run + rollback`
+6. Write ship report at `briefs/_reports/B3_pr<N>_cortex_3t_formalize_1c_20260428.md`
 7. Notify A in chat — A dispatches B1 second-pair-review + runs `/security-review`
 
 ## Co-Authored-By
