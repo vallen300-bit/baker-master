@@ -1,5 +1,5 @@
 ---
-status: OPEN
+status: BLOCKED
 brief: cortex_v1_dry_run_cycle_1
 trigger_class: HIGH
 dispatched_at: 2026-04-28T18:05:00Z
@@ -8,11 +8,16 @@ director_authorization: 2026-04-28T~18:00Z "now"
 target_matter_slug: oskolkov
 target_plan_section: §2.1 (manual director-question trigger)
 prerequisite_state: §1 cleared (deploy dep-d7of8n84un4s73bn2rb0 live; CORTEX_DRY_RUN=true / CORTEX_PIPELINE_ENABLED=false / CORTEX_LIVE_PIPELINE=true verified; matter_config_drift_weekly next_run 2026-05-04T11:00 UTC)
-claimed_at: null
-claimed_by: null
-last_heartbeat: null
-blocker_question: null
-ship_report: null
+claimed_at: 2026-04-28T18:05:00Z
+claimed_by: b3
+last_heartbeat: 2026-04-28T18:30:00Z
+blocker_question: "Phase 3a/3c hit pre-existing 1B import defect (Obs #3 from PR #72 review) — `from orchestrator import config` ImportErrors. Fix in PR #77 (LOW trigger). After A merges, B3 re-fires cycle 1."
+ship_report: briefs/_reports/B3_dry_run_cycle_1_20260428.md
+verdict: BLOCKED
+cycle_id_attempt_1: 0e503e5e-f2e5-461a-acef-9f2482f6f2ee
+cycle_status_attempt_1: "failed (graceful — Phase 6 archive committed, $0.00 spend)"
+fix_pr: 77
+fix_pr_url: https://github.com/vallen300-bit/baker-master/pull/77
 autopoll_eligible: false
 ---
 
