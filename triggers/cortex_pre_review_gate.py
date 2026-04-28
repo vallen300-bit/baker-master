@@ -24,6 +24,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import logging
 import os
 import time
@@ -120,42 +121,64 @@ def already_decided(signal_id: int) -> Optional[str]:
         return None
 
 
-def record_decision(*, signal_id: int, action: str, matter_slug: str) -> None:
-    """Insert a baker_actions row for the gate decision.
+def record_decision(*, signal_id: int, action: str, matter_slug: str) -> bool:
+    """Atomically claim the decision row for ``signal_id`` in baker_actions.
 
-    Idempotent: caller should already_decided() check first; this writes
-    unconditionally. Failures are logged + swallowed (audit best-effort).
+    Returns True if THIS call inserted the row (i.e. claimed the decision),
+    False if a concurrent call already claimed it (or DB unavailable / error).
 
-    Uses parameterized JSON to avoid injection from matter_slug. (psycopg2
-    will escape the string; we do not f-string user data into SQL.)
+    The caller MUST check the return value and skip the cycle fire when False.
+    This closes the TOCTOU race between ``already_decided()`` and the prior
+    plain INSERT (CORTEX_PRE_REVIEW_GATE_2 — security-review confidence 9
+    blocker). Race surface includes:
+      - iPhone double-tap on slow 4G (perceived non-response → user re-taps)
+      - Slack URL preview unfurl GETting the link server-side
+      - Any second-tap happening before the first completes
+
+    Atomicity: ``INSERT ... SELECT ... WHERE NOT EXISTS ... RETURNING id``
+    is a single statement. Postgres serializes concurrent attempts against
+    the same target_task_id at row-lock level. The losing INSERT inserts no
+    row; ``RETURNING id`` produces no row → ``cur.fetchone()`` returns None.
+
+    Uses ``json.dumps`` for payload so matter_slug / action cannot SQL-inject
+    via curly-brace embedding.
     """
     try:
         from memory.store_back import SentinelStoreBack
-        import json as _json
         store = SentinelStoreBack._get_global_instance()
         conn = store._get_conn()
         if not conn:
-            return
+            return False
         try:
             cur = conn.cursor()
-            payload_json = _json.dumps({
+            payload_json = json.dumps({
                 "signal_id": int(signal_id),
                 "matter_slug": str(matter_slug),
                 "action": str(action),
             })
             cur.execute(
-                "INSERT INTO baker_actions (action_type, target_task_id, payload, "
-                "trigger_source, success) VALUES (%s, %s, %s::jsonb, %s, %s)",
+                "INSERT INTO baker_actions "
+                "(action_type, target_task_id, payload, trigger_source, success) "
+                "SELECT %s, %s, %s::jsonb, %s, %s "
+                "WHERE NOT EXISTS ("
+                "    SELECT 1 FROM baker_actions "
+                "    WHERE target_task_id = %s "
+                "    AND action_type IN ('cortex:gate:approved','cortex:gate:skipped')"
+                ") "
+                "RETURNING id",
                 (
                     f"cortex:gate:{action}",
                     str(signal_id),
                     payload_json,
                     "cortex_pre_review_gate",
                     True,
+                    str(signal_id),
                 ),
             )
+            row = cur.fetchone()
             conn.commit()
             cur.close()
+            return row is not None  # True if INSERT actually wrote a row
         except Exception:
             try:
                 conn.rollback()
@@ -166,6 +189,7 @@ def record_decision(*, signal_id: int, action: str, matter_slug: str) -> None:
             store._put_conn(conn)
     except Exception as e:
         logger.error("record_decision insert failed signal_id=%s: %s", signal_id, e)
+        return False
 
 
 def _signal_preview(signal_id: int) -> str:
@@ -242,7 +266,16 @@ def post_gate(*, signal_id: int, matter_slug: str) -> bool:
 
     try:
         from outputs.slack_notifier import post_to_channel
-        return bool(post_to_channel(DIRECTOR_DM_CHANNEL, text))
+        # CORTEX_PRE_REVIEW_GATE_2 (Blocker 2): suppress Slack URL unfurling.
+        # The gate URLs are *side-effecting GETs* — Slack's link-preview
+        # fetcher (Slackbot-LinkExpanding) will GET each URL the moment we
+        # post the message, which would auto-fire record_decision + cycle
+        # before the Director ever taps. Both unfurl flags must be False.
+        return bool(post_to_channel(
+            DIRECTOR_DM_CHANNEL, text,
+            unfurl_links=False,
+            unfurl_media=False,
+        ))
     except Exception as e:
         logger.error("post_gate Slack post failed signal_id=%s: %s", signal_id, e)
         return False

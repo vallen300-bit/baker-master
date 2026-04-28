@@ -148,7 +148,10 @@ def test_gate_decide_endpoint_approve_flow(monkeypatch):
     record_calls = []
 
     def _fake_record(*, signal_id, action, matter_slug):
+        # CORTEX_PRE_REVIEW_GATE_2: record_decision now returns bool. True =
+        # "this caller claimed the row" → endpoint proceeds to fire cycle.
         record_calls.append((signal_id, action, matter_slug))
+        return True
 
     with patch(
         "triggers.cortex_pre_review_gate.already_decided", return_value=None,
@@ -175,3 +178,134 @@ def test_gate_decide_endpoint_approve_flow(monkeypatch):
     assert "Cycle started" in resp.text
     assert len(record_calls) == 1
     assert record_calls[0] == (999, "approve", "oskolkov")
+
+
+# ================================================================
+# CORTEX_PRE_REVIEW_GATE_2_HARDEN — atomic claim + Slack unfurl off
+# ================================================================
+
+# ----------------------------------------------------------------
+# Test 8 — atomic claim: first call wins, second call loses
+# ----------------------------------------------------------------
+
+def test_record_decision_claim_then_loser(monkeypatch):
+    """First record_decision returns True (claimed via INSERT...RETURNING).
+    Second concurrent call for same signal_id returns False (lost the race)."""
+    import triggers.cortex_pre_review_gate as g
+
+    # Single mock cursor whose fetchone returns: 1st call → row tuple (claim),
+    # 2nd call → None (NOT EXISTS predicate fired, no row inserted).
+    fake_cur = MagicMock()
+    fake_cur.fetchone.side_effect = [(1,), None]
+    fake_conn = MagicMock()
+    fake_conn.cursor.return_value = fake_cur
+
+    fake_store = MagicMock()
+    fake_store._get_conn.return_value = fake_conn
+    fake_store._put_conn = MagicMock()
+
+    with patch(
+        "memory.store_back.SentinelStoreBack._get_global_instance",
+        return_value=fake_store,
+    ):
+        first = g.record_decision(
+            signal_id=42, action="approve", matter_slug="oskolkov",
+        )
+        second = g.record_decision(
+            signal_id=42, action="approve", matter_slug="oskolkov",
+        )
+
+    assert first is True, "first call MUST claim the decision row"
+    assert second is False, "second call MUST lose the race (no row inserted)"
+
+
+# ----------------------------------------------------------------
+# Test 9 — race-loser at endpoint level does NOT fire the cycle
+# ----------------------------------------------------------------
+
+def test_gate_decide_endpoint_race_loser_does_not_fire_cycle(monkeypatch):
+    """Endpoint must NOT schedule the BackgroundTask when record_decision
+    returns False (race lost). This is the core mitigation against double-fire
+    of the $4 cycle (CORTEX_PRE_REVIEW_GATE_2 Blocker 1)."""
+    monkeypatch.setenv("CORTEX_GATE_SECRET", "test-secret-32-characters-long-XX")
+    import importlib
+    import triggers.cortex_pre_review_gate as g
+    importlib.reload(g)
+
+    from fastapi.testclient import TestClient
+    from outputs.dashboard import app
+
+    exp = int(time.time()) + 3600
+    tok = g.sign_token(signal_id=999, action="approve", expires_at=exp)
+
+    cycle_fire_mock = AsyncMock()
+
+    with patch(
+        "triggers.cortex_pre_review_gate.already_decided", return_value=None,
+    ), patch(
+        "triggers.cortex_pre_review_gate.lookup_matter_slug",
+        return_value="oskolkov",
+    ), patch(
+        # Loser path: record_decision returns False (concurrent caller won).
+        "triggers.cortex_pre_review_gate.record_decision", return_value=False,
+    ), patch(
+        "outputs.dashboard.maybe_run_cycle", new=cycle_fire_mock,
+    ):
+        client = TestClient(app)
+        resp = client.get(
+            f"/api/cortex/gate/decide"
+            f"?signal_id=999&action=approve&exp={exp}&token={tok}",
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert "Already decided" in resp.text, (
+        "Race-loser MUST be told 'Already decided' rather than 'Cycle started'"
+    )
+    # The actual mitigation: BackgroundTask did NOT call maybe_run_cycle.
+    # If background_tasks.add_task fired with the loser, this would have
+    # been awaited inside the TestClient's lifespan exit.
+    cycle_fire_mock.assert_not_awaited()
+
+
+# ----------------------------------------------------------------
+# Test 10 — post_gate disables Slack URL unfurl on the gate DM
+# ----------------------------------------------------------------
+
+def test_post_gate_disables_slack_unfurl(monkeypatch):
+    """post_gate MUST call post_to_channel with unfurl_links=False AND
+    unfurl_media=False. Closes Blocker 2 (Slackbot-LinkExpanding GETs the
+    signed Yes/Skip URLs the moment we post the message → would auto-fire
+    record_decision + cycle without Director ever tapping)."""
+    monkeypatch.setenv("CORTEX_GATE_SECRET", "test-secret-32-characters-long-XX")
+    import importlib
+    import triggers.cortex_pre_review_gate as g
+    importlib.reload(g)
+
+    captured: dict = {}
+
+    def _fake_post(channel, text, *, unfurl_links=None, unfurl_media=None):
+        captured["channel"] = channel
+        captured["text"] = text
+        captured["unfurl_links"] = unfurl_links
+        captured["unfurl_media"] = unfurl_media
+        return True
+
+    with patch(
+        "triggers.cortex_pre_review_gate.already_decided", return_value=None,
+    ), patch(
+        "triggers.cortex_pre_review_gate._signal_preview", return_value="preview",
+    ), patch(
+        "outputs.slack_notifier.post_to_channel", side_effect=_fake_post,
+    ):
+        ok = g.post_gate(signal_id=42, matter_slug="oskolkov")
+
+    assert ok is True
+    assert captured["unfurl_links"] is False, (
+        "MUST suppress unfurl_links — Slack's URL preview fetcher will GET "
+        "every link in a posted message; our gate URLs are side-effecting "
+        "GETs and would auto-fire the cycle without Director taps."
+    )
+    assert captured["unfurl_media"] is False, (
+        "MUST suppress unfurl_media for symmetry (defense in depth — any "
+        "future media-link addition gets the same protection)."
+    )

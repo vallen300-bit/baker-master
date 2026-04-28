@@ -4216,10 +4216,24 @@ async def cortex_gate_decide(
             status_code=404,
         )
 
-    # 4. Audit the decision (inside baker_actions).
-    record_decision(signal_id=signal_id, action=action, matter_slug=matter_slug)
+    # 4. Atomically claim the decision row (CORTEX_PRE_REVIEW_GATE_2 — closes
+    #    the TOCTOU race between the prior already_decided() read above and
+    #    the INSERT below). record_decision returns False if a concurrent
+    #    request — including a Slackbot-LinkExpanding GET, an iPhone
+    #    double-tap, or a tab-reload — already won the race. We MUST NOT
+    #    fire the BackgroundTask in that case (would trigger 2× $4 cycles).
+    claimed = record_decision(
+        signal_id=signal_id, action=action, matter_slug=matter_slug,
+    )
+    if not claimed:
+        return HTMLResponse(
+            f"<h1>Already decided</h1>"
+            f"<p>Signal {signal_id}: another decision was recorded "
+            f"simultaneously.</p>",
+            status_code=200,
+        )
 
-    # 5. Branch on action.
+    # 5. Branch on action — only reached if THIS call won the race.
     if action == "approve":
         # Fire cycle in background — release HTTP response immediately so the
         # Director's browser tab does not hang for 4-5 minutes.
