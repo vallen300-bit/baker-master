@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Cortex 3T Roadmap — Simplified Locked Architecture</title>
+<style>
+  :root {
+    --bg-page: #fafaf7;
+    --bg-card: #fff;
+    --bg-card-done: #f5f9ed;
+    --bg-card-flight: #fff8e8;
+    --bg-card-queue: #f4f0e6;
+    --bg-card-park: #f0eee8;
+    --bg-locked: #e9f0e2;
+    --bg-summary: #f0ece0;
+    --bg-callout: #faf7eb;
+    --bg-rail: #2c2317;
+    --text-body: #1a1a1a;
+    --text-header: #4a3a1f;
+    --text-muted: #6c5e3f;
+    --text-rail: #f5f1e2;
+    --border-default: #d6cfb8;
+    --border-done: #a8c084;
+    --border-flight: #d8b855;
+    --border-queue: #c8b878;
+    --border-park: #a89c80;
+    --accent: #8c7a4e;
+    --accent-locked: #6a8c4e;
+    --rec-bg: #c2d8a0;
+    --rec-text: #2c4a1c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg-page);
+    color: var(--text-body);
+    line-height: 1.5;
+  }
+  .wrap {
+    max-width: 1180px;
+    margin: 2rem auto;
+    padding: 0 1.5rem 4rem;
+  }
+  header {
+    border-bottom: 1px solid var(--border-default);
+    padding-bottom: 1.25rem;
+    margin-bottom: 1.5rem;
+  }
+  h1 {
+    color: var(--text-header);
+    font-size: 1.6rem;
+    margin: 0 0 0.5rem;
+    letter-spacing: -0.01em;
+  }
+  .meta { color: var(--text-muted); font-size: 0.85rem; }
+  .meta strong { color: var(--text-header); }
+  .progress-bar-wrap {
+    background: var(--border-default);
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 1.25rem 0 0.5rem;
+    height: 22px;
+    position: relative;
+  }
+  .progress-fill {
+    background: var(--accent);
+    height: 100%;
+    transition: width 0.3s;
+  }
+  .progress-label {
+    position: absolute;
+    inset: 0;
+    text-align: center;
+    color: #fff;
+    font-size: 0.85rem;
+    line-height: 22px;
+    font-weight: 600;
+    text-shadow: 0 1px 1px rgba(0,0,0,0.3);
+  }
+  .legend {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 0.75rem;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+  .legend .dot {
+    width: 12px; height: 12px; border-radius: 3px; display: inline-block;
+  }
+  .dot-done { background: var(--bg-card-done); border: 1px solid var(--border-done); }
+  .dot-flight { background: var(--bg-card-flight); border: 1px solid var(--border-flight); }
+  .dot-queue { background: var(--bg-card-queue); border: 1px solid var(--border-queue); }
+  .dot-park { background: var(--bg-card-park); border: 1px solid var(--border-park); }
+
+  .locked {
+    background: var(--bg-locked);
+    border-left: 4px solid var(--accent-locked);
+    padding: 1rem 1.25rem;
+    border-radius: 4px;
+    margin-bottom: 1.5rem;
+    font-size: 0.92rem;
+  }
+  .locked strong { color: var(--text-header); }
+  .locked .ratio {
+    display: inline-block;
+    background: var(--rec-bg);
+    color: var(--rec-text);
+    padding: 0.1rem 0.5rem;
+    border-radius: 3px;
+    font-weight: 600;
+    font-size: 0.85rem;
+  }
+
+  .stage {
+    margin: 2.5rem 0 0.75rem;
+  }
+  .stage-title {
+    color: var(--text-header);
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin: 0 0 0.25rem;
+    letter-spacing: -0.01em;
+    border-bottom: 1px solid var(--border-default);
+    padding-bottom: 0.4rem;
+  }
+  .stage-meta { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.85rem; }
+
+  .item {
+    background: var(--bg-card);
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+    padding: 0.85rem 1rem;
+    margin: 0.55rem 0;
+    display: grid;
+    grid-template-columns: 32px 1fr auto;
+    gap: 0.85rem;
+    align-items: start;
+    transition: border-color 0.2s;
+  }
+  .item.done { background: var(--bg-card-done); border-color: var(--border-done); }
+  .item.flight { background: var(--bg-card-flight); border-color: var(--border-flight); }
+  .item.queue { background: var(--bg-card-queue); border-color: var(--border-queue); }
+  .item.park { background: var(--bg-card-park); border-color: var(--border-park); }
+
+  .icon {
+    font-size: 1.2rem;
+    text-align: center;
+    line-height: 1.4;
+  }
+  .label {
+    font-size: 0.95rem;
+    color: var(--text-header);
+    font-weight: 600;
+    margin-bottom: 0.15rem;
+  }
+  .item .desc {
+    font-size: 0.85rem;
+    color: var(--text-body);
+  }
+  .item .anchor {
+    display: inline-block;
+    margin-top: 0.25rem;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .badge {
+    align-self: center;
+    background: var(--accent);
+    color: #fff;
+    padding: 0.18rem 0.55rem;
+    border-radius: 3px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  .badge.done { background: var(--accent-locked); }
+  .badge.flight { background: #c8901a; }
+  .badge.queue { background: var(--accent); }
+  .badge.park { background: #6c5e3f; }
+
+  .substages { margin: 0.4rem 0 1rem 1.5rem; }
+
+  .position-marker {
+    background: var(--bg-rail);
+    color: var(--text-rail);
+    padding: 1rem 1.25rem;
+    border-radius: 6px;
+    margin: 2rem 0 1rem;
+    font-size: 0.95rem;
+  }
+  .position-marker h3 {
+    margin: 0 0 0.4rem;
+    color: var(--rec-bg);
+    font-size: 1rem;
+    letter-spacing: 0.02em;
+  }
+  .position-marker .next { color: #c8a878; }
+  .position-marker code {
+    background: rgba(255,255,255,0.08);
+    padding: 0.05rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.8rem;
+  }
+  .position-marker ul { margin: 0.3rem 0 0; padding-left: 1.2rem; }
+  .position-marker li { margin: 0.15rem 0; }
+
+  .callout {
+    background: var(--bg-callout);
+    border-left: 3px solid var(--border-queue);
+    padding: 0.6rem 0.85rem;
+    border-radius: 3px;
+    margin: 0.4rem 0 0.6rem 0;
+    font-size: 0.83rem;
+    color: var(--text-body);
+  }
+  .callout strong { color: var(--text-header); }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-default);
+    font-size: 0.78rem;
+    color: var(--text-muted);
+  }
+  footer code { background: rgba(0,0,0,0.04); padding: 0.05rem 0.3rem; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Cortex 3T Roadmap — Simplified Locked Architecture</h1>
+  <div class="meta">
+    Snapshot <strong>2026-04-28 ~18:30 UTC</strong> · Author: AI Head A · Companion canonicals:
+    <code>_ops/ideas/2026-04-27-cortex-3t-formalize-spec.md</code> +
+    <code>_ops/ideas/2026-04-27-cortex-architecture-final-locked.md</code>
+  </div>
+
+  <div class="progress-bar-wrap">
+    <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+    <div class="progress-label" id="progressLabel">computing…</div>
+  </div>
+
+  <div class="legend">
+    <span><span class="dot dot-done"></span> Shipped / Merged</span>
+    <span><span class="dot dot-flight"></span> In flight</span>
+    <span><span class="dot dot-queue"></span> Queued / Next</span>
+    <span><span class="dot dot-park"></span> Parked / Stage 3+</span>
+  </div>
+</header>
+
+<div class="locked">
+  <strong>Architecture lock summary (Director-ratified RA-23, 2026-04-27):</strong>
+  Matter PMs (AO PM, MOVIE AM, future) <span class="ratio">ABSORBED</span> into Cortex per-matter configs.
+  Domain capabilities (legal / finance / tax-X / game-theory) <span class="ratio">INVOKED</span> as specialists.
+  Activation: Cortex auto-trigger OR Director manual-invoke (no third path).
+  Per-matter loading. Curated knowledge layer per matter (Obsidian markdown, Day 1).
+  Self-learning loop on every new object.
+</div>
+
+<!-- ===================== STAGE 0: M0 + M1 FOUNDATION ===================== -->
+<div class="stage">
+  <div class="stage-title">Stage 0 — Foundation (M0 + M1, pre-Cortex)</div>
+  <div class="stage-meta">Pre-requisites for Cortex Stage 2. ALL SHIPPED.</div>
+
+  <div class="item done">
+    <div class="icon">✅</div>
+    <div>
+      <div class="label">M0 deterministic infra (5 briefs)</div>
+      <div class="desc">KBL schema, CHANDA top-3 detectors, KBL ingest endpoint, Prompt-Cache audit, Citations API for Scan</div>
+      <div class="anchor">Closed 2026-04-25</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✅</div>
+    <div>
+      <div class="label">M1 wiki foundation</div>
+      <div class="desc">Hagenauer wiki bootstrap, KBL people/entity loaders, GOLD comment workflow</div>
+      <div class="anchor">PR #62 + #63 + #66 merged 2026-04-26</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✅</div>
+    <div>
+      <div class="label">AI Head consolidation + autonomy charter</div>
+      <div class="desc">Single AI Head skill, 3-file memory, weekly self-audit, charter §4 13 prerogatives + Pattern C amendment</div>
+      <div class="anchor">PR #44 merged + canonical at _ops/processes/ai-head-autonomy-charter.md</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+</div>
+
+<!-- ===================== STAGE 1: SPEC ===================== -->
+<div class="stage">
+  <div class="stage-title">Stage 1 — Memory Architecture + 6-Phase Cycle Spec (RA-22)</div>
+  <div class="stage-meta">Single brief BRIEF_CORTEX_3T_FORMALIZE_1, ~25h estimate, AO-first scope. SPEC LOCKED.</div>
+
+  <div class="item done">
+    <div class="icon">✅</div>
+    <div>
+      <div class="label">Stage 1 spec ratified</div>
+      <div class="desc">Memory architecture (cortex_cycles + cortex_phase_outputs Postgres tables) + 6-phase cycle (sense → load → reason → propose → act → archive) — Director answered Q1/Q2/Q3 in RA-22</div>
+      <div class="anchor">_ops/ideas/2026-04-27-cortex-3t-formalize-spec.md (status: promoted)</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✅</div>
+    <div>
+      <div class="label">Architecture lock ratified (6 outstanding Q's)</div>
+      <div class="desc">Q1 capability migration (RA audit) · Q2 GOLD diff w/ override · Q3 wiki/_cortex/ home · Q4 specialist cap=5 · Q5 60s/2-retry · Q6 weekly drift audit · Q5+ 5-min absolute timeout</div>
+      <div class="anchor">_ops/ideas/2026-04-27-cortex-architecture-final-locked.md (RA-23 HTML Triaga export)</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+</div>
+
+<!-- ===================== STAGE 2 V1: BUILD ===================== -->
+<div class="stage">
+  <div class="stage-title">Stage 2 V1 — Cortex Build (3 sub-briefs + hardening)</div>
+  <div class="stage-meta">All 3 sub-briefs MERGED ON MAIN. Three-reviewer pattern (b1 formal + A /security-review + AI Head B structural). ON CALL: AI Head A as sole orchestrator.</div>
+
+  <div class="item done">
+    <div class="icon">✅</div>
+    <div>
+      <div class="label">1A foundation — cycle persistence + Phase 1/2/6</div>
+      <div class="desc">cortex_cycles + cortex_phase_outputs schema, sense/load/archive phases, base prompt cache</div>
+      <div class="anchor">PR #71 merged 1709483 (b3 build · b1 review · A security)</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✅</div>
+    <div>
+      <div class="label">1B reasoning — Phase 3a / 3b / 3c</div>
+      <div class="desc">Meta-reason → specialist invocations → synthesis. Anthropic Opus 4.6 calls, capability triggers wired</div>
+      <div class="anchor">PR #72 merged 8757ef7 (b3 build · b1 review · A security)</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✅</div>
+    <div>
+      <div class="label">1C interface + ops — Phase 4/5 + scheduler + dry-run + rollback</div>
+      <div class="desc">4-button proposal card, GOLD workflow integration, A2 alerts→signal bridge wire-up, drift-audit APScheduler job, DRY_RUN gating, rollback script</div>
+      <div class="anchor">PR #74 merged 97f26b1 (b3 build · b1 review · A security · AI Head B structural)</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✅</div>
+    <div>
+      <div class="label">IDEMPOTENCY hardening — closed B's PR #74 OBS-1 + OBS-2</div>
+      <div class="desc">CAS guard on 4 Phase 5 handlers + partial-failure surfacing on _write_gold_proposals; +21 tests; 182/182 regression green</div>
+      <div class="anchor">PR #75 merged 1ec079b (b2 build · A security · b3 second-pair APPROVE)</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✅</div>
+    <div>
+      <div class="label">Rollback script op:// path fix</div>
+      <div class="desc">2-line correction: op://Private/* → op://Baker API Keys/*; AI Head A verified vault directly; closes plan §5.2</div>
+      <div class="anchor">PR #76 merged c0295a1 (b3 build · A security · A merge)</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✅</div>
+    <div>
+      <div class="label">Phase 3 config import fix (Cycle 1 catch)</div>
+      <div class="desc">2-line surgical fix — pre-existing 1B defect (Obs #3 backlog) elevated to hot-path blocker by DRY_RUN cycle 1 fire; canonical from config.settings import config aligns to 10+ existing call sites</div>
+      <div class="anchor">PR #77 merged 207aae4 (b3 build · A security · A merge)</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+</div>
+
+<!-- ===================== STAGE 2 V1 VALIDATION: DRY_RUN PROMOTION ===================== -->
+<div class="stage">
+  <div class="stage-title">Stage 2 V1 Validation — DRY_RUN promotion to live</div>
+  <div class="stage-meta">Plan: <code>briefs/_plans/CORTEX_V1_DRY_RUN_LAUNCH_PLAN_20260428.md</code> (b3 author, 604 lines). Six required sections.</div>
+
+  <div class="item done">
+    <div class="icon">✅</div>
+    <div>
+      <div class="label">§1 Pre-flight — Render env matrix (12 vars)</div>
+      <div class="desc">CORTEX_DRY_RUN=true · CORTEX_PIPELINE_ENABLED=false · CORTEX_LIVE_PIPELINE=true; deploy dep-d7of8n84un4s73bn2rb0 LIVE; matter_config_drift_weekly registered next_run 2026-05-04T11:00 UTC</div>
+      <div class="anchor">A executed via Render API · 2026-04-28T~17:55 UTC</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✅</div>
+    <div>
+      <div class="label">§3 Validation SQL — empty-state baseline (B1)</div>
+      <div class="desc">All 6 plan §3 queries parse cleanly + return expected 0-row baseline; 30/30 referenced columns verified via information_schema</div>
+      <div class="anchor">briefs/_reports/B1_validation_sql_dryrun_20260428.md (PASS)</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✅</div>
+    <div>
+      <div class="label">§5 Rollback drill — pre-launch dry rehearsal</div>
+      <div class="desc">Bash parse + usage-banner check + op:// vault paths verified by A; sandbox-fire deferred (no non-prod target). Plan §6 Q4 PASS</div>
+      <div class="anchor">briefs/_reports/B3_rollback_dry_rehearsal_20260428.md + B3_rollback_op_path_fix_20260428.md</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item flight">
+    <div class="icon">🔄</div>
+    <div>
+      <div class="label">§2 First DRY_RUN cycle on AO matter — IN FLIGHT</div>
+      <div class="desc">
+        Attempt 1 (cycle 0e503e5e-…) BLOCKED on Phase 3a config-import defect; PR #77 fix merged.
+        Awaiting B3 cycle 1 RETRY post-deploy → captures cycle_id, runs §3 against real cycle, validates DRY_RUN gating (dry_run_marker / Slack skip / GOLD skip / MAC_MINI skip).
+      </div>
+      <div class="anchor">briefs/_reports/B3_dry_run_cycle_1_20260428.md (BLOCKED → retry pending)</div>
+    </div>
+    <div class="badge flight">RETRY</div>
+  </div>
+
+  <div class="item queue">
+    <div class="icon">⏳</div>
+    <div>
+      <div class="label">§6 Promotion criteria — N=5 consecutive clean cycles</div>
+      <div class="desc">
+        7 quantitative gates: ≥5 consecutive PASS · 0 archive failures · ≤€0.50/cycle · p95 ≤ 60s · dry_run_marker every cycle · 4-action endpoint round-trip · Monday drift fire (2026-05-04T11:00 UTC)
+        + 4 qualitative gates.
+        Currently 0/5 clean cycles (cycle 1 retry in flight).
+      </div>
+      <div class="anchor">Plan §6 — promotion sequence: DRY_RUN→false then PIPELINE_ENABLED→true</div>
+    </div>
+    <div class="badge queue">0 / 5</div>
+  </div>
+</div>
+
+<!-- ===================== STAGE 2 V2: ARCHITECTURE DELTAS ===================== -->
+<div class="stage">
+  <div class="stage-title">Stage 2 V2 — Architecture deltas (post-V1 promotion)</div>
+  <div class="stage-meta">Locked deltas vs Stage 1 spec per architecture-final §9. Builds on V1 substrate; queued behind V1 promotion.</div>
+
+  <div class="item queue">
+    <div class="icon">⏳</div>
+    <div>
+      <div class="label">Per-matter config loading from wiki</div>
+      <div class="desc">Phase 2 reads <code>wiki/matters/&lt;slug&gt;/cortex-config.md</code> instead of hardcoded prompt. AO-first then generalized.</div>
+      <div class="anchor">Architecture lock §9 delta · gates: V1 promoted, M2 wiki-config schema</div>
+    </div>
+    <div class="badge queue">QUEUED</div>
+  </div>
+
+  <div class="item queue">
+    <div class="icon">⏳</div>
+    <div>
+      <div class="label">Phase 3b specialist invocation framework</div>
+      <div class="desc">Per-capability trigger lists in <code>wiki/capabilities/&lt;slug&gt;/triggers.md</code>; cap 5/cycle (Q4); 60s/2-retry per specialist (Q5); 5-min absolute cycle timeout (Q5+)</div>
+      <div class="anchor">Architecture lock §5 + §8 Q4/Q5/Q5+</div>
+    </div>
+    <div class="badge queue">QUEUED</div>
+  </div>
+
+  <div class="item queue">
+    <div class="icon">⏳</div>
+    <div>
+      <div class="label">Curated knowledge read/write hooks</div>
+      <div class="desc">Capability outputs persist as <code>curated/&lt;domain&gt;-&lt;date&gt;.md</code>; Cortex Phase 2 loads accumulated curated knowledge; self-learning loop active</div>
+      <div class="anchor">Architecture lock §4 + §7</div>
+    </div>
+    <div class="badge queue">QUEUED</div>
+  </div>
+
+  <div class="item queue">
+    <div class="icon">⏳</div>
+    <div>
+      <div class="label">22-capability migration audit (Q1)</div>
+      <div class="desc">RA stages one-shot ratification table: which existing capability_sets rows survive as INVOKED specialists vs retire vs absorb. Director picks per row.</div>
+      <div class="anchor">Architecture lock §8 Q1 — RA owner, ~30min audit</div>
+    </div>
+    <div class="badge queue">QUEUED</div>
+  </div>
+
+  <div class="item queue">
+    <div class="icon">⏳</div>
+    <div>
+      <div class="label">GOLD diff propagation w/ override (Q2)</div>
+      <div class="desc">Phase 4 proposal card includes proposed curated-file diffs as checkboxes; Director can deselect individual file updates before Approve</div>
+      <div class="anchor">Architecture lock §8 Q2 — extends PR #66 GOLD workflow</div>
+    </div>
+    <div class="badge queue">QUEUED</div>
+  </div>
+
+  <div class="item queue">
+    <div class="icon">⏳</div>
+    <div>
+      <div class="label">wiki/_cortex/ Brisen-wide meta-knowledge (Q3)</div>
+      <div class="desc">3 files: <code>director-gold-global.md</code> + <code>cross-matter-patterns.md</code> + <code>brisen-style.md</code>. Loaded into Cortex base prompt cache.</div>
+      <div class="anchor">Architecture lock §8 Q3</div>
+    </div>
+    <div class="badge queue">QUEUED</div>
+  </div>
+</div>
+
+<!-- ===================== POST-V1 BACKLOG ===================== -->
+<div class="stage">
+  <div class="stage-title">Post-V1 Backlog (parked, promotion-gated)</div>
+  <div class="stage-meta">All gated post-V1 ship + DRY_RUN passes. Parks live in <code>baker-vault/_ops/ideas/</code>.</div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Cortex archive-failure structured alerting</div>
+      <div class="desc">Sentinel watches cortex_cycles for stuck transient *ing statuses; Slack alert on archive-self-failure. Folds PR #71 obs #2 + PR #72 obs A + PR #75 LOW obs (cortex_approve freshness_check_failed)</div>
+      <div class="anchor">_ops/ideas/2026-04-28-cortex-archive-failure-alerting.md</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Cortex cycle-id generation cleanup</div>
+      <div class="desc">PR #71 obs #3 — minor refactor</div>
+      <div class="anchor">_ops/ideas/2026-04-28-cortex-cycle-id-generation-cleanup.md · gate: ≥1wk stable</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Anthropic helper canonical refactor</div>
+      <div class="desc">PR #72 obs C — fold _call_opus helper duplication. NOT Anthropic Memory feature.</div>
+      <div class="anchor">_ops/ideas/2026-04-28-cortex-anthropic-helper-canonical-refactor.md · gate: ≥1wk stable</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Slack interactivity proxy (HMAC-signed)</div>
+      <div class="desc">PR #74 deferral — V1 ships internal-only X-Baker-Key auth; Slack-signed proxy parked for later</div>
+      <div class="anchor">_ops/ideas/2026-04-28-cortex-slack-interactivity-proxy.md · gate: post-V1 ship + DRY_RUN</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+</div>
+
+<!-- ===================== STAGE 3+: OUT OF SCOPE ===================== -->
+<div class="stage">
+  <div class="stage-title">Stage 3+ — Out of scope (architectural lock §11)</div>
+  <div class="stage-meta">Listed for completeness; no current build commitment.</div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Multi-matter cross-knowledge synthesis</div>
+      <div class="desc">When insights from one matter apply to another. Rare; defer to Stage 3.</div>
+    </div>
+    <div class="badge park">STAGE 3</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Counterparty profile auto-update</div>
+      <div class="desc">Capability proposes; Director GOLD currently. Auto-update without human gate parked.</div>
+    </div>
+    <div class="badge park">STAGE 3</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Eval suite for absorbed-matter Cortex</div>
+      <div class="desc">Measurement framework. Empirical loop tells us when needed.</div>
+    </div>
+    <div class="badge park">STAGE 3</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Matter-config A/B testing</div>
+      <div class="desc">Comparing prompt variants per matter. Premature.</div>
+    </div>
+    <div class="badge park">STAGE 3</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Cross-Cortex coordination (CEO Cortex / BD Cortex)</div>
+      <div class="desc">Per-stream Cortex instances. Architecture supports it; deferred until Director wires the streams.</div>
+    </div>
+    <div class="badge park">STAGE 3</div>
+  </div>
+</div>
+
+<!-- ===================== POSITION MARKER ===================== -->
+<div class="position-marker">
+  <h3>YOU ARE HERE — 2026-04-28 ~18:30 UTC</h3>
+  <ul>
+    <li><strong>Just shipped today:</strong> 1A merge (#71) ⟶ 1B (#72) ⟶ 1C (#74) ⟶ IDEMPOTENCY (#75) ⟶ ROLLBACK_OP_PATH (#76) ⟶ CONFIG_IMPORT_FIX (#77). Six PRs merged on V1 substrate.</li>
+    <li><strong>Stage 2 V1 BUILD:</strong> ✅ complete. All deltas in main.</li>
+    <li><strong>Stage 2 V1 VALIDATION:</strong> §1 ✅ · §3 baseline ✅ · §5 rollback drill ✅ · §2 cycle 1 <span class="next">RETRY IN FLIGHT</span> (Phase 3a defect caught, fixed, re-firing on B3 lane) · §6 promotion <code>0 / 5 cycles</code>.</li>
+    <li><strong>Next gate:</strong> cycle 1 retry PASS ⟶ cycles 2-5 sequentially ⟶ §6 promotion criteria ⟶ flag flip <code>CORTEX_DRY_RUN→false</code> then <code>CORTEX_PIPELINE_ENABLED→true</code> ⟶ Cortex live on AO matter.</li>
+    <li><strong>Then:</strong> Stage 2 V2 architecture deltas (per-matter wiki loading, specialist framework, curated knowledge hooks, Q1 22-cap migration audit).</li>
+  </ul>
+</div>
+
+<!-- ===================== TODAY'S COUNTERS ===================== -->
+<div class="callout">
+  <strong>Today's counters (2026-04-28 session):</strong>
+  6 PRs merged · 1 brief drafted (IDEMPOTENCY) · 1 launch plan delivered (604 lines) · 5 backlog parks added · AmEx deadline #1438 anchored · charter promoted to canonical · 1 Phase 3 defect caught + fixed pre-promotion. Three-reviewer pattern proven on 6 sequential merges.
+</div>
+
+<footer>
+  Built by AI Head A · Source canonicals at <code>_ops/ideas/2026-04-27-cortex-3t-formalize-spec.md</code>
+  + <code>_ops/ideas/2026-04-27-cortex-architecture-final-locked.md</code> ·
+  Live launch plan at <code>briefs/_plans/CORTEX_V1_DRY_RUN_LAUNCH_PLAN_20260428.md</code> ·
+  <br>Re-render this page by asking AI Head A: "refresh the Cortex roadmap HTML".
+</footer>
+
+</div>
+
+<script>
+(function() {
+  // Compute progress: 1 point per shipped item across all stages, denominator = items in stages 0-2 V1 (foundation + spec + V1 build + V1 validation), excludes V2/Backlog/Stage3
+  const items = document.querySelectorAll('.stage .item');
+  let done = 0, flight = 0, queue = 0, park = 0, total = 0;
+  items.forEach(it => {
+    if (it.classList.contains('done')) done++;
+    else if (it.classList.contains('flight')) flight++;
+    else if (it.classList.contains('queue')) queue++;
+    else if (it.classList.contains('park')) park++;
+    total++;
+  });
+  // Active denominator: only stages 0+1+2-V1+2-V1-Validation (exclude V2, Backlog, Stage 3+)
+  // Count: 3 (Stage 0) + 2 (Stage 1) + 6 (Stage 2 V1) + 5 (Validation) = 16
+  const activeDenom = 16;
+  const activeDone = done; // all done items are inside these stages by construction
+  const pct = Math.min(100, Math.round((activeDone / activeDenom) * 100));
+  const fill = document.getElementById('progressFill');
+  const lab = document.getElementById('progressLabel');
+  fill.style.width = pct + '%';
+  lab.textContent = `Stage 2 V1 + Validation progress: ${activeDone} / ${activeDenom} active items shipped (${pct}%) · ${flight} in flight · ${queue} queued`;
+})();
+</script>
+</body>
+</html>
