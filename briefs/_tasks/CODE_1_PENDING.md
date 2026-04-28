@@ -1,20 +1,77 @@
-# CODE_1 — IDLE (post PR #72 review)
+---
+status: OPEN
+brief: review_pr_74
+trigger_class: MEDIUM
+dispatched_at: 2026-04-28T08:12:00Z
+dispatched_by: ai-head-a
+review_target_pr: 74
+review_target_brief: briefs/BRIEF_CORTEX_3T_FORMALIZE_1C.md
+claimed_at: null
+claimed_by: null
+last_heartbeat: null
+blocker_question: null
+ship_report: null
+autopoll_eligible: false
+---
 
-**Status:** COMPLETE 2026-04-28
-**Last task:** PR #72 CORTEX_3T_FORMALIZE_1B second-pair review — APPROVE (with one folded-advisory partial flagged for follow-up; not blocking) shipped 2026-04-28T07:48Z
-**Verdict comment:** [PR #72 #issuecomment-4333299250](https://github.com/vallen300-bit/baker-master/pull/72#issuecomment-4333299250)
-**Full report:** `briefs/_reports/B1_pr72_cortex_3t_formalize_1b_20260428.md` (merged into main as `bed8626`)
-**Gates passed:**
-- 6/7 dispatch criteria fully clear (brief acceptance / EXPLORE corrections / tests real / cap-5 / boundaries / Obs #3 cycle_id)
-- 1/7 partial: Obs #2 logging (f-string captures cycle_id but extra={} not used) — Director-accepted as backlog upgrade per recom
-- 48/48 phase3 + 79/79 full cortex regression locally
-- Zero `kbl.gold_writer` / `kbl.gold_proposer` / `cortex_events` writes from 1B files
-- B3's 5 EXPLORE corrections (Lesson #44) all verified
-**Advisory observations (3, non-blocking, all backlogged per Director RA expected):**
-1. Structured-extra logging upgrade — folded into parked Slack alerting brief
-2. Brief-language clarification (status vs current_phase) — note-only
-3. 3a/3c bypass canonical Anthropic-helper layer — separate post-V1 refactor brief
-**PR #72 merge:** Tier-A direct squash by AI Head A as `8757ef7` 2026-04-28T07:50:48Z.
-**AI Head A `/security-review`:** NO FINDINGS posted as [comment 4333273208](https://github.com/vallen300-bit/baker-master/pull/72#issuecomment-4333273208).
+# CODE_1_PENDING — B1: SECOND-PAIR REVIEW PR #74 (CORTEX_3T_FORMALIZE_1C) — 2026-04-28
 
-**Mailbox state:** B1 idle. Next dispatch (review or build) will overwrite this file per §3 hygiene.
+**Dispatcher:** AI Head A (sole orchestrator)
+**Working dir:** `~/bm-b1`
+**PR to review:** [#74 cortex-3t-formalize-1c](https://github.com/vallen300-bit/baker-master/pull/74) (HEAD `10b4e4a`, +2958/-20, 21 files)
+**Brief:** [`briefs/BRIEF_CORTEX_3T_FORMALIZE_1C.md`](../BRIEF_CORTEX_3T_FORMALIZE_1C.md) — read **Amendment A1 + A2** at top
+**Trigger class:** MEDIUM (new endpoint + Slack interactive + APScheduler + cross-capability state writes + decommission rollback) → B1 second-pair-review per `_ops/ideas/2026-04-24-b1-situational-review-trigger.md`
+**Builder:** B3 (cannot self-review per b1-builder-can't-review-own-work; B1 = independent reviewer)
+
+## §2 pre-dispatch busy-check (AI Head A verified)
+
+- **B1 mailbox prior state:** COMPLETE — PR #72 second-pair review APPROVE shipped (`bed8626`). IDLE.
+- **Other B-codes:** B2 idle post-recovery; B3 just shipped PR #74; §3 hygiene pending post-merge.
+- **Lesson #50 review-in-flight pre-check:** `gh pr view 74 --json reviewDecision` empty; no `briefs/_reports/B1_pr74*` exists; CLEAN.
+
+## What you're reviewing
+
+PR #74 ships sub-brief 1C of 3 (final piece, Cortex Stage 2 V1). Per B3 ship report:
+- 5 new modules: Phase 4 proposal / Phase 5 act / drift audit / rollback / cortex_runner phase4-wire test
+- Endpoint `POST /cortex/cycle/{id}/action` added to `dashboard.py`
+- APScheduler `_matter_config_drift_weekly_job` registered
+- **Amendment A2 wired** at `kbl/bridge/alerts_to_signal.py:495` + `triggers/cortex_pipeline.maybe_dispatch` (env flag `CORTEX_PIPELINE_ENABLED`, default OFF until DRY_RUN passes)
+- Rollback script `scripts/cortex_rollback_v1.sh` committed
+- 82 new tests pass + 5 skipped (Py 3.9 PEP-604 chain — clean on CI 3.10+); full cortex+bridge regression 181 pass, 5 skipped in 0.91s
+- **Amendment A1 honored** (`gold_proposer.propose(ProposedGoldEntry)`, NOT `gold_writer.append`)
+
+## B1 review checklist (7 criteria — 5 standard + 2 amendment-specific)
+
+1. **Brief acceptance match** — every line item in `BRIEF_CORTEX_3T_FORMALIZE_1C.md` §"Verification criteria" + §"Quality Checkpoints" verified against shipped code. Flag any missing.
+2. **EXPLORE corrections accuracy (Lesson #44)** — verify any EXPLORE corrections B3 surfaces in the ship report grep-verify against actual code. B3's EXPLORE pass is the anchor.
+3. **Tests are real, not "passes by inspection" (Lesson #47)** — run literal `pytest tests/test_cortex_phase4_proposal.py tests/test_cortex_phase5_act.py tests/test_cortex_action_endpoint.py tests/test_alerts_to_signal_cortex_dispatch.py tests/test_cortex_rollback.py -v 2>&1 | tail -50` AND full regression `pytest tests/test_cortex_*.py tests/test_alerts_to_signal*.py -v 2>&1 | tail -10` in your worktree; paste literal stdout into review report. 82 new pass + 5 skipped + 181 total green required per B3's claim.
+4. **Slack signature verification (NEW — auth surface)** — this is the only auth surface in the entire Cortex stack. Verify signature verification on `POST /cortex/cycle/{id}/action`: HMAC-SHA256 with Slack signing secret; constant-time comparison (`hmac.compare_digest`); timestamp freshness check (≤5min). If ANY of these is missing or weak → REQUEST_CHANGES with HIGH severity.
+5. **Boundaries respected** — `gold_writer.append` NOT called from any cortex_* module (Amendment A1). `gold_proposer.propose(ProposedGoldEntry)` IS the only cortex-side GOLD write path. cycle_id linkage via `ProposedGoldEntry.cortex_cycle_id` field. Caller-authorized guard (`kbl/gold_writer.py:_check_caller_authorized`) NOT touched.
+
+## Amendment-specific checks (additional 2 criteria)
+
+6. **Amendment A1 (gold_proposer not gold_writer)** — grep all 1C files for `gold_writer.append`; expected count: 0. grep for `gold_proposer.propose`; expected: ≥1. Flag if any cortex_* module imports `kbl.gold_writer` (other than for type-checking imports).
+7. **Amendment A2 (alerts_to_signal:495 callsite)** — verify `triggers/cortex_pipeline.maybe_dispatch(signal_id, matter_slug)` called AFTER the `signal_queue` INSERT commits at `kbl/bridge/alerts_to_signal.py:495`. Verify try/except wrap (dispatch failure must NOT block INSERT). Verify env flag gating on `CORTEX_PIPELINE_ENABLED` (default false). Verify 2 minimum tests in `tests/test_alerts_to_signal_cortex_dispatch.py` (flag-off no-op, flag-on dispatch failure no-block).
+
+## Output: review report at `briefs/_reports/B1_pr74_cortex_3t_formalize_1c_20260428.md`
+
+Then post verdict on PR via `gh pr comment 74 --body "<verdict>"` (formal APPROVE blocked by self-PR rule per #67/#69/#70/#71/#72 precedent — comment is the gate).
+
+## Parallel work this window
+
+- AI Head A runs `/security-review` skill on PR #74 (Lesson #52 mandatory). Slack signature verification + new endpoint = security-sensitive surface; A will scrutinize hard.
+- AI Head B doing structural-design cross-lane pass alongside (3 reviewers > 2 on highest-stakes ship in V1).
+- All 3 verdicts (B1 + AI Head A + AI Head B) gate the merge. AI Head A merges Tier-A on all-clear.
+
+## NOT in scope
+
+- Refactor of Phase 3a/3c through canonical Anthropic helper — parked at `_ops/ideas/2026-04-28-cortex-anthropic-helper-canonical-refactor.md` (post-V1).
+- Structured-extra logging upgrade — parked at `_ops/ideas/2026-04-28-cortex-archive-failure-alerting.md` (post-V1).
+- cycle_id single-source-of-truth cleanup — parked at `_ops/ideas/2026-04-28-cortex-cycle-id-generation-cleanup.md` (post-V1).
+
+## Co-Authored-By
+
+```
+Co-authored-by: Code Brisen #1 <b1@brisengroup.com>
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+```
