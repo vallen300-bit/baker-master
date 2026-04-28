@@ -1,5 +1,5 @@
 ---
-status: OPEN
+status: COMPLETE
 brief: cortex_v1_dry_run_cycles_2_through_5
 trigger_class: HIGH
 dispatched_at: 2026-04-28T19:38:00Z
@@ -7,11 +7,27 @@ predecessor_pass: cycle_1_attempt_5 d91a2252-d65a-45f9-a7dc-1338fa4e0990 (PASS, 
 director_authorization: "no time left, we need to go into business with cortex"
 target_matter_slug: oskolkov
 goal: "Run 4 more consecutive clean cycles (2,3,4,5) to satisfy §6 Q1 N≥5 promotion gate. Same bland prompt; expect Phase 3a to pick from 10 active capabilities; russo_*+legal stay disabled."
-claimed_at: null
-claimed_by: null
-last_heartbeat: null
+claimed_at: 2026-04-28T19:48:00Z
+claimed_by: b3
+last_heartbeat: 2026-04-28T19:55:00Z
 blocker_question: null
 ship_report: briefs/_reports/B3_dry_run_cycle_1_20260428.md (continue appending sections per cycle)
+verdict: PASS
+promotion_gate_q1: "5/5 CLEARED"
+cycle_ids:
+  - cycle_1: d91a2252-d65a-45f9-a7dc-1338fa4e0990
+  - cycle_2: 7729f6d2-20ab-45c5-96cb-42f9e44347db
+  - cycle_3: 1dd70f9a-20a4-4538-ae74-e3666707c701
+  - cycle_4: b010cf3a-82a3-40ce-9819-625086ea32f6
+  - cycle_5: 972b788b-3158-496f-a162-2c0dbda28201
+total_cost_dollars: 0.7378
+p95_wall_db_seconds: 40.6
+p50_wall_db_seconds: 37.8
+all_dry_run_markers_present: true
+slack_posts_under_dry_run: 0
+gold_writes_under_dry_run: 0
+phase3a_picks: "all 5 cycles picked ['sales'] (bland prompt's 'pipeline' regex hit deterministic)"
+ready_for_live_flip: true
 autopoll_eligible: false
 ---
 

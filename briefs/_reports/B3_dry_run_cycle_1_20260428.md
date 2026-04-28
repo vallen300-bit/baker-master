@@ -749,6 +749,85 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 ---
 
+## Cycles 2-5 — N=5 promotion sequence (2026-04-28T19:51-19:54Z)
+
+**Verdict: ALL 4 PASS.** Single warm python3 session; total batch wall 201.7s. Cycle 2 cold-start 90s; cycles 3/4/5 hit warm Anthropic cache at ~37s each. Per-cycle outputs:
+
+```
+cycle_2: cycle_id=7729f6d2-20ab-45c5-96cb-42f9e44347db status=tier_b_pending cost=$0.1510 wall=90.0s py / 38.3s DB
+cycle_3: cycle_id=1dd70f9a-20a4-4538-ae74-e3666707c701 status=tier_b_pending cost=$0.1407 wall=36.4s py / 36.0s DB
+cycle_4: cycle_id=b010cf3a-82a3-40ce-9819-625086ea32f6 status=tier_b_pending cost=$0.1476 wall=38.1s py / 37.8s DB
+cycle_5: cycle_id=972b788b-3158-496f-a162-2c0dbda28201 status=tier_b_pending cost=$0.1467 wall=37.1s py / 36.7s DB
+BATCH_TOTAL_WALL=201.7s
+```
+
+### Per-cycle artifact + Phase 3a verification
+
+```sql
+SELECT cycle_id, COUNT(*) FILTER (WHERE artifact_type='dry_run_marker') AS dry_run_markers,
+       COUNT(*) FILTER (WHERE artifact_type='proposal_card') AS proposal_cards,
+       COUNT(*) AS total_artifacts
+FROM cortex_phase_outputs WHERE cycle_id IN (5 ids) GROUP BY cycle_id;
+```
+
+| cycle_id | total_artifacts | dry_run_markers | proposal_cards | phase 3a picked |
+|---|---:|---:|---:|---|
+| d91a2252 (1) | 7 | 1 | 1 | `["sales"]` |
+| 7729f6d2 (2) | 7 | 1 | 1 | `["sales"]` |
+| 1dd70f9a (3) | 7 | 1 | 1 | `["sales"]` |
+| b010cf3a (4) | 7 | 1 | 1 | `["sales"]` |
+| 972b788b (5) | 7 | 1 | 1 | `["sales"]` |
+
+Identical Phase 3a pick across all 5 cycles — bland prompt's `pipeline` regex hit produces deterministic capability selection. All 5 cycles had sales specialist complete cleanly (single attempt, ~15s) — no timeouts, no retries.
+
+### §6 promotion gate Q1 final tally
+
+| Criterion | Target | Actual | Verdict |
+|---|---|---|---|
+| Q1 ≥5 consecutive clean cycles | 5/5 | **5/5** | **PASS** |
+| 0 archive failures across 5 | 0 | 0 | PASS |
+| Per-cycle p95 wall (DB-side) | ≤ 60s | **40.6s** | PASS |
+| Per-cycle p50 wall (DB-side) | — | 37.8s | — |
+| Per-cycle min/max wall | — | 36.0s / 40.6s | — |
+| Cost ceiling per cycle | < $0.50 | $0.1407–$0.1519 | PASS |
+| Total cost across 5 cycles | < $2.50 | **$0.7378** | PASS |
+| All dry_run_markers present | 5 | 5 | PASS |
+| Slack DM under DRY_RUN | 0 | 0 | PASS |
+| GOLD writes under DRY_RUN | 0 | 0 | PASS |
+
+**Verdict: PROMOTION GATE Q1 CLEARED.**
+
+### Notes for A's next move (DRY_RUN → LIVE flip)
+
+1. All 5 cycles produced `proposal_card` artifacts (6.9k bytes each) but NEVER posted to Slack — `dry_run_marker` payload `{"reason":"CORTEX_DRY_RUN=true; Slack post skipped"}` for each. The flip to live is a single env-var change away.
+2. With russo_* + legal still disabled, AO matter cycles will continue picking `sales` until A re-enables others. Re-enabling should follow the network-latency diagnosis recommended in attempt 5's findings.
+3. Cycle 2's 90s python wall vs cycles 3-5 ~37s confirms Anthropic prompt-cache warm-up dominates first-cycle wall. Production cycles will be effectively "warm" because the long-running web service stays loaded.
+4. Cost per AO matter cycle ≈ $0.15. At 1 cycle/day baseline, ~$55/year per active matter; budget headroom is substantial.
+
+### Notification-style summary for A
+
+```
+5/5 cycles PASS — promotion gate Q1 CLEARED
+cycle_ids:
+  1: d91a2252-d65a-45f9-a7dc-1338fa4e0990 ($0.1519, 40.6s)
+  2: 7729f6d2-20ab-45c5-96cb-42f9e44347db ($0.1510, 38.3s)
+  3: 1dd70f9a-20a4-4538-ae74-e3666707c701 ($0.1407, 36.0s)
+  4: b010cf3a-82a3-40ce-9819-625086ea32f6 ($0.1476, 37.8s)
+  5: 972b788b-3158-496f-a162-2c0dbda28201 ($0.1467, 36.7s)
+total_cost=$0.7378  p95_wall_db=40.6s  all_dry_run_markers=PRESENT
+slack_posts=0  gold_writes=0
+ready: A flips CORTEX_DRY_RUN→false + CORTEX_PIPELINE_ENABLED→true
+```
+
+### Co-Authored-By (cycles 2-5)
+
+```
+Co-authored-by: Code Brisen #3 <b3@brisengroup.com>
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+```
+
+---
+
 ## Co-Authored-By
 
 ```
