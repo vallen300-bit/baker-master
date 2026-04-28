@@ -79,6 +79,16 @@ def _reset_dry_run(monkeypatch):
     monkeypatch.delenv("CORTEX_DRY_RUN", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _bypass_cas(monkeypatch):
+    """CORTEX_PHASE5_IDEMPOTENCY_1: existing tests focus on non-CAS behavior;
+    the CAS guard is exercised in `test_cortex_phase5_idempotency.py`. Bypass
+    here so the prior assertions against handler bodies still hold.
+    """
+    monkeypatch.setattr(p5, "_cas_lock_cycle", lambda *a, **kw: None)
+    monkeypatch.setattr(p5, "_cas_release_to_proposed", lambda *a, **kw: None)
+
+
 # --------------------------------------------------------------------------
 # _archive_cycle
 # --------------------------------------------------------------------------
@@ -224,8 +234,13 @@ def test_cortex_approve_writes_gold_then_propagates_then_archives(monkeypatch):
                                      "proposal_text": "P", "synthesis_confidence": 0.9})
     monkeypatch.setattr(p5, "_is_fresh", lambda cid: True)
     order = []
-    monkeypatch.setattr(p5, "_write_gold_proposals",
-                        lambda **kw: (order.append("gold"), 2)[1])
+    monkeypatch.setattr(
+        p5, "_write_gold_proposals",
+        lambda **kw: (
+            order.append("gold"),
+            {"written": 2, "total": 2, "failed_files": [], "errors": []},
+        )[1],
+    )
     monkeypatch.setattr(p5, "_propagate_curated_via_macmini",
                         lambda **kw: order.append("propagate"))
     monkeypatch.setattr(p5, "_archive_cycle",
@@ -239,6 +254,9 @@ def test_cortex_approve_writes_gold_then_propagates_then_archives(monkeypatch):
     assert result["status"] == "approved"
     assert result["gold_files_written"] == 2
     assert result["actions_logged"] == 2
+    # Full-success path: no warning fields
+    assert "warning" not in result
+    assert "failed_files" not in result
 
 
 def test_cortex_approve_no_cycle_returns_error(monkeypatch):
@@ -298,13 +316,16 @@ def test_write_gold_proposals_calls_gold_proposer_propose(monkeypatch):
 
     import kbl.gold_proposer as gp
     monkeypatch.setattr(gp, "propose", _fake_propose)
-    written = p5._write_gold_proposals(
+    result = p5._write_gold_proposals(
         cycle_id="cyc-aaaa-1234",
         matter_slug="oskolkov",
         selected_files=["funds-flow.md", "deadlines.md"],
         cycle_data={"proposal_text": "PT", "synthesis_confidence": 0.7},
     )
-    assert written == 2
+    # CORTEX_PHASE5_IDEMPOTENCY_1: rich dict return shape
+    assert result == {
+        "written": 2, "total": 2, "failed_files": [], "errors": [],
+    }
     assert {p["matter"] for p in proposed} == {"oskolkov"}
     assert proposed[0]["entry"].proposer == "cortex-3t"
     assert proposed[0]["entry"].cortex_cycle_id == "cyc-aaaa-1234"
@@ -322,21 +343,26 @@ def test_write_gold_proposals_continues_on_individual_failure(monkeypatch):
 
     import kbl.gold_proposer as gp
     monkeypatch.setattr(gp, "propose", _flaky_propose)
-    written = p5._write_gold_proposals(
+    result = p5._write_gold_proposals(
         cycle_id="cyc-zzz",
         matter_slug="movie",
         selected_files=["first.md", "second.md", "third.md"],
         cycle_data={"proposal_text": "", "synthesis_confidence": 0.1},
     )
-    assert written == 2   # second one failed, first + third succeeded
-    assert len(calls) == 3   # all 3 attempted
+    assert result["written"] == 2   # second one failed, first + third succeeded
+    assert result["total"] == 3
+    assert len(calls) == 3           # all 3 attempted
+    # The failed entry's topic includes "second.md"; failed_files captures filename.
+    assert result["failed_files"] == ["second.md"]
+    assert result["errors"] == ["vault offline"]
 
 
 def test_write_gold_proposals_empty_returns_zero():
-    assert p5._write_gold_proposals(
+    result = p5._write_gold_proposals(
         cycle_id="x", matter_slug="m",
         selected_files=[], cycle_data={},
-    ) == 0
+    )
+    assert result == {"written": 0, "total": 0, "failed_files": [], "errors": []}
 
 
 # --------------------------------------------------------------------------

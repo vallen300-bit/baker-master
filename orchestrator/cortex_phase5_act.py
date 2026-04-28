@@ -42,12 +42,146 @@ def _get_store():
 
 
 # --------------------------------------------------------------------------
+# Idempotency CAS guard (CORTEX_PHASE5_IDEMPOTENCY_1)
+# --------------------------------------------------------------------------
+
+
+def _cas_lock_cycle(
+    cycle_id: str,
+    *,
+    from_status: str,
+    to_status: str,
+    action_attempted: str,
+) -> Optional[dict]:
+    """Atomically transition cortex_cycles.status from `from_status` to `to_status`.
+
+    Returns ``None`` on successful transition (cycle is now in ``to_status``).
+    Returns a warning dict if no rows updated (cycle was not in ``from_status``),
+    re-reading the actual current status for diagnostic.
+
+    This is the per-handler idempotency guard: a second invocation of the same
+    Director button (double-click, Slack proxy retry, etc.) sees status already
+    advanced and bails out with HTTP 200 + ``warning="already_actioned"``.
+
+    On DB exception the lock fails CLOSED — re-raises so the caller does NOT
+    proceed past a botched lock (would defeat idempotency). On no-conn the
+    same: returns dict with ``error="no_db_connection"`` so caller bails.
+    """
+    store = _get_store()
+    conn = store._get_conn()
+    if conn is None:
+        return {
+            "error": "no_db_connection",
+            "cycle_id": cycle_id,
+            "action_attempted": action_attempted,
+        }
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE cortex_cycles
+            SET status=%s, updated_at=NOW()
+            WHERE cycle_id=%s AND status=%s
+            RETURNING cycle_id
+            """,
+            (to_status, cycle_id, from_status),
+        )
+        row = cur.fetchone()
+        if row is None:
+            # Re-read current status for diagnostic; HTTP 200 (idempotent retry).
+            cur.execute(
+                "SELECT status FROM cortex_cycles WHERE cycle_id=%s LIMIT 1",
+                (cycle_id,),
+            )
+            current_row = cur.fetchone()
+            current = current_row[0] if current_row else "<not-found>"
+            conn.commit()
+            cur.close()
+            return {
+                "warning": "already_actioned",
+                "current_status": current,
+                "cycle_id": cycle_id,
+                "action_attempted": action_attempted,
+            }
+        conn.commit()
+        cur.close()
+        return None
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error("_cas_lock_cycle failed cycle=%s: %s", cycle_id, e)
+        raise
+    finally:
+        store._put_conn(conn)
+
+
+def _cas_release_to_proposed(cycle_id: str, *, from_status: str) -> None:
+    """Transition cycle back to 'proposed' after a transient lock (edit/refresh).
+
+    Used by ``cortex_edit`` (releases 'editing' → 'proposed') and
+    ``cortex_refresh`` (releases 'refreshing' → 'proposed') so the cycle can
+    be re-approved. Best-effort: DB errors are logged but do not raise — the
+    primary work (insert / re-run Phase 3+4) already succeeded; leaving the
+    cycle in '*ing' state is recoverable by the parked archive-failure
+    sentinel (`_ops/ideas/2026-04-28-cortex-archive-failure-alerting.md`).
+    """
+    store = _get_store()
+    conn = store._get_conn()
+    if conn is None:
+        logger.warning(
+            "cortex_phase5 release-to-proposed skipped (no_db_connection) "
+            "cycle=%s from=%s",
+            cycle_id, from_status,
+        )
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE cortex_cycles
+            SET status='proposed', updated_at=NOW()
+            WHERE cycle_id=%s AND status=%s
+            """,
+            (cycle_id, from_status),
+        )
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(
+            "_cas_release_to_proposed failed cycle=%s from=%s: %s",
+            cycle_id, from_status, e,
+        )
+    finally:
+        store._put_conn(conn)
+
+
+# --------------------------------------------------------------------------
 # Handlers (one per Director button)
 # --------------------------------------------------------------------------
 
 
 async def cortex_approve(*, cycle_id: str, body: dict) -> dict:
-    """Director approved — execute or DRY_RUN-log."""
+    """Director approved — execute or DRY_RUN-log.
+
+    CORTEX_PHASE5_IDEMPOTENCY_1: CAS-locks 'proposed' → 'approving' before any
+    other DB read or write. Double-fire (Director double-click / Slack retry)
+    bails with ``warning="already_actioned"`` and HTTP 200.
+    """
+    guard = _cas_lock_cycle(
+        cycle_id,
+        from_status="proposed",
+        to_status="approving",
+        action_attempted="approve",
+    )
+    if guard is not None:
+        return guard
+
     cycle = _load_cycle(cycle_id)
     if not cycle:
         return {"error": "cycle_not_found"}
@@ -64,7 +198,10 @@ async def cortex_approve(*, cycle_id: str, body: dict) -> dict:
             cycle_id, matter_slug, len(actions),
             len(body.get("selected_gold_files") or []),
         )
-        _archive_cycle(cycle_id, status="approved", director_action="gold_approved")
+        _archive_cycle(
+            cycle_id, status="approved", director_action="gold_approved",
+            from_status="approving",
+        )
         return {"status": "dry_run_approved",
                 "actions_logged": len(actions),
                 "matter_slug": matter_slug}
@@ -74,26 +211,67 @@ async def cortex_approve(*, cycle_id: str, body: dict) -> dict:
         logger.info("Cortex action [logged-only V1]: %s", a)
 
     selected_files = list(body.get("selected_gold_files") or [])
-    written = _write_gold_proposals(
+    gold_result = _write_gold_proposals(
         cycle_id=cycle_id, matter_slug=matter_slug,
         selected_files=selected_files, cycle_data=cycle,
     )
     _propagate_curated_via_macmini(cycle_id=cycle_id, matter_slug=matter_slug)
 
-    _archive_cycle(cycle_id, status="approved", director_action="gold_approved")
-    return {
-        "status": "approved",
+    _archive_cycle(
+        cycle_id, status="approved", director_action="gold_approved",
+        from_status="approving",
+    )
+
+    # Partial-failure surfacing (CORTEX_PHASE5_IDEMPOTENCY_1 OBS-2):
+    # cycle archive proceeded (status='approved') but Director sees discrepancy
+    # in response payload when GOLD writes failed in whole or in part.
+    written = gold_result["written"]
+    total = gold_result["total"]
+    base_response = {
         "actions_logged": len(actions),
         "gold_files_written": written,
         "matter_slug": matter_slug,
     }
+    if total > 0 and written == 0:
+        return {
+            **base_response,
+            "status": "approved_with_errors",
+            "warning": "all_gold_proposals_failed",
+            "cycle_id": cycle_id,
+            "gold_files_attempted": total,
+            "errors": gold_result["errors"],
+        }
+    if total > 0 and written < total:
+        return {
+            **base_response,
+            "status": "approved_with_partial_errors",
+            "warning": "some_gold_proposals_failed",
+            "cycle_id": cycle_id,
+            "gold_files_attempted": total,
+            "failed_files": gold_result["failed_files"],
+        }
+    return {**base_response, "status": "approved"}
 
 
 async def cortex_edit(*, cycle_id: str, body: dict) -> dict:
-    """Save Director edits. Cycle stays tier_b_pending."""
+    """Save Director edits. Cycle stays tier_b_pending.
+
+    CORTEX_PHASE5_IDEMPOTENCY_1: CAS-locks 'proposed' → 'editing' before INSERT;
+    on success, releases back to 'proposed' so the cycle can be re-approved.
+    """
     edits = (body.get("edits") or "").strip()
     if not edits:
         return {"warning": "no_edits_provided"}
+
+    guard = _cas_lock_cycle(
+        cycle_id,
+        from_status="proposed",
+        to_status="editing",
+        action_attempted="edit",
+    )
+    if guard is not None:
+        return guard
+
     store = _get_store()
     conn = store._get_conn()
     if conn is None:
@@ -119,6 +297,9 @@ async def cortex_edit(*, cycle_id: str, body: dict) -> dict:
         raise
     finally:
         store._put_conn(conn)
+
+    # Release back to 'proposed' so cycle is re-approvable.
+    _cas_release_to_proposed(cycle_id, from_status="editing")
     return {"status": "edits_saved", "char_count": len(edits)}
 
 
@@ -128,7 +309,20 @@ async def cortex_refresh(*, cycle_id: str, body: dict) -> dict:
     Uses the existing Phase 3 helpers from cortex_runner; the new card is
     written by ``run_phase4_propose`` so the latest proposal_card row in
     cortex_phase_outputs supersedes the prior one (newer phase_order).
+
+    CORTEX_PHASE5_IDEMPOTENCY_1: CAS-locks 'proposed' → 'refreshing' before
+    Phase-2/3 work; releases back to 'proposed' on success so the cycle can
+    be re-approved with the new card.
     """
+    guard = _cas_lock_cycle(
+        cycle_id,
+        from_status="proposed",
+        to_status="refreshing",
+        action_attempted="refresh",
+    )
+    if guard is not None:
+        return guard
+
     cycle = _load_cycle(cycle_id)
     if not cycle:
         return {"error": "cycle_not_found"}
@@ -173,14 +367,33 @@ async def cortex_refresh(*, cycle_id: str, body: dict) -> dict:
     new_card = await run_phase4_propose(
         cycle_id=cycle_id, matter_slug=matter_slug, phase3c_result=phase3c,
     )
+    # Release back to 'proposed' so cycle is re-approvable with new card.
+    _cas_release_to_proposed(cycle_id, from_status="refreshing")
     return {"status": "refreshed", "new_proposal_id": new_card.proposal_id}
 
 
 async def cortex_reject(*, cycle_id: str, body: dict) -> dict:
-    """Reject — archive + feedback_ledger row."""
+    """Reject — archive + feedback_ledger row.
+
+    CORTEX_PHASE5_IDEMPOTENCY_1: CAS-locks 'proposed' → 'rejecting' before any
+    other DB read or write. Final transition to 'rejected' happens in
+    ``_archive_cycle`` with the hardened ``from_status='rejecting'`` guard.
+    """
+    guard = _cas_lock_cycle(
+        cycle_id,
+        from_status="proposed",
+        to_status="rejecting",
+        action_attempted="reject",
+    )
+    if guard is not None:
+        return guard
+
     reason = (body.get("reason") or "").strip() or "no_reason_given"
     cycle = _load_cycle(cycle_id) or {}
-    _archive_cycle(cycle_id, status="rejected", director_action="gold_rejected")
+    _archive_cycle(
+        cycle_id, status="rejected", director_action="gold_rejected",
+        from_status="rejecting",
+    )
     _write_feedback_ledger(
         cycle_id=cycle_id, action="ignore",
         reason=reason, target_matter=cycle.get("matter_slug"),
@@ -293,17 +506,31 @@ def _write_gold_proposals(
     matter_slug: Optional[str],
     selected_files: list[str],
     cycle_data: dict,
-) -> int:
+) -> dict:
     """For each selected_file build + propose a ProposedGoldEntry.
 
     Per Amendment A1: cortex modules MUST go through gold_proposer (NOT
-    gold_writer). Returns count of entries successfully written.
+    gold_writer).
+
+    CORTEX_PHASE5_IDEMPOTENCY_1 (OBS-2): returns a rich result dict so the
+    caller can surface partial-failure to Director::
+
+        {
+            "written": int,                 # count succeeded
+            "total": int,                   # count attempted
+            "failed_files": list[str],      # filenames that failed
+            "errors": list[str],            # str(exception) per failure
+        }
+
+    Per-file try/except continues across siblings (one bad file shouldn't
+    kill the rest); aggregate failure visibility now lives in the return
+    shape rather than the prior int (which silently lost the discrepancy).
     """
+    result = {"written": 0, "total": len(selected_files), "failed_files": [], "errors": []}
     if not selected_files:
-        return 0
+        return result
     from kbl.gold_proposer import ProposedGoldEntry, propose
     today = datetime.now(timezone.utc).date().isoformat()
-    written = 0
     proposal_text = cycle_data.get("proposal_text") or ""
     confidence = float(cycle_data.get("synthesis_confidence") or 0.0)
     for filename in selected_files:
@@ -322,13 +549,15 @@ def _write_gold_proposals(
         )
         try:
             propose(entry, matter=matter_slug)
-            written += 1
+            result["written"] += 1
         except Exception as e:
             logger.error(
                 "gold_proposer.propose failed for cycle=%s file=%s: %s",
                 cycle_id, filename, e,
             )
-    return written
+            result["failed_files"].append(filename)
+            result["errors"].append(str(e))
+    return result
 
 
 def _propagate_curated_via_macmini(*, cycle_id: str, matter_slug: Optional[str]) -> None:
@@ -378,23 +607,66 @@ def _archive_cycle(
     *,
     status: str,
     director_action: Optional[str] = None,
-) -> None:
+    from_status: Optional[str] = None,
+) -> Optional[dict]:
+    """Archive cycle — terminal status transition + final_archive artifact.
+
+    CORTEX_PHASE5_IDEMPOTENCY_1: when ``from_status`` is supplied, the UPDATE
+    is gated by ``WHERE status=<from_status>`` and ``RETURNING cycle_id``. If
+    no rows match (cycle was not in the expected intermediate '*ing' state),
+    the function logs a warning and returns a warning dict WITHOUT inserting
+    a duplicate ``final_archive`` row. Callers may ignore the return value
+    for backward compatibility (``None`` on success).
+
+    When ``from_status`` is ``None`` the call falls back to the legacy
+    unconditional UPDATE — preserved for any caller that hasn't been migrated
+    yet.
+    """
     store = _get_store()
     conn = store._get_conn()
     if conn is None:
-        return
+        return None
     try:
         cur = conn.cursor()
-        cur.execute(
-            """
-            UPDATE cortex_cycles
-            SET status=%s, director_action=%s,
-                completed_at=COALESCE(completed_at, NOW()),
-                current_phase='archive'
-            WHERE cycle_id=%s
-            """,
-            (status, director_action, cycle_id),
-        )
+        if from_status is not None:
+            cur.execute(
+                """
+                UPDATE cortex_cycles
+                SET status=%s, director_action=%s,
+                    completed_at=COALESCE(completed_at, NOW()),
+                    current_phase='archive'
+                WHERE cycle_id=%s AND status=%s
+                RETURNING cycle_id
+                """,
+                (status, director_action, cycle_id, from_status),
+            )
+            if cur.fetchone() is None:
+                # Cycle was not in the expected intermediate state.
+                # Log + return warning; do NOT insert final_archive (would
+                # otherwise create a duplicate audit row on double-fire).
+                logger.warning(
+                    "cortex_archive_cycle_unexpected_state cycle=%s expected=%s target=%s",
+                    cycle_id, from_status, status,
+                )
+                conn.commit()
+                cur.close()
+                return {
+                    "warning": "archive_unexpected_state",
+                    "cycle_id": cycle_id,
+                    "expected_from_status": from_status,
+                    "target_status": status,
+                }
+        else:
+            cur.execute(
+                """
+                UPDATE cortex_cycles
+                SET status=%s, director_action=%s,
+                    completed_at=COALESCE(completed_at, NOW()),
+                    current_phase='archive'
+                WHERE cycle_id=%s
+                """,
+                (status, director_action, cycle_id),
+            )
         cur.execute(
             """
             INSERT INTO cortex_phase_outputs
@@ -405,6 +677,7 @@ def _archive_cycle(
         )
         conn.commit()
         cur.close()
+        return None
     except Exception as e:
         try:
             conn.rollback()
