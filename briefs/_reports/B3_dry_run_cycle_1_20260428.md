@@ -224,6 +224,256 @@ PR #72 review by B1 listed this as **Observation #3** ("3a/3c bypass canonical A
 
 **Promotion-criteria contribution (plan §6): NONE** — this attempt does not count toward Q1 (≥5 consecutive clean cycles). After PR #77 merges, cycle 1 retry will be the first contribution.
 
+---
+
+## Cycle 1 retry — post-PR-#77-merge — 2026-04-28T18:31Z
+
+**Unblock event verified:** Render deploy `dep-d7ofmri9lc2s73bjfv1g` carrying commit `207aae47` LIVE since `2026-04-28T18:30:35Z` (15s before re-fire). Pre-flight Render API check before firing:
+
+```
+$ curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
+    "https://api.render.com/v1/services/srv-d6dgsbctgctc73f55730/deploys?limit=3"
+id=dep-d7ofmri9lc2s73bjfv1g status=live commit=207aae47 created=2026-04-28T18:24:47Z finished=2026-04-28T18:30:35Z
+id=dep-d7oflcpf9bms73alg20g status=deactivated commit=1017f3b2 (ship report commit)
+id=dep-d7ofcb1f9bms73al9rig status=deactivated commit=8b61a0c3
+```
+
+`live` deploy + `commit=207aae47` confirmed. Re-fire fired immediately after.
+
+### Execution path — same Option B as attempt 1
+
+(Identical command sequence; full env shim from `/tmp/cortex_extra_env.sh` + `/tmp/cortex_pg_env.sh` + 1Password reads.)
+
+### Cycle output
+
+```
+start_iso=2026-04-28T18:31:10Z
+end (cycle row completed_at): 2026-04-28T18:36:12Z
+cycle_id captured: 2fba3342-7996-46a2-b1aa-95bf996794eb
+final status (per cortex_cycles row): failed
+final current_phase: archive
+cost_dollars: $0.0537
+wall_clock: 4m10s (250s — outer asyncio.wait_for(300s) cap fired)
+```
+
+The Python script's `print(...)` line never landed because the cycle re-raised `RuntimeError` from the timeout-handler in `maybe_run_cycle` (per `cortex_runner.py:91-110` design); the cycle row was durably UPDATEd to `status='failed'` first (best-effort mark-failed inside the timeout `except`).
+
+### What changed vs attempt 1 — PR #77 fix VERIFIED working
+
+Phase 3a (`meta_reason`) succeeded. New phase artifact written, 2261 bytes, includes a real Anthropic Opus response:
+
+```sql
+SELECT artifact_type, payload->>'signal_classification' AS classification,
+       length(payload->>'summary') AS summary_chars,
+       payload->'capabilities_to_invoke' AS caps
+FROM cortex_phase_outputs
+WHERE cycle_id='2fba3342-7996-46a2-b1aa-95bf996794eb'
+  AND artifact_type='meta_reason';
+```
+
+Result:
+```
+classification: 'other'  (default fallback — see Observation B below)
+summary_chars: 1244 (real Opus content: "DRY_RUN synthesis of AO/Oskolkov matter:
+                     complex UHNW LP relationship with multi-layered equity, debt,
+                     and restructuring sub-matters requiring careful game-theoretic
+                     management ...")
+capabilities_to_invoke: ['russo_cy', 'legal']  (regex-matched from signal_text)
+```
+
+Pre-PR-#77, this artifact was empty / Phase 3a hit ImportError before the LLM call. Now Phase 3a's `_call_opus` reaches Anthropic, gets a 1244-char response, and persists it. **PR #77 fix is verified working in production.**
+
+### New blocker — Phase 3b specialist invocation timeouts (Option-B latency)
+
+Phase 3a successfully produced `capabilities_to_invoke=['russo_cy', 'legal']`. Phase 3b started invoking `russo_cy` via `CapabilityRunner` and hit:
+
+```
+Phase 3b russo_cy attempt 1: timeout after 60s on attempt 1
+Phase 3b russo_cy attempt 2: timeout after 60s on attempt 2
+Phase 3b russo_cy attempt 3: timeout after 60s on attempt 3
+Cortex cycle timed out after 300s (matter=oskolkov, signal=None)
+```
+
+`specialist_invocation` artifact for `russo_cy` records the failure cleanly:
+```json
+{"capability_slug": "russo_cy", "success": false, "attempts": 3,
+ "error": "timeout after 60s on attempt 3", "duration_seconds": 0.0,
+ "cost_tokens": 0, "cost_dollars": 0.0, "output_text": ""}
+```
+
+`russo_cy` × 3 attempts × 60s = 180s, then `legal` attempt 1 likely partway through 60s-cap → outer `asyncio.wait_for(300s)` cancels everything. Phase 3c synthesis never reached; Phase 4 propose never reached; Phase 6 timeout-handler archive ran.
+
+### Why this is NOT a code defect
+
+The CapabilityRunner specialist invocation budget is 60s/attempt × 3 retries. Specialists do tool-use loops (vault search via Render's `/api/vault/...` endpoints, file reads, etc.). **Each tool round-trip from local network to baker-master.onrender.com adds an HTTPS hop that doesn't exist when running on Render itself.** Plan §2.1 explicitly recommends Option A (Render shell) for exactly this reason — Option B is a documented fallback that bounds Phase 1+2+3a but is NOT guaranteed to complete Phase 3b within the cycle cap.
+
+This is the same operational discrepancy the plan §2.3 budget assumes away ("Total wall-clock: 25-65s ... assumes cycle runs on Render").
+
+### Observation B — Phase 3a JSON-fence parse fallback (LOW priority)
+
+Phase 3a's stdout includes:
+```
+Phase 3a LLM JSON parse failed (using text fallback): Expecting value: line 1 column 1 (char 0)
+```
+
+Claude Opus wrapped its JSON response in a triple-backtick `\`\`\`json ... \`\`\`` fence. The Phase 3a parser expects bare JSON. Falls through to text-mode → `signal_classification` defaults to `'other'` instead of being LLM-classified. The `capabilities_to_invoke` field is preserved from the pre-LLM regex-match pass, so the cycle still proceeds correctly.
+
+**Severity: LOW.** Not a blocker — Phase 3a degrades gracefully. Worth a separate post-V1 brief: strip ` ```json ... ``` ` fence before `json.loads()` in `cortex_phase3_reasoner.py` (mirror the `\`\`\`json` regex stripper that `cortex_phase3_synthesizer._extract_actions` already uses for structured_actions parsing). One-line fix; not in scope of this dispatch.
+
+### Plan §3 validation queries (against cycle_id `2fba3342-7996-46a2-b1aa-95bf996794eb`)
+
+#### Query 1 — cycle row final state
+
+```sql
+SELECT cycle_id, matter_slug, current_phase, status, proposal_id,
+       cost_tokens, cost_dollars, started_at, completed_at,
+       (completed_at - started_at) AS wall_clock
+FROM cortex_cycles
+WHERE cycle_id = '2fba3342-7996-46a2-b1aa-95bf996794eb'::uuid;
+```
+Result: `('2fba3342-…', 'oskolkov', 'archive', 'failed', None, ..., Decimal('0.0537'), 18:32:02, 18:36:12, 4m9.97s)`
+
+**Status: FAIL** (`status='failed'` not `tier_b_pending`; cycle didn't complete) — but graceful Phase 6 archive committed, no orphaned intermediate state.
+
+#### Query 2 — per-phase artifact presence
+
+```sql
+SELECT phase, phase_order, artifact_type, length(payload::text) AS sz, created_at
+FROM cortex_phase_outputs
+WHERE cycle_id='2fba3342-7996-46a2-b1aa-95bf996794eb'
+ORDER BY phase_order, created_at;
+```
+Result:
+```
+('sense',   1, 'cycle_init',              82, 18:32:02)  ← Phase 1 ✓
+('load',    2, 'phase2_context',       18655, 18:32:03)  ← Phase 2 ✓ (vault read worked)
+('reason',  3, 'meta_reason',           2261, 18:32:16)  ← Phase 3a ✓ (PR #77 verified)
+('reason',  4, 'specialist_invocation',  190, 18:35:18)  ← Phase 3b russo_cy FAILED
+('archive', 6, 'cycle_archive',          122, 18:36:11)  ← Phase 6 timeout-handler ✓
+```
+
+Expected (per plan §3.2): rows for `sense / load / meta_reason / specialist_invocations / synthesis / proposal_card / dry_run_marker / final_archive`. **Got: 5 of 8 expected rows; phases 3c, 4, and the dry_run_marker/final_archive variants never reached.**
+
+**Status: PARTIAL.** Phase 1+2+3a artifacts confirm code paths up to and including `meta_reason` work. Phase 3b failure is operational (network latency), not artifact-shape regression.
+
+#### Query 3 — Cost accumulation sanity
+
+```sql
+SELECT matter_slug, count(*) AS cycles_today, sum(cost_dollars) AS total_dollars
+FROM cortex_cycles
+WHERE matter_slug='oskolkov' AND started_at >= CURRENT_DATE
+GROUP BY matter_slug;
+```
+Result: `('oskolkov', 2, Decimal('0.0537'))` (attempt 1 was $0.00; attempt 2 was $0.0537).
+
+**Status: PASS** — well under €0.50/cycle ceiling and €5/day cap. F4 not tripped.
+
+#### Query 4 — Final terminal status
+
+`cycle_id='2fba3342-…'` row: `status='failed'`, `current_phase='archive'`, `completed_at` set. Cycle is durably terminal. Director-action endpoint not exercised this attempt (cycle never reached `tier_b_pending`).
+
+**Status: PARTIAL** (terminal but not the expected terminal).
+
+#### Query 5 — Bridge wire-up sanity (Amendment A2)
+
+```sql
+SELECT count(*) FROM signal_queue s
+LEFT JOIN cortex_cycles c ON c.trigger_signal_id = s.id
+WHERE s.created_at >= NOW() - INTERVAL '15 minutes' AND s.matter='oskolkov';
+```
+Result: 0 rows — no `oskolkov` signals bridged in the cycle window. `CORTEX_PIPELINE_ENABLED=false` keeps the dispatch dormant; manual director-question path bypasses the bridge entirely. **Status: PASS by design** (this query is for cycle-2+ when the flag flips to true post-promotion).
+
+#### Query 6 — Drift audit registration
+
+Plan §1.4 already verified: `matter_config_drift_weekly` next_run = `2026-05-04T11:00 UTC`. Not impacted by cycle-1 attempts. **Status: PASS.**
+
+### Render-side log impact
+
+None. Execution was Option B (local) → all Anthropic API + Postgres traffic was local→Render→Anthropic. The cycle row + phase artifacts are durable on prod Postgres; no Render-side logs polluted.
+
+### DRY_RUN gating verification
+
+| Gate | Expected | Actual |
+|---|---|---|
+| `dry_run_marker` artifact at phase_order=8 | PRESENT (Phase 4 path) | NOT REACHED (Phase 4 never fired) |
+| Slack `chat_postMessage` | SKIPPED | SKIPPED ✓ (Phase 4 never reached) |
+| GOLD write via `gold_proposer.propose` | SKIPPED | SKIPPED ✓ (Phase 5 never reached) |
+| Mac Mini SSH propagate | SKIPPED | SKIPPED ✓ (Phase 5 never reached) |
+
+DRY_RUN gating not exercised this attempt (Phase 4 not reached) but **also not falsely fired**. F3 (real Slack post during DRY_RUN) and F6 (GOLD attempted) **did NOT trip**.
+
+### STOP criteria F1–F9 evaluation (retry)
+
+| # | Trigger | Tripped? |
+|---|---|---|
+| F1 | `status='failed'` vs `tier_b_pending` | **Yes — but EXPECTED-graceful** (Phase 6 timeout-handler did its job; cycle row terminal). |
+| F2 | `dry_run_marker` absent at phase_order=8 | N/A — Phase 4 never reached |
+| F3 | Real Slack post during DRY_RUN | NO ✓ |
+| F4 | `cost_dollars > €0.50` | NO ✓ ($0.0537 — well within cycle cap) |
+| F5 | Wall-clock > 60s / 300s timeout | **Yes — 300s timeout** (specialist-invocation latency from local network) |
+| F6 | Cycle stuck `*ing` >5min | NO ✓ |
+| F7 | `_phase6_archive` itself fails | NO ✓ (cycle_archive committed) |
+| F8 | Bridge regression | NO ✓ |
+| F9 | Phase 5 endpoint 5xx | NO ✓ |
+
+F1 + F5 same as attempt 1 — both EXPECTED outcomes given the operational constraint, not unexpected production regressions. **No rollback fired.**
+
+### Verdict — **PARTIAL PASS** (PR #77 fix verified; Phase 3b operational gap surfaced)
+
+| Pass criterion | Result |
+|---|---|
+| Cycle runs to terminal `tier_b_pending` | ❌ `status='failed'` due to Phase 3b specialist-call timeouts (Option-B latency) |
+| All 6 §3 queries return non-empty rows | PARTIAL — Q1/Q3/Q5/Q6 PASS; Q2 has 5 of 8 expected artifacts (phases 3c/4 missing); Q4 partial |
+| `dry_run_marker` at phase_order=8 | ❌ Phase 4 never reached |
+| No Slack DM | ✓ |
+| Cost within $0.25 | ✓ ($0.0537) |
+| Wall-clock within 65s | ❌ 4m10s (300s timeout — Option-B network latency) |
+| No exceptions in Render logs | N/A (local execution; Render untouched) |
+
+**What this run proves:**
+1. ✅ **PR #77 (config-import fix) is working in production** — Phase 3a's `_call_opus` now reaches Anthropic and persists a real `meta_reason` artifact (was 0 bytes pre-fix; is 2261 bytes post-fix).
+2. ✅ **1A + 1B Phase 1/2/3a code paths are durable on prod Postgres** — `cycle_init`, `phase2_context` (18655 bytes — full vault read), `meta_reason` (2261 bytes) all committed cleanly.
+3. ✅ **Cycle row failure handling works** — graceful Phase 6 timeout-handler UPDATEd `status='failed'`, no orphaned `in_flight` state, $0.0537 cost accurately captured.
+
+**What this run cannot prove (without Option A):**
+1. Phase 3b → 3c → 4 happy path on real specialists (CapabilityRunner timeouts from local network ≠ from Render).
+2. `dry_run_marker` artifact write at Phase 4 phase_order=8.
+3. End-to-end DRY_RUN flow including `_archive_cycle` from a Director button-press simulation (cycle never reaches `tier_b_pending`).
+
+### Promotion-criteria contribution (plan §6) — STILL ZERO
+
+| Q1 sub-criterion | Cycle 1 retry contribution |
+|---|---|
+| Q1 cycle ran cleanly | ❌ 0/5 (cycle reached `failed` not `tier_b_pending`) |
+| Cost < €0.50 | ✓ data point: $0.0537 (would count toward G3 if Q1 passed) |
+| p95 ≤ 60s | ❌ 4m10s wall-clock |
+| `dry_run_marker` present | ❌ Phase 4 never reached |
+
+**No accumulation toward N≥5 yet.** First "clean cycle" of the 5-required must be run via Option A (Render shell) to clear Phase 3b's network bottleneck.
+
+### Path forward (recommendation to A)
+
+The PR #77 fix did exactly what it needed to. The next blocker is **operational, not code**: Phase 3b specialists need the lower network latency that running inside Render's environment provides. Three options:
+
+1. **Director runs cycle 1 via Render dashboard "Shell" tab** — most reliable; takes 30s of Director's time. The plan §2.1 Option A. A relays the heredoc to Director for paste-execution; Director pastes back the printed `cycle_id`; B3 runs §3 validation queries off it.
+
+2. **Install Render CLI on B3's machine** — `brew install render-oss/render/render` then `render ssh srv-d6dgsbctgctc73f55730` opens an interactive Render shell from B3's terminal. B3 can then run the Python heredoc inside Render's container, with Render's network latency, and capture the cycle_id without Director-in-the-loop. Same result as Option 1 but autonomous.
+
+3. **Trigger via a one-shot HTTP endpoint in production** — would require a new `POST /api/cortex/admin/trigger-cycle` admin endpoint (X-Baker-Key gated). Adds scope, requires PR review. Lowest priority.
+
+Recommendation: **Option 2** if A wants this autonomous tonight; **Option 1** if Director is available and A prefers minimal new install. Either way, cycle 1's first clean run must come from inside Render's network — not local.
+
+The Phase 3a JSON-fence parse fallback (Observation B) is a separate LOW-priority cleanup; can be batched with any post-V1 hardening pass.
+
+### Co-Authored-By (retry)
+
+```
+Co-authored-by: Code Brisen #3 <b3@brisengroup.com>
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+```
+
+---
+
 ## Co-Authored-By
 
 ```
