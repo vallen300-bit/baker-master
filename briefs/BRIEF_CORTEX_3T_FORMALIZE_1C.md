@@ -26,6 +26,21 @@
 
 ---
 
+## ⚠️ Amendment A2 (AI Head A from B1 review of PR #71, 2026-04-28T07:15Z)
+
+**Source:** B1 second-pair-review of PR #71 (CORTEX_3T_FORMALIZE_1A) — advisory observation #1, Director-accepted disposition 2026-04-28T07:18Z (`Recommendation A — fold into 1C`).
+
+**Issue:** B3 shipped `triggers/cortex_pipeline.py` in 1A but the pipeline is dormant — the env-flag-gated pipeline call at the upstream INSERT site (`kbl/bridge/alerts_to_signal.py:495`) is NOT yet wired. 1B is reasoning-only and doesn't touch the trigger boundary. Without 1C explicitly wiring it, the pipeline ships dark on main between 1B merge and the wire-up.
+
+**Required addition to 1C scope (NEW Fix/Feature):**
+- After the `signal_queue` INSERT commits at `kbl/bridge/alerts_to_signal.py:495`, call `triggers/cortex_pipeline.maybe_dispatch(signal_id, matter_slug)` gated on env flag `CORTEX_PIPELINE_ENABLED=true` (default false in production until DRY_RUN passes).
+- Wrap call in try/except: `cortex_pipeline.maybe_dispatch` failures must NOT block the `alerts_to_signal` write path (Cortex is downstream/best-effort, signal queue is upstream/canonical).
+- Add `tests/test_alerts_to_signal_cortex_dispatch.py` — 2 tests minimum: (a) flag off → no dispatch call, (b) flag on + dispatch raises → INSERT still commits.
+
+**Add to Quality Checkpoint list:** "Pipeline call-site at `kbl/bridge/alerts_to_signal.py:495` is wired and env-flag-gated; literal dry-run shows env=false → no Cortex cycle row, env=true → cycle row created."
+
+---
+
 ## Context
 
 Sub-brief **1C of 3** — the interface + ops layer. 1A landed cycle persistence + Phase 1/2/6. 1B landed Phase 3 reasoning. 1C completes the cycle: Phase 4 produces a 4-button Slack proposal card with per-file Gold checkboxes; Phase 5 acts on Director's choice + propagates GOLD to curated knowledge files; APScheduler weekly matter-config drift job goes live; Step 29 DRY_RUN flag for log-only first cycle; Step 33 rollback script committed BEFORE Step 34-35 decommission of `ao_signal_detector` + `ao_project_state` (Director-consult cutover, not in this brief).
