@@ -1,5 +1,5 @@
 ---
-status: OPEN
+status: IN_PROGRESS
 brief: briefs/BRIEF_CORTEX_TRIGGER_ENDPOINT_1.md
 trigger_class: HIGH
 dispatched_at: 2026-04-28T22:55:00Z
@@ -22,9 +22,9 @@ b1_review_reason: "External API + auth surface — RA-24 trigger fires"
 builder: b2
 reviewer: b1
 ai_head_review: "/security-review + structural"
-claimed_at: null
-claimed_by: null
-last_heartbeat: null
+claimed_at: 2026-04-29T00:00:00Z
+claimed_by: b2
+last_heartbeat: 2026-04-29T00:00:00Z
 blocker_question: null
 ship_report: briefs/_reports/B2_cortex_trigger_endpoint_20260428.md
 autopoll_eligible: false
