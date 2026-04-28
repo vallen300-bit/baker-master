@@ -114,7 +114,7 @@ def _call_opus(
     caller can accumulate into ``cortex_cycles.cost_dollars``.
     """
     import anthropic
-    from orchestrator import config
+    from config.settings import config
     from orchestrator.cost_monitor import log_api_cost
 
     client = anthropic.Anthropic(api_key=config.claude.api_key)
