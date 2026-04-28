@@ -1,86 +1,131 @@
 ---
-status: IN_PROGRESS
-brief: briefs/BRIEF_CORTEX_PHASE5_IDEMPOTENCY_1.md
-trigger_class: MEDIUM
-dispatched_at: 2026-04-28 14:50:00+00:00
+status: OPEN
+brief: briefs/BRIEF_CORTEX_TRIGGER_ENDPOINT_1.md
+trigger_class: HIGH
+dispatched_at: 2026-04-28T22:55:00Z
 dispatched_by: ai-head-a
-prerequisite_pr: 74
-prerequisite_state: MERGED 2026-04-28T14:45:05Z (squash 97f26b1)
-claimed_at: '2026-04-28T14:52:00.560410+00:00'
-claimed_by: b2
+director_authorization: "1b" (Pick 1b — add /api/cortex/trigger endpoint, V1.1 path to ship Cortex cycles tonight)
+predecessor_state: "B3 first real cycle attempts 1+2 FAILED on cross-network specialist timeout. Root cause not capability-specific — it's question-weight × network-locality. Fix: run cycles inside Render container via HTTP trigger."
+goal: "Add POST /api/cortex/trigger endpoint to outputs/dashboard.py guarded by X-Baker-Key. Calls maybe_run_cycle synchronously inside Render container where DB+Qdrant are localhost (no cross-network latency). Returns terminal cycle state."
+scope_summary:
+  - "1 new POST endpoint at /api/cortex/trigger"
+  - "1 Pydantic request model"
+  - "4 unit tests in tests/test_cortex_trigger_endpoint.py"
+files_modified:
+  - outputs/dashboard.py (~70 LOC added: import + Pydantic model + endpoint)
+  - tests/test_cortex_trigger_endpoint.py (NEW, ~120 LOC, 4 tests)
+files_not_to_touch:
+  - orchestrator/cortex_runner.py (signature/timeouts stay)
+  - triggers/cortex_pipeline.py (auto-dispatch path unchanged)
+b1_review_required: true
+b1_review_reason: "External API + auth surface — RA-24 trigger fires"
+builder: b2
+reviewer: b1
+ai_head_review: "/security-review + structural"
+claimed_at: null
+claimed_by: null
 last_heartbeat: null
 blocker_question: null
-ship_report: null
+ship_report: briefs/_reports/B2_cortex_trigger_endpoint_20260428.md
 autopoll_eligible: false
-context_note: builder=b2 (App, fresh post-triage); reviewer=b3 (hottest Phase 5 context);
-  blind-spot diversification per Director RA 2026-04-28T14:35Z
 ---
 
-# CODE_2_PENDING — B2 (App): CORTEX_PHASE5_IDEMPOTENCY_1 — 2026-04-28
+# CODE_2_PENDING — B2: CORTEX_TRIGGER_ENDPOINT_1 — 2026-04-28
 
 **Dispatcher:** AI Head A (sole orchestrator)
-**Working dir:** `~/bm-b2` (App tab — active agent in Claude App; cd into worktree filesystem)
-**Brief:** [`briefs/BRIEF_CORTEX_PHASE5_IDEMPOTENCY_1.md`](../BRIEF_CORTEX_PHASE5_IDEMPOTENCY_1.md) (~210 lines)
-**Branch:** `cortex-phase5-idempotency-1` (cut from `main` post PR #74 merge `97f26b1`)
-**Estimated time:** ~30-45min
-**Trigger class:** MEDIUM → b3 second-pair-review pre-merge
+**Working dir:** `~/bm-b2/01_build` (App)
+**Trigger class:** HIGH (external API + new auth surface — B1 review required pre-merge per RA-24)
 
-## §2 pre-dispatch busy-check (AI Head A verified)
+## Read full brief
 
-- **B2 (App) prior state:** COMPLETE — backlog triage shipped (`b14a670`). IDLE.
-- **Other B-codes:**
-  - B1: COMPLETE — PR #74 second-pair-review APPROVE shipped (`6eb9dc8`). IDLE.
-  - B3: COMPLETE — PR #74 (1C build) merged `97f26b1` + V1 DRY_RUN launch plan shipped (`01fa06d`). IDLE, warm for second-pair-review on this patch.
-- **Lesson #50 review-in-flight pre-check:** N/A (build, not review).
-- **Self-review block:** B2 cannot self-review own build → b3 = independent reviewer (b3 has Phase 5 context from 1C build, ideal for this patch).
+`briefs/BRIEF_CORTEX_TRIGGER_ENDPOINT_1.md` — complete spec, copy-pasteable code, 4 unit tests, post-deploy smoke.
 
-## Source
+## Execution
 
-AI Head B PR #74 structural-design verdict (relayed via Director 2026-04-28T14:30Z) surfaced:
-- **OBS-1 HIGH** — `cortex_approve` not idempotent (4 handlers affected); double-fire creates duplicate GOLD entries + duplicate audit rows.
-- **OBS-2 MEDIUM** — `_write_gold_proposals` silent-failure swallow on systemic errors (Director sees "approved" but zero GOLD written).
-- OBS-3/4/5 LOW — backlog (separate post-V1 hardening pass).
+```bash
+cd ~/bm-b2/01_build
+git checkout main && git pull -q
+git checkout -b cortex-trigger-endpoint-1
 
-This patch closes OBS-1 + OBS-2 only.
+# Read the brief
+cat briefs/BRIEF_CORTEX_TRIGGER_ENDPOINT_1.md | less
 
-## What you're building
+# Implement per brief
+# - Add `from orchestrator.cortex_runner import maybe_run_cycle` to imports
+# - Add CortexTriggerRequest Pydantic model
+# - Add @app.post("/api/cortex/trigger") endpoint
+# - Create tests/test_cortex_trigger_endpoint.py with 4 tests
 
-Two surgical changes in `orchestrator/cortex_phase5_act.py`:
+# Syntax check
+python3 -c "import py_compile; py_compile.compile('outputs/dashboard.py', doraise=True)"
 
-1. **CAS guard at top of 4 handlers** (`cortex_approve`, `cortex_edit`, `cortex_refresh`, `cortex_reject`) — atomic `UPDATE ... WHERE status='proposed' RETURNING cycle_id` pattern; if 0 rows, return `{"warning": "already_actioned", ...}` with HTTP 200 (idempotent retry not an error).
-2. **Partial-failure surfacing in `_write_gold_proposals` caller** — return `status="approved_with_errors"` (all fail) or `"approved_with_partial_errors"` (some fail) with explicit field counts.
+# Unit tests must PASS literally
+pytest tests/test_cortex_trigger_endpoint.py -v
 
-Plus `_archive_cycle` defensive WHERE-clause hardening (1 line).
+# Commit + push
+git add outputs/dashboard.py tests/test_cortex_trigger_endpoint.py briefs/BRIEF_CORTEX_TRIGGER_ENDPOINT_1.md
+git commit -m "feat(cortex): /api/cortex/trigger endpoint for inside-Render cycle invocation
 
-Plus 12 new idempotency tests + 2 partial-failure tests.
+Adds POST /api/cortex/trigger guarded by X-Baker-Key. Calls maybe_run_cycle
+synchronously inside the Render container, where DB+Qdrant are localhost
+(no cross-network latency that has been killing local-dispatch cycles).
 
-## Hard gate
+- Pydantic request model with length/format validation
+- 4 unit tests (happy path, 401, 422, 504 timeout)
+- No changes to maybe_run_cycle signature or auto-dispatch path
 
-MUST ship before Step 30 (first live cycle on AO matter, post-DRY_RUN). DRY_RUN-only firing in cycle 1 mitigates today; live double-fire would create duplicate GOLD entries + duplicate audit rows.
+Brief: briefs/BRIEF_CORTEX_TRIGGER_ENDPOINT_1.md
+Trigger class: HIGH (B1 situational review required pre-merge)
 
-## Process
+Co-authored-by: Code Brisen #2 <b2@brisengroup.com>
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 
-1. `git checkout main && git pull -q`
-2. `git checkout -b cortex-phase5-idempotency-1`
-3. Build per Brief §"Fix/Feature 1" + §"Fix/Feature 2"
-4. Run literal pytest (Brief §"Verification"):
-   ```bash
-   pytest tests/test_cortex_phase5_idempotency.py tests/test_cortex_phase5_act.py -v 2>&1 | tail -50
-   pytest tests/test_cortex_*.py tests/test_alerts_to_signal*.py -v 2>&1 | tail -10
-   ```
-5. Push branch, open PR with title `CORTEX_PHASE5_IDEMPOTENCY_1: CAS guard + partial-failure surfacing (B's PR #74 OBS-1 + OBS-2)`
-6. Write ship report at `briefs/_reports/B2_pr<N>_cortex_phase5_idempotency_1_20260428.md`
-7. Notify A in chat — A dispatches b3 second-pair-review + runs `/security-review`
+git push -u origin cortex-trigger-endpoint-1
+gh pr create \
+  --title "feat(cortex): /api/cortex/trigger endpoint for inside-Render cycle invocation" \
+  --body "Per BRIEF_CORTEX_TRIGGER_ENDPOINT_1. HIGH trigger class — B1 review required.
 
-## Files Modified (per brief §"Files Modified")
+## Why
+B3 local-dispatch real cycles fail on cross-network specialist timeouts (60s × 3 cap exceeded by vault-heavy tool chains paying network round-trip latency). Root cause is question-weight × network-locality, not capability-specific. Disabling capabilities does not fix it.
 
-- `orchestrator/cortex_phase5_act.py` — CAS guard on 4 handlers + `_archive_cycle` WHERE-hardening + `_write_gold_proposals` partial-failure surfacing
-- `tests/test_cortex_phase5_idempotency.py` — NEW (≥12 tests)
-- `tests/test_cortex_phase5_act.py` — UPDATE existing tests if they assume unconditional UPDATE
+## What
+POST /api/cortex/trigger that calls maybe_run_cycle inline inside the Render container, where DB+Qdrant are localhost.
 
-## Files NOT to Touch
+## Tests
+- 4 unit tests in tests/test_cortex_trigger_endpoint.py
+- All 4 PASS literally (per Lesson #48 — no 'by inspection')
 
-Per brief §"Files NOT to Touch" — `cortex_phase4_proposal.py`, `cortex_runner.py`, migrations, `kbl/gold_writer.py`, `kbl/gold_proposer.py`, `dashboard.py` endpoint signature (additive JSON fields only), rollback script.
+## Reviewers
+- B1: structural + Lesson #52 walkthrough
+- AI Head A: /security-review + final review
+
+## Verification
+Post-deploy smoke curl in brief — confirms endpoint returns 200 + cycle_id."
+```
+
+## Pass criteria
+
+- 4 tests PASS literally (`pytest tests/test_cortex_trigger_endpoint.py -v`)
+- `python3 -c "import py_compile; ..."` clean on `outputs/dashboard.py`
+- PR opened, B1 + A tagged for review
+- No changes outside the 2 listed files
+
+## STOP criteria
+
+- Tests fail → STOP, surface output to A
+- maybe_run_cycle import causes circular import → STOP, surface
+- Existing /api/cortex/* endpoint regression — STOP
+
+## Output
+
+Create `briefs/_reports/B2_cortex_trigger_endpoint_20260428.md` with: PR URL, test output, syntax check output, files-modified diff summary.
+
+## After merge — A executes
+
+1. Confirm Render deploys cleanly (deploy ID + healthy)
+2. Post-deploy curl smoke
+3. If 200 + cycle_id: refire AO Director question via the new endpoint (not B3 local!)
+4. Surface result to Director
 
 ## Co-Authored-By
 
