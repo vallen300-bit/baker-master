@@ -101,7 +101,7 @@ tests/test_cortex_runner_phase3.py::test_cycle_id_propagated_to_all_phase3_calls
 | New test PASSES literally | ✅ |
 | Phase 3 regression PASSES literally | ✅ (12/12) |
 | py_compile clean | ✅ |
-| PR opened | _(footer)_ |
+| PR opened | ✅ [#79](https://github.com/vallen300-bit/baker-master/pull/79) |
 | Only the 2 listed files modified | ✅ (verified via `git diff --name-only main...HEAD`) |
 | No other module imports `SPECIALIST_TIMEOUT_S` | ✅ (grep confirmed) |
 
@@ -117,7 +117,7 @@ Per brief §"Post-merge — A executes":
 
 ## PR
 
-_(URL set on commit + push)_
+https://github.com/vallen300-bit/baker-master/pull/79
 
 ## Co-Authored-By
 
