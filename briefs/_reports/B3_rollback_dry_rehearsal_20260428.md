@@ -131,6 +131,27 @@ Report results back to AI Head A. Expected: two non-empty prefix lines. AI Head 
 
 ---
 
+## Update — Q4 closure (2026-04-28)
+
+AI Head A verified vault paths directly against Director's account via
+`op vault list` + `op item list --vault "Baker API Keys"`. The original
+guess paths (`op://Private/...`) do not exist; the canonical Brisen
+vault is **`Baker API Keys`** with items **`API Render`** and
+**`DATABASE_URL`**.
+
+Verified resolutions (8 / 12 char prefixes):
+- `op read 'op://Baker API Keys/API Render/credential' | head -c 8` → `rnd_KfUr` (valid Render API key prefix)
+- `op read 'op://Baker API Keys/DATABASE_URL/credential' | head -c 12` → `postgresql:/` (valid Postgres URL prefix)
+
+B3 patched the script in PR `ROLLBACK_SCRIPT_OP_PATH_FIX_1` (branch
+`rollback-script-op-path-fix-1`); see `briefs/_reports/B3_rollback_op_path_fix_20260428.md`.
+
+**Q4 PASS on merge** — `scripts/cortex_rollback_v1.sh` resolves both
+secrets cleanly; plan §5.2 fully cleared; DRY_RUN promotion gate
+unblocked on the rollback-drill axis.
+
+---
+
 ## Co-Authored-By
 
 ```

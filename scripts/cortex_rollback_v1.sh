@@ -18,9 +18,8 @@
 #   5. Posts Slack DM to Director confirming rollback.
 #
 # Prerequisites:
-#   * 1Password CLI logged in (`op signin`) — secrets pulled from
-#     `op://` paths below. The exact paths must be verified by the
-#     Director (op item list) before the first live-run.
+#   * 1Password CLI logged in (`op signin`) — secrets pulled from the
+#     `op://Baker API Keys/...` paths below (verified 2026-04-28).
 #   * `confirm` positional arg required (defensive against accidental fire).
 #
 # Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
@@ -43,11 +42,12 @@ fi
 echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] cortex_rollback_v1: START"
 
 # --- secrets via 1Password CLI -----------------------------------------------
-# B-code TODO: verify these op:// paths with `op item list` before first live
-# run. They follow the canonical Brisen vault layout but secrets paths are
-# environment-specific and may have moved.
-RENDER_API_KEY="${RENDER_API_KEY:-$(op read 'op://Private/Render API Key/credential' 2>/dev/null || true)}"
-DB_URL="${DB_URL:-$(op read 'op://Private/Baker DB URL/credential' 2>/dev/null || true)}"
+# Paths verified by AI Head A 2026-04-28 against Director's actual `op vault
+# list` + `op item list --vault "Baker API Keys"`. Both items resolved to live
+# credential prefixes (rnd_… + postgresql:/). Override via env (RENDER_API_KEY
+# / DB_URL) is supported for sandbox or non-1Password contexts.
+RENDER_API_KEY="${RENDER_API_KEY:-$(op read 'op://Baker API Keys/API Render/credential' 2>/dev/null || true)}"
+DB_URL="${DB_URL:-$(op read 'op://Baker API Keys/DATABASE_URL/credential' 2>/dev/null || true)}"
 SERVICE_ID="${SERVICE_ID:-srv-d6dgsbctgctc73f55730}"
 
 if [[ -z "${RENDER_API_KEY}" ]]; then
