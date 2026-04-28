@@ -20,7 +20,7 @@ from typing import Optional
 import anthropic
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -4153,6 +4153,129 @@ async def trigger_cortex_cycle(req: CortexTriggerRequest):
         "cost_dollars": float(cycle.cost_dollars) if cycle.cost_dollars is not None else 0.0,
         "aborted_reason": getattr(cycle, "aborted_reason", None),
     }
+
+
+# CORTEX_PRE_REVIEW_GATE_1: tap-from-Slack endpoint for the cost gate.
+# Auth: signed-token (HMAC) — no X-Baker-Key (must be openable by Slack tap).
+@app.get("/api/cortex/gate/decide", tags=["cortex"], response_class=HTMLResponse)
+async def cortex_gate_decide(
+    background_tasks: BackgroundTasks,
+    signal_id: int,
+    action: str,
+    exp: int,
+    token: str,
+):
+    """CORTEX_PRE_REVIEW_GATE_1: Director-tap endpoint for the cost gate.
+
+    Auth: signed-token via query string (HMAC-SHA256 of
+    signal_id|action|expires_at, secret=CORTEX_GATE_SECRET). NO X-Baker-Key —
+    must be tap-clickable from Slack-on-iPhone (iOS Safari follow-link drops
+    custom headers).
+
+    Idempotent: a re-tap after the decision is already recorded returns the
+    recorded decision page; the cycle does NOT re-fire.
+
+    Sensitive payload (preview text / aborted_reason) is never echoed back
+    in the HTML — only matter_slug + signal_id + action are shown.
+    """
+    from triggers.cortex_pre_review_gate import (
+        verify_token, already_decided, record_decision, lookup_matter_slug,
+    )
+
+    # 1. Verify signed token + action + expiry.
+    ok, err = verify_token(
+        signal_id=signal_id, action=action, expires_at=exp, token=token,
+    )
+    if not ok:
+        return HTMLResponse(
+            f"<h1>Gate link invalid</h1><p>Reason: {err}</p>",
+            status_code=403,
+        )
+
+    # 2. Idempotency — re-tap returns recorded decision, never re-fires.
+    prior = already_decided(signal_id)
+    if prior:
+        return HTMLResponse(
+            f"<h1>Already decided</h1>"
+            f"<p>Signal {signal_id}: <b>{prior}</b></p>",
+            status_code=200,
+        )
+
+    # 3. Resolve matter from signal_queue (real column: `matter`).
+    matter_slug = lookup_matter_slug(signal_id)
+    if matter_slug is None:
+        # DB unavailable or lookup error — best-effort error page (not 500
+        # to avoid exposing infra signals to the world).
+        return HTMLResponse(
+            f"<h1>Lookup error</h1><p>signal_id={signal_id}</p>",
+            status_code=503,
+        )
+    if matter_slug == "":
+        return HTMLResponse(
+            f"<h1>Signal not found</h1><p>signal_id={signal_id}</p>",
+            status_code=404,
+        )
+
+    # 4. Atomically claim the decision row (CORTEX_PRE_REVIEW_GATE_2 — closes
+    #    the TOCTOU race between the prior already_decided() read above and
+    #    the INSERT below). record_decision returns False if a concurrent
+    #    request — including a Slackbot-LinkExpanding GET, an iPhone
+    #    double-tap, or a tab-reload — already won the race. We MUST NOT
+    #    fire the BackgroundTask in that case (would trigger 2× $4 cycles).
+    claimed = record_decision(
+        signal_id=signal_id, action=action, matter_slug=matter_slug,
+    )
+    if not claimed:
+        return HTMLResponse(
+            f"<h1>Already decided</h1>"
+            f"<p>Signal {signal_id}: another decision was recorded "
+            f"simultaneously.</p>",
+            status_code=200,
+        )
+
+    # 5. Branch on action — only reached if THIS call won the race.
+    if action == "approve":
+        # Fire cycle in background — release HTTP response immediately so the
+        # Director's browser tab does not hang for 4-5 minutes.
+        background_tasks.add_task(
+            _cortex_gate_fire_cycle, matter_slug, signal_id,
+        )
+        return HTMLResponse(
+            "<h1>✅ Cycle started</h1>"
+            "<p>Cortex is analyzing now. ETA ~5 minutes. "
+            "Watch Slack for the proposal card.</p>",
+            status_code=200,
+        )
+
+    # action == "skip" (verify_token already rejected anything else)
+    return HTMLResponse(
+        "<h1>❌ Skipped</h1>"
+        "<p>Signal recorded as skipped. No cycle fired, no spend.</p>",
+        status_code=200,
+    )
+
+
+async def _cortex_gate_fire_cycle(matter_slug: str, signal_id: int) -> None:
+    """CORTEX_PRE_REVIEW_GATE_1: background-task wrapper that fires
+    maybe_run_cycle after a gate approval. Never raises — failures are
+    logged so the FastAPI background-task pool stays healthy.
+    """
+    try:
+        cycle = await maybe_run_cycle(
+            matter_slug=matter_slug,
+            triggered_by="director_gate_approve",
+            trigger_signal_id=signal_id,
+        )
+        logger.info(
+            "gate-approved cycle complete: cycle_id=%s status=%s cost=$%.4f",
+            cycle.cycle_id, cycle.status,
+            float(cycle.cost_dollars) if cycle.cost_dollars is not None else 0.0,
+        )
+    except Exception as e:  # noqa: BLE001 — background tasks must not propagate
+        logger.error(
+            "gate-approved cycle failed signal_id=%s matter=%s: %s",
+            signal_id, matter_slug, e,
+        )
 
 
 # ============================================================

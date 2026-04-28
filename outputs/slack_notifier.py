@@ -108,7 +108,13 @@ def _get_webclient():
     return WebClient(token=config.outputs.slack_bot_token)
 
 
-def post_to_channel(channel_id: str, text: str) -> bool:
+def post_to_channel(
+    channel_id: str,
+    text: str,
+    *,
+    unfurl_links: Optional[bool] = None,
+    unfurl_media: Optional[bool] = None,
+) -> bool:
     """Post plain text to an arbitrary Slack channel (DMs included).
 
     BRIEF_AI_HEAD_WEEKLY_AUDIT_1: used by the weekly self-audit job to
@@ -121,6 +127,17 @@ def post_to_channel(channel_id: str, text: str) -> bool:
         text: Plain text body. Max 3000 chars recommended for push
               notifications; not Block Kit — caller ensures no markdown
               surprises on mobile.
+        unfurl_links: Optional. Pass False to suppress URL link previews.
+                      CORTEX_PRE_REVIEW_GATE_2: callers whose URLs are
+                      *side-effecting GETs* MUST pass False — Slack's
+                      preview fetcher (Slackbot-LinkExpanding) GETs every
+                      URL in the message at post time, which would trigger
+                      the action endpoint without the user ever tapping.
+                      Default None preserves Slack's default (= unfurl on)
+                      for all existing callers (audit_sentinel,
+                      ai_head_audit, wiki_lint).
+        unfurl_media: Optional. Pass False to suppress media (image / video)
+                      previews. Same rationale as unfurl_links. Default None.
     Returns:
         True on Slack API ok=true; False otherwise.
     """
@@ -129,10 +146,12 @@ def post_to_channel(channel_id: str, text: str) -> bool:
         return False
     try:
         client = _get_webclient()
-        resp = client.chat_postMessage(
-            channel=channel_id,
-            text=text[:3000],
-        )
+        kwargs = {"channel": channel_id, "text": text[:3000]}
+        if unfurl_links is not None:
+            kwargs["unfurl_links"] = unfurl_links
+        if unfurl_media is not None:
+            kwargs["unfurl_media"] = unfurl_media
+        resp = client.chat_postMessage(**kwargs)
         if resp.get("ok"):
             return True
         logger.warning(
