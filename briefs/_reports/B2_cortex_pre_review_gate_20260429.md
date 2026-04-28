@@ -4,7 +4,7 @@ builder: b2
 shipped_at: 2026-04-29T01:35:00Z
 trigger_class: HIGH
 branch: cortex-pre-review-gate-1
-pr_url: <opened by gh pr create immediately after this report is committed>
+pr_url: https://github.com/vallen300-bit/baker-master/pull/80
 review_required:
   - "B1 (formal) — external API + signed-token auth + Slack DM behavior change (RA-24 trigger)"
   - "AI Head A — /security-review + structural"
