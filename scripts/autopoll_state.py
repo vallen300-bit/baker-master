@@ -42,7 +42,10 @@ def _split_frontmatter(text: str) -> tuple[dict, str]:
     end = text.find("\n---\n", 4)
     if end == -1:
         raise ValueError("unterminated frontmatter")
-    fm = yaml.safe_load(text[4:end]) or {}
+    try:
+        fm = yaml.safe_load(text[4:end]) or {}
+    except yaml.YAMLError as e:
+        raise ValueError(f"malformed YAML in frontmatter: {e}") from e
     if not isinstance(fm, dict):
         raise ValueError("frontmatter is not a mapping")
     body = text[end + 5:]
@@ -166,3 +169,44 @@ def push_state_transition(
             post_to_channel("D0AFY28N030", line)
     except Exception:
         return
+
+
+_IDLE_STATE_DIR = Path.home() / ".autopoll_state"
+
+
+def _idle_state_path(b_code: str) -> Path:
+    """Per-B-code local state file. Survives across wakes; outside any repo."""
+    return _IDLE_STATE_DIR / f"{b_code}.yaml"
+
+
+def read_idle_count(b_code: str) -> int:
+    """Return current idle wake count for this B-code (0 if no state file)."""
+    p = _idle_state_path(b_code)
+    if not p.exists():
+        return 0
+    try:
+        data = yaml.safe_load(p.read_text()) or {}
+    except (yaml.YAMLError, ValueError, OSError):
+        return 0
+    val = data.get("idle_count", 0)
+    return int(val) if isinstance(val, int) else 0
+
+
+def increment_idle_count(b_code: str) -> int:
+    """Increment idle counter, return new value. Creates state dir if missing."""
+    _IDLE_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    p = _idle_state_path(b_code)
+    new = read_idle_count(b_code) + 1
+    p.write_text(yaml.safe_dump({
+        "idle_count": new,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "b_code": b_code,
+    }, sort_keys=False))
+    return new
+
+
+def reset_idle_count(b_code: str) -> None:
+    """Reset to 0 (call after successful claim of fresh dispatch)."""
+    p = _idle_state_path(b_code)
+    if p.exists():
+        p.unlink()
