@@ -1,134 +1,121 @@
 ---
-status: COMPLETE
-brief: cortex_v1_first_real_cycle_ao_baden_baden_intent_attempts_1_and_2
-trigger_class: HIGH
-dispatched_at: 2026-04-28T22:35:00Z
-closed_at: 2026-04-28T22:58:00Z
-verdict: FAIL_REPRODUCIBLE
-attempt_1: "8ba8efc3-2d7d-4371-afc2-08a4107237e7 FAIL — Phase 3a ['finance','sales','game_theory']; finance 60s×3 timeout. cost=$0.0617 wall=248.5s DB."
-attempt_2: "110b4696-7d73-4602-aff1-8ec655729e62 FAIL — finance disabled; sales+game_theory still hit timeout. cost=$0.0693 wall=249.6s. fail_class=SPECIALIST_TIMEOUT_QUESTION_WEIGHT_X_NETWORK_LOCALITY."
-total_cost_local_dispatch: 0.131
-diagnosis: "Cross-network specialist timeout is reproducible with rich Director questions regardless of which capability runs. Disabling caps does NOT fix it. Fix path = run cycles inside Render container (no network round-trip latency on tool calls)."
-forward_handoff: "B2 building POST /api/cortex/trigger per BRIEF_CORTEX_TRIGGER_ENDPOINT_1.md (CODE_2_PENDING.md). After deploy, A will refire same AO question via curl from anywhere — cycle runs inside Render."
-director_authorization: "what is AO actual intentions by getting in touch with Siegfried and Constantinos re meeting dates with them without first informing Brisen about our plans to be in Baden-Baden?"
-target_matter_slug: oskolkov
-ship_report: briefs/_reports/B3_first_real_cycle_20260428.md
+status: OPEN
+brief: briefs/BRIEF_CORTEX_SPECIALIST_TIMEOUT_TUNABLE_1.md
+trigger_class: LOW
+dispatched_at: 2026-04-29T00:55:00Z
+dispatched_by: ai-head-a
+director_authorization: "we need to allocate much more time for specialist answer, say 2 min ? or 3 min ? see if it works"
+predecessor_state: "Real AO cycle fc382469 inside Render hit 300s outer cap. Phase 3a OK (19s); Phase 3b sales specialist 60s × 3 = 180s timeout. Specialist timeout too short for rich prompts."
+goal: "Make SPECIALIST_TIMEOUT_S env-tunable via CORTEX_SPECIALIST_TIMEOUT_S; bump default 60→180 (3 min)."
+b1_review_required: false
+b1_review_reason: "LOW trigger class — config knob change, no auth/API/migration/financial path"
+builder: b3
+reviewer: ai-head-a (solo review acceptable per RA-24 narrowing)
+ai_head_review: structural + py_compile + test PASS
+claimed_at: null
+claimed_by: null
+last_heartbeat: null
+blocker_question: null
+ship_report: briefs/_reports/B3_specialist_timeout_tunable_20260429.md
 autopoll_eligible: false
 ---
 
-# CODE_3_PENDING — B3: CORTEX V1 — FIRST REAL CYCLE ON AO MATTER — 2026-04-28
+# CODE_3_PENDING — B3: CORTEX_SPECIALIST_TIMEOUT_TUNABLE_1 — 2026-04-29
 
 **Dispatcher:** AI Head A (sole orchestrator)
 **Working dir:** `~/bm-b3`
-**Trigger class:** HIGH (live mode, real Director question, real Slack DM downstream)
+**Trigger class:** LOW (config knob, A solo review)
 
-## Predecessor
+## Read full brief
 
-5/5 cycles dry_run PASS earlier this session. CORTEX_DRY_RUN=false + CORTEX_PIPELINE_ENABLED=true flipped at 21:55Z. Deploy `dep-d7oh1v23ords73cdadb0` LIVE. No organic cycles fired since 22:00Z.
-
-## Strategy
-
-Manual `maybe_run_cycle` invocation with real Director question. Bypasses alerts_to_signal auto-dispatch (we don't wait for organic signal). Cycle runs end-to-end LIVE: Phase 1 sense → Phase 2 load → Phase 3a meta-reason → Phase 3b specialists → Phase 3c synthesis → Phase 4 propose → Phase 5 (DEFERRED — Slack interactivity proxy parked) → Phase 6 archive.
-
-If Phase 3a picks `russo_*` or `legal` — they're disabled in DB, runner skips them. If picks `game_theory` / `research` / `ao_pm` / `sales` — those run live.
+`briefs/BRIEF_CORTEX_SPECIALIST_TIMEOUT_TUNABLE_1.md` — full spec.
 
 ## Execution
 
 ```bash
 cd ~/bm-b3
 git checkout main && git pull -q
+git checkout -b cortex-specialist-timeout-tunable-1
 
-export DATABASE_URL=$(op read 'op://Baker API Keys/DATABASE_URL/credential')
-export BAKER_VAULT_PATH=/Users/dimitry/baker-vault
-export ANTHROPIC_API_KEY=$(op read 'op://Baker API Keys/API Anthropic/credential')
-export CORTEX_DRY_RUN=false
-export CORTEX_LIVE_PIPELINE=true
-export CORTEX_PIPELINE_ENABLED=false
+# Implement per brief
+# - Edit orchestrator/cortex_phase3_invoker.py line 33: env-tunable + default 180
+# - Create tests/test_cortex_specialist_timeout_tunable.py with the env override test
+# - Verify no other module imports SPECIALIST_TIMEOUT_S directly:
+grep -rn "SPECIALIST_TIMEOUT_S" --include="*.py"
 
-python3 - <<'PY'
-import asyncio
-from orchestrator.cortex_runner import maybe_run_cycle
+# Syntax check
+python3 -c "import py_compile; py_compile.compile('orchestrator/cortex_phase3_invoker.py', doraise=True)"
 
-QUESTION = (
-    "What is AO's actual intention by getting in touch with Siegfried and "
-    "Constantinos regarding meeting dates with them — without first informing "
-    "Brisen about our plans to be in Baden-Baden? Counterparty-intent analysis "
-    "wanted: what is AO trying to achieve, what should Brisen do about it, and "
-    "what is the recommended response sequence?"
-)
+# Tests must PASS literally
+pytest tests/test_cortex_specialist_timeout_tunable.py tests/test_cortex_runner_phase3.py -v
 
-async def main():
-    c = await maybe_run_cycle(
-        matter_slug="oskolkov",
-        triggered_by="director",
-        director_question=QUESTION,
-    )
-    print(f"cycle_id={c.cycle_id}")
-    print(f"status={c.status}")
-    print(f"current_phase={c.current_phase}")
-    print(f"cost_tokens={c.cost_tokens}")
-    print(f"cost_dollars=${c.cost_dollars:.4f}")
+# Commit + push
+git add orchestrator/cortex_phase3_invoker.py tests/test_cortex_specialist_timeout_tunable.py briefs/BRIEF_CORTEX_SPECIALIST_TIMEOUT_TUNABLE_1.md briefs/_tasks/CODE_3_PENDING.md
+git commit -m "feat(cortex): SPECIALIST_TIMEOUT_S env-tunable + default 60→180s
 
-asyncio.run(main())
-PY
+Real AO cycle fc382469 hit 300s outer cap inside Render — Phase 3b sales
+specialist exhausted 60s × 3 retry budget on rich Director question. Opus
+on heavy reasoning + tool calls genuinely needs 60-180s; the 60s cap was
+too aggressive for production prompts.
+
+- New env: CORTEX_SPECIALIST_TIMEOUT_S (default 180, was hardcoded 60)
+- Single test for env-override behavior
+- No retry logic / cycle cap changes in this PR
+
+Brief: briefs/BRIEF_CORTEX_SPECIALIST_TIMEOUT_TUNABLE_1.md
+Trigger class: LOW.
+
+Co-authored-by: Code Brisen #3 <b3@brisengroup.com>
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
+
+git push -u origin cortex-specialist-timeout-tunable-1
+gh pr create \
+  --title "feat(cortex): SPECIALIST_TIMEOUT_S env-tunable + default 60→180s" \
+  --body "Per BRIEF_CORTEX_SPECIALIST_TIMEOUT_TUNABLE_1. LOW trigger class.
+
+## Why
+Real AO cycle inside Render still hit 300s outer cap. Phase 3a clean (19s) but Phase 3b sales specialist timed out at 60s × 3 = 180s. Opus needs more time for heavy reasoning. Director picked 3 min.
+
+## What
+- SPECIALIST_TIMEOUT_S now env-tunable via CORTEX_SPECIALIST_TIMEOUT_S
+- Default bumped 60→180s
+- 1 test confirms env override works
+
+## Tests
+- tests/test_cortex_specialist_timeout_tunable.py — PASSES literally
+- tests/test_cortex_runner_phase3.py regression — PASSES literally
+
+## Reviewers
+- AI Head A solo (LOW trigger class — RA-24 narrowing applies)
+"
 ```
 
 ## Pass criteria
 
-- status terminal: `tier_b_pending` (cycle proposed; no auto-action because Tier-A scope conservative + no Slack interactivity yet)
-- Wall-clock DB-side < 180s (real specialists, not bland smoke prompt)
-- Cost < $1.50 (real Phase 2 context load + multi-specialist run + Phase 3c synthesis)
-- Phase 3a pick logged
-- 0 archive failures
-- Slack DM to Director WITH proposal card (or note if Slack outbound failed)
+- New test PASSES literally
+- Phase 3 regression suite PASSES literally
+- py_compile clean
+- PR opened
+- Only 2 listed files modified
 
 ## STOP criteria
 
-- status='failed' → STOP, surface cycle_id + which phase failed + which specialist
-- Cost > $2.00 → STOP, surface
-- Phase 3a picks 0 capabilities → STOP, surface (means meta-reason confused by question)
+- Tests fail → STOP, surface
+- Phase 3 regression breaks → STOP, surface
+- grep finds another module importing SPECIALIST_TIMEOUT_S → STOP, surface (need to update that too)
 
 ## Output
 
-Append to `briefs/_reports/B3_first_real_cycle_20260428.md`:
+`briefs/_reports/B3_specialist_timeout_tunable_20260429.md` with PR URL + literal test stdout.
 
-```markdown
-# B3 — Cortex V1 first real cycle on AO matter — 2026-04-28
+## After merge — A executes
 
-## Cycle invocation
-- cycle_id: <UUID>
-- matter_slug: oskolkov
-- triggered_by: director
-- Question: "What is AO's actual intention..." (full text)
-
-## Phase progression
-- Phase 1 sense: <duration>s
-- Phase 2 load: <duration>s, <bytes> Phase 2 context
-- Phase 3a meta-reason: picked [<list of capabilities>]
-- Phase 3b specialists: <list of specialist invocations + per-specialist duration + status>
-- Phase 3c synthesis: <duration>s
-- Phase 4 propose: <action_count> Tier-A actions, <action_count> Tier-B actions
-- Phase 5: DEFERRED (Slack interactivity proxy not yet built)
-- Phase 6 archive: PASS / FAIL
-
-## Wall-clock + cost
-- DB-side: <Ns>
-- Cost tokens: <int>
-- Cost dollars: $<float>
-
-## Slack DM
-- Sent: YES / NO
-- Channel: <DM_id>
-- ts: <slack_ts>
-
-## Observations
-- <anything noteworthy about Phase 2 context load, specialist quality, synthesis output>
-
-## Verdict
-PASS / PARTIAL_PASS / FAIL
-```
-
-Notify A with: cycle_id + status + Phase 3a picks + cost + wall-clock + did Slack DM land.
+1. Render env vars per-key PUT:
+   - `CORTEX_SPECIALIST_TIMEOUT_S=180`
+   - `CORTEX_CYCLE_TIMEOUT_SECONDS=900`
+2. Redeploy
+3. Refire AO Baden-Baden question via `/api/cortex/trigger`
+4. Surface result
 
 ## Co-Authored-By
 
