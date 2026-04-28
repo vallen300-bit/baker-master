@@ -45,6 +45,7 @@ def _llm_call(model: str, messages: list, max_tokens: int = 2000, system: str = 
         return GeminiResponse(resp.content[0].text, resp.usage.input_tokens, resp.usage.output_tokens)
 from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT
 from orchestrator import action_handler as _ah
+from orchestrator.cortex_runner import maybe_run_cycle
 from kbl.cache_telemetry import log_cache_usage
 
 
@@ -337,6 +338,18 @@ class SaveArtifactRequest(BaseModel):
     matter_slug: Optional[str] = None
     alert_id: Optional[int] = None
     format: str = Field("md", pattern=r"^(md|txt)$")
+
+
+class CortexTriggerRequest(BaseModel):
+    """CORTEX_TRIGGER_ENDPOINT_1: Director-invoke a Cortex cycle synchronously
+    inside the Render container, where DB+Qdrant are localhost (no cross-network
+    specialist-tool latency that has been killing local-dispatch cycles)."""
+    matter_slug: str = Field(..., min_length=1, max_length=64,
+                             description="Matter slug (e.g. 'oskolkov', 'movie')")
+    director_question: str = Field(..., min_length=10, max_length=4000,
+                                   description="Director's question driving the cycle")
+    triggered_by: str = Field(default="director_manual", min_length=1, max_length=64,
+                              description="Trigger source label")
 
 
 def _serialize(obj: dict) -> dict:
@@ -4087,6 +4100,59 @@ async def get_cortex_stats():
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         store._put_conn(conn)
+
+
+@app.post("/api/cortex/trigger", tags=["cortex"], dependencies=[Depends(verify_api_key)])
+async def trigger_cortex_cycle(req: CortexTriggerRequest):
+    """CORTEX_TRIGGER_ENDPOINT_1: Director-invoke a Cortex cycle synchronously
+    inside the Render container.
+
+    Designed for: (a) Director curl-from-anywhere on demand, (b) the eventual
+    Slack interactivity proxy, (c) UI button clicks.
+
+    Runs maybe_run_cycle inline. Returns the terminal cycle state. The cycle's
+    own asyncio.wait_for(timeout=CYCLE_TIMEOUT_SECONDS) bounds total wait time;
+    if the cycle exceeds that cap, maybe_run_cycle marks the row 'failed' and
+    raises asyncio.TimeoutError, which we translate to HTTP 504.
+
+    Sensitive payload (director_question, aborted_reason) is NOT info-logged —
+    only matter_slug + triggered_by appear in error-level logs.
+    """
+    try:
+        cycle = await maybe_run_cycle(
+            matter_slug=req.matter_slug,
+            triggered_by=req.triggered_by,
+            director_question=req.director_question,
+        )
+    except asyncio.TimeoutError:
+        logger.error(
+            "Cortex trigger timed out (matter=%s, triggered_by=%s)",
+            req.matter_slug, req.triggered_by,
+        )
+        raise HTTPException(
+            status_code=504,
+            detail="Cycle exceeded internal timeout cap",
+        )
+    except HTTPException:
+        # Propagate any HTTPException raised inside maybe_run_cycle untouched.
+        raise
+    except Exception as e:
+        logger.error(
+            "Cortex trigger failed (matter=%s, triggered_by=%s): %s",
+            req.matter_slug, req.triggered_by, e,
+        )
+        raise HTTPException(status_code=500, detail=f"Cycle invocation failed: {str(e)[:200]}")
+
+    return {
+        "cycle_id": cycle.cycle_id,
+        "matter_slug": cycle.matter_slug,
+        "triggered_by": cycle.triggered_by,
+        "status": cycle.status,
+        "current_phase": cycle.current_phase,
+        "cost_tokens": cycle.cost_tokens,
+        "cost_dollars": float(cycle.cost_dollars) if cycle.cost_dollars is not None else 0.0,
+        "aborted_reason": getattr(cycle, "aborted_reason", None),
+    }
 
 
 # ============================================================
