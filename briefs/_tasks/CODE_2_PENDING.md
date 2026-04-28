@@ -1,32 +1,16 @@
 ---
-status: IN_PROGRESS
+status: COMPLETE
 brief: briefs/BRIEF_CORTEX_TRIGGER_ENDPOINT_1.md
 trigger_class: HIGH
 dispatched_at: 2026-04-28T22:55:00Z
-dispatched_by: ai-head-a
-director_authorization: "1b" (Pick 1b — add /api/cortex/trigger endpoint, V1.1 path to ship Cortex cycles tonight)
-predecessor_state: "B3 first real cycle attempts 1+2 FAILED on cross-network specialist timeout. Root cause not capability-specific — it's question-weight × network-locality. Fix: run cycles inside Render container via HTTP trigger."
-goal: "Add POST /api/cortex/trigger endpoint to outputs/dashboard.py guarded by X-Baker-Key. Calls maybe_run_cycle synchronously inside Render container where DB+Qdrant are localhost (no cross-network latency). Returns terminal cycle state."
-scope_summary:
-  - "1 new POST endpoint at /api/cortex/trigger"
-  - "1 Pydantic request model"
-  - "4 unit tests in tests/test_cortex_trigger_endpoint.py"
-files_modified:
-  - outputs/dashboard.py (~70 LOC added: import + Pydantic model + endpoint)
-  - tests/test_cortex_trigger_endpoint.py (NEW, ~120 LOC, 4 tests)
-files_not_to_touch:
-  - orchestrator/cortex_runner.py (signature/timeouts stay)
-  - triggers/cortex_pipeline.py (auto-dispatch path unchanged)
-b1_review_required: true
-b1_review_reason: "External API + auth surface — RA-24 trigger fires"
-builder: b2
-reviewer: b1
-ai_head_review: "/security-review + structural"
-claimed_at: 2026-04-29T00:00:00Z
-claimed_by: b2
-last_heartbeat: 2026-04-29T00:00:00Z
-blocker_question: null
+closed_at: 2026-04-29T00:40:00Z
+merged_pr: 78
+merge_commit: f2f73b069c3f3a05286d3614ab95e54b95481996
+verdict: PASS
+b1_review: "PASS 7/7 (d414300, comment-fallback APPROVE)"
+ai_head_security_review: "APPROVE — 0 findings ≥8 confidence"
 ship_report: briefs/_reports/B2_cortex_trigger_endpoint_20260428.md
+director_authorization: "1b"
 autopoll_eligible: false
 ---
 
