@@ -1,16 +1,20 @@
 ---
-status: OPEN
+status: COMPLETE
 brief: rollback_script_op_path_fix
 trigger_class: LOW
 dispatched_at: 2026-04-28T16:45:00Z
 dispatched_by: ai-head-a
 target_script: scripts/cortex_rollback_v1.sh
 prior_dispatch_ship_report: briefs/_reports/B3_rollback_dry_rehearsal_20260428.md
-claimed_at: null
-claimed_by: null
-last_heartbeat: null
+claimed_at: 2026-04-28T16:50:00Z
+claimed_by: b3
+last_heartbeat: 2026-04-28T17:05:00Z
 blocker_question: null
-ship_report: null
+ship_report: briefs/_reports/B3_rollback_op_path_fix_20260428.md
+verdict: PASS
+pr_number: 76
+pr_url: https://github.com/vallen300-bit/baker-master/pull/76
+pr_state: OPEN — awaiting AI Head A solo diff-review + Tier-A merge
 autopoll_eligible: false
 ---
 
