@@ -1,17 +1,18 @@
 ---
-status: OPEN
-brief: cortex_v1_first_real_cycle_ao_baden_baden_intent_attempt_2
+status: COMPLETE
+brief: cortex_v1_first_real_cycle_ao_baden_baden_intent_attempts_1_and_2
 trigger_class: HIGH
 dispatched_at: 2026-04-28T22:35:00Z
-predecessor_attempt_1: "8ba8efc3-2d7d-4371-afc2-08a4107237e7 FAIL — Phase 3a picked ['finance','sales','game_theory']; finance specialist 60s × 3 timeout (180s) ate retry budget; outer 300s cap fired before sales/game_theory ran. cost=$0.0617 wall=248.5s DB. fail_class=SPECIALIST_FINANCE_TIMEOUT_FROM_LOCAL_NETWORK."
+closed_at: 2026-04-28T22:58:00Z
+verdict: FAIL_REPRODUCIBLE
+attempt_1: "8ba8efc3-2d7d-4371-afc2-08a4107237e7 FAIL — Phase 3a ['finance','sales','game_theory']; finance 60s×3 timeout. cost=$0.0617 wall=248.5s DB."
+attempt_2: "110b4696-7d73-4602-aff1-8ec655729e62 FAIL — finance disabled; sales+game_theory still hit timeout. cost=$0.0693 wall=249.6s. fail_class=SPECIALIST_TIMEOUT_QUESTION_WEIGHT_X_NETWORK_LOCALITY."
+total_cost_local_dispatch: 0.131
+diagnosis: "Cross-network specialist timeout is reproducible with rich Director questions regardless of which capability runs. Disabling caps does NOT fix it. Fix path = run cycles inside Render container (no network round-trip latency on tool calls)."
+forward_handoff: "B2 building POST /api/cortex/trigger per BRIEF_CORTEX_TRIGGER_ENDPOINT_1.md (CODE_2_PENDING.md). After deploy, A will refire same AO question via curl from anywhere — cycle runs inside Render."
 director_authorization: "what is AO actual intentions by getting in touch with Siegfried and Constantinos re meeting dates with them without first informing Brisen about our plans to be in Baden-Baden?"
 target_matter_slug: oskolkov
-goal: "Refire same Director question after finance disabled. 9 active caps now (russo_*+legal+finance all disabled). Phase 3a should pick from remaining set; expect ['sales','game_theory'] minimum. Validate end-to-end real cycle + Slack DM."
-claimed_at: null
-claimed_by: null
-last_heartbeat: null
-blocker_question: null
-ship_report: briefs/_reports/B3_first_real_cycle_20260428.md (append attempt 2 section)
+ship_report: briefs/_reports/B3_first_real_cycle_20260428.md
 autopoll_eligible: false
 ---
 
