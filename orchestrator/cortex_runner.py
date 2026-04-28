@@ -48,6 +48,8 @@ class CortexCycle:
     cost_dollars: float = 0.0
     # Transient — not persisted on row, used during cycle execution:
     phase2_load_context: dict = field(default_factory=dict)
+    phase3c_result: Optional[Any] = None
+    proposal_id: Optional[str] = None
     aborted_reason: Optional[str] = None
 
 
@@ -131,6 +133,7 @@ async def _run_cycle_inner(
         trigger_signal_id=trigger_signal_id,
     )
     cycle_failed = False
+    proposal_card_posted = False
     try:
         # Phase 1 — sense (create cycle row + sense artifact)
         await _phase1_sense(cycle)
@@ -147,6 +150,23 @@ async def _run_cycle_inner(
         # Phase 3 — reasoning (3a meta + 3b specialist + 3c synthesize)
         cycle.current_phase = "reason"
         await _phase3_reason(cycle)
+
+        # Phase 4 — propose (1C). Posts Slack card + flips status to
+        # 'tier_b_pending' inside _phase4_propose. Director button press
+        # later reaches Phase 5 via /cortex/cycle/{id}/action endpoint
+        # which archives the cycle. Phase 4 only fires if Phase 3 produced
+        # a synthesis; otherwise we fall through to the archive below.
+        if cycle.phase3c_result is not None and cycle.status == "proposed":
+            cycle.current_phase = "propose"
+            try:
+                if await _phase4_propose(cycle):
+                    proposal_card_posted = True
+            except Exception as e:
+                logger.error(
+                    "Phase 4 failed for cycle %s: %s", cycle.cycle_id, e,
+                )
+                cycle.status = "failed"
+                cycle.aborted_reason = f"phase4_error: {str(e)[:400]}"
     except Exception as e:
         cycle_failed = True
         cycle.status = "failed"
@@ -156,12 +176,17 @@ async def _run_cycle_inner(
             cycle.cycle_id, cycle.current_phase, e,
         )
     finally:
-        # Phase 6 — archive ALWAYS runs, even on failure.
-        cycle.current_phase = "archive"
-        try:
-            await _phase6_archive(cycle)
-        except Exception as e:
-            logger.error(f"Phase 6 archive itself failed for cycle {cycle.cycle_id}: {e}")
+        # Phase 6 archive: skipped when Phase 4 successfully posted the
+        # proposal card. The cycle is now 'tier_b_pending' awaiting
+        # Director's button press; Phase 5 (via the action endpoint)
+        # owns the archive in that path. Otherwise we still archive on
+        # the failure / no-synthesis path.
+        if not proposal_card_posted:
+            cycle.current_phase = "archive"
+            try:
+                await _phase6_archive(cycle)
+            except Exception as e:
+                logger.error(f"Phase 6 archive itself failed for cycle {cycle.cycle_id}: {e}")
 
     if cycle_failed:
         # Re-raise the original failure so callers see it, even though the
@@ -328,7 +353,8 @@ async def _phase3_reason(cycle: CortexCycle) -> None:
         )
         cycle.cost_tokens += phase3c.cost_tokens
         cycle.cost_dollars += phase3c.cost_dollars
-        cycle.status = "proposed"  # 1C Phase 4 picks up from here
+        cycle.phase3c_result = phase3c
+        cycle.status = "proposed"  # 1C Phase 4 reads phase3c_result + flips to tier_b_pending
     except Exception as e:
         logger.error(
             "Phase 3 failed for cycle %s: %s", cycle.cycle_id, e,
@@ -339,7 +365,33 @@ async def _phase3_reason(cycle: CortexCycle) -> None:
 
 
 # --------------------------------------------------------------------------
-# Phase 6 — archive (always runs)
+# Phase 4 — propose (1C wiring; delegate to cortex_phase4_proposal module)
+# --------------------------------------------------------------------------
+
+
+async def _phase4_propose(cycle: CortexCycle) -> bool:
+    """Render + post the proposal card. Imports lazily so cortex_runner
+    keeps zero hard dependency on Phase 4 at import time.
+
+    Returns True iff the card was successfully built and persisted —
+    that's the gate that signals to the runner to skip Phase 6 archive
+    (Phase 5 owns the archive on the button-press path). Tests can
+    monkey-patch this function and return None / False to keep the 1B-
+    style Phase-3-isolated assertion semantics.
+    """
+    from orchestrator.cortex_phase4_proposal import run_phase4_propose
+    card = await run_phase4_propose(
+        cycle_id=cycle.cycle_id,
+        matter_slug=cycle.matter_slug,
+        phase3c_result=cycle.phase3c_result,
+    )
+    cycle.proposal_id = card.proposal_id
+    cycle.status = "tier_b_pending"
+    return True
+
+
+# --------------------------------------------------------------------------
+# Phase 6 — archive (always runs unless Phase 4 successfully posted)
 # --------------------------------------------------------------------------
 
 

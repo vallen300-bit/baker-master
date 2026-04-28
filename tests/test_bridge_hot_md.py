@@ -244,7 +244,10 @@ def test_insert_signal_includes_hot_md_match_in_sql_and_params():
     row = bridge.map_alert_to_signal(
         _alert(id=77, tier=1, matter_slug="movie", hot_md_match="Hagenauer")
     )
-    assert bridge._insert_signal_if_new(_Cur(), row) is True
+    # CORTEX_3T_FORMALIZE_1C Amendment A2: function now returns the
+    # inserted ``signal_queue.id`` (or None on duplicate) instead of bool.
+    # Truthiness is preserved; the canonical id from fetchone() is 42 here.
+    assert bridge._insert_signal_if_new(_Cur(), row) == 42
 
     assert "hot_md_match" in captured["sql"]
     # The hot_md_match value is bound as the 10th positional arg
