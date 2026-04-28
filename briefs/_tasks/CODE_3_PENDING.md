@@ -1,5 +1,5 @@
 ---
-status: OPEN
+status: COMPLETE
 brief: rollback_dry_rehearsal
 trigger_class: LOW
 dispatched_at: 2026-04-28T16:00:00Z
@@ -7,11 +7,13 @@ dispatched_by: ai-head-a
 target_script: scripts/cortex_rollback_v1.sh
 prerequisite_pr: 75
 prerequisite_state: MERGED 2026-04-28T~15:55Z (squash 1ec079b)
-claimed_at: null
-claimed_by: null
-last_heartbeat: null
-blocker_question: null
-ship_report: null
+claimed_at: 2026-04-28T17:25:00Z
+claimed_by: b3
+last_heartbeat: 2026-04-28T17:35:00Z
+blocker_question: "Director must execute 2 op:// commands per ship report §3 to fully clear plan §6 Q4"
+ship_report: briefs/_reports/B3_rollback_dry_rehearsal_20260428.md
+verdict: PARTIAL
+verdict_detail: "Steps 1/2/4 PASS locally; Step 3 (op:// vault verification) NEEDS DIRECTOR — only Director can read his own vault. Q4 half-cleared."
 autopoll_eligible: false
 ---
 
