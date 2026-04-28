@@ -1,115 +1,106 @@
 ---
-status: COMPLETE
-brief: briefs/BRIEF_CORTEX_TRIGGER_ENDPOINT_1.md
+status: OPEN
+brief: briefs/BRIEF_CORTEX_PRE_REVIEW_GATE_1.md
 trigger_class: HIGH
-dispatched_at: 2026-04-28T22:55:00Z
-closed_at: 2026-04-29T00:40:00Z
-merged_pr: 78
-merge_commit: f2f73b069c3f3a05286d3614ab95e54b95481996
-verdict: PASS
-b1_review: "PASS 7/7 (d414300, comment-fallback APPROVE)"
-ai_head_security_review: "APPROVE — 0 findings ≥8 confidence"
-ship_report: briefs/_reports/B2_cortex_trigger_endpoint_20260428.md
-director_authorization: "1b"
+dispatched_at: 2026-04-29T01:10:00Z
+dispatched_by: ai-head-a
+director_authorization: "A" (Pick Option A — URL-based pre-review gate to economize cost: cheap Slack ping with Yes/Skip links; only fire $4 cycle on Yes click)
+predecessor_state: "Cortex V1 LIVE on AO matter. First real cycle 7dc3201b shipped tonight at $4.00. Director: 'in order to economize the cost' wants pre-cycle approval via Slack URL gate. Manual /api/cortex/trigger endpoint stays unchanged."
+goal: "Add a URL-based cost gate between auto-dispatch and maybe_run_cycle. Cheap Slack DM with signed-token Yes/Skip URLs. Director taps Yes → fire cycle async. Taps Skip → log + no spend. Idempotent via baker_actions audit."
+scope_summary:
+  - "NEW triggers/cortex_pre_review_gate.py (~180 LOC) — token sign/verify + Slack DM compose + decision audit"
+  - "MODIFY triggers/cortex_pipeline.py (+30 LOC) — gate-enabled fork in maybe_trigger_cortex"
+  - "MODIFY outputs/dashboard.py (+70 LOC) — GET /api/cortex/gate/decide endpoint + background-fire helper"
+  - "NEW tests/test_cortex_pre_review_gate.py (~200 LOC, 7 tests)"
+files_modified:
+  - triggers/cortex_pre_review_gate.py (NEW)
+  - triggers/cortex_pipeline.py
+  - outputs/dashboard.py
+  - tests/test_cortex_pre_review_gate.py (NEW)
+files_not_to_touch:
+  - orchestrator/cortex_runner.py
+  - kbl/bridge/alerts_to_signal.py
+  - existing /api/cortex/trigger endpoint
+b1_review_required: true
+b1_review_reason: "External API + new auth surface (signed-URL token, no X-Baker-Key) + new Slack DM behavior on auto-dispatch path — RA-24 trigger fires"
+builder: b2
+reviewer: b1
+ai_head_review: "/security-review + structural"
+claimed_at: null
+claimed_by: null
+last_heartbeat: null
+blocker_question: null
+ship_report: briefs/_reports/B2_cortex_pre_review_gate_20260429.md
 autopoll_eligible: false
 ---
 
-# CODE_2_PENDING — B2: CORTEX_TRIGGER_ENDPOINT_1 — 2026-04-28
+# CODE_2_PENDING — B2: CORTEX_PRE_REVIEW_GATE_1 — 2026-04-29
 
 **Dispatcher:** AI Head A (sole orchestrator)
-**Working dir:** `~/bm-b2/01_build` (App)
-**Trigger class:** HIGH (external API + new auth surface — B1 review required pre-merge per RA-24)
+**Working dir:** `~/bm-b2/01_build`
+**Trigger class:** HIGH (external API + signed-token auth + Slack DM behavior change — B1 review required pre-merge per RA-24)
 
 ## Read full brief
 
-`briefs/BRIEF_CORTEX_TRIGGER_ENDPOINT_1.md` — complete spec, copy-pasteable code, 4 unit tests, post-deploy smoke.
+`briefs/BRIEF_CORTEX_PRE_REVIEW_GATE_1.md` — complete spec + copy-pasteable code + 7 unit tests + post-deploy smoke.
 
 ## Execution
 
 ```bash
 cd ~/bm-b2/01_build
 git checkout main && git pull -q
-git checkout -b cortex-trigger-endpoint-1
+git checkout -b cortex-pre-review-gate-1
 
 # Read the brief
-cat briefs/BRIEF_CORTEX_TRIGGER_ENDPOINT_1.md | less
+cat briefs/BRIEF_CORTEX_PRE_REVIEW_GATE_1.md | less
 
-# Implement per brief
-# - Add `from orchestrator.cortex_runner import maybe_run_cycle` to imports
-# - Add CortexTriggerRequest Pydantic model
-# - Add @app.post("/api/cortex/trigger") endpoint
-# - Create tests/test_cortex_trigger_endpoint.py with 4 tests
+# Implement per brief — 4 files
+# 1. NEW triggers/cortex_pre_review_gate.py
+# 2. MODIFY triggers/cortex_pipeline.py — add _gate_enabled() + gate fork
+# 3. MODIFY outputs/dashboard.py — add /api/cortex/gate/decide endpoint
+# 4. NEW tests/test_cortex_pre_review_gate.py — 7 tests
 
-# Syntax check
+# Syntax checks
+python3 -c "import py_compile; py_compile.compile('triggers/cortex_pre_review_gate.py', doraise=True)"
+python3 -c "import py_compile; py_compile.compile('triggers/cortex_pipeline.py', doraise=True)"
 python3 -c "import py_compile; py_compile.compile('outputs/dashboard.py', doraise=True)"
 
-# Unit tests must PASS literally
-pytest tests/test_cortex_trigger_endpoint.py -v
+# Tests must PASS literally
+pytest tests/test_cortex_pre_review_gate.py -v
+# Regression
+pytest tests/test_cortex_pipeline.py tests/test_alerts_to_signal_cortex_dispatch.py tests/test_cortex_runner_phase126.py -v
 
-# Commit + push
-git add outputs/dashboard.py tests/test_cortex_trigger_endpoint.py briefs/BRIEF_CORTEX_TRIGGER_ENDPOINT_1.md
-git commit -m "feat(cortex): /api/cortex/trigger endpoint for inside-Render cycle invocation
-
-Adds POST /api/cortex/trigger guarded by X-Baker-Key. Calls maybe_run_cycle
-synchronously inside the Render container, where DB+Qdrant are localhost
-(no cross-network latency that has been killing local-dispatch cycles).
-
-- Pydantic request model with length/format validation
-- 4 unit tests (happy path, 401, 422, 504 timeout)
-- No changes to maybe_run_cycle signature or auto-dispatch path
-
-Brief: briefs/BRIEF_CORTEX_TRIGGER_ENDPOINT_1.md
-Trigger class: HIGH (B1 situational review required pre-merge)
-
-Co-authored-by: Code Brisen #2 <b2@brisengroup.com>
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
-
-git push -u origin cortex-trigger-endpoint-1
-gh pr create \
-  --title "feat(cortex): /api/cortex/trigger endpoint for inside-Render cycle invocation" \
-  --body "Per BRIEF_CORTEX_TRIGGER_ENDPOINT_1. HIGH trigger class — B1 review required.
-
-## Why
-B3 local-dispatch real cycles fail on cross-network specialist timeouts (60s × 3 cap exceeded by vault-heavy tool chains paying network round-trip latency). Root cause is question-weight × network-locality, not capability-specific. Disabling capabilities does not fix it.
-
-## What
-POST /api/cortex/trigger that calls maybe_run_cycle inline inside the Render container, where DB+Qdrant are localhost.
-
-## Tests
-- 4 unit tests in tests/test_cortex_trigger_endpoint.py
-- All 4 PASS literally (per Lesson #48 — no 'by inspection')
-
-## Reviewers
-- B1: structural + Lesson #52 walkthrough
-- AI Head A: /security-review + final review
-
-## Verification
-Post-deploy smoke curl in brief — confirms endpoint returns 200 + cycle_id."
+# Commit + push + PR (use the standard pattern)
 ```
 
 ## Pass criteria
 
-- 4 tests PASS literally (`pytest tests/test_cortex_trigger_endpoint.py -v`)
-- `python3 -c "import py_compile; ..."` clean on `outputs/dashboard.py`
-- PR opened, B1 + A tagged for review
-- No changes outside the 2 listed files
+- 7 new tests PASS literally
+- Phase 1/2/6 + pipeline + bridge regression PASS literally
+- py_compile clean on all 3 modified files
+- PR opened, B1 + A tagged
+- Only the 4 listed files changed
 
 ## STOP criteria
 
-- Tests fail → STOP, surface output to A
-- maybe_run_cycle import causes circular import → STOP, surface
-- Existing /api/cortex/* endpoint regression — STOP
+- Any test fails → STOP, surface
+- HMAC compare_digest not used → STOP (timing attack risk)
+- CORTEX_GATE_SECRET length not validated (<32 char accepted) → STOP
+- Token in URL exceeds reasonable length (>1000 chars) → STOP, surface
+- Existing /api/cortex/trigger or auto-dispatch regression → STOP
 
 ## Output
 
-Create `briefs/_reports/B2_cortex_trigger_endpoint_20260428.md` with: PR URL, test output, syntax check output, files-modified diff summary.
+Create `briefs/_reports/B2_cortex_pre_review_gate_20260429.md` with: PR URL, all 4 sections of test stdout (literal), syntax-check output, file diff summary.
 
 ## After merge — A executes
 
-1. Confirm Render deploys cleanly (deploy ID + healthy)
-2. Post-deploy curl smoke
-3. If 200 + cycle_id: refire AO Director question via the new endpoint (not B3 local!)
-4. Surface result to Director
+1. Generate `CORTEX_GATE_SECRET` (48 random urlsafe chars) and set on Render
+2. Set `CORTEX_GATE_ENABLED=true` on Render (explicit)
+3. Render redeploy
+4. Smoke: synthesize a fake signed URL via `sign_token` REPL, GET it, expect 200
+5. Trigger a synthetic dispatch path → expect Slack DM in Director channel
+6. Director can then test approve / skip flow
 
 ## Co-Authored-By
 
