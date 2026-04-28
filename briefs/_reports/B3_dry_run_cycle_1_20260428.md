@@ -474,6 +474,148 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 
 ---
 
+## Cycle 1 attempt 4 — post russo_cy disable (2026-04-28T19:21Z)
+
+**Verdict:** **FAIL** (status=failed). Phase 3a now picks 3 *different* specialists; ALL of them time out from B3 local network. russo_cy disable correctly removed it from the pool but did NOT unblock the cycle — the operational gap is broader than russo_cy.
+
+### Pre-flight
+
+```sql
+SELECT slug, active FROM capability_sets WHERE slug IN ('russo_cy','legal');
+-- russo_cy=False ✓
+-- legal   =True  ✓
+```
+
+```bash
+$ ls /Users/dimitry/baker-vault/wiki/matters/oskolkov/cortex-config.md
+-rw-r--r--@ 1 dimitry  staff  10803 Apr 28 00:32 (present ✓)
+```
+
+### Re-fire (Option B local with Render-env shim)
+
+Built `/tmp/cortex_prod_env.sh` with 14 Render env vars + local BAKER_VAULT_PATH override. Used `/tmp/cortex_venv` (Python 3.12.12) — same shim as attempt 2.
+
+### Cycle output
+
+```
+cycle_id=f51616df-6c29-4534-b36f-006e5aa9b0ae
+status=failed
+current_phase=archive
+cost_tokens=1961
+cost_dollars=$0.0507
+WALL_CLOCK=391.3s   (Python; includes startup/finalization)
+DB wall_s=249.3s    (started_at→completed_at; outer 300s cap)
+```
+
+Final raised exception: `asyncio.TimeoutError` (cortex_runner.py:76 outer wait_for(maybe_run_cycle, 300s)).
+
+### Phase progression
+
+| Phase | Order | Artifact | Bytes | At (T+) | Note |
+|---|---:|---|---:|---:|---|
+| sense | 1 | cycle_init | 82 | +0.0s | Cycle row created |
+| load | 2 | phase2_context | 18859 | +1.2s | Vault + curated knowledge |
+| reason | 3 | meta_reason | 2241 | +15.6s | Phase 3a Opus call OK |
+| reason | 4 | specialist_invocation | 190 | +3:16 | Phase 3b record on first specialist timeout |
+| archive | 6 | cycle_archive | 124 | +4:08 | Phase 6 archived terminal `failed` |
+
+### Phase 3a — capabilities planned
+
+```
+caps_planned: ["russo_ai", "legal", "russo_ch"]
+classification: other
+```
+
+russo_cy correctly absent (inactive in registry — `_get_capability_def` returns None for inactive caps; `capability_registry.py:70` loads `active_only=True`). Three new candidates surfaced via regex on the AO matter signal.
+
+### Phase 3b — what actually happened
+
+```json
+{"capability_slug":"russo_ai","success":false,"attempts":3,
+ "error":"timeout after 60s on attempt 3","cost_tokens":0,"cost_dollars":0.0}
+```
+
+**`russo_ai` ate 180s (60s × 3 retries). Cycle outer 300s cap fired before `legal` or `russo_ch` could be attempted.** Phase 3b's `_invoke_one` timeout in `cortex_phase3_invoker.py:188` does NOT short-circuit — every specialist gets the full 60s × 3 budget. Three specialists serially = 540s worst case, exceeding the 300s outer cap.
+
+### Phase 3c / Phase 4 / Phase 5
+
+**Never reached.** Synthesis, proposal, act all skipped due to outer timeout during Phase 3b.
+
+### Cycle archive payload
+
+```json
+{"reason":"1B scope — Phase 4-5 stub; awaiting 1C",
+ "final_status":"in_flight",
+ "final_phase_before_archive":"archive"}
+```
+
+The archive `reason` text is a stale 1B comment in `cortex_runner.py` — not new defect. Status was flipped to `failed` post-archive by `_archive_cycle`'s status-update branch.
+
+### §3 validation queries (against cycle_id `f51616df-…`)
+
+| Q | Expected | Result | Status |
+|---|---|---|---|
+| Q1 cycle row final state | terminal status | `failed / archive / 1961 tok / $0.0507 / 249.3s` | **FAIL** (expected `tier_b_pending`) |
+| Q2 phase_outputs sequence | 1→2→3→3b(4)→3c(5)→4(6/7)→8 dry_marker | sense / load / meta_reason / specialist_invocation / **(no synth)** / **(no proposal)** / **(no dry_run_marker)** / archive | **FAIL** (Phase 3c onwards never ran) |
+| Q3 meta_reason caps | non-empty | `["russo_ai","legal","russo_ch"]` | **PASS** |
+| Q4 dry_run_marker | present at phase_order=8 | **MISSING** (Phase 4 never ran) | **FAIL** |
+| Q5 cycle cost | < $0.25 | $0.0507 | **PASS** |
+| Q6 wall-clock | < 65s ideal / < 300s ceiling | 249s DB / 391s python | **FAIL** ceiling (Q6 wall-target ≥ 65s, hit 300s outer cap) |
+
+### STOP-criteria evaluation (plan §4)
+
+| ID | Trip? | Evidence |
+|---|---|---|
+| F1 status='failed' | **YES** | Per brief: "DON'T panic-rollback; surface to A first" — not auto-rollback territory |
+| F2 phase order regression | NO | Linear progression, no out-of-order writes |
+| F3 GOLD write attempted | NO | Phase 5 never reached |
+| F4 cost > $1.00 | NO | $0.0507 |
+| F5 wall-clock > 300s | **YES** at 391s python; 249s DB-side. Outer cap fired correctly. |
+| F6 GOLD write under DRY_RUN | NO | Phase 5 never reached |
+| F7 Slack DM under DRY_RUN | NO | Phase 4 never reached (no DM possible) |
+| F8 stale unarchive | NO | Archive ran cleanly |
+| F9 cycle in_flight > 1h | NO | Cycle terminated within 5 min |
+
+F1 + F5 expected per brief; brief explicitly de-armed auto-rollback for cycle 1 attempt 4.
+
+### Promotion-criteria contribution (plan §6)
+
+- Q1 cycle ran cleanly: **0/5** (failed)
+- Cost < €0.50: 1/5 (PASS, but only Phase 3a counted)
+- p95 ≤ 60s: **0/5** (hit 300s outer cap)
+- dry_run_marker present: **0/5** (never reached Phase 4)
+
+**No promotion-gate progress this attempt.**
+
+### Root-cause read
+
+The russo_cy disable was **necessary but not sufficient**. Phase 3a regex-classification scaled up to 3 different specialists (`russo_ai`, `legal`, `russo_ch`), all of which time out from B3 local network with the same 60s × 3 pattern. This is consistent with the network-latency hypothesis from attempt 2: specialist Anthropic calls + tool-use loops via Render-side endpoints don't terminate within 60s when initiated from outside Render's network.
+
+Even with all 4 russo_* + legal disabled, Phase 3a would likely pick the next regex-matched cap (game_theory, etc.) — playing whack-a-mole on the active flag is not the right fix.
+
+### Recommendation to A
+
+Same conclusion as attempt 2 ship report: **cycle 1's first clean run must come from inside Render's network, not local.**
+
+Proposed pivots, in priority order:
+
+1. **Run from Render shell or Render Jobs** — install Render CLI on B3's machine (`brew install render-oss/render/render`) and `render ssh srv-d6dgsbctgctc73f55730`, OR the heredoc through Render dashboard "Shell" tab. Either way: same code, same DB, but the specialist Anthropic calls fire from Render's network where attempt 3 also failed (see prior attempt 3: tried Render Jobs API, hit "vault not mounted" + russo_cy 3× 60s — vault-mount issue is now solvable).
+
+2. **Investigate why specialist invocations time out outside Render** — diagnose whether it's purely network latency, or whether the capability_runner makes outbound calls to Render-internal endpoints (`baker-master.onrender.com`) that need Render-network ingress. If yes, no amount of CLI install will help; the right fix is to host-key the cycle invocation inside Render via a one-shot admin HTTP endpoint or scheduled Job.
+
+3. **Disable `legal` too** (per brief's Plan B) — would let cycle 1 reach Phase 3c with zero specialists and validate the Phase 3a→3c→4 path. Still leaves the underlying invocation-from-local problem unfixed; useful only as a smoke test of remaining phases.
+
+**My pick:** Option 2 (root-cause first) before more attempts. Attempt 4 produced no new information beyond confirming attempt 2's hypothesis. Continuing to retry from local will keep failing the same way.
+
+### Co-Authored-By (attempt 4)
+
+```
+Co-authored-by: Code Brisen #3 <b3@brisengroup.com>
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+```
+
+---
+
 ## Co-Authored-By
 
 ```

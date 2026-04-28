@@ -1,5 +1,5 @@
 ---
-status: OPEN
+status: FAIL_SURFACED
 brief: cortex_v1_dry_run_cycle_1_attempt_4
 trigger_class: HIGH
 dispatched_at: 2026-04-28T19:10:00Z
@@ -9,14 +9,17 @@ prior_attempts:
   - attempt_1: 0e503e5e-f2e5-461a-acef-9f2482f6f2ee (BLOCKED on Phase 3a config-import — pre-PR-#77)
   - attempt_2: 2fba3342-7996-46a2-b1aa-95bf996794eb (PARTIAL — local network, $0.0537, Phase 3b russo_cy timeout)
   - attempt_3: 510f86a9-1444-4d98-9e54-de8484201a0e (TIMEOUT — Render Jobs API, vault not mounted + russo_cy 3× 60s)
+  - attempt_4: f51616df-6c29-4534-b36f-006e5aa9b0ae (FAIL — local network, $0.0507, russo_ai timed out 60s × 3 = 180s; cycle outer 300s cap fired before legal/russo_ch reached)
 director_authorization: "2026-04-28T19:08Z option b — we need to continue, no time left, we need to go into business with cortex"
 target_matter_slug: oskolkov
 target_plan_section: §2.1 (manual director-question trigger)
-claimed_at: null
-claimed_by: null
-last_heartbeat: null
-blocker_question: null
+claimed_at: 2026-04-28T19:11:00Z
+claimed_by: b3
+last_heartbeat: 2026-04-28T19:30:00Z
+blocker_question: "Disabling russo_cy was necessary but not sufficient: Phase 3a now picks ['russo_ai', 'legal', 'russo_ch'] — ALL of which time out from B3 local network with same 60s × 3 pattern. Pivot needed: (1) install Render CLI for `render ssh` from B3, (2) root-cause why specialist invocations time out outside Render's network (network latency vs internal-endpoint dependency), or (3) disable `legal` too as smoke test (whack-a-mole). Recommendation: Option 2 root-cause first; attempt 4 produced no new information beyond confirming attempt 2's hypothesis."
 ship_report: briefs/_reports/B3_dry_run_cycle_1_20260428.md
+verdict: FAIL
+fail_class: SPECIALIST_INVOCATION_OPERATIONAL_FROM_LOCAL_NETWORK
 autopoll_eligible: false
 ---
 
