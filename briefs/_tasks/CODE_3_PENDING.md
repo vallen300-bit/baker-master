@@ -1,39 +1,56 @@
 ---
-status: BLOCKED
-brief: cortex_v1_dry_run_cycle_1
+status: OPEN
+brief: cortex_v1_dry_run_cycle_1_retry
 trigger_class: HIGH
-dispatched_at: 2026-04-28T18:05:00Z
+dispatched_at: 2026-04-28T18:30:00Z
+unblock_event: PR #77 merged 207aae4 (config-import fix); A /security-review NO FINDINGS; auto-deploy in flight
+prior_attempt_cycle_id: 0e503e5e-f2e5-461a-acef-9f2482f6f2ee (BLOCKED on Phase 3a config import)
+original_dispatched_at: 2026-04-28T18:05:00Z
 dispatched_by: ai-head-a
 director_authorization: 2026-04-28T~18:00Z "now"
 target_matter_slug: oskolkov
 target_plan_section: §2.1 (manual director-question trigger)
 prerequisite_state: §1 cleared (deploy dep-d7of8n84un4s73bn2rb0 live; CORTEX_DRY_RUN=true / CORTEX_PIPELINE_ENABLED=false / CORTEX_LIVE_PIPELINE=true verified; matter_config_drift_weekly next_run 2026-05-04T11:00 UTC)
-claimed_at: 2026-04-28T18:05:00Z
-claimed_by: b3
-last_heartbeat: 2026-04-28T18:30:00Z
-blocker_question: "Phase 3a/3c hit pre-existing 1B import defect (Obs #3 from PR #72 review) — `from orchestrator import config` ImportErrors. Fix in PR #77 (LOW trigger). After A merges, B3 re-fires cycle 1."
+claimed_at: null
+claimed_by: null
+last_heartbeat: null
+blocker_question: null
 ship_report: briefs/_reports/B3_dry_run_cycle_1_20260428.md
-verdict: BLOCKED
-cycle_id_attempt_1: 0e503e5e-f2e5-461a-acef-9f2482f6f2ee
-cycle_status_attempt_1: "failed (graceful — Phase 6 archive committed, $0.00 spend)"
-fix_pr: 77
-fix_pr_url: https://github.com/vallen300-bit/baker-master/pull/77
 autopoll_eligible: false
 ---
 
-# CODE_3_PENDING — B3: CORTEX V1 DRY_RUN — FIRST CYCLE ON AO MATTER — 2026-04-28
+# CODE_3_PENDING — B3: CORTEX V1 DRY_RUN — CYCLE 1 RETRY POST-PR-#77-MERGE — 2026-04-28
 
 **Dispatcher:** AI Head A (sole orchestrator)
 **Working dir:** `~/bm-b3`
 **Plan:** [`briefs/_plans/CORTEX_V1_DRY_RUN_LAUNCH_PLAN_20260428.md`](../_plans/CORTEX_V1_DRY_RUN_LAUNCH_PLAN_20260428.md) §2.1 → §3
-**Trigger class:** HIGH (first live cycle on real matter, even under DRY_RUN gating)
+**Trigger class:** HIGH (first cycle on real matter — counts toward §6 Q1 ≥5 consecutive clean cycles only on retry success)
 
-## §2 pre-dispatch busy-check
+## Unblock event
 
-- **B3 prior state:** COMPLETE — PR #76 op-path-fix merged `c0295a1`. IDLE.
-- **Other B-codes:** B1 IDLE; B2 (App) IDLE.
-- **Director auth:** "now" (fire first cycle).
-- Self-execution acceptable (you wrote the plan + script). AI Head A reviews ship report + runs §3 validation queries against the captured cycle_id.
+PR #77 (`CORTEX_PHASE3_CONFIG_IMPORT_FIX_1`) merged `207aae4` 2026-04-28T~18:25Z:
+- 2-line surgical fix (`from orchestrator import config` → `from config.settings import config`) in `cortex_phase3_reasoner.py:117` + `cortex_phase3_synthesizer.py:63`
+- A /security-review NO FINDINGS posted (PR #77 comment 4338023426)
+- 25/25 cortex_phase3_* tests still green
+- Render auto-deploy on push to main triggered
+
+## Pre-flight before re-fire
+
+Verify the deploy carrying `207aae4` is LIVE before re-firing:
+
+```bash
+# Quickest check — Render dashboard shows deploy commit + status:
+# https://dashboard.render.com/web/srv-d6dgsbctgctc73f55730/deploys
+
+# OR via Render CLI on your machine:
+render deploys list srv-d6dgsbctgctc73f55730 --limit 2
+
+# OR poll Baker /api/health and watch checked_at advance past PR #77 merge time:
+curl -s https://baker-master.onrender.com/api/health | jq '.checked_at'
+# (deploy_sha not surfaced; use Render dashboard for SHA confirmation)
+```
+
+DO NOT re-fire until you've seen `207aae4` (or later) live on Render. Otherwise cycle will hit the same import defect.
 
 ## What you're executing
 
@@ -131,7 +148,18 @@ If any tripped → flip `CORTEX_DRY_RUN→true` (already true), `CORTEX_LIVE_PIP
 
 ## Output
 
-Ship report: `briefs/_reports/B3_dry_run_cycle_1_20260428.md`
+**Same ship report — append a new section, do NOT overwrite the BLOCKED attempt 1 narrative:**
+
+`briefs/_reports/B3_dry_run_cycle_1_20260428.md`
+
+Add a `## Cycle 1 retry — post-PR-#77-merge` section with:
+- Re-fire timestamp + deploy SHA confirmed
+- New cycle_id captured
+- Plan §3 validation queries (all 6) re-executed against the new cycle_id with literal SQL + literal results
+- DRY_RUN gating verification (dry_run_marker / Slack / GOLD / MAC_MINI)
+- Promotion criteria contribution (1/5 only on PASS)
+
+## Original output spec (still applies for the retry section)
 
 Format:
 ```markdown
