@@ -1,103 +1,59 @@
 ---
-status: PARTIAL
-brief: cortex_v1_dry_run_cycle_1_retry
+status: OPEN
+brief: cortex_v1_dry_run_cycle_1_attempt_4
 trigger_class: HIGH
-dispatched_at: 2026-04-28T18:30:00Z
-unblock_event: PR #77 merged 207aae4 (config-import fix); A /security-review NO FINDINGS; auto-deploy in flight
-prior_attempt_cycle_id: 0e503e5e-f2e5-461a-acef-9f2482f6f2ee (BLOCKED on Phase 3a config import)
-retry_attempt_cycle_id: 2fba3342-7996-46a2-b1aa-95bf996794eb (PARTIAL — Phase 3a verified working; Phase 3b operational timeout)
-deploy_sha_verified: 207aae47 (dep-d7ofmri9lc2s73bjfv1g live since 2026-04-28T18:30:35Z)
-original_dispatched_at: 2026-04-28T18:05:00Z
-dispatched_by: ai-head-a
-director_authorization: 2026-04-28T~18:00Z "now"
+dispatched_at: 2026-04-28T19:10:00Z
+unblock_event: "russo_cy capability disabled via UPDATE capability_sets SET active=false (was firing 60s × 3 timeouts on every cycle and exhausting 300s budget)"
+ao_matter_obsidian_state: "ALREADY EXISTS at /Users/dimitry/baker-vault/wiki/matters/oskolkov/ with cortex-config.md (10803 bytes) + 17 files; loads fine from B3 local network"
+prior_attempts:
+  - attempt_1: 0e503e5e-f2e5-461a-acef-9f2482f6f2ee (BLOCKED on Phase 3a config-import — pre-PR-#77)
+  - attempt_2: 2fba3342-7996-46a2-b1aa-95bf996794eb (PARTIAL — local network, $0.0537, Phase 3b russo_cy timeout)
+  - attempt_3: 510f86a9-1444-4d98-9e54-de8484201a0e (TIMEOUT — Render Jobs API, vault not mounted + russo_cy 3× 60s)
+director_authorization: "2026-04-28T19:08Z option b — we need to continue, no time left, we need to go into business with cortex"
 target_matter_slug: oskolkov
 target_plan_section: §2.1 (manual director-question trigger)
-prerequisite_state: §1 cleared (deploy dep-d7of8n84un4s73bn2rb0 live; CORTEX_DRY_RUN=true / CORTEX_PIPELINE_ENABLED=false / CORTEX_LIVE_PIPELINE=true verified; matter_config_drift_weekly next_run 2026-05-04T11:00 UTC)
-claimed_at: 2026-04-28T18:30:00Z
-claimed_by: b3
-last_heartbeat: 2026-04-28T18:42:00Z
-blocker_question: "Phase 3a (post-PR-#77) verified WORKING on prod (real Anthropic call + meta_reason artifact 2261 bytes). New blocker is OPERATIONAL not code: Phase 3b specialist-Anthropic calls time out 60s × 3 retries from local network (vault tool-use loops via Render endpoints). Plan §2.1 Option A (Render shell) needed for clean cycle. Recommendation: install Render CLI on B3's machine OR Director runs heredoc via Render dashboard Shell tab."
+claimed_at: null
+claimed_by: null
+last_heartbeat: null
+blocker_question: null
 ship_report: briefs/_reports/B3_dry_run_cycle_1_20260428.md
-verdict: PARTIAL_PASS
-fix_pr_77_status: VERIFIED_WORKING
 autopoll_eligible: false
 ---
 
-# CODE_3_PENDING — B3: CORTEX V1 DRY_RUN — CYCLE 1 RETRY POST-PR-#77-MERGE — 2026-04-28
+# CODE_3_PENDING — B3: CORTEX V1 DRY_RUN — CYCLE 1 ATTEMPT 4 (post russo_cy disable) — 2026-04-28
 
 **Dispatcher:** AI Head A (sole orchestrator)
 **Working dir:** `~/bm-b3`
-**Plan:** [`briefs/_plans/CORTEX_V1_DRY_RUN_LAUNCH_PLAN_20260428.md`](../_plans/CORTEX_V1_DRY_RUN_LAUNCH_PLAN_20260428.md) §2.1 → §3
-**Trigger class:** HIGH (first cycle on real matter — counts toward §6 Q1 ≥5 consecutive clean cycles only on retry success)
+**Trigger class:** HIGH (first clean cycle on real matter — counts toward §6 Q1 ≥5 consecutive)
 
 ## Unblock event
 
-PR #77 (`CORTEX_PHASE3_CONFIG_IMPORT_FIX_1`) merged `207aae4` 2026-04-28T~18:25Z:
-- 2-line surgical fix (`from orchestrator import config` → `from config.settings import config`) in `cortex_phase3_reasoner.py:117` + `cortex_phase3_synthesizer.py:63`
-- A /security-review NO FINDINGS posted (PR #77 comment 4338023426)
-- 25/25 cortex_phase3_* tests still green
-- Render auto-deploy on push to main triggered
-
-## Pre-flight before re-fire
-
-Verify the deploy carrying `207aae4` is LIVE before re-firing:
-
-```bash
-# Quickest check — Render dashboard shows deploy commit + status:
-# https://dashboard.render.com/web/srv-d6dgsbctgctc73f55730/deploys
-
-# OR via Render CLI on your machine:
-render deploys list srv-d6dgsbctgctc73f55730 --limit 2
-
-# OR poll Baker /api/health and watch checked_at advance past PR #77 merge time:
-curl -s https://baker-master.onrender.com/api/health | jq '.checked_at'
-# (deploy_sha not surfaced; use Render dashboard for SHA confirmation)
+AI Head A disabled `russo_cy` capability at 2026-04-28T19:09Z:
+```sql
+UPDATE capability_sets SET active = false WHERE slug = 'russo_cy';
+-- {"slug": "russo_cy", "name": "Cyprus Tax", "active": false}
 ```
 
-DO NOT re-fire until you've seen `207aae4` (or later) live on Render. Otherwise cycle will hit the same import defect.
+Phase 3a meta_reason on attempts 2+3 picked `['russo_cy', 'legal']` based on regex matches. With russo_cy now inactive, only `legal` will be invoked in Phase 3b. `_get_capability_def` (cortex_phase3_invoker.py:166) filters inactive registry entries — they short-circuit to "not in active registry" error without firing the 60s × 3 retry loop.
 
-## What you're executing
-
-Plan §2.1 verbatim — manual director-question trigger via Python shell with prod env. Capture printed `cycle_id`, then run plan §3 validation queries against it.
-
-## Execution path — pick one
-
-**Option A — Render shell SSH (preferred, closest to prod):**
+## Pre-flight verification before re-fire
 
 ```bash
-# From your local machine:
-render ssh srv-d6dgsbctgctc73f55730
-# (if `render` CLI not installed: brew install render-oss/render/render OR use Render dashboard "Shell" tab)
+# Confirm russo_cy is actually inactive in prod DB:
+curl -s -X POST "https://baker-master.onrender.com/mcp?key=bakerbhavanga" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"baker_raw_query","arguments":{"sql":"SELECT slug, active FROM capability_sets WHERE slug IN ('"'"'russo_cy'"'"','"'"'legal'"'"')"}}}' | python3 -m json.tool
 
-# Once shell'd in, run:
-python3 - <<'PY'
-import asyncio
-from orchestrator.cortex_runner import maybe_run_cycle
-
-async def main():
-    cycle = await maybe_run_cycle(
-        matter_slug="oskolkov",
-        triggered_by="director",
-        director_question=(
-            "DRY_RUN cycle 1 — synthesize current state of the AO matter "
-            "from cortex-config + curated. No live action required."
-        ),
-    )
-    print(f"cycle_id={cycle.cycle_id} status={cycle.status} "
-          f"current_phase={cycle.current_phase} "
-          f"cost_tokens={cycle.cost_tokens} cost_dollars=${cycle.cost_dollars:.4f}")
-
-asyncio.run(main())
-PY
+# Confirm AO matter wiki present locally:
+ls /Users/dimitry/baker-vault/wiki/matters/oskolkov/cortex-config.md
 ```
 
-**Option B — local with `op run` for prod env (fallback):**
+## Re-fire — Option B (B3 local with op run)
 
 ```bash
 cd ~/bm-b3
 git checkout main && git pull -q
 
-# Build prod-env shim from 1Password — minimum vars:
 export DATABASE_URL=$(op read 'op://Baker API Keys/DATABASE_URL/credential')
 export BAKER_VAULT_PATH=/Users/dimitry/baker-vault
 export ANTHROPIC_API_KEY=$(op read 'op://Baker API Keys/API Anthropic/credential' 2>/dev/null || echo "")
@@ -105,104 +61,62 @@ export CORTEX_DRY_RUN=true
 export CORTEX_LIVE_PIPELINE=true
 export CORTEX_PIPELINE_ENABLED=false
 
-# Verify env loaded:
-python3 -c "import os; print('DB ok:', bool(os.getenv('DATABASE_URL'))); print('vault ok:', os.path.isdir(os.getenv('BAKER_VAULT_PATH','')))"
+python3 - <<'PY'
+import asyncio
+from orchestrator.cortex_runner import maybe_run_cycle
 
-# Then run the same heredoc script as Option A.
+async def main():
+    c = await maybe_run_cycle(
+        matter_slug="oskolkov",
+        triggered_by="director",
+        director_question="DRY_RUN cycle 1 attempt 4 (post russo_cy disable). Synthesize current state of the AO matter from cortex-config + curated.",
+    )
+    print(f"cycle_id={c.cycle_id} status={c.status} current_phase={c.current_phase} cost_tokens={c.cost_tokens} cost_dollars=${c.cost_dollars:.4f}")
+
+asyncio.run(main())
+PY
 ```
-
-## Capture (paste literal stdout into ship report)
-
-The Python script's `print(...)` line — exact format:
-```
-cycle_id=<UUID> status=<...> current_phase=<...> cost_tokens=<int> cost_dollars=$<float>
-```
-
-Note the cycle_id — every §3 query keys off it.
-
-## Then — run plan §3 validation against the captured cycle_id
-
-Replace `<UUID>` placeholder in plan §3's 6 queries with the real cycle_id and execute via Baker MCP `baker_raw_query` (read-only). Paste literal SQL + literal result for each.
-
-Cross-check expected timing/cost from plan §2.3:
-- Total wall-clock: 25-65s
-- Cost: $0.03-0.25 (driven by specialist count)
-- Phase sequence: 1 sense → 2 load → 3a meta → 3b invocations → 3c synth → 4 propose (+ DRY_RUN marker artifact at phase_order=8)
 
 ## Pass criteria
 
-- Cycle runs to terminal status (`tier_b_pending` for DRY_RUN, NOT `failed`)
-- All 6 §3 queries return expected non-empty rows for THIS cycle_id
-- `dry_run_marker` artifact present at phase_order=8
-- No Slack DM (DRY_RUN gating verified)
-- Cost within $0.25 ceiling
-- Wall-clock within 65s
-- No exceptions in Render logs (`render logs srv-d6dgsbctgctc73f55730 --tail 200 | grep -E "ERROR|Traceback|cortex"`)
+- Cycle reaches terminal status `tier_b_pending` (DRY_RUN) — NOT `failed`
+- Wall-clock < 300s (likely 30-90s with only legal specialist)
+- Phase 3b artifact shows `legal` invocation success (or graceful skip), NO russo_cy attempt
+- `dry_run_marker` artifact at phase_order=8
+- Cost < $0.25
+- §3 validation queries 1-6 PASS
 
-## STOP criteria (fire rollback if any tripped)
+## STOP criteria
 
-Plan §4 lists 9 STOP criteria F1–F9. Most relevant for cycle 1:
-- F1: cycle hits `status='failed'` (vs expected `tier_b_pending`)
-- F4: cost > $1.00 (cycle 1 budget cap is $0.25; $1.00 is panic ceiling)
-- F5: wall-clock > 300s timeout
-- F6: GOLD write attempted (must NOT happen under DRY_RUN — Phase 5 stub-only)
-- F7: Slack DM sent (must NOT happen under DRY_RUN)
-
-If any tripped → flip `CORTEX_DRY_RUN→true` (already true), `CORTEX_LIVE_PIPELINE→false`, then dispatch decommission+rollback (or call A in chat for guidance — don't auto-rollback for cycle 1).
+- F1 status='failed' → DON'T panic-rollback; surface to A first (could surface ANOTHER blocker — e.g. legal capability also broken; we'll iterate)
+- F4 cost > $1.00 → STOP, surface to A
+- F6 GOLD write fired (must NOT happen under DRY_RUN)
+- F7 Slack DM fired (must NOT happen under DRY_RUN)
 
 ## Output
 
-**Same ship report — append a new section, do NOT overwrite the BLOCKED attempt 1 narrative:**
-
-`briefs/_reports/B3_dry_run_cycle_1_20260428.md`
-
-Add a `## Cycle 1 retry — post-PR-#77-merge` section with:
-- Re-fire timestamp + deploy SHA confirmed
-- New cycle_id captured
-- Plan §3 validation queries (all 6) re-executed against the new cycle_id with literal SQL + literal results
-- DRY_RUN gating verification (dry_run_marker / Slack / GOLD / MAC_MINI)
-- Promotion criteria contribution (1/5 only on PASS)
-
-## Original output spec (still applies for the retry section)
-
-Format:
+Append section to `briefs/_reports/B3_dry_run_cycle_1_20260428.md`:
 ```markdown
-# B3 — Cortex V1 DRY_RUN — first cycle on AO matter — 2026-04-28
-
-## Execution path
-<Option A or B + actual command sequence>
-
-## Cycle output
-cycle_id=<UUID> status=<...> current_phase=<...> cost_tokens=<int> cost_dollars=$<float>
-Wall-clock: <Ns>
-
-## Render log excerpts (sentinel.cortex_*)
-<grep output for the cycle_id timeframe>
-
-## Plan §3 validation queries (against this cycle_id)
-### Query 1 — cycle row final state
-SQL: <literal>
-Result: <literal>
-Status: PASS / FAIL <reason>
-... (repeat for queries 2-6)
-
-## DRY_RUN gating verification
-- dry_run_marker artifact at phase_order=8: PRESENT/MISSING
-- Slack chat_postMessage: SKIPPED/FIRED
-- GOLD write: SKIPPED/FIRED
-- MAC_MINI propagate: SKIPPED/FIRED
-
-## Verdict
-PASS / PARTIAL / FAIL with one-line summary.
-
-## Promotion-criteria contribution (plan §6)
-- Q1 cycle ran cleanly: 1/5
-- Cost < €0.50: 1/5
-- p95 ≤ 60s: 1/5
-- dry_run_marker present: 1/5
+## Cycle 1 attempt 4 — post russo_cy disable
+- Pre-flight: russo_cy.active=false confirmed
+- New cycle_id: <UUID>
+- Wall-clock: <Ns>
+- Status: <terminal>
+- Cost: $<float>
+- Phase 3b legal-only verification: <invoked / skipped / errored>
+- §3 validation: <PASS/FAIL per query>
+- Promotion criteria: <1/5 only on PASS>
 ```
 
-Notify A in chat with: cycle_id + verdict + cost + wall-clock.
+Notify A: cycle_id + verdict + cost + wall-clock.
+
+## If THIS attempt also times out
+
+Likely root cause: `legal` specialist also slow/broken from local network OR _get_capability_def loads inactive caps despite the flag. Surface to A with the new cycle_id; A will pivot to:
+- Disable `legal` too and run cycle 1 with ZERO specialists (Phase 3b skip → 3c synth on meta_reason alone)
+- OR pivot to investigating `legal` capability code path
+
+Either way: DO NOT spend > 5 min on this attempt. If it doesn't complete in budget, surface immediately.
 
 ## Co-Authored-By
 
