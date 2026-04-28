@@ -212,6 +212,10 @@ class SentinelStoreBack:
         # AMEX_RECURRING_DEADLINE_1: deadlines.recurrence + 3 sibling columns
         self._ensure_deadlines_recurrence_columns()
 
+        # BRIEF_CORTEX_3T_FORMALIZE_1A: Cortex Stage 2 V1 cycle + phase output tables
+        self._ensure_cortex_cycles_table()
+        self._ensure_cortex_phase_outputs_table()
+
     # -------------------------------------------------------
     # Connection pool management
     # -------------------------------------------------------
@@ -551,6 +555,96 @@ class SentinelStoreBack:
             except Exception:
                 pass
             logger.warning(f"Could not ensure ai_head_audits table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_cortex_cycles_table(self):
+        """BRIEF_CORTEX_3T_FORMALIZE_1A: Cortex Stage 2 V1 cycle persistence.
+
+        Bootstrap mirror of migrations/20260428_cortex_cycles.sql. Idempotent —
+        safe to run on every startup. Column-for-column with the migration
+        (lesson #37 — keep DDL in migrations; this mirror is belt-and-braces
+        until migration runner has claimed the file in production).
+        """
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS cortex_cycles (
+                    cycle_id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                    matter_slug        TEXT NOT NULL,
+                    triggered_by       TEXT NOT NULL,
+                    trigger_signal_id  BIGINT,
+                    started_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    completed_at       TIMESTAMPTZ,
+                    last_loaded_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    current_phase      TEXT NOT NULL DEFAULT 'sense'
+                        CHECK (current_phase IN ('sense','load','reason','propose','act','archive')),
+                    status             TEXT NOT NULL DEFAULT 'in_flight'
+                        CHECK (status IN ('in_flight','awaiting_reason','proposed','tier_b_pending','approved','rejected','modified','failed','superseded','abandoned')),
+                    proposal_id        UUID,
+                    director_action    TEXT,
+                    feedback_ledger_id BIGINT,
+                    cost_tokens        INTEGER DEFAULT 0,
+                    cost_dollars       NUMERIC(10,4) DEFAULT 0,
+                    created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_cortex_cycles_matter_status
+                    ON cortex_cycles (matter_slug, status, started_at DESC)
+            """)
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure cortex_cycles table: {e}")
+        finally:
+            self._put_conn(conn)
+
+    def _ensure_cortex_phase_outputs_table(self):
+        """BRIEF_CORTEX_3T_FORMALIZE_1A: per-phase artifact persistence.
+
+        Bootstrap mirror of migrations/20260428_cortex_phase_outputs.sql.
+        FK to cortex_cycles(cycle_id) with ON DELETE CASCADE.
+        """
+        conn = self._get_conn()
+        if not conn:
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS cortex_phase_outputs (
+                    output_id      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+                    cycle_id       UUID NOT NULL REFERENCES cortex_cycles(cycle_id) ON DELETE CASCADE,
+                    phase          TEXT NOT NULL
+                        CHECK (phase IN ('sense','load','reason','propose','act','archive')),
+                    phase_order    INT NOT NULL,
+                    artifact_type  TEXT NOT NULL,
+                    payload        JSONB NOT NULL,
+                    citations      JSONB DEFAULT '[]'::jsonb,
+                    created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_cortex_phase_outputs_cycle_phase
+                    ON cortex_phase_outputs (cycle_id, phase_order)
+            """)
+            conn.commit()
+            cur.close()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not ensure cortex_phase_outputs table: {e}")
         finally:
             self._put_conn(conn)
 
