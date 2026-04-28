@@ -60,7 +60,7 @@ def _call_opus(
 ) -> tuple[str, int, int, float]:
     """Direct Anthropic call. Mirror of phase3a helper for consistency."""
     import anthropic
-    from orchestrator import config
+    from config.settings import config
     from orchestrator.cost_monitor import log_api_cost
 
     client = anthropic.Anthropic(api_key=config.claude.api_key)
