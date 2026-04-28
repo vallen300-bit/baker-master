@@ -746,6 +746,25 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info("Skipped: gold_audit_sentinel (GOLD_AUDIT_ENABLED=false)")
 
+    # CORTEX_3T_FORMALIZE_1C (RA-23 Q6): weekly cortex-config drift audit.
+    # Mon 11:00 UTC — slot 1h after ai_head_audit_sentinel (10:00). Walks
+    # ``BAKER_VAULT_PATH/wiki/matters/*/cortex-config.md`` and flags any
+    # config older than ``CORTEX_DRIFT_THRESHOLD_DAYS`` (default 30). Env
+    # gate ``CORTEX_DRIFT_AUDIT_ENABLED`` (default ``true``).
+    _cortex_drift_enabled = _os.environ.get("CORTEX_DRIFT_AUDIT_ENABLED", "true").lower()
+    if _cortex_drift_enabled not in ("false", "0", "no", "off"):
+        scheduler.add_job(
+            _matter_config_drift_weekly_job,
+            CronTrigger(day_of_week="mon", hour=11, minute=0, timezone="UTC"),
+            id="matter_config_drift_weekly",
+            name="Cortex matter-config drift audit (Monday 11:00 UTC)",
+            coalesce=True, max_instances=1, replace_existing=True,
+            misfire_grace_time=3600,
+        )
+        logger.info("Registered: matter_config_drift_weekly (Mon 11:00 UTC)")
+    else:
+        logger.info("Skipped: matter_config_drift_weekly (CORTEX_DRIFT_AUDIT_ENABLED=false)")
+
     # BRIEF_MOVIE_AM_RETROFIT_1 D5: weekly MOVIE AM vault lint.
     # Sunday 06:05 UTC — offset 5 min from ao_pm_lint to avoid vault-mirror
     # contention. Env gate ``MOVIE_AM_LINT_ENABLED`` (default ``true``)
@@ -942,6 +961,28 @@ def _ai_head_weekly_audit_job():
         logger.info("ai_head_weekly_audit: %s", result)
     except Exception as e:
         logger.warning("ai_head_weekly_audit: run raised: %s", e)
+
+
+def _matter_config_drift_weekly_job():
+    """APScheduler wrapper: Monday 11:00 UTC matter-config drift audit.
+
+    CORTEX_3T_FORMALIZE_1C (RA-23 Q6). Mirrors ``_ai_head_weekly_audit_job``:
+    lazy-imports the runner, swallows top-level exceptions as WARN so a
+    single bad week doesn't knock out the scheduler.
+    """
+    try:
+        from orchestrator.cortex_drift_audit import run_drift_audit
+    except Exception as e:
+        logger.error("matter_config_drift_weekly: import failed: %s", e)
+        return
+    try:
+        result = run_drift_audit()
+        logger.info(
+            "matter_config_drift_weekly: %s flagged of %s checked",
+            result.get("flagged_count"), result.get("checked"),
+        )
+    except Exception as e:
+        logger.warning("matter_config_drift_weekly: run raised: %s", e)
 
 
 def _ai_head_audit_sentinel_job():

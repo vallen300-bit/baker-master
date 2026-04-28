@@ -11584,6 +11584,50 @@ async def sentinel_feedback(req: Request):
 
 
 # ============================================================
+# Cortex Stage 2 V1 — Director button webhook (CORTEX_3T_FORMALIZE_1C)
+# ============================================================
+
+@app.post(
+    "/cortex/cycle/{cycle_id}/action",
+    tags=["cortex"],
+    dependencies=[Depends(verify_api_key)],
+)
+async def cortex_cycle_action(cycle_id: str, request: Request):
+    """Director clicked a button on the Cortex proposal card.
+
+    Body shape:
+        {"action": "approve|edit|refresh|reject",
+         "edits": "<optional new text for edit>",
+         "selected_gold_files": ["<files chosen via per-file checkboxes>"],
+         "reason": "<optional rejection reason>"}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid_json_body")
+    action = (body.get("action") or "").lower()
+    if action not in ("approve", "edit", "refresh", "reject"):
+        raise HTTPException(status_code=400, detail=f"invalid_action:{action}")
+    from orchestrator.cortex_phase5_act import (
+        cortex_approve, cortex_edit, cortex_refresh, cortex_reject,
+    )
+    handlers = {
+        "approve": cortex_approve,
+        "edit": cortex_edit,
+        "refresh": cortex_refresh,
+        "reject": cortex_reject,
+    }
+    try:
+        result = await handlers[action](cycle_id=cycle_id, body=body)
+        return {"status": "ok", "action": action, "result": result}
+    except Exception as e:
+        logger.error(
+            "/cortex/cycle/%s/action [%s] failed: %s", cycle_id, action, e,
+        )
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================
 # CLI runner
 # ============================================================
 

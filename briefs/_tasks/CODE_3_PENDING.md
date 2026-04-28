@@ -1,16 +1,19 @@
 ---
-status: OPEN
+status: COMPLETE
 brief: briefs/BRIEF_CORTEX_3T_FORMALIZE_1C.md
 trigger_class: MEDIUM
 dispatched_at: 2026-04-28T07:55:00Z
 dispatched_by: ai-head-a
 prerequisite_pr: 72
 prerequisite_state: MERGED 2026-04-28T07:50:48Z (squash 8757ef7)
-claimed_at: null
-claimed_by: null
-last_heartbeat: null
+claimed_at: 2026-04-28T08:00:00Z
+claimed_by: b3
+last_heartbeat: 2026-04-28T09:55:00Z
 blocker_question: null
-ship_report: null
+ship_report: briefs/_reports/B3_pr74_cortex_3t_formalize_1c_20260428.md
+pr_number: 74
+pr_url: https://github.com/vallen300-bit/baker-master/pull/74
+pr_state: OPEN — awaiting B1 second-pair-review + AI Head A /security-review
 autopoll_eligible: false
 routing_note: re-routed to b3 from original b2 plan (b2 in flight on AI Head B's lane)
 ---

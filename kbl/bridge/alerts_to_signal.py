@@ -479,12 +479,18 @@ def _read_new_alerts(cur, watermark: Any, limit: int) -> list[dict]:
     return [dict(zip(cols, row)) for row in cur.fetchall()]
 
 
-def _insert_signal_if_new(cur, signal_row: dict) -> bool:
+def _insert_signal_if_new(cur, signal_row: dict):
     """Insert one signal_queue row guarded by NOT EXISTS on alert_source_id+alert_id.
 
-    Returns True if a row was inserted, False if a duplicate was
-    detected. The dual-key check (source_id OR alert_id) is the
-    belt-and-suspenders against watermark drift required by the brief.
+    Returns the inserted ``signal_queue.id`` (int) on success, or ``None``
+    when the dedup guard suppressed a duplicate. The dual-key check
+    (source_id OR alert_id) is the belt-and-suspenders against watermark
+    drift required by the brief.
+
+    Return-shape change (CORTEX_3T_FORMALIZE_1C Amendment A2): callers
+    used to receive a bool; we now propagate the row id so the post-
+    commit Cortex dispatcher can address the inserted signal directly.
+    Truthy semantics are preserved (None is falsy, int>=1 is truthy).
     """
     payload_json = json.dumps(signal_row["payload"])
     alert_id = signal_row["payload"].get("alert_id")
@@ -526,7 +532,10 @@ def _insert_signal_if_new(cur, signal_row: dict) -> bool:
             alert_source_id,
         ),
     )
-    return cur.fetchone() is not None
+    row = cur.fetchone()
+    if row is None:
+        return None
+    return row[0]
 
 
 def _upsert_watermark(cur, last_seen: Any) -> None:
@@ -544,6 +553,33 @@ def _upsert_watermark(cur, last_seen: Any) -> None:
 # --------------------------------------------------------------------------
 # Tick entrypoint
 # --------------------------------------------------------------------------
+
+
+def _dispatch_cortex_for_inserted(inserted: list) -> None:
+    """Fire ``triggers.cortex_pipeline.maybe_dispatch`` for every row that
+    landed in ``signal_queue`` this tick.
+
+    CORTEX_3T_FORMALIZE_1C Amendment A2: env-flag-gated by
+    ``CORTEX_PIPELINE_ENABLED`` (default off). The dispatch call MUST
+    never propagate an exception back to the bridge tick — the bridge
+    write is canonical, Cortex is best-effort. Wrapped in try/except
+    individually per signal so a poison signal doesn't starve siblings.
+    """
+    if not inserted:
+        return
+    try:
+        from triggers.cortex_pipeline import maybe_dispatch
+    except Exception as e:
+        _local.warning("cortex_pipeline import failed: %s", e)
+        return
+    for signal_id, matter_slug in inserted:
+        try:
+            maybe_dispatch(signal_id=signal_id, matter_slug=matter_slug)
+        except Exception as e:
+            _local.warning(
+                "cortex maybe_dispatch raised for signal_id=%s matter=%s: %s",
+                signal_id, matter_slug, e,
+            )
 
 
 def run_bridge_tick(max_bridge_per_tick: int = 50) -> dict:
@@ -620,6 +656,14 @@ def run_bridge_tick(max_bridge_per_tick: int = 50) -> dict:
                 hot_md_patterns = load_hot_md_patterns()
 
                 max_created_at = watermark
+                # CORTEX_3T_FORMALIZE_1C Amendment A2: collect (signal_id,
+                # matter_slug) for every signal_queue INSERT so that, AFTER
+                # the transaction commits, we can fire the Cortex dispatcher
+                # per row. Dispatch lives outside the transaction so that
+                # any cortex_pipeline failure cannot roll back the bridge
+                # write — Cortex is downstream/best-effort, signal_queue is
+                # upstream/canonical.
+                inserted_signals: list[tuple[int, Any]] = []
                 with conn.cursor() as cur:
                     for alert in alerts:
                         ts = alert.get("created_at")
@@ -640,12 +684,20 @@ def run_bridge_tick(max_bridge_per_tick: int = 50) -> dict:
 
                         counts["kept"] += 1
                         signal_row = map_alert_to_signal(alert)
-                        if _insert_signal_if_new(cur, signal_row):
+                        inserted_id = _insert_signal_if_new(cur, signal_row)
+                        if inserted_id is not None:
                             counts["bridged"] += 1
+                            inserted_signals.append(
+                                (inserted_id, signal_row.get("matter")),
+                            )
 
                     _upsert_watermark(cur, max_created_at)
 
                 conn.commit()
+                # Post-commit Cortex dispatch (Amendment A2). Failures here
+                # MUST NOT affect the just-committed bridge write — wrapped
+                # in try/except + env-flag-gated.
+                _dispatch_cortex_for_inserted(inserted_signals)
             except Exception:
                 conn.rollback()
                 raise

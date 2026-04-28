@@ -57,3 +57,61 @@ async def maybe_trigger_cortex(
             "Cortex cycle trigger failed for signal %s (matter=%s): %s",
             signal_id, matter_slug, e,
         )
+
+
+# CORTEX_3T_FORMALIZE_1C Amendment A2 ---------------------------------------
+
+
+def _pipeline_dispatch_enabled() -> bool:
+    """Reads ``CORTEX_PIPELINE_ENABLED`` env. Default False until DRY_RUN
+    on the AO matter passes (Step 30). Distinct from
+    ``CORTEX_LIVE_PIPELINE``: that flag controls whether the runner
+    actually exits its dormant stub; this flag controls whether the
+    upstream ``alerts_to_signal`` dispatch call site fires at all.
+    """
+    return os.environ.get("CORTEX_PIPELINE_ENABLED", "false").strip().lower() == "true"
+
+
+def maybe_dispatch(*, signal_id: int, matter_slug: Optional[str]) -> None:
+    """Sync entry point used by ``kbl/bridge/alerts_to_signal.py`` after the
+    ``signal_queue`` INSERT commits.
+
+    Behaviour:
+      * Returns immediately when ``CORTEX_PIPELINE_ENABLED`` is unset.
+      * Otherwise drives ``maybe_trigger_cortex`` on a dedicated event
+        loop (the bridge tick is sync; we own the loop here).
+
+    Never raises. Cortex is best-effort; the upstream signal_queue write
+    has already committed and must not be torn down by a Cortex failure.
+    """
+    if not _pipeline_dispatch_enabled():
+        return
+    if not matter_slug:
+        return
+    try:
+        import asyncio
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Caller is inside an event loop already (unexpected for
+                # the bridge tick today, but defensive). Schedule the
+                # dispatch as a fire-and-forget task.
+                loop.create_task(
+                    maybe_trigger_cortex(
+                        signal_id=signal_id, matter_slug=matter_slug,
+                    )
+                )
+                return
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        loop.run_until_complete(
+            maybe_trigger_cortex(
+                signal_id=signal_id, matter_slug=matter_slug,
+            )
+        )
+    except Exception as e:  # noqa: BLE001 — never propagate
+        logger.error(
+            "cortex_pipeline.maybe_dispatch failed for signal %s (matter=%s): %s",
+            signal_id, matter_slug, e,
+        )

@@ -136,6 +136,15 @@ def stub_phase3(monkeypatch):
     monkeypatch.setattr(
         "orchestrator.cortex_phase3_synthesizer.run_phase3c_synthesize", _3c)
 
+    # 1C wired Phase 4 into the cycle. Phase-3-isolation tests stub it to
+    # a no-op so they keep their original 1B-shape assertions (status
+    # stays 'proposed' after Phase 3c, archive runs as before). Phase 4
+    # behaviour is exercised in tests/test_cortex_runner_phase4.py.
+    async def _phase4_noop(cycle):
+        return False
+
+    monkeypatch.setattr(runner, "_phase4_propose", _phase4_noop)
+
     return captured, behavior
 
 
