@@ -1,98 +1,171 @@
 ---
-status: COMPLETE
-brief: rollback_script_op_path_fix
-trigger_class: LOW
-dispatched_at: 2026-04-28T16:45:00Z
+status: OPEN
+brief: cortex_v1_dry_run_cycle_1
+trigger_class: HIGH
+dispatched_at: 2026-04-28T18:05:00Z
 dispatched_by: ai-head-a
-target_script: scripts/cortex_rollback_v1.sh
-prior_dispatch_ship_report: briefs/_reports/B3_rollback_dry_rehearsal_20260428.md
-claimed_at: 2026-04-28T16:50:00Z
-claimed_by: b3
-last_heartbeat: 2026-04-28T17:05:00Z
+director_authorization: 2026-04-28T~18:00Z "now"
+target_matter_slug: oskolkov
+target_plan_section: §2.1 (manual director-question trigger)
+prerequisite_state: §1 cleared (deploy dep-d7of8n84un4s73bn2rb0 live; CORTEX_DRY_RUN=true / CORTEX_PIPELINE_ENABLED=false / CORTEX_LIVE_PIPELINE=true verified; matter_config_drift_weekly next_run 2026-05-04T11:00 UTC)
+claimed_at: null
+claimed_by: null
+last_heartbeat: null
 blocker_question: null
-ship_report: briefs/_reports/B3_rollback_op_path_fix_20260428.md
-verdict: PASS
-pr_number: 76
-pr_url: https://github.com/vallen300-bit/baker-master/pull/76
-pr_state: OPEN — awaiting AI Head A solo diff-review + Tier-A merge
+ship_report: null
 autopoll_eligible: false
 ---
 
-# CODE_3_PENDING — B3: ROLLBACK SCRIPT op:// PATH FIX + RE-VERIFY (Q4 final pass) — 2026-04-28
+# CODE_3_PENDING — B3: CORTEX V1 DRY_RUN — FIRST CYCLE ON AO MATTER — 2026-04-28
 
 **Dispatcher:** AI Head A (sole orchestrator)
 **Working dir:** `~/bm-b3`
-**Trigger class:** LOW (2-line secret-path fix; no logic change; no auth/DB/financial)
+**Plan:** [`briefs/_plans/CORTEX_V1_DRY_RUN_LAUNCH_PLAN_20260428.md`](../_plans/CORTEX_V1_DRY_RUN_LAUNCH_PLAN_20260428.md) §2.1 → §3
+**Trigger class:** HIGH (first live cycle on real matter, even under DRY_RUN gating)
 
 ## §2 pre-dispatch busy-check
 
-- **B3 prior state:** COMPLETE — rollback rehearsal PARTIAL ship (`520aa3f`). IDLE.
+- **B3 prior state:** COMPLETE — PR #76 op-path-fix merged `c0295a1`. IDLE.
 - **Other B-codes:** B1 IDLE; B2 (App) IDLE.
-- Self-review acceptable: surgical 2-line patch in script you authored. A reviews the diff.
+- **Director auth:** "now" (fire first cycle).
+- Self-execution acceptable (you wrote the plan + script). AI Head A reviews ship report + runs §3 validation queries against the captured cycle_id.
 
-## What you're fixing
+## What you're executing
 
-AI Head A verified Director's actual 1Password vault names via `op vault list` + `op item list`. The script's current `op://` paths are wrong:
+Plan §2.1 verbatim — manual director-question trigger via Python shell with prod env. Capture printed `cycle_id`, then run plan §3 validation queries against it.
 
-| Line | Current (wrong) | Correct |
-|---|---|---|
-| `scripts/cortex_rollback_v1.sh:49` | `op://Private/Render API Key/credential` | `op://Baker API Keys/API Render/credential` |
-| `scripts/cortex_rollback_v1.sh:50` | `op://Private/Baker DB URL/credential` | `op://Baker API Keys/DATABASE_URL/credential` |
+## Execution path — pick one
 
-Both corrected paths verified by AI Head A — resolved to live secrets cleanly:
-- `op read 'op://Baker API Keys/API Render/credential' | head -c 8` → `rnd_KfUr` (valid Render API key prefix)
-- `op read 'op://Baker API Keys/DATABASE_URL/credential' | head -c 12` → `postgresql:/` (valid Postgres URL prefix)
+**Option A — Render shell SSH (preferred, closest to prod):**
 
-Vault name is **`Baker API Keys`** (note the spaces — the `op://` path supports them as-is, no URL-encoding needed). Item names are **`API Render`** and **`DATABASE_URL`**, not `Render API Key` / `Baker DB URL`.
+```bash
+# From your local machine:
+render ssh srv-d6dgsbctgctc73f55730
+# (if `render` CLI not installed: brew install render-oss/render/render OR use Render dashboard "Shell" tab)
 
-## Steps
+# Once shell'd in, run:
+python3 - <<'PY'
+import asyncio
+from orchestrator.cortex_runner import maybe_run_cycle
+
+async def main():
+    cycle = await maybe_run_cycle(
+        matter_slug="oskolkov",
+        triggered_by="director",
+        director_question=(
+            "DRY_RUN cycle 1 — synthesize current state of the AO matter "
+            "from cortex-config + curated. No live action required."
+        ),
+    )
+    print(f"cycle_id={cycle.cycle_id} status={cycle.status} "
+          f"current_phase={cycle.current_phase} "
+          f"cost_tokens={cycle.cost_tokens} cost_dollars=${cycle.cost_dollars:.4f}")
+
+asyncio.run(main())
+PY
+```
+
+**Option B — local with `op run` for prod env (fallback):**
 
 ```bash
 cd ~/bm-b3
-git checkout main
-git pull -q
-git checkout -b rollback-script-op-path-fix-1
+git checkout main && git pull -q
 
-# Apply the 2-line patch — exact strings:
-#   line 49: 'op://Private/Render API Key/credential' → 'op://Baker API Keys/API Render/credential'
-#   line 50: 'op://Private/Baker DB URL/credential'   → 'op://Baker API Keys/DATABASE_URL/credential'
+# Build prod-env shim from 1Password — minimum vars:
+export DATABASE_URL=$(op read 'op://Baker API Keys/DATABASE_URL/credential')
+export BAKER_VAULT_PATH=/Users/dimitry/baker-vault
+export ANTHROPIC_API_KEY=$(op read 'op://Baker API Keys/API Anthropic/credential' 2>/dev/null || echo "")
+export CORTEX_DRY_RUN=true
+export CORTEX_LIVE_PIPELINE=true
+export CORTEX_PIPELINE_ENABLED=false
 
-# Verify the patched script still parses and exit-1's on no-confirm:
-bash -n scripts/cortex_rollback_v1.sh ; echo "parse=$?"
-bash scripts/cortex_rollback_v1.sh ; echo "no-confirm=$?"  # must still print usage + exit 1
+# Verify env loaded:
+python3 -c "import os; print('DB ok:', bool(os.getenv('DATABASE_URL'))); print('vault ok:', os.path.isdir(os.getenv('BAKER_VAULT_PATH','')))"
 
-# Update the TODO comment at line 22-46 to reflect that paths are now verified
-# (drop or rewrite the "B-code TODO" block — it's done).
+# Then run the same heredoc script as Option A.
 ```
 
-## PR
+## Capture (paste literal stdout into ship report)
 
-Title: `ROLLBACK_SCRIPT_OP_PATH_FIX_1: correct 1Password vault paths verified by Director`
-
-Body:
+The Python script's `print(...)` line — exact format:
 ```
-Closes plan §5.2 step 3 (op:// vault verification) and §6 Q4 (rollback drill PASS).
-
-AI Head A ran `op vault list` + `op item list --vault "Baker API Keys"` against
-Director's actual 1Password account; the original guess paths (`op://Private/...`)
-do not exist. Corrected to the verified item locations.
-
-Both new paths resolved cleanly to live credential prefixes (8 + 12 chars) before
-this PR was opened.
-
-No logic change. 2-line patch + TODO-comment cleanup.
+cycle_id=<UUID> status=<...> current_phase=<...> cost_tokens=<int> cost_dollars=$<float>
 ```
 
-Trigger class LOW → A solo review (no second-pair). Tier-A merge on diff-review pass + own pytest if any tests touch the script (they don't).
+Note the cycle_id — every §3 query keys off it.
+
+## Then — run plan §3 validation against the captured cycle_id
+
+Replace `<UUID>` placeholder in plan §3's 6 queries with the real cycle_id and execute via Baker MCP `baker_raw_query` (read-only). Paste literal SQL + literal result for each.
+
+Cross-check expected timing/cost from plan §2.3:
+- Total wall-clock: 25-65s
+- Cost: $0.03-0.25 (driven by specialist count)
+- Phase sequence: 1 sense → 2 load → 3a meta → 3b invocations → 3c synth → 4 propose (+ DRY_RUN marker artifact at phase_order=8)
+
+## Pass criteria
+
+- Cycle runs to terminal status (`tier_b_pending` for DRY_RUN, NOT `failed`)
+- All 6 §3 queries return expected non-empty rows for THIS cycle_id
+- `dry_run_marker` artifact present at phase_order=8
+- No Slack DM (DRY_RUN gating verified)
+- Cost within $0.25 ceiling
+- Wall-clock within 65s
+- No exceptions in Render logs (`render logs srv-d6dgsbctgctc73f55730 --tail 200 | grep -E "ERROR|Traceback|cortex"`)
+
+## STOP criteria (fire rollback if any tripped)
+
+Plan §4 lists 9 STOP criteria F1–F9. Most relevant for cycle 1:
+- F1: cycle hits `status='failed'` (vs expected `tier_b_pending`)
+- F4: cost > $1.00 (cycle 1 budget cap is $0.25; $1.00 is panic ceiling)
+- F5: wall-clock > 300s timeout
+- F6: GOLD write attempted (must NOT happen under DRY_RUN — Phase 5 stub-only)
+- F7: Slack DM sent (must NOT happen under DRY_RUN)
+
+If any tripped → flip `CORTEX_DRY_RUN→true` (already true), `CORTEX_LIVE_PIPELINE→false`, then dispatch decommission+rollback (or call A in chat for guidance — don't auto-rollback for cycle 1).
 
 ## Output
 
-- PR open + branch pushed
-- Ship report: `briefs/_reports/B3_rollback_op_path_fix_20260428.md` — patched diff snippet + post-fix `bash -n` exit code + `bash <script>` no-confirm output
-- Append to `briefs/_reports/B3_rollback_dry_rehearsal_20260428.md` § "Update — Q4 closure": "AI Head A verified vault paths against Director's `op vault list`; B3 patched in PR <#>; Q4 PASS on merge."
-- Notify A in chat: PR # + ship report path + verdict line
+Ship report: `briefs/_reports/B3_dry_run_cycle_1_20260428.md`
 
-After A merges → mailbox flip COMPLETE → DRY_RUN promotion gate Q4 fully cleared.
+Format:
+```markdown
+# B3 — Cortex V1 DRY_RUN — first cycle on AO matter — 2026-04-28
+
+## Execution path
+<Option A or B + actual command sequence>
+
+## Cycle output
+cycle_id=<UUID> status=<...> current_phase=<...> cost_tokens=<int> cost_dollars=$<float>
+Wall-clock: <Ns>
+
+## Render log excerpts (sentinel.cortex_*)
+<grep output for the cycle_id timeframe>
+
+## Plan §3 validation queries (against this cycle_id)
+### Query 1 — cycle row final state
+SQL: <literal>
+Result: <literal>
+Status: PASS / FAIL <reason>
+... (repeat for queries 2-6)
+
+## DRY_RUN gating verification
+- dry_run_marker artifact at phase_order=8: PRESENT/MISSING
+- Slack chat_postMessage: SKIPPED/FIRED
+- GOLD write: SKIPPED/FIRED
+- MAC_MINI propagate: SKIPPED/FIRED
+
+## Verdict
+PASS / PARTIAL / FAIL with one-line summary.
+
+## Promotion-criteria contribution (plan §6)
+- Q1 cycle ran cleanly: 1/5
+- Cost < €0.50: 1/5
+- p95 ≤ 60s: 1/5
+- dry_run_marker present: 1/5
+```
+
+Notify A in chat with: cycle_id + verdict + cost + wall-clock.
 
 ## Co-Authored-By
 
