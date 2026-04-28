@@ -1,5 +1,5 @@
 ---
-status: OPEN
+status: IN_PROGRESS
 brief: briefs/BRIEF_CORTEX_SPECIALIST_TIMEOUT_TUNABLE_1.md
 trigger_class: LOW
 dispatched_at: 2026-04-29T00:55:00Z
@@ -12,9 +12,9 @@ b1_review_reason: "LOW trigger class — config knob change, no auth/API/migrati
 builder: b3
 reviewer: ai-head-a (solo review acceptable per RA-24 narrowing)
 ai_head_review: structural + py_compile + test PASS
-claimed_at: null
-claimed_by: null
-last_heartbeat: null
+claimed_at: 2026-04-29T00:56:00Z
+claimed_by: b3
+last_heartbeat: 2026-04-29T00:56:00Z
 blocker_question: null
 ship_report: briefs/_reports/B3_specialist_timeout_tunable_20260429.md
 autopoll_eligible: false

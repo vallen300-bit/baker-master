@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -30,7 +31,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-SPECIALIST_TIMEOUT_S = 60          # RA-23 Q5
+SPECIALIST_TIMEOUT_S = int(os.getenv("CORTEX_SPECIALIST_TIMEOUT_S", "180"))  # RA-23 Q5; env-tunable post-2026-04-29
 SPECIALIST_MAX_RETRIES = 2         # RA-23 Q5 (so 3 total attempts)
 PHASE3B_MODEL_FOR_COST = "claude-opus-4-6"  # cycle-row cost calc only
 STAGING_ROOT = Path("outputs/cortex_proposed_curated")
