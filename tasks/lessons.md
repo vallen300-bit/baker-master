@@ -271,3 +271,17 @@ Same applies to AI Head ↔ AI Head dispatches (use `aihead1`/`aihead2` labels p
 **Mistake:** PR #66 (GOLD_COMMENT_WORKFLOW_1, MEDIUM-trigger-class) and PR #68 (AMEX_RECURRING_DEADLINE_1, MEDIUM-trigger-class) were both merged 2026-04-26 evening under manual diff-read review only — `/security-review` skill was NOT invoked on either. RA-22 mandated retroactive coverage. PR #68 retroactive pass clean; **PR #66 retroactive pass surfaced 3 real authorization bypasses on `_check_caller_authorized` at `kbl/gold_writer.py:752-759`**: (1) thread/process boundary bypass via `inspect.stack()` only walking current thread (HIGH, conf 9), (2) `__name__` mutation bypass via `frame.f_globals['__name__']` reading mutable module dict (HIGH, conf 9), (3) `__main__` evasion when cortex code runs as direct script (MEDIUM, conf 7). All 3 are concrete exploit paths on the PR's stated security boundary. Manual review missed all 3.
 **Root cause:** manual diff-read review optimizes for code-quality + correctness against brief acceptance criteria. It does NOT systematically check authorization boundaries, deserialization paths, SQL parameterization across all touched modules. `/security-review` skill orchestrates a structured pass against 5 security categories with confidence-scoring and false-positive filtering — disciplined coverage manual review does not produce.
 **Rule:** `/security-review` skill invocation MANDATORY for ALL lane-owner Tier A merges. Apply to all Tier A merges going forward. Manual diff-read is not substitute. RA-22 ratified as Lesson #52, anchor case = PR #66's caller-stack guard. Codify in SKILL.md §Security Review Protocol on next AI Head consolidation pass; flag for SKILL.md amendment. Cousin of Lesson #44 (`/write-brief` REVIEW catches what informal exploration misses) — both are formal-skill discipline rules where the skill catches what informal pass misses.
+
+### 53. Autopoll mode supersedes Lesson #48 *only within defined autopoll window* (2026-04-27)
+
+> **Numbering note:** originally drafted as Lesson #50 in `BRIEF_B_CODE_AUTOPOLL_1` ship branch (B1 build). Renumbered to #53 on rebase 2026-04-28 to resolve collision with main's already-ratified #50/#51/#52 (RA-22 numbering). Authority: AI Head A rebase resolution, PR #69 merge.
+
+**Rule:** B-codes opted into autopoll (per `_ops/processes/b-code-autopoll-startup.md`) self-wake on mailbox commits during the window — paste-block NOT required for fresh dispatches. Outside the window, Lesson #48 fully applies (paste-block mandatory same turn as dispatch).
+
+**Window definition:** active when (a) Director has pasted the start-protocol per startup doc, AND (b) `OVERNIGHT_AUTONOMY_UNTIL` deadline not yet passed, AND (c) B-code's loop has not exited via idle count or `STOP AUTOPOLL`.
+
+**Frontmatter signal:** mailbox `autopoll_eligible: true` indicates AI Head expects autopoll mode pickup. `autopoll_eligible: false` (default) means cold-start paste-block still required even if window is active.
+
+**Why both modes coexist:** highest-traffic dispatches (overnight build cycles) get autopoll; sensitive dispatches (HIGH trigger class, Director-eyeball needed, ambiguous brief) stay paste-block-driven so Director sees the dispatch live.
+
+**Anchor:** BRIEF_B_CODE_AUTOPOLL_1 (Director ratified 2026-04-27 "ratified all" on 8 open Qs).
