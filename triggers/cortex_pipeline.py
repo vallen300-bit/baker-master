@@ -25,6 +25,16 @@ def _live_pipeline_enabled() -> bool:
     return os.environ.get("CORTEX_LIVE_PIPELINE", "false").strip().lower() == "true"
 
 
+def _gate_enabled() -> bool:
+    """CORTEX_PRE_REVIEW_GATE_1: reads ``CORTEX_GATE_ENABLED``. Default true.
+
+    When true, ``maybe_trigger_cortex`` posts a cheap Slack DM asking the
+    Director to approve the cycle ($4) instead of firing it directly. When
+    false, falls through to legacy direct-fire behaviour (kill-switch).
+    """
+    return os.environ.get("CORTEX_GATE_ENABLED", "true").strip().lower() == "true"
+
+
 async def maybe_trigger_cortex(
     *,
     signal_id: int,
@@ -36,6 +46,12 @@ async def maybe_trigger_cortex(
     1C will flip the default after dry-run validation (per brief §Out of
     scope). This function MUST never raise — the caller's signal pipeline
     must continue regardless of Cortex state.
+
+    CORTEX_PRE_REVIEW_GATE_1 (this PR): when ``CORTEX_GATE_ENABLED=true``
+    (default true), the cost gate posts a Slack DM with signed-URL approve/
+    skip links instead of firing the $4 cycle directly. Director taps approve
+    → background task fires the cycle. Tap skip → no spend. Set
+    ``CORTEX_GATE_ENABLED=false`` to bypass and direct-fire (kill-switch).
     """
     if not _live_pipeline_enabled():
         # 1A default — stub is dormant
@@ -43,6 +59,46 @@ async def maybe_trigger_cortex(
     if not matter_slug:
         # No matter → nothing to reason about; skip silently
         return
+
+    # CORTEX_PRE_REVIEW_GATE_1: prefer the cost gate when enabled.
+    if _gate_enabled():
+        try:
+            from triggers.cortex_pre_review_gate import (
+                post_gate, already_decided, _secret,
+            )
+            posted = post_gate(signal_id=signal_id, matter_slug=matter_slug)
+            if posted:
+                logger.info(
+                    "cortex pre-review gate posted (signal_id=%s, matter=%s) — "
+                    "awaiting Director decision",
+                    signal_id, matter_slug,
+                )
+                return
+            # post_gate returned False — either already-decided or gate disabled.
+            if already_decided(signal_id):
+                # Decision already on file: do not re-post and do not fire.
+                return
+            if _secret() is None:
+                # Gate intent ON but secret missing → fall through to direct-fire
+                # so Cortex still works (logged at error in post_gate).
+                pass
+            else:
+                # post_gate failed for transient reasons (Slack post error etc).
+                # Skip cycle to avoid runaway spend without Director approval.
+                logger.warning(
+                    "post_gate returned False with secret set; skipping cycle "
+                    "(no runaway). signal_id=%s", signal_id,
+                )
+                return
+        except Exception as e:  # noqa: BLE001
+            logger.error(
+                "gate dispatch failed signal_id=%s matter=%s: %s — "
+                "falling through to direct-fire",
+                signal_id, matter_slug, e,
+            )
+            # fall through to legacy path
+
+    # Legacy direct-fire path (kill-switch / fallback).
     try:
         # Imported lazily so a missing/broken cortex_runner doesn't break
         # signal-pipeline boot.

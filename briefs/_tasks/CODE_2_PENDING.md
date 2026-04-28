@@ -1,5 +1,5 @@
 ---
-status: OPEN
+status: IN_PROGRESS
 brief: briefs/BRIEF_CORTEX_PRE_REVIEW_GATE_2_HARDEN.md
 trigger_class: HIGH
 dispatched_at: 2026-04-29T01:55:00Z
@@ -27,9 +27,9 @@ b1_review_required: false
 b1_review_reason: "B1 already PASS 10/10 on PR #80 structural. Patches are surgical hardening of areas A is re-reviewing (sections C + E). A solo /security-review re-run sufficient."
 builder: b2
 reviewer: ai-head-a (solo /security-review re-run + section C + E recheck)
-claimed_at: null
-claimed_by: null
-last_heartbeat: null
+claimed_at: 2026-04-29T02:00:00Z
+claimed_by: b2
+last_heartbeat: 2026-04-29T02:00:00Z
 blocker_question: null
 ship_report: briefs/_reports/B2_cortex_pre_review_gate_2_harden_20260429.md
 autopoll_eligible: false
