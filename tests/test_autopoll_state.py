@@ -20,10 +20,14 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.autopoll_state import (  # noqa: E402
     LEGAL_TRANSITIONS,
     VALID_STATUSES,
+    _split_frontmatter,
     find_stale_claims,
     heartbeat,
+    increment_idle_count,
     push_state_transition,
+    read_idle_count,
     read_state,
+    reset_idle_count,
     transition_state,
 )
 
@@ -323,3 +327,54 @@ def test_push_state_transition_silent_on_import_failure(
     monkeypatch.setattr(builtins, "__import__", boom)
 
     push_state_transition(mailbox, to="IN_PROGRESS")
+
+
+@pytest.fixture
+def isolated_idle_state(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Redirect _IDLE_STATE_DIR to a tmp_path so tests don't touch ~/.autopoll_state."""
+    import scripts.autopoll_state as mod
+    monkeypatch.setattr(mod, "_IDLE_STATE_DIR", tmp_path / "autopoll_state")
+    return tmp_path / "autopoll_state"
+
+
+# 21
+def test_idle_count_starts_at_zero(isolated_idle_state: Path) -> None:
+    assert read_idle_count("b3") == 0
+
+
+# 22
+def test_increment_idle_count_returns_new_value(
+    isolated_idle_state: Path,
+) -> None:
+    assert increment_idle_count("b3") == 1
+    assert increment_idle_count("b3") == 2
+    assert increment_idle_count("b3") == 3
+    assert read_idle_count("b3") == 3
+
+
+# 23
+def test_reset_idle_count_clears_state(isolated_idle_state: Path) -> None:
+    increment_idle_count("b3")
+    increment_idle_count("b3")
+    assert read_idle_count("b3") == 2
+    reset_idle_count("b3")
+    assert read_idle_count("b3") == 0
+    reset_idle_count("b3")  # idempotent on missing file
+    assert read_idle_count("b3") == 0
+
+
+# 24
+def test_idle_count_per_b_code_isolation(isolated_idle_state: Path) -> None:
+    increment_idle_count("b2")
+    increment_idle_count("b2")
+    increment_idle_count("b3")
+    assert read_idle_count("b2") == 2
+    assert read_idle_count("b3") == 1
+    assert read_idle_count("b1") == 0
+
+
+# 25
+def test_split_frontmatter_malformed_yaml_raises_valueerror() -> None:
+    bad = "---\nkey: [unclosed\n---\n\nbody\n"
+    with pytest.raises(ValueError, match="malformed YAML"):
+        _split_frontmatter(bad)

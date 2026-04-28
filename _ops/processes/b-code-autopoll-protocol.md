@@ -14,9 +14,13 @@ Window-scoped exception to Lesson #48 — see `tasks/lessons.md` Lesson #50.
    - Read `OVERNIGHT_AUTONOMY_UNTIL` env. If unset, default to `07:00 UTC`
      today. If `now > deadline` → write a one-line STOPPED log to chat,
      do NOT call `ScheduleWakeup`, exit loop.
-   - Track an idle counter in your scratchpad. If 3 consecutive wakes
-     observed no fresh dispatch → STOPPED, exit. Director can re-arm via
-     paste-block.
+   - Read persistent idle counter:
+     ```
+     python3 -c "from scripts.autopoll_state import read_idle_count; \
+       print(read_idle_count('bN'))"
+     ```
+     If returned value `>= 3` → STOPPED, exit. Director re-arms by
+     deleting `~/.autopoll_state/bN.yaml` or pasting startup block.
    - If the user pastes literal `STOP AUTOPOLL` into the tab → exit.
 
 ## Phase 2 — Read mailbox
@@ -37,9 +41,22 @@ Window-scoped exception to Lesson #48 — see `tasks/lessons.md` Lesson #50.
      the status flipped back to `IN_PROGRESS`; if not, idle reschedule.
    - `COMPLETE` / `RETIRED` → idle reschedule.
 
+   On any "idle reschedule" branch above, BEFORE Phase 7's
+   ScheduleWakeup, call:
+   ```
+   python3 -c "from scripts.autopoll_state import increment_idle_count; \
+     print(increment_idle_count('bN'))"
+   ```
+   If returned value `>= 3` → STOPPED, exit (skip Phase 7 reschedule).
+
 ## Phase 3 — Claim
 
 5. `git pull --rebase --quiet` (race protection)
+5a. Successful claim → reset idle counter:
+    ```
+    python3 -c "from scripts.autopoll_state import reset_idle_count; \
+      reset_idle_count('bN')"
+    ```
 6. ```
    python3 -c "from scripts.autopoll_state import transition_state, push_state_transition; \
      transition_state('briefs/_tasks/CODE_N_PENDING.md', to='IN_PROGRESS', claimed_by='bN'); \
@@ -50,9 +67,14 @@ Window-scoped exception to Lesson #48 — see `tasks/lessons.md` Lesson #50.
      git commit -m "claim(bN): <brief-id>" && \
      git push
    ```
-8. If `git push` rejects (someone else's commit landed) → `git pull
-   --rebase`, re-read state. If now `IN_PROGRESS` by another B-code →
-   idle reschedule. Last-writer-wins per Q6 ratification.
+8. If `git push` rejects (someone else's commit landed) → discard local
+   mutation per LWW Q6 (the other writer's transition wins):
+   ```
+   git reset --hard origin/main && git pull --rebase --quiet
+   ```
+   Then re-read state via `read_state(...)`. If now `IN_PROGRESS` by
+   another B-code → idle reschedule. If still `OPEN` → optionally
+   re-attempt claim from Phase 3 step 6.
 
 ## Phase 4 — Execute
 
