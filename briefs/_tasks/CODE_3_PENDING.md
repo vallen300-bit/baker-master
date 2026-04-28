@@ -1,86 +1,100 @@
 ---
-status: COMPLETE
-brief: review_pr_75
-trigger_class: MEDIUM
-dispatched_at: 2026-04-28T15:05:00Z
+status: OPEN
+brief: rollback_dry_rehearsal
+trigger_class: LOW
+dispatched_at: 2026-04-28T16:00:00Z
 dispatched_by: ai-head-a
-review_target_pr: 75
-review_target_brief: briefs/BRIEF_CORTEX_PHASE5_IDEMPOTENCY_1.md
-claimed_at: 2026-04-28T15:10:00Z
-claimed_by: b3
-last_heartbeat: 2026-04-28T15:35:00Z
+target_script: scripts/cortex_rollback_v1.sh
+prerequisite_pr: 75
+prerequisite_state: MERGED 2026-04-28T~15:55Z (squash 1ec079b)
+claimed_at: null
+claimed_by: null
+last_heartbeat: null
 blocker_question: null
-ship_report: briefs/_reports/B3_pr75_cortex_phase5_idempotency_1_20260428.md
-verdict: APPROVE
-verdict_comment_url: https://github.com/vallen300-bit/baker-master/pull/75#issuecomment-4337631637
+ship_report: null
 autopoll_eligible: false
 ---
 
-# CODE_3_PENDING — B3: SECOND-PAIR REVIEW PR #75 (CORTEX_PHASE5_IDEMPOTENCY_1) — 2026-04-28
+# CODE_3_PENDING — B3: PRE-LAUNCH ROLLBACK DRY REHEARSAL — 2026-04-28
 
 **Dispatcher:** AI Head A (sole orchestrator)
 **Working dir:** `~/bm-b3`
-**PR to review:** [#75 cortex-phase5-idempotency-1](https://github.com/vallen300-bit/baker-master/pull/75) (HEAD `d55e850`, +1065/-41, 5 files)
-**Brief:** [`briefs/BRIEF_CORTEX_PHASE5_IDEMPOTENCY_1.md`](../BRIEF_CORTEX_PHASE5_IDEMPOTENCY_1.md)
-**Builder:** B2 (App). B3 = independent reviewer (you wrote 1C / Phase 5 — ideal context).
-**Trigger class:** MEDIUM (cross-capability state-write hardening on cortex_cycles + GOLD path)
+**Plan §:** [`briefs/_plans/CORTEX_V1_DRY_RUN_LAUNCH_PLAN_20260428.md`](../_plans/CORTEX_V1_DRY_RUN_LAUNCH_PLAN_20260428.md) §5.2
+**Trigger class:** LOW (operational verification — no diff, no merge gate)
 
 ## §2 pre-dispatch busy-check (AI Head A verified)
 
-- **B3 prior state:** COMPLETE — V1 DRY_RUN launch plan shipped (`01fa06d`); PR #74 merged `97f26b1`. IDLE.
-- **Other B-codes:**
-  - B1: COMPLETE — PR #74 review APPROVE shipped (`6eb9dc8`). IDLE.
-  - B2 (App): just shipped PR #75 IDEMPOTENCY build (`d55e850`); cannot self-review.
-- **Lesson #50 review-in-flight pre-check:** `gh pr view 75 --json reviewDecision` empty; no `briefs/_reports/B3_pr75*` exists; CLEAN.
+- **B3 prior state:** COMPLETE — PR #75 second-pair review APPROVE shipped (`0749697` + `2d87838`). PR #75 merged `1ec079b`. IDLE.
+- **Other B-codes:** B1 IDLE; B2 (App) IDLE.
+- **Lesson #50 review-in-flight pre-check:** N/A (verification, not review).
 
-## What you're reviewing
+## What you're doing
 
-PR #75 closes B's PR #74 OBS-1 (HIGH idempotency on 4 handlers) + OBS-2 (MEDIUM partial-failure surfacing on `_write_gold_proposals`). Single-file patch on `orchestrator/cortex_phase5_act.py` plus 21 new tests.
+Walk b3's own §5.2 mandatory pre-launch dry rehearsal of `scripts/cortex_rollback_v1.sh` end-to-end. Gate before DRY_RUN promotion criteria can run live (per §6 Q4: "rollback drill PASS = §5.2 walked end-to-end at least once").
 
-B2's ship report claims:
-- 41 passed in 0.04s on dedicated suite (21 new + 20 existing)
-- 182 passed + 5 skipped on full cortex+alerts regression (was 161, +21 new)
-- Math: 1A 31 + 1B 48 + 1C 82 = 161 baseline + 21 new = 182 ✓
-- 4 transient `*ing` statuses live ('approving', 'editing', 'refreshing', 'rejecting')
-- `_cas_lock_cycle` helper centralizes CAS pattern (DRY); fail-CLOSED on DB error
-- `_cas_release_to_proposed` for edit/refresh (re-loop pattern)
-- `_archive_cycle` gains optional `from_status` param (legacy `from_status=None` preserved)
-- `_write_gold_proposals` returns rich dict (3 existing tests updated)
-- autouse `_bypass_cas` fixture keeps existing 20 tests focused on non-CAS
+Self-review acceptable: you wrote the plan and the script — you verify the runbook. AI Head A reviews the ship report.
 
-## B3 review checklist (7 criteria — 5 brief-mandated + 2 design-validation)
+## Steps (literal, paste output verbatim into ship report)
 
-Per b1-trigger-class second-pair review:
+```bash
+cd ~/bm-b3
+git checkout main
+git pull -q
 
-1. **Brief acceptance match** — every line in `BRIEF_CORTEX_PHASE5_IDEMPOTENCY_1.md` §"Quality Checkpoints" (10 items) + §"Verification" verified against shipped code. Flag any missing.
-2. **CAS guard correctness** — verify all 4 handlers have CAS guard at TOP (before any other DB read/write). Verify the WHERE clause matches expected source status (`'proposed'` for all 4) and target intermediate status matches per-handler table in brief §Fix/Feature 1. Flag any handler missing the guard.
-3. **Idempotency proof in tests** — run literal `pytest tests/test_cortex_phase5_idempotency.py -v 2>&1 | tail -50` AND full regression `pytest tests/test_cortex_*.py tests/test_alerts_to_signal*.py -v 2>&1 | tail -10`. Paste literal stdout into review report. 21 new pass + 182 total green required per B2 claim.
-4. **`_archive_cycle` defensive WHERE-clause** — verify `WHERE cycle_id=%s AND status='approving'` (or whatever from_status passed). Verify legacy `from_status=None` path still UPDATEs unconditionally for backward-compat (existing call sites that don't pass from_status).
-5. **Boundaries respected** — `kbl/gold_writer.append` NOT called from any cortex_* file (Amendment A1 preserved). `kbl/gold_proposer.propose` IS the only cortex-side GOLD write path. Caller-authorized guard at `kbl/gold_writer.py:_check_caller_authorized` not touched.
+# Step 1 — file present, executable, parses cleanly
+ls -l scripts/cortex_rollback_v1.sh
+bash -n scripts/cortex_rollback_v1.sh
+echo "exit=$?"
 
-## Design-validation checks (additional 2 criteria specific to this patch)
+# Step 2 — invoked without `confirm` must print usage banner and exit 1
+bash scripts/cortex_rollback_v1.sh
+echo "exit=$?"
+```
 
-6. **Status state machine consistency** — verify the 4 transient `*ing` statuses round-trip correctly:
-   - `proposed → approving → approved` (via Phase 6 archive)
-   - `proposed → editing → ??? → proposed` (re-loop via `_cas_release_to_proposed`) — verify the release helper is actually called on edit-success path
-   - `proposed → refreshing → ??? → proposed` (re-loop via re-running Phase 3) — same release helper check
-   - `proposed → rejecting → rejected` (terminal)
-   Flag any state that can deadlock (e.g., stuck in `*ing` with no release path).
+**Step 3 — `op://` path verification (NEEDS DIRECTOR):**
+You cannot run `op` against Director's 1Password vault. Surface the exact two commands Director must paste in his own terminal:
 
-7. **Partial-failure surfacing semantics** — verify `_write_gold_proposals` returns:
-   - `status="approved"` when all selected files succeed
-   - `status="approved_with_partial_errors"` when some fail (with `failed_files` list + counts)
-   - `status="approved_with_errors"` when ALL fail (with `errors` list + warning)
-   Verify the dashboard endpoint surface (additive JSON fields, no breaking changes per brief).
+```bash
+op read 'op://Private/Render API Key/credential' | head -c 8 ; echo
+op read 'op://Private/Baker DB URL/credential' | head -c 12 ; echo
+```
 
-## Output: review report at `briefs/_reports/B3_pr75_cortex_phase5_idempotency_1_20260428.md`
+In your ship report, list both commands under a "Director to verify" callout. AI Head A will relay to Director and capture the result back in the report.
 
-Then post verdict on PR via `gh pr comment 75 --body "<verdict>"` (formal APPROVE blocked by self-PR rule per #67/#69/#70/#71/#72/#74 precedent — comment is the gate).
+**Step 4 — sandbox-fire (optional):** Your judgment call. If you have a non-prod Render service slot to safely fire against, do it and paste output. If not, write "deferred — no non-prod target available; live execution is gated behind Director auth + 4 hard preconditions per plan §5.3".
 
-## Parallel work this window
+## Pass criteria
 
-- AI Head A runs `/security-review` skill on PR #75 (Lesson #52 mandatory) in parallel.
-- Both verdicts (B3 + AI Head A) gate the merge. AI Head A merges Tier-A on all-clear.
+- Step 1: file mode includes `x`, `bash -n` exit 0
+- Step 2: usage banner prints, exit 1
+- Step 3: 2 `op read` commands surfaced cleanly for Director (block at end of report)
+- Step 4: explicit decision documented (fired / deferred with reason)
+
+## Output
+
+Ship report: `briefs/_reports/B3_rollback_dry_rehearsal_20260428.md`
+
+Format:
+```markdown
+# B3 — Cortex V1 rollback script dry rehearsal — 2026-04-28
+
+## Step 1 — file/parse verification
+<literal stdout>
+
+## Step 2 — usage-banner check
+<literal stdout>
+
+## Step 3 — Director op:// verification (NEEDS DIRECTOR)
+<exact 2 commands + brief explanation of expected output>
+
+## Step 4 — sandbox-fire decision
+<fired+output OR deferred+reason>
+
+## Verdict
+PASS / FAIL / PARTIAL — and what's blocking promotion gate Q4 if not PASS.
+```
+
+Then notify A in chat with verdict line + one-line summary. A relays Step 3 to Director and folds the response back into the report.
 
 ## Co-Authored-By
 
