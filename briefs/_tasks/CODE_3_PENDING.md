@@ -1,5 +1,5 @@
 ---
-status: OPEN
+status: IN_PROGRESS
 brief: briefs/BRIEF_CORTEX_PHASE5_STATUS_RECONCILE_1.md
 trigger_class: HIGH
 dispatched_at: 2026-04-29T~10:00Z
@@ -28,9 +28,9 @@ b1_review_reason: "RA-24 trigger fires: DB migration + cross-capability state wr
 builder: b3
 reviewer: b1
 ai_head_review: "/security-review + structural"
-claimed_at: null
-claimed_by: null
-last_heartbeat: null
+claimed_at: 2026-04-29T11:55:00Z
+claimed_by: b3
+last_heartbeat: 2026-04-29T11:55:00Z
 blocker_question: null
 ship_report: briefs/_reports/B3_cortex_phase5_status_reconcile_20260429.md
 autopoll_eligible: false

@@ -49,15 +49,22 @@ def _get_store():
 def _cas_lock_cycle(
     cycle_id: str,
     *,
-    from_status: str,
+    from_statuses: tuple[str, ...] | list[str] | str,
     to_status: str,
     action_attempted: str,
 ) -> Optional[dict]:
-    """Atomically transition cortex_cycles.status from `from_status` to `to_status`.
+    """Atomically transition cortex_cycles.status from any of ``from_statuses``
+    to ``to_status``.
+
+    ``from_statuses`` accepts a single status string or a tuple/list of valid
+    pre-button statuses. Phase 4 lands the cycle at ``tier_b_pending`` (post
+    Slack DM), but the legacy direct-test path lands at ``proposed`` —
+    BOTH are valid entry points for the 4 Phase-5 handlers. SQL uses
+    ``status = ANY(%s)`` so multi-state acceptance is server-side.
 
     Returns ``None`` on successful transition (cycle is now in ``to_status``).
-    Returns a warning dict if no rows updated (cycle was not in ``from_status``),
-    re-reading the actual current status for diagnostic.
+    Returns a warning dict if no rows updated (cycle was not in any of
+    ``from_statuses``), re-reading the actual current status for diagnostic.
 
     This is the per-handler idempotency guard: a second invocation of the same
     Director button (double-click, Slack proxy retry, etc.) sees status already
@@ -67,6 +74,10 @@ def _cas_lock_cycle(
     proceed past a botched lock (would defeat idempotency). On no-conn the
     same: returns dict with ``error="no_db_connection"`` so caller bails.
     """
+    if isinstance(from_statuses, str):
+        from_statuses_list = [from_statuses]
+    else:
+        from_statuses_list = list(from_statuses)
     store = _get_store()
     conn = store._get_conn()
     if conn is None:
@@ -81,10 +92,10 @@ def _cas_lock_cycle(
             """
             UPDATE cortex_cycles
             SET status=%s, updated_at=NOW()
-            WHERE cycle_id=%s AND status=%s
+            WHERE cycle_id=%s AND status = ANY(%s)
             RETURNING cycle_id
             """,
-            (to_status, cycle_id, from_status),
+            (to_status, cycle_id, from_statuses_list),
         )
         row = cur.fetchone()
         if row is None:
@@ -175,7 +186,7 @@ async def cortex_approve(*, cycle_id: str, body: dict) -> dict:
     """
     guard = _cas_lock_cycle(
         cycle_id,
-        from_status="proposed",
+        from_statuses=("proposed", "tier_b_pending"),
         to_status="approving",
         action_attempted="approve",
     )
@@ -265,7 +276,7 @@ async def cortex_edit(*, cycle_id: str, body: dict) -> dict:
 
     guard = _cas_lock_cycle(
         cycle_id,
-        from_status="proposed",
+        from_statuses=("proposed", "tier_b_pending"),
         to_status="editing",
         action_attempted="edit",
     )
@@ -316,7 +327,7 @@ async def cortex_refresh(*, cycle_id: str, body: dict) -> dict:
     """
     guard = _cas_lock_cycle(
         cycle_id,
-        from_status="proposed",
+        from_statuses=("proposed", "tier_b_pending"),
         to_status="refreshing",
         action_attempted="refresh",
     )
@@ -381,7 +392,7 @@ async def cortex_reject(*, cycle_id: str, body: dict) -> dict:
     """
     guard = _cas_lock_cycle(
         cycle_id,
-        from_status="proposed",
+        from_statuses=("proposed", "tier_b_pending"),
         to_status="rejecting",
         action_attempted="reject",
     )
