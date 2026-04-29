@@ -1,41 +1,46 @@
-# CODE_1 — IDLE (post PR #83 review)
+# CODE_1 — DISPATCH (SCHEDULER_DUPLICATE_INSTANCE_RCA_1)
 
-**Status:** COMPLETE 2026-04-29T12:17:00Z
-**Last task:** Structural review of PR #83 (CORTEX_PHASE5_STATUS_RECONCILE_1) — verdict **PASS** (10 / 10 sections)
-**Full report:** `briefs/_reports/B1_pr83_review_20260429.md`
-**Brief:** `briefs/BRIEF_CORTEX_PHASE5_STATUS_RECONCILE_1.md`
-**B3 ship report:** `briefs/_reports/B3_cortex_phase5_status_reconcile_20260429.md`
-**PR:** https://github.com/vallen300-bit/baker-master/pull/83
-**Builder:** B3 (≠ B1 ✓)
-**Trigger class:** HIGH (DB migration + cross-capability state writes — RA-24)
+**Status:** PENDING — assigned 2026-04-29T~12:25Z
+**Brief:** `briefs/BRIEF_SCHEDULER_DUPLICATE_INSTANCE_RCA_1.md` (commit `e4c5ba1`)
+**Builder:** B1
+**Trigger class:** LOW (read-only RCA; surgical fix only if ≤20 LOC and not lifecycle-touching — per brief STOP criteria)
+**Dispatched by:** AI Head A (sole orchestrator)
+**Director authorization:** "Park for tomorrow brief" (2026-04-29 ~11:30Z) — picked up same session
 
-**Per-section verdicts:**
-- A — `_cas_lock_cycle` signature evolution — ✅ PASS (line 52 type hint `tuple|list|str`; lines 77-80 coercion; line 95 `status = ANY(%s)`; docstring lines 56-67 documents both `proposed` AND `tier_b_pending`)
-- B — 4 handler call sites updated — ✅ PASS (lines 187/277/328/393 — all use `("proposed", "tier_b_pending")`)
-- C — Existing direct callers updated — ✅ PASS (6 occurrences in orchestrator: 1 def + 1 logger fmt + 4 dispatches; 7 test direct-call sites all use `from_statuses=`)
-- D — Migration SQL — ✅ PASS (BEGIN/COMMIT atomic; DROP IF EXISTS idempotent; 15 statuses enumerated; `cortex_cycles_status_check` name preserved)
-- E — store_back drift-defense — ✅ PASS (15 / 15 status values identical between `memory/store_back.py:587` and migration lines 28-49)
-- F — Feedback memory shape — ✅ PASS (frontmatter type=feedback; **Rule:** + **Why:** + **How to apply:** structure; concrete 09:14Z incident; secret NAMES only, no values)
-- G — MEMORY.md index entry — ✅ PASS (~165 chars; format `- [Title](file.md) — hook`; new file = project-scoped index, mirrors auto-memory convention)
-- H — Test integrity — ✅ PASS (3 NEW reconcile tests at lines 188/208/229; 44/44 phase5+idempotency PASS in 0.06s; 34/34 cross-cap regression PASS in 1.97s; no skip/xfail/by-inspection)
-- I — Scope discipline — ✅ PASS (8 files via `gh pr view 83`; merge-base diff confirms; triggers/ + cortex_runner.py + phase4_proposal.py = 0-line diff)
-- J — Render deploy survival — ✅ PASS (additive migration; constraint name preserved; no new deps; no new env vars; idempotent)
+## Scope reminder (read brief for full detail)
 
-**Test evidence (Lesson #48):** literal stdout pasted in §0.1 / §0.2 / §0.3 of the report. 78 / 78 tests pass on PR head `adc1577` in 2.03s combined.
+- RCA-only deliverable: identify second-source of `kbl_bridge_tick` 2× firing.
+- Stable 1.34s offset every minute → two scheduler INSTANCES, not one with `max_instances=2`.
+- Bridge-specific (other jobs fire 1×) → disproves "two complete schedulers" hypothesis.
+- Investigation goals: §"Investigation goals" in brief (find 2nd source / confirm topology / trace second instance).
 
-**Self-PR rule:** formal GitHub APPROVE blocked; comment posted as the gate (precedent #67/#69/#70/#71/#72/#73/#74/#78/#80/#81). Builder is B3 ≠ B1 by mailbox identity, but at GitHub-API layer all bots share the same Claude identity.
+## Hard rails
 
-**4 non-blocking observations (note-only, §K of report):**
-1. Migration `down` block is commented-out (lines 54-69) — `migrate:down` parser hook present but body not active. Deliberate per header docs ("disaster recovery only — operator must hand-uncomment after draining").
-2. str→list coercion path is exercised via legacy direct-call tests using `from_statuses="proposed"` (string form) — existing 4 + 3 new = both branches covered.
-3. `triggers/slack_interactivity.py:37` carries a doc-only stale reference to `_cas_lock_cycle` not mentioning the new multi-state behavior. File is correctly UNTOUCHED per scope discipline.
-4. `memory/MEMORY.md` is a NEW file (project-scoped index, mirrors auto-memory convention) — co-exists with my `~/.claude/projects/.../memory/MEMORY.md`. No conflict.
+- NO touching: Cortex code (`orchestrator/cortex_*`, `triggers/slack_interactivity.py`, `triggers/cortex_stuck_cycle_sentinel.py`), KBL pipeline, migrations.
+- ALLOWED edits ONLY if RCA finds a one-liner: `triggers/embedded_scheduler.py` (≤5 LOC) or `outputs/dashboard.py` (≤5 LOC, scheduler-setup only).
+- STOP and surface RCA-alone if fix touches scheduler lifecycle / watchdog / FastAPI lifespan, OR exceeds 20 LOC, OR touches Cortex / Slack interactivity / Phase 5.
 
-**STOP criteria:** none triggered (all 7 explicitly walked in report).
+## Output
 
-**Blocker for merge:** awaiting AI Head A's `/security-review` clearance.
+`briefs/_reports/B1_scheduler_duplicate_instance_rca_20260429.md` with §0–§5 shape per brief.
 
-**Mailbox state:** B1 idle. Next dispatch will overwrite this file per §3 hygiene.
+## Test plan (Lesson #48 literal stdout)
+
+- IF code fix shipped: literal `pytest tests/test_embedded_scheduler*.py -v` stdout in report §0.
+- IF config-only fix: smoke via `scheduler_executions` table query showing 1× firing across 5-min window post-deploy.
+- IF RCA-only: no test required; §3 must include LOC-estimate of proposed fix.
+
+## Pass criteria
+
+- §2 names second source with file:line evidence
+- §2 explains why ONLY `kbl_bridge_tick` is 2× (other jobs fire 1×)
+- §3 proposed fix with LOC count + scope
+- IF fix shipped: 5 consecutive minutes of 1× firing in `scheduler_executions` post-deploy
+
+## Mailbox hygiene (RATIFIED 2026-04-24 §3)
+
+- On report-only completion: overwrite this file with `COMPLETE` + report path
+- On PR merge (if fix lands): same — overwrite with `COMPLETE` + PR URL + post-deploy verification
 
 ## Co-Authored-By
 
