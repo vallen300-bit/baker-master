@@ -358,6 +358,21 @@ class CortexTriggerRequest(BaseModel):
                               description="Trigger source label")
 
 
+class CortexRunRequest(BaseModel):
+    """CORTEX_MANUAL_INVOKE_1: Director-invoke a Cortex cycle with SSE streaming.
+
+    Same field shape as CortexTriggerRequest — kept distinct so future
+    streaming-only fields (poll_interval override, max_phases, etc.) can
+    diverge without disturbing the sync trigger contract.
+    """
+    matter_slug: str = Field(..., min_length=1, max_length=64,
+                             description="Matter slug (must have cortex-config.md in vault)")
+    director_question: str = Field(..., min_length=10, max_length=4000,
+                                   description="Director's question driving the cycle")
+    triggered_by: str = Field(default="director_manual", min_length=1, max_length=64,
+                              description="Trigger source label — director_manual or scan_intent")
+
+
 def _serialize(obj: dict) -> dict:
     """Convert datetime/date fields to ISO strings for JSON serialization."""
     import datetime as _dt_mod
@@ -4161,6 +4176,91 @@ async def trigger_cortex_cycle(req: CortexTriggerRequest):
     }
 
 
+# CORTEX_MANUAL_INVOKE_1: streaming Director-invoke endpoint. SSE phase
+# events emitted while maybe_run_cycle runs in the background. Disconnect
+# does NOT cancel the cycle — it runs to completion regardless.
+@app.post("/api/cortex/run", tags=["cortex"], dependencies=[Depends(verify_api_key)])
+async def cortex_run_stream(req: CortexRunRequest):
+    """Director-invoke streaming Cortex cycle. SSE Phase 1-6 transitions.
+
+    Auth: X-Baker-Key (reuse existing verify_api_key dependency).
+    Whitelist: matter must have cortex-config.md (CORTEX_MULTI_MATTER_GATE_1).
+    Rate limit: 5 runs/hour/matter across (director_manual, scan_intent) →
+    HTTP 429.
+    Cost guardrail: ≥30 specialist invocations/24h/matter posts a Slack DM
+    warning (observability only — does NOT block the run).
+
+    Sensitive payload (director_question, frontmatter content) is NEVER
+    info-logged — only matter_slug + triggered_by + counts at info-level.
+    """
+    from outputs.cortex_run_stream import (
+        stream_cycle_events,
+        runs_in_last_hour,
+        specialist_calls_today,
+        RUN_RATE_LIMIT_PER_HOUR,
+        COST_WARN_SPECIALIST_PER_DAY,
+    )
+    from triggers.cortex_pre_review_gate import matter_has_cortex_config
+
+    # Whitelist: refuse matters without cortex-config.md (per CORTEX_MULTI_MATTER_GATE_1)
+    if not matter_has_cortex_config(req.matter_slug):
+        logger.info(
+            "cortex_run rejected — matter=%s has no cortex-config.md",
+            req.matter_slug,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Matter '{req.matter_slug}' is not Cortex-enabled "
+                "(no cortex-config.md in vault)."
+            ),
+        )
+
+    # Rate limit: 5 manual runs/hour/matter
+    n_recent = runs_in_last_hour(req.matter_slug)
+    if n_recent >= RUN_RATE_LIMIT_PER_HOUR:
+        logger.info(
+            "cortex_run rate-limited matter=%s recent=%d cap=%d",
+            req.matter_slug, n_recent, RUN_RATE_LIMIT_PER_HOUR,
+        )
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"Rate limit: {n_recent} runs in last hour for "
+                f"{req.matter_slug} (cap={RUN_RATE_LIMIT_PER_HOUR})"
+            ),
+        )
+
+    # Cost guardrail: warn-only Slack DM at threshold, run proceeds
+    n_specialist = specialist_calls_today(req.matter_slug)
+    if n_specialist >= COST_WARN_SPECIALIST_PER_DAY:
+        try:
+            from outputs.slack_notifier import post_to_channel
+            from triggers.cortex_pre_review_gate import DIRECTOR_DM_CHANNEL
+            post_to_channel(
+                DIRECTOR_DM_CHANNEL,
+                (
+                    f"⚠️ Cortex spend watch: {req.matter_slug} has "
+                    f"{n_specialist} specialist invocations in last 24h "
+                    f"(warn threshold: {COST_WARN_SPECIALIST_PER_DAY}). "
+                    "Run proceeding — observability ping only."
+                ),
+                unfurl_links=False,
+                unfurl_media=False,
+            )
+        except Exception as e:
+            logger.error("cortex_run cost-warn Slack post failed: %s", e)
+
+    return StreamingResponse(
+        stream_cycle_events(
+            matter_slug=req.matter_slug,
+            director_question=req.director_question,
+            triggered_by=req.triggered_by,
+        ),
+        media_type="text/event-stream",
+    )
+
+
 # CORTEX_PRE_REVIEW_GATE_1: tap-from-Slack endpoint for the cost gate.
 # Auth: signed-token (HMAC) — no X-Baker-Key (must be openable by Slack tap).
 @app.get("/api/cortex/gate/decide", tags=["cortex"], response_class=HTMLResponse)
@@ -7751,6 +7851,39 @@ async def scan_chat(req: ScanRequest):
                 ),
                 req.question,
             )
+        elif intent.get("type") == "cortex_run_action":
+            # CORTEX_MANUAL_INVOKE_1: route "run cortex on <matter>" through SSE stream
+            from outputs.cortex_run_stream import stream_cycle_events
+            from triggers.cortex_pre_review_gate import matter_has_cortex_config
+            _matter = (intent.get("matter_slug") or "").strip()
+            if not _matter:
+                logger.warning(
+                    "cortex_run_action intent missing matter_slug; falling through"
+                )
+            elif not matter_has_cortex_config(_matter):
+                logger.info(
+                    "cortex_run_action rejected — matter=%s has no cortex-config.md",
+                    _matter,
+                )
+                return _action_stream_response(
+                    f"Matter '{_matter}' is not Cortex-enabled (no cortex-config.md). "
+                    "Add the config in baker-vault first.",
+                    req.question,
+                )
+            else:
+                logger.info(
+                    "SCAN_DEBUG: routing to cortex_run_stream matter=%s",
+                    _matter,
+                )
+                _question_text = (intent.get("question") or req.question or "").strip()
+                return StreamingResponse(
+                    stream_cycle_events(
+                        matter_slug=_matter,
+                        director_question=_question_text,
+                        triggered_by="scan_intent",
+                    ),
+                    media_type="text/event-stream",
+                )
         elif intent.get("type") == "capability_task":
             # AGENT-FRAMEWORK-1: Explicit capability invocation
             from orchestrator.complexity_router import classify_complexity as _cc_cap
