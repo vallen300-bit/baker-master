@@ -157,7 +157,10 @@ Phase 3, 4, and 6 are explicitly named in the brief. Lines 86 and 111 (top-level
 
 ## §5 PR URL
 
-(Pending — push + `gh pr create` after this report commits.)
+https://github.com/vallen300-bit/baker-master/pull/82
+
+Branch: `cortex-archive-failure-alerting-1`
+Commit: `2576f602` (feat(cortex): stuck-cycle + archive-failure alerting sentinel)
 
 ---
 
