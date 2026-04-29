@@ -271,11 +271,21 @@ def test_gate_decide_endpoint_race_loser_does_not_fire_cycle(monkeypatch):
 # Test 10 — post_gate disables Slack URL unfurl on the gate DM
 # ----------------------------------------------------------------
 
-def test_post_gate_disables_slack_unfurl(monkeypatch):
+def test_post_gate_disables_slack_unfurl(monkeypatch, tmp_path):
     """post_gate MUST call post_to_channel with unfurl_links=False AND
     unfurl_media=False. Closes Blocker 2 (Slackbot-LinkExpanding GETs the
     signed Yes/Skip URLs the moment we post the message → would auto-fire
-    record_decision + cycle without Director ever tapping)."""
+    record_decision + cycle without Director ever tapping).
+
+    CORTEX_MULTI_MATTER_GATE_1: post_gate now requires a cortex-config.md
+    for the matter. Set BAKER_VAULT_PATH + write oskolkov/cortex-config.md
+    so the gate clears the new whitelist check and reaches the Slack post.
+    """
+    (tmp_path / "wiki" / "matters" / "oskolkov").mkdir(parents=True)
+    (tmp_path / "wiki" / "matters" / "oskolkov" / "cortex-config.md").write_text(
+        "---\nmatter_slug: oskolkov\n---\n", encoding="utf-8",
+    )
+    monkeypatch.setenv("BAKER_VAULT_PATH", str(tmp_path))
     monkeypatch.setenv("CORTEX_GATE_SECRET", "test-secret-32-characters-long-XX")
     import importlib
     import triggers.cortex_pre_review_gate as g
@@ -309,3 +319,142 @@ def test_post_gate_disables_slack_unfurl(monkeypatch):
         "MUST suppress unfurl_media for symmetry (defense in depth — any "
         "future media-link addition gets the same protection)."
     )
+
+
+# ================================================================
+# CORTEX_MULTI_MATTER_GATE_1 — whitelist by cortex-config.md presence
+# ================================================================
+
+# ----------------------------------------------------------------
+# Test 11 — matter_has_cortex_config positive (file present)
+# ----------------------------------------------------------------
+
+def test_matter_has_cortex_config_positive(monkeypatch, tmp_path):
+    """Returns True when <vault>/wiki/matters/<slug>/cortex-config.md exists."""
+    (tmp_path / "wiki" / "matters" / "oskolkov").mkdir(parents=True)
+    (tmp_path / "wiki" / "matters" / "oskolkov" / "cortex-config.md").write_text(
+        "---\nmatter_slug: oskolkov\n---\n", encoding="utf-8",
+    )
+    monkeypatch.setenv("BAKER_VAULT_PATH", str(tmp_path))
+    import importlib
+    import triggers.cortex_pre_review_gate as g
+    importlib.reload(g)
+    assert g.matter_has_cortex_config("oskolkov") is True
+
+
+# ----------------------------------------------------------------
+# Test 12 — matter_has_cortex_config negative (no config file)
+# ----------------------------------------------------------------
+
+def test_matter_has_cortex_config_negative(monkeypatch, tmp_path):
+    """Returns False when the matter dir exists but has no cortex-config.md."""
+    (tmp_path / "wiki" / "matters" / "hagenauer-rg7").mkdir(parents=True)
+    monkeypatch.setenv("BAKER_VAULT_PATH", str(tmp_path))
+    import importlib
+    import triggers.cortex_pre_review_gate as g
+    importlib.reload(g)
+    assert g.matter_has_cortex_config("hagenauer-rg7") is False
+
+
+# ----------------------------------------------------------------
+# Test 13 — matter_has_cortex_config returns False when BAKER_VAULT_PATH unset
+# ----------------------------------------------------------------
+
+def test_matter_has_cortex_config_no_vault(monkeypatch):
+    """Returns False (fail-closed) when BAKER_VAULT_PATH is unset."""
+    monkeypatch.delenv("BAKER_VAULT_PATH", raising=False)
+    import importlib
+    import triggers.cortex_pre_review_gate as g
+    importlib.reload(g)
+    assert g.matter_has_cortex_config("oskolkov") is False
+
+
+# ----------------------------------------------------------------
+# Test 14 — _read_cost_estimate from frontmatter
+# ----------------------------------------------------------------
+
+def test_read_cost_estimate_from_frontmatter(monkeypatch, tmp_path):
+    """Parses cost_estimate_dollars from the YAML-style frontmatter block."""
+    (tmp_path / "wiki" / "matters" / "movie").mkdir(parents=True)
+    (tmp_path / "wiki" / "matters" / "movie" / "cortex-config.md").write_text(
+        "---\nmatter_slug: movie\ncost_estimate_dollars: 7.50\n---\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("BAKER_VAULT_PATH", str(tmp_path))
+    import importlib
+    import triggers.cortex_pre_review_gate as g
+    importlib.reload(g)
+    assert abs(g._read_cost_estimate("movie") - 7.50) < 1e-6
+
+
+# ----------------------------------------------------------------
+# Test 15 — _read_cost_estimate falls back to default when field absent
+# ----------------------------------------------------------------
+
+def test_read_cost_estimate_default(monkeypatch, tmp_path):
+    """Falls back to DEFAULT_COST_ESTIMATE_DOLLARS when the field is missing."""
+    (tmp_path / "wiki" / "matters" / "ao").mkdir(parents=True)
+    (tmp_path / "wiki" / "matters" / "ao" / "cortex-config.md").write_text(
+        "---\nmatter_slug: ao\n---\n", encoding="utf-8",
+    )
+    monkeypatch.setenv("BAKER_VAULT_PATH", str(tmp_path))
+    monkeypatch.setenv("CORTEX_DEFAULT_COST_DOLLARS", "4.0")
+    import importlib
+    import triggers.cortex_pre_review_gate as g
+    importlib.reload(g)
+    assert abs(g._read_cost_estimate("ao") - 4.0) < 1e-6
+
+
+# ----------------------------------------------------------------
+# Test 16 — post_gate skips (returns False) when matter has no config
+# ----------------------------------------------------------------
+
+def test_post_gate_skips_no_config(monkeypatch, tmp_path):
+    """post_gate MUST early-return False (no Slack post) when the matter has
+    no cortex-config.md. Phase 2 has nothing to load → no point asking the
+    Director to approve a $4 spend on a matter with no per-matter brain."""
+    monkeypatch.setenv("CORTEX_GATE_SECRET", "test-secret-32-characters-long-XX")
+    monkeypatch.setenv("BAKER_VAULT_PATH", str(tmp_path))  # vault root, no matters
+    import importlib
+    import triggers.cortex_pre_review_gate as g
+    importlib.reload(g)
+    with patch(
+        "triggers.cortex_pre_review_gate.already_decided", return_value=None,
+    ), patch(
+        "outputs.slack_notifier.post_to_channel",
+    ) as mock_post:
+        ok = g.post_gate(signal_id=999, matter_slug="hagenauer-rg7")
+    assert ok is False
+    mock_post.assert_not_called()
+
+
+# ----------------------------------------------------------------
+# Test 17 — post_gate fires when matter has config; cost reflects frontmatter
+# ----------------------------------------------------------------
+
+def test_post_gate_fires_with_config_and_cost(monkeypatch, tmp_path):
+    """When the config exists with cost_estimate_dollars: 6.00, the posted
+    Slack DM body MUST include '$6.00' (both the prose line and the link
+    label)."""
+    (tmp_path / "wiki" / "matters" / "movie").mkdir(parents=True)
+    (tmp_path / "wiki" / "matters" / "movie" / "cortex-config.md").write_text(
+        "---\nmatter_slug: movie\ncost_estimate_dollars: 6.00\n---\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("CORTEX_GATE_SECRET", "test-secret-32-characters-long-XX")
+    monkeypatch.setenv("BAKER_VAULT_PATH", str(tmp_path))
+    import importlib
+    import triggers.cortex_pre_review_gate as g
+    importlib.reload(g)
+    with patch(
+        "triggers.cortex_pre_review_gate.already_decided", return_value=None,
+    ), patch(
+        "triggers.cortex_pre_review_gate._signal_preview", return_value="preview",
+    ), patch(
+        "outputs.slack_notifier.post_to_channel", return_value=True,
+    ) as mock_post:
+        ok = g.post_gate(signal_id=42, matter_slug="movie")
+    assert ok is True
+    assert mock_post.call_count == 1
+    posted_text = mock_post.call_args[0][1]
+    assert "$6.00" in posted_text
