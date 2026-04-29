@@ -1,10 +1,10 @@
 # 00 — Worktrees & Session Labels
 
-**Purpose:** reference card for Director's multi-window Claude CLI setup. Tells you which terminal tab maps to which role and working directory.
+**Purpose:** reference card for Director's multi-window Claude setup (Terminal CLI **and** Claude Code App). Tells you which window/tab maps to which role and working directory.
 
-**When to read:** whenever you're unsure what a terminal window is, or when setting up a new window for a specific role.
+**When to read:** whenever you're unsure what a window is, or when setting up a new window for a specific role.
 
-**Last updated:** 2026-04-26.
+**Last updated:** 2026-04-29 — split Terminal vs App AI Head rows after Director verified App AI Heads live in Dropbox-synced project root, not `~/Desktop/baker-code`.
 
 ---
 
@@ -16,41 +16,74 @@
 │                     (Director's MacBook)                            │
 └─────────────────────────────────────────────────────────────────────┘
 
-  ROLE              COMMAND                            DIRECTORY
-  ─────────────────────────────────────────────────────────────────
-  Research Agent    Cowork Code App pane (no CLI)       (no worktree — works in Cowork session)
-                        (RA = Lab + orchestration; writes to _ops/ideas/)
+  ROLE                       SURFACE     COMMAND / OPEN                          DIRECTORY
+  ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Research Agent             App         Cowork Code App pane (no CLI)            (no worktree — Cowork session)
+                                  (RA = Lab + orchestration; writes to _ops/ideas/) — RETIRED 2026-04-28T07:00Z
 
-  AI Head A         cd ~/Desktop/baker-code && aihead1  ~/Desktop/baker-code
-  AI Head B         cd ~/Desktop/baker-code && aihead2  ~/Desktop/baker-code
-                        (one persona, two instances; A = Build lead, B = reviewer; share main repo)
+  AI Head A (Terminal)       Terminal    cd ~/Desktop/baker-code && aihead1       ~/Desktop/baker-code
+  AI Head B (Terminal)       Terminal    cd ~/Desktop/baker-code && aihead2       ~/Desktop/baker-code
+                                  (Tier 2 flat layout — terminal-side checkout)
 
-  Code Brisen B1    cd ~/bm-b1 && b1                    ~/bm-b1
-  Code Brisen B2    cd ~/bm-b2 && b2                    ~/bm-b2
-  Code Brisen B3    cd ~/bm-b3 && b3                    ~/bm-b3
-  Code Brisen B4    cd ~/bm-b4 && b4                    ~/bm-b4
-                        (each its own clone, independent context)
+  AI Head A (App)            App         Open project in Claude Code App          ~/Vallen Dropbox/Dimitry vallen/Baker-Project
+  AI Head B (App)            App         Open project in Claude Code App          ~/Vallen Dropbox/Dimitry vallen/Baker-Project
+                                  (Dropbox-synced, cross-device; auto-memory at
+                                   ~/.claude/projects/-Users-dimitry-Vallen-Dropbox-Dimitry-vallen-Baker-Project/memory/
+                                   — shared by all App AI Heads in this project)
 
-  (dormant)         ~/bm-b5                             staged, not active
+  Code Brisen B1             Terminal    cd ~/bm-b1 && b1                         ~/bm-b1
+  Code Brisen B2 (Terminal)  Terminal    cd ~/bm-b2 && b2                         ~/bm-b2
+  Code Brisen B2 (App)       App         Open project in Claude Code App          ~/bm-b2
+  Code Brisen B3             Terminal    cd ~/bm-b3 && b3                         ~/bm-b3
+  Code Brisen B4             Terminal    cd ~/bm-b4 && b4                         ~/bm-b4
+                                  (each B-code: its own clone, independent context, branch isolation for builds)
+
+  (dormant)                              staged, not active                       ~/bm-b5
 ```
+
+---
+
+## Terminal vs App — when to use which
+
+**Terminal AI Heads** (`~/Desktop/baker-code`)
+- Tier 2 flat layout. Local-only. Fastest.
+- Use for: in-session orchestration when Director is at the laptop.
+
+**App AI Heads** (`~/Vallen Dropbox/Dimitry vallen/Baker-Project`)
+- Dropbox-synced — cross-device continuity (laptop ↔ phone ↔ another machine).
+- Auto-memory shared between A and B App instances when both opened in this project root.
+- Use for: long-running orchestration, cross-device pickup, parallel App-side AI Head A + B that share auto-memory.
+
+**Code Brisens (B1–B4)** stay in their own clones (`~/bm-b{N}`) regardless of Terminal vs App — branch isolation is the whole point of the worktree pattern. B2 currently runs in App (per topology refresh 2026-04-28T08:35Z) but still in `~/bm-b2`.
 
 ---
 
 ## Rules of thumb
 
-- **Planning / dispatching / brief writing** = AI Head lane → `~/Desktop/baker-code`
-- **Implementing a brief / writing code** = Code Brisen lane → `~/bm-b{N}`
-- Each terminal tab's title (set by the functions in `~/.zshrc`) tells you which role that window holds — look at the tab bar, know what the window is.
+- **Planning / dispatching / brief writing** = AI Head lane → `~/Desktop/baker-code` (Terminal) **or** `~/Vallen Dropbox/Dimitry vallen/Baker-Project` (App)
+- **Implementing a brief / writing code** = Code Brisen lane → `~/bm-b{N}` (always — Terminal or App)
+- Each terminal tab's title (set by functions in `~/.zshrc`) tells you which role that window holds — look at the tab bar.
+- App tabs: project picker (top-left in App) shows the working directory — that's the role tell.
 
 ---
 
 ## Session start sequence (every new window)
 
+**Terminal:**
 1. Open new terminal tab.
 2. Type the command for the role you want (from the Map above).
 3. Wait for Claude Code prompt.
 4. Paste the role-specific handover note as your first message.
 5. Claude resumes where the last instance of that role left off.
+
+**App:**
+1. Open Claude Code App → top-left project picker → "Add project" / browse.
+2. Paste the absolute path for the role:
+   - AI Head A or B → `/Users/dimitry/Vallen Dropbox/Dimitry vallen/Baker-Project`
+   - B2 App → `/Users/dimitry/bm-b2`
+3. New chat in that project.
+4. Paste the role-specific handover note as your first message.
+5. After compaction: project sticks; `/clear` then re-paste the orientation handover.
 
 ---
 
