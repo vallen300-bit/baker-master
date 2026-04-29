@@ -324,6 +324,233 @@
   </div>
 </div>
 
+<div class="stage">
+  <h2 class="stage-title">Parked items registry — complete inventory (defer not drop)</h2>
+  <div class="stage-meta">All postponed work tracked here so the roadmap is complete. Grouped by theme. Each item names its anchor + source. Promote on Director ratification or trigger-event.</div>
+
+  <h3 style="color: var(--text-header); font-size: 0.95rem; margin: 1rem 0 0.4rem;">Cortex / reasoning layer</h3>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Phase 3a JSON fence parser cleanup</div>
+      <div class="desc">Specialist outputs sometimes wrapped in <code>```json … ```</code> fences not stripped before parse. V4-V5 carry-over. Promote when next Phase 3a parse failure surfaces.</div>
+      <div class="anchor">memory/project_session_state_20260429_v5.md §Open observations</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Cortex cycle-id generation cleanup</div>
+      <div class="desc">UUID generation path duplicated between trigger + runner. Refactor to single source of truth. V4-V5 carry-over.</div>
+      <div class="anchor">memory/project_session_state_20260429_v5.md §Open observations</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Anthropic helper canonical refactor</div>
+      <div class="desc">Multiple call sites (orchestrator/specialists/scan/dashboard) have slightly different Anthropic SDK wrappers. Consolidate to one helper with prompt-cache + retries built-in.</div>
+      <div class="anchor">memory/project_session_state_20260429_v5.md §Open observations</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">COUNTERPARTY_GAME_ADVISOR_1 — game theory specialist</div>
+      <div class="desc">Per game-theory-playbook §8 spec. Specialist invoked from Phase 3b for counterparty-heavy matters (Oskolkov, Hassa, Hagenauer, MOHG, Aukera, Cupials, Kempinski, banks). Long-horizon Axelrod / Nowak heuristics. Post-Wave-2 / once 4+ matters running.</div>
+      <div class="anchor">_ops/ideas/2026-04-19-game-theory-playbook.md</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <h3 style="color: var(--text-header); font-size: 0.95rem; margin: 1.25rem 0 0.4rem;">Operational hardening</h3>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label"><code>tier_b_pending</code> Director-decision-pending nudge sentinel (V2)</div>
+      <div class="desc">Per PR #82 brief rev 2: when Cortex cycle sits at <code>tier_b_pending</code> &gt;24h waiting for Director decision, sentinel nudges via Slack. Gated on ≥1wk stable cycle volume.</div>
+      <div class="anchor">PR #82 §post-merge parking note</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label"><code>baker_actions</code> UNIQUE constraint on (target_task_id, action_type)</div>
+      <div class="desc">PR #82 /security-review observation #1. Defense-in-depth against duplicate action_type writes for same target. Migration + backfill needed.</div>
+      <div class="anchor">PR #82 /security-review obs #1</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Render env-var hard-stop hook — hookify candidate</div>
+      <div class="desc">From today's 09:14Z 80-var wipe (45-min recovery). Hookify rule: block raw <code>PUT /v1/services/{id}/env-vars</code> when body length materially smaller than current state. Defense-in-depth.</div>
+      <div class="anchor">memory/feedback_render_envvar_paginated_put.md</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">7-day re-validate <code>cortex_stuck_cycle_sentinel</code> via synthetic UPDATE</div>
+      <div class="desc">Scheduled deadline id=1497 due 2026-05-06. Run synthetic stuck-cycle UPDATE → verify alert fires → reset.</div>
+      <div class="anchor">brief PR #82 §post-merge — deadline id=1497</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Test isolation bug <code>test_cortex_trigger_cycle_unauthorized</code></div>
+      <div class="desc">Intermittent failure when test order varies. V4-V5 carry-over. Promote when next CI flake surfaces.</div>
+      <div class="anchor">memory/project_session_state_20260429_v5.md §Open observations</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Add <code>pid</code> + scheduler-id columns to <code>scheduler_executions</code></div>
+      <div class="desc">B1 SCHEDULER_DUPLICATE_INSTANCE_RCA_1 §3 follow-up. Makes future scheduler-doubling incidents a 1-query diagnosis. ~10 LOC migration + 3 LOC listener change.</div>
+      <div class="anchor">briefs/_reports/B1_scheduler_duplicate_instance_rca_20260430.md §3</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <h3 style="color: var(--text-header); font-size: 0.95rem; margin: 1.25rem 0 0.4rem;">Observability / UX surfaces</h3>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Slack interactivity sync <code>_post_response_update</code> async refactor</div>
+      <div class="desc">PR #81 obs §K-1. Sync Slack response_update call inside async webhook handler is anti-pattern. Refactor to <code>asyncio.to_thread</code> with timeout.</div>
+      <div class="anchor">PR #81 obs §K-1</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">BRIEF_WORKSPACE_EVOLUTION_1 — Cockpit → Workspace</div>
+      <div class="desc">Per Baker surface architecture (substrate primary, workspace secondary, archive tertiary): Cockpit evolves into Workspace (option A). Tool-use surface, not status tiles. Post-Cortex-3T.</div>
+      <div class="anchor">_ops/ideas/2026-04-20-baker-surface-architecture.md</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">BRIEF_ARCHIVE_SURFACE_1 — historical safety net</div>
+      <div class="desc">Per Baker surface architecture: archive surface as tertiary (read-only historical view). Post-Cortex-3T.</div>
+      <div class="anchor">_ops/ideas/2026-04-20-baker-surface-architecture.md</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">MORNING_DIGEST_FANOUT_1 — multi-channel morning brief</div>
+      <div class="desc">ctatedev-inspired. Post-Cortex-3T production. Fans out morning briefing to email + Slack + WhatsApp + dashboard with same payload, different format per channel.</div>
+      <div class="anchor">_ops/ideas/2026-04-19-ctatedev-parked-briefs.md</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">GENERATIVE_UI_SCAN_1 — dynamic Scan UI</div>
+      <div class="desc">ctatedev-inspired. Post-Cortex-3T. Scan generates structured UI components (cards, tables, action buttons) instead of plain markdown response.</div>
+      <div class="anchor">_ops/ideas/2026-04-19-ctatedev-parked-briefs.md</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">BRIEF_WIKI_LINT_1 — Karpathy-style weekly vault audit</div>
+      <div class="desc">Weekly auto-audit of <code>baker-vault/</code> for stale dates, dead links, orphaned matter files, drift between distilled-vs-live state. Promotion gated on Cortex-3T close.</div>
+      <div class="anchor">_ops/ideas/2026-04-19-wiki-linting-proposal.md</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <h3 style="color: var(--text-header); font-size: 0.95rem; margin: 1.25rem 0 0.4rem;">Org / governance / agent topology</h3>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">BRIEF_NEW_CANDIDATE_QUEUE_1 — company development queue</div>
+      <div class="desc">Per shadow-org equal-weight framing (Director ratified 2026-04-26): company development is a parallel pillar to active-state management. Without infrastructure for new matters/people inevitably appearing, the shadow org ossifies. Weekly review queue cadence.</div>
+      <div class="anchor">_ops/ideas/2026-04-26-new-candidate-queue.md</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Active-vs-Development streams — agent topology expansion</div>
+      <div class="desc">Per Director ratification 2026-04-26: every matter / Brisen team member / VIP gets <code>stream: active</code> or <code>stream: development</code>. Future roles parked: Business Development Head AI (peer to Baker), CEO AI (above both heads, monthly priority-weight reallocation). Initial 22/11 split confirmed.</div>
+      <div class="anchor">_ops/ideas/2026-04-26-active-vs-development-streams.md</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Research Agent 3-file memory triplet</div>
+      <div class="desc">Symmetric to AI Head's <code>_ops/agents/ai-head/</code>. Promote on observed cross-session continuity loss OR MEMORY.md truncation risk OR second Research Agent window opening. RA retired 2026-04-28; relevance re-evaluates if RA reactivates.</div>
+      <div class="anchor">_ops/ideas/2026-04-24-research-agent-memory-triplet.md</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Autonomous orchestration loop</div>
+      <div class="desc">Agents auto-poll git mailboxes (no human paste-block relay). Parked until post-Cortex-3T production. Today: paste-block strict per <code>memory/feedback_paste_block_strict.md</code>.</div>
+      <div class="anchor">_ops/ideas/2026-04-18-autonomous-orchestration-loop.md</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Top 10 Baker optimization candidates</div>
+      <div class="desc">Director framing 2026-04-20 "nice to consider". Items 1/3/9 already drafted; 2/4/5/6/7/8/10 still ideas. Synthesis from ctatedev + Obsidian COS + agentic patterns.</div>
+      <div class="anchor">_ops/ideas/2026-04-19-top10-baker-optimizations.md</div>
+    </div>
+    <div class="badge park">PARKED</div>
+  </div>
+
+  <div class="callout">
+    <strong>Promotion path for parked items:</strong> ratification by Director (typically when a triggering event surfaces — e.g., next Phase 3a fence-parse failure promotes the cleanup brief; next CI flake on the test-isolation bug promotes the fix). Items aging &gt;90 days flagged for re-evaluation in quarterly first-principles-reset (per <code>memory/project_company_development_principle.md</code>).
+  </div>
+</div>
+
 <div class="summary-bar">
   <strong>Process discipline:</strong> All briefs drafted via <code>/write-brief</code> skill (Director directive 2026-04-29 ~17:00Z; captured in <code>memory/feedback_always_use_write_brief_skill.md</code>). Pre-merge: AI Head A <code>/security-review</code> + cross-lane situational review where MEDIUM trigger hits (per ratified 2026-04-24 §B-code dispatch). Render env vars only via MCP merge mode or per-key PUT — never raw array PUT (today's 80-var wipe).
 </div>
