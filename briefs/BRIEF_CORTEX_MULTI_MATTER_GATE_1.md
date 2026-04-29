@@ -14,7 +14,7 @@ Wave 1 Track 2 per V3 rev 4 roadmap.
 
 → B1 situational review REQUIRED per RA-24 (cost-bearing trigger surface).
 
-**Build assignment:** B3 (`~/bm-b3`). **Review assignment:** B1 (formal) + AI Head A (`/security-review` + structural).
+**Build assignment:** B4 (`~/bm-b4`). **Review assignment:** B1 (formal) + AI Head A (`/security-review` + structural). *(Originally assigned to B3; re-routed to B4 by Director 2026-04-29 — B3 busy.)*
 
 ---
 
@@ -355,6 +355,6 @@ ORDER BY created_at DESC LIMIT 10;
 ## Co-Authored-By
 
 ```
-Co-authored-by: Code Brisen #3 <b3@brisengroup.com>
+Co-authored-by: Code Brisen #4 <b4@brisengroup.com>
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 ```
