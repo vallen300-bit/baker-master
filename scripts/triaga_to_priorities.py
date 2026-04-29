@@ -36,14 +36,38 @@ CLI
 
 Slug-field handling
 -------------------
-* ``[private-assets — slug TBD]`` → strip brackets + ``— slug TBD`` suffix.
-* Multi-slug separators ``+`` / ``/``: split into list, primary slug first.
+* Header parser handles bracketed slug fields containing em-dashes
+  (``[private-assets — slug TBD]``) by anchoring on the bracket close, not
+  on the first ` — `. Without this, Q17/Q18/Q37 would emit slug=``[private-assets``
+  with the bracket-suffix bleeding into the description.
+* Inside the brackets the suffix ``— slug TBD`` / ``— see note`` is stripped.
+* Multi-slug separators:
+    - ``+`` always splits (per RA-23 — the canonical multi-slug separator).
+    - ``/`` splits only when ALL slash-separated tokens match the canonical
+      slug shape ``^[a-z0-9][a-z0-9-]+$`` AND a registry is supplied AND
+      every token resolves against it. Otherwise ``/`` is treated as prose
+      and the slug field stays as a single literal string. Q30 ``tax / lana``
+      and Q31 ``tax / cbp`` (where ``tax`` is a category prefix, not a slug)
+      no longer split into multi-slug lists.
 * Combined-slug overrides (``COMBINED_SLUGS_BY_REF``): some Q-IDs collapse a
   ``X + Y`` field into a single compound slug ``x-y`` per Director intent
-  (e.g. Q33 NVIDIA + Corinthia → ``nvidia-corinthia``). Override map is
-  exposed so callers can extend/replace it without code edits.
+  (e.g. Q33 NVIDIA + Corinthia → ``nvidia-corinthia``).
 * Q19 NVIDIA+Corinthia AI Originations folds into Q33 (Director-ratified
   duplicate; B1 export note flags it). Configurable via ``DUPLICATE_FOLDS``.
+
+Canonical-slug validation
+-------------------------
+If a canonical-slug set is supplied (CLI ``--registry path/to/slugs.yml``,
+or kwarg ``canonical_slugs=`` to :func:`triaga_export_to_priorities`), every
+emitted slug is checked against it. Non-canonical slugs are EMITTED in the
+matter row (the converter never blocks on a Director-wishlist slug) AND
+recorded in a top-level ``pending_slug_review[]`` section so regen + Director
+both see them.
+
+The ``CANONICAL_SLUG_LOOSE`` module flag (default False) gates whether the
+``pending_slug_review`` section is populated. When True, the converter only
+logs warnings and emits an empty ``pending_slug_review[]`` — useful while the
+downstream regen layer is still learning to consume the new section.
 """
 from __future__ import annotations
 
@@ -132,10 +156,23 @@ DUPLICATE_FOLDS: dict[str, str] = {
 
 _STATUS_VALUES = {"Active", "Completed", "Dismiss"}
 
-_HEADER_LINE_RE = re.compile(r"^\*\*(Q\d+)\s+—\s+(.+?)\s+—\s+(.+?)\*\*\s*$")
+# Detect a header line — capture Q-ID + everything between it and the trailing **.
+# Splitting slug-field from description is a second step (handles bracketed
+# slug fields containing internal em-dashes).
+_HEADER_LINE_RE = re.compile(r"^\*\*\s*(Q\d+)\s+—\s+(.+)\*\*\s*$")
 _META_LINE_RE = re.compile(r"^→\s+STATUS:\s*(\S+)(.*)$")
 _NOTE_LINE_RE = re.compile(r"^note:\s*(.+)$", re.IGNORECASE)
 _DATE_LINE_RE = re.compile(r"^\*\*Date:\*\*\s*(\S+)\s*$")
+
+# Default-False module flag controlling whether non-canonical slugs are
+# recorded in `pending_slug_review[]`. When True, the converter logs warnings
+# only — the section is emitted empty so regen can ignore it during the
+# transition. See module docstring "Canonical-slug validation" section.
+CANONICAL_SLUG_LOOSE: bool = False
+
+# Slug-shape used by the `/` split heuristic (Bug 2 hardening). A token
+# qualifies as a possible-slug only if it matches this shape.
+_CANONICAL_SLUG_SHAPE = re.compile(r"^[a-z0-9][a-z0-9-]+$")
 
 
 # ---------------------------------------------------------------------------
@@ -158,6 +195,35 @@ class TriagaItem:
 # ---------------------------------------------------------------------------
 # Parser
 # ---------------------------------------------------------------------------
+
+
+def _split_slug_from_description(rest: str) -> tuple[str, str]:
+    """Bisect a header tail into (slug_field, description).
+
+    Bracketed slug fields (``[...]``) may contain em-dashes internally
+    (e.g. ``[private-assets — slug TBD]``); anchor on the matching ``]``
+    instead of the first ` — ` to keep the bracket suffix from bleeding
+    into the description.
+
+    Falls back to first ` — ` for unbracketed slug fields, which preserves
+    the prior behaviour for ``hagenauer-rg7 — GC takeover — complete hotel...``
+    style entries (description em-dashes survive the non-greedy split).
+    """
+    rest = rest.strip()
+    if rest.startswith("["):
+        close = rest.find("]")
+        if close >= 0:
+            slug_field = rest[: close + 1].strip()
+            after = rest[close + 1:].lstrip()
+            m = re.match(r"^—\s*(.*)$", after)
+            if m:
+                return slug_field, m.group(1).strip()
+            # Bracket parsed but no '— description' after — degrade gracefully.
+            return slug_field, after.strip()
+    parts = re.split(r"\s+—\s+", rest, maxsplit=1)
+    if len(parts) == 2:
+        return parts[0].strip(), parts[1].strip()
+    return rest, ""
 
 
 def parse_export(text: str) -> dict:
@@ -190,8 +256,7 @@ def parse_export(text: str) -> dict:
             continue
 
         triaga_ref = header_m.group(1)
-        slug_field = header_m.group(2).strip()
-        description = header_m.group(3).strip()
+        slug_field, description = _split_slug_from_description(header_m.group(2))
 
         # Find the next non-blank line — must be the meta line.
         j = i + 1
@@ -322,7 +387,21 @@ def _map_value(field_name: str, raw: str, table: dict, triaga_ref: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-_TBD_BRACKET_RE = re.compile(r"^\[(.+?)(?:\s+—\s+slug\s+TBD)?(?:\s+—\s+see\s+note)?\]$", re.IGNORECASE)
+_BRACKET_OUTER_RE = re.compile(r"^\[(.*)\]$", re.DOTALL)
+_BRACKET_SUFFIX_RE = re.compile(
+    r"\s+—\s+(?:slug\s+TBD|see\s+note)\b.*$",
+    re.IGNORECASE,
+)
+
+
+def _strip_bracket_suffix(inner: str) -> str:
+    """Inside a bracketed slug field, strip a trailing ``— slug TBD`` /
+    ``— see note`` annotation, even if extra prose follows the sentinel.
+
+    Example: ``private-assets — slug TBD`` → ``private-assets``.
+    Example: ``philippe-soulier — slug TBD (Bora-Bora)`` → ``philippe-soulier``.
+    """
+    return _BRACKET_SUFFIX_RE.sub("", inner).strip()
 
 
 def normalize_slug_field(
@@ -330,32 +409,68 @@ def normalize_slug_field(
     triaga_ref: str,
     *,
     combined_slugs_by_ref: Optional[dict[str, str]] = None,
+    canonical_slugs: Optional[set[str]] = None,
 ) -> Union[str, list[str]]:
     """Translate the raw ``slug-text`` field into a string OR a list of slugs.
 
-    Steps:
-    1. If wrapped in ``[...]``, strip brackets + ``— slug TBD`` / ``— see note``
-       suffixes — leaves only the slug hint inside.
-    2. If ``triaga_ref`` is in ``combined_slugs_by_ref``, return that compound
-       slug as a single string (overrides any split logic).
-    3. Otherwise split on ``+`` or ``/`` separators, trim whitespace, lowercase,
-       and return list-of-slugs (single-element list collapses to bare string).
+    Pipeline (Bug-1/Bug-2 hardened):
+
+    1. **Combined-slug override first.** If ``triaga_ref`` is in
+       ``combined_slugs_by_ref``, return the compound slug verbatim.
+    2. **Bracket strip BEFORE any separator split.** ``[private-assets —
+       slug TBD]`` → ``private-assets``. The bracket suffix regex consumes
+       ``— slug TBD`` / ``— see note`` even if prose follows the sentinel.
+    3. **Split on ``+`` always.** RA-23 declares ``+`` the canonical
+       multi-slug separator.
+    4. **Split on ``/`` only when shape + canonical-registry agree.** Each
+       slash-token must match ``_CANONICAL_SLUG_SHAPE`` AND be present in
+       ``canonical_slugs`` (when supplied). Otherwise ``/`` is prose and
+       the part stays a single literal token. This keeps Q30 ``tax / lana``
+       and Q31 ``tax / cbp`` (where ``tax`` is a category prefix, not a
+       canonical slug) as single slugs that the canonical-slug-validation
+       layer can flag for ``pending_slug_review``.
+    5. **Lowercase + trim.** Final form is lowercased; outer whitespace
+       trimmed; internal whitespace preserved verbatim (so the surfaced
+       pending-review value matches what the export wrote).
     """
     overrides = combined_slugs_by_ref if combined_slugs_by_ref is not None else COMBINED_SLUGS_BY_REF
     if triaga_ref in overrides:
         return overrides[triaga_ref]
 
     cleaned = raw.strip()
-    bracket_m = _TBD_BRACKET_RE.match(cleaned)
-    if bracket_m:
-        cleaned = bracket_m.group(1).strip()
 
-    parts = [p.strip().lower() for p in re.split(r"\s*[+/]\s*", cleaned) if p.strip()]
-    if not parts:
+    # Step 1: bracket strip BEFORE any separator split (Bug 1).
+    bracket_m = _BRACKET_OUTER_RE.match(cleaned)
+    if bracket_m:
+        cleaned = _strip_bracket_suffix(bracket_m.group(1).strip())
+
+    if not cleaned:
         raise ValueError(f"{triaga_ref}: empty slug field after normalization")
-    if len(parts) == 1:
-        return parts[0]
-    return parts
+
+    # Step 2: '+'-split always.
+    plus_parts = [p.strip() for p in re.split(r"\s*\+\s*", cleaned) if p.strip()]
+
+    # Step 3: per plus-part, maybe further '/'-split (only if shape + registry agree).
+    out_parts: list[str] = []
+    for part in plus_parts:
+        slash_tokens = [t.strip() for t in re.split(r"\s*/\s*", part) if t.strip()]
+        if (
+            len(slash_tokens) > 1
+            and all(_CANONICAL_SLUG_SHAPE.match(t.lower()) for t in slash_tokens)
+            and canonical_slugs is not None
+            and all(t.lower() in canonical_slugs for t in slash_tokens)
+        ):
+            out_parts.extend(t.lower() for t in slash_tokens)
+        else:
+            # Treat '/' as prose — keep the part as a single literal slug
+            # (lowercased; internal whitespace preserved).
+            out_parts.append(part.lower())
+
+    if not out_parts:
+        raise ValueError(f"{triaga_ref}: empty slug field after normalization")
+    if len(out_parts) == 1:
+        return out_parts[0]
+    return out_parts
 
 
 # ---------------------------------------------------------------------------
@@ -371,10 +486,19 @@ def to_priorities_dict(
     archive_copy: str = "",
     combined_slugs_by_ref: Optional[dict[str, str]] = None,
     duplicate_folds: Optional[dict[str, str]] = None,
+    canonical_slugs: Optional[set[str]] = None,
+    canonical_slug_loose: Optional[bool] = None,
 ) -> dict:
-    """Build the final ``_priorities.yml`` dict from a ``parse_export`` result."""
+    """Build the final ``_priorities.yml`` dict from a ``parse_export`` result.
+
+    When ``canonical_slugs`` is supplied, each emitted slug is validated.
+    Non-canonical slugs are emitted in the matter row regardless (the
+    converter never blocks on a Director-wishlist slug) and recorded in
+    ``pending_slug_review[]`` unless ``canonical_slug_loose=True``.
+    """
     items: list[TriagaItem] = list(parsed["items"])
     folds = duplicate_folds if duplicate_folds is not None else DUPLICATE_FOLDS
+    loose = CANONICAL_SLUG_LOOSE if canonical_slug_loose is None else bool(canonical_slug_loose)
 
     # Drop folded duplicates first (Q19 → Q33).
     folded_refs = set(folds.keys())
@@ -384,13 +508,19 @@ def to_priorities_dict(
     dismissed: list[dict] = []
     completed: list[dict] = []
     partial_count = 0
+    # Per-Q-ID raw slug-field text (for pending_slug_review surface).
+    raw_by_ref: dict[str, str] = {}
 
     ratified_date = ratified_at.split("T", 1)[0] if "T" in ratified_at else ratified_at[:10]
 
     for it in items:
         slug_value = normalize_slug_field(
-            it.slug_field, it.triaga_ref, combined_slugs_by_ref=combined_slugs_by_ref
+            it.slug_field,
+            it.triaga_ref,
+            combined_slugs_by_ref=combined_slugs_by_ref,
+            canonical_slugs=canonical_slugs,
         )
+        raw_by_ref[it.triaga_ref] = it.slug_field
         if it.status == "Active":
             entry: dict[str, Any] = {}
             if isinstance(slug_value, list):
@@ -425,6 +555,15 @@ def to_priorities_dict(
             entry["dismissed_at"] = ratified_date
             dismissed.append(entry)
 
+    pending_slug_review = _validate_canonical_slugs(
+        matters=matters,
+        dismissed=dismissed,
+        completed=completed,
+        canonical_slugs=canonical_slugs,
+        raw_by_ref=raw_by_ref,
+        loose=loose,
+    )
+
     out: dict[str, Any] = {
         "schema_version": 1,
         "ratified_at": ratified_at,
@@ -436,6 +575,7 @@ def to_priorities_dict(
         "matters": matters,
         "dismissed": dismissed,
         "completed": completed,
+        "pending_slug_review": pending_slug_review,
         "null_routine": list(DEFAULT_NULL_ROUTINE),
         "not_null_elevate": list(DEFAULT_NOT_NULL_ELEVATE),
         "provenance": {
@@ -446,9 +586,66 @@ def to_priorities_dict(
             "completed_count": len(completed),
             "dismissed_count": len(dismissed),
             "partial_count": partial_count,
+            "pending_slug_review_count": len(pending_slug_review),
         },
     }
     return out
+
+
+def _validate_canonical_slugs(
+    *,
+    matters: list[dict],
+    dismissed: list[dict],
+    completed: list[dict],
+    canonical_slugs: Optional[set[str]],
+    raw_by_ref: dict[str, str],
+    loose: bool,
+) -> list[dict]:
+    """Walk every emitted slug, log warnings on non-canonical ones, and (unless
+    ``loose``) record them in a ``pending_slug_review[]`` list for surfacing
+    to regen + Director.
+
+    Returns the list verbatim (caller embeds it in the output dict).
+    """
+    if canonical_slugs is None:
+        return []
+    canonical_set = set(canonical_slugs)
+    pending: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()  # (triaga_ref, slug, section) dedup
+    sections: tuple[tuple[str, list[dict]], ...] = (
+        ("matters", matters),
+        ("dismissed", dismissed),
+        ("completed", completed),
+    )
+    for section_name, entries in sections:
+        for entry in entries:
+            triaga_ref = entry.get("triaga_ref", "")
+            if "slugs" in entry:
+                emitted: list[str] = list(entry["slugs"])
+            elif "slug" in entry:
+                emitted = [entry["slug"]]
+            else:
+                continue
+            for slug in emitted:
+                if slug in canonical_set:
+                    continue
+                logger.warning(
+                    "non-canonical slug emitted: triaga_ref=%s slug=%r section=%s",
+                    triaga_ref, slug, section_name,
+                )
+                if loose:
+                    continue
+                key = (triaga_ref, slug, section_name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                pending.append({
+                    "triaga_ref": triaga_ref,
+                    "slug": slug,
+                    "section": section_name,
+                    "raw_slug_field": raw_by_ref.get(triaga_ref, ""),
+                })
+    return pending
 
 
 # ---------------------------------------------------------------------------
@@ -481,6 +678,8 @@ def triaga_export_to_priorities(
     archive_copy: str = "",
     combined_slugs_by_ref: Optional[dict[str, str]] = None,
     duplicate_folds: Optional[dict[str, str]] = None,
+    canonical_slugs: Optional[set[str]] = None,
+    canonical_slug_loose: Optional[bool] = None,
 ) -> dict:
     """Convert a Triaga export markdown file → ``_priorities.yml`` on disk.
 
@@ -534,10 +733,28 @@ def triaga_export_to_priorities(
         archive_copy=archive_copy,
         combined_slugs_by_ref=combined_slugs_by_ref,
         duplicate_folds=duplicate_folds,
+        canonical_slugs=canonical_slugs,
+        canonical_slug_loose=canonical_slug_loose,
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(render_yaml(data), encoding="utf-8")
     return data
+
+
+def _load_canonical_slugs_from_registry(registry_path: Path) -> set[str]:
+    """Load canonical slugs from a ``slugs.yml`` file via ``kbl.slug_registry``.
+
+    Imported lazily so unit tests don't pay the dependency cost when they
+    pass a literal set instead.
+    """
+    # Make the repo root importable when invoked as ``python3 scripts/...``
+    # from a working dir that doesn't already have it on sys.path.
+    repo_root = Path(__file__).resolve().parent.parent
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root))
+    from kbl.slug_registry import _parse_yaml as parse_registry_yaml
+    reg = parse_registry_yaml(Path(registry_path))
+    return set(reg.entries.keys())
 
 
 # ---------------------------------------------------------------------------
@@ -552,6 +769,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--ratified-at", help="Override ratified_at ISO timestamp")
     parser.add_argument("--source-inbox", help="Override provenance.source_inbox")
     parser.add_argument("--archive-copy", default="", help="Optional provenance.archive_copy")
+    parser.add_argument(
+        "--registry",
+        default=None,
+        help="Path to slugs.yml; when set, non-canonical slugs land in pending_slug_review[]",
+    )
+    parser.add_argument(
+        "--canonical-slug-loose",
+        action="store_true",
+        help="Warn but skip pending_slug_review[] population (legacy emit-only mode)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -560,12 +787,18 @@ def main(argv: Optional[list[str]] = None) -> int:
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
+    canonical_slugs: Optional[set[str]] = None
+    if args.registry:
+        canonical_slugs = _load_canonical_slugs_from_registry(Path(args.registry))
+
     data = triaga_export_to_priorities(
         args.export,
         args.out,
         ratified_at=args.ratified_at,
         source_inbox=args.source_inbox,
         archive_copy=args.archive_copy,
+        canonical_slugs=canonical_slugs,
+        canonical_slug_loose=args.canonical_slug_loose,
     )
     prov = data["provenance"]
     print(
@@ -574,7 +807,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         f"{prov['active_count']} Active · "
         f"{prov['completed_count']} Completed · "
         f"{prov['dismissed_count']} Dismissed · "
-        f"{prov['partial_count']} Partial)"
+        f"{prov['partial_count']} Partial · "
+        f"{prov['pending_slug_review_count']} pending review)"
     )
     return 0
 

@@ -225,6 +225,7 @@ def render_hot_md(priorities: dict, generated_at: str) -> str:
     dismissed = list(priorities.get("dismissed", []) or [])
     null_routine = list(priorities.get("null_routine", []) or [])
     not_null_elevate = list(priorities.get("not_null_elevate", []) or [])
+    pending_slug_review = list(priorities.get("pending_slug_review", []) or [])
 
     by_when: dict[str, list[Matter]] = {w: [] for w in WHEN_ORDER}
     for m in matters:
@@ -321,6 +322,22 @@ def render_hot_md(priorities: dict, generated_at: str) -> str:
     if dismissed:
         for d in dismissed:
             lines.append(_bullet_dismissed(d))
+    else:
+        lines.append("(none)")
+    lines.append("")
+
+    lines.append("## Pending slug review (non-canonical slugs awaiting Director ratification)")
+    lines.append("")
+    if pending_slug_review:
+        for entry in pending_slug_review:
+            triaga_ref = entry.get("triaga_ref", "")
+            slug = entry.get("slug", "")
+            section = entry.get("section", "")
+            raw = entry.get("raw_slug_field", "")
+            raw_suffix = f" (raw: `{raw}`)" if raw and raw != slug else ""
+            lines.append(
+                f"- **{slug}** ({triaga_ref}, {section}){raw_suffix} — Director: confirm slug or assign canonical."
+            )
     else:
         lines.append("(none)")
     lines.append("")
