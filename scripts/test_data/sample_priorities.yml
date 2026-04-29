@@ -1,0 +1,76 @@
+schema_version: 1
+ratified_at: 2026-04-29T18:45:00+02:00
+ratified_by: director
+ratified_from: _01_INBOX_FROM_CLAUDE/2026-04-29-b1-brisen-triage-ratified-export.md
+last_regen_at: null
+last_regen_sha: null
+
+categories:
+  - active-deal
+  - legal-risk
+  - financial
+  - origination
+
+matters:
+  - slug: hagenauer-rg7
+    when: urgent
+    importance: critical
+    category: legal-risk
+    triaga_ref: Q2
+    description: "Defend against Hagenauer administrator claims on Brisen."
+    notes: []
+
+  - slug: ao
+    when: urgent
+    importance: critical
+    category: active-deal
+    triaga_ref: Q20
+    description: "EUR 4.5M remaining call to Oskolkov via Constantinos."
+    notes:
+      - kind: figure-correction
+        text: "Update old EUR 7M figure to EUR 4.5M outstanding; EUR 2.5M already received."
+        target: "wiki/matters/oskolkov/proposed-gold.md"
+        proposed_gold_id: G1
+
+  - slugs: [aukera, mo-vie-am]
+    when: 4w
+    importance: critical
+    category: financial
+    triaga_ref: Q12
+    description: "Negotiate Aukera EUR 3M release from sold-residence proceeds."
+    notes: []
+
+dismissed:
+  - triaga_ref: Q28
+    slug: brisen-lp
+    reason: "Director dismissed status pull as not currently active."
+    dismissed_at: 2026-04-29
+    slug_action: retire
+
+completed: []
+
+slug_changes:
+  - action: add
+    slug: uk-homes
+    status: active
+    description: "UK residential property held by Director."
+    aliases: ["uk-home", "uk-house", "barclays-uk"]
+    triaga_ref: Q17
+
+null_routine:
+  - "Marketing newsletters."
+  - "Auction invite blasts."
+  - "Generic event promos (conferences, summits, unrelated training)."
+
+not_null_elevate:
+  - 'MIO »OBSERVER« press digest — always read + communicate to Director.'
+  - "Subscription renewal notices — Baker-critical (auto-renewal failure breaks Baker)."
+
+provenance:
+  source_inbox: _01_INBOX_FROM_CLAUDE/2026-04-29-b1-brisen-triage-ratified-export.md
+  archive_copy: _archive/2026-04-29-triage-ratification-export.md
+  ratified_count: 5
+  active_count: 3
+  completed_count: 0
+  dismissed_count: 1
+  partial_count: 0

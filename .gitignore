@@ -5,6 +5,10 @@ config/.env
 *.pyc
 __pycache__/
 
+# regen_hot_md.py side-effect logs (regen_failed.log + regen_diff.log)
+scripts/regen_failed.log
+scripts/regen_diff.log
+
 # Outputs
 analysis_outputs/
 
