@@ -1,11 +1,17 @@
 {
   "version": 1,
-  "updated_at": "2026-04-28",
+  "updated_at": "2026-04-29",
   "folders": [
     {
       "name": "ARCHITECTURE",
       "slug": "architecture",
       "presentations": [
+        {
+          "title": "Cortex Roadmap V3 \u2014 Any-Matter Sprint",
+          "file": "cortex-roadmap-v3-any-matter.html",
+          "created": "2026-04-29",
+          "matter": "baker"
+        },
         {
           "title": "Cortex-3T \u2014 Stage 2 V1 Roadmap (Build + DRY_RUN Promotion)",
           "file": "cortex-roadmap-stage2-v1.html",

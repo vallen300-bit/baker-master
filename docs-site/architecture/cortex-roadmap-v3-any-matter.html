@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Cortex Roadmap V3 — Any-Matter Sprint</title>
+<style>
+  :root {
+    --bg-page: #fafaf7;
+    --bg-card: #fff;
+    --bg-card-done: #f5f9ed;
+    --bg-card-flight: #fff8e8;
+    --bg-card-queue: #f4f0e6;
+    --bg-card-park: #f0eee8;
+    --bg-locked: #e9f0e2;
+    --bg-summary: #f0ece0;
+    --bg-callout: #faf7eb;
+    --bg-rail: #2c2317;
+    --text-body: #1a1a1a;
+    --text-header: #4a3a1f;
+    --text-muted: #6c5e3f;
+    --text-rail: #f5f1e2;
+    --border-default: #d6cfb8;
+    --border-done: #a8c084;
+    --border-flight: #d8b855;
+    --border-queue: #c8b878;
+    --border-park: #a89c80;
+    --accent: #8c7a4e;
+    --accent-locked: #6a8c4e;
+    --rec-bg: #c2d8a0;
+    --rec-text: #2c4a1c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg-page); color: var(--text-body); line-height: 1.5;
+  }
+  .wrap { max-width: 1180px; margin: 2rem auto; padding: 0 1.5rem 4rem; }
+  header { border-bottom: 1px solid var(--border-default); padding-bottom: 1.25rem; margin-bottom: 1.5rem; }
+  h1 { color: var(--text-header); font-size: 1.6rem; margin: 0 0 0.5rem; letter-spacing: -0.01em; }
+  .meta { color: var(--text-muted); font-size: 0.85rem; }
+  .meta strong { color: var(--text-header); }
+  .progress-bar-wrap { background: var(--border-default); border-radius: 4px; overflow: hidden; margin: 1.25rem 0 0.5rem; height: 22px; position: relative; }
+  .progress-fill { background: var(--accent); height: 100%; transition: width 0.3s; }
+  .progress-label { position: absolute; inset: 0; text-align: center; color: #fff; font-size: 0.85rem; line-height: 22px; font-weight: 600; text-shadow: 0 1px 1px rgba(0,0,0,0.3); }
+  .legend { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.8rem; color: var(--text-muted); margin-top: 0.75rem; }
+  .legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+  .legend .dot { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  .dot-done { background: var(--bg-card-done); border: 1px solid var(--border-done); }
+  .dot-flight { background: var(--bg-card-flight); border: 1px solid var(--border-flight); }
+  .dot-queue { background: var(--bg-card-queue); border: 1px solid var(--border-queue); }
+  .dot-park { background: var(--bg-card-park); border: 1px solid var(--border-park); }
+  .locked { background: var(--bg-locked); border-left: 4px solid var(--accent-locked); padding: 1rem 1.25rem; border-radius: 4px; margin-bottom: 1.5rem; font-size: 0.92rem; }
+  .locked strong { color: var(--text-header); }
+  .locked .ratio { display: inline-block; background: var(--rec-bg); color: var(--rec-text); padding: 0.1rem 0.5rem; border-radius: 3px; font-weight: 600; font-size: 0.85rem; }
+  .stage { margin: 2.5rem 0 0.75rem; }
+  .stage-title { color: var(--text-header); font-size: 1.15rem; font-weight: 700; margin: 0 0 0.25rem; letter-spacing: -0.01em; border-bottom: 1px solid var(--border-default); padding-bottom: 0.4rem; }
+  .stage-meta { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.85rem; }
+  .item { background: var(--bg-card); border: 1px solid var(--border-default); border-radius: 6px; padding: 0.85rem 1rem; margin: 0.55rem 0; display: grid; grid-template-columns: 32px 1fr auto; gap: 0.85rem; align-items: start; transition: border-color 0.2s; }
+  .item.done { background: var(--bg-card-done); border-color: var(--border-done); }
+  .item.flight { background: var(--bg-card-flight); border-color: var(--border-flight); }
+  .item.queue { background: var(--bg-card-queue); border-color: var(--border-queue); }
+  .item.park { background: var(--bg-card-park); border-color: var(--border-park); }
+  .icon { font-size: 1.2rem; text-align: center; line-height: 1.4; }
+  .label { font-size: 0.95rem; color: var(--text-header); font-weight: 600; margin-bottom: 0.15rem; }
+  .item .desc { font-size: 0.85rem; color: var(--text-body); }
+  .item .anchor { display: inline-block; margin-top: 0.25rem; font-size: 0.78rem; color: var(--text-muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .badge { align-self: center; background: var(--accent); color: #fff; padding: 0.18rem 0.55rem; border-radius: 3px; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; }
+  .badge.done { background: var(--accent-locked); }
+  .badge.flight { background: #c8901a; }
+  .badge.queue { background: var(--accent); }
+  .badge.park { background: #6c5e3f; }
+  .position-marker { background: var(--bg-rail); color: var(--text-rail); padding: 1rem 1.25rem; border-radius: 6px; margin: 2rem 0 1rem; font-size: 0.95rem; }
+  .position-marker h3 { margin: 0 0 0.4rem; color: var(--rec-bg); font-size: 1rem; letter-spacing: 0.02em; }
+  .position-marker .next { color: #c8a878; }
+  .position-marker code { background: rgba(255,255,255,0.08); padding: 0.05rem 0.35rem; border-radius: 3px; font-size: 0.8rem; }
+  .position-marker ul { margin: 0.3rem 0 0; padding-left: 1.2rem; }
+  .position-marker li { margin: 0.15rem 0; }
+  .callout { background: var(--bg-callout); border-left: 3px solid var(--border-queue); padding: 0.6rem 0.85rem; border-radius: 3px; margin: 0.4rem 0 0.6rem 0; font-size: 0.83rem; }
+  .matrix { width: 100%; border-collapse: collapse; margin: 0.8rem 0 1rem; font-size: 0.82rem; background: var(--bg-card); border-radius: 6px; overflow: hidden; border: 1px solid var(--border-default); }
+  .matrix th { background: var(--bg-summary); color: var(--text-header); text-align: left; padding: 0.55rem 0.7rem; font-size: 0.78rem; letter-spacing: 0.02em; text-transform: uppercase; border-bottom: 1px solid var(--border-default); }
+  .matrix td { padding: 0.55rem 0.7rem; vertical-align: top; border-top: 1px solid var(--border-default); }
+  .matrix td:first-child { font-weight: 700; color: var(--text-header); white-space: nowrap; }
+  .matrix code { background: rgba(140,122,78,0.08); padding: 0.05rem 0.3rem; border-radius: 3px; font-size: 0.78rem; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .summary-bar { background: var(--bg-summary); border-radius: 6px; padding: 0.85rem 1.1rem; margin: 0.4rem 0 1rem; font-size: 0.88rem; }
+  .summary-bar strong { color: var(--text-header); }
+  footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--border-default); font-size: 0.78rem; color: var(--text-muted); }
+  footer code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Cortex Roadmap V3 — Any-Matter Sprint</h1>
+  <div class="meta">
+    Director directive 2026-04-29 — speed Cortex up so it can be invoked on <strong>any matter</strong> for reasoning, analysis, synthesis. Notifications deferred to Wave 2. Supersedes V2 (Stage 2 V1 build/DRY_RUN). Integrates AI Head 1 App + AI Head 2 Terminal cross-review (5 adds accepted).
+  </div>
+  <div class="progress-bar-wrap">
+    <div class="progress-fill" style="width: 55%"></div>
+    <div class="progress-label">55% — V1 LIVE on AO; Wave 1 in flight to Hagenauer + MO Vienna</div>
+  </div>
+  <div class="legend">
+    <span><span class="dot dot-done"></span>Shipped</span>
+    <span><span class="dot dot-flight"></span>In flight (Wave 1)</span>
+    <span><span class="dot dot-queue"></span>Wave 2 queued</span>
+    <span><span class="dot dot-park"></span>Parked / wave 3+</span>
+  </div>
+</header>
+
+<div class="locked">
+  <strong>What "any-matter Cortex" means.</strong> Director picks a matter from a list, asks a question (Slack DM, dashboard button, or Scan), Cortex senses + loads + reasons (5 specialists, 60s each, 5-min cap) + proposes + acts + archives — all in &lt;5 min, with curated output written to <code>baker-vault/wiki/matters/&lt;slug&gt;/curated/</code>. Today this works for <code>oskolkov</code> only (cost gate scoped). Wave 1 unlocks 2 more matters end-to-end (<code>hagenauer-rg7</code>, <code>movie</code>) and the manual-invoke pathway. <span class="ratio">Target: tomorrow EOD</span>
+</div>
+
+<div class="stage">
+  <h2 class="stage-title">Already shipped — foundation</h2>
+  <div class="stage-meta">Cortex V1 LIVE end-to-end + scheduler-singleton hardened.</div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Cortex V1 first cycle on AO matter — REJECT proven end-to-end</div>
+      <div class="desc">Cycle <code>7dc3201b-2056-4522-b0bd-fc84524cc36f</code> ran sense → load → reason → propose → act (rejected via Slack ❌) → archive. $4 / 246K tokens / 290s wall-clock. Real Director button click → archived → feedback_ledger row id=1.</div>
+      <div class="anchor">2026-04-29 — V5 session state + 7 PRs merged in 24h</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Pre-cycle cost gate (URL+HMAC+atomic claim)</div>
+      <div class="desc">PR #80 + #81 + harden — Slack DM with signed approve/skip URLs blocks runaway $4 spend. AO-scoped today; Wave 1 expands to any matter with <code>cortex-config.md</code>.</div>
+      <div class="anchor">PR #80 e910670f, PR #81 df886be</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Phase 5 multi-state acceptance + transient *ing migration</div>
+      <div class="desc">PR #83 — handler now accepts both <code>proposed</code> and <code>tier_b_pending</code> from-states. CHECK constraint pinned for all 15 status values + 4 transient *ing.</div>
+      <div class="anchor">PR #83 a4f35c8</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Scheduler singleton-lock (Render Pro zero-downtime safe)</div>
+      <div class="desc">PR #84 — process-singleton via <code>pg_try_advisory_lock(8800100)</code> on dedicated Neon direct connection. Old container releases on SIGTERM; new acquires on boot. <code>POSTGRES_HOST_DIRECT</code> live on Render. Ends today's silent doubled side-effects (email_poll, clickup_poll, gold_audit_sentinel, ai_head_weekly_audit, daily_briefing).</div>
+      <div class="anchor">PR #84 f0f53e04 — merged 17:23Z, deploy dep-d7p3taq49v5s73efel70</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">MCP pgbouncer pool-poisoning fix + env-var paginated-PUT lessons</div>
+      <div class="desc">Emergency fix <code>a620e55</code> removed <code>set_session(readonly=True)</code> from MCP server (pgbouncer transaction-mode leaked GUC). 80-var Render env wipe at 09:14Z recovered ~45min — standing rule never raw-PUT env-vars without <code>?limit=100</code>.</div>
+      <div class="anchor">memory/feedback_mcp_pgbouncer_pool_poisoning.md + feedback_render_envvar_paginated_put.md</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+</div>
+
+<div class="position-marker">
+  <h3>WHERE WE ARE — 2026-04-29 17:30Z</h3>
+  AO matter Cortex V1 LIVE. Scheduler hardened. Foundation solid. Director's directive: speed up to "any matter usable" by tomorrow EOD. <strong>4 parallel tracks dispatched in Wave 1</strong> (independence matrix verified — no file overlap).
+  <br><br>
+  <span class="next"><strong>Next move →</strong></span> Director ratifies Wave 1 plan; AI Head A drafts 4 briefs via <code>/write-brief</code>; pushes 4 paste-blocks fired in parallel.
+</div>
+
+<div class="stage">
+  <h2 class="stage-title">Wave 1 — 4 parallel tracks (any-matter manual Cortex)</h2>
+  <div class="stage-meta">Tomorrow EOD target. Independence matrix verified. AO live cycle is NOT a hard prerequisite — Tracks 1+2 ship the manual-invoke pathway parallel to auto-trigger; Tracks 3+4 are vault-only.</div>
+
+  <table class="matrix">
+    <thead>
+      <tr><th>Track</th><th>Agent</th><th>Scope</th><th>File touch</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>1</td><td>B1 Terminal</td><td>Manual-invoke endpoint <code>POST /api/cortex/run</code> (X-Baker-Key, body: <code>matter_slug</code>+<code>question</code>) <strong>streaming Phase 1-6 SSE events</strong>; Scan-intent route ("run cortex on X")</td><td><code>outputs/dashboard.py</code>, <code>kbl/scan_intent_classifier.py</code>, tests</td></tr>
+      <tr><td>2</td><td>B3 Terminal</td><td>Cost-gate scope expansion: AO-only → whitelist any matter with <code>cortex-config.md</code> present</td><td><code>triggers/cortex_pre_review_gate.py</code>, tests</td></tr>
+      <tr><td>3</td><td>B2 App</td><td><code>hagenauer-rg7</code>: <code>cortex-config.md</code> + <code>gold.md</code> shell + <code>proposed-gold.md</code> shell + top-5 entity stubs + curated/ seed</td><td><code>baker-vault/wiki/matters/hagenauer-rg7/</code> + <code>baker-vault/wiki/people/</code></td></tr>
+      <tr><td>4</td><td>AI Head 2 App</td><td><code>movie</code>: <code>cortex-config.md</code> + <code>gold.md</code> shell + <code>proposed-gold.md</code> shell + top-5 entity stubs + curated/ seed</td><td><code>baker-vault/wiki/matters/movie/</code> + <code>baker-vault/wiki/people/</code></td></tr>
+    </tbody>
+  </table>
+
+  <div class="item flight">
+    <div class="icon">⏳</div>
+    <div>
+      <div class="label">Track 1 — Manual-invoke endpoint + Scan route (B1)</div>
+      <div class="desc"><code>POST /api/cortex/run</code> wraps <code>orchestrator/cortex_runner.maybe_run_cycle</code> with <code>trigger_type='director_manual'</code>. SSE streams Phase 1-6 events live ("Phase 3 reason → legal ⏳ / finance ✓ / tax-CH ✓ / game-theory ⏳"). Scan-intent classifier routes "run cortex on hagenauer-rg7 — what's our move on Sähn dispute?" to the same endpoint. Auth via <code>X-Baker-Key</code>; rate limit 5 runs/hour/matter; warn at 30 specialist invocations/day/matter.</div>
+      <div class="anchor">brief: CORTEX_MANUAL_INVOKE_1 (drafting via /write-brief)</div>
+    </div>
+    <div class="badge flight">IN FLIGHT</div>
+  </div>
+
+  <div class="item flight">
+    <div class="icon">⏳</div>
+    <div>
+      <div class="label">Track 2 — Cost-gate scope expansion (B3)</div>
+      <div class="desc">Today: <code>cortex_pre_review_gate.post_gate</code> hard-codes AO. Wave 1: read <code>baker-vault/wiki/matters/&lt;slug&gt;/cortex-config.md</code> existence as the "matter is ready for Cortex" gate. If config absent → return False (no gate, no cycle). If present → post Slack approve/skip with $-cost preview pulled from config.</div>
+      <div class="anchor">brief: CORTEX_MULTI_MATTER_GATE_1 (drafting via /write-brief)</div>
+    </div>
+    <div class="badge flight">IN FLIGHT</div>
+  </div>
+
+  <div class="item flight">
+    <div class="icon">⏳</div>
+    <div>
+      <div class="label">Track 3 — Hagenauer-RG7 vault seed (B2)</div>
+      <div class="desc">Active legal/financial dispute, evidence-rich. Cortex-config tuned for legal + finance + game-theory specialists. Top-5 entity stubs (Sähn, Habicher, Leitner, Moravcik, +1). Curated/ seeded from Vienna server <code>Project/RG7/</code> docs already on disk. Director fills <code>_overview.md</code> + <code>gold.md</code> stance after seed (~30min Director time).</div>
+      <div class="anchor">brief: CORTEX_MATTER_CONFIG_HAGENAUER_1 (drafting via /write-brief)</div>
+    </div>
+    <div class="badge flight">IN FLIGHT</div>
+  </div>
+
+  <div class="item flight">
+    <div class="icon">⏳</div>
+    <div>
+      <div class="label">Track 4 — MO Vienna vault seed (AI Head 2)</div>
+      <div class="desc">Primary Brisen asset (Director-owned hotel). Different domain from Hagenauer (hotel ops vs construction dispute) — diversifies Cortex generalization. MOHG team entity stubs (Egger, Habicher, Schauer, Graf, Lyle). Curated/ seeded from <code>Project/MOVIE/</code>. Director uses immediately for MOHG dialogue prep, PR strategy, asset-management synthesis.</div>
+      <div class="anchor">brief: CORTEX_MATTER_CONFIG_MOVIE_1 (drafting via /write-brief)</div>
+    </div>
+    <div class="badge flight">IN FLIGHT</div>
+  </div>
+
+  <div class="callout">
+    <strong>Why these 2 matters first (Director ratification):</strong> Hagenauer = active legal-dispute pattern (high-friction, evidence-heavy). MO Vienna = ongoing-asset-ops pattern (relationship-driven, daily signals). Different domains → diversifies the Cortex test surface; if both work, the architecture generalizes.
+  </div>
+</div>
+
+<div class="stage">
+  <h2 class="stage-title">Wave 2 — queued (after Wave 1 verifies)</h2>
+  <div class="stage-meta">Notification-deferral + 4 more matters seeded + bootstrap-script reconsideration. Ratify after Wave 1 ships.</div>
+
+  <div class="item queue">
+    <div class="icon">2</div>
+    <div>
+      <div class="label">Notification deferral — Slack DM cost-gate optional</div>
+      <div class="desc">Today every gated invocation posts Director DM (3 matters × multiple test runs = spam). Wave 2: per-matter or per-invoke flag suppresses Slack DM; Director runs Cortex silently from Scan with cost gate auto-approving. Default ON (today's behavior); opt-out at runtime.</div>
+      <div class="anchor">brief: CORTEX_NOTIFICATION_DEFER_1</div>
+    </div>
+    <div class="badge queue">WAVE 2</div>
+  </div>
+
+  <div class="item queue">
+    <div class="icon">2</div>
+    <div>
+      <div class="label">Seed 4 more matters: Lilienmatt, MRCI, Wertheimer, Aukera</div>
+      <div class="desc">Hand-author wave (1 matter / idle agent / day). After 4 hand-configured matters, patterns are clear → bootstrap script becomes economical. Lilienmatt has live aukera-merz-mandate signals; Wertheimer is counterparty-side; Aukera + MRCI active corporate work.</div>
+      <div class="anchor">briefs: CORTEX_MATTER_CONFIG_{LILIENMATT,MRCI,WERTHEIMER,AUKERA}_1</div>
+    </div>
+    <div class="badge queue">WAVE 2</div>
+  </div>
+
+  <div class="item queue">
+    <div class="icon">2</div>
+    <div>
+      <div class="label">Verify auto-trigger fan-out — multi-matter signal classification</div>
+      <div class="desc">Once cost-gate accepts any cortex-config'd matter, the auto-trigger pipeline (sentinel signal → bridge → maybe_dispatch) can fire on any matter the classifier tags. Verify cycle independence (one matter's cycle doesn't poison another's state) + cost-cap fairness (no matter monopolizes $/day budget).</div>
+      <div class="anchor">brief: CORTEX_MULTI_MATTER_AUTOTRIGGER_VERIFY_1</div>
+    </div>
+    <div class="badge queue">WAVE 2</div>
+  </div>
+
+  <div class="item queue">
+    <div class="icon">2</div>
+    <div>
+      <div class="label">Side-fix: lock-key 900300 collision (financial_detector + initiative_engine)</div>
+      <div class="desc">B3 surfaced during PR #84 review: <code>orchestrator/financial_detector.py:76</code> and <code>orchestrator/initiative_engine.py:630</code> both use <code>pg_try_advisory_xact_lock(900300)</code>. One silently no-ops when the other holds. Pre-existing, not introduced by PR #84. Audit all advisory_lock keys for collisions; renumber.</div>
+      <div class="anchor">brief: ADVISORY_LOCK_KEY_AUDIT_1</div>
+    </div>
+    <div class="badge queue">WAVE 2</div>
+  </div>
+</div>
+
+<div class="stage">
+  <h2 class="stage-title">Wave 3+ — parked (defer not drop)</h2>
+  <div class="stage-meta">Once 4-6 matters are hand-configured, patterns repeat → reconsider bootstrap script. Plus larger architectural items.</div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Bootstrap script — <code>scripts/bootstrap_matter.py</code> + <code>bootstrap_entities.py</code></div>
+      <div class="desc">AI Head 2 Terminal proposed CORTEX_MATTER_ONBOARDING_AND_TRIGGER_1 with this. Rejected for Wave 1 (YAGNI for matters #1–4). Reconsider Wave 3 onwards (matters #5–30): one CLI command stamps out cortex-config + gold shell + entity stubs in &lt;30s. Ratifiable via PR.</div>
+      <div class="anchor">deferred from V3 plan; AI Head 2 Terminal full brief draft saved chat-only</div>
+    </div>
+    <div class="badge park">WAVE 3+</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Auto-trigger expansion — sentinel-driven fan-out across all matters</div>
+      <div class="desc">Today auto-trigger is AO-only by cost-gate scope. Once Wave 2 verifies multi-matter auto-trigger, lift the AO scope and let any classifier-tagged matter signal fire a cycle (still gated by cost). Director's morning briefing becomes "what 3 cycles fired overnight, what's the proposed move."</div>
+      <div class="anchor">post-Wave-2 ratification</div>
+    </div>
+    <div class="badge park">WAVE 3+</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Cross-matter pattern detection — meta-knowledge writes to <code>wiki/_cortex/cross-matter-patterns.md</code></div>
+      <div class="desc">Per RA-23 lock: meta-knowledge layer above per-matter configs. After 8-10 matters running, Cortex starts noticing patterns across matters (e.g., "every Austrian construction dispute follows the same TU-claim trajectory"). Writes pattern observations to the cross-matter file for Director ratification.</div>
+      <div class="anchor">RA-23 architecture lock §"Cortex meta-knowledge"</div>
+    </div>
+    <div class="badge park">WAVE 3+</div>
+  </div>
+
+  <div class="item park">
+    <div class="icon">⏸</div>
+    <div>
+      <div class="label">Cortex Stage 2 V1 → V2 promotion — DRY_RUN-cleared full pipeline</div>
+      <div class="desc">Per V2 roadmap: DRY_RUN gate before all matters auto-fire. Wave 1 lands manual-invoke first (faster path to "Director uses Cortex"); auto-trigger fan-out remains Wave 2. Stage 2 V1 → V2 happens when Wave 2's auto-trigger verification clears + 4-6 matters are running cleanly for ≥1 week.</div>
+      <div class="anchor">_ops/processes/cortex-stage2-v1-tracker.md</div>
+    </div>
+    <div class="badge park">WAVE 3+</div>
+  </div>
+</div>
+
+<div class="summary-bar">
+  <strong>Process discipline:</strong> All briefs drafted via <code>/write-brief</code> skill (Director directive 2026-04-29 ~17:00Z; captured in <code>memory/feedback_always_use_write_brief_skill.md</code>). Pre-merge: AI Head A <code>/security-review</code> + cross-lane situational review where MEDIUM trigger hits (per ratified 2026-04-24 §B-code dispatch). Render env vars only via MCP merge mode or per-key PUT — never raw array PUT (today's 80-var wipe).
+</div>
+
+<div class="summary-bar">
+  <strong>What ships tomorrow EOD if Wave 1 fires now:</strong> Manual-invoke pathway live + cost-gate accepts any cortex-config'd matter + Hagenauer-RG7 + MO Vienna both have config + Director can ask "run Cortex on hagenauer-rg7 — what's our position on the Sähn final account?" via Slack DM, dashboard, or Scan. AO continues working as today.
+</div>
+
+<footer>
+  Generated by AI Head A · Cortex Roadmap V3 · 2026-04-29 · supersedes <code>cortex-roadmap-stage2-v1.html</code> (V2). Source: integrated 4-track plan + AI Head 2 Terminal cross-review (5 adds accepted). Director ratification pending. Brisen Group internal.
+</footer>
+</div>
+</body>
+</html>
