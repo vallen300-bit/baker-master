@@ -584,7 +584,7 @@ class SentinelStoreBack:
                     current_phase      TEXT NOT NULL DEFAULT 'sense'
                         CHECK (current_phase IN ('sense','load','reason','propose','act','archive')),
                     status             TEXT NOT NULL DEFAULT 'in_flight'
-                        CHECK (status IN ('in_flight','awaiting_reason','proposed','tier_b_pending','approved','rejected','modified','failed','superseded','abandoned')),
+                        CHECK (status IN ('in_flight','awaiting_reason','proposed','tier_b_pending','approved','rejected','modified','failed','superseded','abandoned','archive_failed')),
                     proposal_id        UUID,
                     director_action    TEXT,
                     feedback_ledger_id BIGINT,

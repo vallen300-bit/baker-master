@@ -84,8 +84,15 @@ async def maybe_run_cycle(
         )
     except asyncio.TimeoutError:
         logger.error(
-            "Cortex cycle timed out after %ds (matter=%s, signal=%s)",
-            CYCLE_TIMEOUT_SECONDS, matter_slug, trigger_signal_id,
+            "Cortex cycle timed out",
+            extra={
+                "cycle_id": None,
+                "phase": "timeout",
+                "error_class": "TimeoutError",
+                "matter_slug": matter_slug,
+                "timeout_seconds": CYCLE_TIMEOUT_SECONDS,
+                "trigger_signal_id": trigger_signal_id,
+            },
         )
         # Best-effort cycle-row update to status='failed' on timeout. The
         # cycle row may or may not exist yet (timeout could fire before
@@ -108,7 +115,15 @@ async def maybe_run_cycle(
                 finally:
                     store._put_conn(conn)
         except Exception as e:
-            logger.error(f"Failed to mark timed-out cycle as failed: {e}")
+            logger.error(
+                "Failed to mark timed-out cycle as failed",
+                extra={
+                    "cycle_id": None,
+                    "phase": "timeout_recovery",
+                    "error_class": type(e).__name__,
+                    "matter_slug": matter_slug,
+                },
+            )
         raise
 
 
@@ -163,7 +178,13 @@ async def _run_cycle_inner(
                     proposal_card_posted = True
             except Exception as e:
                 logger.error(
-                    "Phase 4 failed for cycle %s: %s", cycle.cycle_id, e,
+                    "Phase 4 failed",
+                    extra={
+                        "cycle_id": str(cycle.cycle_id),
+                        "phase": "propose",
+                        "error_class": type(e).__name__,
+                        "matter_slug": getattr(cycle, "matter_slug", None),
+                    },
                 )
                 cycle.status = "failed"
                 cycle.aborted_reason = f"phase4_error: {str(e)[:400]}"
@@ -172,8 +193,13 @@ async def _run_cycle_inner(
         cycle.status = "failed"
         cycle.aborted_reason = str(e)[:500]
         logger.error(
-            "Cortex cycle %s failed during phase=%s: %s",
-            cycle.cycle_id, cycle.current_phase, e,
+            "Cortex cycle failed",
+            extra={
+                "cycle_id": str(cycle.cycle_id),
+                "phase": cycle.current_phase,
+                "error_class": type(e).__name__,
+                "matter_slug": getattr(cycle, "matter_slug", None),
+            },
         )
     finally:
         # Phase 6 archive: skipped when Phase 4 successfully posted the
@@ -186,7 +212,37 @@ async def _run_cycle_inner(
             try:
                 await _phase6_archive(cycle)
             except Exception as e:
-                logger.error(f"Phase 6 archive itself failed for cycle {cycle.cycle_id}: {e}")
+                logger.error(
+                    "Phase 6 archive itself failed",
+                    extra={
+                        "cycle_id": str(cycle.cycle_id),
+                        "phase": "archive",
+                        "error_class": type(e).__name__,
+                        "matter_slug": getattr(cycle, "matter_slug", None),
+                    },
+                )
+                # CORTEX_ARCHIVE_FAILURE_ALERTING_1: persist `archive_failed`
+                # terminal state best-effort so cortex_stuck_cycle_sentinel
+                # Detector B can find it. If THIS write also fails, Detector A
+                # remains the safety net for cycles still in transient status.
+                try:
+                    from memory.store_back import SentinelStoreBack
+                    _store = SentinelStoreBack._get_global_instance()
+                    _conn = _store._get_conn()
+                    if _conn:
+                        try:
+                            _cur = _conn.cursor()
+                            _cur.execute(
+                                "UPDATE cortex_cycles SET status='archive_failed', "
+                                "completed_at=NOW() WHERE cycle_id=%s",
+                                (str(cycle.cycle_id),),
+                            )
+                            _conn.commit()
+                            _cur.close()
+                        finally:
+                            _store._put_conn(_conn)
+                except Exception:
+                    pass  # Detector A safety net
 
     if cycle_failed:
         # Re-raise the original failure so callers see it, even though the
@@ -357,7 +413,13 @@ async def _phase3_reason(cycle: CortexCycle) -> None:
         cycle.status = "proposed"  # 1C Phase 4 reads phase3c_result + flips to tier_b_pending
     except Exception as e:
         logger.error(
-            "Phase 3 failed for cycle %s: %s", cycle.cycle_id, e,
+            "Phase 3 failed",
+            extra={
+                "cycle_id": str(cycle.cycle_id),
+                "phase": "reason",
+                "error_class": type(e).__name__,
+                "matter_slug": getattr(cycle, "matter_slug", None),
+            },
         )
         cycle.status = "failed"
         cycle.aborted_reason = f"phase3_error: {str(e)[:400]}"
