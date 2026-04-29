@@ -93,11 +93,11 @@
 <header>
   <h1>Cortex Roadmap V3 — Any-Matter Sprint</h1>
   <div class="meta">
-    Director directive 2026-04-29 — speed Cortex up so it can be invoked on <strong>any matter</strong> for reasoning, analysis, synthesis. Notifications deferred to Wave 2. Supersedes V2 (Stage 2 V1 build/DRY_RUN). Integrates AI Head 1 App + AI Head 2 Terminal cross-review (5 adds accepted).
+    Director directive 2026-04-29 — speed Cortex up so it can be invoked on <strong>any matter</strong> for reasoning, analysis, synthesis. Notifications deferred to Wave 2. Supersedes V2 (Stage 2 V1 build/DRY_RUN). Integrates AI Head 1 App + AI Head 2 Terminal cross-review (5 adds accepted) + AI Head 2 Terminal Track-5 recommendation accepted (<code>hot.md</code> regen from Triaga). Scheduler singleton-lock SHIPPED + PRODUCTION-VERIFIED 2026-04-29 18:15Z.
   </div>
   <div class="progress-bar-wrap">
-    <div class="progress-fill" style="width: 55%"></div>
-    <div class="progress-label">55% — V1 LIVE on AO; Wave 1 in flight to Hagenauer + MO Vienna</div>
+    <div class="progress-fill" style="width: 65%"></div>
+    <div class="progress-label">65% — Foundation complete + Director ratifying Triaga → Wave 1 5-track sprint</div>
   </div>
   <div class="legend">
     <span><span class="dot dot-done"></span>Shipped</span>
@@ -148,11 +148,11 @@
   <div class="item done">
     <div class="icon">✓</div>
     <div>
-      <div class="label">Scheduler singleton-lock (Render Pro zero-downtime safe)</div>
-      <div class="desc">PR #84 — process-singleton via <code>pg_try_advisory_lock(8800100)</code> on dedicated Neon direct connection. Old container releases on SIGTERM; new acquires on boot. <code>POSTGRES_HOST_DIRECT</code> live on Render. Ends today's silent doubled side-effects (email_poll, clickup_poll, gold_audit_sentinel, ai_head_weekly_audit, daily_briefing).</div>
-      <div class="anchor">PR #84 f0f53e04 — merged 17:23Z, deploy dep-d7p3taq49v5s73efel70</div>
+      <div class="label">Scheduler singleton-lock (Render Pro zero-downtime safe) — PRODUCTION-VERIFIED</div>
+      <div class="desc">PR #84 — process-singleton via <code>pg_try_advisory_lock(8800100)</code> on dedicated Neon direct connection. Verified 2026-04-29 18:15Z over 18-min clean window: every job <code>distinct_anchors=1</code> (was 2× pre-merge), <code>pg_locks</code> shows exactly 1 row pid=23823, Cortex <code>dispatches_per_signal=1</code>. Survived 3-deploy stress test in 12 min — clean handoff every time. Ends today's silent doubled side-effects (email_poll, clickup_poll, gold_audit_sentinel, ai_head_weekly_audit, daily_briefing).</div>
+      <div class="anchor">PR #84 f0f53e04 merged 17:23Z · deploy dep-d7p3taq49v5s73efel70 live 17:43Z · mailbox COMPLETE 9e52025</div>
     </div>
-    <div class="badge done">DONE</div>
+    <div class="badge done">DONE ✓ VERIFIED</div>
   </div>
 
   <div class="item done">
@@ -167,15 +167,15 @@
 </div>
 
 <div class="position-marker">
-  <h3>WHERE WE ARE — 2026-04-29 17:30Z</h3>
-  AO matter Cortex V1 LIVE. Scheduler hardened. Foundation solid. Director's directive: speed up to "any matter usable" by tomorrow EOD. <strong>4 parallel tracks dispatched in Wave 1</strong> (independence matrix verified — no file overlap).
+  <h3>WHERE WE ARE — 2026-04-29 18:30Z</h3>
+  Scheduler singleton-lock SHIPPED + PRODUCTION-VERIFIED. AO matter Cortex V1 LIVE. Foundation solid. <strong>Director ratifying Triaga right now</strong> (2026-04-29-b1-brisen-outstanding-triage.html) — outputs feed Track 5 (<code>hot.md</code> regen) which is prerequisite for Tracks 1+2 to deliver actual day-1 value. Wave 1 expanded from 4 → <strong>5 parallel tracks</strong> (independence matrix re-verified).
   <br><br>
-  <span class="next"><strong>Next move →</strong></span> Director ratifies Wave 1 plan; AI Head A drafts 4 briefs via <code>/write-brief</code>; pushes 4 paste-blocks fired in parallel.
+  <span class="next"><strong>Next move →</strong></span> Director completes Triaga; AI Head A drafts 5 briefs via <code>/write-brief</code> (1 of which — Track 5 — depends on Triaga export); 5 paste-blocks fired in parallel.
 </div>
 
 <div class="stage">
-  <h2 class="stage-title">Wave 1 — 4 parallel tracks (any-matter manual Cortex)</h2>
-  <div class="stage-meta">Tomorrow EOD target. Independence matrix verified. AO live cycle is NOT a hard prerequisite — Tracks 1+2 ship the manual-invoke pathway parallel to auto-trigger; Tracks 3+4 are vault-only.</div>
+  <h2 class="stage-title">Wave 1 — 5 parallel tracks (any-matter manual Cortex)</h2>
+  <div class="stage-meta">Tomorrow EOD target. Independence matrix verified across 5 tracks. AO live cycle NOT a hard prerequisite — Tracks 1+2 ship the manual-invoke pathway parallel to auto-trigger; Tracks 3+4 are vault-only; Track 5 unblocks the live-policy filter that Tracks 1+2 query against.</div>
 
   <table class="matrix">
     <thead>
@@ -186,6 +186,7 @@
       <tr><td>2</td><td>B3 Terminal</td><td>Cost-gate scope expansion: AO-only → whitelist any matter with <code>cortex-config.md</code> present</td><td><code>triggers/cortex_pre_review_gate.py</code>, tests</td></tr>
       <tr><td>3</td><td>B2 App</td><td><code>hagenauer-rg7</code>: <code>cortex-config.md</code> + <code>gold.md</code> shell + <code>proposed-gold.md</code> shell + top-5 entity stubs + curated/ seed</td><td><code>baker-vault/wiki/matters/hagenauer-rg7/</code> + <code>baker-vault/wiki/people/</code></td></tr>
       <tr><td>4</td><td>AI Head 2 App</td><td><code>movie</code>: <code>cortex-config.md</code> + <code>gold.md</code> shell + <code>proposed-gold.md</code> shell + top-5 entity stubs + curated/ seed</td><td><code>baker-vault/wiki/matters/movie/</code> + <code>baker-vault/wiki/people/</code></td></tr>
+      <tr><td>5</td><td>B-code (B4 idle)</td><td><strong><code>hot.md</code> regeneration from Director-ratified Triaga export</strong> — pulls [status][when][importance][category] tags into <code>baker-vault/wiki/hot.md</code> via PR #66 GOLD workflow. Cheap (~30 min). Prerequisite for Tracks 1+2 day-1 value.</td><td><code>baker-vault/wiki/hot.md</code> (rewrite); tests for hot.md format validation</td></tr>
     </tbody>
   </table>
 
@@ -229,8 +230,47 @@
     <div class="badge flight">IN FLIGHT</div>
   </div>
 
+  <div class="item flight">
+    <div class="icon">⏳</div>
+    <div>
+      <div class="label">Track 5 — <code>hot.md</code> regeneration from Triaga export (NEW — AI Head 2 Terminal recommendation)</div>
+      <div class="desc">Director's <code>hot.md</code> is a LIVE policy file (verified by AI Head 2 Terminal grep): read on every signal triage at <code>kbl/steps/step1_triage.py:587</code> + every Step 5 Opus Gold synthesis at <code>kbl/prompts/step5_opus_system.txt:23-29</code>. Currently 11 days stale → poisoning every Cortex inference. Director ratifying Triaga RIGHT NOW (2026-04-29-b1-brisen-outstanding-triage.html); export feeds B-code rewrite of <code>hot.md</code> with current [status][when][importance][category] tags. PR #66 GOLD workflow. Without this, Tracks 1+2 ship a manual-invoke endpoint querying against an 11-day-stale priority cache → no day-1 value.</div>
+      <div class="anchor">brief: CORTEX_HOT_MD_REGEN_1 (drafting via /write-brief once Triaga export ready)</div>
+    </div>
+    <div class="badge flight">IN FLIGHT</div>
+  </div>
+
   <div class="callout">
     <strong>Why these 2 matters first (Director ratification):</strong> Hagenauer = active legal-dispute pattern (high-friction, evidence-heavy). MO Vienna = ongoing-asset-ops pattern (relationship-driven, daily signals). Different domains → diversifies the Cortex test surface; if both work, the architecture generalizes.
+  </div>
+
+  <div class="callout">
+    <strong>Why Track 5 must ship before Tracks 1+2 deliver value (AI Head 2 Terminal):</strong> 7 downstream Cortex/Sentinel uses of <code>hot.md</code> ratified priorities — (1) Step 1 elevation thresholds (Critical+ASAP → top, Dismissed → suppress, Completed → drop from priority cache); (2) Step 5 Gold voice framing (Active Deal vs Origination vs Legal risk); (3) per-matter <code>auto_trigger_thresholds</code> calibration (Brisen-wide, not hand-tuned); (4) cross-matter signal routing tiebreaker (Aukera→mo-vie or aukera based on importance); (5) Phase 4 propose-templates by category (Active Deal proposes execution moves; Origination proposes discovery moves; Legal risk proposes defense moves); (6) <code>daily_briefing</code> filter (top-N by Importance × WHEN proximity); (7) future shadow-agent entry context + audit snapshot (frozen Triaga = "this is what Director thought on 2026-04-29"). The Triaga isn't a substitute for <code>hot.md</code> — it's the input that regenerates it.
+  </div>
+</div>
+
+<div class="stage">
+  <h2 class="stage-title">Live policy layer — what <code>hot.md</code> does (verified by AI Head 2 Terminal grep)</h2>
+  <div class="stage-meta">Director's voice in machine form, read on every sensor event. The reason Track 5 is a Wave-1 prerequisite, not a wave-2 nice-to-have.</div>
+
+  <div class="item done">
+    <div class="icon">⚙</div>
+    <div>
+      <div class="label">Step 1 — Sensor-mesh triage filter</div>
+      <div class="desc"><code>kbl/steps/step1_triage.py:587</code> reads <code>hot.md</code> fresh on every signal triage. Step 1 ships [signal + slug glossary + <code>hot.md</code> + feedback ledger] to Gemma local model → triage score 0-100 + matter slug + classification (ELEVATE / FILE / ROUTE_TO_INBOX). Runs on every email, WhatsApp message, meeting transcript ingested. Live filter on the entire sensor mesh.</div>
+      <div class="anchor">verified: grep "hot.md" — kbl/steps/step1_triage.py:587</div>
+    </div>
+    <div class="badge done">LIVE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">⚙</div>
+    <div>
+      <div class="label">Step 5 — Opus Gold synthesis steering</div>
+      <div class="desc"><code>kbl/prompts/step5_opus_system.txt:23-29</code> Opus reads <code>hot.md</code> as steering context when drafting Gold synthesis. When a signal cites a <code>hot.md</code> matter, Opus acknowledges in the Gold body: "Director's current focus on hagenauer-rg7 elevated the triage score; this entry is filed accordingly."</div>
+      <div class="anchor">verified: grep "hot.md" — kbl/prompts/step5_opus_system.txt:23-29</div>
+    </div>
+    <div class="badge done">LIVE</div>
   </div>
 </div>
 
@@ -556,11 +596,11 @@
 </div>
 
 <div class="summary-bar">
-  <strong>What ships tomorrow EOD if Wave 1 fires now:</strong> Manual-invoke pathway live + cost-gate accepts any cortex-config'd matter + Hagenauer-RG7 + MO Vienna both have config + Director can ask "run Cortex on hagenauer-rg7 — what's our position on the Sähn final account?" via Slack DM, dashboard, or Scan. AO continues working as today.
+  <strong>What ships tomorrow EOD if Wave 1 fires now (5 tracks):</strong> Director-ratified <code>hot.md</code> live (Track 5 — sensor-mesh policy refreshed) + manual-invoke pathway (Track 1) + multi-matter cost-gate (Track 2) + Hagenauer-RG7 (Track 3) + MO Vienna (Track 4) seeded → Director asks "run Cortex on hagenauer-rg7 — what's our position on the Sähn final account?" via Slack DM, dashboard, or Scan, against fresh policy + freshly-loaded matter context. AO continues working as today. Bridge benefit: every email/WhatsApp/meeting signal across the entire sensor mesh now triages against current priorities, not 11-day-stale ones.
 </div>
 
 <footer>
-  Generated by AI Head A · Cortex Roadmap V3 · 2026-04-29 · supersedes <code>cortex-roadmap-stage2-v1.html</code> (V2). Source: integrated 4-track plan + AI Head 2 Terminal cross-review (5 adds accepted). Director ratification pending. Brisen Group internal.
+  Generated by AI Head A · Cortex Roadmap V3 (rev 2) · 2026-04-29 18:30Z · supersedes <code>cortex-roadmap-stage2-v1.html</code> (V2). Source: integrated 5-track plan = AI Head 1 App's 4-track sprint + AI Head 2 Terminal cross-review (5 adds accepted) + AI Head 2 Terminal's Track-5 recommendation (<code>hot.md</code> regen from Triaga, accepted). Scheduler singleton-lock production-verified 18:15Z. Director ratifying Triaga in parallel; full Wave-1 ratification pending. Brisen Group internal.
 </footer>
 </div>
 </body>
