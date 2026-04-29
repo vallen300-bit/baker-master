@@ -13,10 +13,13 @@ Coverage:
 6. stream_cycle_events emits started → phase_changed → terminal sequence
 7. stream_cycle_events emits terminal=failed when maybe_run_cycle raises
 8. stream_cycle_events emits terminal=timeout on asyncio.TimeoutError
+9. F-1 fix — _snapshot_cycle disambiguates concurrent taps via since_ts
+10. F-1 fix — stream_cycle_events isolates concurrent runs by sse_anchor
 """
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 from typing import Iterator
 from unittest.mock import MagicMock, patch, AsyncMock
@@ -199,7 +202,7 @@ async def test_stream_cycle_events_emits_full_sequence(monkeypatch):
     ]
     snap_iter = iter(snapshots)
 
-    def _fake_snapshot(*, matter_slug, triggered_by):
+    def _fake_snapshot(*, matter_slug, triggered_by, since_ts=None):
         try:
             return next(snap_iter)
         except StopIteration:
@@ -300,3 +303,277 @@ async def test_stream_cycle_events_terminal_timeout(monkeypatch):
 
     assert events[-1]["type"] == "terminal"
     assert events[-1]["status"] == "timeout"
+
+
+# ---------------------------------------------------------------------------
+# F-1 FIX (PR #88 AI Head B re-review)
+# Test 9 — _snapshot_cycle disambiguates concurrent same-trigger taps via
+# since_ts. The fake cursor inspects the executed SQL + params and serves
+# the appropriate "row" so we don't need a live PG instance to prove the
+# disambiguation logic works end-to-end.
+# ---------------------------------------------------------------------------
+
+
+class _DisambiguationCursor:
+    """Cursor stand-in that responds to _snapshot_cycle SQL by selecting
+    among 2 fake cycle rows based on the WHERE clause + ORDER BY.
+
+    Models two cortex_cycles rows for the same (matter_slug, triggered_by)
+    started 1s apart:
+        cycle_a started_at = T0
+        cycle_b started_at = T0 + 1s
+    """
+
+    T0 = datetime.datetime(2026, 4, 29, 12, 0, 0, tzinfo=datetime.timezone.utc)
+    CYCLE_A_ID = "aaaaaaaa-1111-2222-3333-444444444444"
+    CYCLE_B_ID = "bbbbbbbb-5555-6666-7777-888888888888"
+
+    def __init__(self):
+        self._last_sql = None
+        self._last_params = None
+        self._rows_to_serve: list = []
+
+    def execute(self, sql, params=None):
+        self._last_sql = sql
+        self._last_params = params
+
+        if "FROM cortex_cycles" in sql:
+            # _snapshot_cycle SQL — select cycle row based on filters
+            since_ts = None
+            ascending = "ORDER BY started_at ASC" in sql
+            if "AND started_at >= %s" in sql:
+                since_ts = params[2]
+
+            cycle_a = (self.CYCLE_A_ID, "in_flight", "load", self.T0)
+            cycle_b = (
+                self.CYCLE_B_ID,
+                "in_flight",
+                "sense",
+                self.T0 + datetime.timedelta(seconds=1),
+            )
+            candidates = [cycle_a, cycle_b]
+
+            if since_ts is not None:
+                candidates = [c for c in candidates if c[3] >= since_ts]
+
+            if not candidates:
+                self._rows_to_serve = [None]
+                return
+
+            if ascending:
+                candidates.sort(key=lambda r: r[3])
+            else:
+                candidates.sort(key=lambda r: r[3], reverse=True)
+
+            picked = candidates[0]
+            # Strip started_at (4th col) — query only selects 3 cols
+            self._rows_to_serve = [picked[:3]]
+        elif "FROM cortex_phase_outputs" in sql:
+            # phase_outputs_count query
+            self._rows_to_serve = [(7,)]
+        else:
+            self._rows_to_serve = [None]
+
+    def fetchone(self):
+        if not self._rows_to_serve:
+            return None
+        return self._rows_to_serve.pop(0)
+
+    def close(self):
+        pass
+
+
+class _DisambiguationConn:
+    def __init__(self):
+        self._cursor = _DisambiguationCursor()
+
+    def cursor(self):
+        return self._cursor
+
+    def rollback(self):
+        pass
+
+
+def test_snapshot_cycle_disambiguates_concurrent_taps(monkeypatch):
+    """F-1: with two cycles on same (matter, trigger) 1s apart:
+       - since_ts before both → returns oldest (cycle_a)
+       - since_ts between them → returns cycle_b (only candidate ≥ anchor)
+       - since_ts=None → backward-compat: returns latest by DESC (cycle_b)
+    """
+    from outputs.cortex_run_stream import _snapshot_cycle
+    import outputs.cortex_run_stream as mod
+
+    conn = _DisambiguationConn()
+    monkeypatch.setattr(mod, "_get_store", lambda: _FakeStore(conn))
+
+    T0 = _DisambiguationCursor.T0
+    A = _DisambiguationCursor.CYCLE_A_ID
+    B = _DisambiguationCursor.CYCLE_B_ID
+
+    # Anchor 1s before cycle_a → both cycles are eligible; ASC → oldest = cycle_a
+    snap_a = _snapshot_cycle(
+        matter_slug="oskolkov",
+        triggered_by="director_manual",
+        since_ts=T0 - datetime.timedelta(seconds=1),
+    )
+    assert snap_a is not None
+    assert snap_a["cycle_id"] == A
+    assert snap_a["current_phase"] == "load"
+
+    # Anchor 0.5s after cycle_a → cycle_a filtered out; only cycle_b matches
+    snap_b = _snapshot_cycle(
+        matter_slug="oskolkov",
+        triggered_by="director_manual",
+        since_ts=T0 + datetime.timedelta(milliseconds=500),
+    )
+    assert snap_b is not None
+    assert snap_b["cycle_id"] == B
+    assert snap_b["current_phase"] == "sense"
+
+    # Backward compat — since_ts=None → DESC → latest cycle (cycle_b)
+    snap_legacy = _snapshot_cycle(
+        matter_slug="oskolkov",
+        triggered_by="director_manual",
+        since_ts=None,
+    )
+    assert snap_legacy is not None
+    assert snap_legacy["cycle_id"] == B
+
+
+# ---------------------------------------------------------------------------
+# Test 10 — stream_cycle_events isolates concurrent runs via sse_anchor
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stream_cycle_events_concurrent_isolation(monkeypatch):
+    """F-1: two stream_cycle_events generators run concurrently. The fake
+    snapshot mirrors the disambiguation logic — given a since_ts, return
+    the oldest cycle that started ≥ that anchor. Each stream must see
+    ONLY its own cycle_id in phase_changed events, never the sibling's.
+    """
+    from outputs.cortex_run_stream import stream_cycle_events
+    import outputs.cortex_run_stream as mod
+
+    monkeypatch.setattr(mod, "POLL_INTERVAL_SECONDS", 0.005)
+    # Shrink the SSE anchor slack so the unit test can stage two
+    # concurrent streams without a 2s real-time wait. Production keeps
+    # 2s to absorb create_task → Phase 1 INSERT latency.
+    monkeypatch.setattr(mod, "SSE_ANCHOR_SLACK_SECONDS", 0.01)
+
+    # Cycle A is created when stream A starts; cycle B is created when
+    # stream B starts (anchored later). Each cycle has its own row in
+    # the fake DB; the snapshot helper picks based on since_ts.
+    cycle_rows = []  # list of (cycle_id, started_at, current_phase)
+
+    async def _fake_cycle_a(**_kw):
+        # Insert row "A" right after the test starts stream A
+        cycle_rows.append((
+            "cycle-A",
+            datetime.datetime.now(datetime.timezone.utc),
+            "sense",
+        ))
+        await asyncio.sleep(0.05)
+        # Bump phase
+        if cycle_rows:
+            old = cycle_rows[0]
+            cycle_rows[0] = (old[0], old[1], "load")
+        await asyncio.sleep(0.05)
+        result = _FakeCycleResult()
+        result.cycle_id = "cycle-A"
+        return result
+
+    async def _fake_cycle_b(**_kw):
+        cycle_rows.append((
+            "cycle-B",
+            datetime.datetime.now(datetime.timezone.utc),
+            "sense",
+        ))
+        await asyncio.sleep(0.05)
+        if len(cycle_rows) >= 2:
+            old = cycle_rows[1]
+            cycle_rows[1] = (old[0], old[1], "load")
+        await asyncio.sleep(0.05)
+        result = _FakeCycleResult()
+        result.cycle_id = "cycle-B"
+        return result
+
+    def _fake_snapshot(*, matter_slug, triggered_by, since_ts=None):
+        if not cycle_rows:
+            return None
+        if since_ts is None:
+            picked = max(cycle_rows, key=lambda r: r[1])
+        else:
+            candidates = [r for r in cycle_rows if r[1] >= since_ts]
+            if not candidates:
+                return None
+            picked = min(candidates, key=lambda r: r[1])
+        return {
+            "cycle_id": picked[0],
+            "status": "in_flight",
+            "current_phase": picked[2],
+            "phase_outputs_count": 1,
+        }
+
+    monkeypatch.setattr(mod, "_snapshot_cycle", _fake_snapshot)
+
+    async def _collect(matter, question, triggered_by, runner):
+        monkeypatch.setattr(
+            "orchestrator.cortex_runner.maybe_run_cycle", runner,
+        )
+        out = []
+        async for chunk in stream_cycle_events(
+            matter_slug=matter,
+            director_question=question,
+            triggered_by=triggered_by,
+        ):
+            out.append(json.loads(chunk.strip()[len("data: "):]))
+        return out
+
+    # Run stream A first; let it spawn cycle A. Then 0.05s later start
+    # stream B — its sse_anchor will be after cycle_A's started_at, so
+    # the disambiguation query MUST exclude cycle_A even though it's
+    # also a director_manual cycle on the same matter.
+    monkeypatch.setattr(
+        "orchestrator.cortex_runner.maybe_run_cycle", _fake_cycle_a,
+    )
+    task_a = asyncio.create_task(
+        _collect(
+            "oskolkov",
+            "stream A — first tap",
+            "director_manual",
+            _fake_cycle_a,
+        )
+    )
+
+    # Small gap so cycle_A's row lands BEFORE stream_B captures sse_anchor
+    await asyncio.sleep(0.02)
+
+    monkeypatch.setattr(
+        "orchestrator.cortex_runner.maybe_run_cycle", _fake_cycle_b,
+    )
+    task_b = asyncio.create_task(
+        _collect(
+            "oskolkov",
+            "stream B — second tap",
+            "director_manual",
+            _fake_cycle_b,
+        )
+    )
+
+    events_a, events_b = await asyncio.gather(task_a, task_b)
+
+    # Each stream's phase_changed events MUST reference only its own cycle_id
+    a_phase_cycle_ids = {
+        e.get("cycle_id") for e in events_a if e.get("type") == "phase_changed"
+    }
+    b_phase_cycle_ids = {
+        e.get("cycle_id") for e in events_b if e.get("type") == "phase_changed"
+    }
+
+    assert a_phase_cycle_ids == {"cycle-A"}, (
+        f"stream A leaked sibling cycle_ids: {a_phase_cycle_ids}"
+    )
+    assert b_phase_cycle_ids == {"cycle-B"}, (
+        f"stream B leaked sibling cycle_ids: {b_phase_cycle_ids}"
+    )

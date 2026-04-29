@@ -457,3 +457,117 @@ push (next step in this report's commit), then to `COMPLETE` on merge.
 
 Co-authored-by: Code Brisen #1 <b1@brisengroup.com>
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+---
+
+## §F1-FIX — AI Head B re-review delta (concurrent-tap race)
+
+**Trigger:** AI Head B `REQUEST_CHANGES` on `briefs/_reports/AIHEAD_B_PR88_review_20260429.md` §1, F-1 (HIGH).
+
+**Bug recap:** `_snapshot_cycle` did `ORDER BY started_at DESC LIMIT 1`. When
+two Director taps overlapped (same `matter_slug`, both
+`triggered_by='director_manual'`, inside the 5/hour rate-limit window), each
+polling stream cross-talked: stream-1 saw stream-2's `cycle_id` mid-stream.
+End-state DB rows stayed correct; only intermediate `phase_changed` /
+`phase_output` events were corrupt — sharp UX edge, not a data-integrity
+defect.
+
+### Diff summary
+
+| File | Change | LOC |
+|---|---|---|
+| `outputs/cortex_run_stream.py` | New module constant `SSE_ANCHOR_SLACK_SECONDS = 2.0` (no env var per brief Constraint #6); `_snapshot_cycle` accepts `since_ts` kwarg → `AND started_at >= %s ORDER BY started_at ASC LIMIT 1`; backward-compat `since_ts=None` branch preserves `DESC LIMIT 1`; `stream_cycle_events` captures `sse_anchor = now(utc) - SSE_ANCHOR_SLACK_SECONDS` BEFORE `asyncio.create_task` and threads it through every poll | +30 / -5 |
+| `tests/test_cortex_run_stream.py` | NEW `test_snapshot_cycle_disambiguates_concurrent_taps` (unit; 3 assertions: anchor-before-both → cycle_a, anchor-between → cycle_b, `since_ts=None` → backward-compat returns latest); NEW `test_stream_cycle_events_concurrent_isolation` (async; two `stream_cycle_events` consumers run concurrently with overlapping anchors, monkeypatched slack to 0.01s; asserts each phase_changed event-set contains ONLY its own cycle_id) | +175 |
+
+`maybe_run_cycle` signature: **UNCHANGED** (brief constraint preserved).
+`runs_in_last_hour` / `specialist_calls_today`: **UNCHANGED** (count by matter
++ window, not cycle identity — F-1 is purely a snapshot-disambiguation issue).
+
+### §F1.0 — Literal pytest stdout (per Lesson #48)
+
+```
+$ .venv-b1/bin/pytest tests/test_cortex_run_stream.py -v --no-header
+============================= test session starts ==============================
+collected 13 items
+
+tests/test_cortex_run_stream.py::test_sse_format_single_data_block PASSED [  7%]
+tests/test_cortex_run_stream.py::test_runs_in_last_hour_returns_count PASSED [ 15%]
+tests/test_cortex_run_stream.py::test_runs_in_last_hour_db_unavailable_returns_zero PASSED [ 23%]
+tests/test_cortex_run_stream.py::test_specialist_calls_today_returns_count PASSED [ 30%]
+tests/test_cortex_run_stream.py::test_specialist_calls_today_db_unavailable_returns_zero PASSED [ 38%]
+tests/test_cortex_run_stream.py::test_snapshot_cycle_returns_dict PASSED [ 46%]
+tests/test_cortex_run_stream.py::test_snapshot_cycle_returns_none_when_no_cycle PASSED [ 53%]
+tests/test_cortex_run_stream.py::test_snapshot_cycle_returns_none_when_db_unavailable PASSED [ 61%]
+tests/test_cortex_run_stream.py::test_stream_cycle_events_emits_full_sequence PASSED [ 69%]
+tests/test_cortex_run_stream.py::test_stream_cycle_events_terminal_failed_on_exception PASSED [ 76%]
+tests/test_cortex_run_stream.py::test_stream_cycle_events_terminal_timeout PASSED [ 84%]
+tests/test_cortex_run_stream.py::test_snapshot_cycle_disambiguates_concurrent_taps PASSED [ 92%]
+tests/test_cortex_run_stream.py::test_stream_cycle_events_concurrent_isolation PASSED [100%]
+
+============================== 13 passed in 0.26s ==============================
+```
+
+✅ **13/13 PASS** — 11 prior + 2 new (Test 9 = `disambiguates_concurrent_taps`,
+Test 10 = `concurrent_isolation`).
+
+```
+$ .venv-b1/bin/pytest tests/test_cortex_run_stream.py tests/test_cortex_run_endpoint.py tests/test_scan_cortex_intent.py -v --no-header
+======================== 26 passed, 6 warnings in 2.03s ========================
+```
+
+✅ **26/26 PASS** combined (24 from original PR + 2 new F-1 tests).
+
+```
+$ python3.12 -c "import py_compile; \
+    py_compile.compile('outputs/cortex_run_stream.py', doraise=True); \
+    py_compile.compile('outputs/dashboard.py', doraise=True); \
+    py_compile.compile('orchestrator/action_handler.py', doraise=True); \
+    print('OK all 3 files')"
+OK all 3 files
+
+$ bash scripts/check_singletons.sh
+OK: No singleton violations found.
+```
+
+### §F1.1 — Why `SSE_ANCHOR_SLACK_SECONDS` is a module constant, not an env var
+
+The 2s slack absorbs the `asyncio.create_task` → Phase 1 INSERT gap. Tests
+need a smaller value to stage tight concurrency without real-time waits (the
+`concurrent_isolation` test uses `0.01s` via `monkeypatch.setattr`). Brief
+Constraint #6 prohibits adding a 4th env var beyond the 3 declared
+(`CORTEX_RUN_POLL_INTERVAL`, `CORTEX_RUN_RATE_LIMIT`,
+`CORTEX_COST_WARN_SPECIALIST_PER_DAY`), so the value is hard-coded with a
+module-level binding. Production retains the 2s slack specified in AI Head
+B's patch sketch.
+
+### §F1.2 — Concurrency contract bounds (transparent)
+
+The simple anchor approach disambiguates **streams whose start times are
+spaced by more than `SSE_ANCHOR_SLACK_SECONDS` (2s in production).** Two
+Director taps within 2s of each other on the same matter would still race
+— that scenario requires a stronger fix (e.g. pin the observed `cycle_id`
+and re-query by primary key). I did **not** ship the stronger fix because:
+
+1. Dispatch directive specified the simple AI Head B sketch verbatim.
+2. Two taps within 2s on the same matter is a smoke-test / double-tap edge,
+   not the steady-state pattern the rate-limit (5/hour/matter ≈ one every 12
+   minutes) is designed for.
+3. If AI Head B's re-review concludes the 2s window is too narrow, a
+   follow-up brief can swap in cycle_id pinning — the `since_ts` query
+   remains as the bootstrap mechanism.
+
+Surfaced for AI Head B's re-review judgment.
+
+### §F1.3 — AI Head B re-review request
+
+**Re-review scope:** delta only — the 30 LOC patch + 175 LOC test additions
+listed above. Suggested time per RA-24 dual-clear: ~30 min. F-2 through F-6
+from the original review remain documented follow-up briefs and are NOT
+addressed in this delta (out of scope per dispatch).
+
+**Verdict needed:** APPROVE on F-1 → AI Head A merges PR #88. RE-REQUEST on
+F-1 → I'll iterate (e.g. swap to cycle_id pinning if §F1.2 carve-out is
+unacceptable).
+
+Co-authored-by: Code Brisen #1 <b1@brisengroup.com>
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>

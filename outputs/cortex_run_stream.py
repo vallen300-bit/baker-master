@@ -25,6 +25,7 @@ Lesson #40 cousin: brief named the wrong table):
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 import logging
 import os
@@ -39,6 +40,17 @@ RUN_RATE_LIMIT_PER_HOUR = int(os.environ.get("CORTEX_RUN_RATE_LIMIT", "5"))
 COST_WARN_SPECIALIST_PER_DAY = int(
     os.environ.get("CORTEX_COST_WARN_SPECIALIST_PER_DAY", "30")
 )
+
+# F-1 FIX (PR #88 AI Head B re-review): wall-clock slack subtracted from
+# `now()` when ``stream_cycle_events`` captures its cycle anchor. Absorbs
+# the small gap between ``asyncio.create_task`` scheduling and Phase 1's
+# ``INSERT INTO cortex_cycles`` commit (Phase 1 is local logic + one
+# INSERT, well under 2s in practice). Module-level so tests can
+# monkeypatch a smaller value to exercise tight concurrent-isolation
+# scenarios without a real-time wait. NOT exposed as an env var per
+# brief Key Constraint #6 ("DO NOT add a new env var beyond the 3
+# declared").
+SSE_ANCHOR_SLACK_SECONDS = 2.0
 
 # Surfaces this module accepts as "Director-manual" runs for rate-limit
 # accounting. Matches the values the run endpoint and Scan-intent branch
@@ -132,12 +144,33 @@ def specialist_calls_today(matter_slug: str) -> int:
         store._put_conn(conn)
 
 
-def _snapshot_cycle(*, matter_slug: str, triggered_by: str) -> Optional[dict]:
-    """Return the latest cycle row for (matter_slug, triggered_by) + phase-output count.
+def _snapshot_cycle(
+    *,
+    matter_slug: str,
+    triggered_by: str,
+    since_ts: Optional[datetime.datetime] = None,
+) -> Optional[dict]:
+    """Return one cycle row for (matter_slug, triggered_by) + phase-output count.
 
     Used by ``stream_cycle_events`` to detect phase transitions and new
     phase-output rows to emit as SSE events. Returns None on DB error or
     when no cycle row exists yet (Phase 1 hasn't committed).
+
+    F-1 FIX (PR #88 AI Head B re-review): when ``since_ts`` is provided,
+    filter to cycles started at or after that wall-clock anchor and pick
+    the OLDEST such cycle (``ORDER BY started_at ASC LIMIT 1``). This
+    disambiguates concurrent same-trigger taps within the rate-limit
+    window — each ``stream_cycle_events`` consumer captures its own
+    ``sse_anchor`` BEFORE spawning the cycle task, so the oldest cycle
+    started after that anchor is its own cycle (not a sibling Director
+    tap that overlapped). When ``since_ts`` is None, backward-compat
+    behavior is preserved (latest by DESC) — used by tests and any
+    future caller that doesn't need disambiguation.
+
+    Note: ``current_phase='act'`` is CHECK-allowed in the DB schema but
+    no production code path writes it (Phase 5 jumps directly from
+    'propose'/'reason' to 'archive'). SSE never observes 'act' as a
+    phase value.
     """
     store = _get_store()
     conn = store._get_conn()
@@ -145,13 +178,23 @@ def _snapshot_cycle(*, matter_slug: str, triggered_by: str) -> Optional[dict]:
         return None
     try:
         cur = conn.cursor()
-        cur.execute(
-            "SELECT cycle_id, status, current_phase "
-            "FROM cortex_cycles "
-            "WHERE matter_slug = %s AND triggered_by = %s "
-            "ORDER BY started_at DESC LIMIT 1",
-            (matter_slug, triggered_by),
-        )
+        if since_ts is not None:
+            cur.execute(
+                "SELECT cycle_id, status, current_phase "
+                "FROM cortex_cycles "
+                "WHERE matter_slug = %s AND triggered_by = %s "
+                "AND started_at >= %s "
+                "ORDER BY started_at ASC LIMIT 1",
+                (matter_slug, triggered_by, since_ts),
+            )
+        else:
+            cur.execute(
+                "SELECT cycle_id, status, current_phase "
+                "FROM cortex_cycles "
+                "WHERE matter_slug = %s AND triggered_by = %s "
+                "ORDER BY started_at DESC LIMIT 1",
+                (matter_slug, triggered_by),
+            )
         row = cur.fetchone()
         if not row:
             cur.close()
@@ -205,6 +248,19 @@ async def stream_cycle_events(
     """
     from orchestrator.cortex_runner import maybe_run_cycle
 
+    # F-1 FIX (PR #88 AI Head B re-review): capture wall-clock anchor BEFORE
+    # spawning the cycle task. The 2s slack absorbs the small interval
+    # between asyncio.create_task scheduling and Phase 1's INSERT INTO
+    # cortex_cycles commit (Phase 1 is local logic + one INSERT, well
+    # under 2s in practice). Polling then asks _snapshot_cycle for the
+    # OLDEST cycle started at-or-after this anchor — that is THIS
+    # consumer's cycle, never a concurrent sibling tap on the same
+    # (matter_slug, triggered_by).
+    sse_anchor = (
+        datetime.datetime.now(datetime.timezone.utc)
+        - datetime.timedelta(seconds=SSE_ANCHOR_SLACK_SECONDS)
+    )
+
     yield _sse({
         "type": "started",
         "matter_slug": matter_slug,
@@ -229,7 +285,11 @@ async def stream_cycle_events(
             # Consumer disconnected — leave the cycle task running.
             raise
 
-        snap = _snapshot_cycle(matter_slug=matter_slug, triggered_by=triggered_by)
+        snap = _snapshot_cycle(
+            matter_slug=matter_slug,
+            triggered_by=triggered_by,
+            since_ts=sse_anchor,
+        )
         if not snap:
             continue
 
