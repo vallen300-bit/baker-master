@@ -28,6 +28,7 @@ import json
 import logging
 import os
 import time
+from pathlib import Path
 from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,77 @@ DIRECTOR_DM_CHANNEL = "D0AFY28N030"  # canonical (matches triggers/audit_sentine
 PUBLIC_BASE_URL = os.environ.get(
     "BAKER_PUBLIC_BASE_URL", "https://baker-master.onrender.com"
 )
+
+
+try:
+    DEFAULT_COST_ESTIMATE_DOLLARS = float(
+        os.environ.get("CORTEX_DEFAULT_COST_DOLLARS", "4.0")
+    )
+except ValueError:
+    DEFAULT_COST_ESTIMATE_DOLLARS = 4.0
+
+
+def _vault_root() -> Optional[Path]:
+    """Return Path(BAKER_VAULT_PATH) or None if unset/invalid.
+
+    On Render the env var points at the baker-vault-mirror checkout
+    (e.g. /opt/render/project/src/baker-vault-mirror). On B-code worktrees,
+    /Users/dimitry/baker-vault. Tests set it to a tmp path.
+    """
+    raw = os.environ.get("BAKER_VAULT_PATH", "").strip()
+    if not raw:
+        return None
+    p = Path(raw)
+    return p if p.is_dir() else None
+
+
+def matter_has_cortex_config(matter_slug: str) -> bool:
+    """True iff <vault>/wiki/matters/<matter_slug>/cortex-config.md exists.
+
+    Single source of truth for 'is this matter Cortex-enabled'. Used by the
+    pre-review gate; future: also by /api/cortex/run rate-limit upstream.
+    """
+    if not matter_slug:
+        return False
+    root = _vault_root()
+    if not root:
+        return False
+    cfg = root / "wiki" / "matters" / matter_slug / "cortex-config.md"
+    return cfg.is_file()
+
+
+def _read_cost_estimate(matter_slug: str) -> float:
+    """Read 'cost_estimate_dollars' from cortex-config.md frontmatter, else default.
+
+    Lightweight YAML-free parse — line-based on '---'-delimited frontmatter.
+    Avoids pulling in yaml just for one optional float.
+    """
+    root = _vault_root()
+    if not root:
+        return DEFAULT_COST_ESTIMATE_DOLLARS
+    cfg = root / "wiki" / "matters" / matter_slug / "cortex-config.md"
+    if not cfg.is_file():
+        return DEFAULT_COST_ESTIMATE_DOLLARS
+    try:
+        text = cfg.read_text(encoding="utf-8", errors="replace")
+        if not text.startswith("---"):
+            return DEFAULT_COST_ESTIMATE_DOLLARS
+        end = text.find("\n---", 3)
+        if end < 0:
+            return DEFAULT_COST_ESTIMATE_DOLLARS
+        fm = text[3:end]
+        for line in fm.splitlines():
+            line = line.strip()
+            if line.startswith("cost_estimate_dollars:"):
+                val = line.split(":", 1)[1].strip()
+                try:
+                    return float(val)
+                except ValueError:
+                    return DEFAULT_COST_ESTIMATE_DOLLARS
+        return DEFAULT_COST_ESTIMATE_DOLLARS
+    except Exception as e:
+        logger.error("read_cost_estimate failed matter=%s: %s", matter_slug, e)
+        return DEFAULT_COST_ESTIMATE_DOLLARS
 
 
 def _secret() -> Optional[str]:
@@ -226,14 +298,26 @@ def post_gate(*, signal_id: int, matter_slug: str) -> bool:
     """Post the pre-review gate Slack DM. Returns True if posted.
 
     Idempotency: returns False (no-op) if already_decided(signal_id) is set.
-    Returns False if gate disabled (secret missing/short) — caller decides
-    whether to fall through to legacy direct-fire.
+    Returns False if matter has no cortex-config.md (Phase 2 has nothing to
+    load → no point asking Director to approve a spend with no per-matter
+    brain). Returns False if gate disabled (secret missing/short) — caller
+    decides whether to fall through to legacy direct-fire.
 
     Logging: signal_id + matter_slug at info-level OK; preview / signal_text
-    NEVER info-logged (sensitive matter content).
+    NEVER info-logged (sensitive matter content); frontmatter content beyond
+    cost is NEVER logged (potential matter intel).
     """
     if already_decided(signal_id):
         logger.info("gate skipped — signal_id=%s already decided", signal_id)
+        return False
+
+    # CORTEX_MULTI_MATTER_GATE_1: whitelist by config presence. Single source
+    # of truth = cortex-config.md existence under <vault>/wiki/matters/<slug>/.
+    if not matter_has_cortex_config(matter_slug):
+        logger.info(
+            "gate skipped — matter=%s has no cortex-config.md (signal_id=%s)",
+            matter_slug, signal_id,
+        )
         return False
 
     if _secret() is None:
@@ -243,6 +327,7 @@ def post_gate(*, signal_id: int, matter_slug: str) -> bool:
         )
         return False
 
+    cost = _read_cost_estimate(matter_slug)
     expires_at = int(time.time()) + GATE_TTL_SECONDS
     approve_tok = sign_token(signal_id=signal_id, action="approve", expires_at=expires_at)
     skip_tok = sign_token(signal_id=signal_id, action="skip", expires_at=expires_at)
@@ -258,9 +343,9 @@ def post_gate(*, signal_id: int, matter_slug: str) -> bool:
     preview = _signal_preview(signal_id)
     text = (
         f"📨 *New {matter_slug.upper()} signal — review with Cortex?*\n"
-        f"Approx cost: $4 if approved.\n"
+        f"Approx cost: ${cost:.2f} if approved.\n"
         f"\n*Preview:*\n>>> {preview}\n"
-        f"\n<{approve_url}|✅ Yes, review (~$4)>   |   "
+        f"\n<{approve_url}|✅ Yes, review (~${cost:.2f})>   |   "
         f"<{skip_url}|❌ Skip>"
     )
 
