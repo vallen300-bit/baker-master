@@ -765,6 +765,27 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info("Skipped: matter_config_drift_weekly (CORTEX_DRIFT_AUDIT_ENABLED=false)")
 
+    # CORTEX_ARCHIVE_FAILURE_ALERTING_1: every 5 min stuck-cycle + archive-failure
+    # sentinel. Detects (A) cortex_cycles in machine-transient status past 15-min
+    # threshold (in_flight / awaiting_reason / proposed) and (B) terminal
+    # status='archive_failed' from Phase 6 self-fail path. Posts Director DM with
+    # baker_actions dedup so one alert per (cycle_id × failure-mode). Env gate
+    # ``CORTEX_STUCK_CYCLE_SENTINEL_ENABLED`` (default ``true``).
+    _cortex_stuck_enabled = _os.environ.get("CORTEX_STUCK_CYCLE_SENTINEL_ENABLED", "true").lower()
+    if _cortex_stuck_enabled not in ("false", "0", "no", "off"):
+        from triggers.cortex_stuck_cycle_sentinel import run_cortex_stuck_cycle_sentinel
+        scheduler.add_job(
+            run_cortex_stuck_cycle_sentinel,
+            IntervalTrigger(minutes=5),
+            id="cortex_stuck_cycle_sentinel",
+            name="Cortex stuck-cycle + archive-failure sentinel (every 5 min)",
+            coalesce=True, max_instances=1, replace_existing=True,
+            misfire_grace_time=300,
+        )
+        logger.info("Registered: cortex_stuck_cycle_sentinel (every 5 min)")
+    else:
+        logger.info("Skipped: cortex_stuck_cycle_sentinel (CORTEX_STUCK_CYCLE_SENTINEL_ENABLED=false)")
+
     # BRIEF_MOVIE_AM_RETROFIT_1 D5: weekly MOVIE AM vault lint.
     # Sunday 06:05 UTC — offset 5 min from ao_pm_lint to avoid vault-mirror
     # contention. Env gate ``MOVIE_AM_LINT_ENABLED`` (default ``true``)
