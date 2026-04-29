@@ -1,54 +1,35 @@
-# CODE_1 — DISPATCH (SCHEDULER_SINGLETON_HARDEN_1)
+# CODE_1 — PR-OPEN (SCHEDULER_SINGLETON_HARDEN_1)
 
-**Status:** PENDING — assigned 2026-04-29T~17:30Z
-**Brief:** `briefs/BRIEF_SCHEDULER_SINGLETON_HARDEN_1.md`
-**Builder:** B1
-**Trigger class:** MEDIUM (touches FastAPI lifespan; B1 situational-review pre-merge required)
-**Dispatched by:** AI Head A (sole orchestrator)
-**Director authorization:** "Brief is unblocked. Hand that to AI Head 1 App." (2026-04-29 ~17:00Z)
+**Status:** PR-OPEN awaiting AI Head A/B situational-review (MEDIUM trigger class)
+**PR:** https://github.com/vallen300-bit/baker-master/pull/84
+**Branch:** `b1/scheduler-singleton-harden-1`
+**Commit:** `133a852`
+**Ship report:** `briefs/_reports/B1_scheduler_singleton_harden_20260430.md`
+**Drafted:** 2026-04-29
 
-## Scope reminder (read brief for full detail)
+## What shipped
 
-- Singleton-lock the BackgroundScheduler across processes via `pg_try_advisory_lock` on a DEDICATED non-pooled (Neon direct) connection held for process lifetime.
-- Required because Render Pro zero-downtime deploys = 2-3 min OLD+NEW overlap. Bridge advisory lock saved `kbl_bridge_tick`; other 2x-firing jobs (email_poll, clickup_poll, gold_audit_sentinel, ai_head_weekly_audit, daily_briefing, cortex_stuck_cycle_sentinel) silently doubled for 6+ days.
-- 4 fixes:
-  1. Singleton lock module + start_scheduler integration + 30s lock-poll retry thread
-  2. `_watchdog_cooldown` rate-limit bug fix (variable misused as threshold)
-  3. Live-PG singleton-enforcement tests + watchdog cooldown unit test
-  4. Held-connection liveness probe via `_scheduler_heartbeat` (Neon auto-suspend safeguard)
+1. `triggers/scheduler_lease.py` (NEW) — process-singleton lock via `pg_try_advisory_lock(8800100)` on Neon-direct connection
+2. `start_scheduler` / `stop_scheduler` / `restart_scheduler` integrate lock acquire/release; `restart_scheduler` now `wait=True`
+3. `_watchdog_cooldown` rate-limit bug fixed in `outputs/dashboard.py`
+4. `_scheduler_heartbeat` probes held connection for Neon-auto-suspend liveness
 
-## Hard rails
+## Tests
 
-- MUST use `config.postgres.direct_dsn_params` for the lock connection — pgbouncer pooler is unsafe for session-level locks (today's pool-poisoning RCA at `memory/feedback_mcp_pgbouncer_pool_poisoning.md`).
-- MUST keep `held_conn` alive for process lifetime; do NOT pass back to any pool.
-- MUST NOT call `pg_try_advisory_xact_lock` (transaction-scoped — wrong primitive).
-- MUST NOT touch: `kbl/bridge/alerts_to_signal.py`, `triggers/cortex_pipeline.py`, `migrations/*.sql`, `start.sh`, `_register_jobs()` job set, the `> 720` heartbeat threshold.
-- Render env var `POSTGRES_HOST_DIRECT` set via MCP merge mode ONLY (today's 80-var wipe at `memory/feedback_render_envvar_paginated_put.md`). NEVER raw PUT.
+- 4 pass, 3 live-PG skip (no `TEST_DATABASE_URL` locally; CI auto-provisions Neon ephemeral)
+- 44 adjacent tests pass — no regression
+- `scripts/check_singletons.sh` clean
 
-## Output
+## Director action required (post-merge, NOT in PR)
 
-Standard PR + ship report at `briefs/_reports/B1_scheduler_singleton_harden_20260430.md` with §0 literal `pytest` stdout per Lesson #48 (NOT "by inspection").
+Set Render env-var `POSTGRES_HOST_DIRECT` via MCP merge mode (drop `-pooler` from current `POSTGRES_HOST`). Failure-mode degrades to today's state with loud ERROR log — no new regression.
 
-## Test plan (Lesson #48 literal stdout required)
+## Post-deploy verification (AI Head)
 
-- `pytest tests/test_scheduler_singleton.py -v` — full output in §0
-- `pytest tests/test_watchdog_cooldown.py -v` — full output in §0
-- Post-deploy verification: SQL #1 from brief Verification SQL section — every job `distinct_anchors = 1` over a 15-min window
+- Verification SQL #1 from report §7: every job `distinct_anchors = 1` over 15-min window
+- Verification SQL #2: `pg_locks` shows 1 row for `objid=8800100`
+- Verification SQL #3: `cortex_pipeline.maybe_dispatch` still 1× per signal
 
-## Pass criteria
+## Mailbox hygiene
 
-- All 8 Quality Checkpoints from brief satisfied
-- Verification SQL #1: every job `distinct_anchors = 1` over 15-min window post-deploy
-- Verification SQL #2: `pg_locks` shows exactly 1 row for `objid=8800100`
-- No regression: `kbl_bridge_tick` consumer cadence unchanged, `cortex_pipeline.maybe_dispatch` still fires once per signal
-
-## Mailbox hygiene (RATIFIED 2026-04-24 §3)
-
-- On PR merge: overwrite this file with `COMPLETE` + PR URL + post-deploy verification
-
-## Co-Authored-By
-
-```
-Co-authored-by: Code Brisen #1 <b1@brisengroup.com>
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
-```
+On merge: overwrite this file with `COMPLETE` + post-deploy verification status.
