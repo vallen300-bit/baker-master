@@ -1,121 +1,107 @@
 ---
-status: IN_PROGRESS
-brief: briefs/BRIEF_CORTEX_SPECIALIST_TIMEOUT_TUNABLE_1.md
-trigger_class: LOW
-dispatched_at: 2026-04-29T00:55:00Z
+status: OPEN
+brief: briefs/BRIEF_CORTEX_PHASE5_STATUS_RECONCILE_1.md
+trigger_class: HIGH
+dispatched_at: 2026-04-29T~10:00Z
 dispatched_by: ai-head-a
-director_authorization: "we need to allocate much more time for specialist answer, say 2 min ? or 3 min ? see if it works"
-predecessor_state: "Real AO cycle fc382469 inside Render hit 300s outer cap. Phase 3a OK (19s); Phase 3b sales specialist 60s × 3 = 180s timeout. Specialist timeout too short for rich prompts."
-goal: "Make SPECIALIST_TIMEOUT_S env-tunable via CORTEX_SPECIALIST_TIMEOUT_S; bump default 60→180 (3 min)."
-b1_review_required: false
-b1_review_reason: "LOW trigger class — config knob change, no auth/API/migration/financial path"
+director_authorization: "B" (Director ratified Path B 2026-04-29 morning post-reject-test that exposed the defect on cycle 7dc3201b)
+predecessor_state: "Cycle 7dc3201b reject completed end-to-end via manual SQL flip + forged-from-Mac Slack request. Production button path STILL broken on every new cycle: Phase 4 lands at tier_b_pending, Phase 5 expects proposed. Schema CHECK for *ing transient statuses fixed live but no migration file checked in."
+goal: "Phase 5 handlers accept BOTH 'proposed' AND 'tier_b_pending' as valid pre-button state. Pin the *ing transient status CHECK in a permanent migration. Capture Render env-var paginated-PUT regression as feedback memory."
+scope_summary:
+  - "MOD orchestrator/cortex_phase5_act.py — _cas_lock_cycle multi-from + 4 call sites"
+  - "MOD memory/store_back.py — _ensure_cortex_cycles_table CHECK includes 15 status values"
+  - "NEW migrations/20260429_cortex_cycles_add_transient_statuses.sql"
+  - "NEW memory/feedback_render_envvar_paginated_put.md"
+  - "MOD memory/MEMORY.md — append 1 index entry"
+files_modified:
+  - orchestrator/cortex_phase5_act.py
+  - memory/store_back.py
+  - migrations/20260429_cortex_cycles_add_transient_statuses.sql (NEW)
+  - memory/feedback_render_envvar_paginated_put.md (NEW)
+  - memory/MEMORY.md
+files_not_to_touch:
+  - triggers/slack_interactivity.py
+  - triggers/cortex_stuck_cycle_sentinel.py
+  - All Phase 1/2/3/4 code
+b1_review_required: true
+b1_review_reason: "RA-24 trigger fires: DB migration + cross-capability state writes (Phase 5 state machine touches Gold-write dispatch path)"
 builder: b3
-reviewer: ai-head-a (solo review acceptable per RA-24 narrowing)
-ai_head_review: structural + py_compile + test PASS
-claimed_at: 2026-04-29T00:56:00Z
-claimed_by: b3
-last_heartbeat: 2026-04-29T00:56:00Z
+reviewer: b1
+ai_head_review: "/security-review + structural"
+claimed_at: null
+claimed_by: null
+last_heartbeat: null
 blocker_question: null
-ship_report: briefs/_reports/B3_specialist_timeout_tunable_20260429.md
+ship_report: briefs/_reports/B3_cortex_phase5_status_reconcile_20260429.md
 autopoll_eligible: false
 ---
 
-# CODE_3_PENDING — B3: CORTEX_SPECIALIST_TIMEOUT_TUNABLE_1 — 2026-04-29
+# CODE_3_PENDING — B3: CORTEX_PHASE5_STATUS_RECONCILE_1 — 2026-04-29
 
 **Dispatcher:** AI Head A (sole orchestrator)
-**Working dir:** `~/bm-b3`
-**Trigger class:** LOW (config knob, A solo review)
+**Working dir:** `~/bm-b3/01_build`
+**Trigger class:** HIGH (B1 review required pre-merge per RA-24 — DB migration + cross-cap state writes)
 
 ## Read full brief
 
-`briefs/BRIEF_CORTEX_SPECIALIST_TIMEOUT_TUNABLE_1.md` — full spec.
+`briefs/BRIEF_CORTEX_PHASE5_STATUS_RECONCILE_1.md` — complete spec, 3 bundled fixes, exact migration SQL, 2+ new tests required.
+
+## Why bundled
+
+Three fixes from today's Director session, all rooted in the same incident chain:
+1. **Phase 4/5 status mismatch** — proven blocker on every future AO cycle
+2. **Transient `*ing` statuses missing from CHECK** — fixed live by Director session, needs permanent migration
+3. **Render env-var paginated-PUT regression** — needs feedback memory so it doesn't repeat
+
+All small, all related, one PR.
 
 ## Execution
 
 ```bash
-cd ~/bm-b3
+cd ~/bm-b3/01_build
 git checkout main && git pull -q
-git checkout -b cortex-specialist-timeout-tunable-1
+git checkout -b cortex-phase5-status-reconcile-1
 
-# Implement per brief
-# - Edit orchestrator/cortex_phase3_invoker.py line 33: env-tunable + default 180
-# - Create tests/test_cortex_specialist_timeout_tunable.py with the env override test
-# - Verify no other module imports SPECIALIST_TIMEOUT_S directly:
-grep -rn "SPECIALIST_TIMEOUT_S" --include="*.py"
+cat briefs/BRIEF_CORTEX_PHASE5_STATUS_RECONCILE_1.md | less
 
-# Syntax check
-python3 -c "import py_compile; py_compile.compile('orchestrator/cortex_phase3_invoker.py', doraise=True)"
+# Implement per brief — 5 files (2 mod, 3 new)
+
+# Syntax checks
+python3 -c "import py_compile; py_compile.compile('orchestrator/cortex_phase5_act.py', doraise=True)"
+python3 -c "import py_compile; py_compile.compile('memory/store_back.py', doraise=True)"
 
 # Tests must PASS literally
-pytest tests/test_cortex_specialist_timeout_tunable.py tests/test_cortex_runner_phase3.py -v
+pytest tests/test_cortex_phase5_act.py tests/test_cortex_phase5_idempotency.py -v
+pytest tests/test_cortex_runner_phase126.py tests/test_cortex_pre_review_gate.py tests/test_cortex_slack_interactivity.py
 
-# Commit + push
-git add orchestrator/cortex_phase3_invoker.py tests/test_cortex_specialist_timeout_tunable.py briefs/BRIEF_CORTEX_SPECIALIST_TIMEOUT_TUNABLE_1.md briefs/_tasks/CODE_3_PENDING.md
-git commit -m "feat(cortex): SPECIALIST_TIMEOUT_S env-tunable + default 60→180s
-
-Real AO cycle fc382469 hit 300s outer cap inside Render — Phase 3b sales
-specialist exhausted 60s × 3 retry budget on rich Director question. Opus
-on heavy reasoning + tool calls genuinely needs 60-180s; the 60s cap was
-too aggressive for production prompts.
-
-- New env: CORTEX_SPECIALIST_TIMEOUT_S (default 180, was hardcoded 60)
-- Single test for env-override behavior
-- No retry logic / cycle cap changes in this PR
-
-Brief: briefs/BRIEF_CORTEX_SPECIALIST_TIMEOUT_TUNABLE_1.md
-Trigger class: LOW.
-
-Co-authored-by: Code Brisen #3 <b3@brisengroup.com>
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
-
-git push -u origin cortex-specialist-timeout-tunable-1
-gh pr create \
-  --title "feat(cortex): SPECIALIST_TIMEOUT_S env-tunable + default 60→180s" \
-  --body "Per BRIEF_CORTEX_SPECIALIST_TIMEOUT_TUNABLE_1. LOW trigger class.
-
-## Why
-Real AO cycle inside Render still hit 300s outer cap. Phase 3a clean (19s) but Phase 3b sales specialist timed out at 60s × 3 = 180s. Opus needs more time for heavy reasoning. Director picked 3 min.
-
-## What
-- SPECIALIST_TIMEOUT_S now env-tunable via CORTEX_SPECIALIST_TIMEOUT_S
-- Default bumped 60→180s
-- 1 test confirms env override works
-
-## Tests
-- tests/test_cortex_specialist_timeout_tunable.py — PASSES literally
-- tests/test_cortex_runner_phase3.py regression — PASSES literally
-
-## Reviewers
-- AI Head A solo (LOW trigger class — RA-24 narrowing applies)
-"
+# Commit + PR (standard pattern)
 ```
 
 ## Pass criteria
 
-- New test PASSES literally
-- Phase 3 regression suite PASSES literally
-- py_compile clean
-- PR opened
-- Only 2 listed files modified
+- 2+ new tests PASS literally
+- Phase 5 + idempotency + runner_phase126 + pre_review_gate + slack_interactivity regression PASS literally
+- py_compile clean on both modified .py files
+- Migration SQL parses cleanly
+- PR opened, B1 + A tagged
 
 ## STOP criteria
 
 - Tests fail → STOP, surface
-- Phase 3 regression breaks → STOP, surface
-- grep finds another module importing SPECIALIST_TIMEOUT_S → STOP, surface (need to update that too)
+- `_cas_lock_cycle` accepts states outside `proposed`+`tier_b_pending` → STOP
+- Migration runs but `\d cortex_cycles` shows mismatched CHECK → STOP
+- store_back bootstrap CHECK doesn't match migration CHECK exactly → STOP
+- Files outside the 5-file scope modified → STOP
 
 ## Output
 
-`briefs/_reports/B3_specialist_timeout_tunable_20260429.md` with PR URL + literal test stdout.
+`briefs/_reports/B3_cortex_phase5_status_reconcile_20260429.md` — PR URL + literal test stdout + py_compile output.
 
 ## After merge — A executes
 
-1. Render env vars per-key PUT:
-   - `CORTEX_SPECIALIST_TIMEOUT_S=180`
-   - `CORTEX_CYCLE_TIMEOUT_SECONDS=900`
-2. Redeploy
-3. Refire AO Baden-Baden question via `/api/cortex/trigger`
-4. Surface result
+1. /security-review (Lesson #52)
+2. Verify `pg_get_constraintdef('cortex_cycles_status_check')` matches new CHECK on prod DB
+3. Director-side smoke deferred — next REAL AO cycle naturally exercises the path
 
 ## Co-Authored-By
 
