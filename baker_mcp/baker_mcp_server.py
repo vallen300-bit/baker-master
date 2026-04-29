@@ -84,15 +84,31 @@ def _get_conn_params() -> dict:
 
 
 def _query(sql: str, params: tuple = None, limit: int = 50) -> list[dict]:
-    """Execute a read-only query. Returns list of dicts."""
+    """Execute a read-only query. Returns list of dicts.
+
+    Read-only enforcement happens at the SQL-parse level in _dispatch
+    (forbidden keyword list). We deliberately do NOT call
+    `set_session(readonly=True)` here — Neon's pgbouncer transaction-mode
+    pool does not reset session state by default, so a SET issued on one
+    backend connection leaks to subsequent unrelated callers and forces
+    the entire app into read-only mode (RCA 2026-04-29).
+    """
     conn = psycopg2.connect(**_get_conn_params())
-    conn.set_session(readonly=True, autocommit=True)
+    conn.autocommit = True
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, params)
             rows = cur.fetchmany(limit)
             return [dict(r) for r in rows]
     finally:
+        # Best-effort: reset any session GUCs we might have inherited from a
+        # poisoned pooler backend (e.g. default_transaction_read_only=on
+        # leaked from a pre-fix instance) before returning the connection.
+        try:
+            with conn.cursor() as c:
+                c.execute("DISCARD ALL")
+        except Exception:
+            pass
         conn.close()
 
 
