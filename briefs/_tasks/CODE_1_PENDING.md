@@ -1,63 +1,76 @@
-# CODE_1 — COMPLETE (SCHEDULER_SINGLETON_HARDEN_1)
+# CODE_1 — DISPATCH (CORTEX_MANUAL_INVOKE_1)
 
-**Status:** COMPLETE — PR #84 merged + deployed + production-verified
-**PR:** https://github.com/vallen300-bit/baker-master/pull/84
-**Branch:** `b1/scheduler-singleton-harden-1` (deleted post-merge)
-**Merge commit:** `f0f53e04` (2026-04-29T17:23:53Z, squash)
-**Deploy:** `dep-d7p3taq49v5s73efel70` live 17:43:21Z
-**Ship report:** `briefs/_reports/B1_scheduler_singleton_harden_20260430.md`
+**Status:** PENDING — B1 build
+**Brief:** `briefs/BRIEF_CORTEX_MANUAL_INVOKE_1.md`
+**From:** AI Head A (cross-lane assist drafted by B1-prior-session per AI Head A request, 2026-04-29)
+**Wave:** 1 / Track 1 (V3 rev 4 roadmap)
+**Trigger class:** HIGH (external API + auth + cost-bearing trigger → RA-24 review required)
 
-## Pre-merge reviews — both APPROVE
+**Prior CODE_1 task** SCHEDULER_SINGLETON_HARDEN_1 (PR #84) merged + production-verified 2026-04-29T18:15Z. Mailbox overwrite per §3 hygiene; ship report preserved at `briefs/_reports/B1_scheduler_singleton_harden_20260430.md`.
 
-- **AI Head A `/security-review`** (Lesson #52 mandatory): zero HIGH/MEDIUM findings. Parameterized advisory-lock SQL, module-scoped held connection (no pool poisoning), no credential leak in error paths, graceful fallback on `POSTGRES_HOST_DIRECT` unset.
-- **B3 situational review** (`8d15d40`): APPROVE, all 10 specific concerns clean. One MEDIUM operational flag — `POSTGRES_HOST_DIRECT` required pre-merge — resolved at 17:35Z (Tier B action log entry; Render env-var set via per-key PUT, total var count 53→54).
+## Scope (TL;DR)
 
-## Production verification — ALL PASS (2026-04-29 18:15Z)
+`outputs/dashboard.py` + new helper module + intent-classifier extension:
+1. NEW `outputs/cortex_run_stream.py` — SSE helpers + rate-limit + cost-warn
+2. `POST /api/cortex/run` — streams Phase 1-6 events as SSE; spawns `maybe_run_cycle` in background
+3. `/api/scan` branch — route `cortex_run_action` intent to streaming endpoint
+4. Intent classifier — add `cortex_run_action` shape: `{type, matter_slug, question}`
+5. Rate limit: **5 runs/hour/matter** (HTTP 429 over)
+6. Cost guardrail: **30 specialist invocations/day/matter** → Slack DM warning (observability only)
+7. 8 new tests (`tests/test_cortex_run_endpoint.py`)
 
-Window: 17:57Z onward (5min post-deploy-chain drain + 18min clean observation; no concurrent deploy).
+## Working dir
 
-### SQL #1 — every job `distinct_anchors=1` (singleton enforcement)
+`~/bm-b1`
 
-| job_id | fires/18min | distinct_anchors | anchor (sub-second) |
-|---|---|---|---|
-| kbl_bridge_tick | 18 (60s) | **1** | 38.434904 |
-| kbl_pipeline_tick | 9 (120s) | **1** | 38.434731 |
-| doc_pipeline_drain | 9 (120s) | **1** | 38.400493 |
-| scheduler_heartbeat | 4 (300s) | **1** | 38.434341 |
-| email_poll | 4 (300s) | **1** | 38.306594 |
-| slack_poll | 4 | **1** | 38.334492 |
-| vault_sync_tick | 4 | **1** | 38.440306 |
-| cortex_stuck_cycle_sentinel | 4 | **1** | 38.439574 |
-| memory_watchdog | 4 | **1** | 38.434516 |
-| expire_browser_actions | 4 | **1** | 38.433919 |
-| clickup_poll | 3 | **1** | 8.311840 |
-| fireflies_scan / evening_push_digest / calendar_prep | 1 each | **1** each | various |
-
-**Pre-PR-#84 baseline = 2× per cadence. Post-merge = exactly 1×. Fix confirmed end-to-end.**
-
-### SQL #2 — `pg_locks` shows exactly 1 row for `objid=8800100`
-
-```
-locktype: advisory | classid: 0 | objid: 8800100 | granted: True | pid: 23823
+```bash
+cd ~/bm-b1 && git checkout main && git pull -q
+cat briefs/BRIEF_CORTEX_MANUAL_INVOKE_1.md
 ```
 
-Lock visible + held by single backend.
+## Order of work
 
-### SQL #3 — `cortex_pipeline.maybe_dispatch` still 1× per signal (no Cortex regression)
+1. Read brief end-to-end
+2. Baseline: `pytest tests/test_cortex_action_endpoint.py tests/test_cortex_runner_phase126.py -v` (current PASS)
+3. Implement `outputs/cortex_run_stream.py`
+4. Add endpoint + Pydantic model + Scan branch in `outputs/dashboard.py`
+5. Extend intent classifier (likely `kbl/anthropic_helper.py` — verify via grep)
+6. Add 8 tests; verify PASS literal
+7. Regression: full cortex test suite PASS
+8. `bash scripts/check_singletons.sh` clean
+9. `python3 -c "import py_compile; py_compile.compile('outputs/dashboard.py', doraise=True)"` + same for new file
+10. Push to `b1/cortex-manual-invoke-1` branch + PR
 
-`dispatches_per_signal = 1` for every cycle in last 24h (cycles 6afd444c + 9b525a25 — both AO matter, both 1×). Cortex cost-gate atomic-claim (`record_decision`) continues to dedup as designed.
+## Pass criteria
 
-## Deploy chain stress-test (incidental)
+- `/api/cortex/run` returns `text/event-stream` with ≥3 SSE chunks for AO matter
+- 8/8 new tests PASS literal (no "by inspection" — Lesson #48)
+- Rate limit returns 429 on 6th run/hour for same matter
+- Cost-warn fires Slack DM at 30 specialists/day; cycle still proceeds
+- Existing `/api/cortex/trigger` unchanged (regression-clean)
+- `req.director_question` not info-logged anywhere new (grep diff)
 
-Singleton lock survived 3 back-to-back deploys in 12 min (commits `f0f53e0` PR #84 → `e541abd` V3 roadmap → `1273093` V3 parked items). Each deploy = NEW container's lock-acquire returns None → spawn lock-poll thread → OLD container drains + dies → lock auto-releases → NEW acquires within 30s → starts scheduler. Steady-state achieved post-chain-settle. Real-world proof of Render-Pro zero-downtime overlap handling.
+## Lane rule
 
-## Mailbox hygiene
+- **Out of scope:** `triggers/cortex_pre_review_gate.py` (Brief 2 / Track 2 / B3 owns it — do not race)
+- **Out of scope:** `orchestrator/cortex_runner.py` signature, timeouts, error semantics
+- **Out of scope:** Frontend / static — no UI work
 
-Per ratified 2026-04-24 §3 — overwritten to COMPLETE with PR URL + post-deploy verification.
+## Ship report target
 
-## Side observation surfaced (parked, not blocker)
+`briefs/_reports/B1_cortex_manual_invoke_1_<YYYYMMDD>.md` — include all 8 QC outputs + post-deploy SSE smoke curl output + Scan smoke transcript ("run cortex on oskolkov" → SSE chunks visible) + grep evidence that `director_question` is NOT info-logged.
 
-B3 surfaced during review: pre-existing lock-key collision at `orchestrator/financial_detector.py:76` + `orchestrator/initiative_engine.py:630` — both use `pg_try_advisory_xact_lock(900300)`. One silently no-ops when the other holds. Out of scope for PR #84. Parked as `ADVISORY_LOCK_KEY_AUDIT_1` in V3 roadmap Wave 2.
+## Review path (Tier A — HIGH)
+
+PR opens → AI Head A `/security-review` + structural + B-code peer review (B3 or B2 depending on availability) → Tier A merge on dual clear.
+
+**Note on builder/reviewer concentration:** AI Head A dispatch assigns B1 as builder. If AI Head A judges the B1-builder ↔ B1-was-original-drafter concentration unacceptable, the reassignment option is to swap builder to B2 and have B1 do formal review of B2's PR.
+
+## Coordination with parallel tracks
+
+- **Track 2 (B3) — CORTEX_MULTI_MATTER_GATE_1:** independent file scope (`triggers/cortex_pre_review_gate.py` only); zero overlap. Both can ship concurrently.
+- **Tracks 3+4 (B2 App / AI Head 2 App) — `cortex-config.md` seeds:** baker-vault repo, no overlap.
+- **Track 5 (idle B-code) — `hot.md` regen:** baker-vault repo, no overlap. Track 5 ship before Track 1+2 deploy gives day-1 value.
 
 ## Co-Authored-By
 

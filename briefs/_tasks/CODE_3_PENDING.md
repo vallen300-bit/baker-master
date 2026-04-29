@@ -1,32 +1,65 @@
-# CODE_3 — COMPLETE (SITUATIONAL_REVIEW_PR84_SCHEDULER_SINGLETON)
+# CODE_3 — DISPATCH (CORTEX_MULTI_MATTER_GATE_1)
 
-**Status:** COMPLETE — 2026-04-29T17:21Z
-**Builder:** B3
-**Verdict:** APPROVE
-**Report:** `briefs/_reports/B3_pr84_situational_review_20260429.md`
-**GitHub review:** posted as `COMMENTED` on PR #84 (2026-04-29T17:21:19Z) — `gh pr review --approve` rejected by GitHub (same-account-as-PR-author rule); §0 verdict in the comment body is APPROVE-equivalent per dispatch protocol.
+**Status:** PENDING — B3 build
+**Brief:** `briefs/BRIEF_CORTEX_MULTI_MATTER_GATE_1.md`
+**From:** AI Head A (cross-lane assist drafted by B1 per AI Head A request, 2026-04-29)
+**Wave:** 1 / Track 2 (V3 rev 4 roadmap)
+**Trigger class:** HIGH (cost-bearing gate change → RA-24 review required)
 
-## Summary
+**Prior CODE_3 task** PR #84 situational review (APPROVE, 2026-04-29T17:21Z) shipped — PR #84 merged + production-verified. Mailbox overwrite per §3 hygiene; review report preserved at `briefs/_reports/B3_pr84_situational_review_20260429.md`.
 
-All 10 dispatch concerns clean against `origin/b1/scheduler-singleton-harden-1` head `133a852`:
+## Scope (TL;DR)
 
-| # | Concern | Status |
-|---|---|---|
-| 1 | `_held_conn` never enters any pool | clean |
-| 2 | Lock uses `direct_dsn_params` (not pooled) | clean |
-| 3 | Session-variant `pg_try_advisory_lock` (not xact) | clean |
-| 4 | `autocommit = True` on held conn | clean |
-| 5 | Retry thread daemon + idempotent + exit reachable | clean |
-| 6 | HOST_DIRECT-unset failure mode | **MEDIUM operational flag (§2)** — code matches brief Step 1C but contradicts brief's Render-env-var paragraph; deployment ordering must be honored |
-| 7 | No new schema / migration / `slugs.yml` | clean |
-| 8 | Heartbeat probe doesn't raise out | clean (early-return matches brief Step 4) |
-| 9 | `SCHEDULER_LOCK_KEY = 8800100` collision check | clean |
-| 10 | Test cleanup (`release_singleton_lock` first + `try/finally`) | clean (better than brief sketch) |
+`triggers/cortex_pre_review_gate.py`:
+1. Add `matter_has_cortex_config(matter_slug)` — checks `BAKER_VAULT_PATH/wiki/matters/<slug>/cortex-config.md`
+2. Add `_read_cost_estimate(matter_slug)` — line-based frontmatter parse for `cost_estimate_dollars` (default `$4`)
+3. `post_gate()` early-returns False when no config; Slack DM cost reflects frontmatter
+4. 7 new tests (extend `tests/test_cortex_pre_review_gate.py` from 10 → 17)
+5. Verify `triggers/cortex_pipeline.py` no-config path is safe (per builder judgment — see brief §File 2)
 
-## Action for AI Head A
+## Working dir
 
-- Confirm `POSTGRES_HOST_DIRECT` is set on Render via MCP merge mode **before** merge (per brief §"Render env var (Director action)"). If unset, the scheduler will not run at all post-deploy until the env lands and the next deploy completes. See report §2.
-- Pre-existing collision: `orchestrator/financial_detector.py:76` and `orchestrator/initiative_engine.py:630` both use `pg_try_advisory_xact_lock(900300)`. Surfaced incidentally during concern-9 grep. **Out of scope for PR #84** — flag for follow-up brief if deemed actionable.
+`~/bm-b3`
+
+```bash
+cd ~/bm-b3 && git checkout main && git pull -q
+cat briefs/BRIEF_CORTEX_MULTI_MATTER_GATE_1.md
+```
+
+## Order of work
+
+1. Read brief end-to-end
+2. Baseline: `pytest tests/test_cortex_pre_review_gate.py -v` (10/10 PASS pre-change)
+3. Implement helpers + `post_gate` diff
+4. Add 7 tests; verify 17/17 PASS literal
+5. `bash scripts/check_singletons.sh` clean
+6. Regression: `pytest tests/test_cortex_pipeline.py tests/test_alerts_to_signal_cortex_dispatch.py -v` PASS
+7. py_compile clean
+8. Push to `b3/cortex-multi-matter-gate-1` branch + PR
+
+## Pass criteria
+
+- 17/17 gate tests PASS literal (Test 10 unfurl=False still green)
+- HMAC + idempotency + record_decision contracts unchanged
+- AO matter still gates (config exists); hagenauer-rg7 / kitzbuhel-six-senses signals would log-skip until Tracks 3/4 land their configs
+
+## Lane rule
+
+- **Out of scope:** `outputs/dashboard.py` (Brief 1 / Track 1 / B1 owns it — do not race)
+- **Out of scope:** `orchestrator/cortex_runner.py`, `kbl/bridge/alerts_to_signal.py`
+
+## Ship report target
+
+`briefs/_reports/B3_cortex_multi_matter_gate_1_<YYYYMMDD>.md` — include all 6 QC outputs + `_secret`/`already_decided`/`record_decision` contract-unchanged confirmation + `triggers/cortex_pipeline.py` review note (modified or no-modification rationale).
+
+## Review path (Tier A — HIGH)
+
+PR opens → B1 formal section-by-section review → AI Head A `/security-review` + structural → Tier A auto-merge on dual clear.
+
+## Coordination with parallel tracks
+
+- **Track 1 (B1) — CORTEX_MANUAL_INVOKE_1:** independent file scope (`outputs/dashboard.py` + new module); zero overlap. Both can ship concurrently.
+- **Tracks 3+4 (B2 App / AI Head 2 App) — `cortex-config.md` seeds:** baker-vault repo. After Tracks 3/4 land configs for `hagenauer-rg7` / `nvidia-corinthia`, the new gate whitelist will accept them automatically.
 
 ## Co-Authored-By
 
