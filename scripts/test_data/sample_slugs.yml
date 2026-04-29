@@ -1,0 +1,29 @@
+# Synthetic slugs.yml fixture for regen_hot_md tests.
+version: 13
+updated_at: 2026-04-29
+
+matters:
+  - slug: hagenauer-rg7
+    status: active
+    description: "RG7 final-account dispute, Baden bei Wien"
+    aliases: [hagenauer, rg7]
+
+  - slug: ao
+    status: active
+    description: "Andrey Oskolkov — principal investor"
+    aliases: [oskolkov, andrey]
+
+  - slug: aukera
+    status: active
+    description: "Aukera senior MOV lender"
+    aliases: [aukera-debt]
+
+  - slug: mo-vie-am
+    status: active
+    description: "Mandarin Oriental Vienna asset management"
+    aliases: ["mo-vie", movie]
+
+  - slug: brisen-lp
+    status: active
+    description: "Brisen LP — EPI Bond investor vehicle"
+    aliases: [brisen, "epi bond"]
