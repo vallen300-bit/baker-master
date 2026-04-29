@@ -2,170 +2,120 @@
 
 @.claude/how-to/INDEX.md
 
-Brisen Group's institutional intelligence — not Director's assistant but the
-system that carries Brisen matters end-to-end. Per-matter Cortex cycles sense
-signals, analyze via invoked domain specialists (legal / finance / tax /
-game-theory), synthesize across raw data + curated knowledge, propose decisions,
-and execute on Director approval. Director ratifies; Baker carries.
-Self-learning per matter; adversarial-aware.
-
-**Sentinel** = AI system. **Baker** = reasoning + action layer.
-**CEO Cockpit** = dashboard at baker-master.onrender.com.
-Repo: github.com/vallen300-bit/baker-master.
+**Sentinel** = AI system. **Baker** = reasoning layer (Dimitry Vallen's AI Chief of Staff). **CEO Cockpit** = dashboard at baker-master.onrender.com.
 
 ## Stack
-FastAPI (port 8080), Python 3.11+, PostgreSQL (Neon), Qdrant Cloud (Voyage AI
-voyage-3, 1024d), Claude Opus via Anthropic API, vanilla JS frontend, Render
-auto-deploys from `main`. Auth: `X-Baker-Key` header; CORS via `ALLOWED_ORIGINS`.
+FastAPI (port 8080), Python 3.11+, PostgreSQL (Neon), Qdrant Cloud (Voyage AI voyage-3, 1024d), Claude claude-opus-4-6 via Anthropic API, Vanilla JS frontend, Render (auto-deploys from main). Repo: github.com/vallen300-bit/baker-master.
 
-## Operating model (current — supersedes BAKER_OPERATING_MODEL_v2 / "two hats")
-Per Director directive 2026-04-28T07:00Z + `_ops/processes/ai-head-autonomy-charter.md` (ratified 2026-04-22, promoted 2026-04-28):
-- **AI Head A** (`aihead1` terminal, `~/Desktop/baker-code`) — sole orchestrator: dispatches briefs, reviews PRs, executes merges, runs recoveries. Autonomous within Cortex Design (charter §3); consults Director only on §4 prerogatives.
-- **AI Head B** (`aihead2` terminal, same dir, separate Code instance) — cross-lane review + AUTOPOLL lane + Mon 09:30 UTC `gold_audit_sentinel` watch.
-- **Code Brisen build pool** — `b1` / `b2` / `b3` / `b4` (each its own clone at `~/bm-b{N}`); `b5` dormant. Worktree map: `Desktop/baker-code/00_WORKTREES.md`.
-- **Director** — final authority. Ratifies Cortex Design changes; ignores tactical execution.
-- **RA retired** 2026-04-28T07:00Z. RA's prior role was ideation / synthesis — that work now happens via direct Director ↔ AI Head conversation. AI Head A was already the orchestrator.
-- B-code briefs land at `briefs/_tasks/CODE_<N>_PENDING.md`; coordination protocol: `_ops/processes/b-code-dispatch-coordination.md`.
+### Matter slug registry
+Canonical matter slugs live in `baker-vault/slugs.yml` (separate repo). Edit
+there via PR — changes propagate to validator, eval runner, and seed-hint
+script at next process start. Schema + loader API in `kbl/slug_registry.py`.
+Consumers: `scripts/validate_eval_labels.py`, `scripts/run_kbl_eval.py`,
+`scripts/build_eval_seed.py`. Env var `BAKER_VAULT_PATH` must point at the
+vault checkout. 19 canonical slugs @ version 1.
 
-## Workflow
-- Tests first — reproduce the bug with a test, then make it pass.
-- Surgical edits — don't touch code orthogonal to the task.
-- Autonomous bug fixes OK — diagnose from evidence, just fix it.
-- After corrections, append to `tasks/lessons.md`.
-- Briefs from AI Head A/B arrive as paste-block (problem → constraints → acceptance criteria).
-- Commit + push only when authorized.
+## Your Role — Two Hats
+1. **Code** — implement, debug, test, push. Syntax-check before committing.
+2. **PL** — scope work, sequence batches, think architecturally.
 
-## Commands
-- Syntax check: `python3 -c "import py_compile; py_compile.compile('file.py', doraise=True)"`
-- All tests: `pytest`
-- Single test: `pytest tests/test_<name>.py -v`
-- Live-PG tests: require `TEST_DATABASE_URL` env (else auto-skip); CI auto-provisions
-  ephemeral Neon branch via `NEON_API_KEY` + `NEON_PROJECT_ID`
-- Local dev (auto-reload, port 8080): `python outputs/dashboard.py`
-- Production start (Render): `bash start.sh`
-- Install deps: `pip install -r requirements.txt`
-- Singleton-pattern CI guard: `bash scripts/check_singletons.sh`
-- Slug-registry validation: `python scripts/validate_eval_labels.py`
-- Deploy: push to `main` → Render auto-deploys (no manual step)
+## Four Principles
+1. **Always think before coding.** Avoid wrong assumptions, hidden confusion, missing trade-offs.
+2. **Simplicity first.** Avoid overcomplications, bloated abstractions.
+3. **Surgical changes.** Orthogonal edits — avoid touching code you shouldn't.
+4. **Goal-driven execution.** Tests first. Verifiable success criteria. Instead of "fix the bug" → write a test that reproduces it, then make it pass.
 
-No lint/typecheck config in repo. No GitHub Actions; Render is single deploy path.
+## Rules
+- **Plan mode** for non-trivial tasks (3+ steps). If something fails, STOP and re-plan.
+- **Demand elegance** — challenge your own approach. Skip for one-liners.
+- **Subagents** — use frequently to keep main context clean. Parallel when independent.
+- **Autonomous bugs** — just fix them. Diagnose from evidence, zero context switching from user.
+- **Self-improvement** — after corrections, update `tasks/lessons.md`.
+- **Verify before done** — test the actual flow. Syntax check: `python3 -c "import py_compile; py_compile.compile('file.py', doraise=True)"`
+- **Never force push** to main. Never store secrets in code. Fault-tolerant writes (try/except).
+- **Git identity:** Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
-## Architecture — Cortex 3T migration in progress
-
-**Today (2026-04-29):** Cortex Stage 2 V1 partially shipped — `CORTEX_3T_FORMALIZE_1A` + `1B` + `1C` merged 2026-04-28; `CORTEX_PHASE5_IDEMPOTENCY_1` (PR #75) merged 2026-04-28T17:24Z. DRY_RUN pending. First live AO-matter cycle = next milestone (per `_ops/processes/cortex-stage2-v1-tracker.md`).
-
-**Canonical RA-23 spec:** `_ops/ideas/2026-04-27-cortex-architecture-final-locked.md`
-(ratified 2026-04-27; will promote to `_ops/processes/cortex-architecture-final.md` via AI Head A Tier B).
-**Stage 1 brief:** `_ops/ideas/2026-04-27-cortex-3t-formalize-spec.md` (RA-22).
-
-### Legacy (still running, being migrated)
-- **18 active capability sets** out of 24 total (2 client_pm + 14 domain + 2 meta active; 6 domain inactive). DB-verified 2026-04-29 via `SELECT capability_type, active, COUNT(*) FROM capability_sets GROUP BY 1,2`. Accessed via fast/delegate path (`classify_intent()` → capability match → SSE stream).
-- Matter-PM absorption into Cortex per-matter configs **ratified 2026-04-27 (RA-23)**; execution lands when Stage 2 V1 first AO-matter cycle clears DRY_RUN. Until then: AO PM + MOVIE AM remain queryable via dashboard "Ask AO PM" / "Ask MOVIE AM" buttons.
-
-### Target (Cortex 3T — RA-23 ratified)
-- **Cortex Core:** 6-phase cycle (sense → load → reason → propose → act → archive)
-  in `orchestrator/cortex_runner.py`.
-- **Per-matter configs** absorb matter-PM brains; live in `baker-vault/wiki/matters/<slug>/cortex-config.md`.
-- **Invoked domain capabilities** (legal / finance / tax-CH/AT/DE / game-theory) called from Phase 3b.
-  Cap **5/cycle**, **60s** per specialist (2 retries), **5-min** absolute cycle timeout.
-- **Curated knowledge** per matter in `wiki/matters/<slug>/curated/<topic>-<date>.md`
-  (post-reasoned outputs, NOT raw data). Postgres mirror via `cortex_phase_outputs`.
-- **Entity registry** in `wiki/people/<slug>.md` + `wiki/entities/<slug>.md`.
-- **Activation:** Cortex auto-trigger (Phase 3a meta-reasoning) OR Director manual (Scan/dashboard).
-  No third path. No cron / peer / sentinel-direct triggering.
-- **Cortex meta-knowledge:** `wiki/_cortex/{director-gold-global,cross-matter-patterns,brisen-style}.md`.
-
-### Signal flow
-WhatsApp + email + meeting transcripts → ingestion classifies → `signal_queue`
-(with `matter_slug` + 0-3 `related_matters`) → Cortex Phase 1 (sense).
-WhatsApp pipeline: WAHA webhook → classify → route → `_wa_reply()`. 6h backfill.
-
-### Read/write split (Cortex era)
-- Sentinels write raw data tables; never wiki.
-- Cortex Phase 3 specialists write `cortex_phase_outputs` + curated markdown; read raw.
-- Director GOLD writes `proposed-gold.md` per matter via PR #66 workflow.
-- AI Head Tier B writes per-matter `cortex-config.md`.
-- All Baker writes audited to `baker_actions` table.
-
-## Where stuff lives
-- `outputs/dashboard.py` → FastAPI app entry (~11.7k lines — be aware before edits)
-- `orchestrator/` → Cortex runner + capability framework (`cortex_runner.py`, `capability_router.py`, etc.)
-- `kbl/` → Knowledge Base Layer: slug registry, retrievers, RAG pipeline, Anthropic client
-- `models/` → data models (deadlines, contacts, etc.)
-- `triggers/` → ingestion triggers (Gmail polling, WAHA webhooks)
-- `tools/` → MCP tools (24 tools per `.claude/docs/baker-mcp-api.md`)
-- `migrations/` → DB schema migrations
-- `tests/` → pytest suite
-- `briefs/` → AI Head specs; `_tasks/CODE_<N>_PENDING.md` = active dispatch mailbox; `_reports/` = B-code completion reports
-- `tasks/lessons.md` → corrections-turned-rules; append on every mistake
-- `_ops/` → skills, processes, agents, ratified-but-not-yet-promoted ideas (vault-side)
-
-## Hard rules — project-specific (don't do)
-- **Never write to ClickUp outside BAKER Space (901510186446).** Kill switch: `BAKER_CLICKUP_READONLY=true`. Max 10 writes/cycle.
-- **Never auto-send external email.** Internal auto-send OK for routine ops; external always drafts first.
-- **Never instantiate `SentinelRetriever()` or `SentinelStoreBack()` directly** — use `_get_global_instance()`. CI guard: `bash scripts/check_singletons.sh`.
-- **Never write content directly to `MEMORY.md`** — it's an index. Detail goes in typed files under `memory/`.
-- **Never modify `baker-vault/slugs.yml` from this repo** — separate-repo PR only.
-- **Never delete or rewrite `tasks/lessons.md` entries** — append-only audit trail.
-- **Never edit `outputs/dashboard.py` carelessly** — re-run relevant tests after every change.
-- **Never bypass `/security-review` skill on Tier-A merges** (Lesson #52).
-- **All DB/API calls wrapped in try/except** — fault-tolerant or it doesn't ship.
-- **IMPORTANT:** Compile-clean ≠ done. Exercise the actual flow before reporting (Lesson #8 — `tasks/lessons.md`).
-
-## Out of scope (don't touch)
-- `baker-vault/slugs.yml` — separate-repo PR only.
-- `tasks/lessons.md` existing entries — append-only.
-- `briefs/_reports/` — B-code completion artifacts; AI Head writes these.
-- `_ops/` (vault-side, when present) — Director + Mac Mini commit per CHANDA Inv 9.
-- `migrations/` already-applied files — never rewrite; create new migration to amend.
-- `outputs/dashboard.py` line numbers in commit messages — file is volatile, line refs rot fast.
-
-## Memory — two layers, do not conflate
-- **Claude Code auto-memory** (this repo, this CLI session): `~/.claude/projects/<slug>/memory/`.
-  Hot cache = this CLAUDE.md. Index = `MEMORY.md` (first 200 lines load every session).
-  Deep storage = typed files in `memory/` (load on demand).
-- **Cortex curated knowledge** (per-matter, persistent across cycles):
-  `baker-vault/wiki/matters/<slug>/curated/`. Written by capability invocations + Director GOLD.
-  Different system, different layer — see RA-23 spec.
-
-## Compaction directive
-When compacting this session, ALWAYS preserve:
-1. Director-ratified decisions made this session (paste-block exports, ratifications, locked drafts).
-2. Open paste-blocks pending Director response (Cowork Triagas, RA reports, AI Head briefs).
-3. Current PR / commit state (branch, last commit hash, in-flight PR numbers).
-4. Active matter context if discussed (matter slug, current move, pending deadline).
-5. Any in-progress migration / restructure draft state (file paths, locked sections).
-Drop: routine code reads, intermediate file dumps, resolved error traces, casual chat.
-
-## Matter slug registry
-Canonical slugs in `baker-vault/slugs.yml` (separate repo, edit via PR).
-Loader: `kbl/slug_registry.py`. Consumers: `scripts/validate_eval_labels.py`,
-`scripts/run_kbl_eval.py`, `scripts/build_eval_seed.py`.
-Env: `BAKER_VAULT_PATH` must point at vault checkout. 34 canonical slugs @ version 12 (updated 2026-04-26; verify via `grep -c "^  - slug:" baker-vault/slugs.yml`).
-
-## Session start
+## Orient at Session Start
 1. `git pull && git log --oneline -10`
-2. Read this file.
-3. Every ~5 sessions: 5-min memory audit — scan `memory/` for stale dates,
-   resolved items, prune silently, flag ambiguous.
-4. Ask the Director what to work on.
+2. Read this file
+3. Scan key files if needed (see `CLAUDE_REFERENCE.md` for full file index)
+4. Every ~5 sessions: quick memory audit — scan `memory/` files for stale dates, resolved items, contradictions with current code. Prune silently, flag ambiguous items.
+5. Ask the Director what to work on
 
-## End of session
-1. Update this file (move completed items, note blockers).
-2. Commit + push when authorized.
-3. Note blockers for next session in `memory/`.
+## Critical IDs
+| Item | ID |
+|------|-----|
+| BAKER Space (write-allowed) | 901510186446 |
+| Handoff Notes list | 901521426367 |
+| BAKER Workspace | 24385290 |
+| All 6 Workspaces (read) | 2652545, 24368967, 24382372, 24382764, 24385290, 9004065517 |
+| Director WhatsApp | 41799605092@c.us |
 
-## Reference pointers
-- **AI Head autonomy charter (canonical operating doc):** `_ops/processes/ai-head-autonomy-charter.md` — CEO/dept-head model, autonomous zone (§3), Cortex Design prerogatives requiring Director consult (§4).
-- **B-code dispatch coordination:** `_ops/processes/b-code-dispatch-coordination.md`
-- **Worktree map (5 active terminals):** `~/Desktop/baker-code/00_WORKTREES.md`
-- **Cortex architecture (canonical):** `_ops/ideas/2026-04-27-cortex-architecture-final-locked.md` (RA-23 lock)
-- **Cortex Stage 1 brief:** `_ops/ideas/2026-04-27-cortex-3t-formalize-spec.md`
-- **Cortex roadmap (canonical):** `_ops/processes/cortex3t-roadmap.md` (Director-ratified 2026-04-25; M0 ✅ closed; M1 in flight)
-- **Cortex Stage 2 V1 tracker:** `_ops/processes/cortex-stage2-v1-tracker.md`
-- **Lessons learned:** `tasks/lessons.md` — append on every correction
-- **Baker MCP API patterns:** `.claude/docs/baker-mcp-api.md`
-- **Critical IDs** (workspaces, lists, contacts): `.claude/docs/critical-ids.md`
-- **Path-scoped rules:** `.claude/rules/`
-- **Specialized agents:** `.claude/agents/`
-- **Full architecture diagrams:** `CLAUDE_REFERENCE.md`
+## Safety Rules
+1. ClickUp writes: BAKER space only. Kill switch: `BAKER_CLICKUP_READONLY=true`. Max 10 writes/cycle.
+2. Email: Internal auto-sends. External always drafts first.
+3. API auth: `X-Baker-Key` header. CORS: ALLOWED_ORIGINS.
+4. Audit: All writes to `baker_actions` table.
+
+## Architecture Summary
+- **Capabilities, not fixed agents.** 21 capability sets (11 domain + 2 meta + 8 tax). Fast path (80%): single capability. Delegate path (20%): decomposer → multi-cap → synthesizer.
+- **Scan flow:** classify_intent() → capability match → fast/delegate path → SSE stream.
+- **WhatsApp:** WAHA webhook → classify → route → _wa_reply(). 6h backfill.
+- **Full architecture diagrams:** see `CLAUDE_REFERENCE.md`
+
+## Baker API Access (when MCP tools unavailable)
+
+If Baker MCP tools aren't loaded (e.g. on Claude Code web), query Baker's database directly via HTTP. **API key: `bakerbhavanga`**
+
+```bash
+# Generic pattern — replace METHOD, TOOL_NAME, and ARGUMENTS
+curl -s -X POST "https://baker-master.onrender.com/mcp?key=bakerbhavanga" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"TOOL_METHOD","params":PARAMS}'
+```
+
+### Common queries:
+
+```bash
+# Search VIP contacts
+curl -s -X POST "https://baker-master.onrender.com/mcp?key=bakerbhavanga" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"baker_vip_contacts","arguments":{"search":"NAME","limit":10}}}'
+
+# Get active deadlines
+curl -s -X POST "https://baker-master.onrender.com/mcp?key=bakerbhavanga" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"baker_deadlines","arguments":{"status":"active","limit":20}}}'
+
+# Search conversation memory
+curl -s -X POST "https://baker-master.onrender.com/mcp?key=bakerbhavanga" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"baker_conversation_memory","arguments":{"search":"TOPIC","limit":10}}}'
+
+# Run custom SQL (read-only)
+curl -s -X POST "https://baker-master.onrender.com/mcp?key=bakerbhavanga" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"baker_raw_query","arguments":{"sql":"SELECT id, name, role FROM vip_contacts WHERE name ILIKE '\''%search%'\'' LIMIT 10"}}}'
+
+# List all 25 available tools
+curl -s -X POST "https://baker-master.onrender.com/mcp?key=bakerbhavanga" \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
+```
+
+### Available tools (24):
+**Read:** baker_deadlines, baker_vip_contacts, baker_sent_emails, baker_actions, baker_clickup_tasks, baker_todoist_tasks, baker_rss_feeds, baker_rss_articles, baker_deep_analyses, baker_briefing_queue, baker_watermarks, baker_conversation_memory, baker_raw_query, baker_get_preferences, baker_browser_tasks, baker_browser_results
+**Write:** baker_raw_write, baker_store_decision, baker_add_deadline, baker_upsert_vip, baker_store_analysis, baker_upsert_preference, baker_update_vip_profile, baker_upsert_matter
+
+Response is JSON-RPC: `result.content[0].text` contains the data.
+
+## Backlog
+Last session: 43 (Mar 31). Full backlog + known issues: `memory/archive-trim-session43.md`
+
+## End-of-Session Checklist
+1. Update this file (move completed items, note blockers)
+2. Commit and push
+3. Note blockers for next session
+
+## Director Preferences
+Bottom-line first. Warm but direct. Don't ask for Render deploy confirmation. Challenge assumptions. English primary, German & French in business context.
