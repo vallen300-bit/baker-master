@@ -4,7 +4,7 @@ builder: b2
 shipped_at: 2026-04-29T02:55:00Z
 trigger_class: HIGH
 branch: cortex-slack-interactivity-1
-pr_url: <opened by gh pr create immediately after this report is committed>
+pr_url: https://github.com/vallen300-bit/baker-master/pull/81
 review_required:
   - "B1 (formal) — external API + Slack HMAC auth + dispatches Gold-writing handlers (RA-24 trigger)"
   - "AI Head A — /security-review + structural"
