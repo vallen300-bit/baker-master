@@ -93,11 +93,11 @@
 <header>
   <h1>Cortex Roadmap V3 — Any-Matter Sprint</h1>
   <div class="meta">
-    Director directive 2026-04-29 — speed Cortex up so it can be invoked on <strong>any matter</strong> for reasoning, analysis, synthesis. Notifications deferred to Wave 2. Supersedes V2 (Stage 2 V1 build/DRY_RUN). Integrates AI Head 1 App + AI Head 2 Terminal cross-review (5 adds accepted) + AI Head 2 Terminal Track-5 recommendation accepted (<code>hot.md</code> regen from Triaga). Scheduler singleton-lock SHIPPED + PRODUCTION-VERIFIED 2026-04-29 18:15Z.
+    Director directive 2026-04-29 — speed Cortex up so it can be invoked on <strong>any matter</strong> for reasoning, analysis, synthesis. Supersedes V2 (Stage 2 V1 build/DRY_RUN). Foundation shipped: scheduler singleton-lock VERIFIED 18:15Z + Triaga 41-item ratification COMPLETE 18:45Z (export at <code>_01_INBOX_FROM_CLAUDE/2026-04-29-b1-brisen-triage-ratified-export.md</code>). Wave 1 = 5 tracks. Track 4 swapped per AI Head 2 Terminal recommendation: <strong>movie → nvidia-corinthia</strong> (movie already has config; nvidia-corinthia is fresh Origination build pairing cleanly with Hagenauer for generalization test).
   </div>
   <div class="progress-bar-wrap">
-    <div class="progress-fill" style="width: 65%"></div>
-    <div class="progress-label">65% — Foundation complete + Director ratifying Triaga → Wave 1 5-track sprint</div>
+    <div class="progress-fill" style="width: 75%"></div>
+    <div class="progress-label">75% — Foundation + Triaga complete · Wave 1 5-track sprint dispatchable now</div>
   </div>
   <div class="legend">
     <span><span class="dot dot-done"></span>Shipped</span>
@@ -164,13 +164,23 @@
     </div>
     <div class="badge done">DONE</div>
   </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Director-ratified Triaga export — 41 items classified</div>
+      <div class="desc"><strong>31 Active · 5 Completed · 5 Dismissed · 1 partial.</strong> Active spread: <strong>5 ASAP</strong> (Q7 Lilienmatt restructure · Q21 AO CRM · Q30 Lana €650K · Q33 NVIDIA+Corinthia · Q39 Swiss passport) · <strong>15 Urgent</strong> · 8 in 4w · 3 not urgent. <strong>8 Critical</strong> (Q1+Q2 Hagenauer · Q11 MOVIE Res #8 · Q12 Aukera €3M · Q20 AO €4.5M · Q23 Franck-Muller · Q29 Capital-call · Q39 passport) · 14 High · ~7 Medium · 3 Low. Drives <code>hot.md</code> regen (Track 5) → 7 downstream Cortex/Sentinel uses.</div>
+      <div class="anchor">_01_INBOX_FROM_CLAUDE/2026-04-29-b1-brisen-triage-ratified-export.md</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
 </div>
 
 <div class="position-marker">
-  <h3>WHERE WE ARE — 2026-04-29 18:30Z</h3>
-  Scheduler singleton-lock SHIPPED + PRODUCTION-VERIFIED. AO matter Cortex V1 LIVE. Foundation solid. <strong>Director ratifying Triaga right now</strong> (2026-04-29-b1-brisen-outstanding-triage.html) — outputs feed Track 5 (<code>hot.md</code> regen) which is prerequisite for Tracks 1+2 to deliver actual day-1 value. Wave 1 expanded from 4 → <strong>5 parallel tracks</strong> (independence matrix re-verified).
+  <h3>WHERE WE ARE — 2026-04-29 18:50Z</h3>
+  All Wave-1 prerequisites satisfied. Scheduler singleton-lock production-verified. Triaga ratification complete (41 items). Track 4 finalized as <strong>nvidia-corinthia</strong> (per AI Head 2 Terminal recommendation — fresh Origination build, complements Hagenauer fresh build for cross-domain generalization test). Wave 1 = <strong>5 parallel tracks dispatchable NOW</strong>; independence matrix verified (no file overlap).
   <br><br>
-  <span class="next"><strong>Next move →</strong></span> Director completes Triaga; AI Head A drafts 5 briefs via <code>/write-brief</code> (1 of which — Track 5 — depends on Triaga export); 5 paste-blocks fired in parallel.
+  <span class="next"><strong>Next move →</strong></span> AI Head A drafts 5 briefs via <code>/write-brief</code> (parallel) → push 5 paste-blocks → 5 B-codes fire in parallel → tomorrow EOD: any-matter manual Cortex live on AO + Hagenauer + NVIDIA-Corinthia (3 matters), with ratified <code>hot.md</code> driving every Sentinel signal classification across the entire mesh.
 </div>
 
 <div class="stage">
@@ -185,8 +195,8 @@
       <tr><td>1</td><td>B1 Terminal</td><td>Manual-invoke endpoint <code>POST /api/cortex/run</code> (X-Baker-Key, body: <code>matter_slug</code>+<code>question</code>) <strong>streaming Phase 1-6 SSE events</strong>; Scan-intent route ("run cortex on X")</td><td><code>outputs/dashboard.py</code>, <code>kbl/scan_intent_classifier.py</code>, tests</td></tr>
       <tr><td>2</td><td>B3 Terminal</td><td>Cost-gate scope expansion: AO-only → whitelist any matter with <code>cortex-config.md</code> present</td><td><code>triggers/cortex_pre_review_gate.py</code>, tests</td></tr>
       <tr><td>3</td><td>B2 App</td><td><code>hagenauer-rg7</code>: <code>cortex-config.md</code> + <code>gold.md</code> shell + <code>proposed-gold.md</code> shell + top-5 entity stubs + curated/ seed</td><td><code>baker-vault/wiki/matters/hagenauer-rg7/</code> + <code>baker-vault/wiki/people/</code></td></tr>
-      <tr><td>4</td><td>AI Head 2 App</td><td><code>movie</code>: <code>cortex-config.md</code> + <code>gold.md</code> shell + <code>proposed-gold.md</code> shell + top-5 entity stubs + curated/ seed</td><td><code>baker-vault/wiki/matters/movie/</code> + <code>baker-vault/wiki/people/</code></td></tr>
-      <tr><td>5</td><td>B-code (B4 idle)</td><td><strong><code>hot.md</code> regeneration from Director-ratified Triaga export</strong> — pulls [status][when][importance][category] tags into <code>baker-vault/wiki/hot.md</code> via PR #66 GOLD workflow. Cheap (~30 min). Prerequisite for Tracks 1+2 day-1 value.</td><td><code>baker-vault/wiki/hot.md</code> (rewrite); tests for hot.md format validation</td></tr>
+      <tr><td>4</td><td>AI Head 2 App</td><td><strong><code>nvidia-corinthia</code></strong> (swapped from movie — already configured): <code>cortex-config.md</code> + <code>gold.md</code> shell + <code>proposed-gold.md</code> shell + top-5 entity stubs + curated/ seed. Q33 ASAP+High Origination + Q19 Urgent.</td><td><code>baker-vault/wiki/matters/nvidia-corinthia/</code> + <code>baker-vault/wiki/people/</code></td></tr>
+      <tr><td>5</td><td>B4 (idle)</td><td><strong><code>hot.md</code> regen + 3-file propagation from Triaga export</strong> — touches 4 files in one PR (per AI Head 2 Terminal): (1) <code>baker-vault/wiki/hot.md</code> regenerated index by [when][category] sorted by importance, dismissed/completed dropped; (2) per-matter <code>baker-vault/wiki/matters/&lt;slug&gt;/proposed-gold.md</code> updates from Director notes (Q20 AO €4.5M remaining, Q21 AO CRM framing, Q39 passport ASAP, etc.); (3) <code>baker-vault/slugs.yml</code> — 5 dismissed slugs flipped to <code>status: retired</code> + new slugs if Director confirms follow-ups; (4) export-file provenance copy. PR #66 GOLD workflow on baker-vault repo. ~30 min.</td><td>baker-vault repo (separate from baker-master): <code>wiki/hot.md</code>, <code>wiki/matters/*/proposed-gold.md</code>, <code>slugs.yml</code></td></tr>
     </tbody>
   </table>
 
@@ -223,9 +233,9 @@
   <div class="item flight">
     <div class="icon">⏳</div>
     <div>
-      <div class="label">Track 4 — MO Vienna vault seed (AI Head 2)</div>
-      <div class="desc">Primary Brisen asset (Director-owned hotel). Different domain from Hagenauer (hotel ops vs construction dispute) — diversifies Cortex generalization. MOHG team entity stubs (Egger, Habicher, Schauer, Graf, Lyle). Curated/ seeded from <code>Project/MOVIE/</code>. Director uses immediately for MOHG dialogue prep, PR strategy, asset-management synthesis.</div>
-      <div class="anchor">brief: CORTEX_MATTER_CONFIG_MOVIE_1 (drafting via /write-brief)</div>
+      <div class="label">Track 4 — NVIDIA + Corinthia vault seed (AI Head 2) — swapped from movie</div>
+      <div class="desc">AI Head 2 Terminal recommendation accepted: movie already has <code>cortex-config.md</code> (refresh, not fresh build); nvidia-corinthia is a NEW Origination workstream — Q33 ASAP+High + Q19 Urgent (likely dup of Q33). Fresh build pairs cleanly with Hagenauer (Track 3) for cross-domain generalization test (Origination + Active Deal/Legal). Entity stubs from NVIDIA + Corinthia counterparties; curated/ seeded from existing pitch decks + correspondence. Movie config refresh moved to Wave 2.</div>
+      <div class="anchor">brief: CORTEX_MATTER_CONFIG_NVIDIA_CORINTHIA_1 (drafting via /write-brief)</div>
     </div>
     <div class="badge flight">IN FLIGHT</div>
   </div>
@@ -233,15 +243,26 @@
   <div class="item flight">
     <div class="icon">⏳</div>
     <div>
-      <div class="label">Track 5 — <code>hot.md</code> regeneration from Triaga export (NEW — AI Head 2 Terminal recommendation)</div>
-      <div class="desc">Director's <code>hot.md</code> is a LIVE policy file (verified by AI Head 2 Terminal grep): read on every signal triage at <code>kbl/steps/step1_triage.py:587</code> + every Step 5 Opus Gold synthesis at <code>kbl/prompts/step5_opus_system.txt:23-29</code>. Currently 11 days stale → poisoning every Cortex inference. Director ratifying Triaga RIGHT NOW (2026-04-29-b1-brisen-outstanding-triage.html); export feeds B-code rewrite of <code>hot.md</code> with current [status][when][importance][category] tags. PR #66 GOLD workflow. Without this, Tracks 1+2 ship a manual-invoke endpoint querying against an 11-day-stale priority cache → no day-1 value.</div>
-      <div class="anchor">brief: CORTEX_HOT_MD_REGEN_1 (drafting via /write-brief once Triaga export ready)</div>
+      <div class="label">Track 5 — <code>hot.md</code> regen + 3-file propagation from Triaga export (B4) — UNBLOCKED</div>
+      <div class="desc">Director's <code>hot.md</code> is a LIVE policy file (verified by AI Head 2 Terminal grep): read on every signal triage at <code>kbl/steps/step1_triage.py:587</code> + every Step 5 Opus Gold synthesis at <code>kbl/prompts/step5_opus_system.txt:23-29</code>. Was 11 days stale → poisoning every Cortex inference. <strong>Triaga export READY</strong> at <code>_01_INBOX_FROM_CLAUDE/2026-04-29-b1-brisen-triage-ratified-export.md</code>. AI Head 2 Terminal verified scope spans 4 files in one baker-vault PR: <code>hot.md</code> rewrite (LIVE policy) + per-matter <code>proposed-gold.md</code> updates (strategic context per Director's Q20/Q21/Q39 notes) + <code>slugs.yml</code> housekeeping (5 dismissed → <code>status: retired</code>, possibly 2 new slugs from Director follow-ups) + export provenance copy. Without this, Tracks 1+2 manual-invoke queries against 11-day-stale priority cache → no day-1 value.</div>
+      <div class="anchor">brief: CORTEX_HOT_MD_REGEN_1 (drafting via /write-brief now); pending Director's 5 follow-ups for clean bake-in</div>
     </div>
     <div class="badge flight">IN FLIGHT</div>
   </div>
 
   <div class="callout">
-    <strong>Why these 2 matters first (Director ratification):</strong> Hagenauer = active legal-dispute pattern (high-friction, evidence-heavy). MO Vienna = ongoing-asset-ops pattern (relationship-driven, daily signals). Different domains → diversifies the Cortex test surface; if both work, the architecture generalizes.
+    <strong>Why these 2 matters first (post-Triaga ratification):</strong> Hagenauer = active legal-dispute pattern (Q1+Q2 Critical Urgent — GC takeover + admin-claims defense). NVIDIA-Corinthia = AI Origination workstream (Q33 ASAP High + Q19 Urgent High). Different domains (Active Deal/Legal vs Origination) → diversifies the Cortex test surface; if both work, the architecture generalizes. Both fresh builds — no pre-existing config to refresh.
+  </div>
+
+  <div class="callout">
+    <strong>Director's 5 open follow-ups (does NOT block Wave 1, addresses Wave 2 metadata):</strong>
+    <ol style="margin: 0.4rem 0 0; padding-left: 1.2rem;">
+      <li><strong>Q17/Q18 — private-assets slug:</strong> create new <code>private-assets</code> slug + wiki dir (Barclays UK mortgage + valuer discrepancy)? Or fold under existing slug?</li>
+      <li><strong>Q19 mapping:</strong> is <code>claimsmax</code> slug being retired/renamed, OR is Q19 a duplicate of Q33 (both NVIDIA+Corinthia)? B1 reads as duplicate → drop Q19 row.</li>
+      <li><strong>Q23 category — Franck-Muller:</strong> confirm "Financial / liquidity" (€6M repayment due October)?</li>
+      <li><strong>Q37 slug — Bora-Bora:</strong> = Philippe Soulier same matter? Create <code>philippe-soulier</code> slug, fold Bora-Bora under it?</li>
+      <li><strong>Q39 passport ASAP/Critical:</strong> what's blocking — Director time? Document collection? Worth a separate workstream brief?</li>
+    </ol>
   </div>
 
   <div class="callout">
@@ -291,9 +312,19 @@
   <div class="item queue">
     <div class="icon">2</div>
     <div>
-      <div class="label">Seed 4 more matters: Lilienmatt, MRCI, Wertheimer, Aukera</div>
-      <div class="desc">Hand-author wave (1 matter / idle agent / day). After 4 hand-configured matters, patterns are clear → bootstrap script becomes economical. Lilienmatt has live aukera-merz-mandate signals; Wertheimer is counterparty-side; Aukera + MRCI active corporate work.</div>
-      <div class="anchor">briefs: CORTEX_MATTER_CONFIG_{LILIENMATT,MRCI,WERTHEIMER,AUKERA}_1</div>
+      <div class="label">Seed more matters: MO Vienna refresh + Lilienmatt + MRCI + Wertheimer + Aukera + private-assets (if confirmed)</div>
+      <div class="desc">Hand-author wave (1 matter / idle agent / day). MO Vienna config exists but needs refresh + new entity stubs (Q11/Q12/Q14 current state) + gold/proposed-gold parity. Lilienmatt has live aukera-merz-mandate signals + Q7 ASAP restructure. Wertheimer = counterparty-side (Q38). MRCI = Balgerstrasse (Q6). Aukera = Q12 €3M release. private-assets = Q17/Q18 Barclays UK if Director confirms slug. After 4-6 hand-configured matters total, patterns are clear → bootstrap script becomes economical.</div>
+      <div class="anchor">briefs: CORTEX_MATTER_CONFIG_{MOVIE_REFRESH,LILIENMATT,MRCI,WERTHEIMER,AUKERA,PRIVATE_ASSETS}_1</div>
+    </div>
+    <div class="badge queue">WAVE 2</div>
+  </div>
+
+  <div class="item queue">
+    <div class="icon">2</div>
+    <div>
+      <div class="label">Standalone workstreams from Triaga (non-Cortex)</div>
+      <div class="desc">5 ASAP items not all Cortex-shaped: Q21 AO CRM dashboard (separate UI build, owed/owes/promised view), Q30 Lana €650K tax return tracking, Q39 Swiss passport (Director time + document collection — possibly a separate workstream brief if blocker isn't trivial), Q7 multi-entity restructure (legal/finance specialist deep-dive). Triage these into matter-PM workstreams vs Cortex auto-fire matters.</div>
+      <div class="anchor">post-Wave-1 triage</div>
     </div>
     <div class="badge queue">WAVE 2</div>
   </div>
@@ -600,7 +631,7 @@
 </div>
 
 <footer>
-  Generated by AI Head A · Cortex Roadmap V3 (rev 2) · 2026-04-29 18:30Z · supersedes <code>cortex-roadmap-stage2-v1.html</code> (V2). Source: integrated 5-track plan = AI Head 1 App's 4-track sprint + AI Head 2 Terminal cross-review (5 adds accepted) + AI Head 2 Terminal's Track-5 recommendation (<code>hot.md</code> regen from Triaga, accepted). Scheduler singleton-lock production-verified 18:15Z. Director ratifying Triaga in parallel; full Wave-1 ratification pending. Brisen Group internal.
+  Generated by AI Head A · Cortex Roadmap V3 (rev 3) · 2026-04-29 19:00Z · supersedes <code>cortex-roadmap-stage2-v1.html</code> (V2). Source: integrated 5-track plan = AI Head 1 App's 4-track sprint + AI Head 2 Terminal's 5 adds + Track-5 (<code>hot.md</code> regen) + Track-4 swap (movie → nvidia-corinthia). Foundation: scheduler singleton-lock verified 18:15Z + Triaga 41-item ratification complete 18:45Z. Director's 5 open follow-ups pending for clean Track-5 bake-in. Brisen Group internal.
 </footer>
 </div>
 </body>
