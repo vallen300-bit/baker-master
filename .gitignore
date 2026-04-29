@@ -37,3 +37,4 @@ outputs/share-site/
 .venv*/
 venv/
 
+CLAUDE.local.md
