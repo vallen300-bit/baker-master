@@ -1,5 +1,7 @@
 # Baker / Sentinel — Repo CLAUDE.md
 
+@.claude/how-to/INDEX.md
+
 **Sentinel** = AI system. **Baker** = reasoning layer (Dimitry Vallen's AI Chief of Staff). **CEO Cockpit** = dashboard at baker-master.onrender.com.
 
 ## Stack
