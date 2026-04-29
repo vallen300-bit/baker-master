@@ -3,7 +3,7 @@
 **Brief:** [`briefs/BRIEF_CORTEX_PHASE5_STATUS_RECONCILE_1.md`](../BRIEF_CORTEX_PHASE5_STATUS_RECONCILE_1.md)
 **Trigger class:** HIGH (DB migration + cross-capability state writes — RA-24)
 **Branch:** `cortex-phase5-status-reconcile-1`
-**PR:** _(see footer once opened)_
+**PR:** [#83](https://github.com/vallen300-bit/baker-master/pull/83)
 **Verdict:** **PASS** — code, migration, tests all clean; awaiting B1 + AI Head A `/security-review`.
 
 ## Why (3 bundled fixes from one incident chain — cycle 7dc3201b)
@@ -240,7 +240,7 @@ Per brief §"Post-merge — A executes":
 
 ## PR
 
-_(URL appended after `gh pr create`.)_
+https://github.com/vallen300-bit/baker-master/pull/83
 
 ## Co-Authored-By
 
