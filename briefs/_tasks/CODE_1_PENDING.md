@@ -1,39 +1,128 @@
-# CODE_1 — IDLE (post PR #81 review)
+# CODE_1 — B1: PR #83 STRUCTURAL REVIEW (CORTEX_PHASE5_STATUS_RECONCILE_1)
 
-**Status:** COMPLETE 2026-04-29T05:55:00Z
-**Last task:** Structural review of PR #81 (CORTEX_SLACK_INTERACTIVITY_1) — verdict **PASS** (10 / 10 sections)
-**Full report:** `briefs/_reports/B1_pr81_review_20260429.md`
-**Brief:** `briefs/BRIEF_CORTEX_SLACK_INTERACTIVITY_1.md`
-**PR:** https://github.com/vallen300-bit/baker-master/pull/81
-**Trigger class:** HIGH (external API + Slack HMAC auth surface + dispatches Gold-writing handlers — RA-24)
+**Status:** OPEN
+**Dispatched:** 2026-04-29T~10:30Z
+**Dispatched by:** ai-head-a (sole orchestrator)
+**Director authorization:** "B" (Director ratified Path B post-cycle-7dc3201b reject test)
+**Builder under review:** b3 (≠ b1 ✓)
+**Trigger class:** HIGH
+**PR:** https://github.com/vallen300-bit/baker-master/pull/83
+**Branch:** `cortex-phase5-status-reconcile-1`
+**Brief:** `briefs/BRIEF_CORTEX_PHASE5_STATUS_RECONCILE_1.md`
+**B3 ship report:** `briefs/_reports/B3_cortex_phase5_status_reconcile_20260429.md`
 
-**Per-section verdicts:**
-- A — HMAC correctness — ✅ PASS (v0 base `"v0:{ts}:{body}"` line 96; SHA-256 line 100; `hmac.compare_digest` line 103; hex format line 97)
-- B — Secret hygiene & fail-CLOSED divergence — ✅ PASS (documented in module docstring lines 8-12 + function docstring lines 76-79; ±300s replay window)
-- C — Endpoint contract — ✅ PASS (POST-only; parse_qs+json.loads; 5-action allowlist + gold_select no-op; `cycle_id` required → 400 otherwise, no handler scheduled)
-- D — Phase 5 handler dispatch — ✅ PASS (`BackgroundTasks.add_task` line 333; phase5_act lazy-imported inside `_run_handler` line 196; idempotency via existing `_cas_lock_cycle`)
-- E — 3s budget compliance — ✅ PASS with deviation (Phase 5 handlers properly backgrounded; sync `_post_response_update` "Processing…" call BEFORE return deviates from checklist §E.2 — non-blocking, see obs #1)
-- F — Sensitive payload discipline — ✅ PASS (no proposal/matter/payload-body in any `logger.*()` — grep-confirmed across 8 log sites)
-- G — Error containment in BackgroundTask — ✅ PASS (`_run_handler` wraps all in try/except KeyError + Exception; `_post_response_update` swallows urlopen failures; no bare raise)
-- H — Test integrity — ✅ PASS (8/8 PASS literal in 1.46s; 59/59 regression in 1.20s; no skip/xfail/by-inspection)
-- I — Scope discipline — ✅ PASS (only the 5 listed files touched; phase5_act + phase4_proposal + slack_events UNTOUCHED; dashboard.py is a 3-line router include)
-- J — Render deploy survival — ✅ PASS (no migration; `SLACK_SIGNING_SECRET` already in env via `config.slack.signing_secret`; stdlib-only; no route shadow)
+## What B3 shipped
 
-**Regression:** 59/59 PASS in 1.20s (interactivity + phase5_act + phase5_idempotency + pre_review_gate).
+Three bundled fixes:
+1. `_cas_lock_cycle` kwarg renamed `from_status` → `from_statuses` (tuple|list|str). SQL switched to `status = ANY(%s)`. 4 handler call sites pass `("proposed", "tier_b_pending")`.
+2. NEW migration `migrations/20260429_cortex_cycles_add_transient_statuses.sql` pinning the 4 *ing transient statuses (drift-defense match in `memory/store_back.py` bootstrap).
+3. NEW `memory/feedback_render_envvar_paginated_put.md` + MEMORY.md index entry.
 
-**Lesson #48 compliance:** all suites re-executed on PR head — literal stdout pasted in §0 of report.
+Files modified (8): orchestrator/cortex_phase5_act.py, memory/store_back.py, NEW migration, NEW feedback memory, MEMORY.md, NEW test, mailbox flip, ship report.
 
-**Self-PR rule:** formal GitHub APPROVE blocked; comment posted as the gate (precedent #67/#69/#70/#71/#74/#78/#80).
+## Execution
 
-**4 non-blocking observations (note-only, §K of report):**
-1. **Sync `_post_response_update` Processing… call BEFORE return** (`triggers/slack_interactivity.py:342-350`) deviates from brief checklist §E.2. `urllib.request.urlopen` blocks the event loop for up to 5s in the async endpoint. Phase 5 handlers (heavy work) ARE properly backgrounded; only the optimistic UX-feedback post is sync. Recommend trivial follow-up: schedule it as its own `add_task` or move into `_run_handler`'s entry block. **Not a STOP criterion; not a merge blocker.**
-2. `_run_handler` lazy-imports Phase 5 handlers inside try (line 196) — defensive boundary against import-time failures.
-3. Test 4 (stale_timestamp) doesn't assert `_post_response_update.assert_not_called()` — small completeness gap; load-bearing assertion (`h.assert_not_awaited()`) is present.
-4. `config.slack.signing_secret` indirection is consistent with existing `slack_events.py` pattern — correct choice.
+```bash
+cd ~/bm-b1/01_build
+git fetch origin && git checkout cortex-phase5-status-reconcile-1 && git pull -q
+git log --oneline main..HEAD
 
-**Blocker for merge:** awaiting AI Head A's `/security-review` clearance.
+# Re-run ship gate locally on PR head (Lesson #48)
+pytest tests/test_cortex_phase5_act.py tests/test_cortex_phase5_idempotency.py -v
+pytest tests/test_cortex_runner_phase126.py tests/test_cortex_pre_review_gate.py tests/test_cortex_slack_interactivity.py
+python3 -c "import py_compile; py_compile.compile('orchestrator/cortex_phase5_act.py', doraise=True)"
+python3 -c "import py_compile; py_compile.compile('memory/store_back.py', doraise=True)"
 
-**Mailbox state:** B1 idle. Next dispatch will overwrite this file per §3 hygiene.
+gh pr view 83 --json files --jq '.files[].path'
+```
+
+## Review sections (10) — verdict per section + evidence (file:line)
+
+### A — `_cas_lock_cycle` signature evolution
+- New kwarg `from_statuses` accepts `tuple | list | str` (str for backward-compat fallback)
+- Internal coerce to tuple before SQL
+- SQL uses `status = ANY(%s)` not `status IN (...)` interpolation (param-bound)
+- Docstring updated: documents BOTH `proposed` and `tier_b_pending` as valid pre-button states
+
+### B — 4 handler call sites updated correctly
+- `cortex_approve` (line ~178): `from_statuses=("proposed", "tier_b_pending")`
+- `cortex_reject` (line ~384): same
+- `cortex_edit` (line ~268): same
+- `cortex_refresh` (line ~319): same
+- No site accidentally accepts a status outside the 2 valid pre-button states
+
+### C — Existing direct callers of `_cas_lock_cycle` updated
+- B3 ship report claims 4 existing direct callers updated. Confirm via `grep -n "_cas_lock_cycle" orchestrator/cortex_phase5_act.py` finds only the 4 handler dispatches + the function def itself
+- Test direct callers (in `tests/test_cortex_phase5_idempotency.py`) updated to new kwarg shape
+
+### D — Migration SQL correctness
+- File: `migrations/20260429_cortex_cycles_add_transient_statuses.sql`
+- Wrapped in `BEGIN; … COMMIT;` (atomic)
+- `DROP CONSTRAINT IF EXISTS` (idempotent on re-run)
+- `ADD CONSTRAINT` enumerates exactly 15 statuses (11 pre-existing + `archive_failed` + 4 *ing transient)
+- Constraint name preserved: `cortex_cycles_status_check`
+
+### E — store_back.py drift-defense match
+- `_ensure_cortex_cycles_table` CHECK enumerates exactly the same 15 statuses
+- Pattern matches PR #82 fold-in for `archive_failed` (drift defense lesson)
+- No other places that reference the status enum out-of-sync
+
+### F — `feedback_render_envvar_paginated_put.md` shape
+- Frontmatter: name, description (one-line), type=feedback
+- Lead with the rule, then **Why:** + **How to apply:** lines per memory format
+- Cites the 09:14Z incident concretely (vars wiped, recovery cost, hard-stop suggestion)
+
+### G — `MEMORY.md` index entry
+- One line, ≤200 chars
+- Format: `- [Title](file.md) — one-line hook`
+- Placed in appropriate section
+
+### H — Test integrity
+- 3 new tests minimum (per brief): `cas_lock_cycle_accepts_proposed`, `cas_lock_cycle_accepts_tier_b_pending`, optional `cas_lock_cycle_rejects_random_state`
+- All PASS literally on PR head
+- Existing 41/41 phase5 + idempotency PASS literally (B3 reports 44/44 — verify)
+- Cross-cap regression: runner_phase126 + pre_review_gate + slack_interactivity PASS literally
+- No `pytest.skip` / `xfail` / "by inspection" claims (Lesson #50)
+
+### I — Scope discipline
+- `gh pr view 83 --json files --jq '.files[].path'` returns ONLY:
+  - `orchestrator/cortex_phase5_act.py`
+  - `memory/store_back.py`
+  - `migrations/20260429_cortex_cycles_add_transient_statuses.sql`
+  - `memory/feedback_render_envvar_paginated_put.md`
+  - `memory/MEMORY.md`
+  - `tests/test_cortex_phase5_idempotency.py`
+  - `briefs/_tasks/CODE_3_PENDING.md`
+  - `briefs/_reports/B3_cortex_phase5_status_reconcile_20260429.md`
+- `triggers/slack_interactivity.py`, `triggers/cortex_stuck_cycle_sentinel.py`, all Phase 1-4 paths UNTOUCHED
+
+### J — Render deploy survival
+- Migration is additive (DROP + ADD same constraint name) — won't break existing rows
+- Existing `proposed`/`approved`/etc rows continue to validate
+- No new third-party dep
+- B3's prod-runtime hot-fix (Director session 09:47Z direct ALTER) means migration is essentially a no-op on current prod, but mandatory for fresh prod / replica
+
+## STOP criteria
+
+- `_cas_lock_cycle` accepts a state outside `proposed` + `tier_b_pending` (e.g. accidentally accepts `failed`, `approved`, etc.)
+- Migration changes the constraint NAME (would orphan the live constraint added 09:47Z)
+- store_back bootstrap CHECK has a different enum than the migration CHECK (drift)
+- Tests fail or any "by inspection" / `pytest.skip` claims
+- Files outside the 8-file scope modified
+- Pre-existing handler logic in `cortex_phase5_act.py` semantically changed beyond the kwarg + SQL evolution
+- The new feedback memory file has values that look like real secrets (the original ~80 wiped vars must be referenced by NAME only, never by value)
+
+## Output
+
+`briefs/_reports/B1_pr83_review_20260429.md`:
+- §0: literal stdout for ship-gate commands
+- §A–§J: per-section verdict (PASS / FAIL) + evidence
+- §K: non-blocking observations (note-only)
+- Final verdict line: `**OVERALL: PASS / REQUEST_CHANGES**`
+
+If PASS: comment-fallback approval on PR #83 (self-PR rule precedent).
+
+Mailbox flips OPEN → IN_PROGRESS on claim → COMPLETE on report committed.
 
 ## Co-Authored-By
 
