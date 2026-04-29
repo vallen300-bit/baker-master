@@ -158,7 +158,8 @@ app.add_middleware(
 # SCHEDULER-WATCHDOG-1: Request-time heartbeat check
 # ============================================================
 _watchdog_last_check = 0
-_watchdog_cooldown = 300  # Don't re-alert within 5 min of a restart
+_watchdog_last_alert_ts = 0
+_watchdog_alert_cooldown_s = 300  # min seconds between WA alerts
 
 @app.middleware("http")
 async def scheduler_watchdog_middleware(request, call_next):
@@ -175,8 +176,8 @@ async def scheduler_watchdog_middleware(request, call_next):
 
 
 def _check_scheduler_heartbeat():
-    """If heartbeat stale >12 min, restart scheduler + WhatsApp alert."""
-    global _watchdog_cooldown
+    """If heartbeat stale >12 min, restart scheduler + WhatsApp alert (throttled)."""
+    global _watchdog_last_alert_ts
     try:
         from triggers.state import trigger_state
         hb = trigger_state.get_watermark("scheduler_heartbeat")
@@ -185,8 +186,10 @@ def _check_scheduler_heartbeat():
             logger.error(f"SCHEDULER-WATCHDOG-1: Heartbeat stale ({age_seconds:.0f}s). Restarting...")
             from triggers.embedded_scheduler import restart_scheduler
             restart_scheduler()
-            # Alert Director (throttled — don't spam on repeated checks)
-            if age_seconds > _watchdog_cooldown:
+            # Throttle: only alert if last alert was >cooldown ago
+            now_ts = time.time()
+            if now_ts - _watchdog_last_alert_ts > _watchdog_alert_cooldown_s:
+                _watchdog_last_alert_ts = now_ts
                 try:
                     from outputs.whatsapp_sender import send_whatsapp
                     send_whatsapp(

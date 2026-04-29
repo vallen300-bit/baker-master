@@ -144,6 +144,7 @@ class PlaudConfig:
 @dataclass
 class PostgresConfig:
     host: str = os.getenv("POSTGRES_HOST", "localhost")
+    host_direct: str = os.getenv("POSTGRES_HOST_DIRECT", "")
     port: int = int(os.getenv("POSTGRES_PORT", "5432"))
     database: str = os.getenv("POSTGRES_DB", "sentinel")
     user: str = os.getenv("POSTGRES_USER", "sentinel")
@@ -159,6 +160,28 @@ class PostgresConfig:
         """Return connection params dict for psycopg2."""
         params = {
             "host": self.host,
+            "port": self.port,
+            "dbname": self.database,
+            "user": self.user,
+            "password": self.password,
+        }
+        if self.sslmode and self.sslmode != "disable":
+            params["sslmode"] = self.sslmode
+        return params
+
+    @property
+    def direct_dsn_params(self) -> dict:
+        """Return connection params for the NON-POOLED Neon endpoint.
+
+        Required for session-level advisory locks: pgbouncer transaction-mode
+        resets session state on every commit, releasing the lock. Direct
+        compute keeps the connection 1:1 with a backend for the process
+        lifetime. Falls back to ``host`` if ``host_direct`` is unset; callers
+        MUST handle the case where the lock cannot be held under the pooler.
+        """
+        host = self.host_direct or self.host
+        params = {
+            "host": host,
             "port": self.port,
             "dbname": self.database,
             "user": self.user,

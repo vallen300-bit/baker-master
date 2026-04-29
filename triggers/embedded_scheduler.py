@@ -18,6 +18,7 @@ from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 logger = logging.getLogger("sentinel.embedded_scheduler")
 
 _scheduler: Optional[BackgroundScheduler] = None
+_lock_retry_thread: Optional["threading.Thread"] = None
 
 
 def _job_listener(event):
@@ -1154,7 +1155,32 @@ def _expire_browser_actions():
 
 
 def _scheduler_heartbeat():
-    """SCHEDULER-WATCHDOG-1: Write proof-of-life timestamp to DB every 5 min."""
+    """SCHEDULER-WATCHDOG-1: Write proof-of-life timestamp to DB every 5 min.
+
+    SCHEDULER_SINGLETON_HARDEN_1: also probe the held singleton-lock connection
+    for liveness. If the connection died (Neon auto-suspend, network drop), the
+    advisory lock is already server-side released — restart so the lock-acquire
+    path runs cleanly and reclaims the lock (or yields to a sibling).
+    """
+    try:
+        import triggers.scheduler_lease as _lease
+        held = _lease._held_conn
+        if held is not None:
+            try:
+                cur = held.cursor()
+                cur.execute("SELECT 1")
+                cur.fetchone()
+                cur.close()
+            except Exception as probe_err:
+                logger.error(
+                    "scheduler singleton-lock connection dead (%s) — "
+                    "forcing restart_scheduler()",
+                    probe_err,
+                )
+                restart_scheduler()
+                return  # restart will re-write heartbeat next cycle
+    except Exception:
+        pass  # never fail heartbeat from probe path
     try:
         from triggers.state import trigger_state
         trigger_state.set_watermark("scheduler_heartbeat", datetime.now(timezone.utc))
@@ -1235,25 +1261,57 @@ def _memory_watchdog():
 
 
 def restart_scheduler():
-    """SCHEDULER-WATCHDOG-1: Force restart the scheduler. Called by request-time watchdog."""
+    """SCHEDULER-WATCHDOG-1: Force restart the scheduler. Called by request-time watchdog.
+
+    Uses ``wait=True`` (B1 RCA 2026-04-29 — ``wait=False`` left job-execution
+    threads firing without a scheduler reference). Drops the singleton lock
+    so the re-acquire path runs cleanly through ``start_scheduler()``.
+    """
     global _scheduler
     logger.warning("SCHEDULER-WATCHDOG-1: Force-restarting scheduler...")
     try:
         if _scheduler is not None:
-            _scheduler.shutdown(wait=False)
+            try:
+                _scheduler.shutdown(wait=True)
+            except Exception:
+                pass
     except Exception:
         pass
     _scheduler = None
+    try:
+        from triggers.scheduler_lease import release_singleton_lock
+        release_singleton_lock()
+    except Exception:
+        pass
     start_scheduler()
     logger.warning("SCHEDULER-WATCHDOG-1: Scheduler force-restarted successfully")
 
 
 def start_scheduler():
-    """Create and start the BackgroundScheduler. Idempotent — safe to call twice."""
+    """Create and start the BackgroundScheduler.
+
+    Singleton across processes via PG advisory lock on a dedicated non-pooled
+    connection (``triggers.scheduler_lease``). During Render Pro zero-downtime
+    deploy overlap, only one container holds the lock at any time. The other
+    waits on a 30 s polling thread until the holder dies (SIGTERM closes its
+    connection → server-side lock auto-release).
+
+    In-process idempotent — safe to call twice.
+    """
     global _scheduler
 
     if _scheduler is not None and _scheduler.running:
         logger.warning("Scheduler already running — skipping start")
+        return
+
+    from triggers.scheduler_lease import acquire_singleton_lock
+    held_conn = acquire_singleton_lock()
+    if held_conn is None:
+        logger.warning(
+            "scheduler singleton lock unavailable — registering NO jobs. "
+            "Lock-poll thread will retry every 30s and start jobs on acquisition."
+        )
+        _spawn_lock_retry_thread()
         return
 
     _scheduler = BackgroundScheduler(
@@ -1269,13 +1327,54 @@ def start_scheduler():
     logger.info(f"BackgroundScheduler started with {len(_scheduler.get_jobs())} jobs")
 
 
+def _spawn_lock_retry_thread() -> None:
+    """Background poll thread — retries singleton-lock acquisition every 30 s.
+
+    On success, calls ``start_scheduler()`` to register jobs + start. Daemon
+    thread so SIGTERM never blocks on the poller. Idempotent: skips spawn if
+    a retry thread is already alive.
+    """
+    import threading
+    global _lock_retry_thread
+    if _lock_retry_thread is not None and _lock_retry_thread.is_alive():
+        return
+
+    def _poll():
+        import time
+        while True:
+            time.sleep(30)
+            if _scheduler is not None and _scheduler.running:
+                logger.info(
+                    "scheduler started by another path — retry thread exiting"
+                )
+                return
+            from triggers.scheduler_lease import acquire_singleton_lock
+            held = acquire_singleton_lock()
+            if held is not None:
+                logger.info(
+                    "scheduler singleton lock acquired on retry — starting jobs"
+                )
+                start_scheduler()
+                return
+
+    _lock_retry_thread = threading.Thread(
+        target=_poll, name="scheduler-lock-retry", daemon=True
+    )
+    _lock_retry_thread.start()
+
+
 def stop_scheduler():
-    """Graceful shutdown. Idempotent."""
+    """Graceful shutdown. Idempotent. Releases singleton lock on success."""
     global _scheduler
     if _scheduler is not None and _scheduler.running:
         _scheduler.shutdown(wait=True)
         logger.info("BackgroundScheduler stopped")
     _scheduler = None
+    try:
+        from triggers.scheduler_lease import release_singleton_lock
+        release_singleton_lock()
+    except Exception as e:
+        logger.warning(f"Singleton lock release failed (non-fatal): {e}")
 
 
 def get_scheduler_status() -> dict:
