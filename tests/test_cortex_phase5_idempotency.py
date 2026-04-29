@@ -120,7 +120,7 @@ def test_cas_lock_cycle_first_fire_returns_none(monkeypatch):
     store = _ScriptedStore([script])
     monkeypatch.setattr(p5, "_get_store", lambda: store)
     result = p5._cas_lock_cycle(
-        "cyc-1", from_status="proposed", to_status="approving",
+        "cyc-1", from_statuses="proposed", to_status="approving",
         action_attempted="approve",
     )
     assert result is None
@@ -128,6 +128,8 @@ def test_cas_lock_cycle_first_fire_returns_none(monkeypatch):
     # Exactly 1 query: the UPDATE.
     assert len(store.conns[0].cur.queries) == 1
     assert "UPDATE cortex_cycles" in store.conns[0].cur.queries[0][0]
+    # SQL must use ANY-array form (CORTEX_PHASE5_STATUS_RECONCILE_1).
+    assert "ANY(%s)" in store.conns[0].cur.queries[0][0]
 
 
 def test_cas_lock_cycle_second_fire_returns_already_actioned(monkeypatch):
@@ -136,7 +138,7 @@ def test_cas_lock_cycle_second_fire_returns_already_actioned(monkeypatch):
     store = _ScriptedStore([script])
     monkeypatch.setattr(p5, "_get_store", lambda: store)
     result = p5._cas_lock_cycle(
-        "cyc-1", from_status="proposed", to_status="approving",
+        "cyc-1", from_statuses="proposed", to_status="approving",
         action_attempted="approve",
     )
     assert result == {
@@ -154,7 +156,7 @@ def test_cas_lock_cycle_missing_cycle_returns_not_found_marker(monkeypatch):
     store = _ScriptedStore([script])
     monkeypatch.setattr(p5, "_get_store", lambda: store)
     result = p5._cas_lock_cycle(
-        "cyc-missing", from_status="proposed", to_status="approving",
+        "cyc-missing", from_statuses="proposed", to_status="approving",
         action_attempted="approve",
     )
     assert result["warning"] == "already_actioned"
@@ -168,12 +170,79 @@ def test_cas_lock_cycle_no_db_returns_error(monkeypatch):
         def _put_conn(self, c): pass
     monkeypatch.setattr(p5, "_get_store", lambda: _NullStore())
     result = p5._cas_lock_cycle(
-        "cyc-1", from_status="proposed", to_status="approving",
+        "cyc-1", from_statuses="proposed", to_status="approving",
         action_attempted="approve",
     )
     assert result == {
         "error": "no_db_connection",
         "cycle_id": "cyc-1",
+        "action_attempted": "approve",
+    }
+
+
+# --------------------------------------------------------------------------
+# CORTEX_PHASE5_STATUS_RECONCILE_1 — multi-from acceptance
+# --------------------------------------------------------------------------
+
+
+def test_cas_lock_cycle_accepts_proposed(monkeypatch):
+    """Cycle at 'proposed' (legacy direct-test path) → CAS succeeds with
+    multi-status tuple. Verifies ANY-array param carries 'proposed'."""
+    script = _RowsScript([("cyc-prop",)])
+    store = _ScriptedStore([script])
+    monkeypatch.setattr(p5, "_get_store", lambda: store)
+    result = p5._cas_lock_cycle(
+        "cyc-prop",
+        from_statuses=("proposed", "tier_b_pending"),
+        to_status="approving",
+        action_attempted="approve",
+    )
+    assert result is None
+    # Verify the param passed to ANY(%s) is a list containing both values.
+    q, params = store.conns[0].cur.queries[0]
+    assert "ANY(%s)" in q
+    # params is (to_status, cycle_id, from_statuses_list)
+    assert params[2] == ["proposed", "tier_b_pending"]
+
+
+def test_cas_lock_cycle_accepts_tier_b_pending(monkeypatch):
+    """Cycle at 'tier_b_pending' (Phase-4 production landing state) → CAS
+    succeeds. NEW BEHAVIOR — pre-fix this would silently bail with
+    'already_actioned' because the WHERE clause only matched 'proposed'."""
+    script = _RowsScript([("cyc-tbp",)])
+    store = _ScriptedStore([script])
+    monkeypatch.setattr(p5, "_get_store", lambda: store)
+    result = p5._cas_lock_cycle(
+        "cyc-tbp",
+        from_statuses=("proposed", "tier_b_pending"),
+        to_status="rejecting",
+        action_attempted="reject",
+    )
+    assert result is None
+    assert store.conns[0].committed is True
+    q, params = store.conns[0].cur.queries[0]
+    assert "ANY(%s)" in q
+    # tier_b_pending must be in the array passed to ANY().
+    assert "tier_b_pending" in params[2]
+
+
+def test_cas_lock_cycle_rejects_random_state(monkeypatch):
+    """Cycle at 'failed' → CAS UPDATE matches 0 rows (because 'failed' is
+    NOT in the from_statuses tuple) → re-read returns ('failed',) → warning.
+    Proves multi-state acceptance does NOT include unrelated terminal states."""
+    script = _RowsScript([None, ("failed",)])  # UPDATE 0-rows, SELECT returns failed
+    store = _ScriptedStore([script])
+    monkeypatch.setattr(p5, "_get_store", lambda: store)
+    result = p5._cas_lock_cycle(
+        "cyc-failed",
+        from_statuses=("proposed", "tier_b_pending"),
+        to_status="approving",
+        action_attempted="approve",
+    )
+    assert result == {
+        "warning": "already_actioned",
+        "current_status": "failed",
+        "cycle_id": "cyc-failed",
         "action_attempted": "approve",
     }
 
