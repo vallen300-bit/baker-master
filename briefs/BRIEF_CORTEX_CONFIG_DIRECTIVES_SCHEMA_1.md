@@ -170,13 +170,22 @@ COMMENT ON TABLE prompt_review_queue IS
     'Weekly eyeball-review surface. Phase 6 Reflector inserts; Director or '
     'AI Head A flips reviewed=true after pass. Per Director caveat 2 ratification '
     '2026-04-30: untraceable proposals flag for prompt-engineering review.';
+
+-- Reflector idempotency: enforce one reflector_complete row per cycle.
+-- Brief 3 (CORTEX_PHASE6_REFLECTOR_1) sweep relies on this for
+-- ON CONFLICT DO NOTHING when two sweep firings collide on the same
+-- cycle (e.g., Render redeploy + cron tick on same minute).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cortex_phase_outputs_reflector_complete
+    ON cortex_phase_outputs (cycle_id)
+    WHERE artifact_type = 'reflector_complete';
 ```
 
 **Migration policy:**
-- Idempotent (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`).
+- Idempotent (`CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, partial unique index).
 - Foreign key to `cortex_cycles(cycle_id)` requires that table to exist (it already does — migration `20260428_cortex_cycles.sql` already applied).
+- The `idx_cortex_phase_outputs_reflector_complete` partial unique index lives in this migration (not a separate one) because Brief 3 depends on it; both ship in the same B-code dispatch.
 - No data backfill in the SQL migration itself — vault provisioning + counter seeding handled by Python migration script (caller A).
-- Rollback documented at file end (commented `-- DROP TABLE` lines, like prior cortex migrations).
+- Rollback documented at file end (commented `-- DROP TABLE` + `-- DROP INDEX` lines, like prior cortex migrations).
 
 ### 3.2 Provisioning function
 
@@ -211,17 +220,22 @@ def render_directives_template(matter_slug: str, matter_name: str, today: str) -
     """Render the empty-state directives.md template with frontmatter.
 
     Frontmatter intentionally minimal (matches Cortex curated/ frontmatter
-    discipline from BAKER_VAULT_WRITE_1 §3.4 — source/confidence/provenance
-    are NOT required on this scaffolding file because no directive bodies
-    exist yet; the file becomes a container that Phase 6 Reflector populates,
-    and Reflector's writes will carry the standard frontmatter).
+    discipline). Frontmatter conforms to kbl/ingest_endpoint.py:30-33
+    validator: REQUIRED_KEYS=type/slug/name/updated/author/tags/related,
+    VALID_TYPES={matter,person,entity}, VALID_VOICES={silver,gold}.
+    type='matter' because this file IS the matter's directives playbook —
+    no validator skip, no validator extension. directive_count and
+    schema_version are documentation-only fields below the required block.
     """
     return f"""---
-matter: {matter_slug}
-matter_name: {matter_name}
-type: directives_playbook
-created_at: {today}
-last_updated: {today}
+type: matter
+slug: {matter_slug}
+name: {matter_name} — Directives Playbook
+updated: {today}
+author: agent
+tags: [directives, playbook, cortex-phase6]
+related: []
+voice: silver
 directive_count: 0
 schema_version: 1
 ---
@@ -510,40 +524,36 @@ def render_skeleton(filename: str, kind: str, cfg: dict, today: str) -> str:
     raise ValueError(f"unknown skeleton kind: {kind}")
 ```
 
-**Note on the `_extract_frontmatter` validator** (currently line 528-534): the directives.md template starts with `---\n` and terminates frontmatter correctly, so the existing validator passes. The frontmatter keys (`matter`, `matter_name`, `type`, `created_at`, `last_updated`, `directive_count`, `schema_version`) do not need to match `kbl/ingest_endpoint.validate_frontmatter()` strict-mode rules because directives.md is not a curated-claim file — it's a playbook container. Verify by:
+**Frontmatter validator conformance — Option C (chosen)** (architect-review feedback 2026-04-30):
+
+The `render_directives_template` above emits frontmatter that conforms to `kbl/ingest_endpoint.py:30-33` validator rules — no validator skip, no validator extension. The 7 required keys (`type/slug/name/updated/author/tags/related`) plus optional `voice` are all present:
+- `type: matter` — directives.md IS the matter's directives playbook (the type enum's matter category fits cleanly)
+- `slug: <matter_slug>` — passes `validate_slug_in_registry` because the slug must already be in slugs.yml at provisioning time
+- `voice: silver` — agent-authored (not Director gold)
+- `tags: [directives, playbook, cortex-phase6]` — discoverable
+- `directive_count: 0` + `schema_version: 1` — non-required documentation fields, ignored by validator
+
+**Why Option C over the earlier-considered Option A** (skip validator for kind=='directives'): Option A creates an exception zone. Future implementers will treat the skip as license. Option C is zero validator change, zero skip — the directives.md is a fully-conformant matter file from day 1, and KBL ingest sweeping it later costs nothing.
+
+**Verify by:**
 
 ```bash
 python3 -c "
 import sys
 sys.path.insert(0, '.')
 from kbl.ingest_endpoint import validate_frontmatter
-fm = {'matter':'test','matter_name':'Test','type':'directives_playbook',
-      'created_at':'2026-04-30','last_updated':'2026-04-30',
-      'directive_count':0,'schema_version':1}
+fm = {'type':'matter', 'slug':'test', 'name':'Test — Directives Playbook',
+      'updated':'2026-04-30', 'author':'agent',
+      'tags':['directives', 'playbook'], 'related':[],
+      'voice':'silver', 'directive_count':0, 'schema_version':1}
 validate_frontmatter(fm)
 print('OK')
 "
 ```
 
-**Confirmed mismatch** (verified 2026-04-30 against `kbl/ingest_endpoint.py:30-33`):
-- `REQUIRED_FRONTMATTER_KEYS = ("type", "slug", "name", "updated", "author", "tags", "related")`
-- `VALID_TYPES = frozenset({"matter", "person", "entity"})`
+(The slug 'test' will fail `validate_slug_in_registry` for type='matter' if registry-strict; use a real slug like 'oskolkov' for the verify call. Or run inside an actual provisioning context where slug is already canonical.)
 
-The directives.md frontmatter drafted above (matter / matter_name / type=`directives_playbook` / created_at / last_updated / directive_count / schema_version) will fail validation on **two grounds**: (a) missing 6 of 7 required keys, (b) `directives_playbook` is not in VALID_TYPES.
-
-**Recommended path — Option A** (narrow skip in `write_targets`): gate the `validate_frontmatter` call on kind. One-line change in `scripts/bootstrap_matter.py:568-572`:
-
-```python
-for filename, kind in SKELETON_FILES:
-    content = render_skeleton(filename, kind, cfg, today)
-    fm = _extract_frontmatter(content)
-    if kind != "directives":  # NEW — directives.md is a playbook container, not a KBL claim file
-        validate_frontmatter(fm)
-    (out_root / filename).write_text(content, encoding="utf-8")
-    written += 1
-```
-
-**Why Option A over Option B** (extending KBL validator to allow `directives_playbook` type): Option B ripples through all KBL ingest paths and breaks the type-enum invariant downstream consumers rely on. Option A is 1 line, isolated to bootstrap, and matches the current architecture (directives.md is NOT a KBL claim — it's a playbook container that Phase 6 Reflector populates with separate frontmatter on each directive write).
+**No `bootstrap_matter.py:568-572` change required** — the existing `write_targets` validator call passes as-is.
 
 ### 3.5 What this brief does NOT touch
 

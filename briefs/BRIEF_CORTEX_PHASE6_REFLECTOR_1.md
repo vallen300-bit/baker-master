@@ -61,9 +61,9 @@ V1 = Triaga-only counter signal. ClickUp write is **target only** (proposed acti
 1. Parse `[directive: <id>]` citations from Phase 4 propose-phase output.
 2. After Director Triaga decision (or 14d silence), increment counters on each cited directive in `cortex_directives` (Brief 4 schema).
 3. Flag untraceable proposals (no/unknown/malformed citation) into `prompt_review_queue` (Brief 4 schema) for weekly eyeball review.
-4. Write proposed actions to **two targets**:
-   - **Vault**: `wiki/matters/<slug>/proposed-config-deltas.md` (append per cycle; Markdown-readable)
-   - **ClickUp**: per-matter "Drafts & Deliverables" list (per Brief 5 surface contract; Director + successors get one query-able place)
+4. Write proposed actions to **vault** (V1 sole active target per channels-last directive):
+   - **Vault**: `wiki/matters/<slug>/proposed-config-deltas.md` (append per cycle; Markdown-readable) — V1 ACTIVE
+   - **ClickUp**: per-matter "Drafts & Deliverables" list (per Brief 5 surface contract) — V1 DORMANT, code retained but env-gated `REFLECTOR_CLICKUP_WRITE=false` per Brief 5 deferral
 
 **Counter math** (AI Head 1 Q2 ratification 2026-04-30):
 - helpful++ on Director Triaga ratify
@@ -239,10 +239,25 @@ def parse_citations(proposal_text: str) -> tuple[list[str], list[str], bool]:
     return valid, invalid, has_any
 
 
-def _get_db():
-    """Resolve DB connection via canonical accessor.
+def _get_store():
+    """Resolve canonical SentinelStoreBack singleton.
 
-    Mirrors orchestrator/cortex_phase4_proposal.py _get_store() pattern.
+    NOTE: SentinelStoreBack uses a psycopg2 connection POOL (SimpleConnectionPool)
+    with `_get_conn()` / `_put_conn()` borrow semantics — there is NO `.conn`
+    attribute. All callers MUST borrow + return on every operation:
+
+        conn = store._get_conn()
+        try:
+            ...
+            conn.commit()
+        except Exception:
+            conn.rollback()  # python-backend rule
+            raise
+        finally:
+            store._put_conn(conn)
+
+    Verified against memory/store_back.py:39-715 (every persistence method
+    follows this pattern).
     """
     from memory.store_back import SentinelStoreBack
     return SentinelStoreBack._get_global_instance()
@@ -257,34 +272,65 @@ def increment_counters_on_cited_directives(
 ) -> tuple[int, list[str]]:
     """UPDATE cortex_directives — increment counter on each cited id.
 
-    Returns (rows_updated, unknown_ids). Unknown ids = cited but not present
-    in cortex_directives → caller logs to prompt_review_queue with reason
+    Returns (rows_updated, unknown_ids). Unknown ids include both:
+      * directive_id absent from cortex_directives entirely
+      * directive_id present but matter_slug-scoped to a DIFFERENT matter
+        (cross-matter citation hardening — prevents AO cycle from
+        incrementing MOVIE directive counters via fabricated id)
+
+    `_global-*` ids bypass the matter_slug check (they apply across matters).
+
+    Caller logs unknown_ids to prompt_review_queue with reason
     'unknown_directive_id'.
 
-    All UPDATEs run in one transaction per python-backend rule (rollback
-    on exception before any new query).
+    Connection borrowed + returned via pool. UPDATE in single transaction
+    with rollback on exception (python-backend rule).
     """
     if counter_field not in {"helpful_count", "harmful_count", "stale_count"}:
         raise ValueError(f"counter_field must be one of helpful/harmful/stale, got {counter_field!r}")
     if not cited_ids:
         return 0, []
 
-    store = _get_db()
-    conn = store.conn  # canonical accessor exposes psycopg2 connection
+    # Split into matter-scoped vs global ids; existence-check has different
+    # WHERE clauses for each.
+    global_ids = [d for d in cited_ids if d.startswith("_global-")]
+    matter_ids = [d for d in cited_ids if not d.startswith("_global-")]
+
+    store = _get_store()
+    conn = store._get_conn()
     rows_updated = 0
     unknown: list[str] = []
     try:
         with conn.cursor() as cur:
-            # Batch existence check first (avoids one round-trip per id):
-            cur.execute(
-                "SELECT directive_id FROM cortex_directives WHERE directive_id = ANY(%s)",
-                (cited_ids,),
-            )
-            present = {row[0] for row in cur.fetchall()}
+            present: set[str] = set()
+            # Matter-scoped ids must belong to THIS matter:
+            if matter_ids:
+                cur.execute(
+                    """
+                    SELECT directive_id FROM cortex_directives
+                     WHERE directive_id = ANY(%s)
+                       AND matter_slug = %s
+                       AND status = 'active'
+                    """,
+                    (matter_ids, matter_slug),
+                )
+                present.update(row[0] for row in cur.fetchall())
+            # Global ids are universal:
+            if global_ids:
+                cur.execute(
+                    """
+                    SELECT directive_id FROM cortex_directives
+                     WHERE directive_id = ANY(%s)
+                       AND matter_slug = '_global'
+                       AND status = 'active'
+                    """,
+                    (global_ids,),
+                )
+                present.update(row[0] for row in cur.fetchall())
             unknown = [d for d in cited_ids if d not in present]
             if present:
-                # Parameterized UPDATE; field name interpolated only after whitelist
-                # check above — never user-controlled.
+                # Parameterized UPDATE; field name interpolated only after
+                # whitelist check above — never user-controlled.
                 cur.execute(
                     f"""
                     UPDATE cortex_directives
@@ -299,6 +345,8 @@ def increment_counters_on_cited_directives(
     except Exception:
         conn.rollback()  # python-backend rule
         raise
+    finally:
+        store._put_conn(conn)
     return rows_updated, unknown
 
 
@@ -313,12 +361,14 @@ def log_untraceable_proposal(
 
     flagged_reason ∈ {'no_citation', 'unknown_directive_id', 'malformed_citation'}
     per Brief 4 schema CHECK constraint.
+
+    Connection borrowed + returned via pool.
     """
     if flagged_reason not in {"no_citation", "unknown_directive_id", "malformed_citation"}:
         raise ValueError(f"invalid flagged_reason: {flagged_reason!r}")
 
-    store = _get_db()
-    conn = store.conn
+    store = _get_store()
+    conn = store._get_conn()
     try:
         with conn.cursor() as cur:
             cur.execute(
@@ -336,6 +386,8 @@ def log_untraceable_proposal(
     except Exception:
         conn.rollback()
         raise
+    finally:
+        store._put_conn(conn)
 
 
 def classify_triaga_outcome(director_action: Optional[str], age: timedelta) -> str:
@@ -398,14 +450,25 @@ def write_proposed_actions_to_vault(
     )
 
     if not target.exists():
+        # Frontmatter MUST conform to kbl/ingest_endpoint.validate_frontmatter
+        # (REQUIRED_KEYS: type/slug/name/updated/author/tags/related;
+        # VALID_TYPES: matter/person/entity; VALID_VOICES: silver/gold).
+        # type='matter' because this file IS the matter's proposed-deltas
+        # surface. voice='silver' = agent-authored (per kbl voice enum).
+        # source/provenance are NOT validator-required keys; carried as
+        # documentation-only fields below the required block.
         frontmatter = (
             f"---\n"
-            f"matter: {matter_slug}\n"
-            f"type: proposed_config_deltas\n"
+            f"type: matter\n"
+            f"slug: {matter_slug}\n"
+            f"name: {matter_slug} — Proposed Config Deltas (Reflector)\n"
+            f"updated: {today_iso}\n"
+            f"author: agent\n"
+            f"tags: [cortex-reflector, proposed-deltas]\n"
+            f"related: []\n"
+            f"voice: silver\n"
             f"source: cortex_phase6_reflector\n"
-            f"confidence: cycle-validated\n"
             f"provenance: cortex_cycles.cycle_id\n"
-            f"created_at: {today_iso}\n"
             f"---\n"
             f"# {matter_slug} — Proposed Config Deltas\n\n"
             f"Reflector-emitted proposed actions per Cortex cycle. Append-only.\n"
@@ -418,7 +481,7 @@ def write_proposed_actions_to_vault(
     return target
 ```
 
-**Frontmatter notes:** `source` / `confidence` / `provenance` keys present per Brief 1's curated/ frontmatter discipline (these are required when Brief 1's `baker_vault_write` is later used). Today this is a staging-path write so the validator doesn't gate it, but conforming now means zero-touch when migration to MCP write happens.
+**Frontmatter notes:** the 7 required keys (`type/slug/name/updated/author/tags/related`) plus `voice` are emitted per `kbl/ingest_endpoint.py:30-33` validator. Type is `matter` (this file IS the matter's proposed-deltas surface). `source`/`provenance` are non-required fields included for Reflector audit trace.
 
 ### 3.4 ClickUp write: Drafts & Deliverables list — DORMANT in V1 (Brief 5 deferred)
 
@@ -536,21 +599,35 @@ Standard 6-phase flow runs Phase 6 after Phase 5. If `cortex_cycles.director_act
 
 **Trigger B — deferred (Triaga TTL):**
 
-Most cycles archive with `director_action = NULL` because Director hasn't acted yet. These need a deferred sweep. Add a scheduled job (cron via Render or APScheduler in baker-master, whichever pattern matches existing cron infrastructure):
+Most cycles archive with `director_action = NULL` because Director hasn't acted yet, OR Director acts later (cycle lands at `status='approved' | 'rejected' | 'modified'` post-Triaga). These need a deferred sweep. Schedule via the existing **APScheduler** infrastructure in `triggers/embedded_scheduler.py` (matches `clickup_poll`, `gmail_poll`, etc. patterns) — NOT a separate Render cron service. New job: `phase6_reflector_sweep`, hourly cadence, env override `REFLECTOR_SWEEP_CRON_HOUR` / `REFLECTOR_SWEEP_CRON_MINUTE`.
+
+**Status filter** must include all relevant Triaga-outcome states. The actual `cortex_cycles.status` enum (per `migrations/20260428_cortex_cycles.sql:25` + transient-amendment `20260429_cortex_cycles_add_transient_statuses.sql`) is:
+`'in_flight','awaiting_reason','proposed','tier_b_pending','approving','approved','rejecting','rejected','editing','modified','refreshing','failed','superseded','abandoned'`.
+Reflector-eligible = pre-decision (`proposed`, `tier_b_pending`) OR Triaga-decided (`approved`, `rejected`, `modified`). Excluded = transient *ing variants (will resolve), `in_flight` / `awaiting_reason` (pre-proposal), `failed`/`superseded`/`abandoned` (terminal-no-Reflector).
 
 ```python
 # orchestrator/cortex_phase6_reflector.py — deferred sweep entry point
 
-async def sweep_pending_cycles() -> dict:
-    """Run hourly. Find cycles with status='proposed' or 'modified' that have
-    aged > TRIAGA_TTL_DAYS or have director_action set since last sweep.
+REFLECTOR_ELIGIBLE_STATUSES = (
+    'proposed', 'tier_b_pending',  # pre-decision (sweep on TTL)
+    'approved', 'rejected', 'modified',  # Triaga-decided (sweep immediately)
+)
 
-    For each: call reflect_cycle() to update counters + write surfaces.
+
+async def sweep_pending_cycles() -> dict:
+    """Run hourly via APScheduler. Find Reflector-eligible cycles that
+    either (a) have a Triaga decision since last sweep, or (b) have
+    aged past TRIAGA_TTL_DAYS without a decision.
+
+    For each: invoke reflect_cycle() to update counters + write surfaces.
+    Marks done by writing one cortex_phase_outputs row with
+    phase='archive', artifact_type='reflector_complete'. Idempotent
+    (skips already-marked cycles via NOT IN subquery).
 
     Returns dict with counts: {checked, reflected, stale_count, errors}.
     """
-    store = _get_db()
-    conn = store.conn
+    store = _get_store()
+    conn = store._get_conn()
     cutoff_age = datetime.now(timezone.utc) - timedelta(days=TRIAGA_TTL_DAYS)
     try:
         with conn.cursor() as cur:
@@ -558,7 +635,7 @@ async def sweep_pending_cycles() -> dict:
                 """
                 SELECT cycle_id, matter_slug, started_at, director_action
                   FROM cortex_cycles
-                 WHERE status IN ('proposed', 'modified', 'tier_b_pending')
+                 WHERE status = ANY(%s)
                    AND (director_action IS NOT NULL
                         OR started_at < %s)
                    AND cycle_id NOT IN (
@@ -569,12 +646,17 @@ async def sweep_pending_cycles() -> dict:
                  ORDER BY started_at ASC
                  LIMIT 100
                 """,
-                (cutoff_age,),
+                (list(REFLECTOR_ELIGIBLE_STATUSES), cutoff_age),
             )
             cycles = cur.fetchall()
-        # Process outside the transaction (each cycle has its own).
-        # ... call reflect_cycle for each, log to cortex_phase_outputs
-        # with phase='archive', artifact_type='reflector_complete' to mark done.
+    finally:
+        store._put_conn(conn)
+    # Process outside the SELECT transaction (each cycle has its own
+    # increment+idempotency-mark transaction in reflect_cycle, see below).
+    # Counter increment + idempotency-row INSERT MUST run in one
+    # transaction to avoid double-counting if sweep collides with
+    # itself (e.g., Render redeploy + cron firing on the same minute).
+    # reflect_cycle() does this; sweep_pending_cycles only enumerates.
         # (Note: cortex_phase_outputs.phase CHECK constraint allows only
         # sense/load/reason/propose/act/archive — Phase 6 Reflector is part
         # of the archive phase per RA-23 architecture.)
@@ -583,16 +665,61 @@ async def sweep_pending_cycles() -> dict:
         raise
 ```
 
-**Cron schedule:** hourly. Cost: a single SELECT + N small UPDATEs + ≤ 100 vault writes per hour. Negligible.
+**Cron schedule:** hourly via existing APScheduler in `triggers/embedded_scheduler.py` (NOT a separate Render cron service — matches `clickup_poll`, `gmail_poll`, etc. patterns). Cost: a single SELECT + N small UPDATEs + ≤ 100 vault writes per hour. Negligible.
 
-**Idempotency:** sweep skips cycles that already have a `cortex_phase_outputs` row with `phase='archive'` AND `artifact_type='reflector_complete'`. Re-running sweep is safe.
+**Idempotency (transactional):** `reflect_cycle(cycle_id)` MUST wrap the counter UPDATE + idempotency-marker INSERT in a single transaction:
+
+```python
+def reflect_cycle(cycle_id: str, matter_slug: str, ...):
+    """Increment counters + mark cycle reflector_complete in one txn."""
+    store = _get_store()
+    conn = store._get_conn()
+    try:
+        with conn.cursor() as cur:
+            # 1. Increment counters on cited directives (in same txn)
+            #    ... see increment_counters_on_cited_directives logic ...
+            # 2. Insert idempotency marker — ON CONFLICT prevents
+            #    double-mark if two sweeps collide
+            cur.execute(
+                """
+                INSERT INTO cortex_phase_outputs
+                    (cycle_id, phase, phase_order, artifact_type, payload)
+                VALUES (%s, 'archive', 6, 'reflector_complete', %s::jsonb)
+                ON CONFLICT DO NOTHING
+                """,
+                (cycle_id, json.dumps({"reflected_at": "...", "outcome": "..."})),
+            )
+            if cur.rowcount == 0:
+                # Another sweep marked it first — abort our increments
+                # (transaction will roll back below)
+                raise RuntimeError("cycle already reflected by concurrent sweep")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        store._put_conn(conn)
+```
+
+**Schema prerequisite for ON CONFLICT** (Brief 4 §3.1 follow-up): add a UNIQUE constraint on `cortex_phase_outputs (cycle_id, artifact_type) WHERE artifact_type = 'reflector_complete'` to make `ON CONFLICT DO NOTHING` work. Brief 4 implementer adds this index alongside the directives migration. **Action: Brief 4 §3.1 SQL must include:**
+
+```sql
+-- Idempotency support for Phase 6 Reflector (Brief 3 dependency)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_cortex_phase_outputs_reflector_complete
+    ON cortex_phase_outputs (cycle_id)
+    WHERE artifact_type = 'reflector_complete';
+```
+
+Re-running sweep is safe: idempotency marker prevents double-counter.
+
+**Audit emission (CLAUDE.md hard rule):** every `reflect_cycle()` invocation appends one row to `baker_actions` with action_type='cortex_reflector_complete', action_target=cycle_id, status='success'|'failed'. Mirrors existing patterns in capability_runner / cortex_phase4_proposal.
 
 ### 3.6 What this brief does NOT touch
 
 - `cortex_directives` table schema — Brief 4 owns. Reflector only INSERTs counter increments (UPDATE rows) + reads.
 - `prompt_review_queue` schema — Brief 4 owns. Reflector only INSERTs.
-- Brief 5 surface contract content — Reflector reads, doesn't write the contract.
-- ClickUp write outside BAKER space — CLAUDE.md hard rule. If contract specifies any non-BAKER list, Reflector refuses + logs.
+- Brief 5 surface contract content — Reflector reads (when post-V1 reactivated), doesn't write the contract. **V1: Brief 5 deferred per channels-last directive 2026-04-30 — ClickUp code path dormant, no contract read in V1 ship.**
+- ClickUp write outside BAKER space — CLAUDE.md hard rule. If contract specifies any non-BAKER list (when reactivated), Reflector refuses + logs.
 - Cycle-outcome inspector — V2 (preamble §0).
 - ClickUp aux signal — V2 (preamble §0).
 - `directive_signal_mismatch` log table — does not exist in V1.
