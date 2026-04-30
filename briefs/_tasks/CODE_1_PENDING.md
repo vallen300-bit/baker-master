@@ -1,23 +1,28 @@
-# CODE_1 — PENDING (AUTO_TRIGGER_FAN_OUT_VERIFY_1)
+# CODE_1 — PENDING (B4 PR #107 review → CORTEX_AUTO_TRIGGER_DISPATCH_FIX_1)
 
 **Status:** PENDING — dispatched 2026-04-30 by AI Head A (App)
-**Brief:** `briefs/BRIEF_AUTO_TRIGGER_FAN_OUT_VERIFY_1.md`
-**Builder:** B1
-**Priority:** CRITICAL
-**ETA:** 2026-05-01
+**Priority:** CRITICAL (sequence below)
 
-## Task summary
+## Sequence
 
-Verification work — confirm cost-gate accepts ANY of 22 matters and a non-AO signal fires a Cortex cycle. Pick 3 test matters: `hagenauer-rg7`, `mo-vie-am`, `lilienmatt`. Curl-test signal injection + DB observation. NO code changes unless gap surfaced — file gap as paste-block to AI Head A if found.
+### Step 1 (FIRST, ~10 min)
 
-## Dispatch
+**Review PR #107 (B4 BOOTSTRAP_V2_GOLD_SKIP_1)** per trigger-class rule (Director-override surface).
 
-1. Read brief: `briefs/BRIEF_AUTO_TRIGGER_FAN_OUT_VERIFY_1.md`
-2. Branch: `b1/auto-trigger-fan-out-verify`
-3. Pre-pytest re-checkout ritual applies for any test runs.
-4. Ship report: `briefs/_reports/B1_auto_trigger_fan_out_verify_20260430.md`
-5. PR open + AI Head A self-review + merge.
+- Brief: `briefs/BRIEF_BOOTSTRAP_V2_GOLD_SKIP_1.md`
+- PR: https://github.com/vallen300-bit/baker-master/pull/107
+- Verdict back to AI Head A via paste-block: PASS or REQUEST_CHANGES with specifics.
+
+### Step 2 (SECOND, ~30-60 min)
+
+**Build CORTEX_AUTO_TRIGGER_DISPATCH_FIX_1** — your verification surfaced this gap, you have deepest context.
+
+- Brief: `briefs/BRIEF_CORTEX_AUTO_TRIGGER_DISPATCH_FIX_1.md`
+- Branch: `b1/cortex-auto-trigger-dispatch-fix`
+- Severity: CRITICAL — auto-trigger silently dead for ALL 22 matters since multi-matter gate shipped.
+- Approach: Option A from your ship report (move dispatch from bridge to Step 6 finalize) + add `movie_am` underscore alias to `slugs.yml`.
+- Trigger-class: cross-capability state writes → **B3 second-pair-of-eyes review BEFORE AI Head A merge** (B1 builder-conflict caveat).
 
 ## Previous task (closed)
 
-PR #90 (CORTEX_RUN_SCAN_UI_RENDER_1) shipped 2026-04-30T06:13Z, hotfix PR #91 merged 06:11Z. Wave 2 #1 closed.
+PR #109 (AUTO_TRIGGER_FAN_OUT_VERIFY_1) merged 2026-04-30 — ship report locked in, gap surfaced, Option A ratified.

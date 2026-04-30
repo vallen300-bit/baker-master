@@ -131,12 +131,16 @@ auto-execute per matter as proposals fire.</div>
   <div class="item queued">
     <div class="icon">→</div>
     <div>
-      <div class="label">Wave 2 #4 — auto-trigger fan-out across all 22 matters (cycle independence + cost-cap fairness)<span class="priority critical">critical</span></div>
-      <div class="desc">Today auto-trigger fires on AO only by historical cost-gate scope. With
-multi-matter cost-gate shipped (Wave 1 Track 2), need to verify incoming
-signals (email/whatsapp/clickup/calendar/etc.) classify onto ANY of the
-22 matter brains and fire cycles. Without this, all 22 matter brains sit
-dormant for auto-trigger. ~30 min B-code dispatch + curl verify.</div>
+      <div class="label">Auto-trigger dispatch fix — move maybe_dispatch from bridge tick to Step 6 finalize (Option A)<span class="priority critical">critical</span></div>
+      <div class="desc">B1 verification (PR #109) confirmed auto-trigger has been silently dead
+for ALL 22 matters since multi-matter gate shipped. Root cause:
+kbl/bridge/alerts_to_signal.py:577 fires maybe_dispatch with raw
+signal_queue.matter (PM-era labels) before Step 1 canonicalizes via
+slug_registry.normalize() into primary_matter. Fix: move dispatch to
+Step 6 finalize where canonical primary_matter is committed. Compounding:
+add 'movie_am' underscore alias to slugs.yml (Step 1 currently fails to
+canonicalize that label). Brief: BRIEF_CORTEX_AUTO_TRIGGER_DISPATCH_FIX_1.
+Trigger-class (cross-capability state writes) → B3 second-pair-of-eyes.</div>
       <div class="meta-line"><span><strong>Owner:</strong> b-code</span><span><strong>ETA:</strong> 2026-05-01</span></div>
       
     </div>
@@ -167,21 +171,6 @@ ClickUp Cortex Backlog tail. Session-close: rewrite OPERATING + append
 ARCHIVE + update YAML for shipped items. Standing rule: nothing parked,
 ever — backlog → ClickUp.</div>
       <div class="meta-line"><span><strong>Owner:</strong> ai-head-a</span><span><strong>ETA:</strong> 2026-04-30</span></div>
-      
-    </div>
-    <div class="badge queued">QUEUED</div>
-  </div>
-
-  <div class="item queued">
-    <div class="icon">→</div>
-    <div>
-      <div class="label">Wave 2 #5 — advisory_lock 900300 collision (financial_detector + initiative_engine)<span class="priority high">high</span></div>
-      <div class="desc">B3 surfaced during PR #84 review: orchestrator/financial_detector.py:76
-and orchestrator/initiative_engine.py:630 both use
-pg_try_advisory_xact_lock(900300) — one silently no-ops when the other
-holds. Pre-existing; not introduced by PR #84. Audit all advisory_lock
-keys; renumber. ~10 LOC fix.</div>
-      <div class="meta-line"><span><strong>Owner:</strong> b-code</span><span><strong>ETA:</strong> 2026-05-02</span></div>
       
     </div>
     <div class="badge queued">QUEUED</div>
@@ -590,6 +579,28 @@ running cleanly for ≥1 week.</div>
       <div class="desc"></div>
       <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
       <div class="anchor">AI Head A verification 2026-04-30 — closes Wave 1 Track 5 verification loop</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Auto-trigger fan-out verification across 22 matters (B1 verification, gap surfaced)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
+      <div class="anchor">B1 PR #109 — verification-only, FAIL outcome, gap surfaced. Auto-trigger silently dead for ALL 22 matters since multi-matter gate shipped (not just non-AO as initial brief assumed). Root cause: kbl/bridge/alerts_to_signal.py:577 dispatches with raw signal_queue.matter pre-Step-1 canonicalization. Follow-up: cortex-auto-trigger-dispatch-fix queued.</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">advisory_lock 900300 collision (initiative_engine renumbered to 900800)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
+      <div class="anchor">B3 PR #108 — 2-line renumber + grep proof of 15 unique advisory_lock keys</div>
     </div>
     <div class="badge done">DONE</div>
   </div>
