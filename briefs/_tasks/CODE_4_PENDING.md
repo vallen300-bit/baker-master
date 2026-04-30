@@ -1,68 +1,84 @@
-# CODE_4 — PENDING (CORTEX_PHASE6_REFLECTOR_1 — Brief 3, Reflector consumer)
+# CODE_4 — IN_REVIEW (CORTEX_PHASE6_REFLECTOR_1 — Brief 3, follow-up patch needed)
 
-**Status:** PENDING — dispatched 2026-04-30 by AI Head A
-**Brief:** `briefs/BRIEF_CORTEX_PHASE6_REFLECTOR_1.md` (929 lines, architect-reviewed; on main per PR #111 merge)
+**Status:** IN_REVIEW — REQUEST_CHANGES (1 IMPORTANT) — 2026-04-30
+**PR shipped:** https://github.com/vallen300-bit/baker-master/pull/129 (`b4/cortex-phase6-reflector-1`) — MERGED 2026-04-30T20:59:06Z by Director, before architect-review landed.
+**Follow-up PR needed:** new branch off main, 1-line ORDER BY flip + optional regression test.
 **Builder:** B4
-**Reviewer:** B1 second-pair-of-eyes (B4 builder-conflict caveat — Brief 3 consumes Brief 4's schema which B4 just shipped, so a non-builder reviewer is required)
-**Priority:** CRITICAL (Director priority pivot 2026-04-30 — learning loop is THE priority; channels-last directive elevated Briefs 3+4)
-**Trigger-class:** TIER A — modifies Phase 4 propose-phase prompt + adds new Phase 6 module + new external write surface (vault). AI Head B cross-lane ratify on top of architect-review pass pre-merge.
-**ETA:** 2026-05-06 (target this sprint)
+**Reviewer:** B1 second-pair-of-eyes on the follow-up patch (B4 builder-conflict)
 
-## Why B4 again
+## Verdict
 
-You shipped Brief 4 just now (PR #125 + post-review fixes PR #127 merged 2026-04-30). The Reflector you're about to build:
+Architect-review pass via `code-architecture-reviewer` subagent → APPROVE WITH NITS. 8 of 8 dispatch concerns verified clean. 1 IMPORTANT bug (separate from the 8) requires follow-up patch.
 
-- Reads `cortex_phase_outputs` looking for `phase='archive', artifact_type='reflector_complete'` markers — the partial unique idx **you just shipped** is what makes its `INSERT ... ON CONFLICT DO NOTHING` actually idempotent.
-- Increments `helpful_count` / `harmful_count` columns on `cortex_directives` — the table **you just shipped**.
-- Logs untraceable proposals to `prompt_review_queue` — the table **you just shipped**.
+Full architect comment on PR #129: issuecomment-4356143719.
 
-Continuity bonus is real. Builder-conflict caveat handled by routing review to B1.
+## Required patch (1 IMPORTANT)
 
-## Key spec points (verbatim from architect-reviewed brief — re-read in full)
+### `_load_proposal_text` chops trailing citations on long proposals
 
-- **§0 simplification preamble** — V1 ships Triaga-only signal source. Cycle-outcome inspector + ClickUp aux deferred to V2 with documented trigger criteria.
-- **Q1 flip ratification** — Brief 3 ships AFTER Brief 4 (✅ Brief 4 done; this is the back-half).
-- **Q2 counter math** — `helpful / (helpful + harmful)`, 14-day TTL, ignore stale + pending. Director-ratified.
-- **Q3 slugs.yml** — runtime-read, filter `status != retired` (matches Brief 4 migrator pattern).
-- **A — counter-signal hierarchy** — V1 Triaga only (ClickUp aux V2 if Triaga coverage <50%).
-- **B — citation provenance** — counter routing follows directive-id, not write surface.
-- **C — Brief 5 contract** — DEFERRED. Brief 3 V1 ships ClickUp write code path env-gated OFF (`REFLECTOR_CLICKUP_WRITE=false` default). Vault write to `proposed-config-deltas.md` is sole active write target. ClickUp infrastructure stays dormant in code; activation pending Brief 5 V2+.
-- **Cross-matter citation hardening** — Reflector cites `[directive: <matter>-<topic>-<NNN>]` for matter-scoped or `[directive: _global-<NNN>]` for cross-matter. Schema accepts `matter_slug='_global'` (your Brief 4 `_global` bypass note in `migrations/20260430_cortex_directives.sql` header documents the regex caveat — read it).
-- **Sweep idempotency** — counter increment + `cortex_phase_outputs` marker in single transaction. Brief 4's partial unique idx `idx_cortex_phase_outputs_reflector_complete` is the substrate. **Use it.**
-- **`baker_actions` audit row** — every Reflector write audits per CLAUDE.md hard rule.
-- **Phase 4 propose-prompt edit** — touches `orchestrator/cortex_phase3_synthesizer.py` (loads `synth_prompt` from `capability_sets` table or `_DEFAULT_SYNTH_PROMPT`). Read brief §3.X (TBD precise section) for the exact prompt-template change.
+**File:** `orchestrator/cortex_phase6_reflector.py:496-532`
 
-## Dispatch ritual
+`cortex_phase4_proposal.py:237` truncates `proposal_text[:8000]` before persisting in the `proposal_card` artifact. Phase 3c synthesizer outputs up to `PHASE3C_MAX_TOKENS = 4000` (~12K-16K chars). Citation preamble explicitly tells the model to put `[directive: <id>]` **at the end of the proposal** (`cortex_phase3_synthesizer.py:178`). The Reflector's ORDER BY prefers `proposal_card` over `synthesis`, so for any proposal > 8000 chars the trailing citation gets chopped, parser sees no citation, all proposals get queue-flagged with `no_citation`. Counters never increment.
+
+Worst case: every long proposal looks untraceable → learning loop dark for the most substantive cycles (the very cycles this brief is for).
+
+**Fix (one-line ORDER BY flip):**
+
+```python
+ORDER BY CASE artifact_type
+             WHEN 'synthesis'     THEN 0
+             WHEN 'proposal_card' THEN 1
+         END, created_at DESC
+```
+
+Prefer `synthesis` artifact (full text, no truncation) over `proposal_card` (Slack-rendered, truncated). Slack rendering still uses `[:8000]`; only the Reflector parsing sees full text.
+
+## Required regression test
+
+Add a test that:
+- Creates a `synthesis` artifact >8000 chars with `[directive: <id>]` at the very end (e.g., chars 9000+).
+- Creates a `proposal_card` artifact for the same cycle truncated at 8000 chars (citation chopped).
+- Calls Reflector parse path.
+- Asserts the citation is detected (not flagged `no_citation`).
+
+Without this test, the bug recurs the moment someone re-flips the ORDER BY thinking `proposal_card` is canonical.
+
+## Non-blocking suggestions (deferred — separate brief OK)
+
+- **S1 (RA-23 tracker note):** Trigger A absorbed into the hourly sweep is a defensible V1 scope deviation from brief §3.5. Adds up to 60 min counter-update latency on Triaga-decided cycles. Note in tracker.
+- **S2 (follow-up brief):** Vault write happens outside the counter-update transaction. If vault write throws after counter UPDATE + idempotency marker commit, vault file never written; subsequent sweeps skip via `already_reflected=True`. Inherent PG/filesystem-boundary tradeoff. Follow-up: reconciler that reads `reflector_complete` markers and verifies vault-file presence.
+
+## Patch ritual
 
 ```
 cd ~/bm-b4
 git fetch origin
 git checkout main
 git pull --ff-only origin main
-git checkout -b b4/cortex-phase6-reflector
-# read briefs/BRIEF_CORTEX_PHASE6_REFLECTOR_1.md (929 lines, dense, architect-reviewed)
-# implement Phase 6 module + Phase 4 prompt edit + tests
+git checkout -b b4/cortex-phase6-reflector-orderby-fix
+# 1-line ORDER BY flip in orchestrator/cortex_phase6_reflector.py:496-532
+# new regression test in tests/test_phase6_reflector_parse.py (or counters/sweep)
 # pre-pytest re-checkout ritual
-# PR open with grep proof + pytest output in body
+pytest tests/test_phase6_reflector_*.py -v   # confirm full pass
+git add -p
+git commit -m "fix(reflector): prefer synthesis artifact over truncated proposal_card (PR #129 IMPORTANT from architect-review)"
+git push origin b4/cortex-phase6-reflector-orderby-fix
 ```
 
-## Architect-review yardstick
+Then comment on the new PR with grep proof of the order flip + new test passing. Architect-review re-runs against the patch; B1 second-pair-of-eyes; AI Head A merges.
 
-Same standard applied to Brief 4 (PR #125 → REQUEST_CHANGES → PR #127 → APPROVE). Specifically watch for:
+## Trigger-class
 
-- **Spec-vs-reality mismatches** — your Brief 4 hit one (slugs.yml has no `name:` keys, only `description`). Brief 3 prompts you about Phase 4 prompt edits — verify the Phase 4 entry point is actually where the brief claims it is. Don't trust the brief's file:line refs blindly; grep first.
-- **Counter math edge cases** — denominator zero (helpful=0, harmful=0) — what does `helpful/(helpful+harmful)` return? Decide explicitly (NULL? skip?). Document.
-- **Sweep idempotency under retries** — `INSERT ... ON CONFLICT DO NOTHING` against the partial unique idx works for one cycle, but what about cross-cycle reflector runs against the same matter? Read the partial idx WHERE clause carefully.
-- **`_global` citation handling** — `KEBAB_SLUG_RE` rejects underscore prefix. Your Brief 4 migration note flagged this. Brief 3 implementer (you) must handle it; don't slip.
+TIER A — modifies Phase 6 Reflector's core citation-resolution path. AI Head B cross-lane ratify can chain on top after architect-review re-pass + B1 review.
 
-## Coordination
+## Companion state
 
-- After your push, AI Head A architect-review pass runs (will spawn `code-architecture-reviewer` subagent).
-- B1 second-pair-of-eyes review chains (B4 builder-conflict).
-- AI Head B cross-lane ratify on top per Tier A.
-- AI Head A merges.
-- Mailbox flips to COMPLETE.
+- Brief 4 (CORTEX_CONFIG_DIRECTIVES_SCHEMA_1) shipped in PR #125 + #127.
+- Brief 3 (CORTEX_PHASE6_REFLECTOR_1) shipped in PR #129; this follow-up closes the citation-truncation gap.
+- Vault PR #37 (`brisen` slug v17) merged.
+- Vault PR #40 (Desk memory seeds) merged.
+- Briefs 1+2 build (BAKER_VAULT_WRITE_1 + READ_WIKI_SCOPE_1) — next dispatch when Director ratifies.
 
 ## Previous task (closed)
 
-Brief 4 (CORTEX_CONFIG_DIRECTIVES_SCHEMA_1) shipped via PR #125 + post-review fixes PR #127, both merged 2026-04-30. Schema, partial unique idx for THIS Brief's reflector sweep, bootstrap hook, run-once migrator all live on main.
+Brief 4 dispatch + ship loop closed via PR #125 + #127 + #128 mailbox flip. Brief 3 main shipped via PR #129 (Director-merged before architect-review landed; same race as PR #125 — non-blocking now since sweep is hourly cadence).
