@@ -1,24 +1,50 @@
-# CODE_4 — IN_REVIEW (BOOTSTRAP_V2_GOLD_SKIP_1)
+# CODE_4 — PENDING (CORTEX_CONFIG_DIRECTIVES_SCHEMA_1 — Brief 4, learning loop schema)
 
-**Status:** IN_REVIEW — PR #107 opened 2026-04-30 by B4 (awaiting B1 second-pair-of-eyes per Trigger-class rule, then AI Head A merge)
-**Brief:** `briefs/BRIEF_BOOTSTRAP_V2_GOLD_SKIP_1.md`
+**Status:** PENDING — dispatched 2026-04-30 by AI Head A (App)
+**Brief:** `briefs/BRIEF_CORTEX_CONFIG_DIRECTIVES_SCHEMA_1.md` (now on main, PR #111 merged)
 **Builder:** B4
-**Priority:** HIGH
-**ETA:** 2026-05-02
+**Reviewer:** B1 second-pair-of-eyes (trigger-class: schema migration + cross-capability state writes)
+**Priority:** CRITICAL (Director priority pivot 2026-04-30 — learning loop is priority)
+**ETA:** 2026-05-06 (target this sprint; ship the schema + bootstrap hook)
 
 ## Task summary
 
-`scripts/bootstrap_matter.py` (you shipped, PR #96) emits `gold.md` per matter. CHANDA #4 author:director guard blocks any agent-authored `gold.md` commit, so emission is wasted work that requires manual revert. Remove the emission. ~30 min.
+Build the directives schema + per-matter directive registry + helpfulness counters + bootstrap hook. This is Brief 4 of the ACE direction (architect-reviewed, 826 lines spec, post-fix hardening: cross-matter scope check, sweep idempotency transactional wrap, APScheduler primitive specified).
 
-4 manual revert drops today: capital-call, aukera, uk-homes, 12-matter batch. Stop the bleed.
+You have direct context from BOOTSTRAP_V2_GOLD_SKIP_1 (PR #107 — gold.md skip) — the schema bootstrap hook here ships into the same `scripts/bootstrap_matter.py` you already worked on.
+
+## Q1 flip ratification
+
+Brief 4 ships FIRST (schema + migration + bootstrap hook), Brief 3 (Reflector consumer) ships AFTER.
+
+## Key spec points (per architect-review pass)
+
+- DB schema: per-matter directives with id format, frontmatter Option C (validator-conformance: type/section/voice/etc).
+- Cross-matter citation hardening: WHERE matter_slug = %s scope check; _global-* ids passthrough.
+- Sweep idempotency: counter increment + cortex_phase_outputs marker in single transaction (ON CONFLICT DO NOTHING). Brief 4 §3.1 ships supporting partial unique index.
+- Bootstrap hook: schema auto-provisions on every new matter via scripts/bootstrap_matter.py (live-organism per Director).
+- baker_actions audit row per CLAUDE.md hard rule.
 
 ## Dispatch
 
-1. Read brief: `briefs/BRIEF_BOOTSTRAP_V2_GOLD_SKIP_1.md`
-2. Branch: `b4/bootstrap-v2-gold-skip`
-3. Pre-pytest re-checkout ritual.
-4. **Trigger-class:** B1 second-pair-of-eyes review BEFORE AI Head A merge (touches Director-override surface). Dispatch sequence: B4 builds + opens PR → AI Head A pings B1 for review → B1 PASS → AI Head A merges.
+```
+git checkout main && git pull --ff-only origin main
+git checkout -b b4/cortex-config-directives-schema
+# read briefs/BRIEF_CORTEX_CONFIG_DIRECTIVES_SCHEMA_1.md (826 lines, dense, architect-reviewed)
+# implement schema + migration + bootstrap hook + tests
+# pre-pytest re-checkout ritual
+# PR open with grep proof + pytest output in body
+```
+
+## Trigger-class
+
+Cross-capability state writes (DB schema migration + per-matter state). B1 second-pair-of-eyes review BEFORE AI Head A merges.
+
+## Coordination
+
+- Brief 3 build (CORTEX_PHASE6_REFLECTOR_1) is queued for after Brief 4 ships per Q1 flip.
+- After Brief 4 ships: AI Head A may dispatch you OR another B-code on Brief 3 build.
 
 ## Previous task (closed)
 
-PR #96 (CORTEX_BOOTSTRAP_MATTER_1) squash-merged 2026-04-30T10:27Z.
+PR #107 (BOOTSTRAP_V2_GOLD_SKIP_1) merged 2026-04-30 with B1 PASS verdict.
