@@ -69,8 +69,11 @@ def load_active_matters(vault_root: Path) -> list[dict]:
             continue
         if status == "retired":
             continue
-        # Use description as fallback display name; slug as final fallback.
-        name = row.get("name") or row.get("description") or slug
+        # Real slugs.yml rows have no `name:` key — derive a parseable display
+        # name from the slug. Description is NOT a safe fallback: it contains
+        # ': ', quotes, apostrophes that break unquoted YAML scalars in
+        # render_directives_template. Director can hand-edit later.
+        name = row.get("name") or " ".join(w.capitalize() for w in slug.split("-"))
         out.append({"slug": slug, "name": str(name)[:80], "status": status})
     return out
 

@@ -7,6 +7,12 @@
 --
 -- Spec: briefs/BRIEF_CORTEX_CONFIG_DIRECTIVES_SCHEMA_1.md §3.1
 -- Sequencing: Q1 flip — ships BEFORE Brief 3 Reflector consumer.
+--
+-- NOTE for Brief 3 consumer: matter_slug='_global' is accepted here for
+-- cross-matter directives, but bypasses KEBAB_SLUG_RE
+-- (kbl/ingest_endpoint.py:35 + scripts/bootstrap_matter.py:33) which rejects
+-- underscore prefix. Brief 3 must either special-case '_global' in
+-- citation parsing or extend the regex.
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
