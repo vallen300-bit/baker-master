@@ -1,0 +1,69 @@
+# Bootstrap input — brisen-pr (group-level press / narrative; Sandra Luger)
+# Wave 3 batch — Director-ratified 2026-04-30
+
+matter_slug: brisen-pr
+matter_name: "Brisen PR (group-level press + narrative)"
+absorbed_from: "seed (Wave 3 batch — slugs.yml v2 description)"
+absorbed_at: 2026-04-30
+absorbed_by: "AI Head A"
+authority_chain: "slugs.yml v2 (Brisen Group press + narrative — positive-PR material for Sandra Luger and group-level reputation management; distinct from mo-vie asset press) + Director ratification 2026-04-30 (Wave 3 batch)"
+ratified_at: 2026-04-30
+
+autonomy_level: recommend_wait
+
+sense_sources:
+  - email: matter_keywords
+  - whatsapp: contact_phones
+
+entities:
+  primary:
+    - brisen-capital-sa
+  team:
+    - dimitry-vallen
+    - edita-vallen
+  counterparties:
+    - sandra-luger
+  adjacent:
+    - hagenauer-rg7
+    - movie
+    - nvidia-corinthia
+
+trigger_patterns:
+  - '\b(brisen[-\s]?pr|brisen[-\s]?press|sandra[-\s]?luger)\b'
+  - '\b(press[-\s]?release|media[-\s]?statement|narrative)\b.*\b(brisen|group)\b'
+
+default_specialists: [legal]
+specialist_cap_per_cycle: 5
+specialist_timeout_seconds: 60
+specialist_retries: 2
+cycle_timeout_seconds: 300
+
+auto_trigger:
+  severity_floor: high
+  confidence_floor: 0.8
+
+games_relevant: true
+counterparty_iteration_horizon: long_finite
+counterparty_reputation_stake: 8
+counterparty_observed_strategy: cooperate_with_constraints
+
+project_structure: |
+  - **Scope:** Brisen Group-level press + narrative.
+  - **Lead PR contact:** Sandra Luger.
+  - **Distinct from:** `movie` (MO Vienna asset press — handled via MOHG/PRCO).
+  - **Active context:** Hagenauer reputation containment (per Q4 completed 2026-04-29 — press containment protected Brisen reputation from insolvency fallout).
+
+counterparty_topology: |
+  | Slug | Role | Status |
+  |---|---|---|
+  | `sandra-luger` | Brisen-side PR lead | active |
+
+notes: |
+  Reputation-class matter. Reputation_stake 8 (group-level brand). Game-relevant
+  because press signals interact with counterparty perception (LP confidence,
+  lender comfort, operator relationship).
+
+  ## Bridge
+  - `hagenauer-rg7` — primary reputation pressure source
+  - `movie` — asset-level press handled separately
+  - `nvidia-corinthia` — origination angle has PR upside

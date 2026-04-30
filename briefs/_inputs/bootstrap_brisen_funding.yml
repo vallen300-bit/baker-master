@@ -1,0 +1,73 @@
+# Bootstrap input — brisen-funding (cross-counterparty cash-flow arc)
+# Wave 3 batch — Director-ratified 2026-04-30
+
+matter_slug: brisen-funding
+matter_name: "Brisen Funding (cross-counterparty cash-flow arc)"
+absorbed_from: "seed (Wave 3 batch — slugs.yml v4 description)"
+absorbed_at: 2026-04-30
+absorbed_by: "AI Head A"
+authority_chain: "slugs.yml v4 (cross-counterparty funding/cash-flow arc, bank covenant reporting, investor reports, lender/investor communication spanning Aukera/AO/Franck Muller) + Director ratification 2026-04-30 (Wave 3 batch)"
+ratified_at: 2026-04-30
+
+autonomy_level: recommend_wait
+
+sense_sources:
+  - email: matter_keywords
+  - whatsapp: contact_phones
+
+entities:
+  primary:
+    - brisen-capital-sa
+  team:
+    - dimitry-vallen
+    - edita-vallen
+    - balazs-csepregi
+    - mykola-borsak
+  counterparties:
+    - aukera
+    - franck-muller
+    - andrey-oskolkov
+  adjacent:
+    - capital-call
+    - movie
+    - mo-vie-am
+    - oskolkov
+
+trigger_patterns:
+  - '\b(brisen[-\s]?funding|funding[-\s]?arc|cash[-\s]?flow|brisen[-\s]?finance)\b'
+  - '\b(covenant|covenant.report)\b'
+  - '\b(investor[-\s]?report|lender[-\s]?communication)\b'
+
+default_specialists: [legal, finance, tax-CH]
+specialist_cap_per_cycle: 5
+specialist_timeout_seconds: 60
+specialist_retries: 2
+cycle_timeout_seconds: 300
+
+auto_trigger:
+  severity_floor: high
+  confidence_floor: 0.8
+
+games_relevant: false
+counterparty_iteration_horizon: long_finite
+counterparty_reputation_stake: 6
+counterparty_observed_strategy: cooperate_with_constraints
+
+project_structure: |
+  - **Scope:** Cross-cutting funding / cash-flow arc spanning multiple Brisen counterparties.
+  - **Use:** When a funding signal touches MULTIPLE counterparties (Aukera + AO + Franck Muller etc) — route here for cross-coordination.
+  - **Distinct from:** Single-counterparty matters (aukera / franck-muller / oskolkov) which carry counterparty-specific tactical state.
+
+counterparty_topology: |
+  Aggregator matter — no single counterparty. Specific counterparties tracked
+  in their own matter brains.
+
+notes: |
+  Cross-cutting category. Cortex fan-out: any signal with the trigger_patterns
+  matches typically also fan-outs to specific counterparty matters listed in
+  adjacent.
+
+  ## Bridge
+  - All adjacent matters carry counterparty-specific tactical state; this
+    matter is the cross-cut narrative layer (covenant reporting, consolidated
+    cash-flow, investor reports).

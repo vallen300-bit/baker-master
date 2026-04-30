@@ -1,0 +1,90 @@
+# Bootstrap input — mo-vie-am (MO Vienna asset management — operational ownership oversight)
+# Wave 3 batch — Director-ratified 2026-04-30
+#
+# THIN-STUB seed. Q11/14/15 ratified content not surfaced in baker-vault yet —
+# Director can fatten via gold-comments as workstreams emerge. This stub gives
+# Cortex a recommend_wait-level matter brain sufficient for Phase 1 trigger
+# matching + Phase 2 load.
+
+matter_slug: mo-vie-am
+matter_name: "MO Vienna Asset Management (operational ownership oversight)"
+absorbed_from: "seed (Wave 3 batch — block2 inventory ALIVE shadow PM=MOVIE AM; Q12 multi-tag [aukera, mo-vie-am] €3M release)"
+absorbed_at: 2026-04-30
+absorbed_by: "AI Head A"
+authority_chain: "block2 inventory 2026-04-26 (ALIVE, MOVIE AM shadow PM) + Q12 (€3M Aukera release multi-tag) + Director ratification 2026-04-30 (Wave 3 batch — thin stub, content fatten via gold-comments)"
+ratified_at: 2026-04-30
+
+autonomy_level: recommend_wait
+
+sense_sources:
+  - email: matter_keywords
+  - whatsapp: contact_phones
+
+entities:
+  primary:
+    - rg7-gmbh
+  team:
+    - dimitry-vallen
+    - edita-vallen
+    - balazs-csepregi
+    - mykola-borsak
+  counterparties:
+    - mohg
+  adjacent:
+    - movie
+    - mo-vie-exit
+    - aukera
+    - franck-muller
+    - oskolkov
+    - capital-call
+
+trigger_patterns:
+  - '\b(mo[-\s]?vie[-\s]?am|movie[-\s]?am|mo[-\s]?vienna[-\s]?am)\b'
+  - '\b(asset[-\s]?management|am)\b.*\b(mo[-\s]?vienna|movie|mandarin)\b'
+  - '\b(mohg|mandarin[-\s]?oriental)\b.*\b(opex|operations|asset.management)\b'
+
+default_specialists: [legal, finance, tax-AT, tax-CH, game-theory]
+specialist_cap_per_cycle: 5
+specialist_timeout_seconds: 60
+specialist_retries: 2
+cycle_timeout_seconds: 300
+
+auto_trigger:
+  severity_floor: high
+  confidence_floor: 0.8
+
+games_relevant: true
+counterparty_iteration_horizon: long_finite
+counterparty_reputation_stake: 7
+counterparty_observed_strategy: cooperate_with_constraints
+
+project_structure: |
+  - **Asset:** MO Vienna hotel (operational asset).
+  - **Owner:** Brisen-side via RG7 GmbH (AT) ↔ LCG SA (CH; DV+Edita 100%).
+  - **Operator:** MOHG (Mandarin Oriental Hotel Group).
+  - **Scope distinction:**
+    - `mo-vie-am` = ongoing operational AM (this matter)
+    - `mo-vie-exit` = exit / sale workstream
+    - `movie` = the asset itself / capital structure / reporting
+  - **Live workstream:** Q12 €3M Aukera release from sold-residence proceeds.
+
+counterparty_topology: |
+  | Slug | Role | Status |
+  |---|---|---|
+  | `mohg` | Hotel operator under management agreement | active |
+
+  Brisen-side: DV (principal owner via LCG/RG7), Edita Vallen (LCG director),
+  Balazs Csepregi (financial modeling), Mykola Borsak (Vienna finance ops).
+
+notes: |
+  THIN-STUB seed — Q11/14/15 ratified content pending Director paste-block or
+  gold-comment fatten. Cortex auto-trigger fires on the trigger_patterns above;
+  recommend_wait posture means all proposals surface before any execution.
+
+  ## Bridge
+  - `movie` — same asset; this matter focuses on AM workstream specifically
+  - `mo-vie-exit` — divergent workstream (exit/sale)
+  - `aukera` — Q12 €3M release pair
+  - `franck-muller` — junior lender on capital stack
+  - `oskolkov` — AO ~48% MOVIE quasi-equity (load-bearing at exit)
+  - `capital-call` — RG7 deficit driver feeding MOVIE WC

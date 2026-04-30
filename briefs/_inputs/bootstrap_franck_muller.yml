@@ -1,0 +1,72 @@
+# Bootstrap input — franck-muller (Junior Lender €6M on MOVIE)
+# Wave 3 batch — Director-ratified 2026-04-30
+
+matter_slug: franck-muller
+matter_name: "Franck Muller (Junior Lender — €6M on MO Vienna)"
+absorbed_from: "seed (Wave 3 batch — slugs.yml description; Q23 €6M Oct deadline per V8 handover)"
+absorbed_at: 2026-04-30
+absorbed_by: "AI Head A"
+authority_chain: "slugs.yml v1 (Junior Lender €6M on MOVIE) + Q23 (€6M Oct deadline) + Director ratification 2026-04-30 (Wave 3 batch)"
+ratified_at: 2026-04-30
+
+autonomy_level: recommend_wait
+
+sense_sources:
+  - email: matter_keywords
+  - whatsapp: contact_phones
+
+entities:
+  primary:
+    - franck-muller
+  team:
+    - dimitry-vallen
+    - edita-vallen
+    - balazs-csepregi
+    - mykola-borsak
+  counterparties:
+    - franck-muller
+  adjacent:
+    - movie
+    - mo-vie-exit
+    - aukera
+
+trigger_patterns:
+  - '\b(franck[-\s]?muller)\b'
+  - '\b(junior[-\s]?lender)\b.*\b(mo[-\s]?vienna|movie)\b'
+  - '\b(eur|€)\s*6\s*(m|mm|million)\b.*\b(franck|junior|lender)\b'
+
+default_specialists: [legal, finance, tax-CH, tax-AT, game-theory]
+specialist_cap_per_cycle: 5
+specialist_timeout_seconds: 60
+specialist_retries: 2
+cycle_timeout_seconds: 300
+
+auto_trigger:
+  severity_floor: high
+  confidence_floor: 0.8
+
+games_relevant: true
+counterparty_iteration_horizon: long_finite
+counterparty_reputation_stake: 6
+counterparty_observed_strategy: cooperate_with_constraints
+
+project_structure: |
+  - **Facility:** €6M Junior Lender on MO Vienna project (subordinate to Aukera senior).
+  - **Q23 deadline:** Oct 2026 (~6mo runway) — refinance / repayment / restructure decision window.
+  - **Stack:** Junior to Aukera (senior); proceeds from MOVIE exit / sold-residence flows interact.
+
+counterparty_topology: |
+  | Slug | Role | Status |
+  |---|---|---|
+  | `franck-muller` | Junior lender on MOVIE | active |
+
+notes: |
+  Long-finite horizon (multi-year debt facility, contractual end-date Oct 2026).
+  Capital stack: Aukera senior + Franck Muller junior + Brisen / AO equity. Any
+  Aukera signal (release / restructure / facility revival) cascades here via
+  subordination clauses.
+
+  ## Bridge
+  - `movie` — underlying asset
+  - `mo-vie-exit` — exit proceeds determine repayment cadence
+  - `aukera` — senior in capital stack; subordination linkage

@@ -1,0 +1,78 @@
+# Bootstrap input — lilienmatt (Baden-Baden co-ownership, owns Annaberg)
+# Wave 3 batch — Director-ratified 2026-04-30 ("operational this week")
+
+matter_slug: lilienmatt
+matter_name: "Lilienmatt Immobilien GmbH (Baden-Baden — owns Annaberg)"
+absorbed_from: "seed (Wave 3 batch — slugs.yml v2 + multiple wiki/lilienmatt/ entries 2026-04-22)"
+absorbed_at: 2026-04-30
+absorbed_by: "AI Head A"
+authority_chain: "slugs.yml (KPMG tax restructuring) + Q7 multi-tag [lilienmatt, annaberg, aukera] restructure + Director ratification 2026-04-30 (Wave 3 batch)"
+ratified_at: 2026-04-30
+
+autonomy_level: recommend_wait
+
+sense_sources:
+  - email: matter_keywords
+  - whatsapp: contact_phones
+
+entities:
+  primary:
+    - lilienmatt-immobilien-gmbh
+  team:
+    - dimitry-vallen
+    - edita-vallen
+    - balazs-csepregi
+    - christophe-buchwalder
+    - constantinos-pohanis
+  counterparties:
+    - andrey-oskolkov
+  adjacent:
+    - annaberg
+    - aukera
+    - mrci
+    - oskolkov
+
+trigger_patterns:
+  - '\b(lilienmatt|lilienmat)\b'
+  - '\b(lilienmatt[-\s]immobilien)\b'
+  - '\b(kpmg)\b.*\b(lilienmatt|tax.opinion|restructur)\b'
+
+default_specialists: [legal, finance, tax-DE, tax-CH, game-theory]
+specialist_cap_per_cycle: 5
+specialist_timeout_seconds: 60
+specialist_retries: 2
+cycle_timeout_seconds: 300
+
+auto_trigger:
+  severity_floor: high
+  confidence_floor: 0.8
+
+games_relevant: true
+counterparty_iteration_horizon: infinite_repeated
+counterparty_reputation_stake: 8
+counterparty_observed_strategy: cooperate_with_constraints
+
+project_structure: |
+  - **Owner entity:** Lilienmatt Immobilien GmbH (Baden-Baden, DE) — Brisen 7% / Lana de juro 93% / AO de facto control.
+  - **Owned project:** Annaberg residential development — distinct matter slug `annaberg`.
+  - **Active workstream:** KPMG-led tax restructuring (multi-jurisdictional DE/CH/CY), gated by Constantinos Pohanis dispatch.
+  - **Financing leg:** Aukera EUR 15M facility (450bp+SWAP, 3yr) — STALLED 2026-04-22 on Lilienmatt accounting + legal defects.
+
+counterparty_topology: |
+  | Slug | Role | Status |
+  |---|---|---|
+  | `andrey-oskolkov` | 93% de juro (via Lana) / de facto control | active |
+
+  Brisen-side: DV (7% co-owner), Edita Vallen, Balazs Csepregi (financial modeling — flagged Aukera halt risk), Christophe Buchwalder (Swiss legal), Constantinos Pohanis (KPMG dispatch + Cyprus structure).
+
+notes: |
+  ## Active workstreams (3)
+  1. **KPMG tax opinion** — was due 2026-04-21; status confirmation pending via Constantinos.
+  2. **Q7 financing restructure** — multi-tag [lilienmatt, annaberg, aukera]; ASAP/high.
+  3. **2024 FS** — Q8 completed 2026-04-29 (shareholder signatures resolved).
+
+  ## Bridge to other matters
+  - `annaberg` — owned project; financing/restructure shared.
+  - `aukera` — senior lender (stalled facility); fan-out on every signal.
+  - `mrci` — sister Baden-Baden GmbH (50/50 Brisen/AO); separate project (Balgerstrasse).
+  - `oskolkov` — AO horizon-collapse class; Lana fold-in scope here.

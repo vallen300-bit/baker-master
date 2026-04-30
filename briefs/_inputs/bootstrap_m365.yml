@@ -1,0 +1,69 @@
+# Bootstrap input — m365 (Microsoft 365 migration, BCOMM-led, AI Dennis shadow PM)
+# Wave 3 batch — Director-ratified 2026-04-30
+
+matter_slug: m365
+matter_name: "M365 Migration (Brisen Group IT tenant cutover)"
+absorbed_from: "seed (Wave 3 batch — slugs.yml v2 description + EVOK contract signing 2026-04-22)"
+absorbed_at: 2026-04-30
+absorbed_by: "AI Head A"
+authority_chain: "slugs.yml v2 (Microsoft 365 migration, BCOMM-led) + AI Dennis shadow PM (per block2 inventory) + Director ratification 2026-04-30 (Wave 3 batch)"
+ratified_at: 2026-04-30
+
+autonomy_level: recommend_wait
+
+sense_sources:
+  - email: matter_keywords
+  - whatsapp: contact_phones
+
+entities:
+  primary:
+    - brisen-capital-sa
+  team:
+    - dimitry-vallen
+    - edita-vallen
+  counterparties:
+    - bcomm
+    - evok
+  adjacent:
+    - baker-internal
+
+trigger_patterns:
+  - '\b(m365|microsoft[-\s]?365|o365|microsoft.tenant|m365.migration)\b'
+  - '\b(bcomm)\b.*\b(migration|tenant|m365|365)\b'
+  - '\b(evok)\b.*\b(contract|agreement|migration)\b'
+
+default_specialists: [legal, finance, tax-CH]
+specialist_cap_per_cycle: 5
+specialist_timeout_seconds: 60
+specialist_retries: 2
+cycle_timeout_seconds: 300
+
+auto_trigger:
+  severity_floor: high
+  confidence_floor: 0.8
+
+games_relevant: false
+counterparty_iteration_horizon: long_finite
+counterparty_reputation_stake: 4
+counterparty_observed_strategy: cooperate_with_constraints
+
+project_structure: |
+  - **Workstream:** Brisen Group IT tenant cutover to Microsoft 365.
+  - **Lead vendor:** BCOMM (Benjamin Schuster).
+  - **Adjacent vendor:** EVOK (contract signing 2026-04-22 — final M365 contract points conceded).
+  - **Shadow PM:** AI Dennis (IT shadow agent, per block2 inventory).
+  - **Status:** Tenant pre-cutover. Brief 10 (M365 sentinel) blocked on tenant going live.
+
+counterparty_topology: |
+  | Slug | Role | Status |
+  |---|---|---|
+  | `bcomm` | Migration lead vendor | active |
+  | `evok` | Contract counterparty (final points conceded 2026-04-22) | active |
+
+notes: |
+  Operational IT scope. AI Dennis is the human-shadow PM here; Cortex layer
+  feeds AI Dennis's working context.
+
+  ## Bridge
+  - `baker-internal` — Baker system depends on M365 tenant for downstream
+    integrations (Outlook sentinel, Teams routes if added)

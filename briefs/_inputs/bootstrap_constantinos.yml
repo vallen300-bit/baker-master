@@ -1,0 +1,75 @@
+# Bootstrap input — constantinos (Brisen Group Cyprus director, also AO's Aelio)
+# Wave 3 batch — Director-ratified 2026-04-30
+
+matter_slug: constantinos
+matter_name: "Constantinos Pohanis (Brisen Cyprus + AO Aelio dispatch)"
+absorbed_from: "seed (Wave 3 batch — slugs.yml description; cross-ref oskolkov cortex-config Channel 2 €50.4M Aelio reconciliation)"
+absorbed_at: 2026-04-30
+absorbed_by: "AI Head A"
+authority_chain: "slugs.yml v1 (Director Brisen Cyprus + Aelio Holding director, financial controller) + Director ratification 2026-04-30 (Wave 3 batch)"
+ratified_at: 2026-04-30
+
+autonomy_level: recommend_wait
+
+sense_sources:
+  - email: matter_keywords
+  - whatsapp: contact_phones
+
+entities:
+  primary:
+    - constantinos-pohanis
+  team:
+    - dimitry-vallen
+    - edita-vallen
+    - balazs-csepregi
+  counterparties:
+    - constantinos-pohanis
+    - aelio-holding-ltd
+    - andrey-oskolkov
+  adjacent:
+    - oskolkov
+    - lilienmatt
+    - mrci
+    - aukera
+
+trigger_patterns:
+  - '\b(constantinos|pohanis)\b'
+  - '\b(aelio|aelios)\b.*\b(constantinos|pohanis|cyprus)\b'
+  - '\b(brisen.ventures|brisen.group.cyprus)\b'
+
+default_specialists: [legal, finance, tax-CY, tax-CH, tax-RU, game-theory]
+specialist_cap_per_cycle: 5
+specialist_timeout_seconds: 60
+specialist_retries: 2
+cycle_timeout_seconds: 300
+
+auto_trigger:
+  severity_floor: high
+  confidence_floor: 0.8
+
+games_relevant: true
+counterparty_iteration_horizon: infinite_repeated
+counterparty_reputation_stake: 7
+counterparty_observed_strategy: cooperate_with_constraints
+
+project_structure: |
+  - **Role at Brisen:** Director, Brisen Group Cyprus; financial controller for some Brisen ops.
+  - **Role at AO-side:** Director, Aelio Holding Ltd (AO's Cyprus investment vehicle).
+  - **Channel 2 reconciliation:** Runs the ~€50.4M Aelio-Cyprus loan reconciliation (per oskolkov cortex-config investment-channels.md).
+  - **Dispatch role:** KPMG tax-opinion delivery on Lilienmatt/Annaberg restructure (Q-route via Constantinos).
+
+counterparty_topology: |
+  | Slug | Role | Status |
+  |---|---|---|
+  | `constantinos-pohanis` | Cross-side director (Brisen Cyprus + AO Aelio) | active |
+
+notes: |
+  Dual-role counterparty: Brisen-side AND AO-side. Game-theoretic frame requires
+  careful information segregation — what flows to him about Brisen may reach AO
+  via Aelio. Use commitment devices + dated audit trails (per oskolkov game-
+  theoretic frame Rule 4).
+
+  ## Bridge
+  - `oskolkov` — primary cross-link (AO-side Aelio dispatch)
+  - `lilienmatt` / `mrci` — KPMG tax dispatch route
+  - `aukera` — restructure coordination

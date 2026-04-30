@@ -1,0 +1,63 @@
+# Bootstrap input — cap-ferrat (St Jean Cap Ferrat villa — Director Private Asset)
+# Wave 3 batch — Director-ratified 2026-04-30
+
+matter_slug: cap-ferrat
+matter_name: "Cap Ferrat Villa (Director-personal French asset)"
+absorbed_from: "seed (Wave 3 batch — slugs.yml v2 description + Q16 BDO tax workstream)"
+absorbed_at: 2026-04-30
+absorbed_by: "AI Head A"
+authority_chain: "slugs.yml description (BDO restructuring Q&A and tax/legal admin) + Director ratification 2026-04-30 (Wave 3 batch)"
+ratified_at: 2026-04-30
+
+autonomy_level: recommend_wait
+
+sense_sources:
+  - email: matter_keywords
+  - whatsapp: contact_phones
+
+entities:
+  primary:
+    - dimitry-vallen
+  team:
+    - edita-vallen
+    - balazs-csepregi
+  counterparties:
+    - bdo
+  adjacent:
+    - uk-homes
+    - personal
+
+trigger_patterns:
+  - '\b(cap[-\s]?ferrat|st[-\s]?jean[-\s]?cap[-\s]?ferrat|sjcf|villa[-\s]?cap[-\s]?ferrat)\b'
+  - '\b(bdo)\b.*\b(cap[-\s]?ferrat|france|french|villa)\b'
+
+default_specialists: [legal, finance, tax-FR, tax-CH]
+specialist_cap_per_cycle: 5
+specialist_timeout_seconds: 60
+specialist_retries: 2
+cycle_timeout_seconds: 300
+
+auto_trigger:
+  severity_floor: high
+  confidence_floor: 0.8
+
+games_relevant: false
+counterparty_iteration_horizon: long_finite
+counterparty_reputation_stake: 5
+counterparty_observed_strategy: cooperate_with_constraints
+
+project_structure: |
+  - **Asset:** St Jean Cap Ferrat villa (France, Director-personal). Category: Private Assets (sibling slugs: uk-homes, geneva-home pending).
+  - **Active workstream:** BDO restructuring Q&A and tax/legal admin (Q16).
+
+counterparty_topology: |
+  | Slug | Role | Status |
+  |---|---|---|
+  | `bdo` | Tax/legal advisor on French structure | active |
+
+notes: |
+  Director-personal scope. Conservative posture — proposals surface to Director, never auto-execute.
+
+  ## Bridge
+  - `uk-homes` — sibling Director-personal Private Asset matter
+  - `personal` — umbrella slug

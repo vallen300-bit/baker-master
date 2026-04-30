@@ -1,0 +1,66 @@
+# Bootstrap input — baker-internal (Baker system / internal operations)
+# Wave 3 batch — Director-ratified 2026-04-30
+
+matter_slug: baker-internal
+matter_name: "Baker Internal (Baker system + internal operations)"
+absorbed_from: "seed (Wave 3 batch — slugs.yml v9 description)"
+absorbed_at: 2026-04-30
+absorbed_by: "AI Head A"
+authority_chain: "slugs.yml v9 (Baker system / internal operations) + block2 inventory 2026-04-26 ALIVE Baker (CoS) shadow PM + Director ratification 2026-04-30 (Wave 3 batch)"
+ratified_at: 2026-04-30
+
+autonomy_level: recommend_wait
+
+sense_sources:
+  - email: matter_keywords
+  - whatsapp: contact_phones
+
+entities:
+  primary:
+    - brisen-capital-sa
+  team:
+    - dimitry-vallen
+  counterparties:
+    - dimitry-vallen
+  adjacent:
+    - claimsmax
+    - m365
+
+trigger_patterns:
+  - '\b(baker[-\s]?internal|baker.system)\b'
+  - '\b(cortex|sentinel)\b.*\b(infra|deploy|migration|incident)\b'
+  - '\b(baker)\b.*\b(brief|build|deploy|render|repo|pr)\b'
+
+default_specialists: []
+specialist_cap_per_cycle: 5
+specialist_timeout_seconds: 60
+specialist_retries: 2
+cycle_timeout_seconds: 300
+
+auto_trigger:
+  severity_floor: high
+  confidence_floor: 0.8
+
+games_relevant: false
+counterparty_iteration_horizon: long_finite
+counterparty_reputation_stake: 5
+counterparty_observed_strategy: cooperate_with_constraints
+
+project_structure: |
+  - **Scope:** Baker / Sentinel / Cortex system development + internal operations.
+  - **Distinct from:** `claimsmax` (productized AI for external use).
+  - **Shadow PM:** Baker (CoS) — recursive (Baker tracks its own development).
+
+counterparty_topology: |
+  No external counterparties. Internal only.
+
+notes: |
+  Recursive matter — Baker's self-development. Used to capture Baker-platform
+  signals (deploys, briefs, infra incidents, capability framework changes).
+
+  Specialists list intentionally empty: Baker-internal signals don't need
+  external specialists; they go to Director directly via recommend_wait.
+
+  ## Bridge
+  - `claimsmax` — sibling AI capability (external product)
+  - `m365` — IT infrastructure dependency
