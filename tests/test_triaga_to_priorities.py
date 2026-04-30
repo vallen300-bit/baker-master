@@ -38,6 +38,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = REPO_ROOT / "scripts" / "test_data"
 SAMPLE_EXPORT = FIXTURES / "sample_triaga_export.md"
 SAMPLE_SLUGS = FIXTURES / "sample_slugs.yml"
+HARDEN_REPRO_EXPORT = FIXTURES / "triaga_export_q17_q18_q30_q31_q37.md"
 
 
 # ---------------------------------------------------------------------------
@@ -145,10 +146,45 @@ def test_multi_slug_plus_with_spaces():
     assert normalize_slug_field("mo-prague + citic", "Q36") == ["mo-prague", "citic"]
 
 
-def test_multi_slug_slash_separator():
-    assert normalize_slug_field(
+def test_slash_no_split_without_registry():
+    """Without a canonical-slug set, '/' never splits — '/' in Triaga prose is
+    ambiguous (often a category prefix like ``tax /``). Q38's 4-counterparty
+    field stays a single literal slug; the canonical-slug check then routes
+    it to ``pending_slug_review`` for Director attention.
+    """
+    result = normalize_slug_field(
         "wertheimer / balducci / minor-hotels / philippe-soulier", "Q38"
-    ) == ["wertheimer", "balducci", "minor-hotels", "philippe-soulier"]
+    )
+    assert isinstance(result, str)
+    assert result == "wertheimer / balducci / minor-hotels / philippe-soulier"
+
+
+def test_slash_splits_only_when_registry_confirms_all_tokens():
+    """When a canonical-slug set is supplied AND every slash-token is in it,
+    '/' is treated as a multi-slug separator. This is the narrow case where
+    a Triaga export legitimately uses '/' for a counterparty list.
+    """
+    canon = {"wertheimer", "balducci", "minor-hotels", "philippe-soulier"}
+    result = normalize_slug_field(
+        "wertheimer / balducci / minor-hotels / philippe-soulier",
+        "Q38",
+        canonical_slugs=canon,
+    )
+    assert result == ["wertheimer", "balducci", "minor-hotels", "philippe-soulier"]
+
+
+def test_slash_does_not_split_when_one_token_missing_from_registry():
+    """If even one slash-token is absent from the registry, the field stays a
+    single literal slug. Mixed canonical/non-canonical lists are too risky to
+    auto-split without Director confirmation.
+    """
+    canon = {"wertheimer", "balducci"}  # minor-hotels + philippe-soulier missing
+    result = normalize_slug_field(
+        "wertheimer / balducci / minor-hotels / philippe-soulier",
+        "Q38",
+        canonical_slugs=canon,
+    )
+    assert isinstance(result, str)
 
 
 def test_q33_nvidia_corinthia_combined_slug():
@@ -317,6 +353,223 @@ def test_unknown_when_raises(tmp_path):
     )
     with pytest.raises(ValueError, match="when="):
         parse_export(export.read_text(encoding="utf-8"))
+
+
+# ---------------------------------------------------------------------------
+# Chain test — converter output is regen-script-compatible
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Bug 1 — em-dash split bleeds bracket suffix into slug (Q17 / Q18 / Q37)
+# ---------------------------------------------------------------------------
+
+
+def test_q17_uk_homes_bracket_em_dash():
+    """Q17 raw header line `**Q17 — [private-assets — slug TBD] — Barclays UK
+    mortgage renewal form issued**` must produce slug=``private-assets`` and
+    description=``Barclays UK mortgage renewal form issued``.
+
+    Pre-fix bug: non-greedy ` — ` split bisected at the first em-dash,
+    leaving slug=``[private-assets`` and description=``slug TBD] — Barclays
+    UK mortgage renewal form issued``.
+    """
+    export_text = (
+        "**Date:** 2026-04-29\n\n"
+        "**Q17 — [private-assets — slug TBD] — Barclays UK mortgage renewal form issued**\n"
+        "→ STATUS: Active · WHEN: 4 weeks · IMPORTANCE: High · CATEGORY: Financial\n"
+    )
+    parsed = parse_export(export_text)
+    assert len(parsed["items"]) == 1
+    item = parsed["items"][0]
+    assert item.triaga_ref == "Q17"
+    assert item.slug_field == "[private-assets — slug TBD]"
+    assert item.description == "Barclays UK mortgage renewal form issued"
+    assert normalize_slug_field(item.slug_field, "Q17") == "private-assets"
+
+
+def test_q18_uk_homes_bracket_em_dash():
+    """Q18 has a SECOND em-dash in the description (`Strutt Parker vs Monaco`
+    follows another ` — `). The bracket-anchored split must still produce
+    a single slug and a single (em-dash-bearing) description string.
+    """
+    export_text = (
+        "**Date:** 2026-04-29\n\n"
+        "**Q18 — [private-assets — slug TBD] — Barclays UK valuer discrepancy — Strutt Parker vs Monaco**\n"
+        "→ STATUS: Active · WHEN: Urgent · IMPORTANCE: High · CATEGORY: Financial\n"
+    )
+    parsed = parse_export(export_text)
+    item = parsed["items"][0]
+    assert item.triaga_ref == "Q18"
+    assert item.slug_field == "[private-assets — slug TBD]"
+    # Description preserves its internal em-dash verbatim.
+    assert item.description == "Barclays UK valuer discrepancy — Strutt Parker vs Monaco"
+    assert normalize_slug_field(item.slug_field, "Q18") == "private-assets"
+
+
+def test_q37_bora_bora_bracket():
+    """Q37 end-to-end via parse_export: bracketed `[philippe-soulier — slug
+    TBD]` must extract slug=``philippe-soulier`` and description=``Bora-Bora
+    pipeline``. (The unit-level `normalize_slug_field` test for the same
+    Q-ID continues to live alongside; this one exercises the header parser.)
+    """
+    export_text = (
+        "**Date:** 2026-04-29\n\n"
+        "**Q37 — [philippe-soulier — slug TBD] — Bora-Bora pipeline**\n"
+        "→ STATUS: Active · WHEN: Not urgent · IMPORTANCE: Low · CATEGORY: Origination\n"
+    )
+    parsed = parse_export(export_text)
+    item = parsed["items"][0]
+    assert item.triaga_ref == "Q37"
+    assert item.slug_field == "[philippe-soulier — slug TBD]"
+    assert item.description == "Bora-Bora pipeline"
+    assert normalize_slug_field(item.slug_field, "Q37") == "philippe-soulier"
+
+
+# ---------------------------------------------------------------------------
+# Bug 2 — '/' always splits slug field (Q30 / Q31)
+# ---------------------------------------------------------------------------
+
+
+def test_q30_slash_no_split(tmp_path):
+    """Q30 raw header line `**Q30 — tax / lana — Expected €650K tax return on
+    Lana issue**` must produce a single slug, NOT a 2-element list. ``tax``
+    is a category prefix in Triaga prose, not a canonical slug — splitting
+    on '/' here was the Wave-1 bug.
+    """
+    export = tmp_path / "q30.md"
+    export.write_text(
+        "**Date:** 2026-04-29\n\n"
+        "**Q30 — tax / lana — Expected €650K tax return on Lana issue**\n"
+        "→ STATUS: Active · WHEN: ASAP · IMPORTANCE: High · CATEGORY: Active Deal\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "_priorities.yml"
+    data = triaga_export_to_priorities(export, out)
+    assert len(data["matters"]) == 1
+    q30 = data["matters"][0]
+    assert q30["triaga_ref"] == "Q30"
+    assert "slug" in q30, "Q30 must emit `slug:` (single), not `slugs:` (list)"
+    assert "slugs" not in q30
+    # Literal text preserved (lowercased / outer-trimmed); will route to
+    # pending_slug_review when a registry is supplied.
+    assert q30["slug"] == "tax / lana"
+
+
+def test_q31_slash_no_split(tmp_path):
+    """Q31 (Dismiss) `**Q31 — tax / cbp — US CBP tariff refund portal**` must
+    produce a single slug in the dismissed[] entry, not slugs: [tax, cbp].
+    """
+    export = tmp_path / "q31.md"
+    export.write_text(
+        "**Date:** 2026-04-29\n\n"
+        "**Q31 — tax / cbp — US CBP tariff refund portal**\n"
+        "→ STATUS: Dismiss\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "_priorities.yml"
+    data = triaga_export_to_priorities(export, out)
+    assert len(data["dismissed"]) == 1
+    q31 = data["dismissed"][0]
+    assert q31["triaga_ref"] == "Q31"
+    assert "slug" in q31 and "slugs" not in q31
+    assert q31["slug"] == "tax / cbp"
+
+
+# ---------------------------------------------------------------------------
+# Bug 3 — non-canonical slugs route to pending_slug_review
+# ---------------------------------------------------------------------------
+
+
+def test_non_canonical_slug_routes_to_pending_review(tmp_path):
+    """Non-canonical slugs (not in supplied ``canonical_slugs``) are emitted
+    as-is in the matter row AND surface in ``pending_slug_review[]`` for
+    Director attention. Default mode is strict: the section is populated.
+
+    Loose mode (CANONICAL_SLUG_LOOSE / kwarg) only logs warnings.
+    """
+    export = tmp_path / "noncanon.md"
+    export.write_text(
+        "**Date:** 2026-04-29\n\n"
+        "**Q1 — ao — Canonical AO matter**\n"
+        "→ STATUS: Active · WHEN: Urgent · IMPORTANCE: Critical · CATEGORY: Active Deal\n\n"
+        "**Q30 — tax / lana — Expected €650K tax return on Lana issue**\n"
+        "→ STATUS: Active · WHEN: ASAP · IMPORTANCE: High · CATEGORY: Active Deal\n\n"
+        "**Q41 — orbit / amir — Amir Frankfurt May 8-9 touchpoint**\n"
+        "→ STATUS: Active · WHEN: 4 weeks · IMPORTANCE: Medium · CATEGORY: Origination\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "_priorities.yml"
+    canonical = {"ao", "hagenauer-rg7", "lilienmatt"}  # tax/lana, orbit/amir absent
+    data = triaga_export_to_priorities(export, out, canonical_slugs=canonical)
+
+    assert len(data["matters"]) == 3
+    pending = data["pending_slug_review"]
+    refs_in_pending = {p["triaga_ref"] for p in pending}
+    assert refs_in_pending == {"Q30", "Q41"}, f"got {refs_in_pending}"
+    # Q1 (ao) is canonical — must NOT appear in pending review.
+    assert "Q1" not in refs_in_pending
+
+    # Each pending entry preserves the raw slug field for Director context.
+    q30_pending = next(p for p in pending if p["triaga_ref"] == "Q30")
+    assert q30_pending["slug"] == "tax / lana"
+    assert q30_pending["raw_slug_field"] == "tax / lana"
+    assert q30_pending["section"] == "matters"
+
+    # Provenance count matches.
+    assert data["provenance"]["pending_slug_review_count"] == 2
+
+    # Loose mode: warning-only, pending_slug_review empty.
+    out2 = tmp_path / "_priorities_loose.yml"
+    data_loose = triaga_export_to_priorities(
+        export, out2, canonical_slugs=canonical, canonical_slug_loose=True
+    )
+    assert data_loose["pending_slug_review"] == []
+    assert data_loose["provenance"]["pending_slug_review_count"] == 0
+    # Slugs are still emitted in the matter rows in loose mode.
+    assert any(m["triaga_ref"] == "Q30" and m["slug"] == "tax / lana" for m in data_loose["matters"])
+
+
+# ---------------------------------------------------------------------------
+# End-to-end on the trimmed reproducer fixture (all 3 bugs at once)
+# ---------------------------------------------------------------------------
+
+
+def test_harden_repro_fixture_clean_extraction(tmp_path):
+    """Run converter on the dedicated reproducer fixture and assert clean
+    output for all 5 affected Q-IDs simultaneously.
+    """
+    out = tmp_path / "_priorities.yml"
+    canonical = {"private-assets", "philippe-soulier", "ao"}  # match neither tax nor lana
+    data = triaga_export_to_priorities(
+        HARDEN_REPRO_EXPORT, out, canonical_slugs=canonical
+    )
+
+    by_ref = {m["triaga_ref"]: m for m in data["matters"]}
+    # Q17, Q18 — bracket strip clean
+    assert by_ref["Q17"]["slug"] == "private-assets"
+    assert by_ref["Q17"]["description"] == "Barclays UK mortgage renewal form issued"
+    assert by_ref["Q18"]["slug"] == "private-assets"
+    assert by_ref["Q18"]["description"] == "Barclays UK valuer discrepancy — Strutt Parker vs Monaco"
+    # Q37 — bracket strip clean
+    assert by_ref["Q37"]["slug"] == "philippe-soulier"
+    assert by_ref["Q37"]["description"] == "Bora-Bora pipeline"
+    # Q30 — single slug, NOT split
+    assert by_ref["Q30"]["slug"] == "tax / lana"
+    assert "slugs" not in by_ref["Q30"]
+
+    # Q31 — single slug in dismissed[]
+    q31 = next(d for d in data["dismissed"] if d["triaga_ref"] == "Q31")
+    assert q31["slug"] == "tax / cbp"
+
+    # pending_slug_review captures the non-canonical slugs (tax / lana,
+    # tax / cbp). private-assets + philippe-soulier are canonical here so
+    # they should NOT appear in pending.
+    pending_refs = {p["triaga_ref"] for p in data["pending_slug_review"]}
+    assert "Q30" in pending_refs
+    assert "Q31" in pending_refs
+    assert "Q17" not in pending_refs
+    assert "Q37" not in pending_refs
 
 
 # ---------------------------------------------------------------------------

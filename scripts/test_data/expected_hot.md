@@ -45,6 +45,10 @@ Last ratified 2026-04-29T18:45:00+02:00 from 5-item Triaga (3 Active · 0 Comple
 
 - **brisen-lp** (Q28): Director dismissed status pull as not currently active.
 
+## Pending slug review (non-canonical slugs awaiting Director ratification)
+
+(none)
+
 ## Null / routine (always suppress)
 
 - Marketing newsletters.
