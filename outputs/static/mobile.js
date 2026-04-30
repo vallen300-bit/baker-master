@@ -335,6 +335,118 @@ function updateThinkingLabel(el, text) {
     if (span) span.textContent = text;
 }
 
+// CORTEX_RUN_SCAN_UI_RENDER_1: mobile parallel of desktop renderCortexEvent.
+// Inline DOM (no md() heavy markdown — mobile uses simpler rendering).
+// Phase ticker is collapsed to a single-line progress label; terminal card
+// shows status + cost + cycle hash + proposal text.
+function renderCortexEventMobile(data, replyEl, full) {
+    if (!replyEl) return full;
+    var t = data.type;
+
+    var ctxEl = replyEl.querySelector('.cortex-stream-mobile');
+    if (!ctxEl) {
+        replyEl.textContent = '';
+        ctxEl = document.createElement('div');
+        ctxEl.className = 'cortex-stream-mobile';
+        var hdr = document.createElement('div');
+        hdr.className = 'cortex-header-mobile';
+        hdr.appendChild(document.createTextNode(
+            'Cortex · ' + (data.matter_slug || 'unknown') + ' · ' + (data.triggered_by || 'manual')
+        ));
+        ctxEl.appendChild(hdr);
+        var prog = document.createElement('div');
+        prog.className = 'cortex-progress-mobile';
+        prog.appendChild(document.createTextNode('Starting…'));
+        ctxEl.appendChild(prog);
+        replyEl.appendChild(ctxEl);
+    }
+
+    var prog2 = ctxEl.querySelector('.cortex-progress-mobile');
+
+    if (t === 'phase_changed') {
+        if (prog2) {
+            prog2.textContent = '';
+            prog2.appendChild(document.createTextNode(_cortexPhaseLabelMobile(data.phase) + '…'));
+        }
+        return full;
+    }
+    if (t === 'phase_output') {
+        if (prog2) {
+            prog2.appendChild(document.createTextNode(' ·'));
+        }
+        return full;
+    }
+    if (t === 'terminal') {
+        if (prog2) prog2.remove();
+        var card = document.createElement('div');
+        card.className = 'cortex-terminal-mobile';
+        card.appendChild(document.createTextNode(
+            _cortexStatusLabelMobile(data.status) +
+            ' — $' + Number(data.cost_dollars || 0).toFixed(4)
+        ));
+        if (data.cycle_id) {
+            var sub = document.createElement('div');
+            sub.className = 'cortex-terminal-sub';
+            sub.appendChild(document.createTextNode('cycle ' + data.cycle_id.slice(0, 8) + '…'));
+            card.appendChild(sub);
+        }
+        var body = document.createElement('div');
+        body.className = 'cortex-terminal-body-mobile';
+        body.appendChild(document.createTextNode('Loading proposal…'));
+        card.appendChild(body);
+        ctxEl.appendChild(card);
+
+        if (data.cycle_id && data.status !== 'failed' && data.status !== 'timeout') {
+            _fetchCortexProposalMobile(data.cycle_id, body);
+        } else {
+            body.textContent = '';
+            body.appendChild(document.createTextNode(
+                data.status === 'timeout' ? 'Cycle timed out.' : 'Cycle did not complete propose phase.'
+            ));
+        }
+        return full;
+    }
+    return full;
+}
+
+function _cortexPhaseLabelMobile(phase) {
+    var labels = { sense: 'Sensing', load: 'Loading', reason: 'Reasoning', propose: 'Proposing', archive: 'Archiving' };
+    return labels[phase] || (phase || 'Phase');
+}
+
+function _cortexStatusLabelMobile(status) {
+    var labels = {
+        tier_b_pending: 'Proposal ready',
+        completed: 'Complete',
+        rejected: 'Rejected',
+        failed: 'Failed',
+        timeout: 'Timeout',
+        archived: 'Archived'
+    };
+    return labels[status] || (status || 'unknown');
+}
+
+async function _fetchCortexProposalMobile(cycle_id, bodyEl) {
+    try {
+        var resp = await bakerFetch('/api/cortex/cycles/' + encodeURIComponent(cycle_id) + '/proposal');
+        if (!resp.ok) {
+            bodyEl.textContent = '';
+            bodyEl.appendChild(document.createTextNode('Fetch failed (HTTP ' + resp.status + ')'));
+            return;
+        }
+        var d = await resp.json();
+        bodyEl.textContent = '';
+        if (d.has_proposal && d.proposal_text) {
+            setSafeHTML(bodyEl, '<div class="md-content">' + md(d.proposal_text) + '</div>');
+        } else {
+            bodyEl.appendChild(document.createTextNode('No proposal yet (' + (d.current_phase || 'unknown') + ').'));
+        }
+    } catch (e) {
+        bodyEl.textContent = '';
+        bodyEl.appendChild(document.createTextNode('Error: ' + e.message));
+    }
+}
+
 // ═══ SSE STREAM HANDLER ═══
 async function streamChat(url, body, containerId, history) {
     if (streaming) return;
@@ -393,6 +505,13 @@ async function streamChat(url, body, containerId, history) {
                     if (data.status && !full && replyEl) {
                         var lbl = statusLabels[data.status];
                         if (lbl) updateThinkingLabel(replyEl, lbl);
+                    }
+                    // CORTEX_RUN_SCAN_UI_RENDER_1: typed events from
+                    // /api/cortex/run via Scan cortex_run_action intent.
+                    if (data.type === 'started' || data.type === 'phase_changed'
+                        || data.type === 'phase_output' || data.type === 'terminal') {
+                        full = renderCortexEventMobile(data, replyEl, full);
+                        continue;
                     }
                     if (data.token) {
                         if (!full && replyEl) replyEl.textContent = '';
