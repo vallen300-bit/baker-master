@@ -153,6 +153,85 @@ def _format_results(rows: list[dict], title: str = "") -> str:
 
 
 # ---------------------------------------------------------------------------
+# Vault-write audit helpers (BAKER_VAULT_WRITE_1)
+# ---------------------------------------------------------------------------
+# Schema verified 2026-04-30 against information_schema.columns:
+#   action_type, target_task_id, target_space_id, payload, trigger_source,
+#   created_at, success, error_message.
+# Re-verify if the brief's reference date drifts more than ~1 month.
+
+def _emit_vault_write_audit(
+    path: str,
+    mode: str,
+    commit_message: str,
+) -> int | None:
+    """INSERT initial audit row in attempt state. Returns row id or None on failure.
+
+    success is set explicitly to NULL to mark "attempt in flight" — the table's
+    DEFAULT TRUE would otherwise mask crashes between INSERT and UPDATE.
+    """
+    try:
+        payload = {"mode": mode, "commit_message": commit_message[:200]}
+        row = _write(
+            """INSERT INTO baker_actions
+                   (action_type, target_task_id, payload, trigger_source,
+                    created_at, success)
+               VALUES (%s, %s, %s::jsonb, %s, NOW(), %s)
+               RETURNING id""",
+            ("vault_write", path, json.dumps(payload), "mcp", None),
+        )
+        return row["id"] if row else None
+    except Exception as e:  # pragma: no cover — DB outage is best-effort logged
+        logger.warning("vault_write audit emit failed: %s", e)
+        return None
+
+
+def _update_vault_write_audit(
+    audit_id: int | None,
+    success: bool,
+    payload_extra: dict | None = None,
+    error_message: str | None = None,
+) -> None:
+    """UPDATE the audit row with terminal state.
+
+    payload_extra (success path): merges into existing payload — adds klass,
+    commit_sha, content_sha, html_url, bytes_written. target_space_id is set
+    to klass for downstream filtering.
+    error_message (failure path): MUST already be _redact()-ed by caller.
+    """
+    if not audit_id:
+        return
+    try:
+        if payload_extra:
+            extra_json = json.dumps(payload_extra, default=str)[:8000]
+            _write(
+                """UPDATE baker_actions
+                   SET success = %s,
+                       payload = COALESCE(payload, '{}'::jsonb) || %s::jsonb,
+                       target_space_id = %s,
+                       error_message = %s
+                   WHERE id = %s""",
+                (
+                    success,
+                    extra_json,
+                    payload_extra.get("klass"),
+                    error_message,
+                    audit_id,
+                ),
+            )
+        else:
+            _write(
+                """UPDATE baker_actions
+                   SET success = %s,
+                       error_message = %s
+                   WHERE id = %s""",
+                (success, error_message, audit_id),
+            )
+    except Exception as e:  # pragma: no cover — DB outage is best-effort logged
+        logger.warning("vault_write audit update failed: %s", e)
+
+
+# ---------------------------------------------------------------------------
 # MCP Server
 # ---------------------------------------------------------------------------
 
@@ -507,6 +586,52 @@ TOOLS = [
                 },
             },
             "required": ["path"],
+        },
+    ),
+    Tool(
+        name="baker_vault_write",
+        description=(
+            "Write a curated knowledge file to the baker-vault via GitHub Contents API. "
+            "STRICT path whitelist (6 path classes), append-only except _session-state.md, "
+            "frontmatter required for curated/ and proposed-gold.md. "
+            "Allowed path classes: "
+            "wiki/matters/<slug>/_session-state.md (overwrite OK), "
+            "wiki/matters/<slug>/curated/<YYYY-MM-DD>-<topic>.md (append-only, frontmatter req'd), "
+            "wiki/_inbox/handoff-<date>-<src>-to-<tgt>.md (append-only), "
+            "wiki/matters/<slug>/proposed-gold.md (append-only, frontmatter req'd), "
+            "wiki/matters/<slug>/decisions/<YYYY-MM-DD>-<topic>.md (append-only), "
+            "wiki/matters/<slug>/red-flags.md (append-only). "
+            "Returns commit SHA + content SHA + GitHub URL."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Relative vault path. Must match one of the 6 allowed patterns.",
+                    "minLength": 1,
+                    "maxLength": 500,
+                },
+                "content": {
+                    "type": "string",
+                    "description": "UTF-8 file content. For append mode, the segment to append.",
+                    "minLength": 1,
+                    "maxLength": 100000,
+                },
+                "mode": {
+                    "type": "string",
+                    "enum": ["append", "overwrite"],
+                    "description": "append (default for all paths) or overwrite (only allowed for _session-state.md).",
+                    "default": "append",
+                },
+                "commit_message": {
+                    "type": "string",
+                    "description": "Git commit message. Required. Format: '<Desk> — <topic>'.",
+                    "minLength": 1,
+                    "maxLength": 200,
+                },
+            },
+            "required": ["path", "content", "commit_message"],
         },
     ),
     Tool(
@@ -1377,6 +1502,54 @@ def _dispatch(name: str, args: dict) -> str:
         except VaultPathError as e:
             return f"Error: {e}"
         return json.dumps(result, indent=2)
+
+    elif name == "baker_vault_write":
+        from baker_mcp.vault_write import (
+            write_vault_file,
+            VaultWriteError,
+            _redact,
+        )
+
+        path = args.get("path")
+        content = args.get("content")
+        mode = args.get("mode", "append")
+        commit_message = args.get("commit_message")
+
+        if not path or not content or not commit_message:
+            return "Error: 'path', 'content', and 'commit_message' are required"
+
+        token = os.getenv("GITHUB_TOKEN", "")
+        if not token:
+            return "Error: GITHUB_TOKEN env var not set on Render"
+
+        # Audit BEFORE attempt — captures intent even on hard crashes between
+        # INSERT and the GitHub round-trip. success=NULL marks "in flight";
+        # the daily sweeper detects rows still NULL after 5 minutes.
+        audit_id = _emit_vault_write_audit(path, mode, commit_message)
+
+        try:
+            result = write_vault_file(path, content, mode, commit_message, token)
+            _update_vault_write_audit(audit_id, success=True, payload_extra=result)
+            return json.dumps(result, indent=2)
+        except VaultWriteError as e:
+            # Validation rejection — should never contain tokens, but redact anyway.
+            _update_vault_write_audit(
+                audit_id, success=False, error_message=_redact(str(e))
+            )
+            return f"Error: {_redact(str(e))}"
+        except httpx.HTTPStatusError as e:
+            # GitHub error response body could echo Authorization header — MUST
+            # redact before audit + caller. Lesson #18 + vault_mirror._redact.
+            body = _redact(f"{e.response.status_code}: {e.response.text[:200]}")
+            _update_vault_write_audit(
+                audit_id, success=False, error_message=body
+            )
+            return f"Error: GitHub API rejected write — {e.response.status_code}"
+        except Exception as e:
+            _update_vault_write_audit(
+                audit_id, success=False, error_message=_redact(str(e))
+            )
+            return f"Error: {_redact(str(e))}"
 
     elif name == "baker_scan":
         return _baker_scan_via_loopback(args)
