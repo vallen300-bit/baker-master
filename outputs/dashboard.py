@@ -4031,7 +4031,7 @@ async def get_cortex_cycle_proposal(cycle_id: str):
             """
             SELECT cycle_id::text, matter_slug, triggered_by, status,
                    current_phase, cost_dollars, cost_tokens,
-                   started_at, completed_at, aborted_reason
+                   started_at, completed_at
             FROM cortex_cycles
             WHERE cycle_id = %s
             LIMIT 1
@@ -4073,8 +4073,11 @@ async def get_cortex_cycle_proposal(cycle_id: str):
             "cost_tokens": int(cyc.get("cost_tokens") or 0),
             "started_at": cyc.get("started_at"),
             "completed_at": cyc.get("completed_at"),
-            "aborted_reason": cyc.get("aborted_reason"),
         })
+        # NOTE: aborted_reason is NOT in cortex_cycles schema — it lives
+        # only on the in-memory cycle object returned by maybe_run_cycle
+        # (consumed by the SSE terminal event). Frontend gets it from
+        # SSE, not from this endpoint.
         result["proposal_text"] = proposal_text
         result["has_proposal"] = bool(proposal_text)
         return result

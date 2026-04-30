@@ -86,7 +86,6 @@ def test_proposal_returns_200_with_synthesis(monkeypatch):
         "cost_tokens": 4922,
         "started_at": None,
         "completed_at": None,
-        "aborted_reason": None,
     }
     syn_row = {
         "payload": {"proposal_text": "# State of Play\n\nTest proposal."},
@@ -134,7 +133,6 @@ def test_proposal_returns_has_proposal_false_when_no_synthesis(monkeypatch):
         "cost_tokens": 0,
         "started_at": None,
         "completed_at": None,
-        "aborted_reason": None,
     }
     from outputs import dashboard
     monkeypatch.setattr(dashboard, "_get_store", lambda: _StubStore([cycle_row, None]))

@@ -19,6 +19,10 @@ Review at session start. Add new lessons after any correction. Remove stale ones
 **Mistake:** `doc_type` referenced in code but actual column is `document_type`. Same pattern as `is_critical`. Both caused features to silently fail — try/except swallowed the errors, user saw "Failed to load" or empty sections.
 **Rule:** When writing SQL in Python, always verify column names first: `SELECT column_name FROM information_schema.columns WHERE table_name = 'X'`. Don't assume — check.
 
+### 3b. Column-existence check belongs in the BRIEF, not the build
+**Mistake (CORTEX_RUN_SCAN_UI_RENDER_1, 2026-04-30):** AI Head A's brief specified a SELECT including `aborted_reason` from `cortex_cycles`, sourced from the in-memory cycle object's terminal-SSE shape. B1 implemented the brief verbatim; tests passed because the test fixture stubbed cursor results without verifying actual schema; deploy succeeded because import works fine. Endpoint then 500-errored on every real call: `column "aborted_reason" does not exist`. `aborted_reason` lives only on the Python object returned by `maybe_run_cycle`, not in `cortex_cycles`. Hotfixed in PR #91.
+**Rule:** Brief author owns column verification. Before writing any SELECT in a brief, run `SELECT column_name FROM information_schema.columns WHERE table_name = '<name>'` and paste the actual list of columns into the brief's "DB schema verified" section. Don't infer column names from in-memory object attributes, SSE event shapes, or other downstream payloads — those can have fields that exist only at the Python layer.
+
 ### 4. CSS cache busting
 **Rule:** Always bump `?v=N` on both CSS and JS in index.html when modifying either file.
 
