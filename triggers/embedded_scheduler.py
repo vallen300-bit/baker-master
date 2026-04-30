@@ -866,6 +866,29 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info(f"Registered: vault_sync_tick (every {_vault_sync_seconds}s)")
 
+    # ROADMAP_DRIFT_CLICKUP_SENTINEL_1: daily 06:00 UTC drift sentinel.
+    # Compares cortex-roadmap-current.yml last-edit vs PR merge cadence on
+    # baker-vault + baker-master. >=5 PRs since YAML touch -> ClickUp comment
+    # on recurring task 86c9k6kau (NO Slack — Director rule 2026-04-30).
+    # Env gate ``ROADMAP_DRIFT_SENTINEL_ENABLED`` (default ``true``).
+    _roadmap_drift_enabled = _os.environ.get(
+        "ROADMAP_DRIFT_SENTINEL_ENABLED", "true"
+    ).lower()
+    if _roadmap_drift_enabled not in ("false", "0", "no", "off"):
+        scheduler.add_job(
+            _roadmap_drift_sentinel_job,
+            CronTrigger(hour=6, minute=0, timezone="UTC"),
+            id="roadmap_drift_sentinel",
+            name="Roadmap drift sentinel (daily 06:00 UTC)",
+            coalesce=True, max_instances=1, replace_existing=True,
+            misfire_grace_time=3600,
+        )
+        logger.info("Registered: roadmap_drift_sentinel (daily 06:00 UTC)")
+    else:
+        logger.info(
+            "Skipped: roadmap_drift_sentinel (ROADMAP_DRIFT_SENTINEL_ENABLED=false)"
+        )
+
     # BRIEF_PROACTIVE_PM_SENTINEL_1: proactive sentinels (env-gated kill-switch).
     # Default enabled; set PROACTIVE_SENTINEL_ENABLED=false to disable both jobs.
     import os as _os
@@ -1025,6 +1048,28 @@ def _ai_head_audit_sentinel_job():
         logger.info("ai_head_audit_sentinel: %s", result)
     except Exception as e:
         logger.warning("ai_head_audit_sentinel: run raised: %s", e)
+
+
+def _roadmap_drift_sentinel_job():
+    """APScheduler wrapper: daily 06:00 UTC roadmap drift sentinel.
+
+    ROADMAP_DRIFT_CLICKUP_SENTINEL_1. Lazy-imports the runner; swallows
+    top-level exceptions as WARN so a single bad day doesn't knock out
+    the scheduler. The runner itself is non-fatal per step (graceful
+    no-op on GitHub or ClickUp API failure).
+    """
+    try:
+        from orchestrator.roadmap_drift_sentinel import (
+            run_roadmap_drift_sentinel,
+        )
+    except Exception as e:
+        logger.error("roadmap_drift_sentinel: import failed: %s", e)
+        return
+    try:
+        result = run_roadmap_drift_sentinel()
+        logger.info("roadmap_drift_sentinel: %s", result)
+    except Exception as e:
+        logger.warning("roadmap_drift_sentinel: run raised: %s", e)
 
 
 def _wiki_lint_weekly_job():
