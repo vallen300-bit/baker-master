@@ -1,29 +1,82 @@
-COMPLETE — Brief 3 (CORTEX_PHASE6_REFLECTOR_1) shipped via PR #129 + follow-up patch PR #132, both merged 2026-04-30 (`efd791d` Phase 6 Reflector module + Phase 4 prompt prepend + scheduler wiring + 51 tests; `4c075f6` 1-line ORDER BY flip in `_load_proposal_text` preferring `synthesis` over truncated `proposal_card` + live-PG regression test).
+# CODE_4 — DISPATCH (BAKER_VAULT_READ_WIKI_SCOPE_1)
 
-Prior: Q1-flip back-half dispatch 2026-04-30 by AI Head A. Trigger-class TIER A reviewed via architect-review pass twice (APPROVE WITH NITS on #129 — 8/8 dispatch concerns clean, 1 IMPORTANT bug → APPROVE on #132). PR #129 was merged by Director before architect-review landed (same race as PR #125 → #127 pattern); #132 closes the citation-truncation gap (was non-blocking — sweep is hourly cadence, no >8K-char proposals between merges).
+**Status:** PENDING — 2026-05-01 by AI Head A (Director-cleared after pre-dispatch B4 coordination handshake)
+**Brief:** `briefs/BRIEF_BAKER_VAULT_READ_WIKI_SCOPE_1.md` (286 lines, MEDIUM trigger class, ~1-2h)
+**Builder:** B4 (confirmed green, clean working tree, no Brief-3-leftovers)
+**Branch:** `b4/baker-vault-read-wiki-scope-1` (cut off latest main — includes PR #136 + #137 BRISEN_LAB_1 brief + B5 dispatch)
+**Tier:** Tier B (autonomous merge on green per AI Head A autonomy charter §3) — brief itself flags MEDIUM with cross-lane review pre-merge + `/security-review` recommended (boundary-broadening change)
+**autopoll_eligible:** false — paste-block dispatch; cold-start required
 
-Both halves of the Q1-flipped learning loop are now live on main:
-- Schema (Brief 4, PR #125 + #127): `cortex_directives` + `prompt_review_queue` + partial unique idx `idx_cortex_phase_outputs_reflector_complete`
-- Consumer (Brief 3, PR #129 + #132): Phase 6 Reflector + citation parser + counter increment + vault `proposed-config-deltas.md` writer + APScheduler sweep job (`phase6_reflector_sweep`, env-gated `CORTEX_PHASE6_REFLECTOR_ENABLED=true` default, 5-min floor)
+## Task summary
 
-ClickUp write path remains DORMANT per channels-last directive (`REFLECTOR_CLICKUP_WRITE=false` default). Brief 5 (PER_MATTER_CLICKUP_LINKAGE_1) remains DEFERRED.
+Extend Cowork-side vault read scope from `_ops/` only to `_ops/` + `wiki/`. Three files touched:
 
-B4 idle. Next dispatcher: run §2 busy-check (`_ops/processes/b-code-dispatch-coordination.md`) before overwriting.
+1. `vault_mirror.py` — replace `OPS_PREFIX` constant with `ALLOWED_PREFIXES` frozenset (keep back-compat `OPS_PREFIX` alias); update `_normalize_and_resolve()` (lines 266-297) to test against the set; rename `list_ops_files` → `list_vault_files` (with alias); same for `read_ops_file` → `read_vault_file`.
+2. `baker_mcp/baker_mcp_server.py` — broaden Tool descriptions for `baker_vault_list` (~line 485-496) and `baker_vault_read` (~line 498-510): replace "scoped to `_ops/`" wording with allowed-prefix list. No logic change here — dispatch handlers already call into `vault_mirror`.
+3. `tests/test_mcp_vault_tools.py` — extend with `wiki/` happy-path + traversal-attempt tests. Existing `_ops/` tests must stay green byte-for-byte (regression guard).
 
-## Deferred follow-ups (separate briefs, not blocking learning loop)
+Read the brief in full before starting — full spec including before/after code blocks for `_normalize_and_resolve()`, complete test matrix (5 happy / 5 reject), live-verification curl recipes, and the explicit do-not-touch list.
 
-- **S1** — Trigger A consolidation note for RA-23 tracker. Brief 3 V1 absorbs Trigger A (immediate-counter-update on Triaga decision) into the hourly sweep — defensible scope deviation from brief §3.5 with up to 60 min latency on Triaga-decided cycles. Worth tracker note so future-AI-Head-A doesn't rediscover.
-- **S2** — Vault-write-outside-counter-txn reconciler brief. Reflector commits counter UPDATE + idempotency marker, then attempts vault write outside that txn. If vault write throws, marker stays in place → subsequent sweeps skip → vault file never written. Inherent PG/filesystem-boundary tradeoff; non-trivial to fix transactionally. Follow-up: reconciler that reads `reflector_complete` markers and verifies vault-file presence.
+## Context updates (vs. brief text — written before Wave 2/3 close)
 
-## Companion state at Brief 3 close
+1. Brief §Companion section says `BRIEF_BAKER_VAULT_WRITE_1` is "in flight on B2." **Stale** — neither brief is in flight as of 2026-05-01 dispatch. Brief 1 awaits separate dispatch from AI Head A pending Director consult on Tier A trigger class (see §Coordination note below).
+2. Brief §Working branch suggests "B1 once free." Reassigned to B4 — confirmed green via pre-dispatch handshake; freshest Cortex/vault context from Brief 3+4 ship 2026-04-30.
 
-- Brief 4 (CORTEX_CONFIG_DIRECTIVES_SCHEMA_1): shipped (PR #125 + #127, both merged).
-- Brief 3 (CORTEX_PHASE6_REFLECTOR_1): shipped (PR #129 + #132, both merged).
-- Vault `slugs.yml` v17 with `brisen` canonical: shipped (vault PR #37 merged).
-- Vault Desk memory seeds (5 desks × 3 files + INDEX): shipped (vault PR #40 merged).
-- Briefs 1+2 (BAKER_VAULT_WRITE_1 + BAKER_VAULT_READ_WIKI_SCOPE_1): docs on main since PR #95 merge; build dispatch pending Director ratification.
-- Brief 5 (PER_MATTER_CLICKUP_LINKAGE_1): DEFERRED per channels-last.
+## Pre-flight checks (already confirmed in handshake)
 
-## Lesson captured
+- B4 confirmed: branch `b4/cortex-phase6-reflector-orderby-fix` (clean, no uncommitted), local mailbox stale, will `git checkout main && git pull` before cutting `b4/baker-vault-read-wiki-scope-1`.
+- No open PR conflicts on master (PR #135 brief-only, PR #137 just merged).
+- `gh pr list --state open --limit 20` clean as of dispatch.
 
-Always re-run `gh pr list --state open` immediately before drafting any dispatch — even on a 60-second gap from prior PR work. Today's PR #130 dispatch was post-hoc to PR #129 because I missed a 30-second open-PR window. Folding into `tasks/lessons.md` next.
+## Dispatch steps
+
+```bash
+cd ~/bm-b4
+git checkout main && git pull --ff-only origin main
+git checkout -b b4/baker-vault-read-wiki-scope-1
+
+# Read brief in full
+cat briefs/BRIEF_BAKER_VAULT_READ_WIKI_SCOPE_1.md
+
+# Implement per brief §Implementation (3 files)
+# Run pytest after each file change to catch regressions early
+
+# Quality checkpoints (brief §Quality Checkpoints):
+pytest tests/test_mcp_vault_tools.py -v
+python3 -c "import py_compile; py_compile.compile('vault_mirror.py', doraise=True)"
+python3 -c "import py_compile; py_compile.compile('baker_mcp/baker_mcp_server.py', doraise=True)"
+bash scripts/check_singletons.sh
+
+# Push + open PR
+git push -u origin b4/baker-vault-read-wiki-scope-1
+gh pr create --title "feat(vault): extend read scope from _ops/ to {_ops/, wiki/} (BAKER_VAULT_READ_WIKI_SCOPE_1)" \
+  --body "...per brief..."
+```
+
+## Acceptance criteria
+
+Per brief §Quality Checkpoints (1-9):
+- All existing `_ops/` tests in `tests/test_mcp_vault_tools.py` pass (regression)
+- New `wiki/` happy-path + traversal-attempt tests pass
+- `vault_mirror.py` + `baker_mcp/baker_mcp_server.py` compile clean
+- Render deploy succeeds (auto on push to main after merge)
+- Live H1 (regression `_ops/` read) + H2 (`wiki/hot.md` read) + H3 (`wiki/matters/oskolkov/cortex-config.md` read) + R1 (`wiki/../etc/passwd` traversal rejected) all verify
+- AI Head A invokes `code-architecture-reviewer` + `/security-review` skill on the build PR (Lesson #52 + brief §Quality Checkpoints 8-9)
+
+## Architect-review checkpoints (per Lessons #52 + #54)
+
+When PR opens, AI Head A runs:
+1. `code-architecture-reviewer` subagent — particular focus on (a) realpath/symlink invariants preserved across both prefixes, (b) extension-allowlist + size-cap unchanged, (c) regression coverage for `OPS_PREFIX` consumers via the back-compat alias, (d) MCP tool description correctness in `baker_mcp_server.py`.
+2. `/security-review` skill — boundary-broadening change; specifically check path-escape vectors, symlink-traversal edge cases, prefix-collision handling (e.g. is `_ops/foo` mistakenly accepted under `wiki/` matching?).
+
+## Verdict + handoff
+
+Surface paste-block to AI Head A when PR opens with: PR number, file diffs summary, test counts (existing pass + new pass), Render deploy status, brief §Live verification curl results.
+
+## Coordination note
+
+Brief 1 (`BAKER_VAULT_WRITE_1`, TIER A) NOT dispatched in this round. Reason: TIER A trigger class warrants Director consult on dispatch timing per AI Head A autonomy charter; AI Head A is surfacing a separate paste-block on Brief 1.
+
+## Previous task (closed)
+
+Brief 3 (`CORTEX_PHASE6_REFLECTOR_1`) shipped via PR #129 + #132, both merged 2026-04-30. B4 idle since.
