@@ -1,0 +1,148 @@
+# Bootstrap input — Aukera (senior lender — MOVIE + Annaberg + Lilienmatt + MRCI)
+#
+# Wave 3 #2 matter for CORTEX_BOOTSTRAP_MATTER_1.
+# Per Director ratification 2026-04-30 (post-capital-call seed).
+#
+# Provenance:
+# - Aukera is the existing Senior Lender on MO Vienna.
+# - Aukera EUR 15M facility for Lilienmatt/MRCI restructure: 450bp+SWAP, 3yr,
+#   deadline end of May 2026 (per oskolkov cortex-config Sub-Matter #3).
+# - Q7 (cortex-priorities-schema): multi-tag [lilienmatt, annaberg, aukera] —
+#   "Move financing — multi-entity company restructure" (asap, high).
+# - Q12 (cortex-priorities-schema): multi-tag [aukera, mo-vie-am] — "Negotiate
+#   Aukera €3M release from sold-residence proceeds to Brisen" (4w, critical).
+# - Aukera senior-debt-for-Annaberg DD data room prep in flight (wiki/aukera/
+#   2026-04-27 entry).
+# - Risk signals: Aukera EUR 15M facility stalled on Lilienmatt accounting/
+#   legal defects 2026-04-22 (signal_id 88, threat); Merz flagged Annaberg
+#   as "bloody messy", Aukera chances thin (signal_id 73).
+# - AO PM red flag: "Patrick warning" — AO horizon-collapse signal class
+#   (oskolkov cortex-config game-theoretic frame).
+#
+# Multi-matter touch: Aukera straddles MOVIE + Annaberg + Lilienmatt + MRCI.
+# This matter brain consolidates Aukera-side counterparty intelligence + facility
+# tracking; per-Brisen-vehicle restructure work stays in those matter brains
+# (annaberg, lilienmatt, mrci, mo-vie-am). Adjacent fan-out captures the cross.
+
+matter_slug: aukera
+matter_name: "Aukera (senior lender — MOVIE + Annaberg + Lilienmatt + MRCI)"
+absorbed_from: "seed (Wave 3 #2 — Director ratification 2026-04-30; pivoted from mo-vie-am after content gap on Q11/14/15)"
+absorbed_at: 2026-04-30
+absorbed_by: "AI Head A"
+authority_chain: "Q7 (multi-tag [lilienmatt, annaberg, aukera] — restructure financing) + Q12 (multi-tag [aukera, mo-vie-am] — €3M release) per cortex-priorities-schema; Director ratification 2026-04-30 (Wave 3 #2 pivot)"
+ratified_at: 2026-04-30
+
+autonomy_level: recommend_wait
+
+sense_sources:
+  - email: matter_keywords
+  - whatsapp: contact_phones
+
+entities:
+  primary:
+    - brisen-capital-sa
+  team:
+    - dimitry-vallen
+    - edita-vallen
+    - balazs-csepregi
+    - christophe-buchwalder
+  counterparties:
+    - aukera
+  adjacent:
+    - movie              # Aukera is existing Senior Lender on MOVIE
+    - mo-vie-am          # Q12 €3M release from sold-residence proceeds
+    - mo-vie-exit        # exit proceeds touch Aukera facility close-out
+    - annaberg           # Aukera senior debt DD in flight
+    - lilienmatt         # Aukera EUR 15M facility (stalled)
+    - mrci               # Baden-Baden cluster — Aukera planned senior lender
+    - oskolkov           # AO horizon-collapse / Patrick warning class
+
+trigger_patterns:
+  - '\b(aukera)\b'
+  - '\b(senior.lender|senior.debt|senior.facility)\b.*\b(mo[-\s]?vienna|movie|annaberg|lilienmatt|baden.baden)\b'
+  - '\b(450\s*bp|450\+swap)\b'
+  - '\b(eur|€)\s*15\s*(m|mm|million)\b.*\b(lilienmatt|aukera)\b'
+  - '\b(eur|€)\s*3\s*(m|mm|million)\b.*\b(release|residence.proceeds|sold.residence)\b'
+  - '\b(patrick)\b.*\b(aukera|warning|trust.review)\b'
+
+default_specialists: [legal, finance, tax-DE, tax-CH, tax-AT, game-theory]
+specialist_cap_per_cycle: 5
+specialist_timeout_seconds: 60
+specialist_retries: 2
+cycle_timeout_seconds: 300
+
+auto_trigger:
+  severity_floor: high
+  confidence_floor: 0.8
+
+games_relevant: true
+counterparty_iteration_horizon: long_finite
+counterparty_reputation_stake: 7
+counterparty_observed_strategy: cooperate_with_constraints
+
+project_structure: |
+  - **Existing facility:** Senior Lender on MO Vienna (in place).
+  - **In flight EUR 15M facility:** Lilienmatt/MRCI restructure — 450bp+SWAP,
+    3yr, deadline end of May 2026. **Status: stalled** on Lilienmatt accounting
+    + legal defects (signal_id 88, 2026-04-22, threat-class).
+  - **Annaberg DD:** Aukera positioned for senior debt; data room prep in flight
+    (wiki/aukera/2026-04-27 entry). Risk: Merz flagged Annaberg "bloody messy"
+    (signal_id 73, 2026-04-22).
+  - **MRCI (Baden-Baden):** Aukera planned senior lender for Balgerstrasse
+    development — slug-tier reference per slugs.yml.
+  - **Q12 €3M release:** Negotiate release of €3M from MOVIE sold-residence
+    proceeds back to Brisen (4w window, critical). Multi-tag [aukera, mo-vie-am].
+
+counterparty_topology: |
+  | Slug | Role | Status |
+  |---|---|---|
+  | `aukera` | Senior lender across 4 Brisen vehicles | active |
+
+  Aukera-side individuals (not yet in people.yml — soft-warn expected; backfill
+  via `bootstrap_entities.py` follow-up or hand-add to people.yml):
+  - **Patrick** — Aukera-side contact; flagged as horizon-collapse signal in AO PM
+    red flags (oskolkov cortex-config). Reputational tell when surfaces in
+    correspondence.
+  - **Christian Merz** — German legal advisor (Brisen-retained, Handels-/
+    Gesellschaftsrecht + Bank-/Kapitalmarktrecht); Aukera mandate confirmation
+    intermediary (signal_id 324, 2026-04-29).
+  - **Conrad Weiss** — Lilienmatt Immobilien GmbH counterparty; nudges Christian
+    Merz on Aukera mandate confirmation (signal_id 324).
+
+  Brisen-side: DV (principal), Edita Vallen (LCG director), Balazs Csepregi
+  (financial modeling — flagged Aukera halt risk on Annaberg, signal_id 47),
+  Christophe Buchwalder (Swiss legal — Gantey Ltd, AO restructure context).
+
+notes: |
+  ## Active workstreams (3)
+  1. **EUR 15M facility revival** (Lilienmatt/MRCI restructure) — stalled
+     2026-04-22; needs Lilienmatt accounting + legal cleanup before Aukera DD
+     can re-engage. End-May-2026 deadline.
+  2. **Annaberg DD data room** — in flight 2026-04-27; risk-of-thin-chances per
+     Merz read.
+  3. **Q12 €3M MOVIE release** — 4w critical, paired with mo-vie-am.
+
+  ## Game-theoretic frame
+  Long-finite horizon (multi-year debt facility, contractual end-date). Reputation
+  stake 7 (institutional bank — reputational floor higher than transactional
+  counterparty, lower than relationship LP). Observed strategy:
+  `cooperate_with_constraints` — Aukera engages but tightens on every adverse
+  signal (Lilienmatt accounting wobble, Annaberg "bloody messy" framing,
+  Patrick warning class).
+
+  ## Coordination rules
+  - Brisen exposure straddles 4 vehicles: any new Aukera signal MUST adjacent-
+    fan-out to (movie, mo-vie-am, mo-vie-exit, annaberg, lilienmatt, mrci) for
+    cross-vehicle posture coherence.
+  - Patrick warnings escalate to AO PM (per oskolkov cortex-config Rule 5:
+    horizon-collapse = immediate protection).
+
+  ## Bridge to other matters
+  - `oskolkov` — AO horizon-collapse class; Patrick warning routes here for
+    relationship-protection moves.
+  - `lilienmatt` — primary stall point; Aukera DD gated on Lilienmatt cleanup.
+  - `annaberg` — DD in flight; Aukera deal jeopardized by Lilienmatt fallout.
+  - `mrci` — Baden-Baden Balgerstrasse; Aukera planned senior lender (parallel
+    to Lilienmatt facility).
+  - `movie` / `mo-vie-am` / `mo-vie-exit` — existing senior facility; Q12 €3M
+    release ties exit proceeds to Brisen liquidity.
