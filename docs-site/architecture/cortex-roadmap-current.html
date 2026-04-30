@@ -131,25 +131,6 @@ auto-execute per matter as proposals fire.</div>
   <div class="item queued">
     <div class="icon">→</div>
     <div>
-      <div class="label">Auto-trigger dispatch fix — move maybe_dispatch from bridge tick to Step 6 finalize (Option A)<span class="priority critical">critical</span></div>
-      <div class="desc">B1 verification (PR #109) confirmed auto-trigger has been silently dead
-for ALL 22 matters since multi-matter gate shipped. Root cause:
-kbl/bridge/alerts_to_signal.py:577 fires maybe_dispatch with raw
-signal_queue.matter (PM-era labels) before Step 1 canonicalizes via
-slug_registry.normalize() into primary_matter. Fix: move dispatch to
-Step 6 finalize where canonical primary_matter is committed. Compounding:
-add 'movie_am' underscore alias to slugs.yml (Step 1 currently fails to
-canonicalize that label). Brief: BRIEF_CORTEX_AUTO_TRIGGER_DISPATCH_FIX_1.
-Trigger-class (cross-capability state writes) → B3 second-pair-of-eyes.</div>
-      <div class="meta-line"><span><strong>Owner:</strong> b-code</span><span><strong>ETA:</strong> 2026-05-01</span></div>
-      
-    </div>
-    <div class="badge queued">QUEUED</div>
-  </div>
-
-  <div class="item queued">
-    <div class="icon">→</div>
-    <div>
       <div class="label">AI Head SKILL.md session-start + close rituals + no-PARKED rule<span class="priority high">high</span></div>
       <div class="desc">Session-start: read OPERATING + skim LONGTERM + last ARCHIVE block
 + fetch active roadmap from brisen-docs URL in MEMORY.md + read
@@ -157,19 +138,6 @@ ClickUp Cortex Backlog tail. Session-close: rewrite OPERATING + append
 ARCHIVE + update YAML for shipped items. Standing rule: nothing parked,
 ever — backlog → ClickUp.</div>
       <div class="meta-line"><span><strong>Owner:</strong> ai-head-a</span><span><strong>ETA:</strong> 2026-04-30</span></div>
-      
-    </div>
-    <div class="badge queued">QUEUED</div>
-  </div>
-
-  <div class="item queued">
-    <div class="icon">→</div>
-    <div>
-      <div class="label">Bootstrap V2 — auto-skip gold.md emission (CHANDA #4 author:director guard)<span class="priority high">high</span></div>
-      <div class="desc">4 manual gold.md drops today across capital-call/aukera/uk-homes/12-batch.
-~30 min B-code fix to eliminate the manual step. Author:director guard
-blocks agent-authored gold.md commits anyway — emission is wasted work.</div>
-      <div class="meta-line"><span><strong>Owner:</strong> b-code</span><span><strong>ETA:</strong> 2026-05-02</span></div>
       
     </div>
     <div class="badge queued">QUEUED</div>
@@ -671,6 +639,28 @@ running cleanly for ≥1 week.</div>
       <div class="desc"></div>
       <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
       <div class="anchor">B2 PR #114 — daily 06:00 UTC sentinel; lock 900900; env gate ROADMAP_DRIFT_SENTINEL_ENABLED; 12/12 tests pass; ClickUp recurring task 86c9k6kau receives drift comment on ≥5 PRs since YAML touch. Manual smoke deferred to natural cron fire 2026-05-01T06:00Z.</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Bootstrap V2 — auto-skip gold.md emission (B4 BOOTSTRAP_V2_GOLD_SKIP_1)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
+      <div class="anchor">B4 PR #107 — gold.md dropped from SKELETON_FILES + render_gold removed; 28/28 tests green; B1 second-pair-of-eyes PASS verdict. Eliminates 4 manual revert drops/day on bootstrap.</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Auto-trigger dispatch fix — move maybe_dispatch from bridge to Step 6 finalize (B1 CORTEX_AUTO_TRIGGER_DISPATCH_FIX_1)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
+      <div class="anchor">B1 PR #116 + vault PR #30 (slugs.yml v16 movie_am alias). Approach: Option A from B1 ship report. 5 files / +541 / -103. Idempotency via cortex:dispatch:{signal_id} INSERT-IF-NOT-EXISTS. 6/6 finalize call sites wired in pipeline_tick.py. 107 passed / 2 skipped pytest. B3 second-pair-of-eyes PASS (5-area audit clean; 4 informational residuals non-blocking). CLOSES the silently-dead auto-trigger that has been broken for ALL 22 matters since multi-matter gate shipped. Post-merge spot-check pending: confirm triggered_by='signal' rows for canonical hagenauer-rg7/mo-vie-am/lilienmatt within 30 min of next bridge tick (tomorrow's drift sentinel cron will catch + report).</div>
     </div>
     <div class="badge done">DONE</div>
   </div>
