@@ -110,6 +110,10 @@ async def run_phase3c_synthesize(
     cycle status to 'proposed'.
     """
     synth_prompt = _load_synthesizer_prompt() or _DEFAULT_SYNTH_PROMPT
+    # Prepend Reflector citation directive (Brief CORTEX_PHASE6_REFLECTOR_1 §3.1).
+    # Always prepended regardless of DB-loaded prompt content so the citation
+    # contract is uniform across all matters and survives capability_sets edits.
+    synth_prompt = _DIRECTIVE_CITATION_PREAMBLE + synth_prompt
 
     user_msg = _build_user_message(
         matter_slug=matter_slug,
@@ -160,6 +164,30 @@ _DEFAULT_SYNTH_PROMPT = (
     "into a unified proposal for the Director. Be concise, decision-"
     "ready, and end with a JSON code block listing structured_actions."
 )
+
+# Citation directive prepended to whatever synthesizer prompt is loaded
+# (DB capability_sets row OR _DEFAULT_SYNTH_PROMPT). Brief: CORTEX_PHASE6_REFLECTOR_1
+# §3.1. Reflector parses [directive: <id>] from proposal_text; untraceable
+# proposals (no/unknown/malformed citation) flow to prompt_review_queue for
+# Director eyeball review (NOT penalized — combats fabricated citations).
+_DIRECTIVE_CITATION_PREAMBLE = """\
+DIRECTIVE CITATION REQUIREMENT
+==============================
+You have been provided with the matter's directives playbook (curated/
+directives.md, loaded in Phase 2). If you draw on any directive in
+formulating this proposal, cite it by id at the end of your proposal:
+
+  [directive: <id>]
+
+Multiple directives OK: [directive: <id1>, <id2>, ...]
+
+If your proposal does not draw on the playbook (novel reasoning), omit
+the citation. Untraceable proposals are flagged to a review queue, not
+penalized — but consistent omission suggests the playbook needs new
+directives. Be honest, not performative: cite only directives you
+actually relied on.
+
+"""
 
 
 def _load_synthesizer_prompt() -> str:
