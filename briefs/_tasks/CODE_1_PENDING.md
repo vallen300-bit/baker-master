@@ -1,56 +1,88 @@
-# CODE_1 — PR-OPEN (CORTEX_MANUAL_INVOKE_1)
+# CODE_1 — PENDING (CORTEX_RUN_SCAN_UI_RENDER_1)
 
-**Status:** PR-OPEN — awaiting AI Head A `/security-review` + AI Head B cross-lane review (RA-24 dual-clear)
-**Brief:** `briefs/BRIEF_CORTEX_MANUAL_INVOKE_1.md`
-**Wave:** 1 / Track 1 (V3 rev 4 roadmap)
-**Trigger class:** HIGH (external API + auth + cost-bearing)
+**Status:** PENDING — B1 build
+**Brief:** `briefs/BRIEF_CORTEX_RUN_SCAN_UI_RENDER_1.md`
+**From:** AI Head A — dispatched 2026-04-30 (Wave 2 #1, swapped ahead of `CORTEX_NOTIFICATION_DEFER_1` per Director ratification 2026-04-30 ~05:35Z)
+**Wave:** 2 / Track 1 (V3 rev 4 roadmap)
+**Trigger class:** MEDIUM (Director-visible UX gap on Wave-1-shipped feature; frontend + read endpoint; no auth/financial/migration touch)
 
-**PR:** https://github.com/vallen300-bit/baker-master/pull/88
-**Branch:** `b1/cortex-manual-invoke-1`
-**Ship report:** `briefs/_reports/B1_cortex_manual_invoke_1_20260429.md`
+**Prior CODE_1 task** CORTEX_MANUAL_INVOKE_1 — PR #88 MERGED 2026-04-30T04:46Z (`7a36312`). Mailbox overwritten per §3 hygiene; ship report preserved at `briefs/_reports/B1_cortex_manual_invoke_1_20260429.md`.
 
-## What shipped
+## Scope (TL;DR)
 
-- `outputs/cortex_run_stream.py` — NEW (263 LOC). Pure SSE helpers + rate-limit + cost-warn + cycle snapshot.
-- `outputs/dashboard.py` — MOD (+133 LOC). `CortexRunRequest`, `POST /api/cortex/run`, Scan `cortex_run_action` branch.
-- `orchestrator/action_handler.py` — MOD (+57 LOC). `_quick_cortex_run_detect` regex fast-path + extended LLM `_INTENT_SYSTEM` schema.
-- 3 NEW test files (24 tests total): `test_cortex_run_stream.py`, `test_cortex_run_endpoint.py`, `test_scan_cortex_intent.py`.
+Director's post-deploy smoke (cycle `18a18ec5-ea69-4e44-97c9-4308488b8aba`) ran end-to-end on the backend in $1.46 — but Scan UI sat on "Baker is thinking…" indefinitely because front-end SSE consumers only render `data.token`. Cortex stream emits typed events (`{type: started|phase_changed|phase_output|terminal}`) with no `token` and they get silently dropped. This is V7 follow-up F-2 exactly, raised by AI Head B in PR #88 review §F-2 (MEDIUM).
 
-## Tests
+**6 changes:**
 
-- 24/24 PASS new suite (`tests/test_cortex_run_stream.py` + `tests/test_cortex_run_endpoint.py` + `tests/test_scan_cortex_intent.py`)
-- 143/143 PASS across 10 cortex/pipeline/scan suites (regression)
-- `bash scripts/check_singletons.sh` clean
-- 3 modified production files compile clean
+1. **NEW endpoint** `GET /api/cortex/cycles/{cycle_id}/proposal` in `outputs/dashboard.py` — read-only, returns cycle metadata + propose-phase synthesis text from `cortex_phase_outputs.payload->>'proposal_text'`. Backs the front-end terminal-card render.
+2. **`outputs/static/app.js`** — add `renderCortexEvent(...)` + helpers above `sendScanMessage` (~line 3962); add narrow `data.type` branch inside the SSE reader (~line 4053).
+3. **`outputs/static/mobile.js`** — parallel `renderCortexEventMobile(...)` + helpers + branch in `streamChat` (~line 339, 389).
+4. **`outputs/static/style.css`** — append Cortex UI styles (`.cortex-stream`, `.cortex-ticker`, `.cortex-terminal-card`, mobile variants).
+5. **Cache busts** in `outputs/static/index.html` (and `mobile.html` if present): bump `?v=N` on `app.js`, `style.css`, `mobile.js`, `mobile.css` by exactly 1.
+6. **Tests:** new `tests/test_cortex_proposal_endpoint.py` (4 cases: 200 with synthesis / 404 missing / 400 invalid uuid / 200 has_proposal=false on no synthesis) + extend `tests/test_scan_cortex_intent.py` with one typed-event passthrough assertion.
 
-## Director action required
+## Working branch
 
-Set the 3 optional Render env vars (defaults shipped, override if desired):
+```
+b1/cortex-run-scan-ui-render-1
+```
 
-| Env var | Default | Purpose |
-|---|---|---|
-| `CORTEX_RUN_POLL_INTERVAL` | `0.5` | seconds between phase-snapshot polls |
-| `CORTEX_RUN_RATE_LIMIT` | `5` | manual runs/hour/matter cap (HTTP 429 over) |
-| `CORTEX_COST_WARN_SPECIALIST_PER_DAY` | `30` | specialist invocations/24h/matter that triggers Slack DM warn |
+## Pre-flight
 
-No required env vars. `BAKER_VAULT_PATH` (already required by PR #85) gates the whitelist.
+```bash
+cd ~/bm-b1
+git fetch origin && git checkout main && git pull --ff-only origin main
+git checkout -b b1/cortex-run-scan-ui-render-1
+```
 
-## Post-merge verification
+Verify the smoke cycle synthesis row exists before you start — fixture and manual verification both depend on it. Use the Baker MCP `baker_raw_query` tool:
 
-1. Render redeploys → curl smoke (config-rich + config-less matters) — full snippets in ship report §10
-2. Scan UI smoke: "run cortex on oskolkov — quick smoke"
-3. SQL: `SELECT cycle_id, status, cost_dollars FROM cortex_cycles WHERE triggered_by IN ('director_manual','scan_intent') ORDER BY started_at DESC LIMIT 5;`
+```sql
+SELECT artifact_type FROM cortex_phase_outputs
+WHERE cycle_id = '18a18ec5-ea69-4e44-97c9-4308488b8aba'
+  AND artifact_type = 'synthesis' LIMIT 1;
+```
 
-## Side findings (non-blocking, surfaced for tracker)
+Expected: one row with `artifact_type='synthesis'`.
 
-1. **Pre-existing test pollution** at `tests/test_cortex_action_endpoint.py:62` — global `app.dependency_overrides[verify_api_key]=lambda: None` never cleaned up. Confirmed via clean-main repro. Hardened MY tests defensively; trigger-test fix out of scope (surgical edits).
-2. **Pre-existing main failures** — 3× `tests/test_scan_endpoint.py` + 1× `tests/test_scan_prompt.py`. Unrelated to this PR.
-3. **Schema deviation from brief** (Lesson #40 cousin): brief named `capability_runs` for specialist counter; that table has no `matter_slug` column. Implementation uses `cortex_phase_outputs JOIN cortex_cycles` filtered by `artifact_type='specialist_invocation'`. Documented in `outputs/cortex_run_stream.py` docstring.
+## Hard rules / RA-24 trigger classes (review path)
 
-## Prior CODE_1 task
+- Trigger class: **MEDIUM** — Director-visible UX gap, frontend-heavy, plus a small read-only endpoint. **Not** auth / DB-migration / financial / external API / cross-capability state writes.
+- **Review path:** AI Head A solo `/security-review` + standard PR review. **No** RA-24 dual-clear required (Director ratified 2026-04-24: only the 7 trigger classes get B1 second-pair). MEDIUM is in AI Head A's autonomous merge scope per charter §4.
+- **Self-PR rule:** AI Head A reviews + merges directly via squash-merge (per Item 7 ratification 2026-04-28).
 
-SCHEDULER_SINGLETON_HARDEN_1 (PR #84) merged + production-verified 2026-04-29T18:15Z. Mailbox overwrite per §3 hygiene; ship report preserved at `briefs/_reports/B1_scheduler_singleton_harden_20260430.md`.
+## Acceptance criteria
 
-## Mailbox hygiene
+1. `pytest tests/test_cortex_proposal_endpoint.py tests/test_scan_cortex_intent.py tests/test_cortex_run_endpoint.py tests/test_cortex_run_stream.py -v` — literal green output (paste tail in ship report; no "pass by inspection")
+2. `bash scripts/check_singletons.sh` clean
+3. `python -c "from outputs.dashboard import app; print('OK')"` clean (catches import errors before deploy)
+4. `curl -H "X-Baker-Key: bakerbhavanga" https://baker-master.onrender.com/api/cortex/cycles/18a18ec5-ea69-4e44-97c9-4308488b8aba/proposal` post-deploy returns `has_proposal: true` + Hagenauer state-of-play markdown (confirms end-to-end on real DB row)
+5. Manual Scan smoke after AI Head A merges + deploy lands: `run cortex on hagenauer-rg7 — quick state of play` — UI shows phase ticker → terminal card → proposal text inline
+6. iOS PWA hard-reload: confirm cache-bust took (no stale `app.js` causing the same hang)
+7. JS console clean (no `Uncaught ReferenceError`, no XSS-related warnings)
 
-On PR merge: overwrite this file with `COMPLETE` + post-deploy verification status.
+## Ship report fields (mandatory)
+
+Save to `briefs/_reports/B1_cortex_run_scan_ui_render_1_<date>.md`:
+
+- Files changed (with LOC delta)
+- `pytest` literal tail showing all targeted suites green
+- Singleton check output
+- Import smoke output
+- New endpoint manual curl output (200 / 404 / 400)
+- Cache-bust verification grep output (`grep -nE 'app\.js\?v=|style\.css\?v=' outputs/static/*.html`)
+- Any deviations from brief (with rationale)
+
+## Director paste / PR
+
+When done, push branch + open PR titled:
+`feat(cortex): Scan UI renders cortex_run_action SSE events (CORTEX_RUN_SCAN_UI_RENDER_1)`
+
+Body must include the V7 F-2 anchor:
+> Closes V7 follow-up F-2 (PR #88 review §F-2 MEDIUM). Backend unchanged — this brief adds the Scan UI render path: phase ticker, terminal card, and inline proposal markdown via new `GET /api/cortex/cycles/{cycle_id}/proposal` endpoint.
+
+## Reference docs
+
+- Brief: `briefs/BRIEF_CORTEX_RUN_SCAN_UI_RENDER_1.md` (the contract)
+- AI Head B PR #88 review §F-2: `briefs/_reports/AIHEAD_B_PR88_review_20260429.md` (lines 158-183) — original gap analysis
+- V7 snapshot: `memory/project_session_state_20260430_v7.md` — F-2 listed as the only Wave-1-surface follow-up
