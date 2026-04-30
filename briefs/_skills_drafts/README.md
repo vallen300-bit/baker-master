@@ -1,24 +1,24 @@
 ---
 title: Desk SKILL.md drafts — staging area
-status: V1 drafts, pattern-lock pending
+status: V1 drafts, pattern-locked 2026-04-30
 authored: 2026-04-30 (AI Head A CLI)
 ---
 
 # Desk SKILL.md drafts
 
-Staging area for the 5 Cowork-side scoped Desk agents ratified 2026-04-30 (Director: Desk naming + Manus filesystem-as-memory + 6-class path whitelist).
+Staging area for the 5 Cowork-side scoped Desk agents ratified 2026-04-30 (Director: Desk naming + Manus filesystem-as-memory + 6-class path whitelist + ratification-based LONGTERM update rule).
 
-## Pattern lock (in progress)
+## Pattern lock (closed 2026-04-30)
 
 | Desk | Status | File | Matter slugs |
 |---|---|---|---|
 | AO Desk | **DRAFT V1 (canonical)** | `AO_DESK_SKILL.md` | `oskolkov` |
-| MOVIE Desk | Not yet authored | `MOVIE_DESK_SKILL.md` | `mo-vie-am`, `mo-vie-exit` |
-| Hagenauer Desk | Not yet authored | `HAGENAUER_DESK_SKILL.md` | `hagenauer-rg7` |
-| Origination Desk | Not yet authored | `ORIGINATION_DESK_SKILL.md` | `nvidia-corinthia`, `kitz-kempinski`, `kitzbuhel-six-senses`, `wertheimer`, `balducci`, `philippe-soulier`, `mo-prague`, `citic`, `corinthia`, `cap-ferrat`, `bora-bora`, `minor-hotels` |
-| Brisen Desk | Not yet authored | `BRISEN_DESK_SKILL.md` | (cross-cutting; portfolio view) |
+| MOVIE Desk | DRAFT V1 | `MOVIE_DESK_SKILL.md` | `mo-vie-am`, `mo-vie-exit` (one Desk owns both per Director ratification) |
+| Hagenauer Desk | DRAFT V1 | `HAGENAUER_DESK_SKILL.md` | `hagenauer-rg7` |
+| Origination Desk | DRAFT V1 | `ORIGINATION_DESK_SKILL.md` | `nvidia-corinthia`, `kitz-kempinski`, `kitzbuhel-six-senses`, `wertheimer`, `balducci`, `philippe-soulier`, `mo-prague`, `citic`, `corinthia`, `cap-ferrat`, `bora-bora`, `minor-hotels` (one Desk per Director ratification) |
+| **AI CEO** (renamed from Brisen Desk per Director 2026-04-30) | DRAFT V1 | `AI_CEO_SKILL.md` | `ai-ceo` (NEW slug to add to slugs.yml — meta-matter, cross-cutting view) |
 
-**Authoring strategy:** AO Desk is drafted first as the canonical pattern. Sibling Desks follow the same 11-section structure with per-matter substitutions (slug, counterparty, sibling-Desk routing map, Brisen-specific facts). If Director approves AO Desk pattern, siblings author quickly. If pattern needs revision, fix once then duplicate.
+**Authoring strategy used:** AO Desk drafted first as the canonical pattern. Director ratified pattern + naming + scope decisions 2026-04-30; sibling Desks then authored in one batch with per-matter substitutions.
 
 ## Deployment dependency chain
 
@@ -50,19 +50,45 @@ Every Desk has 3 files at `_ops/agents/<desk-slug>/`:
 
 Memory pattern adapted from AI Dennis (it-manager skill) — proven 3-file architecture.
 
+### LONGTERM.md update cadence — ratification-based rule (Director-ratified 2026-04-30)
+
+Update LONGTERM.md immediately when a fact is **ratified** by:
+- **Director-ratified** — explicit Triaga / paste-block / inline confirmation
+- **Counterparty-signed** — contract executed, email confirmation arrived, court order issued
+- **Data-confirmed** — bank wire received, signed PDF in vault, audited number landed
+
+Do NOT update LONGTERM.md for unratified observations, in-flight signals, single-source claims, or speculation. Those stay in OPERATING.md (current working state) or `curated/<date>-<topic>.md` (specific deliberations) until a ratification signal arrives. Per-Desk variations in §7.2 of each SKILL.md (Hagenauer Desk extends to "Thomas Leitner-ratified" for legal facts within his scope; AI CEO extends to "deal-closed-elsewhere = real comparable").
+
 ## Sibling-Desk routing protocol
 
 When a Desk discovers work in another Desk's lane: write a Tier A handoff file at `_inbox/handoff-<YYYY-MM-DD>-<src>-to-<tgt>.md` with frontmatter (`from`, `to`, `subject`, `priority`). Target Desk picks up at next session start.
 
 NO direct cross-Desk writes. Lane discipline is the load-bearing invariant.
 
-## Open questions for Director (pattern-lock review)
+## Director ratifications 2026-04-30 (pattern-lock answers)
 
-1. **Naming:** AO Desk reads as informal vs. "Oskolkov Desk" formal. Director ratified "AO Desk" 2026-04-30. Confirm AO/MOVIE/Hagenauer/Origination/Brisen all use the short / matter-keyword form?
-2. **MOVIE Desk scope:** does one Desk own both `mo-vie-am` (asset management) and `mo-vie-exit` (disposal track)? Or split?
-3. **Origination Desk breadth:** 12+ slug list above. Is this one Desk or should it split (e.g., hotel-chains vs. residences)?
-4. **Brisen Desk responsibility:** is it a portfolio synthesizer (read-only across all matters) or does it write to its own `wiki/matters/brisen/` paths?
-5. **Memory consolidation cadence:** OPERATING.md rewrite-each-session is clear; LONGTERM.md update cadence less so. Per-session updates? Weekly compaction?
-6. **End-to-end test plan:** when Briefs 1+2 ship, do we want a dry-run pilot on AO Desk only (1 week) before activating other 4? Or activate all 5 simultaneously?
+1. **Naming:** ✅ AO Desk / MOVIE Desk / Hagenauer Desk / Origination Desk / **AI CEO** (renamed from "Brisen Desk").
+2. **MOVIE Desk scope:** ✅ ONE Desk owns BOTH `mo-vie-am` + `mo-vie-exit`.
+3. **Origination Desk breadth:** ✅ ONE Desk owns all 12+ slugs (no split).
+4. **AI CEO write surface:** ✅ Own write surface at `wiki/matters/ai-ceo/`. Slug `ai-ceo` added to slugs.yml as meta-matter (separate PR).
+5. **LONGTERM.md cadence:** ✅ Ratification-based rule (see above).
+6. **Pilot strategy:** ✅ Activate ALL 5 simultaneously when Briefs 1+2 ship.
 
-These don't block AO Desk pattern review — flagging now to capture intent before sibling authoring.
+## Slugs.yml addition required (separate PR — Director or AI Head)
+
+```yaml
+- slug: ai-ceo
+  status: active
+  description: "AI CEO meta-matter — portfolio synthesizer agent's own write surface. Cross-cutting; reads all matter Desks, writes only here."
+  aliases: [ceo, brisen-ceo]
+```
+
+## Deployment checklist (when Briefs 1+2 ship)
+
+1. **Pre-ship:** add `ai-ceo` slug to baker-vault `slugs.yml` (separate-repo PR, version bump).
+2. **Pre-ship:** create empty seed memory files `_ops/agents/{ao,movie,hagenauer,origination,ai-ceo}-desk/{OPERATING,LONGTERM,ARCHIVE}.md` with frontmatter (Tier A path; can be Director-seeded or initial-Desk-seeded).
+3. **Ship Brief 1 (vault_write MCP).**
+4. **Ship Brief 2 (read scope wiki/).**
+5. **Copy each `briefs/_skills_drafts/<DESK>_SKILL.md` → `~/.claude/skills/<desk-slug>/SKILL.md`**.
+6. **Validate:** open a Cowork session per Desk, verify session-start briefing renders correctly + memory reads work via `mcp__baker__baker_vault_read`.
+7. **Pilot week:** all 5 Desks active; observe friction patterns; revise per practice.

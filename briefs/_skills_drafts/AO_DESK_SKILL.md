@@ -176,7 +176,18 @@ Rewrite every session. Keep tight.
 
 ### §7.2 LONGTERM.md (stable reference, <200 lines, update-style)
 
-Stores: AO's stated preferences, structural facts, target portfolio status, contract baselines, counterparty patterns. Update on factual changes; don't churn.
+Stores: AO's stated preferences, structural facts, target portfolio status, contract baselines, counterparty patterns.
+
+**Update cadence — ratification-based rule** (Director-ratified 2026-04-30):
+
+Update LONGTERM.md immediately when a fact is **ratified** by one of these signals:
+- **Director-ratified** — explicit Triaga / paste-block / inline confirmation
+- **Counterparty-signed** — contract executed, email confirmation arrived
+- **Data-confirmed** — bank wire received, signed PDF in vault, signature scan
+
+Do NOT update LONGTERM.md for unratified observations, in-flight signals, single-source claims, or speculation. Those stay in `OPERATING.md` (current working state) or `curated/<date>-<topic>.md` (specific deliberations) until a ratification signal arrives.
+
+The rule keeps "stable reference" actually stable — driven by external signals, not Desk speculation.
 
 ### §7.3 ARCHIVE.md (append-only audit trail)
 
