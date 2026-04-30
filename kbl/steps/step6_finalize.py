@@ -49,6 +49,7 @@ Transaction-boundary contract (Task K YELLOW remediation, 2026-04-19):
 """
 from __future__ import annotations
 
+import json
 import logging as _stdlib_logging
 import re
 import sys
@@ -786,3 +787,161 @@ def _route_validation_failure(
             f"terminal finalize failure after {new_count} Opus retries; "
             f"routed to {_STATE_FINALIZE_FAILED}",
         )
+
+
+# ---------------------------- post-finalize cortex dispatch ----------------------------
+
+
+# CORTEX_AUTO_TRIGGER_DISPATCH_FIX_1 (2026-04-30): dispatch was previously
+# fired from kbl/bridge/alerts_to_signal.py post-INSERT — but at that point
+# signal_queue.matter is still the raw classifier label (Step 1 triage
+# canonicalizes primary_matter LATER). matter_has_cortex_config() therefore
+# always missed → auto-trigger silently dead for all 22 matters since
+# multi-matter cost-gate shipped. Moving the call here means we read
+# primary_matter AFTER Step 1+5+6 have run + committed the canonical slug.
+
+_DISPATCH_AUDIT_INVOKED = "cortex:dispatch:invoked"
+_DISPATCH_AUDIT_SKIP_NO_MATTER = "cortex:dispatch:skip_no_matter"
+_DISPATCH_AUDIT_SKIP_NO_CONFIG = "cortex:dispatch:skip_no_config"
+_DISPATCH_AUDIT_PREFIX = "cortex:dispatch:"
+
+
+def dispatch_cortex_after_finalize(signal_id: int) -> Dict[str, Any]:
+    """Idempotent post-Step-6 Cortex dispatch hook. Never raises.
+
+    Caller fires this AFTER ``finalize()`` succeeds and the outer
+    transaction commits — i.e. once ``signal_queue.primary_matter`` holds
+    the canonical slug.
+
+    Idempotency: a single ``baker_actions`` row with ``action_type LIKE
+    'cortex:dispatch:%%'`` and ``target_task_id=str(signal_id)`` is
+    INSERTed via ``INSERT ... WHERE NOT EXISTS`` — re-runs (R3 reflip,
+    crash-recovery reclaim) skip dispatch when a prior row exists.
+    Mirrors the pattern in
+    ``triggers.cortex_pre_review_gate.record_decision``.
+
+    Outcomes (encoded in action_type):
+      * ``cortex:dispatch:invoked``        — gate post attempted (matter
+                                             has cortex-config.md).
+      * ``cortex:dispatch:skip_no_matter`` — primary_matter is NULL (Step
+                                             1 returned no canonical slug
+                                             OR signal pre-dates Step 1).
+      * ``cortex:dispatch:skip_no_config`` — canonical slug present but
+                                             no per-matter cortex-config
+                                             — gate would reject.
+
+    Returns a dict with ``outcome`` + ``fired`` + diagnostic fields.
+    Never raises; caller should not need to wrap.
+    """
+    result: Dict[str, Any] = {
+        "outcome": "error",
+        "fired": False,
+        "signal_id": signal_id,
+    }
+    try:
+        # Lazy imports to avoid loading the cortex stack on Mac Mini /
+        # tests that don't exercise dispatch.
+        from memory.store_back import SentinelStoreBack
+        from triggers.cortex_pre_review_gate import matter_has_cortex_config
+
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            result["outcome"] = "skip_no_db"
+            return result
+        try:
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    "SELECT primary_matter FROM signal_queue WHERE id = %s",
+                    (signal_id,),
+                )
+                row = cur.fetchone()
+            except Exception:
+                conn.rollback()
+                raise
+            primary_matter = (row[0] if row else None) or None
+
+            if primary_matter is None:
+                action_type = _DISPATCH_AUDIT_SKIP_NO_MATTER
+            elif not matter_has_cortex_config(primary_matter):
+                action_type = _DISPATCH_AUDIT_SKIP_NO_CONFIG
+            else:
+                action_type = _DISPATCH_AUDIT_INVOKED
+
+            payload_json = json.dumps({
+                "signal_id": int(signal_id),
+                "primary_matter": primary_matter,
+                "outcome": action_type.split(":")[-1],
+            })
+
+            try:
+                cur.execute(
+                    "INSERT INTO baker_actions "
+                    "(action_type, target_task_id, payload, "
+                    " trigger_source, success) "
+                    "SELECT %s, %s, %s::jsonb, %s, %s "
+                    "WHERE NOT EXISTS ("
+                    "  SELECT 1 FROM baker_actions "
+                    "  WHERE target_task_id = %s "
+                    "  AND action_type LIKE 'cortex:dispatch:%%' "
+                    ") "
+                    "RETURNING id",
+                    (
+                        action_type, str(signal_id), payload_json,
+                        "step6_finalize_post_commit", True,
+                        str(signal_id),
+                    ),
+                )
+                inserted = cur.fetchone()
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                raise
+            finally:
+                cur.close()
+
+            if not inserted:
+                result.update({
+                    "outcome": "already_dispatched",
+                    "fired": False,
+                    "primary_matter": primary_matter,
+                })
+                return result
+
+            result.update({
+                "outcome": action_type.split(":")[-1],
+                "primary_matter": primary_matter,
+            })
+
+            if action_type == _DISPATCH_AUDIT_INVOKED:
+                # Best-effort fire. cortex_pipeline.maybe_dispatch is itself
+                # never-raises + env-flag-gated; we still wrap defensively.
+                try:
+                    from triggers.cortex_pipeline import maybe_dispatch
+                    maybe_dispatch(
+                        signal_id=signal_id, matter_slug=primary_matter,
+                    )
+                    result["fired"] = True
+                except Exception as e:
+                    logger.error(
+                        "post-finalize maybe_dispatch raised "
+                        "signal_id=%s matter=%s: %s",
+                        signal_id, primary_matter, e,
+                    )
+            return result
+        finally:
+            try:
+                store._put_conn(conn)
+            except Exception:
+                pass
+    except Exception as e:  # noqa: BLE001 — pipeline must continue
+        logger.error(
+            "dispatch_cortex_after_finalize failed signal_id=%s: %s",
+            signal_id, e,
+        )
+        result["error"] = str(e)
+        return result

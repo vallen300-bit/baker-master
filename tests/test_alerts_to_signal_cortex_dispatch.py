@@ -1,12 +1,22 @@
-"""Tests for Amendment A2 — kbl/bridge/alerts_to_signal.py wires
-``triggers.cortex_pipeline.maybe_dispatch`` after every signal_queue
-INSERT commits. CORTEX_3T_FORMALIZE_1C.
+"""Tests for the Cortex dispatch hook.
 
-Two-pronged coverage:
-  (a) the bridge module's ``_dispatch_cortex_for_inserted`` helper —
-      env-flag-gated, never-raises, per-signal try/except.
-  (b) ``triggers.cortex_pipeline.maybe_dispatch`` — env-flag-gated, never
-      raises, drives ``maybe_trigger_cortex`` on a fresh event loop.
+History:
+  * CORTEX_3T_FORMALIZE_1C wired ``_dispatch_cortex_for_inserted`` into
+    ``kbl/bridge/alerts_to_signal.py`` post-INSERT.
+  * CORTEX_AUTO_TRIGGER_DISPATCH_FIX_1 (2026-04-30) moved the dispatch
+    out of the bridge — the bridge fired BEFORE Step 1 canonicalized
+    ``primary_matter`` so the cost-gate's ``matter_has_cortex_config``
+    always missed on raw classifier labels. Dispatch now lives in
+    ``kbl.steps.step6_finalize.dispatch_cortex_after_finalize``,
+    invoked post-commit by ``kbl/pipeline_tick.py``.
+
+Coverage:
+  * Source-level assertion that the bridge no longer dispatches.
+  * ``triggers.cortex_pipeline.maybe_dispatch`` — env-flag-gated,
+    never-raises, drives ``maybe_trigger_cortex`` on a fresh event loop.
+
+Helper-level tests for ``dispatch_cortex_after_finalize`` live in
+``tests/test_step6_cortex_dispatch.py``.
 """
 from __future__ import annotations
 
@@ -17,56 +27,20 @@ from triggers import cortex_pipeline
 
 
 # --------------------------------------------------------------------------
-# bridge module — _dispatch_cortex_for_inserted
+# bridge module — must NOT dispatch any more
 # --------------------------------------------------------------------------
 
 
-def test_dispatch_helper_calls_maybe_dispatch_per_signal(monkeypatch):
-    calls = []
+def test_bridge_module_no_longer_dispatches_cortex():
+    """Bridge tick must not import or call cortex_pipeline.maybe_dispatch.
 
-    def _fake_maybe_dispatch(*, signal_id, matter_slug):
-        calls.append((signal_id, matter_slug))
-
-    monkeypatch.setattr(
-        "triggers.cortex_pipeline.maybe_dispatch", _fake_maybe_dispatch,
-    )
-    bridge._dispatch_cortex_for_inserted([(101, "oskolkov"), (102, "movie")])
-    assert calls == [(101, "oskolkov"), (102, "movie")]
-
-
-def test_dispatch_helper_swallows_per_signal_exception(monkeypatch, caplog):
-    """A poison signal must not starve siblings nor escape to caller."""
-    seen = []
-
-    def _flaky(*, signal_id, matter_slug):
-        seen.append(signal_id)
-        if signal_id == 102:
-            raise RuntimeError("poison")
-
-    monkeypatch.setattr("triggers.cortex_pipeline.maybe_dispatch", _flaky)
-    with caplog.at_level("WARNING"):
-        bridge._dispatch_cortex_for_inserted([(101, "a"), (102, "b"), (103, "c")])
-    assert seen == [101, 102, 103]   # all attempted
-    assert any("poison" in r.message for r in caplog.records)
-
-
-def test_dispatch_helper_no_op_on_empty_list():
-    bridge._dispatch_cortex_for_inserted([])  # must not raise
-
-
-def test_dispatch_helper_handles_import_failure(monkeypatch, caplog):
-    """If cortex_pipeline import fails, log + return — don't raise."""
-    real_import = __builtins__["__import__"] if isinstance(__builtins__, dict) else __builtins__.__import__
-
-    def _bad_import(name, *a, **k):
-        if name == "triggers.cortex_pipeline":
-            raise ImportError("simulated")
-        return real_import(name, *a, **k)
-
-    monkeypatch.setattr("builtins.__import__", _bad_import)
-    with caplog.at_level("WARNING"):
-        bridge._dispatch_cortex_for_inserted([(1, "m")])
-    # No exception escaped
+    CORTEX_AUTO_TRIGGER_DISPATCH_FIX_1: dispatch moved to Step 6 finalize.
+    """
+    src = open("kbl/bridge/alerts_to_signal.py").read()
+    assert "maybe_dispatch" not in src
+    assert "_dispatch_cortex_for_inserted" not in src
+    # Helper symbol must also be gone from the public API.
+    assert not hasattr(bridge, "_dispatch_cortex_for_inserted")
 
 
 # --------------------------------------------------------------------------
@@ -132,17 +106,25 @@ def test_maybe_dispatch_flag_default_off():
 
 
 # --------------------------------------------------------------------------
-# bridge wire-up source assertion
+# Step 6 wire-up source assertion
 # --------------------------------------------------------------------------
 
 
-def test_bridge_calls_dispatch_after_commit_in_source():
-    """The dispatch call MUST happen AFTER conn.commit() — not before."""
-    src = open("kbl/bridge/alerts_to_signal.py").read()
-    # The post-commit dispatch is wired
-    assert "_dispatch_cortex_for_inserted" in src
-    commit_idx = src.find("conn.commit()\n                # Post-commit Cortex dispatch")
-    assert commit_idx > 0, "expected commit followed by Cortex dispatch comment"
+def test_step6_finalize_dispatches_cortex_after_commit_in_source():
+    """The dispatch call now lives in Step 6 finalize, called by
+    pipeline_tick AFTER each finalize commit (CORTEX_AUTO_TRIGGER_DISPATCH_FIX_1).
+    """
+    finalize_src = open("kbl/steps/step6_finalize.py").read()
+    assert "def dispatch_cortex_after_finalize" in finalize_src
+    assert "maybe_dispatch" in finalize_src
+
+    tick_src = open("kbl/pipeline_tick.py").read()
+    # 6 process_signal_* variants each fire dispatch after Step 6 commit.
+    occurrences = tick_src.count("step6_finalize.dispatch_cortex_after_finalize")
+    assert occurrences >= 6, (
+        f"expected dispatch_cortex_after_finalize wired into all 6 "
+        f"finalize call sites, found {occurrences}"
+    )
 
 
 def test_insert_signal_returns_id_not_bool():
