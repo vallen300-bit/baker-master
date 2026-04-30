@@ -328,21 +328,6 @@ DEPENDS on Brief 3.</div>
   <div class="item queued">
     <div class="icon">→</div>
     <div>
-      <div class="label">Roadmap drift detector → ClickUp recurring task (not Slack per Director 2026-04-30)<span class="priority medium">medium</span></div>
-      <div class="desc">Daily 06:00 UTC: compare cortex-roadmap-current.yml last-edit timestamp
-vs last-PR-merge timestamp on baker-vault + baker-master. If ≥5 PRs
-merged without YAML touch, write findings as comment on a recurring
-ClickUp task in BAKER space "Cortex Backlog" list 901523104264. AI Head
-reads on session start.</div>
-      <div class="meta-line"><span><strong>Owner:</strong> b-code</span><span><strong>ETA:</strong> 2026-05-03</span></div>
-      
-    </div>
-    <div class="badge queued">QUEUED</div>
-  </div>
-
-  <div class="item queued">
-    <div class="icon">→</div>
-    <div>
       <div class="label">Wertheimer matter seed (only Wave 2 #2 matter not yet seeded)<span class="priority medium">medium</span></div>
       <div class="desc">Wave 2 #2 listed Wertheimer alongside MO/Lilienmatt/MRCI/Aukera/private
 assets. The other 5 categories closed today; Wertheimer remains gap.
@@ -675,6 +660,17 @@ running cleanly for ≥1 week.</div>
       <div class="desc"></div>
       <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
       <div class="anchor">Director executed today. Old UK passport sent to UK for renewal; awaiting return mail. Q39-swiss-passport-checklist.md (AI Head 2 App PR #27) was authored under wrong-passport premise — preserved as historical record but obsolete.</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Roadmap drift detector → ClickUp recurring task (B2 ROADMAP_DRIFT_CLICKUP_SENTINEL_1)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
+      <div class="anchor">B2 PR #114 — daily 06:00 UTC sentinel; lock 900900; env gate ROADMAP_DRIFT_SENTINEL_ENABLED; 12/12 tests pass; ClickUp recurring task 86c9k6kau receives drift comment on ≥5 PRs since YAML touch. Manual smoke deferred to natural cron fire 2026-05-01T06:00Z.</div>
     </div>
     <div class="badge done">DONE</div>
   </div>
