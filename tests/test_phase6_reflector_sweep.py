@@ -325,3 +325,55 @@ def test_no_citation_logs_to_prompt_review_queue(live_db, tmp_path):
     )
     assert cur.fetchone()[0] == "no_citation"
     cur.close()
+
+
+def test_load_proposal_text_prefers_synthesis_over_truncated_proposal_card(
+    live_db,
+):
+    """Regression: when both synthesis and proposal_card exist for the same
+    cycle, _load_proposal_text must return synthesis (full text) so trailing
+    [directive: <id>] survives. proposal_card is truncated [:8000] in
+    cortex_phase4_proposal.py — citation placed at end-of-prompt would chop.
+    """
+    from orchestrator.cortex_phase6_reflector import _load_proposal_text
+
+    suffix = uuid.uuid4().hex[:8]
+    matter = f"orderby-fix-{suffix}"
+    cycle_id = _create_cycle(
+        live_db,
+        matter_slug=matter,
+        status="approved",
+        director_action="gold_approved",
+        started_at=datetime.now(timezone.utc) - timedelta(days=1),
+    )
+
+    # Full synthesis output: 9000 chars filler + citation at the very end.
+    cited_id = f"{matter}-001"
+    full_synthesis = ("x" * 9000) + f" [directive: {cited_id}]"
+    # proposal_card mirrors Phase 4's [:8000] truncation: citation chopped.
+    truncated_card = full_synthesis[:8000]
+
+    cur = live_db.cursor()
+    cur.execute(
+        """INSERT INTO cortex_phase_outputs
+              (cycle_id, phase, phase_order, artifact_type, payload)
+           VALUES (%s, 'synthesize', 5, 'synthesis', %s::jsonb)""",
+        (cycle_id, json.dumps({"proposal_text": full_synthesis})),
+    )
+    cur.execute(
+        """INSERT INTO cortex_phase_outputs
+              (cycle_id, phase, phase_order, artifact_type, payload)
+           VALUES (%s, 'propose', 7, 'proposal_card', %s::jsonb)""",
+        (cycle_id, json.dumps({"proposal_text": truncated_card})),
+    )
+    live_db.commit()
+    cur.close()
+
+    loaded = _load_proposal_text(live_db, cycle_id)
+
+    assert loaded == full_synthesis, (
+        "Reflector must prefer synthesis (full text) over truncated "
+        "proposal_card; got truncated card means trailing citation was "
+        "chopped and learning loop goes dark on long proposals."
+    )
+    assert f"[directive: {cited_id}]" in loaded
