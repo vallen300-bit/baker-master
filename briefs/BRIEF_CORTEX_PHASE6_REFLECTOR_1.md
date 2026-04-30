@@ -5,20 +5,21 @@ revision: v1 (author-time draft, simplification preamble §0)
 authored_by: AI Head A (CLI)
 authored_at: 2026-04-30
 estimated_time: ~5-7h (incl. tests + dry-run on real cycle)
-complexity: Medium-High (touches Phase 4 prompt + new Phase 6 module + two-pronged write)
+complexity: Medium-High (touches Phase 4 prompt + new Phase 6 module + vault write; ClickUp infrastructure ships dormant per Brief 5 deferral)
 trigger_class: TIER A — modifies Phase 4 propose-phase prompt + adds new phase + new external write surface (ClickUp via Brief 5 contract). Pre-merge: AI Head B cross-lane review per `_ops/processes/b-code-dispatch-coordination.md` §HIGH-class.
 prerequisites: |
   HARD: Brief 4 (CORTEX_CONFIG_DIRECTIVES_SCHEMA_1) shipped — cortex_directives
         + prompt_review_queue tables must exist for counter increments and
         untraceable-proposal logging.
-  SOFT: Brief 5 (PER_MATTER_CLICKUP_LINKAGE_1) shipped — surface contract
-        at _ops/processes/cortex-clickup-surface-contract.md must define
-        list names + custom fields. Reflector imports the contract.
-        Ship-order options:
-          (a) Brief 5 ships first → Reflector ClickUp write enabled day-1
-          (b) Brief 5 not yet shipped → Reflector ClickUp write feature-flagged
-              off via REFLECTOR_CLICKUP_WRITE=false; vault write still active.
-        Brief implementer reads CHANDA / live state to choose.
+  Brief 5 (PER_MATTER_CLICKUP_LINKAGE_1) — DEFERRED per Director 2026-04-30
+        directive: "matters knowledge + obsidian + LEARNING LOOP + reasoning
+        are PRIORITY. Channels are last-stage." Brief 3 V1 ships with
+        ClickUp write code path env-gated OFF (REFLECTOR_CLICKUP_WRITE=false
+        default; remains false in V1). NO Brief 5 dependency at runtime.
+        Vault write to proposed-config-deltas.md is the SOLE active write
+        target in V1 — exactly the channels-last shape Director ratified.
+        ClickUp infrastructure stays dormant in code; activation pending
+        any future Brief 5 V2+ ship.
   NOT a prereq: Brief 1 (vault_write MCP tool) — Reflector writes via the
         same staging-path-then-Mac-Mini-mirror pattern Brief 4 uses (CHANDA #9
         current form). If Brief 1 lands first, can re-point to baker_vault_write
@@ -28,11 +29,17 @@ sequencing: |
   Brief 4. ETA ~2026-05-13 per V4 roadmap (early week of May 11).
 ---
 
-# BRIEF: CORTEX_PHASE6_REFLECTOR_1 — Phase 6 Reflector with citation counters + two-pronged write
+# BRIEF: CORTEX_PHASE6_REFLECTOR_1 — Phase 6 Reflector with citation counters + vault write (V1)
 
 ## §0. Simplification preamble (DROPS + V2 triggers)
 
-Per Director directive 2026-04-30 ("build simple, refine from practice"). V1 ships the smallest Reflector that observes whether Triaga-only counter signal works at all. Production data drives V2 selection.
+Per Director directives 2026-04-30:
+1. "build simple, refine from practice" — V1 ships the smallest Reflector that observes whether Triaga-only counter signal works at all. Production data drives V2 selection.
+2. **PRIORITY PIVOT 2026-04-30 (channels-last):** "matters knowledge + obsidian + LEARNING LOOP + reasoning are PRIORITY. Channels are last-stage." Brief 5 (PER_MATTER_CLICKUP_LINKAGE_1) DEFERRED — moved to held-back queue in V4 YAML. Brief 3 + 4 (this and CORTEX_CONFIG_DIRECTIVES_SCHEMA_1) ELEVATED to critical-path: they ARE the learning loop.
+
+V1 effects:
+- ClickUp write infrastructure ships in Brief 3 V1 BUT stays dormant (env-gated `REFLECTOR_CLICKUP_WRITE=false`, remains false in V1). Code retained so future Brief 5 V2+ activation is a 1-line env flip rather than re-spec/re-implement.
+- Vault write to `proposed-config-deltas.md` is the SOLE active write target in V1 — channels-last shape Director ratified.
 
 | Dropped from V1 | Reason | V2 trigger criterion |
 |---|---|---|
@@ -105,7 +112,7 @@ Phase 4 emits proposals; Director Triaga ratifies / declines; cycle is archived.
 ### 2.3 What this brief delivers
 
 1. **Phase 4 prompt amendment**: prepend the citation directive to the propose-phase prompt. Models cite or are flagged.
-2. **New module `orchestrator/cortex_phase6_reflector.py`**: parse citations, increment counters, log untraceable, write two-pronged proposed-actions surfaces.
+2. **New module `orchestrator/cortex_phase6_reflector.py`**: parse citations, increment counters, log untraceable, write proposed-actions to vault (`proposed-config-deltas.md`). ClickUp write code path included BUT dormant in V1 (env-gated off per Brief 5 deferral).
 3. **Phase 6 wiring** in `cortex_runner.py`: hook in after Phase 5 (act) completes — or after Triaga TTL for cycles archived without immediate Director action (see §3.5 deferred-trigger pattern).
 4. **ClickUp client extension** (read Brief 5 contract): write proposed actions to per-matter Drafts & Deliverables list per surface contract.
 5. **Vault write**: append proposed-actions block to `wiki/matters/<slug>/proposed-config-deltas.md` via existing CHANDA-#9 staging path.
@@ -146,7 +153,7 @@ actually relied on.
 **New file `orchestrator/cortex_phase6_reflector.py`:**
 
 ```python
-"""Cortex Phase 6 Reflector — citation parsing, counter updates, two-pronged write.
+"""Cortex Phase 6 Reflector — citation parsing, counter updates, vault write (V1).
 
 Brief: CORTEX_PHASE6_REFLECTOR_1.
 
@@ -413,9 +420,13 @@ def write_proposed_actions_to_vault(
 
 **Frontmatter notes:** `source` / `confidence` / `provenance` keys present per Brief 1's curated/ frontmatter discipline (these are required when Brief 1's `baker_vault_write` is later used). Today this is a staging-path write so the validator doesn't gate it, but conforming now means zero-touch when migration to MCP write happens.
 
-### 3.4 ClickUp write: Drafts & Deliverables list (Brief 5 contract)
+### 3.4 ClickUp write: Drafts & Deliverables list — DORMANT in V1 (Brief 5 deferred)
 
-**Behavior gate:** `REFLECTOR_CLICKUP_WRITE` env var (default `false` until Brief 5 contract ships). When `true`, Reflector reads the contract and writes:
+**V1 status:** Brief 5 (PER_MATTER_CLICKUP_LINKAGE_1) DEFERRED per Director 2026-04-30 channels-last directive. This section's code ships in Brief 3 V1 but stays DORMANT — env-gated `REFLECTOR_CLICKUP_WRITE=false` default, **remains false throughout V1**.
+
+The dormant code is retained (rather than removed) so future Brief 5 V2+ activation is a 1-line env flip rather than re-spec/re-implement. **Vault write to `proposed-config-deltas.md` (§3.3) is the SOLE active write target in V1.**
+
+**Behavior gate:** `REFLECTOR_CLICKUP_WRITE` env var (default `false`; stays false in V1). When `true` (post-Brief-5 V2+), Reflector reads the contract and writes:
 
 ```python
 def write_proposed_actions_to_clickup(
@@ -753,14 +764,14 @@ After Phase 6 wired:
 
 ## §9. PR notes
 
-**Suggested PR title:** `feat(cortex): Phase 6 Reflector with citation counters + two-pronged write (CORTEX_PHASE6_REFLECTOR_1)`
+**Suggested PR title:** `feat(cortex): Phase 6 Reflector with citation counters + vault write V1 (CORTEX_PHASE6_REFLECTOR_1)`
 
 **Suggested PR body:**
 
 > **Trigger class: TIER A** — modifies Phase 4 prompt + adds new phase + new external write surface (ClickUp via Brief 5 contract).
 > Per `_ops/processes/b-code-dispatch-coordination.md` §HIGH-class, requires AI Head B cross-lane review pre-merge.
 >
-> **Depends on Brief 4** (CORTEX_CONFIG_DIRECTIVES_SCHEMA_1 — schema). Soft-depends on Brief 5 (PER_MATTER_CLICKUP_LINKAGE_1 — surface contract); ClickUp write env-gated `REFLECTOR_CLICKUP_WRITE` until contract ships.
+> **Depends on Brief 4** (CORTEX_CONFIG_DIRECTIVES_SCHEMA_1 — schema). **Brief 5 (PER_MATTER_CLICKUP_LINKAGE_1) DEFERRED** per Director 2026-04-30 channels-last directive — moved to held-back queue. Brief 3 ClickUp write infrastructure ships dormant in V1 (env `REFLECTOR_CLICKUP_WRITE=false`, stays false). Vault write is the sole active target in V1.
 >
 > **Simplification preamble** ([§0 in brief](briefs/BRIEF_CORTEX_PHASE6_REFLECTOR_1.md#0-simplification-preamble-drops--v2-triggers)) — V1 = Triaga-only counter signal. Cycle-outcome inspector + ClickUp aux signal explicitly deferred to V2 with documented trigger criteria (stale-rate > 30%, Triaga coverage < 50%). Per Director directive 2026-04-30 "build simple, refine from practice."
 >
@@ -787,5 +798,5 @@ After Phase 6 wired:
   - Q3 (slugs.yml at run-time, status != retired) — applies to Brief 4 only; Reflector reads cycles, not matters list
   - A (counter-signal hierarchy) — V1 simplified to Triaga-only (drops aux), still primary-signal-overrides discipline
   - B (counter routing follows directive-id provenance, not write-target surface) — central to ClickUp tag-only routing
-  - C (Brief 5 surface contract import) — soft prereq, env-gated until contract ships
+  - C (Brief 5 surface contract import) — Brief 5 DEFERRED per Director 2026-04-30 channels-last directive ("matters knowledge + obsidian + LEARNING LOOP + reasoning are PRIORITY. Channels are last-stage."). ClickUp write infrastructure ships dormant in V1, env-gated off; reactivation pending any future Brief 5 V2+ ship. C ratification preserved as code path.
 - Pen-lift: granted by AI Head 1 2026-04-30, deviation-flag-in-preamble path
