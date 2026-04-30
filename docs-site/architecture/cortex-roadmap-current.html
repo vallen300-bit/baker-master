@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Cortex Roadmap (LIVE) — V4</title>
+<style>
+  :root {
+    --bg-page: #fafaf7;
+    --bg-card: #fff;
+    --bg-card-done: #f5f9ed;
+    --bg-card-flight: #fff8e8;
+    --bg-card-queue: #f4f0e6;
+    --bg-card-dropped: #f5ecec;
+    --bg-summary: #f0ece0;
+    --bg-callout: #faf7eb;
+    --bg-rail: #2c2317;
+    --text-body: #1a1a1a;
+    --text-header: #4a3a1f;
+    --text-muted: #6c5e3f;
+    --text-rail: #f5f1e2;
+    --border-default: #d6cfb8;
+    --border-done: #a8c084;
+    --border-flight: #d8b855;
+    --border-queue: #c8b878;
+    --border-dropped: #c8a8a8;
+    --accent: #8c7a4e;
+    --accent-locked: #6a8c4e;
+    --accent-dropped: #a86c6c;
+    --rec-bg: #c2d8a0;
+    --rec-text: #2c4a1c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg-page); color: var(--text-body); line-height: 1.5;
+  }
+  .wrap { max-width: 1180px; margin: 2rem auto; padding: 0 1.5rem 4rem; }
+  header { border-bottom: 1px solid var(--border-default); padding-bottom: 1.25rem; margin-bottom: 1.5rem; }
+  h1 { color: var(--text-header); font-size: 1.6rem; margin: 0 0 0.5rem; letter-spacing: -0.01em; }
+  .meta { color: var(--text-muted); font-size: 0.85rem; }
+  .meta strong { color: var(--text-header); }
+  .live-badge { display: inline-block; background: var(--rec-bg); color: var(--rec-text); padding: 0.15rem 0.6rem; border-radius: 3px; font-weight: 600; font-size: 0.75rem; letter-spacing: 0.05em; margin-left: 0.5rem; vertical-align: middle; }
+  .legend { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.8rem; color: var(--text-muted); margin-top: 0.75rem; }
+  .legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+  .legend .dot { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  .dot-done { background: var(--bg-card-done); border: 1px solid var(--border-done); }
+  .dot-flight { background: var(--bg-card-flight); border: 1px solid var(--border-flight); }
+  .dot-queue { background: var(--bg-card-queue); border: 1px solid var(--border-queue); }
+  .dot-dropped { background: var(--bg-card-dropped); border: 1px solid var(--border-dropped); }
+  .stage { margin: 2.5rem 0 0.75rem; }
+  .stage-title { color: var(--text-header); font-size: 1.15rem; font-weight: 700; margin: 0 0 0.25rem; letter-spacing: -0.01em; border-bottom: 1px solid var(--border-default); padding-bottom: 0.4rem; }
+  .stage-meta { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.85rem; }
+  .item { background: var(--bg-card); border: 1px solid var(--border-default); border-radius: 6px; padding: 0.85rem 1rem; margin: 0.55rem 0; display: grid; grid-template-columns: 32px 1fr auto; gap: 0.85rem; align-items: start; }
+  .item.done { background: var(--bg-card-done); border-color: var(--border-done); }
+  .item.flight { background: var(--bg-card-flight); border-color: var(--border-flight); }
+  .item.queue { background: var(--bg-card-queue); border-color: var(--border-queue); }
+  .item.dropped { background: var(--bg-card-dropped); border-color: var(--border-dropped); }
+  .icon { font-size: 1.2rem; text-align: center; line-height: 1.4; }
+  .label { font-size: 0.95rem; color: var(--text-header); font-weight: 600; margin-bottom: 0.15rem; }
+  .item .desc { font-size: 0.85rem; color: var(--text-body); white-space: pre-wrap; }
+  .item .anchor { display: inline-block; margin-top: 0.25rem; font-size: 0.78rem; color: var(--text-muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  .item .meta-line { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.25rem; }
+  .item .meta-line span { margin-right: 1rem; }
+  .badge { align-self: center; background: var(--accent); color: #fff; padding: 0.18rem 0.55rem; border-radius: 3px; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.02em; white-space: nowrap; }
+  .badge.done { background: var(--accent-locked); }
+  .badge.flight { background: #c8901a; }
+  .badge.queue { background: var(--accent); }
+  .badge.dropped { background: var(--accent-dropped); }
+  .priority { display: inline-block; padding: 0.05rem 0.4rem; border-radius: 2px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; margin-left: 0.4rem; }
+  .priority.critical { background: #c84e3a; color: #fff; }
+  .priority.high { background: #c8901a; color: #fff; }
+  .priority.medium { background: #8c7a4e; color: #fff; }
+  .summary-bar { background: var(--bg-summary); border-radius: 6px; padding: 0.85rem 1.1rem; margin: 0.4rem 0 1rem; font-size: 0.88rem; }
+  .summary-bar strong { color: var(--text-header); }
+  .callout { background: var(--bg-callout); border-left: 3px solid var(--border-queue); padding: 0.6rem 0.85rem; border-radius: 3px; margin: 0.4rem 0 0.6rem 0; font-size: 0.83rem; }
+  .callout strong { color: var(--text-header); }
+  .backlog-link { display: inline-block; background: var(--bg-rail); color: var(--rec-bg); padding: 0.5rem 0.9rem; border-radius: 4px; text-decoration: none; font-weight: 600; font-size: 0.85rem; margin-top: 0.5rem; }
+  .backlog-link:hover { background: #1a1410; }
+  footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--border-default); font-size: 0.78rem; color: var(--text-muted); }
+  footer code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Cortex Roadmap <span class="live-badge">LIVE V4</span></h1>
+  <div class="meta">
+    Cut <strong>2026-04-30</strong>. Source-of-truth: <code>baker-vault/_ops/processes/cortex-roadmap-current.yml</code>. Auto-rendered to HTML on commit. Backlog (not on this page) lives in ClickUp BAKER space "Cortex Backlog" list — <a href="https://app.clickup.com/24385290/v/l/li/901523104264" target="_blank">open</a>.
+  </div>
+  <div class="legend">
+    <span><span class="dot dot-done"></span>Done</span>
+    <span><span class="dot dot-flight"></span>In flight</span>
+    <span><span class="dot dot-queue"></span>Queued (current sprint)</span>
+    <span><span class="dot dot-dropped"></span>Dropped (audit trail)</span>
+  </div>
+</header>
+
+<div class="summary-bar">
+  <strong>Cut reason:</strong>
+  <div style="white-space: pre-wrap; margin-top: 0.4rem; font-size: 0.84rem;">V3 (2026-04-29 19:15Z) had 5 Wave 1 tracks + 5 Wave 2 items + ~20 PARKED items.
+V4 cuts because:
+- Wave 1 mostly closed (manual-invoke + cost-gate + Hagenauer + NVIDIA + hot.md)
+- Wave 2 partially closed (NOTIFICATION_DEFER shipped + 12 matter seeds beyond
+  the planned 6 + bootstrap script promoted from Wave 3)
+- Director directive 2026-04-30: "no parked, ever" — parked registry migrated
+  to ClickUp Cortex Backlog list 901523104264
+- Architectural framing shift: roadmap = active sprint focus only; backlog
+  lives in ClickUp; parked banned.</div>
+</div>
+
+<div class="summary-bar">
+  <strong>Target:</strong>
+  <div style="white-space: pre-wrap; margin-top: 0.4rem; font-size: 0.84rem;">Cortex fully operational on all 22 active matters this week. "Operational" =
+signals from sense mesh (email/whatsapp/clickup/calendar/etc.) auto-classify
+onto a matter, fire a Cortex cycle, propose Director action, archive. Manual
+invoke pathway works for any matter. Director gold-comments unlock
+auto-execute per matter as proposals fire.</div>
+</div>
+
+<div class="stage">
+  <h2 class="stage-title">In flight</h2>
+  <div class="stage-meta">Active builds. Carries assignee + ETA. Closes to <code>done</code> on ship.</div>
+  
+  <div class="item in_flight">
+    <div class="icon">⏳</div>
+    <div>
+      <div class="label">Live roadmap mechanism — YAML source-of-truth + CI render to brisen-docs</div>
+      <div class="desc">Pattern C (hybrid versioned-live) ratified by Director 2026-04-30. This
+YAML is the source-of-truth; render script rebuilds HTML on commit.
+No PARKED status. Backlog → ClickUp.</div>
+      <div class="meta-line"><span><strong>Started:</strong> 2026-04-30</span><span><strong>Owner:</strong> ai-head-a</span><span><strong>ETA:</strong> 2026-04-30</span></div>
+      <div class="anchor">this PR (aihead/cortex-roadmap-live-v4)</div>
+    </div>
+    <div class="badge in_flight">IN FLIGHT</div>
+  </div>
+</div>
+
+<div class="stage">
+  <h2 class="stage-title">Queued — current sprint (no PARKED, ever)</h2>
+  <div class="stage-meta">Owner + ETA mandatory. ETA cap = 2 weeks. Items past ETA get reprioritized or dropped — never silently shelved. Items not in this sprint live in <a href="https://app.clickup.com/24385290/v/l/li/901523104264" target="_blank">ClickUp Cortex Backlog</a>.</div>
+  
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">Verify hot.md regen actually shipped + Step 1/Step 5 reading current values<span class="priority critical">critical</span></div>
+      <div class="desc">V3 Track 5 was IN FLIGHT 2026-04-29. If still 11-day stale, every Step 1
+triage + Step 5 Gold synthesis is poisoned across the entire sensor mesh.
+~15 min check, ~30 min fire if not actually shipped.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> ai-head-a</span><span><strong>ETA:</strong> 2026-04-30</span></div>
+      
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">Wave 2 #4 — auto-trigger fan-out across all 22 matters (cycle independence + cost-cap fairness)<span class="priority critical">critical</span></div>
+      <div class="desc">Today auto-trigger fires on AO only by historical cost-gate scope. With
+multi-matter cost-gate shipped (Wave 1 Track 2), need to verify incoming
+signals (email/whatsapp/clickup/calendar/etc.) classify onto ANY of the
+22 matter brains and fire cycles. Without this, all 22 matter brains sit
+dormant for auto-trigger. ~30 min B-code dispatch + curl verify.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> b-code</span><span><strong>ETA:</strong> 2026-05-01</span></div>
+      
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">Q39 Swiss passport workstream (Director time-bound, expires July 2026)<span class="priority critical">critical</span></div>
+      <div class="desc">Triaga ASAP. Director in 3-month travel-restriction window. Apply by
+mail (Director not at UK office). Brief checklist: mail forms, photo,
+fee, current passport, signed declaration, return-mail tracking.
+NOT Cortex auto-fire — Director-time workstream.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> director</span><span><strong>ETA:</strong> 2026-05-08</span></div>
+      
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">AI Head SKILL.md session-start + close rituals + no-PARKED rule<span class="priority high">high</span></div>
+      <div class="desc">Session-start: read OPERATING + skim LONGTERM + last ARCHIVE block
++ fetch active roadmap from brisen-docs URL in MEMORY.md + read
+ClickUp Cortex Backlog tail. Session-close: rewrite OPERATING + append
+ARCHIVE + update YAML for shipped items. Standing rule: nothing parked,
+ever — backlog → ClickUp.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> ai-head-a</span><span><strong>ETA:</strong> 2026-04-30</span></div>
+      
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">Wave 2 #5 — advisory_lock 900300 collision (financial_detector + initiative_engine)<span class="priority high">high</span></div>
+      <div class="desc">B3 surfaced during PR #84 review: orchestrator/financial_detector.py:76
+and orchestrator/initiative_engine.py:630 both use
+pg_try_advisory_xact_lock(900300) — one silently no-ops when the other
+holds. Pre-existing; not introduced by PR #84. Audit all advisory_lock
+keys; renumber. ~10 LOC fix.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> b-code</span><span><strong>ETA:</strong> 2026-05-02</span></div>
+      
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">Bootstrap V2 — auto-skip gold.md emission (CHANDA #4 author:director guard)<span class="priority high">high</span></div>
+      <div class="desc">4 manual gold.md drops today across capital-call/aukera/uk-homes/12-batch.
+~30 min B-code fix to eliminate the manual step. Author:director guard
+blocks agent-authored gold.md commits anyway — emission is wasted work.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> b-code</span><span><strong>ETA:</strong> 2026-05-02</span></div>
+      
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">Q21 AO CRM dashboard (owed/owes/promised both directions)<span class="priority high">high</span></div>
+      <div class="desc">Triaga ASAP item. Separate UI build, not Cortex-shaped. Bidirectional
+money-flow tracking. Frame as AO CRM, not just dashboard.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> ai-head-a</span><span><strong>ETA:</strong> 2026-05-09</span></div>
+      
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">Q30 Lana €650K tax return tracking workstream<span class="priority high">high</span></div>
+      <div class="desc">Triaga ASAP item. Lana is folded into oskolkov slug; this is a specific
+tax-return workstream within that matter. Likely needs Constantinos
+dispatch coordination.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> ai-head-a</span><span><strong>ETA:</strong> 2026-05-10</span></div>
+      
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">Roadmap drift detector → ClickUp recurring task (not Slack per Director 2026-04-30)<span class="priority medium">medium</span></div>
+      <div class="desc">Daily 06:00 UTC: compare cortex-roadmap-current.yml last-edit timestamp
+vs last-PR-merge timestamp on baker-vault + baker-master. If ≥5 PRs
+merged without YAML touch, write findings as comment on a recurring
+ClickUp task in BAKER space "Cortex Backlog" list 901523104264. AI Head
+reads on session start.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> b-code</span><span><strong>ETA:</strong> 2026-05-03</span></div>
+      
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">Wertheimer matter seed (only Wave 2 #2 matter not yet seeded)<span class="priority medium">medium</span></div>
+      <div class="desc">Wave 2 #2 listed Wertheimer alongside MO/Lilienmatt/MRCI/Aukera/private
+assets. The other 5 categories closed today; Wertheimer remains gap.
+Counterparty matter — needs Director paste-block of strategic context
+(no rich vault content).</div>
+      <div class="meta-line"><span><strong>Owner:</strong> ai-head-a</span><span><strong>ETA:</strong> 2026-05-03</span></div>
+      
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">7-day re-validate cortex_stuck_cycle_sentinel via synthetic UPDATE<span class="priority medium">medium</span></div>
+      <div class="desc">Scheduled deadline id=1497. Synthetic stuck-cycle UPDATE → verify alert
+fires → reset. Ride-along during normal session.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> ai-head-a</span><span><strong>ETA:</strong> 2026-05-06</span></div>
+      
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">COUNTERPARTY_GAME_ADVISOR_1 — game-theory specialist<span class="priority medium">medium</span></div>
+      <div class="desc">Per game-theory-playbook §8 spec. Specialist invoked from Phase 3b for
+counterparty-heavy matters (oskolkov, mohg, aukera, hagenauer, etc.).
+Long-horizon Axelrod / Nowak heuristics. Promote when 4+ matters
+running cleanly for ≥1 week.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> b-code</span><span><strong>ETA:</strong> 2026-05-15</span></div>
+      
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+</div>
+
+<a class="backlog-link" href="https://app.clickup.com/24385290/v/l/li/901523104264" target="_blank">→ Open ClickUp Cortex Backlog (queryable backlog)</a>
+
+<div class="stage">
+  <h2 class="stage-title">Done</h2>
+  <div class="stage-meta">Shipped + verified.</div>
+  
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Cortex V1 first cycle on AO matter — REJECT proven end-to-end</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-29</span></div>
+      <div class="anchor">cycle 7dc3201b · 7 PRs in 24h</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Pre-cycle cost gate (URL+HMAC+atomic claim)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-28</span></div>
+      <div class="anchor">PR #80 e910670 + PR #81 df886be</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Phase 5 multi-state acceptance + transient *ing migration</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-29</span></div>
+      <div class="anchor">PR #83 a4f35c8</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Scheduler singleton-lock (Render Pro zero-downtime safe)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-29</span></div>
+      <div class="anchor">PR #84 f0f53e0 · prod-verified 18:15Z</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">MCP pgbouncer pool-poisoning fix + env-var paginated-PUT lessons</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-29</span></div>
+      <div class="anchor">fix a620e55 · feedback memories captured</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Director-ratified Triaga export — 41 items classified</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-29</span></div>
+      <div class="anchor">_01_INBOX_FROM_CLAUDE/2026-04-29-b1-brisen-triage-ratified-export.md</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Wave 1 Track 1 — Manual-invoke endpoint POST /api/cortex/run + Scan route</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-29</span></div>
+      <div class="anchor">CORTEX_MANUAL_INVOKE_1 · B1 build</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Wave 1 Track 2 — Cost-gate scope expansion (any matter with cortex-config.md)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-29</span></div>
+      <div class="anchor">CORTEX_MULTI_MATTER_GATE_1 · B3 build</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Wave 1 Track 3 — Hagenauer-RG7 vault seed (cortex-config + entity stubs + curated/)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-29</span></div>
+      <div class="anchor">CORTEX_MATTER_CONFIG_HAGENAUER_1 · B2 build</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Wave 1 Track 4 — NVIDIA + Corinthia vault seed</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-29</span></div>
+      <div class="anchor">CORTEX_MATTER_CONFIG_NVIDIA_CORINTHIA_1 · AI Head 2 build</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Wave 2 #1 — Notification deferral (per-invoke + per-matter Slack opt-out)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
+      <div class="anchor">PR #92 420d00c · CORTEX_NOTIFICATION_DEFER_1</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Wave 2 #2 + Wave 3 batch — 15 matter brains seeded</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
+      <div class="anchor">baker-vault PRs #13 (mrci+annaberg+mo-vie-exit + movie refresh)
+#16 (capital-call), #17 (aukera), #18 (uk-homes + slugs.yml v14),
+#19 (12-matter batch + K6S patch), #20 (brisen-lp retire + slugs.yml v15)
+</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Wave 3 — bootstrap_matter.py + bootstrap_entities.py (generic matter scaffolding)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span><span style='color: var(--accent-locked);'>↑ promoted from parked</span><span><strong>Deviation:</strong> V3 parked this for Wave 3+ as 'YAGNI for matters #1–4'. Promoted forward when matter count crossed 4 (Wave 2 close).</span></div>
+      <div class="anchor">PR #96 41fd59d · CORTEX_BOOTSTRAP_MATTER_1 · 41/41 tests + 10/10 precedent regression</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Wave 1 Track 5 — hot.md regen + 3-file propagation (slugs.yml + per-matter proposed-gold + provenance)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-29</span></div>
+      <div class="anchor">CORTEX_HOT_MD_REGEN_1 · B4 build</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">brisen-lp matter retire (Q28 dismissal generalized)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
+      <div class="anchor">baker-vault PR #20 · slugs.yml v14→v15</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">AI Head A self-audit — Session 5 ARCHIVE + OPERATING rewrite + LONGTERM update</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
+      <div class="anchor">baker-vault PR #15</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+</div>
+
+<div class="stage">
+  <h2 class="stage-title">Dropped (audit trail)</h2>
+  <div class="stage-meta">Explicitly killed with reason. Kept for audit; not actionable.</div>
+  
+  <div class="item dropped">
+    <div class="icon">✕</div>
+    <div>
+      <div class="label">PARKED status as a roadmap category</div>
+      <div class="desc">Director directive 2026-04-30: "I do not like anything parked. Parked
+is never done." Backlog moved to ClickUp BAKER space "Cortex Backlog"
+list 901523104264. Items either DONE / IN_FLIGHT / QUEUED / DROPPED in
+this YAML, or sit as ClickUp tasks with explicit due dates.</div>
+      <div class="meta-line"><span><strong>Dropped:</strong> 2026-04-30</span><span><strong>Superseded by:</strong> clickup_backlog_list_id</span></div>
+      
+    </div>
+    <div class="badge dropped">DROPPED</div>
+  </div>
+
+  <div class="item dropped">
+    <div class="icon">✕</div>
+    <div>
+      <div class="label">brisen-lp as active matter slug</div>
+      <div class="desc">Q28 dismissal status pull generalized to matter retirement per Director
+2026-04-30. slugs.yml v14→v15 status active→retired (PR #20). Aliases
+preserved for legacy signal resolution.</div>
+      <div class="meta-line"><span><strong>Dropped:</strong> 2026-04-30</span></div>
+      
+    </div>
+    <div class="badge dropped">DROPPED</div>
+  </div>
+
+  <div class="item dropped">
+    <div class="icon">✕</div>
+    <div>
+      <div class="label">edita-russo composite slug</div>
+      <div class="desc">RA-21 ratification: composite slug retired; signals route to
+edita-vallen + andrea-russo separately. Confirmed 2026-04-30 by
+Director (re-asked, re-confirmed retired status).</div>
+      <div class="meta-line"><span><strong>Dropped:</strong> 2026-04-26</span><span><strong>Superseded by:</strong> edita-vallen + andrea-russo (people.yml)</span></div>
+      
+    </div>
+    <div class="badge dropped">DROPPED</div>
+  </div>
+
+  <div class="item dropped">
+    <div class="icon">✕</div>
+    <div>
+      <div class="label">cupial as active matter slug</div>
+      <div class="desc">Director: dispute resolved. slugs.yml status active→retired.</div>
+      <div class="meta-line"><span><strong>Dropped:</strong> 2026-04-26</span></div>
+      
+    </div>
+    <div class="badge dropped">DROPPED</div>
+  </div>
+
+  <div class="item dropped">
+    <div class="icon">✕</div>
+    <div>
+      <div class="label">ANTHROPIC_MEMORY_PILOT (Brisen-side equivalent already exists)</div>
+      <div class="desc">Director FYI 2026-04-28: "Anthropic memory not to be implemented
+anymore." Brisen has equivalent (3-file memory triplets per agent).</div>
+      <div class="meta-line"><span><strong>Dropped:</strong> 2026-04-28</span></div>
+      
+    </div>
+    <div class="badge dropped">DROPPED</div>
+  </div>
+</div>
+
+<div class="callout">
+  <strong>Standing rules (Director-ratified):</strong>
+  <ul style="margin: 0.4rem 0 0; padding-left: 1.2rem;">
+    <li>NO <code>parked</code> status — items either DONE / IN_FLIGHT / QUEUED / DROPPED on this page, or sit as ClickUp tasks in Cortex Backlog with priority + due date + assignee. (Director 2026-04-30: "I do not like anything parked. Parked is never done.")</li>
+    <li>Backlog drift detection writes to ClickUp recurring task — NOT Slack DM. (Director 2026-04-30.)</li>
+    <li>YAML edits are the SOURCE-OF-TRUTH. Every shipped item flips status in YAML; CI rebuilds this HTML.</li>
+    <li>Version cuts every ~2 weeks OR on major architectural shift. Past versions snapshot to <code>cortex-roadmap-vN-YYYY-MM-DD.html</code>.</li>
+  </ul>
+</div>
+
+<footer>
+  Auto-rendered <strong>2026-04-30</strong> from <code>_ops/processes/cortex-roadmap-current.yml</code> by <code>scripts/render_cortex_roadmap.py</code>. Live page: <code>https://brisen-docs.onrender.com/architecture/cortex-roadmap-current.html</code>.
+  Supersedes: <code>cortex-roadmap-v3-any-matter.html</code>.
+</footer>
+</div>
+</body>
+</html>
