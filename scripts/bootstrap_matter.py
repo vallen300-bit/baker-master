@@ -371,8 +371,9 @@ def render_index(matter_slug: str, matter_name: str, today: str) -> str:
         "- `_overview.md` — distilled-knowledge anchor",
         "- `agenda.md` — active items + deadlines",
         "- `state.md` — Cortex live state (per-cycle updates)",
-        "- `gold.md` — Director-confirmed insights",
-        "- `proposed-gold.md` — agent-drafted insights awaiting ratification",
+        "- `proposed-gold.md` — agent-drafted insights awaiting ratification "
+        "(Director writes `gold.md` manually on ratification — CHANDA #4 "
+        "`author:director` guard blocks agent-authored gold.md commits)",
         "- `curated/` — Phase-2 specialist outputs (post-reasoned)",
         "",
     ])
@@ -427,27 +428,6 @@ def render_state(matter_slug: str, matter_name: str, today: str) -> str:
     ])
 
 
-def render_gold(matter_slug: str, matter_name: str, today: str) -> str:
-    fm = _vault_frontmatter(
-        matter_slug, matter_name, today,
-        sub_slug=f"{matter_slug}-gold",
-        sub_name=f"{matter_name} — Gold",
-        voice="gold",
-    )
-    fm_text = yaml.safe_dump(fm, sort_keys=False, allow_unicode=True).rstrip("\n")
-    return "\n".join([
-        "---", fm_text, "---", "",
-        f"# {matter_name} — Gold",
-        "",
-        NEEDS_CONTENT_MARKER,
-        "",
-        "## Director Gold (DV)",
-        "",
-        "(empty — Director appends GOLD comments here as the matter develops)",
-        "",
-    ])
-
-
 def render_proposed_gold(matter_slug: str, matter_name: str, today: str) -> str:
     fm = _vault_frontmatter(
         matter_slug, matter_name, today,
@@ -486,9 +466,12 @@ SKELETON_FILES = (
     ("_index.md", "index"),
     ("agenda.md", "agenda"),
     ("state.md", "state"),
-    ("gold.md", "gold"),
     ("proposed-gold.md", "proposed-gold"),
 )
+# NB: gold.md intentionally NOT emitted (BOOTSTRAP_V2_GOLD_SKIP_1, 2026-04-30).
+# CHANDA #4 author:director guard blocks any agent-authored gold.md commit;
+# Director writes gold.md manually on ratification. Emission was 4 manual
+# revert drops/day before this guard.
 
 
 def determine_staging_root(repo_root: Path, matter_slug: str) -> Path:
@@ -518,8 +501,6 @@ def render_skeleton(filename: str, kind: str, cfg: dict, today: str) -> str:
         return render_agenda(matter_slug, matter_name, today)
     if kind == "state":
         return render_state(matter_slug, matter_name, today)
-    if kind == "gold":
-        return render_gold(matter_slug, matter_name, today)
     if kind == "proposed-gold":
         return render_proposed_gold(matter_slug, matter_name, today)
     raise ValueError(f"unknown skeleton kind: {kind}")

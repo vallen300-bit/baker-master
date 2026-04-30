@@ -193,10 +193,39 @@ def test_emitted_frontmatter_passes_kbl_validation(tmp_path):
     assert rc == 0
     out = tmp_path / "out"
     md_files = sorted(out.glob("*.md"))
-    assert len(md_files) == 7, f"expected 7 .md files, got {len(md_files)}"
+    assert len(md_files) == 6, f"expected 6 .md files, got {len(md_files)}"
     for f in md_files:
         fm = boot._extract_frontmatter(f.read_text(encoding="utf-8"))
         validate_frontmatter(fm)  # raises on schema drift
+
+
+def test_gold_md_not_emitted(tmp_path):
+    """BOOTSTRAP_V2_GOLD_SKIP_1: gold.md must NOT be emitted by bootstrap.
+
+    CHANDA #4 author:director guard blocks any agent-authored gold.md;
+    Director writes gold.md manually when ratifying.
+    """
+    rc = _run_main(tmp_path, _minimal_input())
+    assert rc == 0
+    out = tmp_path / "out"
+    assert not (out / "gold.md").exists(), "gold.md must not be emitted"
+    # Sibling proposed-gold.md must still be present.
+    assert (out / "proposed-gold.md").is_file()
+
+
+def test_dry_run_does_not_list_gold_md(tmp_path, capsys):
+    inp = _write_input(tmp_path, _minimal_input())
+    out = tmp_path / "out"
+    rc = boot.main([
+        "--input", str(inp),
+        "--out-root", str(out),
+        "--vault-root", str(tmp_path / "no-vault"),
+        "--dry-run",
+    ])
+    assert rc == 0
+    captured = capsys.readouterr().out
+    assert "- gold.md" not in captured
+    assert "proposed-gold.md" in captured
 
 
 def test_emit_creates_curated_gitkeep(tmp_path):
@@ -212,9 +241,10 @@ def test_emit_marks_director_content_on_appropriate_files(tmp_path):
     out = tmp_path / "out"
     # _index.md and cortex-config.md don't get the marker (auto-populated).
     assert boot.NEEDS_CONTENT_MARKER not in (out / "_index.md").read_text()
-    # The other 5 do (cortex-config.md DOES get marker only if input fields
-    # missing — minimal config triggers it).
-    for fn in ("_overview.md", "agenda.md", "state.md", "gold.md", "proposed-gold.md"):
+    # The other 4 do (cortex-config.md DOES get marker only if input fields
+    # missing — minimal config triggers it). gold.md not emitted per
+    # BOOTSTRAP_V2_GOLD_SKIP_1.
+    for fn in ("_overview.md", "agenda.md", "state.md", "proposed-gold.md"):
         assert boot.NEEDS_CONTENT_MARKER in (out / fn).read_text(), fn
 
 
@@ -329,8 +359,9 @@ def test_capital_call_fixture_dry_run(tmp_path, capsys):
     ])
     assert rc == 0
     captured = capsys.readouterr()
-    assert "8 files" in captured.out
+    assert "7 files" in captured.out
     assert "cortex-config.md" in captured.out
+    assert "- gold.md" not in captured.out
 
 
 def test_capital_call_fixture_emits_full_skeleton(tmp_path):
@@ -346,7 +377,8 @@ def test_capital_call_fixture_emits_full_skeleton(tmp_path):
     ])
     assert rc == 0
     md_files = sorted(out.glob("*.md"))
-    assert len(md_files) == 7
+    assert len(md_files) == 6
+    assert not (out / "gold.md").exists()
     for f in md_files:
         fm = boot._extract_frontmatter(f.read_text())
         validate_frontmatter(fm)
