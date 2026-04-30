@@ -1,6 +1,6 @@
-# CODE_4 — PENDING (BOOTSTRAP_V2_GOLD_SKIP_1)
+# CODE_4 — IN_REVIEW (BOOTSTRAP_V2_GOLD_SKIP_1)
 
-**Status:** PENDING — dispatched 2026-04-30 by AI Head A (App)
+**Status:** IN_REVIEW — PR #107 opened 2026-04-30 by B4 (awaiting B1 second-pair-of-eyes per Trigger-class rule, then AI Head A merge)
 **Brief:** `briefs/BRIEF_BOOTSTRAP_V2_GOLD_SKIP_1.md`
 **Builder:** B4
 **Priority:** HIGH
