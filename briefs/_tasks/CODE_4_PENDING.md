@@ -1,36 +1,38 @@
-# CODE_4 — PENDING (CORTEX_BOOTSTRAP_MATTER_1)
+# CODE_4 — COMPLETE (CORTEX_BOOTSTRAP_MATTER_1)
 
-**From:** AI Head A
-**To:** B4 (`~/bm-b4`)
-**Status:** OPEN — assigned 2026-04-30 (post-V8 housekeeping window)
-**Brief:** `briefs/BRIEF_CORTEX_BOOTSTRAP_MATTER_1.md` (merged baker-master `c76f39a`)
-**Estimated:** ~5–6h
-**Tier:** A (AI Head A merges on green, no Trigger-class match per RA-24)
-**Branch:** `feature/cortex-bootstrap-matter-1`
+**Status:** COMPLETE — 2026-04-30T10:27Z (PR #96 squash-merged on green)
+**Brief:** `briefs/BRIEF_CORTEX_BOOTSTRAP_MATTER_1.md`
+**Builder:** B4
+**Ship report:** `briefs/_reports/B4_cortex_bootstrap_matter_1_20260430.md`
+**Reviewer:** AI Head A (sole orchestrator) — comment-verdict APPROVE + Tier-A direct squash-merge under self-PR rule
 
-## Prior task close
+## Outcome
 
-Previous task CORTEX_NOTIFICATION_DEFER_1 closed 2026-04-30T08:58Z — PR #92 merged, deploy `dep-d7phev7avr4c73e4rlp0` live, curl smoke green. Wave 2 fully closed.
+| | |
+|---|---|
+| Build PR | #96 squash `41fd59d` (merged 2026-04-30T10:27Z) |
+| Tests | 41/41 new + 10/10 precedent regression (test_bootstrap_hagenauer_wiki.py) — 51 passed in 0.32s local re-run |
+| DDL grep | 0 matches for INSERT/UPDATE/DELETE/conn./cursor./execute( — bootstrap is filesystem-only |
+| Brief criteria | 8/8 met (≥10 negative cases vs ≥5 required) |
+| Test fixture | `briefs/_inputs/bootstrap_capital_call.yml` — V8 Q29 ratification (EUR 7M phased Apr/May/Jun, AO LP via Aelio Holding Ltd) |
+| Out of scope | Mac Mini mirror (CHANDA #9), slugs.yml PR (capital-call already canonical from version-7) |
 
-## This task
+## Closes
 
-Build the generic matter scaffolding generator that generalizes the precedent `scripts/bootstrap_hagenauer_wiki.py` to any matter slug. Two scripts:
+Wave 3 enabler. Bootstrap script now consumable for all future Wave 3+ matter dispatches.
 
-1. `scripts/bootstrap_matter.py` — generates full `wiki/matters/<slug>/` directory from input YAML
-2. `scripts/bootstrap_entities.py` — appends validated entity rows to staged `entities.yml`
+## Held-back queue (Director picks next)
 
-**Reference template:** `wiki/matters/mrci/cortex-config.md` (Wave 2 Director-ratified canonical, NOT oskolkov).
+**Wave 3 candidates (matter seeding via newly-shipped `bootstrap_matter.py`):**
+- mo-vie-am (Q11/12/14/15 critical)
+- capital-call (Q29 critical — fixture exists, just needs `--input` invocation + Mac Mini mirror)
+- franck-muller (Q23 €6M Oct deadline)
+- mo-prague+citic (Q36)
+- private-assets (Q17/18 Barclays UK)
+- cap-ferrat (Q16 BDO tax)
+- lilienmatt (Q7/8 — owns Annaberg)
+- aukera (Q12)
 
-**Test fixture matter:** `capital-call` slug — populate `briefs/_inputs/bootstrap_capital_call.yml` from V8 Q29 ratification (matter critical priority, this script's first real consumer).
+**Post-volume hardening (LOW priority):** F-3 doc-comment, F-4 specialist scope, F-5 cycle index migration deferred, F-6 POLL_INTERVAL retune.
 
-Full spec at `briefs/BRIEF_CORTEX_BOOTSTRAP_MATTER_1.md`. All 8 verification criteria + literal pytest output mandatory in ship report.
-
-## Coordination
-
-- Other B-codes idle (B1/B2/B3/B5 mailboxes COMPLETE).
-- No file overlap with any in-flight work.
-- AI Head A is sole orchestrator for review + merge.
-
-## Ship report path
-
-`briefs/_reports/B4_cortex_bootstrap_matter_1_<YYYYMMDD>.md`
+**P1-conditional:** CORTEX_RUN_CYCLE_ID_PINNING_1.
