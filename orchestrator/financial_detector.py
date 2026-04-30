@@ -72,7 +72,7 @@ def run_financial_detection():
     try:
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
 
-        # Transaction-level advisory lock
+        # Transaction-level advisory lock; key 900300 unique to financial_detector.
         cur.execute("SELECT pg_try_advisory_xact_lock(900300)")
         if not cur.fetchone()["pg_try_advisory_xact_lock"]:
             logger.info("Financial detector: another instance running — skipping")

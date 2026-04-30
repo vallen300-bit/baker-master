@@ -627,7 +627,9 @@ def run_initiative_engine():
 
         try:
             cur = conn.cursor()
-            cur.execute("SELECT pg_try_advisory_xact_lock(900300)")
+            # Advisory lock key 900800 — unique per LOCK_KEY_900300_COLLISION_1.
+            # Was 900300; collided with financial_detector.py. See CLAUDE.md key registry.
+            cur.execute("SELECT pg_try_advisory_xact_lock(900800)")
             if not cur.fetchone()[0]:
                 logger.info("Initiative engine: another instance running — skipping")
                 return
