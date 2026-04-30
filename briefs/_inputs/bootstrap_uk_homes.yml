@@ -1,0 +1,110 @@
+# Bootstrap input — uk-homes (Director-personal UK residential property)
+#
+# Wave 3 #3 matter for CORTEX_BOOTSTRAP_MATTER_1.
+# Per Director ratification 2026-04-30 (post-aukera seed; "one more").
+#
+# Provenance (per cortex-priorities-schema.md slug_changes section, Q17/Q18):
+# - Q17 (active): Barclays UK mortgage renewal form — current workstream
+# - Q18 (active): Valuer discrepancy — Strutt Parker (UK valuer) vs Monaco
+#   valuer (different methodology / valuation gap on UK property)
+# - Category: Private Assets (parent category — siblings cap-ferrat,
+#   geneva-home pending; all three are Director-personal asset matters)
+# - Slug ratified for slugs.yml v14 add (this PR bundles the slug add +
+#   matter seed since the queued v12→v13 regen never landed uk-homes; was
+#   superseded by Wave-1 nvidia-corinthia v13 work).
+#
+# Director-personal scope: this matter brain consolidates UK property
+# operational + financial workstreams. Distinct from `personal` slug
+# (which covers passport / household admin). Distinct from `personal-admin`.
+
+matter_slug: uk-homes
+matter_name: "UK Homes (Director-personal residential property)"
+absorbed_from: "seed (Wave 3 #3 — Director ratification 2026-04-30; cortex-priorities-schema.md slug_changes Q17/Q18)"
+absorbed_at: 2026-04-30
+absorbed_by: "AI Head A"
+authority_chain: "Q17 (Barclays UK mortgage renewal) + Q18 (Strutt Parker vs Monaco valuer discrepancy) per cortex-priorities-schema slug_changes; Director ratification 2026-04-30 (Wave 3 #3 — 'one more')"
+ratified_at: 2026-04-30
+
+autonomy_level: recommend_wait
+
+sense_sources:
+  - email: matter_keywords
+  - whatsapp: contact_phones
+
+entities:
+  primary:
+    - dimitry-vallen
+  team:
+    - edita-vallen
+    - balazs-csepregi
+  counterparties:
+    - barclays-uk
+  adjacent:
+    - cap-ferrat       # sibling Private Assets matter
+    - personal         # Director personal matters umbrella
+
+trigger_patterns:
+  - '\b(uk[-\s]?home|uk[-\s]?house|uk[-\s]?property|barclays[-\s]?uk)\b'
+  - '\b(barclays)\b.*\b(mortgage|renewal|uk|residential)\b'
+  - '\b(strutt[-\s]?parker)\b'
+  - '\b(valuer|valuation)\b.*\b(uk|monaco|strutt)\b'
+
+default_specialists: [legal, finance, tax-UK, tax-CH]
+specialist_cap_per_cycle: 5
+specialist_timeout_seconds: 60
+specialist_retries: 2
+cycle_timeout_seconds: 300
+
+auto_trigger:
+  severity_floor: high
+  confidence_floor: 0.8
+
+games_relevant: false
+counterparty_iteration_horizon: long_finite
+counterparty_reputation_stake: 5
+counterparty_observed_strategy: cooperate_with_constraints
+
+project_structure: |
+  - **Asset:** UK residential property (Director-personal). Category: Private
+    Assets — sibling slugs `cap-ferrat` + `geneva-home` (pending seed).
+  - **Q17 active:** Barclays UK mortgage renewal form — operational workstream.
+  - **Q18 active:** Valuer discrepancy — Strutt Parker (UK methodology) vs
+    Monaco valuer (different methodology). Methodology gap to be reconciled.
+  - **Scope boundary:** UK property operational + financial workstreams ONLY.
+    Distinct from `personal` (umbrella) and `personal-admin` (passport /
+    household admin per Q39).
+
+counterparty_topology: |
+  | Slug | Role | Status |
+  |---|---|---|
+  | `barclays-uk` | UK mortgage lender (active renewal workstream Q17) | active |
+
+  Counterparty individuals (not yet in people.yml — soft-warn expected):
+  - **Strutt Parker** (UK valuer) — Q18 valuation methodology counterparty
+  - **Monaco valuer** (name TBD) — alternate valuation methodology
+
+  Brisen-side: DV (principal owner), Edita Vallen (co-asset, household admin
+  overlap), Balazs Csepregi (financial modeling — household consolidated
+  position context).
+
+notes: |
+  ## Active workstreams (2)
+  1. **Q17 Barclays UK mortgage renewal form** — operational paperwork cycle.
+  2. **Q18 Valuer discrepancy** — Strutt Parker (UK) vs Monaco valuation gap.
+     Methodology reconciliation needed before any refinance or sale modelling.
+
+  ## Game-theoretic frame
+  `games_relevant: false` — this is operational property administration, not
+  strategic counterparty game-play. Long-finite horizon (multi-year mortgage
+  facility + property hold). Reputation stake 5 (institutional bank floor;
+  no relationship-fragility class).
+
+  ## Sensitivity
+  Director-personal scope. Cortex auto-trigger posture conservative
+  (severity_floor=high, autonomy_level=recommend_wait). All proposals
+  surface to Director — no auto-execute under any circumstance.
+
+  ## Bridge to other matters
+  - `cap-ferrat` — sibling Private Asset; Brisen Director-personal property cluster
+  - `personal` — umbrella Director-personal slug
+  - `personal-admin` (pending slug add per Q39) — household admin, distinct workstream
