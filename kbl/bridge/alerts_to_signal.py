@@ -555,31 +555,15 @@ def _upsert_watermark(cur, last_seen: Any) -> None:
 # --------------------------------------------------------------------------
 
 
-def _dispatch_cortex_for_inserted(inserted: list) -> None:
-    """Fire ``triggers.cortex_pipeline.maybe_dispatch`` for every row that
-    landed in ``signal_queue`` this tick.
-
-    CORTEX_3T_FORMALIZE_1C Amendment A2: env-flag-gated by
-    ``CORTEX_PIPELINE_ENABLED`` (default off). The dispatch call MUST
-    never propagate an exception back to the bridge tick — the bridge
-    write is canonical, Cortex is best-effort. Wrapped in try/except
-    individually per signal so a poison signal doesn't starve siblings.
-    """
-    if not inserted:
-        return
-    try:
-        from triggers.cortex_pipeline import maybe_dispatch
-    except Exception as e:
-        _local.warning("cortex_pipeline import failed: %s", e)
-        return
-    for signal_id, matter_slug in inserted:
-        try:
-            maybe_dispatch(signal_id=signal_id, matter_slug=matter_slug)
-        except Exception as e:
-            _local.warning(
-                "cortex maybe_dispatch raised for signal_id=%s matter=%s: %s",
-                signal_id, matter_slug, e,
-            )
+# CORTEX_AUTO_TRIGGER_DISPATCH_FIX_1 (2026-04-30): Cortex dispatch was
+# moved out of this module. Dispatching here ran BEFORE Step 1 triage
+# canonicalized ``primary_matter`` via ``slug_registry.normalize`` — so
+# ``cortex_pre_review_gate.matter_has_cortex_config`` always missed on
+# raw PM-era classifier labels (``Hagenauer``, ``Oskolkov-RG7``,
+# ``movie_am``) and the gate has been silent for all 22 matters since
+# multi-matter gate shipped. Dispatch now fires from
+# ``kbl.steps.step6_finalize.dispatch_cortex_after_finalize`` post-commit,
+# where ``primary_matter`` is canonical.
 
 
 def run_bridge_tick(max_bridge_per_tick: int = 50) -> dict:
@@ -656,14 +640,6 @@ def run_bridge_tick(max_bridge_per_tick: int = 50) -> dict:
                 hot_md_patterns = load_hot_md_patterns()
 
                 max_created_at = watermark
-                # CORTEX_3T_FORMALIZE_1C Amendment A2: collect (signal_id,
-                # matter_slug) for every signal_queue INSERT so that, AFTER
-                # the transaction commits, we can fire the Cortex dispatcher
-                # per row. Dispatch lives outside the transaction so that
-                # any cortex_pipeline failure cannot roll back the bridge
-                # write — Cortex is downstream/best-effort, signal_queue is
-                # upstream/canonical.
-                inserted_signals: list[tuple[int, Any]] = []
                 with conn.cursor() as cur:
                     for alert in alerts:
                         ts = alert.get("created_at")
@@ -687,17 +663,13 @@ def run_bridge_tick(max_bridge_per_tick: int = 50) -> dict:
                         inserted_id = _insert_signal_if_new(cur, signal_row)
                         if inserted_id is not None:
                             counts["bridged"] += 1
-                            inserted_signals.append(
-                                (inserted_id, signal_row.get("matter")),
-                            )
 
                     _upsert_watermark(cur, max_created_at)
 
                 conn.commit()
-                # Post-commit Cortex dispatch (Amendment A2). Failures here
-                # MUST NOT affect the just-committed bridge write — wrapped
-                # in try/except + env-flag-gated.
-                _dispatch_cortex_for_inserted(inserted_signals)
+                # CORTEX_AUTO_TRIGGER_DISPATCH_FIX_1: dispatch now fires
+                # from Step 6 finalize, post-commit, with the canonical
+                # ``primary_matter``. See helper note above.
             except Exception:
                 conn.rollback()
                 raise

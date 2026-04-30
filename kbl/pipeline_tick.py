@@ -484,6 +484,12 @@ def _process_signal(signal_id: int, conn: Any) -> None:
         conn.rollback()
         raise
 
+    # CORTEX_AUTO_TRIGGER_DISPATCH_FIX_1: post-Step-6 Cortex dispatch with
+    # the canonical primary_matter. Idempotent + never-raises (see helper
+    # docstring). Runs BEFORE Step 7 because dispatch is independent of
+    # vault commit.
+    step6_finalize.dispatch_cortex_after_finalize(signal_id)
+
     # Step 6 may have parked the signal at ``finalize_failed`` (3 Opus
     # retries exhausted) before raising. If the status is no longer
     # ``awaiting_commit``, Step 7 must not run.
@@ -589,6 +595,10 @@ def _process_signal_remote(signal_id: int, conn: Any) -> None:
         conn.rollback()
         raise
 
+    # CORTEX_AUTO_TRIGGER_DISPATCH_FIX_1: post-Step-6 Cortex dispatch with
+    # canonical primary_matter. Idempotent + never-raises.
+    step6_finalize.dispatch_cortex_after_finalize(signal_id)
+
     # Signal now sits at ``awaiting_commit`` (success — Mac Mini poller
     # picks up) or ``finalize_failed`` (Step 6 internal terminal flip).
     # Either way we stop here; Render never touches Step 7.
@@ -642,6 +652,10 @@ def _process_signal_reclaim_remote(signal_id: int, conn: Any) -> None:
     except Exception:
         conn.rollback()
         raise
+
+    # CORTEX_AUTO_TRIGGER_DISPATCH_FIX_1: post-Step-6 Cortex dispatch with
+    # canonical primary_matter. Idempotent + never-raises.
+    step6_finalize.dispatch_cortex_after_finalize(signal_id)
 
     # Signal now sits at ``awaiting_commit`` (success — Mac Mini poller
     # picks up) or ``finalize_failed`` (Step 6 terminal flip — budget
@@ -705,6 +719,10 @@ def _process_signal_classify_remote(signal_id: int, conn: Any) -> None:
         conn.rollback()
         raise
 
+    # CORTEX_AUTO_TRIGGER_DISPATCH_FIX_1: post-Step-6 Cortex dispatch with
+    # canonical primary_matter. Idempotent + never-raises.
+    step6_finalize.dispatch_cortex_after_finalize(signal_id)
+
 
 def _process_signal_opus_remote(signal_id: int, conn: Any) -> None:
     """Run Steps 5-6 on a reclaimed ``awaiting_opus`` crash orphan.
@@ -744,6 +762,10 @@ def _process_signal_opus_remote(signal_id: int, conn: Any) -> None:
         conn.rollback()
         raise
 
+    # CORTEX_AUTO_TRIGGER_DISPATCH_FIX_1: post-Step-6 Cortex dispatch with
+    # canonical primary_matter. Idempotent + never-raises.
+    step6_finalize.dispatch_cortex_after_finalize(signal_id)
+
 
 def _process_signal_finalize_remote(signal_id: int, conn: Any) -> None:
     """Run Step 6 only on a reclaimed ``awaiting_finalize`` crash orphan.
@@ -770,6 +792,10 @@ def _process_signal_finalize_remote(signal_id: int, conn: Any) -> None:
     except Exception:
         conn.rollback()
         raise
+
+    # CORTEX_AUTO_TRIGGER_DISPATCH_FIX_1: post-Step-6 Cortex dispatch with
+    # canonical primary_matter. Idempotent + never-raises.
+    step6_finalize.dispatch_cortex_after_finalize(signal_id)
 
 
 def main() -> int:
