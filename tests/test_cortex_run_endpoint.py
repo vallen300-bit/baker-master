@@ -210,3 +210,67 @@ def test_run_endpoint_happy_path_streams(monkeypatch):
     assert "started" in body
     assert "phase_changed" in body
     assert "terminal" in body
+
+
+# ---------------------------------------------------------------------------
+# CORTEX_NOTIFICATION_DEFER_1 — gate matrix (defer_invoke × defer_matter)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "defer_invoke,defer_matter,expect_slack_post",
+    [
+        (False, False, True),   # default — DM fires
+        (True,  False, False),  # per-invoke suppresses
+        (False, True,  False),  # per-matter suppresses
+        (True,  True,  False),  # both suppress (no double-fire)
+    ],
+)
+def test_cortex_run_cost_warn_defer_matrix(
+    monkeypatch, defer_invoke, defer_matter, expect_slack_post,
+):
+    """CORTEX_NOTIFICATION_DEFER_1: cost-warn Slack DM gated on
+    (per-invoke OR per-matter) defer flags. Logger always fires."""
+    _set_api_key(monkeypatch)
+    from outputs.dashboard import app
+
+    async def _fake_stream(**_kw):
+        yield 'data: {"type":"started"}\n\n'
+        yield 'data: {"type":"terminal","status":"proposed"}\n\n'
+
+    mock_post = MagicMock(return_value=True)
+
+    with patch(
+        "triggers.cortex_pre_review_gate.matter_has_cortex_config",
+        return_value=True,
+    ), patch(
+        "outputs.cortex_run_stream.runs_in_last_hour", return_value=0,
+    ), patch(
+        "outputs.cortex_run_stream.specialist_calls_today", return_value=42,
+    ), patch(
+        "outputs.cortex_run_stream.stream_cycle_events", _fake_stream,
+    ), patch(
+        "triggers.cortex_pre_review_gate.matter_notification_deferred",
+        return_value=defer_matter,
+    ), patch(
+        "outputs.slack_notifier.post_to_channel", mock_post,
+    ):
+        body = {
+            "matter_slug": "oskolkov",
+            "director_question": "defer-matrix smoke test — long enough.",
+            "triggered_by": "director_manual",
+        }
+        if defer_invoke:
+            body["defer_notification"] = True
+        client = TestClient(app)
+        resp = client.post(
+            "/api/cortex/run",
+            json=body,
+            headers={"X-Baker-Key": "test-key-123"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    expected_calls = 1 if expect_slack_post else 0
+    assert mock_post.call_count == expected_calls, (
+        f"defer_invoke={defer_invoke} defer_matter={defer_matter}: "
+        f"expected slack_post calls={expected_calls}, got {mock_post.call_count}"
+    )

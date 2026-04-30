@@ -458,3 +458,74 @@ def test_post_gate_fires_with_config_and_cost(monkeypatch, tmp_path):
     assert mock_post.call_count == 1
     posted_text = mock_post.call_args[0][1]
     assert "$6.00" in posted_text
+
+
+# ================================================================
+# CORTEX_NOTIFICATION_DEFER_1 — matter_notification_deferred() helper
+# ================================================================
+
+def test_matter_notification_deferred_true(monkeypatch, tmp_path):
+    """notification_defer: true in frontmatter → returns True."""
+    matter = tmp_path / "wiki" / "matters" / "test-defer"
+    matter.mkdir(parents=True)
+    (matter / "cortex-config.md").write_text(
+        "---\nmatter_slug: test-defer\nnotification_defer: true\n---\n# body\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("BAKER_VAULT_PATH", str(tmp_path))
+    import importlib
+    import triggers.cortex_pre_review_gate as g
+    importlib.reload(g)
+    assert g.matter_notification_deferred("test-defer") is True
+
+
+def test_matter_notification_deferred_false_when_field_absent(monkeypatch, tmp_path):
+    """field absent → returns False (default behavior preserved)."""
+    matter = tmp_path / "wiki" / "matters" / "test-no-defer"
+    matter.mkdir(parents=True)
+    (matter / "cortex-config.md").write_text(
+        "---\nmatter_slug: test-no-defer\n---\n# body\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("BAKER_VAULT_PATH", str(tmp_path))
+    import importlib
+    import triggers.cortex_pre_review_gate as g
+    importlib.reload(g)
+    assert g.matter_notification_deferred("test-no-defer") is False
+
+
+def test_matter_notification_deferred_false_when_config_missing(monkeypatch, tmp_path):
+    """no cortex-config.md → returns False (fail-closed)."""
+    monkeypatch.setenv("BAKER_VAULT_PATH", str(tmp_path))
+    import importlib
+    import triggers.cortex_pre_review_gate as g
+    importlib.reload(g)
+    assert g.matter_notification_deferred("ghost-matter") is False
+    assert g.matter_notification_deferred("") is False
+
+
+def test_matter_notification_deferred_truthy_spellings(monkeypatch, tmp_path):
+    """yes/on/1/True/TRUE all accepted as truthy; false/no/blank are not."""
+    import importlib
+    import triggers.cortex_pre_review_gate as g
+    monkeypatch.setenv("BAKER_VAULT_PATH", str(tmp_path))
+    for spelling in ("yes", "on", "1", "True", "TRUE"):
+        slug = f"m-truthy-{spelling.lower()}"
+        matter = tmp_path / "wiki" / "matters" / slug
+        matter.mkdir(parents=True, exist_ok=True)
+        (matter / "cortex-config.md").write_text(
+            f"---\nmatter_slug: {slug}\nnotification_defer: {spelling}\n---\n",
+            encoding="utf-8",
+        )
+        importlib.reload(g)
+        assert g.matter_notification_deferred(slug) is True, spelling
+    for spelling in ("false", "no", "off", "0", ""):
+        slug = f"m-falsy-{spelling or 'blank'}"
+        matter = tmp_path / "wiki" / "matters" / slug
+        matter.mkdir(parents=True, exist_ok=True)
+        (matter / "cortex-config.md").write_text(
+            f"---\nmatter_slug: {slug}\nnotification_defer: {spelling}\n---\n",
+            encoding="utf-8",
+        )
+        importlib.reload(g)
+        assert g.matter_notification_deferred(slug) is False, spelling

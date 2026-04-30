@@ -111,6 +111,46 @@ def _read_cost_estimate(matter_slug: str) -> float:
         return DEFAULT_COST_ESTIMATE_DOLLARS
 
 
+def matter_notification_deferred(matter_slug: str) -> bool:
+    """CORTEX_NOTIFICATION_DEFER_1: True iff cortex-config.md frontmatter
+    has ``notification_defer: true``.
+
+    When True, suppress the cost-warn Slack DM for ALL Cortex cycles on
+    this matter (per-matter opt-out). Logger.info still emits — only the
+    Slack push is gated.
+
+    Returns False on any of: vault unset, config missing, frontmatter
+    malformed, field absent, value not truthy. Fail-closed: if we can't
+    read the field cleanly, default to current behavior (DM fires).
+    Mirrors ``_read_cost_estimate`` parsing pattern (no PyYAML dependency).
+    """
+    if not matter_slug:
+        return False
+    root = _vault_root()
+    if not root:
+        return False
+    cfg = root / "wiki" / "matters" / matter_slug / "cortex-config.md"
+    if not cfg.is_file():
+        return False
+    try:
+        text = cfg.read_text(encoding="utf-8", errors="replace")
+        if not text.startswith("---"):
+            return False
+        end = text.find("\n---", 3)
+        if end < 0:
+            return False
+        fm = text[3:end]
+        for line in fm.splitlines():
+            line = line.strip()
+            if line.startswith("notification_defer:"):
+                val = line.split(":", 1)[1].strip().lower()
+                return val in ("true", "yes", "on", "1")
+        return False
+    except Exception as e:
+        logger.error("matter_notification_deferred failed matter=%s: %s", matter_slug, e)
+        return False
+
+
 def _secret() -> Optional[str]:
     """Return CORTEX_GATE_SECRET if set + length>=32, else None.
 
