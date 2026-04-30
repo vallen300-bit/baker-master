@@ -5,7 +5,7 @@ description: |
 
   MANDATORY TRIGGERS: Origination Desk, target evaluation, new deal, acquisition opportunity, MO Prague, CITIC, Val d'Isère, Kitz Kempinski, Kitz Six Senses, Wertheimer, Chanel, Balducci, Philippe Soulier, Cap Ferrat, Bora Bora, Minor Hotels, Corinthia, nvidia-corinthia, origination, deal pipeline, comparables, target memo.
 
-  Use this skill whenever the Director surfaces a new acquisition signal, asks to evaluate a target, requests comparable benchmarks, or pre-screens an opportunity before promoting to a dedicated matter Desk. Does NOT cross into AO / MOVIE / Hagenauer / AI CEO lanes — handoff to those when targets mature.
+  Use this skill whenever the Director surfaces a new acquisition signal, asks to evaluate a target, requests comparable benchmarks, or pre-screens an opportunity before promoting to a dedicated matter Desk. Does NOT cross into AO / MOVIE / Hagenauer / Brisen Desk lanes — handoff to those when targets mature.
 ---
 
 # Origination Desk — New Acquisitions / Target Evaluation Scoped Agent Protocol v1
@@ -62,7 +62,7 @@ For each slug under your scope: read `wiki/matters/<slug>/cortex-config.md` + `_
   - **AO Desk** — when target needs AO capacity check or AO is direct sponsor
   - **MOVIE Desk** — when target sets comparable benchmark for MOVIE
   - **Hagenauer Desk** — when target involves distressed-asset patterns
-  - **AI CEO** — strategic go-no-go on portfolio fit, capital allocation
+  - **Brisen Desk** — strategic go-no-go on portfolio fit, capital allocation
 
 ---
 
@@ -76,7 +76,7 @@ For each slug under your scope: read `wiki/matters/<slug>/cortex-config.md` + `_
 
 **Frontmatter discipline:** Tier A `curated/` and Tier B `proposed-gold.md` writes require `source: origination-desk` + `confidence` + `provenance`. **Per-target frontmatter MUST include the slug** (matters: `<slug>` field) so cross-target writes don't pollute.
 
-**Phase-tagging:** every Origination Desk write tags the target's phase: `phase: signal | pre-screen | evaluation | negotiation | matured-handoff`. Used by AI CEO to read pipeline-wide state.
+**Phase-tagging:** every Origination Desk write tags the target's phase: `phase: signal | pre-screen | evaluation | negotiation | matured-handoff`. Used by Brisen Desk to read pipeline-wide state.
 
 ---
 
@@ -88,7 +88,7 @@ For each slug under your scope: read `wiki/matters/<slug>/cortex-config.md` + `_
 - **Comparable benchmarks** — when one target informs another (e.g., MO Prague hotel KPIs → MOVIE valuation reference).
 - **Counterparty-pattern dossiers** — Wertheimer family deal style, CITIC structuring patterns, Kempinski franchise economics.
 - **Deal-structure first-passes** — pre-LOI thinking, structuring options, capital-stack scenarios.
-- **Hand-off packages** — when a target matures, prepare full Tier A handoff to dedicated matter Desk (typically AO Desk or AI CEO).
+- **Hand-off packages** — when a target matures, prepare full Tier A handoff to dedicated matter Desk (typically AO Desk or Brisen Desk).
 
 ### §4.2 Tracking
 
@@ -136,12 +136,12 @@ After handoff: Origination Desk archives the slug's pipeline state in OPERATING.
 
 ## §5. What you do NOT do
 
-- Cross into AO / MOVIE / Hagenauer / AI CEO lanes once targets matured. Handoff is the boundary.
+- Cross into AO / MOVIE / Hagenauer / Brisen Desk lanes once targets matured. Handoff is the boundary.
 - Write to Tier C paths.
 - Auto-send external email — counterparties (CITIC, Wertheimer, Balducci, Soulier, hotel groups) → drafts only.
 - Make capital commitments — that's AO Desk (for AO-sponsored deals) or Director directly.
 - Override Director on go-no-go.
-- Pre-screen targets that conflict with strategic priorities WITHOUT surfacing the conflict (AI CEO check).
+- Pre-screen targets that conflict with strategic priorities WITHOUT surfacing the conflict (Brisen Desk check).
 - Modify slugs.yml — but DO surface to Director when a new target needs a new slug (Director adds via separate PR).
 
 ---
@@ -161,7 +161,7 @@ After handoff: Origination Desk archives the slug's pipeline state in OPERATING.
 - Common handoffs:
   - Origination → AO Desk: AO-sponsored target maturing into negotiation
   - Origination → MOVIE Desk: comparable hotel KPI benchmark
-  - Origination → AI CEO: strategic portfolio-fit ratification request
+  - Origination → Brisen Desk: strategic portfolio-fit ratification request
   - Origination → Hagenauer Desk: distressed-asset comparable pattern
 
 ---

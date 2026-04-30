@@ -16,7 +16,7 @@ Staging area for the 5 Cowork-side scoped Desk agents ratified 2026-04-30 (Direc
 | MOVIE Desk | DRAFT V1 | `MOVIE_DESK_SKILL.md` | `mo-vie-am`, `mo-vie-exit` (one Desk owns both per Director ratification) |
 | Hagenauer Desk | DRAFT V1 | `HAGENAUER_DESK_SKILL.md` | `hagenauer-rg7` |
 | Origination Desk | DRAFT V1 | `ORIGINATION_DESK_SKILL.md` | `nvidia-corinthia`, `kitz-kempinski`, `kitzbuhel-six-senses`, `wertheimer`, `balducci`, `philippe-soulier`, `mo-prague`, `citic`, `corinthia`, `cap-ferrat`, `bora-bora`, `minor-hotels` (one Desk per Director ratification) |
-| **AI CEO** (renamed from Brisen Desk per Director 2026-04-30) | DRAFT V1 | `AI_CEO_SKILL.md` | `ai-ceo` (NEW slug to add to slugs.yml — meta-matter, cross-cutting view) |
+| **Brisen Desk** (kept as Brisen Desk per Director 2026-04-30) | DRAFT V1 | `BRISEN_DESK_SKILL.md` | `brisen` (NEW slug to add to slugs.yml — meta-matter, cross-cutting view) |
 
 **Authoring strategy used:** AO Desk drafted first as the canonical pattern. Director ratified pattern + naming + scope decisions 2026-04-30; sibling Desks then authored in one batch with per-matter substitutions.
 
@@ -57,7 +57,7 @@ Update LONGTERM.md immediately when a fact is **ratified** by:
 - **Counterparty-signed** — contract executed, email confirmation arrived, court order issued
 - **Data-confirmed** — bank wire received, signed PDF in vault, audited number landed
 
-Do NOT update LONGTERM.md for unratified observations, in-flight signals, single-source claims, or speculation. Those stay in OPERATING.md (current working state) or `curated/<date>-<topic>.md` (specific deliberations) until a ratification signal arrives. Per-Desk variations in §7.2 of each SKILL.md (Hagenauer Desk extends to "Thomas Leitner-ratified" for legal facts within his scope; AI CEO extends to "deal-closed-elsewhere = real comparable").
+Do NOT update LONGTERM.md for unratified observations, in-flight signals, single-source claims, or speculation. Those stay in OPERATING.md (current working state) or `curated/<date>-<topic>.md` (specific deliberations) until a ratification signal arrives. Per-Desk variations in §7.2 of each SKILL.md (Hagenauer Desk extends to "Thomas Leitner-ratified" for legal facts within his scope; Brisen Desk extends to "deal-closed-elsewhere = real comparable").
 
 ## Sibling-Desk routing protocol
 
@@ -67,26 +67,26 @@ NO direct cross-Desk writes. Lane discipline is the load-bearing invariant.
 
 ## Director ratifications 2026-04-30 (pattern-lock answers)
 
-1. **Naming:** ✅ AO Desk / MOVIE Desk / Hagenauer Desk / Origination Desk / **AI CEO** (renamed from "Brisen Desk").
+1. **Naming:** ✅ AO Desk / MOVIE Desk / Hagenauer Desk / Origination Desk / **Brisen Desk** (renamed from "Brisen Desk").
 2. **MOVIE Desk scope:** ✅ ONE Desk owns BOTH `mo-vie-am` + `mo-vie-exit`.
 3. **Origination Desk breadth:** ✅ ONE Desk owns all 12+ slugs (no split).
-4. **AI CEO write surface:** ✅ Own write surface at `wiki/matters/ai-ceo/`. Slug `ai-ceo` added to slugs.yml as meta-matter (separate PR).
+4. **Brisen Desk write surface:** ✅ Own write surface at `wiki/matters/brisen/`. Slug `brisen` added to slugs.yml as meta-matter (separate PR).
 5. **LONGTERM.md cadence:** ✅ Ratification-based rule (see above).
 6. **Pilot strategy:** ✅ Activate ALL 5 simultaneously when Briefs 1+2 ship.
 
 ## Slugs.yml addition required (separate PR — Director or AI Head)
 
 ```yaml
-- slug: ai-ceo
+- slug: brisen
   status: active
-  description: "AI CEO meta-matter — portfolio synthesizer agent's own write surface. Cross-cutting; reads all matter Desks, writes only here."
+  description: "Brisen Desk meta-matter — portfolio synthesizer agent's own write surface. Cross-cutting; reads all matter Desks, writes only here."
   aliases: [ceo, brisen-ceo]
 ```
 
 ## Deployment checklist (when Briefs 1+2 ship)
 
-1. **Pre-ship:** add `ai-ceo` slug to baker-vault `slugs.yml` (separate-repo PR, version bump).
-2. **Pre-ship:** create empty seed memory files `_ops/agents/{ao,movie,hagenauer,origination,ai-ceo}-desk/{OPERATING,LONGTERM,ARCHIVE}.md` with frontmatter (Tier A path; can be Director-seeded or initial-Desk-seeded).
+1. **Pre-ship:** add `brisen` slug to baker-vault `slugs.yml` (separate-repo PR, version bump).
+2. **Pre-ship:** create empty seed memory files `_ops/agents/{ao,movie,hagenauer,origination,brisen-desk}/{OPERATING,LONGTERM,ARCHIVE}.md` with frontmatter (Tier A path; can be Director-seeded or initial-Desk-seeded).
 3. **Ship Brief 1 (vault_write MCP).**
 4. **Ship Brief 2 (read scope wiki/).**
 5. **Copy each `briefs/_skills_drafts/<DESK>_SKILL.md` → `~/.claude/skills/<desk-slug>/SKILL.md`**.
