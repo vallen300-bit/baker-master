@@ -1,10 +1,21 @@
-# CODE_2 — PENDING (mo-vie-am curated knowledge — MATTER_KNOWLEDGE_CURATION_PATTERN_1)
+# CODE_2 — COMPLETE (mo-vie-am curated knowledge — MATTER_KNOWLEDGE_CURATION_PATTERN_1)
 
-**Status:** PENDING — dispatched 2026-04-30 by AI Head A (App)
+**Status:** COMPLETE — 2026-04-30 by B2
+**PR:** baker-vault#33 — https://github.com/vallen300-bit/baker-vault/pull/33
 **Pattern brief:** `briefs/BRIEF_MATTER_KNOWLEDGE_CURATION_PATTERN_1.md`
 **Builder:** B2
 **Priority:** CRITICAL (Director priority pivot 2026-04-30 — matter knowledge first)
-**ETA:** end of session tonight (start small, ship a usable scaffold)
+**ETA:** end of session tonight — delivered same session
+
+## Delivery
+
+- 3 files at `wiki/matters/mo-vie-am/curated/` — 00_overview (61L) / 01_parties (78L) / 04_documents (75L), all ≤80 lines per quality bar.
+- 11 `[?]` gaps surfaced for Director/source confirmation (LCG SA legal name, MOHG titles, GM, Francesco/Robin lastnames, TPA scope, RG7 bank lenders, Vienna server MOVIE subpath, etc).
+- Canonical slug correction: brief said "Eastdeal" → canonical is **Eastdil Secured**. Flagged in PR + 01_parties.md.
+
+## Coordination note
+
+Concurrent shared-FS activity in `~/baker-vault` between B2 + AI Head 2 App caused branch crosstalk during commit phase. Resolved by pushing the correct mo-vie-am-only commit (`8021715`, 214 lines) directly to remote `b2/mo-vie-am-curated-knowledge`. AI Head A's hagenauer-rg7 commit (`9df2b50`, 315 lines) sits on the local b2 branch tip and needs reseating onto aihead2 branch — flagged for AI Head A cleanup in PR description.
 
 ## Task summary
 
@@ -56,4 +67,6 @@ Surface paste-block back to AI Head A when curated/ folder is committed: list fi
 
 ## Previous task (closed)
 
-PR #114 (ROADMAP_DRIFT_CLICKUP_SENTINEL_1) merged 2026-04-30 — daily 06:00 UTC drift sentinel live.
+baker-master PR #114 (ROADMAP_DRIFT_CLICKUP_SENTINEL_1) merged 2026-04-30 — daily 06:00 UTC drift sentinel live.
+
+baker-vault PR #33 (mo-vie-am curated 00/01/04) opened 2026-04-30 — awaiting AI Head A spot-review.
