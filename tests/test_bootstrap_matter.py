@@ -199,6 +199,22 @@ def test_emitted_frontmatter_passes_kbl_validation(tmp_path):
         validate_frontmatter(fm)  # raises on schema drift
 
 
+def test_directives_md_emitted_under_curated(tmp_path):
+    """CORTEX_CONFIG_DIRECTIVES_SCHEMA_1: bootstrap auto-provisions
+    curated/directives.md for every new matter (Phase 6 Reflector surface).
+    """
+    rc = _run_main(tmp_path, _minimal_input())
+    assert rc == 0
+    target = tmp_path / "out" / "curated" / "directives.md"
+    assert target.is_file(), "curated/directives.md must be emitted"
+    fm = boot._extract_frontmatter(target.read_text(encoding="utf-8"))
+    validate_frontmatter(fm)
+    assert fm["type"] == "matter"
+    assert fm["slug"] == "test-matter"
+    assert fm["voice"] == "silver"
+    assert "directives" in fm["tags"]
+
+
 def test_gold_md_not_emitted(tmp_path):
     """BOOTSTRAP_V2_GOLD_SKIP_1: gold.md must NOT be emitted by bootstrap.
 
@@ -359,8 +375,10 @@ def test_capital_call_fixture_dry_run(tmp_path, capsys):
     ])
     assert rc == 0
     captured = capsys.readouterr()
-    assert "7 files" in captured.out
+    # 6 top-level skeletons + curated/directives.md + curated/.gitkeep = 8
+    assert "8 files" in captured.out
     assert "cortex-config.md" in captured.out
+    assert "curated/directives.md" in captured.out
     assert "- gold.md" not in captured.out
 
 

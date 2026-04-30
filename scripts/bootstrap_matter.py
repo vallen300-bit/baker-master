@@ -467,11 +467,14 @@ SKELETON_FILES = (
     ("agenda.md", "agenda"),
     ("state.md", "state"),
     ("proposed-gold.md", "proposed-gold"),
+    ("curated/directives.md", "directives"),
 )
 # NB: gold.md intentionally NOT emitted (BOOTSTRAP_V2_GOLD_SKIP_1, 2026-04-30).
 # CHANDA #4 author:director guard blocks any agent-authored gold.md commit;
 # Director writes gold.md manually on ratification. Emission was 4 manual
 # revert drops/day before this guard.
+# curated/directives.md added by CORTEX_CONFIG_DIRECTIVES_SCHEMA_1 (2026-04-30):
+# every new matter auto-provisions the Phase 6 Reflector directive surface.
 
 
 def determine_staging_root(repo_root: Path, matter_slug: str) -> Path:
@@ -503,6 +506,9 @@ def render_skeleton(filename: str, kind: str, cfg: dict, today: str) -> str:
         return render_state(matter_slug, matter_name, today)
     if kind == "proposed-gold":
         return render_proposed_gold(matter_slug, matter_name, today)
+    if kind == "directives":
+        from orchestrator.cortex_directives import render_directives_template
+        return render_directives_template(matter_slug, matter_name, today)
     raise ValueError(f"unknown skeleton kind: {kind}")
 
 
@@ -550,7 +556,9 @@ def write_targets(
         content = render_skeleton(filename, kind, cfg, today)
         fm = _extract_frontmatter(content)
         validate_frontmatter(fm)
-        (out_root / filename).write_text(content, encoding="utf-8")
+        target = out_root / filename
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
         written += 1
     (out_root / "curated").mkdir(parents=True, exist_ok=True)
     (out_root / "curated" / ".gitkeep").write_text("", encoding="utf-8")
