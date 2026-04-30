@@ -1,0 +1,108 @@
+# Bootstrap input — Capital Call (RG7 EUR 7M, AO LP)
+#
+# Test fixture matter for CORTEX_BOOTSTRAP_MATTER_1.
+# Per V8 Q29 Director ratification 2026-04-30 — matter elevated to critical
+# priority alongside Wave 2 close. First real consumer of bootstrap_matter.py.
+#
+# Provenance:
+# - Capital call letter delivered to AO at FX Mayr (2026-04-11) — DV walked
+#   AO through v009 line by line. AO heard ~EUR 11M total deficit until June.
+# - Director final decision (2026-04-12): EUR 7M call — EUR 2.5M Apr,
+#   EUR 2.5M May, EUR 2M Jun. Slightly above what AO heard (6M); framed
+#   as rounding for contingency.
+# - Cross-matter: tightly coupled with `oskolkov` (LP relationship) +
+#   `hagenauer-rg7` (RG7 deficit driving the call) + `movie` (hotel WC need).
+#
+# Validation note: `capital-call` already in slugs.yml as an action-type slug
+# (drawdown mechanics tag). Bootstrap reuses it as the matter slug for the
+# Wave 3 EUR 7M call workstream — wiki dir creation, not slug registration.
+
+matter_slug: capital-call
+matter_name: "Capital Call (RG7 EUR 7M)"
+absorbed_from: "seed (Wave 3 — V8 Q29 ratification 2026-04-30; first real consumer of bootstrap_matter.py)"
+absorbed_at: 2026-04-30
+absorbed_by: "AI Head A"
+authority_chain: "Director walkthrough at FX Mayr 2026-04-11 → Director final decision 2026-04-12 (EUR 7M, 2.5/2.5/2 phasing) → Director V8 Q29 ratification 2026-04-30 (matter critical priority, build bootstrap first per Option 2)"
+ratified_at: 2026-04-30
+
+autonomy_level: recommend_wait
+
+sense_sources:
+  - email: matter_keywords
+  - whatsapp: contact_phones
+
+entities:
+  primary:
+    - brisen-capital-sa
+  team:
+    - dimitry-vallen
+    - edita-vallen
+    - balazs-csepregi
+    - mykola-borsak
+  counterparties:
+    - andrey-oskolkov
+    - aelio-holding-ltd
+  adjacent:
+    - oskolkov          # AO matter brain — game-theoretic context
+    - hagenauer-rg7     # RG7 deficit driving the call
+    - movie             # hotel WC bridge component
+
+trigger_patterns:
+  - '\b(capital.call|capital-call|drawdown)\b'
+  - '\b(eur|€)\s*7\s*(m|mm|million)\b'
+  - '\b(2\.5\s*m).*\b(april|may)\b'
+  - '\b(call.letter|drawdown.request|shareholder.funding)\b'
+  - '\b(ao)\b.*\b(capital|funding|wire|transfer|tranche)\b'
+
+default_specialists: [legal, finance, tax-CH, game-theory]
+specialist_cap_per_cycle: 5
+specialist_timeout_seconds: 60
+specialist_retries: 2
+cycle_timeout_seconds: 300
+
+auto_trigger:
+  severity_floor: high
+  confidence_floor: 0.8
+
+games_relevant: true
+counterparty_iteration_horizon: infinite_repeated
+counterparty_reputation_stake: 9
+counterparty_observed_strategy: cooperate_with_constraints
+
+project_structure: |
+  - **Workstream:** EUR 7M capital call to AO (Aelio Holding Ltd) — phased
+    EUR 2.5M April / EUR 2.5M May / EUR 2M June.
+  - **Driver:** ~EUR 11M total deficit thru June 2026 across RG7 (Hagenauer
+    delay + replacement costs + VAT clawback) + MO Vienna working capital.
+  - **Vehicle:** Brisen Capital SA — capital call mechanic (NOT debt). LP
+    framing per AO partnership terms.
+  - **Counterparty entity:** Aelio Holding Ltd (AO's investment vehicle).
+
+counterparty_topology: |
+  | Slug | Role | Status |
+  |---|---|---|
+  | `andrey-oskolkov` | Principal LP / counterparty (22-year partner) | active |
+  | `aelio-holding-ltd` | AO's investment vehicle — wire destination | active |
+
+  Team-side: DV (principal), Edita Vallen (co-owner), Balazs Csepregi
+  (financial modeling — v009 numbers), Mykola Borsak (Vienna finance ops —
+  wire confirmations).
+
+notes: |
+  ## Phasing (Director-locked 2026-04-12)
+  - April: EUR 2.5M
+  - May:   EUR 2.5M
+  - June:  EUR 2M
+  - Total: EUR 7M (vs ~EUR 6M AO heard at FX Mayr — surplus framed as contingency rounding)
+
+  ## Game-theoretic frame
+  Infinite-repeated horizon — AO multi-decade partnership. Reputation stake 9
+  (highest among Brisen LPs). Observed strategy: `cooperate_with_constraints`
+  — AO accepts the call but expects clean execution (timely wire confirms,
+  audit trail, no surprise top-ups).
+
+  ## Bridge to other matters
+  - `oskolkov` — AO matter brain; surfaces game-theoretic + relationship context
+  - `hagenauer-rg7` — primary deficit source (~EUR 11M thru June); RG7 cash
+    delivery cadence determines whether June EUR 2M holds or shifts.
+  - `movie` — hotel WC component of the deficit; covers MOHG opex bridge.
