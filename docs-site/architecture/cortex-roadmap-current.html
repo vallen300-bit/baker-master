@@ -246,27 +246,43 @@ B cross-lane review pre-merge.</div>
   <div class="item queued">
     <div class="icon">→</div>
     <div>
-      <div class="label">Brief 3 — CORTEX_PHASE6_REFLECTOR_1 (ACE-style learning loop + per-directive citation counters)<span class="priority high">high</span></div>
-      <div class="desc">ACE-style Reflector + Curator in Cortex Phase 6 (Archive). Reflector
-reads Phase 3-4 trace, outputs proposed_deltas + counter_updates.
-Curator (deterministic) writes proposed_deltas to wiki/matters/<slug>/
-proposed-config-deltas.md; Director ratifies via Triaga; AI Head A
-merges deltas → cortex-config.md. NO auto-merge into core playbook.
+      <div class="label">Brief 5 — PER_MATTER_CLICKUP_LINKAGE_1 (per-matter ClickUp surface + Obsidian linkage + backfill 22 matters)<span class="priority high">high</span></div>
+      <div class="desc">Generalizes the Cortex Backlog "no-parked" pattern to per-matter scope.
+Each of the 22 active matter brains gets a linked ClickUp surface
+sized to matter complexity:
 
-COUNTER-ACCURACY MECHANISM (Director ratified caveat 2 — option c):
-per-directive citation in propose phase. Cortex propose-phase prompt
-adds: "If you drew on a directive from the playbook, cite it by id
-at the end of your proposal: [directive: <id>]". Reflector parses
-cited IDs; cycle outcome (Director ratified / declined / silent
-timeout) → Reflector increments helpful/harmful on cited directives.
-Untraceable proposals (no citation) flagged for prompt-engineering
-review. Cost ~$0.10-0.20/cycle, acceptable.
+Pattern C (hybrid — Director-ratified 2026-04-30):
+- SUBSTANTIVE deal/asset matters → ClickUp folder with 6 standard
+  lists (Active Tracks, Risk Register, Drafts & Deliverables,
+  Incoming Feed, Handoff Notes, Decisions Log). 8 already exist;
+  add 7 more (lilienmatt, kitzbuhel-six-senses, mo-vie-am,
+  mo-vie-exit, capital-call, aukera, franck-muller, uk-homes).
+- SINGLE-THREAD / OPERATIONAL matters → single list under
+  "Operational" parent (claimsmax, m365, baker-internal, personal).
+- CROSS-CUTTING / COUNTERPARTY meta → tag only, no list
+  (constantinos, brisen-funding, brisen-pr).
 
-~200 LOC orchestrator + ~100 LOC curator. DEPENDS on Brief 1
-(path whitelist must add proposed-config-deltas.md path class).
-Trigger class HIGH per RA-24 — cross-capability state writes.</div>
-      <div class="meta-line"><span><strong>Owner:</strong> terminal-ai-head-a-authoring + b-code-build</span><span><strong>ETA:</strong> 2026-05-08</span></div>
-      <div class="anchor">Candidate brief — pending Terminal AI Head A authoring · ACE arXiv 2510.04618 · wiki/research/2026-04-30-hermes-ace-cortex-auto-evolution.md</div>
+Linkage:
+- cortex-config.md frontmatter gets clickup: {type, id, url}
+- wiki/matters/<slug>/_index.md gets clickup link (Obsidian-readable)
+- bootstrap_matter.py amended to require clickup: in input YAML
+
+Naming: keep human-readable display ("Hagenauer", "MRCI Baden");
+YAML maps slug→folder_id (Director ratified 2026-04-30).
+Retired matters' folders: leave for audit (mirrors slugs.yml retired
+alias retention — Director ratified 2026-04-30).
+
+Discipline scaling mitigation:
+- Session-start ritual: ONE rolled-up query
+  mcp__baker__baker_clickup_tasks(...) across all matter folders,
+  filter by priority+due — not 22 separate queries.
+- Drift sentinel: ONE rolled-up walk of all matter folders, single
+  recurring ClickUp task in Cortex Backlog (not 22 sentinels).
+
+DEPENDS on Brief 1 (vault_write — for linkage write-back).
+Trigger class MEDIUM (file edits + ClickUp surface adds, no schema).</div>
+      <div class="meta-line"><span><strong>Owner:</strong> ai-head-a-authoring + b-code-build</span><span><strong>ETA:</strong> 2026-05-08</span></div>
+      <div class="anchor">Director ratification 2026-04-30 (App AI Head A chat) · 2 judgment Qs answered</div>
     </div>
     <div class="badge queued">QUEUED</div>
   </div>
@@ -292,6 +308,45 @@ tax-return workstream within that matter. Likely needs Constantinos
 dispatch coordination.</div>
       <div class="meta-line"><span><strong>Owner:</strong> ai-head-a</span><span><strong>ETA:</strong> 2026-05-10</span></div>
       
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">Brief 3 — CORTEX_PHASE6_REFLECTOR_1 (ACE-style learning loop + per-directive citation counters)<span class="priority high">high</span></div>
+      <div class="desc">ACE-style Reflector + Curator in Cortex Phase 6 (Archive). Reflector
+reads Phase 3-4 trace, outputs proposed_deltas + counter_updates.
+Curator (deterministic) writes proposed_deltas to wiki/matters/<slug>/
+proposed-config-deltas.md; Director ratifies via Triaga; AI Head A
+merges deltas → cortex-config.md. NO auto-merge into core playbook.
+
+WRITE TARGETS (amended 2026-04-30 to incorporate Brief 5 linkage):
+- proposed_deltas → wiki/matters/<slug>/proposed-config-deltas.md
+  (via baker_vault_write from Brief 1)
+- PROPOSED ACTIONS → per-matter ClickUp surface from Brief 5
+  (folder's "Drafts & Deliverables" list for substantive matters;
+  single list for operational matters; tag-only matters get no
+  ClickUp write — proposals route to AO/parent surface). Successors
+  + Director query proposed actions via single ClickUp surface, not
+  scattered markdown.
+
+COUNTER-ACCURACY MECHANISM (Director ratified caveat 2 — option c):
+per-directive citation in propose phase. Cortex propose-phase prompt
+adds: "If you drew on a directive from the playbook, cite it by id
+at the end of your proposal: [directive: <id>]". Reflector parses
+cited IDs; cycle outcome (Director ratified / declined / silent
+timeout) → Reflector increments helpful/harmful on cited directives.
+Outcome signal can come from ClickUp task status (closed=accepted,
+dismissed=declined) when Brief 5 surface is the proposal target.
+Untraceable proposals (no citation) flagged for prompt-engineering
+review. Cost ~$0.10-0.20/cycle, acceptable.
+
+~200 LOC orchestrator + ~100 LOC curator. DEPENDS on Briefs 1 + 5.
+Trigger class HIGH per RA-24 — cross-capability state writes.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> terminal-ai-head-a-authoring + b-code-build</span><span><strong>ETA:</strong> 2026-05-13</span></div>
+      <div class="anchor">Candidate brief — pending Terminal AI Head A authoring · ACE arXiv 2510.04618 · wiki/research/2026-04-30-hermes-ace-cortex-auto-evolution.md · amended 2026-04-30 to write to Brief 5 per-matter ClickUp surfaces</div>
     </div>
     <div class="badge queued">QUEUED</div>
   </div>
