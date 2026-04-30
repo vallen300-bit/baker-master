@@ -141,3 +141,69 @@ def test_missing_slugs_yml_raises_systemexit(tmp_path: Path, import_module):
     vault_root.mkdir()
     with pytest.raises(SystemExit):
         import_module.load_active_matters(vault_root)
+
+
+def test_real_slugs_yml_shape_emits_validator_conformant_files(
+    tmp_path: Path, import_module
+):
+    """Regression for PR #125 architect-review CRITICAL.
+
+    Real ~/baker-vault/slugs.yml v16 has ZERO `name:` keys across 36 rows;
+    every row is {slug, status, description, aliases}. Earlier fixtures used
+    hand-crafted 1-2-char descriptions and never omitted `name:` — that's why
+    pytest stayed green while live wet-run produced YAML-breaking frontmatter.
+
+    Mimic the real shape (no `name:`; descriptions with ': ', apostrophes,
+    quotes) and assert every emitted directives.md passes the KBL
+    validate_frontmatter validator.
+    """
+    from kbl.ingest_endpoint import validate_frontmatter
+    import yaml
+
+    vault_root = tmp_path / "vault"
+    staging = tmp_path / "staging"
+    # Real-world description shapes pulled from live slugs.yml v16 — colons,
+    # apostrophes, quotes, parenthetical clauses. None has a `name:` key.
+    _write_slugs_yml(
+        vault_root,
+        """
+matters:
+  - slug: hagenauer-rg7
+    status: active
+    description: "RG7 final-account dispute, Baden bei Wien (insolvency Mar 2026)"
+  - slug: uk-homes
+    status: active
+    description: "UK residential property held by Director. Category: Private Assets (sibling slug — Directives Playbook)"
+  - slug: cupial
+    status: retired
+    description: "Cupial handover dispute. RETIRED 2026-04-26 per Director: 'Cupial- dispute ended'."
+  - slug: mo-vie-am
+    status: active
+    description: "Mandarin Oriental Vienna — Asset Management (hotel ops, F&B, residences)"
+""",
+    )
+
+    rc = import_module.main(
+        [
+            "--vault-root",
+            str(vault_root),
+            "--staging-root",
+            str(staging),
+        ]
+    )
+    assert rc == 0
+
+    # Every non-retired matter should emit a directives.md that validates.
+    expected_slugs = {"hagenauer-rg7", "uk-homes", "mo-vie-am"}
+    for slug in expected_slugs:
+        target = staging / slug / "curated" / "directives.md"
+        assert target.is_file(), f"missing {target}"
+        content = target.read_text(encoding="utf-8")
+        # Frontmatter must be parseable YAML AND pass validator.
+        assert content.startswith("---\n")
+        end = content.find("\n---\n", 4)
+        assert end != -1, f"frontmatter not terminated in {target}"
+        fm = yaml.safe_load(content[4:end])  # raises YAMLError on broken scalars
+        validate_frontmatter(fm)  # raises KBLIngestError on validator failure
+    # Retired slug must be skipped.
+    assert not (staging / "cupial").exists()

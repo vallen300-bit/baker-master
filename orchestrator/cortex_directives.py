@@ -115,6 +115,31 @@ def provision_directive_schema(
 
     today_str = today or date.today().isoformat()
     content = render_directives_template(matter_slug, matter_name, today_str)
+
+    # Validate rendered frontmatter against the KBL ingest validator before
+    # writing to disk. matter_name is interpolated unquoted into the template;
+    # any value containing YAML-special chars (':', "'", etc.) silently produces
+    # malformed frontmatter that only surfaces much later (Mac Mini sync, KBL
+    # ingest). Bake validation in as a self-invariant — mirrors the
+    # _extract_frontmatter + validate_frontmatter pattern in
+    # scripts/bootstrap_matter.py:557-558.
+    from kbl.ingest_endpoint import validate_frontmatter  # local import to avoid cycle
+    import yaml
+
+    if not content.startswith("---\n"):
+        raise ValueError("rendered directives.md missing leading frontmatter delimiter")
+    fm_end = content.find("\n---\n", 4)
+    if fm_end == -1:
+        raise ValueError("rendered directives.md frontmatter not terminated")
+    try:
+        fm = yaml.safe_load(content[4:fm_end])
+    except yaml.YAMLError as e:
+        raise ValueError(
+            f"rendered directives.md frontmatter is not parseable YAML "
+            f"for matter_slug={matter_slug!r}, matter_name={matter_name!r}: {e}"
+        ) from e
+    validate_frontmatter(fm)
+
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
     logger.info("provisioned directives.md at %s", target)
