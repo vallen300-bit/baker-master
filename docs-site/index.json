@@ -1,13 +1,20 @@
 {
   "version": 1,
-  "updated_at": "2026-04-29",
+  "updated_at": "2026-04-30",
   "folders": [
     {
       "name": "ARCHITECTURE",
       "slug": "architecture",
       "presentations": [
         {
-          "title": "Cortex Roadmap V3 \u2014 Any-Matter Sprint",
+          "title": "\u2605 Cortex Roadmap (LIVE)",
+          "file": "cortex-roadmap-current.html",
+          "created": "2026-04-30",
+          "matter": "baker",
+          "live": true
+        },
+        {
+          "title": "Cortex Roadmap V3 \u2014 Any-Matter Sprint (snapshot)",
           "file": "cortex-roadmap-v3-any-matter.html",
           "created": "2026-04-29",
           "matter": "baker"
