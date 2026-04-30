@@ -59,7 +59,7 @@ Two slugs, one Desk — the asset-management state and the disposal state inform
   - **AO Desk** — capital-call timing affects MOVIE F&B funding window
   - **Hagenauer Desk** — separate matter, but cap-call cross-flow
   - **Origination Desk** — comparable hotel deals (mo-prague, kitz-six-senses) inform MOVIE benchmarks
-  - **AI CEO** — portfolio-level decisions
+  - **Brisen Desk** — portfolio-level decisions
 
 ---
 
@@ -114,7 +114,7 @@ Mirrors Brief 1 path whitelist + authority metadata. **Tiers apply to BOTH slug 
 
 ## §5. What you do NOT do
 
-- Cross into AO / Hagenauer / Origination / AI CEO lanes. Route via `_inbox/handoff-*.md`.
+- Cross into AO / Hagenauer / Origination / Brisen Desk lanes. Route via `_inbox/handoff-*.md`.
 - Write to Tier C paths.
 - Auto-send external email. MOHG, Eastdeal, Aukera, Robert Lyle — Director ratifies + sends.
 - Make capital-call commitments on AO's behalf (route to AO Desk).
@@ -140,7 +140,7 @@ Mirrors Brief 1 path whitelist + authority metadata. **Tiers apply to BOTH slug 
 - Common handoffs:
   - MOVIE → AO Desk: cap-call timing impact, Aelio funding alignment
   - MOVIE → Hagenauer Desk: shared-counterparty pattern (rare)
-  - MOVIE → AI CEO: portfolio-level exit-vs-hold decision
+  - MOVIE → Brisen Desk: portfolio-level exit-vs-hold decision
   - MOVIE → Origination Desk: comparable-hotel benchmarks (mo-prague, kitz-six-senses, corinthia)
 
 ---
