@@ -497,9 +497,14 @@ def _load_proposal_text(conn, cycle_id: str) -> str:
     """Read proposal_text from cortex_phase_outputs payload.
 
     Preference order:
-      1. artifact_type='proposal_card' (Phase 4 final output)
-      2. artifact_type='synthesis'     (Phase 3c output, fallback for cycles
-                                        that aborted before Phase 4)
+      1. artifact_type='synthesis'     (Phase 3c output, full text)
+      2. artifact_type='proposal_card' (Phase 4 output, fallback)
+
+    `proposal_card` is truncated to [:8000] in cortex_phase4_proposal.py for
+    Slack rendering; Phase 3c synthesizer can emit ~12K-16K chars and the
+    Phase 4 prompt directs the model to place [directive: <id>] at the end —
+    exactly the position the truncation would chop. Reflector parses the
+    untruncated synthesis row to keep the citation intact.
 
     Caller passes a borrowed connection; this fn does NOT commit/rollback.
     """
@@ -510,8 +515,8 @@ def _load_proposal_text(conn, cycle_id: str) -> str:
              WHERE cycle_id = %s
                AND artifact_type IN ('proposal_card', 'synthesis')
              ORDER BY CASE artifact_type
-                          WHEN 'proposal_card' THEN 0
-                          WHEN 'synthesis'     THEN 1
+                          WHEN 'synthesis'     THEN 0
+                          WHEN 'proposal_card' THEN 1
                       END,
                       created_at DESC
              LIMIT 1
