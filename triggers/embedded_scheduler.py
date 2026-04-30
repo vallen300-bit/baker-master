@@ -122,19 +122,28 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info("Plaud trigger: PLAUD_TOKEN not set — skipping registration")
 
-    # ClickUp polling — every 5 minutes
-    # DEPLOY-FIX-2: Defer first run by 90s to avoid rate-limit sleeps blocking
-    # Render's deploy timeout window (ClickUp 5-workspace sync can take 2+ min)
+    # ClickUp polling — once a day at 04:30 UTC (Director rule 2026-04-30:
+    # 5-min cadence was over-polling; once-a-day is sufficient for Brisen's
+    # ClickUp use cases per priority pivot — channels are last-stage work).
+    # Override via CLICKUP_POLL_CRON_HOUR + CLICKUP_POLL_CRON_MINUTE if needed.
+    # Manual fire still available via direct python invocation.
+    import os as _os_clickup
     from triggers.clickup_trigger import run_clickup_poll
-    from datetime import timedelta
+    try:
+        _clickup_hour = int(_os_clickup.environ.get("CLICKUP_POLL_CRON_HOUR", "4"))
+        _clickup_minute = int(_os_clickup.environ.get("CLICKUP_POLL_CRON_MINUTE", "30"))
+    except (TypeError, ValueError):
+        _clickup_hour, _clickup_minute = 4, 30
     scheduler.add_job(
         run_clickup_poll,
-        IntervalTrigger(minutes=5),
-        id="clickup_poll", name="ClickUp multi-workspace poll",
+        CronTrigger(hour=_clickup_hour, minute=_clickup_minute, timezone="UTC"),
+        id="clickup_poll", name="ClickUp multi-workspace poll (daily)",
         coalesce=True, max_instances=1, replace_existing=True,
-        next_run_time=datetime.now(timezone.utc) + timedelta(seconds=90),
+        misfire_grace_time=3600,
     )
-    logger.info("Registered: clickup_poll (every 5 minutes)")
+    logger.info(
+        f"Registered: clickup_poll (daily at {_clickup_hour:02d}:{_clickup_minute:02d} UTC)"
+    )
 
     # Dropbox polling — every 30 minutes
     from triggers.dropbox_trigger import run_dropbox_poll
