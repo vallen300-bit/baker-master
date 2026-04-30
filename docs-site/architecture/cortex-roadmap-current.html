@@ -228,6 +228,52 @@ blocks agent-authored gold.md commits anyway — emission is wasted work.</div>
   <div class="item queued">
     <div class="icon">→</div>
     <div>
+      <div class="label">Brief 1 — BAKER_VAULT_WRITE_1 (MCP tool via GitHub Contents API + path whitelist)<span class="priority high">high</span></div>
+      <div class="desc">Phase 6 archive infrastructure (RA-23 spec already requires curated
+writes). NEW MCP tool baker_vault_write. 6 path classes whitelisted;
+gold.md/_cortex/_priorities.yml/_ops/_install hard-blocked. Frontmatter
+enforced. 16+ tests + three review passes already in PR #95 (draft).
+AMENDS CHANDA #9 from "Mac Mini single writer" to "Mac Mini OR
+Tier-A-authorized-write-via-baker_vault_write" (Director ratification
+2026-04-30 caveat 1). Trigger class HIGH per RA-24 — requires AI Head
+B cross-lane review pre-merge.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> terminal-ai-head-a-authoring + b-code-build</span><span><strong>ETA:</strong> 2026-05-06</span></div>
+      <div class="anchor">PR #95 draft (cb1f3ee) · briefs/BRIEF_BAKER_VAULT_WRITE_1.md · authored Terminal AI Head A</div>
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">Brief 3 — CORTEX_PHASE6_REFLECTOR_1 (ACE-style learning loop + per-directive citation counters)<span class="priority high">high</span></div>
+      <div class="desc">ACE-style Reflector + Curator in Cortex Phase 6 (Archive). Reflector
+reads Phase 3-4 trace, outputs proposed_deltas + counter_updates.
+Curator (deterministic) writes proposed_deltas to wiki/matters/<slug>/
+proposed-config-deltas.md; Director ratifies via Triaga; AI Head A
+merges deltas → cortex-config.md. NO auto-merge into core playbook.
+
+COUNTER-ACCURACY MECHANISM (Director ratified caveat 2 — option c):
+per-directive citation in propose phase. Cortex propose-phase prompt
+adds: "If you drew on a directive from the playbook, cite it by id
+at the end of your proposal: [directive: <id>]". Reflector parses
+cited IDs; cycle outcome (Director ratified / declined / silent
+timeout) → Reflector increments helpful/harmful on cited directives.
+Untraceable proposals (no citation) flagged for prompt-engineering
+review. Cost ~$0.10-0.20/cycle, acceptable.
+
+~200 LOC orchestrator + ~100 LOC curator. DEPENDS on Brief 1
+(path whitelist must add proposed-config-deltas.md path class).
+Trigger class HIGH per RA-24 — cross-capability state writes.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> terminal-ai-head-a-authoring + b-code-build</span><span><strong>ETA:</strong> 2026-05-08</span></div>
+      <div class="anchor">Candidate brief — pending Terminal AI Head A authoring · ACE arXiv 2510.04618 · wiki/research/2026-04-30-hermes-ace-cortex-auto-evolution.md</div>
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
       <div class="label">Q21 AO CRM dashboard (owed/owes/promised both directions)<span class="priority high">high</span></div>
       <div class="desc">Triaga ASAP item. Separate UI build, not Cortex-shaped. Bidirectional
 money-flow tracking. Frame as AO CRM, not just dashboard.</div>
@@ -246,6 +292,30 @@ tax-return workstream within that matter. Likely needs Constantinos
 dispatch coordination.</div>
       <div class="meta-line"><span><strong>Owner:</strong> ai-head-a</span><span><strong>ETA:</strong> 2026-05-10</span></div>
       
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">Brief 4 — CORTEX_CONFIG_DIRECTIVES_SCHEMA_1 (frontmatter directives array + 22-matter migration)<span class="priority high">high</span></div>
+      <div class="desc">Extends cortex-config.md frontmatter with directives array
+(id/content/source/helpful/harmful/last_invoked/status). Status enum:
+proposed | active | core | flagged. Auto-promotion: proposed→active
+on Director ratification; active→core after helpful>=10 AND
+harmful==0; any→flagged on harmful>helpful OR last_invoked>90d.
+
+MIGRATION SCOPE (Director ratified caveat 3): all 22 active matter
+brains (NOT 5 — handoff was stale; Wave 3 batch + uk-homes raised
+count to 22). ~30 LOC schema + ~80 LOC pruning sweep cron + 22-matter
+migration script.
+
+Highest trigger class — DB schema migration + 22-matter batch +
+directive promotion logic. RA-24 + B1 second-pair-of-eyes mandatory.
+DEPENDS on Brief 3.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> terminal-ai-head-a-authoring + b-code-build</span><span><strong>ETA:</strong> 2026-05-15</span></div>
+      <div class="anchor">Candidate brief — pending Terminal AI Head A authoring against caveats 2+3 · scope corrected from 5→22 matters</div>
     </div>
     <div class="badge queued">QUEUED</div>
   </div>
@@ -287,6 +357,20 @@ Counterparty matter — needs Director paste-block of strategic context
 fires → reset. Ride-along during normal session.</div>
       <div class="meta-line"><span><strong>Owner:</strong> ai-head-a</span><span><strong>ETA:</strong> 2026-05-06</span></div>
       
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">Brief 2 — BAKER_VAULT_READ_WIKI_SCOPE_1 (extend vault_mirror.py read scope to include wiki/)<span class="priority medium">medium</span></div>
+      <div class="desc">~30-50 LOC change. Extends read scope from _ops/ to {_ops/, wiki/}.
+Tool descriptions broadened (baker_vault_list / baker_vault_read).
+Read-only invariant + extension whitelist + size cap unchanged.
+Independent of Brief 1 — either can ship first. MEDIUM trigger class.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> terminal-ai-head-a-authoring + b-code-build</span><span><strong>ETA:</strong> 2026-05-06</span></div>
+      <div class="anchor">PR #95 draft · briefs/BRIEF_BAKER_VAULT_READ_WIKI_SCOPE_1.md · authored Terminal AI Head A</div>
     </div>
     <div class="badge queued">QUEUED</div>
   </div>
