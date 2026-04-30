@@ -122,7 +122,7 @@ V1 accepts the small race window (filesystem-level; sub-second). Reflector sweep
 
 ## APScheduler wiring
 
-Edit `triggers/embedded_scheduler.py` — add new job after the existing `phase6_reflector_sweep` registration at lines 826–836. Pattern matches the existing block exactly:
+Edit `triggers/embedded_scheduler.py` — add new job AFTER the entire existing `phase6_reflector_sweep` env-gated block (lines 809–840 inclusive — `_reflector_enabled` gate through the `Skipped` else-branch log). Insertion point is line 841, immediately before the `BRIEF_MOVIE_AM_RETROFIT_1 D5` comment at line 842. Do NOT insert inside the if/else (the else-branch at 837–840 is the skip path). Pattern matches the existing block exactly:
 
 ```python
 # Phase 6 Reconciler — vault-write-outside-counter-txn drift detector.
