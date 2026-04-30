@@ -3962,6 +3962,183 @@ function _createDownloadCard(genData) {
     return card;
 }
 
+// CORTEX_RUN_SCAN_UI_RENDER_1: Scan-driven Cortex cycles emit typed SSE
+// events (started → phase_changed* → phase_output* → terminal). We render
+// a phase ticker progressively, then on terminal call the proposal
+// endpoint and render the synthesis text inline. Cycles that disconnect
+// mid-stream still complete server-side (cortex_run_stream guarantees
+// this); the user can refetch by cycle_id later.
+function renderCortexEvent(data, replyEl, assistantId) {
+    if (!replyEl) return;
+    var t = data.type;
+
+    var ctxEl = replyEl.querySelector('.cortex-stream');
+    if (!ctxEl) {
+        replyEl.textContent = '';
+        ctxEl = document.createElement('div');
+        ctxEl.className = 'cortex-stream';
+        ctxEl.appendChild(_cortexHeader(data));
+        ctxEl.appendChild(_cortexTicker());
+        replyEl.appendChild(ctxEl);
+    }
+
+    if (t === 'started') {
+        return;
+    }
+
+    if (t === 'phase_changed') {
+        var ticker = ctxEl.querySelector('.cortex-ticker');
+        if (ticker) {
+            var phases = ticker.querySelectorAll('.cortex-phase');
+            for (var i = 0; i < phases.length; i++) {
+                phases[i].classList.remove('cortex-phase-active');
+                phases[i].classList.add('cortex-phase-done');
+            }
+            var row = document.createElement('div');
+            row.className = 'cortex-phase cortex-phase-active';
+            var dot = document.createElement('span');
+            dot.className = 'cortex-phase-dot';
+            row.appendChild(dot);
+            var label = document.createElement('span');
+            label.className = 'cortex-phase-label';
+            label.appendChild(document.createTextNode(_cortexPhaseLabel(data.phase)));
+            row.appendChild(label);
+            ticker.appendChild(row);
+        }
+        return;
+    }
+
+    if (t === 'phase_output') {
+        var active = ctxEl.querySelector('.cortex-phase-active');
+        if (active) {
+            var badge = active.querySelector('.cortex-phase-count');
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'cortex-phase-count';
+                active.appendChild(badge);
+            }
+            badge.textContent = '· ' + (data.count || 1);
+        }
+        return;
+    }
+
+    if (t === 'terminal') {
+        var ticker2 = ctxEl.querySelector('.cortex-ticker');
+        if (ticker2) {
+            var phases2 = ticker2.querySelectorAll('.cortex-phase');
+            for (var j = 0; j < phases2.length; j++) {
+                phases2[j].classList.remove('cortex-phase-active');
+                phases2[j].classList.add('cortex-phase-done');
+            }
+        }
+
+        var card = document.createElement('div');
+        card.className = 'cortex-terminal-card cortex-terminal-' + esc(data.status || 'unknown');
+
+        var heading = document.createElement('div');
+        heading.className = 'cortex-terminal-status';
+        heading.appendChild(document.createTextNode(
+            _cortexStatusLabel(data.status) +
+            ' — $' + Number(data.cost_dollars || 0).toFixed(4) +
+            ' / ' + Number(data.cost_tokens || 0).toLocaleString() + ' tokens'
+        ));
+        card.appendChild(heading);
+
+        if (data.cycle_id) {
+            var meta = document.createElement('div');
+            meta.className = 'cortex-terminal-meta';
+            meta.appendChild(document.createTextNode('cycle ' + data.cycle_id.slice(0, 8) + '…'));
+            card.appendChild(meta);
+        }
+
+        if (data.aborted_reason) {
+            var reason = document.createElement('div');
+            reason.className = 'cortex-terminal-reason';
+            reason.appendChild(document.createTextNode('Aborted: ' + data.aborted_reason));
+            card.appendChild(reason);
+        }
+
+        var body = document.createElement('div');
+        body.className = 'cortex-terminal-body';
+        body.appendChild(document.createTextNode('Loading proposal…'));
+        card.appendChild(body);
+
+        ctxEl.appendChild(card);
+
+        if (data.cycle_id && data.status !== 'failed' && data.status !== 'timeout') {
+            _fetchCortexProposal(data.cycle_id, body);
+        } else {
+            body.textContent = '';
+            body.appendChild(document.createTextNode(
+                data.status === 'timeout' ? 'Cycle timed out — partial outputs may exist in /api/cortex/events.'
+                : 'Cycle did not complete propose phase.'
+            ));
+        }
+        return;
+    }
+}
+
+function _cortexHeader(data) {
+    var h = document.createElement('div');
+    h.className = 'cortex-header';
+    h.appendChild(document.createTextNode(
+        'Cortex · ' + (data.matter_slug || 'unknown matter') + ' · ' + (data.triggered_by || 'manual')
+    ));
+    return h;
+}
+
+function _cortexTicker() {
+    var el = document.createElement('div');
+    el.className = 'cortex-ticker';
+    return el;
+}
+
+function _cortexPhaseLabel(phase) {
+    var labels = {
+        sense: 'Sensing signals',
+        load: 'Loading context',
+        reason: 'Reasoning + specialists',
+        propose: 'Drafting proposal',
+        archive: 'Archiving cycle'
+    };
+    return labels[phase] || (phase || 'Unknown phase');
+}
+
+function _cortexStatusLabel(status) {
+    var labels = {
+        tier_b_pending: 'Proposal ready — awaiting Director ratification',
+        completed: 'Cycle complete',
+        rejected: 'Cycle rejected',
+        failed: 'Cycle failed',
+        timeout: 'Cycle timed out',
+        archived: 'Archived'
+    };
+    return labels[status] || ('Status: ' + (status || 'unknown'));
+}
+
+async function _fetchCortexProposal(cycle_id, bodyEl) {
+    try {
+        var resp = await bakerFetch('/api/cortex/cycles/' + encodeURIComponent(cycle_id) + '/proposal');
+        if (!resp.ok) {
+            bodyEl.textContent = '';
+            bodyEl.appendChild(document.createTextNode('Could not fetch proposal (HTTP ' + resp.status + ')'));
+            return;
+        }
+        var d = await resp.json();
+        bodyEl.textContent = '';
+        if (d.has_proposal && d.proposal_text) {
+            setSafeHTML(bodyEl, '<div class="md-content cortex-proposal">' + md(d.proposal_text) + '</div>');
+        } else {
+            bodyEl.appendChild(document.createTextNode(
+                'No proposal text yet (current phase: ' + (d.current_phase || 'unknown') + ').'
+            ));
+        }
+    } catch (e) {
+        bodyEl.textContent = '';
+        bodyEl.appendChild(document.createTextNode('Proposal fetch error: ' + e.message));
+    }
+}
+
 async function sendScanMessage(question) {
     if (scanStreaming || !question.trim()) return;
 
@@ -4043,6 +4220,17 @@ async function sendScanMessage(question) {
                                 _thinkDiv.appendChild(document.createTextNode(' ' + _label));
                             }
                         }
+                    }
+                    // CORTEX_RUN_SCAN_UI_RENDER_1: typed events from
+                    // /api/cortex/run stream proxied through /api/scan when
+                    // intent='cortex_run_action'. Narrow `data.type` check to
+                    // the four event types cortex_run_stream emits — avoids
+                    // accidental capture if a future Scan response gains a
+                    // `type` field.
+                    if (data.type === 'started' || data.type === 'phase_changed'
+                        || data.type === 'phase_output' || data.type === 'terminal') {
+                        renderCortexEvent(data, replyEl, assistantId);
+                        continue;
                     }
                     if (data.token) {
                         if (!fullResponse && replyEl) replyEl.textContent = ''; // clear thinking indicator

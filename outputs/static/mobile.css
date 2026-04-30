@@ -1675,3 +1675,44 @@ html, body {
   font-size: 14px;
   margin: 4px 0 8px;
 }
+
+/* CORTEX_RUN_SCAN_UI_RENDER_1: Scan-driven Cortex stream rendering (mobile) */
+.cortex-stream-mobile {
+    border-left: 2px solid var(--accent, #6b8e9f);
+    padding: 0.4rem 0.6rem;
+    margin: 0.2rem 0;
+    background: rgba(107, 142, 159, 0.04);
+    font-size: 0.85rem;
+}
+.cortex-header-mobile {
+    font-size: 0.7rem;
+    color: var(--muted, #888);
+    margin-bottom: 0.3rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.cortex-progress-mobile {
+    font-size: 0.85rem;
+    color: var(--accent, #6b8e9f);
+    margin-bottom: 0.3rem;
+}
+.cortex-terminal-mobile {
+    border: 1px solid var(--accent, #6b8e9f);
+    border-radius: 3px;
+    padding: 0.4rem 0.6rem;
+    margin-top: 0.3rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+.cortex-terminal-sub {
+    font-size: 0.7rem;
+    color: var(--muted, #888);
+    font-weight: 400;
+    margin-top: 0.2rem;
+}
+.cortex-terminal-body-mobile {
+    margin-top: 0.3rem;
+    font-weight: 400;
+    font-size: 0.85rem;
+    line-height: 1.4;
+}

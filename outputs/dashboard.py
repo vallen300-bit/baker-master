@@ -4001,6 +4001,96 @@ async def get_cortex_events(
         store._put_conn(conn)
 
 
+@app.get(
+    "/api/cortex/cycles/{cycle_id}/proposal",
+    tags=["cortex"],
+    dependencies=[Depends(verify_api_key)],
+)
+async def get_cortex_cycle_proposal(cycle_id: str):
+    """Return the propose-phase synthesis text for a cycle.
+
+    Read-only. Backs the Scan UI's terminal card render in
+    CORTEX_RUN_SCAN_UI_RENDER_1. Returns 404 if cycle has no
+    synthesis row yet (cycle still running, archived without propose,
+    or failed pre-synthesis).
+    """
+    import uuid as _uuid
+    try:
+        _uuid.UUID(cycle_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid cycle_id")
+
+    store = _get_store()
+    conn = store._get_conn()
+    if not conn:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    try:
+        import psycopg2.extras
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        cur.execute(
+            """
+            SELECT cycle_id::text, matter_slug, triggered_by, status,
+                   current_phase, cost_dollars, cost_tokens,
+                   started_at, completed_at, aborted_reason
+            FROM cortex_cycles
+            WHERE cycle_id = %s
+            LIMIT 1
+            """,
+            (cycle_id,),
+        )
+        cyc = cur.fetchone()
+        if not cyc:
+            cur.close()
+            conn.commit()
+            raise HTTPException(status_code=404, detail="Cycle not found")
+
+        cur.execute(
+            """
+            SELECT payload, created_at
+            FROM cortex_phase_outputs
+            WHERE cycle_id = %s
+              AND artifact_type = 'synthesis'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (cycle_id,),
+        )
+        syn = cur.fetchone()
+        cur.close()
+        conn.commit()
+
+        proposal_text = None
+        if syn and isinstance(syn.get("payload"), dict):
+            proposal_text = syn["payload"].get("proposal_text")
+
+        result = _serialize({
+            "cycle_id": cyc["cycle_id"],
+            "matter_slug": cyc["matter_slug"],
+            "triggered_by": cyc["triggered_by"],
+            "status": cyc["status"],
+            "current_phase": cyc["current_phase"],
+            "cost_dollars": float(cyc.get("cost_dollars") or 0.0),
+            "cost_tokens": int(cyc.get("cost_tokens") or 0),
+            "started_at": cyc.get("started_at"),
+            "completed_at": cyc.get("completed_at"),
+            "aborted_reason": cyc.get("aborted_reason"),
+        })
+        result["proposal_text"] = proposal_text
+        result["has_proposal"] = bool(proposal_text)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error("get_cortex_cycle_proposal: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        store._put_conn(conn)
+
+
 @app.get("/api/cortex/lint", tags=["cortex"], dependencies=[Depends(verify_api_key)])
 async def get_cortex_lint(status: str = "open", limit: int = 50):
     """Lint results — wiki health findings."""
