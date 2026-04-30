@@ -1,38 +1,24 @@
-# CODE_4 — COMPLETE (CORTEX_BOOTSTRAP_MATTER_1)
+# CODE_4 — PENDING (BOOTSTRAP_V2_GOLD_SKIP_1)
 
-**Status:** COMPLETE — 2026-04-30T10:27Z (PR #96 squash-merged on green)
-**Brief:** `briefs/BRIEF_CORTEX_BOOTSTRAP_MATTER_1.md`
+**Status:** PENDING — dispatched 2026-04-30 by AI Head A (App)
+**Brief:** `briefs/BRIEF_BOOTSTRAP_V2_GOLD_SKIP_1.md`
 **Builder:** B4
-**Ship report:** `briefs/_reports/B4_cortex_bootstrap_matter_1_20260430.md`
-**Reviewer:** AI Head A (sole orchestrator) — comment-verdict APPROVE + Tier-A direct squash-merge under self-PR rule
+**Priority:** HIGH
+**ETA:** 2026-05-02
 
-## Outcome
+## Task summary
 
-| | |
-|---|---|
-| Build PR | #96 squash `41fd59d` (merged 2026-04-30T10:27Z) |
-| Tests | 41/41 new + 10/10 precedent regression (test_bootstrap_hagenauer_wiki.py) — 51 passed in 0.32s local re-run |
-| DDL grep | 0 matches for INSERT/UPDATE/DELETE/conn./cursor./execute( — bootstrap is filesystem-only |
-| Brief criteria | 8/8 met (≥10 negative cases vs ≥5 required) |
-| Test fixture | `briefs/_inputs/bootstrap_capital_call.yml` — V8 Q29 ratification (EUR 7M phased Apr/May/Jun, AO LP via Aelio Holding Ltd) |
-| Out of scope | Mac Mini mirror (CHANDA #9), slugs.yml PR (capital-call already canonical from version-7) |
+`scripts/bootstrap_matter.py` (you shipped, PR #96) emits `gold.md` per matter. CHANDA #4 author:director guard blocks any agent-authored `gold.md` commit, so emission is wasted work that requires manual revert. Remove the emission. ~30 min.
 
-## Closes
+4 manual revert drops today: capital-call, aukera, uk-homes, 12-matter batch. Stop the bleed.
 
-Wave 3 enabler. Bootstrap script now consumable for all future Wave 3+ matter dispatches.
+## Dispatch
 
-## Held-back queue (Director picks next)
+1. Read brief: `briefs/BRIEF_BOOTSTRAP_V2_GOLD_SKIP_1.md`
+2. Branch: `b4/bootstrap-v2-gold-skip`
+3. Pre-pytest re-checkout ritual.
+4. **Trigger-class:** B1 second-pair-of-eyes review BEFORE AI Head A merge (touches Director-override surface). Dispatch sequence: B4 builds + opens PR → AI Head A pings B1 for review → B1 PASS → AI Head A merges.
 
-**Wave 3 candidates (matter seeding via newly-shipped `bootstrap_matter.py`):**
-- mo-vie-am (Q11/12/14/15 critical)
-- capital-call (Q29 critical — fixture exists, just needs `--input` invocation + Mac Mini mirror)
-- franck-muller (Q23 €6M Oct deadline)
-- mo-prague+citic (Q36)
-- private-assets (Q17/18 Barclays UK)
-- cap-ferrat (Q16 BDO tax)
-- lilienmatt (Q7/8 — owns Annaberg)
-- aukera (Q12)
+## Previous task (closed)
 
-**Post-volume hardening (LOW priority):** F-3 doc-comment, F-4 specialist scope, F-5 cycle index migration deferred, F-6 POLL_INTERVAL retune.
-
-**P1-conditional:** CORTEX_RUN_CYCLE_ID_PINNING_1.
+PR #96 (CORTEX_BOOTSTRAP_MATTER_1) squash-merged 2026-04-30T10:27Z.
