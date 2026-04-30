@@ -371,6 +371,14 @@ class CortexRunRequest(BaseModel):
                                    description="Director's question driving the cycle")
     triggered_by: str = Field(default="director_manual", min_length=1, max_length=64,
                               description="Trigger source label — director_manual or scan_intent")
+    defer_notification: bool = Field(
+        default=False,
+        description=(
+            "CORTEX_NOTIFICATION_DEFER_1: when true, suppress the cost-warn "
+            "Slack DM for THIS invocation. Cost-warn still logs to logger.info "
+            "(observability preserved); only the Slack push is gated."
+        ),
+    )
 
 
 def _serialize(obj: dict) -> dict:
@@ -4324,25 +4332,47 @@ async def cortex_run_stream(req: CortexRunRequest):
             ),
         )
 
-    # Cost guardrail: warn-only Slack DM at threshold, run proceeds
+    # Cost guardrail: warn-only Slack DM at threshold, run proceeds.
+    # CORTEX_NOTIFICATION_DEFER_1: per-invoke + per-matter opt-out.
     n_specialist = specialist_calls_today(req.matter_slug)
     if n_specialist >= COST_WARN_SPECIALIST_PER_DAY:
-        try:
-            from outputs.slack_notifier import post_to_channel
-            from triggers.cortex_pre_review_gate import DIRECTOR_DM_CHANNEL
-            post_to_channel(
-                DIRECTOR_DM_CHANNEL,
-                (
-                    f"⚠️ Cortex spend watch: {req.matter_slug} has "
-                    f"{n_specialist} specialist invocations in last 24h "
-                    f"(warn threshold: {COST_WARN_SPECIALIST_PER_DAY}). "
-                    "Run proceeding — observability ping only."
-                ),
-                unfurl_links=False,
-                unfurl_media=False,
+        from triggers.cortex_pre_review_gate import (
+            DIRECTOR_DM_CHANNEL,
+            matter_notification_deferred,
+        )
+        defer_matter = matter_notification_deferred(req.matter_slug)
+        # Always log for observability — separate from Slack push.
+        logger.info(
+            "cortex_run cost-warn matter=%s specialists=%d threshold=%d defer_invoke=%s defer_matter=%s",
+            req.matter_slug,
+            n_specialist,
+            COST_WARN_SPECIALIST_PER_DAY,
+            req.defer_notification,
+            defer_matter,
+        )
+        if not (req.defer_notification or defer_matter):
+            try:
+                from outputs.slack_notifier import post_to_channel
+                post_to_channel(
+                    DIRECTOR_DM_CHANNEL,
+                    (
+                        f"⚠️ Cortex spend watch: {req.matter_slug} has "
+                        f"{n_specialist} specialist invocations in last 24h "
+                        f"(warn threshold: {COST_WARN_SPECIALIST_PER_DAY}). "
+                        "Run proceeding — observability ping only."
+                    ),
+                    unfurl_links=False,
+                    unfurl_media=False,
+                )
+            except Exception as e:
+                logger.error("cortex_run cost-warn Slack post failed: %s", e)
+        else:
+            logger.info(
+                "cortex_run cost-warn Slack DM suppressed matter=%s defer_invoke=%s defer_matter=%s",
+                req.matter_slug,
+                req.defer_notification,
+                defer_matter,
             )
-        except Exception as e:
-            logger.error("cortex_run cost-warn Slack post failed: %s", e)
 
     return StreamingResponse(
         stream_cycle_events(
