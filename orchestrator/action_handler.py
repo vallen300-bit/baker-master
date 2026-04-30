@@ -232,7 +232,7 @@ _INTENT_SYSTEM = """You are Baker's intent classifier. Given a Director's messag
 
 Return exactly this JSON structure (no other text, no markdown):
 {
-  "type": "email_action" | "whatsapp_action" | "deadline_action" | "contact_action" | "fireflies_fetch" | "clickup_action" | "clickup_fetch" | "clickup_plan" | "meeting_declaration" | "critical_declaration" | "question",
+  "type": "email_action" | "whatsapp_action" | "deadline_action" | "contact_action" | "fireflies_fetch" | "clickup_action" | "clickup_fetch" | "clickup_plan" | "meeting_declaration" | "critical_declaration" | "cortex_run_action" | "question",
   "recipient": "<email address OR name of recipient(s). For multiple recipients, return comma-separated (e.g. 'Edita Vallen, Philip Vallen, dvallen@brisengroup.com'). 'myself' or 'me' means dvallen@brisengroup.com. Return null only if no recipient at all.>",
   "subject": "<inferred subject line or null>",
   "content_request": "<what Baker should include in the email body, or null>",
@@ -253,7 +253,9 @@ Return exactly this JSON structure (no other text, no markdown):
   "clickup_status": "<target status like 'complete', 'in progress', or null>",
   "clickup_comment_text": "<comment body, or null>",
   "clickup_project_name": "<project name for planning, or null>",
-  "clickup_status_filter": "<'overdue', 'open', etc., or null>"
+  "clickup_status_filter": "<'overdue', 'open', etc., or null>",
+  "matter_slug": "<canonical matter slug for cortex_run_action, e.g. 'oskolkov', 'hagenauer-rg7', 'movie', 'kitzbuhel-six-senses', 'nvidia-corinthia'. null otherwise.>",
+  "question": "<full Director question for cortex_run_action — pass through verbatim. null otherwise.>"
 }
 
 Your job is ONLY to classify the intent type. Do NOT judge complexity — that is handled separately.
@@ -337,6 +339,14 @@ Critical item patterns (classify as critical_declaration — Director is marking
 - "Urgent: call Philip about tax" → type: "critical_declaration"
 Do NOT classify general urgency in questions as critical_declaration. "What's the most urgent thing?" is type: "question".
 
+Cortex run patterns (classify as cortex_run_action — Director wants a full Cortex reasoning cycle on a specific matter):
+- "Run cortex on hagenauer-rg7 — what's our position?" → type: "cortex_run_action", matter_slug: "hagenauer-rg7"
+- "Fire cortex for oskolkov" → type: "cortex_run_action", matter_slug: "oskolkov"
+- "Trigger cortex on movie regarding the Sähn dispute" → type: "cortex_run_action", matter_slug: "movie"
+- "Cortex review on nvidia-corinthia" → type: "cortex_run_action", matter_slug: "nvidia-corinthia"
+Use canonical lowercase slugs only: oskolkov, hagenauer-rg7, movie, kitzbuhel-six-senses, nvidia-corinthia.
+Always include the original Director question in the "question" field. If the matter slug isn't one of the canonical names, treat as a regular question instead.
+
 If the message is a question, information request, or anything else → type: "question".
 Only return the JSON object."""
 
@@ -359,6 +369,40 @@ def _quick_capability_detect(question: str) -> Optional[dict]:
             "complexity_reasoning": "Explicit specialist invocation implies analysis",
         }
     return None
+
+
+_CORTEX_RUN_PATTERN = re.compile(
+    r"\b(?:run|fire|trigger)\s+cortex\s+(?:on|for)\s+([a-z0-9][a-z0-9-]*)"
+    r"|\bcortex\s+review\s+(?:on|for)\s+([a-z0-9][a-z0-9-]*)",
+    re.IGNORECASE,
+)
+
+
+def _quick_cortex_run_detect(question: str) -> Optional[dict]:
+    """CORTEX_MANUAL_INVOKE_1: detect explicit Cortex-run requests.
+
+    Matches:
+      - "run cortex on hagenauer-rg7 — what's our position?"
+      - "fire cortex for oskolkov"
+      - "trigger cortex on movie regarding ..."
+      - "cortex review on hagenauer-rg7"
+
+    Returns ``{"type": "cortex_run_action", "matter_slug": "<slug>",
+    "question": "<original question>"}`` or None on no match. The full
+    original question is preserved in ``question`` — the cycle's Phase 2
+    loader handles trimming.
+    """
+    match = _CORTEX_RUN_PATTERN.search(question)
+    if not match:
+        return None
+    matter_slug = (match.group(1) or match.group(2) or "").lower()
+    if not matter_slug:
+        return None
+    return {
+        "type": "cortex_run_action",
+        "matter_slug": matter_slug,
+        "question": question,
+    }
 
 
 def _quick_email_detect(question: str) -> dict:
@@ -610,6 +654,15 @@ def classify_intent(question: str, conversation_history: str = "") -> dict:
     conversation_history: optional recent turns for resolving references.
     """
     _log_action("classify_intent:start", f"question={question[:200]}")
+
+    # CORTEX_MANUAL_INVOKE_1: Fast path — regex catches "run cortex on <matter>"
+    quick_cortex = _quick_cortex_run_detect(question)
+    if quick_cortex:
+        _log_action(
+            "classify_intent:regex_match",
+            f"type=cortex_run_action, matter={quick_cortex.get('matter_slug')}",
+        )
+        return quick_cortex
 
     # AGENT-FRAMEWORK-1: Fast path — regex catches explicit capability invocations
     quick_cap = _quick_capability_detect(question)
