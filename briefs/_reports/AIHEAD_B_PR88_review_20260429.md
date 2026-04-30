@@ -260,5 +260,108 @@ If Director time-pressure dominates correctness on F-1: AI Head A may downgrade 
 
 ---
 
+## §F1-FIX-REREVIEW (2026-04-30) — APPROVE delta
+
+**Reviewer:** AI Head B (aihead2)
+**Delta commit:** `0f91601` on `b1/cortex-manual-invoke-1` (atop `94a82ca`)
+**Verdict:** **APPROVE delta** — F-1 closed; carve-out (<2s tap-on-tap) accepted for Wave 1 surface.
+
+### §F1-0 — Literal stdout
+
+```
+$ python3 -c "import py_compile; py_compile.compile('outputs/cortex_run_stream.py', doraise=True); print('OK cortex_run_stream.py')"
+OK cortex_run_stream.py
+
+$ ~/bm-b1/.venv-b1/bin/pytest tests/test_cortex_run_stream.py -v
+... 13 items
+tests/test_cortex_run_stream.py::test_sse_format_single_data_block PASSED
+tests/test_cortex_run_stream.py::test_runs_in_last_hour_returns_count PASSED
+tests/test_cortex_run_stream.py::test_runs_in_last_hour_db_unavailable_returns_zero PASSED
+tests/test_cortex_run_stream.py::test_specialist_calls_today_returns_count PASSED
+tests/test_cortex_run_stream.py::test_specialist_calls_today_db_unavailable_returns_zero PASSED
+tests/test_cortex_run_stream.py::test_snapshot_cycle_returns_dict PASSED
+tests/test_cortex_run_stream.py::test_snapshot_cycle_returns_none_when_no_cycle PASSED
+tests/test_cortex_run_stream.py::test_snapshot_cycle_returns_none_when_db_unavailable PASSED
+tests/test_cortex_run_stream.py::test_stream_cycle_events_emits_full_sequence PASSED
+tests/test_cortex_run_stream.py::test_stream_cycle_events_terminal_failed_on_exception PASSED
+tests/test_cortex_run_stream.py::test_stream_cycle_events_terminal_timeout PASSED
+tests/test_cortex_run_stream.py::test_snapshot_cycle_disambiguates_concurrent_taps PASSED
+tests/test_cortex_run_stream.py::test_stream_cycle_events_concurrent_isolation PASSED
+============================== 13 passed in 0.27s ==============================
+
+$ ~/bm-b1/.venv-b1/bin/pytest tests/test_cortex_run_stream.py tests/test_cortex_run_endpoint.py tests/test_scan_cortex_intent.py -v
+... 26 items, all PASSED
+======================= 26 passed, 4 warnings in 55.26s ========================
+```
+
+✅ **13/13 stream + 26/26 combined new-suite + py_compile clean.** B1's claim verified.
+
+> Process note: a prior 4-failure transient on `tests/test_cortex_run_endpoint.py` was a worktree branch-race in shared `~/Desktop/baker-code` (aihead1 + aihead2 share the worktree per `00_WORKTREES.md`). Re-checkout of `b1/cortex-manual-invoke-1` cleared it. Worth flagging as a workflow lesson — concurrent reviewers in shared worktree risk silent branch-switch mid-test. Mitigation: each reviewer should re-checkout immediately before running tests, or use a dedicated `~/bm-aihead2` worktree if AI Head B work outgrows occasional review.
+
+### §F1-1 — Patch shape vs §1 sketch
+
+| §1 sketch element | `0f91601` implementation | Match |
+|---|---|---|
+| `sse_anchor = utcnow() - 2s slack` captured BEFORE `cycle_task = asyncio.create_task(...)` | `outputs/cortex_run_stream.py:251-258` — captures `sse_anchor` before `asyncio.create_task`, uses module constant `SSE_ANCHOR_SLACK_SECONDS=2.0` | ✅ |
+| `_snapshot_cycle` accepts `since_ts` kwarg | Added at `:147-152` with `Optional[datetime.datetime] = None` default | ✅ |
+| Filter `started_at >= %s`, `ORDER BY started_at ASC LIMIT 1` | Implemented at `:181-188` (gated on `since_ts is not None`) | ✅ |
+| Backward-compat (since_ts=None → DESC) | Preserved at `:189-196` (else branch) | ✅ |
+| `maybe_run_cycle` signature unchanged | No diff in `orchestrator/cortex_runner.py` | ✅ |
+| New live-PG concurrency test | `test_snapshot_cycle_disambiguates_concurrent_taps` (mock-cursor-based) + `test_stream_cycle_events_concurrent_isolation` (asyncio concurrent generators with monkeypatched `SSE_ANCHOR_SLACK_SECONDS=0.01`) | ✅ |
+
+Implementation is faithful to the sketch. The 2s slack is correctly module-level (not env var per brief Constraint #6); tests monkeypatch it to a small value to exercise concurrency in unit time.
+
+### §F1-2 — Carve-out assessment (B1's flagged residual)
+
+B1 flagged: "Two Director taps within 2s on same matter would still race — that requires cycle_id pinning, a strictly larger refactor."
+
+**Mechanism of residual race:** if two taps fire within `SSE_ANCHOR_SLACK_SECONDS` (2s) of each other, both their `sse_anchor` timestamps are EARLIER than both cycles' Phase 1 commits. Both polling loops query `_snapshot_cycle(since_ts=anchor)` → both find both cycles eligible → ASC LIMIT 1 → both return cycle A. Stream A correctly sees its own cycle; stream B sees A's events with A's `cycle_id` (sibling leak), then `cycle_task` resolves to B's actual Cycle object → terminal event has B's cycle_id → mid-stream cycle_id flip exactly as in the original F-1 (just narrower window).
+
+**Wave 1 acceptability:**
+- Director-only manual surface (curl + Scan + dashboard button)
+- Rate limit 5/hr/matter → average ~12 min between taps under sustained use
+- 2s window is tighter than human double-click reaction time on a CTA-style "Run Cortex" button (~200-500ms) — so dashboard button without debounce IS a residual reproducer
+- Programmatic invokers (auto-fire from another sentinel, scheduled job, batch script) NOT on Wave 1 surface
+- Smoke-test stress (curl & curl &) reproduces the residual
+
+**Verdict:** acceptable for Wave 1 close, with two cheap defenses worth adding before Director-driven UI ships:
+1. **Dashboard CTA debounce** (already-recommended button-design pattern; no Cortex-side change needed). 1-line JS guard or button-disable-on-click.
+2. **Telemetry**: log `runs_in_last_hour=1+` at INFO level when stream_cycle_events starts, so any residual race shows up in logs. Tiny addition, no semantic change.
+
+Cycle_id pinning (the strictly larger refactor B1 cited) is a defensible P1 follow-up `CORTEX_RUN_CYCLE_ID_PINNING_1` if/when programmatic invokers appear OR if the dashboard ships without debounce AND the Director hits the residual. Pinning would either:
+- (a) Modify `maybe_run_cycle` to accept a caller-supplied `cycle_id` (changes signature — was a brief constraint), or
+- (b) Use an asyncio.Queue / Future to propagate Phase 1's freshly-committed cycle_id back from the Task to the stream generator (no signature change, but 30-50 LOC + new failure modes), or
+- (c) Tag cycles with a per-stream UUID before INSERT and filter snapshot by that UUID (cleanest; ~15 LOC schema add + carrier-column).
+
+Option (c) is the right long-term fix. Out of scope for Wave 1 close.
+
+### §F1-3 — Other delta concerns
+
+- **Tests adequately cover the disambiguation path.** `test_snapshot_cycle_disambiguates_concurrent_taps` exercises three scenarios (anchor before both, anchor between, anchor=None); `test_stream_cycle_events_concurrent_isolation` (read in delta diff §300+) runs two real `stream_cycle_events` generators concurrently with a fake DB. Coverage is sufficient for the unit-test layer; live-PG end-to-end concurrency would be a nice-to-have follow-up but not a merge blocker.
+- **Backward compat** (`since_ts=None` → DESC): correctly preserved + documented. The existing `test_snapshot_cycle_returns_dict` still passes because it doesn't pass `since_ts`. The fake-snapshot signature change in `test_stream_cycle_events_emits_full_sequence` (`since_ts=None` added to kwargs) is correct.
+- **`SSE_ANCHOR_SLACK_SECONDS` documentation** in module-level comment block (`:44-53`) explains the rationale + the test-monkeypatch pattern. Future maintainers won't be surprised by the 2s offset.
+- **Module-level constant vs env var**: correct call. Brief Constraint #6 caps the env-var addition at 3 named vars. The 2s slack should be invariant production behavior, not operator-tunable.
+- **No new findings on F-2 through F-6**: delta scope limited to `outputs/cortex_run_stream.py` + `tests/test_cortex_run_stream.py`. Scan UI render gap (F-2), 'act' phase doc note (F-3), specialist counter comment (F-4), index plan (F-5), poll interval (F-6) — all unchanged. They remain post-merge follow-up briefs.
+
+### §F1-4 — RA-24 dual-clear status (post-delta)
+
+- **AI Head A (#1):** APPROVE structural + security (original review on PR comments) + APPROVE delta (per dispatch lean: accept 2s carve-out).
+- **AI Head B (#2, this delta re-review):** **APPROVE delta** on F-1 fix `0f91601`. Carve-out accepted; cycle_id pinning parked as P1 follow-up `CORTEX_RUN_CYCLE_ID_PINNING_1` if/when programmatic invokers appear or Director hits the residual.
+
+**Dual-clear satisfied.** AI Head A may merge PR #88 immediately. Render env-vars (`CORTEX_RUN_POLL_INTERVAL` / `CORTEX_RUN_RATE_LIMIT` / `CORTEX_COST_WARN_SPECIALIST_PER_DAY`) ship with defaults — no Render env action required unless tuning. Wave 1 closes on this merge + the four Track 3/4/5 already merged matter-config PRs.
+
+### §F1-5 — Post-merge follow-up brief queue (recap)
+
+| Brief | Source | Priority |
+|---|---|---|
+| `CORTEX_RUN_SCAN_UI_RENDER_1` | F-2 | MEDIUM (Director user-visible gap on Scan smoke) |
+| `CORTEX_RUN_PHASE_ACT_DOCNOTE_1` | F-3 | LOW (doc-only) |
+| `CORTEX_RUN_SPECIALIST_COUNTER_COMMENT_1` | F-4 | LOW (1-line code comment) |
+| `CORTEX_RUN_INDEX_TRIGGERED_BY_1` | F-5 | LOW (migration when 10K cycles/matter) |
+| `CORTEX_RUN_POLL_INTERVAL_TUNING_1` | F-6 | LOW (default 0.5→2.0s) |
+| `CORTEX_RUN_CYCLE_ID_PINNING_1` | this re-review §F1-2 | P1 conditional (programmatic invokers OR Director hits 2s residual) |
+
+---
+
 Co-authored-by: AI Head B <aihead-b@brisengroup.com>
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
