@@ -796,6 +796,49 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info("Skipped: cortex_stuck_cycle_sentinel (CORTEX_STUCK_CYCLE_SENTINEL_ENABLED=false)")
 
+    # CORTEX_PHASE6_REFLECTOR_1 (Brief 3): hourly Phase 6 Reflector sweep.
+    # Trigger B (deferred) per brief §3.5 — finds Reflector-eligible cycles
+    # that either (a) have a Triaga decision since last sweep, or (b) have
+    # aged past TRIAGA_TTL_DAYS without a decision; updates counters on
+    # cited directives + writes proposed-config-deltas.md to vault staging.
+    # Idempotent via cortex_phase_outputs partial unique idx on
+    # artifact_type='reflector_complete' (Brief 4 migration §3.1).
+    # Env gate ``CORTEX_PHASE6_REFLECTOR_ENABLED`` (default ``true``).
+    # Cadence override via REFLECTOR_SWEEP_CRON_HOUR / *_MINUTE (cron) or
+    # REFLECTOR_SWEEP_INTERVAL_MINUTES (default 60 = hourly).
+    _reflector_enabled = _os.environ.get(
+        "CORTEX_PHASE6_REFLECTOR_ENABLED", "true"
+    ).lower()
+    if _reflector_enabled not in ("false", "0", "no", "off"):
+        from orchestrator.cortex_phase6_reflector import sweep_pending_cycles_sync
+        try:
+            _reflector_minutes = int(
+                _os.environ.get("REFLECTOR_SWEEP_INTERVAL_MINUTES", "60")
+            )
+        except (TypeError, ValueError):
+            _reflector_minutes = 60
+        if _reflector_minutes < 5:
+            logger.warning(
+                "REFLECTOR_SWEEP_INTERVAL_MINUTES=%s below 5min floor; clamping to 5",
+                _reflector_minutes,
+            )
+            _reflector_minutes = 5
+        scheduler.add_job(
+            sweep_pending_cycles_sync,
+            IntervalTrigger(minutes=_reflector_minutes),
+            id="phase6_reflector_sweep",
+            name=f"Cortex Phase 6 Reflector sweep (every {_reflector_minutes} min)",
+            coalesce=True, max_instances=1, replace_existing=True,
+            misfire_grace_time=3600,
+        )
+        logger.info(
+            f"Registered: phase6_reflector_sweep (every {_reflector_minutes} min)"
+        )
+    else:
+        logger.info(
+            "Skipped: phase6_reflector_sweep (CORTEX_PHASE6_REFLECTOR_ENABLED=false)"
+        )
+
     # BRIEF_MOVIE_AM_RETROFIT_1 D5: weekly MOVIE AM vault lint.
     # Sunday 06:05 UTC — offset 5 min from ao_pm_lint to avoid vault-mirror
     # contention. Env gate ``MOVIE_AM_LINT_ENABLED`` (default ``true``)

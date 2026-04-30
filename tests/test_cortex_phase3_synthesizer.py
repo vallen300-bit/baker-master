@@ -120,7 +120,14 @@ def test_load_synthesizer_prompt_uses_db_row(patched, monkeypatch):
         phase2_context={}, phase3a_result=_fake_3a_result(),
         phase3b_result=_fake_3b_result(),
     ))
-    assert holder["opus_calls"][0]["sys"] == "SYNTH_PROMPT_FROM_DB"
+    # CORTEX_PHASE6_REFLECTOR_1 §3.1: citation directive is prepended to
+    # whatever synthesizer prompt is loaded (DB or default). Assert the
+    # DB-loaded prompt is preserved AS A SUFFIX, with the citation preamble
+    # leading.
+    sys_prompt = holder["opus_calls"][0]["sys"]
+    assert sys_prompt.endswith("SYNTH_PROMPT_FROM_DB")
+    assert "DIRECTIVE CITATION REQUIREMENT" in sys_prompt
+    assert "[directive: <id>]" in sys_prompt
 
 
 def test_load_synthesizer_prompt_falls_back_when_missing(patched):
