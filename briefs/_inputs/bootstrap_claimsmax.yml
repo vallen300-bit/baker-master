@@ -1,0 +1,63 @@
+# Bootstrap input — claimsmax (Brisen AI product for construction-claim parsing)
+# Wave 3 batch — Director-ratified 2026-04-30
+
+matter_slug: claimsmax
+matter_name: "ClaimsMax (Brisen AI product — construction-claim parsing at scale)"
+absorbed_from: "seed (Wave 3 batch — slugs.yml v8 description)"
+absorbed_at: 2026-04-30
+absorbed_by: "AI Head A"
+authority_chain: "slugs.yml v8 (Brisen AI product, 500K+ docs parallel processing, tested on Hagenauer corpus, deployable to Corinthia/third-party) + Director ratification 2026-04-30 (Wave 3 batch)"
+ratified_at: 2026-04-30
+
+autonomy_level: recommend_wait
+
+sense_sources:
+  - email: matter_keywords
+  - whatsapp: contact_phones
+
+entities:
+  primary:
+    - brisen-capital-sa
+  team:
+    - dimitry-vallen
+    - edita-vallen
+    - balazs-csepregi
+  counterparties:
+    - hagenauer-rg7
+  adjacent:
+    - nvidia-corinthia
+    - baker-internal
+
+trigger_patterns:
+  - '\b(claimsmax|claims[-\s]?max|tendermax|tender[-\s]?max)\b'
+
+default_specialists: [legal, finance]
+specialist_cap_per_cycle: 5
+specialist_timeout_seconds: 60
+specialist_retries: 2
+cycle_timeout_seconds: 300
+
+auto_trigger:
+  severity_floor: high
+  confidence_floor: 0.8
+
+games_relevant: false
+counterparty_iteration_horizon: long_finite
+counterparty_reputation_stake: 5
+counterparty_observed_strategy: cooperate_with_constraints
+
+project_structure: |
+  - **Product:** ClaimsMax — AI parsing of construction-claim documents at scale (500K+ docs, parallel processing).
+  - **Status:** New AI business venture. Tested on Hagenauer corpus.
+  - **Distribution targets:** Corinthia / third-party contractors (post-validation).
+  - **Distinction:** ClaimsMax is the productized AI; `baker-internal` is the Baker system itself.
+
+counterparty_topology: |
+  No external counterparties yet (pre-commercialization). Future: contractor
+  GCs, insurance / claims firms, real-estate operators.
+
+notes: |
+  ## Bridge
+  - `hagenauer-rg7` — first real corpus test (final-account dispute parsing)
+  - `nvidia-corinthia` — distribution channel candidate (Corinthia hospitality angle)
+  - `baker-internal` — sibling AI capability; ClaimsMax may share Baker infra components

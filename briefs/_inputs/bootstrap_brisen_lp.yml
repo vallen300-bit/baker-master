@@ -1,0 +1,72 @@
+# Bootstrap input — brisen-lp (EPI Bond investor vehicle)
+# Wave 3 batch — Director-ratified 2026-04-30
+#
+# Note: Q28 dismissed status pull 2026-04-29 ("not currently active"). Block2
+# inventory 2026-04-26 still listed brisen-lp as ALIVE. Seeding as thin stub
+# to make matter visible to Cortex; if Director wants this retired, slug update
+# follows in a separate change.
+
+matter_slug: brisen-lp
+matter_name: "Brisen LP (EPI Bond investor vehicle)"
+absorbed_from: "seed (Wave 3 batch — slugs.yml v1 description; Q28 dismissed status pull 2026-04-29)"
+absorbed_at: 2026-04-30
+absorbed_by: "AI Head A"
+authority_chain: "slugs.yml v1 (Brisen LP — EPI Bond investor vehicle) + block2 inventory 2026-04-26 ALIVE + Director ratification 2026-04-30 (Wave 3 batch — thin stub; Q28 dismissed doesn't retire matter)"
+ratified_at: 2026-04-30
+
+autonomy_level: recommend_wait
+
+sense_sources:
+  - email: matter_keywords
+  - whatsapp: contact_phones
+
+entities:
+  primary:
+    - brisen-capital-sa
+  team:
+    - dimitry-vallen
+    - edita-vallen
+    - balazs-csepregi
+  counterparties:
+    - ubs
+  adjacent:
+    - oskolkov
+    - brisen-funding
+
+trigger_patterns:
+  - '\b(brisen[-\s]?lp|brisen.lp\b)\b'
+  - '\b(epi[-\s]?bond|epi[-\s]?bonds)\b'
+  - '\b(ubs)\b.*\b(epi|bond|brisen.lp)\b'
+
+default_specialists: [legal, finance, tax-CH]
+specialist_cap_per_cycle: 5
+specialist_timeout_seconds: 60
+specialist_retries: 2
+cycle_timeout_seconds: 300
+
+auto_trigger:
+  severity_floor: high
+  confidence_floor: 0.8
+
+games_relevant: false
+counterparty_iteration_horizon: long_finite
+counterparty_reputation_stake: 6
+counterparty_observed_strategy: cooperate_with_constraints
+
+project_structure: |
+  - **Vehicle:** Brisen LP (EPI Bond investor).
+  - **Bank channel:** UBS (per Tier 0 CLAUDE.md "John related to EPI bonds / UBS").
+  - **Q28 status:** Status pull dismissed 2026-04-29 (not currently active per Director). Matter still listed ALIVE in block2 inventory 2026-04-26.
+
+counterparty_topology: |
+  | Slug | Role | Status |
+  |---|---|---|
+  | `ubs` | Bond channel bank | active |
+
+notes: |
+  Thin stub — Director may want to retire if Q28 dismissal generalizes to
+  matter-level retirement.
+
+  ## Bridge
+  - `oskolkov` — possible LP overlap (AO investor universe)
+  - `brisen-funding` — cross-cut funding category

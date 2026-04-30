@@ -1,0 +1,72 @@
+# Bootstrap input — kitzbuhel-six-senses (existing dir, adding cortex-config.md only)
+# Wave 3 batch — Director-ratified 2026-04-30
+#
+# NOTE: matter dir already exists in baker-vault (with _index.md, _overview.md,
+# gold.md, proposed-gold.md). This input generates the FULL canonical shape;
+# only NEW files (cortex-config.md, agenda.md, state.md, curated/) get mirrored
+# to baker-vault. Existing files left untouched.
+
+matter_slug: kitzbuhel-six-senses
+matter_name: "Kitzbühel Six Senses (hotel development + Steininger dispute)"
+absorbed_from: "seed (Wave 3 batch — slugs.yml v2 + RA-21 Steininger fold 2026-04-26)"
+absorbed_at: 2026-04-30
+absorbed_by: "AI Head A"
+authority_chain: "slugs.yml v2 (Kitzbühel Six Senses — hotel development, Steininger-family dispute) + RA-21 Steininger fold ratification 2026-04-26 + Director ratification 2026-04-30 (Wave 3 batch — adding cortex-config.md to existing dir)"
+ratified_at: 2026-04-30
+
+autonomy_level: recommend_wait
+
+sense_sources:
+  - email: matter_keywords
+  - whatsapp: contact_phones
+
+entities:
+  primary:
+    - brisen-capital-sa
+  team:
+    - dimitry-vallen
+    - edita-vallen
+    - balazs-csepregi
+  counterparties:
+    - steininger
+  adjacent:
+    - hagenauer-rg7
+
+trigger_patterns:
+  - '\b(kitzbuhel|kitzbühel|kitzbuehel)\b.*\b(six.senses|sixsenses)\b'
+  - '\b(k6s|kitzbuhel.6s)\b'
+  - '\b(steininger)\b'
+
+default_specialists: [legal, finance, tax-AT, tax-CH, game-theory]
+specialist_cap_per_cycle: 5
+specialist_timeout_seconds: 60
+specialist_retries: 2
+cycle_timeout_seconds: 300
+
+auto_trigger:
+  severity_floor: high
+  confidence_floor: 0.8
+
+games_relevant: true
+counterparty_iteration_horizon: long_finite
+counterparty_reputation_stake: 7
+counterparty_observed_strategy: cooperate_with_constraints
+
+project_structure: |
+  - **Project:** Kitzbühel Six Senses hotel development.
+  - **Location:** Kitzbühel, Austria.
+  - **Brand:** Six Senses (operator-class).
+  - **Active dispute:** Steininger family — counterparty cluster folded into this matter slug (RA-21 disposition 2026-04-26; alias preserved on retired `steininger` slug).
+
+counterparty_topology: |
+  | Slug | Role | Status |
+  |---|---|---|
+  | `steininger` | Counterparty cluster (folded from former standalone slug) | active |
+
+notes: |
+  Steininger-family dispute is K6S-internal counterparty signals — not a
+  separate matter. Per RA-21 ratification 2026-04-26.
+
+  ## Bridge
+  - `hagenauer-rg7` — operational analog (Brisen-led hotel/residential project
+    with active counterparty dispute)
