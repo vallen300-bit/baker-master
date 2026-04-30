@@ -477,19 +477,20 @@ TOOLS = [
         },
     ),
     # ------------------------------------------------------------------
-    # VAULT-READ TOOLS (SOT_OBSIDIAN_1_PHASE_D) — Cowork reads her own
-    # canonical skill + memory files from the Render-side baker-vault
-    # mirror. Read-only; scoped to `_ops/` subtree only.
+    # VAULT-READ TOOLS (SOT_OBSIDIAN_1_PHASE_D + BAKER_VAULT_READ_WIKI_SCOPE_1)
+    # Cowork reads her own canonical skill + memory files plus per-matter
+    # dossiers from the Render-side baker-vault mirror. Read-only; scoped
+    # to `_ops/` and `wiki/` subtrees only.
     # ------------------------------------------------------------------
     Tool(
         name="baker_vault_list",
-        description="List files in the baker-vault mirror under a given prefix (scoped to `_ops/` — skills, agents, processes, briefs, registries). Use this to discover what canonical files are available. Returns sorted relative paths for `.md`, `.yml`, `.yaml`, `.txt` files only.",
+        description="List files in the baker-vault mirror under a given prefix. Allowed prefixes: `_ops/` (skills, agents, processes, briefs, registries) and `wiki/` (matter dossiers, curated knowledge, ratified priorities). Use this to discover what canonical files are available. Returns sorted relative paths for `.md`, `.yml`, `.yaml`, `.txt` files only.",
         inputSchema={
             "type": "object",
             "properties": {
                 "prefix": {
                     "type": "string",
-                    "description": "Path prefix to list under. Must start with `_ops/`. Default `_ops/`.",
+                    "description": "Path prefix to list under. Must start with `_ops/` or `wiki/`. Default `_ops/`.",
                     "default": "_ops/",
                 },
             },
@@ -497,13 +498,13 @@ TOOLS = [
     ),
     Tool(
         name="baker_vault_read",
-        description="Read a canonical file from the baker-vault mirror (your single source of truth for AI Dennis's skill + memory, write-brief skill, bank-model, etc.). Scoped to `_ops/**` with path-traversal protection. 128 KB cap — oversize files return metadata only. Returns `{path, content_utf8, sha256, bytes, last_commit_sha, truncated}`.",
+        description="Read a canonical file from the baker-vault mirror — single source of truth for AI Dennis's skill + memory, write-brief skill, bank-model (`_ops/`) plus per-matter dossiers like `wiki/matters/<slug>/cortex-config.md`, `gold.md`, `curated/*`, and `wiki/hot.md` (`wiki/`). Scoped to `_ops/**` and `wiki/**` with path-traversal protection. 128 KB cap — oversize files return metadata only. Returns `{path, content_utf8, sha256, bytes, last_commit_sha, truncated}`.",
         inputSchema={
             "type": "object",
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Relative path, e.g. `_ops/skills/it-manager/SKILL.md`. Must start with `_ops/`. Only .md / .yml / .yaml / .txt allowed.",
+                    "description": "Relative path, e.g. `_ops/skills/it-manager/SKILL.md` or `wiki/matters/oskolkov/cortex-config.md`. Must start with `_ops/` or `wiki/`. Only .md / .yml / .yaml / .txt allowed.",
                 },
             },
             "required": ["path"],

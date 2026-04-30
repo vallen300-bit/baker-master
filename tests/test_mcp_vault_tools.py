@@ -37,6 +37,14 @@ LONGTERM_FIXTURE = """# AI Dennis — Longterm\n\nLongterm memory.\n"""
 REGISTRY_FIXTURE = "slug_registry:\n  version: 1\n  slugs: []\n"
 BINARY_FIXTURE = b"\x89PNG\r\n\x1a\nfakebinary"
 
+# wiki/ scope fixtures (BAKER_VAULT_READ_WIKI_SCOPE_1)
+HOT_FIXTURE = "# Hot priorities\n\nDirector-ratified focus list.\n"
+AO_CORTEX_CONFIG_FIXTURE = (
+    "# Andrey Oskolkov — Cortex config\n\nMatter slug: oskolkov.\n"
+)
+AO_GOLD_FIXTURE = "# AO — gold\n\nDirector-curated knowledge.\n"
+WIKI_PRIORITIES_FIXTURE = "priorities:\n  - tier_1\n  - tier_2\n"
+
 
 @pytest.fixture
 def vault_mirror_repo(tmp_path, monkeypatch):
@@ -70,6 +78,19 @@ def vault_mirror_repo(tmp_path, monkeypatch):
 
     # A binary file under _ops/ — read tool must reject.
     (work / "_ops" / "skills" / "it-manager" / "image.png").write_bytes(BINARY_FIXTURE)
+
+    # wiki/ scope fixtures (BAKER_VAULT_READ_WIKI_SCOPE_1)
+    (work / "wiki").mkdir()
+    (work / "wiki" / "hot.md").write_text(HOT_FIXTURE)
+    (work / "wiki" / "_priorities.yml").write_text(WIKI_PRIORITIES_FIXTURE)
+    (work / "wiki" / "matters").mkdir()
+    (work / "wiki" / "matters" / "oskolkov").mkdir()
+    (work / "wiki" / "matters" / "oskolkov" / "cortex-config.md").write_text(
+        AO_CORTEX_CONFIG_FIXTURE
+    )
+    (work / "wiki" / "matters" / "oskolkov" / "gold.md").write_text(AO_GOLD_FIXTURE)
+    # A binary inside wiki/ to prove the extension allowlist still applies.
+    (work / "wiki" / "matters" / "oskolkov" / "image.png").write_bytes(BINARY_FIXTURE)
 
     # Init + commit + push to bare origin
     env = {
@@ -151,10 +172,15 @@ def test_read_absolute_path_is_rejected(vault_mirror_repo):
 
 
 def test_read_out_of_scope_prefix_is_rejected(vault_mirror_repo):
-    """Path that doesn't start with `_ops/` — must raise."""
+    """Path that doesn't start with an ALLOWED_PREFIX — must raise.
+
+    Was ``wiki/`` pre-BAKER_VAULT_READ_WIKI_SCOPE_1; flipped to ``raw/``
+    (different threat model, deliberately out of scope per brief
+    §Key Constraints).
+    """
     vm = vault_mirror_repo["module"]
     with pytest.raises(vm.VaultPathError):
-        vm.read_ops_file("wiki/someone.md")
+        vm.read_ops_file("raw/contracts/foo.md")
 
 
 def test_read_nonexistent_returns_not_found(vault_mirror_repo):
@@ -220,15 +246,178 @@ def test_list_ops_agents_subdir(vault_mirror_repo):
 
 
 def test_list_out_of_scope_is_rejected(vault_mirror_repo):
+    """Listing under a non-allowed prefix (``raw/``) must raise.
+
+    Was ``wiki/`` pre-BAKER_VAULT_READ_WIKI_SCOPE_1; flipped because
+    ``wiki/`` is now legal. ``raw/`` stays deliberately out of scope.
+    """
     vm = vault_mirror_repo["module"]
     with pytest.raises(vm.VaultPathError):
-        vm.list_ops_files("wiki/")
+        vm.list_ops_files("raw/")
 
 
 def test_list_traversal_is_rejected(vault_mirror_repo):
     vm = vault_mirror_repo["module"]
     with pytest.raises(vm.VaultPathError):
         vm.list_ops_files("_ops/../")
+
+
+# --------------------------------------------------------------------------
+# wiki/ scope (BAKER_VAULT_READ_WIKI_SCOPE_1)
+# --------------------------------------------------------------------------
+
+
+def test_read_wiki_hot_md_returns_content(vault_mirror_repo):
+    """H2 — wiki/hot.md (Director-ratified priorities) reads cleanly."""
+    vm = vault_mirror_repo["module"]
+    result = vm.read_ops_file("wiki/hot.md")
+    assert result["path"] == "wiki/hot.md"
+    assert result["content_utf8"] == HOT_FIXTURE
+    assert result["bytes"] == len(HOT_FIXTURE.encode("utf-8"))
+    assert (
+        result["sha256"]
+        == hashlib.sha256(HOT_FIXTURE.encode("utf-8")).hexdigest()
+    )
+    assert result["truncated"] is False
+
+
+def test_read_wiki_matter_cortex_config(vault_mirror_repo):
+    """H3 — per-matter cortex-config under wiki/matters/<slug>/ reads cleanly."""
+    vm = vault_mirror_repo["module"]
+    result = vm.read_ops_file("wiki/matters/oskolkov/cortex-config.md")
+    assert result["content_utf8"] == AO_CORTEX_CONFIG_FIXTURE
+    assert result["truncated"] is False
+
+
+def test_read_wiki_yml_is_allowed(vault_mirror_repo):
+    """H4 — yml under wiki/ obeys the same extension allowlist as _ops/."""
+    vm = vault_mirror_repo["module"]
+    result = vm.read_ops_file("wiki/_priorities.yml")
+    assert result["content_utf8"] == WIKI_PRIORITIES_FIXTURE
+    assert result["truncated"] is False
+
+
+def test_read_wiki_traversal_is_rejected(vault_mirror_repo):
+    """R2 — `wiki/../etc/passwd` escapes; realpath must catch it."""
+    vm = vault_mirror_repo["module"]
+    with pytest.raises(vm.VaultPathError):
+        vm.read_ops_file("wiki/../etc/passwd")
+
+
+def test_read_wiki_traversal_into_ops_is_rejected(vault_mirror_repo):
+    """`wiki/../_ops/foo.md` escapes the wiki/ subtree; reject even though
+    target lands inside another allowed prefix. Each call is scoped to one
+    prefix at a time — crossing prefixes via `..` is still a traversal.
+    """
+    vm = vault_mirror_repo["module"]
+    with pytest.raises(vm.VaultPathError):
+        vm.read_ops_file("wiki/../_ops/skills/it-manager/SKILL.md")
+
+
+def test_read_wiki_binary_extension_is_rejected(vault_mirror_repo):
+    """R3 — extension allowlist applies inside wiki/ too."""
+    vm = vault_mirror_repo["module"]
+    with pytest.raises(vm.VaultPathError, match="extension not allowed"):
+        vm.read_ops_file("wiki/matters/oskolkov/image.png")
+
+
+def test_list_wiki_root_returns_allowed_files(vault_mirror_repo):
+    """H5-ish — listing wiki/ surfaces .md + .yml; binary excluded."""
+    vm = vault_mirror_repo["module"]
+    paths = vm.list_ops_files("wiki/")
+    assert "wiki/hot.md" in paths
+    assert "wiki/_priorities.yml" in paths
+    assert "wiki/matters/oskolkov/cortex-config.md" in paths
+    assert "wiki/matters/oskolkov/gold.md" in paths
+    # Extension allowlist still in force — png excluded.
+    assert "wiki/matters/oskolkov/image.png" not in paths
+    # _ops/ files must NOT leak into a wiki/ listing.
+    assert all(p.startswith("wiki/") for p in paths)
+
+
+def test_list_wiki_matter_subdir(vault_mirror_repo):
+    """Listing scoped to wiki/matters/<slug>/ returns only that subtree."""
+    vm = vault_mirror_repo["module"]
+    paths = vm.list_ops_files("wiki/matters/oskolkov/")
+    assert all(p.startswith("wiki/matters/oskolkov/") for p in paths)
+    assert "wiki/matters/oskolkov/cortex-config.md" in paths
+    assert "wiki/matters/oskolkov/gold.md" in paths
+
+
+def test_read_wiki_rejects_symlink_escape(vault_mirror_repo, tmp_path):
+    """Symlink inside wiki/ pointing outside the mirror is rejected.
+
+    Same realpath defense as the _ops/ symlink-escape test, applied to the
+    new prefix. A regression here would let any wiki/ writer plant a
+    symlink that exfiltrates host files.
+    """
+    vm = vault_mirror_repo["module"]
+    mirror = vault_mirror_repo["mirror_path"]
+    outside = tmp_path / "outside-wiki-secrets.md"
+    outside.write_text("WIKI_SECRET\n")
+
+    evil = mirror / "wiki" / "matters" / "oskolkov" / "EVIL.md"
+    os.symlink(str(outside), str(evil))
+
+    with pytest.raises(vm.VaultPathError):
+        vm.read_ops_file("wiki/matters/oskolkov/EVIL.md")
+
+    paths = vm.list_ops_files("wiki/")
+    assert "wiki/matters/oskolkov/EVIL.md" not in paths
+
+
+def test_mcp_dispatch_baker_vault_read_wiki_happy(vault_mirror_repo):
+    """End-to-end MCP dispatch — wiki/ path reads through the tool."""
+    from baker_mcp.baker_mcp_server import _dispatch
+    output = _dispatch(
+        "baker_vault_read",
+        {"path": "wiki/matters/oskolkov/cortex-config.md"},
+    )
+    parsed = json.loads(output)
+    assert parsed["path"] == "wiki/matters/oskolkov/cortex-config.md"
+    assert parsed["content_utf8"] == AO_CORTEX_CONFIG_FIXTURE
+
+
+def test_mcp_dispatch_baker_vault_list_wiki_returns_json(vault_mirror_repo):
+    """End-to-end MCP dispatch — wiki/ listing through the tool."""
+    from baker_mcp.baker_mcp_server import _dispatch
+    output = _dispatch("baker_vault_list", {"prefix": "wiki/matters/oskolkov/"})
+    parsed = json.loads(output)
+    assert parsed["prefix"] == "wiki/matters/oskolkov/"
+    assert "wiki/matters/oskolkov/cortex-config.md" in parsed["paths"]
+
+
+def test_allowed_prefixes_constant_is_locked():
+    """Pin the allowed-prefix set — adding a new prefix must be a deliberate
+    brief (separate threat model). Brief §Key Constraints: do NOT add raw/
+    here.
+    """
+    import vault_mirror
+    importlib.reload(vault_mirror)
+    assert vault_mirror.ALLOWED_PREFIXES == frozenset(["_ops/", "wiki/"])
+
+
+def test_ops_prefix_back_compat_alias_preserved():
+    """OPS_PREFIX must still resolve to `_ops/` so legacy importers don't
+    break before the rename cleanup brief lands.
+    """
+    import vault_mirror
+    importlib.reload(vault_mirror)
+    assert vault_mirror.OPS_PREFIX == "_ops/"
+
+
+def test_read_function_back_compat_alias_preserved():
+    """read_ops_file must remain a callable alias of read_vault_file."""
+    import vault_mirror
+    importlib.reload(vault_mirror)
+    assert vault_mirror.read_ops_file is vault_mirror.read_vault_file
+
+
+def test_list_function_back_compat_alias_preserved():
+    """list_ops_files must remain a callable alias of list_vault_files."""
+    import vault_mirror
+    importlib.reload(vault_mirror)
+    assert vault_mirror.list_ops_files is vault_mirror.list_vault_files
 
 
 # --------------------------------------------------------------------------
