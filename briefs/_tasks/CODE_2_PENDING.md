@@ -1,25 +1,23 @@
-# CODE_2 — IDLE (post PR #81 ship)
+# CODE_2 — PENDING (ROADMAP_DRIFT_CLICKUP_SENTINEL_1)
 
-**Status:** COMPLETE 2026-04-29T05:55:00Z
-**Last task:** B2 build of CORTEX_SLACK_INTERACTIVITY_1 — PR #81 (`df886be`) merged after dual-clear (B1 PASS + /security-review PASS).
-**Brief:** `briefs/BRIEF_CORTEX_SLACK_INTERACTIVITY_1.md`
-**Ship report:** `briefs/_reports/B2_cortex_slack_interactivity_20260429.md`
-**B1 review report:** `briefs/_reports/B1_pr81_review_20260429.md`
-**PR:** https://github.com/vallen300-bit/baker-master/pull/81 (squash-merged 2026-04-29; branch deleted)
-**Trigger class:** HIGH (RA-24)
+**Status:** PENDING — dispatched 2026-04-30 by AI Head A (App)
+**Brief:** `briefs/BRIEF_ROADMAP_DRIFT_CLICKUP_SENTINEL_1.md`
+**Builder:** B2
+**Priority:** MEDIUM
+**ETA:** 2026-05-03
 
-**Ship gate:** 8/8 interactivity + 59/59 regression PASS (literal); py_compile clean (2 files); B1 10/10 sections PASS; /security-review zero HIGH/MEDIUM findings.
+## Task summary
 
-**Non-blocking obs (B1 §K + /security-review):**
-1. Sync `_post_response_update` "Processing…" before return at `triggers/slack_interactivity.py:342-350` deviates from brief §E.2 — Phase 5 handlers properly backgrounded, only the UX-feedback post is sync. Trivial follow-up brief.
-2. `response_url` not pinned to `hooks.slack.com` (defense-in-depth; signature-gated so confidence-low).
-3. Test 4 (stale_ts) missing `_post_response_update.assert_not_called()` (cosmetic).
+Daily 06:00 UTC sentinel comparing `cortex-roadmap-current.yml` last-edit vs PR merge cadence on baker-vault + baker-master. If ≥5 PRs merged without YAML update → write comment on recurring ClickUp task `86c9k6kau` (drift sentinel). NO Slack — Director rule 2026-04-30.
 
-**Mailbox state:** B2 idle. Next dispatch will overwrite this file per §3 hygiene.
+## Dispatch
 
-## Co-Authored-By
+1. Read brief: `briefs/BRIEF_ROADMAP_DRIFT_CLICKUP_SENTINEL_1.md`
+2. Branch: `b2/roadmap-drift-clickup-sentinel`
+3. Coordinate with B3 on advisory_lock key choice (B3 is renumbering 900300 in parallel — pick a distinct key, e.g. 900900, after re-grepping post-B3 merge).
+4. Pre-pytest re-checkout ritual.
+5. AI Head A solo review (non-trigger-class).
 
-```
-Co-authored-by: Code Brisen #2 <b2@brisengroup.com>
-Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
-```
+## Previous task (closed)
+
+PR #81 (CORTEX_SLACK_INTERACTIVITY_1) squash-merged 2026-04-29.
