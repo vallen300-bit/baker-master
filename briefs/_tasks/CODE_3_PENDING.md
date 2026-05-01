@@ -1,14 +1,15 @@
 ---
-status: OPEN
+status: COMPLETE
 brief: briefs/BRIEF_VAULT_WRITE_FOLLOWUP_NITS_1.md
 trigger_class: LOW
 dispatched_at: 2026-05-01T09:30:00Z
 dispatched_by: ai-head-a
-claimed_at: null
-claimed_by: null
-last_heartbeat: null
+claimed_at: 2026-05-01T10:00:00Z
+claimed_by: b3
+last_heartbeat: 2026-05-01T10:30:00Z
 blocker_question: null
-ship_report: null
+ship_report: briefs/_reports/B3_vault_write_followup_nits_1_20260501.md
+pr: https://github.com/vallen300-bit/baker-master/pull/142
 autopoll_eligible: false
 ---
 
