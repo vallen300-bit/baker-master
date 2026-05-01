@@ -85,7 +85,9 @@ def main() -> int:
         return 1
 
     body_lines = [f"{sha}  {filename}\n" for filename, sha in rows]
-    LOCK_PATH.write_text(HEADER + "".join(body_lines))
+    tmp_path = LOCK_PATH.with_suffix(LOCK_PATH.suffix + ".tmp")
+    tmp_path.write_text(HEADER + "".join(body_lines))
+    os.replace(tmp_path, LOCK_PATH)
     print(
         f"[refresh_applied_migrations_lock] wrote {len(rows)} entries to {LOCK_PATH}"
     )

@@ -108,7 +108,7 @@ WhatsApp pipeline: WAHA webhook → classify → route → `_wa_reply()`. 6h bac
 - **Never modify `baker-vault/slugs.yml` from this repo** — separate-repo PR only.
 - **Never delete or rewrite `tasks/lessons.md` entries** — append-only audit trail.
 - **Never edit `outputs/dashboard.py` carelessly** — re-run relevant tests after every change.
-- **Edit applied migrations → blocked by pre-commit hook + start.sh check; bypass requires `Migration-edit-authorized:` trailer.**
+- **Editing an applied migration is forbidden** unless (1) prod has been corrected by hand AND (2) you refresh `applied_migrations.lock` from prod. Bypass mechanism (`Migration-edit-authorized:` commit trailer or `BAKER_MIGRATION_EDIT_AUTHORIZED=1` env-var for `-m` flow) is for that flow only — never to "make the build pass."
 - **Never bypass `/security-review` skill on Tier-A merges** (Lesson #52).
 - **All DB/API calls wrapped in try/except** — fault-tolerant or it doesn't ship.
 - **IMPORTANT:** Compile-clean ≠ done. Exercise the actual flow before reporting (Lesson #8 — `tasks/lessons.md`).
