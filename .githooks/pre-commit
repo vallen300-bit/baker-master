@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Baker pre-commit: enforce migration immutability.
+#
+# Activation (one-time per clone):
+#   git config core.hooksPath .githooks
+#
+# Bypass paths (in order of precedence):
+#   1. "Migration-edit-authorized: <reason>" trailer in commit message.
+#      Detected via .git/COMMIT_EDITMSG (works for editor and `-F` flows).
+#   2. BAKER_MIGRATION_EDIT_AUTHORIZED=1 environment variable.
+#      Required for `git commit -m "..."` flow because git does not write
+#      COMMIT_EDITMSG before pre-commit fires when -m is used.
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+CHECK="scripts/check_applied_migrations.sh"
+if [ ! -x "$CHECK" ]; then
+  echo "[pre-commit] $CHECK missing or non-executable; skipping migration immutability check" >&2
+  exit 0
+fi
+
+COMMIT_MSG_FILE=".git/COMMIT_EDITMSG"
+exec "$CHECK" --commit-msg-file "$COMMIT_MSG_FILE"
