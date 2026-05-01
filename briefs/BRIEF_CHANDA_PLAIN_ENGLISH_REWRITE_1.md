@@ -1,3 +1,12 @@
+# BRIEF: CHANDA_PLAIN_ENGLISH_REWRITE_1 — KILLED 2026-05-01
+
+> **STATUS: KILLED** — AI Head A recommendation, Director ratified 2026-05-01.
+> Brief was dormant since 2026-04-21 ratification; CHANDA_enforcement.md (PR #45) absorbed the load-bearing half.
+> Resurrect via fresh brief if a new use-case emerges; don't pick this one back up cold.
+> Director-signed: kill via "follow your recommendations" 2026-05-01.
+
+---
+
 # BRIEF: CHANDA_PLAIN_ENGLISH_REWRITE_1 — rewrite CHANDA.md in plain English, 5 missions, 2-file split
 
 ## Context
