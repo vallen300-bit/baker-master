@@ -52,10 +52,10 @@ _ALLOWED_PATTERNS: list[tuple[str, str, bool]] = [
 # the canonical path. Reviewer flag (R6): alternate `gold.md` / `_cortex/`
 # placements would otherwise slip through allowed-pattern fall-through.
 _BLOCKED_PATTERNS: list[str] = [
-    r"^wiki/.*gold\.md$",            # any gold.md anywhere under wiki/ (incl. proposed-gold filtered FIRST below)
+    r"^(wiki/)?.*gold\.md$",         # any gold.md anywhere in the tree, including root (incl. proposed-gold filtered FIRST below)
     r"^wiki/_cortex/.*\.md$",        # cortex meta-knowledge — Director-only
     r"^slugs\.yml$",
-    r"^wiki/.*_priorities\.yml$",    # any _priorities.yml anywhere under wiki/
+    r"^(wiki/)?.*_priorities\.yml$", # any _priorities.yml anywhere in the tree, including root
     r"^_ops/.*$",
     r"^_install/.*$",
 ]
@@ -112,6 +112,8 @@ def validate_path(path: str, mode: str) -> tuple[str, bool]:
     """
     if not isinstance(path, str) or not path:
         raise VaultWriteError("path must be a non-empty string")
+    if any(c in path for c in "\n\r\x00"):
+        raise VaultWriteError(f"path contains control characters: {path!r}")
     if path.startswith("/") or "\\" in path or ".." in path:
         raise VaultWriteError(f"path must be relative without traversal: {path!r}")
 

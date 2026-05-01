@@ -222,6 +222,33 @@ class TestRejectionPaths:
                     "ghp_TEST",
                 )
 
+    # F1 (architect nits #141): control-char rejection — explicit, not via h11.
+
+    def test_f1a_path_with_newline_rejected(self):
+        """\\n in path → VaultWriteError 'control characters', not h11 LocalProtocolError."""
+        with pytest.raises(VaultWriteError, match="control characters"):
+            validate_path(
+                "wiki/matters/x/_session-state.md\nX-Injected: yes", "overwrite"
+            )
+
+    def test_f1b_path_with_carriage_return_rejected(self):
+        """\\r\\n in path → VaultWriteError 'control characters'."""
+        with pytest.raises(VaultWriteError, match="control characters"):
+            validate_path("wiki/matters/x/_session-state.md\r\n", "overwrite")
+
+    # F2 (architect nits #141): root-level placements hit the hard-blocker
+    # explicitly, not the allow-pattern fall-through with the wrong error msg.
+
+    def test_f2a_root_gold_md_hard_blocked(self):
+        """Root-level gold.md must be hard-blocked, not 'does not match any allowed pattern'."""
+        with pytest.raises(VaultWriteError, match="hard-blocked"):
+            validate_path("gold.md", "append")
+
+    def test_f2b_root_priorities_yml_hard_blocked(self):
+        """Root-level _priorities.yml must be hard-blocked, not allow-pattern fall-through."""
+        with pytest.raises(VaultWriteError, match="hard-blocked"):
+            validate_path("_priorities.yml", "append")
+
 
 # -------------------------------------------------------------------------
 # Allow proposed-gold despite the gold blocker (whitelist precedence)
