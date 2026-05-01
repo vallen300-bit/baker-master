@@ -1,11 +1,30 @@
-# BRIEF — DEDICATED_WORKTREE_PER_AGENT_1
+# BRIEF: DEDICATED_WORKTREE_PER_AGENT_1 — eliminate baker-vault shared-FS race via per-agent worktrees
 
 **Owner:** AI Head A (Director-ratified 2026-05-01 09:42Z)
 **Author:** AI Head A
 **Drafted:** 2026-05-01
 **Priority:** HIGH (chronic productivity drag — 4 incidents in 2 days, escalating)
 **Roadmap item:** `dedicated-worktree-per-agent` (V4 queued, NEW)
-**Trigger class:** infra / dev environment (no production code paths; vault data writes only)
+
+## Context
+
+Cortex tonight (Session 8) shipped Heavy 8/8 + Light 13/13 matter knowledge + Briefs 3+4. Five Wave dispatches ran 2-4 agents in parallel against `~/baker-vault`. Result: **4 shared-filesystem race incidents in 48 hours** (memory file `feedback_baker_vault_shared_fs_race_2nd_incident.md`). Atomic single-shell-command stopgap works at 1-2 concurrent agents, breaks at 3+ when HEAD bounces between interleaved checkouts. Cost is now ~30-60 min/day pure recovery overhead and growing with parallelism. Structural fix required.
+
+## Estimated time: ~30 minutes
+## Complexity: Low (shell + markdown only; no production code; no DB writes)
+## Prerequisites:
+- Director's machine has `git` 2.5+ (worktree command)
+- `~/baker-vault` clone exists with origin pointing at `github.com/vallen300-bit/baker-vault`
+- All in-flight feature branches on `~/baker-vault` are pushed before migration begins (verify with `cd ~/baker-vault && git status` — no uncommitted work)
+
+## Step 1 EXPLORE results (already done by AI Head A)
+
+- Verified `~/bm-vault-*` paths do NOT exist (`ls ~/bm-vault-* → no matches found`).
+- `~/baker-vault` worktree currently checked out on `b1/wave5-lilienmatt-aukera-20260501` — confirms the race is happening live (AI Head A's lane contaminated by B1's branch).
+- `~/Desktop/baker-code/00_WORKTREES.md` exists and documents baker-code worktree map (B1/B2/B3/B4 at `~/bm-b1`, etc.) — no baker-vault map yet. This brief extends that doc.
+- `~/Desktop/baker-code/scripts/` exists with 20+ Python scripts (canonical script location). New shell script fits convention.
+- `~/baker-vault/scripts/` does NOT exist; not the canonical location.
+- Lessons.md grep: no prior worktree-related lesson; precedent for `/write-brief` mandatory rule (Lesson on AMEX_RECURRING_DEADLINE inline-drafting) — this brief follows SOP.
 
 ## Background
 
@@ -111,12 +130,60 @@ Each agent's dispatch paste-block MUST start with `cd ~/bm-vault-<agent>` — ne
 - Automated worktree pruning / sync hygiene (manual verification sufficient at 5 worktrees).
 - CI enforcement of "no `cd ~/baker-vault` in B-code paste-blocks" — manual discipline + AI Head A reviews suffice for V1.
 
+## Files Modified
+
+- `~/Desktop/baker-code/scripts/setup_agent_worktrees.sh` — NEW shell script per spec above
+- `~/Desktop/baker-code/00_WORKTREES.md` — ADD baker-vault worktree map under existing baker-code map (single source of truth for both repos)
+- `~/baker-vault/_ops/agents/ai-head/OPERATING.md` — ADD "Worktree discipline" section under Standing rules; reference per-agent paths
+- `~/Desktop/baker-code/briefs/BRIEF_MATTER_KNOWLEDGE_CURATION_PATTERN_1.md` — UPDATE atomic-shell pattern reference to new `cd ~/bm-vault-<agent>` workflow
+
+## Do NOT Touch
+
+- `~/baker-vault/.git/` — shared backing repo; worktree command manages this. No manual `.git/` edits.
+- Existing `~/bm-b{1,2,3,4}` baker-code worktrees — unrelated repo (baker-master); already working with their own worktree system.
+- `~/Desktop/baker-code/scripts/` Python files — none touched.
+- Any in-flight branches on `~/baker-vault` (B1 lane: `b1/wave5-lilienmatt-aukera-20260501` is live; let it land cleanly before migration).
+- Render env vars / production deployment — this is local-only dev infra.
+- `wiki/matters/<slug>/curated/*.md` content — curation work continues normally; only the dispatch path changes.
+
+## Quality Checkpoints
+
+1. **Worktrees listed:** `cd ~/baker-vault && git worktree list` shows 6 entries (1 main + 5 agent paths).
+2. **Each agent path navigable:** `cd ~/bm-vault-aihead2 && git status` reports clean working tree on `scratch-aihead2`. Repeat for b1/b2/b3/b4.
+3. **Shared `.git`:** `git config --get core.worktree` empty in main repo; worktree paths use `.git` link file (verify `ls -la ~/bm-vault-aihead2/.git` shows file, not dir).
+4. **Branch isolation works:** in `~/bm-vault-b1`, `git checkout -b test-branch origin/main && echo "x" > /tmp/x && git status` shows `test-branch` checked out — concurrently in `~/bm-vault-b2`, `git status` still shows `scratch-b2` (no HEAD bleed).
+5. **OPERATING.md updated:** `grep -n "bm-vault" ~/baker-vault/_ops/agents/ai-head/OPERATING.md` returns the new "Worktree discipline" section.
+6. **00_WORKTREES.md updated:** `grep -n "bm-vault" ~/Desktop/baker-code/00_WORKTREES.md` returns the baker-vault map.
+7. **Curation brief updated:** `grep -n "bm-vault-<agent>" ~/Desktop/baker-code/briefs/BRIEF_MATTER_KNOWLEDGE_CURATION_PATTERN_1.md` returns the new dispatch path.
+8. **No race in next wave:** first multi-agent wave run after deploy has zero shared-FS race incidents (vs 4-incident baseline). Verified via memory file annotation.
+
+## Verification (no SQL needed — bash verification)
+
+```bash
+# 1. Worktree count
+[ "$(cd ~/baker-vault && git worktree list | wc -l)" -eq 6 ] && echo "PASS: 6 worktrees" || echo "FAIL"
+
+# 2. Each agent path exists + on correct scratch branch
+for a in aihead2 b1 b2 b3 b4; do
+  branch=$(cd ~/bm-vault-$a 2>/dev/null && git branch --show-current)
+  [ "$branch" = "scratch-$a" ] && echo "PASS: $a on scratch-$a" || echo "FAIL: $a got '$branch'"
+done
+
+# 3. Shared .git verified (worktree path .git is a file, not dir)
+[ -f ~/bm-vault-aihead2/.git ] && echo "PASS: .git is link file" || echo "FAIL"
+
+# 4. Documentation sweep
+grep -q "bm-vault" ~/Desktop/baker-code/00_WORKTREES.md && echo "PASS: 00_WORKTREES.md updated"
+grep -q "bm-vault" ~/baker-vault/_ops/agents/ai-head/OPERATING.md && echo "PASS: OPERATING.md updated"
+grep -q "bm-vault-<agent>" ~/Desktop/baker-code/briefs/BRIEF_MATTER_KNOWLEDGE_CURATION_PATTERN_1.md && echo "PASS: curation brief updated"
+```
+
 ## Trigger class for review
 
-NOT trigger-class for code-review purposes. AI Head A spot-reviews script + OPERATING.md update; no second-pair-of-eyes required. Pure dev-environment infra; no production code or DB writes.
+NOT trigger-class for code-review purposes (no production code paths; no DB writes; pure local dev-environment infra). AI Head A spot-reviews script content + OPERATING.md update; no second-pair-of-eyes required.
 
-## Estimated effort
+## Estimated effort breakdown
 
-~30 minutes total: script (~5 min) + run (~1 min) + OPERATING.md edit (~5 min) + 00_WORKTREES.md edit (~5 min) + curation brief update (~5 min) + agent communication (~5 min) + verification (~5 min).
+~30 minutes total: script write (~5 min) + run + verify (~3 min) + 00_WORKTREES.md edit (~5 min) + OPERATING.md edit (~5 min) + curation brief update (~5 min) + agent communication paste-blocks (~5 min) + verification checkpoints (~3 min).
 
-Single B-code lane; B4 natural assignee (currently bench).
+Single B-code lane; B4 natural assignee (currently bench post-Brief-3 ship). Could also be AI Head A direct execution (Tier A autonomous, dev-infra change) given trivial complexity.
