@@ -21,5 +21,5 @@ if [ ! -x "$CHECK" ]; then
   exit 0
 fi
 
-COMMIT_MSG_FILE=".git/COMMIT_EDITMSG"
+COMMIT_MSG_FILE="$(git rev-parse --git-path COMMIT_EDITMSG)"
 exec "$CHECK" --commit-msg-file "$COMMIT_MSG_FILE"

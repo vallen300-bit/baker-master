@@ -70,7 +70,12 @@ while IFS= read -r line || [ -n "$line" ]; do
     mismatch=1
     continue
   fi
-  actual=$(_sha "$path")
+  actual=$(_sha "$path" 2>/dev/null) || actual=""
+  if [ -z "$actual" ]; then
+    problems+=("hash tool failed on $path (sha256sum/shasum returned empty)")
+    mismatch=1
+    continue
+  fi
   if [ "$actual" != "$expected" ]; then
     problems+=("sha256 drift: $path expected=$expected actual=$actual")
     mismatch=1
