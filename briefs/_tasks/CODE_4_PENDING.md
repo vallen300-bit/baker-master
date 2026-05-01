@@ -1,20 +1,24 @@
 ---
-status: OPEN
+status: COMPLETE
 brief: briefs/BRIEF_CORTEX_PHASE6_VAULT_RECONCILER_1.md
 trigger_class: MEDIUM
 dispatched_at: 2026-05-01T10:05:00Z
 dispatched_by: ai-head-a
-claimed_at: null
-claimed_by: null
-last_heartbeat: null
+claimed_at: 2026-05-01T10:10:00Z
+claimed_by: b4
+last_heartbeat: 2026-05-01T11:30:00Z
+completed_at: 2026-05-01T11:30:00Z
+pr: https://github.com/vallen300-bit/baker-master/pull/144
+ship_report: briefs/_reports/B4_cortex_phase6_vault_reconciler_1_20260501.md
 blocker_question: null
-ship_report: null
 autopoll_eligible: false
 ---
 
 # CODE_4 — DISPATCH (CORTEX_PHASE6_VAULT_RECONCILER_1)
 
-**Status:** OPEN — 2026-05-01T10:05Z by AI Head A (Director-cleared 2026-05-01; B4 reserved for AI Head A)
+**Status:** COMPLETE — 2026-05-01T11:30Z by B4. PR [#144](https://github.com/vallen300-bit/baker-master/pull/144) opened on `b4/cortex-phase6-vault-reconciler-1`. Ship report: `briefs/_reports/B4_cortex_phase6_vault_reconciler_1_20260501.md`. Tier B autonomous merge pending AI Head A green check.
+
+**Original status:** OPEN — 2026-05-01T10:05Z by AI Head A (Director-cleared 2026-05-01; B4 reserved for AI Head A)
 **Brief:** `briefs/BRIEF_CORTEX_PHASE6_VAULT_RECONCILER_1.md` (~2-3h, MEDIUM, Tier B)
 **Builder:** B4 (freshest Reflector context — surfaced the gap in CODE_4_PENDING handover §S2)
 **Branch (cut from latest main):** `b4/cortex-phase6-vault-reconciler-1`
