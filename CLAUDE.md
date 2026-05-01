@@ -108,6 +108,7 @@ WhatsApp pipeline: WAHA webhook → classify → route → `_wa_reply()`. 6h bac
 - **Never modify `baker-vault/slugs.yml` from this repo** — separate-repo PR only.
 - **Never delete or rewrite `tasks/lessons.md` entries** — append-only audit trail.
 - **Never edit `outputs/dashboard.py` carelessly** — re-run relevant tests after every change.
+- **Edit applied migrations → blocked by pre-commit hook + start.sh check; bypass requires `Migration-edit-authorized:` trailer.**
 - **Never bypass `/security-review` skill on Tier-A merges** (Lesson #52).
 - **All DB/API calls wrapped in try/except** — fault-tolerant or it doesn't ship.
 - **IMPORTANT:** Compile-clean ≠ done. Exercise the actual flow before reporting (Lesson #8 — `tasks/lessons.md`).
@@ -149,6 +150,7 @@ Env: `BAKER_VAULT_PATH` must point at vault checkout. 34 canonical slugs @ versi
 3. Every ~5 sessions: 5-min memory audit — scan `memory/` for stale dates,
    resolved items, prune silently, flag ambiguous.
 4. Ask the Director what to work on.
+5. If pre-commit hook not installed: `git config core.hooksPath .githooks`.
 
 ## End of session
 1. Update this file (move completed items, note blockers).
