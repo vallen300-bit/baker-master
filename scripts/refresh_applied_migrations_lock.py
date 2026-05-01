@@ -76,6 +76,21 @@ def main() -> int:
         )
         return 1
 
+    missing = [filename for filename, _sha in rows if not (LOCK_PATH.parent / filename).is_file()]
+    if missing:
+        print(
+            "[refresh_applied_migrations_lock] prod schema_migrations references "
+            f"{len(missing)} file(s) not present on disk — refusing to write lock:",
+            file=sys.stderr,
+        )
+        for fn in missing:
+            print(f"  missing: {fn}", file=sys.stderr)
+        print(
+            "  fix: restore the missing migration file(s) from git history, then re-run.",
+            file=sys.stderr,
+        )
+        return 1
+
     if not LOCK_PATH.parent.is_dir():
         print(
             f"[refresh_applied_migrations_lock] {LOCK_PATH.parent} is not a directory; "
