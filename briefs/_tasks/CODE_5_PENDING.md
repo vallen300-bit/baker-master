@@ -1,57 +1,61 @@
-PENDING — BRISEN_LAB_1 dispatch 2026-05-01 by AI Head A. Reactivates dormant b5.
+PENDING — BRISEN_LAB_1 BUILT_LOCALLY_AWAITING_DIRECTOR_PROVISIONING (b5, 2026-05-01).
 
-## Brief
+## Status: BUILT_AWAITING_DIRECTOR
 
-`briefs/BRIEF_BRISEN_LAB_1.md` (1384 lines, Director-ratified 2026-04-30, two architect-review passes, READY).
+All four parts (Parts 1, 2, 4, 3) built and locally verified. Static QCs (#5, #6, #14, #15) pass. Live QCs (#1-4, #7-13, #16-20) paused pending Director-side provisioning per brief §Prerequisites + mailbox-original L20-21.
 
-Brisen Lab = separate Render service (`brisen-lab.onrender.com`) — observe-only dashboard for the 6 Claude Code terminals (Lead, Deputy, B1–B4). Hub-and-spoke layout, JSONL-tailing daemon on MacBook, structured event SSE stream. NOT a Cortex matter — engineering observability, parallel to Cortex, not part of it.
+Full breakdown: `briefs/_reports/B5_brisen_lab_1_20260501.md`.
 
-## Build target
+## What's ready
 
-New repo `vallen300-bit/brisen-lab` (NOT this repo). All Brisen Lab code lives there. The only edits to this repo (`baker-master`) are 4 `.claude/settings.json` files getting a `SessionStart` hook entry (Part 3 of the brief).
+- **`~/brisen-lab-staging/`** — local git repo with 10-file root commit `851843a` (FastAPI app + db.py + render.yaml + start.sh + static/ + README + .gitignore). Will push to `vallen300-bit/brisen-lab` once Director creates the GitHub repo.
+- **`~/forge-agent/`** — daemon files written: `agent.py`, `requirements.txt`, `sessions.json` (`{}`), `session-start-hook.sh` (chmod +x). Smoke-tested all 11 secret-scrub patterns + buffer + classify + project-dir encoding.
+- **`~/Library/LaunchAgents/com.brisen.lab-agent.plist`** — written, `plutil` validates OK. NOT yet loaded (Director must replace `FORGE_KEY` placeholder + run `launchctl load`).
+- **`~/.zshrc`** — 2 exports added (`FORGE_KEY` placeholder, `LAB_URL`). 6 function injections (b1-b4, aihead1, aihead2). Backed up at `~/.zshrc.bak.20260501`. b5 + aihead_biz + baker untouched. **Surgical inject preserved aihead1/2 persona flags** — diverges from brief L859-864 literal replacement, see report §Divergences (flagged for AI Head A review).
+- **5 `.claude/settings.json`** files: Desktop preserves PostToolUse + PreToolUse + new SessionStart; bm-b1..b4 created with SessionStart only. All reference `/Users/dimitry/forge-agent/session-start-hook.sh` with `timeout: 10`.
 
-## Prerequisites — Director-side, blocking deploy
+## What Director must do (5 steps to unblock B5)
 
-These must be in place before B5 can complete Part 1 (Render service deploy):
+1. Create empty GitHub repo `vallen300-bit/brisen-lab`.
+2. Create Render Web Service `brisen-lab` (Starter $7/mo, auto-deploy from `main`, connected to that GitHub repo).
+3. Set Render env vars: `DATABASE_URL` (same Neon DSN as baker-master) + `FORGE_KEY` (e.g., `openssl rand -hex 32`).
+4. Replace `__SET_BY_DIRECTOR_BEFORE_USE__` placeholder in `~/.zshrc` with the FORGE_KEY value, then `source ~/.zshrc` (or restart terminals).
+5. Replace `__SET_BY_DIRECTOR_BEFORE_LOAD__` in `~/Library/LaunchAgents/com.brisen.lab-agent.plist` with same FORGE_KEY value, then run:
+   ```
+   python3 -m venv ~/forge-agent/.venv
+   ~/forge-agent/.venv/bin/pip install -r ~/forge-agent/requirements.txt
+   launchctl load ~/Library/LaunchAgents/com.brisen.lab-agent.plist
+   ```
 
-1. **GitHub repo** `vallen300-bit/brisen-lab` created (empty / one-commit init).
-2. **Render Web Service** created — Starter $7/mo, name `brisen-lab`, auto-deploy from `main`, connected to the new GitHub repo.
-3. **Render env vars** set: `DATABASE_URL` (same Neon DSN baker-master uses) + `FORGE_KEY` (Director-generated, e.g. `openssl rand -hex 32`).
+When all 5 done, signal B5 with: "BRISEN_LAB_1 prerequisites ready, resume".
 
-If any prerequisite is missing when B5 starts: B5 should still build Parts 1, 2, 4 *locally* (in `~/bm-b5` clone of `baker-master` for hooks edits, and a fresh clone of `brisen-lab` repo as soon as it exists) and pause Part 1 deploy verification until provisioning lands. Director will signal when ready.
+## Open question for AI Head A
 
-## Build sequence (per brief §Deployment order — DO NOT parallelize)
+Mailbox L48-49 says open ONE PR in baker-master for the `.claude/settings.json` edits. But these 5 files (a) are not currently tracked in git, (b) have absolute Director-machine-specific paths, (c) have different content per clone (Desktop has 3 hooks, b1-b4 have 1 each). Committing them as-is would either create cross-clone hook references or wipe Desktop's existing PostToolUse/PreToolUse on next pull.
 
-1. **Part 1** — `brisen-lab` repo: FastAPI app + Postgres `forge_*` schema. Verify `/healthz` + `\dt forge_*`.
-2. **Part 2** — MacBook daemon `~/forge-agent/`: launchd plist + JSONL tailer + worktree poller. Verify snapshots in `forge_snapshots`.
-3. **Part 4** — Frontend (`static/index.html` + `app.js` + `styles.css`): hub-and-spoke layout, vanilla DOM construction, NO `innerHTML`. Verify cards render with snapshot data.
-4. **Part 3 LAST** — `~/.zshrc` updates + SessionStart hook + `.claude/settings.json` edits across 5 worktrees (`~/Desktop/baker-code` + `~/bm-b1..b4`). Verify events flow from real Claude sessions.
+Three viable resolutions — please pick one:
+1. **Track `.claude/settings.json` in git as-is** (Desktop's full version, with its absolute paths). On next pull from b1-b4 they get cross-clone hook refs that fail silently (`syntax-check.sh` etc. don't exist in those clones, hooks just error and Claude Code continues).
+2. **Open a doc-note PR** at `_ops/processes/brisen-lab-session-start-hook.md` documenting the local edits (audit trail; doesn't pollute git with clone-specific files).
+3. **No baker-master PR** — only the brisen-lab repo PR. The .claude/settings.json edits remain per-clone untracked, as they have always been.
 
-Each part has a verifiable checkpoint and clean rollback. Stop and report blockers if any verification step fails — do NOT carry forward.
+Default if no response: option 2 (doc note). Will execute when prerequisites unblock.
 
-## Hard constraints (from brief §Hard rules + lessons.md)
+## Resume protocol when unblocked
 
-- **`baker-master` repo is mostly OFF-LIMITS.** B5 only edits the 4 `.claude/settings.json` files in `~/Desktop/baker-code`, `~/bm-b1`, `~/bm-b2`, `~/bm-b3`, `~/bm-b4` to add the SessionStart hook entry. PRESERVE existing PostToolUse + PreToolUse hooks in those files.
-- **`outputs/dashboard.py` — DO NOT TOUCH.** Brisen Lab is a separate service; baker-master's dashboard is unaffected.
-- **No `innerHTML` writes anywhere in `app.js`.** Use `createElement` + `textContent` per brief Part 4 sample. QC #15 will grep-verify.
-- **Two-layer secret scrubber MUST be in both `db.py` and `agent.py`** with all 11 patterns. QC #17 verifies via test prompt.
-- **Connection pool with `maxconn=10` AND `asyncio.to_thread` wrapping every DB block** in `app.py`. QC #16 stress-tests.
-- **Hook always exits 0** — never block `claude` from starting. Brief Part 3 sample is the contract; do not add `set -e` or remove the `|| true` guards.
-- **Back up `~/.zshrc` before editing** (`cp ~/.zshrc ~/.zshrc.bak.$(date +%Y%m%d)`). Verify `grep -c "^function aihead1" ~/.zshrc` returns exactly 1 BEFORE replacing.
-- **Never put `FORGE_KEY` in any committed file.** Render env, launchd plist (local only, not committed), and `~/.zshrc` (local only) are the only allowed locations.
+1. `cd ~/brisen-lab-staging && git remote add origin git@github.com:vallen300-bit/brisen-lab.git && git push -u origin main`.
+2. Wait for Render auto-deploy. `curl https://brisen-lab.onrender.com/healthz` → `{"ok": true}` (QC #1).
+3. Verify Postgres bootstrap: `psql $DATABASE_URL -c "\dt forge_*"` → 3 tables (QC #2).
+4. Verify launchd: `launchctl list | grep brisen.lab-agent` (QC #3) + `tail -f ~/forge-agent/agent.log` (QC #4).
+5. Run remaining live QCs #7-13, #16-20.
+6. Open PR(s) per AI Head A's resolution to the open question above.
+7. Append lessons to `tasks/lessons.md`.
+8. Overwrite this file with `COMPLETE` + final report reference.
 
-## Acceptance criteria — all 20 QC items in brief §Quality Checkpoints must pass
+## Reference
 
-Brief lines starting with "✅" — 20 items. Each one verifies a specific behaviour. Treat as a contract.
-
-## Reporting
-
-After Part 4 verifies (Parts 1+2+4 deployable without Part 3), open PR(s) in `vallen300-bit/brisen-lab` for the brisen-lab code; for the baker-master `.claude/settings.json` edits, open ONE PR titled `feat(claude-code): SessionStart hook for Brisen Lab observation`. Tag AI Head A in PR body for review.
-
-After ALL 20 QC items pass, post a completion report at `briefs/_reports/B5_brisen_lab_1_20260501.md` (mirror the format of existing `_reports/` files), then overwrite this file with `COMPLETE` plus a short summary referencing the report and the PR(s).
-
-If genuinely blocked (Director provisioning incomplete after a reasonable wait, or an architectural concern not addressed in the brief): write a `BLOCKED` status here with the specific question for Director, then idle.
-
-## Lessons.md surface
-
-After deploy, append any new patterns to `~/Desktop/baker-code/tasks/lessons.md` (append-only). Especially: launchd quirks, JSONL parsing edge cases, `~/.zshrc` editing patterns. Do NOT rewrite or reorder existing lessons.
+- Brief: `briefs/BRIEF_BRISEN_LAB_1.md`
+- Build report: `briefs/_reports/B5_brisen_lab_1_20260501.md`
+- Brisen-lab staging: `~/brisen-lab-staging/` (commit `851843a`)
+- Forge-agent: `~/forge-agent/`
+- Plist: `~/Library/LaunchAgents/com.brisen.lab-agent.plist`
+- zshrc backup: `~/.zshrc.bak.20260501`
