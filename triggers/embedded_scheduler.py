@@ -839,6 +839,48 @@ def _register_jobs(scheduler: BackgroundScheduler):
             "Skipped: phase6_reflector_sweep (CORTEX_PHASE6_REFLECTOR_ENABLED=false)"
         )
 
+    # CORTEX_PHASE6_VAULT_RECONCILER_1: Phase 6 reconciler — drift detector
+    # for the vault-write-outside-counter-txn gap. Reads cortex_phase_outputs
+    # reflector_complete markers and re-emits the vault block when
+    # proposed-config-deltas.md is missing or lacks the cycle's block (gap
+    # from Reflector vault write happening outside the counter-update txn at
+    # cortex_phase6_reflector.py:694 -> :724-737).
+    # Env gate ``CORTEX_PHASE6_RECONCILER_ENABLED`` (default ``true``).
+    # Cadence: REFLECTOR_RECONCILER_INTERVAL_MINUTES (default 65 min,
+    # 5-min stagger from sweep to reduce collision; floor 15 min).
+    _reconciler_enabled = _os.environ.get(
+        "CORTEX_PHASE6_RECONCILER_ENABLED", "true"
+    ).lower()
+    if _reconciler_enabled not in ("false", "0", "no", "off"):
+        from orchestrator.cortex_phase6_reconciler import reconcile_vault_writes_sync
+        try:
+            _reconciler_minutes = int(
+                _os.environ.get("REFLECTOR_RECONCILER_INTERVAL_MINUTES", "65")
+            )
+        except (TypeError, ValueError):
+            _reconciler_minutes = 65
+        if _reconciler_minutes < 15:
+            logger.warning(
+                "REFLECTOR_RECONCILER_INTERVAL_MINUTES=%s below 15min floor; clamping to 15",
+                _reconciler_minutes,
+            )
+            _reconciler_minutes = 15
+        scheduler.add_job(
+            reconcile_vault_writes_sync,
+            IntervalTrigger(minutes=_reconciler_minutes),
+            id="phase6_reconciler",
+            name=f"Cortex Phase 6 vault reconciler (every {_reconciler_minutes} min)",
+            coalesce=True, max_instances=1, replace_existing=True,
+            misfire_grace_time=3600,
+        )
+        logger.info(
+            f"Registered: phase6_reconciler (every {_reconciler_minutes} min)"
+        )
+    else:
+        logger.info(
+            "Skipped: phase6_reconciler (CORTEX_PHASE6_RECONCILER_ENABLED=false)"
+        )
+
     # BRIEF_MOVIE_AM_RETROFIT_1 D5: weekly MOVIE AM vault lint.
     # Sunday 06:05 UTC — offset 5 min from ao_pm_lint to avoid vault-mirror
     # contention. Env gate ``MOVIE_AM_LINT_ENABLED`` (default ``true``)
