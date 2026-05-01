@@ -131,14 +131,19 @@ auto-execute per matter as proposals fire.</div>
   <div class="item queued">
     <div class="icon">→</div>
     <div>
-      <div class="label">Brief 4 — CORTEX_CONFIG_DIRECTIVES_SCHEMA_1 (LEARNING LOOP — schema + migration + bootstrap hook)<span class="priority critical">critical</span></div>
-      <div class="desc">Director priority pivot 2026-04-30 ELEVATES learning loop. Brief 4 =
-schema for per-matter directives + helpfulness counters. Q1 flip
-ratified: schema-first (Brief 4), Reflector second (Brief 3). Both
-include bootstrap-hook so every NEW matter auto-provisions directive
-schema (live-organism-friendly per 22→31 matter drift). Awaiting
-Terminal AI Head A rebase of PR #111.</div>
-      <div class="meta-line"><span><strong>Owner:</strong> terminal-ai-head-a-authoring + b-code-build</span><span><strong>ETA:</strong> 2026-05-06</span></div>
+      <div class="label">Wave 5 — fill 04_documents + 06_decisions_log + 07_open_questions on 8 heavy matters (Director Q5 ratified 2026-04-30)<span class="priority high">high</span></div>
+      <div class="desc">Director Q5 ratified close-after-PR-51 + Wave 5 tomorrow AM. 4
+parallel dispatches; each agent fills 3 sections (04, 06, 07) on 2
+heavy matters; 99_scratchpad skipped until promoted. Continuity
+preserved: agents (mostly) do matters they curated in Wave 1/2.
+Assignments:
+  AH2 → hagenauer-rg7 + oskolkov
+  B1  → lilienmatt + aukera
+  B2  → mo-vie-am + annaberg
+  B3  → mrci + capital-call
+B4 = bench / reserve. Estimated 2-3h start-to-merge → afternoon free
+for 18 [?] gap batch ratification + light follow-up sweeps.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> distributed</span><span><strong>ETA:</strong> 2026-05-01</span></div>
       
     </div>
     <div class="badge queued">QUEUED</div>
@@ -147,29 +152,27 @@ Terminal AI Head A rebase of PR #111.</div>
   <div class="item queued">
     <div class="icon">→</div>
     <div>
-      <div class="label">Brief 3 — CORTEX_PHASE6_REFLECTOR_1 (LEARNING LOOP — Reflector consumer)<span class="priority critical">critical</span></div>
-      <div class="desc">Director priority pivot 2026-04-30 ELEVATES learning loop. Brief 3 =
-Reflector that increments per-directive helpfulness counters based
-on Triaga ratification + cycle outcome + ClickUp aux. Ships AFTER
-Brief 4 per Q1 flip. V1 simplification: counter shape simplified,
-ClickUp aux deferred to V2 (stale-rate >30% trigger).</div>
-      <div class="meta-line"><span><strong>Owner:</strong> terminal-ai-head-a-authoring + b-code-build</span><span><strong>ETA:</strong> 2026-05-13</span></div>
-      
-    </div>
-    <div class="badge queued">QUEUED</div>
-  </div>
+      <div class="label">Cortex Stage 2 V1 Step 30 — first LIVE AO cycle (Director consult-gate per §4)<span class="priority high">high</span></div>
+      <div class="desc">Step 30 is the next milestone in Cortex Stage 2 V1 sequence. First LIVE
+(non-DRY_RUN) cycle on AO matter post Step 29 closure. Per Director
+consult-gate §4, requires Director sign-off + active Slack-watching
+session before fire (cycle WILL post Slack notification + may trigger
+vault writes).
 
-  <div class="item queued">
-    <div class="icon">→</div>
-    <div>
-      <div class="label">AI Head SKILL.md session-start + close rituals + no-PARKED rule<span class="priority high">high</span></div>
-      <div class="desc">Session-start: read OPERATING + skim LONGTERM + last ARCHIVE block
-+ fetch active roadmap from brisen-docs URL in MEMORY.md + read
-ClickUp Cortex Backlog tail. Session-close: rewrite OPERATING + append
-ARCHIVE + update YAML for shipped items. Standing rule: nothing parked,
-ever — backlog → ClickUp.</div>
-      <div class="meta-line"><span><strong>Owner:</strong> ai-head-a</span><span><strong>ETA:</strong> 2026-04-30</span></div>
-      
+Pre-fire checklist:
+  - CORTEX_DRY_RUN=false in production (already cleared 2026-05-01 16:07Z)
+  - AO cortex-config GOLD-locked (✓ vault PR #62 commit 07e415f)
+  - Director picks cycle topic
+  - Director confirms active Slack-watching window (15-30 min)
+  - Pre-fire confirmation: estimated $3-5, ~3 specialists, 5-15min wall clock
+
+Per Terminal AI Head A 2026-05-01 close-of-session note: "Step 30
+deserves a fresh session where you're actively watching Slack — pick
+a cycle topic, fire when ready."</div>
+      <div class="meta-line"><span><strong>Owner:</strong> terminal-ai-head-a + director-consult-gate</span><span><strong>ETA:</strong> 2026-05-02</span></div>
+      <div class="anchor">Terminal AI Head A handoff chat 2026-05-01 close.
+Cycle 42be04ac (Step 29 DRY_RUN evidence) preserved for reference.
+</div>
     </div>
     <div class="badge queued">QUEUED</div>
   </div>
@@ -188,6 +191,100 @@ Tier-A-authorized-write-via-baker_vault_write" (Director ratification
 B cross-lane review pre-merge.</div>
       <div class="meta-line"><span><strong>Owner:</strong> terminal-ai-head-a-authoring + b-code-build</span><span><strong>ETA:</strong> 2026-05-06</span></div>
       <div class="anchor">PR #95 draft (cb1f3ee) · briefs/BRIEF_BAKER_VAULT_WRITE_1.md · authored Terminal AI Head A</div>
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">BRIEF_BRISEN_LAB_MSGBUS_1 — Brisen Lab as cross-terminal message bus (Director out of relay path)<span class="priority high">high</span></div>
+      <div class="desc">Removes Director from cross-terminal relay bottleneck. Brisen Lab evolves
+from observe-only to message bus — direct cross-terminal coordination
+compresses the loop ~5-15x while preserving Director audit via Brisen Lab UI.
+
+5 components: per-terminal inbox (Neon Postgres + terminal-key auth) +
+class-aware wake-up nudge (tmux send-keys / SessionStart hook /
+Cowork MCP) + /api/state pagination + per-event payload-cap fix +
+threads/addressing (thread_id, to:[list], kind:dispatch|ack|broadcast|ratify) +
+Cowork as first-class peer (baker_inbox_post / baker_inbox_read MCP tools).
+
+AH2 designed the scope + offered to author the brief (chat 2026-05-01).
+App AI Head A added 5 tweaks before dispatch:
+  (1) Neon Postgres not SQLite;
+  (2) align terminal naming with current Brisen Lab dashboard schema (lead,
+      deputy, b1-b5, cowork);
+  (3) pagination AND per-event payload cap fix (both truncations);
+  (4) feature flag BRISEN_LAB_MSGBUS_ENABLED kill-switch;
+  (5) lock thread-visibility + ratify-kind authority via 2 open Qs to
+      Director BEFORE B3 codes.
+Director ratified scope-with-tweaks 2026-05-01.
+
+Standing-rule preservation: paste-block-via-Director STAYS as fallback
+(carve-out, not deprecation); Director audit-only model via Brisen Lab UI
+(informed without relaying).
+
+Tier B / MEDIUM. Mandatory /security-review pre-merge per Lesson #52
+(new auth surface + new MCP tools + new persisted state).
+DEPENDS on Brisen Lab v1 (already shipped via Terminal AH1 authoring).</div>
+      <div class="meta-line"><span><strong>Owner:</strong> ah2-authoring + b3-build</span><span><strong>ETA:</strong> 2026-05-08</span></div>
+      <div class="anchor">Pre-brief scope notes: baker-vault/_ops/ideas/2026-05-01-brisen-lab-msgbus-scope.md
+Brief target path: baker-master/briefs/BRIEF_BRISEN_LAB_MSGBUS_1.md
+Lane: AH2 authoring → B3 build
+Branch convention: aihead2/brief-brisen-lab-msgbus-1 (author)
+                    + b3/brisen-lab-msgbus-1 (build)
+</div>
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">BRIEF_CORTEX_TWOSTAGE_PREVIEW_1 — Free Preview → Tap to Upgrade cost-safety pattern<span class="priority high">high</span></div>
+      <div class="desc">Director directive 2026-05-01: cost safety on Cortex auto-triggers. Two-tier
+UX so Director never pays $3-5 for a Cortex cycle that he could have
+satisfied with a $0.10 cheap-RAG answer.
+
+Pattern (3 trigger paths covered):
+
+For #2 Scan questions:
+- Default Scan answer stays cheap-RAG (~$0.10) — never fires specialists
+- Inline button at end of every Scan answer:
+    'Run Cortex deep cycle (~$3-5, 5-15min) — specialists: legal, tax-AT, finance'
+  with cost estimate visible
+- Tap = explicit authorization to spend $3-5
+- Kill the existing classifier auto-route to Cortex; Scan stays Scan
+
+For #3 Sentinel auto-triggers:
+- Signals never auto-fire a cycle
+- Each material signal becomes a 'Pending Cortex' card in Cockpit:
+  matter + signal preview + cheap-RAG baseline answer + Tap-to-Upgrade button
+- Director scans queue; upgrades only what's worth $3-5
+- Cards age out after N days (default 7) — no spend
+
+For #1 Director manual fires:
+- Stay as-is — explicit ask, explicit spend
+- Optional pre-fire confirmation popup (cost estimate + specialist count)
+
+Result: zero accidental Cortex spend; deep cycles fire only when
+Director taps.
+
+Complementary to (not redundant with) existing CORTEX_DRY_RUN env-toggle:
+DRY_RUN gates side-effects; TWOSTAGE_PREVIEW gates COST. Both ship.
+
+Effort: 1 brief, ~3-5 days B-code. Frontend Scan upgrade button +
+backend Sentinel-pending-queue refactor + Cockpit queue view.
+
+Interim mitigation (5-min config flip, no code; pending Director's
+'OK to flip' ratification): kill Sentinel auto-trigger globally + kill
+Scan classifier auto-route to Cortex — until full pattern ships.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> terminal-ai-head-a-authoring + b-code-build</span><span><strong>ETA:</strong> 2026-05-08</span></div>
+      <div class="anchor">Director chat 2026-05-01 — surfaced as response to 'find safety
+solution for #2 + #3 trigger paths'.
+Pre-brief scope notes: baker-vault/_ops/ideas/2026-05-01-cortex-twostage-preview-scope.md
+Brief target path: baker-master/briefs/BRIEF_CORTEX_TWOSTAGE_PREVIEW_1.md
+</div>
     </div>
     <div class="badge queued">QUEUED</div>
   </div>
@@ -303,23 +400,6 @@ Trigger class HIGH per RA-24 — cross-capability state writes.</div>
   <div class="item queued">
     <div class="icon">→</div>
     <div>
-      <div class="label">Roll out curated/ knowledge to remaining ~29 matters (post-anchor)<span class="priority high">high</span></div>
-      <div class="desc">After hagenauer-rg7 + mo-vie-am anchors shipped 2026-04-30, ~29
-matters need curated/ first pass. Distribute across AI Head 2 App +
-B-codes + Director. Each matter ships 00_overview + 1-3 prioritized
-sections per matter weight. Heavy matters (oskolkov, lilienmatt,
-annaberg, mrci, aukera, capital-call) get full 9-file build over
-time; light matters (brisen-pr, brisen-funding) may stop at 2-3.
-Drift detector + lint after first-pass ship.</div>
-      <div class="meta-line"><span><strong>Owner:</strong> distributed</span><span><strong>ETA:</strong> 2026-05-15</span></div>
-      
-    </div>
-    <div class="badge queued">QUEUED</div>
-  </div>
-
-  <div class="item queued">
-    <div class="icon">→</div>
-    <div>
       <div class="label">Brief 4 — CORTEX_CONFIG_DIRECTIVES_SCHEMA_1 (frontmatter directives array + 22-matter migration)<span class="priority high">high</span></div>
       <div class="desc">Extends cortex-config.md frontmatter with directives array
 (id/content/source/helpful/harmful/last_invoked/status). Status enum:
@@ -377,6 +457,63 @@ Read-only invariant + extension whitelist + size cap unchanged.
 Independent of Brief 1 — either can ship first. MEDIUM trigger class.</div>
       <div class="meta-line"><span><strong>Owner:</strong> terminal-ai-head-a-authoring + b-code-build</span><span><strong>ETA:</strong> 2026-05-06</span></div>
       <div class="anchor">PR #95 draft · briefs/BRIEF_BAKER_VAULT_READ_WIKI_SCOPE_1.md · authored Terminal AI Head A</div>
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">Director's Manual: How to Use Cortex Best for Business — post-production optimization brainstorming<span class="priority medium">medium</span></div>
+      <div class="desc">Director directive 2026-05-01: now that Cortex is live in production, build
+a Director-facing manual capturing how to use Cortex BEST for business —
+not the technical roadmap, the operational playbook.
+
+Two artefacts, one workstream:
+
+(a) MANUAL — Director-facing playbook covering:
+    - When to manual-fire a cycle (#1) vs. let Sentinel auto-fire (#3) vs.
+      ask via Scan (#2)
+    - How to read a Cortex proposal card (Tier-A vs Tier-B, what to ratify
+      vs reject vs refresh)
+    - Cost-management hygiene (when $3-5 is worth it; when cheap-RAG is
+      enough; managing monthly envelope)
+    - Per-matter activation rules (which matters benefit from auto-trigger
+      vs which should stay manual-only)
+    - Director-comment / GOLD-lock pattern (how Director-comments on
+      cortex-config become directives that boost specialist accuracy)
+    - Reading the learning loop (Phase 6 reflector counters, directive
+      promotions proposed→active→core)
+    - Common patterns + anti-patterns from production usage
+    - When to escalate to a fresh chat session (Director-active-watching
+      mode for Tier-B reviews)
+
+(b) BRAINSTORMING SESSION — post-production optimization workshop:
+    - What's working / what's not after 1-2 weeks of live operation
+    - Per-matter Cortex effectiveness (heavy matters vs light)
+    - Cost vs value ratio per cycle type
+    - Where the Director-as-relay friction still binds (despite MSGBUS)
+    - Where signals need re-tuning (false positives / false negatives)
+    - Where the curated knowledge layer needs deeper passes
+    - Whether DRY_RUN + TWOSTAGE_PREVIEW + MSGBUS gates are sufficient
+
+Format: brainstorming session with App AI Head A producing a structured
+Problem-Goal-Cause-Solutions output (per ceo-decision-framing skill);
+Director ratifies output → it becomes the manual draft.
+
+Lane: App AI Head A drafts based on Director input + production usage data
+(cortex_cycles + cortex_phase_outputs + Director ratification patterns).
+Director iterates + ratifies. Final manual lives at
+baker-vault/_ops/processes/director-cortex-manual.md.</div>
+      <div class="meta-line"><span><strong>Owner:</strong> ai-head-a-drafting + director-collab + director-ratify</span><span><strong>ETA:</strong> 2026-05-15</span></div>
+      <div class="anchor">Director chat 2026-05-01: 'Manual for DIRECTOR OF HOW TO USE BEST CORTEX
+FOR BUSINESS - needs brainstorming for optimization of post production
+runs'.
+Trigger: post-production-day milestone (Cortex live 2026-05-01); ETA
+2026-05-15 = ~2 weeks of live data accumulated for evidence-based input.
+Target path: baker-vault/_ops/processes/director-cortex-manual.md
+Brainstorm output path: baker-vault/_ops/decisions/<date>-cortex-business-manual.md
+</div>
     </div>
     <div class="badge queued">QUEUED</div>
   </div>
@@ -788,6 +925,227 @@ anchor; build deferred until channels resume.</div>
     </div>
     <div class="badge done">DONE</div>
   </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Heavy matter curated knowledge — Wave 1 (oskolkov + lilienmatt + annaberg + mrci, 2-4 sections each)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
+      <div class="anchor">PRs #38 (oskolkov 00/01/03/06, AH2), #39 (mrci 00/01/02, B3), #41 (annaberg 00/02/05, B2), #42 (lilienmatt 00/01/02/05, B1). 4 PRs / 14 files / ~1000 lines / ~80 [?] gaps surfaced.</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Heavy matter curated knowledge — Wave 2 (aukera + capital-call)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
+      <div class="anchor">PRs #43 (aukera 00/01/02, AH2), #44 (capital-call 00/02, B3). Cross-cutting senior-lender + cycle/process matters; strict no-duplication discipline (term sheet on annaberg, STALLED on lilienmatt, Balgerstrasse-leg on mrci).</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Light matter curated knowledge — Wave 3 + Wave 4 (13 matters, 00_overview only)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
+      <div class="anchor">PRs #45 (kitzbuhel-six-senses + mo-vie-exit, AH2), #46 (constantinos + brisen-funding, B1), #47 (franck-muller + cap-ferrat, B3), #48 (claimsmax + m365, B2 — caught ClaimsMax framing reframe + EVOK lead-vendor drift), #49 (nvidia-corinthia, B1), #51 (uk-homes + personal, B3 — rebased + Q39 closure amend), #53 (baker-internal + brisen-pr, B2 — caught Sandra Luger lead reframe). 13 light matters covered; movie skipped as alias for mo-vie-am.</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Brief 4 — CORTEX_CONFIG_DIRECTIVES_SCHEMA_1 (learning loop schema)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
+      <div class="anchor">PR #125 baker-master, B4 build, B1 trigger-class review (6 PASS checks). Migration 20260430_cortex_directives.sql + cortex_directives + prompt_review_queue + partial unique idx for reflector idempotency + bootstrap_matter.py hook + migrate_directives_for_existing_matters.py batch + 41 tests.</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Brief 3 — CORTEX_PHASE6_REFLECTOR_1 (learning loop reflector)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
+      <div class="anchor">PR #129 baker-master, B4 build, B1 trigger-class review (8 PASS checks across 4 trigger classes). orchestrator/cortex_phase6_reflector.py (~899 actual lines) + Phase 4 prompt amendment (DIRECTIVE CITATION REQUIREMENT preamble) + scheduler wiring (phase6_reflector_sweep, 60min cadence, kill switch) + 44 passed / 17 skipped. Learning loop fully functional.</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Eastdil Secured slug alignment — slugs.yml v18 + mo-vie-exit reference sweep</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
+      <div class="anchor">PR #50 baker-vault, AH2 build. slugs.yml v17 → v18; new canonical eastdil-secured (aliases: eastdeal, eastdil, eastdil-frankfurt); 8 swaps in mo-vie-exit/cortex-config.md; regex backward-compat preserved; Director-quoted directive verbatim retained. Validator clean: 37 → 38 slugs, no collisions.</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Wenk-Laura slug registration — slugs.yml v19 (follow-up from Eastdil alignment)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
+      <div class="anchor">PR #52 baker-vault, AH2 build. slugs.yml v18 → v19; new canonical wenk-laura (aliases: laura-wenk, wenk); 5-case alias-resolution validator passed. Single-file change, no cortex-config edits needed.</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Session-start + close rituals + no-PARKED rule (executed via Session 7 + 8 closes)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-04-30</span></div>
+      <div class="anchor">OPERATING.md V11 rewritten + V11 session state file + V4 YAML mark-shipped sweep + ARCHIVE Session 8 block. NO PARKED rule active.</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Cortex into production day — 8-step critical path closed end-to-end</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-05-01</span></div>
+      <div class="anchor">Director directive 2026-05-01 'Cortex into production today'. 8 steps:
+  1. Migration drift fix (Terminal AI Head A) ✓ PR #144 reconciler + DELETE on schema_migrations
+  2. Deploy clears (Render auto-deploy) ✓ dep-d7q7rkt8nd3s738p0v00 + B3/B4 follow-ons
+  3. Verify Brief 3+4 + reconciler live in prod scheduler ✓ /health 58 jobs running
+  4. Director rips top-10 blocks-cycle [?] batch ✓ 9/9 effective closed (Q8 ≡ Q4)
+  5. AH2 second-pass writes resolutions into curated/* ✓ PR #61 + PR #63
+  6. First prod cycle target matter ✓ hagenauer-rg7 (locked)
+  7. Manual cycle invoke + verify Phase 4/6 end-to-end ✓ cycle f7795012 ($3.46, 16min, 6 phases clean)
+  8. Cortex live in production ✓ ratified gold_approved 15:21:21Z; 6 structured actions logged
+Total verification spend: $6.68 across 2 matters (hagenauer-rg7 live + oskolkov DRY_RUN).
+</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Top-10 [?] batch ratification — 9/9 effective closed (Q8 ≡ Q4 mechanic; Q3.5b async)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-05-01</span></div>
+      <div class="anchor">Q1 Sosnin €150K Geneva MRCI (slug correction Annaberg→MRCI)
+Q2 Wackerbau €1.21M MRCI receivable (NOT liability — framing reversed)
+Q3 Sardarov €5.58M AO conduit (already-repaid; NOT €600K loan)
+Q3.5 Conrad Weiss shared GF Lilienmatt+MRCI (systemic root cause)
+Q4 Aukera cross-vehicle siloed; informal ~€2-3M consent route
+Q5 KPMG NOT commissioned; Plan B Klaus Weipert under Director consideration
+Q6 Drawdown #1 €2.5M cleared LCG CBH 24-28 Apr (€700K CBH internal + €1.8M Bank of Cyprus)
+Q7 Aukera Annaberg TS reserves €12.75M capex + €2.25M interest/36mo on €15M; €30M frame myth busted; Target Structure App.3 binds Brisen-sole-shareholder cleanup as TS condition
+Q8 ≡ Q4 (folded — same mechanic)
+Q9 Aukera Balgerstrasse oral-only Patrick Züchner; post-Annaberg sequencing
+Q10 Lilienmatt → MRCI IC direction; amounts pending Csepregi/Pohanis
+Q3.5b Brandner-async €600K-vs-Sardarov sub-question still pending.
+Cascade folded into curated content via vault PRs #61 + #63.
+</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Cortex Stage 2 V1 Step 29 — DRY_RUN cycle on AO matter, FULLY CLOSED</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-05-01</span></div>
+      <div class="anchor">Terminal AI Head A authoring + execution.
+- CORTEX_DRY_RUN=true deploy d7qcpdebn58s73abu8pg live 15:57Z
+- director_manual trigger fired on oskolkov; HTTP 200 in 359s
+- Cycle 42be04ac-4a59-49b8-8d1f-18253dfd83ea — all 6 phases clean
+- dry_run_marker row in cortex_phase_outputs ✓ ('CORTEX_DRY_RUN=true; Slack post skipped')
+- Cost $3.22 / 179,808 tokens (within $1-4 forecast)
+- Specialist count 3 (under cap-5)
+- Cycle terminal status tier_b_pending (Phase 5 act gated; DRY_RUN-correct — no Slack push, no vault writes)
+- DRY_RUN flipped back to false; deploy dep-d7qcucdckfvc739qsur0 live 16:07:56Z (2:51 build)
+- Production mode back to normal (DRY_RUN cleared)
+- Cycle 42be04ac preserved as Step 29 evidence row
+- Tracker: vault PR #64 merged b1c6eac
+Cortex Stage 2 V1 milestone: ✅ Tasks 1-5 (2026-04-28) + ✅ Steps 14-28 (PRs 1A/1B/1C + Phase 5/6 follow-ups) + ✅ AO cortex-config GOLD-locked (07e415f) + ✅ Step 29 DRY_RUN clean.
+</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">AO cortex-config GOLD lock — Stage 2 V1 unblocks DRY_RUN</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-05-01</span></div>
+      <div class="anchor">vault PR #62 + commit 07e415f. Director-ratified GOLD lock on oskolkov cortex-config; unblocked Step 29 DRY_RUN cycle.</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">MIGRATION_IMMUTABILITY_GUARD_1 — applied_migrations.lock + pre-commit + start.sh pre-flight</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-05-01</span></div>
+      <div class="anchor">baker-master PR #146. B1 build, Terminal AI Head A authored brief.
+Two-layer mechanical guard against editing already-applied migration files.
+Cheap-insurance follow-up to 2026-05-01 09:21-09:57Z deploy block where
+a comment-edit on PR #125's already-applied migration silently slipped past
+review and triggered prod boot abort on next deploy.
+- migrations/applied_migrations.lock (sha256 snapshot of prod schema_migrations)
+- scripts/check_applied_migrations.sh + scripts/refresh_applied_migrations_lock.py
+- .githooks/pre-commit + start.sh pre-flight (env-strip BAKER_MIGRATION_EDIT_AUTHORIZED)
+- CLAUDE.md hard-rule + session-start activation note
+All 6 acceptance criteria verified live during PR commit hook test.
+</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">BRIEF_MIGRATION_GUARD_FOLLOWUP_1 — worktree EDITMSG + hash-tool failure visibility + refresher disk-presence</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-05-01</span></div>
+      <div class="anchor">baker-master PR #147. B1 build. Followup polish on PR #146:
+- Worktree EDITMSG path resolution
+- Hash-tool failure visibility surfaced (not silent)
+- Lock-refresher disk-presence verification
+Closes the migration-drift defenses bundle.
+</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">CORTEX_DRY_RUN safety toggle — verified working in production (Step 29 evidence)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-05-01</span></div>
+      <div class="anchor">Terminal AI Head A's Step 29 DRY_RUN cycle confirms CORTEX_DRY_RUN=true gates
+Phase 5 act side-effects (no Slack push, no vault writes) while still running
+all 6 cycle phases. Partial precursor to BRIEF_CORTEX_TWOSTAGE_PREVIEW_1 (queued)
+— DRY_RUN gates ACTIONS but does NOT gate COST. TWOSTAGE_PREVIEW will gate cost
+via cheap-RAG-first; complementary not redundant.
+</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
 </div>
 
 <div class="stage">
@@ -869,7 +1227,7 @@ anymore." Brisen has equivalent (3-file memory triplets per agent).</div>
 </div>
 
 <footer>
-  Auto-rendered <strong>2026-04-30</strong> from <code>_ops/processes/cortex-roadmap-current.yml</code> by <code>scripts/render_cortex_roadmap.py</code>. Live page: <code>https://brisen-docs.onrender.com/architecture/cortex-roadmap-current.html</code>.
+  Auto-rendered <strong>2026-05-01</strong> from <code>_ops/processes/cortex-roadmap-current.yml</code> by <code>scripts/render_cortex_roadmap.py</code>. Live page: <code>https://brisen-docs.onrender.com/architecture/cortex-roadmap-current.html</code>.
   Supersedes: <code>cortex-roadmap-v3-any-matter.html</code>.
 </footer>
 </div>
