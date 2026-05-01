@@ -9,15 +9,17 @@ Scope invariants (brief §Key Constraints):
 * **Read-only.** ``sync_tick()`` only ``git pull``s; never pushes.
 * **Path safety is load-bearing.** Every ``baker_vault_read`` /
   ``baker_vault_list`` call resolves its path with ``realpath`` and
-  asserts the result stays inside ``{mirror_root}/_ops/``. A traversal
-  regression would give Cowork arbitrary file read on Render's
-  container.
+  asserts the result stays inside one of ``ALLOWED_PREFIXES`` subtrees
+  (``_ops/`` or ``wiki/``). A traversal regression would give Cowork
+  arbitrary file read on Render's container.
 * **Extension + size caps.** Only ``.md`` / ``.yml`` / ``.yaml`` /
-  ``.txt`` under ``_ops/`` return content. 128 KB file-size cap; oversize
-  returns metadata only with ``truncated: true``.
+  ``.txt`` under an allowed prefix return content. 128 KB file-size
+  cap; oversize returns metadata only with ``truncated: true``.
 
 See ``briefs/BRIEF_SOT_OBSIDIAN_1_PHASE_D_VAULT_READ.md`` for the
-full ratified design.
+original ratified design and
+``briefs/BRIEF_BAKER_VAULT_READ_WIKI_SCOPE_1.md`` for the
+2026-04-30 ``wiki/`` scope extension.
 """
 
 from __future__ import annotations
@@ -42,6 +44,16 @@ SYNC_INTERVAL_FLOOR_SECONDS = 60
 # MCP-tool limits. Treat as contract — the tests pin them.
 MAX_FILE_BYTES = 128 * 1024
 ALLOWED_EXTENSIONS = frozenset([".md", ".yml", ".yaml", ".txt"])
+
+# Allowed read-scope prefixes. Originally ``_ops/`` only
+# (SOT_OBSIDIAN_1_PHASE_D); extended 2026-04-30 with ``wiki/`` for
+# Desk-skill dossier reads (BAKER_VAULT_READ_WIKI_SCOPE_1). Any new
+# prefix MUST keep realpath + symlink + extension + size invariants.
+ALLOWED_PREFIXES = frozenset(["_ops/", "wiki/"])
+
+# Back-compat alias — some imports may still reference ``OPS_PREFIX``.
+# Keep as a pointer to the canonical _ops prefix. Drop in a follow-up
+# brief once all imports migrate.
 OPS_PREFIX = "_ops/"
 
 # Module-level last-pull timestamp for /health.
@@ -260,7 +272,7 @@ def mirror_status() -> dict:
 
 
 class VaultPathError(ValueError):
-    """Raised when a caller-supplied path violates the `_ops/` scope."""
+    """Raised when a caller-supplied path violates the allowed-prefix scope."""
 
 
 def _normalize_and_resolve(rel_path: str) -> Path:
@@ -268,7 +280,8 @@ def _normalize_and_resolve(rel_path: str) -> Path:
 
     Invariants on return:
       * result is absolute
-      * result lives strictly inside ``{mirror_root}/_ops/``
+      * result lives strictly inside one of the ``ALLOWED_PREFIXES``
+        subtrees (``_ops/`` or ``wiki/``)
       * no symlink escapes (``realpath`` folds those)
 
     Raises ``VaultPathError`` otherwise. Does NOT require the file to
@@ -280,18 +293,27 @@ def _normalize_and_resolve(rel_path: str) -> Path:
     normalized = rel_path.replace("\\", "/").strip()
     if normalized.startswith("/"):
         raise VaultPathError("path must be relative, not absolute")
-    if not normalized.startswith(OPS_PREFIX):
-        raise VaultPathError(f"path must start with '{OPS_PREFIX}'")
+
+    matched_prefix: Optional[str] = None
+    for prefix in ALLOWED_PREFIXES:
+        if normalized == prefix.rstrip("/") or normalized.startswith(prefix):
+            matched_prefix = prefix
+            break
+    if matched_prefix is None:
+        raise VaultPathError(
+            f"path must start with one of {sorted(ALLOWED_PREFIXES)}; "
+            f"got: {rel_path!r}"
+        )
 
     root = mirror_path()
-    ops_root = (root / "_ops").resolve()
+    prefix_root = (root / matched_prefix.rstrip("/")).resolve()
     # ``resolve`` on a nonexistent path still folds .. segments.
     resolved = (root / normalized).resolve()
 
     # ``is_relative_to`` (py3.9+) — strict containment incl. symlink escapes.
-    if not (resolved == ops_root or ops_root in resolved.parents):
+    if not (resolved == prefix_root or prefix_root in resolved.parents):
         raise VaultPathError(
-            f"path escapes _ops/ scope: {rel_path!r}"
+            f"path escapes {matched_prefix} scope: {rel_path!r}"
         )
 
     return resolved
@@ -301,11 +323,27 @@ def _ext_allowed(p: Path) -> bool:
     return p.suffix.lower() in ALLOWED_EXTENSIONS
 
 
-def list_ops_files(prefix: str = OPS_PREFIX) -> list[str]:
+def _matched_prefix_root(resolved: Path) -> Optional[Path]:
+    """Return the resolved prefix-root that contains ``resolved``, or None.
+
+    Used by ``list_vault_files`` to re-verify each glob hit stays inside
+    the same allowed-prefix subtree the caller asked for. Symlinks that
+    escape get filtered here, after ``realpath`` folds the target.
+    """
+    root = mirror_path()
+    for prefix in ALLOWED_PREFIXES:
+        prefix_root = (root / prefix.rstrip("/")).resolve()
+        if resolved == prefix_root or prefix_root in resolved.parents:
+            return prefix_root
+    return None
+
+
+def list_vault_files(prefix: str = OPS_PREFIX) -> list[str]:
     """Return relative paths for files under ``prefix`` with allowed extensions.
 
-    ``prefix`` must start with ``_ops/``. Result paths are relative to
-    the mirror root and sorted for deterministic output.
+    ``prefix`` must start with one of ``ALLOWED_PREFIXES`` (``_ops/`` or
+    ``wiki/``). Result paths are relative to the mirror root and sorted
+    for deterministic output.
     """
     if not prefix:
         prefix = OPS_PREFIX
@@ -327,19 +365,23 @@ def list_ops_files(prefix: str = OPS_PREFIX) -> list[str]:
         if not _ext_allowed(candidate):
             continue
         # Re-resolve every hit — guards against symlinks inside the tree
-        # pointing outside _ops/.
+        # pointing outside any allowed prefix.
         try:
             resolved_hit = candidate.resolve()
         except OSError:
             continue
-        ops_root = (root / "_ops").resolve()
-        if not (resolved_hit == ops_root or ops_root in resolved_hit.parents):
+        if _matched_prefix_root(resolved_hit) is None:
             continue
         results.append(str(candidate.relative_to(root)))
     return results
 
 
-def read_ops_file(rel_path: str) -> dict:
+# Back-compat alias — pre-BAKER_VAULT_READ_WIKI_SCOPE_1 name. Drop in
+# a follow-up cleanup brief once all consumers migrate.
+list_ops_files = list_vault_files
+
+
+def read_vault_file(rel_path: str) -> dict:
     """Return ``{path, content_utf8, sha256, bytes, last_commit_sha}``.
 
     Size > ``MAX_FILE_BYTES`` returns metadata only with
@@ -390,3 +432,8 @@ def read_ops_file(rel_path: str) -> dict:
         "truncated": False,
         "last_commit_sha": last_commit,
     }
+
+
+# Back-compat alias — pre-BAKER_VAULT_READ_WIKI_SCOPE_1 name. Drop in
+# a follow-up cleanup brief once all consumers migrate.
+read_ops_file = read_vault_file
