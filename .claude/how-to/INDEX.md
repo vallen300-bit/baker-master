@@ -8,6 +8,7 @@
 
 - [X / Twitter access](.claude/how-to/x-twitter.md) — `x.com` returns 402; use `cdn.syndication.twimg.com/tweet-result?id={ID}&token=a` syndication endpoint
 - [Local research via Gemma 4](.claude/how-to/local-research-gemma.md) — free Ollama @ `localhost:11434`, structured note in ~30-60s, force a confidence section
+- [Chrome debug port 9222 recovery](.claude/how-to/chrome-debug-recovery.md) — auto-starts at login; if dead, `launchctl kickstart -k gui/$(id -u)/com.baker.chrome-debug`
 
 ## Adding a new how-to
 
