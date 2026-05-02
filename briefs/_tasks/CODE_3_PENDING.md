@@ -1,15 +1,15 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_TERMINAL_AUTO_ONBOARD_1.md
 trigger_class: LOW
 dispatched_at: 2026-05-02T12:00:00Z
 dispatched_by: ai-head-a
 claimed_at: 2026-05-02T12:05:00Z
 claimed_by: b3
-last_heartbeat: 2026-05-02T12:05:00Z
+last_heartbeat: 2026-05-02T12:25:00Z
 blocker_question: null
 ship_report: briefs/_reports/B3_terminal_auto_onboard_1_20260502.md
-pr: pending
+pr: https://github.com/vallen300-bit/baker-master/pull/149
 autopoll_eligible: false
 ---
 
