@@ -1,5 +1,8 @@
 # Baker / Sentinel — Repo CLAUDE.md
 
+> **B2 working in this dir:** read `~/baker-vault/_ops/agents/b2/orientation.md` first.
+> Other Code Brisens (B1 / B3 / B4): read your own `bN/orientation.md` if it exists; otherwise treat this CLAUDE.md as your orientation.
+
 @.claude/how-to/INDEX.md
 
 Brisen Group's institutional intelligence — not Director's assistant but the
