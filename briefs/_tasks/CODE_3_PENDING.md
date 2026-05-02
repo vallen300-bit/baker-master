@@ -1,101 +1,74 @@
 ---
-status: COMPLETE
-brief: briefs/BRIEF_TERMINAL_AUTO_ONBOARD_1.md
+status: OPEN
+brief: briefs/BRIEF_CHROME_DEBUG_PERMANENT_1.md
 trigger_class: LOW
-dispatched_at: 2026-05-02T12:00:00Z
-dispatched_by: ai-head-a
-claimed_at: 2026-05-02T12:05:00Z
-claimed_by: b3
-last_heartbeat: 2026-05-02T12:25:00Z
+dispatched_at: 2026-05-02T19:30:00Z
+dispatched_by: ai-head-b
+claimed_at: null
+claimed_by: null
+last_heartbeat: null
 blocker_question: null
-ship_report: briefs/_reports/B3_terminal_auto_onboard_1_20260502.md
-pr: https://github.com/vallen300-bit/baker-master/pull/149
+ship_report: null
+pr: null
 autopoll_eligible: false
+notes: User-side macOS config dispatch — produces NO PR. Completion = ship_report file at briefs/_reports/B3_chrome_debug_permanent_1_20260502.md with all 6 verification command outputs pasted, then mailbox flips to COMPLETE.
 ---
 
-# CODE_3 — DISPATCH (BRIEF_TERMINAL_AUTO_ONBOARD_1)
+# CODE_3 — DISPATCH (BRIEF_CHROME_DEBUG_PERMANENT_1)
 
-**Status:** OPEN — 2026-05-02T12:00Z by AI Head A (overwrites prior CODE_3 closure on VAULT_WRITE_FOLLOWUP_NITS_1 / PR #142 merged 2026-05-01)
-**Brief:** `briefs/BRIEF_TERMINAL_AUTO_ONBOARD_1.md` (LOW, ~1-2h, Tier B)
+**Status:** OPEN — 2026-05-02T19:30Z by AI Head B (overwrites prior CODE_3 closure on TERMINAL_AUTO_ONBOARD_1 / PR #149 merged 2026-05-02)
+**Brief:** `briefs/BRIEF_CHROME_DEBUG_PERMANENT_1.md` (LOW, ~30 min, Tier B)
 **Builder:** B3
-**Branch (cut from latest main):** `b3/terminal-auto-onboard-1`
-**Tier:** **Tier B** — autonomous merge on green per `_ops/processes/ai-head-autonomy-charter.md` §3
+**Branch:** N/A — no baker-master code change. User-side macOS config only.
+**Tier:** **Tier B** — autonomous merge / completion on green per `_ops/processes/ai-head-autonomy-charter.md` §3
 **autopoll_eligible:** false — paste-block dispatch; cold-start required
 
 ## Why this exists
 
-Today, when Director (or any human) opens a new Claude Code session in a
-terminal, the model has no idea whether it is AH1 / AH2 / B1-B5. Director
-manually pastes "You are AH2..." as the first message every cold start.
-This brief eliminates the paste step by wiring a SessionStart hook that
-reads `$BAKER_ROLE` and emits the per-role context block via the JSON
-envelope contract Claude Code expects.
+Today (2026-05-02) Director and AH-B discovered debug Chrome on port 9222 is NOT auto-started. First Code session of the day hits "Could not connect to Chrome" until a manual `pkill + open -na` cycle re-binds the port. Manual fix evaporates at next reboot. Memory file `chrome-bridge.md` claims a LaunchAgent already exists at `com.baker.chrome-debug.plist` — it doesn't (verified 2026-05-02). This brief retires that gap.
 
-Companion / next-step brief: `BRIEF_BRISEN_LAB_MSGBUS_1` (pending Director
-ratification) — removes Director from the relay path entirely once
-auto-onboarding lands here.
+Infrastructure pieces (Chrome profile + idempotent launch script) **already exist** from BROWSER-AGENT-1 (Mar 2026). What's missing is the macOS LaunchAgent wrapper. **B3 must NOT recreate the launch script or profile dir** — see brief's "What already exists" table.
+
+Cloudflare bridge half (`chrome.brisen-infra.com`) is **out of scope** — Dennis flagged 2026-05-02 as parked P4 (502/broken). Brief explicitly carves it out.
 
 ## Task summary
 
-9 in-repo files: 1 SessionStart hook + 7 role-context texts + 1
-`settings.local.json.example`. Vault-side process doc body lives in PR
-description (separate baker-vault PR is Director-side, low priority).
+3 user-side files (NO repo files modified):
 
-**Files touched:** 9 added.
+1. **NEW**: `~/Library/LaunchAgents/com.baker.chrome-debug.plist` — macOS LaunchAgent. Plist body provided verbatim in brief §Scope File 1. RunAtLoad + KeepAlive-on-crash-only (respects Cmd+Q via `SuccessfulExit=false`).
+2. **MODIFY**: `~/.claude/projects/-Users-dimitry-Desktop-baker-code/memory/chrome-bridge.md` — full-file rewrite to current 2026-05-02 verified state. Body provided verbatim in brief §Scope File 2.
+3. **MODIFY**: `~/.claude/projects/-Users-dimitry-Desktop-baker-code/memory/MEMORY.md` — single-line correction of the "Chrome debug" line in `## Local Infrastructure` block. Old/new line provided in brief §Scope File 3.
 
 **Critical: do NOT touch:**
-- Existing `.claude/hooks/block-secrets.sh`, `.claude/hooks/syntax-check.sh`.
-- `.claude/settings.json` — only `.example` is new + checked-in.
-- `~/.claude/bin/baker-statusline.sh` — leave alone; example wraps it.
-- No SessionEnd hook — `/handover` slash command (shipped 2026-05-02) covers session-end.
+- `~/.chrome-debug-profile/launch-chrome-debug.sh` — works as-is.
+- `~/.chrome-debug-profile/chrome-proxy.py` — Cloudflare bridge piece, parked P4.
+- `~/.chrome-debug-profile/` profile contents (cookies, settings).
+- `~/.cloudflared/` — parked P4.
+- Render env var `CHROME_BROWSER_URL`.
+- Any baker-master code (no API/MCP/dashboard changes).
+- `tasks/lessons.md` existing entries (append-only).
 
-## Dispatch steps
+## Verification (run all 6 commands, paste exact output into ship_report)
 
-```bash
-cd ~/bm-b3
-git fetch origin
-git checkout main && git pull --ff-only origin main
-gh pr list --state open --limit 20    # Lesson #54 precheck
-git checkout -b b3/terminal-auto-onboard-1
-git config core.hooksPath .githooks
+See brief §Verification — 6 commands covering: plist installed, plist syntax-valid, agent loaded, port live, unload/load cycle, memory files updated.
 
-# Read brief in full
-cat briefs/BRIEF_TERMINAL_AUTO_ONBOARD_1.md
+**Director-side reboot test** is the FINAL acceptance — Director will manually verify port 9222 alive within 30s of next login. Ship_report closes the AH-side loop; reboot test closes the Director-side loop.
 
-# Implement Scope per brief — 9 in-repo files exactly.
-# Vault doc body goes in PR description, NOT committed to baker-vault from here.
+## Reporting
 
-# Quality checkpoints (4 manual unit tests + smoke test) — see brief §Quality checkpoints.
+This dispatch produces NO PR (user-side files only).
 
-git push -u origin b3/terminal-auto-onboard-1
-gh pr create --title "feat(claude-code): SessionStart role auto-onboard via BAKER_ROLE env (BRIEF_TERMINAL_AUTO_ONBOARD_1)" \
-  --body "$(see brief §Quality checkpoints for full body template)"
-```
+On completion, B3 writes `briefs/_reports/B3_chrome_debug_permanent_1_20260502.md` containing:
 
-## Acceptance criteria
+- All 6 verification command outputs pasted verbatim from terminal.
+- Confirmation that plist file exists, loads with PID > 0, port 9222 returns JSON within 8s of `launchctl load`.
+- Note any TCC prompts encountered (none expected).
+- Summary line: `PORT 9222 LIVE; LAUNCHAGENT LOADED; MEMORY UPDATED` or specific failure mode.
 
-- 9 files added (`.claude/hooks/session-start-role.sh` + 7 role-context md
-  files + `.claude/settings.local.json.example`).
-- Hook is executable (`100755`); confirm via `git ls-files --stage`.
-- All 4 manual unit tests produce a valid JSON envelope on stdout with
-  `hookSpecificOutput.hookEventName == "SessionStart"`.
-- Hook exits 0 in every branch (set / unset / unknown / missing-file).
-- Smoke test in fresh Claude session with `BAKER_ROLE=B3` → role greeting
-  appears in turn 1.
-- PR opened with brief link in body + vault doc body inline.
-- Tier B autonomous-merge on green.
-- Ship report at `briefs/_reports/B3_terminal_auto_onboard_1_20260502.md`.
+Then this mailbox flips to `status: COMPLETE`. AH1 or AH2 reads the report and accepts.
 
-## On completion
+## Blocker policy
 
-1. Open PR.
-2. Update this mailbox to `status: COMPLETE` with PR link + ship-report path.
-3. AI Head A reviews + merges on green (autonomous Tier B per charter §3).
-4. Director copies vault doc body into baker-vault when convenient (separate PR, low priority).
+If TCC blocks Chrome at launchd-spawn time (Lesson #43 — `launchd.stderr.log` shows "Operation not permitted"), STOP and surface in `blocker_question` field. Director-side System Settings grant required (Files-and-Folders → Google Chrome). Do not attempt workaround; just flag.
 
-## Out of scope (per brief §Out of scope)
-
-- COWORK role (web Claude.ai — separate brief MSGBUS_1).
-- `.claude/settings.local.json` itself (gitignored; `.example` only).
-- SessionEnd hook (covered by `/handover` slash command).
-- Auto-loading handover *contents* — only a pointer.
+If anything else surprising surfaces (e.g., `pkill -f "Google Chrome"` in launch script kills Director's everyday Chrome during a KeepAlive relaunch), document in ship_report's "follow-up" section and propose a follow-up brief tightening the pkill match. Do not modify launch script in this dispatch.
