@@ -1,14 +1,14 @@
 ---
-status: OPEN
+status: COMPLETE
 brief: briefs/BRIEF_CHROME_DEBUG_PERMANENT_1.md
 trigger_class: LOW
 dispatched_at: 2026-05-02T19:30:00Z
 dispatched_by: ai-head-b
-claimed_at: null
-claimed_by: null
-last_heartbeat: null
+claimed_at: 2026-05-02T19:35:00Z
+claimed_by: b3
+last_heartbeat: 2026-05-02T19:55:00Z
 blocker_question: null
-ship_report: null
+ship_report: briefs/_reports/B3_chrome_debug_permanent_1_20260502.md
 pr: null
 autopoll_eligible: false
 notes: User-side macOS config dispatch — produces NO PR. Completion = ship_report file at briefs/_reports/B3_chrome_debug_permanent_1_20260502.md with all 6 verification command outputs pasted, then mailbox flips to COMPLETE.
