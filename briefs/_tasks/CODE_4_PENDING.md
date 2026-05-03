@@ -1,13 +1,36 @@
 ---
-status: PENDING
+status: CLAIMED
 brief: briefs/BRIEF_BRISEN_LAB_V2_BRIDGE_1.md
 trigger_class: TIER_B
 dispatched_at: 2026-05-03T20:00:00Z
 dispatched_by: ai-head-a
-claimed_at: null
-claimed_by: null
-last_heartbeat: null
-blocker_question: null
+claimed_at: 2026-05-03T20:30:00Z
+claimed_by: b4
+last_heartbeat: 2026-05-03T20:30:00Z
+blocker_question: |
+  Cross-repo scope confirmation requested before deep build.
+
+  Brief AC4 puts the bus daemon (10 new endpoints) + 3 new tables + UI Component 6 in
+  the **brisen-lab** repo (~/brisen-lab-staging, github.com/vallen300-bit/brisen-lab,
+  brisen-lab.onrender.com). Brief A7 puts the new MCP tools (baker_inbox_post +
+  baker_inbox_read) in the **baker-master** repo (this dispatch clone). Branches
+  b4/brisen-lab-v2-bridge-1 created in BOTH repos.
+
+  §8 step 10 says "Merge — rebase + standard squash-merge to main" (singular). Given
+  the necessary code split, my read is:
+  1. **Two coordinated PRs** — one per repo. brisen-lab PR carries the auth surface +
+     hardening + UI; baker-master PR carries MCP tools (A7) + completion report +
+     mailbox COMPLETE.
+  2. **/security-review runs against the brisen-lab PR** (where the auth surface +
+     ed25519 + JWT + rate-limit wrapper actually live; H1-H7 mostly enforced there).
+  3. **Merge order: brisen-lab first**, then baker-master (MCP tools depend on the
+     endpoints existing).
+  4. **Heartbeat in this baker-master mailbox** (per dispatch convention) while build
+     activity primarily lands in brisen-lab.
+
+  Confirm or correct. Proceeding with foundations (schema migrations, endpoint
+  scaffold in brisen-lab, MCP tool stubs in baker-master) on this interpretation;
+  will pause before /security-review + PR-open if no correction by next heartbeat.
 ship_report: null
 pr: null
 autopoll_eligible: false
