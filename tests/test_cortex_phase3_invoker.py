@@ -267,7 +267,10 @@ def test_persist_writes_specialist_invocation_artifact(patched):
     assert "'reason', 4, 'specialist_invocation'" in inserts[0][0]
 
 
-def test_persist_bumps_cycle_cost_after_loop(patched):
+def test_persist_bumps_cycle_cost_per_completion(patched):
+    """Per-completion bump (one UPDATE per successful specialist) so
+    partial cost survives mid-cycle cancellation by the outer
+    asyncio.wait_for(CYCLE_TIMEOUT_SECONDS) umbrella."""
     set_behavior, store, register_caps, _, _ = patched
     register_caps("a", "b")
     set_behavior(lambda c, q: _agent_result(in_tok=100, out_tok=50))
@@ -277,9 +280,55 @@ def test_persist_bumps_cycle_cost_after_loop(patched):
         capabilities_to_invoke=["a", "b"], phase2_context={},
     ))
     updates = [q for q in store.conn.cur.queries if "UPDATE cortex_cycles" in q[0]]
-    assert len(updates) == 1
-    # Total: (100+50)*2 = 300 tokens; cost = 300 * 0.0001 = 0.03
-    assert updates[0][1] == (300, pytest.approx(0.03), "cR")
+    assert len(updates) == 2
+    # Each bump is (150 tokens, 0.015 dollars, "cR").
+    for upd in updates:
+        assert upd[1] == (150, pytest.approx(0.015), "cR")
+
+
+def test_persist_skips_cost_bump_on_zero_cost_failure(patched):
+    """Failure path returns cost_tokens=0/cost_dollars=0 — the
+    per-completion bump is skipped (no-op DB write avoided)."""
+    set_behavior, store, register_caps, _, _ = patched
+    register_caps("flaky")
+
+    def _raise(c, q):
+        raise RuntimeError("nope")
+    set_behavior(_raise)
+
+    asyncio.run(invoker.run_phase3b_invocations(
+        cycle_id="cZ", matter_slug="x", signal_text="...",
+        capabilities_to_invoke=["flaky"], phase2_context={},
+    ))
+    updates = [q for q in store.conn.cur.queries if "UPDATE cortex_cycles" in q[0]]
+    assert len(updates) == 0
+
+
+def test_concurrent_execution_bounded_by_slowest(patched):
+    """3 specialists each blocking 0.2s should complete in well under
+    the sequential 0.6s. Validates asyncio.gather + asyncio.to_thread
+    runs specialists in parallel."""
+    import time as _time
+    set_behavior, _, register_caps, _, _ = patched
+    register_caps("a", "b", "c")
+
+    def _slow(cap, q):
+        _time.sleep(0.2)
+        return _agent_result(answer=f"out-{cap.slug}")
+    set_behavior(_slow)
+
+    t0 = _time.monotonic()
+    result = asyncio.run(invoker.run_phase3b_invocations(
+        cycle_id="cC", matter_slug="x", signal_text="...",
+        capabilities_to_invoke=["a", "b", "c"], phase2_context={},
+    ))
+    elapsed = _time.monotonic() - t0
+
+    # gather preserves input order.
+    assert [o.capability_slug for o in result.outputs] == ["a", "b", "c"]
+    assert all(o.success for o in result.outputs)
+    # Sequential floor = 3 × 0.2s = 0.6s. Parallel ≈ 0.2s + overhead.
+    assert elapsed < 0.5, f"expected parallel <0.5s, got {elapsed:.2f}s"
 
 
 # ==========================================================================
