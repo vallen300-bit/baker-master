@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AO Baden-Baden Agenda — 04 May 2026</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+         max-width: 900px; margin: 0 auto; padding: 1.5rem 1.2rem;
+         color: #1a1a1a; background: #fafaf7; line-height: 1.55; font-size: 16px; }
+  h1 { font-weight: 600; margin: 0 0 0.3rem; color: #2c2317; font-size: 1.55rem; }
+  h2 { color: #4a3a1f; border-bottom: 1px solid #d6cfb8; padding-bottom: 0.4rem;
+       margin-top: 2.2rem; font-weight: 600; font-size: 1.2rem; }
+  h3 { color: #2c2317; margin-top: 1.6rem; margin-bottom: 0.3rem; font-weight: 600;
+       font-size: 1.05rem; }
+  h3 .timetag { font-size: 0.78rem; background: #ebe5d2; color: #4a3a1f;
+                padding: 0.1rem 0.45rem; border-radius: 3px; margin-left: 0.4rem;
+                font-weight: 500; vertical-align: middle; }
+  h3 .typetag { font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 3px;
+                margin-left: 0.3rem; font-weight: 600; vertical-align: middle; }
+  h3 .full { background: #c2d8a0; color: #2c4a1c; }
+  h3 .brief { background: #e0d6b0; color: #4a3a1f; }
+  h3 .opener { background: #d6cfb8; color: #2c2317; }
+  .meta { color: #6a6a6a; font-size: 0.95rem; margin-bottom: 1rem; }
+  .clocks { background: #e9f0e2; border-left: 3px solid #6a8c4e;
+            padding: 0.7rem 1rem; margin: 1rem 0; font-size: 0.95rem; }
+  .clocks ul { margin: 0.3rem 0 0 1rem; padding: 0; }
+  .checklist { background: #f0ece0; border-left: 3px solid #8c7a4e;
+               padding: 0.7rem 1rem; margin: 1rem 0; font-size: 0.95rem; }
+  .checklist ol { margin: 0.3rem 0 0.2rem 1.2rem; padding: 0; }
+  .checklist li { margin-bottom: 0.3rem; }
+  .risks { background: #faf3e8; border-left: 3px solid #c8853f;
+           padding: 0.7rem 1rem; margin: 1rem 0; font-size: 0.95rem; }
+  .risks ul { margin: 0.3rem 0 0.2rem 1.2rem; padding: 0; }
+  .risks li { margin-bottom: 0.3rem; }
+  .deferred { background: #f0ece0; border-left: 3px solid #8c7a4e;
+              padding: 0.7rem 1rem; margin: 2rem 0 1rem; font-size: 0.92rem; }
+  .deferred ul { margin: 0.3rem 0 0.2rem 1.2rem; padding: 0; }
+  .block { background: #fff; border: 1px solid #d6cfb8; border-radius: 4px;
+           padding: 0.9rem 1.1rem; margin-bottom: 1rem;
+           box-shadow: 0 1px 2px rgba(0,0,0,0.03); }
+  .block .tone { color: #6a6a6a; font-style: italic; font-size: 0.9rem; margin-bottom: 0.5rem; }
+  .block .body { font-size: 0.92rem; }
+  .block .body ul { margin: 0.3rem 0 0.5rem 1.1rem; padding: 0; }
+  .block .body li { margin-bottom: 0.25rem; }
+  .ask { background: #f5f9ed; border-left: 3px solid #6a8c4e;
+         padding: 0.5rem 0.85rem; margin: 0.6rem 0 0.4rem;
+         font-size: 0.9rem; color: #2c4a1c; }
+  .ask strong { color: #1a3a0a; }
+  .careful { background: #faf3e8; border-left: 3px solid #c8853f;
+             padding: 0.5rem 0.85rem; margin: 0.4rem 0;
+             font-size: 0.88rem; color: #5a3a1f; }
+  .careful strong { color: #4a2a0f; }
+  .toc { background: #fff; border: 1px solid #d6cfb8; border-radius: 4px;
+         padding: 0.7rem 1rem; margin: 1.2rem 0; font-size: 0.9rem; }
+  .toc ol { margin: 0.3rem 0 0 1.4rem; padding: 0; }
+  .toc li { margin-bottom: 0.15rem; }
+  .toc a { color: #4a3a1f; text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .totaltime { display: inline-block; background: #2c2317; color: #f5f1e2;
+               padding: 0.25rem 0.6rem; border-radius: 3px; font-size: 0.85rem;
+               margin-left: 0.4rem; font-weight: 500; }
+  .footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #d6cfb8;
+            color: #6a6a6a; font-size: 0.82rem; }
+  code { background: #f0ece0; padding: 0.05rem 0.3rem; border-radius: 2px;
+         font-family: ui-monospace, Consolas, monospace; font-size: 0.82rem; }
+  em.ru { color: #2c2317; font-weight: 500; font-style: normal;
+          background: #ebe5d2; padding: 0.05rem 0.3rem; border-radius: 2px; }
+  @media print {
+    body { background: #fff; max-width: 100%; padding: 1rem; font-size: 12pt; }
+    .block { break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+
+<h1>AO Baden-Baden — Meeting Agenda</h1>
+<div class="meta">Monday 04 May 2026 · ~112 min substantive · plan 2.5–3 h with tangents <span class="totaltime">13 blocks</span></div>
+
+<div class="clocks">
+  <strong>Two clocks govern the broader posture</strong> (briefs only Monday — full decisions in next session):
+  <ul>
+    <li><strong>Aukera EUR 15M term sheet</strong> — execute by 30 May 2026</li>
+    <li><strong>Participation Agreement (LCG &harr; Aelio)</strong> — wet ink by 31 May 2026</li>
+  </ul>
+</div>
+
+<div class="checklist">
+  <strong>Pre-meeting checklist — finish Sunday EOD</strong>
+  <ol>
+    <li><strong>Constantinos:</strong> LM + MRCI 2024 package actually sent to Mascha?</li>
+    <li><strong>Buchwalder:</strong> which PA version operative — 25% PDF or 45% DOCX?</li>
+    <li><strong>Siegfried:</strong> updated LM cash, Katsan EUR 696K tranche landed?, in town Monday?</li>
+    <li><strong>Conrad:</strong> MRCI shareholder resolution (1 May) signed?</li>
+    <li><strong>Weipert:</strong> available Monday for Lana tax discussion?</li>
+  </ol>
+</div>
+
+<div class="risks">
+  <strong>Walk-in risks (pre-decide alone, not in the room)</strong>
+  <ul>
+    <li><strong>R1 — PA may not close Monday.</strong> AO may stall because 48/45 isn't internally resolved (deferred). This meeting only sets the date if needed.</li>
+    <li><strong>R2 — Aukera 30 May aggressive</strong> (KPMG deferred + Constantinos paternity from 5 May). Fallback: 2-4 wk extension, EUR 60K breakup fee. Decide pre-meeting whether you'd pay.</li>
+    <li><strong>R3 — AO emotional state.</strong> Lana + capital ask + restructure — multiple cheque-asks. Annaberg sales (block 2) is the counter-balance; don't skip.</li>
+  </ul>
+</div>
+
+<div class="toc">
+  <strong>Agenda flow</strong>
+  <ol>
+    <li><a href="#b1">RU tax check — opener</a> · 1 min</li>
+    <li><a href="#b2">Annaberg sales + LM cash</a> · 15 min</li>
+    <li><a href="#b3">Annaberg site walk</a> · 3 min</li>
+    <li><a href="#b4">Lana tax — fire suppression</a> · 15 min</li>
+    <li><a href="#b5">Lilienmatt restructure</a> · 25 min</li>
+    <li><a href="#b6">Aukera EUR 15M brief</a> · 5 min</li>
+    <li><a href="#b7">MRCI ownership</a> · 15 min</li>
+    <li><a href="#b8">Balgerstrasse develop-or-sell</a> · 15 min</li>
+    <li><a href="#b9">MRCI loan haircut tax</a> · 3 min</li>
+    <li><a href="#b10">Aelio capital call</a> · 5 min</li>
+    <li><a href="#b11">PA wet-ink target</a> · 5 min</li>
+    <li><a href="#b12">Bond waterfall</a> · 3 min</li>
+    <li><a href="#b13">Constantinos paternity transition</a> · 2 min</li>
+  </ol>
+</div>
+
+<h2>Tone &amp; framing</h2>
+<p>Lead Russian for substantive points. Good news first; bad news with solutions. Never lead with a number. AO's biggest fear: being treated as a passive cash source — treat him as partner. If you sense queue-frustration: <em class="ru">"Андрей, у меня долг перед тобой по нескольким вопросам — сегодня закроем."</em></p>
+
+<h2>Blocks</h2>
+
+<div class="block" id="b1">
+  <h3>1. RU tax reporting check<span class="timetag">~1 min</span><span class="typetag opener">opener</span></h3>
+  <div class="tone">Touch only — defuse, not absorb. Package is in his hands.</div>
+  <div class="body">
+    <p>Lead Russian: <em class="ru">"Андрей, отчётность дошла, всё в твоих руках — у тебя всё в порядке с Россией?"</em></p>
+    <ul>
+      <li>If yes → move on.</li>
+      <li>If specific issue → park as follow-up, do NOT absorb into meeting.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="block" id="b2">
+  <h3>2. Annaberg sales + Lilienmatt cash<span class="timetag">~15 min</span><span class="typetag full">full</span></h3>
+  <div class="tone">Warm — momentum first. Sets tone before cold blocks.</div>
+  <div class="body">
+    <p><strong>Sales pipeline:</strong></p>
+    <ul>
+      <li>Kögel — apt 1.5 — EUR 1,222,650 paid 30 Jan</li>
+      <li>Aleskerov — apt 3.3 — EUR 928,000 imminent</li>
+      <li>Katsan — notary 27 Apr — EUR 1,200,000; first tranche EUR 696,000 in ~4 wks</li>
+      <li>Penthouse H5 — binding offer EUR 2,350,000 (Jan 31, confirm status)</li>
+    </ul>
+    <p><strong>Cash + ops:</strong></p>
+    <ul>
+      <li>LM cash 22 Apr: EUR 760,230. Buyer advances funding ops.</li>
+      <li>Hand-over <strong>hard deadline</strong>: Houses 1/2/3 by 30 Nov 2026.</li>
+      <li>Façade EUR 1,931,255 net · roof EUR 1,012,219 net (Brandner 30 Apr).</li>
+    </ul>
+  </div>
+  <div class="ask"><strong>Ask AO:</strong> none — informational, sets tone.</div>
+</div>
+
+<div class="block" id="b3">
+  <h3>3. Annaberg site walk-through<span class="timetag">~3 min</span><span class="typetag brief">brief</span></h3>
+  <div class="tone">One-pager only. Physical walk if AO asks.</div>
+  <div class="body">
+    <p>Pre-print one-pager: 21 units · 3-4 secured · construction completion % · cash waterfall.</p>
+    <p>If AO wants to walk: schedule after the meeting (Sieg confirmed in town).</p>
+  </div>
+</div>
+
+<div class="block" id="b4">
+  <h3>4. Lana tax (EUR 650K + EUR 100K Vollstreckung)<span class="timetag">~15 min</span><span class="typetag full">full</span></h3>
+  <div class="tone">Fire suppression early. Active enforcement vs IO apartment.</div>
+  <div class="body">
+    <ul>
+      <li>EUR 650K Finanzamt Baden-Baden assessment. RU tax docs in certified translation; Weipert files Einspruch when ready.</li>
+      <li><strong>EUR 100K immediate</strong> to stop apartment Vollstreckung (Merz 23 Apr).</li>
+      <li>Merz invoice in this matter unpaid — coordinate Monday.</li>
+    </ul>
+  </div>
+  <div class="ask"><strong>Ask AO:</strong> confirm EUR 100K routing into AO/IO Sparkasse Privatkonto. Get Weipert's <em>concrete</em> Einspruch filing date — not "soon."</div>
+  <div class="careful"><strong>Why first (not last):</strong> if Finanzamt registers a Zwangshypothek, surfaces in Grundbuch — Aukera DD on LM sees it. Fire suppression is non-optional and visible to lender.</div>
+</div>
+
+<div class="block" id="b5">
+  <h3>5. Lilienmatt restructure → Brisen Ventures CY<span class="timetag">~25 min</span><span class="typetag full">full</span></h3>
+  <div class="tone">Strategic frame only. KPMG was deferred — no green-light ask Monday.</div>
+  <div class="body">
+    <p><strong>Current ownership:</strong> Brisen 7.5% · AO ~46.25% · IO ~46.25% (notarised 11/2025).</p>
+    <p><strong>Target:</strong> 100% to Brisen Ventures Ltd (CY) — required for Aukera bankability.</p>
+    <p><strong>Tax flags to surface only if AO probes:</strong></p>
+    <ul>
+      <li>GrESt 5–6.5% on Grundbesitzwert (~EUR 500K–1M depending on assessment)</li>
+      <li>§ 17 EStG ~26.375% on AO/IO gain (cost basis question — nominal Stammkapital vs. shareholder loans)</li>
+      <li>DTA Germany-Austria Art. 13(4) — no escape on real-estate-rich shares</li>
+      <li>Skliar/Derkachova internal junior debt subordination required by Aukera</li>
+      <li>Disguised-equity / § 6 AStG risk if structure looks artificial</li>
+    </ul>
+    <p><strong>Quid-pro-quo frame:</strong> shareholder loans (~EUR 21M Ebner Stolz) repaid from Aukera proceeds; Grundschulden subordinated; AO loses German tax-filing burden.</p>
+  </div>
+  <div class="ask"><strong>Ask AO:</strong> verbal alignment that ownership restructure is the right strategic direction. <strong>Not</strong> KPMG engagement decision. <strong>Not</strong> signature. Frame KPMG as "next session topic — once we have proposals to compare."</div>
+  <div class="careful"><strong>Do NOT open:</strong> AO's EUR 7.5M Grundschulden (deferred — wait for KPMG output session).</div>
+</div>
+
+<div class="block" id="b6">
+  <h3>6. Aukera EUR 15M term sheet<span class="timetag">~5 min</span><span class="typetag brief">brief</span></h3>
+  <div class="tone">Calendar awareness, not mechanics. Inform-only.</div>
+  <div class="body">
+    <ul>
+      <li>Patrick Züchner term sheet: EUR 15M, 3yr, SWAP+400-450bp, mandate fee EUR 60-75K.</li>
+      <li>Balazs confirmed "Annaberg is a go" 03 Apr.</li>
+      <li><strong>30 May execution deadline.</strong> Fallback: 2-4 wk extension, EUR 60K breakup fee at risk.</li>
+      <li>Bankability gate = block 5 (restructure).</li>
+    </ul>
+  </div>
+  <div class="ask"><strong>Ask AO:</strong> none. Inform. Decision lands in next session with KPMG output.</div>
+</div>
+
+<div class="block" id="b7">
+  <h3>7. MRCI ownership disentanglement<span class="timetag">~15 min</span><span class="typetag full">full</span></h3>
+  <div class="tone">Live decision item. Court-claim insolvency-risk drives this.</div>
+  <div class="body">
+    <ul>
+      <li>Now: Brisen 50% · IO 50%. Asset Balgerstrasse 7 ~EUR 6M. AO/IO ~EUR 5M shareholder loans.</li>
+      <li><strong>Court-claim risk</strong> (Phase 1 owners): ~EUR 500K–1M. Brisen prefers AO/IO off MRCI register.</li>
+      <li>Conrad MRCI shareholder resolution prepped 1 May.</li>
+      <li>Merz options (Jan 20): merge LM+MRCI · asset out to new co · shareholders out — each ~5% land tax (~EUR 300K).</li>
+    </ul>
+  </div>
+  <div class="ask"><strong>Ask AO:</strong> directional alignment on path forward. Loan-haircut tax handling = block 9.</div>
+</div>
+
+<div class="block" id="b8">
+  <h3>8. Balgerstrasse 7 — develop or sell<span class="timetag">~15 min</span><span class="typetag full">full</span></h3>
+  <div class="tone">Strategic. Long-overdue binary decision.</div>
+  <div class="body">
+    <ul>
+      <li>118 apts. Construction cost ~<strong>EUR 49,051,091</strong> (excl. land + ~EUR 9.5M historical). GU Koester + 10% surcharge EUR 4.26M.</li>
+      <li><strong>Standard scenario margin: EUR 314K</strong> (essentially break-even).</li>
+      <li>Optimistic (EUR 5,500/m²): ~15% margin.</li>
+      <li>Sosnin civil action active vs Brisen — €150K (MRCI projects, Buchwalder counsel).</li>
+      <li>AO confirmed Annaberg funding willingness 22 Apr — extend to Balgerstrasse?</li>
+    </ul>
+  </div>
+  <div class="ask"><strong>Ask AO:</strong> develop or sell? If develop: who funds? If exit: agree haircut terms (loan + ownership).</div>
+  <div class="careful"><strong>Pushback:</strong> standard scenario is essentially zero margin for risk on EUR 49M build. Make AO say out loud he commits to optimistic-pricing discipline before greenlighting development.</div>
+</div>
+
+<div class="block" id="b9">
+  <h3>9. MRCI shareholder loan haircut tax<span class="timetag">~3 min</span><span class="typetag brief">brief</span></h3>
+  <div class="tone">Inform-only. Decision deferred to Weipert/Merz brief.</div>
+  <div class="body">
+    <p>If AO/IO accept ~10¢ on the EUR for ~EUR 5M loans → MRCI books extraordinary gain.</p>
+    <p>Weipert/Merz must coordinate before any haircut signature.</p>
+  </div>
+  <div class="ask"><strong>Ask AO:</strong> acknowledge tax-handling clearance is a precondition. No decision pressure.</div>
+</div>
+
+<div class="block" id="b10">
+  <h3>10. Aelio capital call EUR 7M<span class="timetag">~5 min</span><span class="typetag brief">brief</span></h3>
+  <div class="tone">Verbal commit on May wire. Inform on Jun.</div>
+  <div class="body">
+    <ul>
+      <li>DR#1 Apr EUR 2.5M — verify settled (Constantinos 9 Mar Aelio→LCG transfer = same money?).</li>
+      <li><strong>DR#2 May EUR 2.5M — set ink target 15 May.</strong></li>
+      <li>DR#3 Jun EUR 2.0M — flag for forward planning.</li>
+    </ul>
+  </div>
+  <div class="ask"><strong>Ask AO:</strong> verbal commit to May wire by 15 May.</div>
+</div>
+
+<div class="block" id="b11">
+  <h3>11. Participation Agreement<span class="timetag">~5 min</span><span class="typetag brief">brief</span></h3>
+  <div class="tone">Set wet-ink target 15 May. Buchwalder reconciles versions.</div>
+  <div class="body">
+    <ul>
+      <li>Two versions in circulation: signed-PDF 25% vs. draft-DOCX 45%. Buchwalder reconciles before any signature.</li>
+      <li>Section 3 anti-dilution = AO's protection — frame as protecting <em>him</em>, not Brisen.</li>
+      <li><strong>Hard deadline: 31 May 2026.</strong></li>
+    </ul>
+  </div>
+  <div class="ask"><strong>Ask AO:</strong> commit to 15 May ink target.</div>
+  <div class="careful"><strong>Do NOT open:</strong> 48% vs 45% economic interest dispute (deferred). Don't let it surface.</div>
+</div>
+
+<div class="block" id="b12">
+  <h3>12. Bond payout mechanics / waterfall<span class="timetag">~3 min</span><span class="typetag brief">brief</span></h3>
+  <div class="tone">Carry-over close-the-loop.</div>
+  <div class="body">
+    <p>EUR 5,125,000 unrestructured Swiss Bank bonds — outside Aelio restructuring.</p>
+    <p>Inform: payout/waterfall mechanics presented in next session with full Financing-to-Completion table.</p>
+  </div>
+</div>
+
+<div class="block" id="b13">
+  <h3>13. Constantinos paternity transition<span class="timetag">~2 min</span><span class="typetag brief">brief</span></h3>
+  <div class="tone">Operational housekeeping. AO needs to know who to hit.</div>
+  <div class="body">
+    <p>Constantinos out from <strong>5 May</strong> (day after meeting). Affects:</p>
+    <ul>
+      <li>RU package final transmission to Mascha</li>
+      <li>KPMG mandate sequencing (when promoted from defer)</li>
+      <li>PA close coordination</li>
+    </ul>
+    <p><strong>Interim contacts:</strong> Balazs for finance + LCG drawdowns; you for PA reconciliation with Buchwalder.</p>
+  </div>
+</div>
+
+<div class="deferred">
+  <strong>Deferred items (sidebar — not Monday)</strong>
+  <ul>
+    <li>48% vs 45% economic interest dispute — Director to defend a position before next session</li>
+    <li>Hagenauer press story briefing — overdue 28 days from your queue</li>
+    <li>EUR 540K Skliar/Derkachova loan (June maturity) — fold into next Annaberg session</li>
+    <li>AO's EUR 7.5M Grundschulden release/subordination — gated on KPMG output</li>
+    <li>KPMG cross-border tax engagement — green-light decision next session</li>
+    <li>Financing-to-Completion table presentation — promote with bond waterfall presentation next session</li>
+  </ul>
+</div>
+
+<div class="footer">
+  Source: Cortex cycle <code>70c5e634-134a-4e4d-a478-6c8da512f017</code> · 4 specialists synthesized: russo_de + russo_cy + legal + sales · Director-curated 2026-05-03 (Step 1 + Step 2 Triagas) · Canonical: <code>~/baker-vault/wiki/matters/oskolkov/curated/agenda-baden-baden-2026-05-04.md</code>
+</div>
+
+</body>
+</html>
