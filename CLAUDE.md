@@ -1,7 +1,15 @@
 # Baker / Sentinel — Repo CLAUDE.md
 
-> **B2 working in this dir:** read `~/baker-vault/_ops/agents/b2/orientation.md` first.
-> Other Code Brisens (B1 / B3 / B4): read your own `bN/orientation.md` if it exists; otherwise treat this CLAUDE.md as your orientation.
+> **Code Brisens (B1 / B2 / B3 / B4) opening this dir — MANDATORY before any reply:**
+> 1. Invoke the Read tool on `~/baker-vault/_ops/agents/b<N>/orientation.md` (your role orientation — `<N>` = your build worker number).
+> 2. Invoke the Read tool on `briefs/_tasks/CODE_<N>_PENDING.md` (your dispatched brief, if any).
+> 3. Invoke the Read tool on `~/.claude/projects/-Users-dimitry-Vallen-Dropbox-Dimitry-vallen-Baker-Project/memory/MEMORY.md` (canonical Baker memory — V12-V14 handovers, Cortex roadmap, in-flight briefs, accumulated lessons).
+>
+> **No "by inspection".** Actually invoke the Read tool — do not improvise from this CLAUDE.md alone.
+>
+> **First-message confirmation phrase (evidence-bound, exact):** `"B<N> oriented. Read: CODE_<N>_PENDING.md, MEMORY.md."`
+>
+> If a file is missing or unreadable, reply with which one + skip the confirmation phrase entirely. If `briefs/_tasks/CODE_<N>_PENDING.md` doesn't exist (no current dispatch), reply: `"B<N> oriented. Mailbox empty (no CODE_<N>_PENDING.md). Read: MEMORY.md."`
 
 @.claude/how-to/INDEX.md
 
