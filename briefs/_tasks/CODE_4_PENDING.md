@@ -1,135 +1,74 @@
 ---
-status: COMPLETE
-brief: briefs/BRIEF_CORTEX_PHASE6_VAULT_RECONCILER_1.md
-trigger_class: MEDIUM
-dispatched_at: 2026-05-01T10:05:00Z
+status: PENDING
+brief: briefs/BRIEF_BRISEN_LAB_V2_BRIDGE_1.md
+trigger_class: TIER_B
+dispatched_at: 2026-05-03T20:00:00Z
 dispatched_by: ai-head-a
-claimed_at: 2026-05-01T10:10:00Z
-claimed_by: b4
-last_heartbeat: 2026-05-01T11:30:00Z
-completed_at: 2026-05-01T11:30:00Z
-pr: https://github.com/vallen300-bit/baker-master/pull/144
-ship_report: briefs/_reports/B4_cortex_phase6_vault_reconciler_1_20260501.md
+claimed_at: null
+claimed_by: null
+last_heartbeat: null
 blocker_question: null
+ship_report: null
+pr: null
 autopoll_eligible: false
 ---
 
-# CODE_4 — DISPATCH (CORTEX_PHASE6_VAULT_RECONCILER_1)
+# DISPATCH: B4 → BRIEF_BRISEN_LAB_V2_BRIDGE_1 (V0.3.5)
 
-**Status:** COMPLETE — 2026-05-01T11:30Z by B4. PR [#144](https://github.com/vallen300-bit/baker-master/pull/144) opened on `b4/cortex-phase6-vault-reconciler-1`. Ship report: `briefs/_reports/B4_cortex_phase6_vault_reconciler_1_20260501.md`. Tier B autonomous merge pending AI Head A green check.
+**Brief:** `briefs/BRIEF_BRISEN_LAB_V2_BRIDGE_1.md` (V0.3.5, 711 lines)
 
-**Original status:** OPEN — 2026-05-01T10:05Z by AI Head A (Director-cleared 2026-05-01; B4 reserved for AI Head A)
-**Brief:** `briefs/BRIEF_CORTEX_PHASE6_VAULT_RECONCILER_1.md` (~2-3h, MEDIUM, Tier B)
-**Builder:** B4 (freshest Reflector context — surfaced the gap in CODE_4_PENDING handover §S2)
-**Branch (cut from latest main):** `b4/cortex-phase6-vault-reconciler-1`
-**Tier:** **Tier B** — autonomous merge on green per `_ops/processes/ai-head-autonomy-charter.md` §3
-**autopoll_eligible:** false — paste-block dispatch; cold-start required
+## Why you (B4)
 
-## Why this exists
+You shipped `CORTEX_PHASE6_VAULT_RECONCILER_1` 2026-05-01. V2_BRIDGE_1 §4 endpoints + Component 6 (§7 A15–A20) read from `cortex_cycles` + `cortex_phase_outputs` + `cortex-roadmap-current.yml` heavily — your Phase-6 reconciler context maps directly. You also know the vault YAML loading patterns (`BAKER_VAULT_PATH`).
 
-Brief 3 (Reflector) shipped with an inherent gap (B4 surfaced it):
-counter-increment + idempotency-marker INSERT happens in one txn, but the
-vault write to `proposed-config-deltas.md` happens AFTER commit, in a
-try/except that only logs. If the vault write throws (FS permissions, disk
-full, mac-mini sync glitch), the cycle "looks complete" in PG but Director's
-per-matter vault surface is silently missing. Subsequent sweeps then skip
-because the marker is present.
+## Provenance
 
-This brief builds the cheap reconciler: read markers, check vault file
-presence + cycle block, re-emit when missing. Pure vault-write replay; NO
-counter touches; same-substring idempotency for race window.
+V0.1 → V0.3.5 evolution:
+- V0.1 (Cowork) — original 19-decision spec
+- V0.2 (Cowork) — scope-shrunk to bus + 6 hardening
+- V0.3 (AH1) — Director ratified Q1(c), Q2(b), OTel mandatory, verify-before-dispatch, Component 6 fold, Hermes-pattern Amendment 2
+- V0.3.1 (AH1, post-AH2 anchor verify) — H3/H4/H5 anchors corrected (Lakera, AICosts.ai 49-helpers, Anthropic Apr 23 postmortem)
+- V0.3.2 → V0.3.5 (AH1, post-architect-reviewer 4 passes) — schema fixes, auth primitives, idle threshold, atomicity
 
-## Task summary
+## Pass-history convergence (architect-reviewer code-architecture-reviewer)
+- Pass 1: 5 Critical / 6 High / 5 Medium / 3 Low
+- Pass 2: 3 Critical / 2 High / 3 Medium (introduced by V0.3.2 patches)
+- Pass 3: 0 Critical / 3 High / 3 Medium / 2 Low
+- Pass 4: 0 Critical / 1 High / 2 Medium / 1 Low
+- All folded as of V0.3.5; architect's last-pass verdict: "ship-ready after [the V0.3.5 fixes]". Director ratified ship 2026-05-03.
 
-Build `orchestrator/cortex_phase6_reconciler.py` (single-file module +
-APScheduler wiring + tests). Brief has full spec including:
-- File-by-file scope with line citations
-- Pre-check / enumeration / re-emit logic
-- Idempotency strategy (same-substring header match)
-- Audit row format (action_type='cortex_reflector_reconcile')
-- APScheduler wiring point in `triggers/embedded_scheduler.py:841`
-  (immediately before BRIEF_MOVIE_AM_RETROFIT_1 D5 comment at line 842)
-- V1 explicit drops (no counter rollback, no ClickUp reconciliation,
-  no alerting threshold, no missing-marker backstop, no metrics dashboard)
+## Read order (recommended)
 
-Read the full brief before starting — the scheduler insertion point in
-particular has a clarifying note about NOT inserting inside the existing
-else-branch (the brief was self-audited + updated to call this out).
+1. **§0 Version log + V0.3.x patch history** — explains WHY each constraint exists; many are responses to specific architect findings.
+2. **§3 Schema** — `brisen_lab_msg`, `brisen_lab_worker_authority`, `brisen_lab_session_keys`. Read with the V0.3.x annotations (C1, C3, NM3, M-A2, H-A2 etc.) — they tell you what would-be-bugs each line defends.
+3. **§4 Endpoints + §4.1 Topic→tier classification** — auth chain.
+4. **§5.1 Hermes-pattern** — pay attention to H-A4 atomicity (V0.3.5) for the lifecycle/restart UPDATE+INSERT transaction.
+5. **§6 Production Hardening H1–H7** — H3 wrapper+egress-firewall (C5), H4 watchdog, H5 Lakera anchor, H6 audit emit, H7 ed25519 session-key flow (NC2).
+6. **§7 Acceptance criteria A1–A21** — your test plan.
+7. **§8 Lane** — sequence; you're step 7 (build).
 
-## Pre-flight checks
+## Constraints
 
-```bash
-cd ~/bm-b4
-git fetch origin
-git status -sb                      # confirm clean working tree
-git checkout main && git pull --ff-only origin main
-gh pr list --state open --limit 20  # Lesson #54 precheck
-git checkout -b b4/cortex-phase6-vault-reconciler-1
-```
+- **Tier B / mandatory `/security-review`** (Lesson #52). H1–H7 ALL must pass — hard gate, not checkbox.
+- **`/write-brief` SOP** ran on the spec (4 architect passes); your job is implementation per spec, not redesign.
+- **Migration order (L-A1):** `brisen_lab_msg` → `brisen_lab_worker_authority` → `brisen_lab_session_keys` (FK ordering).
+- **No worker direct DB writes (NM3):** all `acknowledged_at` updates go through `POST /msg/<id>/ack` endpoint.
+- **No force-push to main (L3):** rebase + standard squash-merge only.
+- **Vault PR for `wiki/research/2026-05-02-multi-agent-war-stories.md` §1/§3/§4/§5 corrections** is queued as separate scope (AH1 owns); coordinate before/at merge — don't block on it during build.
 
-Expected: clean tree; PR list shows zero conflicting open PRs (the only
-open PR pre-dispatch was B5's BRISEN_LAB_1 staging — separate repo, no
-overlap).
+## ETA
 
-## Dispatch steps
+~2.5–3 weeks total per spec §8 (3–4 days bus + 3–5 days Component 6 + 1–2h Hermes + hardening + /security-review + Component 6 UI). Calibrate on first push if your read of complexity differs.
 
-```bash
-# Read brief in full (~250+ lines — complete spec)
-cat briefs/BRIEF_CORTEX_PHASE6_VAULT_RECONCILER_1.md
+## Coordination
 
-# Implement per brief §Solution + §Implementation
-# Key files:
-#   orchestrator/cortex_phase6_reconciler.py (NEW)
-#   triggers/embedded_scheduler.py (MOD — APScheduler job at line 841)
-#   tests/test_cortex_phase6_reconciler.py (NEW)
+- Branch: `b4/brisen-lab-v2-bridge-1`
+- Heartbeat: update `last_heartbeat` in this mailbox file every ~4h while in-flight
+- Blocker: surface to AH1 via `blocker_question` field; do not stall silently
+- PR opens against `main`; AH1 + `/security-review` both required reviewers per Lesson #52
 
-# Quality checkpoints (brief §Quality Checkpoints + repo defaults):
-pytest tests/test_cortex_phase6_reconciler.py -v
-python3 -c "import py_compile; py_compile.compile('orchestrator/cortex_phase6_reconciler.py', doraise=True)"
-python3 -c "import py_compile; py_compile.compile('triggers/embedded_scheduler.py', doraise=True)"
-bash scripts/check_singletons.sh
+## Reference (this clone)
 
-# Push + open PR
-git push -u origin b4/cortex-phase6-vault-reconciler-1
-gh pr create --title "feat(cortex): Phase 6 vault reconciler — drift detector for vault-write-outside-counter-txn (CORTEX_PHASE6_VAULT_RECONCILER_1)" \
-  --body "<see brief §PR template>"
-```
-
-## Acceptance criteria
-
-- New module `orchestrator/cortex_phase6_reconciler.py` per brief §Solution
-- APScheduler job wired at `triggers/embedded_scheduler.py:841` (before line 842 comment)
-- Tests cover: missing file → re-emit; present file with cycle block → no-op;
-  present file without cycle block → re-emit; race-window idempotency
-- `bash scripts/check_singletons.sh` green
-- 200-row LIMIT per run respected (brief §Solution step 1)
-- `baker_actions` audit row format matches brief §Audit
-- PR opened with brief link in body
-- Tier B — autonomous merge on green
-
-## Hot rules to respect
-
-- **Migrations are immutable.** Don't edit any existing migration file even
-  if you need a comment update — write a new migration file instead. See
-  `feedback_migration_file_immutability.md` (incident on this same date —
-  PR #127 broke deploys via comment edit on PR #125's applied migration).
-- **No raw `SentinelRetriever()` / `SentinelStoreBack()` instantiation** —
-  use `_get_global_instance()`. CI guard catches this.
-- **PostgreSQL: `conn.rollback()` in except blocks before any new query.**
-- **All DB/API calls wrapped in try/except** — fault-tolerant or it doesn't ship.
-
-## On completion
-
-1. Open PR; AI Head A reviews + merges Tier B autonomous on green.
-2. Update this mailbox to `status: COMPLETE` with PR link + ship-report path.
-3. Ship report at `briefs/_reports/B4_cortex_phase6_vault_reconciler_1_<date>.md`.
-
-## Companion context
-
-- Briefs 1+2 SHIPPED today. Vault read+write live; 31 MCP tools.
-- PR #142 (architect-nit followup) merged + deploying — completes #141
-  feedback loop.
-- Migration drift was caught + fixed today; lesson captured. Don't reopen.
-- PR #135 (this brief itself) merged 2026-04-30; brief sits on main.
-- B3 just freed up post-#142 ship; B4 has the Reflector context per CODE_4
-  prior handover. Both could build this; B4 chosen for context affinity.
+- AI Head autonomy charter: `_ops/processes/ai-head-autonomy-charter.md`
+- B-code dispatch coordination: `_ops/processes/b-code-dispatch-coordination.md`
+- Lessons (read #44 + #52 minimum): `tasks/lessons.md`
