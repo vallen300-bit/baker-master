@@ -1,72 +1,41 @@
-# CODE_2 — COMPLETE (mo-vie-am curated knowledge — MATTER_KNOWLEDGE_CURATION_PATTERN_1)
+# CODE_2 — PENDING (CORTEX_PHASE3B_PARALLEL_AND_INCREMENTAL_COST_1)
 
-**Status:** COMPLETE — 2026-04-30 by B2
-**PR:** baker-vault#33 — https://github.com/vallen300-bit/baker-vault/pull/33
-**Pattern brief:** `briefs/BRIEF_MATTER_KNOWLEDGE_CURATION_PATTERN_1.md`
-**Builder:** B2
-**Priority:** CRITICAL (Director priority pivot 2026-04-30 — matter knowledge first)
-**ETA:** end of session tonight — delivered same session
+**Status:** PENDING — dispatched 2026-05-03 by AI Head A
+**Brief:** `briefs/BRIEF_CORTEX_PHASE3B_PARALLEL_AND_INCREMENTAL_COST_1.md`
+**Builder:** B2 (worktree `~/bm-b2`)
+**Priority:** P1 — gates clean Step 31 (first canonical Director GOLD on AO matter)
+**ETA:** ~2-3h
 
-## Delivery
+## Why this matters
+Step 30 first LIVE AO Cortex cycle (`70c5e634-134a-4e4d-a478-6c8da512f017`) wall-clocked before Phase 4 because all 4 selected specialists ran sequentially over 13 min. Two bugs in `orchestrator/cortex_phase3_invoker.py`:
 
-- 3 files at `wiki/matters/mo-vie-am/curated/` — 00_overview (61L) / 01_parties (78L) / 04_documents (75L), all ≤80 lines per quality bar.
-- 11 `[?]` gaps surfaced for Director/source confirmation (LCG SA legal name, MOHG titles, GM, Francesco/Robin lastnames, TPA scope, RG7 bank lenders, Vienna server MOVIE subpath, etc).
-- Canonical slug correction: brief said "Eastdeal" → canonical is **Eastdil Secured**. Flagged in PR + 01_parties.md.
+1. Sequential `for` loop with `await _invoke_one(...)` — should be concurrent.
+2. `_bump_cycle_cost` called once at end of loop — never runs if cycle is cancelled mid-loop, so `cortex_cycles.cost_dollars` stuck at meta-reason cost ($0.07 vs actual $11.93 for cycle 70c5e634).
 
-## Coordination note
+## Acceptance criteria
+- `run_phase3b_invocations` uses `asyncio.gather` (not sequential `for`)
+- New `_invoke_one_with_persist_and_bump` helper added; per-completion persist + cost bump
+- `asyncio.Semaphore(3)` gates DB writes (PG pool `maxconn=5` per `memory/store_back.py:227-228`)
+- Existing `_invoke_one`, `_persist_specialist_output`, `_bump_cycle_cost` primitives **unchanged** (only orchestration changes)
+- `pytest tests/test_cortex_phase3_invoker.py -v` passes (tests updated for concurrent ordering)
+- `pytest tests/test_cortex_runner_phase126.py -v` still passes
+- `bash scripts/check_singletons.sh` clean
+- Manual SSE test in DRY_RUN: phase_outputs timestamps clustered within ~30-60s of each other (not the prior 100-300s sequential gaps observed in cycle 70c5e634)
 
-Concurrent shared-FS activity in `~/baker-vault` between B2 + AI Head 2 App caused branch crosstalk during commit phase. Resolved by pushing the correct mo-vie-am-only commit (`8021715`, 214 lines) directly to remote `b2/mo-vie-am-curated-knowledge`. AI Head A's hagenauer-rg7 commit (`9df2b50`, 315 lines) sits on the local b2 branch tip and needs reseating onto aihead2 branch — flagged for AI Head A cleanup in PR description.
+## Key constraints (do NOT touch)
+- `cortex_runner.py` outer wrapper (`CYCLE_TIMEOUT_SECONDS=900` stays)
+- `cortex_phase3_reasoner.py` Phase 3a meta-reason cost bump (already correct)
+- `capability_runner.py` (already concurrency-safe — fresh runner per call)
+- `SPECIALIST_TIMEOUT_S` (180s), `SPECIALIST_MAX_RETRIES` (2), `STAGING_ROOT` constants — RA-23-ratified
+- DB schema (`cortex_cycles`, `cortex_phase_outputs`) — no migration
 
-## Task summary
+## Verification SQL
+See `briefs/BRIEF_CORTEX_PHASE3B_PARALLEL_AND_INCREMENTAL_COST_1.md` § Verification SQL — two queries: timestamp clustering check + cycle cost roll-up consistency.
 
-Author distilled knowledge for the **mo-vie-am** (Mandarin Oriental Vienna — Asset Management) matter at `baker-vault/wiki/matters/mo-vie-am/curated/`.
+## After merge
+- Drop completion report at `briefs/_reports/B2_phase3b_parallel_cost_<YYYYMMDD>.md`
+- Mark this mailbox COMPLETE
+- AI Head A re-fires Step 30 LIVE AO cycle on fixed runner → canonical first Director GOLD (Step 31)
 
-Read `briefs/BRIEF_MATTER_KNOWLEDGE_CURATION_PATTERN_1.md` for full pattern + canonical structure + frontmatter format + source priority order.
-
-## Tonight's scope (3 sections, NOT all 9)
-
-| File | Content |
-|---|---|
-| `00_overview.md` | 1-page summary: what mo-vie-am is, ownership structure (LCG SA → RG7 GmbH → MOVIE asset), MOHG operator role, Brisengroup CEO oversight stake, what's at stake (asset value, exit option, hotel ops quality) |
-| `01_parties.md` | Anna Egger, Katja Graf, Mario Habicher, Christoph Schauer (MOHG); Robert Lyle (PRCO); contacts at TPA, Eastdeal (Laura Wenk for exit), bank counterparties; internal Brisen team (Director, Edita, Mykola/Nikolai) |
-| `04_documents.md` | Pointers to canonical source docs in baker-vault + Dropbox (don't duplicate content; just paths + 1-line "this is X"). Operator agreement, performance reports, sales brochures, residence inventory. |
-
-Skip the other 6 sections this session — pattern doc says lean over comprehensive on first pass.
-
-## Dispatch
-
-```
-git checkout main && git pull --ff-only origin main
-git checkout -b b2/mo-vie-am-curated-knowledge
-mkdir -p ~/baker-vault/wiki/matters/mo-vie-am/curated
-# author 3 .md files per the pattern brief
-git -C ~/baker-vault add wiki/matters/mo-vie-am/curated/
-git -C ~/baker-vault commit -m "matter(mo-vie-am): curated knowledge first pass (00, 01, 04)"
-# push to baker-vault on a b2/ branch + open PR
-```
-
-## Quality bar reminders
-
-- ≤ 80 lines per file. Dense. Bottom line first.
-- Cite sources for non-obvious facts: `[meeting 2026-04-15]`, `[email AO 2026-04-22]`.
-- Canonical slugs only (`mo-vie-am`, never `movie_am` / `movie-am` / `MO Vienna`).
-- `[?] need to confirm` for unknowns — don't fabricate.
-- Frontmatter on every file (see pattern brief).
-
-## Source priority hints for mo-vie-am
-
-1. baker-vault: existing `wiki/matters/mo-vie-am/cortex-config.md` for posture/rules.
-2. Dropbox `1_ACTIVE_PROJECTS/MOVIE/`, `_02_DASHBOARDS/`, `12_PRIVATE_RE_ASSETS/` — canonical source docs.
-3. Recent MOHG meetings via fireflies_search.
-4. Sent emails to / from MOHG addresses (kgraf@mohg.com, mhabicher@mohg.com, etc.) via baker_search.
-5. `memory/people/` files for Anna Egger / Katja Graf / Mario Habicher.
-
-## Verdict + handoff
-
-Surface paste-block back to AI Head A when curated/ folder is committed: list files written + line counts + any source gaps surfaced (`[?] need to confirm` items).
-
-## Previous task (closed)
-
-baker-master PR #114 (ROADMAP_DRIFT_CLICKUP_SENTINEL_1) merged 2026-04-30 — daily 06:00 UTC drift sentinel live.
-
-baker-vault PR #33 (mo-vie-am curated 00/01/04) opened 2026-04-30 — awaiting AI Head A spot-review.
+## Prior CODE_2 task (overwritten, archive reference)
+Last CODE_2: `MATTER_KNOWLEDGE_CURATION_PATTERN_1` (mo-vie-am curated knowledge), COMPLETE 2026-04-30, PR baker-vault#33 merged. Mailbox hygiene rule applied — overwriting per `_ops/processes/b-code-dispatch-coordination.md` §3.
