@@ -1,74 +1,77 @@
 ---
-status: COMPLETE
-brief: briefs/BRIEF_CHROME_DEBUG_PERMANENT_1.md
-trigger_class: LOW
-dispatched_at: 2026-05-02T19:30:00Z
-dispatched_by: ai-head-b
-claimed_at: 2026-05-02T19:35:00Z
-claimed_by: b3
-last_heartbeat: 2026-05-02T19:55:00Z
+status: PENDING
+brief: briefs/BRIEF_FLEET_ROADMAP_HTML_RENDER_1.md
+trigger_class: MEDIUM
+dispatched_at: 2026-05-03T22:30:00Z
+dispatched_by: ai-head-a
+claimed_at: null
+claimed_by: null
+last_heartbeat: null
 blocker_question: null
-ship_report: briefs/_reports/B3_chrome_debug_permanent_1_20260502.md
+ship_report: null
 pr: null
 autopoll_eligible: false
-notes: User-side macOS config dispatch — produces NO PR. Completion = ship_report file at briefs/_reports/B3_chrome_debug_permanent_1_20260502.md with all 6 verification command outputs pasted, then mailbox flips to COMPLETE.
 ---
 
-# CODE_3 — DISPATCH (BRIEF_CHROME_DEBUG_PERMANENT_1)
+# DISPATCH: B3 → BRIEF_FLEET_ROADMAP_HTML_RENDER_1 (V0.3.1)
 
-**Status:** OPEN — 2026-05-02T19:30Z by AI Head B (overwrites prior CODE_3 closure on TERMINAL_AUTO_ONBOARD_1 / PR #149 merged 2026-05-02)
-**Brief:** `briefs/BRIEF_CHROME_DEBUG_PERMANENT_1.md` (LOW, ~30 min, Tier B)
-**Builder:** B3
-**Branch:** N/A — no baker-master code change. User-side macOS config only.
-**Tier:** **Tier B** — autonomous merge / completion on green per `_ops/processes/ai-head-autonomy-charter.md` §3
-**autopoll_eligible:** false — paste-block dispatch; cold-start required
+**Brief:** `briefs/BRIEF_FLEET_ROADMAP_HTML_RENDER_1.md` (V0.3.1, ship-ready after 3 architect-reviewer passes)
 
-## Why this exists
+**Note:** Overwrites prior CODE_3 closure on `BRIEF_CHROME_DEBUG_PERMANENT_1` (B3 shipped 2026-05-02; ship report archived at `briefs/_reports/B3_chrome_debug_permanent_1_20260502.md`).
 
-Today (2026-05-02) Director and AH-B discovered debug Chrome on port 9222 is NOT auto-started. First Code session of the day hits "Could not connect to Chrome" until a manual `pkill + open -na` cycle re-binds the port. Manual fix evaporates at next reboot. Memory file `chrome-bridge.md` claims a LaunchAgent already exists at `com.baker.chrome-debug.plist` — it doesn't (verified 2026-05-02). This brief retires that gap.
+## Why you (B3)
 
-Infrastructure pieces (Chrome profile + idempotent launch script) **already exist** from BROWSER-AGENT-1 (Mar 2026). What's missing is the macOS LaunchAgent wrapper. **B3 must NOT recreate the launch script or profile dir** — see brief's "What already exists" table.
+You shipped every prior render-script work on baker-master:
+- PR #101 — `roadmap: render script + V4 HTML + brisen-docs index updates`
+- PR #148 — `docs(roadmap): re-render V4 HTML from YAML — Step 29 closure`
+- PR #121 / #118 / #115 / #113 — successive re-renders.
 
-Cloudflare bridge half (`chrome.brisen-infra.com`) is **out of scope** — Dennis flagged 2026-05-02 as parked P4 (502/broken). Brief explicitly carves it out.
+V5 dispatch is an extension of patterns you already own (`render_v5(yml)` alongside renamed `render_v4`).
 
-## Task summary
+## Pass-history convergence (architect-reviewer code-architecture-reviewer)
 
-3 user-side files (NO repo files modified):
+- Pass 1: 3 Critical / 3 High / 5 Medium / 5 Low — V0.2 patch
+- Pass 2: 0 Critical / 2 High / 1 Medium / 3 Low — V0.3 patch
+- Pass 3: 0 Critical / 0 High / 0 Medium / 2 Low (acceptable, polished into V0.3.1)
+- Architect's final verdict at V0.3.1: **ship-ready**
 
-1. **NEW**: `~/Library/LaunchAgents/com.baker.chrome-debug.plist` — macOS LaunchAgent. Plist body provided verbatim in brief §Scope File 1. RunAtLoad + KeepAlive-on-crash-only (respects Cmd+Q via `SuccessfulExit=false`).
-2. **MODIFY**: `~/.claude/projects/-Users-dimitry-Desktop-baker-code/memory/chrome-bridge.md` — full-file rewrite to current 2026-05-02 verified state. Body provided verbatim in brief §Scope File 2.
-3. **MODIFY**: `~/.claude/projects/-Users-dimitry-Desktop-baker-code/memory/MEMORY.md` — single-line correction of the "Chrome debug" line in `## Local Infrastructure` block. Old/new line provided in brief §Scope File 3.
+## Read order (recommended)
 
-**Critical: do NOT touch:**
-- `~/.chrome-debug-profile/launch-chrome-debug.sh` — works as-is.
-- `~/.chrome-debug-profile/chrome-proxy.py` — Cloudflare bridge piece, parked P4.
-- `~/.chrome-debug-profile/` profile contents (cookies, settings).
-- `~/.cloudflared/` — parked P4.
-- Render env var `CHROME_BROWSER_URL`.
-- Any baker-master code (no API/MCP/dashboard changes).
-- `tasks/lessons.md` existing entries (append-only).
+1. **§Version log + V0.3.x patch history** — explains WHY each constraint exists; many are responses to specific architect findings.
+2. **§Solution → Files to modify** — 4 files across 2 repos (baker-vault YAML + baker-master renderer/tests/HTML).
+3. **§YAML schema v5 (target)** — full schema example. Note: `target:` and `backlog:` are PRESERVED FROM V4 verbatim (not renamed, not moved).
+4. **§Strict schema rules (v5)** — required vs SOFT (render-with-fallback) fields. `target`/`backlog`/`cut_at`/etc. are SOFT.
+5. **§Renderer changes** — §1 dispatch + §2 `render_v4` rename + §3 `render_v5` layout + §3a html-escape + §3b sort.
+6. **§Tests** — 12 test functions; copy-paste runnable.
+7. **§Acceptance criteria** — 9 ACs. AC #6 corrects the upstream spec's GitHub-Actions-rebuild claim (no GHA in baker-master; rebuild is manual + Render auto-deploy on push).
+8. **§Cross-repo PR coordination** — paired PRs, baker-vault YAML PR merges FIRST.
 
-## Verification (run all 6 commands, paste exact output into ship_report)
+## Constraints
 
-See brief §Verification — 6 commands covering: plist installed, plist syntax-valid, agent loaded, port live, unload/load cycle, memory files updated.
+- **MEDIUM trigger class. B1 second-pair-of-eyes review on the baker-master PR before merge** (RA-24 — Director-facing surface). `/security-review` NOT required.
+- **2 paired PRs.** Branch in BOTH repos: `b3/fleet-roadmap-html-render-1`. Open baker-vault PR (YAML migration) FIRST; wait for AH1 merge; pull merged YAML locally; then open baker-master PR (renderer + tests + regenerated HTML).
+- **Public function name `render` MUST be preserved** — existing tests + callers depend on it. New code: `render` (entry) → `render_v4` / `render_v5` (private).
+- **No new CSS color system.** Reuse existing `--bg-*`, `--border-*`, `--accent-*` variables. New CSS rules append to existing `<style>` block.
+- **HTML escape v5-introduced user-content fields** (gates label/note, deps from/to/effect, tracks.<>.purpose). Pre-existing v4 unescaped behavior is grandfathered — do NOT retrofit.
+- **No GitHub Actions added.** Out of scope. Existing manual + Render auto-deploy stays.
+- **No force-push to main** — rebase + standard squash-merge only.
 
-**Director-side reboot test** is the FINAL acceptance — Director will manually verify port 9222 alive within 30s of next login. Ship_report closes the AH-side loop; reboot test closes the Director-side loop.
+## ETA
 
-## Reporting
+~4–6h end-to-end (1.5h YAML migration + Brisen Lab backfill, 2h renderer changes, 1.5h tests, 1h verification + paired PRs). Calibrate on first push if your read of complexity differs.
 
-This dispatch produces NO PR (user-side files only).
+## Coordination
 
-On completion, B3 writes `briefs/_reports/B3_chrome_debug_permanent_1_20260502.md` containing:
+- Branch: `b3/fleet-roadmap-html-render-1` (both repos)
+- Heartbeat: update `last_heartbeat` in this mailbox file every ~4h while in flight
+- Blocker: surface to AH1 via `blocker_question` field; do not stall silently
+- PR opens against `main` in both repos
+- Required reviewers: AH1 (both PRs); B1 second-pair-of-eyes on baker-master PR
 
-- All 6 verification command outputs pasted verbatim from terminal.
-- Confirmation that plist file exists, loads with PID > 0, port 9222 returns JSON within 8s of `launchctl load`.
-- Note any TCC prompts encountered (none expected).
-- Summary line: `PORT 9222 LIVE; LAUNCHAGENT LOADED; MEMORY UPDATED` or specific failure mode.
+## Reference (this clone)
 
-Then this mailbox flips to `status: COMPLETE`. AH1 or AH2 reads the report and accepts.
-
-## Blocker policy
-
-If TCC blocks Chrome at launchd-spawn time (Lesson #43 — `launchd.stderr.log` shows "Operation not permitted"), STOP and surface in `blocker_question` field. Director-side System Settings grant required (Files-and-Folders → Google Chrome). Do not attempt workaround; just flag.
-
-If anything else surprising surfaces (e.g., `pkill -f "Google Chrome"` in launch script kills Director's everyday Chrome during a KeepAlive relaunch), document in ship_report's "follow-up" section and propose a follow-up brief tightening the pkill match. Do not modify launch script in this dispatch.
+- AI Head autonomy charter: `_ops/processes/ai-head-autonomy-charter.md`
+- B-code dispatch coordination: `_ops/processes/b-code-dispatch-coordination.md`
+- Lessons (read #3b, #8, #44, #47, #52 minimum): `tasks/lessons.md`
+- Existing renderer: `scripts/render_cortex_roadmap.py` (323 lines)
+- Existing YAML (v4): `~/baker-vault/_ops/processes/cortex-roadmap-current.yml` (868 lines)
