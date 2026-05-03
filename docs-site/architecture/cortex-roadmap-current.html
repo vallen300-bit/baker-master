@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Cortex Roadmap (LIVE) — V4</title>
+<title>Fleet Operationalization Roadmap (LIVE) — V5</title>
 <style>
   :root {
     --bg-page: #fafaf7;
@@ -51,6 +51,7 @@
   .stage { margin: 2.5rem 0 0.75rem; }
   .stage-title { color: var(--text-header); font-size: 1.15rem; font-weight: 700; margin: 0 0 0.25rem; letter-spacing: -0.01em; border-bottom: 1px solid var(--border-default); padding-bottom: 0.4rem; }
   .stage-meta { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.85rem; }
+  .substage-title { font-size: 0.95rem; color: var(--text-muted); margin: 1.1rem 0 0.4rem; }
   .item { background: var(--bg-card); border: 1px solid var(--border-default); border-radius: 6px; padding: 0.85rem 1rem; margin: 0.55rem 0; display: grid; grid-template-columns: 32px 1fr auto; gap: 0.85rem; align-items: start; }
   .item.done { background: var(--bg-card-done); border-color: var(--border-done); }
   .item.flight { background: var(--bg-card-flight); border-color: var(--border-flight); }
@@ -77,6 +78,15 @@
   .callout strong { color: var(--text-header); }
   .backlog-link { display: inline-block; background: var(--bg-rail); color: var(--rec-bg); padding: 0.5rem 0.9rem; border-radius: 4px; text-decoration: none; font-weight: 600; font-size: 0.85rem; margin-top: 0.5rem; }
   .backlog-link:hover { background: #1a1410; }
+  .gate-table { width: 100%; border-collapse: collapse; margin: 0.5rem 0 1rem; }
+  .gate-table th, .gate-table td { padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border-default); text-align: left; font-size: 0.88rem; }
+  .gate-table th { color: var(--text-header); font-weight: 700; }
+  .gate-status-pill { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 3px; font-size: 0.75rem; font-weight: 600; }
+  .gate-status-pill.open { background: var(--bg-card-flight); border: 1px solid var(--border-flight); color: var(--text-header); }
+  .gate-status-pill.pending { background: var(--bg-card-queue); border: 1px solid var(--border-default); color: var(--text-muted); }
+  .gate-status-pill.closed { background: var(--bg-card-done); border: 1px solid var(--border-done); color: var(--accent-locked); }
+  .dep-list { margin: 0.4rem 0 0.6rem; padding-left: 1.2rem; font-size: 0.88rem; }
+  .dep-list li { margin: 0.3rem 0; }
   footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--border-default); font-size: 0.78rem; color: var(--text-muted); }
   footer code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
 </style>
@@ -84,9 +94,9 @@
 <body>
 <div class="wrap">
 <header>
-  <h1>Cortex Roadmap <span class="live-badge">LIVE V4</span></h1>
+  <h1>Fleet Operationalization Roadmap <span class="live-badge">LIVE V5</span></h1>
   <div class="meta">
-    Cut <strong>2026-04-30</strong>. Source-of-truth: <code>baker-vault/_ops/processes/cortex-roadmap-current.yml</code>. Auto-rendered to HTML on commit. Backlog (not on this page) lives in ClickUp BAKER space "Cortex Backlog" list — <a href="https://app.clickup.com/24385290/v/l/li/901523104264" target="_blank">open</a>.
+    Cut <strong>2026-05-03</strong>. Source-of-truth: <code>baker-vault/_ops/processes/cortex-roadmap-current.yml</code>. Auto-rendered to HTML on commit. Backlog (not on this page) lives in ClickUp BAKER space "Cortex Backlog" list — <a href="https://app.clickup.com/24385290/v/l/li/901523104264" target="_blank">open</a>.
   </div>
   <div class="legend">
     <span><span class="dot dot-done"></span>Done</span>
@@ -98,15 +108,10 @@
 
 <div class="summary-bar">
   <strong>Cut reason:</strong>
-  <div style="white-space: pre-wrap; margin-top: 0.4rem; font-size: 0.84rem;">V3 (2026-04-29 19:15Z) had 5 Wave 1 tracks + 5 Wave 2 items + ~20 PARKED items.
-V4 cuts because:
-- Wave 1 mostly closed (manual-invoke + cost-gate + Hagenauer + NVIDIA + hot.md)
-- Wave 2 partially closed (NOTIFICATION_DEFER shipped + 12 matter seeds beyond
-  the planned 6 + bootstrap script promoted from Wave 3)
-- Director directive 2026-04-30: "no parked, ever" — parked registry migrated
-  to ClickUp Cortex Backlog list 901523104264
-- Architectural framing shift: roadmap = active sprint focus only; backlog
-  lives in ClickUp; parked banned.</div>
+  <div style="white-space: pre-wrap; margin-top: 0.4rem; font-size: 0.84rem;">V4 (2026-04-30) covered Cortex sprint only. V5 cuts to add the Brisen Lab
+build-out as a peer track to Cortex on the live roadmap, plus Director's
+standing gates and the cross-track dependency map. Same URL, expanded
+content. V4 is preserved as audit snapshot.</div>
 </div>
 
 <div class="summary-bar">
@@ -119,15 +124,84 @@ auto-execute per matter as proposals fire.</div>
 </div>
 
 <div class="stage">
-  <h2 class="stage-title">In flight</h2>
-  <div class="stage-meta">Active builds. Carries assignee + ETA. Closes to <code>done</code> on ship.</div>
-  <p style='color: var(--text-muted); font-style: italic;'>(none in flight)</p>
+  <h2 class="stage-title">Brisen Lab</h2>
+  <div class="stage-meta">One dashboard for the fleet + direct ratify path so Cortex doesn&#x27;t depend on paste-blocks.</div>
+  <h3 class="substage-title">In flight</h3>
+
+  <div class="item in_flight">
+    <div class="icon">⏳</div>
+    <div>
+      <div class="label">Lab V2 — message bus + per-worker auth + matter cards + production hardening + Hermes-pattern context renewal + OTel</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Started:</strong> 2026-05-03</span><span><strong>Owner:</strong> b4</span><span><strong>ETA:</strong> 2026-05-24</span></div>
+      <div class="anchor">BRIEF_BRISEN_LAB_V2_BRIDGE_1 V0.3.6 · b4/brisen-lab-v2-bridge-1</div>
+    </div>
+    <div class="badge in_flight">IN FLIGHT</div>
+  </div>
+  <h3 class="substage-title">Queued</h3>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">BRIEF_ARCHITECT_TERMINAL_1 — new Code terminal 'architect' + 3-file memory<span class="priority medium">medium</span></div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Owner:</strong> ah1</span><span><strong>ETA:</strong> post-lab-v2</span></div>
+      
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">BRIEF_TIER_B_AUTONOMY_1 — Tier-B autonomy update + bank-model.md standing rule<span class="priority medium">medium</span></div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Owner:</strong> ah1</span><span><strong>ETA:</strong> post-lab-v2</span></div>
+      
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">BRIEF_SESSION_START_DIGEST_1 — session-start digest behavior<span class="priority medium">medium</span></div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Owner:</strong> ah1</span><span><strong>ETA:</strong> post-lab-v2</span></div>
+      
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+  <h3 class="substage-title">Done</h3>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Lab V1 — observe-only dashboard at brisen-lab.onrender.com</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-05-01</span></div>
+      <div class="anchor">PR #145 baker-master · BRISEN_LAB_1</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Lab V2 brief V0.3.6 — 4 architect-reviewer passes; 5C+6H → 0C+0H</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-05-03</span></div>
+      <div class="anchor">BRIEF_BRISEN_LAB_V2_BRIDGE_1 final · commits e1a85f6 + 2b8a381</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
 </div>
 
 <div class="stage">
-  <h2 class="stage-title">Queued — current sprint (no PARKED, ever)</h2>
-  <div class="stage-meta">Owner + ETA mandatory. ETA cap = 2 weeks. Items past ETA get reprioritized or dropped — never silently shelved. Items not in this sprint live in <a href="https://app.clickup.com/24385290/v/l/li/901523104264" target="_blank">ClickUp Cortex Backlog</a>.</div>
-  
+  <h2 class="stage-title">Cortex</h2>
+  <div class="stage-meta">Replace per-matter PM agents with one reasoning loop configured per matter; specialists invoked on demand; learning loop accumulates curated knowledge.</div>
+  <h3 class="substage-title">Queued</h3>
+
   <div class="item queued">
     <div class="icon">→</div>
     <div>
@@ -361,6 +435,17 @@ dispatch coordination.</div>
   <div class="item queued">
     <div class="icon">→</div>
     <div>
+      <div class="label">Stage 2 Steps 33-36 — decommission ao_signal_detector + freeze ao_project_state + 1 week observation<span class="priority high">high</span></div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Owner:</strong> ah1 + director-consult</span><span><strong>ETA:</strong> 2026-05-12</span></div>
+      
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
       <div class="label">Brief 3 — CORTEX_PHASE6_REFLECTOR_1 (ACE-style learning loop + per-directive citation counters)<span class="priority high">high</span></div>
       <div class="desc">ACE-style Reflector + Curator in Cortex Phase 6 (Archive). Reflector
 reads Phase 3-4 trace, outputs proposed_deltas + counter_updates.
@@ -417,6 +502,17 @@ directive promotion logic. RA-24 + B1 second-pair-of-eyes mandatory.
 DEPENDS on Brief 3.</div>
       <div class="meta-line"><span><strong>Owner:</strong> terminal-ai-head-a-authoring + b-code-build</span><span><strong>ETA:</strong> 2026-05-15</span></div>
       <div class="anchor">Candidate brief — pending Terminal AI Head A authoring against caveats 2+3 · scope corrected from 5→22 matters</div>
+    </div>
+    <div class="badge queued">QUEUED</div>
+  </div>
+
+  <div class="item queued">
+    <div class="icon">→</div>
+    <div>
+      <div class="label">Stage 2 Step 37 — onboard MOVIE as second matter (activate wiki/matters/movie/cortex-config.md)<span class="priority high">high</span></div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Owner:</strong> ah1 + director-consult</span><span><strong>ETA:</strong> 2026-05-19</span></div>
+      
     </div>
     <div class="badge queued">QUEUED</div>
   </div>
@@ -574,14 +670,8 @@ anchor; build deferred until channels resume.</div>
     </div>
     <div class="badge queued">QUEUED</div>
   </div>
-</div>
+  <h3 class="substage-title">Done</h3>
 
-<a class="backlog-link" href="https://app.clickup.com/24385290/v/l/li/901523104264" target="_blank">→ Open ClickUp Cortex Backlog (queryable backlog)</a>
-
-<div class="stage">
-  <h2 class="stage-title">Done</h2>
-  <div class="stage-meta">Shipped + verified.</div>
-  
   <div class="item done">
     <div class="icon">✓</div>
     <div>
@@ -1146,12 +1236,8 @@ via cheap-RAG-first; complementary not redundant.
     </div>
     <div class="badge done">DONE</div>
   </div>
-</div>
+  <h3 class="substage-title">Dropped</h3>
 
-<div class="stage">
-  <h2 class="stage-title">Dropped (audit trail)</h2>
-  <div class="stage-meta">Explicitly killed with reason. Kept for audit; not actionable.</div>
-  
   <div class="item dropped">
     <div class="icon">✕</div>
     <div>
@@ -1216,6 +1302,31 @@ anymore." Brisen has equivalent (3-file memory triplets per agent).</div>
   </div>
 </div>
 
+<div class="stage">
+  <h2 class="stage-title">Director's Gates</h2>
+  <table class="gate-table">
+    <thead><tr><th>Gate</th><th>Status</th><th>Note</th></tr></thead>
+    <tbody>
+    <tr><td>Step 30 first LIVE AO cycle — Director sits Slack-watching 15-30min</td><td><span class="gate-status-pill open">open</span></td><td>Pick cycle topic + go-time</td></tr>
+    <tr><td>Decommission ao_signal_detector + freeze ao_project_state (Steps 33-36)</td><td><span class="gate-status-pill pending">pending</span></td><td>Gated on Step 30 success + 1 week observation</td></tr>
+    <tr><td>Onboard MOVIE as second matter (Step 37)</td><td><span class="gate-status-pill pending">pending</span></td><td>Gated on AO 1-week observation clean</td></tr>
+    <tr><td>Wertheimer matter seed (Wave 2 #2 gap)</td><td><span class="gate-status-pill pending">pending</span></td><td>Needs Director paste-block of strategic context</td></tr>
+    <tr><td>Two-stage preview interim flip — kill Sentinel auto-trigger globally + Scan classifier auto-route</td><td><span class="gate-status-pill pending">pending</span></td><td>5-min config flip; &#x27;OK to flip&#x27; needed</td></tr>
+    <tr><td>Cortex Business Manual brainstorm session</td><td><span class="gate-status-pill pending">pending</span></td><td>ETA 2026-05-15; needs ~2 weeks production data</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="stage">
+  <h2 class="stage-title">Dependencies</h2>
+  <ul class="dep-list">
+  <li><strong>lab-v2</strong> → <strong>cortex-step-30</strong>: Removes paste-relay tax (5-15 min per cycle); Director ratifies in Lab UI</li>
+  <li><strong>cortex-stage2-v1</strong> → <strong>matter-pm-absorption</strong>: AO PM + MOVIE AM become Cortex per-matter configs; pattern generalizes to 22 matters</li>
+  <li><strong>lab-v2</strong> → <strong>brisen-lab-msgbus-1</strong>: Same infrastructure, two consumers — cross-terminal coord + Cortex ratify</li>
+  <li><strong>vault-write-1</strong> → <strong>per-matter-clickup-linkage-5</strong>: Linkage write-back path</li>
+</ul>
+</div>
+
 <div class="callout">
   <strong>Standing rules (Director-ratified):</strong>
   <ul style="margin: 0.4rem 0 0; padding-left: 1.2rem;">
@@ -1227,8 +1338,14 @@ anymore." Brisen has equivalent (3-file memory triplets per agent).</div>
 </div>
 
 <footer>
-  Auto-rendered <strong>2026-05-01</strong> from <code>_ops/processes/cortex-roadmap-current.yml</code> by <code>scripts/render_cortex_roadmap.py</code>. Live page: <code>https://brisen-docs.onrender.com/architecture/cortex-roadmap-current.html</code>.
-  Supersedes: <code>cortex-roadmap-v3-any-matter.html</code>.
+  Auto-rendered <strong>2026-05-03</strong> from <code>_ops/processes/cortex-roadmap-current.yml</code> by <code>scripts/render_cortex_roadmap.py</code>. Live page: <code>https://brisen-docs.onrender.com/architecture/cortex-roadmap-current.html</code>.
+  Supersedes: <code>cortex-roadmap-v4-2026-04-30.html</code>.
+  <div style="margin-top: 0.5rem;">
+    Refs:
+    <code>_ops/processes/cortex-stage2-v1-tracker.md</code> ·
+    <code>_ops/ideas/2026-04-27-cortex-architecture-final-locked.md</code> ·
+    <code>briefs/BRIEF_BRISEN_LAB_V2_BRIDGE_1.md</code>.
+  </div>
 </footer>
 </div>
 </body>
