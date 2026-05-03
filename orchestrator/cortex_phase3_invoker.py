@@ -92,6 +92,34 @@ def _calc_cost_eur(in_tokens: int, out_tokens: int) -> float:
         return 0.0
 
 
+async def _invoke_one_with_persist_and_bump(
+    *,
+    cycle_id: str,
+    matter_slug: str,
+    signal_text: str,
+    capability_slug: str,
+    phase2_context: dict,
+    db_semaphore: asyncio.Semaphore,
+) -> SpecialistOutput:
+    """Invoke one capability, then immediately persist + bump cycle cost.
+
+    Per-completion bump (vs end-of-loop) ensures partial cost survives
+    mid-cycle cancellation. DB writes are gated by a small semaphore to
+    keep concurrent PG borrowers ≤ pool maxconn (5).
+    """
+    out = await _invoke_one(
+        matter_slug=matter_slug,
+        signal_text=signal_text,
+        capability_slug=capability_slug,
+        phase2_context=phase2_context,
+    )
+    async with db_semaphore:
+        await _persist_specialist_output(cycle_id, out)
+        if out.cost_tokens or out.cost_dollars:
+            await _bump_cycle_cost(cycle_id, out.cost_tokens, out.cost_dollars)
+    return out
+
+
 # --------------------------------------------------------------------------
 # Public entry point
 # --------------------------------------------------------------------------
@@ -105,26 +133,48 @@ async def run_phase3b_invocations(
     capabilities_to_invoke: list[str],
     phase2_context: dict,
 ) -> Phase3bResult:
-    """Invoke each capability sequentially with bounded resilience.
+    """Invoke each capability concurrently with bounded resilience.
 
-    Cap-5 + sequential keeps total Phase 3b time bounded under the
-    outer 5-min cycle umbrella (worst case 5×60s × 3 attempts = 15min,
-    but timeout-then-fail-forward pattern keeps median far lower).
+    Per RA-23 Q5: 180s timeout per invocation, 2 retries, fail-forward.
+    Concurrent execution bounds Phase 3b wall-clock by the SLOWEST
+    specialist (~180s p99), not the SUM (~750s for cap=5). Worst-case
+    Phase 3b wall = 180s × 3 attempts = 540s, fitting inside the 900s
+    cycle umbrella with room for Phase 4-6.
+
+    Per-specialist completion immediately persists artifact + bumps
+    cortex_cycles cost columns so partial cost survives mid-cycle
+    cancellation by the outer asyncio.wait_for umbrella.
     """
     result = Phase3bResult()
-    for slug in capabilities_to_invoke:
-        out = await _invoke_one(
+
+    # PG pool maxconn=5 (memory/store_back.py). Cap concurrent DB
+    # borrowers at 3 to leave headroom for the outer cycle runner and
+    # Phase 3c synthesis writes that may overlap with late completions.
+    db_semaphore = asyncio.Semaphore(3)
+
+    invoke_tasks = [
+        _invoke_one_with_persist_and_bump(
+            cycle_id=cycle_id,
             matter_slug=matter_slug,
             signal_text=signal_text,
             capability_slug=slug,
             phase2_context=phase2_context,
+            db_semaphore=db_semaphore,
         )
+        for slug in capabilities_to_invoke
+    ]
+
+    # gather preserves input order. _invoke_one is fail-forward
+    # (returns SpecialistOutput with success=False on retry exhaustion)
+    # so exceptions here are unexpected and propagate to the Phase 3
+    # outer try/except in cortex_runner.py.
+    outputs = await asyncio.gather(*invoke_tasks)
+
+    for out in outputs:
         result.outputs.append(out)
         result.total_cost_tokens += out.cost_tokens
         result.total_cost_dollars += out.cost_dollars
-        await _persist_specialist_output(cycle_id, out)
 
-    await _bump_cycle_cost(cycle_id, result.total_cost_tokens, result.total_cost_dollars)
     return result
 
 
