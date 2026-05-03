@@ -1,6 +1,6 @@
-# BRIEF_BRISEN_LAB_V2_BRIDGE_1 — Cowork↔terminal bridge + Dashboard 2-view (V0.3.5)
+# BRIEF_BRISEN_LAB_V2_BRIDGE_1 — Cowork↔terminal bridge + Dashboard 2-view (V0.3.6)
 
-**Status:** V0.3.5 RATIFIED 2026-05-03 (Director). Architect-reviewer pass 4 returned 0 Critical + 1 High + 2 Medium + 1 Low ("Add one sentence + one transaction + one acceptance test and the brief is dispatch-ready"); all folded. Ready for Director final OK → B-code dispatch.
+**Status:** V0.3.6 RATIFIED 2026-05-03 (Director). B4 in flight on `b4/brisen-lab-v2-bridge-1` since 2026-05-03 ~20:00Z. V0.3.6 = post-dispatch documentation patch only — no spec changes; surfaces the cross-repo split B4 discovered during build.
 **Author:** AI Head 2 (Cowork) → V0.3 amend by AI Head A (terminal AH1)
 **Reviewer:** AI Head A (App) + Director
 **Build lane:** least-loaded B-code per Lab mailbox state at dispatch time (post-verification)
@@ -90,6 +90,31 @@ Pass 4 returned 0 Critical, 1 High, 2 Medium, 1 Low. Architect verdict: "Add one
 - **M-A5 / §4.1 M-A1 wording** — pass-4 flagged language tension: M-A1 said "Daemon refuses to start (loud failure beats silent wrong default)"; NH1 (line 576) says "Daemon never aborts on YAML failure (silent stale > full Lab outage)." Different scenarios but wording was general enough an implementer could conflate them. Fix: tightened M-A1 to "**at process start, with no in-memory last-good**, daemon refuses to start" — disambiguates from the running-daemon refresh path covered by NH1.
 - **L-A3 / §6 H7 LRU cap justification** — appended "(cap chosen for misbehaving-client safety, not steady-state sizing — peak fleet load is ~480 entries; 10K covers pathological burst from a buggy client hitting `/auth/human-confirmation` in a tight loop)".
 
+### V0.3.6 patch (2026-05-03 ~20:30Z, post-dispatch — documentation only)
+
+B4 claimed dispatch and immediately surfaced a real cross-repo coordination question: V2_BRIDGE_1 actually spans **two** repos, not one. AH1 brief-author error (Lesson #44 EXPLORE-phase miss — didn't check `~/brisen-lab-*` paths during V0.1→V0.3.5 authoring). Spec is correct; only the AC4 "extend existing Brisen Lab daemon on Render" wording was misleading on repo location. Director ratified B4's coordination plan in chat 2026-05-03; documenting here so future readers don't repeat the same EXPLORE miss.
+
+**Repo split (clarification, not change):**
+- **`brisen-lab` repo** (`github.com/vallen300-bit/brisen-lab.git`, daemon live at https://brisen-lab.onrender.com) — owns ALL of:
+  - §3 Schema (`brisen_lab_msg`, `brisen_lab_worker_authority`, `brisen_lab_session_keys`)
+  - §4 Endpoints (all bus + auth + Component 6 endpoints)
+  - §4.1 Topic→tier classification validator
+  - §5.1 Hermes-pattern daemon code + `/state` Unix socket
+  - §6 Production Hardening H1–H7 (auth surface lives here)
+  - §7 OTel spans (A13)
+  - §7 Component 6 UI (A15–A20)
+- **`baker-master` repo** — owns:
+  - §7 A7 MCP tools (`baker_inbox_post` + `baker_inbox_read` in `tools/`)
+  - That's it — no other V2_BRIDGE_1 surface lives here
+
+**Coordination plan (Director-ratified 2026-05-03):**
+- 2 paired PRs: B4 opens `b4/brisen-lab-v2-bridge-1` in BOTH repos for traceability.
+- `/security-review` MANDATORY on the brisen-lab PR (where the auth surface lives, per Lesson #52). The baker-master PR is MCP-tool-only — lighter review acceptable.
+- Merge order: brisen-lab FIRST (daemon must be live in prod before MCP tools call its endpoints). baker-master PR holds until brisen-lab merge confirmed.
+- Mailbox stays single-source-of-truth in `baker-master/briefs/_tasks/CODE_4_PENDING.md`; B4 heartbeats there for both PRs.
+
+**Lesson for future briefs:** EXPLORE phase MUST grep for `~/brisen-*` and `~/bm-*` paths when the brief touches the lab daemon, dashboard, or any non-Baker-master service. Single-repo assumption is the default failure mode.
+
 ### V0.2 → V0.1 history (preserved)
 V0.1 carried 19 decisions + 6 admin-confirms covering bus + dashboard + new-terminal + autonomy-tier + session-start-digest in a single brief. Director ratified the redraft path 2026-05-02 after both research deliveries (Research 1 + 2) landed.
 
@@ -168,7 +193,7 @@ Today's pain: every cross-agent action (App AI Head A → Terminal AH1, Terminal
 - **AC1** Terminal-key auth headers: per-worker, rotatable, stored 1Password (one secret per worker, scoped vault per H1).
 - **AC2** Feature flag `BRISEN_LAB_V2_ENABLED`: env var; default ON after `/security-review` passes; flip OFF triggers SIGTERM kill-switch (per H2) — workers physically halt, fall back to paste-block-via-Director.
 - **AC3** Database: Neon Postgres (reuse Baker's existing connection; one backup story; concurrent-write safe). Schema in §3.
-- **AC4** Endpoint hosting: extend existing Brisen Lab daemon on Render. New routes: `POST /msg/<terminal>`, `GET /msg/<terminal>`, `GET /event/<id>/full`, `DELETE /msg/<id>`. Auth middleware: terminal-key header validated against 1Password-stored hash.
+- **AC4** Endpoint hosting: extend existing Brisen Lab daemon on Render. **Repo location (V0.3.6 clarification):** the daemon lives in `github.com/vallen300-bit/brisen-lab.git` (separate from baker-master), local checkout at `~/brisen-lab-staging/`, deployed to https://brisen-lab.onrender.com. NOT in baker-master `outputs/dashboard.py`. New routes: `POST /msg/<terminal>`, `GET /msg/<terminal>`, `GET /event/<id>/full`, `DELETE /msg/<id>`, `POST /msg/<id>/ack`, `POST /msg/<id>/ratify_decision`, `GET /api/v2/matters`, `GET /api/v2/terminals`, `POST /auth/register-session-pubkey`, `POST /auth/human-confirmation`. Auth middleware: terminal-key header validated against 1Password-stored hash. Cross-repo coordination per §0 V0.3.6 patch.
 - **AC5** Mandatory `/security-review` pre-merge per Lesson #52 (new auth surface + new MCP tools + new persisted state). Reviewer: AI Head A (App) + reviewer-rotation if available.
 - **AC6** Standing-rule preservation: paste-block-via-Director STAYS as fallback (carve-out, not deprecation). Director audit-only model via Brisen Lab UI (informed without relaying). When `BRISEN_LAB_V2_ENABLED=false` or any worker is unreachable, system falls back to paste-block-via-Director without code rollback.
 
