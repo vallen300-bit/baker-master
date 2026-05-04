@@ -1,9 +1,11 @@
 ---
-status: PENDING
+status: IN_PROGRESS
 brief: briefs/BRIEF_CORTEX_SCAN_FLASH_ROUTE_KILL_1.md
 trigger_class: COST_SAFETY_GATE
 dispatched_at: 2026-05-04T06:35Z
 dispatched_by: ai-head-a
+claimed_at: 2026-05-04T07:05Z
+claimed_by: b1
 ah2_review_required: true
 autopoll_eligible: false
 ---

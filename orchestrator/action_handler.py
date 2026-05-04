@@ -15,6 +15,7 @@ Internal flow:
 """
 import json
 import logging
+import os
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -678,6 +679,15 @@ def classify_intent(question: str, conversation_history: str = "") -> dict:
     if quick:
         _log_action("classify_intent:regex_match", f"type={quick.get('type')}, recipient={quick.get('recipient')}")
         return quick
+
+    # CORTEX_SCAN_FLASH_ROUTE_KILL_1: cost-safety gate. When env var is true,
+    # skip the Flash branch entirely (skip-entirely is cheaper than call-then-
+    # downgrade). Regex fast-paths above already short-circuited Director's
+    # explicit "run cortex on <matter>" commands, so they remain unblocked.
+    if os.getenv("CORTEX_SCAN_FLASH_ROUTE_DISABLED", "").strip().lower() == "true":
+        _log_action("classify_intent:flash_route_suppressed", "CORTEX_SCAN_FLASH_ROUTE_SUPPRESSED")
+        logger.warning("CORTEX_SCAN_FLASH_ROUTE_SUPPRESSED — kill switch active, returning question")
+        return {"type": "question"}
 
     try:
         from orchestrator.gemini_client import call_flash
