@@ -1,14 +1,26 @@
 ---
-status: IN_PROGRESS
+status: COMPLETE
 brief: briefs/BRIEF_CORTEX_SCAN_FLASH_ROUTE_KILL_1.md
 trigger_class: COST_SAFETY_GATE
 dispatched_at: 2026-05-04T06:35Z
 dispatched_by: ai-head-a
 claimed_at: 2026-05-04T07:05Z
 claimed_by: b1
+completed_at: 2026-05-04T07:30Z
+verdict: PASS
+ship_report: briefs/_reports/B1_cortex_scan_flash_route_kill_20260504.md
+pr: 156
 ah2_review_required: true
 autopoll_eligible: false
 ---
+
+B1 PASS — PR #156 opened. Awaiting AH2 review + AH1-Terminal merge + post-merge Render env var (A7-A8).
+- Tests 9-11 PASS literally on `b1/cortex-scan-flash-route-kill-1`
+- Targeted suite: 65 passed / 1 skipped / 1 pre-existing unrelated fail (Test 8, verified on pristine main)
+- /security-review NO FINDINGS
+- Ship report: `briefs/_reports/B1_cortex_scan_flash_route_kill_20260504.md`
+
+
 
 B1: Scan→Cortex Flash-route kill switch.
 
