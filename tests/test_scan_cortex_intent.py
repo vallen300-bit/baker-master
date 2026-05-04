@@ -173,3 +173,70 @@ def test_cortex_run_yields_typed_events_for_ui(monkeypatch):
     assert '"type": "phase_changed"' in body or '"type":"phase_changed"' in body
     assert '"type": "terminal"' in body or '"type":"terminal"' in body
     assert '"status": "tier_b_pending"' in body or '"status":"tier_b_pending"' in body
+
+
+# ---------------------------------------------------------------------------
+# Test 9 — CORTEX_SCAN_FLASH_ROUTE_DISABLED suppresses Flash branch
+# ---------------------------------------------------------------------------
+
+def test_classify_intent_flash_route_kill_active(monkeypatch):
+    """When CORTEX_SCAN_FLASH_ROUTE_DISABLED=true, classify_intent must NOT
+    invoke Flash and must return type=question even if Flash WOULD have
+    classified the input as cortex_run_action. Closes the cost-safety gap
+    where Scan→Cortex bypasses CORTEX_GATE_ENABLED. Anchor: BRIEF_CORTEX_
+    SCAN_FLASH_ROUTE_KILL_1, architect-reviewed 2026-05-04."""
+    from orchestrator import action_handler as ah
+
+    monkeypatch.setenv("CORTEX_SCAN_FLASH_ROUTE_DISABLED", "true")
+
+    # Ambiguous question that would NOT match the regex fast-path. If the
+    # kill switch is wired correctly, call_flash must NOT be invoked at all
+    # (skip-entirely is cheaper than call-then-downgrade per architect).
+    with patch("orchestrator.gemini_client.call_flash") as mock_llm:
+        out = ah.classify_intent("analyze the oskolkov situation broadly")
+
+    assert out == {"type": "question"}
+    mock_llm.assert_not_called()
+
+
+def test_classify_intent_flash_route_kill_inactive_default(monkeypatch):
+    """When CORTEX_SCAN_FLASH_ROUTE_DISABLED is unset (default), Flash branch
+    runs as before — verify the kill switch is OFF by default. Mocks Flash to
+    return cortex_run_action; assert it propagates through unchanged."""
+    from orchestrator import action_handler as ah
+
+    monkeypatch.delenv("CORTEX_SCAN_FLASH_ROUTE_DISABLED", raising=False)
+
+    with patch("orchestrator.gemini_client.call_flash") as mock_llm:
+        # Mock Flash response shape: GeminiResponse with .text + .usage attrs
+        mock_resp = type(
+            "FakeResp",
+            (),
+            {
+                "text": '{"type": "cortex_run_action", "matter_slug": "oskolkov", "question": "x"}',
+                "usage": type("U", (), {"input_tokens": 10, "output_tokens": 5})(),
+            },
+        )()
+        mock_llm.return_value = mock_resp
+        out = ah.classify_intent("analyze the oskolkov situation broadly")
+
+    assert out["type"] == "cortex_run_action"
+    assert out["matter_slug"] == "oskolkov"
+    mock_llm.assert_called_once()
+
+
+def test_classify_intent_regex_path_unaffected_by_kill(monkeypatch):
+    """Even with CORTEX_SCAN_FLASH_ROUTE_DISABLED=true, explicit "run cortex
+    on <matter>" regex commands MUST still route to cortex_run_action. The
+    regex fast-path short-circuits BEFORE the env gate. Director's explicit
+    invocations are never blocked."""
+    from orchestrator import action_handler as ah
+
+    monkeypatch.setenv("CORTEX_SCAN_FLASH_ROUTE_DISABLED", "true")
+
+    with patch("orchestrator.gemini_client.call_flash") as mock_llm:
+        out = ah.classify_intent("Run cortex on oskolkov — quick smoke")
+
+    assert out["type"] == "cortex_run_action"
+    assert out["matter_slug"] == "oskolkov"
+    mock_llm.assert_not_called()
