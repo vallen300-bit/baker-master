@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lilienmatt — Annaberg XXI · Construction Budget · Status 31.10.2025</title>
+<style>
+  :root {
+    --navy:    #1F3A5F;
+    --gold:    #8C7A4E;
+    --light-gold: #F0ECE0;
+    --dark-grey: #404040;
+    --light-grey: #EFEFEF;
+    --mid-grey: #8A8A8A;
+    --green-ok: #5A8A4E;
+    --amber:   #B8862C;
+    --red:     #A04040;
+    --white:   #FFFFFF;
+    --bg:      #FAFAF7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Calibri", system-ui, sans-serif;
+    color: var(--dark-grey);
+    background: var(--bg);
+    max-width: 1180px;
+    margin: 2rem auto;
+    padding: 0 1.8rem;
+    line-height: 1.45;
+  }
+  .title {
+    color: var(--navy);
+    font-size: 1.85rem;
+    font-weight: 700;
+    margin: 0 0 0.15rem;
+    letter-spacing: 0.3px;
+  }
+  .subtitle {
+    color: var(--gold);
+    font-size: 1.05rem;
+    font-style: italic;
+    margin: 0 0 0.2rem;
+  }
+  .source {
+    color: var(--mid-grey);
+    font-size: 0.82rem;
+    font-style: italic;
+    margin: 0 0 1.5rem;
+  }
+  .section-banner {
+    background: var(--navy);
+    color: var(--white);
+    font-weight: 700;
+    font-size: 0.82rem;
+    letter-spacing: 1.2px;
+    padding: 0.55rem 1rem;
+    margin: 1.6rem 0 0;
+    border-radius: 2px 2px 0 0;
+  }
+  .section-banner.gold { background: var(--gold); }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--white);
+    border-bottom: 2px solid var(--navy);
+    margin-bottom: 0.5rem;
+    font-size: 0.92rem;
+  }
+  thead th {
+    background: var(--light-gold);
+    color: var(--dark-grey);
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    padding: 0.55rem 0.7rem;
+    border-bottom: 1px solid #c8c0ab;
+    text-align: left;
+  }
+  thead th.num { text-align: right; }
+  tbody td {
+    padding: 0.45rem 0.7rem;
+    border-bottom: 1px solid #ECE7D8;
+    vertical-align: middle;
+  }
+  tbody tr:nth-child(even) { background: var(--light-grey); }
+  tbody tr:nth-child(odd)  { background: var(--white); }
+  td.label { font-weight: 600; color: var(--dark-grey); }
+  td.num   { text-align: right; font-variant-numeric: tabular-nums; }
+  td.note  { color: var(--mid-grey); font-style: italic; font-size: 0.85rem; }
+  td.pct-good   { color: var(--green-ok); font-weight: 700; text-align: right; }
+  td.pct-warn   { color: var(--amber);    font-weight: 700; text-align: right; }
+  tr.subtotal td {
+    background: var(--light-gold) !important;
+    font-weight: 700;
+    color: var(--navy);
+    border-top: 2px solid var(--navy);
+  }
+  /* KPI cards */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0.8rem;
+    margin: 0.4rem 0 0.4rem;
+  }
+  .kpi {
+    background: var(--white);
+    border-left: 4px solid var(--gold);
+    padding: 0.7rem 0.9rem;
+    border-radius: 0 2px 2px 0;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .kpi .lbl { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.7px; color: var(--mid-grey); }
+  .kpi .val { font-size: 1.4rem; font-weight: 700; color: var(--navy); margin-top: 0.15rem; font-variant-numeric: tabular-nums; }
+  .kpi .val.amber { color: var(--amber); }
+  .kpi .note { font-size: 0.78rem; color: var(--mid-grey); margin-top: 0.25rem; font-style: italic; line-height: 1.3; }
+  .notes-box {
+    background: #FAF7EB;
+    border-left: 3px solid var(--gold);
+    padding: 0.8rem 1.1rem;
+    margin-top: 0.5rem;
+    font-size: 0.86rem;
+    color: var(--dark-grey);
+    border-radius: 0 2px 2px 0;
+  }
+  .notes-box ol { margin: 0; padding-left: 1.2rem; }
+  .notes-box li { margin-bottom: 0.3rem; line-height: 1.5; }
+  .footer {
+    margin-top: 2rem;
+    padding-top: 0.8rem;
+    border-top: 1px solid #d6cfb8;
+    color: var(--mid-grey);
+    font-size: 0.78rem;
+    font-style: italic;
+    text-align: right;
+  }
+  @media print {
+    body { background: white; max-width: none; margin: 0; padding: 1cm 1.2cm; }
+    .kpi { box-shadow: none; }
+    .section-banner { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    thead th, tr.subtotal td, tbody tr:nth-child(even) { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+</style>
+</head>
+<body>
+
+<div class="title">LILIENMATT — ANNABERG XXI</div>
+<div class="subtitle">Construction Budget — Status 31 October 2025</div>
+<div class="source">Source: Annaberg XXI · Lilienmatt progress schedule (signed at shareholder meeting 23.10.2025)</div>
+
+<div class="section-banner">HEADLINE</div>
+<div class="kpi-grid">
+  <div class="kpi">
+    <div class="lbl">Total project budget</div>
+    <div class="val">EUR 14,158,750</div>
+    <div class="note">6 houses + common areas</div>
+  </div>
+  <div class="kpi">
+    <div class="lbl">Completed value (31.10.2025)</div>
+    <div class="val">EUR 7,086,600</div>
+    <div class="note">Net of open balance</div>
+  </div>
+  <div class="kpi">
+    <div class="lbl">Open to completion</div>
+    <div class="val">EUR 7,072,150</div>
+    <div class="note">Houses EUR 5.67M · Common EUR 1.40M</div>
+  </div>
+  <div class="kpi">
+    <div class="lbl">Target hand-over</div>
+    <div class="val amber">30 Nov 2026</div>
+    <div class="note">Outside finishing level by May 2026</div>
+  </div>
+</div>
+
+<div class="section-banner">PER-HOUSE BREAKDOWN</div>
+<table>
+  <thead>
+    <tr>
+      <th>House</th>
+      <th>Scope</th>
+      <th class="num">Budget (EUR)</th>
+      <th class="num">Done (EUR)</th>
+      <th class="num">Open (EUR)</th>
+      <th class="num">% Done</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td class="label">House 1</td><td>Envelope · Outside · Fit-out L1+L2 · MEP · Common</td><td class="num">2,220,000</td><td class="num">1,353,000</td><td class="num">867,000</td><td class="pct-warn">61%</td></tr>
+    <tr><td class="label">House 2</td><td>Envelope · Outside · Fit-out L1+L2 · MEP · Common</td><td class="num">2,275,000</td><td class="num">1,341,100</td><td class="num">933,900</td><td class="pct-warn">59%</td></tr>
+    <tr><td class="label">House 3</td><td>Envelope · Outside · Fit-out L1+L2 · MEP · Common</td><td class="num">2,115,000</td><td class="num">486,750</td><td class="num">1,628,250</td><td class="pct-warn">23%</td></tr>
+    <tr><td class="label">House 4</td><td>Envelope · Outside · Fit-out L1+L2 · MEP · Common</td><td class="num">2,055,000</td><td class="num">1,282,750</td><td class="num">772,250</td><td class="pct-warn">62%</td></tr>
+    <tr><td class="label">House 5</td><td>Envelope · Outside · Fit-out L1+L2 · MEP · Common</td><td class="num">2,050,000</td><td class="num">1,284,000</td><td class="num">766,000</td><td class="pct-warn">63%</td></tr>
+    <tr><td class="label">House 6</td><td>Envelope · Outside · Fit-out L1+L2 · MEP · Common</td><td class="num">2,040,000</td><td class="num">1,339,000</td><td class="num">701,000</td><td class="pct-warn">66%</td></tr>
+    <tr class="subtotal"><td class="label">Subtotal — 6 houses</td><td></td><td class="num">12,755,000</td><td class="num">7,086,600</td><td class="num">5,668,400</td><td class="num">56%</td></tr>
+  </tbody>
+</table>
+
+<div class="section-banner">COMMON AREAS &amp; SITE INFRASTRUCTURE</div>
+<table>
+  <thead>
+    <tr>
+      <th>Item</th>
+      <th>Description</th>
+      <th class="num">Budget (EUR)</th>
+      <th class="num">Done (EUR)</th>
+      <th class="num">Open (EUR)</th>
+      <th class="num">% Done</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td class="label">Trafo station + outside light</td><td>Main trafo + path/stair lighting</td><td class="num">155,000</td><td class="num">23,250</td><td class="num">131,750</td><td class="pct-warn">15%</td></tr>
+    <tr><td class="label">Outside areas — upper row</td><td>Gardens, walkways, stairs</td><td class="num">180,000</td><td class="num">117,000</td><td class="num">63,000</td><td class="pct-warn">65%</td></tr>
+    <tr><td class="label">Middle road</td><td>Road between two rows of houses</td><td class="num">150,000</td><td class="num">15,000</td><td class="num">135,000</td><td class="pct-warn">10%</td></tr>
+    <tr><td class="label">Outside areas — lower row</td><td>Gardens, walkways, stairs</td><td class="num">180,000</td><td class="num">9,000</td><td class="num">171,000</td><td class="pct-warn">5%</td></tr>
+    <tr><td class="label">Access road</td><td>Public street to plot</td><td class="num">120,000</td><td class="num">0</td><td class="num">120,000</td><td class="pct-warn">0%</td></tr>
+    <tr><td class="label">Garage + common areas</td><td>Fit-out garage, building access</td><td class="num">650,000</td><td class="num">0</td><td class="num">650,000</td><td class="pct-warn">0%</td></tr>
+    <tr><td class="label">Snagging / deficiencies</td><td>Removal of defects</td><td class="num">100,000</td><td class="num">0</td><td class="num">100,000</td><td class="pct-warn">0%</td></tr>
+    <tr><td class="label">Documentation / authorities</td><td>Hand-over approvals</td><td class="num">10,000</td><td class="num">2,000</td><td class="num">8,000</td><td class="pct-warn">20%</td></tr>
+    <tr><td class="label">Hand-over</td><td>Cleaning + functional checks</td><td class="num">25,000</td><td class="num">0</td><td class="num">25,000</td><td class="pct-warn">0%</td></tr>
+    <tr class="subtotal"><td class="label">Subtotal — common</td><td></td><td class="num">1,570,000</td><td class="num">166,250</td><td class="num">1,403,750</td><td class="num">11%</td></tr>
+  </tbody>
+</table>
+
+<div class="section-banner">FUNDING PLAN — agreed at Shareholder Meeting 23.10.2025</div>
+<table>
+  <thead>
+    <tr>
+      <th>Period</th>
+      <th>Source</th>
+      <th class="num">Amount (EUR)</th>
+      <th>Note</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td class="label">27 Oct – 10 Nov 2025</td><td>AO front-load</td><td class="num">2,000,000</td><td class="note">Required to place orders</td></tr>
+    <tr><td class="label">October 2025</td><td>AO monthly tranche</td><td class="num">1,000,000</td><td class="note">Performance month</td></tr>
+    <tr><td class="label">November 2025</td><td>AO monthly tranche</td><td class="num">1,000,000</td><td class="note">Performance month</td></tr>
+    <tr><td class="label">December 2025</td><td>AO monthly tranche</td><td class="num">1,000,000</td><td class="note">Performance month</td></tr>
+    <tr><td class="label">January 2026</td><td>AO monthly tranche</td><td class="num">1,000,000</td><td class="note">Performance month</td></tr>
+    <tr><td class="label">February 2026</td><td>AO monthly tranche</td><td class="num">1,000,000</td><td class="note">Performance month</td></tr>
+    <tr><td class="label">March 2026</td><td>AO monthly tranche</td><td class="num">1,000,000</td><td class="note">Performance month</td></tr>
+    <tr><td class="label">Ongoing</td><td>Apartment sales</td><td class="num">1,072,150</td><td class="note">Covers second-level inside finishing</td></tr>
+    <tr class="subtotal"><td class="label">Total funding plan</td><td></td><td class="num">9,072,150</td><td class="note" style="color: var(--navy); font-style: normal;">Covers EUR 7,072,150 open balance + EUR 2.0M order front-load</td></tr>
+  </tbody>
+</table>
+
+<div class="section-banner gold">NOTES</div>
+<div class="notes-box">
+  <ol>
+    <li>Figures stated net (excl. VAT). Status reflects on-site progress as at 31 October 2025.</li>
+    <li>Project finishing — outside completion targeted May 2026; full hand-over Houses 1/2/3 by 30 November 2026.</li>
+    <li>Funding plan ratified by main shareholder AO at 23.10.2025 meeting: EUR 1.0M / month plus EUR 2.0M front-load.</li>
+    <li>Remaining ~EUR 1.07M of inside finishing (second level) covered by ongoing apartment sales.</li>
+    <li>This summary supersedes prior versions. Underlying ledger: Lilienmatt cashflow statement (status 14.10.2025).</li>
+  </ol>
+</div>
+
+<div class="footer">Brisen Capital SA · For internal AO discussion · 4 May 2026</div>
+
+</body>
+</html>

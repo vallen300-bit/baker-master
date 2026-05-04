@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lilienmatt — Annaberg XXI · Cost-to-Completion · Status 4 May 2026</title>
+<style>
+  :root {
+    --navy: #1F3A5F; --gold: #8C7A4E; --light-gold: #F0ECE0;
+    --dark-grey: #404040; --light-grey: #EFEFEF; --mid-grey: #8A8A8A;
+    --green-ok: #5A8A4E; --amber: #B8862C; --red: #A04040;
+    --warm: #FFF5E0; --white: #FFFFFF; --bg: #FAFAF7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Calibri", system-ui, sans-serif;
+    color: var(--dark-grey); background: var(--bg);
+    max-width: 1180px; margin: 2rem auto; padding: 0 1.8rem; line-height: 1.45;
+  }
+  .title { color: var(--navy); font-size: 1.85rem; font-weight: 700; margin: 0 0 0.15rem; letter-spacing: 0.3px; }
+  .subtitle { color: var(--gold); font-size: 1.05rem; font-style: italic; margin: 0 0 0.2rem; }
+  .source { color: var(--mid-grey); font-size: 0.82rem; font-style: italic; margin: 0 0 1.5rem; }
+  .section-banner {
+    background: var(--navy); color: var(--white); font-weight: 700; font-size: 0.82rem;
+    letter-spacing: 1.2px; padding: 0.55rem 1rem; margin: 1.6rem 0 0; border-radius: 2px 2px 0 0;
+  }
+  .section-banner.gold { background: var(--gold); }
+  table {
+    width: 100%; border-collapse: collapse; background: var(--white);
+    border-bottom: 2px solid var(--navy); margin-bottom: 0.5rem; font-size: 0.92rem;
+  }
+  thead th {
+    background: var(--light-gold); color: var(--dark-grey);
+    font-size: 0.78rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px;
+    padding: 0.55rem 0.7rem; border-bottom: 1px solid #c8c0ab; text-align: left;
+  }
+  thead th.num { text-align: right; }
+  tbody td { padding: 0.5rem 0.7rem; border-bottom: 1px solid #ECE7D8; vertical-align: middle; }
+  tbody tr:nth-child(even) { background: var(--light-grey); }
+  tbody tr:nth-child(odd)  { background: var(--white); }
+  td.label { font-weight: 600; color: var(--dark-grey); }
+  td.num   { text-align: right; font-variant-numeric: tabular-nums; }
+  td.note  { color: var(--mid-grey); font-style: italic; font-size: 0.85rem; }
+  tr.subtotal td {
+    background: var(--light-gold) !important; font-weight: 700; color: var(--navy);
+    border-top: 2px solid var(--navy);
+  }
+  tr.fitout td { background: var(--warm) !important; }
+  tr.grand td {
+    background: var(--light-gold) !important; font-weight: 700; color: var(--navy);
+    border-top: 2px solid var(--navy); border-bottom: 2px solid var(--navy); font-size: 1rem;
+  }
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.8rem; margin: 0.4rem 0; }
+  .kpi {
+    background: var(--white); border-left: 4px solid var(--gold);
+    padding: 0.7rem 0.9rem; border-radius: 0 2px 2px 0; box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  }
+  .kpi.warm { border-left-color: var(--amber); background: var(--warm); }
+  .kpi .lbl { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.7px; color: var(--mid-grey); }
+  .kpi .val { font-size: 1.4rem; font-weight: 700; color: var(--navy); margin-top: 0.15rem; font-variant-numeric: tabular-nums; }
+  .kpi .val.amber { color: var(--amber); }
+  .kpi .note { font-size: 0.78rem; color: var(--mid-grey); margin-top: 0.25rem; font-style: italic; line-height: 1.3; }
+  .notes-box {
+    background: #FAF7EB; border-left: 3px solid var(--gold);
+    padding: 0.8rem 1.1rem; margin-top: 0.5rem; font-size: 0.86rem;
+    color: var(--dark-grey); border-radius: 0 2px 2px 0;
+  }
+  .notes-box ol { margin: 0; padding-left: 1.2rem; }
+  .notes-box li { margin-bottom: 0.3rem; line-height: 1.5; }
+  .footer {
+    margin-top: 2rem; padding-top: 0.8rem; border-top: 1px solid #d6cfb8;
+    color: var(--mid-grey); font-size: 0.78rem; font-style: italic; text-align: right;
+  }
+  @media print {
+    body { background: white; max-width: none; margin: 0; padding: 1cm 1.2cm; }
+    .kpi { box-shadow: none; }
+    .section-banner, thead th, tr.subtotal td, tr.grand td, tr.fitout td, tbody tr:nth-child(even) {
+      -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="title">LILIENMATT — ANNABERG XXI</div>
+<div class="subtitle">Cost-to-Completion — Status 4 May 2026</div>
+<div class="source">Source: Siegfried, on-site update 04.05.2026 (supersedes 23.10.2025 shareholder-meeting baseline)</div>
+
+<div class="section-banner">HEADLINE</div>
+<div class="kpi-grid">
+  <div class="kpi">
+    <div class="lbl">Open construction works</div>
+    <div class="val">EUR 2,850,000</div>
+    <div class="note">Funded by Lilienmatt (shareholder / Aukera)</div>
+  </div>
+  <div class="kpi warm">
+    <div class="lbl">Open fit-out</div>
+    <div class="val">EUR 3,900,000</div>
+    <div class="note">Not in Oct 2025 plan — funded by apartment buyer payments</div>
+  </div>
+  <div class="kpi">
+    <div class="lbl">Total cost-to-completion</div>
+    <div class="val">EUR 6,750,000</div>
+    <div class="note">Construction + fit-out</div>
+  </div>
+  <div class="kpi">
+    <div class="lbl">Target hand-over</div>
+    <div class="val amber">30 Nov 2026</div>
+    <div class="note">Houses 1/2/3</div>
+  </div>
+</div>
+
+<div class="section-banner">OPEN WORKS — BREAKDOWN (status 04.05.2026)</div>
+<table>
+  <thead>
+    <tr>
+      <th>Work package</th>
+      <th>Scope</th>
+      <th class="num">Open (EUR)</th>
+      <th>Funding source</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td class="label">MEP</td><td>Sanitary · plumbing · heating · cooling · electrical</td><td class="num">1,200,000</td><td>Lilienmatt / Aukera</td></tr>
+    <tr><td class="label">Outside construction</td><td>Roads · gardens · pathways · stairs</td><td class="num">500,000</td><td>Lilienmatt / Aukera</td></tr>
+    <tr><td class="label">Façade</td><td>Outstanding façade works</td><td class="num">300,000</td><td>Lilienmatt / Aukera</td></tr>
+    <tr><td class="label">Steel balustrade</td><td>Handrails · balustrades</td><td class="num">350,000</td><td>Lilienmatt / Aukera</td></tr>
+    <tr><td class="label">Garage</td><td>Garage fit-out + access</td><td class="num">500,000</td><td>Lilienmatt / Aukera</td></tr>
+    <tr class="subtotal"><td class="label">Construction subtotal</td><td></td><td class="num">2,850,000</td><td>Lilienmatt / Aukera</td></tr>
+    <tr class="fitout"><td class="label">Fit-out (apartments)</td><td>Inside finishing · 2nd-level fit-out (tiles, bathrooms, flooring, paintings)</td><td class="num">3,900,000</td><td>Apartment buyer payments</td></tr>
+    <tr class="grand"><td class="label">Total cost-to-completion</td><td></td><td class="num">6,750,000</td><td>Construction (Lilienmatt) + fit-out (buyers)</td></tr>
+  </tbody>
+</table>
+
+<div class="section-banner">FUNDING SOURCES</div>
+<table>
+  <thead>
+    <tr>
+      <th>Source</th>
+      <th>Covers</th>
+      <th class="num">Amount (EUR)</th>
+      <th>Note</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="label">Lilienmatt (shareholder / Aukera)</td>
+      <td>Construction works (MEP, outside, façade, steel, garage)</td>
+      <td class="num">2,850,000</td>
+      <td class="note">Per 23.10.2025 plan + Aukera EUR 15M facility (target close 30 May 2026)</td>
+    </tr>
+    <tr>
+      <td class="label">Apartment buyers</td>
+      <td>Fit-out (inside finishing)</td>
+      <td class="num">3,900,000</td>
+      <td class="note">Buyer instalments triggered by sales / handover — outside Oct 2025 plan</td>
+    </tr>
+    <tr class="subtotal">
+      <td class="label">Total funding required</td>
+      <td></td>
+      <td class="num">6,750,000</td>
+      <td>Matches total cost-to-completion</td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="section-banner gold">NOTES</div>
+<div class="notes-box">
+  <ol>
+    <li>Figures stated net (excl. VAT). Status reflects on-site progress as at 4 May 2026 (Siegfried).</li>
+    <li>Project finishing — outside completion targeted May 2026; full hand-over Houses 1/2/3 by 30 November 2026.</li>
+    <li>Construction works (EUR 2.85M) funded by Lilienmatt — covered by shareholder funding plan ratified 23.10.2025 plus Aukera EUR 15M facility.</li>
+    <li>Fit-out (EUR 3.9M) is NEW — not included in October 2025 shareholder meeting. Funding source: apartment buyer instalments.</li>
+    <li>This summary supersedes the 31.10.2025 baseline.</li>
+  </ol>
+</div>
+
+<div class="footer">Brisen Capital SA · For internal AO discussion · 4 May 2026</div>
+
+</body>
+</html>

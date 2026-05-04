@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-04-30",
+  "updated_at": "2026-05-04",
   "folders": [
     {
       "name": "ARCHITECTURE",
@@ -55,6 +55,20 @@
       "name": "AO",
       "slug": "ao",
       "presentations": [
+        {
+          "title": "Lilienmatt / Annaberg \u2014 Cost-to-Completion (Status 4 May 2026)",
+          "file": "lilienmatt-budget-04-may-2026.html",
+          "download": "Lilienmatt_Annaberg_CostToCompletion_Status_04_May_2026.xlsx",
+          "created": "2026-05-04",
+          "matter": "oskolkov"
+        },
+        {
+          "title": "Lilienmatt / Annaberg \u2014 Construction Budget (Status 31 October 2025)",
+          "file": "lilienmatt-budget-october-2025.html",
+          "download": "Lilienmatt_Annaberg_Budget_Status_31_October_2025.xlsx",
+          "created": "2026-05-04",
+          "matter": "oskolkov"
+        },
         {
           "title": "Hotel Stabilization \u2014 How Long Does It Take?",
           "file": "hotel-stabilization.html",
