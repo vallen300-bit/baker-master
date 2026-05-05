@@ -46,5 +46,23 @@
 
 ---
 
+## DESIGN-BLOCKER RESOLUTION — V0.2 amendment ratified (2026-05-05)
+
+**Status:** Director ratified Option A (adapt to bootstrap pattern, drop CONCURRENTLY). V0.2 amendment landed on baker-master main at commit **`9bac2a2`** — read brief tail §V0.2 §A-§F for full details.
+
+**Net effect for B4:**
+- **Feature 1 implementation REPLACED:** edit `db.py` `SCHEMA_V2_SQL` inline (no `migrations/` dir, no `applied_migrations.lock`, no CONCURRENTLY). Add `CREATE UNIQUE INDEX IF NOT EXISTS uq_session_keys_worker_active ON brisen_lab_session_keys (worker_slug) WHERE expired_at IS NULL` + `DROP INDEX IF EXISTS idx_session_keys_worker_active` to the SCHEMA_V2_SQL string in db.py.
+- **ACs DROPPED:** A1, A8, A9, A11 (migration-runner-specific). REPLACED with A1' (grep db.py) + A8' (post-deploy `\d`) + A9' (duplicate-detect SELECT) + A11' (code-level rollback).
+- **Pre-work DROPPED:** no runner inspection needed; bootstrap-pattern confirmed.
+- **Architect folds STATUS:** Feature 5 hook retry-on-409 + psycopg2 ≥2.8 / SQLSTATE '23505' fallback + threading.Barrier(2) + stderr log = **STAY**. CONCURRENTLY symmetry / `pg_index.indisvalid` / runner-verification = **MOOT**.
+- **Sequencing:** drop step 3 (runner inspection); replace step 5 (no migration file — db.py edit instead).
+- **Features 2/3/4/5 unchanged.**
+
+**Cleared to proceed.** Create branches `b4/brisen-lab-surface-6a-partial-unique-index-1` (brisen-lab) + `b4/baker-master-surface-6a-hook-retry-1` (baker-master), implement per V0.2 amendment, ship via PL paste-block.
+
+No autonomous polling. Stop after ship report.
+
+---
+
 ## Prior CODE_4 task (archive reference)
 BRIEF_BRISEN_LAB_V2_BRIDGE_1 V0.3.7 — COMPLETE 2026-05-05. baker-master PR #157 squash-merged 2026-05-05T20:57:19Z (commit `57ab073`); brisen-lab PR #2 squash-merged 2026-05-05T20:57:08Z (commit `bc1e3e6`). All 4 gates cleared (B4 pytest + AH2 /security-review + architect + code-reviewer). `BRISEN_LAB_V2_ENABLED=false` stays on Render until Surface 6a (this brief) ships + Tier-B cutover Director-ratified. Mailbox hygiene rule applied — overwriting per `_ops/processes/b-code-dispatch-coordination.md` §3.
