@@ -31,6 +31,7 @@ import base64
 import hashlib
 import json
 import os
+import random
 import sys
 import time
 import uuid
@@ -53,6 +54,16 @@ _AUTH_BEARING_ROLES = frozenset({
 _REGISTER_TIMEOUT_S = 5.0
 _HUMAN_CONFIRM_TIMEOUT_S = 5.0
 _DRAIN_TIMEOUT_S = 8.0
+
+# Surface 6a (V0.2): retry register-session-pubkey once on 409 race-loss.
+# The partial UNIQUE index on brisen_lab_session_keys rejects the second
+# concurrent INSERT for one worker_slug; retrying once with jitter lets the
+# loser re-register cleanly (the winner's row is now active so the loser's
+# UPDATE step expires it before INSERT). Max-retry = 1: two collisions in a
+# row = systemic contention; further retries don't materially help.
+_REGISTER_MAX_RETRIES = 1
+_REGISTER_RETRY_JITTER_LO_S = 0.05  # seconds (50 ms)
+_REGISTER_RETRY_JITTER_HI_S = 0.15  # seconds (150 ms)
 
 
 # ---------------------------------------------------------------------------
@@ -201,19 +212,37 @@ def _run_auth_chain(prompt: str) -> str | None:
     # Step 2: register-session-pubkey → daemon issues fresh session_id.
     # Encoding: brisen-lab daemon requires strict base64 (bus.py:635 — rejects
     # non-base64 with HTTP 400 pubkey_not_base64).
-    try:
-        with httpx.Client(timeout=_REGISTER_TIMEOUT_S) as client:
-            resp = client.post(
-                f"{base}/auth/register-session-pubkey",
-                headers=headers,
-                json={
-                    "pubkey": base64.b64encode(pubkey_bytes).decode("ascii"),
-                    "worker_slug": worker_slug,
-                },
-            )
-    except Exception:
+    # Surface 6a: retry once on 409 race-loss (concurrent register from a sibling
+    # SessionStart fires within the same UPDATE+INSERT window; the partial UNIQUE
+    # index rejected this caller's INSERT). Other non-200 statuses fail-open
+    # immediately per V0.3.7 contract.
+    register_payload = {
+        "pubkey": base64.b64encode(pubkey_bytes).decode("ascii"),
+        "worker_slug": worker_slug,
+    }
+    resp = None
+    for attempt in range(_REGISTER_MAX_RETRIES + 1):
+        try:
+            with httpx.Client(timeout=_REGISTER_TIMEOUT_S) as client:
+                resp = client.post(
+                    f"{base}/auth/register-session-pubkey",
+                    headers=headers,
+                    json=register_payload,
+                )
+        except Exception:
+            return None
+        if resp.status_code == 200:
+            break
+        if resp.status_code == 409 and attempt < _REGISTER_MAX_RETRIES:
+            # Jitter required: without it, both losers retry in lockstep and
+            # collide again deterministically. 50-150ms is large enough to
+            # break the tie via Python scheduler granularity.
+            time.sleep(random.uniform(
+                _REGISTER_RETRY_JITTER_LO_S, _REGISTER_RETRY_JITTER_HI_S
+            ))
+            continue
         return None
-    if resp.status_code != 200:
+    if resp is None or resp.status_code != 200:
         return None
     try:
         session_id = resp.json().get("session_id")
