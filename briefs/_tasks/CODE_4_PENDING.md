@@ -6,7 +6,7 @@ dispatched_at: 2026-05-03T20:00:00Z
 dispatched_by: ai-head-a
 claimed_at: 2026-05-03T20:30:00Z
 claimed_by: b4
-last_heartbeat: 2026-05-05T09:30:00Z — §3+§4+§4.1+§5.1+§6+§7+§8 ALL shipped to brisen-lab; pytest scaffolding for §7 A1-A21 in place (28 tests collected, brisen-lab 88bf7ad); /security-review remains. Blocked on TEST_DATABASE_URL.
+last_heartbeat: 2026-05-05T13:30:00Z — AH2 4 fixes folded (brisen-lab 13212ff): A5 topic pattern, DSN alias, db pool threading.Lock, freeze gate on 5 endpoints. Plus 2 latent test-scaffolding fixes (FORGE_KEY hard-override, OTel fixture provider binding) needed for live pytest. Live pytest GREEN: 27 passed / 1 skipped (A21g per V0.3.6) / 0 failed against TEST_DATABASE_URL_BRISEN_LAB. PR opened: brisen-lab #1. Awaiting /security-review (Lesson #52 hard gate) by AH1-App or AH2.
 blocker_question: |
   §7 A1-A21 live acceptance pass requires a TEST_DATABASE_URL pointing at
   an isolated Neon branch. Local 1Password has the prod DATABASE_URL
@@ -44,8 +44,8 @@ blocker_question: |
 # write+read OK in brisen_lab_test, no leak to prod neondb. DB-level isolation
 # (shared compute autoscale). Acceptable for Tier-B per brief authorization.
 # Re-engage §7 A1–A21 acceptance pass.
-ship_report: null
-pr: null
+ship_report: briefs/_reports/B4_brisen_lab_v2_bridge_1_ah2_fixes_2026-05-05.md
+pr: https://github.com/vallen300-bit/brisen-lab/pull/1
 autopoll_eligible: false
 ---
 
