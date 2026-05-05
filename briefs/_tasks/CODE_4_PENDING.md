@@ -6,7 +6,7 @@ dispatched_at: 2026-05-03T20:00:00Z
 dispatched_by: ai-head-a
 claimed_at: 2026-05-03T20:30:00Z
 claimed_by: b4
-last_heartbeat: 2026-05-05T13:30:00Z — AH2 4 fixes folded (brisen-lab 13212ff): A5 topic pattern, DSN alias, db pool threading.Lock, freeze gate on 5 endpoints. Plus 2 latent test-scaffolding fixes (FORGE_KEY hard-override, OTel fixture provider binding) needed for live pytest. Live pytest GREEN: 27 passed / 1 skipped (A21g per V0.3.6) / 0 failed against TEST_DATABASE_URL_BRISEN_LAB. PR opened: brisen-lab #1. Awaiting /security-review (Lesson #52 hard gate) by AH1-App or AH2.
+last_heartbeat: 2026-05-05T19:00:00Z — code-reviewer 4 fixes folded (brisen-lab 13212ff→44b3697): (1) HIGH bus.py verify-then-burn (consume_nonce now after verify_ed25519_signature); (2) MEDIUM app.py _emit_freeze_broadcast async + asyncio.to_thread; (3) MEDIUM lifecycle.py confirm_idle pops _flows; (4) MEDIUM tier_classification.py tier_priority None-guard + bus.py structured 500 on unknown_tier. 5 new regression tests added (tests/test_review_fixes_2026_05_05.py). Live pytest GREEN: 32 passed / 1 skipped (A21g per V0.3.6) / 0 failed against TEST_DATABASE_URL_BRISEN_LAB. brisen-lab PR #1 updated in place; awaiting AH2 static re-audit + AH2 /security-review + architect spot-check on Issues 1+2 per dispatch path forward.
 blocker_question: |
   §7 A1-A21 live acceptance pass requires a TEST_DATABASE_URL pointing at
   an isolated Neon branch. Local 1Password has the prod DATABASE_URL
@@ -44,7 +44,8 @@ blocker_question: |
 # write+read OK in brisen_lab_test, no leak to prod neondb. DB-level isolation
 # (shared compute autoscale). Acceptable for Tier-B per brief authorization.
 # Re-engage §7 A1–A21 acceptance pass.
-ship_report: briefs/_reports/B4_brisen_lab_v2_bridge_1_ah2_fixes_2026-05-05.md
+ship_report: briefs/_reports/B4_brisen_lab_v2_bridge_1_codereviewer_fixes_2026-05-05.md
+ship_report_prev: briefs/_reports/B4_brisen_lab_v2_bridge_1_ah2_fixes_2026-05-05.md
 pr: https://github.com/vallen300-bit/brisen-lab/pull/1
 autopoll_eligible: false
 ---
@@ -143,3 +144,63 @@ V0.1 → V0.3.5 evolution:
 **Coverage gaps noted (not change-blocking, follow-up):**
 - A2 schema test missing index assertions for idx_msg_thread / idx_session_keys_worker_active / idx_msg_to_terminals (NM1 broad GIN). Coverage gap, not correctness gap.
 - `test_a14g_atomic_h_a4` `time.sleep(0.5)` is overkill but harmless.
+
+## UPDATE 2026-05-05 — code-reviewer REQUEST_CHANGES (post-13212ff)
+
+**Status:** REQUEST_CHANGES. feature-dev:code-reviewer pass on `13212ff` returned 1 HIGH + 3 MEDIUM. **These are findings prior gates (static, security, architect) all missed.** Path A: fold all 4 into one fix-up commit on b4 branch.
+
+### Fix 1 [HIGH] — nonce consumed before signature verified
+**File:** `bus.py` (~lines 677-708 at HEAD 13212ff; lines may shift, locate by function — the handler that calls both `consume_nonce()` and `verify_ed25519_signature()`; per code-reviewer this is in the auth chain leading to ratify_decision / human-confirmation flow).
+
+**Bug:** `consume_nonce(nonce)` runs BEFORE `verify_ed25519_signature(...)`. On verify-fail (transient: clock drift at 60s boundary; or attacker replaying with forged sig), nonce is already burned. Legitimate caller locked out for remainder of 60s window; attacker can selectively DoS legit nonces.
+
+**Fix:** invert order — verify signature first, then `consume_nonce` ONLY on verify-success. Single critical section: signature-OK-then-burn, atomic.
+
+**Tests to add:**
+- `valid_sig + replayed_nonce → 403 nonce_replayed` (existing or extend)
+- `invalid_sig + valid_nonce → 403 sig_invalid AND same nonce STILL VALID on retry within 60s` (new — this is the regression guard)
+
+### Fix 2 [MEDIUM] — event-loop block on freeze flip
+**File:** `app.py:179-207` (`_emit_freeze_broadcast`)
+
+**Bug:** sync function calling blocking psycopg2 `_do()` directly from `_freeze_flag_watch_loop` (an `async def` on event loop). Contradicts codebase design (line 233-236 comment: "Handlers that touch the blocking psycopg2 pool are wrapped via asyncio.to_thread"). Will block SSE clients at exact moment freeze fires (worst possible time).
+
+**Fix:** wrap `_do()` in `await asyncio.to_thread(_do)` from inside `_freeze_flag_watch_loop` (cleanest — keeps `_emit_freeze_broadcast` sync). Alternative: convert `_emit_freeze_broadcast` to `async def` and `await` it. `_broadcast()` is queue-based — leave alone.
+
+**Test:** assert `_freeze_flag_watch_loop` doesn't block event loop for >50ms during freeze flip (or unit-level: mock `_do` to assert it's called via `to_thread`).
+
+### Fix 3 [MEDIUM] — _flows registry leak
+**File:** `lifecycle.py:91, 279-296` (`confirm_idle`)
+
+**Bug:** `confirm_idle` sets `flow.confirmed = True` and cancels `timer_task` but never removes entry from `_flows` dict. Render service uptime is weeks → entries accumulate per worker per restart event.
+
+**Fix:** add `_flows.pop(worker_slug, None)` after `timer_task.cancel()` in `confirm_idle`. The existing trigger-skip-if-confirmed guard at lines 226-232 already handles concurrent reads (lookup returns None → caller's None-path).
+
+**Test:** unit — call `confirm_idle(slug)` on a registered flow → assert `_flows.get(slug) is None`.
+
+### Fix 4 [MEDIUM] — KeyError on unknown tier
+**File:** `tier_classification.py:170-173` (`tier_priority`); call site at `bus.py:558` (`_do_decision`)
+
+**Bug:** `_TIER_ORDER[tier]` raises unhandled KeyError on out-of-enum tier values. DB CHECK constraint is primary mitigation but partial (data pre-dating constraint, or raw-SQL writes). Surfaces as opaque 500.
+
+**Fix:** `_TIER_ORDER.get(tier)` with None-guard. In `_do_decision`, on None return `{"err": "unknown_tier", "tier": tier}` consistent with other error paths.
+
+**Test:** unit — `_do_decision` with parent.tier_required="invalid" → returns err structure, no exception.
+
+### Architect nits (LOW — confirmed by code-reviewer, no fix in this PR)
+- forge-agent SPOF on kill path → architectural property, captured in follow-ups
+- /lifecycle/status unauth read → accepted by design, captured
+- session_keys accumulation across soft restarts → confirmed real, captured for follow-up brief
+
+### Path forward
+1. Apply 4 fixes on b4 branch + add new tests
+2. Re-run live pytest — GREEN required (literal output, no by-inspection)
+3. Ship via PL paste-block per SKILL.md §"PL ship-report contract"
+4. **Re-review chain** (focused, not full re-audit):
+   - AH2 static re-audit on diff vs 13212ff
+   - AH2 /security-review on diff vs 13212ff (Issue 1 is auth-adjacent)
+   - Architect spot-check (Issues 1 + 2 — auth ordering + async correctness)
+5. Then merge: brisen-lab #1 → baker-master MCP-tools → BRISEN_LAB_V2_ENABLED=true cutover
+
+### Heartbeat
+Continue 12h cadence.
