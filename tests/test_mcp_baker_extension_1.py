@@ -95,9 +95,10 @@ def test_all_four_new_tools_registered():
     assert "baker_health" in names
 
 
-def test_total_tool_count_is_thirty():
-    """Was 26 + 4 new = 30 (per brief verification #2)."""
-    assert len(srv.TOOLS) == 30
+def test_total_tool_count_matches_baseline_plus_brisen_lab():
+    """27 base + 4 BAKER_MCP_EXTENSION_1 + 3 BRISEN_LAB_V2_BRIDGE_1 consumer-side
+    (baker_inbox_{post,read,ack}) = 34."""
+    assert len(srv.TOOLS) == 34
 
 
 def test_baker_scan_schema_requires_query():
