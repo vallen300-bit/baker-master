@@ -9,6 +9,12 @@
         "type": "command",
         "command": ".claude/hooks/session-start-role.sh"
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "type": "command",
+        "command": "python3 .claude/hooks/user-prompt-submit-confirm.py"
+      }
     ]
   }
 }

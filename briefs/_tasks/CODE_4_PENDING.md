@@ -1,74 +1,50 @@
+# CODE_4_PENDING — BRIEF_BRISEN_LAB_SURFACE_6A_PARTIAL_UNIQUE_INDEX_1 — 2026-05-05
+
+**Brief:** baker-master `briefs/BRIEF_BRISEN_LAB_SURFACE_6A_PARTIAL_UNIQUE_INDEX_1.md` (Tier A, ~3-4 hours, 12 ACs)
+**Working branches (TWO PRs, cross-repo):**
+- `b4/brisen-lab-surface-6a-partial-unique-index-1` (brisen-lab repo)
+- `b4/baker-master-surface-6a-hook-retry-1` (baker-master repo)
+**Pre-requisites:** brisen-lab main HEAD `bc1e3e6` (Surface 6 merged) + baker-master main HEAD `bad7c6d` (this brief commit)
+**Acceptance criteria:** per brief §ACs (12 testable items, A1-A12)
+**Ship gate:** literal `pytest` GREEN both sides — no by-inspection (Lesson #52)
+**Heartbeat:** 12h cadence binding (per SKILL.md `59f23c4` §B-code stall chase)
+
+**Read first (MANDATORY):**
+1. `briefs/BRIEF_BRISEN_LAB_SURFACE_6A_PARTIAL_UNIQUE_INDEX_1.md` — full spec + 5 features + 12 ACs
+2. `~/baker-vault/_ops/agents/b4/orientation.md` — your role
+3. `~/.claude/projects/-Users-dimitry-Vallen-Dropbox-Dimitry-vallen-Baker-Project/memory/MEMORY.md` — canonical Baker memory
+
+**First-message confirmation phrase (evidence-bound, exact):**
+`"B4 oriented. Read: CODE_4_PENDING.md, MEMORY.md."`
+
+**Path forward:**
+1. Read brief BRIEF_BRISEN_LAB_SURFACE_6A_PARTIAL_UNIQUE_INDEX_1.md cover-to-cover
+2. **Pre-work — verify migration runner CONCURRENTLY-handling** (Sequencing step 3): inspect `~/bm-b4-brisen-lab/start.sh` (or migration runner). If runner wraps `.sql` files in BEGIN/COMMIT, surface to AH1 BEFORE writing migration.
+3. **Pre-apply prod sanity check:** run duplicate-detect SELECT against prod brisen-lab DB. Surface to AH1 if non-empty.
+4. Implement Feature 1 (migration) on `b4/brisen-lab-surface-6a-partial-unique-index-1` branch in brisen-lab repo
+5. Apply locally + verify `pg_index.indisvalid = TRUE` post-CONCURRENTLY
+6. Implement Feature 2 (handler 409 + observability) in brisen-lab `bus.py`
+7. Implement Feature 3 (regression tests with threading.Barrier + 20× loop) in brisen-lab `tests/`
+8. Implement Feature 5 (hook retry-on-409 with jitter, max-retry=1) in baker-master `.claude/hooks/user-prompt-submit-confirm.py` on `b4/baker-master-surface-6a-hook-retry-1` branch
+9. Implement Feature 4 (cutover runbook in baker-vault `_ops/processes/v2-bridge-cutover-runbook.md`)
+10. Live pytest GREEN both repos
+11. Open TWO PRs (brisen-lab + baker-master)
+12. Ship via PL paste-block per SKILL.md §"PL ship-report contract"
+13. 4-gate review chain on each PR: live pytest + AH2 /security-review + architect spot-check + feature-dev:code-reviewer 2nd-pass
+
+**Critical pre-merge gates (from architect post-WRITE review):**
+- Hook retry-on-409 (Feature 5) is NEW scope, cross-repo — without it, race-loser silently fails fail-open. V0.3.7 hook does NOT retry on non-200 today (verified at `.claude/hooks/user-prompt-submit-confirm.py:216-217`).
+- Migration runner CONCURRENTLY-handling: verify upfront before writing migration (cannot run inside transaction block).
+- pg_index.indisvalid check post-CONCURRENTLY: INVALID index from duplicate-mid-build silently masks future re-runs via `IF NOT EXISTS`. Hard ship-blocker.
+- DROP INDEX CONCURRENTLY for symmetry/online-safety.
+- psycopg2 version: verify ≥2.8 in requirements.txt; fallback `e.pgcode == '23505'` if uncertain.
+- Test determinism: `threading.Barrier(2)` + 20× loop + reject SQLite at conftest.
+
+**Merge order (mandatory):** brisen-lab PR FIRST → baker-master PR second. Brisen-lab daemon emits 409 first; baker-master hook retries against the now-409-emitting daemon. Reverse order = hook retries against daemon that doesn't emit 409 → no-op, harmless but unverifiable.
+
+**Anchor:** Director ratification 2026-05-05 ("agreed" → "go Surface 6a"); brief commit `bad7c6d` baker-master main; architect post-WRITE review agent `abd0422d6c3f380b8` 2026-05-05.
+
 ---
-status: PENDING
-brief: briefs/BRIEF_BRISEN_LAB_V2_BRIDGE_1.md
-trigger_class: TIER_B
-dispatched_at: 2026-05-03T20:00:00Z
-dispatched_by: ai-head-a
-claimed_at: null
-claimed_by: null
-last_heartbeat: null
-blocker_question: null
-ship_report: null
-pr: null
-autopoll_eligible: false
----
 
-# DISPATCH: B4 → BRIEF_BRISEN_LAB_V2_BRIDGE_1 (V0.3.5)
-
-**Brief:** `briefs/BRIEF_BRISEN_LAB_V2_BRIDGE_1.md` (V0.3.5, 711 lines)
-
-## Why you (B4)
-
-You shipped `CORTEX_PHASE6_VAULT_RECONCILER_1` 2026-05-01. V2_BRIDGE_1 §4 endpoints + Component 6 (§7 A15–A20) read from `cortex_cycles` + `cortex_phase_outputs` + `cortex-roadmap-current.yml` heavily — your Phase-6 reconciler context maps directly. You also know the vault YAML loading patterns (`BAKER_VAULT_PATH`).
-
-## Provenance
-
-V0.1 → V0.3.5 evolution:
-- V0.1 (Cowork) — original 19-decision spec
-- V0.2 (Cowork) — scope-shrunk to bus + 6 hardening
-- V0.3 (AH1) — Director ratified Q1(c), Q2(b), OTel mandatory, verify-before-dispatch, Component 6 fold, Hermes-pattern Amendment 2
-- V0.3.1 (AH1, post-AH2 anchor verify) — H3/H4/H5 anchors corrected (Lakera, AICosts.ai 49-helpers, Anthropic Apr 23 postmortem)
-- V0.3.2 → V0.3.5 (AH1, post-architect-reviewer 4 passes) — schema fixes, auth primitives, idle threshold, atomicity
-
-## Pass-history convergence (architect-reviewer code-architecture-reviewer)
-- Pass 1: 5 Critical / 6 High / 5 Medium / 3 Low
-- Pass 2: 3 Critical / 2 High / 3 Medium (introduced by V0.3.2 patches)
-- Pass 3: 0 Critical / 3 High / 3 Medium / 2 Low
-- Pass 4: 0 Critical / 1 High / 2 Medium / 1 Low
-- All folded as of V0.3.5; architect's last-pass verdict: "ship-ready after [the V0.3.5 fixes]". Director ratified ship 2026-05-03.
-
-## Read order (recommended)
-
-1. **§0 Version log + V0.3.x patch history** — explains WHY each constraint exists; many are responses to specific architect findings.
-2. **§3 Schema** — `brisen_lab_msg`, `brisen_lab_worker_authority`, `brisen_lab_session_keys`. Read with the V0.3.x annotations (C1, C3, NM3, M-A2, H-A2 etc.) — they tell you what would-be-bugs each line defends.
-3. **§4 Endpoints + §4.1 Topic→tier classification** — auth chain.
-4. **§5.1 Hermes-pattern** — pay attention to H-A4 atomicity (V0.3.5) for the lifecycle/restart UPDATE+INSERT transaction.
-5. **§6 Production Hardening H1–H7** — H3 wrapper+egress-firewall (C5), H4 watchdog, H5 Lakera anchor, H6 audit emit, H7 ed25519 session-key flow (NC2).
-6. **§7 Acceptance criteria A1–A21** — your test plan.
-7. **§8 Lane** — sequence; you're step 7 (build).
-
-## Constraints
-
-- **Tier B / mandatory `/security-review`** (Lesson #52). H1–H7 ALL must pass — hard gate, not checkbox.
-- **`/write-brief` SOP** ran on the spec (4 architect passes); your job is implementation per spec, not redesign.
-- **Migration order (L-A1):** `brisen_lab_msg` → `brisen_lab_worker_authority` → `brisen_lab_session_keys` (FK ordering).
-- **No worker direct DB writes (NM3):** all `acknowledged_at` updates go through `POST /msg/<id>/ack` endpoint.
-- **No force-push to main (L3):** rebase + standard squash-merge only.
-- **Vault PR for `wiki/research/2026-05-02-multi-agent-war-stories.md` §1/§3/§4/§5 corrections** is queued as separate scope (AH1 owns); coordinate before/at merge — don't block on it during build.
-
-## ETA
-
-~2.5–3 weeks total per spec §8 (3–4 days bus + 3–5 days Component 6 + 1–2h Hermes + hardening + /security-review + Component 6 UI). Calibrate on first push if your read of complexity differs.
-
-## Coordination
-
-- Branch: `b4/brisen-lab-v2-bridge-1`
-- Heartbeat: update `last_heartbeat` in this mailbox file every ~4h while in-flight
-- Blocker: surface to AH1 via `blocker_question` field; do not stall silently
-- PR opens against `main`; AH1 + `/security-review` both required reviewers per Lesson #52
-
-## Reference (this clone)
-
-- AI Head autonomy charter: `_ops/processes/ai-head-autonomy-charter.md`
-- B-code dispatch coordination: `_ops/processes/b-code-dispatch-coordination.md`
-- Lessons (read #44 + #52 minimum): `tasks/lessons.md`
+## Prior CODE_4 task (archive reference)
+BRIEF_BRISEN_LAB_V2_BRIDGE_1 V0.3.7 — COMPLETE 2026-05-05. baker-master PR #157 squash-merged 2026-05-05T20:57:19Z (commit `57ab073`); brisen-lab PR #2 squash-merged 2026-05-05T20:57:08Z (commit `bc1e3e6`). All 4 gates cleared (B4 pytest + AH2 /security-review + architect + code-reviewer). `BRISEN_LAB_V2_ENABLED=false` stays on Render until Surface 6a (this brief) ships + Tier-B cutover Director-ratified. Mailbox hygiene rule applied — overwriting per `_ops/processes/b-code-dispatch-coordination.md` §3.

@@ -69,8 +69,12 @@ _hard_stop_sent_date = None
 def ensure_api_cost_log_table(conn):
     """Create api_cost_log table. Called from store_back.__init__.
 
-    Schema kept aligned with migration 20260505_api_cost_log_matter_slug.sql
-    (matter_slug column included here for fresh-deploy parity per Lesson #50).
+    Schema kept aligned with two migrations (Lesson #50 — migration-vs-bootstrap
+    drift trap):
+      - 20260505_api_cost_log_matter_slug.sql       (BAKER-COST-INSTRUMENTATION-1)
+      - 20260505_140000_api_cost_log_cache_columns  (BAKER-PROMPT-CACHING-1)
+    Fresh DBs (tests / new environments) match the migrated prod schema for
+    both matter_slug attribution and cache-token accounting.
     """
     try:
         cur = conn.cursor()
@@ -81,12 +85,27 @@ def ensure_api_cost_log_table(conn):
                 model TEXT NOT NULL,
                 input_tokens INTEGER DEFAULT 0,
                 output_tokens INTEGER DEFAULT 0,
+                cache_creation_input_tokens INTEGER DEFAULT 0,
+                cache_read_input_tokens INTEGER DEFAULT 0,
                 cost_eur NUMERIC(10,6) DEFAULT 0,
                 source TEXT,
                 capability_id TEXT,
                 task_id TEXT,
                 matter_slug TEXT DEFAULT NULL
             )
+        """)
+        # Idempotent column adds for existing DBs that pre-date this column set.
+        cur.execute("""
+            ALTER TABLE api_cost_log
+            ADD COLUMN IF NOT EXISTS cache_creation_input_tokens INTEGER DEFAULT 0
+        """)
+        cur.execute("""
+            ALTER TABLE api_cost_log
+            ADD COLUMN IF NOT EXISTS cache_read_input_tokens INTEGER DEFAULT 0
+        """)
+        cur.execute("""
+            ALTER TABLE api_cost_log
+            ADD COLUMN IF NOT EXISTS matter_slug TEXT DEFAULT NULL
         """)
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_api_cost_log_logged_at
@@ -135,11 +154,28 @@ def ensure_cost_alert_state_table(conn):
 # Cost Calculation
 # ─────────────────────────────────────────────
 
-def calculate_cost_eur(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Calculate cost in EUR for a given API call."""
+def calculate_cost_eur(
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_creation_input_tokens: int = 0,
+    cache_read_input_tokens: int = 0,
+) -> float:
+    """Calculate cost in EUR for a given API call.
+
+    BAKER-PROMPT-CACHING-1: Anthropic prompt caching pricing per docs:
+      - cache_read_input_tokens billed at 10% of standard input rate (90% discount)
+      - cache_creation_input_tokens billed at 125% of standard input rate (one-time premium)
+      - regular input_tokens billed at standard rate
+
+    For non-Anthropic models the cache args are zero (kwargs default), so this
+    reduces to the original two-term formula. Safe for Gemini callers.
+    """
     costs = MODEL_COSTS.get(model, DEFAULT_COSTS)
     cost_usd = (
         (input_tokens / 1_000_000) * costs["input"]
+        + (cache_creation_input_tokens / 1_000_000) * costs["input"] * 1.25
+        + (cache_read_input_tokens / 1_000_000) * costs["input"] * 0.10
         + (output_tokens / 1_000_000) * costs["output"]
     )
     return round(cost_usd * USD_TO_EUR, 6)
@@ -157,14 +193,23 @@ def log_api_cost(
     capability_id: str = None,
     task_id: str = None,
     matter_slug: str = None,
+    cache_creation_input_tokens: int = 0,
+    cache_read_input_tokens: int = 0,
 ) -> Optional[float]:
     """Log an API call cost. Returns cost in EUR or None on failure.
 
-    `matter_slug` is BAKER-COST-INSTRUMENTATION-1 (per-matter attribution);
-    None = unattributed. Cache-token params are owned by the sibling caching
-    brief and intentionally NOT added here (decoupled signature).
+    Merged signature (BAKER-COST-INSTRUMENTATION-1 + BAKER-PROMPT-CACHING-1):
+      - matter_slug: per-matter attribution (None = unattributed).
+      - cache_creation_input_tokens / cache_read_input_tokens: Anthropic
+        prompt-cache accounting; default 0 so non-caching callers
+        (capability_runner, pipeline, Gemini paths) work unchanged.
+    All trailing params are kwargs-defaulted — call sites should pass by name.
     """
-    cost_eur = calculate_cost_eur(model, input_tokens, output_tokens)
+    cost_eur = calculate_cost_eur(
+        model, input_tokens, output_tokens,
+        cache_creation_input_tokens=cache_creation_input_tokens,
+        cache_read_input_tokens=cache_read_input_tokens,
+    )
     try:
         from memory.store_back import SentinelStoreBack
         store = SentinelStoreBack._get_global_instance()
@@ -175,16 +220,19 @@ def log_api_cost(
             cur = conn.cursor()
             cur.execute(
                 """INSERT INTO api_cost_log
-                   (model, input_tokens, output_tokens, cost_eur, source,
-                    capability_id, task_id, matter_slug)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-                (model, input_tokens, output_tokens, cost_eur, source,
-                 capability_id, task_id, matter_slug),
+                   (model, input_tokens, output_tokens,
+                    cache_creation_input_tokens, cache_read_input_tokens,
+                    cost_eur, source, capability_id, task_id, matter_slug)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                (model, input_tokens, output_tokens,
+                 cache_creation_input_tokens, cache_read_input_tokens,
+                 cost_eur, source, capability_id, task_id, matter_slug),
             )
             conn.commit()
             cur.close()
             logger.debug(
                 f"Cost: {model} {input_tokens}in/{output_tokens}out "
+                f"cache=({cache_creation_input_tokens}c/{cache_read_input_tokens}r) "
                 f"= €{cost_eur:.4f} [{source}] matter={matter_slug or '-'}"
             )
         except Exception as e:
