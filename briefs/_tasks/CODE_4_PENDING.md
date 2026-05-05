@@ -6,7 +6,7 @@ dispatched_at: 2026-05-03T20:00:00Z
 dispatched_by: ai-head-a
 claimed_at: 2026-05-03T20:30:00Z
 claimed_by: b4
-last_heartbeat: 2026-05-03T21:30:00Z
+last_heartbeat: 2026-05-05T05:55:00Z — wake-check; §3+§4+§4.1+H7-auth shipped to brisen-lab a8be2db (2026-05-03 08:18Z); 45h gap = silent stall (terminal idle / context wipe, no env break); resuming on §5.1 Hermes lifecycle next; cadence reset to 12h commit-msg heartbeats
 blocker_question: null
 # RATIFIED 2026-05-03 by AH1: cross-repo split confirmed (brisen-lab daemon ↔
 # baker-master MCP tools); 2 paired PRs; /security-review MANDATORY against
