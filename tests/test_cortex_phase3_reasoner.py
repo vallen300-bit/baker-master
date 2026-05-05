@@ -89,11 +89,12 @@ def patch_reasoner(monkeypatch):
         return list(holder["caps"])
 
     def _call_opus(*, system_prompt, user_message, model=None, max_tokens=None,
-                   source="", capability_id=None):
+                   source="", capability_id=None, matter_slug=None):
         holder["opus_calls"].append({
             "system_prompt": system_prompt,
             "user_message": user_message,
             "source": source,
+            "matter_slug": matter_slug,
         })
         return holder["opus_response"]
 

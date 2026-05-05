@@ -57,6 +57,7 @@ def _call_opus(
     model: str = PHASE3C_MODEL,
     max_tokens: int = PHASE3C_MAX_TOKENS,
     source: str = "cortex_phase3c",
+    matter_slug: str | None = None,
 ) -> tuple[str, int, int, float]:
     """Direct Anthropic call. Mirror of phase3a helper for consistency."""
     import anthropic
@@ -80,6 +81,7 @@ def _call_opus(
             output_tokens=out_tokens,
             source=source,
             capability_id="synthesizer",
+            matter_slug=matter_slug,
         )
     except Exception as e:
         logger.error(f"log_api_cost failed (non-fatal): {e}")
@@ -128,6 +130,7 @@ async def run_phase3c_synthesize(
             system_prompt=synth_prompt,
             user_message=user_msg,
             source="cortex_phase3c",
+            matter_slug=matter_slug,
         )
     except Exception as e:
         logger.error(f"Phase 3c LLM call failed for cycle {cycle_id}: {e}")

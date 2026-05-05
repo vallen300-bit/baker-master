@@ -1,6 +1,6 @@
 """
-Cost Monitor — Phase 4A
-Tracks API costs per call, aggregates daily, circuit breaker at €15/€100.
+Cost Monitor — Phase 4A + BAKER-COST-INSTRUMENTATION-1
+Tracks API costs per call, aggregates daily, tiered alarms + hard-stop breaker.
 
 Usage:
     from orchestrator.cost_monitor import log_api_cost, check_circuit_breaker
@@ -11,7 +11,8 @@ Usage:
         return  # hard-stopped
 
     # After each API call:
-    log_api_cost(model, input_tokens, output_tokens, source="agent_loop")
+    log_api_cost(model, input_tokens, output_tokens, source="agent_loop",
+                 matter_slug="oskolkov")  # matter_slug optional
 """
 import logging
 import os
@@ -36,12 +37,28 @@ DEFAULT_COSTS = {"input": 15.00, "output": 75.00}
 # EUR/USD conversion rate (approximate)
 USD_TO_EUR = float(os.getenv("BAKER_USD_TO_EUR", "0.92"))
 
-# Thresholds (EUR/day) — raised Session 21 (€15 was too noisy)
-COST_ALERT_EUR = float(os.getenv("BAKER_COST_ALERT_EUR", "50.0"))
+# BAKER-COST-INSTRUMENTATION-1: tiered alarm thresholds (EUR/day).
+# Walked in ascending order; one alarm per (date, tier) per day, DB-persisted.
+COST_TIERS = [
+    (float(os.getenv("BAKER_COST_TIER_INFO_EUR", "30.0")), "info", "ℹ️"),
+    (float(os.getenv("BAKER_COST_TIER_WARN_EUR", "60.0")), "warn", "⚠️"),
+    (float(os.getenv("BAKER_COST_TIER_CRITICAL_EUR", "80.0")), "critical", "🚨"),
+]
+
+# Hard stop unchanged (existing behavior; absolute kill).
 COST_HARD_STOP_EUR = float(os.getenv("BAKER_COST_HARD_STOP_EUR", "100.0"))
 
-# Track if alert was already sent today (avoid spamming)
-_alert_sent_date = None
+# Master kill-switch — disables all tier alarms AND daily summary.
+# Hard stop is always on regardless.
+COST_ALARMS_ENABLED = os.getenv("BAKER_COST_ALARMS_ENABLED", "true").lower() == "true"
+
+# Backwards-compat alias — still referenced by get_daily_breakdown +
+# get_cost_dashboard JSON payloads. Points at the lowest (info) tier so
+# the dashboard's "alert_threshold_eur" remains a meaningful number.
+COST_ALERT_EUR = COST_TIERS[0][0]
+
+# In-process belt-and-suspenders cache for hard-stop alarm
+# (one Slack message per process per day; DB-persisted in cost_alert_state for tier alarms).
 _hard_stop_sent_date = None
 
 
@@ -52,10 +69,12 @@ _hard_stop_sent_date = None
 def ensure_api_cost_log_table(conn):
     """Create api_cost_log table. Called from store_back.__init__.
 
-    BAKER-PROMPT-CACHING-1: bootstrap DDL keeps cache token columns in
-    sync with migration 20260505_140000_api_cost_log_cache_columns.sql so
-    fresh DBs (tests / new environments) match the migrated prod schema
-    (Lesson #50 — migration-vs-bootstrap drift trap).
+    Schema kept aligned with two migrations (Lesson #50 — migration-vs-bootstrap
+    drift trap):
+      - 20260505_api_cost_log_matter_slug.sql       (BAKER-COST-INSTRUMENTATION-1)
+      - 20260505_140000_api_cost_log_cache_columns  (BAKER-PROMPT-CACHING-1)
+    Fresh DBs (tests / new environments) match the migrated prod schema for
+    both matter_slug attribution and cache-token accounting.
     """
     try:
         cur = conn.cursor()
@@ -71,7 +90,8 @@ def ensure_api_cost_log_table(conn):
                 cost_eur NUMERIC(10,6) DEFAULT 0,
                 source TEXT,
                 capability_id TEXT,
-                task_id TEXT
+                task_id TEXT,
+                matter_slug TEXT DEFAULT NULL
             )
         """)
         # Idempotent column adds for existing DBs that pre-date this column set.
@@ -84,8 +104,16 @@ def ensure_api_cost_log_table(conn):
             ADD COLUMN IF NOT EXISTS cache_read_input_tokens INTEGER DEFAULT 0
         """)
         cur.execute("""
+            ALTER TABLE api_cost_log
+            ADD COLUMN IF NOT EXISTS matter_slug TEXT DEFAULT NULL
+        """)
+        cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_api_cost_log_logged_at
             ON api_cost_log (logged_at)
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_api_cost_log_matter_slug
+            ON api_cost_log (matter_slug) WHERE matter_slug IS NOT NULL
         """)
         conn.commit()
         cur.close()
@@ -96,6 +124,30 @@ def ensure_api_cost_log_table(conn):
         except Exception:
             pass
         logger.warning(f"Could not ensure api_cost_log table: {e}")
+
+
+def ensure_cost_alert_state_table(conn):
+    """Create cost_alert_state table for DB-persisted tier-alarm idempotence.
+    Aligned with migration 20260505b_cost_alert_state.sql per Lesson #50."""
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS cost_alert_state (
+                alert_date DATE NOT NULL,
+                tier_label TEXT NOT NULL,
+                fired_at TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY (alert_date, tier_label)
+            )
+        """)
+        conn.commit()
+        cur.close()
+        logger.info("cost_alert_state table verified")
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning(f"Could not ensure cost_alert_state table: {e}")
 
 
 # ─────────────────────────────────────────────
@@ -140,14 +192,18 @@ def log_api_cost(
     source: str,
     capability_id: str = None,
     task_id: str = None,
+    matter_slug: str = None,
     cache_creation_input_tokens: int = 0,
     cache_read_input_tokens: int = 0,
 ) -> Optional[float]:
     """Log an API call cost. Returns cost in EUR or None on failure.
 
-    BAKER-PROMPT-CACHING-1: cache token kwargs default to 0 so existing
-    callers (capability_runner, pipeline, etc.) work unchanged. Agent loop
-    paths pass real values from response.usage.
+    Merged signature (BAKER-COST-INSTRUMENTATION-1 + BAKER-PROMPT-CACHING-1):
+      - matter_slug: per-matter attribution (None = unattributed).
+      - cache_creation_input_tokens / cache_read_input_tokens: Anthropic
+        prompt-cache accounting; default 0 so non-caching callers
+        (capability_runner, pipeline, Gemini paths) work unchanged.
+    All trailing params are kwargs-defaulted — call sites should pass by name.
     """
     cost_eur = calculate_cost_eur(
         model, input_tokens, output_tokens,
@@ -166,18 +222,18 @@ def log_api_cost(
                 """INSERT INTO api_cost_log
                    (model, input_tokens, output_tokens,
                     cache_creation_input_tokens, cache_read_input_tokens,
-                    cost_eur, source, capability_id, task_id)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    cost_eur, source, capability_id, task_id, matter_slug)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (model, input_tokens, output_tokens,
                  cache_creation_input_tokens, cache_read_input_tokens,
-                 cost_eur, source, capability_id, task_id),
+                 cost_eur, source, capability_id, task_id, matter_slug),
             )
             conn.commit()
             cur.close()
             logger.debug(
                 f"Cost: {model} {input_tokens}in/{output_tokens}out "
                 f"cache=({cache_creation_input_tokens}c/{cache_read_input_tokens}r) "
-                f"= €{cost_eur:.4f} [{source}]"
+                f"= €{cost_eur:.4f} [{source}] matter={matter_slug or '-'}"
             )
         except Exception as e:
             try:
@@ -229,14 +285,14 @@ def get_daily_cost(day: date = None) -> float:
 
 
 def get_daily_breakdown(day: date = None) -> dict:
-    """Get cost breakdown by model and source for a given day."""
+    """Get cost breakdown by model, source, and matter for a given day."""
     import psycopg2.extras
 
     if day is None:
         day = datetime.now(timezone.utc).date()
     result = {"date": str(day), "total_eur": 0.0, "total_input_tokens": 0,
               "total_output_tokens": 0, "call_count": 0,
-              "by_model": {}, "by_source": {},
+              "by_model": {}, "by_source": {}, "by_matter": {},
               "alert_threshold_eur": COST_ALERT_EUR,
               "hard_stop_threshold_eur": COST_HARD_STOP_EUR}
     try:
@@ -281,6 +337,17 @@ def get_daily_breakdown(day: date = None) -> dict:
                 (day,),
             )
             result["by_source"] = {r["source"]: dict(r) for r in cur.fetchall()}
+            # By matter (NULL bucketed as [unattributed], never silently filtered)
+            cur.execute(
+                """SELECT COALESCE(matter_slug, '[unattributed]') as matter,
+                          COALESCE(SUM(cost_eur), 0) as cost,
+                          COUNT(*) as calls
+                   FROM api_cost_log WHERE DATE(logged_at) = %s
+                   GROUP BY COALESCE(matter_slug, '[unattributed]')
+                   ORDER BY cost DESC""",
+                (day,),
+            )
+            result["by_matter"] = {r["matter"]: dict(r) for r in cur.fetchall()}
             cur.close()
         except Exception as e:
             try:
@@ -312,7 +379,7 @@ def get_cost_history(days: int = 7) -> list:
                           COALESCE(SUM(input_tokens), 0) as tokens_in,
                           COALESCE(SUM(output_tokens), 0) as tokens_out
                    FROM api_cost_log
-                   WHERE logged_at > NOW() - INTERVAL '%s days'
+                   WHERE logged_at > NOW() - (INTERVAL '1 day' * %s)
                    GROUP BY DATE(logged_at)
                    ORDER BY day DESC""",
                 (days,),
@@ -360,7 +427,7 @@ def get_capability_costs(days: int = 7) -> list:
                        SUM(output_tokens) as tokens_out,
                        ROUND(AVG(cost_eur)::numeric, 4) as avg_cost_eur
                 FROM api_cost_log
-                WHERE logged_at > NOW() - INTERVAL '%s days'
+                WHERE logged_at > NOW() - (INTERVAL '1 day' * %s)
                   AND capability_id IS NOT NULL
                 GROUP BY capability_id
                 ORDER BY total_eur DESC
@@ -414,58 +481,106 @@ def get_cost_dashboard(days: int = 7) -> dict:
 
 
 # ─────────────────────────────────────────────
+# Tier-alarm idempotence (DB-persisted)
+# ─────────────────────────────────────────────
+
+def _claim_tier_alert(alert_date: date, tier_label: str) -> bool:
+    """Atomically claim a (date, tier_label) slot in cost_alert_state.
+
+    Returns True if we got the lock (caller should fire the Slack alert);
+    False if the slot was already taken (someone else fired it today).
+
+    Uses INSERT ... ON CONFLICT DO NOTHING — duplicate inserts are a no-op
+    and report 0 rows affected. Safe across process restarts (Render bounces
+    no longer re-fire today's alarms) and across concurrent workers.
+
+    On DB failure returns True (degrade open — better to over-fire than
+    under-fire on cost alarms).
+    """
+    try:
+        from memory.store_back import SentinelStoreBack
+        store = SentinelStoreBack._get_global_instance()
+        conn = store._get_conn()
+        if not conn:
+            return True
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO cost_alert_state (alert_date, tier_label)
+                   VALUES (%s, %s)
+                   ON CONFLICT (alert_date, tier_label) DO NOTHING""",
+                (alert_date, tier_label),
+            )
+            claimed = cur.rowcount == 1
+            conn.commit()
+            cur.close()
+            return claimed
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning(f"Could not claim tier alert {tier_label}: {e}")
+            return True
+        finally:
+            store._put_conn(conn)
+    except Exception as e:
+        logger.warning(f"Tier-alert claim degraded open: {e}")
+        return True
+
+
+# ─────────────────────────────────────────────
 # Circuit Breaker
 # ─────────────────────────────────────────────
 
 def check_circuit_breaker() -> Tuple[bool, float]:
     """Check if API calls should be allowed.
     Returns (allowed: bool, daily_cost_eur: float).
-    Sends alert at €15/day, hard-stops at €100/day.
+
+    Walks COST_TIERS in ascending order; fires at most one Slack message per
+    (date, tier_label) per day via DB-backed claim. Hard stop unchanged.
     """
-    global _alert_sent_date, _hard_stop_sent_date
+    global _hard_stop_sent_date
     today = datetime.now(timezone.utc).date()
     daily_cost = get_daily_cost(today)
 
-    # Hard stop
+    # Tiered alarms (visibility only, do NOT block).
+    if COST_ALARMS_ENABLED:
+        for threshold, label, emoji in COST_TIERS:
+            if daily_cost >= threshold:
+                if _claim_tier_alert(today, label):
+                    _send_tiered_alarm(daily_cost, threshold, label, emoji)
+                    logger.warning(
+                        f"Cost tier alarm [{label}]: €{daily_cost:.2f} >= €{threshold:.2f}"
+                    )
+
+    # Hard stop (kept bit-for-bit; always on regardless of COST_ALARMS_ENABLED).
     if daily_cost >= COST_HARD_STOP_EUR:
         if _hard_stop_sent_date != today:
             _hard_stop_sent_date = today
-            _send_cost_alert(daily_cost, hard_stop=True)
+            _send_hard_stop_alert(daily_cost)
         logger.error(f"COST HARD STOP: €{daily_cost:.2f} >= €{COST_HARD_STOP_EUR:.2f}")
         return False, daily_cost
-
-    # Soft alert
-    if daily_cost >= COST_ALERT_EUR:
-        if _alert_sent_date != today:
-            _alert_sent_date = today
-            _send_cost_alert(daily_cost, hard_stop=False)
-        logger.warning(f"Cost alert: €{daily_cost:.2f} >= €{COST_ALERT_EUR:.2f}")
 
     return True, daily_cost
 
 
-def _send_cost_alert(daily_cost: float, hard_stop: bool = False):
-    """Send cost alert via Slack (direct HTTP — no LLM call needed)."""
+def _send_tiered_alarm(daily_cost: float, threshold: float,
+                       tier_label: str, emoji: str):
+    """Send a tiered cost alarm to #cockpit. Mirrors `_send_hard_stop_alert`."""
     try:
         import requests
         slack_token = os.getenv("SLACK_BOT_TOKEN")
         if not slack_token:
-            logger.warning("No SLACK_BOT_TOKEN — cannot send cost alert")
+            logger.warning(f"No SLACK_BOT_TOKEN — cannot send {tier_label} alarm")
             return
 
-        if hard_stop:
-            msg = (
-                f":octagonal_sign: *Baker HARD STOP*\n"
-                f"Daily API spend: *€{daily_cost:.2f}* — ALL API CALLS BLOCKED\n"
-                f"Threshold: €{COST_HARD_STOP_EUR:.2f}\n"
-                f"Baker will resume tomorrow. Override: set BAKER_COST_HARD_STOP_EUR higher."
-            )
-        else:
-            msg = (
-                f":warning: *Baker Cost Alert*\n"
-                f"Daily API spend: *€{daily_cost:.2f}* (threshold: €{COST_ALERT_EUR:.2f})\n"
-                f"Hard stop at: €{COST_HARD_STOP_EUR:.2f}"
-            )
+        msg = (
+            f"{emoji} *Baker Cost Alarm — {tier_label.upper()}*\n"
+            f"Daily API spend: *€{daily_cost:.2f}* (tier: €{threshold:.2f})\n"
+            f"Hard stop at: €{COST_HARD_STOP_EUR:.2f}\n"
+            f"Disable tiers: `BAKER_COST_ALARMS_ENABLED=false` (hard stop stays on)"
+        )
 
         requests.post(
             "https://slack.com/api/chat.postMessage",
@@ -473,9 +588,114 @@ def _send_cost_alert(daily_cost: float, hard_stop: bool = False):
             json={"channel": "#cockpit", "text": msg},
             timeout=5,
         )
-        logger.info(f"Cost alert sent to Slack: €{daily_cost:.2f} (hard_stop={hard_stop})")
+        logger.info(f"Tier alarm sent to Slack: {tier_label} €{daily_cost:.2f}")
     except Exception as e:
-        logger.warning(f"Could not send cost alert: {e}")
+        logger.warning(f"Could not send {tier_label} tier alarm: {e}")
 
-    # WhatsApp cost alerts REMOVED (Director decision, Session 21 — noisy, not helpful).
-    # Slack alert above is sufficient. Hard stop still blocks API calls.
+
+def _send_hard_stop_alert(daily_cost: float):
+    """Send hard-stop alert to #cockpit. Always-on; not gated by ALARMS_ENABLED."""
+    try:
+        import requests
+        slack_token = os.getenv("SLACK_BOT_TOKEN")
+        if not slack_token:
+            logger.warning("No SLACK_BOT_TOKEN — cannot send hard stop alert")
+            return
+
+        msg = (
+            f"🛑 *Baker HARD STOP*\n"
+            f"Daily API spend: *€{daily_cost:.2f}* — ALL API CALLS BLOCKED\n"
+            f"Threshold: €{COST_HARD_STOP_EUR:.2f}\n"
+            f"Baker will resume tomorrow. Override: set BAKER_COST_HARD_STOP_EUR higher."
+        )
+
+        requests.post(
+            "https://slack.com/api/chat.postMessage",
+            headers={"Authorization": f"Bearer {slack_token}"},
+            json={"channel": "#cockpit", "text": msg},
+            timeout=5,
+        )
+        logger.info(f"Hard stop alert sent to Slack: €{daily_cost:.2f}")
+    except Exception as e:
+        logger.warning(f"Could not send hard stop alert: {e}")
+
+
+# Backwards-compat shim — older call sites may still import this symbol.
+def _send_cost_alert(daily_cost: float, hard_stop: bool = False):
+    """Deprecated; retained for any external import. Routes to new helpers."""
+    if hard_stop:
+        _send_hard_stop_alert(daily_cost)
+    else:
+        _send_tiered_alarm(daily_cost, COST_ALERT_EUR, "info", "ℹ️")
+
+
+# ─────────────────────────────────────────────
+# Daily summary post (BAKER-COST-INSTRUMENTATION-1 Feature 4)
+# ─────────────────────────────────────────────
+
+def post_daily_cost_summary(day: date = None) -> dict:
+    """Post a daily cost summary to #cockpit. Idempotent per UTC day via the
+    cost_alert_state table (tier_label='daily_summary'). Suppressed when
+    BAKER_COST_ALARMS_ENABLED=false.
+
+    Returns the rendered breakdown (whether or not the Slack post fired) so
+    callers can log or test the structure.
+    """
+    if day is None:
+        day = datetime.now(timezone.utc).date()
+    breakdown = get_daily_breakdown(day)
+
+    if not COST_ALARMS_ENABLED:
+        logger.info("daily_cost_summary suppressed (BAKER_COST_ALARMS_ENABLED=false)")
+        return breakdown
+
+    # Idempotence — once-per-UTC-day Slack post even if scheduler retries.
+    if not _claim_tier_alert(day, "daily_summary"):
+        logger.info(f"daily_cost_summary already posted for {day}; skipping")
+        return breakdown
+
+    lines = [
+        f"📊 *Baker daily cost — {breakdown['date']}*",
+        f"Total: €{breakdown['total_eur']:.2f} (calls: {breakdown['call_count']})",
+        "",
+    ]
+
+    by_source = breakdown.get("by_source") or {}
+    if by_source:
+        lines.append("*By source:*")
+        for src, row in by_source.items():
+            lines.append(f"  • {src}: €{float(row.get('cost', 0)):.2f}")
+        lines.append("")
+
+    by_matter = breakdown.get("by_matter") or {}
+    if by_matter:
+        lines.append("*By matter (where attributed):*")
+        for matter, row in by_matter.items():
+            lines.append(f"  • {matter}: €{float(row.get('cost', 0)):.2f}")
+        lines.append("")
+
+    by_model = breakdown.get("by_model") or {}
+    if by_model:
+        lines.append("*By model:*")
+        for model, row in by_model.items():
+            lines.append(f"  • {model}: €{float(row.get('cost', 0)):.2f}")
+
+    msg = "\n".join(lines)
+
+    try:
+        import requests
+        slack_token = os.getenv("SLACK_BOT_TOKEN")
+        if not slack_token:
+            logger.warning("No SLACK_BOT_TOKEN — daily summary not posted to Slack")
+            return breakdown
+        requests.post(
+            "https://slack.com/api/chat.postMessage",
+            headers={"Authorization": f"Bearer {slack_token}"},
+            json={"channel": "#cockpit", "text": msg},
+            timeout=5,
+        )
+        logger.info(f"daily_cost_summary posted to #cockpit for {day}")
+    except Exception as e:
+        logger.warning(f"Could not post daily_cost_summary: {e}")
+
+    return breakdown

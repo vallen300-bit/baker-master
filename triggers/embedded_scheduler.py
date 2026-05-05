@@ -775,6 +775,30 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info("Skipped: matter_config_drift_weekly (CORTEX_DRIFT_AUDIT_ENABLED=false)")
 
+    # BAKER-COST-INSTRUMENTATION-1: daily cost summary post to #cockpit at
+    # 23:55 UTC. Posts a per-source / per-matter / per-model breakdown for
+    # the closing UTC day. Idempotent via cost_alert_state row keyed on
+    # (alert_date, 'daily_summary'). Suppressed when
+    # ``BAKER_COST_ALARMS_ENABLED=false`` (job runs but exits early). Env
+    # gate ``BAKER_COST_DAILY_SUMMARY_ENABLED`` (default ``true``) lets ops
+    # disable the job registration entirely without redeploy.
+    _cost_summary_enabled = _os.environ.get(
+        "BAKER_COST_DAILY_SUMMARY_ENABLED", "true"
+    ).lower()
+    if _cost_summary_enabled not in ("false", "0", "no", "off"):
+        from orchestrator.cost_monitor import post_daily_cost_summary
+        scheduler.add_job(
+            post_daily_cost_summary,
+            CronTrigger(hour=23, minute=55, timezone="UTC"),
+            id="daily_cost_summary",
+            name="Baker daily cost summary (23:55 UTC)",
+            coalesce=True, max_instances=1, replace_existing=True,
+            misfire_grace_time=3600,
+        )
+        logger.info("Registered: daily_cost_summary (23:55 UTC)")
+    else:
+        logger.info("Skipped: daily_cost_summary (BAKER_COST_DAILY_SUMMARY_ENABLED=false)")
+
     # CORTEX_ARCHIVE_FAILURE_ALERTING_1: every 5 min stuck-cycle + archive-failure
     # sentinel. Detects (A) cortex_cycles in machine-transient status past 15-min
     # threshold (in_flight / awaiting_reason / proposed) and (B) terminal

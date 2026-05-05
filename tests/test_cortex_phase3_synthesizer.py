@@ -66,9 +66,10 @@ def patched(monkeypatch):
     store_holder = {"store": _FakeStore()}
 
     def _call_opus(*, system_prompt, user_message, model=None, max_tokens=None,
-                   source="", capability_id=None):
+                   source="", capability_id=None, matter_slug=None):
         holder["opus_calls"].append({"sys": system_prompt, "usr": user_message,
-                                      "source": source})
+                                      "source": source,
+                                      "matter_slug": matter_slug})
         return holder["opus_response"]
 
     monkeypatch.setattr(synth, "_call_opus", _call_opus)

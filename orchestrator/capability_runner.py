@@ -591,7 +591,8 @@ class CapabilityRunner:
                    history: list = None, domain: str = None,
                    mode: str = None,
                    entity_context: str = "",
-                   complexity: str = None) -> AgentResult:
+                   complexity: str = None,
+                   matter_slug: str = None) -> AgentResult:
         """
         Fast path — one capability, one question.
         Builds system prompt from capability definition.
@@ -693,10 +694,12 @@ class CapabilityRunner:
                             model=_model)
 
             # PHASE-4A: Log API cost (includes thinking tokens if present)
+            # BAKER-COST-INSTRUMENTATION-1: matter_slug attribution.
             self._log_api_cost(_model, response.usage.input_tokens,
                                response.usage.output_tokens,
                                source="capability_runner",
-                               capability_id=capability.slug)
+                               capability_id=capability.slug,
+                               matter_slug=matter_slug)
 
             if response.stop_reason == "end_turn":
                 text_parts = [b.text for b in response.content if b.type == "text"]
@@ -711,6 +714,7 @@ class CapabilityRunner:
                 threading.Thread(
                     target=self._maybe_store_insight,
                     args=(capability, question, answer),
+                    kwargs={"matter_slug": matter_slug},
                     daemon=True,
                 ).start()
                 return AgentResult(
@@ -797,7 +801,8 @@ class CapabilityRunner:
                       history: list = None, domain: str = None,
                       mode: str = None,
                       entity_context: str = "",
-                      complexity: str = None) -> Generator[dict, None, None]:
+                      complexity: str = None,
+                      matter_slug: str = None) -> Generator[dict, None, None]:
         """
         SSE streaming variant for Scan dashboard.
         Yields {"token": text}, {"tool_call": name}, {"_agent_result": AgentResult}.
@@ -907,10 +912,12 @@ class CapabilityRunner:
                             model=_model)
 
             # PHASE-4A: Log API cost (includes thinking tokens if present)
+            # BAKER-COST-INSTRUMENTATION-1: matter_slug attribution.
             self._log_api_cost(_model, response.usage.input_tokens,
                                response.usage.output_tokens,
                                source="capability_runner_streaming",
-                               capability_id=capability.slug)
+                               capability_id=capability.slug,
+                               matter_slug=matter_slug)
 
             if response.stop_reason == "end_turn":
                 for block in response.content:
@@ -925,6 +932,7 @@ class CapabilityRunner:
                 threading.Thread(
                     target=self._maybe_store_insight,
                     args=(capability, question, full_answer),
+                    kwargs={"matter_slug": matter_slug},
                     daemon=True,
                 ).start()
                 result = AgentResult(
@@ -1391,7 +1399,8 @@ class CapabilityRunner:
             return ""
 
     def _maybe_store_insight(self, capability, question: str, answer: str,
-                              baker_task_id: int = None):
+                              baker_task_id: int = None,
+                              matter_slug: str = None):
         """Auto-extract key findings from specialist response. Entirely non-fatal.
         RUSSO-MEMORY-1: Also auto-save Russo AI outputs as documents for Edita.
         """
@@ -1433,6 +1442,7 @@ class CapabilityRunner:
             self._log_api_cost(
                 "gemini-2.5-flash", resp.usage.input_tokens, resp.usage.output_tokens,
                 source="auto_insight", capability_id=capability.slug,
+                matter_slug=matter_slug,
             )
 
             raw = resp.text.strip()

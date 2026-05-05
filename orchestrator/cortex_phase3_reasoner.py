@@ -105,6 +105,7 @@ def _call_opus(
     max_tokens: int = PHASE3A_MAX_TOKENS,
     source: str = "cortex_phase3a",
     capability_id: str | None = None,
+    matter_slug: str | None = None,
 ) -> tuple[str, int, int, float]:
     """Direct Anthropic Messages API call. Returns (text, in, out, cost_eur).
 
@@ -134,6 +135,7 @@ def _call_opus(
             output_tokens=out_tokens,
             source=source,
             capability_id=capability_id,
+            matter_slug=matter_slug,
         )
     except Exception as e:
         logger.error(f"log_api_cost failed (non-fatal): {e}")
@@ -274,6 +276,7 @@ def _llm_meta_reason(
         system_prompt=system,
         user_message=user,
         source="cortex_phase3a",
+        matter_slug=matter_slug,
     )
     summary = text[:200] if text else ""
     classification = "other"
