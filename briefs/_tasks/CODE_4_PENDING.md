@@ -204,3 +204,60 @@ V0.1 → V0.3.5 evolution:
 
 ### Heartbeat
 Continue 12h cadence.
+
+## UPDATE 2026-05-05 — §Consumer-side build (post brisen-lab PR #1 merge `e5a6617`)
+
+**Status:** UNBLOCK + extend. Brisen-lab side merged + smoke green; consumer-side (baker-master) is the next critical-path build. Single PR on existing branch `b4/brisen-lab-v2-bridge-1` (baker-master).
+
+### 5 surfaces to ship
+
+| # | Surface | Path | Notes |
+|---|---|---|---|
+| 1 | `baker_inbox_post` + `baker_inbox_read` MCP tools (A7) | `baker_mcp/baker_mcp_server.py` | Consumes brisen-lab `POST /msg/<terminal>` + `GET /msg/`. Fail-open to AC6 paste-block fallback when V2 endpoints return 503 (flag-off state). |
+| 2 | SessionStart hook — ed25519 keygen + `POST /auth/register-session-pubkey` (H7/NC2) | extend `.claude/hooks/session-start-role.sh` OR new sibling Python hook | Fresh keypair per session; private key in process-memory only (NEVER on disk). Re-fire on Hermes-pattern restart per A14 (force_fresh_context broadcast). |
+| 3 | UserPromptSubmit hook — sign `{worker_slug, session_id, prompt_hash, ts, nonce}` + exchange for JWT via `POST /auth/human-confirmation` (H7/NC2) | NEW hook: `.claude/hooks/user-prompt-submit-confirm.{sh,py}` | Replay-protection via nonce; worker_slug binding correctness is load-bearing (wrong slug → 403 token_worker_mismatch, loud-and-recoverable). |
+| 4 | A14 Hermes-restart re-keygen wiring | same SessionStart extension | Fresh keypair + re-register on every SessionStart fire including force_fresh_context-triggered restart. |
+| 5 | Drain wiring | UserPromptSubmit hook (drain side) | Drain inbox each turn boundary; `POST /msg/<id>/ack` per consumed msg. Cowork auto-read: session-init hook calls `baker_inbox_read(since_ts=last_seen)` on first tool-use. |
+
+### Hook impl path — Python recommended, B4 override OK
+
+Hooks need ed25519 crypto (PyNaCl / cryptography). Two paths:
+
+- **(a) Bash + Python shell-out** — extend existing `session-start-role.sh`; shell-out to one-shot Python for keygen + sign. Faster (~2-4h saved) but creates dual-language hook surface.
+- **(b) Port hook to Python** — clean single-language hook. AH2 recommendation, AH1-App agrees. B4 final call.
+
+Default: **(b) Python port** unless B4 surfaces a concrete reason to do (a).
+
+### Pre-flag-flip safety (mandatory)
+
+`BRISEN_LAB_V2_ENABLED=false` stays until consumer-side ships + cuts over. While off:
+- All V2 endpoints return 503 → MCP tools must **fail open** to AC6 paste-block fallback
+- Hooks must `exit 0` on EVERY error path (PR #149 fail-open discipline). **Hook bug = terminal-startup hazard** — non-negotiable.
+
+### Tests
+
+- MCP tool unit tests (mock daemon, no live HTTP)
+- Hook unit tests — 4-way matrix per role per PR #149 pattern (lead / deputy / AH1 / AH2 etc.)
+- Manual integration smoke once `BRISEN_LAB_V2_ENABLED=true` flips post-merge
+- Ship gate: live pytest GREEN — literal output, no by-inspection (Lesson #52)
+
+### Re-review chain (lighter than brisen-lab side, but mandatory)
+
+Per V0.3.6 §0 line 112: "MCP-tool-only — lighter review acceptable." Still required:
+1. Live pytest GREEN
+2. AH2 `/security-review` — focus on hook fail-open discipline + ed25519 keypair lifetime (process-memory-only) + worker_slug binding + no terminal-key leak in MCP tool error paths
+3. Architect spot-check on auth-adjacent surfaces (hooks + MCP tools touching auth = Trigger 1+3 of new §Code-reviewer 2nd-pass Protocol)
+4. `feature-dev:code-reviewer` 2nd-pass per new §Code-reviewer 2nd-pass Protocol (auth-touching = mandatory trigger)
+
+### After ship
+
+- AH1-App authorizes Tier-B `BRISEN_LAB_V2_ENABLED=true` env-var flip on brisen-lab daemon (env-flip on Render, no code merge)
+- Post-cutover: AC6 paste-block-via-Director fallback retired
+
+### Heartbeat
+
+Continue 12h cadence per binding 2026-05-05.
+
+### Anchor
+
+AH2 scope memo 2026-05-05 (chat) + V0.3.6 §0 lines 107-112 cross-repo split + §4 lines 323-324 auth endpoints + §5 lines 408-410 wake mechanism + §6 lines 540-571 H7 hook primitives + §7 A7+A14.
