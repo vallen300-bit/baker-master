@@ -27,6 +27,7 @@ Exit codes:
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -197,13 +198,18 @@ def _run_auth_chain(prompt: str) -> str | None:
     base = _brisen_lab_url()
     headers = {"X-Terminal-Key": terminal_key, "Content-Type": "application/json"}
 
-    # Step 2: register-session-pubkey → daemon issues fresh session_id
+    # Step 2: register-session-pubkey → daemon issues fresh session_id.
+    # Encoding: brisen-lab daemon requires strict base64 (bus.py:635 — rejects
+    # non-base64 with HTTP 400 pubkey_not_base64).
     try:
         with httpx.Client(timeout=_REGISTER_TIMEOUT_S) as client:
             resp = client.post(
                 f"{base}/auth/register-session-pubkey",
                 headers=headers,
-                json={"pubkey": pubkey_bytes.hex(), "worker_slug": worker_slug},
+                json={
+                    "pubkey": base64.b64encode(pubkey_bytes).decode("ascii"),
+                    "worker_slug": worker_slug,
+                },
             )
     except Exception:
         return None
@@ -224,7 +230,7 @@ def _run_auth_chain(prompt: str) -> str | None:
     except Exception:
         return None
 
-    # Step 4: exchange for JWT
+    # Step 4: exchange for JWT (base64 sig per daemon contract bus.py:718)
     try:
         with httpx.Client(timeout=_HUMAN_CONFIRM_TIMEOUT_S) as client:
             resp = client.post(
@@ -233,7 +239,7 @@ def _run_auth_chain(prompt: str) -> str | None:
                 json={
                     "session_id": session_id,
                     "payload": payload,
-                    "signature": signature_bytes.hex(),
+                    "signature": base64.b64encode(signature_bytes).decode("ascii"),
                 },
             )
     except Exception:

@@ -175,10 +175,12 @@ def test_ah_roles_run_full_auth_chain(hook_mod, monkeypatch, role, patch_httpx, 
     assert envelope["hookSpecificOutput"]["hookEventName"] == "UserPromptSubmit"
     assert "JWT.eyTest.value" in envelope["hookSpecificOutput"]["additionalContext"]
 
-    # Register payload contains pubkey hex + worker_slug
+    # Register payload contains pubkey base64 + worker_slug (daemon contract bus.py:635)
     assert captured["register_body"] is not None
     assert "pubkey" in captured["register_body"]
-    assert len(captured["register_body"]["pubkey"]) == 64  # 32 bytes hex-encoded
+    import base64 as _b64
+    decoded = _b64.b64decode(captured["register_body"]["pubkey"], validate=True)
+    assert len(decoded) == 32  # ed25519 pubkey size
     assert captured["register_body"]["worker_slug"] == role
     # X-Terminal-Key on every auth call
     for h in captured["auth_headers"]:
@@ -195,7 +197,8 @@ def test_ah_roles_run_full_auth_chain(hook_mod, monkeypatch, role, patch_httpx, 
     assert "ts" in payload
     assert "nonce" in payload
     assert isinstance(hc["signature"], str)
-    assert len(hc["signature"]) == 128  # ed25519 sig is 64 bytes hex
+    sig_decoded = _b64.b64decode(hc["signature"], validate=True)
+    assert len(sig_decoded) == 64  # ed25519 sig is 64 bytes
 
 
 # ==========================================================================
@@ -210,18 +213,19 @@ def test_sign_happens_before_human_confirmation_post(hook_mod, monkeypatch, patc
     """
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
+    import base64 as _b64
     captured = {"pubkey": None, "payload": None, "signature": None}
 
     def handler(request):
         url = str(request.url)
         if url.endswith("/auth/register-session-pubkey"):
             body = json.loads(request.content.decode("utf-8"))
-            captured["pubkey"] = bytes.fromhex(body["pubkey"])
+            captured["pubkey"] = _b64.b64decode(body["pubkey"], validate=True)
             return httpx.Response(200, json={"session_id": "ss-1"})
         if url.endswith("/auth/human-confirmation"):
             body = json.loads(request.content.decode("utf-8"))
             captured["payload"] = body["payload"]
-            captured["signature"] = bytes.fromhex(body["signature"])
+            captured["signature"] = _b64.b64decode(body["signature"], validate=True)
             return httpx.Response(200, json={"token": "tok"})
         if "/msg/" in url:
             return httpx.Response(200, json=[])
