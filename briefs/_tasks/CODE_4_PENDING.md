@@ -261,3 +261,37 @@ Continue 12h cadence per binding 2026-05-05.
 ### Anchor
 
 AH2 scope memo 2026-05-05 (chat) + V0.3.6 §0 lines 107-112 cross-repo split + §4 lines 323-324 auth endpoints + §5 lines 408-410 wake mechanism + §6 lines 540-571 H7 hook primitives + §7 A7+A14.
+
+## UPDATE 2026-05-05 — V0.3.7 amendment + Surface 6 (Item 3 session_keys cleanup BUNDLE)
+
+**Status:** V0.3.7 amendment landed in brief (same commit as this UPDATE). Per Director "d" + "bundle" 2026-05-05, Item 3 session_keys row-cleanup is bundled into your consumer-side PR. **6 surfaces total** (Surfaces 1-5 unchanged from prior UPDATE; Surface 6 added below).
+
+### Surface 6 — session_keys row-cleanup at register-session-pubkey path
+
+**Path:** brisen-lab side `bus.py` — `POST /auth/register-session-pubkey` handler
+
+**Change:** in same DB transaction as the new INSERT, expire any prior active row for the same `worker_slug`:
+
+```sql
+BEGIN;
+UPDATE brisen_lab_session_keys SET expired_at = now() WHERE worker_slug = %s AND expired_at IS NULL;
+INSERT INTO brisen_lab_session_keys (worker_slug, session_id, pubkey, created_at) VALUES (%s, %s, %s, now());
+COMMIT;
+```
+
+Wrap in single `with get_conn()` block per existing pattern.
+
+**Rationale:** V0.3.7 per-prompt registration accelerates row-accumulation ~50-200x. Without cleanup, table grows unbounded between 24h sweeps; could hit scaling-followups Item 3 trigger threshold (10K rows / 100ms P95 latency) within hours of cutover.
+
+**Tests:** 2-3
+- Register twice for same worker_slug → assert prior row `expired_at` set + new row active
+- Two concurrent registrations for same worker_slug → both committed atomically (no UNIQUE-violation race)
+- (Optional) Pubkey lookup correctness post-cleanup — ensures `_load_pubkey` query at bus.py:684 still returns the new active row
+
+**Trigger fires:** §1 (auth) + §7 (cross-capability state writes) — same review chain as your other surfaces; single 4-gate cycle covers V0.3.7 + Surface 6 atomically.
+
+**Updated scaling-followups doc:** Item 3 in `_ops/processes/brisen-lab-scaling-followups.md` updated in same dispatch (baker-vault Commit B). Trigger threshold preserved as Self-Audit operational alarm.
+
+**Heartbeat:** continue 12h cadence.
+
+**Anchor:** Director "d" + "bundle" 2026-05-05; architect + ai-head 2-lens review chain on V0.3.7 (8 nits folded).

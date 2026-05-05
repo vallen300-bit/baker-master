@@ -721,3 +721,53 @@ Each carve-out is a one-paragraph stub queueable into `cortex-roadmap-current.ym
 **Implementation status:** B4 already correctly skipped at `tests/test_a21_h7_auth.py:181`. Brief spec now aligns to implementation. No code change required.
 
 **Anchor:** AH2 static audit `88bf7ad` (brisen-lab-staging, b4/brisen-lab-v2-bridge-1) 2026-05-05.
+
+## V0.3.7 amendment — 2026-05-05 (post B4 architectural escalation, Director-ratified Option D + bundle)
+
+**Change:** Retire SessionStart-time ed25519 keygen + register-session-pubkey FOR THE UserPromptSubmit-driven auth chain. Replace with per-UserPromptSubmit re-registration: each prompt hook keygens, registers (server issues fresh session_id), signs, exchanges for JWT — all within the UserPromptSubmit process. Process exits; key dies with it.
+
+**Affected sections (scoped):**
+- §5 wake mechanism row 2 (SessionStart hook auth role for UserPromptSubmit-driven path): RETIRED. SessionStart no longer participates in the UserPromptSubmit auth chain. Existing SessionStart functions (role config, etc.) preserved.
+- §6 H7 hook primitives: UserPromptSubmit is now the SOLE crypto-bearing hook for the prompt-driven auth chain.
+- §7 A14 Hermes-restart re-keygen wiring: SCOPED. Vestigial for UserPromptSubmit-driven path only. Daemon/cron/non-prompt callers (AI Dennis cron-fired baker_inbox_post, scheduled-tasks substrate pushes, weekly self-audit Slack pushes, etc.) require separate auth-path design — DO NOT delete A14 from §7 ACs in this amendment; mark as "scoped: UserPromptSubmit retired; non-prompt callers TBD." Follow-on brief required when MCP-tools cutover is live; AH1-App owns drafting.
+
+**Rationale:**
+
+1. **Architectural simplicity** — no IPC, no sidecar, no platform-specific cleanup.
+
+2. **Forward secrecy (scoped to per-prompt path)** — Compromise of one UserPromptSubmit-issued ed25519 private key does NOT expose any prior or future UserPromptSubmit prompt invocations. Forward secrecy is scoped to per-prompt scope only; it does not apply to daemon-side JWT issuance trail or any logged identifiers that span prompts.
+
+3. **Ship velocity** — ~hours vs Option C's 1-2 days.
+
+4. **Cost acceptable** — ~50ms extra per UserPromptSubmit hook. Well below ~100-200ms user-perception threshold.
+
+**Implementation notes for B4:**
+
+UserPromptSubmit hook lifecycle (single process):
+1. Generate fresh ed25519 keypair (PyNaCl or cryptography) — process memory only
+2. POST /auth/register-session-pubkey with worker_slug + pubkey → daemon issues fresh session_id (server-issued UUID4 per V0.3.5 M-A4)
+3. Sign {worker_slug, session_id, prompt_hash, ts, nonce} with private key
+4. POST /auth/human-confirmation with signed payload → JWT issued
+5. **JWT semantics: single-use per ratify_decision invocation.** If a prompt requires multiple ratify_decision calls (e.g., Tool-use chain triggering >1 Tier-B confirmation), EACH ratify_decision call requires a fresh sign + JWT exchange — not JWT reuse. Preserves per-action authorization model from V0.3.6 §6 H7. JWT 60s TTL is single-shot; do not cache or reuse across ratify_decision calls.
+6. Process exits; private key gone with it.
+
+session_id semantics:
+- V0.3.6: per-session lifetime
+- V0.3.7: per-prompt lifetime (~one UserPromptSubmit hook invocation)
+- Row in `brisen_lab_session_keys` per UserPromptSubmit fire — accumulation rate up ~50-200x (typical AH session = 50-200 prompts).
+- **Item 3 (session_keys row-cleanup) BUNDLED into this consumer-side PR** per Director ratification 2026-05-05 ("bundle"). See Surface 6 in CODE_4_PENDING.md mailbox UPDATE.
+
+**AI Dennis compatibility note:**
+Per-prompt re-registration is UserPromptSubmit-shaped. AI Dennis baker_inbox_post path TBD — if Dennis invokes baker-master MCP from a long-lived process (no UserPromptSubmit-equivalent boundary), V0.3.7 has no auth path for him. Requires separate auth design; deferred until AI Dennis MCP integration brief.
+
+**Self-audit hookup:**
+SKILL.md §Weekly Self-Audit step 2 (landed in `59f23c4`) checks CYCLE_REGISTER drift. V0.3.7 introduces high-velocity row-accumulating `brisen_lab_session_keys` — new operational health signal. Add to weekly self-audit step 2:
+- `SELECT COUNT(*), MAX(created_at) FROM brisen_lab_session_keys`
+- Flag if growth rate exceeds prior-week by >2x OR absolute count exceeds 10K rows OR P95 register-session-pubkey latency exceeds 100ms (thresholds anchor scaling-followups Item 3 trigger update)
+- AH1-App reviews at Mondays 09:00 UTC self-audit
+
+**SessionStart hook** (`.claude/hooks/session-start-role.sh`): no auth-chain role under V0.3.7 for UserPromptSubmit-driven path. Existing functions (role config) preserved; just no crypto in this lane.
+
+**Spec divergence acknowledgment:** V0.3.6 §5 row 2 said SessionStart "ALSO generates ed25519 keypair + registers" for UserPromptSubmit auth chain. V0.3.7 retires that for the UserPromptSubmit-driven path only.
+
+**Anchor:** Director ratification 2026-05-05 — chat reply "d" confirming AH1-App recommendation of Option D over Option C following B4 architectural escalation on SessionStart→UserPromptSubmit IPC handoff. Plus Director "bundle" 2026-05-05 ratifying Item 3 bundling into consumer-side PR. Full context in actions_log.md entry alongside this commit. Two-lens review chain: picker-architect (PASS-WITH-NITS, 1 FAIL-line + 3 nits) + ai-head agent `a31efcf5c549448b5` (PASS-WITH-NITS, 4 findings); 8 nits folded across both reviews before commit.
