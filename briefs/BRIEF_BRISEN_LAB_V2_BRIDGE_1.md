@@ -709,3 +709,15 @@ V0.3 update (2026-05-02): DASHBOARD_2VIEW_1 absorbed as Component 6; stub delete
 - `BRIEF_SESSION_START_DIGEST_1.md`
 
 Each carve-out is a one-paragraph stub queueable into `cortex-roadmap-current.yml`; AI Head A handles the roadmap amendment in a separate paste-block.
+
+## V0.3.6 amendment — 2026-05-05 (post-AH2 audit `88bf7ad`)
+
+**Change:** A21 H7 auth chain test (g) NC2 registration-uniqueness — DROPPED.
+
+**Rationale:** V0.3.3 spec required "POST /auth/register-session-pubkey twice with same session_id → 409." V0.3.5 M-A4 introduced server-issued session_id (client-supplied rejected at 400 first). The NC2 attack vector through the API is unreachable post-V0.3.5 — UUID4 server-generated, collision probability ~10⁻³⁷. Test (g) cannot fail under the current contract.
+
+**Alternative considered + declined:** convert test (g) to raw-DB INSERT bypassing endpoint contract. Declined — tests DB unique constraint, different test class (DB-layer ≠ API-acceptance), out of scope for A21 H7 suite. If DB-layer constraint coverage wanted, surface as separate test class in a follow-up brief.
+
+**Implementation status:** B4 already correctly skipped at `tests/test_a21_h7_auth.py:181`. Brief spec now aligns to implementation. No code change required.
+
+**Anchor:** AH2 static audit `88bf7ad` (brisen-lab-staging, b4/brisen-lab-v2-bridge-1) 2026-05-05.

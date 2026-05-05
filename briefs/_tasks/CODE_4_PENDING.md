@@ -108,3 +108,38 @@ V0.1 → V0.3.5 evolution:
 - AI Head autonomy charter: `_ops/processes/ai-head-autonomy-charter.md`
 - B-code dispatch coordination: `_ops/processes/b-code-dispatch-coordination.md`
 - Lessons (read #44 + #52 minimum): `tasks/lessons.md`
+
+## UPDATE 2026-05-05 — AH2 review verdict + 4 fixes (post `88bf7ad`)
+
+**Status:** REQUEST_CHANGES. Static audit clean on A21/A2/M5/A14/A8 cores. 4 actionable fixes required before live test pass.
+
+**Fixes (file:line + description):**
+
+1. **[HIGH]** `tests/test_a3_a8_a9_bus.py:65` — A5 test topic `capital-call/oskolkov/q3` doesn't match YAML pattern `cortex/*/capital-call/`. Falls to default tier B → no tier-below rejection → test will FAIL live. Fix: change topic to `cortex/oskolkov/capital-call/q3`.
+
+2. **[MEDIUM]** `tests/conftest.py:29,39` — Reads `TEST_DATABASE_URL` only. AH1-Terminal provisioned DSN as `TEST_DATABASE_URL_BRISEN_LAB`. Tests will skip rather than run. Fix: `os.environ.get("TEST_DATABASE_URL") or os.environ.get("TEST_DATABASE_URL_BRISEN_LAB")` at both sites.
+
+3. **[MEDIUM]** `db.py:21-30` — `_get_pool()` not thread-safe. Two FastAPI threadpool workers can both pass `if _pool is None` → orphan pool → connection leak (Neon limit risk per existing comment). Fix: threading.Lock double-checked, OR force pool init in `app.py:_startup()` (bootstrap() at L80 already triggers DB hit — pre-warm there closes the race). Error path on missing DATABASE_URL is correct (L26-28 RuntimeError); no change there.
+
+4. **[MEDIUM]** `bus.py:470,429,386,600,640` — Freeze gate (per brief §5: "every wake-mechanism call site") not enforced on:
+   - POST /msg/<id>/ratify_decision **(load-bearing — INSERTs bus row during freeze; minimum required fix)**
+   - POST /msg/<id>/ack
+   - DELETE /msg/<id>
+   - POST /auth/register-session-pubkey
+   - POST /auth/human-confirmation
+   Fix: add `if not freeze.is_v2_enabled(): raise HTTPException(503, "lab_frozen")` at top of each (or shared dependency).
+
+**Brief V0.3.6 amendment landed same push:** drops test (g) NC2 unreachability (AH2 issue 5). No B4 action required — already correctly skipped.
+
+**Path forward:**
+1. Apply fixes 1-4 on b4 branch.
+2. Re-run live pytest (DSN is `TEST_DATABASE_URL_BRISEN_LAB` per CODE_4_PENDING.md UNBLOCK above).
+3. Ship via PL paste-block per SKILL.md §"PL ship-report contract".
+4. AH1-App or AH2 runs `/security-review` against diff (Lesson #52 hard gate).
+5. Cross-repo merge order: brisen-lab FIRST, then baker-master MCP-tools side.
+
+**Heartbeat:** continue 12h cadence per binding (2026-05-05 ratified). Two consecutive 12h misses → AH1-App auto-surfaces.
+
+**Coverage gaps noted (not change-blocking, follow-up):**
+- A2 schema test missing index assertions for idx_msg_thread / idx_session_keys_worker_active / idx_msg_to_terminals (NM1 broad GIN). Coverage gap, not correctness gap.
+- `test_a14g_atomic_h_a4` `time.sleep(0.5)` is overkill but harmless.
