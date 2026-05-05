@@ -1514,3 +1514,130 @@ Add to "Risks":
 5. Director invokes BEN — first session walks 17-row authority table for ratification, then BEN populates initial cash position from Conrad's most recent weekly Excel.
 
 **End V0.2 amendment.**
+
+---
+
+# V0.3 Amendment — Brisen Desk synthesis fold (2026-05-05, post-V0.2 dispatch)
+
+> **Source:** Brisen Desk synthesis returned AFTER V0.2 fold; Director ratified V0.3 in AH2 session (`memory/project_baden_baden_ben_install_2026_05_05.md`). Six folds — authority tier-restructure, learning log, Phase 2 trigger, kill criteria, Rheinstrasse fork resolution, AO/MOVIE deferral.
+>
+> **b3 already dispatched (commit `762a788` mailbox, claimed 2026-05-05T23:10Z).** If b3 has drafted authority-boundary-table v0 with the flat 17-row list, REFACTOR per §A before merge.
+
+## Amendment §A — authority-boundary-table.md restructured to Tier A/B/C
+
+**Replaces** the flat 17-row table form (V0.1 §"Out of authority" + V0.2 §B 3 added rows) with explicit Tier A (auto) / Tier B (recommend) / Tier C (never) structure. Director ratified this restructure in AH2 session 2026-05-05 over the V0.1 flat-list approach.
+
+**File:** `wiki/_finance/baden-baden/authority-boundary-table.md` — three tier sections; row IDs and contents merge V0.1+V0.2 entries into the appropriate tier.
+
+### Tier A — auto (BEN drafts; Brandner verifies; Director signs Rheinstrasse PM-fee invoices to Romme)
+Scope: MRCI vehicle, Lilienmatt vehicle, Balgerstrasse project, Annaberg project, Rheinstrasse PM mandate (sub-ledger).
+- Bank-statement reconciliations (both vehicles)
+- Vendor-invoice variance checks
+- Weekly cash report drafts
+- Monthly P&L drafts
+- Quarterly covenant tracker drafts
+- Annual tax-pack drafts
+- PM-fee invoicing tracker (Rheinstrasse → Romme; Conrad invoices and collects, Director signs invoice)
+- Cash forecast (~13-week rolling)
+
+### Tier B — recommend (BEN proposes; Director ratifies; AO Desk handoff where AO-side flow involved)
+Three hot-list items in scope at Phase 0:
+- **Lilienmatt fit-out** budget recommendations (vendor selection + spend authorization)
+- **Shareholder restructure** (cross-handoff to AO Desk for AO-side capital flows on Lilienmatt/MRCI)
+- **Kopp PM contract** adjustment recommendations (terms + fee structure)
+
+### Tier C — never (BEN must NOT)
+- **Outbound payments** — Conrad as Geschäftsführer only.
+- **Counterparty communications** — Director + Brandner only.
+- **Rheinstrasse PM contract terms** — Director only (BEN tracks PM-fee invoicing per Tier A but does NOT touch contract terms).
+
+**b3 action:** if `authority-boundary-table.md` v0 was drafted in flat-list form before this amendment landed, refactor into the Tier A/B/C structure above. Row IDs may be re-numbered; preserve all underlying authority-boundary content from V0.1 §"Out of authority" + V0.2 §B (3 added rows). Director will ratify row-by-row at first BEN session against the tier structure.
+
+## Amendment §B — BEN learning-log.md (new artefact)
+
+**File:** `wiki/_finance/baden-baden/learning-log.md` (new — append to vault scaffold per V0.1 §"Files Modified" / V0.2 §F).
+
+**Purpose:** Weekly capture of which BEN patterns are **BB-specific** vs **portfolio-generalisable** — supports month-6 BEN review when Director decides whether to clone BEN for AO / MOVIE / other geographies (per §F amendment below).
+
+**Format (rewrite-style ≤200 lines, weekly entries):**
+```
+## 2026-MM-DD — week N
+- Pattern: <description>
+- BB-specific? <yes/no + reason>
+- Generalisable signal? <yes/no + which geography>
+- Director decision deferred to month-6 review? <yes/no>
+```
+
+**b3 action:** add as 9th P1 artefact in §6.2 / §7 (file architecture); cite from SKILL.md §4.2 (Tracking) as a BEN responsibility. README stub:
+```
+# learning-log.md — weekly pattern capture (BB-specific vs portfolio-generalisable)
+```
+
+## Amendment §C — 90-day Phase 2 trigger (anti-shelf-ware, pre-committed)
+
+V0.1+V0.2 mention "Phase 1 data feed: Conrad sends statements... Phase 2 automation later" without committing a Phase 2 start date. V0.3 pre-commits the date to prevent shelf-ware drift.
+
+**Pre-committed Phase 2 start:** Phase 0 ship date + **90 days**.
+
+**Mechanics:**
+- Phase 0 ship date = baker-vault PR merge date (per V0.2 §I sequencing step 4).
+- Phase 2 (data-feed automation) brief drafted by AH1 + Director ratified within 90 days post-ship.
+- If 90-day window expires without Phase 2 dispatch → Director-side review forcing function (NOT auto-uninstall; Director decides scope/extend).
+
+**b3 action:** add this commitment to brief §"Out of authority" or new §"Phase commitments" section; reference from SKILL.md §1 (session start) so BEN surfaces the 90-day clock at every session-start until Phase 2 dispatched or extended.
+
+## Amendment §D — three kill criteria (encoded in brief)
+
+V0.1+V0.2 do not encode explicit BEN-uninstall criteria. V0.3 encodes three.
+
+1. **Manual-feed staleness:** feed lag >2 weeks for 3 consecutive months → force Phase 2 ingest dispatch OR uninstall BEN.
+2. **Authority creep:** any Tier A action causing >€25K reversal → tier-authority audit + immediate Tier-A freeze pending Director re-ratification.
+3. **PM-fee / cap-stack ledger separation:** Rheinstrasse PM-fees must stay clearly labelled as PM-mandate **sub-ledger** inside BEN; merging with cap-stack lines triggers freeze + audit.
+
+**b3 action:** add §"Kill criteria (BEN)" section to brief, between V0.1 "Verification" and "Risks". Reference from SKILL.md §5 (What you do NOT do) so BEN surfaces these as pre-committed stop conditions.
+
+## Amendment §E — Rheinstrasse fork resolved (PM-fees stay in BEN)
+
+V0.1+V0.2 carry an unresolved fork on whether Rheinstrasse PM-fees belong in BEN's surface or in a separate slug. **Director rejected Brisen Desk counter-case #3** (separate slug) in AH2 session 2026-05-05.
+
+**Resolution:** PM-fees STAY in BEN.
+- Rheinstrasse PM contract is **NOT** held by Brisen Capital SA.
+- Held by MRCI **or** Lilienmatt — entity TBC pending Siegfried email confirmation.
+- Implement as separately-labelled **sub-ledger** inside BEN (not a separate slug, not a separate vault folder).
+
+**b3 action:**
+- In `wiki/_finance/baden-baden/projects/` add `rheinstrasse-pm-mandate.md` (sub-ledger header, not a top-level project entry).
+- Confirm SKILL.md §"What you do" + §"Out of authority" clearly mark Rheinstrasse PM-fees as **sub-ledger only**, never co-mingled with MRCI/Lilienmatt cap-stack lines (also reflected in kill criterion #3 above).
+- Entity attribution placeholder until Siegfried email lands: `entity: MRCI | Lilienmatt (TBC pending Siegfried)`.
+
+## Amendment §F — AO/MOVIE equivalents DEFERRED to month-6 review
+
+V0.1+V0.2 hint at portfolio generalisation (clone BEN pattern for AO / MOVIE / other geographies). V0.3 explicitly defers all such scaffolding.
+
+**Director ratification:** do NOT add `ao-finance` / `mo-finance` slugs, scaffolding, or skill stubs in this brief. Decision deferred to **month-6 BEN review** (informed by §B learning-log entries).
+
+**b3 action:**
+- Remove any `ao-finance` / `mo-finance` placeholder references from §"Files Modified" / §6 / §7 if present.
+- Add explicit "DEFERRED to month-6 review" line in brief §"Out of authority" (BEN does not).
+- Learning-log §B is the input to that month-6 review.
+
+## Amendment §G — sequencing summary (V0.3 final, supersedes V0.2 §I)
+
+1. Director or AH1 opens baker-vault PR for `slugs.yml` (`bb-finance` slug + aliases) — separate PR, merges first.
+2. Director or AH1 runs `claude plugin install fund-admin@claude-for-financial-services && claude plugin install financial-analysis@claude-for-financial-services` (Director-side, NOT B-code lane).
+3. AH1 dispatches B3 with this brief (V0.1 + V0.2 + V0.3 amendments) → B3 lands single baker-vault PR with all Phase 0 artefacts:
+   - Lens folder + 7 sub-READMEs + **`learning-log.md`** (new §B)
+   - **`authority-boundary-table.md` v0 in Tier A/B/C structure** (per §A — refactor flat list if already drafted)
+   - 4 _stubs/ files + 9 wiki/people + 1 wiki/entities + 3 vault companion files
+   - **Rheinstrasse PM-mandate sub-ledger entry** in `projects/rheinstrasse-pm-mandate.md` (per §E)
+   - Brief §"Phase commitments" with 90-day Phase 2 trigger (per §C)
+   - Brief §"Kill criteria" (per §D)
+   - Brief §"Out of authority" updated for AO/MOVIE deferral (per §F)
+   - 1 Cowork-side write (`~/.claude/skills/bb-finance/SKILL.md` with full §1-§11 + V0.2 §6.4-§6.6 + V0.3 references to learning-log / 90-day clock / kill-criteria / sub-ledger discipline)
+   - 1 baden-baden-desk SKILL cleanup edit
+4. Director ratifies B3's PR; AH1 merges; BEN goes live.
+5. Director invokes BEN — first session walks Tier A/B/C authority table for ratification, then BEN populates initial cash position from Conrad's most recent weekly Excel.
+6. **Phase 2 forcing function:** at Phase 0 ship + 90 days, AH1 drafts Phase 2 brief or surfaces extension request to Director (per §C).
+7. **Month-6 review:** AH1 drafts BEN month-6 review brief drawing on learning-log entries (§B); Director decides AO/MOVIE clone scope (§F).
+
+**End V0.3 amendment.**
