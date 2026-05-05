@@ -11,6 +11,16 @@
 >
 > If a file is missing or unreadable, reply with which one + skip the confirmation phrase entirely. If `briefs/_tasks/CODE_<N>_PENDING.md` doesn't exist (no current dispatch), reply: `"B<N> oriented. Mailbox empty (no CODE_<N>_PENDING.md). Read: MEMORY.md."`
 
+> **AI Head A2 (AH2) opening this dir via picker symlink** (`~/Vallen Dropbox/Dimitry vallen/bm-aihead2/` → `~/bm-aihead2/`, ratified 2026-05-05 to fix `/security-review` harness git-cwd gap) — MANDATORY before any reply:
+> 1. Invoke the Read tool on `/Users/dimitry/.claude/CLAUDE.md` (global rules + Tier 0 portfolio context).
+> 2. Invoke the Read tool on `~/baker-vault/_ops/agents/aihead2/orientation.md` (full AH2 orientation).
+> 3. Invoke the Read tool on `~/baker-vault/_ops/skills/ai-head/SKILL.md` (canonical AI Head operating rules).
+> 4. Invoke the Read tool on `~/.claude/projects/-Users-dimitry-Vallen-Dropbox-Dimitry-vallen-Baker-Project/memory/MEMORY.md` (canonical AH memory).
+>
+> **First-message confirmation phrase (evidence-bound, exact):** `"AH2 oriented. Read: aihead2/orientation.md, ai-head/SKILL.md, MEMORY.md."`
+>
+> Block applies ONLY when cwd basename resolves to `bm-aihead2` (i.e., session opened via the AH2 picker symlink). B-code sessions follow the B-code block above; AH1 sessions follow the AH1 picker pattern at `~/Vallen Dropbox/Dimitry vallen/bm-aihead1/`.
+
 @.claude/how-to/INDEX.md
 
 Brisen Group's institutional intelligence — not Director's assistant but the
