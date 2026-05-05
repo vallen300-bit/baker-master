@@ -1,4 +1,29 @@
-# CODE_4_PENDING — BRIEF_BRISEN_LAB_SURFACE_6A_PARTIAL_UNIQUE_INDEX_1 — 2026-05-05
+---
+status: COMPLETE
+brief: briefs/BRIEF_BRISEN_LAB_SURFACE_6A_PARTIAL_UNIQUE_INDEX_1.md
+trigger_class: TIER_A_CROSS_REPO_SCHEMA_PLUS_HOOK
+dispatched_at: 2026-05-05
+dispatched_by: ai-head-a-pl
+claimed_by: b4
+brief_revisions: V0.1 + V0.2 (bootstrap-pattern pivot, Director-ratified 2026-05-05)
+ship_report: briefs/_reports/B4_SURFACE_6A_PARTIAL_UNIQUE_INDEX_20260505.md
+gate_chain_initial: pytest GREEN (brisen-lab 40/41 + baker-master hook 33/33) + AH2 /security-review PASS both PR #3 + #161 + Architect PASS-WITH-NITS both (3 NITs each non-blocking) + feature-dev:code-reviewer PASS-WITH-NITS-FOLD-NEEDED both (1 MED each)
+fold_commits:
+  brisen_lab_pr3: 6141850
+  baker_master_pr161: 255220f
+gate_chain_post_fold: pytest GREEN (brisen-lab 41/41 incl. new MED-B4-1 regression test + baker-master hook 33/33); fold-diff focused gate re-fire skipped (diff = exactly the 2 findings, defensible per AH1 PL discipline + B2 precedent)
+prs_merged:
+  brisen_lab_3: d7c46a0f3c8f0e3af89ab84578f94b1b3417238c
+  baker_master_161: 87f0535d1ed11454b60d2b3fc608dc823dd563fb
+  baker_vault_85: 6683e035d63a8d75135984551e97196ab5ccccfe
+merged_at: 2026-05-06
+verdict: PASS
+follow_ups: 6 architect NITs (3 per PR) + 3 NITs from B2 PR #158 post-merge AH2 review pending file alongside B1 scaling-followups stub
+tier_b_pending: BRISEN_LAB_V2_ENABLED=true Render env-var flip (Tier-B Director-ratified separately, NOT in this brief scope)
+autopoll_eligible: false
+---
+
+# CODE_4_PENDING — BRIEF_BRISEN_LAB_SURFACE_6A_PARTIAL_UNIQUE_INDEX_1 — 2026-05-05 (COMPLETE 2026-05-06)
 
 **Brief:** baker-master `briefs/BRIEF_BRISEN_LAB_SURFACE_6A_PARTIAL_UNIQUE_INDEX_1.md` (Tier A, ~3-4 hours, 12 ACs)
 **Working branches (TWO PRs, cross-repo):**
