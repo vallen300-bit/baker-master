@@ -446,69 +446,6 @@ dispatch coordination.</div>
   <div class="item queued">
     <div class="icon">→</div>
     <div>
-      <div class="label">Brief 3 — CORTEX_PHASE6_REFLECTOR_1 (ACE-style learning loop + per-directive citation counters)<span class="priority high">high</span></div>
-      <div class="desc">ACE-style Reflector + Curator in Cortex Phase 6 (Archive). Reflector
-reads Phase 3-4 trace, outputs proposed_deltas + counter_updates.
-Curator (deterministic) writes proposed_deltas to wiki/matters/<slug>/
-proposed-config-deltas.md; Director ratifies via Triaga; AI Head A
-merges deltas → cortex-config.md. NO auto-merge into core playbook.
-
-WRITE TARGETS (amended 2026-04-30 to incorporate Brief 5 linkage):
-- proposed_deltas → wiki/matters/<slug>/proposed-config-deltas.md
-  (via baker_vault_write from Brief 1)
-- PROPOSED ACTIONS → per-matter ClickUp surface from Brief 5
-  (folder's "Drafts & Deliverables" list for substantive matters;
-  single list for operational matters; tag-only matters get no
-  ClickUp write — proposals route to AO/parent surface). Successors
-  + Director query proposed actions via single ClickUp surface, not
-  scattered markdown.
-
-COUNTER-ACCURACY MECHANISM (Director ratified caveat 2 — option c):
-per-directive citation in propose phase. Cortex propose-phase prompt
-adds: "If you drew on a directive from the playbook, cite it by id
-at the end of your proposal: [directive: <id>]". Reflector parses
-cited IDs; cycle outcome (Director ratified / declined / silent
-timeout) → Reflector increments helpful/harmful on cited directives.
-Outcome signal can come from ClickUp task status (closed=accepted,
-dismissed=declined) when Brief 5 surface is the proposal target.
-Untraceable proposals (no citation) flagged for prompt-engineering
-review. Cost ~$0.10-0.20/cycle, acceptable.
-
-~200 LOC orchestrator + ~100 LOC curator. DEPENDS on Briefs 1 + 5.
-Trigger class HIGH per RA-24 — cross-capability state writes.</div>
-      <div class="meta-line"><span><strong>Owner:</strong> terminal-ai-head-a-authoring + b-code-build</span><span><strong>ETA:</strong> 2026-05-13</span></div>
-      <div class="anchor">Candidate brief — pending Terminal AI Head A authoring · ACE arXiv 2510.04618 · wiki/research/2026-04-30-hermes-ace-cortex-auto-evolution.md · amended 2026-04-30 to write to Brief 5 per-matter ClickUp surfaces</div>
-    </div>
-    <div class="badge queued">QUEUED</div>
-  </div>
-
-  <div class="item queued">
-    <div class="icon">→</div>
-    <div>
-      <div class="label">Brief 4 — CORTEX_CONFIG_DIRECTIVES_SCHEMA_1 (frontmatter directives array + 22-matter migration)<span class="priority high">high</span></div>
-      <div class="desc">Extends cortex-config.md frontmatter with directives array
-(id/content/source/helpful/harmful/last_invoked/status). Status enum:
-proposed | active | core | flagged. Auto-promotion: proposed→active
-on Director ratification; active→core after helpful>=10 AND
-harmful==0; any→flagged on harmful>helpful OR last_invoked>90d.
-
-MIGRATION SCOPE (Director ratified caveat 3): all 22 active matter
-brains (NOT 5 — handoff was stale; Wave 3 batch + uk-homes raised
-count to 22). ~30 LOC schema + ~80 LOC pruning sweep cron + 22-matter
-migration script.
-
-Highest trigger class — DB schema migration + 22-matter batch +
-directive promotion logic. RA-24 + B1 second-pair-of-eyes mandatory.
-DEPENDS on Brief 3.</div>
-      <div class="meta-line"><span><strong>Owner:</strong> terminal-ai-head-a-authoring + b-code-build</span><span><strong>ETA:</strong> 2026-05-15</span></div>
-      <div class="anchor">Candidate brief — pending Terminal AI Head A authoring against caveats 2+3 · scope corrected from 5→22 matters</div>
-    </div>
-    <div class="badge queued">QUEUED</div>
-  </div>
-
-  <div class="item queued">
-    <div class="icon">→</div>
-    <div>
       <div class="label">Stage 2 Step 37 — onboard MOVIE as second matter (activate wiki/matters/movie/cortex-config.md)<span class="priority high">high</span></div>
       <div class="desc"></div>
       <div class="meta-line"><span><strong>Owner:</strong> ah1 + director-consult</span><span><strong>ETA:</strong> 2026-05-19</span></div>
@@ -1236,6 +1173,72 @@ via cheap-RAG-first; complementary not redundant.
     </div>
     <div class="badge done">DONE</div>
   </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Fleet Roadmap render — v5 schema (Brisen Lab + Cortex + Gates + Deps)</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-05-03</span></div>
+      <div class="anchor">PR #152 baker-master 5820223 + B1 second-pair-of-eyes PASS PR #153 ccacf11</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Anthropic cache TTL audit — diagnostic only</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-05-03</span></div>
+      <div class="anchor">PR #154 baker-master 3a80513 · B1 build · diagnostic only, no behavior change</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">Cortex Phase 3b parallel specialist execution + per-completion cost increment</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-05-04</span></div>
+      <div class="anchor">PR #155 baker-master 7fa48cb · B2 build · phase3b parallelization + cost-bump fix</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">PL authorization landing — AH1 sole PL on Fleet Roadmap + ship-report contract + on-demand dispatch flow + learning loop</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-05-03</span></div>
+      <div class="anchor">baker-vault d85f379 · 4 files / +205 / architect-cleared pass 4/5 · ship-report contract + on-demand cycle dispatch flow + per-matter learning loop active until Lab V2 ship</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">SKILL.md amendment — AH1-App in-flight cycle register + stall chase</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-05-04</span></div>
+      <div class="anchor">baker-vault 951a85a · CYCLE_REGISTER.md scaffold + chase rules · architect-reviewed 2C+3H+2M+1L → all addressed</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
+
+  <div class="item done">
+    <div class="icon">✓</div>
+    <div>
+      <div class="label">BRIEF_CORTEX_SCAN_FLASH_ROUTE_KILL_1 — Scan→Cortex Flash-route cost-safety gate</div>
+      <div class="desc"></div>
+      <div class="meta-line"><span><strong>Shipped:</strong> 2026-05-04</span></div>
+      <div class="anchor">PR #156 baker-master d8ab383 · B1 build · 2 files / +77 · /security-review NO FINDINGS · architect post-merge PASS-WITH-NITS · env var CORTEX_SCAN_FLASH_ROUTE_DISABLED=true LIVE in prod (env-var deploy dep-d7s57uudt0rs73a54f20 LIVE 08:17:34Z 2026-05-04) · log breadcrumb fired 08:20:26Z · A1-A8 all GREEN</div>
+    </div>
+    <div class="badge done">DONE</div>
+  </div>
   <h3 class="substage-title">Dropped</h3>
 
   <div class="item dropped">
@@ -1338,7 +1341,7 @@ anymore." Brisen has equivalent (3-file memory triplets per agent).</div>
 </div>
 
 <footer>
-  Auto-rendered <strong>2026-05-03</strong> from <code>_ops/processes/cortex-roadmap-current.yml</code> by <code>scripts/render_cortex_roadmap.py</code>. Live page: <code>https://brisen-docs.onrender.com/architecture/cortex-roadmap-current.html</code>.
+  Auto-rendered <strong>2026-05-05</strong> from <code>_ops/processes/cortex-roadmap-current.yml</code> by <code>scripts/render_cortex_roadmap.py</code>. Live page: <code>https://brisen-docs.onrender.com/architecture/cortex-roadmap-current.html</code>.
   Supersedes: <code>cortex-roadmap-v4-2026-04-30.html</code>.
   <div style="margin-top: 0.5rem;">
     Refs:
