@@ -118,3 +118,54 @@ vars are unset. Also update any test that hardcodes critical=100.
 3. Live pytest GREEN both sides (literal output — Lesson #52)
 4. Re-fire focused gate chain on diff only
 5. Report new HEAD SHA + gate verdicts back to PL
+
+---
+
+## MERGE-CONFLICT RESOLUTION UPDATE — 2026-05-05 (post B1 PR #159 merge)
+
+**Source:** PR #158 mergeStateStatus=DIRTY against `origin/main` after B1 PR #159 (BAKER_PROMPT_CACHING_1) merged at `a8dea7c`. AH1 PL skip+merge authorization withheld pending conflict resolution by you (B2 has full test coverage).
+
+**Conflicts surfaced (5 total):**
+
+1. `orchestrator/cost_monitor.py` lines ~72-80 — docstring of `ensure_api_cost_log_table`. Both branches updated for Lesson #50 alignment. Merge: combine both docstring intents (matter_slug parity + cache token parity).
+
+2. `orchestrator/cost_monitor.py` lines ~194-219 — `log_api_cost` signature + docstring + `calculate_cost_eur` call.
+   **Architect-mandated decoupling:** matter_slug param OWNED by you (B2); cache_creation_input_tokens / cache_read_input_tokens params OWNED by B1. Merged signature MUST include all three, kwargs-defaulted.
+   ```
+   def log_api_cost(
+       model: str,
+       input_tokens: int,
+       output_tokens: int,
+       source: str,
+       capability_id: str = None,
+       task_id: str = None,
+       matter_slug: str = None,
+       cache_creation_input_tokens: int = 0,
+       cache_read_input_tokens: int = 0,
+   ) -> Optional[float]:
+   ```
+   Update `calculate_cost_eur` call to pass cache token kwargs (B1's enhanced signature on main accepts them).
+
+3. `orchestrator/cost_monitor.py` lines ~230-244 — INSERT statement. 10 columns required: model, input, output, cache_creation, cache_read, cost_eur, source, capability_id, task_id, matter_slug. Update VALUES bind list to match (10 placeholders).
+
+4. `orchestrator/cost_monitor.py` lines ~250-255 — log message. Combine matter + cache info, e.g.:
+   ```
+   f"Cost: {model} {input_tokens}in/{output_tokens}out cache=({cache_creation_input_tokens}c/{cache_read_input_tokens}r) = €{cost_eur:.4f} [{source}] matter={matter_slug or '-'}"
+   ```
+
+5. `_ops/processes/cost-control-runbook.md` add/add conflict — both B1 and B2 authored this file fresh. Merge: combine sections (B1 added §"Cache hit rate" + §"Caching kill-switch" subsections; B2 authored core tier-thresholds + alert dispatch sections). Preserve both Director-facing sections.
+
+**Critical post-merge verification:**
+- All log_api_cost call sites in main use kwargs for trailing params — verify no positional clashes (capability_runner, agent_loop, _force_synthesis x5).
+- B1's A6/A7 SQL extension (`IN ('agent_loop','agent_loop_streaming','agent_loop_synthesis')`) is on main — your A6/A7 SQL queries elsewhere should not regress this.
+- ensure_api_cost_log_table bootstrap DDL must include matter_slug + cache_creation + cache_read columns + indexes.
+
+**Action:**
+1. `git fetch origin && git checkout b2/baker-cost-instrumentation-1`
+2. `git merge origin/main` → resolve 5 conflicts per spec above
+3. Run full pytest GREEN (literal output, Lesson #52)
+4. Push merge commit to `b2/baker-cost-instrumentation-1`
+5. Confirm PR #158 mergeable=MERGEABLE
+6. Report new HEAD SHA back to PL → I autonomous-merge per AH1 charter §3.
+
+No autonomous polling. Stop after step 6 report.
