@@ -33,6 +33,17 @@ blocker_question: |
 # branch b4/brisen-lab-v2-bridge-1 in both repos; mailbox single-source-of-truth
 # stays in baker-master. AH1 will fold repo-split correction into V0.3.6 brief
 # amendment (no rework here). Schema commit 8e7c98f confirmed clean.
+# UNBLOCKED 2026-05-05 by AH1-Terminal under Director auth 2026-05-05 "pls do":
+# TEST_DATABASE_URL_BRISEN_LAB landed in 1Password Baker API Keys vault.
+# Reference: op://Baker API Keys/l52lf6yww3p4zkjbyfjnbax4jq/credential
+# Path taken: fallback (c) — sibling DB `brisen_lab_test` on prod Neon project
+# `summer-sun` (compute ep-summer-sun-aih7ha4h, role neondb_owner has CREATEDB).
+# Neon API key not in 1Password + no neonctl auth + 0 logged-in console.neon.tech
+# tab in debug Chrome → option (a) ephemeral branch not reachable from Terminal.
+# Pooler DSN written; smoke verified: connect OK, public.tables=0 (fresh),
+# write+read OK in brisen_lab_test, no leak to prod neondb. DB-level isolation
+# (shared compute autoscale). Acceptable for Tier-B per brief authorization.
+# Re-engage §7 A1–A21 acceptance pass.
 ship_report: null
 pr: null
 autopoll_eligible: false
