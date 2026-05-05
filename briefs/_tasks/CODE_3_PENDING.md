@@ -1,13 +1,17 @@
 ---
-status: PENDING
+status: IN_FLIGHT
 brief: briefs/BRIEF_BB_FINANCE_BEN_PHASE0_INSTALL_1.md
 trigger_class: VAULT_SCAFFOLD
 dispatched_at: 2026-05-05T22:00:00Z
 dispatched_by: ai-head-a
-brief_revision: V0.1 (initial) + V0.2 (researcher + Anthropic templates fold)
+claimed_at: 2026-05-05T23:10:00Z
+claimed_by: b3
+last_heartbeat: 2026-05-05T23:10:00Z
+brief_revision: V0.1 (initial) + V0.2 (researcher + Anthropic templates fold) + V0.3 (Brisen Desk synthesis fold)
 brief_commits:
   v0_1: 8b8690a
   v0_2: b2fe75a
+  v0_3: 92696aa
 working_branch_baker_vault: b3/bb-finance-ben-phase0-install-1
 working_branch_baker_master: n/a (vault-only — no baker-master changes in Phase 0)
 ratified_by: Director 2026-05-05 (initial brief + V0.2 amendment)
@@ -22,7 +26,32 @@ heartbeat_cadence: 12h binding (per SKILL.md `59f23c4` §B-code stall chase)
 
 # CODE_3_PENDING — BRIEF_BB_FINANCE_BEN_PHASE0_INSTALL_1 — 2026-05-05
 
-**Brief:** baker-master `briefs/BRIEF_BB_FINANCE_BEN_PHASE0_INSTALL_1.md` (V0.1 commit `8b8690a` + V0.2 amendment commit `b2fe75a`)
+**Brief:** baker-master `briefs/BRIEF_BB_FINANCE_BEN_PHASE0_INSTALL_1.md` (V0.1 commit `8b8690a` + V0.2 amendment commit `b2fe75a` + **V0.3 amendment commit `92696aa`**)
+
+**🛑 V0.3 AMENDMENT NOTIFICATION (read before any further work) 🛑**
+
+V0.3 landed on baker-master main at commit `92696aa` (2026-05-05, post your claim). Six folds — read `briefs/BRIEF_BB_FINANCE_BEN_PHASE0_INSTALL_1.md` §V0.3 amendment §A-§G:
+
+- **§A authority-boundary-table.md restructured:** flat 17-row list → Tier A (auto) / Tier B (recommend) / Tier C (never). **If you have already drafted v0 in flat-list form, REFACTOR before merge.** Director ratified Tier structure over flat list in AH2 session 2026-05-05.
+- **§B BEN learning-log.md (new artefact):** weekly BB-specific vs portfolio-generalisable capture; supports month-6 BEN review.
+- **§C 90-day Phase 2 trigger:** pre-committed (Phase 0 ship + 90d). Add to brief §"Phase commitments"; reference from SKILL.md §1.
+- **§D three kill criteria:** manual-feed staleness (>2wk × 3mo) / authority creep (>€25K reversal) / PM-fee-cap-stack ledger separation. Add to brief §"Kill criteria"; reference from SKILL.md §5.
+- **§E Rheinstrasse fork RESOLVED:** PM-fees STAY in BEN as separately-labelled sub-ledger inside BEN (not separate slug). Implement at `wiki/_finance/baden-baden/projects/rheinstrasse-pm-mandate.md` (sub-ledger header). Entity TBC pending Siegfried email.
+- **§F AO/MOVIE equivalents DEFERRED to month-6 review:** do NOT add ao-finance / mo-finance scaffolding. If any references exist in your draft, remove.
+
+**§G updated sequencing supersedes V0.2 §I.** Phase 0 ship still single baker-vault PR; just adds learning-log + Rheinstrasse sub-ledger entry + brief-side §"Phase commitments" + §"Kill criteria" + AO/MOVIE deferral line.
+
+**Action sequence:**
+1. If authority-boundary-table v0 already drafted in flat list → refactor to Tier A/B/C per §A.
+2. Add learning-log.md per §B.
+3. Add Rheinstrasse PM-mandate sub-ledger entry per §E.
+4. Cross-reference §C (90-day clock) + §D (kill criteria) + §F (AO/MOVIE defer) in SKILL.md as specified.
+5. Continue toward single Phase 0 PR per §G sequencing.
+
+If unclear on any fold, stop and report up before merging.
+
+---
+
 **Working branch (baker-vault):** `b3/bb-finance-ben-phase0-install-1`
 **Pre-requisites:** Director-side: (1) baker-vault slugs.yml PR for `bb-finance` slug merged; (2) Anthropic financial-services plugins (`fund-admin` + `financial-analysis`) installed via `claude plugin install`. Both verified by Director or AH1 before B3 begins work.
 
