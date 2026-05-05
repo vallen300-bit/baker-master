@@ -255,6 +255,37 @@ calls until UTC midnight or until thresholds are raised (see §5).
 
 ---
 
+## 8. Rollout follow-ups (BAKER-PROMPT-CACHING-1 NITs)
+
+Architect Gate-3 verdict on PR #159 surfaced 5 non-blocking NITs (comment 4382710967). Two are operational and live here; three are scaling-followups in `briefs/BRIEF_BAKER_PROMPT_CACHING_SCALING_FOLLOWUPS_1.md`.
+
+### 8.1 Kill-switch is deploy-cycle, not live-runtime (N1)
+
+`PROMPT_CACHE_ENABLED` env var is read at module import in `agent.py:35`. Toggling via Render UI requires the service to restart before the change takes effect. Render auto-restarts on env-var PUT (~30s), so the practical UX is "save → wait ~30s → confirm /health 200." The brief's "Director can disable from Render UI" framing applies but is **not instantaneous** — flip the env var, then wait for restart, then re-check the next `/api/scan` call to confirm cache_control is no longer attached.
+
+Operational implication for incident response: if a cache misbehavior is causing immediate cost spike, the kill switch will reduce spend within ~1 minute (env-var PUT → auto-restart → next request). For sub-30s response, use the BAKER_COST_HARD_STOP_EUR breaker (§2 + §5) which blocks ALL API calls instantly via runtime check.
+
+### 8.2 Post-deploy 7-day cache-hit-rate validation window (N5)
+
+Unit tests cover wrap-shape + cost arithmetic but do NOT measure real cache hit rate end-to-end. A6/A7 SQL queries (§4) measure post-deploy cache effectiveness. Brief's modeled €10/day savings claim must be validated against **7 consecutive days of production observation** post-merge:
+
+```sql
+-- Cache hit rate over last 7 days (target: ≥60% per A7)
+SELECT
+  ROUND(100.0 * SUM(cache_read_input_tokens) /
+        NULLIF(SUM(cache_read_input_tokens + input_tokens), 0), 2) AS cache_hit_pct,
+  COUNT(*) AS n_calls
+FROM api_cost_log
+WHERE source IN ('agent_loop', 'agent_loop_streaming', 'agent_loop_synthesis')
+  AND logged_at > NOW() - INTERVAL '7 days';
+```
+
+If `cache_hit_pct < 60%` at the 7-day mark, escalate to Director — likely root causes: (a) dynamic system_prompt content invalidating cache (`now` / pre_stuffed retrieval / deadlines / domain_context — see Decision 5 audit), (b) 5-min TTL too short for actual conversation cadence (see N2 in scaling-followups), (c) Gemini fallback rate higher than expected.
+
+If `< 30%` over 7 days, file a corrective brief — the caching wiring is materially under-delivering vs the modeled savings.
+
+---
+
 ## Related
 
 - `briefs/BRIEF_BAKER_COST_INSTRUMENTATION_1.md` — tiered alarms, daily
