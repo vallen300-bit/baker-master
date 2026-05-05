@@ -37,3 +37,49 @@
 
 ## Prior CODE_1 task (archive reference)
 BRIEF_CORTEX_SCAN_FLASH_ROUTE_KILL_1 — COMPLETE 2026-05-04, PR #156 (verdict PASS, /security-review NO FINDINGS, AH2 review pending). Ship report: `briefs/_reports/B1_cortex_scan_flash_route_kill_20260504.md`. Mailbox hygiene rule applied — overwriting per `_ops/processes/b-code-dispatch-coordination.md` §3.
+
+---
+
+## GATE-4 2nd-pass UPDATE — 2026-05-05 (fold before merge)
+
+**Source:** feature-dev:code-reviewer 2nd-pass on PR #159 — verdict PASS-WITH-NITS-FOLD-NEEDED. 1 HIGH + 2 MED substantive (no current breakage on H1; M2 is measurement-accuracy gap on A6/A7). 2 LOW non-blocking (not appended). Same fold-pre-merge pattern as B4 cycle.
+
+**H1** `orchestrator/agent.py:2291,2293,2308` — `run_agent_loop` passes
+`config.claude.model` raw to `_build_cached_system_and_tools` instead of
+the already-resolved `_effective_model`. Streaming path uses `_model`
+consistently. Fix: replace all three `config.claude.model` references
+inside the `run_agent_loop` iteration body with `_effective_model`. No
+current breakage (both resolve identically today) but creates a
+maintenance trap if a `model_override` param is ever added to
+`run_agent_loop` mirroring the streaming path.
+Regression test: unit test asserting `_build_cached_system_and_tools` is
+called with `_effective_model`, not a fresh config read.
+
+**M1** `orchestrator/agent.py:59-62` — `list(tools)` is a shallow copy;
+`{**tools_value[-1]}` creates a new top-level dict for the last entry but
+nested dicts (`input_schema`, etc.) are shared with the module-level
+`AGENT_TOOLS` constant. SDK doesn't mutate today, but wrong defensive
+posture for a loop-invariant constant. Fix: replace `{**tools_value[-1],
+"cache_control": ...}` with `{**copy.deepcopy(tools_value[-1]),
+"cache_control": ...}` (add `import copy` at module level).
+Regression test: after calling the helper, mutate a nested key on
+`tools_v[-1]["input_schema"]` and assert `AGENT_TOOLS[-1]["input_schema"]`
+is unchanged.
+
+**M2** `orchestrator/agent.py:2192-2211` — `_force_synthesis` emits
+`cache_control` (via the helper) but never calls `log_api_cost` for the
+synthesis turn. Cache tokens on synthesis responses are lost — A6/A7 SQL
+undercounts cache activity on timeout/max_iter/tool_limit paths. Fix:
+add `log_api_cost(..., source="agent_loop_synthesis", cache_creation_input_tokens=...,
+cache_read_input_tokens=...)` inside `_force_synthesis` after the API call,
+and extend A6/A7 SQL IN clause to include `'agent_loop_synthesis'`.
+Regression test: mock claude_client in a `_force_synthesis` unit test;
+assert `log_api_cost` is called with source `"agent_loop_synthesis"` and
+non-zero cache token values.
+
+**Path forward:**
+1. Apply H1+M1+M2 on `b1/baker-prompt-caching-1` branch
+2. Add 3 regression tests (one per finding)
+3. Live pytest GREEN both sides
+4. Re-fire focused gate chain on diff only
+5. Report new HEAD SHA + gate verdicts back to PL
