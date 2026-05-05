@@ -6,8 +6,27 @@ dispatched_at: 2026-05-03T20:00:00Z
 dispatched_by: ai-head-a
 claimed_at: 2026-05-03T20:30:00Z
 claimed_by: b4
-last_heartbeat: 2026-05-05T05:55:00Z — wake-check; §3+§4+§4.1+H7-auth shipped to brisen-lab a8be2db (2026-05-03 08:18Z); 45h gap = silent stall (terminal idle / context wipe, no env break); resuming on §5.1 Hermes lifecycle next; cadence reset to 12h commit-msg heartbeats
-blocker_question: null
+last_heartbeat: 2026-05-05T09:30:00Z — §3+§4+§4.1+§5.1+§6+§7+§8 ALL shipped to brisen-lab; pytest scaffolding for §7 A1-A21 in place (28 tests collected, brisen-lab 88bf7ad); /security-review remains. Blocked on TEST_DATABASE_URL.
+blocker_question: |
+  §7 A1-A21 live acceptance pass requires a TEST_DATABASE_URL pointing at
+  an isolated Neon branch. Local 1Password has the prod DATABASE_URL
+  (Baker API Keys vault) — running tests against it would touch live
+  brisen_lab_msg / brisen_lab_session_keys data on the production daemon.
+  Need either:
+    (a) Director / AH1 provisions a Neon ephemeral branch + drops the
+        DSN into 1Password as TEST_DATABASE_URL_BRISEN_LAB, OR
+    (b) explicit ratification to run tests against prod Neon with a
+        scoped test-only schema (would still need a clean truncate
+        between cases — risky on shared infra), OR
+    (c) ratification to defer the live A1-A21 pass to /security-review
+        gate (which would need to provision its own Neon branch anyway,
+        per Lesson #52).
+  Recommendation: (a). 1-time vault entry, ~5 min Neon branch provision,
+  unblocks both A1-A21 and the future /security-review gate. Test
+  scaffolding (28 tests, conftest, fixtures) is ready to run end-to-end
+  the moment TEST_DATABASE_URL is available.
+  Compile-clean + skip-clean today; brisen-lab branch
+  b4/brisen-lab-v2-bridge-1 at 88bf7ad ready for review.
 # RATIFIED 2026-05-03 by AH1: cross-repo split confirmed (brisen-lab daemon ↔
 # baker-master MCP tools); 2 paired PRs; /security-review MANDATORY against
 # brisen-lab PR (Lesson #52); merge order brisen-lab FIRST then baker-master;
