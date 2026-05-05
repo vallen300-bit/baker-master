@@ -41,6 +41,9 @@ class _Cursor:
         else:
             self.rowcount = 0
 
+    def fetchall(self):
+        return []
+
     def close(self):
         pass
 
@@ -94,6 +97,38 @@ def test_cost_tiers_ascending() -> None:
 def test_cost_alert_eur_alias_points_at_info_tier() -> None:
     """A2: COST_ALERT_EUR alias kept and points at COST_TIERS[0][0]."""
     assert cost_monitor.COST_ALERT_EUR == cost_monitor.COST_TIERS[0][0]
+
+
+def test_get_cost_history_interval_parameterization() -> None:
+    """GATE-4 H1: psycopg2 does NOT interpolate %s inside a SQL string literal.
+
+    Original `INTERVAL '%s days'` was sent to PostgreSQL verbatim and crashed
+    every cost-dashboard call with an invalid interval. The fix multiplies a
+    fixed `INTERVAL '1 day'` by the bound %s integer so the parameter is
+    actually substituted by the driver.
+    """
+    conn = _Conn()
+    store = _Store(conn)
+    with patch("memory.store_back.SentinelStoreBack._get_global_instance", return_value=store):
+        cost_monitor.get_cost_history(days=7)
+    last_sql, last_params = conn._cursor.queries[-1]
+    assert "INTERVAL '1 day' * %s" in last_sql
+    assert "INTERVAL '%s" not in last_sql, (
+        "psycopg2 cannot interpolate %s inside a literal — must multiply"
+    )
+    assert last_params == (7,)
+
+
+def test_critical_tier_below_hard_stop_by_default() -> None:
+    """GATE-4 M1: critical tier must give advance warning before hard stop.
+
+    Defaults: critical=80, hard_stop=100 — critical fires before the breaker
+    flips so the Director sees a Slack signal with headroom to react.
+    """
+    assert cost_monitor.COST_TIERS[2][1] == "critical"
+    assert cost_monitor.COST_TIERS[2][0] < cost_monitor.COST_HARD_STOP_EUR, (
+        "critical tier default must be strictly below hard-stop default"
+    )
 
 
 # --------------------------- log_api_cost signature ---------------------------
@@ -204,7 +239,7 @@ def test_check_circuit_breaker_fires_each_tier_once_idempotent() -> None:
 
 
 def test_check_circuit_breaker_walks_tiers_only_for_crossed_thresholds() -> None:
-    """At €45, only the info tier fires (warn=60, critical=100 not crossed)."""
+    """At €45, only the info tier fires (warn=60, critical=80 not crossed)."""
     sent: list[str] = []
 
     def _fake_send(daily_cost, threshold, label, emoji):

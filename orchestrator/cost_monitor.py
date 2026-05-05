@@ -42,7 +42,7 @@ USD_TO_EUR = float(os.getenv("BAKER_USD_TO_EUR", "0.92"))
 COST_TIERS = [
     (float(os.getenv("BAKER_COST_TIER_INFO_EUR", "30.0")), "info", "ℹ️"),
     (float(os.getenv("BAKER_COST_TIER_WARN_EUR", "60.0")), "warn", "⚠️"),
-    (float(os.getenv("BAKER_COST_TIER_CRITICAL_EUR", "100.0")), "critical", "🚨"),
+    (float(os.getenv("BAKER_COST_TIER_CRITICAL_EUR", "80.0")), "critical", "🚨"),
 ]
 
 # Hard stop unchanged (existing behavior; absolute kill).
@@ -331,7 +331,7 @@ def get_cost_history(days: int = 7) -> list:
                           COALESCE(SUM(input_tokens), 0) as tokens_in,
                           COALESCE(SUM(output_tokens), 0) as tokens_out
                    FROM api_cost_log
-                   WHERE logged_at > NOW() - INTERVAL '%s days'
+                   WHERE logged_at > NOW() - (INTERVAL '1 day' * %s)
                    GROUP BY DATE(logged_at)
                    ORDER BY day DESC""",
                 (days,),
@@ -379,7 +379,7 @@ def get_capability_costs(days: int = 7) -> list:
                        SUM(output_tokens) as tokens_out,
                        ROUND(AVG(cost_eur)::numeric, 4) as avg_cost_eur
                 FROM api_cost_log
-                WHERE logged_at > NOW() - INTERVAL '%s days'
+                WHERE logged_at > NOW() - (INTERVAL '1 day' * %s)
                   AND capability_id IS NOT NULL
                 GROUP BY capability_id
                 ORDER BY total_eur DESC
