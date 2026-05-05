@@ -259,15 +259,20 @@ class SentinelStoreBack:
                 pass
 
     def _ensure_cost_and_metrics_tables(self):
-        """PHASE-4A: Create api_cost_log + agent_tool_calls tables."""
+        """PHASE-4A: Create api_cost_log + agent_tool_calls tables.
+        BAKER-COST-INSTRUMENTATION-1: also bootstrap cost_alert_state."""
         conn = self._get_conn()
         if not conn:
             return
         try:
-            from orchestrator.cost_monitor import ensure_api_cost_log_table
+            from orchestrator.cost_monitor import (
+                ensure_api_cost_log_table,
+                ensure_cost_alert_state_table,
+            )
             from orchestrator.agent_metrics import ensure_agent_tool_calls_table
             ensure_api_cost_log_table(conn)
             ensure_agent_tool_calls_table(conn)
+            ensure_cost_alert_state_table(conn)
         except Exception as e:
             logger.warning(f"Could not ensure Phase 4A tables: {e}")
         finally:

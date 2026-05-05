@@ -237,7 +237,10 @@ async def _invoke_one(
         t0 = time.monotonic()
         try:
             agent_result = await asyncio.wait_for(
-                asyncio.to_thread(runner.run_single, cap, question),
+                asyncio.to_thread(
+                    runner.run_single, cap, question,
+                    matter_slug=matter_slug,
+                ),
                 timeout=SPECIALIST_TIMEOUT_S,
             )
             elapsed = time.monotonic() - t0
