@@ -62,8 +62,8 @@ _DRAIN_TIMEOUT_S = 8.0
 # UPDATE step expires it before INSERT). Max-retry = 1: two collisions in a
 # row = systemic contention; further retries don't materially help.
 _REGISTER_MAX_RETRIES = 1
-_REGISTER_RETRY_JITTER_LO = 0.05
-_REGISTER_RETRY_JITTER_HI = 0.15
+_REGISTER_RETRY_JITTER_LO_S = 0.05  # seconds (50 ms)
+_REGISTER_RETRY_JITTER_HI_S = 0.15  # seconds (150 ms)
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +238,7 @@ def _run_auth_chain(prompt: str) -> str | None:
             # collide again deterministically. 50-150ms is large enough to
             # break the tie via Python scheduler granularity.
             time.sleep(random.uniform(
-                _REGISTER_RETRY_JITTER_LO, _REGISTER_RETRY_JITTER_HI
+                _REGISTER_RETRY_JITTER_LO_S, _REGISTER_RETRY_JITTER_HI_S
             ))
             continue
         return None
