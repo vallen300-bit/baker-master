@@ -11,6 +11,7 @@ Two entry points:
 
 Feature flag: BAKER_AGENTIC_RAG=true  (env var on Render).
 """
+import copy
 import json
 import logging
 import os
@@ -57,8 +58,11 @@ def _build_cached_system_and_tools(system_prompt, tools, model):
     }]
     if tools:
         tools_value = list(tools)
+        # Deep-copy the last entry before injecting cache_control so nested
+        # dicts (e.g. input_schema) cannot be mutated in the module-level
+        # AGENT_TOOLS constant by anything downstream.
         tools_value[-1] = {
-            **tools_value[-1],
+            **copy.deepcopy(tools_value[-1]),
             "cache_control": {"type": "ephemeral"},
         }
     else:
@@ -2202,6 +2206,21 @@ def _force_synthesis(claude_client, model: str, system_prompt: str,
         for block in response.content:
             if block.type == "text" and block.text:
                 synthesis += block.text
+        # BAKER-PROMPT-CACHING-1: log synthesis-turn cost so cache token
+        # activity on timeout/max_iter/tool_limit paths is captured by
+        # A6/A7 reporting (otherwise these turns are invisible to spend
+        # and hit-ratio queries).
+        try:
+            from orchestrator.cost_monitor import log_api_cost
+            _cc = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+            _cr = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+            log_api_cost(model, response.usage.input_tokens,
+                         response.usage.output_tokens,
+                         source="agent_loop_synthesis",
+                         cache_creation_input_tokens=_cc,
+                         cache_read_input_tokens=_cr)
+        except Exception as e:
+            logger.warning(f"Synthesis cost logging failed (non-fatal): {e}")
         logger.info(f"AGENTIC-LOOP-FIX: Forced synthesis after {reason} — "
                     f"{len(synthesis)} chars, "
                     f"{response.usage.input_tokens}+{response.usage.output_tokens} tokens")
@@ -2288,9 +2307,9 @@ def run_agent_loop(
 
         # BAKER-PROMPT-CACHING-1: cache static system prompt + tools.
         _system_value, _tools_value = _build_cached_system_and_tools(
-            system_prompt, AGENT_TOOLS, config.claude.model)
+            system_prompt, AGENT_TOOLS, _effective_model)
         response = claude.messages.create(
-            model=config.claude.model,
+            model=_effective_model,
             max_tokens=2048,
             system=_system_value,
             messages=messages,
@@ -2305,7 +2324,7 @@ def run_agent_loop(
         # (Anthropic SDK populates them only when cache_control is sent).
         _cache_create = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
         _cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
-        log_api_cost(config.claude.model, response.usage.input_tokens,
+        log_api_cost(_effective_model, response.usage.input_tokens,
                      response.usage.output_tokens, source="agent_loop",
                      cache_creation_input_tokens=_cache_create,
                      cache_read_input_tokens=_cache_read)
@@ -2403,7 +2422,7 @@ def run_agent_loop(
     answer = ""
     if tool_log:
         synth, s_in, s_out = _force_synthesis(
-            claude, config.claude.model, system_prompt, messages,
+            claude, _effective_model, system_prompt, messages,
             max_tokens=2048, reason="max_iterations")
         total_in += s_in
         total_out += s_out

@@ -25,7 +25,7 @@ returning 4xx from Anthropic, disable caching without a code revert:
    ```sql
    SELECT logged_at, cache_creation_input_tokens, cache_read_input_tokens
    FROM api_cost_log
-   WHERE source IN ('agent_loop', 'agent_loop_streaming')
+   WHERE source IN ('agent_loop', 'agent_loop_streaming', 'agent_loop_synthesis')
    ORDER BY logged_at DESC LIMIT 5;
    ```
 5. No code revert needed. Reverse the flip when the underlying issue is
@@ -44,7 +44,7 @@ ratio) gates fire. Useful queries:
 -- A6: actual savings, agent loop only.
 SELECT DATE(logged_at) AS day, SUM(cost_eur) AS daily
 FROM api_cost_log
-WHERE source IN ('agent_loop', 'agent_loop_streaming')
+WHERE source IN ('agent_loop', 'agent_loop_streaming', 'agent_loop_synthesis')
   AND logged_at > NOW() - INTERVAL '7 days'
 GROUP BY day ORDER BY day;
 
@@ -57,7 +57,7 @@ SELECT
             + input_tokens), 0)
     AS savings_ratio
 FROM api_cost_log
-WHERE source IN ('agent_loop', 'agent_loop_streaming')
+WHERE source IN ('agent_loop', 'agent_loop_streaming', 'agent_loop_synthesis')
   AND logged_at > NOW() - INTERVAL '24 hours';
 ```
 
