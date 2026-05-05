@@ -291,6 +291,97 @@ def test_network_timeout_silent_exit(hook_mod, monkeypatch, patch_httpx):
     assert exc.value.code == 0
 
 
+# ==========================================================================
+# 5b. Surface 6a — register-session-pubkey retry on 409 race-loss
+# ==========================================================================
+
+
+def test_register_409_retried_once_then_succeeds(hook_mod, monkeypatch, patch_httpx, capsys):
+    """First /auth/register-session-pubkey call returns 409 (concurrent
+    register lost the partial-unique-index race); the hook waits jitter ms
+    and retries once; the retry's UPDATE step expires the prior winner and
+    the new INSERT succeeds with 200; auth chain proceeds to JWT issuance."""
+    register_calls: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url.endswith("/auth/register-session-pubkey"):
+            register_calls.append(url)
+            if len(register_calls) == 1:
+                return httpx.Response(
+                    409,
+                    json={"detail": {"error": "concurrent_registration_lost_race"}},
+                )
+            return httpx.Response(200, json={"session_id": "sess-after-retry"})
+        if url.endswith("/auth/human-confirmation"):
+            return httpx.Response(200, json={"token": "JWT.eyTest.retry"})
+        if "/msg/" in url:
+            return httpx.Response(200, json=[])
+        return httpx.Response(404)
+
+    patch_httpx(handler)
+    # Stub jitter sleep so the test runs fast + deterministic.
+    monkeypatch.setattr(hook_mod.time, "sleep", lambda *_: None)
+    with patch.object(sys, "stdin", _stdin_with({"prompt": "race-loser"})):
+        with pytest.raises(SystemExit) as exc:
+            hook_mod.main()
+    assert exc.value.code == 0
+    assert len(register_calls) == 2, "hook must retry register exactly once on 409"
+    out = capsys.readouterr().out
+    envelope = json.loads(out.strip())
+    assert "JWT.eyTest.retry" in envelope["hookSpecificOutput"]["additionalContext"]
+
+
+def test_register_409_twice_fails_open_no_jwt(hook_mod, monkeypatch, patch_httpx, capsys):
+    """Both register attempts return 409 (systemic contention storm). Hook
+    fails open per V0.3.7 — exits 0, emits no JWT, no further retries."""
+    register_calls: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url.endswith("/auth/register-session-pubkey"):
+            register_calls.append(url)
+            return httpx.Response(
+                409,
+                json={"detail": {"error": "concurrent_registration_lost_race"}},
+            )
+        if "/msg/" in url:
+            return httpx.Response(200, json=[])
+        return httpx.Response(404)
+
+    patch_httpx(handler)
+    monkeypatch.setattr(hook_mod.time, "sleep", lambda *_: None)
+    with patch.object(sys, "stdin", _stdin_with({"prompt": "double-409"})):
+        with pytest.raises(SystemExit) as exc:
+            hook_mod.main()
+    assert exc.value.code == 0
+    assert len(register_calls) == 2, "max-retry=1 → exactly 2 attempts then give up"
+    out = capsys.readouterr().out
+    assert "JWT" not in out
+
+
+def test_register_500_no_retry_immediate_fail_open(hook_mod, monkeypatch, patch_httpx):
+    """Surface 6a retry is scoped strictly to 409. Other non-200 (500, 503,
+    400, 403) must NOT trigger retry — they're either daemon outage or
+    permanent failures where retry is wasted latency."""
+    register_calls: list = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url.endswith("/auth/register-session-pubkey"):
+            register_calls.append(url)
+            return httpx.Response(500, text="boom")
+        return httpx.Response(200, json=[])
+
+    patch_httpx(handler)
+    monkeypatch.setattr(hook_mod.time, "sleep", lambda *_: None)
+    with patch.object(sys, "stdin", _stdin_with({"prompt": "five-hundred"})):
+        with pytest.raises(SystemExit) as exc:
+            hook_mod.main()
+    assert exc.value.code == 0
+    assert len(register_calls) == 1, "non-409 must short-circuit; no retry"
+
+
 def test_no_terminal_key_silent_exit(hook_mod, monkeypatch, capsys):
     monkeypatch.delenv("BRISEN_LAB_TERMINAL_KEY", raising=False)
     with patch.object(sys, "stdin", _stdin_with({"prompt": "hi"})):
