@@ -284,3 +284,91 @@ None. Single migration + small handler change. If the migration runner doesn't a
 - V2_BRIDGE_1 brief: `briefs/BRIEF_BRISEN_LAB_V2_BRIDGE_1.md` (V0.3.7 ship 2026-05-05)
 - Cascade actions_log: `~/baker-vault/_ops/agents/ai-head/actions_log.md` "V2_BRIDGE_1 cross-repo merge cascade (steps 1-2 of 4)" 2026-05-05
 - Migration immutability lesson: `tasks/lessons.md` Lesson #50
+
+---
+
+# V0.2 Amendment — Bootstrap-pattern pivot (Director-ratified 2026-05-05)
+
+> **Trigger:** B4 design-blocker escalation 2026-05-05 (Tier-B #7). Brief V0.1 assumed brisen-lab has a migration runner (`migrations/` dir + `applied_migrations.lock` + CONCURRENTLY-aware applier). **It does not.** Schema bootstraps via `db.bootstrap()` calling `SCHEMA_V2_SQL` as one big string from `app.py:80` (`@app.on_event("startup")`) inside an implicit psycopg2 transaction. Existing `idx_session_keys_worker_active` itself was created via the bootstrap path (`db.py:198-200`), not via a migration file.
+>
+> **Director ratification:** Option A (adapt to bootstrap pattern, drop CONCURRENTLY) selected over (B) build mini-migration runner — gold-plating; (C) apply DDL out-of-band via psql — loses audit trail.
+>
+> Brief V0.1 Decision §2 already foresaw this fallback: *"Production `brisen_lab_session_keys` is small (rows: a few hundred max) so plain `CREATE` would also work."* This amendment formalizes that fallback.
+
+## Amendment §A — Feature 1 implementation (REPLACES V0.1 §Implementation)
+
+**File touched:** `db.py` (brisen-lab repo, branch `b4/brisen-lab-surface-6a-partial-unique-index-1`).
+
+**Action:** add the partial unique index + drop-old-index pair inline in `SCHEMA_V2_SQL` (the same string that already houses the existing non-unique partial index at `db.py:198-200`). Bootstrap reapplies on next deploy via `db.bootstrap()` startup hook.
+
+```sql
+-- Inside SCHEMA_V2_SQL (db.py), replacing the prior non-unique partial index block:
+CREATE UNIQUE INDEX IF NOT EXISTS uq_session_keys_worker_active
+    ON brisen_lab_session_keys (worker_slug)
+    WHERE expired_at IS NULL;
+
+DROP INDEX IF EXISTS idx_session_keys_worker_active;
+```
+
+**Why no CONCURRENTLY:** CONCURRENTLY cannot run inside a transaction block, and `db.bootstrap()` executes the whole SCHEMA_V2_SQL inside an implicit psycopg2 transaction. Plain `CREATE` is acceptable per Decision §2 (small table, hundreds of rows max — lock impact is microseconds).
+
+**Why `IF NOT EXISTS` + `IF EXISTS`:** idempotent re-bootstrap on every container start. Matches the rest of SCHEMA_V2_SQL's pattern.
+
+## Amendment §B — Critical pre-work (REPLACES V0.1 Feature 1 §"CRITICAL pre-work")
+
+V0.1 mandated B-code inspect `start.sh` / migration runner for CONCURRENTLY-incompatibility. **Pre-work outcome already known:** brisen-lab has no runner; bootstrap-pattern. No file inspection needed; no design escalation pathway needed (this amendment IS the resolution).
+
+## Amendment §C — Acceptance Criteria deltas
+
+**Dropped (migration-runner-specific):**
+- ~~A1: Migration file applies clean; `applied_migrations.lock` updated~~
+- ~~A8: Migration filename ≥1s timestamp separation; lock-file refresh~~
+- ~~A9: `pg_index.indisvalid = TRUE` post-CONCURRENTLY~~
+- ~~A11: Migration rollback documented (SQL-level)~~ (replaced — see new A11' below)
+
+**Replacement A1' — Bootstrap-pattern verification (ships in place of A1):**
+| **A1'** | `SCHEMA_V2_SQL` in `db.py` contains `CREATE UNIQUE INDEX IF NOT EXISTS uq_session_keys_worker_active ... WHERE expired_at IS NULL` AND `DROP INDEX IF EXISTS idx_session_keys_worker_active` | grep both lines in `db.py`; bootstrap reapplies on container restart |
+
+**Replacement A8' — Post-deploy schema verification (ships in place of A8 + A9):**
+| **A8'** | Post-deploy: `psql $DATABASE_URL -c "\d brisen_lab_session_keys"` shows `uq_session_keys_worker_active` listed as `UNIQUE` partial index (`WHERE expired_at IS NULL`); `idx_session_keys_worker_active` no longer present | Manual verification step in cutover runbook §"Pre-cutover checklist" (Feature 4) |
+
+**Replacement A9' — Duplicate-detect query returns 0 rows (ships in place of A9):**
+| **A9'** | Post-deploy: `SELECT worker_slug, COUNT(*) FROM brisen_lab_session_keys WHERE expired_at IS NULL GROUP BY worker_slug HAVING COUNT(*) > 1;` returns 0 rows | Verifies no duplicate-active state survived the rebootstrap |
+
+**Replacement A11' — Bootstrap-pattern rollback documentation (ships in place of A11):**
+| **A11'** | Cutover runbook §Rollback documents: revert the `db.py` change in a follow-up commit (re-add old `idx_session_keys_worker_active` non-unique, drop `uq_session_keys_worker_active`); deploy → bootstrap reapplies revert | Code-level rollback, not SQL-level — matches the bootstrap-pattern primitive |
+
+**Unchanged ACs:** A2, A3, A4, A5, A6, A7, A10, A12 (handler 409, regression tests, hook retry-on-409, observability — all application-side, independent of migration mechanics).
+
+## Amendment §D — Architect post-WRITE folds (status under V0.2)
+
+| Architect fold | V0.2 status |
+|---|---|
+| Feature 5 hook retry-on-409 with jitter (max-retry=1) | **STAYS** — application-side, unchanged |
+| Migration: DROP CONCURRENTLY symmetry + `pg_index.indisvalid` post-CONCURRENTLY check + runner CONCURRENTLY-handling verification | **MOOT** — no migration runner; CONCURRENTLY dropped; `indisvalid` check N/A under bootstrap-pattern |
+| psycopg2 ≥2.8 pin OR SQLSTATE '23505' fallback | **STAYS** — application-side, Feature 2 handler 409 path |
+| Test determinism: `threading.Barrier(2)` + 20× loop + reject SQLite at conftest | **STAYS** — Feature 3 regression test |
+| Observability: stderr log on 409 branch | **STAYS** — Feature 2 + AC A12 |
+| Migration rollback path documented in cutover runbook | **REWRITTEN** — see A11' (code-level revert, not SQL-level) |
+
+## Amendment §E — Sequencing (UPDATES V0.1 §Sequencing)
+
+**Replaces V0.1 step 3 (pre-work runner inspection) + step 5 (author migration file):**
+
+3. ~~Pre-work — verify migration runner~~ — DROPPED. Bootstrap-pattern confirmed.
+5. ~~Author migration file~~ — REPLACED with: edit `db.py` `SCHEMA_V2_SQL` to add `CREATE UNIQUE INDEX IF NOT EXISTS uq_session_keys_worker_active ... WHERE expired_at IS NULL` + `DROP INDEX IF EXISTS idx_session_keys_worker_active`.
+
+**Replaces V0.1 step 12 (post-apply A8 + A9 sanity checks):**
+
+12. Post-deploy A8' (`\d` schema verification) + A9' (duplicate-detect SELECT) — automated one-liners pasted into ship report.
+
+**Steps 1-2, 4, 6-11, 13-14 unchanged.** Director Tier-B ratification on `BRISEN_LAB_V2_ENABLED=true` flip (step 14) unchanged.
+
+## Amendment §F — Net effect summary
+
+- **Files touched (brisen-lab):** `db.py` only (1 SQL block edit). No `migrations/` dir created. No `applied_migrations.lock` touched.
+- **Files touched (baker-master):** Feature 5 hook retry-on-409 unchanged from V0.1.
+- **Risk delta:** lower than V0.1 — no migration-runner infra to verify; no CONCURRENTLY race to monitor; replaced with surgical SQL primitive matching V0.3.7's existing pattern.
+- **Brief intent (DB-level race close on session_keys) preserved.**
+
+**End V0.2 amendment.**
