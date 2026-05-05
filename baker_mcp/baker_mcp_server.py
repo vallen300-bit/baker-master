@@ -1156,6 +1156,31 @@ def _brisen_lab_caller_terminal() -> str:
     return role or "cowork"
 
 
+def _brisen_lab_extract_error(resp) -> str:
+    """Surface only the daemon's structured `error` field, never raw body.
+
+    Daemon errors are JSON-structured today (`{"error": "...", ...}`). If the
+    daemon ever logs request context (session_id, worker_slug fragments,
+    headers) into the error body, raw `resp.text` would surface it to the LLM
+    via the MCP tool response. This helper parses JSON and surfaces only the
+    `error` field; on non-JSON or missing-error-field, falls back to a short
+    truncated raw-text slice (80 chars) — enough to debug without leaking
+    full request context.
+    """
+    try:
+        body = resp.json()
+        if isinstance(body, dict):
+            err = body.get("error")
+            if isinstance(err, str) and err:
+                return err
+    except (ValueError, TypeError):
+        pass
+    try:
+        return resp.text[:80]
+    except Exception:
+        return ""
+
+
 def _brisen_lab_paste_block_fallback(operation: str, payload: dict) -> str:
     """AC6 fallback marker — when V2 endpoints return 503 (BRISEN_LAB_V2_ENABLED=false).
 
@@ -1225,7 +1250,8 @@ def _brisen_lab_post_via_http(args: dict) -> str:
     if resp.status_code == 503:
         return _brisen_lab_paste_block_fallback("post", payload)
     if resp.status_code >= 400:
-        return f"Error: brisen-lab POST returned HTTP {resp.status_code}: {resp.text[:400]}"
+        err = _brisen_lab_extract_error(resp)
+        return f"Error: brisen-lab POST returned HTTP {resp.status_code}: {err}"
     try:
         data = resp.json()
     except Exception:
@@ -1269,11 +1295,13 @@ def _brisen_lab_read_via_http(args: dict) -> str:
     if resp.status_code == 503:
         return f"[brisen-lab v2 disabled — empty inbox returned for {terminal}]"
     if resp.status_code >= 400:
-        return f"Error: brisen-lab GET returned HTTP {resp.status_code}: {resp.text[:400]}"
+        err = _brisen_lab_extract_error(resp)
+        return f"Error: brisen-lab GET returned HTTP {resp.status_code}: {err}"
     try:
         data = resp.json()
     except Exception:
-        return f"Error: brisen-lab GET non-JSON response: {resp.text[:200]}"
+        err = _brisen_lab_extract_error(resp)
+        return f"Error: brisen-lab GET non-JSON response: {err}"
 
     rows = data if isinstance(data, list) else data.get("messages") or data.get("rows") or []
     if not rows:

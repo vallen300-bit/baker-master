@@ -228,7 +228,22 @@ def _run_auth_chain(prompt: str) -> str | None:
     try:
         signature_bytes = privkey.sign(canonical.encode("utf-8"))
     except Exception:
+        try:
+            del privkey
+        except Exception:
+            pass
         return None
+    # Drop privkey reference IMMEDIATELY post-sign — before the ~5s
+    # human-confirmation HTTP round-trip opens. Narrows the forward-secrecy
+    # window from "key alive across HTTP round-trip" to "key alive only during
+    # the local sign() call." CPython refcount drops the underlying memory at
+    # this point; not a guarantee vs. a determined attacker reading process
+    # memory, but closes the gap between brief §6 "key dies with it" claim and
+    # actual code behavior.
+    try:
+        del privkey
+    except Exception:
+        pass
 
     # Step 4: exchange for JWT (base64 sig per daemon contract bus.py:718)
     try:
@@ -250,15 +265,6 @@ def _run_auth_chain(prompt: str) -> str | None:
         return resp.json().get("token")
     except Exception:
         return None
-    finally:
-        # Defensive: explicitly drop the privkey reference. CPython refcount drops
-        # the underlying memory immediately; not a security guarantee against a
-        # determined attacker (process memory is still readable while we run) but
-        # narrows the window. The actual security is "process exits at hook end."
-        try:
-            del privkey
-        except Exception:
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -341,11 +347,17 @@ def _drain_inbox() -> str | None:
                     newest_ts = str(created)
                 # Compose summary line — NEVER include body if it could carry
                 # sensitive content; preview only (daemon caps at 8K).
+                # No body fallback: brief §6 forbids surfacing raw body for
+                # ratify_required messages with structured payload (capital
+                # allocation, counterparty name, decision text). If the daemon
+                # ever omits body_preview, surface a placeholder instead.
                 kind = row.get("kind", "?")
                 topic = row.get("topic") or ""
                 from_t = row.get("from_terminal", "?")
-                preview = (row.get("body_preview") or row.get("body") or "")
-                if isinstance(preview, str) and len(preview) > 140:
+                preview = row.get("body_preview")
+                if not isinstance(preview, str) or not preview:
+                    preview = "(preview unavailable)"
+                elif len(preview) > 140:
                     preview = preview[:137] + "..."
                 summary_lines.append(f"  [{kind}] {from_t} → {topic}: {preview}")
     except Exception:
