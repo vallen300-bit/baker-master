@@ -295,3 +295,52 @@ Wrap in single `with get_conn()` block per existing pattern.
 **Heartbeat:** continue 12h cadence.
 
 **Anchor:** Director "d" + "bundle" 2026-05-05; architect + ai-head 2-lens review chain on V0.3.7 (8 nits folded).
+
+## UPDATE 2026-05-05 — gate 4 code-reviewer findings (post `d8dbb00` / `e6fd4c3`)
+
+**Status:** REQUEST_CHANGES on baker-master PR #157 only (brisen-lab PR #2 cleared without findings). Gate 4 (feature-dev:code-reviewer) returned PASS-WITH-NITS with 1 HIGH + 2 MEDIUM substantive findings on the consumer-side hook + MCP tools. Same pattern as the prior brisen-lab cycle's code-reviewer HIGH catch — fold before merge.
+
+### Fix 1 [HIGH] — narrow privkey lifetime
+`.claude/hooks/user-prompt-submit-confirm.py:233-261` — `del privkey` is currently inside the `finally` block of the human-confirmation POST. Private key lives in CPython refcount memory across the full HTTP round-trip (~5s timeout window). Tightening:
+
+**Fix:** Move `del privkey` to immediately AFTER `signature_bytes = privkey.sign(...)` on line 229 — BEFORE the second `with httpx.Client(...)` block opens. Closes the gap between the brief's "key dies with it" forward-secrecy claim and actual code behavior. One-line move; no functional change.
+
+### Fix 2 [MEDIUM] — drop body fallback in drain hook preview
+`.claude/hooks/user-prompt-submit-confirm.py:347` — current `preview = (row.get("body_preview") or row.get("body") or "")` falls back to raw `body` if daemon omits `body_preview`. Brief §6 says "NEVER include body if it could carry sensitive content" — fallback contradicts that for ratify_required messages with structured payload (capital allocation, counterparty name, decision text).
+
+**Fix:** Drop the `row.get("body")` fallback: `preview = (row.get("body_preview") or "")`. If body_preview is absent, emit placeholder `"(preview unavailable)"`. Truncation at line 349 stays.
+
+### Fix 3 [MEDIUM] — parse daemon error response as JSON, surface only `error` field
+`baker_mcp/baker_mcp_server.py:1228, 1272` — error returns use `resp.text[:400]` raw. Daemon errors are JSON-structured today, but if daemon ever logs request context in error body (session_id, worker_slug fragments), that reaches LLM via MCP tool response.
+
+**Fix:** Parse error body as JSON; surface only the `error` field with fallback to truncated raw text only on JSON parse failure. Pattern:
+```python
+try:
+    err = resp.json().get("error", resp.text[:80])
+except (ValueError, KeyError):
+    err = resp.text[:80]
+```
+Apply at all 3 error-return sites in `baker_mcp_server.py` MCP tool dispatchers.
+
+### Tests
+- Add: `del privkey`-already-gone assertion at the line immediately following the sign() call (introspection-based unit test)
+- Add: drain-preview test where daemon response omits `body_preview` → assert placeholder is emitted, not raw body
+- Add: MCP tool error-path test where daemon returns 4xx with structured JSON → assert `error` field surfaces only, no raw body in tool response
+
+### LOW findings (non-blocking, follow-ups)
+- L1 confirms architect N1 (Surface 6 race) — LOW per code-reviewer; partial unique index recommended; **filed as pre-cutover follow-up** (separate small commit before BRISEN_LAB_V2_ENABLED=true flip)
+- L2 confirms N3 (JWT in additionalContext, bounded leak) — accept-as-is per Director call (60s TTL + single-use jti + worker_slug-bound; Cowork transcript window non-load-bearing)
+- L3 test assertion looseness on `test_uncaught_exception_in_main_still_exits_zero` — fix optional, document or tighten as time permits
+
+### Path forward
+1. Apply 3 fixes on b4 branch (baker-master PR #157)
+2. Re-run live pytest GREEN both sides (baker-master + brisen-lab unchanged from `e6fd4c3`)
+3. Ship via PL paste-block per SKILL.md §"PL ship-report contract"
+4. Re-fire focused gate chain on diff: AH2 static + /security-review + architect spot-check + feature-dev:code-reviewer 2nd-pass (per SKILL.md `59f23c4` standing rule on substantive Tier-B PR fix-ups)
+5. After clear: cross-repo merge brisen-lab #2 FIRST → baker-master #157 → file Surface 6a partial unique index → BRISEN_LAB_V2_ENABLED=true Tier-B cutover
+
+### Heartbeat
+Continue 12h cadence per binding 2026-05-05.
+
+### Anchor
+gate 4 code-reviewer agent `a07ab8c0a75168417` 2026-05-05; architect N1+N2+N3 2026-05-05; AH2 /security-review PASS 2026-05-05; harness-gap symlink fix `6703be8` 2026-05-05.
