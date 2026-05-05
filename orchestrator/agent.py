@@ -30,6 +30,41 @@ _AGENTIC_RAG = os.getenv("BAKER_AGENTIC_RAG", "false").lower() == "true"
 # If the agent loop exceeds this, we abandon and fall back to single-pass.
 AGENT_TIMEOUT_SECONDS = float(os.getenv("BAKER_AGENT_TIMEOUT", "30"))
 
+# BAKER-PROMPT-CACHING-1: Anthropic prompt-caching kill switch.
+# Disabled path returns plain string + tools list (no cache_control), so
+# Gemini callers and any future non-Anthropic adapter remain compatible.
+PROMPT_CACHE_ENABLED = os.getenv("BAKER_PROMPT_CACHE_ENABLED", "true").lower() == "true"
+
+
+def _build_cached_system_and_tools(system_prompt, tools, model):
+    """BAKER-PROMPT-CACHING-1: Wrap system prompt + tools with ephemeral
+    cache_control for Anthropic models. Skips wrapping when caching is
+    disabled or the active client is the Gemini adapter (which 400s on
+    Anthropic-shaped system blocks).
+
+    Returns (system_value, tools_value):
+      - system_value: list[dict] (cached) or str (passthrough)
+      - tools_value: list[dict] with cache_control on the LAST entry, or
+        the original tools (passthrough)
+    """
+    from orchestrator.gemini_client import is_gemini_model
+    if not PROMPT_CACHE_ENABLED or is_gemini_model(model):
+        return system_prompt, tools
+    system_value = [{
+        "type": "text",
+        "text": system_prompt,
+        "cache_control": {"type": "ephemeral"},
+    }]
+    if tools:
+        tools_value = list(tools)
+        tools_value[-1] = {
+            **tools_value[-1],
+            "cache_control": {"type": "ephemeral"},
+        }
+    else:
+        tools_value = tools
+    return system_value, tools_value
+
 
 # ─────────────────────────────────────────────────
 # Tool Definitions (Anthropic format)
@@ -2151,11 +2186,15 @@ def _force_synthesis(claude_client, model: str, system_prompt: str,
             "Do not attempt any more searches — synthesize what you have."
         ),
     }]
+    # BAKER-PROMPT-CACHING-1: synthesis path benefits from already-warm
+    # cache entry written by the main agent loop. Reuse the same helper so
+    # we cache the static prefix consistently and skip on Gemini.
+    system_value, _ = _build_cached_system_and_tools(system_prompt, None, model)
     try:
         response = claude_client.messages.create(
             model=model,
             max_tokens=max_tokens,
-            system=system_prompt,
+            system=system_value,
             messages=synth_messages,
             # NO tools — forces text-only response
         )
@@ -2247,20 +2286,29 @@ def run_agent_loop(
                 elapsed_ms=int((time.time() - t0) * 1000),
             )
 
+        # BAKER-PROMPT-CACHING-1: cache static system prompt + tools.
+        _system_value, _tools_value = _build_cached_system_and_tools(
+            system_prompt, AGENT_TOOLS, config.claude.model)
         response = claude.messages.create(
             model=config.claude.model,
             max_tokens=2048,
-            system=system_prompt,
+            system=_system_value,
             messages=messages,
-            tools=AGENT_TOOLS,
+            tools=_tools_value,
         )
 
         total_in += response.usage.input_tokens
         total_out += response.usage.output_tokens
 
-        # PHASE-4A: Log API cost
+        # PHASE-4A: Log API cost.
+        # BAKER-PROMPT-CACHING-1: capture cache token fields when present
+        # (Anthropic SDK populates them only when cache_control is sent).
+        _cache_create = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+        _cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
         log_api_cost(config.claude.model, response.usage.input_tokens,
-                     response.usage.output_tokens, source="agent_loop")
+                     response.usage.output_tokens, source="agent_loop",
+                     cache_creation_input_tokens=_cache_create,
+                     cache_read_input_tokens=_cache_read)
 
         # Check stop reason
         if response.stop_reason == "end_turn":
@@ -2496,20 +2544,28 @@ def run_agent_loop_streaming(
         # (streaming with tools is tricky — partial tool_use blocks)
         _model = model_override or config.claude.model
         _max_tok = max_tokens_override or 4096
+        # BAKER-PROMPT-CACHING-1: cache static system prompt + tools.
+        _system_value, _tools_value = _build_cached_system_and_tools(
+            system_prompt, AGENT_TOOLS, _model)
         response = claude.messages.create(
             model=_model,
             max_tokens=_max_tok,
-            system=system_prompt,
+            system=_system_value,
             messages=messages,
-            tools=AGENT_TOOLS,
+            tools=_tools_value,
         )
 
         total_in += response.usage.input_tokens
         total_out += response.usage.output_tokens
 
-        # PHASE-4A: Log API cost
+        # PHASE-4A: Log API cost.
+        # BAKER-PROMPT-CACHING-1: capture cache token fields.
+        _cache_create = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+        _cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
         log_api_cost(_model, response.usage.input_tokens,
-                     response.usage.output_tokens, source="agent_loop_streaming")
+                     response.usage.output_tokens, source="agent_loop_streaming",
+                     cache_creation_input_tokens=_cache_create,
+                     cache_read_input_tokens=_cache_read)
 
         if response.stop_reason == "end_turn":
             # Stream the final text to client
