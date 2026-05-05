@@ -70,3 +70,51 @@ Files (in merge):
 - A7 honest scope: matter_slug attribution for `capability_runner` only; pipeline + agent_loop pass-through `None` is acceptable (~95% `[unattributed]` day-one expected); follow-up brief stub `BRIEF_PIPELINE_MATTER_RESOLUTION_1.md` opens the gap visibly
 
 **Anchor:** Director ratification 2026-05-05 ("go" after compare-and-contrast of code-side vs app-side architect verdicts); brief commit `d086c8d`; AH2 busy-check confirmed B2 effectively idle 2026-05-05.
+
+---
+
+## GATE-4 2nd-pass UPDATE — 2026-05-05 (fold before merge)
+
+**Source:** feature-dev:code-reviewer 2nd-pass on PR #158 — verdict PASS-WITH-NITS-FOLD-NEEDED. 1 HIGH (real runtime crash on cost dashboard endpoint) + 1 MED (zero-warning-window on critical tier). Same fold-pre-merge pattern as B1/B4.
+
+### H1 — FOLD REQUIRED — SQL INTERVAL parameterization crash in get_cost_history / get_capability_costs
+
+File: `orchestrator/cost_monitor.py`
+Lines: 334 (get_cost_history) + 386 (get_capability_costs)
+
+Issue: Both queries use `INTERVAL '%s days'` with `(days,)` as a bound
+parameter. psycopg2 does NOT interpolate %s inside a SQL string literal — the
+interval string is sent verbatim as `'%s days'` to PostgreSQL, which is not a
+valid interval syntax and raises a runtime error. The cost dashboard endpoint
+and `get_cost_dashboard()` will 500 on every call.
+
+Fix (both sites):
+    Change: WHERE logged_at > NOW() - INTERVAL '%s days'
+    To:     WHERE logged_at > NOW() - (INTERVAL '1 day' * %s)
+
+Regression test: add `test_get_cost_history_interval_parameterization` to
+`tests/test_cost_alarms.py` using the existing `_Cursor` harness — assert
+cursor.queries[-1][0] contains `INTERVAL '1 day' * %s` and does NOT contain
+`INTERVAL '%s'`.
+
+### M1 — FOLD RECOMMENDED — critical tier threshold equals hard-stop (zero warning window)
+
+File: `orchestrator/cost_monitor.py`
+Lines: 45, 49
+
+Issue: Default `BAKER_COST_TIER_CRITICAL_EUR=100.0` == `BAKER_COST_HARD_STOP_EUR=100.0`.
+Critical alarm and hard-stop fire atomically on the same call; critical tier
+provides no advance warning.
+
+Fix: Change `BAKER_COST_TIER_CRITICAL_EUR` default from `"100.0"` to `"80.0"`.
+
+Regression test: add `test_critical_tier_below_hard_stop_by_default` asserting
+`cost_monitor.COST_TIERS[2][0] < cost_monitor.COST_HARD_STOP_EUR` when env
+vars are unset. Also update any test that hardcodes critical=100.
+
+**Path forward:**
+1. Apply H1+M1 on `b2/baker-cost-instrumentation-1` branch
+2. Add 2 regression tests (one per finding)
+3. Live pytest GREEN both sides (literal output — Lesson #52)
+4. Re-fire focused gate chain on diff only
+5. Report new HEAD SHA + gate verdicts back to PL
