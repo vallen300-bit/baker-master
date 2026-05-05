@@ -755,6 +755,143 @@ TOOLS = [
             "properties": {},
         },
     ),
+    # ----------------------------------------------------------------------
+    # Brisen Lab V2 bridge — message bus consumer-side tools (BRISEN_LAB_V2_BRIDGE_1)
+    # Brief: briefs/BRIEF_BRISEN_LAB_V2_BRIDGE_1.md §A7
+    # Daemon: brisen-lab.onrender.com (paired repo `vallen300-bit/brisen-lab`)
+    # Auth: X-Terminal-Key header from BRISEN_LAB_TERMINAL_KEY env (per-worker scoped)
+    # Fail-open: when V2 endpoints return 503 (BRISEN_LAB_V2_ENABLED=false on daemon),
+    # tools return a paste-block fallback marker per AC6 instead of raising.
+    # ----------------------------------------------------------------------
+    Tool(
+        name="baker_inbox_post",
+        description=(
+            "Post a message to the Brisen Lab V2 message bus. "
+            "Posts as `from_terminal` = caller's terminal slug (BAKER_ROLE env). "
+            "Recipients are the `to` array; `kind` is one of dispatch / broadcast / "
+            "ratify_required / ratify_decision. For `ratify_required`, set "
+            "`tier_required` (B / A / director_only); the daemon validates it against "
+            "the topic→tier classification and rejects HTTP 400 if downgraded. "
+            "For `ratify_decision`, supply `parent_id` (the ratify_required msg id) AND "
+            "`human_confirmation_token` (JWT from /auth/human-confirmation). "
+            "Returns the daemon's response (msg_id, thread_id, etc.) or a paste-block "
+            "fallback marker when V2 is disabled."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "to": {
+                    "anyOf": [
+                        {"type": "array", "items": {"type": "string"}},
+                        {"type": "string"},
+                    ],
+                    "description": "Recipient terminal slug(s). Single string coerced to 1-element list.",
+                },
+                "kind": {
+                    "type": "string",
+                    "enum": ["dispatch", "broadcast", "ratify_required", "ratify_decision"],
+                    "description": "Message kind per brief §3 schema.",
+                },
+                "topic": {
+                    "type": "string",
+                    "description": "Optional topic prefix, e.g. 'cortex/aukera/cycle-f7795012'.",
+                },
+                "body": {
+                    "type": "string",
+                    "description": "Message body (string; structured payloads serialized by caller).",
+                },
+                "parent_id": {
+                    "type": "integer",
+                    "description": "Parent message id (required for kind=ratify_decision; otherwise reply linkage).",
+                },
+                "thread_id": {
+                    "type": "string",
+                    "description": "Optional thread UUID (daemon assigns if omitted).",
+                },
+                "tier_required": {
+                    "type": "string",
+                    "enum": ["B", "A", "director_only"],
+                    "description": "Required only for kind=ratify_required (defaults to B; daemon-validated against topic classification).",
+                },
+                "human_confirmation_token": {
+                    "type": "string",
+                    "description": "JWT from POST /auth/human-confirmation (required for kind=ratify_decision).",
+                },
+                "from_terminal": {
+                    "type": "string",
+                    "description": "Override caller terminal slug (defaults to $BAKER_ROLE lower-cased; useful for cowork→cowork-ah1 mapping).",
+                },
+            },
+            "required": ["to", "kind", "body"],
+        },
+    ),
+    Tool(
+        name="baker_inbox_read",
+        description=(
+            "Read the caller's inbox from the Brisen Lab V2 message bus. "
+            "Returns messages where the caller's terminal slug is in `to_terminals` "
+            "and `acknowledged_at IS NULL`. Does NOT ack — call `baker_inbox_ack` "
+            "after processing each consumed message (NM3: workers cannot write the "
+            "DB directly). Filters: `since` (ISO timestamp), `kind`, `topic` "
+            "(prefix LIKE), `exclude_self` (drop messages from this terminal). "
+            "Fail-open: returns empty list with a fallback notice when V2 disabled."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "terminal": {
+                    "type": "string",
+                    "description": "Terminal slug to read inbox for (defaults to $BAKER_ROLE lower-cased).",
+                },
+                "since": {
+                    "type": "string",
+                    "description": "Optional ISO timestamp filter (created_at > since).",
+                },
+                "kind": {
+                    "type": "string",
+                    "description": "Optional kind filter.",
+                },
+                "topic": {
+                    "type": "string",
+                    "description": "Optional topic prefix filter.",
+                },
+                "exclude_self": {
+                    "type": "boolean",
+                    "description": "If true, drop messages where from_terminal == this terminal (Cortex peer/self-read filter).",
+                    "default": False,
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max rows (default 50; daemon caps preview at 8K bytes per row).",
+                    "default": 50,
+                },
+            },
+        },
+    ),
+    Tool(
+        name="baker_inbox_ack",
+        description=(
+            "Ack a consumed inbox message via POST /msg/<id>/ack. NM3: this is the "
+            "sole authoritative path to set `acknowledged_at`; workers do NOT have "
+            "direct DB write access. Call once per message id after processing. "
+            "Idempotent on the daemon side (re-ack returns 200). Fail-open: silent "
+            "no-op when V2 disabled (drain side stays cheap)."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "msg_id": {
+                    "type": "integer",
+                    "description": "Message id from baker_inbox_read.",
+                },
+                "msg_ids": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Bulk ack: list of message ids (alternative to msg_id; both NOT both).",
+                },
+            },
+        },
+    ),
 ]
 
 
@@ -987,6 +1124,199 @@ def _baker_health_via_loopback() -> str:
         parts.append(f"Vault mirror sha: {str(data['vault_mirror_commit_sha'])[:12]}")
     parts.append(f"Timestamp: {data.get('timestamp', '?')}")
     return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Brisen Lab V2 bridge helpers — message bus consumer-side (BRISEN_LAB_V2_BRIDGE_1)
+# ---------------------------------------------------------------------------
+
+def _brisen_lab_url() -> str:
+    """Brisen Lab daemon base URL; override via BRISEN_LAB_URL env."""
+    return os.getenv("BRISEN_LAB_URL", "https://brisen-lab.onrender.com").rstrip("/")
+
+
+def _brisen_lab_terminal_key() -> str:
+    """Per-worker terminal-key for X-Terminal-Key header.
+
+    Lookup order:
+      1. BRISEN_LAB_TERMINAL_KEY (preferred — set by 1Password run wrapper)
+      2. empty string (caller will get 401 from daemon — surface clearly)
+    """
+    return os.getenv("BRISEN_LAB_TERMINAL_KEY", "")
+
+
+def _brisen_lab_caller_terminal() -> str:
+    """Caller's terminal slug for from_terminal / inbox-read paths.
+
+    Lookup order:
+      1. BAKER_ROLE env (lower-cased; matches role-context filenames)
+      2. "cowork" fallback (Cowork Claude.ai App default — no terminal harness)
+    """
+    role = os.getenv("BAKER_ROLE", "").strip().lower()
+    return role or "cowork"
+
+
+def _brisen_lab_paste_block_fallback(operation: str, payload: dict) -> str:
+    """AC6 fallback marker — when V2 endpoints return 503 (BRISEN_LAB_V2_ENABLED=false).
+
+    Returns a paste-block-shaped string the caller can copy to Director for manual
+    relay. Per brief §AC6: paste-block-via-Director fallback works when flag OFF or
+    worker unreachable.
+    """
+    return (
+        f"[brisen-lab v2 disabled — paste-block fallback]\n"
+        f"operation: {operation}\n"
+        f"from_terminal: {_brisen_lab_caller_terminal()}\n"
+        f"payload: {json.dumps(payload, default=_json_serial, indent=2)}\n"
+        f"# Director: relay this manually until BRISEN_LAB_V2_ENABLED=true on daemon."
+    )
+
+
+def _brisen_lab_post_via_http(args: dict) -> str:
+    """POST /msg/<from_terminal> on the Brisen Lab daemon.
+
+    Fail-open semantics:
+      - HTTP 503 → paste-block fallback marker (V2 disabled state)
+      - HTTP 4xx → loud error string (caller's bug; surface)
+      - Network/timeout → loud error string
+      - HTTP 200 → daemon JSON response stringified
+    """
+    to = args.get("to")
+    kind = args.get("kind")
+    body = args.get("body")
+    if not to or not kind or body is None:
+        return "Error: to, kind, body are required"
+    if isinstance(to, str):
+        to = [to]
+    if not isinstance(to, list) or not all(isinstance(x, str) for x in to):
+        return "Error: to must be a string or list of strings"
+
+    payload: dict = {
+        "to_terminals": to,
+        "kind": kind,
+        "body": body,
+    }
+    if args.get("topic"):
+        payload["topic"] = args["topic"]
+    if args.get("parent_id") is not None:
+        payload["parent_id"] = args["parent_id"]
+    if args.get("thread_id"):
+        payload["thread_id"] = args["thread_id"]
+    if args.get("tier_required"):
+        payload["tier_required"] = args["tier_required"]
+
+    from_terminal = args.get("from_terminal") or _brisen_lab_caller_terminal()
+    url = f"{_brisen_lab_url()}/msg/{from_terminal}"
+    headers = {
+        "X-Terminal-Key": _brisen_lab_terminal_key(),
+        "Content-Type": "application/json",
+    }
+    if args.get("human_confirmation_token"):
+        headers["X-Human-Confirmation-Token"] = args["human_confirmation_token"]
+
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.post(url, json=payload, headers=headers)
+    except httpx.TimeoutException:
+        return f"Error: brisen-lab POST timed out after 15s ({url})"
+    except Exception as e:
+        return f"Error: brisen-lab POST failed: {e}"
+
+    if resp.status_code == 503:
+        return _brisen_lab_paste_block_fallback("post", payload)
+    if resp.status_code >= 400:
+        return f"Error: brisen-lab POST returned HTTP {resp.status_code}: {resp.text[:400]}"
+    try:
+        data = resp.json()
+    except Exception:
+        return f"OK (non-JSON response): {resp.text[:200]}"
+    return json.dumps(data, default=_json_serial, indent=2)
+
+
+def _brisen_lab_read_via_http(args: dict) -> str:
+    """GET /msg/<terminal> on the Brisen Lab daemon.
+
+    Fail-open: 503 returns empty list with fallback notice; loud on other errors.
+    """
+    terminal = args.get("terminal") or _brisen_lab_caller_terminal()
+    params: dict = {}
+    if args.get("since"):
+        params["since"] = args["since"]
+    if args.get("kind"):
+        params["kind"] = args["kind"]
+    if args.get("topic"):
+        params["topic"] = args["topic"]
+    if args.get("exclude_self"):
+        params["exclude_self"] = "true"
+    try:
+        limit = int(args.get("limit", 50))
+    except (TypeError, ValueError):
+        limit = 50
+    limit = max(1, min(limit, 200))
+    params["limit"] = limit
+
+    url = f"{_brisen_lab_url()}/msg/{terminal}"
+    headers = {"X-Terminal-Key": _brisen_lab_terminal_key()}
+
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get(url, params=params, headers=headers)
+    except httpx.TimeoutException:
+        return f"Error: brisen-lab GET timed out after 15s ({url})"
+    except Exception as e:
+        return f"Error: brisen-lab GET failed: {e}"
+
+    if resp.status_code == 503:
+        return f"[brisen-lab v2 disabled — empty inbox returned for {terminal}]"
+    if resp.status_code >= 400:
+        return f"Error: brisen-lab GET returned HTTP {resp.status_code}: {resp.text[:400]}"
+    try:
+        data = resp.json()
+    except Exception:
+        return f"Error: brisen-lab GET non-JSON response: {resp.text[:200]}"
+
+    rows = data if isinstance(data, list) else data.get("messages") or data.get("rows") or []
+    if not rows:
+        return f"Inbox empty for {terminal} (filters: {json.dumps({k: v for k, v in params.items() if k != 'limit'})})"
+    return json.dumps(rows, default=_json_serial, indent=2)
+
+
+def _brisen_lab_ack_via_http(args: dict) -> str:
+    """POST /msg/<id>/ack for one or many message ids (NM3: sole authoritative ack path)."""
+    msg_id = args.get("msg_id")
+    msg_ids = args.get("msg_ids") or []
+    if msg_id is not None:
+        msg_ids = [msg_id]
+    if not msg_ids:
+        return "Error: msg_id or msg_ids is required"
+    if not all(isinstance(x, int) for x in msg_ids):
+        return "Error: msg_ids must be integers"
+
+    headers = {"X-Terminal-Key": _brisen_lab_terminal_key()}
+    base = _brisen_lab_url()
+
+    results: list[dict] = []
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            for mid in msg_ids:
+                url = f"{base}/msg/{mid}/ack"
+                try:
+                    resp = client.post(url, headers=headers)
+                except httpx.TimeoutException:
+                    results.append({"msg_id": mid, "status": "timeout"})
+                    continue
+                except Exception as e:
+                    results.append({"msg_id": mid, "status": "error", "error": str(e)[:120]})
+                    continue
+                if resp.status_code == 503:
+                    # Drain side fail-open: silent no-op + record
+                    results.append({"msg_id": mid, "status": "v2_disabled"})
+                    continue
+                results.append({"msg_id": mid, "status": resp.status_code})
+    except Exception as e:
+        return f"Error: brisen-lab ack loop failed: {e}"
+
+    return json.dumps({"acked": results}, default=_json_serial, indent=2)
 
 
 def _dispatch(name: str, args: dict) -> str:
@@ -1563,6 +1893,15 @@ def _dispatch(name: str, args: dict) -> str:
 
     elif name == "baker_health":
         return _baker_health_via_loopback()
+
+    elif name == "baker_inbox_post":
+        return _brisen_lab_post_via_http(args)
+
+    elif name == "baker_inbox_read":
+        return _brisen_lab_read_via_http(args)
+
+    elif name == "baker_inbox_ack":
+        return _brisen_lab_ack_via_http(args)
 
     else:
         return f"Unknown tool: {name}"
