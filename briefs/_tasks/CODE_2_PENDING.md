@@ -35,7 +35,27 @@ Files (in merge):
 
 ---
 
-# CODE_2_PENDING — BRIEF_BAKER_COST_INSTRUMENTATION_1 — 2026-05-05
+---
+status: COMPLETE
+brief: briefs/BRIEF_BAKER_COST_INSTRUMENTATION_1.md
+trigger_class: TIER_A_DB_SCHEMA_PLUS_COST_TRACKING
+dispatched_at: 2026-05-05
+dispatched_by: ai-head-a-pl
+claimed_by: b2
+ship_report: briefs/_reports/B2_cost_instrumentation_20260505.md
+gate_chain_initial: pytest GREEN 67/67 + AH2 /security-review PASS-WITH-NITS (5 NITs non-blocking) + Architect PASS + feature-dev:code-reviewer PASS-WITH-NITS-FOLD-NEEDED → fold H1+M1 → re-fired gates 1+3+4 PASS on fold diff (parallel Terminal architect + code-reviewer agents) + AH2 gate-2 re-fire PASS on fold diff (comment 4383029994)
+fold_commit: 55d2ad19
+mergeconflict_resolution_spec_commit: eb3d6293
+merge_commit_b2_branch: 6e3bb51c (true merge against origin/main 46c5b1a)
+merged_at: 2026-05-05T~21:XXZ
+merge_commit: 4b457b2ec32b24249f10ed02a934910217b599ae
+pr: 158
+verdict: PASS
+follow_ups: B1 NITs (N1+N5 → cost-control-runbook rollout note; N2/N3/N4 → scaling-followups stub) pending; sweep brief 1553b6e dispatch to next idle B-code pending
+autopoll_eligible: false
+---
+
+# CODE_2_PENDING — BRIEF_BAKER_COST_INSTRUMENTATION_1 — 2026-05-05 (COMPLETE)
 
 **Brief:** baker-master `briefs/BRIEF_BAKER_COST_INSTRUMENTATION_1.md` (Tier A, ~2 days, 10 ACs)
 **Working branch:** `b2/baker-cost-instrumentation-1`
