@@ -1218,5 +1218,299 @@ That's the handover point to Phase 1.
 - AH2 outline drafted 2026-05-05 (this file's predecessor at same path)
 - AH1 `/write-brief` SOP run 2026-05-05 (EXPLORE → PLAN → WRITE — this revision)
 - Director-resolved blockers (skill path / companion files / slug / Aukera framing / Weippert spelling) 2026-05-05
-- Director ratification: PENDING this brief
-- B-code dispatch: PENDING Director ratification + slugs.yml merge
+- Director ratification: 2026-05-05 — initial brief ratified
+- V0.2 amendment (researcher + Anthropic financial-services templates fold) — appended below; Director-ratified 2026-05-05
+- B-code dispatch: PENDING slugs.yml merge
+
+---
+
+# V0.2 Amendment — Researcher + Anthropic Financial-Services Templates Fold (2026-05-05)
+
+> **Status:** Director-ratified 2026-05-05.
+> **Triggered by:** (1) Researcher pass `wiki/research/2026-05-05-ben-aicfo-skillset-brisen-desk-design.md`; (2) Anthropic financial-services agent templates released 2026-05-05 (https://www.anthropic.com/news/finance-agents).
+> **Net effect:** Adds 5 Anthropic skill-vertical invocations + 11 Brisen tool-skills to BEN's §6.1; defines 4 v1 gap-stubs (cap-table / covenant-tracker / waterfall-modeler / MaBV) in §6.2; expands §4 with 11 ranked artefacts P1/P2/P3; adds Steuerberater monthly close workflow as §6.4; adds 3 new rows to authority-boundary-table.md.
+
+## Amendment §A — additional Prerequisites (Director-side, NOT B-code lane)
+
+Before B1 dispatch:
+1. Director or AH1 installs Anthropic financial-services skill verticals via Claude Code:
+   ```bash
+   claude plugin marketplace add anthropics/claude-for-financial-services
+   claude plugin install financial-analysis@claude-for-financial-services
+   claude plugin install fund-admin@claude-for-financial-services
+   ```
+   **Do NOT install** `month-end-closer`, `gl-reconciler`, `valuation-reviewer`, or any other agent-wrapper plugin — those assume MCP data connectors (Daloopa / S&P Global / FactSet / Morningstar) Brisen does not subscribe to. We use the underlying skills only.
+2. Verify install: `claude plugin list | grep financial-services` — expect 2 plugins active.
+3. Skills now available to BEN at runtime: `accruals`, `roll-forwards`, `variance-commentary`, `pptx-author`, `xlsx-author`, plus the broader `financial-analysis` skill catalog.
+
+## Amendment §B — extended Feature 1: authority-boundary-table.md
+
+Add 3 new rows to the table created in Feature 1 (insert after row 14):
+
+| # | Function | Drafts | Coordinates | Ratifies | Executes / Signs |
+|---|---|---|---|---|---|
+| 15 | MaBV / Bauträgerverordnung Kaufpreis-tranche approval (HARD-BLOCK with Director override) | BEN | BEN | Director (override required to bypass) | Conrad executes payment per Director-ratified row |
+| 16 | Pre-mortem on Aukera facility (cadence: 6-monthly + on entry to <30% covenant headroom) | BEN | BEN | Director (reviews) | n/a |
+| 17 | Cap-table reconciliation (Lilienmatt + MRCI; Handelsregister + internal records + Notar; monthly) | BEN | BEN | Director (reviews drift) | Christophe Buchwalder + Christian Merz amend per Director-ratified items |
+
+After these additions, total table is 17 rows. Status remains `draft v0 — awaiting Director ratification`.
+
+## Amendment §C — extended Feature 1: covenants/README.md
+
+Replace the body of `wiki/_finance/baden-baden/covenants/README.md` created in Feature 1 with the following (frontmatter unchanged):
+
+```markdown
+# covenants/
+
+Covenant tracking + covenant-report drafts.
+
+**Status as of 2026-05-05:** Aukera facility on Annaberg is in active negotiation — Term Sheet under discussion, contract terms being negotiated, Brisen + AO restructuring Lilienmatt + MRCI cap tables to satisfy Aukera preconditions for closure. **No active loan facility today; no active covenants today.** This folder is forward-looking.
+
+**Placeholder covenant grid (until real grid loaded post-close):** BEN's covenant-tracker v1 stub uses standard German senior-debt covenant types as placeholder design — DSCR (Debt Service Coverage Ratio), LTV (Loan-to-Value), ICR (Interest Coverage Ratio), cash-trap thresholds. **Real Aukera grid arrives at facility close from Baden-Baden Desk** (handoff via `_inbox/handoff-baden-baden-desk-to-bb-finance-aukera-grid.md`). On receipt: BEN replaces placeholder grid; covenant-tracker v1 stub graduates from placeholder to live tracker.
+
+**On closure:** BEN drafts covenant reports (authority table row 2); Director ratifies; Conrad signs and sends.
+
+**Pre-mortem cadence (authority table row 16):** 6-monthly + on entry to <30% headroom.
+```
+
+## Amendment §D — extended Feature 2: SKILL.md
+
+The SKILL.md content created in Feature 2 is extended with the following sections. **Insert at the locations specified below.**
+
+### §D.1 — Replace §4.1 Drafting (researcher's 11-artefact ranked list)
+
+The Feature 2 SKILL.md §4.1 currently has prose bullets. Replace those bullets with the following ranked list:
+
+```markdown
+### §4.1 Drafting
+
+BEN's drafting catalog is **11 artefacts ranked P1 / P2 / P3**, sequenced v1 (Phase 0 — Week 1-2) → v2 (Phase 1 — month 2-3) → v3 (Phase 2 — month 3+).
+
+**P1 — v1 stubs ship with Phase 0 (Week 1-2):**
+
+1. **13-week rolling cash forecast** — across MRCI + Lilienmatt; from Sparkasse statements + commitment register; weekly refresh. Invokes: `back-of-envelope-math`, `scenario-planning`. Custom-build (P1 v1 stub).
+2. **Covenant headroom tracker** — placeholder DSCR / LTV / ICR / cash-trap grid (Aukera facility forward-looking; real grid arrives post-close from Baden-Baden Desk). Invokes: `back-of-envelope-math`. Custom-build (P1 v1 stub — see §6.2 Gap #2).
+3. **Cap-table snapshot + dilution scenarios** — Lilienmatt + MRCI; reconcile Handelsregister + internal records + Notar; monthly cycle. Invokes: `scenario-planning`, `analog-library`. Custom-build (P1 v1 stub — see §6.2 Gap #1).
+4. **Annaberg unit-by-unit closing waterfall** — per-closure cash booking + capex-delta handoff to MOVIE Desk. Invokes: `back-of-envelope-math`. Custom-build (P1 v1 stub — see §6.2 Gap #3).
+
+**P2 — v2 ships with Phase 1 (month 2-3):**
+
+5. **Standardized monthly close pack** — using Anthropic skills `accruals` + `roll-forwards` + `variance-commentary` (installed via `fund-admin@claude-for-financial-services`). Output: BWA + SuSa + OPOS reconciled; variance commentary; Director board pack.
+6. **Quarterly covenant report (when Aukera facility live)** — pre-template ready; activates on facility close.
+7. **Vendor-variance dashboard** — every invoice >20% over budget logged + flagged; cumulative variance per vendor.
+8. **Tax-pack coordination memo** — annual; coordinates russo-de (tax positions) + Weippert (filings) + Director (ratification).
+
+**P3 — v3 ships with Phase 2 (month 3+):**
+
+9. **Sensitivity analysis on Aukera covenant headroom** — bull/base/bear at facility live. Invokes: `scenario-planning`, `pre-mortem`.
+10. **IRR + NPV per Annaberg unit closure** — informs sale-velocity / pricing decisions. Invokes: `back-of-envelope-math`, `scenario-planning`.
+11. **Scenario planning bull/base/bear on sale velocity** — tied to MOVIE Desk capex window. Invokes: `scenario-planning`, `time-horizon-filter`.
+
+**Plus 4 v1 stub gap-files (see §6.2):** cap-table-modeler, covenant-tracker, waterfall-modeler, mabv-tracker.
+```
+
+### §D.2 — Insert §6.1 Applied skills (after existing §6 communication subsections)
+
+Add the following new subsection after the existing §6.3:
+
+```markdown
+### §6.4 Applied skills — invoke aggressively by default
+
+BEN invokes the following skills as part of standard drafting work, without prompting. Mirrors Brisen Desk §6.1 pattern.
+
+**From Brisen vault (`~/.claude/skills/`):**
+1. `back-of-envelope-math` — sanity checks on every cash / model / variance number
+2. `scenario-planning` — 13-week cash forecast / sale velocity / Aukera headroom
+3. `pre-mortem` — Aukera facility entry + every 6 months + on <30% headroom (authority row 16)
+4. `kill-criteria-definer` — when to walk from a project / facility / deal
+5. `counterparty-model` — Aukera negotiation + Weippert workflow + Sparkasse relationship
+6. `negotiation-prep` — Aukera Term Sheet contract-term review
+7. `ceo-decision-framing` — Director-facing memos on capital allocation
+8. `devils-advocate` — every staged Tier B artefact gets a counter-case before surface
+9. `decision-log` — every Director ratification logged with reasoning
+10. `time-horizon-filter` — separate signal from noise across multi-year project tails
+11. `analog-library` — cap-table dilution scenarios reference family-office / Bauträger analogues
+
+**Watch-list (invoke when triggered):**
+- `first-principles-reset` — quarterly evaluation of whether each Baden-Baden vehicle / project would be re-undertaken from zero today
+
+**From Anthropic financial-services (`~/.claude/plugins/financial-services/`):**
+12. `accruals` (from `fund-admin` vertical) — month-end accrual calculations
+13. `roll-forwards` (from `fund-admin`) — balance-sheet continuity schedules
+14. `variance-commentary` (from `fund-admin`) — auto-generated commentary on variance
+15. `pptx-author` (from `financial-analysis`) — Director board-pack formatting
+16. `xlsx-author` (from `financial-analysis`) — Excel-native deliverables for Conrad's workflow
+
+**Anti-pattern:** BEN does NOT invoke Anthropic agent wrappers (`month-end-closer`, `gl-reconciler`, `valuation-reviewer`, etc.). Those assume MCP data connectors Brisen doesn't have, and they bypass Director ratification. Skills only.
+```
+
+### §D.3 — Insert §6.5 Gaps + v1 stubs (after the new §6.4)
+
+```markdown
+### §6.5 Gaps + v1 stubs (4 gap-files BEN owns until promoted)
+
+No existing Brisen or Anthropic skill covers these 4 finance functions. BEN ships v1 stubs at install (Phase 0); promote to standalone skills only if reused beyond Baden-Baden (e.g., MOVIE-exit, Origination).
+
+**Gap #1 — `cap-table-modeler` (BEN-internal v1)**
+- Lilienmatt + MRCI dilution scenarios; reconciles Handelsregister + internal + Notar monthly (authority row 17).
+- Promote to `~/.claude/skills/cap-table-modeler/SKILL.md` if MOVIE-exit or Origination Desk needs it.
+
+**Gap #2 — `covenant-tracker` (BEN-internal v1)**
+- Standard German senior-debt covenant types as placeholder grid: DSCR / LTV / ICR / cash-trap. Real Aukera grid arrives at facility close.
+- Promote to standalone skill if reused beyond Aukera.
+
+**Gap #3 — `waterfall-modeler` (BEN-internal v1)**
+- Annaberg unit-by-unit closing waterfall; capex-delta handoff to MOVIE Desk per closure.
+- Promote to standalone skill if reused beyond Annaberg / Balgerstrasse.
+
+**Gap #4 — `mabv-tracker` (BEN-internal — KEEP BEN-specific)**
+- German Makler- und Bauträgerverordnung (MaBV) compliance tracker. Pre-tranche approval requires documented MaBV milestone (BR § 3 conditions: building permit, mortgage clearance, baseplate, frame, roof, etc.).
+- HARD-BLOCK on Director Kaufpreis-tranche approvals with Director override (authority row 15).
+- Bauträger-only relevance — keep BEN-specific; do NOT promote to standalone skill.
+
+**Implementation in Phase 0:** B-code creates 4 stub files at `wiki/_finance/baden-baden/_stubs/{cap-table-modeler,covenant-tracker,waterfall-modeler,mabv-tracker}.md` — each with frontmatter (`type: gap-stub-v1`, `owner: bb-finance`, `promote_to_skill_if: <criteria>`) + 1-paragraph description of what BEN drafts when invoking + named-template for output. Full implementation lands in Phase 1 (separate brief).
+```
+
+### §D.4 — Insert §6.6 Steuerberater workflow norms (after the new §6.5)
+
+```markdown
+### §6.6 Steuerberater workflow norms (German monthly close cycle)
+
+**Monthly close cycle (Day 1-20 of each month following close period):**
+- **Day 1-3** — Caroline Schreiner uploads source docs to DATEV-Unternehmen-Online for Klaus Weippert (`K.Weippert@wsjp.de`)
+- **Day 5-15** — Weippert books the period (postings, depreciations, accruals)
+- **Day 15-20** — Weippert delivers BWA (Betriebswirtschaftliche Auswertung) + SuSa (Summen- und Saldenliste) + OPOS (Offene Posten)
+- **Day 16-20** — BEN reconciles BWA/SuSa/OPOS against bank statements, vendor commitments, project budgets; flags variances; produces variance commentary (using Anthropic `variance-commentary` skill)
+- **Day 20** — Director board pack delivered (BEN draft → Director ratifies)
+
+**USt-VA (Umsatzsteuer-Voranmeldung):**
+- Filed on **10th of M+2** (Brisen has Dauerfristverlängerung — 1-month extension from default 10th of M+1)
+- Weippert files; BEN tracks compliance
+
+**§ 13b UStG watchpoint (reverse-charge for Bauleistungen):**
+- Bauträger generally **NOT** a § 13b debtor (sells finished real estate, doesn't provide construction services to others)
+- **EXCEPTION:** if a Bauträger ALSO provides continuous Bauleistungen as a separate business activity, § 13b applies
+- BEN runs **quarterly status check per GmbH** to confirm Bauträger-only status; flags any cross-activity
+- Reference: Bauträger erbringen keine Bauleistungen (stbv.tax)
+
+**Bauabzugsteuer (15% withholding on construction-service payments):**
+- Brisen withholds 15% from payments to Subunternehmer (subcontractors) UNLESS Subunternehmer presents valid **Freistellungsbescheinigung (FBSchein)**
+- BEN owns the **FBSchein register** per Subunternehmer — tracks expiry, flags renewals, ensures payments ≥€5K hold withholding when no valid FBSchein
+- Reference: Bauabzugssteuer Prüfschema (steuerschroeder.de)
+
+**Role split (Director-ratified 2026-05-05):**
+- **Caroline Schreiner** — mechanical doc logistics (DATEV uploads, source-doc handling, bank-transfer reviews)
+- **russo-de** — analytical (drafts German tax positions; Brisen-internal tax skill)
+- **Klaus Weippert** — booking + tax filings (Steuerberater)
+- **BEN** — financial CFO (analytical layer + reconciliation + reports + workflow coordination)
+- **Director** — ratification + payment execution
+```
+
+### §D.5 — Update §11 Authoring provenance
+
+Append to the existing §11 Authoring provenance block:
+
+```markdown
+- **V0.2 amendment 2026-05-05** — researcher + Anthropic financial-services templates fold:
+  - Researcher pass `wiki/research/2026-05-05-ben-aicfo-skillset-brisen-desk-design.md` (313 lines) — 11-artefact §4 list ranked P1/P2/P3; Brisen tool-skills mapping; 4 gap-files; Steuerberater workflow norms.
+  - Anthropic financial-services release 2026-05-05 (https://www.anthropic.com/news/finance-agents + https://github.com/anthropics/financial-services) — 5 skills folded into §6.4 (`accruals`, `roll-forwards`, `variance-commentary`, `pptx-author`, `xlsx-author` from `fund-admin` + `financial-analysis` verticals). Agent wrappers explicitly NOT used (assume MCP data connectors Brisen doesn't subscribe to + bypass Director ratification).
+  - Director ratification chain (chat 2026-05-05): 6 researcher Q's all ratified per AH1 recommendations (russo-de = analytical not ops; Tier A only; MaBV hard-block with override; pre-mortem 6-monthly + <30% headroom; cap-table SoT = Handelsregister + internal + Notar monthly; v1/v2/v3 sequencing). Plus Anthropic-skills-not-wrappers ratified.
+  - 3 new authority-table rows (15/16/17 — MaBV / pre-mortem cadence / cap-table reconciliation).
+  - 4 v1 gap-stubs (`_stubs/{cap-table-modeler,covenant-tracker,waterfall-modeler,mabv-tracker}.md`) ship with Phase 0; full v1 lands Phase 1.
+```
+
+## Amendment §E — extended Feature 2: LONGTERM.md seed
+
+Append to the LONGTERM.md content created in Feature 2 (after the Top 3 Day-1 open items):
+
+```markdown
+## Steuerberater monthly close cycle (added V0.2)
+- Day 1-3: Caroline uploads docs to DATEV-Unternehmen-Online
+- Day 5-15: Weippert books
+- Day 15-20: BWA / SuSa / OPOS delivered
+- Day 16-20: BEN reconciles + variance commentary
+- Day 20: Director board pack
+- USt-VA on 10th of M+2 (Dauerfristverlängerung)
+
+## Tax watchpoints (added V0.2)
+- § 13b UStG — Bauträger NOT debtor unless cross-activity (quarterly check per GmbH)
+- Bauabzugsteuer 15% — BEN owns FBSchein register per Subunternehmer
+
+## Role split (Director-ratified 2026-05-05; added V0.2)
+- Caroline = doc logistics
+- russo-de = tax analysis
+- Weippert = booking + filings
+- BEN = financial CFO
+- Director = ratification + payment
+
+## §4 Drafting catalog ranked P1/P2/P3 (added V0.2 — see SKILL.md §4.1)
+- P1 (Phase 0 v1): 13-week cash forecast, covenant tracker, cap-table snapshot, Annaberg waterfall
+- P2 (Phase 1 v2): monthly close pack (Anthropic skills), quarterly covenant report, vendor-variance dashboard, tax-pack memo
+- P3 (Phase 2 v3): Aukera headroom sensitivity, IRR/NPV per unit, sale-velocity scenarios
+
+## Skills BEN invokes by default (added V0.2 — see SKILL.md §6.4)
+- 11 Brisen tool-skills + 1 watch-list (first-principles-reset)
+- 5 Anthropic skills (accruals / roll-forwards / variance-commentary / pptx-author / xlsx-author)
+- 4 BEN-internal v1 gap-stubs (cap-table-modeler / covenant-tracker / waterfall-modeler / mabv-tracker)
+```
+
+## Amendment §F — additional files to create (extends "Files Modified" in Feature 2)
+
+**Created (NEW) — added by V0.2:**
+- `baker-vault/wiki/_finance/baden-baden/_stubs/cap-table-modeler.md` — Gap #1 v1 stub
+- `baker-vault/wiki/_finance/baden-baden/_stubs/covenant-tracker.md` — Gap #2 v1 stub
+- `baker-vault/wiki/_finance/baden-baden/_stubs/waterfall-modeler.md` — Gap #3 v1 stub
+- `baker-vault/wiki/_finance/baden-baden/_stubs/mabv-tracker.md` — Gap #4 v1 stub
+
+Each stub file frontmatter:
+```yaml
+---
+type: gap-stub-v1
+owner: bb-finance
+created: 2026-05-05
+promote_to_skill_if: <criteria specific to gap>
+---
+```
+
+Each stub file body: 1-paragraph description of the function + named template for output (B-code drafts the templates per §6.5 spec).
+
+**Total file count after V0.2:** 27 created (was 23) + 1 edited.
+
+## Amendment §G — updated Verification
+
+Add to the verification block in "Verification (file-existence)" section:
+
+```bash
+# 7. V0.2 amendment artefacts
+echo "--- V0.2 amendment checks ---"
+test -d wiki/_finance/baden-baden/_stubs && echo OK _stubs dir || echo MISSING
+for f in wiki/_finance/baden-baden/_stubs/{cap-table-modeler,covenant-tracker,waterfall-modeler,mabv-tracker}.md; do
+  test -f "$f" && echo "OK $f" || echo "MISSING $f"
+done
+echo "Anthropic skills installed (Director-side, before B1 dispatch):"
+claude plugin list 2>/dev/null | grep -E "financial-analysis|fund-admin" || echo "RUN: claude plugin install fund-admin@claude-for-financial-services && claude plugin install financial-analysis@claude-for-financial-services"
+
+# 8. Authority table extended to 17 rows
+grep -c "^| [0-9]" wiki/_finance/baden-baden/authority-boundary-table.md  # expect 17
+
+# 9. SKILL.md sections present
+grep -c "^### §6\.4 Applied skills" ~/.claude/skills/bb-finance/SKILL.md  # expect 1
+grep -c "^### §6\.5 Gaps + v1 stubs" ~/.claude/skills/bb-finance/SKILL.md  # expect 1
+grep -c "^### §6\.6 Steuerberater workflow norms" ~/.claude/skills/bb-finance/SKILL.md  # expect 1
+```
+
+## Amendment §H — updated risk
+
+Add to "Risks":
+- **Anthropic plugin install dependency** — V0.2 §A requires Director-side `claude plugin install` before B1 dispatch. If skipped, BEN's §6.4 Anthropic-skill invocations silently fail; BEN falls back to custom-build per artefact. Mitigation: §A install is a one-line bash; verify with `claude plugin list`. Adds 5-10 min to Director-side prerequisites.
+- **Anthropic agent wrappers banned** — V0.2 explicitly does NOT install month-end-closer / gl-reconciler / valuation-reviewer agents. If Director or AH1 installs them later inadvertently, BEN must NOT invoke them (skills-only rule per §6.4 anti-pattern). Mitigation: documented as anti-pattern in §6.4.
+
+## Amendment §I — sequencing summary (V0.2 final)
+
+1. Director or AH1 opens baker-vault PR for `slugs.yml` (`bb-finance` slug + aliases) — separate PR, merges first.
+2. Director or AH1 runs `claude plugin install fund-admin@claude-for-financial-services && claude plugin install financial-analysis@claude-for-financial-services` (Director-side, NOT B-code lane).
+3. AH1 dispatches B1 with this brief (V0.1 + V0.2 amendment) → B1 lands single baker-vault PR with all Phase 0 artefacts (lens folder + 7 sub-READMEs + authority-table v0 with 17 rows + 4 _stubs/ files + 9 wiki/people + 1 wiki/entities + 3 vault companion files) + 1 Cowork-side write (`~/.claude/skills/bb-finance/SKILL.md` with full §1-§11 + V0.2 §6.4 / §6.5 / §6.6 sections) + 1 baden-baden-desk SKILL cleanup edit.
+4. Director ratifies B1's PR; AH1 merges; BEN goes live.
+5. Director invokes BEN — first session walks 17-row authority table for ratification, then BEN populates initial cash position from Conrad's most recent weekly Excel.
+
+**End V0.2 amendment.**
