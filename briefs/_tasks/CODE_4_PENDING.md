@@ -64,5 +64,70 @@ No autonomous polling. Stop after ship report.
 
 ---
 
+## GATE-4 2nd-pass UPDATE — 2026-05-05 (fold pre-merge across both repos)
+
+**Source:** feature-dev:code-reviewer 2nd-pass on brisen-lab PR #3 + baker-master PR #161. Both = PASS-WITH-NITS-FOLD-NEEDED (1 MED each, no blockers). baker-vault PR #85 PL-reviewed manually = PASS clean (no fold needed). AH2 gate-2 security-review on PR #3 + PR #161 = PASS both (no findings).
+
+### MED-B4-1 — brisen-lab `bus.py` bare `except Exception` returns HTTP 400 for non-FK server errors
+
+File: `bus.py` (brisen-lab repo, branch `b4/brisen-lab-surface-6a-partial-unique-index-1`), `register_session_pubkey` handler, bare `except Exception` block immediately after the `UniqueViolation` catch.
+
+Issue: comment above says "FK violation → unknown worker_slug → surface 400," but the bare except catches *any* unexpected DB error (pool exhaustion, connection timeout, other constraints) and maps them to HTTP 400 `register_failed`. 400 signals client error; server-side failures should surface 500. Misleading observability under pool/timeout failures.
+
+Fix (one of):
+- Change `status_code=400` → `status_code=500` in the bare except.
+- Narrow the catch: `except psycopg2.errors.ForeignKeyViolation` returns 400; re-raise everything else as 500.
+
+Regression test: add a unit test mocking the cursor to raise a non-FK / non-Unique DB error (e.g. `psycopg2.errors.QueryCanceled`) and assert the response is 500, not 400.
+
+### MED-B4-2 — baker-master hook `_REGISTER_RETRY_JITTER_LO/HI` constants lack unit suffix
+
+File: `.claude/hooks/user-prompt-submit-confirm.py` (baker-master repo, branch `b4/baker-master-surface-6a-hook-retry-1`), constants block lines 65-66.
+
+Issue: `_REGISTER_RETRY_JITTER_LO = 0.05` and `_REGISTER_RETRY_JITTER_HI = 0.15` are passed directly to `time.sleep()` (seconds). Variable names lack a unit suffix; constants block comment says nothing about units. A future maintainer editing them assuming milliseconds would set values causing Claude startup to block ~2 minutes (50-150 *seconds*). Tests stub `time.sleep` so this would not be caught by the test suite.
+
+Fix: rename + add inline unit comment:
+
+```python
+# Before (lines 65-66):
+_REGISTER_RETRY_JITTER_LO = 0.05
+_REGISTER_RETRY_JITTER_HI = 0.15
+
+# After:
+_REGISTER_RETRY_JITTER_LO_S = 0.05  # seconds (50 ms)
+_REGISTER_RETRY_JITTER_HI_S = 0.15  # seconds (150 ms)
+```
+
+And update the call site (~lines 240-242):
+```python
+time.sleep(random.uniform(
+    _REGISTER_RETRY_JITTER_LO_S, _REGISTER_RETRY_JITTER_HI_S
+))
+```
+
+Regression test: not strictly needed (rename + comment); existing retry tests will continue to pass.
+
+### LOW non-blocking (not appended for fold)
+
+- LOW-B4-1 (brisen-lab tests): code-reviewer agent could not locate tests/ directory at the expected local path; per B4 ship report `40 passed, 1 skipped (Surface 6a tests = 4/4)`, file exists on branch.
+- LOW-B4-2 (baker-master test fixture): `hook_mod` fixture uses `scope="module"`; per-function `monkeypatch` of `hook_mod.time.sleep` could leak across tests in failure scenarios. Structural brittleness, not a present bug. Address in a future cleanup if it bites.
+
+**Path forward:**
+1. Apply MED-B4-1 on `b4/brisen-lab-surface-6a-partial-unique-index-1` (brisen-lab worktree at `~/bm-b4-brisen-lab/`)
+2. Apply MED-B4-2 on `b4/baker-master-surface-6a-hook-retry-1` (baker-master worktree at `~/bm-b4/`)
+3. Add regression test for MED-B4-1 (non-FK DB error → HTTP 500); MED-B4-2 needs no new test
+4. Live pytest GREEN both repos (literal output, Lesson #52)
+5. Re-fire focused gate chain on diffs only
+6. Report new HEAD SHAs back to PL → AH1 PL autonomous-merges in mandatory order: brisen-lab #3 → baker-master #161 → vault #85 (vault stays unchanged; ready to merge any time after).
+
+No autonomous polling. Stop after step 6 report.
+
+**Other gates state (for context):**
+- AH2 /security-review gate 2: PASS both PR #3 + PR #161 (no findings).
+- Architect spot-check gate 3: paste-blocks in Director hand; not yet relayed.
+- baker-vault PR #85: PL-reviewed PASS clean; no gate dispatch pending.
+
+---
+
 ## Prior CODE_4 task (archive reference)
 BRIEF_BRISEN_LAB_V2_BRIDGE_1 V0.3.7 — COMPLETE 2026-05-05. baker-master PR #157 squash-merged 2026-05-05T20:57:19Z (commit `57ab073`); brisen-lab PR #2 squash-merged 2026-05-05T20:57:08Z (commit `bc1e3e6`). All 4 gates cleared (B4 pytest + AH2 /security-review + architect + code-reviewer). `BRISEN_LAB_V2_ENABLED=false` stays on Render until Surface 6a (this brief) ships + Tier-B cutover Director-ratified. Mailbox hygiene rule applied — overwriting per `_ops/processes/b-code-dispatch-coordination.md` §3.
