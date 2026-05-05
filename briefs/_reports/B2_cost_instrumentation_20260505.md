@@ -173,3 +173,72 @@ Other passing pre-existing test suites: `tests/test_phase6_*` (28 tests), `tests
 ---
 
 **Anchor:** Director ratification 2026-05-05 ("go" after compare-and-contrast of code-side vs app-side architect verdicts); brief commit `d086c8d`; mailbox dispatch `96cd7b86`.
+
+---
+
+## GATE-4 2nd-pass fold — 2026-05-05
+
+**Source:** feature-dev:code-reviewer 2nd-pass on PR #158 — verdict
+PASS-WITH-NITS-FOLD-NEEDED. 1 HIGH (runtime crash) + 1 MED (no-warning-window).
+
+**Fold commit:** `34b0628c` on `b2/baker-cost-instrumentation-1` (pushed
+2026-05-05).
+
+### H1 — SQL INTERVAL parameterization (merge-blocking)
+
+`orchestrator/cost_monitor.py:334,386`
+
+Both `get_cost_history()` and `get_capability_costs()` used
+`INTERVAL '%s days'` with `(days,)` as a bound parameter. psycopg2 does NOT
+interpolate `%s` inside a SQL string literal — the interval string was sent
+verbatim to PostgreSQL and raised a runtime error on every dashboard call.
+
+**Fix (both sites):**
+- `WHERE logged_at > NOW() - INTERVAL '%s days'` →
+- `WHERE logged_at > NOW() - (INTERVAL '1 day' * %s)`
+
+The `%s` is now outside the string literal so psycopg2 substitutes the int
+correctly.
+
+**Regression test:** `test_get_cost_history_interval_parameterization` —
+asserts `cursor.queries[-1][0]` contains `INTERVAL '1 day' * %s` and does
+NOT contain `INTERVAL '%s`. `_Cursor` harness extended with `fetchall()`
+stub returning `[]` so the function can run end-to-end against the mock.
+
+### M1 — Critical-tier headroom (recommended)
+
+`orchestrator/cost_monitor.py:45`
+
+Default `BAKER_COST_TIER_CRITICAL_EUR=100.0` previously equalled
+`BAKER_COST_HARD_STOP_EUR=100.0` — critical alarm and hard-stop fired
+atomically on the same call, providing zero advance warning.
+
+**Fix:** lowered critical default to `80.0`. Critical now Slacks when daily
+cost crosses €80 with €20 of headroom before the breaker hard-stops.
+
+**Regression test:** `test_critical_tier_below_hard_stop_by_default` —
+asserts `COST_TIERS[2][0] < COST_HARD_STOP_EUR` with env unset.
+
+**Existing test docstring update:**
+`test_check_circuit_breaker_walks_tiers_only_for_crossed_thresholds` —
+"warn=60, critical=100 not crossed" → "warn=60, critical=80 not crossed".
+Behaviour unchanged (€45 still doesn't cross any non-info tier).
+
+### Live pytest GREEN — Python 3.12 (project target)
+
+```
+$ /opt/homebrew/bin/python3.12 -m pytest tests/test_cost_alarms.py -v
+...
+============================== 16 passed in 0.60s ==============================
+```
+
+All 16 tests green. Two new regression tests are first-and-fourth in the
+collected order:
+- `test_get_cost_history_interval_parameterization` PASSED
+- `test_critical_tier_below_hard_stop_by_default` PASSED
+
+### New HEAD
+
+`34b0628c861c5fae58532b56a3d08354480bb844` — re-fire focused gate chain on
+diff only (AH2 static + /security-review + architect spot-check +
+feature-dev:code-reviewer 2nd-pass).
