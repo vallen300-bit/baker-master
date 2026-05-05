@@ -1,4 +1,22 @@
-# CODE_1_PENDING — BRIEF_BAKER_PROMPT_CACHING_1 — 2026-05-05
+---
+status: COMPLETE
+brief: briefs/BRIEF_BAKER_PROMPT_CACHING_1.md
+trigger_class: TIER_A_AGENT_CORE_PLUS_DB_SCHEMA
+dispatched_at: 2026-05-05
+dispatched_by: ai-head-a-pl
+claimed_by: b1
+ship_report: briefs/_reports/B1_baker_prompt_caching_20260505.md
+gate_chain: pytest GREEN 35/35 + AH2 /security-review PASS + Architect PASS-WITH-NITS (comment 4382710967, 5 NITs non-blocking) + feature-dev:code-reviewer PASS-WITH-NITS-FOLD-NEEDED → fold H1+M1+M2 → re-fired gates 1+2+3 PASS on fold diff
+fold_commit: 57b3043
+merged_at: 2026-05-05T20:5XZ
+merge_commit: a8dea7ccb9c03bcd2636747e9485cba8b5338c57
+pr: 159
+verdict: PASS
+follow_ups: N1+N5 → cost-control-runbook rollout note (pending); N2/N3/N4 → scaling-followups stub (pending)
+autopoll_eligible: false
+---
+
+# CODE_1_PENDING — BRIEF_BAKER_PROMPT_CACHING_1 — 2026-05-05 (COMPLETE)
 
 **Brief:** baker-master `briefs/BRIEF_BAKER_PROMPT_CACHING_1.md` (Tier A, ~3 days, 10 ACs)
 **Working branch:** `b1/baker-prompt-caching-1`
