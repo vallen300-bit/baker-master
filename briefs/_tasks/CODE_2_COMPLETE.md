@@ -1,86 +1,95 @@
-# CODE_2_PENDING — BRISEN_LAB_AUTHZ_FACTORY_1
+# CODE_2_PENDING — BRISEN_LAB_V2_BRIDGE_F2
 
 **Dispatched:** 2026-05-06
-**Tier:** A (auth-touching surface)
-**Repo:** `vallen300-bit/brisen-lab` (NOT baker-master)
-**Branch:** `b2/brisen-lab-authz-factory-1`
-**Brief:** `briefs/BRIEF_BRISEN_LAB_AUTHZ_FACTORY_1.md` (in baker-master repo — read it first)
+**Tier:** B (no daemon code change; client-side helper + convention update)
+**Repo (primary):** `vallen300-bit/baker-master`
+**Branch (primary):** `b2/brisen-lab-v2-bridge-f2`
+**Repo (companion, optional):** `vallen300-bit/brisen-lab`
+**Branch (companion):** `b2/brisen-lab-v2-bridge-f2-authz-bools`
+**Brief:** `briefs/BRIEF_BRISEN_LAB_V2_BRIDGE_F2.md` (read it first — full spec)
 
-## Summary (read the full brief — this is the dispatch shortcut, not the spec)
+## Summary
 
-Bundle of two F1 follow-ups, both F2-gating. Director ratified bundle 2026-05-06.
-
-- **F1-FU-1** — add `_is_director` exemption to `GET /msg/{terminal}` + regression test (test 9 in `test_inbox_read_authz.py`). Matches existing exemption at event-full / ack / delete.
-- **F1-FU-2** — extract FastAPI `Depends(authz(policy, allow_director))` factory consolidating 6 hand-rolled authz shapes at `bus.py:184/307/362/398/446/510` (architect H2 finding).
-
-The factory is the natural home for the Director exemption — fold them in one PR.
+Outbound auto-post script for AI Heads. Director ratified 2026-05-06 OPTION A + policy (ii). Closes the Director-as-relay loop for inter-worker dispatches; AH1/AH2 invoke `~/.baker-hooks/bus_post.sh <recipient> <body> [topic]` instead of producing paste-blocks. Sender key fetched from 1Password on demand (~200ms/call). Director-recipient explicitly blocked at script level — Director-facing chat stays paste-blocks until Stage 2 autopoll.
 
 ## What to build
 
-NEW file `authz.py`: `Policy` enum + `CallerContext` dataclass with row-helpers + `authz(policy, allow_director=True)` Depends factory.
+NEW (baker-master):
+- `scripts/bus_post.sh` — POSIX-portable Bash helper, shellcheck-clean
+- `scripts/bus_post.py` — Python companion for richer payloads (multi-recipient, parent_id chains)
+- `tests/test_bus_post.py` — 15 subprocess + stub-daemon tests
 
-REFACTOR `bus.py`: 5 of the 6 hand-rolled shapes consume the factory. `ratify_decision` keeps its bespoke H7 chain (token + jti + parent FOR UPDATE too entangled). After refactor, `_require_worker_slug` (line 66) and `_is_director` (line 73) are dead and removed.
+**V0.2 amendment 2026-05-06 (B2 boundary #7 catch):** vault-side files (`_ops/agents/aihead{1,2}/orientation.md`, `_ops/skills/ai-head/SKILL.md`) are OUT OF B2 SCOPE — they live in `~/baker-vault/_ops/` per CHANDA Inv 9. AH1-T handles vault convention update separately. AC A7 STRUCK.
 
-NEW `tests/test_authz_factory.py`: 22 matrix tests (factory + CallerContext helpers).
+EXTEND (brisen-lab, companion PR — Architect Item 5 fold per AH1-T disposition):
+- `authz.py` — `is_party_to_message()` + `is_recipient_of_message()` bool-predicates on CallerContext
+- `tests/test_authz_factory.py` — 4 new tests (22 → 26)
 
-EXTEND `tests/test_inbox_read_authz.py`: add test 9 (Director-on-GET-{terminal} regression). Update docstring 8→9.
+Symlinks: `~/.baker-hooks/bus_post.{sh,py}` → `scripts/bus_post.{sh,py}`.
 
-## CRITICAL: 5-gate review chain MANDATORY before AH1-T merge
+## Two-repo split — IMPORTANT
 
-Run reviews in **parallel** in a single message:
+Baker-master PR ships INDEPENDENTLY of brisen-lab companion PR. Script doesn't depend on the bool-predicates. If brisen-lab review hits issues, baker-master ships standalone; the bool-predicate fold can land later. Don't gate baker-master merge on brisen-lab.
 
-1. **AH2 static review** — `feature-dev:code-reviewer` agent
-2. **AH2 `/security-review`** — full pass over auth surface; verdict in PR comment
-3. **picker-architect review** — abstraction sanity (Policy enum, CallerContext shape, inline-boolean carve-outs in delete + ack)
+## CRITICAL: 5-gate review chain MANDATORY
+
+Run all reviewers in **parallel** in a single message:
+
+1. **AH2 static review** — `feature-dev:code-reviewer` — full diff (both repos)
+2. **AH2 `/security-review`** — focus on 1P key fetch, recipient validation, payload escaping, daemon URL injection
+3. **picker-architect review** — script-vs-tool tradeoff, env-var policy adherence, brisen-lab fold scoping
 4. **feature-dev:code-reviewer 2nd-pass** — after any review-driven changes
 
-Tag PR with `tier-a-auth-touching`. Link to ClickUp `86c9nnyvj` (FU-1) + `86c9nnywq` (FU-2).
+Tag PR `tier-b-tooling`. Link brisen-lab companion PR in baker-master PR body.
 
-## CRITICAL: AC A9 — pin-not-vacuous local sanity check
+## CRITICAL: 12-slug registry hard-coded
 
-Verify the F1-FU-1 regression test 9 isn't vacuously passing:
+Valid recipients (verified against `auth_lab._TERMINAL_KEYS` test fixture):
+```
+director (REJECTED by script), cowork-ah1, lead, deputy, architect, b1, b2, b3, b4, b5, cortex, daemon
+```
 
-1. Temporarily flip `Depends(authz(Policy.RECIPIENT_OF_TERMINAL, allow_director=True))` → `allow_director=False` on `GET /msg/{terminal}` in `bus.py`
-2. `pytest tests/test_inbox_read_authz.py::test_get_msg_director_exemption_succeeds -v` — must FAIL (403 reader_slug_mismatch)
-3. Revert the flip — do NOT commit `False`
-4. Document the local-only verification in PR body
+`director` rejection is a load-bearing safety check — Director-facing dispatches must NOT silently land in the bus inbox until Stage 2 autopoll wires Cowork's App-side hook. AC A6 pins this.
 
-This pins the choice the Director ratified.
+## Acceptance criteria
 
-## Acceptance criteria (full table in brief — quick form here)
+- A1: shellcheck `scripts/bus_post.sh` clean
+- A2: py_compile `scripts/bus_post.py` clean
+- A3: `pytest tests/test_bus_post.py -v` — 15 PASS
+- A4: symlinks `~/.baker-hooks/bus_post.{sh,py}` exist + executable
+- A5: manual smoke (post-merge by AH1-T): `BAKER_ROLE=AH1 ~/.baker-hooks/bus_post.sh b2 "F2 smoke" "v2-bridge/f2/smoke"` → HTTP 200 + valid JSON
+- A6: director-recipient block verified — `bus_post.sh director "x"` exits 1 with explicit stderr
+- ~~A7: orientation + SKILL update~~ — STRUCK (V0.2; vault-side, AH1-T handles)
+- A8: (brisen-lab companion PR) authz.py CallerContext bool-predicates + 4 new tests PASS; ClickUp 86c9nr9dw closes on merge
+- A9: brisen-lab full pytest still GREEN (no regression in 22+9 = 31 existing tests)
 
-- A1: 22 factory tests PASS
-- A2: 9 inbox tests PASS (8 existing + 1 new)
-- A3: full `pytest` PASS (no regressions)
-- A4: `grep -n "_require_worker_slug\|_is_director\b" bus.py` = empty
-- A5: `grep -n "x_terminal_key" bus.py` = empty
-- A6: `grep -n "Header(None)" bus.py` = ONLY `x_human_confirmation_token` line
-- A7: py_compile bus.py + authz.py clean
-- A8: `from authz import authz, CallerContext, Policy` works
-- A9: pin-not-vacuous sanity check (above) — document in PR body
+## Smoke test (manual, post-merge — AH1-T runs in own shell)
+
+```bash
+BAKER_ROLE=AH1 ~/.baker-hooks/bus_post.sh b2 "F2 smoke test from AH1-T at $(date -u +%FT%TZ)" "v2-bridge/f2/smoke"
+LEAD_KEY=$(op read 'op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_lead/credential')
+curl -s -H "X-Terminal-Key: $LEAD_KEY" https://brisen-lab.onrender.com/msg/b2 | jq '.messages[-1]'
+```
+
+Expected: posted message appears in B2's inbox.
 
 ## Ship-report
 
-After merge, write `briefs/_reports/B2_brisen_lab_authz_factory_1_<YYYYMMDD>.md` in baker-master repo: PR number, merge commit, AC table all ☑, files modified, in-flight observations, any V0.x amendments triggered by review feedback.
+After merge, write `briefs/_reports/B2_brisen_lab_v2_bridge_f2_<YYYYMMDD>.md`: PR numbers (both repos if both shipped), merge commits, AC table all ☑, files modified, in-flight observations, V0.x amendments.
 
-## Files modified
-
-- NEW: `authz.py` (~85 lines, repo root)
-- MODIFY: `bus.py` (refactor 5 endpoints; remove 2 dead helpers; update imports)
-- NEW: `tests/test_authz_factory.py` (22 tests)
-- EXTEND: `tests/test_inbox_read_authz.py` (add test 9, update docstring)
+## Files modified — see brief §"Files modified"
 
 ## Do NOT touch
 
-- `auth_lab.py` (slug + JWT primitives stay; we just consume them)
-- Inner H7 chain in `_ratify_decision_inner`
-- `app.py`, `migrations/`, `lifecycle.py`, `freeze.py`, `tier_classification.py`
-- `conftest.py` (env-loaded test keys already match)
+- `brisen-lab/bus.py` (daemon endpoints unchanged)
+- `.claude/hooks/user-prompt-submit-confirm.py` (receive-side, separate lane)
+- Director-facing paste-block patterns (STAYS until Stage 2)
+- `~/.zshrc` launchers (separate hygiene brief if Director wants env-var purge)
 
 ## Lessons applied (in brief)
 
-- function-signature verification (every snippet in brief written after reading actual files — no guessed signatures)
-- Tier-A `/security-review` mandatory (Lesson #52)
-- pin-not-vacuous test (AC A9)
-- in-place brief amendments if review chain produces fixes (NOT append-only)
-- PEP 563 `from __future__ import annotations` already in bus.py:24 — keep convention in new authz.py
+- Function signatures verified against actual `auth_lab.py` / `bus.py` before writing
+- Tier B classification (no daemon code change; no new auth surface)
+- Director-recipient block as load-bearing safety
+- Pin-not-vacuous test on the block (AC A6)
+- Two-repo split — primary PR ships standalone if companion lags
