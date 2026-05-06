@@ -113,13 +113,15 @@ async def ack_msg(msg_id: int,
 
 #### Unit test (NEW file: `tests/test_inbox_read_authz.py`)
 
-Test cases:
-1. **`test_get_msg_self_succeeds`** — `lead` reads `/msg/lead` → 200.
-2. **`test_get_msg_other_403`** — `lead` reads `/msg/cowork-ah1` → 403 with `detail="reader_slug_mismatch"`.
-3. **`test_get_msg_no_key_401`** — no `X-Terminal-Key` header → 401 (regression: existing behavior preserved).
-4. **`test_ack_self_addressed_succeeds`** — `cowork-ah1` acks a msg with `to_terminals=['cowork-ah1']` → 200.
-5. **`test_ack_not_in_recipients_403`** — `lead` tries to ack a msg addressed only to `cowork-ah1` → 403 with `detail="acker_slug_not_in_recipients"`.
-6. **`test_ack_unknown_msg_404`** — caller acks `msg_id=999999` → 404.
+> **⚠️ V0.4: SUPERSEDED — see Amendment §L for the AUTHORITATIVE 8-test list.** The V0.1 numbered list below is RETAINED for audit trail only. B-code MUST implement Amendment §L's table verbatim, NOT the list below.
+
+~~Test cases (V0.1 — DO NOT IMPLEMENT):~~
+1. ~~`test_get_msg_self_succeeds` — `lead` reads `/msg/lead` → 200.~~
+2. ~~`test_get_msg_other_403` — `lead` reads `/msg/cowork-ah1` → 403 with `detail="reader_slug_mismatch"`.~~
+3. ~~`test_get_msg_no_key_401` — no `X-Terminal-Key` header → 401 (regression: existing behavior preserved).~~
+4. ~~`test_ack_self_addressed_succeeds` — `cowork-ah1` acks a msg with `to_terminals=['cowork-ah1']` → 200.~~
+5. ~~`test_ack_not_in_recipients_403` — `lead` tries to ack a msg addressed only to `cowork-ah1` → 403 with `detail="acker_slug_not_in_recipients"`.~~
+6. ~~`test_ack_unknown_msg_404` — caller acks `msg_id=999999` → 404. (DROPPED in V0.3 §L — out of F1 scope.)~~
 
 Use existing `TEST_DATABASE_URL_BRISEN_LAB` infrastructure + `conftest.py` patterns. Tests skip if env-var absent (existing convention).
 
@@ -179,7 +181,7 @@ CRITICAL: must NOT clobber existing 3 keys. Read current value first, merge, the
 # Read current map
 RENDER_API_KEY=$(op read 'op://Baker API Keys/API Render/credential')
 CURRENT_JSON=$(curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
-  "https://api.render.com/v1/services/srv-d7q7kvlckfvc739l2e8g/env-vars?limit=50" \
+  "https://api.render.com/v1/services/srv-d7q7kvlckfvc739l2e8g/env-vars?limit=100" \
   | python3 -c "import sys,json; data=json.load(sys.stdin); print([d['envVar']['value'] for d in data if d['envVar']['key']=='BRISEN_LAB_TERMINAL_KEYS'][0])")
 
 # Merge new keys into existing JSON
@@ -248,7 +250,7 @@ rm -rf /tmp/.lab_keys
 # 1. Render daemon env-var contains all 12 keys
 RENDER_API_KEY=$(op read 'op://Baker API Keys/API Render/credential')
 curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
-  "https://api.render.com/v1/services/srv-d7q7kvlckfvc739l2e8g/env-vars?limit=50" \
+  "https://api.render.com/v1/services/srv-d7q7kvlckfvc739l2e8g/env-vars?limit=100" \
   | python3 -c "import sys,json; data=json.load(sys.stdin); raw=[d['envVar']['value'] for d in data if d['envVar']['key']=='BRISEN_LAB_TERMINAL_KEYS'][0]; print('slugs:', sorted(json.loads(raw).keys()))"
 # Expect: ['architect', 'b1', 'b2', 'b3', 'b4', 'b5', 'cortex', 'cowork-ah1', 'daemon', 'deputy', 'director', 'lead']
 
@@ -278,9 +280,9 @@ op item list --vault='Baker API Keys' | grep BRISEN_LAB_TERMINAL_KEY
 
 | AC | Description | Verification |
 |---|---|---|
-| **A1** | `bus.py` GET `/msg/{terminal}` raises 403 when `reader_slug != terminal` | grep + 6 unit tests in `test_inbox_read_authz.py` |
-| **A2** | `bus.py` POST `/msg/{msg_id}/ack` raises 403 when `acker_slug not in to_terminals` | grep + unit tests |
-| **A3** | All 6 unit tests pass on `TEST_DATABASE_URL_BRISEN_LAB` | literal pytest output |
+| **A1** | `bus.py` GET `/msg/{terminal}` raises 403 when `reader_slug != terminal` (V0.4: 8-test list per §L; broadcast OR-branch verified per §K) | grep + 8 unit tests in `test_inbox_read_authz.py` |
+| **A2** | `bus.py:442-463` existing `_is_director` ack-authz path REGRESSION-VERIFIED unchanged (V0.4: per §F — Edit 2 was struck) | grep + tests 5+6+8 |
+| **A3** | All 8 unit tests pass on `TEST_DATABASE_URL_BRISEN_LAB` (V0.4: 8 not 6 — per §L+§M) | literal pytest output |
 | **A4** | Existing brisen-lab test suite unchanged (no regressions) | full pytest run |
 | **A5** | Manual prod verification: `lead` → `/msg/cowork-ah1` returns 403 | curl one-liner output |
 | **A6** | Manual prod verification: `lead` → `/msg/lead` returns 200 | curl one-liner output |
@@ -329,9 +331,9 @@ op item list --vault='Baker API Keys' | grep BRISEN_LAB_TERMINAL_KEY
 
 ## Sequencing
 
-1. B-code claims brief; reads cover-to-cover.
-2. EXPLORE: re-read `bus.py:298-349` + `bus.py:433`; verify `_authz_lookup` integrates cleanly with existing `_ack` thread function.
-3. WRITE: F1 handler edits + 6 unit tests.
+1. B-code claims brief; reads cover-to-cover (including ALL amendments — V0.2/V0.3/V0.4 instructions are AUTHORITATIVE over V0.1 body).
+2. EXPLORE (V0.4: per §A struck Edit 2; per §K added broadcast OR-branch verification gate): re-read `bus.py:298-349` (GET handler) + `bus.py:442-463` (existing ack-authz, do NOT modify). **Verify broadcast SQL OR-branch at bus.py:330-340 per §K — Variant A (present) or Variant B (absent).** If Variant B, Edit 1 expands per §K. NO `_authz_lookup` block (struck per §A).
+3. WRITE: F1 handler edit (GET only — single edit per §A) + 8 unit tests per §L+§M.
 4. Local pytest GREEN against `TEST_DATABASE_URL_BRISEN_LAB`.
 5. Open PR. AH1 reviews + runs `/security-review`. After PASS, AH1 merges.
 6. AH1 verifies F1 in prod via curl one-liners (Quality Checkpoints §1).
@@ -419,7 +421,7 @@ Updated AC A1 to require all 7 tests pass.
 RENDER_API_KEY=$(op read 'op://Baker API Keys/API Render/credential')
 # Read existing map → /tmp/.lab_keys/_existing.json
 curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
-  "https://api.render.com/v1/services/srv-d7q7kvlckfvc739l2e8g/env-vars?limit=50" \
+  "https://api.render.com/v1/services/srv-d7q7kvlckfvc739l2e8g/env-vars?limit=100" \
   | python3 -c "
 import sys, json, os
 data = json.load(sys.stdin)
@@ -496,7 +498,7 @@ function aihead2() {
 
 **Reviewer finding (CRITICAL, confidence high):** F3 Step 2 + Amendment §D both call `?limit=50` on `/v1/services/{id}/env-vars`. Per `feedback_render_envvar_paginated_put.md`, Render env-var API paginates and the daemon may have ≥50 vars (DATABASE_URL, FORGE_KEY, BRISEN_LAB_TERMINAL_KEYS, BRISEN_LAB_V2_ENABLED, ALLOWED_ORIGINS, plus per-deploy + framework defaults). If `BRISEN_LAB_TERMINAL_KEYS` falls past index 50, the merge step reads it as missing → silently writes a fresh JSON containing ONLY the 9 new keys → CLOBBERS the 3 keys (lead/director/cowork-ah1) provisioned 2026-05-05.
 
-**Action — replace BOTH `?limit=50` calls with `?limit=100`:**
+**Action — replace ALL THREE `?limit=50` calls with `?limit=100` (V0.4: applied IN-PLACE at lines 182, 251, 422):**
 
 V0.1/V0.2 F3 Step 2 (line ~182):
 ```bash
@@ -565,7 +567,7 @@ Replace V0.2 Sequencing §2 with:
 | 4 | `test_get_msg_self_broadcast_succeeds` | DB-seeded msg `to_terminals=['*']` from director | lead's key, GET `/msg/lead` | 200 + broadcast msg in list (Amendment §K) |
 | 5 | `test_ack_self_addressed_succeeds` | post msg `to_terminals=['cowork-ah1']` from lead | cowork-ah1's key, POST `/msg/<id>/ack` | 200 (regression — existing `_is_director` exemption preserved) |
 | 6 | `test_ack_not_in_recipients_403` | post msg `to_terminals=['cowork-ah1']` from lead | lead's key, POST `/msg/<id>/ack` | 403 (regression — existing path holds) |
-| 7 | `test_get_msg_cross_slug_attack_403` | post msg `to_terminals=['lead']` from director | b2's key (after F3 lands) OR architect's key, GET `/msg/lead` | 403 `detail="reader_slug_mismatch"` |
+| 7 | `test_get_msg_cross_slug_attack_403` | post msg `to_terminals=['lead']` from director; **third-slug key created INLINE in test** (`secrets.token_urlsafe(32)` + insert into test DB worker registry — DO NOT read from env, otherwise test fails with 401 not 403 = wrong signal) | inline-created third-slug key (e.g. `b2-test`), GET `/msg/lead` | 403 `detail="reader_slug_mismatch"` |
 
 **Director-exemption test moved to Amendment §M (test 8 — MEDIUM).**
 
@@ -629,6 +631,19 @@ AC A3 updates: "all 8 unit tests pass."
 > ```
 >
 > If this gate fires STOP: revert the Render env to the pre-merge value (Render dashboard rollback or re-MCP-merge with the cached `_existing.json`), surface to Director, then resume from Step 1 with diagnosis. DO NOT write 1Password items if the daemon is in a bad state.
+>
+> **CRITICAL (V0.4) — Step 5 cleanup interaction:** Step 5 (`rm -rf /tmp/.lab_keys`) MUST NOT run if Step 2a returned non-zero. Before Step 2a, copy `_existing.json` to a non-temp location for rollback safety:
+>
+> ```bash
+> # BEFORE Step 2a runs — preserve rollback artifact outside /tmp
+> mkdir -p ~/.baker-rollback
+> chmod 700 ~/.baker-rollback
+> cp /tmp/.lab_keys/_existing.json ~/.baker-rollback/brisen_lab_terminal_keys_premerge_$(date -u +%Y%m%dT%H%M%SZ).json
+> chmod 600 ~/.baker-rollback/brisen_lab_terminal_keys_premerge_*.json
+> echo "Rollback artifact saved: $(ls -la ~/.baker-rollback/ | tail -1)"
+> ```
+>
+> Then if Step 2a fires STOP, the rollback file survives even if `/tmp/.lab_keys` is wiped. Step 5 cleanup of `/tmp/.lab_keys` proceeds ONLY on Step 2a PASS. Manual cleanup of `~/.baker-rollback/` happens after AC A11 verification (after the deploy is verified live for 24h).
 
 This gate makes the failure mode loud: a clobber would manifest as `ACTUAL_COUNT != 12` BEFORE 1Password is touched, leaving 1Password in a recoverable state.
 

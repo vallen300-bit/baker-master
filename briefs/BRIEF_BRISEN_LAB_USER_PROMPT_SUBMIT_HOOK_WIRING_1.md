@@ -56,7 +56,36 @@ The hook itself is correct in design:
 
 (`~/bm-aihead1/.claude/settings.json` — verify; this is the Cowork-AH1 picker symlink target.)
 
-**Hook block to add to each `settings.json`:**
+**Hook block to add to each settings file (V0.4: AUTHORITATIVE — split by file type per §A timeout-30 + §J path-strategy):**
+
+> **⚠️ V0.4: TWO blocks — choose based on file type. The V0.1 single-block design below was SUPERSEDED by §A (timeout fix) and §J (path-strategy split). Both blocks below are the operative versions; do NOT use the V0.1 single-block.**
+
+| File type | File path(s) | Hook block to use |
+|---|---|---|
+| **Committed** | `~/Desktop/baker-code/.claude/settings.json` (only) | **Block A — symlink path** (below) |
+| **Device-local** | `~/bm-aihead1/.claude/settings.local.json`, `~/bm-aihead2/.claude/settings.local.json`, `~/bm-b1..b5/.claude/settings.local.json` | **Block B — direct absolute path** (below) |
+
+**Block A — Committed file (symlink path, requires `~/.baker-hooks/` sequencing 0a):**
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /Users/dimitry/.baker-hooks/user-prompt-submit-confirm.py",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**Block B — Device-local files (direct absolute path, no symlink dependency — eliminates "sh: no such file" SIGKILL hazard per §J):**
 
 ```json
 {
@@ -67,7 +96,7 @@ The hook itself is correct in design:
           {
             "type": "command",
             "command": "python3 /Users/dimitry/Desktop/baker-code/.claude/hooks/user-prompt-submit-confirm.py",
-            "timeout": 15
+            "timeout": 30
           }
         ]
       }
@@ -79,8 +108,8 @@ The hook itself is correct in design:
 **Critical wiring rules:**
 
 - **MERGE with existing `hooks` block** — do NOT clobber `SessionStart`, `PostToolUse`, `PreToolUse`. If a `settings.json` already has a `hooks` key, fold the new `UserPromptSubmit` array in.
-- **Absolute path to the hook file** — Claude Code resolves hook commands from a varying CWD across sessions. Hard-code `/Users/dimitry/Desktop/baker-code/.claude/hooks/user-prompt-submit-confirm.py`.
-- **Timeout = 15s** — hook does up to 3 sequential HTTPS calls (register-pubkey + human-confirm + drain) at 5s + 5s + 8s timeouts internally. 15s outer timeout gives slack for retry (Surface 6a 409 path adds 50–150ms jitter once).
+- **Path strategy (V0.4 per §J):** committed file uses `~/.baker-hooks/` symlink (Block A); device-local `settings.local.json` uses direct absolute path (Block B). Symlink-missing-on-device → `sh: no such file` exits non-zero BEFORE Python starts, bypassing the `sys.exit(0)` safety net.
+- **Timeout = 30s (V0.4 per §A — was 15s in V0.1, fix CRITICAL):** hook does up to 3 sequential HTTPS calls (register-pubkey + human-confirm + drain) at 5s + 5s + 8s timeouts internally + Surface 6a 409 retry adds ~5s jitter. Worst-case = 23.15s sequential. 30s outer = ~6.85s cushion for OS scheduling + Render Frankfurt egress slow first-byte.
 - **Worker scope per role**: B-codes (b1–b5) and `cortex` are NOT auth-bearing. The hook self-skips for non-auth-bearing roles via `_AUTH_BEARING_ROLES` early return. **Wire it anyway** — keeps the surface uniform; future role-policy changes don't need a settings.json sweep. The skip path costs ~5 ms (no HTTPS calls). Negligible.
 
 **For each picker that needs the wire:**
@@ -392,13 +421,13 @@ Rationale:
 1. `settings.local.json` is `.gitignore`'d AND device-local by Claude Code convention. It's NEVER cross-machine; the symlink-portability argument doesn't apply.
 2. If Director moves baker-code on this Mac, all 7 device-local files break — but so does the committed file (which has the symlink). Symlink protects the committed file; device-local files have no advantage from the symlink layer.
 3. Direct absolute path eliminates the missing-symlink failure mode entirely. The script's own `sys.exit(0)` safety net always fires because Python always starts.
-4. bm-aihead1 Dropbox-sync footgun (V0.2 §C) is partially mitigated: if a second Dropbox-synced device opens this picker, the absolute path `/Users/dimitry/Desktop/baker-code/...` resolves only on Director's MacBook. Other devices `sh: command not found` → claude-code logs warning + skips hook → no terminal-startup hazard, no latency cliff (no HTTPS calls fired). Still surface to Director as Q1 (V0.2 §C decision pending).
+4. bm-aihead1 Dropbox-sync footgun (V0.2 §C) is partially mitigated: if a second Dropbox-synced device opens this picker, the absolute path `/Users/dimitry/Desktop/baker-code/...` resolves only on Director's MacBook. Other devices: **[V0.4 ASSUMED — NOT verified against Claude Code docs]** `sh: command not found` → claude-code logs warning + skips hook → no terminal-startup hazard, no latency cliff (no HTTPS calls fired). Still surface to Director as Q1 (V0.2 §C decision pending). **V0.4 — DO NOT treat as confirmed mitigation until either: (a) Claude Code documentation cited proving silent-skip on missing hook binary, OR (b) AH1 tests on a machine without `/Users/dimitry/Desktop/baker-code/` mounted and observes claude-code session opens normally.** If neither verified before F2 execution, scope wire to ONLY this Mac (`Desktop/baker-code/.claude/settings.json` only) and skip Dropbox-synced bm-aihead1.
 
 **Updated AC A9:**
 | **A9** | `~/.baker-hooks/user-prompt-submit-confirm.py` symlink exists; `~/Desktop/baker-code/.claude/settings.json` references it | `ls -la ~/.baker-hooks/` + grep settings.json |
 
-**New AC A13:**
-| **A13** | All `settings.local.json` files reference the direct absolute path (NOT `~/.baker-hooks/...`) | grep — must show `/Users/dimitry/Desktop/baker-code/.claude/hooks/user-prompt-submit-confirm.py` |
+**New AC A13 (V0.4: SUPERSEDED by §L A13 — broader scope: covers BOTH file types in one row, not just settings.local.json):**
+~~| **A13** | All `settings.local.json` files reference the direct absolute path (NOT `~/.baker-hooks/...`) | grep — must show `/Users/dimitry/Desktop/baker-code/.claude/hooks/user-prompt-submit-confirm.py` |~~
 
 ## Amendment §K — MEDIUM: drop speculative grep; smoke-test direct path
 
@@ -423,6 +452,8 @@ Replace V0.2 Sequencing §0c with:
 > ```
 >
 > If either test returns non-zero, STOP — fix before wiring. If symlink test fails (Test 1) but direct test passes (Test 2), the symlink is broken — re-create it per Sequencing 0a before continuing.
+>
+> **CAVEAT (V0.4):** Both smoke tests above hit the hook's early-exit guards (e.g., `BRISEN_LAB_V2_ENABLED` check at hook source line ~50, or non-auth-bearing-role early return). A clean exit:0 proves ONLY: (a) file is present at the path, (b) Python interpreter starts, (c) script parses without `SyntaxError`. It does NOT exercise `register-session-pubkey`, `human-confirmation`, or drain. **Live test (Render log 200 trio) is the ONLY authoritative functional pass signal.** Treat smoke test as pre-flight, not as functional verification.
 
 Replace V0.2 Amendment §F (hook-load verification) with the live-test signal as the AUTHORITATIVE pass:
 
