@@ -485,3 +485,174 @@ function aihead2() {
 - **Brief intent (close horizontal-privilege gap on inbox-read + complete 12-key provisioning) preserved.**
 
 **End V0.2 amendment.**
+
+---
+
+# V0.3 Amendment — Pre-dispatch code-reviewer fold (2026-05-06)
+
+> **Trigger:** AH1-App-spawned `feature-dev:code-reviewer` 2nd-pass on V0.2 returned VERDICT FAIL (1 CRITICAL + 3 HIGH + 1 MEDIUM). Folding before re-dispatch. Reviewer agent ID: `a0732361a346047eb`.
+
+## Amendment §J — CRITICAL: Render env-var paginated GET (limit=50 → limit=100)
+
+**Reviewer finding (CRITICAL, confidence high):** F3 Step 2 + Amendment §D both call `?limit=50` on `/v1/services/{id}/env-vars`. Per `feedback_render_envvar_paginated_put.md`, Render env-var API paginates and the daemon may have ≥50 vars (DATABASE_URL, FORGE_KEY, BRISEN_LAB_TERMINAL_KEYS, BRISEN_LAB_V2_ENABLED, ALLOWED_ORIGINS, plus per-deploy + framework defaults). If `BRISEN_LAB_TERMINAL_KEYS` falls past index 50, the merge step reads it as missing → silently writes a fresh JSON containing ONLY the 9 new keys → CLOBBERS the 3 keys (lead/director/cowork-ah1) provisioned 2026-05-05.
+
+**Action — replace BOTH `?limit=50` calls with `?limit=100`:**
+
+V0.1/V0.2 F3 Step 2 (line ~182):
+```bash
+curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
+  "https://api.render.com/v1/services/srv-d7q7kvlckfvc739l2e8g/env-vars?limit=100" \
+```
+
+V0.2 Amendment §D (line ~422):
+```bash
+curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
+  "https://api.render.com/v1/services/srv-d7q7kvlckfvc739l2e8g/env-vars?limit=100" \
+```
+
+V0.1/V0.2 F3 Step 6 verification (line ~251):
+```bash
+curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
+  "https://api.render.com/v1/services/srv-d7q7kvlckfvc739l2e8g/env-vars?limit=100" \
+```
+
+(All three Render env-var GETs must use `?limit=100`. If the env-var count ever exceeds 100, escalate — Render API supports pagination cursor; this brief does not handle that case because we are below it today.)
+
+## Amendment §K — HIGH (a): explicit broadcast SQL OR-branch verification + DB-seeded test
+
+**Reviewer finding (HIGH, confidence high):** V0.2 Amendment §B asserts that the existing SQL `clauses = ["%s = ANY(to_terminals)"]` covers `'*'` self-broadcast reads. This claim is unverified — if `to_terminals=['*']` (the broadcast convention) is stored in the DB but the SQL filter is `WHERE %s = ANY(to_terminals)` with `params=[reader_slug]`, the match is `'lead' = ANY(['*'])` which is FALSE. Broadcast reads are then DROPPED post-V0.1 fix.
+
+**Action — make EXPLORE step (Sequencing §2) require explicit verification:**
+
+Replace V0.2 Sequencing §2 with:
+
+> 2. **EXPLORE — verification gate (auth-touching trigger):**
+>    - Re-read `bus.py:298-349` (GET handler) + `bus.py:442-463` (existing ack authz).
+>    - **Verify the broadcast OR-branch:** read the SQL clause-builder around `bus.py:330-340`. Confirm whether the `to_terminals` filter is:
+>      - **PRESENT (Variant A):** clause includes `OR '*' = ANY(to_terminals)` → `'*'`-broadcast reads work today; only F1's recipient-bind check is needed.
+>      - **ABSENT (Variant B):** clause is bare `%s = ANY(to_terminals)` → `'*'`-broadcast reads DO NOT match self-queries today; F1 fix must extend the clause to add the OR-branch alongside the recipient-bind check.
+>    - **If Variant B:** Edit 1 expands to:
+>      ```python
+>      if reader_slug != terminal:
+>          raise HTTPException(status_code=403, detail="reader_slug_mismatch")
+>      # ... in the SQL clause-builder section, change the to_terminals filter from:
+>      clauses = ["%s = ANY(to_terminals)"]
+>      params: list[Any] = [terminal]
+>      # to:
+>      clauses = ["(%s = ANY(to_terminals) OR '*' = ANY(to_terminals))"]
+>      params: list[Any] = [terminal]
+>      ```
+>    - **DB-seeded assertion in `test_get_msg_self_broadcast_succeeds`:**
+>      - Setup: post a message with `to_terminals=['*']` from director's terminal-key (verify via direct INSERT into `brisen_lab_msg` if test infra allows; else POST via daemon test client).
+>      - Caller: `lead`'s key, GET `/msg/lead`.
+>      - Expect: 200 + the broadcast message in result list (id matches the seeded row).
+>      - This test FAILS in Variant B until the OR-branch is added — making the SQL gap visible at test time, not at production-broadcast time.
+>    - Surface the variant determination to AH1 in PR body before merge.
+
+## Amendment §L — HIGH (b): explicit final 7-test list
+
+**Reviewer finding (HIGH, confidence high):** V0.2 §B replaces test 2 (`test_get_msg_other_403`) with `test_get_msg_self_broadcast_succeeds`, but V0.2 §C *adds* `test_get_msg_cross_slug_attack_403`. The combined test count becomes ambiguous (6? 7? 8?) because §B says "replacing" while §C says "adding test 7." The two amendments don't compose cleanly.
+
+**Action — state the final ordered 7-test list explicitly. This SUPERSEDES all prior test enumerations (V0.1 §Verification + V0.2 §B + V0.2 §C):**
+
+`tests/test_inbox_read_authz.py` MUST contain exactly these 7 tests, in this order:
+
+| # | Test name | Setup | Caller | Expect |
+|---|-----------|-------|--------|--------|
+| 1 | `test_get_msg_self_succeeds` | post msg `to_terminals=['lead']` from director | lead's key, GET `/msg/lead` | 200 + msg in list |
+| 2 | `test_get_msg_cross_terminal_403` | post msg `to_terminals=['cowork-ah1']` from lead | lead's key, GET `/msg/cowork-ah1` | 403 `detail="reader_slug_mismatch"` |
+| 3 | `test_get_msg_no_key_401` | (no setup) | no `X-Terminal-Key` header, GET `/msg/lead` | 401 (regression — existing behavior) |
+| 4 | `test_get_msg_self_broadcast_succeeds` | DB-seeded msg `to_terminals=['*']` from director | lead's key, GET `/msg/lead` | 200 + broadcast msg in list (Amendment §K) |
+| 5 | `test_ack_self_addressed_succeeds` | post msg `to_terminals=['cowork-ah1']` from lead | cowork-ah1's key, POST `/msg/<id>/ack` | 200 (regression — existing `_is_director` exemption preserved) |
+| 6 | `test_ack_not_in_recipients_403` | post msg `to_terminals=['cowork-ah1']` from lead | lead's key, POST `/msg/<id>/ack` | 403 (regression — existing path holds) |
+| 7 | `test_get_msg_cross_slug_attack_403` | post msg `to_terminals=['lead']` from director | b2's key (after F3 lands) OR architect's key, GET `/msg/lead` | 403 `detail="reader_slug_mismatch"` |
+
+**Director-exemption test moved to Amendment §M (test 8 — MEDIUM).**
+
+V0.1 `test_ack_unknown_msg_404` is DROPPED — it tests existing pre-V0.1 ack behavior unrelated to F1 (msg_not_found is daemon-internal robustness, not auth surface). If brisen-lab repo wants this coverage, spin separately.
+
+AC A3 updates from "all 6 unit tests pass" → "all 7 unit tests pass" (or 8 if Amendment §M lands).
+
+## Amendment §M — MEDIUM: director exemption regression test
+
+**Reviewer finding (MEDIUM, confidence high):** V0.2 §A noted the existing `_is_director(slug)` exemption at `bus.py:454` — director-slug holders ack messages addressed to other terminals (moderation flow). V0.2 §F renames AC A2 to "REGRESSION-verify existing 403 path holds; existing `_is_director` exemption preserved" but provides NO test for the exemption itself. The 7-test list above tests the deny path, not the allow path.
+
+**Action — add test 8 to `tests/test_inbox_read_authz.py`:**
+
+| 8 | `test_ack_director_exemption_succeeds` | post msg `to_terminals=['cowork-ah1']` from lead | director's key, POST `/msg/<id>/ack` | 200 (`_is_director` exemption preserved) |
+
+This guards against silent regression if a future PR strips the exemption "for security" without realizing moderation flows depend on it.
+
+AC A3 updates: "all 8 unit tests pass."
+
+## Amendment §N — HIGH (c): F3 Step 2a — post-merge verification gate
+
+**Reviewer finding (HIGH, confidence high):** V0.1 F3 sequencing has a gap between Step 2 (Render MCP merge) and Step 3 (1Password loop). If the MCP merge silently fails or partially succeeds, the 1Password loop runs against a daemon that isn't accepting the new keys. Worse: if the merge clobbers existing keys (e.g., Render API edge case where merge mode regresses to PUT), the 1Password write succeeds but the daemon now rejects director/cowork-ah1/lead.
+
+**Action — insert F3 Step 2a between Step 2 and Step 3:**
+
+> **Step 2a (NEW — post-merge verification gate)**
+>
+> Immediately after `mcp__render__update_environment_variables` returns success, BEFORE writing any 1Password items, verify the daemon's env-var contains the expected slug count:
+>
+> ```bash
+> RENDER_API_KEY=$(op read 'op://Baker API Keys/API Render/credential')
+> EXPECTED_COUNT=12  # 3 existing + 9 new
+> ACTUAL_SLUGS=$(curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
+>   "https://api.render.com/v1/services/srv-d7q7kvlckfvc739l2e8g/env-vars?limit=100" \
+>   | python3 -c "
+> import sys, json
+> data = json.load(sys.stdin)
+> raw = [d['envVar']['value'] for d in data if d['envVar']['key']=='BRISEN_LAB_TERMINAL_KEYS'][0]
+> slugs = sorted(json.loads(raw).keys())
+> print(' '.join(slugs))
+> ")
+> ACTUAL_COUNT=$(echo "$ACTUAL_SLUGS" | wc -w | tr -d ' ')
+>
+> if [ "$ACTUAL_COUNT" -ne "$EXPECTED_COUNT" ]; then
+>   echo "FAIL: expected $EXPECTED_COUNT slugs, got $ACTUAL_COUNT: $ACTUAL_SLUGS"
+>   echo "STOP — do not proceed to Step 3 (1Password write). Escalate to Director."
+>   exit 1
+> fi
+>
+> # Also verify all 12 expected slugs are present (catches case where merge dropped one)
+> EXPECTED_SLUGS="architect b1 b2 b3 b4 b5 cortex cowork-ah1 daemon deputy director lead"
+> if [ "$ACTUAL_SLUGS" != "$EXPECTED_SLUGS" ]; then
+>   echo "FAIL: slug set mismatch"
+>   echo "Expected: $EXPECTED_SLUGS"
+>   echo "Actual:   $ACTUAL_SLUGS"
+>   echo "STOP — do not proceed to Step 3. Escalate to Director."
+>   exit 1
+> fi
+>
+> echo "PASS: 12 slugs present on daemon. Proceeding to 1Password write."
+> ```
+>
+> If this gate fires STOP: revert the Render env to the pre-merge value (Render dashboard rollback or re-MCP-merge with the cached `_existing.json`), surface to Director, then resume from Step 1 with diagnosis. DO NOT write 1Password items if the daemon is in a bad state.
+
+This gate makes the failure mode loud: a clobber would manifest as `ACTUAL_COUNT != 12` BEFORE 1Password is touched, leaving 1Password in a recoverable state.
+
+AC A7 updates: "Render `BRISEN_LAB_TERMINAL_KEYS` JSON has all 12 slugs **AND Step 2a verification gate passed**."
+
+## Amendment §O — Updated Acceptance Criteria summary
+
+**Updated:**
+- AC A3: "all 7 unit tests pass" → **"all 8 unit tests pass"** (7 from §L + 1 from §M).
+- AC A7: amended to require Step 2a verification gate pass.
+
+**New:**
+| **A14** | F1 EXPLORE pass surfaced broadcast SQL variant determination in PR body | grep PR body for "Variant A" or "Variant B" |
+| **A15** | F3 Step 2a verification gate output captured in actions log | grep `~/baker-vault/_ops/agents/ai-head/actions_log.md` |
+
+**Unchanged:** A1, A2 (regression-only per V0.2 §F), A4, A5, A6, A8, A9, A10, A11, A12, A13.
+
+## Amendment §P — Net effect summary
+
+- **Pagination CRITICAL fix:** all 3 Render env-var GETs use `?limit=100`, eliminating silent-clobber risk.
+- **Broadcast SQL HIGH fix:** EXPLORE step explicitly verifies OR-branch presence; if absent, F1 fix expands to add it; DB-seeded test catches gap.
+- **Test list HIGH fix:** explicit ordered 8-test list supersedes all prior enumerations.
+- **F3 verification gate HIGH fix:** Step 2a between merge and 1Password write makes silent failures loud.
+- **Director exemption MEDIUM fix:** test 8 guards moderation-flow regression.
+- **Brief intent (close horizontal-privilege gap on inbox-read + complete 12-key provisioning) preserved.**
+
+**End V0.3 amendment.**

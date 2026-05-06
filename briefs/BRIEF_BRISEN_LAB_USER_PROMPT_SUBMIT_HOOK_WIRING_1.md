@@ -363,3 +363,99 @@ Subsequent steps unchanged but:
 **Brief intent (activate H7 auth chain + Surface 5 inbox drain across auth-bearing terminals) preserved.**
 
 **End V0.2 amendment.**
+
+---
+
+# V0.3 Amendment — Pre-execute code-reviewer fold (2026-05-06)
+
+> **Trigger:** AH1-App-spawned `feature-dev:code-reviewer` 2nd-pass on V0.2 returned VERDICT PASS-WITH-NITS (1 HIGH + 1 MEDIUM). Folding before AH1 executes. Reviewer agent ID: `a89b11bf39ec316f8`.
+
+## Amendment §J — HIGH: drop symlink for device-local wires; reserve for committed file only
+
+**Reviewer finding (HIGH, confidence high):** V0.2 §B's stable-symlink approach has a silent failure mode: if `~/.baker-hooks/user-prompt-submit-confirm.py` is missing on a device (e.g., bm-aihead1's Dropbox-synced settings.local.json reaches Mac Mini, but `~/.baker-hooks/` was never created there), the shell command `python3 ~/.baker-hooks/user-prompt-submit-confirm.py` fails BEFORE Python starts — `sh` returns non-zero from "no such file" and the hook's internal `sys.exit(0)` safety net is bypassed. Result: terminal-startup hazard returns (the exact failure the timeout fix was designed to eliminate).
+
+**Action — split wiring strategy by file type:**
+
+**Committed file (`~/Desktop/baker-code/.claude/settings.json`):** keep V0.2 §B symlink approach. The file is committed in baker-master; the symlink path `~/.baker-hooks/...` is stable on this Mac (the only machine that runs this picker). Symlink benefit (decouple from baker-code path) is realized here.
+
+**Device-local files (`.claude/settings.local.json` on bm-aihead1, bm-aihead2, bm-b1..b5):** drop the symlink. Use the direct absolute path:
+
+```json
+{
+  "type": "command",
+  "command": "python3 /Users/dimitry/Desktop/baker-code/.claude/hooks/user-prompt-submit-confirm.py",
+  "timeout": 30
+}
+```
+
+Rationale:
+1. `settings.local.json` is `.gitignore`'d AND device-local by Claude Code convention. It's NEVER cross-machine; the symlink-portability argument doesn't apply.
+2. If Director moves baker-code on this Mac, all 7 device-local files break — but so does the committed file (which has the symlink). Symlink protects the committed file; device-local files have no advantage from the symlink layer.
+3. Direct absolute path eliminates the missing-symlink failure mode entirely. The script's own `sys.exit(0)` safety net always fires because Python always starts.
+4. bm-aihead1 Dropbox-sync footgun (V0.2 §C) is partially mitigated: if a second Dropbox-synced device opens this picker, the absolute path `/Users/dimitry/Desktop/baker-code/...` resolves only on Director's MacBook. Other devices `sh: command not found` → claude-code logs warning + skips hook → no terminal-startup hazard, no latency cliff (no HTTPS calls fired). Still surface to Director as Q1 (V0.2 §C decision pending).
+
+**Updated AC A9:**
+| **A9** | `~/.baker-hooks/user-prompt-submit-confirm.py` symlink exists; `~/Desktop/baker-code/.claude/settings.json` references it | `ls -la ~/.baker-hooks/` + grep settings.json |
+
+**New AC A13:**
+| **A13** | All `settings.local.json` files reference the direct absolute path (NOT `~/.baker-hooks/...`) | grep — must show `/Users/dimitry/Desktop/baker-code/.claude/hooks/user-prompt-submit-confirm.py` |
+
+## Amendment §K — MEDIUM: drop speculative grep; smoke-test direct path
+
+**Reviewer finding (MEDIUM, confidence high):** V0.2 §F's `grep -rE "user-prompt-submit-confirm|UserPromptSubmit" ~/.claude/cache/` is speculative — Claude Code's hook execution log location is undocumented and may not exist at that path. The verification provides false confidence (grep returns empty → assumed "no fire" → false alarm) or false negative (grep finds stale cache → assumed "fire" → real failure missed).
+
+**Action — replace V0.2 Amendment §F + Sequencing 0c with explicit pre-wire smoke test on BOTH paths:**
+
+Replace V0.2 Sequencing §0c with:
+
+> **0c (NEW — REVISED).** Pre-wire smoke test BOTH the symlink path AND the direct absolute path:
+>
+> ```bash
+> echo "Test 1: symlink path"
+> python3 ~/.baker-hooks/user-prompt-submit-confirm.py < /dev/null
+> echo "exit:$?"
+> # Expect: exit:0 (clean exit on empty stdin)
+>
+> echo "Test 2: direct absolute path"
+> python3 /Users/dimitry/Desktop/baker-code/.claude/hooks/user-prompt-submit-confirm.py < /dev/null
+> echo "exit:$?"
+> # Expect: exit:0
+> ```
+>
+> If either test returns non-zero, STOP — fix before wiring. If symlink test fails (Test 1) but direct test passes (Test 2), the symlink is broken — re-create it per Sequencing 0a before continuing.
+
+Replace V0.2 Amendment §F (hook-load verification) with the live-test signal as the AUTHORITATIVE pass:
+
+> **Hook-load verification (replaces V0.2 §F):**
+>
+> Authoritative pass signal = Render brisen-lab daemon log shows `POST /auth/register-session-pubkey 200` AND `POST /auth/human-confirmation 200` within ~5s of submitting the literal `hello` prompt in a fresh `aihead1` session.
+>
+> ```bash
+> # Live-test signal — tail Render brisen-lab logs filtered for the auth chain endpoints:
+> # (use Render dashboard log stream or mcp__render__list_logs filtered by serviceId
+> # srv-d7q7kvlckfvc739l2e8g, path=/auth/register-session-pubkey, last 60s)
+> ```
+>
+> Pre-wire smoke test (above) catches silent failures (malformed JSON, missing file, broken symlink) before live-test. Live-test catches wired-but-not-firing failures (settings.json structure wrong, hook timeout too low, env var missing).
+>
+> The speculative `grep ~/.claude/cache/` step from V0.2 §F is REMOVED — that path is undocumented and unreliable.
+
+## Amendment §L — Updated Acceptance Criteria deltas
+
+**Replaced:**
+- A12: "Live test success-path timing < 1s wall-clock" — kept; Render log timestamps measure this.
+
+**New:**
+| **A13** | All `settings.local.json` files reference direct absolute path; `settings.json` (committed) references symlink path | per-file grep |
+| **A14** | Pre-wire smoke test (Sequencing 0c REVISED) returns exit:0 for BOTH paths | command output captured in actions log |
+
+**Removed:**
+- V0.2 §F's `grep ~/.claude/cache/` step is DROPPED. No corresponding AC.
+
+## Amendment §M — Net effect summary
+
+- **Symlink-missing-on-device HIGH fix:** committed file uses symlink; device-local files use direct absolute path. Eliminates the OS-level `sh: no such file` SIGKILL-equivalent hazard for `settings.local.json` paths.
+- **Speculative grep MEDIUM fix:** dropped `~/.claude/cache/` grep; pre-wire smoke test on BOTH paths is the authoritative pre-live signal; Render log 200 trio is the authoritative live signal.
+- **Brief intent (activate H7 auth chain + Surface 5 inbox drain) preserved.**
+
+**End V0.3 amendment.**
