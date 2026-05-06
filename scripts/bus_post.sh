@@ -33,20 +33,17 @@ TOPIC="${3:-}"
 
 # --- recipient validation ---
 
-# Reject Director recipient — Director-facing → paste-block (not bus until Stage 2).
-if [ "$RECIPIENT" = "director" ]; then
-    echo "ERROR: director-recipient blocked." >&2
-    echo "  Director-facing dispatches must stay paste-blocks until Stage 2 autopoll." >&2
-    echo "  See: BRIEF_BRISEN_LAB_V2_BRIDGE_F2.md — Director ratified 2026-05-06 sequencing." >&2
-    exit 1
-fi
+# F2-FU-1 (Stage 2 BRISEN_LAB_APP_AUTOPOLL_INBOX_1): director-recipient is no
+# longer hard-rejected client-side. Daemon enforces the env-gated block via
+# BRISEN_LAB_DIRECTOR_RECIPIENT_BLOCKED. Single control point — flipping the
+# daemon flag is now the only kill-switch (no script-layer drift).
 
-# Validate against canonical 12-slug registry.
+# Validate against canonical 12-slug registry (now includes director).
 case "$RECIPIENT" in
-    cowork-ah1|lead|deputy|architect|b1|b2|b3|b4|b5|cortex|daemon) ;;
+    director|cowork-ah1|lead|deputy|architect|b1|b2|b3|b4|b5|cortex|daemon) ;;
     *)
         echo "ERROR: unknown slug: $RECIPIENT" >&2
-        echo "  Valid: cowork-ah1 lead deputy architect b1 b2 b3 b4 b5 cortex daemon" >&2
+        echo "  Valid: director cowork-ah1 lead deputy architect b1 b2 b3 b4 b5 cortex daemon" >&2
         exit 1
         ;;
 esac

@@ -24,7 +24,7 @@ import urllib.request
 DAEMON_URL = os.environ.get("BRISEN_LAB_DAEMON_URL", "https://brisen-lab.onrender.com")
 
 VALID_SLUGS = {
-    "cowork-ah1", "lead", "deputy", "architect",
+    "director", "cowork-ah1", "lead", "deputy", "architect",
     "b1", "b2", "b3", "b4", "b5",
     "cortex", "daemon",
 }
@@ -105,11 +105,8 @@ def main() -> None:
     args = ap.parse_args()
 
     recipients = [r.strip() for r in args.to.split(",") if r.strip()]
-    if "director" in recipients:
-        sys.exit(
-            "ERROR: director-recipient blocked. Director-facing → paste-block, not bus.\n"
-            "  See BRIEF_BRISEN_LAB_V2_BRIDGE_F2.md."
-        )
+    # F2-FU-1: director-recipient is daemon-gated (BRISEN_LAB_DIRECTOR_RECIPIENT_BLOCKED).
+    # Single control point — script passes through; daemon enforces.
     bad = [r for r in recipients if r not in VALID_SLUGS]
     if bad:
         sys.exit(f"ERROR: unknown slug(s): {bad}. Valid: {sorted(VALID_SLUGS)}")
