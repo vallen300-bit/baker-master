@@ -421,38 +421,13 @@ def test_caller_context_is_recipient_of_message_outsider_false():
 
 ---
 
-## Convention update
+## Convention update — VAULT-SIDE, OUT OF B2 SCOPE (V0.2 fold per B2 catch 2026-05-06)
 
-### UPDATE: `_ops/agents/aihead1/orientation.md` + `_ops/agents/aihead2/orientation.md`
+The orientation files (`_ops/agents/aihead1/orientation.md`, `_ops/agents/aihead2/orientation.md`) and SKILL file (`_ops/skills/ai-head/SKILL.md`) live exclusively in `~/baker-vault/_ops/` — NOT in baker-master. Per project `CLAUDE.md` "Out of scope (don't touch): `_ops/` (vault-side, when present) — Director + Mac Mini commit per CHANDA Inv 9". B2 caught this scope-conflict pre-coding (boundary #7 escalation, 2026-05-06).
 
-Add a section near the top:
+**Resolution:** AH1-T handles the vault-side convention update via a separate baker-vault PR (or direct vault commit per CHANDA Inv 9), AFTER baker-master F2 ships. B2 ships baker-master script + tests + symlinks ONLY. The script can ship without the orientation update — AH1/AH2 know the convention from the brief itself; orientation is documentation hygiene.
 
-```markdown
-## Bus-direct dispatch (Director ratified 2026-05-06 OPTION A)
-
-For inter-worker dispatches (to b1-b5, deputy/AH2, architect, cortex, cowork-ah1):
-INVOKE: `~/.baker-hooks/bus_post.sh <recipient> <body> [topic]`
-NOT: produce a paste-block for Director to relay.
-
-Director-facing chat (questions, ratifications, ship-reports addressed to Director):
-STAYS: paste-blocks. The script blocks recipient=director until Stage 2 autopoll.
-
-For richer payloads (multi-recipient, parent_id chains, multiline body):
-INVOKE: `~/.baker-hooks/bus_post.py --to <slug[,slug]> --body "..." [--topic ...] [--parent-id N]`
-
-The script fetches your sender key from 1P on every call (Director ratified policy ii).
-~200ms per call; acceptable for low-frequency dispatch.
-```
-
-(Identical block in both files; AH1 uses BAKER_ROLE=AH1 → sender slug "lead", AH2 uses BAKER_ROLE=AH2 → sender slug "deputy". Single source of truth in orientation; no per-AH-Head divergence.)
-
-### UPDATE: `_ops/skills/ai-head/SKILL.md`
-
-Add a single-line reference under the existing "PL ship-report contract" section:
-
-```markdown
-**Inter-worker dispatch:** invoke `~/.baker-hooks/bus_post.sh` (or .py for richer payloads). Director-facing chat stays paste-blocks. See `_ops/agents/aihead*/orientation.md` for full convention.
-```
+**For B2 — out of scope, do not touch:** any path under `_ops/agents/`, `_ops/skills/`. Skip the convention-update task entirely.
 
 ---
 
@@ -466,7 +441,7 @@ Add a single-line reference under the existing "PL ship-report contract" section
 | A4 | Symlinks `~/.baker-hooks/bus_post.sh` + `~/.baker-hooks/bus_post.py` exist + `chmod +x` | ☐ |
 | A5 | Manual smoke test (post-merge by AH1-T): `BAKER_ROLE=AH1 ~/.baker-hooks/bus_post.sh b2 "F2 smoke" "v2-bridge/f2/smoke"` returns HTTP 200 + valid JSON | ☐ |
 | A6 | director-recipient block verified — `bus_post.sh director "x"` exits 1 with explicit stderr | ☐ |
-| A7 | Orientation files updated for AH1 + AH2 (identical block) + ai-head SKILL.md reference | ☐ |
+| A7 | ~~Orientation + SKILL update~~ — STRUCK by V0.2 amendment (vault-side, out of B2 scope; AH1-T handles separately) | n/a |
 | A8 | (brisen-lab repo, separate PR) authz.py CallerContext bool-predicates added; 4 new tests PASS; ClickUp 86c9nr9dw closed | ☐ |
 | A9 | brisen-lab full pytest still PASSES (no regression in existing 22 factory tests + 9 inbox tests) | ☐ |
 
@@ -495,9 +470,8 @@ Tag PR with `tier-b-tooling`. Link the brisen-lab companion PR in the baker-mast
 | `scripts/bus_post.sh` | NEW — Bash helper |
 | `scripts/bus_post.py` | NEW — Python richer-payload variant |
 | `tests/test_bus_post.py` | NEW — 15 subprocess + stub-daemon tests |
-| `_ops/agents/aihead1/orientation.md` | UPDATE — bus-direct convention block |
-| `_ops/agents/aihead2/orientation.md` | UPDATE — same block |
-| `_ops/skills/ai-head/SKILL.md` | UPDATE — single-line reference |
+
+**Vault-side files** (`_ops/agents/aihead{1,2}/orientation.md`, `_ops/skills/ai-head/SKILL.md`) — **OUT OF B2 SCOPE per V0.2 amendment**. AH1-T handles via separate baker-vault PR. See "Convention update" section above.
 
 ### brisen-lab (companion PR — optional, can ship later)
 
@@ -538,3 +512,21 @@ Tag PR with `tier-b-tooling`. Link the brisen-lab companion PR in the baker-mast
 **Mailbox:** `briefs/_tasks/CODE_2_PENDING.md`
 **Closes:** ClickUp 86c9nr9dw (architect Item 5 fold) on companion PR merge.
 **Customer:** Stage 2 brief (App-side autopoll) — will leverage the same op-fetch + 12-slug-registry conventions.
+
+---
+
+# V0.2 Amendment — B2 scope-conflict catch (2026-05-06)
+
+**B2 finding (boundary #7 escalation, pre-coding):** V0.1 brief listed `_ops/agents/aihead{1,2}/orientation.md` and `_ops/skills/ai-head/SKILL.md` under baker-master files-modified. These paths exist exclusively in `~/baker-vault/_ops/`, NOT in baker-master (`baker-master/_ops/` only contains `processes/` and `runbooks/`). Project `CLAUDE.md` rule: "Out of scope (don't touch): `_ops/` (vault-side, when present) — Director + Mac Mini commit per CHANDA Inv 9".
+
+**AH1-T disposition:** Option 1 ratified — strike vault-side files from B2 scope; AH1-T handles the vault convention update via separate baker-vault PR (or direct vault commit per CHANDA Inv 9) AFTER baker-master F2 ships. B2 ships script + tests + symlinks only.
+
+**In-place edits:**
+- §"Convention update" — replaced with "VAULT-SIDE, OUT OF B2 SCOPE" section
+- §"Files modified" baker-master table — vault-side rows struck, replaced with note pointing to V0.2 amendment
+- AC A7 — STRUCK (n/a; vault-side handled separately)
+
+**Lesson captured (append to `tasks/lessons.md` post-merge):**
+> Brief authors must verify file paths exist in the target repo BEFORE listing them in files-modified. `_ops/agents/` and `_ops/skills/` live in `~/baker-vault/`, not baker-master. CHANDA Inv 9 reserves vault commits for Director + Mac Mini. B2's pre-coding catch (boundary #7) saved a wasted PR cycle.
+
+**No code change required from V0.1 — this amendment is scope-narrowing only.** Script + tests + symlinks unchanged. Companion brisen-lab PR unchanged.

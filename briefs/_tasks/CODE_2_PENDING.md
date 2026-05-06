@@ -18,8 +18,8 @@ NEW (baker-master):
 - `scripts/bus_post.sh` — POSIX-portable Bash helper, shellcheck-clean
 - `scripts/bus_post.py` — Python companion for richer payloads (multi-recipient, parent_id chains)
 - `tests/test_bus_post.py` — 15 subprocess + stub-daemon tests
-- `_ops/agents/aihead1/orientation.md` + `_ops/agents/aihead2/orientation.md` — convention block
-- `_ops/skills/ai-head/SKILL.md` — single-line reference
+
+**V0.2 amendment 2026-05-06 (B2 boundary #7 catch):** vault-side files (`_ops/agents/aihead{1,2}/orientation.md`, `_ops/skills/ai-head/SKILL.md`) are OUT OF B2 SCOPE — they live in `~/baker-vault/_ops/` per CHANDA Inv 9. AH1-T handles vault convention update separately. AC A7 STRUCK.
 
 EXTEND (brisen-lab, companion PR — Architect Item 5 fold per AH1-T disposition):
 - `authz.py` — `is_party_to_message()` + `is_recipient_of_message()` bool-predicates on CallerContext
@@ -59,7 +59,7 @@ director (REJECTED by script), cowork-ah1, lead, deputy, architect, b1, b2, b3, 
 - A4: symlinks `~/.baker-hooks/bus_post.{sh,py}` exist + executable
 - A5: manual smoke (post-merge by AH1-T): `BAKER_ROLE=AH1 ~/.baker-hooks/bus_post.sh b2 "F2 smoke" "v2-bridge/f2/smoke"` → HTTP 200 + valid JSON
 - A6: director-recipient block verified — `bus_post.sh director "x"` exits 1 with explicit stderr
-- A7: orientation files updated for AH1 + AH2 (identical block) + SKILL.md reference
+- ~~A7: orientation + SKILL update~~ — STRUCK (V0.2; vault-side, AH1-T handles)
 - A8: (brisen-lab companion PR) authz.py CallerContext bool-predicates + 4 new tests PASS; ClickUp 86c9nr9dw closes on merge
 - A9: brisen-lab full pytest still GREEN (no regression in 22+9 = 31 existing tests)
 
