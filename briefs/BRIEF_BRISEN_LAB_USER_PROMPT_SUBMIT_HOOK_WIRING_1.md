@@ -65,7 +65,7 @@ The hook itself is correct in design:
 | **Committed** | `~/Desktop/baker-code/.claude/settings.json` (only) | **Block A — symlink path** (below) |
 | **Device-local** | `~/bm-aihead1/.claude/settings.local.json`, `~/bm-aihead2/.claude/settings.local.json`, `~/bm-b1..b5/.claude/settings.local.json` | **Block B — direct absolute path** (below) |
 
-**Block A — Committed file (symlink path, requires `~/.baker-hooks/` sequencing 0a):**
+**Block A — Committed file (V0.6: shell-guarded for cross-device safety; symlink path):**
 
 ```json
 {
@@ -75,7 +75,7 @@ The hook itself is correct in design:
         "hooks": [
           {
             "type": "command",
-            "command": "python3 /Users/dimitry/.baker-hooks/user-prompt-submit-confirm.py",
+            "command": "test -e /Users/dimitry/.baker-hooks/user-prompt-submit-confirm.py && python3 /Users/dimitry/.baker-hooks/user-prompt-submit-confirm.py || exit 0",
             "timeout": 30
           }
         ]
@@ -85,7 +85,7 @@ The hook itself is correct in design:
 }
 ```
 
-**Block B — Device-local files (direct absolute path, no symlink dependency — eliminates "sh: no such file" SIGKILL hazard per §J):**
+**Block B — Device-local files (V0.6: shell-guarded for cross-device safety; direct absolute path):**
 
 ```json
 {
@@ -95,7 +95,7 @@ The hook itself is correct in design:
         "hooks": [
           {
             "type": "command",
-            "command": "python3 /Users/dimitry/Desktop/baker-code/.claude/hooks/user-prompt-submit-confirm.py",
+            "command": "test -e /Users/dimitry/Desktop/baker-code/.claude/hooks/user-prompt-submit-confirm.py && python3 /Users/dimitry/Desktop/baker-code/.claude/hooks/user-prompt-submit-confirm.py || exit 0",
             "timeout": 30
           }
         ]
@@ -106,11 +106,13 @@ The hook itself is correct in design:
 ```
 
 > **Note (V0.4 M2):** the path above is host-specific (`/Users/dimitry/Desktop/baker-code/`). Do NOT copy verbatim to a machine where baker-code lives at a different path. AH1 wires this on Director's MacBook only.
+>
+> **Note (V0.6):** the `test -e ... && python3 ... || exit 0` shell-guard wrap forces exit 0 when the path is missing. Empirical probe (claude-code-guide + `python3 /missing/path.py; echo $?` test) confirmed: bare `python3 /missing/path.py` exits **2**, which Claude Code interprets as `UserPromptSubmit BLOCK` — a terminal-startup hazard on any device that has the settings file but lacks baker-code at the hardcoded path. Wrap eliminates this on BOTH Block A (cross-device if the committed file ever syncs) and Block B (cross-device on Dropbox-synced settings.local.json — bm-aihead1 + bm-aihead2 are Dropbox-synced per user CLAUDE.md, contradicting V0.4 §J's "device-local" assumption). ~5ms shell-startup overhead.
 
 **Critical wiring rules:**
 
 - **MERGE with existing `hooks` block** — do NOT clobber `SessionStart`, `PostToolUse`, `PreToolUse`. If a `settings.json` already has a `hooks` key, fold the new `UserPromptSubmit` array in.
-- **Path strategy (V0.4 per §J):** committed file uses `~/.baker-hooks/` symlink (Block A); device-local `settings.local.json` uses direct absolute path (Block B). Symlink-missing-on-device → `sh: no such file` exits non-zero BEFORE Python starts, bypassing the `sys.exit(0)` safety net.
+- **Path strategy (V0.6 — supersedes V0.4 §J split):** BOTH file types use shell-guarded commands. Block A keeps the `~/.baker-hooks/` symlink path for stability across baker-code path-moves on this Mac; Block B uses direct absolute path (no symlink dependency). The shell-guard `test -e && python3 ... || exit 0` makes both safe on any device — missing path → exit 0 (silent skip), present path → run hook. V0.4 §J's "device-local files use direct path because settings.local.json is local-only" rationale was FALSE (bm-aihead1/aihead2 are Dropbox-synced); shell-guard is the correct fix on both blocks.
 - **Timeout = 30s (V0.4 per §A — was 15s in V0.1, fix CRITICAL):** hook does up to 3 sequential HTTPS calls (register-pubkey + human-confirm + drain) at 5s + 5s + 8s timeouts internally + Surface 6a 409 retry adds ~5s jitter. Worst-case = 23.15s sequential. 30s outer = ~6.85s cushion for OS scheduling + Render Frankfurt egress slow first-byte.
 - **Worker scope per role**: B-codes (b1–b5) and `cortex` are NOT auth-bearing. The hook self-skips for non-auth-bearing roles via `_AUTH_BEARING_ROLES` early return. **Wire it anyway** — keeps the surface uniform; future role-policy changes don't need a settings.json sweep. The skip path costs ~5 ms (no HTTPS calls). Negligible.
 
@@ -493,3 +495,61 @@ Replace V0.2 Amendment §F (hook-load verification) with the live-test signal as
 - **Brief intent (activate H7 auth chain + Surface 5 inbox drain) preserved.**
 
 **End V0.3 amendment.**
+
+---
+
+# V0.6 Amendment — §J ASSUMED resolved + shell-guard wrap (2026-05-06, Director-authorized)
+
+> **Trigger:** AH1-App resolved V0.4 §J ASSUMED via claude-code-guide doc citation + empirical probe (`python3 /missing/path.py; echo $?` → exit 2 → UserPromptSubmit BLOCK). V0.4 §J's "direct path safer than symlink because settings.local.json is local-only" claim was FALSE — `bm-aihead1/.claude/settings.local.json` IS Dropbox-synced cross-device per user CLAUDE.md. Director authorized Option B (V0.2 reviewer's original Fix A, which V0.3 had rejected in error). Folded IN-PLACE.
+
+## Amendment §V — Empirical exit-code findings
+
+| Failure mode | Exit code | Claude Code interpretation |
+|---|---|---|
+| `python3 /missing/path.py` | 2 | **BLOCKS prompt submit** (terminal-startup hazard) |
+| `sh: command not found` | 127 | non-blocking (silent skip — what V0.4 §J assumed) |
+| `python3 ... uncaught Python exception` | 1 | non-blocking |
+
+V0.4 §J relied on the 127 path; the actual hazard is the 2 path. Bare `python3 /missing/path.py` is the dangerous case — it's caught by neither symlink-missing-on-device (V0.4 §J fix) nor direct-path-missing-on-device (V0.4 §J Block B).
+
+## Amendment §W — Shell-guard wrap (Director-authorized, applied IN-PLACE)
+
+Both Block A and Block B commands are now wrapped:
+
+```
+test -e <path> && python3 <path> || exit 0
+```
+
+`|| exit 0` forces exit 0 when path missing → non-blocking → cross-device safe. ~5ms shell-startup overhead, negligible.
+
+Applied IN-PLACE in §Implementation Block A (symlink path) + Block B (direct absolute path). Both use the wrap.
+
+## Amendment §X — bm-aihead1/aihead2 wires UNBLOCKED
+
+V0.4 §J safe-default deferred bm-aihead1 + bm-aihead2 wires. With shell-guard in place, both are now safe to wire. F2 scope expands from 6/8 pickers (V0.4) → 8/8 (V0.6).
+
+## Amendment §Y — V0.4 §J/§K caveats SUPERSEDED
+
+- V0.4 §J's "drop symlink for device-local; use direct path" rationale: SUPERSEDED. Both blocks use shell-guard regardless.
+- V0.4 §J's "[ASSUMED — NOT verified]" marker: RESOLVED. Empirical evidence above.
+- V0.4 §J's bm-aihead1 wire-deferral: REMOVED. Wire as part of F2 completion.
+- V0.4 §K smoke-test caveat: still valid (early-exit-guard, not auth-chain functional pass).
+
+## Amendment §Z — Acceptance Criteria deltas (V0.6)
+
+**Updated:**
+- A2: "all 6 worker pickers" → "all 8 pickers (Desktop/baker-code, bm-aihead1, bm-aihead2, bm-b1..b5)" — bm-aihead1 + bm-aihead2 wires no longer deferred.
+- A13a: command must contain `test -e ... && python3 ... || exit 0` shell-guard wrap (grep for `|| exit 0`).
+- A13b: same — both blocks now use shell-guard.
+
+**New:**
+| **A15** | All 8 settings files contain shell-guard wrap (`test -e ... && python3 ... \|\| exit 0`) | grep across all 8 files |
+
+## Amendment §AA — Net effect summary
+
+- **§J ASSUMED → RESOLVED** via empirical exit-code testing.
+- **Shell-guard wrap applied IN-PLACE on both Block A + Block B.**
+- **bm-aihead1 + bm-aihead2 wires unblocked → F2 reaches 8/8.**
+- **Brief intent (activate H7 auth chain + Surface 5 inbox drain across all auth-bearing terminals) preserved + extended to cross-device-safe.**
+
+**End V0.6 amendment.**
