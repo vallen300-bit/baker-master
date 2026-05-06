@@ -560,15 +560,10 @@ def _drain_director_inbox() -> str | None:
                 except Exception:
                     pass
 
-                try:
-                    client.post(f"{base}/msg/{mid}/ack", headers=headers)
-                except Exception:
-                    continue
-
-                created = row.get("created_at")
-                if created and (newest_ts is None or str(created) > str(newest_ts)):
-                    newest_ts = str(created)
-
+                # Compose + surface BEFORE ack so a transient ack failure does
+                # not silently drop a message we already paid the network cost
+                # to fetch. NM3 idempotent ack means re-delivery on ack-fail is
+                # safe; not advancing newest_ts on ack-fail makes that explicit.
                 body = full_body
                 if not isinstance(body, str) or not body:
                     body = row.get("body_preview")
@@ -586,6 +581,18 @@ def _drain_director_inbox() -> str | None:
                     pinned_lines.append(line)
                 else:
                     chronological_lines.append(line)
+
+                ack_ok = False
+                try:
+                    ar = client.post(f"{base}/msg/{mid}/ack", headers=headers)
+                    ack_ok = ar.status_code == 200
+                except Exception:
+                    ack_ok = False
+
+                if ack_ok:
+                    created = row.get("created_at")
+                    if created and (newest_ts is None or str(created) > str(newest_ts)):
+                        newest_ts = str(created)
     except Exception:
         pass
 
