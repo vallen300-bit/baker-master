@@ -105,6 +105,8 @@ The hook itself is correct in design:
 }
 ```
 
+> **Note (V0.4 M2):** the path above is host-specific (`/Users/dimitry/Desktop/baker-code/`). Do NOT copy verbatim to a machine where baker-code lives at a different path. AH1 wires this on Director's MacBook only.
+
 **Critical wiring rules:**
 
 - **MERGE with existing `hooks` block** — do NOT clobber `SessionStart`, `PostToolUse`, `PreToolUse`. If a `settings.json` already has a `hooks` key, fold the new `UserPromptSubmit` array in.
@@ -477,7 +479,8 @@ Replace V0.2 Amendment §F (hook-load verification) with the live-test signal as
 - A12: "Live test success-path timing < 1s wall-clock" — kept; Render log timestamps measure this.
 
 **New:**
-| **A13** | All `settings.local.json` files reference direct absolute path; `settings.json` (committed) references symlink path | per-file grep |
+| **A13a** | Committed file (`~/Desktop/baker-code/.claude/settings.json`) references symlink path | `grep -l "baker-hooks" ~/Desktop/baker-code/.claude/settings.json` must return the file path |
+| **A13b** | Device-local files (`~/bm-*/.claude/settings.local.json`) do NOT reference symlink path | `grep -rL "baker-hooks" ~/bm-*/.claude/settings.local.json` must return empty (zero files use the symlink path) |
 | **A14** | Pre-wire smoke test (Sequencing 0c REVISED) returns exit:0 for BOTH paths | command output captured in actions log |
 
 **Removed:**
