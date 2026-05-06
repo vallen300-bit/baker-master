@@ -70,7 +70,7 @@ _REGISTER_RETRY_JITTER_HI_S = 0.15  # seconds (150 ms)
 # secretary). When BAKER_ROLE matches AND BRISEN_LAB_APP_AUTOPOLL_ENABLED=true,
 # the hook drains /msg/director in addition to /msg/{role}.
 _DIRECTOR_FACING_ROLES = frozenset({
-    "lead", "ah1", "aihead1",
+    "cowork-ah1", "lead", "ah1", "aihead1",
 })
 
 # Director's terminal-key 1P reference (mirrors F2 sender-key fetch pattern).
