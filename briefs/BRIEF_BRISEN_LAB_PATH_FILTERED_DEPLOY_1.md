@@ -252,9 +252,11 @@ print(f'{dep.get(\"id\")} {int(created.timestamp())} {dep.get(\"status\")}')
   EPOCH=$(echo $RESULT | awk '{print $2}')
   if [ "$EPOCH" -ge "$PUSH_TS" ]; then
     echo "PASS: new deploy fired (epoch $EPOCH >= push $PUSH_TS) — positive control proves runtime files DO trigger redeploys"
-    break
+    exit 0
   fi
 done
+echo "FAIL: 90s window elapsed with NO new deploy after runtime-file commit — positive control inconclusive (filter may be over-filtering, or Render queue is delayed beyond 90s)"
+exit 1
 ```
 
 #### Step 6 — Rollback (if Step 4 or 5 fails)
@@ -279,9 +281,11 @@ curl -s -X PATCH \
 
 ```bash
 cd ~/brisen-lab-staging
-APP_PRE_SHA=$1  # passed from Step 5 capture; or use HEAD~1 ref
-# Restore runtime file via COMMIT SHA per baker-master recovery lesson (NOT blob)
-git checkout HEAD~1 -- app.py  # explicit ref, not bare 'git checkout'
+# Use COMMIT SHA captured in Step 5 (not blob — per baker-master recovery lesson).
+# Fallback: HEAD~2 = pre-smoke baseline (Step 4 added 1 commit, Step 5 added 1 — total 2 commits ahead of original)
+APP_PRE_SHA=${APP_PRE_SHA:-$(git rev-parse HEAD~2)}
+echo "Restoring app.py from $APP_PRE_SHA"
+git checkout "$APP_PRE_SHA" -- app.py
 
 # Remove smoke .md file
 rm docs/path_filter_smoke_*.md 2>/dev/null
