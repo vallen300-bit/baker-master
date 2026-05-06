@@ -204,7 +204,68 @@ mcp__render__update_environment_variables(
 )
 ```
 
+**Step 2a — Post-merge verification gate (V0.5: body-folded from V0.3 §N)**
+
+Before any 1Password write, verify the daemon's env-var contains all 12 expected slugs. Full gate script + STOP/rollback discipline are in V0.3 Amendment §N — execute that block here verbatim, capturing output to `~/baker-vault/_ops/agents/ai-head/actions_log.md` (AC A15).
+
+Pre-gate rollback artifact (V0.4 §N safety):
+
+```bash
+mkdir -p ~/.baker-rollback && chmod 700 ~/.baker-rollback
+cp /tmp/.lab_keys/_existing.json \
+  ~/.baker-rollback/brisen_lab_terminal_keys_premerge_$(date -u +%Y%m%dT%H%M%SZ).json
+chmod 600 ~/.baker-rollback/brisen_lab_terminal_keys_premerge_*.json
+```
+
+If Step 2a fires STOP: do NOT proceed; revert via Render dashboard or re-MCP-merge with cached `_existing.json`; surface to Director.
+
+**Step 2b — Trigger redeploy + wait live (V0.5: NEW per defect D1)**
+
+> **Defect D1 finding (V0.5, captured from F3 execution 2026-05-06):** `mcp__render__update_environment_variables` writes the env-var but does NOT auto-restart the daemon process. The 9 new keys returned 401 for ~30s until manual redeploy was triggered. Adding explicit deploy step removes this silent failure mode.
+
+```bash
+RENDER_API_KEY=$(op read 'op://Baker API Keys/API Render/credential')
+
+# Trigger redeploy. Response is 202 + EMPTY body — DO NOT pipe to python json.load
+# (defect D3 — duplicate deploys queued during execution because retry-after-JSON-crash fired).
+# Capture HTTP code via -w; treat 201/202 as queued.
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+  -X POST -H "Authorization: Bearer $RENDER_API_KEY" \
+  -H "Content-Type: application/json" \
+  "https://api.render.com/v1/services/srv-d7q7kvlckfvc739l2e8g/deploys" \
+  -d '{}')
+
+if [ "$HTTP_CODE" != "201" ] && [ "$HTTP_CODE" != "202" ]; then
+  echo "FAIL: deploy POST returned HTTP $HTTP_CODE — STOP, do not proceed to Step 3."
+  exit 1
+fi
+echo "Deploy queued (HTTP $HTTP_CODE). Waiting for live..."
+
+# Poll until live. Daemon redeploy takes 45-60s typically; 5-min cap.
+DEADLINE=$(($(date +%s) + 300))
+while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+  STATUS=$(curl -s -H "Authorization: Bearer $RENDER_API_KEY" \
+    "https://api.render.com/v1/services/srv-d7q7kvlckfvc739l2e8g/deploys?limit=1" \
+    | python3 -c "import sys, json; d=json.load(sys.stdin); print(d[0]['deploy']['status'])")
+  case "$STATUS" in
+    live)        echo "Daemon LIVE."; break ;;
+    build_failed|update_failed|canceled|deactivated)
+                 echo "FAIL: deploy status=$STATUS — STOP."; exit 1 ;;
+    *)           sleep 8 ;;
+  esac
+done
+
+# Smoke-test one of the new keys to confirm daemon is accepting them
+B1_KEY=$(op read 'op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_b1/credential')
+SMOKE=$(curl -sw "%{http_code}" -o /dev/null -H "X-Terminal-Key: $B1_KEY" \
+  https://brisen-lab.onrender.com/msg/b1)
+[ "$SMOKE" = "200" ] && echo "Smoke PASS — daemon accepting b1 key" \
+                     || echo "FAIL: smoke=$SMOKE — STOP, do not write 1Password until daemon healthy."
+```
+
 **Step 3 — Write 9 1Password items** (vault: `Baker API Keys`, naming pattern matches the 3 already created):
+
+> **Defect D2 finding (V0.5, captured from F3 execution 2026-05-06):** zsh does NOT word-split `$VAR` by default. If you generalize the loop to `for slug in $NEW_SLUGS`, the entire string is treated as ONE token. Use the literal list below verbatim, or an explicit array (`slugs=(deputy architect ...); for slug in "${slugs[@]}"`). DO NOT replace the literal list with a variable.
 
 ```bash
 for slug in deputy architect b1 b2 b3 b4 b5 cortex daemon; do
@@ -301,7 +362,7 @@ op item list --vault='Baker API Keys' | grep BRISEN_LAB_TERMINAL_KEY
 ## Files Modified (F1)
 
 - `bus.py` (brisen-lab) — 2 handler edits (`get_msg`, `ack_msg`); new authz checks.
-- `tests/test_inbox_read_authz.py` (brisen-lab, NEW) — 6 unit tests.
+- `tests/test_inbox_read_authz.py` (brisen-lab, NEW) — 8 unit tests (V0.4: per §L 7-test list + §M director-exemption test 8).
 
 ## Files Modified (F3)
 
@@ -481,7 +542,7 @@ function aihead2() {
 
 ## Amendment §G — Net effect summary
 
-- **Files changed (F1):** `bus.py` — 1 handler edit (GET only), not 2. `tests/test_inbox_read_authz.py` — 7 tests, not 6 (one is a regression-only test for existing ack behavior).
+- **Files changed (F1):** `bus.py` — 1 handler edit (GET only), not 2. `tests/test_inbox_read_authz.py` — 8 tests — superseded by §L+§M (V0.4: §L authoritative 7-test list + §M test 8 director-exemption).
 - **F3 hardened:** file-based JSON round-trip + explicit aihead2 launcher snippet + director-slug scoped out.
 - **Risk delta:** lower than V0.1 — eliminated dead-work proposal that would have regressed `_is_director` ack exemption.
 - **Brief intent (close horizontal-privilege gap on inbox-read + complete 12-key provisioning) preserved.**
@@ -671,3 +732,44 @@ AC A7 updates: "Render `BRISEN_LAB_TERMINAL_KEYS` JSON has all 12 slugs **AND St
 - **Brief intent (close horizontal-privilege gap on inbox-read + complete 12-key provisioning) preserved.**
 
 **End V0.3 amendment.**
+
+---
+
+# V0.5 Amendment — F3 execution defects + doc-prose fixes (2026-05-06)
+
+> **Trigger:** AH1-App ratified F3 execution GREEN (12/12 keys live, daemon dep-d7tefirtll9c73bvdovg LIVE) but flagged 3 operational defects that surfaced during execution + 2 stale doc-prose lines. Folded IN-PLACE per V0.4 lesson (avoid amendment-only fixes).
+
+## Amendment §Q — D1 IN-PLACE: Step 2b "trigger redeploy + wait live"
+
+**Source (F3 execution 2026-05-06):** env-var update via Render API does NOT auto-restart the daemon process. 9 new keys returned 401 for ~30s until AH1-App diagnosed and triggered redeploy manually.
+
+**Action — applied IN-PLACE between Step 2a and Step 3 in F3 runbook body** (see new "Step 2b — Trigger redeploy + wait live"). Block uses HTTP-code capture via `curl -w` (NOT json.load), polls deploy status to `live`, smoke-tests one new key against `/msg/b1` before proceeding to 1Password write.
+
+## Amendment §R — D2 IN-PLACE: zsh word-split warning on Step 3 loop
+
+**Source (F3 execution 2026-05-06):** AH1-App generalized Step 3's literal loop to `for slug in $NEW_SLUGS` — zsh treats `$NEW_SLUGS` as ONE token (no IFS word-split by default). First iteration ran with `$slug` = whole concatenated string, creating one malformed 1Password item. Recovery: deleted bad item + retried clean.
+
+**Action — applied IN-PLACE in F3 Step 3 body** as a defect-warning block before the loop. Reinforces literal list use OR explicit array (`slugs=(...); for slug in "${slugs[@]}"`). DO NOT replace literal list with variable.
+
+## Amendment §S — D3 IN-PLACE: deploy POST response is 202 + empty body
+
+**Source (F3 execution 2026-05-06):** AH1-App's runbook piped `POST /v1/services/{id}/deploys` response to `python -c "json.load(...)"` — Render returns 202 + EMPTY body, not JSON. The crash triggered a retry, queueing two duplicate deploys before Render's serialization absorbed the noise (~30s wasted).
+
+**Action — applied IN-PLACE in F3 Step 2b body** (V0.5 §Q above). Capture HTTP code via `curl -s -o /dev/null -w "%{http_code}"` and treat 201/202 as queued. NEVER pipe deploy POST response to json.load.
+
+## Amendment §T — Doc-prose alignment (Director B-pick, no re-review)
+
+Two stale doc-prose lines outside the operative runbook still cited "6 unit tests" / "7 tests, not 6":
+
+- Line 304 ("Files Modified" §F1): "6 unit tests" → "8 unit tests (V0.4: per §L 7-test list + §M director-exemption test 8)" — applied IN-PLACE.
+- Line 484 (V0.2 §G summary): "7 tests, not 6" → "8 tests — superseded by §L+§M" — applied IN-PLACE.
+
+## Amendment §U — Net effect
+
+- **Step 2b NEW (D1):** redeploy + wait-live + smoke-test gate inserted between env-var write and 1Password write. Removes silent 401 window.
+- **Step 3 D2 warning:** literal-list discipline reinforced; word-split footgun called out.
+- **Step 2b D3 fix:** deploy POST handled via HTTP-code capture, not json.load.
+- **Doc-prose:** test-count references aligned with §L+§M state.
+- **Brief intent preserved.** No scope change to F1.
+
+**End V0.5 amendment.**
