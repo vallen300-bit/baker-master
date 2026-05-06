@@ -155,13 +155,50 @@ def _worker_slug() -> str:
     return role or "cowork"
 
 
+def _resolve_terminal_key(val: str) -> str:
+    """Resolve a terminal-key env value to its literal key.
+
+    If `val` starts with `op://`, resolve via 1Password CLI (`op read`) at
+    runtime. Otherwise treat `val` as a literal key already.
+
+    Background: Cowork-App's `settings.local.json` `env` block does NOT
+    auto-resolve `op://` references — values arrive in `os.environ` as the
+    literal 63-char ref string. Without this helper, the hook would send the
+    ref as `X-Terminal-Key` header → daemon 401 `bad_terminal_key` → silent
+    drain failure (AH1-App diagnosis 2026-05-06, Stage 2 burn-in blocker).
+
+    Returns empty string on any failure (op CLI absent, unauthenticated,
+    timeout) — preserves the caller's fail-open contract.
+    """
+    if not val:
+        return ""
+    if not val.startswith("op://"):
+        return val
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["op", "read", val],
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode == 0:
+            return out.stdout.strip()
+    except Exception:
+        pass
+    return ""
+
+
 def _terminal_key() -> str:
-    """Per-worker key takes precedence; fall back to unsuffixed for backward-compat."""
+    """Per-worker key takes precedence; fall back to unsuffixed for backward-compat.
+
+    Wraps both env paths through `_resolve_terminal_key` so values stored as
+    `op://` refs in Cowork-App's settings env block are resolved at hook-runtime
+    rather than sent literally to the daemon.
+    """
     slug_key = f"BRISEN_LAB_TERMINAL_KEY_{_worker_slug()}"
-    val = os.environ.get(slug_key, "").strip()
+    val = _resolve_terminal_key(os.environ.get(slug_key, "").strip())
     if val:
         return val
-    return os.environ.get("BRISEN_LAB_TERMINAL_KEY", "").strip()
+    return _resolve_terminal_key(os.environ.get("BRISEN_LAB_TERMINAL_KEY", "").strip())
 
 
 def _brisen_lab_url() -> str:
@@ -205,31 +242,25 @@ def _write_director_last_seen(ts: str) -> None:
 
 
 def _fetch_director_key() -> str | None:
-    """Fetch Director's terminal-key. Tries env first, then op CLI fallback.
+    """Fetch Director's terminal-key. Resolves env value through
+    `_resolve_terminal_key`; falls back to the canonical op-ref if env unset.
 
-    Env path: BRISEN_LAB_TERMINAL_KEY_director (set on AH1-App's shell).
-    Op fallback: 1Password CLI (mirrors F2 bus_post.sh policy ii). Op CLI is
-    optional — if not installed/authenticated, fall back to env-only.
+    Env path: `BRISEN_LAB_TERMINAL_KEY_director`. May be a literal key OR an
+    `op://` reference (Cowork-App `settings.local.json` env block stores refs
+    literally — see `_resolve_terminal_key` docstring).
+
+    Op fallback: if env unset entirely, try `_DIRECTOR_KEY_OP_REF` directly.
 
     Returns None on miss — caller fail-opens silent (no Director-inbox drain
     that prompt). Hook discipline: never block startup on Director-inbox flow.
     """
-    env_key = os.environ.get("BRISEN_LAB_TERMINAL_KEY_director", "").strip()
-    if env_key:
-        return env_key
-    try:
-        import subprocess
-        out = subprocess.run(
-            ["op", "read", _DIRECTOR_KEY_OP_REF],
-            capture_output=True, text=True, timeout=5,
-        )
-        if out.returncode == 0:
-            key = out.stdout.strip()
-            if key:
-                return key
-    except Exception:
-        pass
-    return None
+    val = _resolve_terminal_key(
+        os.environ.get("BRISEN_LAB_TERMINAL_KEY_director", "").strip()
+    )
+    if val:
+        return val
+    val = _resolve_terminal_key(_DIRECTOR_KEY_OP_REF)
+    return val or None
 
 
 def _last_seen_path() -> str:

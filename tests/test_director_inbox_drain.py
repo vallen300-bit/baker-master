@@ -442,3 +442,34 @@ def test_10_daemon_503_fail_open_silent(stub_daemon, fake_op_dir, tmp_path):
     ctx = _hook_context(r.stdout)
     assert "Director" not in ctx, ctx
     assert "Traceback" not in r.stderr, r.stderr
+
+
+def test_11_director_key_op_ref_in_env_resolves(stub_daemon, fake_op_dir, tmp_path):
+    """11 — env BRISEN_LAB_TERMINAL_KEY_director set to literal `op://...` ref
+    (Cowork-App settings.local.json behavior — does NOT auto-resolve op refs)
+    is resolved via op CLI at hook runtime → drain succeeds.
+
+    Pins the AH1-App diagnosis 2026-05-06 fix (`_resolve_terminal_key` helper).
+    Pre-fix behavior: hook sent the 63-char op-ref as X-Terminal-Key → daemon
+    401 bad_terminal_key → silent no-drain. Post-fix: ref is resolved before
+    use; daemon receives literal key and serves the inbox."""
+    url, captured = stub_daemon
+    _DrainStubHandler._director_rows = [DIRECTOR_ROW_DISPATCH]
+    _DrainStubHandler._full_bodies = {102: "drained via op-ref resolution"}
+    env = _base_env(
+        {"BAKER_ROLE": "lead",
+         "BRISEN_LAB_APP_AUTOPOLL_ENABLED": "true",
+         # Literal op-ref — Cowork-App env behavior:
+         "BRISEN_LAB_TERMINAL_KEY_director":
+             "op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_director/credential",
+         "BRISEN_LAB_URL": url},
+        fake_op=fake_op_dir, tmpdir=tmp_path,
+    )
+    r = _run_hook(env)
+    assert r.returncode == 0
+    ctx = _hook_context(r.stdout)
+    assert "Director inbox" in ctx, ctx
+    assert "drained via op-ref resolution" in ctx, ctx
+    # Must have hit /msg/director with the resolved key (fake_op returns
+    # 'op-fake-director-key'); pre-fix this would not have appeared.
+    assert "/msg/director" in _get_paths(captured), captured
