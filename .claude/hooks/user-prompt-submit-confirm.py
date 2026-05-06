@@ -136,7 +136,12 @@ def _worker_slug() -> str:
 
 
 def _terminal_key() -> str:
-    return os.environ.get("BRISEN_LAB_TERMINAL_KEY", "")
+    """Per-worker key takes precedence; fall back to unsuffixed for backward-compat."""
+    slug_key = f"BRISEN_LAB_TERMINAL_KEY_{_worker_slug()}"
+    val = os.environ.get(slug_key, "").strip()
+    if val:
+        return val
+    return os.environ.get("BRISEN_LAB_TERMINAL_KEY", "").strip()
 
 
 def _brisen_lab_url() -> str:
