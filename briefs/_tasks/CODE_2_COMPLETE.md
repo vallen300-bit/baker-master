@@ -1,100 +1,86 @@
----
-status: PENDING
-brief: briefs/BRIEF_BRISEN_LAB_AUTH_COMPLETION_1.md
-brief_version: V0.4 (V0.5 §T doc-prose fold; F1 scope unchanged)
-scope: F1 ONLY (handler edit + 8 tests). F3 = AH1-App-EXECUTED (12/12 keys live as of dep-d7tefirtll9c73bvdovg).
-trigger_class: TIER_A_AUTH_TOUCHING
-dispatched_at: 2026-05-06T07:2XZ
-dispatched_by: ai-head-a (lead)
-target_branch: b2/brisen-lab-auth-completion-1
-target_repo: vallen300-bit/brisen-lab (NOT baker-master)
-review_chain_mandatory:
-  - feature-dev:code-architect (post-WRITE design review)
-  - feature-dev:code-reviewer (standard pass)
-  - feature-dev:code-reviewer SECOND PASS (auth-touching trigger)
-  - /security-review (auth-touching → mandatory; AH2 lane)
-  - B1 SITUATIONAL REVIEW (auth-touching trigger fires per ai_head_b1_review_triggers.md)
-ship_gate: ACs A1+A3+A4+A5+A6+A12+A13 all GREEN per V0.4 brief
----
+# CODE_2_PENDING — BRISEN_LAB_AUTHZ_FACTORY_1
 
-# CODE_2_PENDING — BRIEF_BRISEN_LAB_AUTH_COMPLETION_1 — F1 (V0.4 architect+reviewer-folded, V0.5 doc-prose; 2026-05-06)
+**Dispatched:** 2026-05-06
+**Tier:** A (auth-touching surface)
+**Repo:** `vallen300-bit/brisen-lab` (NOT baker-master)
+**Branch:** `b2/brisen-lab-authz-factory-1`
+**Brief:** `briefs/BRIEF_BRISEN_LAB_AUTHZ_FACTORY_1.md` (in baker-master repo — read it first)
 
-## Mailbox
+## Summary (read the full brief — this is the dispatch shortcut, not the spec)
 
-- **Brief:** `briefs/BRIEF_BRISEN_LAB_AUTH_COMPLETION_1.md` on baker-master `main` (latest commit on that file).
-- **Read top-to-bottom — including ALL amendments**. V0.4 amendment text is AUTHORITATIVE over V0.1 body wherever they conflict.
-- **Scope for B2:** F1 ONLY. F3 (12-key provisioning) is COMPLETE — AH1-App shipped 2026-05-06. Do NOT touch Render env, 1Password, or zshrc.
+Bundle of two F1 follow-ups, both F2-gating. Director ratified bundle 2026-05-06.
 
-## What you're building (F1)
+- **F1-FU-1** — add `_is_director` exemption to `GET /msg/{terminal}` + regression test (test 9 in `test_inbox_read_authz.py`). Matches existing exemption at event-full / ack / delete.
+- **F1-FU-2** — extract FastAPI `Depends(authz(policy, allow_director))` factory consolidating 6 hand-rolled authz shapes at `bus.py:184/307/362/398/446/510` (architect H2 finding).
 
-**Repo:** `~/bm-b4-brisen-lab` (or your preferred clone of `vallen300-bit/brisen-lab`). NOT `baker-master`.
+The factory is the natural home for the Director exemption — fold them in one PR.
 
-**Branch:** `b2/brisen-lab-auth-completion-1` (do NOT clobber existing b2/* branches).
+## What to build
 
-**Files modified (per V0.2 §A + V0.3 §K):**
+NEW file `authz.py`: `Policy` enum + `CallerContext` dataclass with row-helpers + `authz(policy, allow_director=True)` Depends factory.
 
-1. `bus.py` — ONE handler edit on `GET /msg/{terminal}` (lines 298-349). Add IMMEDIATELY after `reader_slug = _require_worker_slug(x_terminal_key)`:
+REFACTOR `bus.py`: 5 of the 6 hand-rolled shapes consume the factory. `ratify_decision` keeps its bespoke H7 chain (token + jti + parent FOR UPDATE too entangled). After refactor, `_require_worker_slug` (line 66) and `_is_director` (line 73) are dead and removed.
 
-   ```python
-   if reader_slug != terminal:
-       raise HTTPException(status_code=403, detail="reader_slug_mismatch")
-   ```
+NEW `tests/test_authz_factory.py`: 22 matrix tests (factory + CallerContext helpers).
 
-   **PLUS — V0.3 §K broadcast OR-branch verification gate (MANDATORY EXPLORE step):**
-   - Read `bus.py:330-340` (SQL clause-builder section).
-   - Determine: does the `to_terminals` filter clause include `OR '*' = ANY(to_terminals)` already?
-     - **Variant A (present):** no SQL change needed — single recipient-bind check above is the whole edit.
-     - **Variant B (absent):** Edit 1 expands — extend the SQL clause to add the OR-branch:
-       ```python
-       clauses = ["(%s = ANY(to_terminals) OR '*' = ANY(to_terminals))"]
-       params: list[Any] = [terminal]
-       ```
-   - Surface the variant determination in the PR body before merge (AC A14).
-   - Do NOT touch the ack handler at line 442-463 — V0.2 §A struck Edit 2; ack already enforces with `_is_director` exemption.
+EXTEND `tests/test_inbox_read_authz.py`: add test 9 (Director-on-GET-{terminal} regression). Update docstring 8→9.
 
-2. `tests/test_inbox_read_authz.py` (NEW) — **8 tests per V0.4 §L+§M (AUTHORITATIVE — overrides V0.1 6-test list which is SUPERSEDED in the brief):**
+## CRITICAL: 5-gate review chain MANDATORY before AH1-T merge
 
-   | # | Test name | Setup | Caller | Expect |
-   |---|---|---|---|---|
-   | 1 | `test_get_msg_self_succeeds` | post msg `to=['lead']` from director | lead's key, GET `/msg/lead` | 200 + msg in list |
-   | 2 | `test_get_msg_cross_terminal_403` | post msg `to=['cowork-ah1']` from lead | lead's key, GET `/msg/cowork-ah1` | 403 `detail="reader_slug_mismatch"` |
-   | 3 | `test_get_msg_no_key_401` | (no setup) | no `X-Terminal-Key` header, GET `/msg/lead` | 401 (regression) |
-   | 4 | `test_get_msg_self_broadcast_succeeds` | DB-seed msg `to=['*']` from director | lead's key, GET `/msg/lead` | 200 + broadcast msg in list |
-   | 5 | `test_ack_self_addressed_succeeds` | post msg `to=['cowork-ah1']` from lead | cowork-ah1's key, POST `/msg/<id>/ack` | 200 (regression) |
-   | 6 | `test_ack_not_in_recipients_403` | post msg `to=['cowork-ah1']` from lead | lead's key, POST `/msg/<id>/ack` | 403 (regression) |
-   | 7 | `test_get_msg_cross_slug_attack_403` | post msg `to=['lead']` from director; **third-slug key created INLINE** (`secrets.token_urlsafe(32)` + insert into test DB worker registry) | inline-created third-slug key, GET `/msg/lead` | 403 `detail="reader_slug_mismatch"` |
-   | 8 | `test_ack_director_exemption_succeeds` | post msg `to=['cowork-ah1']` from lead | director's key, POST `/msg/<id>/ack` | 200 (`_is_director` exemption regression) |
+Run reviews in **parallel** in a single message:
 
-   **Test 7 conftest discipline (V0.4 medium-fold):** third-slug key MUST be created INLINE; do NOT read from env. Reading from env will fail with 401 (key absent in test DB worker registry) instead of 403 — wrong signal.
+1. **AH2 static review** — `feature-dev:code-reviewer` agent
+2. **AH2 `/security-review`** — full pass over auth surface; verdict in PR comment
+3. **picker-architect review** — abstraction sanity (Policy enum, CallerContext shape, inline-boolean carve-outs in delete + ack)
+4. **feature-dev:code-reviewer 2nd-pass** — after any review-driven changes
 
-## Trigger class + review chain (MANDATORY)
+Tag PR with `tier-a-auth-touching`. Link to ClickUp `86c9nnyvj` (FU-1) + `86c9nnywq` (FU-2).
 
-This is auth-touching → triggers full chain per `feedback_ai_head_b1_review_triggers.md`:
+## CRITICAL: AC A9 — pin-not-vacuous local sanity check
 
-1. After your write: `feature-dev:code-architect` post-WRITE pass (you invoke).
-2. After local pytest GREEN (8 tests against `TEST_DATABASE_URL_BRISEN_LAB`): `feature-dev:code-reviewer` standard pass.
-3. **Second-pass `code-reviewer` on the diff** (auth-touching trigger; not optional).
-4. **`/security-review`** — AH2 lane runs this on the PR; do NOT merge until verdict PASS.
-5. **B1 SITUATIONAL REVIEW** — B1 picks up the PR per ai_head_b1_review_triggers.md.
+Verify the F1-FU-1 regression test 9 isn't vacuously passing:
 
-## Pre-work
+1. Temporarily flip `Depends(authz(Policy.RECIPIENT_OF_TERMINAL, allow_director=True))` → `allow_director=False` on `GET /msg/{terminal}` in `bus.py`
+2. `pytest tests/test_inbox_read_authz.py::test_get_msg_director_exemption_succeeds -v` — must FAIL (403 reader_slug_mismatch)
+3. Revert the flip — do NOT commit `False`
+4. Document the local-only verification in PR body
 
-- Run `git pull && git status` in your brisen-lab clone (verify clean main).
-- `git checkout -b b2/brisen-lab-auth-completion-1`.
-- **Read the WHOLE brief — V0.1 body + V0.2 + V0.3 + V0.4 + V0.5 amendments.** V0.4 IN-PLACE edits (Sequencing §2, AC table, V0.1 test-list SUPERSEDED notice, etc.) make later amendments authoritative wherever they conflict with body.
-- Re-read `bus.py:298-349` AND `bus.py:442-463` AND `bus.py:330-340` (broadcast SQL clause).
+This pins the choice the Director ratified.
 
-## Definition of done
+## Acceptance criteria (full table in brief — quick form here)
 
-- Variant A or B determination surfaced in PR body (AC A14).
-- ACs A1, A2, A3 (8 tests pass), A4, A5, A6 from the V0.4 brief all GREEN.
-- A12 (`feature-dev:code-reviewer` standard pass) verdict pasted in PR.
-- A13 (`/security-review`) verdict pasted in PR.
-- Ship-report at `briefs/_reports/B2_brisen_lab_auth_completion_1_F1_<date>.md` per SKILL.md.
-- Mailbox flipped to COMPLETE on merge (§3 hygiene).
+- A1: 22 factory tests PASS
+- A2: 9 inbox tests PASS (8 existing + 1 new)
+- A3: full `pytest` PASS (no regressions)
+- A4: `grep -n "_require_worker_slug\|_is_director\b" bus.py` = empty
+- A5: `grep -n "x_terminal_key" bus.py` = empty
+- A6: `grep -n "Header(None)" bus.py` = ONLY `x_human_confirmation_token` line
+- A7: py_compile bus.py + authz.py clean
+- A8: `from authz import authz, CallerContext, Policy` works
+- A9: pin-not-vacuous sanity check (above) — document in PR body
 
-## Notes
+## Ship-report
 
-- F3 is DONE (AH1-App execute, 2026-05-06 — 12/12 keys live, dep-d7tefirtll9c73bvdovg LIVE). DO NOT touch Render env, 1Password, or zshrc launchers.
-- Tier-A → ratification path runs through `/security-review` PASS + B1 review verdict. Director nod on terminal merge typical for Tier-A.
-- If you discover a fact-error in V0.2/V0.3/V0.4 amendments during pre-work — STOP, surface to AH1 (lead) before any code change.
+After merge, write `briefs/_reports/B2_brisen_lab_authz_factory_1_<YYYYMMDD>.md` in baker-master repo: PR number, merge commit, AC table all ☑, files modified, in-flight observations, any V0.x amendments triggered by review feedback.
+
+## Files modified
+
+- NEW: `authz.py` (~85 lines, repo root)
+- MODIFY: `bus.py` (refactor 5 endpoints; remove 2 dead helpers; update imports)
+- NEW: `tests/test_authz_factory.py` (22 tests)
+- EXTEND: `tests/test_inbox_read_authz.py` (add test 9, update docstring)
+
+## Do NOT touch
+
+- `auth_lab.py` (slug + JWT primitives stay; we just consume them)
+- Inner H7 chain in `_ratify_decision_inner`
+- `app.py`, `migrations/`, `lifecycle.py`, `freeze.py`, `tier_classification.py`
+- `conftest.py` (env-loaded test keys already match)
+
+## Lessons applied (in brief)
+
+- function-signature verification (every snippet in brief written after reading actual files — no guessed signatures)
+- Tier-A `/security-review` mandatory (Lesson #52)
+- pin-not-vacuous test (AC A9)
+- in-place brief amendments if review chain produces fixes (NOT append-only)
+- PEP 563 `from __future__ import annotations` already in bus.py:24 — keep convention in new authz.py
