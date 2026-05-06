@@ -65,6 +65,26 @@ _REGISTER_MAX_RETRIES = 1
 _REGISTER_RETRY_JITTER_LO_S = 0.05  # seconds (50 ms)
 _REGISTER_RETRY_JITTER_HI_S = 0.15  # seconds (150 ms)
 
+# Stage 2 — App-side autopoll (BRISEN_LAB_APP_AUTOPOLL_INBOX_1).
+# Roles whose Cowork sessions are Director-facing (AH1-App as Director's
+# secretary). When BAKER_ROLE matches AND BRISEN_LAB_APP_AUTOPOLL_ENABLED=true,
+# the hook drains /msg/director in addition to /msg/{role}.
+_DIRECTOR_FACING_ROLES = frozenset({
+    "lead", "ah1", "aihead1",
+})
+
+# Director's terminal-key 1P reference (mirrors F2 sender-key fetch pattern).
+_DIRECTOR_KEY_OP_REF = "op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_director/credential"
+
+# Director-inbox body cap (Q4(b) ratified): 8K matches daemon body_preview cap.
+# Higher than the existing 140-char self-inbox cap (Q4 rationale: Director
+# message density warrants full body; aesthetics secondary).
+_DIRECTOR_BODY_FULL_CAP = 8000
+
+# Per-inbox last-seen markers — distinct files so /msg/lead and /msg/director
+# advance independently. Resetting one does not over-read the other.
+_DIRECTOR_LAST_SEEN_FILENAME = "baker-brisen-lab-lastseen-director-via-{role}.txt"
+
 
 # ---------------------------------------------------------------------------
 # Stdin drain (NEVER raise — SIGPIPE-safe)
@@ -146,6 +166,70 @@ def _terminal_key() -> str:
 
 def _brisen_lab_url() -> str:
     return os.environ.get("BRISEN_LAB_URL", "https://brisen-lab.onrender.com").rstrip("/")
+
+
+def _app_autopoll_enabled() -> bool:
+    """Stage 2 kill-switch — BRISEN_LAB_APP_AUTOPOLL_ENABLED. Default false."""
+    raw = os.environ.get("BRISEN_LAB_APP_AUTOPOLL_ENABLED", "").strip().lower()
+    return raw in ("true", "1", "yes", "on")
+
+
+def _is_director_facing_role() -> bool:
+    """Caller's role is one of the AH1-App-equivalent slugs."""
+    return _worker_slug() in _DIRECTOR_FACING_ROLES
+
+
+def _director_last_seen_path() -> str:
+    """Per-role marker for Director-inbox drain. Separate from self-inbox marker."""
+    tmp = os.environ.get("TMPDIR", "/tmp").rstrip("/")
+    return f"{tmp}/" + _DIRECTOR_LAST_SEEN_FILENAME.format(role=_worker_slug())
+
+
+def _read_director_last_seen() -> str | None:
+    try:
+        with open(_director_last_seen_path(), "r", encoding="utf-8") as f:
+            ts = f.read().strip()
+        return ts or None
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
+
+
+def _write_director_last_seen(ts: str) -> None:
+    try:
+        with open(_director_last_seen_path(), "w", encoding="utf-8") as f:
+            f.write(ts)
+    except Exception:
+        pass
+
+
+def _fetch_director_key() -> str | None:
+    """Fetch Director's terminal-key. Tries env first, then op CLI fallback.
+
+    Env path: BRISEN_LAB_TERMINAL_KEY_director (set on AH1-App's shell).
+    Op fallback: 1Password CLI (mirrors F2 bus_post.sh policy ii). Op CLI is
+    optional — if not installed/authenticated, fall back to env-only.
+
+    Returns None on miss — caller fail-opens silent (no Director-inbox drain
+    that prompt). Hook discipline: never block startup on Director-inbox flow.
+    """
+    env_key = os.environ.get("BRISEN_LAB_TERMINAL_KEY_director", "").strip()
+    if env_key:
+        return env_key
+    try:
+        import subprocess
+        out = subprocess.run(
+            ["op", "read", _DIRECTOR_KEY_OP_REF],
+            capture_output=True, text=True, timeout=5,
+        )
+        if out.returncode == 0:
+            key = out.stdout.strip()
+            if key:
+                return key
+    except Exception:
+        pass
+    return None
 
 
 def _last_seen_path() -> str:
@@ -405,6 +489,133 @@ def _drain_inbox() -> str | None:
     return "📨 Brisen Lab inbox drained:\n" + "\n".join(summary_lines)
 
 
+def _drain_director_inbox() -> str | None:
+    """Stage 2 — drain /msg/director using Director's terminal-key.
+
+    Q3(b): AH1-App as Director's secretary; one window surfaces both inboxes.
+    Q4(b): full body (up to 8K) via /event/{id}/full — bypasses 140-char preview cap.
+    Q5(a): ratify_required pinned at top of returned summary.
+
+    Acks each consumed message (NM3 — sole authoritative path). Tracks newest
+    created_at in a SEPARATE marker file so /msg/lead drain (existing) and
+    /msg/director drain advance independently.
+
+    Returns formatted summary or None. Fail-open silent on any error.
+    """
+    if not _app_autopoll_enabled():
+        return None
+    if not _is_director_facing_role():
+        return None
+    director_key = _fetch_director_key()
+    if not director_key:
+        return None
+    try:
+        import httpx  # type: ignore
+    except Exception:
+        return None
+
+    last_seen = _read_director_last_seen()
+    params: dict[str, Any] = {"limit": 50}
+    if last_seen:
+        params["since"] = last_seen
+
+    base = _brisen_lab_url()
+    headers = {"X-Terminal-Key": director_key}
+
+    try:
+        with httpx.Client(timeout=_DRAIN_TIMEOUT_S) as client:
+            resp = client.get(f"{base}/msg/director", params=params, headers=headers)
+    except Exception:
+        return None
+    if resp.status_code != 200:
+        return None
+    try:
+        payload = resp.json()
+    except Exception:
+        return None
+    rows = payload if isinstance(payload, list) else (
+        payload.get("messages") or payload.get("rows") or []
+    )
+    if not rows:
+        return None
+
+    pinned_lines: list[str] = []
+    chronological_lines: list[str] = []
+    newest_ts: str | None = last_seen
+
+    try:
+        with httpx.Client(timeout=_DRAIN_TIMEOUT_S) as client:
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                mid = row.get("id")
+                if mid is None:
+                    continue
+
+                full_body = None
+                try:
+                    fr = client.get(f"{base}/event/{mid}/full", headers=headers)
+                    if fr.status_code == 200:
+                        full_body = fr.json().get("body")
+                except Exception:
+                    pass
+
+                # Compose + surface BEFORE ack so a transient ack failure does
+                # not silently drop a message we already paid the network cost
+                # to fetch. NM3 idempotent ack means re-delivery on ack-fail is
+                # safe; not advancing newest_ts on ack-fail makes that explicit.
+                body = full_body
+                if not isinstance(body, str) or not body:
+                    body = row.get("body_preview")
+                if not isinstance(body, str) or not body:
+                    body = "(body unavailable)"
+                if len(body) > _DIRECTOR_BODY_FULL_CAP:
+                    body = body[:_DIRECTOR_BODY_FULL_CAP - 3] + "..."
+
+                kind = row.get("kind", "?")
+                topic = row.get("topic") or ""
+                from_t = row.get("from_terminal", "?")
+                line = f"  [{kind}] {from_t} → {topic}\n    {body}"
+
+                if kind == "ratify_required":
+                    pinned_lines.append(line)
+                else:
+                    chronological_lines.append(line)
+
+                ack_ok = False
+                try:
+                    ar = client.post(f"{base}/msg/{mid}/ack", headers=headers)
+                    ack_ok = ar.status_code == 200
+                except Exception:
+                    ack_ok = False
+
+                if ack_ok:
+                    created = row.get("created_at")
+                    if created and (newest_ts is None or str(created) > str(newest_ts)):
+                        newest_ts = str(created)
+    except Exception:
+        pass
+
+    if newest_ts:
+        _write_director_last_seen(newest_ts)
+
+    if not pinned_lines and not chronological_lines:
+        return None
+
+    sections: list[str] = []
+    if pinned_lines:
+        sections.append(
+            "🔔 Director-Q (ratify_required) — pending decisions:\n"
+            + "\n".join(pinned_lines)
+        )
+    if chronological_lines:
+        sections.append(
+            "📨 Director inbox (chronological):\n"
+            + "\n".join(chronological_lines)
+        )
+    return "\n\n".join(sections)
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -449,6 +660,12 @@ def main() -> None:
     drain = _drain_inbox()
     if drain:
         parts.append(drain)
+
+    # Stage 2 — Director-inbox drain (AH1-App as Director's secretary).
+    # Gated by BRISEN_LAB_APP_AUTOPOLL_ENABLED + _DIRECTOR_FACING_ROLES.
+    director_drain = _drain_director_inbox()
+    if director_drain:
+        parts.append(director_drain)
 
     _exit_clean("\n\n".join(parts) if parts else None)
 

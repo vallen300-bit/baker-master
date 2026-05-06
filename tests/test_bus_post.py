@@ -137,12 +137,19 @@ def _run_py(args: list[str], env: dict) -> subprocess.CompletedProcess:
 
 # ---------- tests ----------
 
-def test_01_sh_director_blocked():
-    """Director-recipient → exit 1, stderr 'director-recipient blocked'.
-    Pin-not-vacuous AC A6."""
-    r = _run_sh(["director", "x"], _env_with({"BAKER_ROLE": "AH1"}))
-    assert r.returncode == 1
-    assert "director-recipient blocked" in r.stderr
+def test_01_sh_director_passes_through(stub_daemon, fake_op_path):
+    """F2-FU-1 (BRISEN_LAB_APP_AUTOPOLL_INBOX_1): director-recipient is no
+    longer script-blocked. Script POSTS to daemon; daemon enforces the
+    env-gated block (covered in brisen-lab tests/test_director_recipient_block.py).
+    Inverts the F2 test_01_sh_director_blocked assertion."""
+    url, captured = stub_daemon
+    r = _run_sh(
+        ["director", "test body", "test/topic"],
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
+    )
+    assert r.returncode == 0, r.stderr
+    assert any(req["path"] == "/msg/director" for req in captured), captured
 
 
 def test_02_sh_unknown_slug():
@@ -254,14 +261,18 @@ def test_11_py_multi_recipient(stub_daemon, fake_op_path):
     assert captured[0]["payload"]["to"] == ["lead", "deputy"]
 
 
-def test_12_py_director_blocked():
-    """py: --to director → exit 1, stderr 'director-recipient blocked'."""
+def test_12_py_director_passes_through(stub_daemon, fake_op_path):
+    """F2-FU-1 (BRISEN_LAB_APP_AUTOPOLL_INBOX_1): py: --to director passes
+    through to daemon (no script-side reject). Daemon enforces the env-gated
+    block. Inverts the F2 test_12_py_director_blocked assertion."""
+    url, captured = stub_daemon
     r = _run_py(
         ["--to", "director", "--body", "x"],
-        _env_with({"BAKER_ROLE": "AH1"}),
+        _env_with({"BAKER_ROLE": "AH1", "BRISEN_LAB_DAEMON_URL": url},
+                  fake_op_dir=fake_op_path),
     )
-    assert r.returncode != 0
-    assert "director-recipient blocked" in r.stderr
+    assert r.returncode == 0, r.stderr
+    assert any(req["path"] == "/msg/director" for req in captured), captured
 
 
 def test_13_py_payload_includes_parent_id(stub_daemon, fake_op_path):
