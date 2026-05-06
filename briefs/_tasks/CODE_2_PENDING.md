@@ -1,4 +1,22 @@
-# CODE_2_PENDING — BRISEN_LAB_APP_AUTOPOLL_INBOX_1
+---
+status: COMPLETE
+brief: briefs/BRIEF_BRISEN_LAB_APP_AUTOPOLL_INBOX_1.md
+trigger_class: TIER_A_DAEMON_AUTHZ_PLUS_HOOK_INBOX
+dispatched_at: 2026-05-06
+dispatched_by: ai-head-a
+claimed_by: b2
+ship_report: briefs/_reports/B2_brisen_lab_app_autopoll_inbox_1_20260506.md
+prs_merged:
+  brisen_lab_7: stage-2-companion
+  baker_master_166: 6d4b14a
+followups_post_merge:
+  - 1194259 fix(hook): add cowork-ah1 to _DIRECTOR_FACING_ROLES (Stage 2 activation)
+  - 134baff fix(hook): resolve op:// terminal-key refs at runtime (Stage 2 burn-in unblock)
+merged_at: 2026-05-06
+verdict: PASS
+---
+
+# CODE_2_PENDING — BRISEN_LAB_APP_AUTOPOLL_INBOX_1 (COMPLETE)
 
 **Dispatched:** 2026-05-06
 **Tier:** A (daemon authz surface change + receive-side hook extension touching Director's inbox)
