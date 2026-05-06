@@ -384,11 +384,92 @@ def test_register_500_no_retry_immediate_fail_open(hook_mod, monkeypatch, patch_
 
 def test_no_terminal_key_silent_exit(hook_mod, monkeypatch, capsys):
     monkeypatch.delenv("BRISEN_LAB_TERMINAL_KEY", raising=False)
+    monkeypatch.delenv("BRISEN_LAB_TERMINAL_KEY_lead", raising=False)
+    # Block op CLI fallback so it returns "" deterministically.
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: (_ for _ in ()).throw(FileNotFoundError("op not found")))
     with patch.object(sys, "stdin", _stdin_with({"prompt": "hi"})):
         with pytest.raises(SystemExit) as exc:
             hook_mod.main()
     assert exc.value.code == 0
     assert capsys.readouterr().out.strip() == ""
+
+
+# ==========================================================================
+# _terminal_key precedence + 1Password CLI fallback (V0.3.8 / 2026-05-06)
+# ==========================================================================
+#
+# Cowork-App's settings.local.json `env` block does NOT resolve op:// references
+# — only literal strings reach the hook subprocess. The hook must self-fetch
+# from 1Password CLI as last resort when both env names return empty.
+
+
+def test_terminal_key_env_suffixed_takes_precedence(hook_mod, monkeypatch):
+    """Per-worker suffixed env-var wins over unsuffixed AND op fallback."""
+    monkeypatch.setenv("BAKER_ROLE", "cowork-ah1")
+    monkeypatch.setenv("BRISEN_LAB_TERMINAL_KEY", "unsuffixed-value")
+    monkeypatch.setenv("BRISEN_LAB_TERMINAL_KEY_cowork-ah1", "suffixed-winner")
+    op_called = {"count": 0}
+
+    def _spy_run(*args, **kwargs):
+        op_called["count"] += 1
+        return MagicMock(returncode=0, stdout="op-fallback-value")
+
+    monkeypatch.setattr(subprocess, "run", _spy_run)
+    assert hook_mod._terminal_key() == "suffixed-winner"
+    assert op_called["count"] == 0, "op CLI must not be invoked when env-suffixed is set"
+
+
+def test_terminal_key_falls_back_to_op_cli_when_env_empty(hook_mod, monkeypatch):
+    """Both env names empty → op read fires; return value passed through stripped."""
+    monkeypatch.setenv("BAKER_ROLE", "cowork-ah1")
+    monkeypatch.delenv("BRISEN_LAB_TERMINAL_KEY", raising=False)
+    monkeypatch.delenv("BRISEN_LAB_TERMINAL_KEY_cowork-ah1", raising=False)
+    captured = {}
+
+    def _mock_run(args, **kwargs):
+        captured["args"] = args
+        captured["timeout"] = kwargs.get("timeout")
+        captured["capture_output"] = kwargs.get("capture_output")
+        captured["text"] = kwargs.get("text")
+        return MagicMock(returncode=0, stdout="op-secret-from-vault\n")
+
+    monkeypatch.setattr(subprocess, "run", _mock_run)
+    assert hook_mod._terminal_key() == "op-secret-from-vault"
+    assert captured["args"] == [
+        "op", "read",
+        "op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_cowork-ah1/credential",
+    ]
+    assert captured["timeout"] == 4.0
+    assert captured["capture_output"] is True
+    assert captured["text"] is True
+
+
+def test_terminal_key_op_cli_failure_returns_empty_silent(hook_mod, monkeypatch):
+    """op CLI errors (timeout, non-zero, missing binary) → silent empty string."""
+    monkeypatch.setenv("BAKER_ROLE", "cowork-ah1")
+    monkeypatch.delenv("BRISEN_LAB_TERMINAL_KEY", raising=False)
+    monkeypatch.delenv("BRISEN_LAB_TERMINAL_KEY_cowork-ah1", raising=False)
+
+    # Case 1: subprocess raises (e.g. op binary not on PATH)
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **kw: (_ for _ in ()).throw(FileNotFoundError("op not found")),
+    )
+    assert hook_mod._terminal_key() == ""
+
+    # Case 2: subprocess returns non-zero (op authenticated but item missing)
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **kw: MagicMock(returncode=1, stdout="", stderr="not signed in"),
+    )
+    assert hook_mod._terminal_key() == ""
+
+    # Case 3: subprocess.TimeoutExpired
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda *a, **kw: (_ for _ in ()).throw(subprocess.TimeoutExpired(cmd="op", timeout=4.0)),
+    )
+    assert hook_mod._terminal_key() == ""
 
 
 def test_garbage_stdin_silent_exit(hook_mod, monkeypatch, patch_httpx):

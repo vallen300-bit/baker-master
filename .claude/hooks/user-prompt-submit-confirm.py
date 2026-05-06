@@ -136,12 +136,28 @@ def _worker_slug() -> str:
 
 
 def _terminal_key() -> str:
-    """Per-worker key takes precedence; fall back to unsuffixed for backward-compat."""
-    slug_key = f"BRISEN_LAB_TERMINAL_KEY_{_worker_slug()}"
+    """Per-worker key precedence: env-suffixed → env-unsuffixed → 1Password CLI fallback."""
+    slug = _worker_slug()
+    slug_key = f"BRISEN_LAB_TERMINAL_KEY_{slug}"
     val = os.environ.get(slug_key, "").strip()
     if val:
         return val
-    return os.environ.get("BRISEN_LAB_TERMINAL_KEY", "").strip()
+    val = os.environ.get("BRISEN_LAB_TERMINAL_KEY", "").strip()
+    if val:
+        return val
+    # 1Password CLI fallback — last resort. Silent on any failure (fail-open contract).
+    try:
+        import subprocess
+        ref = f"op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_{slug}/credential"
+        result = subprocess.run(
+            ["op", "read", ref],
+            capture_output=True, text=True, timeout=4.0,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return ""
 
 
 def _brisen_lab_url() -> str:
