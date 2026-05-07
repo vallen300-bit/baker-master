@@ -204,7 +204,7 @@ PL ship-report
 PR: #168  https://github.com/vallen300-bit/baker-master/pull/168
 Branch: b1/plaud-trigger-fix-1
 HEAD (pre-fold):  a11122f
-HEAD (post-fold): <FOLD_SHA>
+HEAD (post-fold): 81a8dcd
 Brief: BRIEF_PLAUD_TRIGGER_FIX_1 + GATE-1+3 fold UPDATE (CODE_1_PENDING.md @ f2d7350)
 Status: OPEN — fold landed; awaiting re-fired gate-1+3 verdicts + AH2 /security-review
 
