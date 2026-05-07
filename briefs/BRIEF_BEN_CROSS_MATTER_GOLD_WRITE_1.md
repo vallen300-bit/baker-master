@@ -365,7 +365,9 @@ ratified — promote to GOLD: <artefact-path>
 
 **Flow on detection:**
 
-1. **Read** the ratified artefact at `<artefact-path>` (must exist; if not, surface error to Director).
+1. **Read** the ratified artefact at `<artefact-path>`. Two checks before reading:
+   - **(a) Vault-root containment** (V0.5 fold — Gate 4 MEDIUM): resolve the path to absolute via `Path(artefact_path).resolve()` and assert it is a child of `$BAKER_VAULT_ROOT`. Reject with explicit error if not. Defends against path-traversal if the trigger phrase ever appears in attacker-controlled chat (forwarded email pasted into session, scraped message, etc.) — file-exists check alone is insufficient because `../../etc/passwd` resolves and exists.
+   - **(b) Existence**: file must exist after vault-root check passes. If not, surface error to Director.
 2. **Draft** a proposed GOLD entry following Hybrid C schema (`## YYYY-MM-DD — topic`, ratification quote, resolution; DV initials).
 3. **Tag** the entry with `<!-- domain: bb-finance -->` immediately after the H2 header.
 4. **Surface** the diff to Director inline (full proposed entry text) before any write. Director either:
@@ -695,6 +697,7 @@ If BEN cannot acquire the lock, surface to Director: "Another BEN session has a 
 5. Test: BEN's first GOLD promotion produces correctly formatted row in `gold-promotions.md`
 6. CONTRACT.md + authority-boundary-table.md frontmatter `last_updated:` reflect 2026-05-07
 7. SKILL.md §5 readable + parseable by BEN on session-start
+8. **Activation verification** (V0.5 fold — Gate 4 LOW): on the local baker-vault checkout, after appending the pre-commit hook block per §Ship Target step 3, attempt a scratch commit with `domain: ao` content as non-Director author — pre-commit hook MUST return non-zero exit and emit the REJECT message. Confirm before declaring Ship complete. Without this verification, the entire scope-guard could be silently non-functional but commits appear to "work".
 
 ## Verification SQL
 N/A (file-system + git operations only; no PG schema touched)
