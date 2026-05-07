@@ -114,6 +114,16 @@ _GOLD_TARGET = "wiki/_cortex/director-gold-global.md"
 _AUDIT_LOG = "wiki/_cortex/gold-promotions.md"
 
 _H2_RE = re.compile(r"^## \d{4}-\d{2}-\d{2}\b")
+# V0.3 fix C2: scope-guard intentionally only inspects DATE-format H2s (Gold entries).
+# Non-date H2s (e.g., "## Schema", "## Entry frontmatter — domain scoping", structural
+# document sections) are NOT scope-guarded — they are document-level prose that
+# Director-only writes by convention. The brief's Fix 1 explicitly establishes this:
+# Gold ENTRIES use `## YYYY-MM-DD — topic` format; structural sections use other H2s
+# and don't carry domain tags. Author authority on structural sections is enforced
+# by Inv 9 (single AGENT writer = Mac Mini); BEN cannot modify the file outside
+# its own promotion flow per skill discipline. If a future Desk needs to scope-guard
+# non-date sections, broaden _H2_RE to `^##\s+` and require ALL H2 sections to carry
+# a domain tag (with a reserved `domain: structural` for document-level sections).
 _DOMAIN_RE = re.compile(r"<!--\s*domain:\s*([\w-]+)\s*-->")
 
 
@@ -168,11 +178,13 @@ def _parse_h2_to_domain(text: str) -> dict[str, str]:
     return result
 
 
-def _changed_h2s_from_diff(diff: str, all_h2s_in_order: list[str]) -> set[str]:
-    """Map each diff hunk to its enclosing H2 header in post-commit file order.
+def _changed_h2s_from_diff(diff: str) -> set[str]:
+    """Map each diff hunk to its enclosing H2 header.
 
     Strategy: walk the diff line-by-line, tracking the current H2 (last seen header in
     pre-image OR post-image). Any added or removed line = its enclosing H2 is "changed".
+    NEW entries (added with `+## YYYY-MM-DD ...`) are caught naturally because the H2
+    line itself is a `+` line — it sets `current` AND counts as a change.
     """
     changed: set[str] = set()
     current: str | None = None
@@ -184,8 +196,6 @@ def _changed_h2s_from_diff(diff: str, all_h2s_in_order: list[str]) -> set[str]:
             current = body.rstrip()
         if raw.startswith(("+", "-")) and not raw.startswith(("+++", "---")) and current:
             changed.add(current)
-    # Also: any H2 that exists in post-commit but not in pre-commit must be flagged
-    # (NEW entries are always changed).
     return changed
 
 
@@ -198,24 +208,36 @@ def _check_gold_target(author_email: str) -> list[str]:
     post_text = _staged_file_content(_GOLD_TARGET)
     if not post_text:
         return []  # file deleted entirely — let other guards handle
-    h2_to_domain = _parse_h2_to_domain(post_text)
+    h2_to_domain_post = _parse_h2_to_domain(post_text)
+
+    # V0.3 fix L1: also parse pre-commit (HEAD) state to recover domain of DELETED entries.
+    # Without this, a deletion of an `ao`-domain entry by BEN would emit the misleading
+    # "no domain tag" error instead of the correct "not authorized to delete domain=ao" error.
+    pre_text = _git("show", f"HEAD:{_GOLD_TARGET}") if _GOLD_TARGET else ""
+    h2_to_domain_pre = _parse_h2_to_domain(pre_text) if pre_text else {}
+
     diff = _staged_diff(_GOLD_TARGET)
-    changed = _changed_h2s_from_diff(diff, list(h2_to_domain.keys()))
+    changed = _changed_h2s_from_diff(diff)
 
     errors: list[str] = []
     for h2 in changed:
-        domain = h2_to_domain.get(h2, "")
+        # Prefer post-commit domain (for adds/modifications); fall back to pre-commit
+        # (for deletions where H2 no longer exists in post-commit).
+        domain = h2_to_domain_post.get(h2) or h2_to_domain_pre.get(h2, "")
         if not domain:
             errors.append(
                 f"REJECT [{_GOLD_TARGET}]: changed entry {h2!r} has no "
-                f"`<!-- domain: ... -->` tag within 5 lines of H2 header"
+                f"`<!-- domain: ... -->` tag within 5 lines of H2 header (neither pre- nor post-commit)"
             )
             continue
         allowed = _AUTHORITY_BY_EMAIL.get(domain, set())
         if author_email not in allowed:
+            # Distinguish deletion vs add/modify in the error message for clearer debugging.
+            verb = "delete" if h2 not in h2_to_domain_post else "modify"
             errors.append(
-                f"REJECT [{_GOLD_TARGET}]: entry {h2!r} tagged domain={domain} but "
-                f"author email {author_email!r} not in allowlist {sorted(allowed) or '(reserved)'}"
+                f"REJECT [{_GOLD_TARGET}]: not authorized to {verb} entry {h2!r} "
+                f"(domain={domain}); author email {author_email!r} not in allowlist "
+                f"{sorted(allowed) or '(reserved)'}"
             )
     return errors
 
@@ -503,7 +525,54 @@ Create `tests/test_check_gold_domain_tags.py` covering V0.2 hardening:
 8. **MODIFICATION** of an existing `domain: ao` entry by author=`bb-finance@brisengroup.com` → FAIL (CRIT 1: BEN cannot edit ao-domain even on existing entries)
 9. **DELETION** of lines from existing `domain: ao` entry by author=`bb-finance@brisengroup.com` → FAIL (CRIT 1)
 10. **Substring spoofing**: author email `directory-bot@evilcorp.com` claiming director access → FAIL (CRIT 3: V1's `a in author` would have matched "director"; V0.2 exact-match prevents)
-11. **Trigger phrase regex** (separate test file `tests/test_parse_ratification_trigger.py`): em-dash, en-dash, ASCII hyphen, NB-hyphen, smart-quote variant ALL match (CRIT 2); whitespace tolerance; case-insensitive match; missing `: <path>` does NOT match
+11. **Trigger phrase regex** — separate test file `tests/test_parse_ratification_trigger.py`. Import path: `from scripts.check_gold_domain_tags import parse_ratification_trigger` (place the function in that module alongside the gate logic; if separated later into `scripts/parse_trigger.py`, update tests + V0.3 §5 reference). Test stub:
+
+```python
+"""Tests for parse_ratification_trigger — V0.3 fix H2."""
+import pytest
+from scripts.check_gold_domain_tags import parse_ratification_trigger
+
+
+@pytest.mark.parametrize("phrase, expected_path", [
+    # ASCII hyphen
+    ("ratified - promote to GOLD: wiki/_finance/baden-baden/proposed-reports/x.md",
+     "wiki/_finance/baden-baden/proposed-reports/x.md"),
+    # Em-dash (U+2014)
+    ("ratified — promote to GOLD: foo.md", "foo.md"),
+    # En-dash (U+2013)
+    ("ratified – promote to GOLD: bar.md", "bar.md"),
+    # Non-breaking hyphen (U+2011)
+    ("ratified ‑ promote to GOLD: baz.md", "baz.md"),
+    # Smart quote-style hyphen (U+2010)
+    ("ratified ‐ promote to GOLD: q.md", "q.md"),
+    # Horizontal bar (U+2015)
+    ("ratified ― promote to GOLD: q.md", "q.md"),
+    # Case variants — ratified/RATIFIED/Ratified
+    ("RATIFIED — promote to gold: y.md", "y.md"),
+    # Extra whitespace tolerance
+    ("ratified   —    promote   to   GOLD :   spaced.md", "spaced.md"),
+])
+def test_trigger_matches_dash_variants(phrase, expected_path):
+    assert parse_ratification_trigger(phrase) == expected_path
+
+
+@pytest.mark.parametrize("non_match_phrase", [
+    "ratified",  # bare ratify
+    "ratified the offer",  # ratified without GOLD suffix
+    "promote to GOLD: orphan.md",  # missing 'ratified' lead
+    "ratified — promote to GOLD",  # missing colon + path
+    "ratified — promote to GOLD: ",  # trailing colon, no path token
+    "ratifiedpromote to GOLD: x.md",  # missing dash separator
+])
+def test_trigger_does_not_match_invalid(non_match_phrase):
+    assert parse_ratification_trigger(non_match_phrase) is None
+
+
+def test_trigger_extracts_first_path_only():
+    # If two trigger phrases appear, only the first match wins (search returns first).
+    text = "ratified — promote to GOLD: a.md\nlater: ratified — promote to GOLD: b.md"
+    assert parse_ratification_trigger(text) == "a.md"
+```
 12. **Audit log append-only**: addition at end of `gold-promotions.md` → PASS (IMP 5)
 13. **Audit log non-append**: any `-` line in diff of `gold-promotions.md` (modification or deletion) by non-Director → FAIL (IMP 5)
 14. **Audit log Director bypass**: same modification by Director email → PASS (IMP 5 + IMP 8)
@@ -628,10 +697,11 @@ N/A (file-system + git operations only; no PG schema touched)
 
 Once russo-de Desk activates (separate brief, Phase B):
 
-1. Add `russo-de` to `_AUTHORITY` map in `scripts/check_gold_domain_tags.py`:
+1. Add `russo-de` to `_AUTHORITY_BY_EMAIL` map in `scripts/check_gold_domain_tags.py` (V0.2 model — emails only, not name/role strings):
    ```python
-   "russo-de": {"director", "Dimitry Vallen", "russo-de"},
+   "russo-de": {"russo-de@brisengroup.com"},
    ```
+   Director bypass is inherited from `_DIRECTOR_EMAILS` automatically — do NOT add `"director"` or `"Dimitry Vallen"` strings into the authorized set. (V0.3 fix C1: prior V0.2 example used legacy name/role strings; corrected here to email-only.)
 2. Russo-de Desk's SKILL.md adds equivalent §5 GOLD-Write Capability section, scoped to `<!-- domain: russo-de -->`
 3. Russo-de Desk's CONTRACT.md gets equivalent §3.2 carve-out
 4. Russo-de Desk's authority-boundary-table row gets equivalent Tier-B conditional revision
