@@ -45,7 +45,7 @@ Format: H2 entry header is followed by a blank line, then a fenced HTML comment 
 <entry body>
 ```
 
-Agents enforce tag presence + domain match via pre-commit hook (`scripts/check_gold_domain_tags.py` — added by this brief). Director's manual edits bypass the hook (DV-only initials in commit message exempts).
+Agents enforce tag presence + domain match via pre-commit hook (`scripts/check_gold_domain_tags.py` — added by this brief). **Director bypass** (V0.2): commit author email matches `_DIRECTOR_EMAILS` allowlist (`dvallen@brisengroup.com`, `vallen300@gmail.com`). NOT bypassable via "DV" initials in commit message — that text is unverifiable (Gate 3 IMP 8).
 ```
 
 ### Verification
@@ -54,115 +54,207 @@ Agents enforce tag presence + domain match via pre-commit hook (`scripts/check_g
 
 ---
 
-## Fix 2: Scope-guard implementation — `scripts/check_gold_domain_tags.py`
+## Fix 2: Scope-guard implementation — `scripts/check_gold_domain_tags.py` (V0.2 hardened)
 
 ### Problem
-Need a deterministic pre-commit gate: BEN's commit may only contain entries with `domain: bb-finance` tag. Any entry tagged for other domains in the same commit = REJECT.
+Need a deterministic pre-commit gate. **V0.2 fold** (Gate 3 CRIT 1 + 3 + IMP 5 + 8 addressed):
+- Diff-only inspection misses MODIFICATIONS to existing entries (CRIT 1)
+- Substring author-match leaks scope (CRIT 3 — "directory-bot" matches "director")
+- Audit log append-only must be enforced, not just documented (IMP 5)
+- "DV initials in commit msg" bypass is brittle — anyone can type DV (IMP 8)
 
-### Implementation
+### Implementation (V0.2)
 
 Create new file `scripts/check_gold_domain_tags.py`:
 
 ```python
 #!/usr/bin/env python3
-"""Pre-commit gate for wiki/_cortex/director-gold-global.md writes.
+"""Pre-commit gate for wiki/_cortex/director-gold-global.md + gold-promotions.md writes.
 
-Enforces:
-1. Every NEW or MODIFIED H2 entry carries `<!-- domain: <tag> -->` within 3 lines of header.
-2. The committing author (from --author flag or git config) is authorized for that domain.
+Two enforcement modes:
+1. director-gold-global.md — every CHANGED H2 entry must carry `<!-- domain: <tag> -->`
+   within 3 lines of header; author email must be authorized for that domain. Inspection
+   uses POST-COMMIT file state (not just diff) so modifications/deletions to existing
+   entries are validated against their domain authority.
+2. gold-promotions.md — append-only enforced: any modification removing or altering
+   existing lines is REJECTED. Only pure additions at end-of-file pass.
 
-Domain authority matrix (locked in this script, not config — domain assignment is a
-capability change requiring its own brief):
-    cross-cutting → director only
-    bb-finance    → ben (bb-finance agent commits) + director
-    russo-at|de|ch, ao, movie, hagenauer → reserved (no agent yet); director only
+Director bypass: commit author email matches `_DIRECTOR_EMAILS` allowlist → both checks
+skipped (Director may write any domain entry, may rewrite audit log if needed).
+NOT bypassable via "DV" in commit message — that text is unverifiable.
 
-Usage (called by pre-commit hook):
-    python3 scripts/check_gold_domain_tags.py --author "$(git config user.name)" --staged
+Usage (called from .git/hooks/pre-commit):
+    python3 scripts/check_gold_domain_tags.py --staged
 """
-import argparse
+from __future__ import annotations
+
 import re
 import subprocess
 import sys
+import unicodedata
 from pathlib import Path
 
 
-_AUTHORITY = {
-    "cross-cutting": {"director", "Dimitry Vallen"},
-    "bb-finance":    {"director", "Dimitry Vallen", "BEN", "bb-finance"},
-    "russo-at":      {"director", "Dimitry Vallen"},
-    "russo-de":      {"director", "Dimitry Vallen"},
-    "russo-ch":      {"director", "Dimitry Vallen"},
-    "ao":            {"director", "Dimitry Vallen"},
-    "movie":         {"director", "Dimitry Vallen"},
-    "hagenauer":     {"director", "Dimitry Vallen"},
+# Author allowlist by email. Domain assignment is itself a capability change requiring
+# its own brief — adding a Desk to this map = brief amendment.
+_AUTHORITY_BY_EMAIL: dict[str, set[str]] = {
+    "cross-cutting": set(),  # Director-only via _DIRECTOR_EMAILS bypass
+    "bb-finance":    {"bb-finance@brisengroup.com", "ben@brisengroup.com"},
+    "russo-at":      set(),  # reserved
+    "russo-de":      set(),  # reserved
+    "russo-ch":      set(),
+    "ao":            set(),
+    "movie":         set(),
+    "hagenauer":     set(),
 }
 
-_TARGET = "wiki/_cortex/director-gold-global.md"
-_H2_RE = re.compile(r"^## \d{4}-\d{2}-\d{2}")
+_DIRECTOR_EMAILS: set[str] = {"dvallen@brisengroup.com", "vallen300@gmail.com"}
+
+_GOLD_TARGET = "wiki/_cortex/director-gold-global.md"
+_AUDIT_LOG = "wiki/_cortex/gold-promotions.md"
+
+_H2_RE = re.compile(r"^## \d{4}-\d{2}-\d{2}\b")
 _DOMAIN_RE = re.compile(r"<!--\s*domain:\s*([\w-]+)\s*-->")
 
 
-def _staged_diff() -> str:
-    out = subprocess.run(
-        ["git", "diff", "--cached", "--unified=10", "--", _TARGET],
-        capture_output=True, text=True, check=False,
-    )
+def _git(*args: str) -> str:
+    out = subprocess.run(["git", *args], capture_output=True, text=True, check=False)
     return out.stdout
 
 
-def _check(diff: str, author: str) -> list[str]:
-    """Return list of error strings; empty list = PASS."""
-    errors: list[str] = []
-    in_added = False
-    pending_h2 = None
-    pending_h2_lineno = 0
-    line_after_h2 = 0
+def _author_email() -> str:
+    """Read the author email git will use for the impending commit. Lowercased + stripped."""
+    return _git("config", "user.email").strip().lower()
 
+
+def _staged_files() -> list[str]:
+    return [ln for ln in _git("diff", "--cached", "--name-only").splitlines() if ln]
+
+
+def _staged_file_content(path: str) -> str:
+    """Returns POST-COMMIT file content (i.e., index version, what will land if commit lands)."""
+    return _git("show", f":{path}")
+
+
+def _staged_diff(path: str) -> str:
+    return _git("diff", "--cached", "--unified=0", "--", path)
+
+
+# --- gold-target enforcement (CRIT 1: post-commit state parse) ---
+
+
+def _parse_h2_to_domain(text: str) -> dict[str, str]:
+    """Build {h2_header_line: domain_tag} from full file content.
+
+    H2 line is matched as `## YYYY-MM-DD ...`. Domain tag must appear within the next
+    ~5 non-empty lines (tolerant: 3 lines per spec + slack for blank lines).
+    Entries without tag map to empty string (will fail enforcement).
+    """
+    result: dict[str, str] = {}
+    lines = text.splitlines()
+    i = 0
+    while i < len(lines):
+        if _H2_RE.match(lines[i]):
+            h2 = lines[i].rstrip()
+            # scan up to 5 following lines
+            domain = ""
+            for j in range(i + 1, min(i + 6, len(lines))):
+                m = _DOMAIN_RE.search(lines[j])
+                if m:
+                    domain = m.group(1).strip()
+                    break
+            result[h2] = domain
+        i += 1
+    return result
+
+
+def _changed_h2s_from_diff(diff: str, all_h2s_in_order: list[str]) -> set[str]:
+    """Map each diff hunk to its enclosing H2 header in post-commit file order.
+
+    Strategy: walk the diff line-by-line, tracking the current H2 (last seen header in
+    pre-image OR post-image). Any added or removed line = its enclosing H2 is "changed".
+    """
+    changed: set[str] = set()
+    current: str | None = None
     for raw in diff.splitlines():
-        if raw.startswith("+## ") and _H2_RE.match(raw[1:]):
-            pending_h2 = raw[1:].strip()
-            pending_h2_lineno = 0
-            line_after_h2 = 0
-            in_added = True
+        if raw.startswith(("---", "+++", "@@", "diff ")):
             continue
-        if pending_h2 and raw.startswith("+"):
-            line_after_h2 += 1
-            m = _DOMAIN_RE.search(raw)
-            if m:
-                domain = m.group(1).strip()
-                allowed = _AUTHORITY.get(domain, set())
-                if author not in allowed and not any(a in author for a in allowed):
-                    errors.append(
-                        f"REJECT: entry '{pending_h2}' tagged domain={domain} but "
-                        f"author={author!r} not in {sorted(allowed)}"
-                    )
-                pending_h2 = None
-            elif line_after_h2 > 3:
-                errors.append(
-                    f"REJECT: entry '{pending_h2}' has no `<!-- domain: ... -->` tag "
-                    f"within 3 lines of H2 header"
-                )
-                pending_h2 = None
+        body = raw[1:] if raw and raw[0] in "+- " else raw
+        if _H2_RE.match(body.strip()):
+            current = body.rstrip()
+        if raw.startswith(("+", "-")) and not raw.startswith(("+++", "---")) and current:
+            changed.add(current)
+    # Also: any H2 that exists in post-commit but not in pre-commit must be flagged
+    # (NEW entries are always changed).
+    return changed
 
+
+def _check_gold_target(author_email: str) -> list[str]:
+    if _GOLD_TARGET not in _staged_files():
+        return []
+    if author_email in _DIRECTOR_EMAILS:
+        return []  # Director bypass
+
+    post_text = _staged_file_content(_GOLD_TARGET)
+    if not post_text:
+        return []  # file deleted entirely — let other guards handle
+    h2_to_domain = _parse_h2_to_domain(post_text)
+    diff = _staged_diff(_GOLD_TARGET)
+    changed = _changed_h2s_from_diff(diff, list(h2_to_domain.keys()))
+
+    errors: list[str] = []
+    for h2 in changed:
+        domain = h2_to_domain.get(h2, "")
+        if not domain:
+            errors.append(
+                f"REJECT [{_GOLD_TARGET}]: changed entry {h2!r} has no "
+                f"`<!-- domain: ... -->` tag within 5 lines of H2 header"
+            )
+            continue
+        allowed = _AUTHORITY_BY_EMAIL.get(domain, set())
+        if author_email not in allowed:
+            errors.append(
+                f"REJECT [{_GOLD_TARGET}]: entry {h2!r} tagged domain={domain} but "
+                f"author email {author_email!r} not in allowlist {sorted(allowed) or '(reserved)'}"
+            )
     return errors
 
 
-def main() -> int:
-    p = argparse.ArgumentParser()
-    p.add_argument("--author", required=True)
-    p.add_argument("--staged", action="store_true")
-    args = p.parse_args()
+# --- audit log enforcement (IMP 5: append-only) ---
 
-    if not args.staged:
-        print("only --staged mode supported in V1", file=sys.stderr)
+
+def _check_audit_log_append_only(author_email: str) -> list[str]:
+    if _AUDIT_LOG not in _staged_files():
+        return []
+    if author_email in _DIRECTOR_EMAILS:
+        return []
+
+    diff = _staged_diff(_AUDIT_LOG)
+    # Append-only = no `-` lines in the diff (no removals or modifications), and all
+    # `+` lines are after the prior end-of-file marker. We approximate: any `-` line
+    # (other than `---` file marker) → REJECT.
+    for raw in diff.splitlines():
+        if raw.startswith("---"):
+            continue
+        if raw.startswith("-"):
+            return [
+                f"REJECT [{_AUDIT_LOG}]: append-only enforcement — diff contains "
+                f"removal {raw!r}; only pure end-of-file additions allowed"
+            ]
+    return []
+
+
+def main() -> int:
+    if "--staged" not in sys.argv:
+        print("only --staged mode supported in V0.2", file=sys.stderr)
         return 2
 
-    diff = _staged_diff()
-    if not diff:
-        return 0  # nothing staged for this file
+    author_email = _author_email()
+    if not author_email:
+        print("REJECT: git config user.email is empty; cannot authorize", file=sys.stderr)
+        return 1
 
-    errors = _check(diff, args.author)
+    errors = _check_gold_target(author_email) + _check_audit_log_append_only(author_email)
     if errors:
         for e in errors:
             print(e, file=sys.stderr)
@@ -174,25 +266,52 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-Wire to `.git/hooks/pre-commit` (existing hook script — append; do not overwrite):
+Wire to `.git/hooks/pre-commit` (existing hook — append; idempotent grep-guarded):
 
 ```bash
-# BEN GOLD-write scope-guard (BRIEF_BEN_CROSS_MATTER_GOLD_WRITE_1)
-if git diff --cached --name-only | grep -q "^wiki/_cortex/director-gold-global\.md$"; then
-    python3 scripts/check_gold_domain_tags.py --author "$(git config user.name)" --staged || exit 1
+# BEN GOLD-write scope-guard + audit append-only (BRIEF_BEN_CROSS_MATTER_GOLD_WRITE_1)
+if ! grep -q "check_gold_domain_tags.py" "$0" 2>/dev/null; then : ; fi  # marker
+files=$(git diff --cached --name-only)
+if echo "$files" | grep -qE "^wiki/_cortex/(director-gold-global|gold-promotions)\.md$"; then
+    python3 scripts/check_gold_domain_tags.py --staged || exit 1
 fi
 ```
 
-### Verification
-1. `pytest tests/test_check_gold_domain_tags.py` GREEN with literal output (test cases: missing tag, wrong domain, correct domain match, multi-entry mixed-domain commit, Director bypass, etc.)
-2. Manual: BEN drafts a commit adding entry with `domain: bb-finance` tag → pre-commit PASS; BEN drafts commit adding entry tagged `domain: ao` → pre-commit FAIL with REJECT message
+### Verification (V0.2)
+1. `pytest tests/test_check_gold_domain_tags.py` GREEN with literal output. New test cases (V0.2 additions): modification of existing tagged entry by wrong-author REJECTED (CRIT 1); deletion of entry by wrong-author REJECTED (CRIT 1); audit-log non-append modification REJECTED (IMP 5); substring-spoofing attempts ("directory-bot@example.com" claiming director access) REJECTED (CRIT 3); Director email bypass works for both files (IMP 8).
+2. Manual: BEN edits an EXISTING `domain: bb-finance` entry (modification, not new add) → pre-commit PASSES (correct: BEN authorized for bb-finance). BEN attempts to edit an EXISTING `domain: ao` entry → pre-commit FAILS (correct: BEN NOT authorized for ao). V1 hook missed this; V0.2 catches it.
 
 ---
 
-## Fix 3: Ratification trigger phrase parser — BEN side
+## Fix 3: Ratification trigger phrase parser — BEN side (V0.2 hardened)
 
 ### Problem
-BEN must detect Director's `"ratified — promote to GOLD"` phrase + artefact path in chat, then enter the GOLD-promotion workflow.
+BEN must detect Director's GOLD-promotion phrase + artefact path in chat. **V0.2 fold** (Gate 3 CRIT 2): V1 said "em-dash not hyphen" but no regex spec; smart quotes / case / whitespace make activation non-deterministic. Fix: tolerant regex with Unicode normalization + named capture for path.
+
+### Canonical regex (locked)
+
+```python
+import re, unicodedata
+
+# Match any Unicode hyphen/dash variant (U+002D ASCII hyphen, U+2010 hyphen, U+2011
+# non-breaking hyphen, U+2012 figure dash, U+2013 en-dash, U+2014 em-dash, U+2015
+# horizontal bar). Case-insensitive on `ratified` and `promote to GOLD`.
+_TRIGGER_RE = re.compile(
+    r"\bratified\s*[-‐-―]\s*promote\s+to\s+GOLD\s*:\s*(?P<path>\S+)",
+    re.IGNORECASE,
+)
+
+def parse_ratification_trigger(chat_text: str) -> str | None:
+    """Returns the artefact path if the Director ratification trigger phrase is present
+    in chat_text, else None. Apply Unicode NFKC normalization first to fold smart-quote
+    variants and width forms; the tolerant dash class handles all common dash forms.
+    """
+    if not chat_text:
+        return None
+    normalized = unicodedata.normalize("NFKC", chat_text)
+    m = _TRIGGER_RE.search(normalized)
+    return m.group("path") if m else None
+```
 
 ### Implementation
 
@@ -201,13 +320,20 @@ Add to `~/.claude/skills/bb-finance/SKILL.md` under a new `## §5. GOLD-Write Ca
 ```markdown
 ## §5. GOLD-Write Capability (Tier-B conditional)
 
-**Activation:** Director ratifies a Layer 3 (proposed-reports) artefact with the EXACT phrase:
+**Activation:** Director ratifies a Layer 3 (proposed-reports) artefact with the canonical trigger phrase:
 
 ```
 ratified — promote to GOLD: <artefact-path>
 ```
 
-(em-dash `—` not hyphen `-`; phrase is load-bearing — bare "ratified" does NOT trigger.)
+**Tolerant regex** (BEN's parser at `parse_ratification_trigger` per Fix 3 spec):
+- `ratified` — case-insensitive match
+- separator — any Unicode dash/hyphen (U+002D, U+2010-U+2015) — accepts `-`, `‐`, `‑`, `‒`, `–`, `—`, `―`
+- `promote to GOLD` — case-insensitive
+- `:` — required
+- `<path>` — non-whitespace token; the parser does NOT validate the path syntactically — caller does the file-exists check
+
+**Bare `ratified` does NOT trigger.** The full phrase including `— promote to GOLD: <path>` is load-bearing. If Director uses ambiguous wording, BEN replies asking for the canonical form.
 
 **Flow on detection:**
 
@@ -360,29 +486,125 @@ On session-start, BEN reads tail of `wiki/_cortex/gold-promotions.md` (latest 20
 
 ---
 
-## Fix 8: Tests
+## Fix 8: Tests (V0.2 expanded)
 
-Create `tests/test_check_gold_domain_tags.py` covering:
-1. Entry with correct `domain: bb-finance` tag + author `BEN` → PASS
-2. Entry with wrong `domain: ao` tag + author `BEN` → FAIL with REJECT message
-3. Entry with NO `<!-- domain -->` tag within 3 lines → FAIL with no-tag message
-4. Multi-entry commit: one tagged correctly, one tagged wrong → FAIL on the wrong one
-5. Director author + `domain: cross-cutting` → PASS
-6. Director author + bare H2 (no tag) → FAIL (even Director must declare scope)
-7. Diff with no changes to target file → PASS (early return)
+Create `tests/test_check_gold_domain_tags.py` covering V0.2 hardening:
+
+**V1 baseline cases:**
+1. New entry with correct `domain: bb-finance` tag + author email `bb-finance@brisengroup.com` → PASS
+2. New entry with `domain: ao` tag + author email `bb-finance@brisengroup.com` → FAIL (BEN not authorized for ao)
+3. New entry with NO `<!-- domain -->` tag within 5 lines → FAIL with no-tag message
+4. Multi-entry commit: one tagged bb-finance, one tagged ao, author=BEN → FAIL on the ao entry
+5. Director email `dvallen@brisengroup.com` → bypass passes regardless of tags
+6. Diff with no changes to target file → PASS (early return)
+
+**V0.2 critical-path cases (Gate 3 fold):**
+7. **MODIFICATION** of an existing `domain: bb-finance` entry by author=`bb-finance@brisengroup.com` → PASS (CRIT 1: V1 missed this; V0.2 catches via post-commit file state parse)
+8. **MODIFICATION** of an existing `domain: ao` entry by author=`bb-finance@brisengroup.com` → FAIL (CRIT 1: BEN cannot edit ao-domain even on existing entries)
+9. **DELETION** of lines from existing `domain: ao` entry by author=`bb-finance@brisengroup.com` → FAIL (CRIT 1)
+10. **Substring spoofing**: author email `directory-bot@evilcorp.com` claiming director access → FAIL (CRIT 3: V1's `a in author` would have matched "director"; V0.2 exact-match prevents)
+11. **Trigger phrase regex** (separate test file `tests/test_parse_ratification_trigger.py`): em-dash, en-dash, ASCII hyphen, NB-hyphen, smart-quote variant ALL match (CRIT 2); whitespace tolerance; case-insensitive match; missing `: <path>` does NOT match
+12. **Audit log append-only**: addition at end of `gold-promotions.md` → PASS (IMP 5)
+13. **Audit log non-append**: any `-` line in diff of `gold-promotions.md` (modification or deletion) by non-Director → FAIL (IMP 5)
+14. **Audit log Director bypass**: same modification by Director email → PASS (IMP 5 + IMP 8)
+15. **Empty `git config user.email`** → FAIL with explicit error (V0.2 guard)
+16. **Multi-file commit** with ONE valid bb-finance edit AND ONE invalid ao edit by BEN → FAIL on the ao one only (single-file rejection isolates blast radius)
+
+---
+
+## Fix 9: State machine for Director-decline mid-flow (Gate 3 IMP 4)
+
+### Problem
+V1 had no spec for what happens if Director sees the inline diff and rejects/revises. No staged-state file, no resume protocol, no timeout. BEN would be stuck holding draft state in process memory only.
+
+### Implementation
+
+Add to `~/.claude/skills/bb-finance/SKILL.md` §5 (GOLD-Write Capability):
+
+```markdown
+### §5.1. Staged-state file + resume + timeout
+
+After step 2 (BEN drafts proposed GOLD entry), BEN persists the draft to:
+
+```
+$TMPDIR/baker/ben/gold-promotion-staged-<session-id>.json
+```
+
+Schema:
+```json
+{
+  "session_id": "<uuid>",
+  "staged_at_utc": "<iso-8601>",
+  "ttl_hours": 24,
+  "source_artefact": "<path>",
+  "proposed_h2_header": "## YYYY-MM-DD — topic",
+  "proposed_domain_tag": "bb-finance",
+  "proposed_body": "<full body markdown>",
+  "director_ratification_quote": "<verbatim>",
+  "state": "awaiting_director_diff_ratify"
+}
+```
+
+**Three resume paths:**
+
+1. **Director ratifies diff in-session** (`ok` / `commit` / `approved`) → BEN proceeds to step 5 (commit). On success, delete staged file.
+
+2. **Director revises in-session** (`revise: <instructions>`) → BEN updates proposed_body + bumps `staged_at_utc`, re-surfaces. Stays in `awaiting_director_diff_ratify`.
+
+3. **Director declines** (`no` / `abort` / silent) → BEN moves staged file to `$TMPDIR/baker/ben/gold-promotion-declined-<session-id>.json` for audit; clears working state.
+
+**Timeout:** any staged file with `staged_at_utc` older than 24h is auto-expired on next BEN session-start: moved to `gold-promotion-expired-<session-id>.json` for audit; not auto-resumed.
+
+**Resume on session-start:** BEN reads `$TMPDIR/baker/ben/gold-promotion-staged-*.json`. For each non-expired file, surfaces to Director: "Pending GOLD promotion from <staged_at>: <h2_header>. Resume / revise / abort?". Director-on-demand only — does NOT auto-resume to avoid surprise commits.
+```
+
+---
+
+## Fix 10: Concurrency lock (Gate 3 IMP 7)
+
+### Problem
+Two concurrent BEN sessions could stage GOLD promotions on the same target file → race on commit. V1 had no lock.
+
+### Implementation
+
+Add to `~/.claude/skills/bb-finance/SKILL.md` §5:
+
+```markdown
+### §5.2. Concurrency lock
+
+Before staging a GOLD-promotion (step 2 of §5 flow), BEN acquires an advisory lock:
+
+```bash
+# Pseudocode — actual implementation in BEN's skill helper
+exec 200>$BAKER_VAULT_ROOT/wiki/_cortex/.gold-promotion.lock
+flock --nonblock 200 || {
+    echo "Another GOLD promotion in progress. Try again after that one commits or expires (24h TTL)." >&2
+    exit 1
+}
+
+# ... staging + Director-diff-ratify + commit happens inside lock ...
+# Lock auto-released on shell exit (FD 200 close).
+```
+
+If BEN cannot acquire the lock, surface to Director: "Another BEN session has a GOLD promotion in flight. Wait or check `wiki/_cortex/.gold-promotion.lock` mtime to see how long it's been held." Do NOT proceed.
+
+`.gold-promotion.lock` file is in `.gitignore` (lock state, not tracked).
+```
 
 ---
 
 ## Files Modified
 - `wiki/_cortex/director-gold-global.md` — add domain-scoping schema doc
 - NEW: `wiki/_cortex/gold-promotions.md` — audit log
-- NEW: `scripts/check_gold_domain_tags.py` — pre-commit gate
-- NEW: `tests/test_check_gold_domain_tags.py` — gate tests
-- `.git/hooks/pre-commit` — wire the gate (one-line append, idempotent grep-guarded)
-- `~/.claude/skills/bb-finance/SKILL.md` — new §5 GOLD-Write Capability section
-- `_ops/agents/bb-finance/CONTRACT.md` — §3.2 carve-out
+- NEW: `scripts/check_gold_domain_tags.py` — pre-commit gate (V0.2 — post-commit state parse + audit append-only + email-based author auth)
+- NEW: `tests/test_check_gold_domain_tags.py` — gate tests (16 cases V0.2)
+- NEW: `tests/test_parse_ratification_trigger.py` — trigger-phrase regex tests (Unicode dash variants + smart quotes + case)
+- `.git/hooks/pre-commit` — wire the gate (idempotent grep-guarded append; activation step LAST per Ship Target)
+- `~/.claude/skills/bb-finance/SKILL.md` — new §5 (GOLD-Write Capability) + §5.1 (staged-state machine) + §5.2 (concurrency lock)
+- `_ops/agents/bb-finance/CONTRACT.md` — §3.2 carve-out (V0.2: email-allowlist Director bypass, NOT DV-initials)
 - `wiki/_finance/baden-baden/authority-boundary-table.md` — row revision
 - `_ops/agents/bb-finance/OPERATING.md` — §X revert-path session-start clause
+- `.gitignore` (baker-vault) — add `wiki/_cortex/.gold-promotion.lock` (lock state, not tracked)
 
 ## Do NOT Touch
 - Other Desks' SKILL.md (russo-at / russo-de / russo-ch / AO / MOVIE / Hagenauer Desks) — Phase B follow-on per Desk
@@ -425,11 +647,21 @@ Same pattern applies to russo-at, russo-ch, AO Desk, MOVIE Desk, Hagenauer Desk.
 - `/security-review` (Gate 2 — AH2 or AH1-App; new pre-commit hook touches author-string from git config; verify no shell injection in subprocess args)
 - `code-architecture-reviewer` (Gate 3 — AH1-T spawns picker-architect; reviews capability-extension architecture, scope-guard mechanism, pattern-generalisation soundness)
 
-## Ship Target
-- PR with all gates passing
+## Ship Target (V0.2 — cross-repo merge ordering, Gate 3 IMP 6)
+
+Implementation spans TWO repos. **Strict merge order to avoid activation racing schema:**
+
+1. **baker-vault PR FIRST** — schema-only changes; idempotent; safe to merge before code lands.
+   Files: `wiki/_cortex/director-gold-global.md` (frontmatter schema doc), NEW `wiki/_cortex/gold-promotions.md` (audit log skeleton), `_ops/agents/bb-finance/CONTRACT.md` (§3.2 carve-out + email-allowlist replaces DV-initials), `wiki/_finance/baden-baden/authority-boundary-table.md` (row revision), `_ops/agents/bb-finance/OPERATING.md` (§X revert path), `~/.claude/skills/bb-finance/SKILL.md` (§5 + §5.1 + §5.2).
+
+2. **baker-master PR SECOND** — code + tests; depends on schema being merged so test fixtures match production state.
+   Files: NEW `scripts/check_gold_domain_tags.py`, NEW `tests/test_check_gold_domain_tags.py`, NEW `tests/test_parse_ratification_trigger.py`.
+
+3. **Activation step LAST** (manual, post both merges) — append the pre-commit hook block to `.git/hooks/pre-commit` in BAKER-VAULT local checkout (where target files live). NOT a PR commit; local-checkout activation. Verify hook fires by attempting a tagged-but-wrong-domain commit on a scratch branch — must FAIL.
+
 - Ship report at `briefs/_reports/<bN>_ben_cross_matter_gold_write_1_<date>.md`
-- Pre-commit hook activated on baker-vault repo (where target files live) — verify hook fires before declaring ship
 - BEN performs first live GOLD promotion against one of the 6 staged Layer 3 reports (Director-curated test set per V2 addendum) AFTER merge — that's the burn-in proof
+- Roll-back path: `git revert` on each repo's merge commit; remove pre-commit hook block; staged files in `$TMPDIR/baker/ben/` cleaned up on next session-start (auto-expire)
 
 ## Caller / Provenance
 - AH2-T re-emit 2026-05-07 ~07:53Z (re-relayed after prior session API-terminated; primary dispatch + V2 addendum from chat-history context, persisted to bm-aihead2/memory/ben_gold_write_brief_paste_blocks.md)
