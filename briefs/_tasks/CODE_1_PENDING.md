@@ -1,4 +1,9 @@
-# CODE_1_PENDING — BRIEF_PLAUD_TRIGGER_FIX_1
+# CODE_1_PENDING — BRIEF_PLAUD_TRIGGER_FIX_1 — **COMPLETE**
+
+**Status:** COMPLETE 2026-05-07
+**PR:** https://github.com/vallen300-bit/baker-master/pull/168 (OPEN — awaiting 5-gate review)
+**Branch:** `b1/plaud-trigger-fix-1` @ `4cf2651`
+**Ship report:** `briefs/_reports/B1_plaud_trigger_fix_1_20260507.md`
 
 **Dispatched:** 2026-05-06
 **Tier:** B
