@@ -249,3 +249,119 @@ def test_extract_transcript_text_logs_warnings(caplog):
             msg = r.getMessage()
             assert "X-Amz-Signature" not in msg, "url-tail leaked signing material"
             assert "X-Amz-Credential" not in msg, "url-tail leaked signing material"
+
+
+# ---------------------------------------------------------------------------
+# I1 — empty-body sentinel per-source_id-per-day dedup (alarm fatigue fix)
+# ---------------------------------------------------------------------------
+
+def test_empty_body_sentinel_dedup_per_source_id():
+    """I1: empty-body sentinel fires exactly once per source_id per UTC day, even when
+    same broken recording is observed across multiple poll cycles."""
+    from datetime import datetime, timezone
+    from triggers import plaud_trigger
+    from triggers.plaud_trigger import check_new_plaud_recordings
+
+    rec = {
+        "id": "stuck1", "is_trans": True, "duration": 600_000,
+        "start_time": 1_800_000_010_000, "filename": "stuck",
+    }
+    formatted_stub = {
+        # ~30 chars — sub-200 threshold mimics broken-backfill shell.
+        "text": "Meeting: stuck\nDate: 2026-05-07\n",
+        "metadata": {
+            "transcript_id": "stuck1", "meeting_title": "stuck", "date": "",
+            "duration": "10min", "organizer": "", "participants": "",
+        },
+        "raw_id": "stuck1",
+    }
+
+    # Stateful is_processed/mark_processed emulating real trigger_log dedup.
+    state = {"meeting": set(), "plaud_alarm": set()}
+
+    def is_processed_se(kind, sid):
+        return sid in state.get(kind, set())
+
+    def mark_processed_se(kind, sid):
+        state.setdefault(kind, set()).add(sid)
+
+    pipeline_mock = MagicMock()
+    old_watermark = datetime.fromtimestamp(0, tz=timezone.utc)
+
+    with patch.object(plaud_trigger.config.plaud, "api_token", "tok"), \
+         patch("triggers.sentinel_health.should_skip_poll", return_value=False), \
+         patch("triggers.sentinel_health.report_success"), \
+         patch("triggers.sentinel_health.report_failure") as report_failure, \
+         patch("triggers.plaud_trigger.fetch_plaud_recordings", return_value=[rec]), \
+         patch("triggers.plaud_trigger.fetch_plaud_detail", return_value={"id": "stuck1"}), \
+         patch("triggers.plaud_trigger.format_plaud_transcript", return_value=formatted_stub), \
+         patch("triggers.plaud_trigger._has_empty_db_row", return_value=True), \
+         patch.object(plaud_trigger.trigger_state, "get_watermark", return_value=old_watermark), \
+         patch.object(plaud_trigger.trigger_state, "is_processed", side_effect=is_processed_se), \
+         patch.object(plaud_trigger.trigger_state, "mark_processed", side_effect=mark_processed_se), \
+         patch.object(plaud_trigger.trigger_state, "set_watermark"), \
+         patch("orchestrator.pipeline.SentinelPipeline", return_value=pipeline_mock), \
+         patch("memory.store_back.SentinelStoreBack._get_global_instance",
+               return_value=_make_lock_store_mock(lock_acquired=True)):
+        # Two consecutive polls — same broken recording observed twice.
+        check_new_plaud_recordings()
+        check_new_plaud_recordings()
+
+    plaud_failures = [c for c in report_failure.call_args_list if c.args and c.args[0] == "plaud"]
+    assert len(plaud_failures) == 1, \
+        f"I1 dedup: expected exactly 1 plaud sentinel failure, got {len(plaud_failures)}"
+    assert "empty-body-after-transcription" in plaud_failures[0].args[1]
+    assert "plaud_stuck1" in plaud_failures[0].args[1]
+
+
+# ---------------------------------------------------------------------------
+# I2 — stale-refresh advisory lock (multi-instance race fix)
+# ---------------------------------------------------------------------------
+
+def test_stale_refresh_advisory_lock_skips_when_held():
+    """I2: when pg_try_advisory_xact_lock fails (peer instance owns it), stale-refresh
+    skips the iteration cleanly — no fetch_plaud_detail, no store, no Qdrant write."""
+    from contextlib import contextmanager
+    from datetime import datetime, timezone
+    from triggers import plaud_trigger
+    from triggers.plaud_trigger import check_new_plaud_recordings
+
+    rec = {
+        "id": "lockheld1", "is_trans": True, "duration": 600_000,
+        "start_time": 1_800_000_020_000, "filename": "lockheld",
+    }
+
+    @contextmanager
+    def fake_lock_unacquired(source_id):
+        # Peer instance owns the lock — we never acquire.
+        yield False
+
+    pipeline_mock = MagicMock()
+    old_watermark = datetime.fromtimestamp(0, tz=timezone.utc)
+
+    with patch.object(plaud_trigger.config.plaud, "api_token", "tok"), \
+         patch("triggers.sentinel_health.should_skip_poll", return_value=False), \
+         patch("triggers.sentinel_health.report_success"), \
+         patch("triggers.sentinel_health.report_failure"), \
+         patch("triggers.plaud_trigger.fetch_plaud_recordings", return_value=[rec]), \
+         patch("triggers.plaud_trigger.fetch_plaud_detail") as fetch_detail, \
+         patch("triggers.plaud_trigger.format_plaud_transcript") as fmt, \
+         patch("triggers.plaud_trigger._has_empty_db_row", return_value=True), \
+         patch("triggers.plaud_trigger._stale_refresh_advisory_lock", side_effect=fake_lock_unacquired), \
+         patch.object(plaud_trigger.trigger_state, "get_watermark", return_value=old_watermark), \
+         patch.object(plaud_trigger.trigger_state, "is_processed", return_value=True), \
+         patch.object(plaud_trigger.trigger_state, "mark_processed"), \
+         patch.object(plaud_trigger.trigger_state, "set_watermark"), \
+         patch("orchestrator.pipeline.SentinelPipeline", return_value=pipeline_mock), \
+         patch("memory.store_back.SentinelStoreBack._get_global_instance",
+               return_value=_make_lock_store_mock(lock_acquired=True)) as get_store:
+        store_mock = get_store.return_value
+        store_mock.store_meeting_transcript = MagicMock()
+        check_new_plaud_recordings()
+
+        assert not fetch_detail.called, \
+            "fetch_plaud_detail must not be called when stale-refresh lock not acquired"
+        assert not fmt.called, \
+            "format_plaud_transcript must not be called when stale-refresh lock not acquired"
+        assert not store_mock.store_meeting_transcript.called, \
+            "store_meeting_transcript must not be called when stale-refresh lock not acquired"
