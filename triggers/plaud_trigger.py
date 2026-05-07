@@ -5,6 +5,7 @@ the same pipeline as Fireflies.
 """
 import logging
 import sys
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -128,10 +129,12 @@ def _extract_transcript_text(detail: dict) -> str:
     """
     url = _get_content_url(detail, "transaction")
     if not url:
+        logger.warning(f"_extract_transcript_text: no transaction URL in detail (file_id={detail.get('id', '?')})")
         return ""
 
     segments = _fetch_s3_content(url, is_json=True)
     if not segments or not isinstance(segments, list):
+        logger.warning(f"_extract_transcript_text: empty/invalid S3 segments for {detail.get('id', '?')} (url-tail={url.split('?')[0][-40:]})")
         return ""
 
     lines = []
@@ -188,6 +191,111 @@ def _recording_title(rec: dict) -> str:
 def _recording_id(rec: dict) -> str:
     """Extract file ID. API field: id (32-char hex)."""
     return rec.get("id") or rec.get("file_id") or ""
+
+
+def _has_empty_db_row(source_id: str, threshold: int = 200) -> bool:
+    """Returns True if meeting_transcripts has a row for source_id with full_transcript shorter than threshold.
+
+    Used by stale-refresh path: a row from the broken-backfill era has length(full_transcript)
+    well below 200 chars (header-only shell). A real transcript is typically >> 200 chars even
+    for short recordings.
+    """
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    conn = store._get_conn()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT length(full_transcript) FROM meeting_transcripts WHERE id = %s LIMIT 1",
+            (source_id,),
+        )
+        row = cur.fetchone()
+        cur.close()
+        return bool(row) and (row[0] or 0) < threshold
+    except Exception as e:
+        conn.rollback()
+        logger.debug(f"_has_empty_db_row probe failed for {source_id} (non-fatal): {e}")
+        return False
+    finally:
+        store._put_conn(conn)
+
+
+def _maybe_report_empty_body_alarm(rec: dict, source_id: str, body: str) -> None:
+    """Fire empty-body sentinel exactly once per source_id per UTC day.
+
+    With ~4 known-stuck recordings polled every 15 min, an unbounded sentinel
+    floods #cockpit Slack. UTC-day bucketed dedup via trigger_log gives
+    once-per-recording-per-day cadence + full audit trail. Also coalesces both
+    backfill + incremental call sites into a single dedup check (cycle-aware
+    via DB state — second call hits is_processed and short-circuits).
+    """
+    try:
+        from triggers.sentinel_health import report_failure as _report_failure
+        dur_ms = rec.get("duration") or 0
+        if not (dur_ms > 300_000 and len(body) < 200 and rec.get("is_trans")):
+            return
+        utc_day = datetime.now(timezone.utc).strftime("%Y%m%d")
+        dedup_key = f"plaud_empty_alarm_{source_id}_{utc_day}"
+        if trigger_state.is_processed("plaud_alarm", dedup_key):
+            return
+        _report_failure(
+            "plaud",
+            f"empty-body-after-transcription: {source_id} dur={dur_ms}ms body={len(body)}chars",
+        )
+        trigger_state.mark_processed("plaud_alarm", dedup_key)
+    except Exception as _se:
+        logger.debug(f"empty-body alarm dedup helper failed (non-fatal): {_se}")
+
+
+@contextmanager
+def _stale_refresh_advisory_lock(source_id: str):
+    """Per-source_id advisory lock for stale-refresh re-ingest. Yields bool acquired.
+
+    Render rolling deploy runs 2 instances concurrently. Without serialization,
+    both can fire fetch_plaud_detail + store_meeting_transcript on the same stale
+    source_id; PG dedupes via ON CONFLICT but Qdrant uses fresh uuid4 per point
+    (duplicate Voyage embedding calls + duplicate Qdrant points). Lock is held
+    for the duration of the iteration body and auto-released when the txn ends
+    (pg_try_advisory_xact_lock semantics).
+    """
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    conn = store._get_conn()
+    if not conn:
+        # No DB conn — fail closed (skip iteration so we don't double-write Qdrant).
+        yield False
+        return
+    acquired = False
+    try:
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT pg_try_advisory_xact_lock(hashtext(%s))",
+                (source_id,),
+            )
+            row = cur.fetchone()
+            cur.close()
+            acquired = bool(row and row[0])
+        except Exception as e:
+            conn.rollback()
+            logger.debug(f"stale-refresh lock probe failed for {source_id} (non-fatal): {e}")
+            acquired = False
+        yield acquired
+    finally:
+        try:
+            # Either commit (releases xact lock) or rollback (also releases).
+            if acquired:
+                conn.commit()
+            else:
+                conn.rollback()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        store._put_conn(conn)
 
 
 def _recording_duration(rec: dict) -> str:
@@ -319,145 +427,181 @@ def check_new_plaud_recordings():
 
             source_id = f"plaud_{file_id}"
 
-            # Skip if already processed
+            # Skip if already processed AND DB body is non-empty.
+            # Stale-refresh: if Plaud previously returned is_trans=False (broken backfill
+            # pre-fix landed shells), allow re-ingest once Plaud reports is_trans=True.
+            # store_meeting_transcript ON CONFLICT (id) DO UPDATE handles upsert cleanly.
+            #
+            # I2: stale-refresh acquires per-source pg_try_advisory_xact_lock(hashtext(source_id))
+            # so concurrent Render instances don't double-write Qdrant (PG dedupes via ON CONFLICT,
+            # Qdrant uses fresh uuid4). Lock held across iteration body, released at finally.
+            _stale_lock_cm = None
             if trigger_state.is_processed("meeting", source_id):
-                continue
-
-            # Fetch full transcript detail
-            detail = fetch_plaud_detail(file_id)
-            if not detail:
-                logger.warning(f"Plaud trigger: could not fetch detail for {file_id}")
-                continue
-
-            formatted = format_plaud_transcript(rec, detail)
-            metadata = formatted["metadata"]
-
-            # COST-OPT-WAVE1: Pre-mark as processed BEFORE expensive pipeline work
-            trigger_state.mark_processed("meeting", source_id)
-
-            trigger = TriggerEvent(
-                type="meeting",
-                content=formatted["text"],
-                source_id=source_id,
-                contact_name="",
-                priority="medium",
-            )
-
-            # Store full transcript in meeting_transcripts (same table as Fireflies)
-            try:
-                from memory.store_back import SentinelStoreBack
-                store = SentinelStoreBack._get_global_instance()
-                store.store_meeting_transcript(
-                    transcript_id=source_id,
-                    title=metadata.get("meeting_title", "Untitled"),
-                    meeting_date=metadata.get("date"),
-                    duration=metadata.get("duration"),
-                    organizer=metadata.get("organizer"),
-                    participants=metadata.get("participants"),
-                    summary=formatted["text"] if "Summary:" in formatted["text"] else None,
-                    full_transcript=formatted["text"],
-                    source="plaud",
+                if not _has_empty_db_row(source_id, threshold=200):
+                    continue
+                logger.info(
+                    f"Plaud trigger: stale-refresh re-ingesting {source_id} "
+                    f"(DB body < 200 chars, is_trans now True)"
                 )
-            except Exception as _e:
-                logger.warning(f"Failed to store Plaud transcript {source_id} in PostgreSQL (non-fatal): {_e}")
-
-            # BRIEF_PM_SIDEBAR_STATE_WRITE_1 D6: relevance-on-ingest sentinel.
-            try:
-                from orchestrator.pm_signal_detector import (
-                    detect_relevant_pms_meeting, flag_pm_signal,
-                )
-                _title = metadata.get("meeting_title", "") or ""
-                _participants = metadata.get("participants", "") or ""
-                for _pm_slug in detect_relevant_pms_meeting(
-                    title=_title, participants=_participants,
-                ):
-                    flag_pm_signal(
-                        _pm_slug, "meeting",
-                        source=f"plaud: {_title[:120]}",
-                        summary=(formatted.get("text") or "")[:280],
-                        push_slack=True,
+                _stale_lock_cm = _stale_refresh_advisory_lock(source_id)
+                if not _stale_lock_cm.__enter__():
+                    logger.info(
+                        f"Plaud trigger: stale-refresh lock held by peer instance for "
+                        f"{source_id}, skipping (will retry next cycle)"
                     )
-            except Exception as _pm_e:
-                logger.debug(f"meeting signal detection failed (non-fatal): {_pm_e}")
+                    try:
+                        _stale_lock_cm.__exit__(None, None, None)
+                    except Exception:
+                        pass
+                    continue
 
-            # Record contact interactions from participants
             try:
-                from memory.store_back import SentinelStoreBack
-                _store_ip = SentinelStoreBack._get_global_instance()
-                _participants_str = metadata.get("participants", "")
-                for _pname in _participants_str.split(","):
-                    _pname = _pname.strip()
-                    if not _pname or len(_pname) < 2:
-                        continue
-                    _cid = _store_ip.match_contact_by_name(name=_pname)
-                    if _cid:
-                        _store_ip.record_interaction(
-                            contact_id=_cid, channel="meeting",
-                            direction="bidirectional",
-                            timestamp=metadata.get("date"),
-                            subject=metadata.get("meeting_title", "")[:200],
-                            source_ref=f"meeting:{source_id}:{_cid}",
-                        )
-            except Exception:
-                pass  # Non-fatal
+                # Fetch full transcript detail
+                detail = fetch_plaud_detail(file_id)
+                if not detail:
+                    logger.warning(f"Plaud trigger: could not fetch detail for {file_id}")
+                    continue
 
-            # Extract deadlines
-            try:
-                from orchestrator.deadline_manager import extract_deadlines
-                extract_deadlines(
+                formatted = format_plaud_transcript(rec, detail)
+                metadata = formatted["metadata"]
+
+                # COST-OPT-WAVE1: Pre-mark as processed BEFORE expensive pipeline work
+                trigger_state.mark_processed("meeting", source_id)
+
+                trigger = TriggerEvent(
+                    type="meeting",
                     content=formatted["text"],
-                    source_type="plaud",
                     source_id=source_id,
-                    sender_name="",
-                    source_agent="meeting_pipeline",
+                    contact_name="",
+                    priority="medium",
                 )
-            except Exception as _e:
-                logger.debug(f"Deadline extraction failed for Plaud {source_id}: {_e}")
 
-            # Extract commitments (same as Fireflies)
-            try:
-                from triggers.fireflies_trigger import _extract_commitments_from_meeting
-                _extract_commitments_from_meeting(
-                    transcript_text=formatted["text"],
-                    meeting_title=metadata.get("meeting_title", "Untitled"),
-                    participants=metadata.get("participants", ""),
-                    source_id=source_id,
-                )
-            except Exception as _e:
-                logger.debug(f"Commitment extraction failed for Plaud {source_id}: {_e}")
+                # Store full transcript in meeting_transcripts (same table as Fireflies)
+                try:
+                    from memory.store_back import SentinelStoreBack
+                    store = SentinelStoreBack._get_global_instance()
+                    store.store_meeting_transcript(
+                        transcript_id=source_id,
+                        title=metadata.get("meeting_title", "Untitled"),
+                        meeting_date=metadata.get("date"),
+                        duration=metadata.get("duration"),
+                        organizer=metadata.get("organizer"),
+                        participants=metadata.get("participants"),
+                        summary=formatted["text"] if "Summary:" in formatted["text"] else None,
+                        full_transcript=formatted["text"],
+                        source="plaud",
+                    )
+                except Exception as _e:
+                    logger.warning(f"Failed to store Plaud transcript {source_id} in PostgreSQL (non-fatal): {_e}")
 
-            # Extract Director's personal commitments as deadlines
-            try:
-                from triggers.fireflies_trigger import _extract_director_commitments_as_deadlines
-                _extract_director_commitments_as_deadlines(
-                    transcript_text=formatted["text"],
-                    meeting_title=metadata.get("meeting_title", "Untitled"),
-                    participants=metadata.get("participants", ""),
-                    source_id=source_id,
-                    meeting_date=metadata.get("date", ""),
-                )
-            except Exception as _e:
-                logger.debug(f"Director commitment extraction failed for Plaud {source_id}: {_e}")
+                # I1 dedup: empty-body sentinel fires once per source_id per UTC day to
+                # prevent #cockpit alarm-flood (4 stuck recordings × 15-min polls).
+                _maybe_report_empty_body_alarm(rec, source_id, formatted.get("text") or "")
 
-            # Run Sentinel pipeline
-            try:
-                pipeline.run(trigger)
-                processed += 1
-            except Exception as e:
-                logger.error(f"Plaud trigger: pipeline failed for {source_id}: {e}")
+                # BRIEF_PM_SIDEBAR_STATE_WRITE_1 D6: relevance-on-ingest sentinel.
+                try:
+                    from orchestrator.pm_signal_detector import (
+                        detect_relevant_pms_meeting, flag_pm_signal,
+                    )
+                    _title = metadata.get("meeting_title", "") or ""
+                    _participants = metadata.get("participants", "") or ""
+                    for _pm_slug in detect_relevant_pms_meeting(
+                        title=_title, participants=_participants,
+                    ):
+                        flag_pm_signal(
+                            _pm_slug, "meeting",
+                            source=f"plaud: {_title[:120]}",
+                            summary=(formatted.get("text") or "")[:280],
+                            push_slack=True,
+                        )
+                except Exception as _pm_e:
+                    logger.debug(f"meeting signal detection failed (non-fatal): {_pm_e}")
 
-            # Post-meeting auto-pipeline (non-blocking)
-            try:
-                from orchestrator.meeting_pipeline import process_meeting_async
-                process_meeting_async(
-                    transcript_id=source_id,
-                    title=metadata.get("meeting_title", "Untitled"),
-                    participants=metadata.get("participants", ""),
-                    meeting_date=metadata.get("date", ""),
-                    full_transcript=formatted["text"],
-                )
-            except Exception as _mp_err:
-                logger.warning(f"Meeting pipeline hook failed for Plaud (non-fatal): {_mp_err}")
+                # Record contact interactions from participants
+                try:
+                    from memory.store_back import SentinelStoreBack
+                    _store_ip = SentinelStoreBack._get_global_instance()
+                    _participants_str = metadata.get("participants", "")
+                    for _pname in _participants_str.split(","):
+                        _pname = _pname.strip()
+                        if not _pname or len(_pname) < 2:
+                            continue
+                        _cid = _store_ip.match_contact_by_name(name=_pname)
+                        if _cid:
+                            _store_ip.record_interaction(
+                                contact_id=_cid, channel="meeting",
+                                direction="bidirectional",
+                                timestamp=metadata.get("date"),
+                                subject=metadata.get("meeting_title", "")[:200],
+                                source_ref=f"meeting:{source_id}:{_cid}",
+                            )
+                except Exception:
+                    pass  # Non-fatal
+
+                # Extract deadlines
+                try:
+                    from orchestrator.deadline_manager import extract_deadlines
+                    extract_deadlines(
+                        content=formatted["text"],
+                        source_type="plaud",
+                        source_id=source_id,
+                        sender_name="",
+                        source_agent="meeting_pipeline",
+                    )
+                except Exception as _e:
+                    logger.debug(f"Deadline extraction failed for Plaud {source_id}: {_e}")
+
+                # Extract commitments (same as Fireflies)
+                try:
+                    from triggers.fireflies_trigger import _extract_commitments_from_meeting
+                    _extract_commitments_from_meeting(
+                        transcript_text=formatted["text"],
+                        meeting_title=metadata.get("meeting_title", "Untitled"),
+                        participants=metadata.get("participants", ""),
+                        source_id=source_id,
+                    )
+                except Exception as _e:
+                    logger.debug(f"Commitment extraction failed for Plaud {source_id}: {_e}")
+
+                # Extract Director's personal commitments as deadlines
+                try:
+                    from triggers.fireflies_trigger import _extract_director_commitments_as_deadlines
+                    _extract_director_commitments_as_deadlines(
+                        transcript_text=formatted["text"],
+                        meeting_title=metadata.get("meeting_title", "Untitled"),
+                        participants=metadata.get("participants", ""),
+                        source_id=source_id,
+                        meeting_date=metadata.get("date", ""),
+                    )
+                except Exception as _e:
+                    logger.debug(f"Director commitment extraction failed for Plaud {source_id}: {_e}")
+
+                # Run Sentinel pipeline
+                try:
+                    pipeline.run(trigger)
+                    processed += 1
+                except Exception as e:
+                    logger.error(f"Plaud trigger: pipeline failed for {source_id}: {e}")
+
+                # Post-meeting auto-pipeline (non-blocking)
+                try:
+                    from orchestrator.meeting_pipeline import process_meeting_async
+                    process_meeting_async(
+                        transcript_id=source_id,
+                        title=metadata.get("meeting_title", "Untitled"),
+                        participants=metadata.get("participants", ""),
+                        meeting_date=metadata.get("date", ""),
+                        full_transcript=formatted["text"],
+                    )
+                except Exception as _mp_err:
+                    logger.warning(f"Meeting pipeline hook failed for Plaud (non-fatal): {_mp_err}")
+            finally:
+                # I2: release advisory lock if we acquired it (commits txn → releases pg_advisory_xact_lock).
+                if _stale_lock_cm is not None:
+                    try:
+                        _stale_lock_cm.__exit__(None, None, None)
+                    except Exception:
+                        pass
 
         # Update watermark
         trigger_state.set_watermark("plaud")
@@ -521,6 +665,12 @@ def backfill_plaud():
             if not file_id:
                 continue
 
+            # Mirror incremental-path filter (line 297-299): skip un-transcribed recordings.
+            # Without this, header-only shells get stored + source_id locked, breaking re-ingest
+            # after Plaud completes transcription.
+            if not rec.get("is_trans"):
+                continue
+
             source_id = f"plaud_{file_id}"
 
             # Skip if already processed
@@ -548,6 +698,10 @@ def backfill_plaud():
             )
             trigger_state.mark_processed("meeting", source_id)
             ingested += 1
+
+            # I1 dedup: same helper as incremental path — coalesces backfill + incremental
+            # alarm sites into a single per-source_id-per-UTC-day fire.
+            _maybe_report_empty_body_alarm(rec, source_id, formatted.get("text") or "")
 
             # BRIEF_PM_SIDEBAR_STATE_WRITE_1 D6: relevance-on-ingest sentinel
             # (backfill path — regex-only, no LLM; Lesson #25 respected).
