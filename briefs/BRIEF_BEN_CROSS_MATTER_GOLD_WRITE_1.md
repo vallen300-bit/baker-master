@@ -266,9 +266,30 @@ def _check_audit_log_append_only(author_email: str) -> list[str]:
     return []
 
 
+# --- ratification trigger parser (Fix 3 — bundled into this module per V0.4 fold) ---
+
+
+_TRIGGER_RE = re.compile(
+    r"\bratified\s*[-‐-―]\s*promote\s+to\s+GOLD\s*:\s*(?P<path>\S+)",
+    re.IGNORECASE,
+)
+
+
+def parse_ratification_trigger(chat_text: str) -> str | None:
+    """Returns the artefact path if Director's ratification trigger phrase is present
+    in chat_text, else None. Apply Unicode NFKC normalization first to fold smart-quote
+    variants and width forms; the tolerant dash class handles all common dash forms.
+    """
+    if not chat_text:
+        return None
+    normalized = unicodedata.normalize("NFKC", chat_text)
+    m = _TRIGGER_RE.search(normalized)
+    return m.group("path") if m else None
+
+
 def main() -> int:
     if "--staged" not in sys.argv:
-        print("only --staged mode supported in V0.2", file=sys.stderr)
+        print("only --staged mode supported", file=sys.stderr)
         return 2
 
     author_email = _author_email()
@@ -310,30 +331,15 @@ fi
 ### Problem
 BEN must detect Director's GOLD-promotion phrase + artefact path in chat. **V0.2 fold** (Gate 3 CRIT 2): V1 said "em-dash not hyphen" but no regex spec; smart quotes / case / whitespace make activation non-deterministic. Fix: tolerant regex with Unicode normalization + named capture for path.
 
-### Canonical regex (locked)
+### Canonical regex (locked) — IMPLEMENTED IN FIX 2 MODULE
+
+**V0.4 fold:** the `parse_ratification_trigger` function + `_TRIGGER_RE` regex are bundled directly into `scripts/check_gold_domain_tags.py` (the Fix 2 module body) so a B-code creating that file from Fix 2's code block alone has all required code. Tests at `tests/test_parse_ratification_trigger.py` (Fix 8) import it via:
 
 ```python
-import re, unicodedata
-
-# Match any Unicode hyphen/dash variant (U+002D ASCII hyphen, U+2010 hyphen, U+2011
-# non-breaking hyphen, U+2012 figure dash, U+2013 en-dash, U+2014 em-dash, U+2015
-# horizontal bar). Case-insensitive on `ratified` and `promote to GOLD`.
-_TRIGGER_RE = re.compile(
-    r"\bratified\s*[-‐-―]\s*promote\s+to\s+GOLD\s*:\s*(?P<path>\S+)",
-    re.IGNORECASE,
-)
-
-def parse_ratification_trigger(chat_text: str) -> str | None:
-    """Returns the artefact path if the Director ratification trigger phrase is present
-    in chat_text, else None. Apply Unicode NFKC normalization first to fold smart-quote
-    variants and width forms; the tolerant dash class handles all common dash forms.
-    """
-    if not chat_text:
-        return None
-    normalized = unicodedata.normalize("NFKC", chat_text)
-    m = _TRIGGER_RE.search(normalized)
-    return m.group("path") if m else None
+from scripts.check_gold_domain_tags import parse_ratification_trigger
 ```
+
+The function spec (regex + NFKC normalization + named capture group `path`) is defined in Fix 2's module code block (search for `# --- ratification trigger parser`). Match any Unicode hyphen/dash variant (U+002D ASCII hyphen, U+2010 hyphen, U+2011 non-breaking hyphen, U+2012 figure dash, U+2013 en-dash, U+2014 em-dash, U+2015 horizontal bar); case-insensitive on `ratified` and `promote to GOLD`.
 
 ### Implementation
 
