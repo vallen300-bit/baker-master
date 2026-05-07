@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>aiOla — Brisen Briefing & Meeting Dossier · 7 May 2026</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #12121a;
+    --surface2: #1a1a28;
+    --accent: #6c63ff;
+    --blue: #0a6fdb;
+    --blue-dim: rgba(10,111,219,0.15);
+    --blue-glow: rgba(10,111,219,0.3);
+    --green: #22c55e;
+    --green-dim: rgba(34,197,94,0.15);
+    --amber: #f59e0b;
+    --amber-dim: rgba(245,158,11,0.15);
+    --red: #dc2626;
+    --red-dim: rgba(220,38,38,0.15);
+    --gold: #d4a853;
+    --text: #e8e6f0;
+    --text-dim: #8a87a0;
+    --border: rgba(108,99,255,0.15);
+    --border-blue: rgba(10,111,219,0.25);
+  }
+
+  * { margin:0; padding:0; box-sizing:border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', -apple-system, sans-serif;
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  .conf-banner {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    z-index: 1000;
+    background: linear-gradient(90deg, rgba(10,111,219,0.95), rgba(108,99,255,0.95));
+    padding: 8px 0;
+    text-align: center;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: #fff;
+    backdrop-filter: blur(20px);
+  }
+
+  body { padding-top: 36px; }
+
+  .hero {
+    min-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    padding: 4rem 2rem;
+  }
+
+  .hero::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: radial-gradient(ellipse at 30% 50%, rgba(10,111,219,0.10) 0%, transparent 50%),
+                radial-gradient(ellipse at 70% 50%, rgba(108,99,255,0.07) 0%, transparent 50%);
+    animation: heroGlow 18s ease-in-out infinite alternate;
+  }
+
+  @keyframes heroGlow {
+    0% { transform: translate(0, 0) rotate(0deg); }
+    100% { transform: translate(-5%, 5%) rotate(3deg); }
+  }
+
+  .hero-meta {
+    position: relative;
+    z-index: 2;
+    font-size: 0.7rem;
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    color: var(--blue);
+    margin-bottom: 1.5rem;
+    font-weight: 600;
+  }
+
+  .hero h1 {
+    position: relative;
+    z-index: 2;
+    font-family: 'Playfair Display', serif;
+    font-size: clamp(2.5rem, 6vw, 4.5rem);
+    font-weight: 700;
+    margin-bottom: 1rem;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, #ffffff 0%, #b0c4de 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hero .sub {
+    position: relative;
+    z-index: 2;
+    font-size: 1.1rem;
+    color: var(--text-dim);
+    max-width: 760px;
+    margin: 0 auto 2rem;
+  }
+
+  .hero .meeting-card {
+    position: relative;
+    z-index: 2;
+    background: var(--surface);
+    border: 1px solid var(--border-blue);
+    border-radius: 12px;
+    padding: 1.5rem 2rem;
+    display: inline-flex;
+    gap: 2.5rem;
+    margin-top: 1rem;
+  }
+
+  .hero .meeting-card .item {
+    text-align: left;
+  }
+
+  .hero .meeting-card .label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    margin-bottom: 0.3rem;
+  }
+
+  .hero .meeting-card .value {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 4rem 2rem;
+  }
+
+  .section {
+    margin-bottom: 4rem;
+  }
+
+  .section-tag {
+    display: inline-block;
+    font-size: 0.65rem;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--blue);
+    font-weight: 700;
+    padding: 4px 12px;
+    background: var(--blue-dim);
+    border: 1px solid var(--border-blue);
+    border-radius: 4px;
+    margin-bottom: 1rem;
+  }
+
+  .section h2 {
+    font-family: 'Playfair Display', serif;
+    font-size: 2.2rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+    color: #fff;
+  }
+
+  .section h3 {
+    font-size: 1.3rem;
+    font-weight: 600;
+    margin: 2rem 0 1rem;
+    color: var(--text);
+  }
+
+  .section p {
+    color: var(--text-dim);
+    margin-bottom: 1rem;
+    font-size: 0.98rem;
+  }
+
+  .section p strong { color: var(--text); }
+
+  .section ul {
+    color: var(--text-dim);
+    margin-bottom: 1rem;
+    padding-left: 1.5rem;
+  }
+
+  .section li {
+    margin-bottom: 0.5rem;
+    font-size: 0.95rem;
+  }
+
+  .section li strong { color: var(--text); }
+
+  .bottom-line {
+    background: linear-gradient(135deg, rgba(10,111,219,0.12), rgba(108,99,255,0.08));
+    border: 1px solid var(--border-blue);
+    border-left: 4px solid var(--blue);
+    border-radius: 12px;
+    padding: 2rem 2.5rem;
+    margin: 2rem 0;
+  }
+
+  .bottom-line .tag {
+    font-size: 0.65rem;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--blue);
+    font-weight: 700;
+    margin-bottom: 0.6rem;
+  }
+
+  .bottom-line .text {
+    font-size: 1.1rem;
+    color: var(--text);
+    line-height: 1.6;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+  }
+
+  th, td {
+    text-align: left;
+    padding: 0.8rem 1rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+
+  th {
+    background: var(--surface);
+    color: var(--text-dim);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-weight: 700;
+  }
+
+  tr:hover td { background: rgba(255,255,255,0.02); }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 2rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .card.blue { border-left: 4px solid var(--blue); }
+  .card.green { border-left: 4px solid var(--green); }
+  .card.amber { border-left: 4px solid var(--amber); }
+  .card.red { border-left: 4px solid var(--red); }
+
+  .card-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    font-weight: 800;
+    font-size: 0.95rem;
+    margin-right: 0.8rem;
+    color: #fff;
+    vertical-align: middle;
+  }
+
+  .card-num.blue { background: var(--blue); }
+  .card-num.green { background: var(--green); }
+  .card-num.amber { background: var(--amber); }
+  .card-num.red { background: var(--red); }
+
+  .card-title {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+
+  .pill {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-left: 0.5rem;
+  }
+
+  .pill.green { background: var(--green-dim); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+  .pill.amber { background: var(--amber-dim); color: var(--amber); border: 1px solid rgba(245,158,11,0.3); }
+  .pill.red { background: var(--red-dim); color: var(--red); border: 1px solid rgba(220,38,38,0.3); }
+
+  .quote {
+    background: rgba(10,111,219,0.07);
+    border-left: 3px solid var(--blue);
+    padding: 1rem 1.5rem;
+    margin: 1rem 0;
+    border-radius: 0 6px 6px 0;
+    font-style: italic;
+    color: var(--text);
+    font-size: 0.95rem;
+  }
+
+  .quote .who {
+    display: block;
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    font-style: normal;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+
+  .questions {
+    background: rgba(220,38,38,0.04);
+    border: 1px solid rgba(220,38,38,0.15);
+    border-radius: 10px;
+    padding: 1.5rem 2rem;
+    margin: 1.5rem 0;
+  }
+
+  .questions h4 {
+    font-size: 0.75rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--red);
+    font-weight: 700;
+    margin-bottom: 1rem;
+  }
+
+  .questions ol {
+    color: var(--text);
+    padding-left: 1.5rem;
+  }
+
+  .questions li {
+    margin-bottom: 0.7rem;
+    font-size: 0.95rem;
+    line-height: 1.6;
+  }
+
+  .questions li::marker {
+    color: var(--red);
+    font-weight: 700;
+  }
+
+  .questions .group-label {
+    display: block;
+    margin: 1rem 0 0.5rem;
+    font-size: 0.7rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--red);
+    font-weight: 700;
+  }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin: 1.5rem 0;
+  }
+
+  @media (max-width: 768px) {
+    .grid-2 { grid-template-columns: 1fr; }
+    .hero .meeting-card { flex-direction: column; gap: 1rem; }
+  }
+
+  .signal-good { color: var(--green); font-weight: 700; }
+  .signal-warn { color: var(--amber); font-weight: 700; }
+  .signal-bad { color: var(--red); font-weight: 700; }
+
+  .recommendation {
+    background: linear-gradient(135deg, rgba(34,197,94,0.10), rgba(10,111,219,0.06));
+    border: 1px solid rgba(34,197,94,0.25);
+    border-radius: 14px;
+    padding: 2rem 2.5rem;
+    margin: 2rem 0;
+  }
+
+  .recommendation .tag {
+    font-size: 0.7rem;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: var(--green);
+    font-weight: 800;
+    margin-bottom: 0.8rem;
+  }
+
+  .footer {
+    border-top: 1px solid var(--border);
+    padding: 2rem;
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    margin-top: 4rem;
+  }
+</style>
+</head>
+<body>
+
+<div class="conf-banner">CONFIDENTIAL · Brisen Internal · For Director's Eyes Only</div>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-meta">aiOla Briefing · Meeting Dossier · 7 May 2026</div>
+  <h1>aiOla &mdash; Voice AI for Enterprise</h1>
+  <p class="sub">Three proposals on the table: technology pilot, hospitality co-marketing, and a $10M SAFE. This dossier integrates the Baker dashboard intelligence with the Origination Desk's strategic read and pre-loaded sharp questions for the conversation.</p>
+
+  <div class="meeting-card">
+    <div class="item"><div class="label">Date</div><div class="value">7 May 2026</div></div>
+    <div class="item"><div class="label">Location</div><div class="value">Brisen · Geneva Office</div></div>
+    <div class="item"><div class="label">Time</div><div class="value">~11:00 CET</div></div>
+    <div class="item"><div class="label">Counterparty</div><div class="value">Amir Haramaty (Co-Founder &amp; President)</div></div>
+  </div>
+</section>
+
+<div class="container">
+
+<!-- BOTTOM LINE -->
+<div class="bottom-line">
+  <div class="tag">Bottom Line</div>
+  <div class="text">aiOla is institutionally credible — chaired by Mitch Garber (ex-Caesars/Playtika $4.4B), backed personally by Marc Rowan (Apollo CEO), with United Airlines Ventures leading the last priced round. The technology is real. <strong>Pursue the partnership at MO Vienna. Approach the $10M SAFE with surgical questions.</strong> Goal of today's meeting: lock in N1 (pilot) and N2 (hospitality narrative); use the questions in §6 to either materially de-risk N3 or surface enough friction to walk politely.</div>
+</div>
+
+<!-- WHAT THEY DO -->
+<div class="section">
+  <span class="section-tag">Section 1 · The Company</span>
+  <h2>What aiOla Actually Is</h2>
+  <p>aiOla is a deep-tech voice and conversational AI lab building <strong>speech-to-workflow agents</strong> for frontline enterprise operations. Workers speak naturally in noisy, multilingual, jargon-heavy environments — kitchens, factory floors, construction sites, airline maintenance hangars — and aiOla converts that speech into structured, auditable data and triggers downstream workflows in real time.</p>
+
+  <table>
+    <tr><th>Field</th><th>Detail</th></tr>
+    <tr><td>Legal name</td><td>aiOla Ltd. (Israel) / aiOla Inc.</td></tr>
+    <tr><td>Founded</td><td>2019/2020 · Herzliya, Israel</td></tr>
+    <tr><td>Headcount</td><td>51&ndash;100 employees</td></tr>
+    <tr><td>Recognition</td><td>Fast Company "Most Innovative Companies 2025"; featured in Jensen Huang's NVIDIA GTC keynote; NYSE International Day</td></tr>
+    <tr><td>Total raised</td><td>~$58M cumulative</td></tr>
+  </table>
+</div>
+
+<!-- LEADERSHIP & SIGNAL -->
+<div class="section">
+  <span class="section-tag">Section 2 · Leadership &amp; Investor Signal</span>
+  <h2>Why The Cap Table Matters Here</h2>
+  <p>The single most important fact that changes the read on this deal: <strong>Amir is Co-Founder &amp; President — not the CEO.</strong> The CEO &amp; Executive Chairman is Mitch Garber, and the cap table includes Marc Rowan personally.</p>
+
+  <table>
+    <tr><th>Person</th><th>Role</th><th>Why It Matters</th></tr>
+    <tr><td><strong>Mitch Garber</strong></td><td>CEO &amp; Executive Chairman</td><td>Ex-CEO Paysafe (Nasdaq), PartyGaming (LSE), Caesars/Playtika (sold for $4.4B). Order of Canada. Senior advisor to Apollo. Co-invests with Apollo, TPG, Bonderman/Wildcat, Fosun. Institutional gravity.</td></tr>
+    <tr><td><strong>Omri Shai</strong></td><td>Founder &amp; Executive GM</td><td>Original technical founder. Launched Jargonic foundation model (Mar 2026).</td></tr>
+    <tr><td><strong>Amir Haramaty</strong></td><td>Co-Founder &amp; President</td><td>Serial entrepreneur (ex-COO SparkBeyond, Adallom→Microsoft, co-founder Armis→$1.1B Insight Partners). Your primary contact.</td></tr>
+    <tr><td><strong>Ofir Goren Bar</strong></td><td>CTO</td><td>Tech lead for Jargonic + Drax models.</td></tr>
+    <tr><td><strong>Meytal Fine</strong></td><td>VP Business Development</td><td>Likely accompanying Amir on hospitality conversations.</td></tr>
+  </table>
+
+  <h3>Funding History</h3>
+  <table>
+    <tr><th>Round</th><th>Date</th><th>Amount</th><th>Lead / Key Investors</th></tr>
+    <tr><td>Series A / A2</td><td>Through Jul 2025</td><td>$33M+</td><td>New Era Capital, Hamilton Lane</td></tr>
+    <tr><td>Series A2 (top-up)</td><td>Jul 2025</td><td>$25M</td><td><strong>United Airlines Ventures</strong> (strategic), New Era, Hamilton Lane</td></tr>
+    <tr><td>Strategic</td><td>Nov 2025</td><td>Undisclosed</td><td><strong>UST</strong> (via UST Spark)</td></tr>
+    <tr><td colspan="2"><strong>Personal investors</strong></td><td colspan="2"><strong>Marc Rowan (CEO Apollo, $700B AUM)</strong> · Mitch Garber</td></tr>
+  </table>
+
+  <div class="quote">
+    The Marc Rowan personal cheque is the single strongest signal in this file. Apollo's CEO doesn't write personal checks for "marginally better" technology.
+    <span class="who">— Origination Desk read</span>
+  </div>
+</div>
+
+<!-- TECH -->
+<div class="section">
+  <span class="section-tag">Section 3 · Technology</span>
+  <h2>Three Pillars — Real Lab, Not A Wrapper</h2>
+
+  <div class="card blue">
+    <div class="card-title"><span class="card-num blue">1</span>Jargonic — Proprietary ASR Foundation Model <span class="pill green">Released Mar 2026</span></div>
+    <ul>
+      <li>Enterprise-grade speech-to-text, <strong>100+ languages</strong> with jargon, accents, abbreviations, acronyms</li>
+      <li>Self-published benchmarks: <strong>5.2% WER on CommonVoice V13 multilingual</strong> (beats Whisper V3 + AssemblyAI)</li>
+      <li><strong>4.7% CER on AISHELL Mandarin</strong> (best in class, per their data)</li>
+      <li><strong>45% more accurate than Whisper</strong> on domain-specific dialogue</li>
+      <li>Works in <strong>90+ dB noisy environments</strong> — the differentiator for field deployment</li>
+    </ul>
+  </div>
+
+  <div class="card blue">
+    <div class="card-title"><span class="card-num blue">2</span>Drax — Open-Source Speed Breakthrough <span class="pill amber">Strategic Move</span></div>
+    <ul>
+      <li>Non-autoregressive speech model using Discrete Flow Matching</li>
+      <li><strong>Whisper-level accuracy at 32&times; faster-than-real-time</strong></li>
+      <li>5&times; lower latency than Alibaba's Qwen2</li>
+      <li><strong>Open-sourced</strong> — establishes them as a research-grade lab and seeds developer adoption (vs. acquisition-target framing)</li>
+    </ul>
+  </div>
+
+  <div class="card blue">
+    <div class="card-title"><span class="card-num blue">3</span>Voice-Agentic Workflow Platform <span class="pill green">Live with Fortune 500</span></div>
+    <ul>
+      <li>Goes beyond transcription: <strong>speech &rarr; structured data &rarr; automated workflows &rarr; system updates</strong></li>
+      <li>Live Salesforce + Snowflake integrations</li>
+      <li>"Squad" architecture: multiple specialised AI agents in parallel behind a single voice interface</li>
+      <li>Field workers talk &rarr; CRM auto-populates &rarr; reports generate</li>
+    </ul>
+  </div>
+</div>
+
+<!-- CUSTOMERS -->
+<div class="section">
+  <span class="section-tag">Section 4 · Customers &amp; Proven ROI</span>
+  <h2>Production Deployments — What's Real</h2>
+  <table>
+    <tr><th>Industry</th><th>Use Case</th><th>Documented Impact</th></tr>
+    <tr><td><strong>United Airlines</strong> (Fortune 50)</td><td>Frontline ops, maintenance, inspections</td><td>Strategic investor + global rollout</td></tr>
+    <tr><td>Car Rental</td><td>Eliminating manual triage / data entry on returns</td><td><strong>$2M annual benefit per site</strong> · ROI &lt; 3 months</td></tr>
+    <tr><td>Grocery Retail</td><td>Daily refrigerator temperature checks</td><td><strong>110,000 staff-hours saved</strong></td></tr>
+    <tr><td>Jewelry Manufacturing</td><td>QA inspection reporting in Mandarin</td><td>Process time <strong>180s &rarr; under 30s</strong></td></tr>
+    <tr><td>Fortune 50 CPG</td><td>Field sales CRM capture</td><td>CRM completeness <strong>23% &rarr; 90%+</strong>; +30% customer-facing time</td></tr>
+    <tr><td>Fortune 500 Retailer</td><td>Field sales pipeline management</td><td>"Not a tool win — that's a revenue win" (CRO quote)</td></tr>
+  </table>
+</div>
+
+<!-- COMPETITIVE -->
+<div class="section">
+  <span class="section-tag">Section 5 · Competitive Landscape</span>
+  <h2>Where The Moat Lives — And Doesn't</h2>
+  <table>
+    <tr><th>Competitor</th><th>Focus</th><th>vs. aiOla</th></tr>
+    <tr><td>OpenAI Whisper</td><td>Open-source ASR</td><td>aiOla claims +45% domain accuracy; Jargonic built specifically for enterprise jargon</td></tr>
+    <tr><td>Deepgram</td><td>Real-time ASR API</td><td>Strong on speed; aiOla differentiates on jargon + noise</td></tr>
+    <tr><td>AssemblyAI</td><td>Speech understanding</td><td>Good accuracy; aiOla differentiates on end-to-end workflow automation</td></tr>
+    <tr><td>ElevenLabs</td><td>Voice generation / TTS</td><td>Different focus (generation); some overlap in agentic voice</td></tr>
+    <tr><td>Google / AWS Transcribe</td><td>Hyperscaler ASR</td><td>Scale + compliance; aiOla differentiates on domain-specific accuracy</td></tr>
+  </table>
+
+  <div class="quote">
+    Voice-to-text is a very populated field… she is just marginally better than competitors… the play is for them to be acquired by Anthropic or OpenAI.
+    <span class="who">— Philip Vallen · Zoom 27 March 2026 · 14:10 CET</span>
+  </div>
+
+  <p><strong>Counter-view:</strong> aiOla's defensible position is the workflow + integration layer + domain data flywheel — not raw ASR accuracy. The Fast Company recognition + United Airlines strategic position + Jensen Huang keynote slot suggest more than marginal improvement. The truth is somewhere between Philip's view and the marketing.</p>
+</div>
+
+<!-- FINANCIAL READ -->
+<div class="section">
+  <span class="section-tag">Section 6 · Financial Indicators</span>
+  <h2>What We Know About The Numbers</h2>
+  <table>
+    <tr><th>Metric</th><th>Value</th><th>Source</th></tr>
+    <tr><td>Estimated annual revenue</td><td>~$1.1M</td><td>Prospeo (likely understated; production deployments suggest more)</td></tr>
+    <tr><td>Monthly burn</td><td><strong>~$1.3M/mo</strong></td><td>Amir's direct statement to Director at GTC, Mar 2026</td></tr>
+    <tr><td>Implied runway from Jul 2025 raise</td><td>~24&ndash;36 months</td><td>Calc: $58M cumulative · ~$1M net burn</td></tr>
+    <tr><td>Revenue per employee</td><td>~$16K</td><td>Pre-profitability, investment-stage</td></tr>
+  </table>
+
+  <p>This is a company that has <strong>not yet reached product-market-fit economics</strong>. $10M for 13% would make Brisen the largest single check in what looks like a bridge.</p>
+</div>
+
+<!-- THE THREE PROPOSALS -->
+<div class="section">
+  <span class="section-tag">Section 7 · The Three Proposals</span>
+  <h2>What Amir Is Selling — And How To Position Each</h2>
+
+  <!-- N1 -->
+  <div class="card green">
+    <div class="card-title"><span class="card-num green">N1</span>Use Cases for Brisen Operations <span class="pill green">Genuinely Interesting</span></div>
+    <p><strong>Posture:</strong> Real operational fit at <strong>Mandarin Oriental Vienna</strong> (housekeeping, F&amp;B, multilingual staff, maintenance, concierge) and on European construction sites (ClaimsMax / SiteWatch evidence capture). Frame as <strong>commercial pilot — not investment-conditional.</strong></p>
+    <p><strong>Talking points:</strong></p>
+    <ul>
+      <li>MO Vienna is the obvious European reference deployment — multilingual staff, noisy F&amp;B environments, structured ops data missing today.</li>
+      <li>Brisen owns the European hotel-owner relationships. That's the scarce asset. Their tech is ours to deploy, ours to test.</li>
+      <li>90-day pilot, single asset, defined KPIs. They get the logo + case study; we get the integration without equity strings.</li>
+    </ul>
+
+    <div class="questions">
+      <h4>Sharp Questions — N1</h4>
+      <ol>
+        <li>Show me 2 reference customers in noisy / multilingual environments. Names, contract size, time-on-platform. Can I speak to one?</li>
+        <li>What's your German + Russian + Polish + English accuracy in a real hotel back-of-house recording (not lab)? Send me a benchmark file we can A/B test.</li>
+        <li>Pilot cost — who pays? Who owns the data? What's the exit clause if accuracy disappoints?</li>
+        <li>On-site latency with intermittent connectivity — does it work offline-first or cloud-only?</li>
+        <li>Are you in active conversation with MOHG or any other luxury operator? If yes, who, and at what stage?</li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- N2 -->
+  <div class="card amber">
+    <div class="card-title"><span class="card-num amber">N2</span>Hospitality Vertical / NVIDIA Co-Marketing <span class="pill amber">Cautiously Open</span></div>
+    <p><strong>Posture:</strong> Useful for the <strong>Peter Storer (NVIDIA) ecosystem narrative</strong> — three complementary AI companies serving European hospitality (Brisen AI intelligence + aiOla voice + Bellboy Robotics physical). <strong>Marketing partnership, not structural. No exclusivity, no equity.</strong></p>
+    <p><strong>Talking points:</strong></p>
+    <ul>
+      <li>Coordinate the NVIDIA narrative — when we follow up with Peter Storer, the aiOla conversation is evidence the ecosystem is forming organically.</li>
+      <li>Brisen owns European hotel-owner relationships; aiOla brings voice; Bellboy brings robotics. Jointly we tell a story Peter wants to tell internally.</li>
+      <li>No exclusivity. Both sides can pursue whoever they want.</li>
+    </ul>
+
+    <div class="questions">
+      <h4>Sharp Questions — N2</h4>
+      <ol>
+        <li>How many hotel customers do you have today? Names, PMS integration depth, ARR per customer?</li>
+        <li>Are you in active conversation with MOHG, Kempinski, Six Senses, Mandarin, or any of our origination targets? Who, what stage?</li>
+        <li>Do you expect exclusivity in European hospitality — and if so, what do you offer in exchange?</li>
+        <li>Have you signed anything with Bellboy Robotics, or is that still NVIDIA-side coordination?</li>
+        <li>What is NVIDIA's actual ask of <em>you</em> in Inception? Are they pushing a portfolio bundle, or are you self-organising the ecosystem?</li>
+      </ol>
+    </div>
+  </div>
+
+  <!-- N3 -->
+  <div class="card red">
+    <div class="card-title"><span class="card-num red">N3</span>$10M SAFE / ~13% / "Repricing" / Time-Sensitive <span class="pill red">Surgical Questioning</span></div>
+    <p><strong>Posture:</strong> Polite. Curious. The Garber + Rowan + United signal is too strong to dismiss — but we ask <strong>institutional-grade VC questions that any clean deal answers in five minutes</strong>. We don't refuse. We surface the data and let the round's own facts dictate the answer.</p>
+    <p><strong>Talking points to demote N3 conversationally:</strong></p>
+    <ul>
+      <li><strong>"Brisen is a real-estate operator, not a venture Voice-AI LP. A $10M cheque has to clear an institutional process here, and we'd be a strange fit on your cap table."</strong></li>
+      <li>"We're happy to be a strategic partner without the equity — partnership shouldn't be capital-conditional."</li>
+      <li>"If there's a strategic rationale for a smaller token cheque tied to a signed pilot, we can look. A $10M anchor on a SAFE with re-pricing is not us as proposed."</li>
+    </ul>
+
+    <div class="questions">
+      <h4>Sharp Questions — N3 (the surgical set)</h4>
+
+      <span class="group-label">On the round itself</span>
+      <ol>
+        <li><strong>Why a SAFE after two priced equity rounds?</strong> SAFEs typically precede priced rounds — what triggered this structure?</li>
+        <li>What was the <strong>price-per-share of the last priced round</strong>, and what is <strong>this SAFE's cap</strong>? What's the % delta? Is there a discount on top of the cap?</li>
+        <li>Who is the <strong>price-setting lead investor</strong> at the new cap, and what's their cheque size?</li>
+        <li>Are existing investors (United, New Era, Hamilton Lane, UST) <strong>taking pro-rata</strong> at this cap? Which ones are stepping up, which ones are passing — and why?</li>
+        <li>What's the <strong>MFN clause</strong> structure? Liquidation preferences inherited or stripped at conversion?</li>
+      </ol>
+
+      <span class="group-label">On the financials</span>
+      <ol start="6">
+        <li><strong>ARR today</strong> (booked, recognised — not pipeline)? <strong>Net-new ARR last 12 months</strong>? <strong>Net revenue retention</strong>? <strong>Gross logo churn</strong>?</li>
+        <li><strong>Cash on hand today, monthly burn, runway in months</strong> at current burn?</li>
+        <li><strong>Top-5 customer concentration</strong> as % of ARR? <strong>Average contract length and renewal rate</strong>?</li>
+        <li>What does the <strong>$10M specifically fund</strong> — sales hires, R&amp;D, GTM expansion, working capital?</li>
+      </ol>
+
+      <span class="group-label">On the moat</span>
+      <ol start="10">
+        <li>If Anthropic, OpenAI, or Google ships <strong>native speech-to-workflow</strong> in the next 12&ndash;18 months, what's left of your defensible position?</li>
+        <li>What do your <strong>patents actually claim</strong> — algorithmic, data-pipeline, or use-case specific? Have any been challenged?</li>
+        <li>Drax is open-source. Why give that away — what's the strategic calculus, and does it commoditise your core?</li>
+      </ol>
+
+      <span class="group-label">On strategic rationale (the uncomfortable one)</span>
+      <ol start="13">
+        <li><strong>Mitch, Marc Rowan, and United are already on the cap table.</strong> Why is a $10M strategic check from a European real-estate / hospitality operator the next piece — and would a smaller anchor ($1&ndash;2M) tied to a signed MO Vienna deployment work for the round, or do you specifically need the full $10M from one source?</li>
+        <li>Why not strategic capital from <strong>Salesforce, Microsoft, NVIDIA Ventures, or a hospitality strategic</strong> like Accor or Marriott Ventures?</li>
+        <li>What's the <strong>governance ask</strong> at $10M / 13% — observer seat, board seat, none?</li>
+      </ol>
+    </div>
+  </div>
+</div>
+
+<!-- STRATEGIC ASSESSMENT -->
+<div class="section">
+  <span class="section-tag">Section 8 · Strategic Assessment</span>
+  <h2>What's Real, What Deserves Scrutiny</h2>
+
+  <div class="grid-2">
+    <div class="card green">
+      <div class="card-title"><span class="signal-good">Genuinely Interesting</span></div>
+      <ul>
+        <li><strong>Mitch Garber as Chairman.</strong> Not a random Israeli startup.</li>
+        <li><strong>Marc Rowan personal cheque.</strong> Apollo's CEO doesn't gamble.</li>
+        <li><strong>United Airlines</strong> — strategic investor + production customer.</li>
+        <li><strong>Jensen Huang GTC keynote feature.</strong> NVIDIA's stamp.</li>
+        <li><strong>Hospitality fit at MO Vienna</strong> is real and immediate.</li>
+        <li><strong>Drax open-source</strong> = serious research lab, not application wrapper.</li>
+      </ul>
+    </div>
+
+    <div class="card red">
+      <div class="card-title"><span class="signal-bad">Deserves Scrutiny</span></div>
+      <ul>
+        <li><strong>SAFE after priced rounds is unusual</strong> (Philip's flag).</li>
+        <li><strong>Revenue / burn imbalance</strong> — pre-PMF economics.</li>
+        <li><strong>Moat compression risk</strong> — Anthropic / OpenAI native voice-to-workflow within 12-18 months would compress core advantage.</li>
+        <li><strong>"Marginally better" framing</strong> from Philip — partially valid on raw ASR.</li>
+        <li><strong>$10M is significant</strong> vs. current Brisen priorities (MO Vienna sales, LP fundraise, AO matters).</li>
+        <li><strong>Sergey financial discussion never happened</strong> — open action item from 27 March.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- TIMELINE -->
+<div class="section">
+  <span class="section-tag">Section 9 · Relationship Timeline</span>
+  <h2>How We Got Here</h2>
+  <table>
+    <tr><th>Date</th><th>Event</th></tr>
+    <tr><td>16&ndash;18 Mar 2026</td><td>GTC San Jose. Peter Storer (NVIDIA) introduces aiOla alongside Bellboy Robotics. Brisen Squad attempts to line up NVIDIA / aiOla meeting.</td></tr>
+    <tr><td>21 Mar 2026</td><td>Director bumps into Amir at Lufthansa lounge.</td></tr>
+    <tr><td>22 Mar 2026</td><td>Amir's follow-up email. Three topics on the table: use cases, hospitality collaboration, $10M SAFE. Amir's burn statement: $1.3M/mo.</td></tr>
+    <tr><td>23 Mar 2026</td><td>Jasmyn Jarnigan emails Peter Storer for Amir + Meytal contacts.</td></tr>
+    <tr><td>26 Mar 2026</td><td>Amir follow-up referencing materials sent.</td></tr>
+    <tr><td>27 Mar 2026</td><td>Philip receives aiOla overview. Director + Philip Zoom 14:10 CET — skeptical on SAFE structure, interested in tech. Action item: Director to discuss financials with Sergey by weekend. <span class="signal-bad">NOT DONE.</span></td></tr>
+    <tr><td>14 Apr 2026</td><td>Amir proposes Frankfurt meeting (24 Apr) or "anywhere in Europe." No record of response.</td></tr>
+    <tr><td>6 May 2026</td><td>Director WhatsApp to team: "Tomorrow around 11:00 in the office? Some US company will come, they are in AI, from Silicon Valley. Aiola."</td></tr>
+    <tr><td><strong>7 May 2026</strong></td><td><strong>This meeting · Geneva office · ~11:00 CET</strong></td></tr>
+  </table>
+</div>
+
+<!-- RECOMMENDATION -->
+<div class="recommendation">
+  <div class="tag">Origination Desk Recommendation</div>
+  <h3 style="margin-top:0; color:#fff;">How To Play This Meeting</h3>
+  <ol style="color: var(--text); padding-left: 1.5rem; font-size: 1rem; line-height: 1.8;">
+    <li><strong>Open on N1.</strong> "We see a real fit at Mandarin Oriental Vienna." Establishes Brisen as a real operator, not a passive investor pretending interest. Move to N1 sharp questions.</li>
+    <li><strong>Move to N2.</strong> "We can co-write the European hospitality + NVIDIA narrative." Show willingness to co-market, withhold exclusivity. Press on existing hotel customers.</li>
+    <li><strong>Let Amir bring up N3.</strong> When he does, deliver the surgical questions — particularly Q1 (why SAFE after priced rounds), Q4 (existing investors taking pro-rata), Q6 (real ARR / NRR / churn), Q13 (why Brisen specifically as the next $10M).</li>
+    <li><strong>If answers are clean</strong> → propose a $1&ndash;2M anchor tied to a signed MO Vienna deployment, conditional on Sergey financial review.</li>
+    <li><strong>If answers are evasive</strong> → "We'll need a full data room before we can take this internally," meeting ends, ball in their court, round closes without us. The exit is graceful and the partnership is preserved.</li>
+  </ol>
+  <p style="margin-top: 1.5rem; color: var(--text);"><strong>The exit line if pushed:</strong> <em>"Capital allocation at Brisen runs through a real-estate IC — a $10M Voice-AI SAFE is structurally outside our mandate. We'd rather earn our way in through the pilot."</em></p>
+</div>
+
+</div>
+
+<div class="footer">
+  Brisen Group · Origination Desk · aiOla Briefing 7 May 2026 · Confidential — Director's Eyes Only<br>
+  Sources: Amir Haramaty correspondence (3 emails 22 Mar / 26 Mar / 14 Apr 2026) · Philip overview document (Dropbox 27 Mar 2026) · Baker dashboard dossier (analysis_id chat_18cb8308b6e6, 7 May 2026 08:26 UTC) · Origination Desk strategic read.
+</div>
+
+</body>
+</html>
