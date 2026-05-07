@@ -128,10 +128,12 @@ def _extract_transcript_text(detail: dict) -> str:
     """
     url = _get_content_url(detail, "transaction")
     if not url:
+        logger.warning(f"_extract_transcript_text: no transaction URL in detail (file_id={detail.get('id', '?')})")
         return ""
 
     segments = _fetch_s3_content(url, is_json=True)
     if not segments or not isinstance(segments, list):
+        logger.warning(f"_extract_transcript_text: empty/invalid S3 segments for {detail.get('id', '?')} (url-tail={url.split('?')[0][-40:]})")
         return ""
 
     lines = []
@@ -188,6 +190,35 @@ def _recording_title(rec: dict) -> str:
 def _recording_id(rec: dict) -> str:
     """Extract file ID. API field: id (32-char hex)."""
     return rec.get("id") or rec.get("file_id") or ""
+
+
+def _has_empty_db_row(source_id: str, threshold: int = 200) -> bool:
+    """Returns True if meeting_transcripts has a row for source_id with full_transcript shorter than threshold.
+
+    Used by stale-refresh path: a row from the broken-backfill era has length(full_transcript)
+    well below 200 chars (header-only shell). A real transcript is typically >> 200 chars even
+    for short recordings.
+    """
+    from memory.store_back import SentinelStoreBack
+    store = SentinelStoreBack._get_global_instance()
+    conn = store._get_conn()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT length(full_transcript) FROM meeting_transcripts WHERE id = %s LIMIT 1",
+            (source_id,),
+        )
+        row = cur.fetchone()
+        cur.close()
+        return bool(row) and (row[0] or 0) < threshold
+    except Exception as e:
+        conn.rollback()
+        logger.debug(f"_has_empty_db_row probe failed for {source_id} (non-fatal): {e}")
+        return False
+    finally:
+        store._put_conn(conn)
 
 
 def _recording_duration(rec: dict) -> str:
@@ -319,9 +350,14 @@ def check_new_plaud_recordings():
 
             source_id = f"plaud_{file_id}"
 
-            # Skip if already processed
+            # Skip if already processed AND DB body is non-empty.
+            # Stale-refresh: if Plaud previously returned is_trans=False (broken backfill
+            # pre-fix landed shells), allow re-ingest once Plaud reports is_trans=True.
+            # store_meeting_transcript ON CONFLICT (id) DO UPDATE handles upsert cleanly.
             if trigger_state.is_processed("meeting", source_id):
-                continue
+                if not _has_empty_db_row(source_id, threshold=200):
+                    continue
+                logger.info(f"Plaud trigger: stale-refresh re-ingesting {source_id} (DB body < 200 chars, is_trans now True)")
 
             # Fetch full transcript detail
             detail = fetch_plaud_detail(file_id)
@@ -360,6 +396,17 @@ def check_new_plaud_recordings():
                 )
             except Exception as _e:
                 logger.warning(f"Failed to store Plaud transcript {source_id} in PostgreSQL (non-fatal): {_e}")
+
+            # Loud sentinel: if duration > 5min AND body < 200 chars AND is_trans=True,
+            # something went wrong upstream (S3 fetch, parsing). report_failure raises
+            # the existing sentinel-health alarm; surfaces in #cockpit Slack.
+            try:
+                _dur_ms = rec.get("duration") or 0
+                _body = formatted.get("text") or ""
+                if _dur_ms > 300_000 and len(_body) < 200 and rec.get("is_trans"):
+                    report_failure("plaud", f"empty-body-after-transcription: {source_id} dur={_dur_ms}ms body={len(_body)}chars")
+            except Exception as _se:
+                logger.debug(f"empty-body sentinel check failed (non-fatal): {_se}")
 
             # BRIEF_PM_SIDEBAR_STATE_WRITE_1 D6: relevance-on-ingest sentinel.
             try:
@@ -521,6 +568,12 @@ def backfill_plaud():
             if not file_id:
                 continue
 
+            # Mirror incremental-path filter (line 297-299): skip un-transcribed recordings.
+            # Without this, header-only shells get stored + source_id locked, breaking re-ingest
+            # after Plaud completes transcription.
+            if not rec.get("is_trans"):
+                continue
+
             source_id = f"plaud_{file_id}"
 
             # Skip if already processed
@@ -548,6 +601,18 @@ def backfill_plaud():
             )
             trigger_state.mark_processed("meeting", source_id)
             ingested += 1
+
+            # Loud sentinel: if duration > 5min AND body < 200 chars AND is_trans=True,
+            # something went wrong upstream (S3 fetch, parsing). report_failure raises
+            # the existing sentinel-health alarm; surfaces in #cockpit Slack.
+            try:
+                from triggers.sentinel_health import report_failure as _report_failure
+                _dur_ms = rec.get("duration") or 0
+                _body = formatted.get("text") or ""
+                if _dur_ms > 300_000 and len(_body) < 200 and rec.get("is_trans"):
+                    _report_failure("plaud", f"empty-body-after-transcription: {source_id} dur={_dur_ms}ms body={len(_body)}chars")
+            except Exception as _se:
+                logger.debug(f"empty-body sentinel check failed (non-fatal): {_se}")
 
             # BRIEF_PM_SIDEBAR_STATE_WRITE_1 D6: relevance-on-ingest sentinel
             # (backfill path — regex-only, no LLM; Lesson #25 respected).
