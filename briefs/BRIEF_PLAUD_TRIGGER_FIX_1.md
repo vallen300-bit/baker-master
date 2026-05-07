@@ -150,11 +150,11 @@ Replace lines 129-135 with:
 
     segments = _fetch_s3_content(url, is_json=True)
     if not segments or not isinstance(segments, list):
-        logger.warning(f"_extract_transcript_text: empty/invalid S3 segments for {detail.get('id', '?')} (url-tail={url[-40:]})")
+        logger.warning(f"_extract_transcript_text: empty/invalid S3 segments for {detail.get('id', '?')} (url-tail={url.split('?')[0][-40:]})")
         return ""
 ```
 
-Constraint: do NOT log full URL or token (PII / credential exposure); url-tail safely identifies the failing object without leaking auth.
+Constraint: do NOT log full URL or token (PII / credential exposure). `url.split('?')[0][-40:]` strips query params (S3 pre-signed URLs carry `X-Amz-Signature` / `X-Amz-Credential` in the query string) and returns only the path-tail — safely identifies the failing object without leaking signing material. (Gate-4 review nit, 2026-05-07.)
 
 ### Verification
 Test: call `_extract_transcript_text` with detail missing transaction URL; assert WARNING logged. Same with detail returning empty segments.
