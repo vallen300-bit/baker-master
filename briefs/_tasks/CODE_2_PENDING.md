@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_WHATSAPP_RECIPIENT_RESOLVER_FIX_1.md
 trigger_class: TIER_A_INCIDENT_FIX_PII_LEAK_VECTOR
 dispatched_at: 2026-05-08T08:10Z
@@ -11,9 +11,14 @@ brief_version: 0.3
 expected_pr_count: 1 (baker-master)
 expected_branch_name: b2/whatsapp-recipient-resolver-fix-1
 gate_to_re_enable: this brief shipped + tested + Director's verbatim "re-enable whatsapp"
+shipped_at: 2026-05-08T08:30Z
+shipped_by: B2
+pr: https://github.com/vallen300-bit/baker-master/pull/173
+commit: 76d8c609
+report: briefs/_reports/B2_whatsapp_recipient_resolver_fix_1_20260508.md
 ---
 
-# CODE_2_PENDING — WHATSAPP_RECIPIENT_RESOLVER_FIX_1 (PENDING)
+# CODE_2_PENDING — WHATSAPP_RECIPIENT_RESOLVER_FIX_1 (COMPLETE — awaiting /security-review + merge gate)
 
 **Dispatched:** 2026-05-08T08:10Z
 **Tier:** A (PII-leak-vector incident fix; Tier-A merge gates: `/security-review` PASS + AH-side ratify)
