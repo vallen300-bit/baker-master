@@ -115,6 +115,8 @@ STOP. Do NOT guess endpoint contract. Bus-post to `/msg/cowork-ah1` with topic `
 
 **Acceptance for Step 0:** B-code records discovered endpoint + body shape in the ship report under §"Plaud auto-generate endpoint contract". The test suite (Step 4) mocks this exact request shape. Implementation (Step 1+) calls this exact request shape. If Path D fires, ship report instead documents the failure path under §"Step 0 BLOCKED" and brief halts.
 
+**Step 0 — additional capture requirement (V0.3 fold, S1):** B-code MUST also capture the exact Plaud response body for the **already-transcribed-PATCH** case (i.e., what Plaud returns when an auto-generate PATCH targets a `file_id` whose transcript has already completed between the file-list snapshot and the PATCH — the M1 race condition). Reproduce by clicking Generate twice on the same file in rapid succession (or PATCHing twice via discovered endpoint). Record the exact response: HTTP status, JSON `status` code, `msg` string, any other discriminator. The Fix 1 helper's M1 success-equivalent branch must match against the **observed** response — hardcoded heuristic string-match (e.g., `"already" in msg.lower() and "trans" in msg.lower()`) is unacceptable; replace with the exact captured contract. Document captured shape under §"Plaud already-transcribed PATCH response" in the ship report.
+
 ---
 
 ## Fix 1: `_request_auto_generate(file_id)` helper
@@ -212,12 +214,19 @@ def _request_auto_generate(file_id: str) -> bool:
     status = payload.get("status")
     msg = (payload.get("msg") or "")[:200]
 
-    # M1 race: if Plaud reports already-transcribed (status code TBD by Step 0 — replace constant),
-    # treat as success-equivalent. The next 15-min poll's existing happy path ingests the body.
+    # M1 race success-equivalent.
+    # The exact response contract for "already-transcribed" PATCH MUST be Step-0-derived
+    # (V0.3 fold S1) — see §Step 0 additional capture requirement. Replace the
+    # placeholder match below with the EXACT captured discriminator (status code +
+    # msg string OR HTTP status + body field). Hardcoded heuristic string-match is
+    # NOT acceptable for V1 ship — silent mis-classification would convert genuine
+    # rejections into false-success and break the retry semantics.
     if status == 0:
         logger.info(f"Plaud auto-generate {file_id} accepted")
         _reset_breaker()
         return True
+    # PLACEHOLDER — replace with Step-0-derived exact contract (e.g., status == <captured>):
+    # if status == STEP_0_DERIVED_ALREADY_TRANSCRIBED_STATUS:
     if "already" in msg.lower() and ("trans" in msg.lower() or "complete" in msg.lower()):
         logger.info(f"Plaud auto-generate {file_id} already-transcribed — success-equivalent")
         _reset_breaker()
@@ -265,9 +274,26 @@ Add this helper next to `_request_auto_generate` in `triggers/plaud_trigger.py`.
 ```python
 # Per-cycle rate cap (G3-suggestions): hard upper bound on auto-generate PATCHes per cycle.
 # Defends against a sudden surge of stuck files (e.g., post-outage backlog) hammering Plaud.
+#
+# V0.3 fold (S2): SCOPE = per-process / per-Render-instance, NOT per-cluster. On Render Pro
+# multi-instance (current 2-CPU baker-master + future scale-out), each process tracks its
+# own counter — worst case is N × the cap (e.g., 2 instances × 10 = 20/cycle/cluster).
+# Acceptable for V1 because:
+#   1. Plaud account is Unlimited tier (credits not the throttle).
+#   2. Circuit breaker (5-fail trip → 30-min cooldown) is shared per-process and trips
+#      independently on each instance, so a Plaud-side outage hard-stops both processes
+#      within ~5 cycles regardless of counter scope.
+#   3. PR #168 advisory-lock (`pg_try_advisory_lock(867532)`) already serializes the
+#      destructive write path (transcript ingestion); the auto-generate PATCH is read-only
+#      from Plaud's side (no DB write conflict surface).
+# TODO (deferred to a separate brief, post-V1): if cluster-wide rate ceiling becomes
+# necessary (scale-out to N>2 instances OR Plaud rate-limit observed in production), promote
+# to PostgreSQL-backed counter table keyed (date, scope) with row-locks under the existing
+# advisory-lock context. Out-of-scope for this brief.
 _PLAUD_AUTO_GEN_MAX_PER_CYCLE = 10
 
 # Cycle-scoped counter — caller resets to 0 at the start of each check_new / backfill loop.
+# Per-process state — see V0.3 fold S2 comment above for multi-instance reasoning.
 _auto_gen_calls_this_cycle = {"count": 0}
 
 def _reset_auto_gen_cycle_counter():
@@ -610,6 +636,7 @@ Both queries should return rows after the first auto-generate cycle completes (t
 ## Director ratification anchors
 - **2026-05-07 (V0.1):** Director ratified "follow your recoms" + asked AH1-T to "do" the brief. Cowork (Director-relay) verified Plaud Desktop has no account-level auto-generate toggle (General/Recording/Private Cloud Sync/About). AH1-T probed Plaud REST API and confirmed `/file/auto_setting`, `/file/auto`, `/file/setting` are PATCH endpoints — exact body shape pending Step 0 discovery.
 - **2026-05-08 (V0.2):** Director ratified "concur with AH1-T's wait-and-fold-both" 2026-05-08 ~07:00Z. V0.2 folds 14 findings: Gate 1 (cowork-ah1 / `feature-dev:code-reviewer` agent `a411e9e9bff231fa0`) = 2 CRIT (C1 inverted kill-switch, C2 broken sentinel call) + 5 HIGH (H1 config split, H2 missing httpx import, H3 empty-headers guard, H4 CDP event-discard bug, H5 backfill silent rejection) + 2 MED (M1 is_trans race, M2 null-date silent skip); Gate 3 (AH1-T `architecture-reviewer`) = 1 CRIT (dedup-on-failure invariant prose) + 4 IMP (no circuit breaker, missing 3 tests, Fix 2/3 duplication, Step-0 Path-D escape hatch) + 5 SUGGESTIONS (empirical 30-min anchor, partial index, env propagation note, max-10/cycle rate cap, default-age-0 disabled).
+- **2026-05-08 (V0.3):** Director ratified "follow your recommendations" 2026-05-08 ~07:38Z (relayed by AH1-App). V0.3 folds the 2 SUGGESTION-class nits from Gate 3 V0.2 (AH1-T `architecture-reviewer` agent `a6118b97de94b7a4b`): S1 — already-transcribed PATCH response contract MUST be Step-0-derived (added Step 0 capture requirement + replaced hardcoded heuristic in `_request_auto_generate` with PLACEHOLDER + explicit warning to substitute Step-0 contract); S2 — per-cycle rate counter scope explicitly documented as per-process with TODO for PG-backed promotion if cluster-wide ceiling becomes necessary (justified by Plaud Unlimited tier + circuit breaker per-process trip + PR #168 advisory-lock context). No code structure changes; comments + acceptance criteria only.
 - **PR #168 (`8641a11a`):** dependency — alarm dedup helper + advisory lock + stale-refresh lane all referenced.
 
 ## PL ship-report
