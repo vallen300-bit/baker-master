@@ -1,117 +1,86 @@
 ---
-status: COMPLETE
-brief: briefs/BRIEF_BRISEN_LAB_APP_AUTOPOLL_INBOX_1.md
-trigger_class: TIER_A_DAEMON_AUTHZ_PLUS_HOOK_INBOX
-dispatched_at: 2026-05-06
-dispatched_by: ai-head-a
-claimed_by: b2
-ship_report: briefs/_reports/B2_brisen_lab_app_autopoll_inbox_1_20260506.md
-prs_merged:
-  brisen_lab_7: stage-2-companion
-  baker_master_166: 6d4b14a
-followups_post_merge:
-  - 1194259 fix(hook): add cowork-ah1 to _DIRECTOR_FACING_ROLES (Stage 2 activation)
-  - 134baff fix(hook): resolve op:// terminal-key refs at runtime (Stage 2 burn-in unblock)
-merged_at: 2026-05-06
-verdict: PASS
+status: PENDING
+brief: briefs/BRIEF_WHATSAPP_RECIPIENT_RESOLVER_FIX_1.md
+trigger_class: TIER_A_INCIDENT_FIX_PII_LEAK_VECTOR
+dispatched_at: 2026-05-08T08:10Z
+dispatched_by: ai-head-b (terminal, incident-containment lane)
+director_ratification: "go" (2026-05-08T08:09Z chat verbatim, ratifying brief v0.3 + B2 / PR / manual-re-enable-gate dispatch)
+incident: waha-mis-route-marcus-pisani (2026-05-08)
+post_mortem: ~/baker-vault/_ops/incidents/2026-05-08-waha-mis-route-marcus-pisani.md
+brief_version: 0.3
+expected_pr_count: 1 (baker-master)
+expected_branch_name: b2/whatsapp-recipient-resolver-fix-1
+gate_to_re_enable: this brief shipped + tested + Director's verbatim "re-enable whatsapp"
 ---
 
-# CODE_2_PENDING — BRISEN_LAB_APP_AUTOPOLL_INBOX_1 (COMPLETE)
+# CODE_2_PENDING — WHATSAPP_RECIPIENT_RESOLVER_FIX_1 (PENDING)
 
-**Dispatched:** 2026-05-06
-**Tier:** A (daemon authz surface change + receive-side hook extension touching Director's inbox)
-**Repo (primary):** `vallen300-bit/baker-master`
-**Branch (primary):** `b2/brisen-lab-app-autopoll-inbox-1`
-**Repo (companion, REQUIRED — daemon ships first):** `vallen300-bit/brisen-lab`
-**Branch (companion):** `b2/brisen-lab-app-autopoll-inbox-1-daemon-block`
-**Brief:** `briefs/BRIEF_BRISEN_LAB_APP_AUTOPOLL_INBOX_1.md` (read it first — full spec, copy-paste-ready code blocks)
+**Dispatched:** 2026-05-08T08:10Z
+**Tier:** A (PII-leak-vector incident fix; Tier-A merge gates: `/security-review` PASS + AH-side ratify)
+**Repo:** `vallen300-bit/baker-master`
+**Brief:** `briefs/BRIEF_WHATSAPP_RECIPIENT_RESOLVER_FIX_1.md` v0.3 — read it first, top to bottom, before opening any code. The brief contains copy-paste-ready code blocks, schema verbatim, grep-evidence block, parametrized test bodies, and an audit-row contract (`path_taken`).
 
-## Summary
+## Containment context — read before touching code
 
-Stage 2 of the Director-locked sequence (F2 ship → Stage 2 → 1-week burn-in). Bundles F2-FU-1 (move Director-recipient block from F2 script-layer to brisen-lab daemon, env-gated) + App-side autopoll (AH1-App's UserPromptSubmit hook drains `/msg/director` on top of `/msg/lead`). Director sees Director-facing bus traffic in preamble alongside AH1's own inbox.
+Three Baker T1-Alert WhatsApp messages addressed to Director were silently mis-routed to counterparty Marcus Pisani's WhatsApp thread on the morning of 2026-05-08 between 00:02:28Z and 02:02:26Z. Item #3 was family-financial PII (Lana €650k tax tracking). Director observed at ~07:20Z; AH2-T containment GREEN at 07:32:39Z via Render env-var flip on `srv-d6dgsbctgctc73f55730`: `WAHA_BASE_URL=https://baker-waha-DISABLED-INCIDENT-2026-05-08.invalid`. Outbound WAHA is currently neutralized at the network layer.
 
-Director Q1-Q5 ratified 2026-05-06: per-prompt drain (Q1a), two flags (Q2b), reuse bm-aihead1 picker drain-both (Q3b), full body up to 8K (Q4b), ratify_required pinned at top (Q5a).
+**Your job is to fix the root-cause bug so the WAHA outbound URL can be safely restored.** Do NOT attempt to flip `WAHA_BASE_URL` back during your work — the re-enable is gated on (a) your PR merging cleanly, (b) Director's verbatim phrase `"re-enable whatsapp"`, and (c) AH2-T running the 3-smoke verification.
+
+Full incident dossier: `~/baker-vault/_ops/incidents/2026-05-08-waha-mis-route-marcus-pisani.md`.
 
 ## What to build
 
-**brisen-lab (companion PR — ships FIRST):**
-- `bus.py` EXTEND — env-gated (`BRISEN_LAB_DIRECTOR_RECIPIENT_BLOCKED`, default=true) reject in `_post_msg_inner` when `to` includes "director". Defense-in-depth at daemon layer.
-- `tests/test_director_recipient_block.py` NEW — 8 tests (default behavior, multi-recipient, regression, typo-tolerance, etc.)
+**Single PR against `vallen300-bit/baker-master`:**
 
-**baker-master (primary PR — ships AFTER companion):**
-- `.claude/hooks/user-prompt-submit-confirm.py` EXTEND — new helpers `_app_autopoll_enabled`, `_is_director_facing_role`, `_fetch_director_key`, `_drain_director_inbox`. Integrate into `main()` after existing self-inbox drain. Per-inbox last-seen markers (separate files for /msg/lead vs /msg/director).
-- `scripts/bus_post.sh` + `scripts/bus_post.py` EDIT — REMOVE F2 director-recipient hard-reject; ADD "director" to slug allowlist. Single control point at daemon (defense-in-depth split is now structurally impossible).
-- `tests/test_director_inbox_drain.py` NEW — 10 hook unit tests (autopoll gate, role gate, key fetch, ratify_required pinning, full-body via /event/{id}/full, ack semantics, marker isolation, fail-open).
-- `tests/test_bus_post.py` EDIT — invert F2 tests 1 + 12 (director-passes-through; daemon enforces).
+- `outputs/whatsapp_sender.py` — patch per brief §"Patch — outputs/whatsapp_sender.py" (Changes 1-6). Adds: `_phone_root` helper, `DIRECTOR_PHONE_ROOTS` literal frozenset, module-import sanity assert, asymmetric `_recipient_id_compatible` with tri-state `_RecipientCheck` enum, `_lid_belongs_to_phone` returning `Optional[bool]`, `_alarm_slack_lid_db_degraded` Slack hook, recipient-id assertion + `path_taken` tagging in `send_whatsapp`. Director-target sends fail-closed on LID-DB error; non-Director DEGRADED falls through with Slack alarm.
+- `tests/test_whatsapp_sender_lid.py` — keep existing 6 tests passing; add the 7 new tests verbatim from brief §"New tests (7) — all must pass". Test A and Test A2 must use `@pytest.mark.parametrize("director_root", sorted(sender.DIRECTOR_PHONE_ROOTS))` so adding any new Director root automatically gets test coverage.
 
-## Two flags (kill-switch design)
+**Out of scope (do NOT touch in this PR):**
+- `WAHA_BASE_URL`, `WHATSAPP_API_KEY`, or `DIRECTOR_WHATSAPP` constants (no value changes).
+- `baker_actions` table schema (the `path_taken` field lives inside the JSONB `payload` — no migration needed).
+- `whatsapp_lid_map` table population. The brief assumes the table is already populated (1,018 rows per memory). If the table is empty in your test environment, mock at the function boundary.
+- `outputs/slack_notifier.py` — `_alarm_slack_lid_db_degraded` calls `post_to_channel`, which already exists. Don't refactor slack_notifier.
+- `outputs/dashboard.py` — irrelevant to this fix.
 
-- `BRISEN_LAB_DIRECTOR_RECIPIENT_BLOCKED` — Render env on brisen-lab. Default=true (blocked). Flip to false to allow Director-recipient bus traffic.
-- `BRISEN_LAB_APP_AUTOPOLL_ENABLED` — AH1-App's shell env. Default=false. Flip to true to enable hook drain of /msg/director.
+## Acceptance criteria (10 items — all 10 must be green at PR-ready time)
 
-Both default-OFF. Brief merge = NO behavior change. Director flips each independently to enable Stage 2.
+Reproduced verbatim from brief §"Implementation acceptance criteria":
 
-## CRITICAL: 5-gate review chain MANDATORY (Tier A)
+1. All 6 existing `test_whatsapp_sender_lid.py` tests pass.
+2. All 7 new tests pass (Test A, A2, C, D, E, F, G). Total parametrized instances ≥18.
+3. `python3 -c "import py_compile; py_compile.compile('outputs/whatsapp_sender.py', doraise=True)"` clean.
+4. PR description includes verbatim copy of **Test A, Test A2, AND Test E** code in the test plan checklist.
+5. Patch does NOT touch `WAHA_BASE_URL`, `WHATSAPP_API_KEY`, or `DIRECTOR_WHATSAPP`. Patch DOES add `DIRECTOR_PHONE_ROOTS = frozenset({"41799605092", "447588690632"})` adjacent to `DIRECTOR_WHATSAPP`, plus the module-import sanity assert.
+6. Patch does NOT remove `_log_send_to_baker_actions`. Patch DOES extend it with `path_taken: str` keyword argument; existing payload structure preserved (JSONB augment, not replace).
+7. `/security-review` skill PASS on the PR diff (Lesson #52 — Tier-A merges).
+8. PR description includes output of:
+   ```
+   grep -rn "_resolve_to_active_chat_id\|sendText\|baker-waha" outputs/ orchestrator/ tools/
+   ```
+   Expected: exactly one resolver call site at `outputs/whatsapp_sender.py:140`; one sendText egress at `:151`. No other matches in `outputs/`, `orchestrator/`, or `tools/`. **If any other caller surfaces, stop and escalate to AH2-T before proceeding** — the recipient-id assertion design assumes single-callsite gating.
+9. PR description embeds the `whatsapp_lid_map` schema verbatim per the brief schema block, and confirms `_lid_belongs_to_phone` SQL uses `f"{expected_phone_digits}@c.us"` for the `phone =` parameter.
+10. PR description lists which `path_taken` value covers which code branch and confirms Test G parametrizes over all 5 paths. No code branch may write zero or >1 audit rows for a given send invocation.
 
-Run all reviewers in **parallel** in a single message:
+## PR workflow
 
-1. **AH2 static review** — `feature-dev:code-reviewer` agent — full diff (both repos)
-2. **AH2 `/security-review`** — focus areas:
-   - Director's terminal-key handling in hook (env vs op CLI fetch path; never logged)
-   - daemon env-flag parsing (defaults safe; typos/title-case don't unblock)
-   - hook fail-open contract preserved (no new exit-non-zero paths)
-   - drain ordering (ack-then-fetch acceptable for read-only inbox)
-3. **picker-architect review** — design fit:
-   - kill-switch flag granularity (Q2b two-flag design)
-   - per-role marker file naming (collision-safe across roles + flips)
-   - body-cap policy (8K matches daemon ceiling)
-   - F2 script cleanup tradeoff (single control point vs defense-in-depth — daemon is load-bearing)
-4. **feature-dev:code-reviewer 2nd-pass** — after any review-driven changes
-5. **AH1-T merges** — squash + delete branches + PL ship-report
+1. Create branch `b2/whatsapp-recipient-resolver-fix-1` off `main`.
+2. Apply the patch + tests per brief.
+3. Run `pytest tests/test_whatsapp_sender_lid.py -v` locally; all 6 existing + 7 new must pass (≥18 parametrized instances).
+4. Run the literal grep from acceptance criterion #8; paste output into PR description.
+5. Run `python3 -c "import py_compile; py_compile.compile('outputs/whatsapp_sender.py', doraise=True)"` clean.
+6. Push branch, open PR titled `fix(whatsapp): recipient-id assertion + Director-target asymmetric fail-closed (incident waha-mis-route-marcus-pisani-1)`.
+7. PR body must include the items from acceptance criteria #4, #8, #9, #10 (verbatim test code blocks + grep output + schema + path_taken table).
+8. End your chat ship report with the fenced PL paste-block per SKILL.md §"PL ship-report contract". PL paste-block topic: `incident/waha-mis-route-marcus-pisani-fix`.
 
-Tag PRs with `tier-a-authz`. Cross-link companion PRs in both bodies.
+**On merge gate:** AH2-T runs `/security-review` on the PR diff (Lesson #52). Director ratifies merge. After merge, AH2-T executes the 3-smoke re-enable sequence per brief §"Re-enable sequence (after merge)".
 
-## Two-repo split + ship sequencing
+## Coordination notes
 
-**Companion (brisen-lab) merges FIRST.** Daemon ships with default-blocked behavior — no behavior change vs F2. THEN baker-master primary merges (hook + script changes ship with autopoll flag default-OFF — no behavior change). Two no-op merges. Director then flips env flags to enable Stage 2 traffic.
+- **Slack outbound is currently LIVE** (Director scope-narrowed the kill to WhatsApp only). `_alarm_slack_lid_db_degraded` will reach #cockpit during your tests if your test environment hits live Slack — patch it in tests as shown in brief Test D (`patch.object(sender, "_alarm_slack_lid_db_degraded")`).
+- **WAHA outbound is DEAD.** Don't try to live-fire `send_whatsapp` from your B2 dev environment — `WAHA_BASE_URL` on baker-master Render is scrambled, and Render env doesn't propagate to local dev. Test entirely via mocks per brief.
+- **Director's UK number (`447588690632`)** is in scope — appears in `DIRECTOR_PHONE_ROOTS` literal because the future Baker UK eSIM activation must not silently fail-open on the asymmetric Director-fail-closed branch. Pre-protected per reviewer HIGH-1 v0.3.
+- **PII handling:** the 3 mis-routed message contents are referenced by `baker_actions.id` (854, 855, 856) only. **Do not paste the message text into your PR description, commit messages, or chat ship report.** That handling is locked into the brief and post-mortem; B2 follows the same constraint.
 
-If brisen-lab review hits issues: STOP. Hook depends on daemon being ready to handle director-recipient. Don't merge baker-master without brisen-lab landing first.
+## PL ship-report
 
-## Acceptance criteria — 11 total
-
-- A1: brisen-lab `pytest tests/test_director_recipient_block.py -v` — 8/8 PASS
-- A2: brisen-lab full `pytest` GREEN (no regression in 22 factory + 9 inbox + 8 new)
-- A3: baker-master `pytest tests/test_director_inbox_drain.py -v` — 10/10 PASS
-- A4: baker-master `tests/test_bus_post.py` — F2 inversion tests PASS (director passes through)
-- A5: shellcheck `scripts/bus_post.sh` clean (post-edit)
-- A6: py_compile `.claude/hooks/user-prompt-submit-confirm.py` clean
-- A7: py_compile `scripts/bus_post.py` clean
-- A8: py_compile `bus.py` (brisen-lab) clean
-- A9: smoke (post-merge by AH1-T): both env flags ON → `BAKER_ROLE=AH1 ~/.baker-hooks/bus_post.sh director "Stage 2 smoke" "stage2/smoke"` returns 200; AH1-App next prompt surfaces the message
-- A10: reverse smoke (post-merge): default flags → same call returns 403 director_recipient_blocked. Pin-not-vacuous.
-- A11: pin-not-vacuous (autopoll): autopoll=false → hook does NOT call /msg/director (verify via daemon access log)
-
-## Ship-report
-
-After both PRs merge, write `briefs/_reports/B2_brisen_lab_app_autopoll_inbox_1_20260506.md`: PR numbers (both repos), merge commits, AC table all ☑, files modified, any V0.x amendments, in-flight observations on hook/daemon interaction edge cases.
-
-## Files modified — see brief §"Files modified"
-
-## Do NOT touch
-
-- `authz.py` — daemon authz factory unchanged. Director-block is a recipient-list filter, not an authz policy.
-- `auth_lab.py` — no key-store changes.
-- Existing `_drain_inbox()` for self-inbox — Director-inbox drain is parallel new function; do NOT merge into one.
-- `BRISEN_LAB_V2_ENABLED` — orthogonal master switch; do NOT couple Stage 2 flags.
-- AH2 / B-code orientation files — vault-side per CHANDA Inv 9. AH1-T handles separately if needed.
-- Director's outbound flow — Stage 2 only automates AH1 → Director; Director's outbound stays prompt-typed (no Stage 3).
-
-## Lessons applied (in brief)
-
-- Two-flag kill-switch — daemon and hook concerns separated; either flips independently
-- Default-safe env parse — missing env defaults to BLOCKED; typo-tolerant via .lower() check
-- Per-inbox marker isolation — /msg/lead and /msg/director have distinct last-seen files
-- /event/{id}/full reuse for Q4(b) full-body fetch — no daemon endpoint expansion
-- Single control point (script cleanup) — F2 script-layer hard-reject removed; daemon is load-bearing gate
-- Pin-not-vacuous tests A10/A11 — explicit verification flags actually gate behavior
-- Two-repo split with cross-link + STRICT ship sequencing — companion FIRST
+End your chat ship report with a fenced PL paste-block per SKILL.md §"PL ship-report contract". PL paste-block topic: `incident/waha-mis-route-marcus-pisani-fix`.
