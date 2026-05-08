@@ -63,6 +63,17 @@ def run_backfill_with_timeout(name: str, fn, timeout_s: int = BACKFILL_TIMEOUT_S
     t = threading.Thread(target=_wrap, name=f"backfill-{name}", daemon=True)
     t.start()
     t.join(timeout=timeout_s)
+    if not t.is_alive():
+        # Clean completion — clear the same sentinel key the timeout path sets
+        # (Gate 4 finding 2026-05-08: failure path uses f"{name}_backfill" but
+        # plaud_trigger / fireflies_trigger success terminus uses bare ``name``,
+        # so the _backfill-suffixed key would never get cleared and would trip
+        # T1 after 3 restarts without DB intervention).
+        try:
+            from triggers.sentinel_health import report_success
+            report_success(f"{name}_backfill")
+        except Exception as _sh_e:
+            logger.warning(f"sentinel report_success crashed (non-fatal): {_sh_e}")
     if t.is_alive():
         abandoned_backfill_count += 1
         # Capture the wedged thread's stack frame for diagnostics.
@@ -98,6 +109,7 @@ def run_backfill_with_timeout(name: str, fn, timeout_s: int = BACKFILL_TIMEOUT_S
 def run_boot_backfill_chain(
     plaud_token: Optional[str],
     plaud_fn: Optional[Callable[[], None]],
+    fireflies_api_key: Optional[str],
     fireflies_fn: Optional[Callable[[], None]],
     timeout_s: int = BACKFILL_TIMEOUT_SEC,
 ) -> List[str]:
@@ -111,7 +123,10 @@ def run_boot_backfill_chain(
     reverse order let a hung Fireflies block Plaud's startup (PR #172).
 
     Each step is gated on its own credential / module presence; missing
-    credentials silently skip that step (no exception).
+    credentials silently skip that step (no exception). Fireflies gate
+    added 2026-05-08 (Gate 4 finding) — without it the chain log lied,
+    claiming Fireflies was invoked when ``FIREFLIES_API_KEY`` was unset
+    and ``backfill_fireflies`` returned immediately.
     """
     invoked: List[str] = []
 
@@ -119,7 +134,7 @@ def run_boot_backfill_chain(
         invoked.append("plaud")
         run_backfill_with_timeout("plaud", plaud_fn, timeout_s)
 
-    if fireflies_fn is not None:
+    if fireflies_api_key and fireflies_fn is not None:
         invoked.append("fireflies")
         run_backfill_with_timeout("fireflies", fireflies_fn, timeout_s)
 

@@ -568,12 +568,20 @@ async def startup():
         try:
             from triggers.fireflies_trigger import backfill_fireflies
             fireflies_fn = backfill_fireflies
-        except ImportError:
-            pass  # Fireflies module deletable; absence is fine
+        except Exception:
+            # Widened from ImportError 2026-05-08 (Gate 4 finding): non-ImportError
+            # module-level failures (AttributeError from missing config, NameError,
+            # etc.) used to propagate and silently kill this boot daemon thread,
+            # so Fireflies would never fire and no sentinel alarm would surface.
+            logger.warning(
+                "fireflies_trigger import failed — Fireflies backfill skipped",
+                exc_info=True,
+            )
 
         invoked = run_boot_backfill_chain(
             plaud_token=config.plaud.api_token,
             plaud_fn=plaud_fn,
+            fireflies_api_key=config.fireflies.api_key,
             fireflies_fn=fireflies_fn,
             timeout_s=BACKFILL_TIMEOUT_SEC,
         )

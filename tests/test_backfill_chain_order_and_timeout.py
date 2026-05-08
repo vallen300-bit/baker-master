@@ -30,7 +30,8 @@ def test_run_backfill_with_timeout_completes_fast_call():
     from triggers.backfill_runner import run_backfill_with_timeout
 
     fn = MagicMock()
-    run_backfill_with_timeout("test", fn, timeout_s=5)
+    with patch("triggers.sentinel_health.report_success", MagicMock()):
+        run_backfill_with_timeout("test", fn, timeout_s=5)
     assert fn.called, "backfill function must be invoked"
 
 
@@ -63,8 +64,12 @@ def test_run_backfill_with_timeout_swallows_exceptions():
     def boom():
         raise RuntimeError("simulated upstream API failure")
 
-    # Must not raise.
-    run_backfill_with_timeout("boom", boom, timeout_s=5)
+    # Must not raise. (The wrapped exception is caught inside _wrap, so the
+    # outer thread completes "cleanly" — success-clear path will still fire,
+    # which is fine: an exception inside the backfill is the trigger module's
+    # own concern + reported via its own report_failure call site.)
+    with patch("triggers.sentinel_health.report_success", MagicMock()):
+        run_backfill_with_timeout("boom", boom, timeout_s=5)
 
 
 # ---------------------------------------------------------------------------
@@ -105,8 +110,36 @@ def test_clean_completion_does_not_increment_abandoned_counter():
     import triggers.backfill_runner as br
 
     initial = br.abandoned_backfill_count
-    br.run_backfill_with_timeout("fast_test", MagicMock(), timeout_s=5)
+    with patch("triggers.sentinel_health.report_success", MagicMock()):
+        br.run_backfill_with_timeout("fast_test", MagicMock(), timeout_s=5)
     assert br.abandoned_backfill_count == initial
+
+
+def test_clean_completion_clears_failure_sentinel_key():
+    """Clean completion fires report_success on the SAME sentinel key the
+    timeout path sets — f"{name}_backfill" — so failures clear after a healthy
+    run instead of accumulating until T1 trips after 3 restarts.
+
+    Anchor: 2026-05-08 Gate 4 HIGH finding — sentinel-key parity.
+    backfill_plaud / backfill_fireflies use bare ``name`` for their own
+    success terminus; the wrapper's failure terminus uses
+    f"{name}_backfill". Without this success-clear, the wrapper's failure
+    key would never get cleared.
+    """
+    from triggers.backfill_runner import run_backfill_with_timeout
+
+    captured = {}
+
+    def fake_report_success(source):
+        captured["source"] = source
+
+    with patch("triggers.sentinel_health.report_success", fake_report_success):
+        run_backfill_with_timeout("fast_clean", MagicMock(), timeout_s=5)
+
+    assert captured.get("source") == "fast_clean_backfill", (
+        "success-clear must use the same f'{name}_backfill' key the timeout "
+        "path sets — otherwise the failure key never clears"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -128,12 +161,14 @@ def test_run_boot_backfill_chain_runs_plaud_before_fireflies():
     plaud_fn = MagicMock(side_effect=lambda: call_order.append("plaud"))
     fireflies_fn = MagicMock(side_effect=lambda: call_order.append("fireflies"))
 
-    invoked = run_boot_backfill_chain(
-        plaud_token="present",
-        plaud_fn=plaud_fn,
-        fireflies_fn=fireflies_fn,
-        timeout_s=5,
-    )
+    with patch("triggers.sentinel_health.report_success", MagicMock()):
+        invoked = run_boot_backfill_chain(
+            plaud_token="present",
+            plaud_fn=plaud_fn,
+            fireflies_api_key="present",
+            fireflies_fn=fireflies_fn,
+            timeout_s=5,
+        )
 
     assert call_order == ["plaud", "fireflies"]
     assert invoked == ["plaud", "fireflies"]
@@ -146,16 +181,45 @@ def test_run_boot_backfill_chain_skips_plaud_when_token_missing():
     plaud_fn = MagicMock()
     fireflies_fn = MagicMock()
 
-    invoked = run_boot_backfill_chain(
-        plaud_token=None,
-        plaud_fn=plaud_fn,
-        fireflies_fn=fireflies_fn,
-        timeout_s=5,
-    )
+    with patch("triggers.sentinel_health.report_success", MagicMock()):
+        invoked = run_boot_backfill_chain(
+            plaud_token=None,
+            plaud_fn=plaud_fn,
+            fireflies_api_key="present",
+            fireflies_fn=fireflies_fn,
+            timeout_s=5,
+        )
 
     assert not plaud_fn.called
     assert fireflies_fn.called
     assert invoked == ["fireflies"]
+
+
+def test_run_boot_backfill_chain_skips_fireflies_when_api_key_missing():
+    """No FIREFLIES_API_KEY → Fireflies step skipped, log doesn't lie.
+
+    Anchor: 2026-05-08 Gate 4 MEDIUM #2. Without this gate, a missing
+    api_key still appended "fireflies" to ``invoked`` while the trigger
+    returned immediately — operator-facing chain log claimed Fireflies
+    ran when it had not.
+    """
+    from triggers.backfill_runner import run_boot_backfill_chain
+
+    plaud_fn = MagicMock()
+    fireflies_fn = MagicMock()
+
+    with patch("triggers.sentinel_health.report_success", MagicMock()):
+        invoked = run_boot_backfill_chain(
+            plaud_token="present",
+            plaud_fn=plaud_fn,
+            fireflies_api_key=None,
+            fireflies_fn=fireflies_fn,
+            timeout_s=5,
+        )
+
+    assert plaud_fn.called
+    assert not fireflies_fn.called
+    assert invoked == ["plaud"]
 
 
 def test_run_boot_backfill_chain_skips_fireflies_when_module_missing():
@@ -163,12 +227,14 @@ def test_run_boot_backfill_chain_skips_fireflies_when_module_missing():
     from triggers.backfill_runner import run_boot_backfill_chain
 
     plaud_fn = MagicMock()
-    invoked = run_boot_backfill_chain(
-        plaud_token="present",
-        plaud_fn=plaud_fn,
-        fireflies_fn=None,
-        timeout_s=5,
-    )
+    with patch("triggers.sentinel_health.report_success", MagicMock()):
+        invoked = run_boot_backfill_chain(
+            plaud_token="present",
+            plaud_fn=plaud_fn,
+            fireflies_api_key="present",
+            fireflies_fn=None,
+            timeout_s=5,
+        )
 
     assert plaud_fn.called
     assert invoked == ["plaud"]
@@ -196,7 +262,8 @@ def test_hung_fireflies_does_not_block_plaud_completion_pattern():
         fireflies_blocker.wait(timeout=10)
 
     start = time.monotonic()
-    run_backfill_with_timeout("plaud", plaud_fn, timeout_s=5)
+    with patch("triggers.sentinel_health.report_success", MagicMock()):
+        run_backfill_with_timeout("plaud", plaud_fn, timeout_s=5)
     assert plaud_done.is_set(), "Plaud must complete in step 1"
     # Patch sentinel so the abandoned-thread alarm path doesn't write to real DB.
     with patch("triggers.sentinel_health.report_failure", MagicMock()):
@@ -222,7 +289,8 @@ def test_plaud_token_missing_skips_plaud_chain():
     # Just verify the helper itself is robust to a None fn replaced via the
     # caller's `if config.plaud.api_token:` gate (mimicking the dashboard code).
     fireflies_fn = MagicMock()
-    run_backfill_with_timeout("fireflies", fireflies_fn, timeout_s=5)
+    with patch("triggers.sentinel_health.report_success", MagicMock()):
+        run_backfill_with_timeout("fireflies", fireflies_fn, timeout_s=5)
     assert fireflies_fn.called
 
 
