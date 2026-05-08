@@ -365,3 +365,168 @@ def test_stale_refresh_advisory_lock_skips_when_held():
             "format_plaud_transcript must not be called when stale-refresh lock not acquired"
         assert not store_mock.store_meeting_transcript.called, \
             "store_meeting_transcript must not be called when stale-refresh lock not acquired"
+
+
+# ---------------------------------------------------------------------------
+# Regression — stale-refresh past-watermark gate (PR #168 follow-up 2026-05-08)
+# ---------------------------------------------------------------------------
+# Bug: PR #168 stale-refresh logic at line ~439 lives inside the `for rec in
+# new_recordings` loop body, but `new_recordings` is built by a watermark
+# filter at line ~409 (`rec_date > watermark`). Recordings older than the
+# advancing watermark — exactly the broken-backfill shells we want to refresh
+# — never reach the stale-refresh code, so 8 stuck files (Apr 12-28) sat at
+# body_len 71-177 chars for 9 days even after PR #168 deployed.
+#
+# Fix: include past-watermark recordings in `new_recordings` when DB has a
+# shell row, so the existing in-loop stale-refresh re-ingest fires.
+
+def test_stale_refresh_includes_past_watermark_shell():
+    """Past-watermark recording with shell DB row reaches stale-refresh re-ingest."""
+    from datetime import datetime, timezone
+    from triggers import plaud_trigger
+    from triggers.plaud_trigger import check_new_plaud_recordings
+
+    # Plaud-side: is_trans=True, start_time = 2026-04-15 (well before watermark).
+    rec = {
+        "id": "shell_past_wm", "is_trans": True, "duration": 600_000,
+        "start_time": 1_776_500_000_000, "filename": "stuck",
+    }
+    # Watermark advanced to 2026-05-01 — past the recording date, so without
+    # the fix the watermark gate excludes this rec from new_recordings.
+    advanced_watermark = datetime.fromtimestamp(1_777_500_000_000 / 1000, tz=timezone.utc)
+
+    formatted_stub = {
+        "text": "Meeting: stuck\n" + ("z" * 1000),
+        "metadata": {
+            "transcript_id": "shell_past_wm", "meeting_title": "stuck", "date": "",
+            "duration": "10min", "organizer": "", "participants": "",
+        },
+        "raw_id": "shell_past_wm",
+    }
+
+    pipeline_mock = MagicMock()
+
+    with patch.object(plaud_trigger.config.plaud, "api_token", "tok"), \
+         patch("triggers.sentinel_health.should_skip_poll", return_value=False), \
+         patch("triggers.sentinel_health.report_success"), \
+         patch("triggers.sentinel_health.report_failure"), \
+         patch("triggers.plaud_trigger.fetch_plaud_recordings", return_value=[rec]), \
+         patch("triggers.plaud_trigger.fetch_plaud_detail", return_value={"id": "shell_past_wm"}) as fetch_detail, \
+         patch("triggers.plaud_trigger.format_plaud_transcript", return_value=formatted_stub), \
+         patch("triggers.plaud_trigger._has_empty_db_row", return_value=True), \
+         patch.object(plaud_trigger.trigger_state, "get_watermark", return_value=advanced_watermark), \
+         patch.object(plaud_trigger.trigger_state, "is_processed", return_value=True), \
+         patch.object(plaud_trigger.trigger_state, "mark_processed"), \
+         patch.object(plaud_trigger.trigger_state, "set_watermark"), \
+         patch("orchestrator.pipeline.SentinelPipeline", return_value=pipeline_mock), \
+         patch("memory.store_back.SentinelStoreBack._get_global_instance",
+               return_value=_make_lock_store_mock(lock_acquired=True)) as get_store:
+        store_mock = get_store.return_value
+        store_mock.store_meeting_transcript = MagicMock()
+        store_mock.match_contact_by_name = MagicMock(return_value=None)
+
+        check_new_plaud_recordings()
+
+    fetched_ids = [c.args[0] for c in fetch_detail.call_args_list]
+    assert "shell_past_wm" in fetched_ids, (
+        "Past-watermark shell must reach stale-refresh re-ingest "
+        "(regression: bug shipped in PR #168 — watermark gate excluded shells)"
+    )
+    assert store_mock.store_meeting_transcript.called, \
+        "store_meeting_transcript must be called for past-watermark shell"
+
+
+def test_stale_refresh_skips_past_watermark_real_body():
+    """Past-watermark recording with full DB body is NOT re-ingested (avoid no-op churn)."""
+    from datetime import datetime, timezone
+    from triggers import plaud_trigger
+    from triggers.plaud_trigger import check_new_plaud_recordings
+
+    rec = {
+        "id": "real_past_wm", "is_trans": True, "duration": 600_000,
+        "start_time": 1_776_500_000_000, "filename": "ok",
+    }
+    advanced_watermark = datetime.fromtimestamp(1_777_500_000_000 / 1000, tz=timezone.utc)
+
+    pipeline_mock = MagicMock()
+
+    with patch.object(plaud_trigger.config.plaud, "api_token", "tok"), \
+         patch("triggers.sentinel_health.should_skip_poll", return_value=False), \
+         patch("triggers.sentinel_health.report_success"), \
+         patch("triggers.sentinel_health.report_failure"), \
+         patch("triggers.plaud_trigger.fetch_plaud_recordings", return_value=[rec]), \
+         patch("triggers.plaud_trigger.fetch_plaud_detail") as fetch_detail, \
+         patch("triggers.plaud_trigger._has_empty_db_row", return_value=False), \
+         patch.object(plaud_trigger.trigger_state, "get_watermark", return_value=advanced_watermark), \
+         patch.object(plaud_trigger.trigger_state, "is_processed", return_value=True), \
+         patch.object(plaud_trigger.trigger_state, "mark_processed"), \
+         patch.object(plaud_trigger.trigger_state, "set_watermark"), \
+         patch("orchestrator.pipeline.SentinelPipeline", return_value=pipeline_mock), \
+         patch("memory.store_back.SentinelStoreBack._get_global_instance",
+               return_value=_make_lock_store_mock(lock_acquired=True)):
+        check_new_plaud_recordings()
+
+    assert not fetch_detail.called, \
+        "Past-watermark recording with full DB body must NOT trigger re-fetch"
+
+
+def test_backfill_re_ingests_processed_shell():
+    """backfill_plaud re-ingests is_processed=True shells (DB body < 200) — same fix as incremental."""
+    from triggers import plaud_trigger
+    from triggers.plaud_trigger import backfill_plaud
+
+    rec = {
+        "id": "bf_shell", "is_trans": True, "duration": 600_000,
+        "start_time": 1_776_500_000_000, "filename": "shell",
+    }
+
+    formatted_stub = {
+        "text": "Meeting: shell\n" + ("q" * 1000),
+        "metadata": {
+            "transcript_id": "bf_shell", "meeting_title": "shell", "date": "",
+            "duration": "10min", "organizer": "", "participants": "",
+        },
+        "raw_id": "bf_shell",
+    }
+
+    with patch.object(plaud_trigger.config.plaud, "api_token", "tok"), \
+         patch("triggers.plaud_trigger.fetch_plaud_recordings", return_value=[rec]), \
+         patch("triggers.plaud_trigger.fetch_plaud_detail", return_value={"id": "bf_shell"}) as fetch_detail, \
+         patch("triggers.plaud_trigger.format_plaud_transcript", return_value=formatted_stub), \
+         patch("triggers.plaud_trigger._has_empty_db_row", return_value=True) as empty_probe, \
+         patch("memory.store_back.SentinelStoreBack._get_global_instance",
+               return_value=_make_lock_store_mock(lock_acquired=True)) as get_store, \
+         patch.object(plaud_trigger.trigger_state, "is_processed", return_value=True), \
+         patch.object(plaud_trigger.trigger_state, "mark_processed"):
+        store_mock = get_store.return_value
+        store_mock.store_meeting_transcript = MagicMock()
+        backfill_plaud()
+
+    assert empty_probe.called, "backfill must probe _has_empty_db_row when is_processed=True"
+    fetched_ids = [c.args[0] for c in fetch_detail.call_args_list]
+    assert "bf_shell" in fetched_ids, "backfill must re-fetch detail for stale shell"
+    assert store_mock.store_meeting_transcript.called, "backfill must upsert via store_meeting_transcript"
+
+
+def test_backfill_skips_processed_real_body():
+    """backfill_plaud skips is_processed=True with full DB body (no-op churn avoidance)."""
+    from triggers import plaud_trigger
+    from triggers.plaud_trigger import backfill_plaud
+
+    rec = {
+        "id": "bf_ok", "is_trans": True, "duration": 600_000,
+        "start_time": 1_776_500_000_000, "filename": "ok",
+    }
+
+    with patch.object(plaud_trigger.config.plaud, "api_token", "tok"), \
+         patch("triggers.plaud_trigger.fetch_plaud_recordings", return_value=[rec]), \
+         patch("triggers.plaud_trigger.fetch_plaud_detail") as fetch_detail, \
+         patch("triggers.plaud_trigger._has_empty_db_row", return_value=False), \
+         patch("memory.store_back.SentinelStoreBack._get_global_instance",
+               return_value=_make_lock_store_mock(lock_acquired=True)), \
+         patch.object(plaud_trigger.trigger_state, "is_processed", return_value=True), \
+         patch.object(plaud_trigger.trigger_state, "mark_processed"):
+        backfill_plaud()
+
+    assert not fetch_detail.called, \
+        "backfill must skip is_processed=True with full DB body"
