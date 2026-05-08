@@ -498,6 +498,13 @@ def backfill_fireflies():
 
         if not raw:
             logger.info("Fireflies backfill: no transcripts returned from API")
+            # Empty result is still a successful poll round (BRIEF_BACKFILL_THREADED_POOL_AND_OBSERVABILITY_1
+            # Fix 1b — sentinel must advance on no-op coverage paths, not stay stale).
+            try:
+                from triggers.sentinel_health import report_success
+                report_success("fireflies")
+            except Exception as _sh_e:
+                logger.warning(f"sentinel report_success crashed (non-fatal): {_sh_e}")
             return
 
         ingested = 0
@@ -597,9 +604,24 @@ def backfill_fireflies():
             f"Fireflies backfill complete: ingested {ingested} of {ingested + skipped} "
             f"transcripts (skipped {skipped} duplicates)"
         )
+        # Sentinel success on clean completion of the ingest loop
+        # (BRIEF_BACKFILL_THREADED_POOL_AND_OBSERVABILITY_1 Fix 1b).
+        try:
+            from triggers.sentinel_health import report_success
+            report_success("fireflies")
+        except Exception as _sh_e:
+            logger.warning(f"sentinel report_success crashed (non-fatal): {_sh_e}")
 
     except Exception as e:
         logger.error(f"Fireflies backfill failed: {e}")
+        # Sentinel failure on top-level except so the cockpit surfaces it
+        # (BRIEF_BACKFILL_THREADED_POOL_AND_OBSERVABILITY_1 Fix 1b — flips
+        # silent-dead Fireflies into loud-broken so it can be diagnosed).
+        try:
+            from triggers.sentinel_health import report_failure
+            report_failure("fireflies", f"backfill: {e}")
+        except Exception as _sh_e:
+            logger.warning(f"sentinel report_failure crashed (non-fatal): {_sh_e}")
     finally:
         _backfill_running = False
         # Release advisory lock

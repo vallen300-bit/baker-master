@@ -527,7 +527,7 @@ def _ensure_vault_mirror() -> None:
 # unit-testable without pulling in FastAPI + the dashboard dependency graph.
 from triggers.backfill_runner import (
     BACKFILL_TIMEOUT_SEC,
-    run_backfill_with_timeout as _run_backfill_with_timeout,
+    run_boot_backfill_chain,
 )
 
 
@@ -557,16 +557,27 @@ async def startup():
         # (PR #171). Order swapped from Fireflies-first 2026-05-08 because Fireflies
         # has been silent-dead since 2026-04-11 (Director migrated off it) and was
         # blocking Plaud's backfill from ever starting at boot.
+        # The canonical order lives in triggers/backfill_runner.run_boot_backfill_chain
+        # so dashboard + tests share exactly one definition (Fix 4 of
+        # BRIEF_BACKFILL_THREADED_POOL_AND_OBSERVABILITY_1).
+        plaud_fn = None
         if config.plaud.api_token:
             from triggers.plaud_trigger import backfill_plaud
-            _run_backfill_with_timeout("plaud", backfill_plaud, BACKFILL_TIMEOUT_SEC)
-        # Fireflies SECOND — legacy, kept while Plaud transitions to fully-operational.
-        # If it hangs, the per-step timeout means it cannot block Plaud anymore.
+            plaud_fn = backfill_plaud
+        fireflies_fn = None
         try:
             from triggers.fireflies_trigger import backfill_fireflies
-            _run_backfill_with_timeout("fireflies", backfill_fireflies, BACKFILL_TIMEOUT_SEC)
+            fireflies_fn = backfill_fireflies
         except ImportError:
             pass  # Fireflies module deletable; absence is fine
+
+        invoked = run_boot_backfill_chain(
+            plaud_token=config.plaud.api_token,
+            plaud_fn=plaud_fn,
+            fireflies_fn=fireflies_fn,
+            timeout_s=BACKFILL_TIMEOUT_SEC,
+        )
+        logger.info(f"Boot backfill chain complete; invoked={invoked}")
         # OOM-FIX-2: WhatsApp backfill removed from startup.
         # It fetched 500 chats + media + Qdrant embedding → 2-3GB memory spike.
         # Regular WhatsApp periodic re-sync (scheduler) handles catch-up safely.

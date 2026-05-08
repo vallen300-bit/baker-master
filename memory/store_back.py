@@ -3,7 +3,10 @@ Sentinel AI — Store Back Layer (Step 5)
 Write-side counterpart to memory/retriever.py (read-side).
 Handles all PostgreSQL structured writes + Qdrant interaction embeddings.
 
-Uses psycopg2 (sync) with SimpleConnectionPool.
+Uses psycopg2 (sync) with ThreadedConnectionPool (2026-05-08; was
+SimpleConnectionPool — swapped because the pool is shared across the
+FastAPI thread, APScheduler workers, and boot-time daemon backfill threads,
+and SimpleConnectionPool is documented single-thread-only).
 All writes use parameterized queries — no SQL injection risk.
 """
 import json
@@ -221,9 +224,14 @@ class SentinelStoreBack:
     # -------------------------------------------------------
 
     def _init_pool(self):
-        """Initialize psycopg2 connection pool."""
+        """Initialize psycopg2 connection pool.
+
+        Uses ThreadedConnectionPool — the pool is shared by the FastAPI thread,
+        APScheduler workers, the boot-time daemon backfill thread, and Cortex
+        cycle threads. SimpleConnectionPool is documented single-thread-only.
+        """
         try:
-            self._pool = psycopg2.pool.SimpleConnectionPool(
+            self._pool = psycopg2.pool.ThreadedConnectionPool(
                 minconn=1,
                 maxconn=5,
                 **config.postgres.dsn_params,
