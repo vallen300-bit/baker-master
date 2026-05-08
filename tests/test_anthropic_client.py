@@ -58,15 +58,15 @@ def test_compute_cost_with_cache_read_discount() -> None:
 
 
 def test_compute_cost_with_cache_write_markup() -> None:
-    """Cache writes cost 1.25x base input rate."""
+    """Cache writes cost 2.00x base input rate at 1-hour TTL (PR #176 2026-05-08)."""
     cost = _compute_cost_usd(
         input_tokens=0,
         output_tokens=0,
         cache_read_tokens=0,
         cache_write_tokens=1000,
     )
-    # 1000 * 15 * 1.25 / 1M = 0.01875 USD
-    assert cost == Decimal("0.01875")
+    # 1000 * 15 * 2.00 / 1M = 0.030 USD
+    assert cost == Decimal("0.030")
 
 
 def test_compute_cost_zero_tokens_is_zero() -> None:
@@ -184,7 +184,7 @@ def test_call_opus_system_block_has_cache_control() -> None:
 
     call_kwargs = mock_client.messages.create.call_args.kwargs
     system_blocks = call_kwargs["system"]
-    assert system_blocks[0]["cache_control"] == {"type": "ephemeral"}
+    assert system_blocks[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     assert system_blocks[0]["text"] == "stable sys"
     assert system_blocks[0]["type"] == "text"
 

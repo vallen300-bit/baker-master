@@ -64,7 +64,7 @@ def _split_scan_system_for_cache(system_prompt: str) -> list:
         return [{"type": "text", "text": system_prompt}]
     blocks: list = [
         {"type": "text", "text": stable,
-         "cache_control": {"type": "ephemeral"}},
+         "cache_control": {"type": "ephemeral", "ttl": "1h"}},
     ]
     if dynamic.strip():
         blocks.append({"type": "text", "text": dynamic})

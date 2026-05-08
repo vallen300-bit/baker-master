@@ -44,12 +44,13 @@ def test_calculate_cost_eur_cache_read_billed_at_10_percent():
     assert base == expected
 
 
-def test_calculate_cost_eur_cache_creation_billed_at_125_percent():
+def test_calculate_cost_eur_cache_creation_billed_at_200_percent():
+    """Cache writes cost 2.00x base input rate at 1-hour TTL (PR #176 2026-05-08)."""
     from orchestrator.cost_monitor import calculate_cost_eur, MODEL_COSTS, USD_TO_EUR
     model = "claude-opus-4-6"
     rate_in = MODEL_COSTS[model]["input"]
     base = calculate_cost_eur(model, 0, 0, cache_creation_input_tokens=1_000_000)
-    expected = round(rate_in * 1.25 * USD_TO_EUR, 6)
+    expected = round(rate_in * 2.00 * USD_TO_EUR, 6)
     assert base == expected
 
 
@@ -83,13 +84,13 @@ def test_build_caches_system_and_marks_last_tool(monkeypatch):
     assert isinstance(sys_v, list) and len(sys_v) == 1
     assert sys_v[0]["type"] == "text"
     assert sys_v[0]["text"] == "STATIC PROMPT"
-    assert sys_v[0]["cache_control"] == {"type": "ephemeral"}
+    assert sys_v[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
 
     # Tools: cache_control on LAST entry only, others untouched.
     assert isinstance(tools_v, list) and len(tools_v) == 3
     assert "cache_control" not in tools_v[0]
     assert "cache_control" not in tools_v[1]
-    assert tools_v[-1]["cache_control"] == {"type": "ephemeral"}
+    assert tools_v[-1]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     assert tools_v[-1]["name"] == "t3"
 
     # Original tools list must not be mutated (defensive copy).
@@ -118,7 +119,7 @@ def test_build_handles_empty_tools(monkeypatch):
     agent_mod = _reload_agent_module(monkeypatch, enabled=True, gemini=False)
     sys_v, tools_v = agent_mod._build_cached_system_and_tools(
         "STATIC", None, "claude-opus-4-6")
-    assert isinstance(sys_v, list) and sys_v[0]["cache_control"] == {"type": "ephemeral"}
+    assert isinstance(sys_v, list) and sys_v[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     assert tools_v is None
 
 

@@ -59,9 +59,11 @@ _API_KEY_ENV = "ANTHROPIC_API_KEY"
 # for Phase 1. Phase 2 introduces proper multi-ccy handling.
 _PRICE_OPUS_INPUT_PER_M = float(os.getenv("PRICE_OPUS4_IN", "15.00"))
 _PRICE_OPUS_OUTPUT_PER_M = float(os.getenv("PRICE_OPUS4_OUT", "75.00"))
-# Prompt-caching multipliers (Anthropic public pricing: cache writes are
-# 1.25x base input; cache reads are 0.1x base input — i.e. ~90% discount).
-_PRICE_OPUS_CACHE_WRITE_MUL = 1.25
+# Prompt-caching multipliers (Anthropic public pricing).
+# Cache writes: 1.25x base input for 5-min TTL, 2.00x base input for 1-hour TTL.
+# Baker uses 1-hour TTL on all hot sites (PR #176, 2026-05-08), so the write
+# multiplier is 2.00x. Cache reads: 0.1x base input — i.e. ~90% discount.
+_PRICE_OPUS_CACHE_WRITE_MUL = 2.00
 _PRICE_OPUS_CACHE_READ_MUL = 0.10
 
 
@@ -138,7 +140,8 @@ def _compute_cost_usd(
     """Per-call cost in USD derived from the SDK's usage object.
 
     Cache reads are discounted (~10% of base input). Cache writes are a
-    small markup (1.25x base input). The ``input_tokens`` figure the SDK
+    markup (2.00x base input at 1-hour TTL per PR #176 2026-05-08; was
+    1.25x under default 5-min TTL). The ``input_tokens`` figure the SDK
     reports is the count of tokens that hit the base-rate path — i.e.
     tokens NOT served from cache. So the three streams sum disjointly;
     we multiply each by its own rate and sum.
@@ -235,7 +238,7 @@ def call_opus(
         {
             "type": "text",
             "text": system,
-            "cache_control": {"type": "ephemeral"},
+            "cache_control": {"type": "ephemeral", "ttl": "1h"},
         }
     ]
 

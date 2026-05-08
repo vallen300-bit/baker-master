@@ -54,7 +54,7 @@ def _build_cached_system_and_tools(system_prompt, tools, model):
     system_value = [{
         "type": "text",
         "text": system_prompt,
-        "cache_control": {"type": "ephemeral"},
+        "cache_control": {"type": "ephemeral", "ttl": "1h"},
     }]
     if tools:
         tools_value = list(tools)
@@ -63,7 +63,7 @@ def _build_cached_system_and_tools(system_prompt, tools, model):
         # AGENT_TOOLS constant by anything downstream.
         tools_value[-1] = {
             **copy.deepcopy(tools_value[-1]),
-            "cache_control": {"type": "ephemeral"},
+            "cache_control": {"type": "ephemeral", "ttl": "1h"},
         }
     else:
         tools_value = tools

@@ -165,7 +165,8 @@ def calculate_cost_eur(
 
     BAKER-PROMPT-CACHING-1: Anthropic prompt caching pricing per docs:
       - cache_read_input_tokens billed at 10% of standard input rate (90% discount)
-      - cache_creation_input_tokens billed at 125% of standard input rate (one-time premium)
+      - cache_creation_input_tokens billed at 200% of standard input rate (1-hour TTL,
+        per PR #176 2026-05-08; was 125% under default 5-min TTL)
       - regular input_tokens billed at standard rate
 
     For non-Anthropic models the cache args are zero (kwargs default), so this
@@ -174,7 +175,7 @@ def calculate_cost_eur(
     costs = MODEL_COSTS.get(model, DEFAULT_COSTS)
     cost_usd = (
         (input_tokens / 1_000_000) * costs["input"]
-        + (cache_creation_input_tokens / 1_000_000) * costs["input"] * 1.25
+        + (cache_creation_input_tokens / 1_000_000) * costs["input"] * 2.00
         + (cache_read_input_tokens / 1_000_000) * costs["input"] * 0.10
         + (output_tokens / 1_000_000) * costs["output"]
     )

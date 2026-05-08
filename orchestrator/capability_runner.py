@@ -38,7 +38,7 @@ def _cache_wrap(system_str: str) -> list:
     text is stable across calls (most PM + domain capabilities);
     misses harmlessly when dynamic bits vary."""
     return [{"type": "text", "text": system_str,
-             "cache_control": {"type": "ephemeral"}}]
+             "cache_control": {"type": "ephemeral", "ttl": "1h"}}]
 
 # Max sub-tasks in delegate path (safety bound)
 MAX_SUB_TASKS = 4
