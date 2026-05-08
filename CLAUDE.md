@@ -19,7 +19,19 @@
 >
 > **First-message confirmation phrase (evidence-bound, exact):** `"AH2 oriented. Read: aihead2/orientation.md, ai-head/SKILL.md, MEMORY.md."`
 >
-> Block applies ONLY when cwd basename resolves to `bm-aihead2` (i.e., session opened via the AH2 picker symlink). B-code sessions follow the B-code block above; AH1 sessions follow the AH1 picker pattern at `~/Vallen Dropbox/Dimitry vallen/bm-aihead1/`.
+> Block applies ONLY when cwd basename resolves to `bm-aihead2` (i.e., session opened via the AH2 picker symlink). B-code sessions follow the B-code block above; AH1 sessions follow the AH1 block below.
+
+> **AI Head A1 (AH1) opening this dir via picker symlink** (`~/Vallen Dropbox/Dimitry vallen/bm-aihead1/` → `~/bm-aihead1/`, ratified 2026-05-08 to mirror AH2 pattern + drop session start cost from ~12% to ~6% by retiring the heavy `~/Desktop/baker-code` auto-memory slug) — MANDATORY before any reply:
+> 1. Invoke the Read tool on `/Users/dimitry/.claude/CLAUDE.md` (global rules + Tier 0 portfolio context).
+> 2. Invoke the Read tool on `~/baker-vault/_ops/agents/aihead1/orientation.md` (full AH1 orientation).
+> 3. Invoke the Read tool on `~/baker-vault/_ops/skills/ai-head/SKILL.md` (canonical AI Head operating rules).
+> 4. Invoke the Read tool on `~/.claude/projects/-Users-dimitry-Vallen-Dropbox-Dimitry-vallen-Baker-Project/memory/MEMORY.md` (canonical AH memory).
+>
+> **First-message confirmation phrase (evidence-bound, exact):** `"AH1 oriented. Read: aihead1/orientation.md, ai-head/SKILL.md, MEMORY.md."`
+>
+> Historical session handovers (pre-2026-05-08) are archived in `~/baker-vault/_ops/agents/aihead1/handover-archive/YYYY-MM/` — Read on demand if a thread requires prior-session context. Latest handover stays referenced in the new auto-memory slug's MEMORY.md.
+>
+> Block applies ONLY when cwd basename resolves to `bm-aihead1` (i.e., session opened via the AH1 picker symlink). Pre-2026-05-08 AH1 sessions opened directly at `~/Desktop/baker-code` and used the heavier auto-memory slug there — that fallback path remains operational but new sessions should use the picker.
 
 @.claude/how-to/INDEX.md
 
