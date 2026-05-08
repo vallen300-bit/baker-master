@@ -140,7 +140,8 @@ def _compute_cost_usd(
     """Per-call cost in USD derived from the SDK's usage object.
 
     Cache reads are discounted (~10% of base input). Cache writes are a
-    small markup (1.25x base input). The ``input_tokens`` figure the SDK
+    markup (2.00x base input at 1-hour TTL per PR #176 2026-05-08; was
+    1.25x under default 5-min TTL). The ``input_tokens`` figure the SDK
     reports is the count of tokens that hit the base-rate path — i.e.
     tokens NOT served from cache. So the three streams sum disjointly;
     we multiply each by its own rate and sum.
