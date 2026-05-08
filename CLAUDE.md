@@ -29,7 +29,7 @@
 >
 > **First-message confirmation phrase (evidence-bound, exact):** `"AH1 oriented. Read: aihead1/orientation.md, ai-head/SKILL.md, MEMORY.md."`
 >
-> Historical session handovers (pre-2026-05-08) are archived in `~/baker-vault/_ops/agents/aihead1/handover-archive/YYYY-MM/` — Read on demand if a thread requires prior-session context. Latest handover stays referenced in the new auto-memory slug's MEMORY.md.
+> AH1 picker has NO auto-memory directory (Director-ratified 2026-05-08 PM, mirror AH2 — drops start cost to ~6%). All historical session handovers + feedback + project memories live in baker-vault `_ops/agents/aihead1/handover-archive/YYYY-MM/` + `_ops/agents/aihead1/auto-memory-archive-20260508/`. Read on demand. Latest in-flight state lives in `_ops/agents/aihead1/operating.md` + `ARCHIVE.md` (canonical, no MEMORY.md). SessionEnd hook at `.claude/hooks/aihead1-session-end.sh` warns on uncommitted/unpushed `_ops/agents/aihead1/` state.
 >
 > Block applies ONLY when cwd basename resolves to `bm-aihead1` (i.e., session opened via the AH1 picker symlink). Pre-2026-05-08 AH1 sessions opened directly at `~/Desktop/baker-code` and used the heavier auto-memory slug there — that fallback path remains operational but new sessions should use the picker.
 
