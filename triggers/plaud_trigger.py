@@ -400,13 +400,28 @@ def check_new_plaud_recordings():
             report_success("plaud")
             return
 
-        # Filter to recordings newer than watermark + transcription complete
+        # Filter to recordings newer than watermark + transcription complete.
+        # STALE-REFRESH (PR #168 fix completion 2026-05-08): also include recordings
+        # whose DB row is a shell (length < 200) regardless of watermark — without this,
+        # PR #168's stale-refresh logic at line ~439 never fires for files older than
+        # the watermark (the original 25-day silent failure repeated). Confirmed via
+        # 8 stuck files (Apr 12-28) sitting at body_len 71-177 chars even after PR #168
+        # deployed — Plaud-side is_trans=True, but watermark gate excluded them from
+        # the loop body where the stale-refresh re-ingest lives.
         new_recordings = []
         for rec in recordings:
             if not rec.get("is_trans"):
                 continue  # Skip recordings still being transcribed
             rec_date = _recording_date(rec)
             if rec_date and rec_date > watermark:
+                new_recordings.append(rec)
+                continue
+            # Past-watermark stale-refresh gate: re-ingest if a shell exists in DB.
+            file_id = _recording_id(rec)
+            if not file_id:
+                continue
+            source_id = f"plaud_{file_id}"
+            if trigger_state.is_processed("meeting", source_id) and _has_empty_db_row(source_id, threshold=200):
                 new_recordings.append(rec)
 
         if not new_recordings:
@@ -673,9 +688,17 @@ def backfill_plaud():
 
             source_id = f"plaud_{file_id}"
 
-            # Skip if already processed
+            # Skip if already processed AND DB has a real body (not a broken-backfill shell).
+            # Stale-refresh (PR #168 follow-up 2026-05-08): if Plaud now reports is_trans=True
+            # but our DB row is a header-only shell (<200 chars) from the broken backfill era,
+            # re-ingest. store_meeting_transcript ON CONFLICT (id) DO UPDATE handles upsert.
             if trigger_state.is_processed("meeting", source_id):
-                continue
+                if not _has_empty_db_row(source_id, threshold=200):
+                    continue
+                logger.info(
+                    f"Plaud backfill: stale-refresh re-ingesting {source_id} "
+                    f"(DB body < 200 chars, is_trans now True)"
+                )
 
             detail = fetch_plaud_detail(file_id)
             if not detail:
