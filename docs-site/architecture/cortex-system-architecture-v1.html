@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Cortex — System Architecture (v1, 2026-05-07)</title>
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --ink-mute: #555;
+    --rule: #d4d4d4;
+    --bg: #fafaf7;
+    --tier-1: #e8eef4;
+    --tier-2: #e8f0e8;
+    --tier-3: #efeae0;
+    --phase: #f5f1e8;
+    --accent: #5a4a3a;
+    --sig: #d8e2ec;
+    --cap: #efe4d4;
+    --gate: #e6dad0;
+  }
+  body { background: var(--bg); color: var(--ink); font-family: -apple-system, system-ui, sans-serif; margin: 0; padding: 32px 48px 64px; }
+  h1 { font-weight: 500; font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--ink-mute); font-size: 13px; margin-bottom: 28px; }
+  .stage { background: white; border: 1px solid var(--rule); border-radius: 4px; padding: 18px 20px; margin-bottom: 16px; }
+  .stage h2 { font-size: 13px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-mute); margin: 0 0 14px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .box { padding: 10px 14px; border-radius: 3px; font-size: 13px; line-height: 1.45; flex: 1; min-width: 140px; }
+  .box .label { font-weight: 600; display: block; margin-bottom: 3px; }
+  .box .desc { color: var(--ink-mute); font-size: 12px; }
+  .box.signal { background: var(--sig); }
+  .box.phase { background: var(--phase); border-left: 3px solid var(--accent); }
+  .box.cap { background: var(--cap); }
+  .box.gate { background: var(--gate); }
+  .box.tier1 { background: var(--tier-1); }
+  .box.tier2 { background: var(--tier-2); }
+  .box.tier3 { background: var(--tier-3); }
+  .arrow { font-size: 18px; color: var(--ink-mute); display: flex; align-items: center; padding: 0 4px; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; color: var(--ink-mute); margin-top: 8px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+  .grid { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 16px; }
+  .micro { font-size: 11px; color: var(--ink-mute); margin-top: 6px; font-family: ui-monospace, "SF Mono", monospace; }
+  .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--rule); font-size: 11px; color: var(--ink-mute); font-family: ui-monospace, monospace; }
+  .pill { display: inline-block; padding: 1px 8px; border: 1px solid var(--rule); border-radius: 99px; font-size: 11px; color: var(--ink-mute); margin-right: 6px; }
+  .stage-num { display: inline-block; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); color: white; font-size: 11px; font-weight: 600; text-align: center; line-height: 18px; margin-right: 8px; }
+</style>
+</head>
+<body>
+
+<h1>Cortex — System Architecture</h1>
+<div class="sub">v1 · 2026-05-07 · Per RA-23 lock (2026-04-27) + Stage 2 V1 partial-ship status (2026-04-28). Source-of-truth: <code>_ops/ideas/2026-04-27-cortex-architecture-final-locked.md</code>.</div>
+
+<!-- ───────────────────── 1. SIGNAL FLOW ───────────────────── -->
+<div class="stage">
+  <h2><span class="stage-num">1</span>Signal flow — ingestion to queue</h2>
+  <div class="row">
+    <div class="box signal"><span class="label">Sources</span><div class="desc">WhatsApp (WAHA webhook) · email (Gmail + Bluewin IMAP + Exchange IMAP) · meeting transcripts (Fireflies · Plaud · YouTube)</div></div>
+    <div class="arrow">→</div>
+    <div class="box signal"><span class="label">Ingestion + classify</span><div class="desc">Flash classifier assigns <code>matter_slug</code> + 0–3 <code>related_matters</code></div></div>
+    <div class="arrow">→</div>
+    <div class="box signal"><span class="label">signal_queue</span><div class="desc">Postgres queue · per-matter routing · feeds Cortex Phase 1</div></div>
+  </div>
+  <div class="micro">Sentinels write raw tables only — never wiki. Read/write split enforced.</div>
+</div>
+
+<!-- ───────────────────── 2. CORTEX 6-PHASE CYCLE ───────────────────── -->
+<div class="stage">
+  <h2><span class="stage-num">2</span>Cortex Core — 6-phase cycle (<code>orchestrator/cortex_runner.py</code>)</h2>
+  <div class="row">
+    <div class="box phase"><span class="label">1. Sense</span><div class="desc">Pull signals from <code>signal_queue</code> for matter</div></div>
+    <div class="arrow">→</div>
+    <div class="box phase"><span class="label">2. Load</span><div class="desc">Per-matter <code>cortex-config.md</code> + curated knowledge + entity registry</div></div>
+    <div class="arrow">→</div>
+    <div class="box phase"><span class="label">3. Reason</span><div class="desc">3a meta-reason (auto-trigger gate) · 3b invoke domain capabilities</div></div>
+    <div class="arrow">→</div>
+    <div class="box phase"><span class="label">4. Propose</span><div class="desc">Synthesize → recommendation</div></div>
+    <div class="arrow">→</div>
+    <div class="box phase"><span class="label">5. Act</span><div class="desc">Director-ratified actions only · audited to <code>baker_actions</code></div></div>
+    <div class="arrow">→</div>
+    <div class="box phase"><span class="label">6. Archive</span><div class="desc">Curated MD + <code>cortex_phase_outputs</code> mirror</div></div>
+  </div>
+  <div class="row" style="margin-top: 14px;">
+    <div class="box cap" style="flex: 0 0 100%;"><span class="label">Phase 3b — invoked domain capabilities</span><div class="desc">legal · finance · tax-CH / AT / DE · game-theory · counterparty-model · russo-* — <strong>cap 5/cycle, 60s/specialist (2 retries), 5-min absolute cycle timeout</strong></div></div>
+  </div>
+  <div class="micro">Activation: Cortex auto-trigger (Phase 3a meta-reasoning) OR Director manual (Scan / dashboard). No cron · no peer · no sentinel-direct.</div>
+</div>
+
+<!-- ───────────────────── 3. THREE TIERS ───────────────────── -->
+<div class="stage">
+  <h2><span class="stage-num">3</span>Three-tier execution topology</h2>
+  <div class="row">
+    <div class="box tier1"><span class="label">Tier 1 — Render (cloud)</span><div class="desc">Cortex V2 phases 0–3 (deployed) · sensors · alerts · 8K context · PostgreSQL Neon · Qdrant Cloud · Voyage embeddings · Claude Opus via API · WhatsApp WAHA · cron jobs</div></div>
+    <div class="box tier2"><span class="label">Tier 2 — Mac Mini (reasoning)</span><div class="desc">200K context · Obsidian vault + Claude Code · Gemini Pro triage librarian · 15-min cron · single-writer to vault · Ollama / Gemma 4 local triage</div></div>
+    <div class="box tier3"><span class="label">Tier 3 — MacBook (deliberation)</span><div class="desc">1M context · session-based · deep analysis with Director · matter Desks · AI Heads · BEN · AI Dennis</div></div>
+  </div>
+  <div class="micro">Smart layer is Tiers 2–3 · Tier 1 is the "nervous system" (PostgreSQL = state · Qdrant = recall · Render = reflexes).</div>
+</div>
+
+<!-- ───────────────────── 4. KNOWLEDGE LAYERS ───────────────────── -->
+<div class="stage">
+  <h2><span class="stage-num">4</span>Knowledge layers — read/write split</h2>
+  <div class="grid">
+    <div class="box" style="background:white;border:1px solid var(--rule);">
+      <span class="label">Raw — Postgres</span>
+      <div class="desc">whatsapp_messages · meeting_transcripts · emails · signal_queue · cortex_phase_outputs (Phase-3 specialist mirror) · baker_actions (audit)</div>
+      <div class="micro">Sentinels write · Cortex reads</div>
+    </div>
+    <div class="box" style="background:white;border:1px solid var(--rule);">
+      <span class="label">Curated — per matter</span>
+      <div class="desc"><code>baker-vault/wiki/matters/&lt;slug&gt;/</code><br>· <code>cortex-config.md</code> (AI Head Tier-B writes)<br>· <code>curated/&lt;topic&gt;-&lt;date&gt;.md</code> (post-reasoned)<br>· <code>gold.md</code> + <code>proposed-gold.md</code> (Director ratifies)</div>
+      <div class="micro">Cortex Phase 3b writes · Director ratifies promotions</div>
+    </div>
+    <div class="box" style="background:white;border:1px solid var(--rule);">
+      <span class="label">Meta-knowledge — cross-matter</span>
+      <div class="desc"><code>wiki/_cortex/</code><br>· <code>director-gold-global.md</code><br>· <code>cross-matter-patterns.md</code><br>· <code>brisen-style.md</code><br>+ entities <code>wiki/people/&lt;slug&gt;.md</code> · <code>wiki/entities/&lt;slug&gt;.md</code></div>
+      <div class="micro">Highest visibility · Director-only writes</div>
+    </div>
+  </div>
+</div>
+
+<!-- ───────────────────── 5. WRITE GATES + RATIFICATION ───────────────────── -->
+<div class="stage">
+  <h2><span class="stage-num">5</span>Write gates + ratification chain</h2>
+  <div class="row">
+    <div class="box gate"><span class="label">Sentinels</span><div class="desc">Raw tables only · never wiki</div></div>
+    <div class="arrow">→</div>
+    <div class="box gate"><span class="label">Cortex Phase 3</span><div class="desc">cortex_phase_outputs + curated MD per matter</div></div>
+    <div class="arrow">→</div>
+    <div class="box gate"><span class="label">AI Head Tier B</span><div class="desc">cortex-config.md per matter</div></div>
+    <div class="arrow">→</div>
+    <div class="box gate"><span class="label">Director GOLD</span><div class="desc">proposed-gold.md → gold.md (PR #66 workflow)</div></div>
+  </div>
+  <div class="micro">All Baker writes audited to <code>baker_actions</code> · Director-ratification is the only path to GOLD.</div>
+</div>
+
+<!-- ───────────────────── 6. CURRENT STATUS ───────────────────── -->
+<div class="stage">
+  <h2><span class="stage-num">6</span>Implementation status (2026-05-07)</h2>
+  <div class="row">
+    <div class="box" style="background:white;border:1px solid var(--rule);flex: 1;">
+      <span class="label">Shipped</span>
+      <div class="desc">
+        <span class="pill">RA-23 lock</span><span class="pill">CORTEX_3T_FORMALIZE 1A/1B/1C</span><span class="pill">PHASE5_IDEMPOTENCY (PR #75)</span><span class="pill">PROMPT_CACHING (PR #159)</span><span class="pill">BEN Phase 0</span><span class="pill">BEN CONTRACT v1</span>
+      </div>
+    </div>
+  </div>
+  <div class="row" style="margin-top: 10px;">
+    <div class="box" style="background:white;border:1px solid var(--rule);flex: 1;">
+      <span class="label">In flight</span>
+      <div class="desc">
+        <span class="pill">V2_BRIDGE Stage 2 cascade</span><span class="pill">Step 30 AO ratification</span><span class="pill">Plaud trigger fix (PR #168)</span><span class="pill">BEN cross-matter GOLD-write brief</span><span class="pill">First live AO-matter Cortex cycle (DRY_RUN clear pending)</span>
+      </div>
+    </div>
+  </div>
+  <div class="row" style="margin-top: 10px;">
+    <div class="box" style="background:white;border:1px solid var(--rule);flex: 1;">
+      <span class="label">Pending classification</span>
+      <div class="desc">
+        <span class="pill">Tier 1 contracts: AH1 / AH2 / AO / MOVIE / Hagenauer / Baden-Baden Desks</span><span class="pill">Strategic Advisor scoped agent</span><span class="pill">B-code shared charter</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="legend">
+  <span><span class="swatch" style="background:var(--sig)"></span>Signals</span>
+  <span><span class="swatch" style="background:var(--phase)"></span>Cortex phases</span>
+  <span><span class="swatch" style="background:var(--cap)"></span>Domain capabilities</span>
+  <span><span class="swatch" style="background:var(--tier-1)"></span>Tier 1 (Render)</span>
+  <span><span class="swatch" style="background:var(--tier-2)"></span>Tier 2 (Mac Mini)</span>
+  <span><span class="swatch" style="background:var(--tier-3)"></span>Tier 3 (MacBook)</span>
+  <span><span class="swatch" style="background:var(--gate)"></span>Write gates</span>
+</div>
+
+<div class="footer">
+  Authoring · AH2 · 2026-05-07 · v1<br>
+  Source: <code>CLAUDE.md</code> Architecture §Cortex 3T migration · <code>_ops/ideas/2026-04-27-cortex-architecture-final-locked.md</code> (RA-23) · <code>_ops/processes/cortex3t-roadmap.md</code> · <code>_ops/processes/cortex-stage2-v1-tracker.md</code> · <code>_ops/processes/ai-head-autonomy-charter.md</code><br>
+  Caveats · v1 is a McKinsey-style snapshot intended for Director ratification before commit. Local-only file (not yet pushed to brisen-docs).
+</div>
+
+</body>
+</html>
