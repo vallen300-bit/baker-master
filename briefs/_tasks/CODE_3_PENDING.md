@@ -1,14 +1,49 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_BACKFILL_THREADED_POOL_AND_OBSERVABILITY_1.md
 trigger_class: TIER_B_OBSERVABILITY_PLUS_CONCURRENCY_HARDENING
 dispatched_at: 2026-05-08T~11:55Z
 dispatched_by: ai-head-a (terminal)
+claimed_at: 2026-05-08T12:00:00Z
+claimed_by: b3
+last_heartbeat: 2026-05-08T13:00:00Z
+shipped_at: 2026-05-08T13:00:00Z
+working_branch: b3/backfill-threaded-pool-and-observability-1
+working_branch_head: c1aedd2
+ship_report: briefs/_reports/B3_backfill_threaded_pool_and_observability_1_20260508.md
+prs:
+  baker_master: 175  # open, awaiting AH1-App PL review + merge
+autopoll_eligible: false
 director_ratification: "go" (2026-05-08 chat verbatim, this session — explicit dispatch instruction "dispatch BRIEF_BACKFILL_THREADED_POOL_AND_OBSERVABILITY_1")
 folds: 4 IMPORTANT findings from am handover session_handover_2026-05-08_am_aihead_a_plaud_token_restored_3_transcripts.md
 ---
 
-# CODE_3_PENDING — BRIEF_BACKFILL_THREADED_POOL_AND_OBSERVABILITY_1
+# CODE_3 — COMPLETE (BRIEF_BACKFILL_THREADED_POOL_AND_OBSERVABILITY_1)
+
+**Shipped:** 2026-05-08T13:00:00Z by B3.
+
+**PR:** baker-master [#175](https://github.com/vallen300-bit/baker-master/pull/175) — **open**, awaiting AH1-App PL review + merge.
+
+**Ship report:** [briefs/_reports/B3_backfill_threaded_pool_and_observability_1_20260508.md](../_reports/B3_backfill_threaded_pool_and_observability_1_20260508.md)
+
+**Branch:** `b3/backfill-threaded-pool-and-observability-1` @ HEAD `c1aedd2`.
+
+**Files changed:** 5 modified + 1 new test (`tests/test_store_back_pool_threadsafe.py`) + tests/test_backfill_chain_order_and_timeout.py expanded 6 → 11 cases.
+
+**Verification (all green):**
+- `pytest tests/test_backfill_chain_order_and_timeout.py tests/test_store_back_pool_threadsafe.py -v` → 12 passed, 1 skipped (env-dep live probe; paired source-text static guard passes everywhere).
+- `pytest tests/ -k "store_back or pool or backfill" -v` → 18 passed, 1 skipped, no regression.
+- `bash scripts/check_singletons.sh` → OK.
+- `py_compile` clean for all 5 modified + 2 test files.
+- Grep verifications #5–#8 — all pass (#5: 0 matches; #8: SimpleConnectionPool callable = 0).
+
+**Annotations / spec gaps:** see ship report §"Annotations". 2 surfaced — line drift on AC #8 (functionally equivalent), live-instance test skips locally without env vars (paired with source-text static guard).
+
+**B3 idle.** Next dispatcher: run §2 busy-check before overwriting.
+
+---
+
+## Original brief content (for archive)
 
 **Brief:** `briefs/BRIEF_BACKFILL_THREADED_POOL_AND_OBSERVABILITY_1.md`
 **Working branch:** `b3/backfill-threaded-pool-and-observability-1`
