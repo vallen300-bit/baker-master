@@ -523,6 +523,14 @@ def _ensure_vault_mirror() -> None:
     ensure_mirror()
 
 
+# Boot-time backfill helper lives in triggers/backfill_runner.py so it's
+# unit-testable without pulling in FastAPI + the dashboard dependency graph.
+from triggers.backfill_runner import (
+    BACKFILL_TIMEOUT_SEC,
+    run_backfill_with_timeout as _run_backfill_with_timeout,
+)
+
+
 @app.on_event("startup")
 async def startup():
     """Initialize shared resources on server start.
@@ -545,18 +553,20 @@ async def startup():
     def _delayed_backfills():
         time.sleep(60)
         logger.info("Starting delayed backfills (60s after startup)...")
+        # Plaud FIRST — primary source. Render restart triggers refresh of stuck shells
+        # (PR #171). Order swapped from Fireflies-first 2026-05-08 because Fireflies
+        # has been silent-dead since 2026-04-11 (Director migrated off it) and was
+        # blocking Plaud's backfill from ever starting at boot.
+        if config.plaud.api_token:
+            from triggers.plaud_trigger import backfill_plaud
+            _run_backfill_with_timeout("plaud", backfill_plaud, BACKFILL_TIMEOUT_SEC)
+        # Fireflies SECOND — legacy, kept while Plaud transitions to fully-operational.
+        # If it hangs, the per-step timeout means it cannot block Plaud anymore.
         try:
             from triggers.fireflies_trigger import backfill_fireflies
-            backfill_fireflies()
-        except Exception as e:
-            logger.warning(f"Fireflies backfill failed (non-fatal): {e}")
-        # Plaud backfill (PG-only, sequential after Fireflies)
-        if config.plaud.api_token:
-            try:
-                from triggers.plaud_trigger import backfill_plaud
-                backfill_plaud()
-            except Exception as e:
-                logger.warning(f"Plaud backfill failed (non-fatal): {e}")
+            _run_backfill_with_timeout("fireflies", backfill_fireflies, BACKFILL_TIMEOUT_SEC)
+        except ImportError:
+            pass  # Fireflies module deletable; absence is fine
         # OOM-FIX-2: WhatsApp backfill removed from startup.
         # It fetched 500 chats + media + Qdrant embedding → 2-3GB memory spike.
         # Regular WhatsApp periodic re-sync (scheduler) handles catch-up safely.
@@ -566,7 +576,7 @@ async def startup():
         name="delayed-backfills",
         daemon=True,
     ).start()
-    logger.info("Backfills scheduled (60s delay, sequential to limit memory)")
+    logger.info("Backfills scheduled (60s delay, Plaud-first, per-step timeout 300s)")
 
     # Mount static files if directory exists
     if _static_dir.exists():
