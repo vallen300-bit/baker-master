@@ -184,7 +184,7 @@ def test_call_opus_system_block_has_cache_control() -> None:
 
     call_kwargs = mock_client.messages.create.call_args.kwargs
     system_blocks = call_kwargs["system"]
-    assert system_blocks[0]["cache_control"] == {"type": "ephemeral"}
+    assert system_blocks[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     assert system_blocks[0]["text"] == "stable sys"
     assert system_blocks[0]["type"] == "text"
 

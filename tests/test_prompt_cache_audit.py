@@ -41,7 +41,7 @@ def test_audit_identifies_cached_call_site(tmp_path):
 def test_cache_control_block_shape_in_anthropic_client():
     """kbl/anthropic_client.py retains its {type, text, cache_control} block shape."""
     src = (REPO / "kbl" / "anthropic_client.py").read_text()
-    assert '"cache_control": {"type": "ephemeral"}' in src
+    assert '"cache_control": {"type": "ephemeral", "ttl": "1h"}' in src
     assert '"type": "text"' in src
 
 

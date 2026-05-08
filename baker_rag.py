@@ -211,7 +211,7 @@ def call_baker_rag(retrieved_context, query, max_output_tokens=8192):
         system=[{
             "type": "text",
             "text": BAKER_SYSTEM_PROMPT,
-            "cache_control": {"type": "ephemeral"},
+            "cache_control": {"type": "ephemeral", "ttl": "1h"},
         }],
         messages=[{"role": "user", "content": user_message}],
         extra_headers={"anthropic-beta": config.claude.beta_header},

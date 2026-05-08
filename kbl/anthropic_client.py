@@ -235,7 +235,7 @@ def call_opus(
         {
             "type": "text",
             "text": system,
-            "cache_control": {"type": "ephemeral"},
+            "cache_control": {"type": "ephemeral", "ttl": "1h"},
         }
     ]
 
