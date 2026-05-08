@@ -670,6 +670,13 @@ def backfill_plaud():
         recordings = fetch_plaud_recordings()
         if not recordings:
             logger.info("Plaud backfill: no recordings found")
+            # Empty result is still a successful poll round (BRIEF_BACKFILL_THREADED_POOL_AND_OBSERVABILITY_1
+            # Fix 1a — sentinel must advance on no-op coverage paths, not stay stale).
+            try:
+                from triggers.sentinel_health import report_success
+                report_success("plaud")
+            except Exception as _sh_e:
+                logger.warning(f"sentinel report_success crashed (non-fatal): {_sh_e}")
             return
 
         store = SentinelStoreBack._get_global_instance()
@@ -760,9 +767,23 @@ def backfill_plaud():
                 pass
 
         logger.info(f"Plaud backfill complete: {ingested} recordings ingested")
+        # Sentinel success on clean completion of the ingest loop
+        # (BRIEF_BACKFILL_THREADED_POOL_AND_OBSERVABILITY_1 Fix 1a).
+        try:
+            from triggers.sentinel_health import report_success
+            report_success("plaud")
+        except Exception as _sh_e:
+            logger.warning(f"sentinel report_success crashed (non-fatal): {_sh_e}")
 
     except Exception as e:
         logger.error(f"Plaud backfill failed: {e}")
+        # Sentinel failure on top-level except so the cockpit surfaces it
+        # (BRIEF_BACKFILL_THREADED_POOL_AND_OBSERVABILITY_1 Fix 1a).
+        try:
+            from triggers.sentinel_health import report_failure
+            report_failure("plaud", f"backfill: {e}")
+        except Exception as _sh_e:
+            logger.warning(f"sentinel report_failure crashed (non-fatal): {_sh_e}")
     finally:
         _backfill_running = False
         # Release advisory lock
