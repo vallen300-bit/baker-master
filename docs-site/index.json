@@ -136,6 +136,18 @@
           "matter": "corinthia"
         }
       ]
+    },
+    {
+      "name": "RESEARCH",
+      "slug": "research",
+      "presentations": [
+        {
+          "title": "Claude for Stock Research \u2014 Setup Guide (for John Martin)",
+          "file": "research/john-martin-claude-setup.html",
+          "created": "2026-05-08",
+          "matter": "personal"
+        }
+      ]
     }
   ]
 }

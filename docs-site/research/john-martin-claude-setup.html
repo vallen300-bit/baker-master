@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claude for Stock Research — Setup Guide</title>
+<style>
+  :root {
+    --navy: #1a2840;
+    --slate: #475569;
+    --ink: #1f2937;
+    --paper: #fafaf7;
+    --rule: #d4d4cf;
+    --muted: #6b7280;
+    --accent: #8a6d3b;
+    --soft: #f5f5f0;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+  }
+  .page {
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 56px 56px 80px;
+    background: #ffffff;
+    border-left: 1px solid var(--rule);
+    border-right: 1px solid var(--rule);
+    min-height: 100vh;
+  }
+  header {
+    border-bottom: 2px solid var(--navy);
+    padding-bottom: 18px;
+    margin-bottom: 32px;
+  }
+  .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 2.5px;
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  h1 {
+    font-family: Georgia, "Times New Roman", serif;
+    font-weight: 500;
+    font-size: 30px;
+    color: var(--navy);
+    margin: 0 0 8px 0;
+    line-height: 1.25;
+  }
+  .subtitle {
+    color: var(--slate);
+    font-size: 15px;
+    font-weight: 400;
+  }
+  .meta {
+    margin-top: 16px;
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+    border-top: 1px solid var(--rule);
+    padding-top: 12px;
+  }
+  h2 {
+    font-family: Georgia, "Times New Roman", serif;
+    font-weight: 500;
+    font-size: 20px;
+    color: var(--navy);
+    margin: 38px 0 14px;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 6px;
+  }
+  h3 {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--slate);
+    margin: 22px 0 8px;
+    font-weight: 600;
+  }
+  p { margin: 0 0 12px; }
+  ol, ul { margin: 0 0 14px 22px; padding: 0; }
+  ol li, ul li { margin-bottom: 8px; }
+  .lede {
+    background: var(--soft);
+    border-left: 3px solid var(--navy);
+    padding: 16px 20px;
+    margin: 0 0 28px;
+    font-size: 15px;
+  }
+  .lede strong { color: var(--navy); }
+  .principle {
+    background: #fbfbf7;
+    border: 1px solid var(--rule);
+    padding: 14px 18px;
+    margin: 14px 0 20px;
+    font-style: italic;
+    color: var(--slate);
+  }
+  .principle .bold {
+    font-style: normal;
+    font-weight: 600;
+    color: var(--navy);
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 22px;
+    font-size: 14px;
+  }
+  th, td {
+    border: 1px solid var(--rule);
+    padding: 9px 12px;
+    text-align: left;
+    vertical-align: top;
+  }
+  th {
+    background: var(--soft);
+    color: var(--navy);
+    font-weight: 600;
+  }
+  code, pre {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    background: #f3f3ee;
+    color: #2a2a2a;
+  }
+  code { padding: 1px 5px; border-radius: 3px; }
+  pre {
+    padding: 14px 16px;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    overflow-x: auto;
+    margin: 8px 0 18px;
+    line-height: 1.5;
+  }
+  .callout {
+    background: #fdf6e3;
+    border-left: 3px solid var(--accent);
+    padding: 12px 16px;
+    margin: 14px 0 20px;
+    font-size: 14px;
+    color: #5a4a23;
+  }
+  .callout strong { color: var(--accent); }
+  .twocol {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin: 12px 0 20px;
+  }
+  .card {
+    border: 1px solid var(--rule);
+    padding: 14px 16px;
+    border-radius: 4px;
+    background: #fcfcf9;
+  }
+  .card h4 {
+    margin: 0 0 8px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--navy);
+  }
+  .card p { font-size: 13px; color: var(--slate); margin: 0; }
+  footer {
+    margin-top: 56px;
+    padding-top: 18px;
+    border-top: 1px solid var(--rule);
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    justify-content: space-between;
+  }
+  @media (max-width: 720px) {
+    .page { padding: 28px 22px 60px; }
+    h1 { font-size: 24px; }
+    .twocol { grid-template-columns: 1fr; }
+    .meta, footer { flex-direction: column; gap: 6px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header>
+  <div class="eyebrow">Prepared for John Martin</div>
+  <h1>Claude for Stock Research</h1>
+  <div class="subtitle">A practical setup so research compounds — without bloating the context window</div>
+  <div class="meta">
+    <span>Brisen Capital SA &middot; Geneva</span>
+    <span>8 May 2026</span>
+  </div>
+</header>
+
+<div class="lede">
+  <strong>Bottom line.</strong> Claude is excellent for digesting filings, building investment theses, and stress-testing your reasoning &mdash; but only if you keep <em>chats short</em> and <em>knowledge in files</em>. Treat conversations as throwaway; treat files as memory. Follow the four-file structure below and you will avoid the single biggest mistake retail investors make with Claude: 50-turn threads where the model forgets, contradicts itself, and bills you for the privilege.
+</div>
+
+<div class="principle">
+  <span class="bold">The principle &mdash;</span> Chat is the workbench. Project Knowledge is the memory. Files are the durable artifacts.
+</div>
+
+<h2>1. One-time setup (15 minutes)</h2>
+<ol>
+  <li><strong>Subscribe to Claude.ai Pro</strong> (USD ~20/month) or Max if you want larger context. Pro is sufficient for individual stock research. Sign up at <code>claude.ai</code>.</li>
+  <li><strong>Turn on Memory.</strong> Settings &rarr; Profile &rarr; Memory &rarr; ON. This lets Claude remember your investor profile across sessions. Useful supplement, not a substitute for the file discipline below.</li>
+  <li><strong>Set a global system prompt</strong> in Settings &rarr; Custom Instructions. Suggested text:
+    <pre>I am a private investor based in Switzerland. I focus on
+[dividend stocks / European equities / your niche]. Risk tolerance:
+[moderate / conservative]. When I ask about a company, always
+structure the answer as:
+  1. Bottom line (buy / hold / avoid &mdash; with reason)
+  2. Thesis in 3 bullets
+  3. Key numbers (revenue, margin, leverage, valuation)
+  4. Risks
+  5. What would change my view
+
+Never invent figures. If you cannot verify a number from a
+primary source, say so explicitly. Do not give legal,
+tax or regulatory advice.</pre>
+  </li>
+  <li><strong>Bookmark Perplexity.ai</strong> as a secondary tool for time-sensitive news with citations. Use it alongside Claude, not instead.</li>
+</ol>
+
+<h2>2. Per-ticker setup (5 minutes per company)</h2>
+<p>For every stock you actively follow, create a dedicated <strong>Project</strong> inside Claude. One ticker = one Project. Do not mix companies in a single Project &mdash; the knowledge bleeds.</p>
+<ol>
+  <li>Click <strong>+ New Project</strong> &rarr; name it after the ticker (e.g. <code>NESN.SW &mdash; Nestl&eacute;</code>).</li>
+  <li>Add <strong>Custom Instructions</strong> at the Project level (3-5 lines): your specific thesis on this name, your time horizon, your position size if any.</li>
+  <li>Upload <strong>four base files</strong> to Project Knowledge (templates in Section 6):
+    <ul>
+      <li><code>thesis.md</code> &mdash; your bull case, bear case, base case in three short paragraphs.</li>
+      <li><code>key-numbers.md</code> &mdash; latest reported revenue, EBITDA, net debt, EPS, dividend, guidance.</li>
+      <li><code>watch-triggers.md</code> &mdash; the specific events that would change your view (margin compression below X%, debt above Y, CEO change, regulatory ruling).</li>
+      <li><code>decision-log.md</code> &mdash; every buy/sell/hold decision with date, price, reason. Append-only.</li>
+    </ul>
+  </li>
+  <li>Optionally upload the latest <strong>10-K / annual report PDF</strong> and the most recent <strong>earnings transcript</strong>. Replace quarterly &mdash; do not stockpile every filing.</li>
+</ol>
+
+<h2>3. Research workflow (per session)</h2>
+<table>
+  <tr>
+    <th style="width: 30%">Step</th>
+    <th>Action</th>
+  </tr>
+  <tr>
+    <td><strong>Open Project</strong></td>
+    <td>Click into the relevant ticker Project. Confirm Project Knowledge is loaded (Claude can see your four files).</td>
+  </tr>
+  <tr>
+    <td><strong>Start a NEW chat</strong></td>
+    <td>Always. Do not continue old threads beyond a single research question. New question = new chat. The Project Knowledge carries over; the chat noise does not.</td>
+  </tr>
+  <tr>
+    <td><strong>State the question</strong></td>
+    <td>One concrete question per chat. Examples: "What did Nestl&eacute; guide on H2 margin?" "Compare Roche vs Novartis on pipeline replacement risk." "Stress-test my thesis: what if China dairy demand drops 20%?"</td>
+  </tr>
+  <tr>
+    <td><strong>Iterate 3-7 turns</strong></td>
+    <td>Refine, push back, ask for sources. Stop when you have your answer. <strong>Do not let a chat run past ~10 turns</strong> &mdash; quality degrades, context bloats.</td>
+  </tr>
+  <tr>
+    <td><strong>End-of-chat ritual</strong></td>
+    <td>Ask: <em>"Summarise today's findings as a one-paragraph entry I can append to my decision-log."</em> Copy the output. Edit your <code>decision-log.md</code> locally. Re-upload to Project Knowledge.</td>
+  </tr>
+  <tr>
+    <td><strong>Close the chat</strong></td>
+    <td>Walk away. Tomorrow's research starts a fresh chat against the (now updated) Project Knowledge.</td>
+  </tr>
+</table>
+
+<h2>4. Hard rules</h2>
+<ol>
+  <li><strong>New chat for every new question.</strong> Threads bloat after ~10 turns &mdash; Claude starts contradicting itself and you are paying tokens for amnesia.</li>
+  <li><strong>Live prices come from your broker, never from Claude.</strong> Claude analyses; broker quotes. Treat any price or current valuation Claude states as suspect until verified.</li>
+  <li><strong>Numbers from primary source only.</strong> Earnings figures from the company's own filing or transcript &mdash; not Claude's recall. Upload the PDF, then ask.</li>
+  <li><strong>Web Search ON for time-sensitive questions.</strong> Off by default in some plans &mdash; check the toggle below the message box.</li>
+  <li><strong>Quarterly clean-up.</strong> Once a quarter, review what Memory has stored about you (Settings &rarr; Memory &rarr; View). Delete anything stale or wrong. Refresh the four files per Project.</li>
+  <li><strong>Confidentiality.</strong> Do not paste private information you would not put on a postcard. Anthropic does not train on Pro/Max chats by default, but treat every prompt as potentially loggable.</li>
+</ol>
+
+<h2>5. The four file templates</h2>
+
+<h3>thesis.md</h3>
+<pre># [TICKER] &mdash; Investment Thesis
+Last updated: YYYY-MM-DD
+Holding: [yes / no / size]
+
+## Base case
+[2-3 sentences. What you expect to happen and why.]
+
+## Bull case
+[What goes right. What multiple / earnings / catalyst.]
+
+## Bear case
+[What breaks the thesis. Be specific.]
+
+## Time horizon
+[6 months / 2 years / 5+ years]</pre>
+
+<h3>key-numbers.md</h3>
+<pre># [TICKER] &mdash; Key Numbers
+Source: [Q1 2026 report, dated YYYY-MM-DD]
+
+Revenue (LTM):       [CHF X bn]
+EBITDA margin:       [X%]
+Net debt / EBITDA:   [X.Xx]
+EPS (LTM):           [CHF X.XX]
+Dividend yield:      [X.X%]
+Forward P/E:         [Xx]
+Guidance (next FY):  [revenue X-Y%, margin Z%]
+
+## My valuation
+[Your fair-value estimate and how you got there.]</pre>
+
+<h3>watch-triggers.md</h3>
+<pre># [TICKER] &mdash; Watch Triggers
+What would change my view:
+
+BEAR triggers (sell / trim):
+- EBITDA margin drops below [X%] for two consecutive quarters
+- Net debt / EBITDA rises above [X.Xx]
+- CEO or CFO change
+- [specific regulatory or competitive event]
+
+BULL triggers (add):
+- Guidance raise on margin
+- [specific catalyst]
+- Multiple compression to forward P/E below [X]
+
+NEUTRAL events (note, don't act):
+- [routine items you don't want to over-react to]</pre>
+
+<h3>decision-log.md</h3>
+<pre># [TICKER] &mdash; Decision Log
+
+## YYYY-MM-DD &mdash; Initial position
+Action: BUY 100 shares @ CHF X
+Reason: [one paragraph summarising the thesis at entry]
+
+## YYYY-MM-DD &mdash; [event]
+Action: HOLD / ADD / TRIM / SELL
+Reason: [what happened, what you concluded, why]
+Source: [link to filing / transcript / news]
+
+[Append-only. Never edit historical entries &mdash; you want
+the audit trail of how your thinking evolved.]</pre>
+
+<h2>6. Common pitfalls (and how to avoid them)</h2>
+<div class="twocol">
+  <div class="card">
+    <h4>Pitfall 1 &mdash; The mega-chat</h4>
+    <p>Running one chat for weeks. Symptoms: Claude forgets, contradicts itself, repeats. Fix: new chat per question, always.</p>
+  </div>
+  <div class="card">
+    <h4>Pitfall 2 &mdash; Trusting Claude's numbers</h4>
+    <p>Claude confidently invents financial figures (hallucination). Fix: every number must come from an uploaded primary source. Ask Claude to cite the page.</p>
+  </div>
+  <div class="card">
+    <h4>Pitfall 3 &mdash; Stale Project Knowledge</h4>
+    <p>Files uploaded six months ago are now wrong. Fix: replace the four files quarterly. Old earnings PDF out, new one in.</p>
+  </div>
+  <div class="card">
+    <h4>Pitfall 4 &mdash; Confirmation bias</h4>
+    <p>Asking only for the bull case. Fix: explicitly prompt for the bear case in every research session. The principle: if you cannot articulate the strongest counter-argument, you do not understand the trade.</p>
+  </div>
+  <div class="card">
+    <h4>Pitfall 5 &mdash; Memory pollution</h4>
+    <p>Claude's Memory feature retaining a bad assumption. Fix: monthly review of stored memories. Delete what is wrong.</p>
+  </div>
+  <div class="card">
+    <h4>Pitfall 6 &mdash; Mistaking Claude for alpha</h4>
+    <p>Claude works on public information. Real edge requires Bloomberg / FactSet / a research broker. Frame Claude as a productivity tool, not an information advantage.</p>
+  </div>
+</div>
+
+<h2>7. A reasonable starting portfolio of Projects</h2>
+<p>Begin with no more than five Projects. Each takes 30-60 minutes a quarter to maintain properly. Beyond five, the discipline collapses. A practical first set:</p>
+<ol>
+  <li>Two or three core holdings you already own.</li>
+  <li>One or two watch-list names you are considering.</li>
+  <li>One thematic Project (e.g. <em>European Defence</em>, <em>Swiss Dividend Aristocrats</em>) for cross-cutting research.</li>
+</ol>
+
+<div class="callout">
+  <strong>If in doubt:</strong> start with one Project on one stock you know well. Live with the four-file workflow for two weeks. Then expand. The discipline is the moat &mdash; not the tool.
+</div>
+
+<footer>
+  <span>Prepared by Brisen Capital SA for John Martin</span>
+  <span>v1 &middot; 8 May 2026</span>
+</footer>
+
+</div>
+</body>
+</html>
