@@ -44,12 +44,13 @@ def test_calculate_cost_eur_cache_read_billed_at_10_percent():
     assert base == expected
 
 
-def test_calculate_cost_eur_cache_creation_billed_at_125_percent():
+def test_calculate_cost_eur_cache_creation_billed_at_200_percent():
+    """Cache writes cost 2.00x base input rate at 1-hour TTL (PR #176 2026-05-08)."""
     from orchestrator.cost_monitor import calculate_cost_eur, MODEL_COSTS, USD_TO_EUR
     model = "claude-opus-4-6"
     rate_in = MODEL_COSTS[model]["input"]
     base = calculate_cost_eur(model, 0, 0, cache_creation_input_tokens=1_000_000)
-    expected = round(rate_in * 1.25 * USD_TO_EUR, 6)
+    expected = round(rate_in * 2.00 * USD_TO_EUR, 6)
     assert base == expected
 
 
