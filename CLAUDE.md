@@ -11,23 +11,76 @@
 >
 > If a file is missing or unreadable, reply with which one + skip the confirmation phrase entirely. If `briefs/_tasks/CODE_<N>_PENDING.md` doesn't exist (no current dispatch), reply: `"B<N> oriented. Mailbox empty (no CODE_<N>_PENDING.md). Read: MEMORY.md."`
 
-> **AI Head A2 (AH2) opening this dir via picker symlink** (`~/Vallen Dropbox/Dimitry vallen/bm-aihead2/` → `~/bm-aihead2/`, ratified 2026-05-05 to fix `/security-review` harness git-cwd gap) — MANDATORY before any reply:
+> **AI Head A2 (AH2) opening this dir via picker symlink** (`~/Vallen Dropbox/Dimitry vallen/bm-aihead2/` → `~/bm-aihead2/`, ratified 2026-05-05 to fix `/security-review` harness git-cwd gap) — MANDATORY before any reply (Tier 0/1/2/3 access model, ratified 2026-05-09 — `_ops/processes/cross-agent-knowledge-dispatch.md`):
+>
+> **Tier 0 — always (~3K tokens):**
 > 1. Invoke the Read tool on `/Users/dimitry/.claude/CLAUDE.md` (global rules + Tier 0 portfolio context).
 > 2. Invoke the Read tool on `~/baker-vault/_ops/agents/aihead2/orientation.md` (full AH2 orientation).
 > 3. Invoke the Read tool on `~/baker-vault/_ops/skills/ai-head/SKILL.md` (canonical AI Head operating rules).
 > 4. Invoke the Read tool on `~/.claude/projects/-Users-dimitry-Vallen-Dropbox-Dimitry-vallen-Baker-Project/memory/MEMORY.md` (canonical AH memory).
 >
-> **First-message confirmation phrase (evidence-bound, exact):** `"AH2 oriented. Read: aihead2/orientation.md, ai-head/SKILL.md, MEMORY.md."`
+> **Tier 1 — keyword-routed (load on match in user's first substantive message):**
+>
+> | Keywords in user message | Also Read |
+> |---|---|
+> | cross-lane review, PR, security-review, picker-architect, code-reviewer | `~/baker-vault/_ops/processes/ai-head-autonomy-charter.md` (review boundaries) |
+> | AUTOPOLL, sentinel watch, gold_audit_sentinel, Mon 09:30 UTC | `~/baker-vault/_ops/agents/aihead2/operating.md` (lane state) |
+> | PINNED, handover, session resume, prior wait-state | `~/baker-vault/_ops/agents/aihead2/PINNED.md` (if present) |
+> | Cortex, capability set, signal queue (only when AH1-dispatched review fires) | `~/baker-vault/_ops/processes/cortex-stage2-v1-tracker.md` |
+>
+> **Tier 2 — topic-depth (read only when question genuinely needs deep domain reasoning):**
+>
+> | Question depth | Also Read |
+> |---|---|
+> | Specific PR review on substantive Tier-B diff | open the diff via `gh pr diff <N>` — do not pre-load briefs |
+> | Cortex architecture deep dive | `~/baker-vault/_ops/ideas/2026-04-27-cortex-architecture-final-locked.md` |
+>
+> **Tier 3 — cross-agent dispatch (DO NOT read another agent's library directly):**
+>
+> | Domain | Owner — dispatch a question; do not read directly |
+> |---|---|
+> | IT / SRE / NIST / agent-architecture / security-engineering / prompt-engineering | AID-T (`wiki/_ai-it/aid-t/library/`) |
+> | Finance / commercial reasoning / Baden-Baden vehicles | BEN (`wiki/_finance/baden-baden/`) |
+> | Specific matter context (Hagenauer, Cupial, MOVIE, AO, Annaberg, Balgerstrasse) | matter desk for that slug (`wiki/<matter-slug>/`) |
+>
+> **First-message confirmation phrase (evidence-bound, exact):** `"AH2 oriented (Tier 0). Read: aihead2/orientation.md, ai-head/SKILL.md, MEMORY.md. Tier 1+ on demand."`
 >
 > Block applies ONLY when cwd basename resolves to `bm-aihead2` (i.e., session opened via the AH2 picker symlink). B-code sessions follow the B-code block above; AH1 sessions follow the AH1 block below.
 
-> **AI Head A1 (AH1) opening this dir via picker symlink** (`~/Vallen Dropbox/Dimitry vallen/bm-aihead1/` → `~/bm-aihead1/`, ratified 2026-05-08 to mirror AH2 pattern + drop session start cost from ~12% to ~6% by retiring the heavy `~/Desktop/baker-code` auto-memory slug) — MANDATORY before any reply:
+> **AI Head A1 (AH1) opening this dir via picker symlink** (`~/Vallen Dropbox/Dimitry vallen/bm-aihead1/` → `~/bm-aihead1/`, ratified 2026-05-08 to mirror AH2 pattern + drop session start cost from ~12% to ~6% by retiring the heavy `~/Desktop/baker-code` auto-memory slug) — MANDATORY before any reply (Tier 0/1/2/3 access model, ratified 2026-05-09 — `_ops/processes/cross-agent-knowledge-dispatch.md`):
+>
+> **Tier 0 — always (~3K tokens):**
 > 1. Invoke the Read tool on `/Users/dimitry/.claude/CLAUDE.md` (global rules + Tier 0 portfolio context).
 > 2. Invoke the Read tool on `~/baker-vault/_ops/agents/aihead1/orientation.md` (full AH1 orientation).
 > 3. Invoke the Read tool on `~/baker-vault/_ops/skills/ai-head/SKILL.md` (canonical AI Head operating rules).
 > 4. Invoke the Read tool on `~/.claude/projects/-Users-dimitry-Vallen-Dropbox-Dimitry-vallen-Baker-Project/memory/MEMORY.md` (canonical AH memory).
 >
-> **First-message confirmation phrase (evidence-bound, exact):** `"AH1 oriented. Read: aihead1/orientation.md, ai-head/SKILL.md, MEMORY.md."`
+> **Tier 1 — keyword-routed (load on match in user's first substantive message):**
+>
+> | Keywords in user message | Also Read |
+> |---|---|
+> | Cortex, RA-23, Phase 1-6, signal queue, capability set / framework, cortex-config | `~/baker-vault/_ops/processes/cortex-stage2-v1-tracker.md` + `~/baker-vault/_ops/processes/cortex3t-roadmap.md` |
+> | charter, autonomy, Tier B prerogative, Cortex Design boundary | `~/baker-vault/_ops/processes/ai-head-autonomy-charter.md` |
+> | B-code, dispatch, mailbox, b1/b2/b3/b4, brief format, write-brief | `~/baker-vault/_ops/processes/b-code-dispatch-coordination.md` + `~/baker-vault/_ops/processes/INDEX.md` |
+> | lessons, scar tissue, prior incident | `tasks/lessons.md` |
+> | PINNED, handover-archive, prior session resume | `~/baker-vault/_ops/agents/aihead1/PINNED.md` (if present) |
+>
+> **Tier 2 — topic-depth (read only when question genuinely needs deep domain reasoning):**
+>
+> | Question depth | Also Read |
+> |---|---|
+> | Cortex architecture deep dive | `~/baker-vault/_ops/ideas/2026-04-27-cortex-architecture-final-locked.md` |
+> | Specific brief by name | `briefs/_tasks/<name>.md` or `~/baker-vault/_ops/briefs/<name>.md` |
+>
+> **Tier 3 — cross-agent dispatch (DO NOT read another agent's library directly):**
+>
+> | Domain | Owner — dispatch a question; do not read directly |
+> |---|---|
+> | IT / SRE / NIST / agent-architecture / security-engineering / prompt-engineering | AID-T (`wiki/_ai-it/aid-t/library/`) |
+> | Finance / commercial reasoning / Baden-Baden vehicles | BEN (`wiki/_finance/baden-baden/`) |
+> | Specific matter context (Hagenauer, Cupial, MOVIE, AO, Annaberg, Balgerstrasse) | matter desk for that slug (`wiki/<matter-slug>/`) |
+>
+> **First-message confirmation phrase (evidence-bound, exact):** `"AH1 oriented (Tier 0). Read: aihead1/orientation.md, ai-head/SKILL.md, MEMORY.md. Tier 1+ on demand."`
 >
 > AH1 picker has NO auto-memory directory (Director-ratified 2026-05-08 PM, mirror AH2 — drops start cost to ~6%). All historical session handovers + feedback + project memories live in baker-vault `_ops/agents/aihead1/handover-archive/YYYY-MM/` + `_ops/agents/aihead1/auto-memory-archive-20260508/`. Read on demand. Latest in-flight state lives in `_ops/agents/aihead1/operating.md` + `ARCHIVE.md` (canonical, no MEMORY.md). SessionEnd hook at `.claude/hooks/aihead1-session-end.sh` warns on uncommitted/unpushed `_ops/agents/aihead1/` state.
 >
