@@ -42,7 +42,7 @@ Researcher v2 (`wiki/research/2026-05-08-aidennis-terminal-scavenged-patterns.md
 ## Fix 1: Install `aidennis-terminal/runbook-template`
 
 ### Problem
-AID-T has no canonical "how to write an IT runbook" template. CONTRACT.md §3.1 lists "writes briefs for IT Workshop (PL + Code) to execute technical changes" but no shared structural pattern. Researcher v2 §3.1 identified Anthropic ops/runbook as direct-steal with the bregman-arie YAML safety schema layered on top. Standing runbook library (DNS cutover, M365 phase, Mac BYOD→corporate, secret rotation, pgbouncer-pool-recovery, EVOK GDAP audit, mac-fleet-patch, phishing-simulation, sev1-first-15, restore-drill-quarterly) is the downstream output — this stub is the meta-template that produces it.
+AID-T has no canonical "how to write an IT runbook" template. CONTRACT.md §3.1 lists "writes briefs for IT Workshop (PL + Code) to execute technical changes" but no shared structural pattern. Researcher v2 §3.1 identified Anthropic ops/runbook (template structure) + bregman-arie/devops-sre-skills (YAML safety schema) as the pattern sources; the "painfully specific" rule + "test the runbook" discipline are Researcher v2 Brisen overlays, NOT Anthropic-verbatim — the upstream Anthropic SKILL.md is template-only without the prose discipline. Standing runbook library (DNS cutover, M365 phase, Mac BYOD→corporate, secret rotation, pgbouncer-pool-recovery, EVOK GDAP audit, mac-fleet-patch, phishing-simulation, sev1-first-15, restore-drill-quarterly) is the downstream output — this stub is the meta-template that produces it.
 
 ### Implementation
 Create file at `~/baker-vault/_ops/skills/aidennis-terminal/runbook-template/SKILL.md`. Symlink `~/.claude/skills/aidennis-terminal/runbook-template` → vault path.
@@ -60,17 +60,17 @@ safety:
   requires_confirmation_for:
     - vault.commit
 source: |
-  Anthropic knowledge-work-plugins/operations/skills/runbook + bregman-arie/devops-sre-skills schema.
-  Attribution: Anthropic operations/runbook (published-as-reference). bregman-arie YAML schema (MIT).
+  Pattern inspired by Anthropic knowledge-work-plugins/operations/skills/runbook (template structure, published-as-reference) + bregman-arie/devops-sre-skills (YAML safety schema, MIT).
+  "Painfully specific" rule + "test the runbook" rule = Researcher v2 §3.1 Brisen overlays (not Anthropic-verbatim — verified against upstream 2026-05-09).
 ---
 
 # AID-T Runbook Template
 
 You are writing an operational runbook for a recurring IT task. The runbook must be executable by anyone (Director, Dennis Egorenkov, IT PL, IT Code) without further context.
 
-## Painfully-specific rule
+## Painfully-specific rule (Researcher v2 §3.1 Brisen overlay)
 
-"Run the script" is NOT a step. "Run `python sync.py --prod --dry-run` from `~/baker-vault/_ops/scripts/` and confirm stdout starts with `[dry-run-ok]`" IS a step. Apply this rule verbatim — every step must have:
+"Run the script" is NOT a step. "Run `python sync.py --prod --dry-run` from `~/baker-vault/_ops/scripts/` and confirm stdout starts with `[dry-run-ok]`" IS a step. Apply this rule on every runbook — every step must have:
 
 - Exact CLI command (copy-pasteable)
 - Working directory
@@ -136,11 +136,13 @@ Every runbook MUST declare `authority_tier` in frontmatter:
 
 A runbook with destructive steps (DNS cutover, secret rotation, env-var delete) is automatically Tier 2 or Tier 3.
 
-## Test-the-runbook rule
+## Test-the-runbook rule (Researcher v2 §3.1 Brisen overlay)
 
 Before marking a runbook `status: live`, AID-T must have someone unfamiliar with the procedure follow it end-to-end. Fix where they get stuck. "Live" means: it has been executed at least once by a human-in-the-loop, by AID-T at least once with Director observing, or both.
 
 ## Standing runbook library (Wave 1+ fills these)
+
+**Note**: "skills" live at `_ops/skills/aidennis-terminal/<name>/SKILL.md` (these are reusable templates Wave 1 installs); "runbooks" live at `_ops/runbooks/<slug>.md` (these are concrete operational procedures the runbook-template skill produces — Wave 1+ output). Different folders, different artefacts. Wave 1 = skills only.
 
 Output paths AID-T should populate over Waves 1-4:
 
@@ -305,7 +307,9 @@ This forces honest pricing of the change.
 ## Fix 3: Install `aidennis-terminal/incident-response`
 
 ### Problem
-CONTRACT.md §6 KPI #2 requires "zero missed P1/P2 incidents per quarter; false-positive rate <15%." CONTRACT.md §4 has a one-line P1-P4 reference for response-speed only (P1 immediate / P2 same session / P3 this week / P4 backlog) — no impact-criteria matrix and no operational lifecycle. Researcher v2 §3.3 carries the verbatim SEV1-4 impact-criteria matrix (Production Baker down / M365 lockout / etc.) AND the four-phase lifecycle (TRIAGE → COMMUNICATE → MITIGATE → POSTMORTEM) from Anthropic engineering/incident-response. Wave 1 codifies impact + lifecycle from Researcher v2 §3.3 and cross-references CONTRACT §4 for response speed via an explicit P↔SEV mapping table.
+CONTRACT.md §6 KPI #2 requires "zero missed P1/P2 incidents per quarter; false-positive rate <15%." CONTRACT.md §4 has a one-line P1-P4 reference for response-speed only (P1 immediate / P2 same session / P3 this week / P4 backlog) — no impact-criteria matrix and no operational lifecycle. Researcher v2 §3.3 carries the four-phase lifecycle (TRIAGE → COMMUNICATE → MITIGATE → POSTMORTEM) from Anthropic engineering/incident-response (verbatim from upstream) AND the Brisen-specific SEV1-4 impact criteria (Production Baker down / M365 lockout / etc.) which are Researcher-authored Brisen overlays — not upstream Anthropic verbatim. Wave 1 codifies impact + lifecycle from Researcher v2 §3.3 and cross-references CONTRACT §4 for response speed via an explicit P↔SEV mapping table.
+
+**Note on Researcher v2 status:** the Researcher v2 file is `pending` Director ratification per its frontmatter (line 5). AID-T's Wave 1 install is the first canonical use of these SEV criteria — Director ratifies them implicitly by ratifying the Wave 1 ship-report. If the criteria need adjustment post-install, the change lands in BOTH the Researcher v2 file AND `incident-response/SKILL.md` in the same commit.
 
 ### Implementation
 Create file at `~/baker-vault/_ops/skills/aidennis-terminal/incident-response/SKILL.md`. Symlink `~/.claude/skills/aidennis-terminal/incident-response` → vault path.
@@ -561,17 +565,17 @@ After 15 minutes (or when stabilized, whichever first), hand off to `aidennis-te
 
 ---
 
-## Files Created (5 total)
+## Files Created (4 SKILL.md + 4 symlinks)
 
 - `~/baker-vault/_ops/skills/aidennis-terminal/runbook-template/SKILL.md` (NEW)
 - `~/baker-vault/_ops/skills/aidennis-terminal/change-request/SKILL.md` (NEW)
 - `~/baker-vault/_ops/skills/aidennis-terminal/incident-response/SKILL.md` (NEW)
 - `~/baker-vault/_ops/skills/aidennis-terminal/sev1-first-15-min/SKILL.md` (NEW)
-- 4 × symlink `~/.claude/skills/aidennis-terminal/<name>` → vault path (mirrors `it-manager` install pattern)
+- 4 × symlink `~/.claude/skills/aidennis-terminal/<name>` → vault path. Use absolute path (mirror `it-manager` precedent): `ln -s /Users/dimitry/baker-vault/_ops/skills/aidennis-terminal/<name> /Users/dimitry/.claude/skills/aidennis-terminal/<name>` — NOT the `~` shorthand on disk.
 
 ## Files Modified (1)
 
-- `~/baker-vault/_ops/agents/ai-dennis/LONGTERM.md` — append "Wave 1 skills installed" section pointing at the 4 new SKILL.mds. ≤ 10 new lines. Do not rewrite existing content.
+- `~/baker-vault/_ops/agents/ai-dennis/LONGTERM.md` — append a new section at end of file with literal heading `## 2026-05-09 — Wave 1 skills installed (BRIEF_AIDENNIS_TERMINAL_INSTALL_WAVE_1)`, then 4 bullet lines pointing at the new SKILL.md vault paths. ≤ 10 new lines total. Do NOT rewrite existing content. Do NOT touch OPERATING.md at install — only LONGTERM.md (CONTRACT §3.1 memory-rewrite happens at session-end, not install-end; install logs to LONGTERM only).
 
 ## Do NOT Touch
 
@@ -592,7 +596,7 @@ After install, AID-T verifies in this order:
 4. **Schema discipline:** each file has `safety.default_mode` set; each has a `source:` attribution block.
 5. **Skill discovery:** AID-T opens a fresh Cowork session and confirms the 4 skills appear in the available-skills list (alongside `aidennis-edge-scout` + `it-manager`).
 6. **Source-of-truth discipline:** incident-response SEV1-4 impact-criteria matrix sourced from Researcher v2 §3.3 verbatim; P↔SEV mapping table cross-references CONTRACT §4 response-speed line (not a redefinition). Verify via `grep` triple: `Production Baker down OR M365 tenant lockout` (≥1), `SEV1 ↔ P1` (≥1), `CONTRACT.md §4` (≥1) — all three present in `incident-response/SKILL.md`.
-7. **Trigger phrase test:** open a new session, type "draft IT runbook" → `runbook-template` should be auto-suggested or invoked.
+7. **Trigger phrase smoke (best-effort, non-blocking):** open a new session, mention "draft IT runbook"; if `runbook-template` is suggested by Cowork, log it. If not, file as a Wave 2 follow-up — do NOT block Wave 1 ratification on this. Cowork skill auto-discovery is description-matched and not deterministic.
 8. **Brief commit gate:** baker-master PR for this brief merged AND baker-vault commits pushed AND Director ratifies smoke test before Wave 1 closes.
 
 ## Post-install — write Wave 1 ship-report
@@ -635,10 +639,12 @@ No production-Baker risk. No Render env-var risk. No external counterparty risk.
 
 1. **Wave 2 trigger:** does Director want Wave 1 ship-report → ratify → Wave 2 brief drafted automatically by AH1-App, or hold Wave 2 until next Director-initiated execution window?
    - *Recommendation*: hold Wave 2 until Director-initiated. Lets the Wave 1 stubs prove the pattern before adding more.
-2. **License attribution wording:** the brief uses `Source: <repo>/<path> (license)`. Confirm this is the canonical attribution format for all Brisen-installed skills going forward (Researcher §8 open-Q).
-   - *Recommendation*: yes, lock as canonical; cite in Wave 2+ briefs.
-3. **CHANDA Inv 9 vault commit:** AID-T self-install commits 4 files directly to baker-vault `main`. Confirm vault main is the right target (not a feature branch + PR).
+2. **CHANDA Inv 9 vault commit:** AID-T self-install commits 4 files directly to baker-vault `main`. Confirm vault main is the right target (not a feature branch + PR).
    - *Recommendation*: direct to main (same pattern as ai-dennis OPERATING.md / LONGTERM.md edits). No vault-side PR for skill content.
+3. **Researcher v2 quote re-verification at install time:** Researcher v2 §3.1 contains a "painfully specific" quote attributed to Anthropic ops/runbook that is Brisen-authored, not upstream verbatim (caught in this brief's reviewer pass; F1 fix folded). Should AID-T re-verify upstream Researcher quotes against actual upstream source files at install time as a standing rule for Waves 2-4?
+   - *Recommendation*: yes — AID-T runs `gh api` fetches against the cited upstream paths at install start, flags any divergence in the Wave ship-report. One-time cost ~10 min per Wave; eliminates "Researcher said it's verbatim" cascading errors.
+
+**Removed**: prior Open Q #2 ("license attribution wording") — already shipped with `Source: <repo>/<path> (license)` format in all 4 Wave 1 SKILL.mds; ratification implicit on Wave 1 merge per Researcher §8 recommendation.
 
 ---
 
