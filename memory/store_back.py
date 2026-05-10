@@ -1051,12 +1051,15 @@ class SentinelStoreBack:
                     committed_at TIMESTAMPTZ,
                     committer_agent TEXT,
                     action_class TEXT,
-                    self_cost_eur NUMERIC(12, 2)
+                    self_cost_eur NUMERIC(12, 2),
+                    reserved_at TIMESTAMPTZ
                 )
             """)
             # CORTEX_TIER_B_RUNTIME_V1: idempotent additive ALTER for envs where
             # baker_actions pre-existed without Tier-B columns. Mirrors
             # migrations/20260510_baker_actions_tier_b_runtime.sql.
+            # CORTEX_TIER_B_ATOMICITY_V1: reserved_at column added; mirrors
+            # migrations/20260511_baker_actions_reservation.sql.
             cur.execute("""
                 ALTER TABLE baker_actions
                     ADD COLUMN IF NOT EXISTS tier TEXT,
@@ -1064,7 +1067,8 @@ class SentinelStoreBack:
                     ADD COLUMN IF NOT EXISTS committed_at TIMESTAMPTZ,
                     ADD COLUMN IF NOT EXISTS committer_agent TEXT,
                     ADD COLUMN IF NOT EXISTS action_class TEXT,
-                    ADD COLUMN IF NOT EXISTS self_cost_eur NUMERIC(12, 2)
+                    ADD COLUMN IF NOT EXISTS self_cost_eur NUMERIC(12, 2),
+                    ADD COLUMN IF NOT EXISTS reserved_at TIMESTAMPTZ
             """)
             conn.commit()
             cur.close()
@@ -1137,6 +1141,13 @@ class SentinelStoreBack:
                 CREATE INDEX IF NOT EXISTS idx_baker_actions_tier_b_committed
                     ON baker_actions (committed_at)
                     WHERE tier = 'B' AND cost_eur IS NOT NULL
+            """)
+            # CORTEX_TIER_B_ATOMICITY_V1: reservation-aware partial index.
+            # Mirrors migrations/20260511_baker_actions_reservation.sql.
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_baker_actions_tier_b_reserved
+                    ON baker_actions (reserved_at)
+                    WHERE tier = 'B' AND cost_eur IS NOT NULL AND committed_at IS NULL
             """)
             # Seed the registry so a fresh env can resolve known classes
             # immediately. Mirrors migration step 5.
