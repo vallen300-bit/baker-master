@@ -1,84 +1,97 @@
 ---
-status: COMPLETE
-brief: briefs/BRIEF_BACKFILL_THREADED_POOL_AND_OBSERVABILITY_1.md
-trigger_class: TIER_B_OBSERVABILITY_PLUS_CONCURRENCY_HARDENING
-dispatched_at: 2026-05-08T~11:55Z
-dispatched_by: ai-head-a (terminal)
-claimed_at: 2026-05-08T12:00:00Z
-claimed_by: b3
-last_heartbeat: 2026-05-08T13:00:00Z
-shipped_at: 2026-05-08T13:00:00Z
-working_branch: b3/backfill-threaded-pool-and-observability-1
-working_branch_head: c1aedd2
-ship_report: briefs/_reports/B3_backfill_threaded_pool_and_observability_1_20260508.md
-prs:
-  baker_master: 175  # open, awaiting AH1-App PL review + merge
-autopoll_eligible: false
-director_ratification: "go" (2026-05-08 chat verbatim, this session — explicit dispatch instruction "dispatch BRIEF_BACKFILL_THREADED_POOL_AND_OBSERVABILITY_1")
-folds: 4 IMPORTANT findings from am handover session_handover_2026-05-08_am_aihead_a_plaud_token_restored_3_transcripts.md
+status: PENDING
+brief: briefs/BRIEF_CORTEX_TIER_B_RUNTIME_V1.md
+trigger_class: TIER_B_DB_SCHEMA_PLUS_ATOMICITY_PLUS_EXTERNAL_SURFACE
+dispatched_at: 2026-05-10
+dispatched_by: ai-head-1 (AH1)
+target: b3
+director_ratification: D8 ratified 2026-05-10 via D3+D8 Triaga (Conservative caps locked); AID-resolved 7 clarifications 2026-05-10 (pool-wide, mixed-cost-source, dedicated-tier-b-pending, 00:00 UTC reset)
+priority: P1
+unblocks:
+  - I5 (first Cortex auto-trigger cycle, STUCK since 2026-05-03)
+  - B4 (6-phase loop runtime — adopts enforce_tier_b)
+  - B5 (substrate push runtime — adopts enforce_tier_b)
+expected_pr_count: 1 (baker-master)
+expected_branch_name: b3/cortex-tier-b-runtime-v1
+expected_complexity: medium (~6-8h)
+mandatory_2nd_pass: TRUE  # Triggers #2 (DB schema/migrations/atomicity) + #3 (concurrency-ordering) + #4 (external-surface endpoint)
+last_heartbeat: null
 ---
 
-# CODE_3 — COMPLETE (BRIEF_BACKFILL_THREADED_POOL_AND_OBSERVABILITY_1)
+# CODE_3_PENDING — BRIEF_CORTEX_TIER_B_RUNTIME_V1 — 2026-05-10
 
-**Shipped:** 2026-05-08T13:00:00Z by B3.
+**Brief:** `briefs/BRIEF_CORTEX_TIER_B_RUNTIME_V1.md` (read first — full spec, 6 fixes, copy-pasteable code blocks, test plan, ship gate)
+**Working dir:** `~/bm-b3`
+**Working branch:** `b3/cortex-tier-b-runtime-v1`
+**Repo:** `vallen300-bit/baker-master`
 
-**PR:** baker-master [#175](https://github.com/vallen300-bit/baker-master/pull/175) — **open**, awaiting AH1-App PL review + merge.
+## Summary
 
-**Ship report:** [briefs/_reports/B3_backfill_threaded_pool_and_observability_1_20260508.md](../_reports/B3_backfill_threaded_pool_and_observability_1_20260508.md)
+Build forward-looking Tier-B autonomous-action budget enforcement runtime. Caps: €100/action, €500/day, €2500/mo (pool-wide); reset 1st calendar month 00:00 UTC. 6 fixes:
+1. Schema extension on `baker_actions` (6 new nullable columns) + 3 new tables (`tier_b_action_classes`, `tier_b_pending`, `tier_b_counter_resets`) + seed registry. Migration `migrations/20260510_baker_actions_tier_b_runtime.sql` + matching `_ensure_*` bootstrap update in `memory/store_back.py`.
+2. `orchestrator/tier_b_runtime.py` — `enforce_tier_b(action) → Decision` singleton with SERIALIZABLE-txn counter check-and-pause.
+3. `orchestrator/tier_b_ratify.py` — pause-handler + ratify card prep (visual reuse from GOLD card; separate workflow domain).
+4. `triggers/tier_b_reset.py` + register in `triggers/embedded_scheduler.py` — APScheduler cron, day=1, hour=0, minute=0, timezone="UTC".
+5. `outputs/dashboard.py` — `GET /api/admin/tier-b-status` audit endpoint.
+6. Tests: `tests/test_tier_b_runtime.py` + `tests/test_tier_b_reset.py` + `tests/test_tier_b_status_endpoint.py` (PG-required, skip-if-no-TEST_DATABASE_URL pattern).
 
-**Branch:** `b3/backfill-threaded-pool-and-observability-1` @ HEAD `c1aedd2`.
+## Pre-requisites
+- `baker_actions` table exists (bootstrap `memory/store_back.py:1036` — verified)
+- GOLD ratify workflow exists (PR #66 — verified for visual template reuse)
+- D8 caps ratified 2026-05-10
+- `TEST_DATABASE_URL` env (CI ephemeral Neon branch — auto-provisioned)
 
-**Files changed:** 5 modified + 1 new test (`tests/test_store_back_pool_threadsafe.py`) + tests/test_backfill_chain_order_and_timeout.py expanded 6 → 11 cases.
+## Acceptance criteria
+- All 6 fixes implemented per spec.
+- Migration creates 3 new tables + 6 new columns on baker_actions; bootstrap updated to match (Brief Standard #4).
+- All caps enforce correctly (pytest scenarios in Fix 6 cover edge cases).
+- Calendar-month reset fires at 1st 00:00 UTC (cron registered, verifiable in logs).
+- `/api/admin/tier-b-status` returns valid JSON shape.
+- No false-positive pauses (action below cap → PASS).
+- No false-negative passes (action above cap → PAUSE_REQUIRED).
+- Pool-wide isolation: AH1 spend visible to B3's enforce check.
+- Singleton: `TierBRuntime._get_global_instance()` only; pre-push hook `scripts/check_singletons.sh` passes.
+- All DB calls in try/except with rollback; all SELECTs have LIMIT.
 
-**Verification (all green):**
-- `pytest tests/test_backfill_chain_order_and_timeout.py tests/test_store_back_pool_threadsafe.py -v` → 12 passed, 1 skipped (env-dep live probe; paired source-text static guard passes everywhere).
-- `pytest tests/ -k "store_back or pool or backfill" -v` → 18 passed, 1 skipped, no regression.
-- `bash scripts/check_singletons.sh` → OK.
-- `py_compile` clean for all 5 modified + 2 test files.
-- Grep verifications #5–#8 — all pass (#5: 0 matches; #8: SimpleConnectionPool callable = 0).
+## Ship gate
+**Literal `pytest tests/test_tier_b_runtime.py tests/test_tier_b_reset.py tests/test_tier_b_status_endpoint.py -v` output GREEN — no "pass by inspection."**
 
-**Annotations / spec gaps:** see ship report §"Annotations". 2 surfaced — line drift on AC #8 (functionally equivalent), live-instance test skips locally without env vars (paired with source-text static guard).
+Plus full suite: `pytest` exit-0 (no regressions on existing baker_actions write paths).
 
-**B3 idle.** Next dispatcher: run §2 busy-check before overwriting.
+## Mandatory review chain (4 gates per SKILL.md §Code-reviewer 2nd-pass Protocol)
 
----
+This PR fires multiple triggers — full chain required pre-merge:
 
-## Original brief content (for archive)
+1. **Gate 1 — pytest GREEN** (B3 ships report w/ literal output)
+2. **Gate 2 — AH2 `/security-review`** (atomicity + external-surface scrutiny)
+3. **Gate 3 — picker-architect** (architectural soundness)
+4. **Gate 4 — `feature-dev:code-reviewer` 2nd-pass** (mandatory: triggers #2 DB/migration/atomicity + #3 concurrency-ordering + #4 external-surface endpoint)
 
-**Brief:** `briefs/BRIEF_BACKFILL_THREADED_POOL_AND_OBSERVABILITY_1.md`
-**Working branch:** `b3/backfill-threaded-pool-and-observability-1`
-**Working dir:** `~/bm-b3/`
+REQUEST_CHANGES on any FAIL or HIGH/CRITICAL findings. Re-fire chain on each fold-fix commit.
 
-**Pre-requisites:**
-- baker-master `main` HEAD ≥ `bdb6416` (PR #170 merged earlier this session — doc-only, does not change code surface).
-- PR #172 (`d8ebf17`) on main — your fix layers on top.
-- Python 3.12 local for pytest (per Lesson #62, MacBook 3.9 default breaks PEP 604).
+## Heartbeat policy (per SKILL.md §B-code stall chase)
 
-**Acceptance criteria (literal — REQUEST_CHANGES on any "by inspection" claim):**
-1. `pytest tests/test_backfill_chain_order_and_timeout.py tests/test_store_back_pool_threadsafe.py -v` → all green, paste literal stdout in ship report.
-2. `pytest tests/ -k "store_back or pool or backfill" -v` → no regression, paste literal stdout.
-3. `bash scripts/check_singletons.sh` → green.
-4. `python3 -c "import py_compile; py_compile.compile('memory/store_back.py', doraise=True)"` clean for all 5 modified Python files.
-5. `grep -n "_run_backfill_with_timeout" outputs/dashboard.py` → zero matches post-edit (legacy alias removed per Fix 4).
-6. `grep -n "report_success" triggers/plaud_trigger.py` → must show ≥1 new call inside `backfill_plaud()` lines 668-775 (in addition to the 3 existing calls in the incremental poller at lines 400/429/624).
-7. `grep -n "report_success\|report_failure" triggers/fireflies_trigger.py` → must show ≥1 new call inside `backfill_fireflies()` lines 452-611 success terminus + ≥1 in the failure terminus.
-8. `grep -n "ThreadedConnectionPool" memory/store_back.py` → exactly 1 match at line ~226; `grep -n "SimpleConnectionPool" memory/store_back.py` → 0 matches in code (comments OK if you reference the historical class).
-9. New abandoned-thread alarm fires `report_failure("<name>_backfill", ...)` — covered by `test_abandoned_thread_increments_counter_and_fires_sentinel_alarm`.
+Minimum heartbeat every 12h while actively building. Acceptable formats:
+- Mailbox UPDATE entry in this file with ISO timestamp
+- Ship-report file at `briefs/_reports/...`
+- Commit-msg heartbeat on `b3/cortex-tier-b-runtime-v1` (`mailbox(b3): heartbeat <ISO> — <where>` pattern)
 
-**Scope-out (DO NOT touch — REQUEST_CHANGES if your diff hits any of these):**
-- `pipeline.run()`, Qdrant, LLM call sites — backfill stays PG-only.
-- Advisory lock IDs `867531` / `867532` — stable contract.
-- `_backfill_running` flag semantics — stays process-local.
-- Incremental poller `report_success` calls (lines 400/429/624 plaud, line 443 fireflies) — already report; do NOT add another.
-- `BACKFILL_TIMEOUT_SEC = 300` — enforced by existing test.
-- `pg_try_advisory_lock` / `pg_advisory_unlock` flow — NO "release on timeout" or "second-attempt-by-fresh-thread" logic. Render restart IS the recovery path.
+Two consecutive 12h misses → AH1 auto-surfaces stall to Director.
 
-**Ship gate:** literal `pytest` output AND `bash scripts/check_singletons.sh` green AND grep verifications #5-#8 pasted into ship report. No "pass by inspection".
+## Out of scope (do NOT implement)
+- Wiring `enforce_tier_b()` into Cortex Phase 5 / B4 6-phase loop / B5 substrate push (those briefs adopt this runtime when they ship)
+- Anthropic API token-cost cap (D4 risk action, AID owns, target 2026-05-31)
+- Tier C definition (separate brief if needed)
+- Slack push of ratify card actual-send (B3 prepares card payload + DB transitions; B4 wires Slack push)
 
-**PR target:** open against `main` of `vallen300-bit/baker-master`. Title: `fix(backfill): sentinel-on-success + thread-safe pool + abandoned-thread alarm + real chain test`. Body: brief acceptance criteria checklist + literal pytest output + grep verifications.
+## PL ship-report contract
 
-**PL ship-report:** End your chat ship report with a fenced PL paste-block per SKILL.md §"PL ship-report contract" (target: AH1-App PL).
+End your chat ship report with a fenced PL paste-block per SKILL.md §"PL ship-report contract":
 
-**Heartbeat cadence:** minimum every 12h while actively building (per SKILL.md §"B-code stall chase" 2026-05-05 ratification). Heartbeat formats accepted: mailbox UPDATE entry, ship-report file, commit-msg `mailbox(b3): heartbeat <ISO> — <where>`.
-
-**N1 carryover from PR #170 (NOT applicable to this brief):** N1 was about the heuristic-shippable risk in `BRIEF_BAKER_PLAUD_AUTO_GENERATE_1.md` — that is a separate brief / future B-code dispatch when the implementation lands. This brief is unrelated; do not fold N1 here.
+```
+**TO: AH1-App PL**
+- WHAT: <one-line summary>
+- LINKS: <PR # / commit SHA / file paths / Render deploy ID>
+- COST: <$X / time / N cycles, or "n/a">
+- NEXT: <next blocker, dispatch, or "ready for next">
+```
