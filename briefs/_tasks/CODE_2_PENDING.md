@@ -1,10 +1,12 @@
 ---
-status: PENDING
+status: CLAIMED
 brief: briefs/BRIEF_BUS_DRAIN_CURSOR_CAP_FIX_1.md
 trigger_class: TIER_B_FOLLOWUP_CORRECTNESS_FIX
 dispatched_at: 2026-05-11
 dispatched_by: ai-head-1 (AH1)
 target: b2
+claimed_at: 2026-05-11T01:05Z
+claimed_by: B2
 director_ratification: Director ruled "ship now, fix later" on parent PR #183 cursor-cap data-loss bug (2026-05-11); Director "fire follow-ups" 2026-05-11 greenlit this dispatch end-to-end.
 priority: P3
 phase: 1 of 1 (single PR, follow-up to PR #183)

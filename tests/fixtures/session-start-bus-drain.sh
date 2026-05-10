@@ -144,7 +144,7 @@ lines.append("To reply: BAKER_ROLE={} ~/Desktop/baker-code/scripts/bus_post.sh <
 # B2 fold: atomic state-file write via tempfile.mkstemp + os.replace.
 # On failure: leave canonical state file unchanged (re-drain next session beats
 # silent cursor corruption). Still emit the rendered summary so messages are seen.
-newest = max(m["created_at"] for m in msgs)
+newest = max(m["created_at"] for m in shown)
 state_dir = os.path.dirname(state_file) or "."
 write_failed = False
 tmp_path = None
