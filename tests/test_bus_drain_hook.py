@@ -233,7 +233,6 @@ def test_happy_path_renders_and_writes_state(stubs_dir, base_env, tmp_path):
             },
         ]
     }
-    body_json = json.dumps(sample).replace("'", "'\\''")
     _make_stub(stubs_dir / "op", "#!/bin/bash\necho 'fake-key-1234'\n")
     _make_stub(stubs_dir / "curl", f"#!/bin/bash\ncat <<'EOF'\n{json.dumps(sample)}\nEOF\nexit 0\n")
 
@@ -295,6 +294,55 @@ def test_existing_state_file_used_as_since(stubs_dir, base_env, tmp_path):
     captured = sentinel.read_text()
     assert "since=2026-05-10T22:00:00Z" in captured, captured
     assert "limit=50" in captured, captured  # token-budget fold
+
+
+# ---------------------------------------------------------------------------
+# Regression: overflow path — cursor must advance to rendered slice's max,
+# not the full fetched slice's max. Otherwise messages RENDER_CAP+1..N are
+# silently lost. Daemon orders ASC by created_at (bus.py:349), so shown[:30]
+# are oldest unread; max(shown).created_at = msgs[29].created_at.
+# ---------------------------------------------------------------------------
+
+def test_overflow_cursor_advances_to_rendered_max(stubs_dir, base_env, tmp_path):
+    """40 messages → cursor lands on msgs[29] (rendered slice's max),
+    NOT msgs[39] (full slice's max). Guards against silent loss of 31-40."""
+    sample = {
+        "messages": [
+            {
+                "id": i,
+                "thread_id": f"t-{i}",
+                "parent_id": None,
+                "from_terminal": "lead",
+                "to_terminals": ["b2"],
+                "topic": None,
+                "kind": "broadcast",
+                "body_preview": f"msg {i}",
+                "created_at": f"2026-05-11T01:{i:02d}:00Z",
+                "wake_attempted_at": None,
+                "acknowledged_at": None,
+                "deleted_at": None,
+                "tier_required": "B",
+            }
+            for i in range(40)
+        ]
+    }
+    _make_stub(stubs_dir / "op", "#!/bin/bash\necho 'fake-key-1234'\n")
+    _make_stub(stubs_dir / "curl", f"#!/bin/bash\ncat <<'EOF'\n{json.dumps(sample)}\nEOF\nexit 0\n")
+
+    env = dict(base_env, BAKER_ROLE="b2")
+    result = _run_hook(env, tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    state_file = tmp_path / ".brisen-lab-bus-last-seen-b2.txt"
+    assert state_file.exists(), "state file should have been written"
+    cursor = state_file.read_text().strip()
+    # RENDER_CAP=30 → shown = msgs[:30] → max(shown) = msgs[29]
+    assert cursor == "2026-05-11T01:29:00Z", (
+        f"cursor should be msgs[29] (rendered slice's max), got {cursor!r}"
+    )
+    # Negative guard: cursor must NOT be msgs[39] (full slice's max — would
+    # silently lose messages 30-39 on next drain).
+    assert cursor != "2026-05-11T01:39:00Z"
 
 
 # ---------------------------------------------------------------------------
