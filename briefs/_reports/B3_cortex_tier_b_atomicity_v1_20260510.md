@@ -5,9 +5,12 @@ trigger_class: TIER_B_DB_SCHEMA_PLUS_ATOMICITY_PLUS_CONCURRENCY
 agent: b3
 pr: https://github.com/vallen300-bit/baker-master/pull/182
 branch: b3/cortex-tier-b-atomicity-v1
-commit: 3a8b4e5f42e7fe3523a24d0d4d7ede58bc9735f1
-status: AWAITING_REVIEW_CHAIN
+commit: c64cc7f
+fold_commit: c64cc7f
+prior_commit: 3a8b4e5f42e7fe3523a24d0d4d7ede58bc9735f1
+status: SHIPPED_FOLD_OK
 shipped_at: 2026-05-10T22:00Z
+fold_at: 2026-05-11T00:35Z
 ---
 
 # B3 Ship Report — CORTEX_TIER_B_ATOMICITY_V1
@@ -252,3 +255,143 @@ Pattern B keeps side effects OUTSIDE the SERIALIZABLE txn — Phase 5 V2 adapter
 - LINKS: PR https://github.com/vallen300-bit/baker-master/pull/182 · commit `3a8b4e5` · branch `b3/cortex-tier-b-atomicity-v1` · ship-gate evidence in this report
 - COST: ~5h elapsed (matches brief estimate). Tests: 21/21 GREEN in 150.86s targeted; 10/10 GREEN ship-gate (~9.5s mean); full suite +21 / 0 new failures.
 - NEXT: idle pending AID 4-gate review chain (pytest + AH2 /security-review + picker-architect + feature-dev:code-reviewer 2nd-pass). Surface back on PASS → propose merge, or any FAIL/HIGH/CRITICAL → fold-fix.
+
+---
+
+# B3 Ship Report Fold — 2026-05-11T00:35Z
+
+## Fold trigger
+
+4-gate review chain returned. Gate 2 (AH2 `/security-review`) PASS. Gates
+3 + 4 independently SOUND on the atomicity argument and verified the
+`memory/store_back.py` brief deviation as LEGITIMATE (Lesson #50 /
+Brief Standard #4).
+
+ONE convergent MEDIUM surfaced by both reviewers (independent reads):
+`orchestrator/tier_b_runtime.py:204-260` — if both
+`conn.set_isolation_level(SERIALIZABLE)` AND the in-txn `SET
+TRANSACTION` fallback raise, the original code silently swallowed both
+errors. The connection returned to the pool in an inconsistent state
+AND the atomicity argument silently defeats to READ COMMITTED — cap can
+breach. Per AH1's fold dispatch (post-4-gate).
+
+## Fold scope (per AH1 mailbox)
+
+| # | File | Change |
+|---|---|---|
+| 1 | `orchestrator/tier_b_runtime.py` | Collapse two-stage isolation-set try/except into a single outer try/finally with explicit `isolation_set` flag; HARD-raise `RuntimeError` if BOTH primary and fallback paths fail (chained from `fallback_exc`); gate finally-block isolation restore on `isolation_set` |
+| 2 | `tests/test_tier_b_atomicity.py:208-215` | Trivial docstring clarification on `seed_committed_today` override behavior (Gate 4 M2 cosmetic) — explicit that `eur_cost` arg writes directly onto the seeded row, ignoring registered class price; the reuse of `test.synthetic` as seed class is harmless |
+
+Out of fold scope (deferred to Phase 5 V2 brief per AH1): `NOW()`
+evaluated twice across day/month cap queries · `confirm`/`cancel` READ
+COMMITTED docstring · orphan-confirm-after-sweep audit semantic · sweep
+log f-string style · JSONB literal style in `_seed_reserved`.
+
+## Fold acceptance criteria — all met
+
+| Item | Status |
+|---|---|
+| `py_compile` clean on both files | ✅ |
+| Hard ship-gate 10/10 deterministic | ✅ 10/10 GREEN |
+| Targeted Tier-B suite (21 tests) | ✅ 21/21 GREEN, 150.50s |
+| `bash scripts/check_singletons.sh` | ✅ OK |
+
+## Fold ship-gate (literal pytest)
+
+### Hard ship-gate — 10/10 deterministic
+
+```
+$ for i in 1 2 3 4 5 6 7 8 9 10; do
+    echo "=== RUN $i ==="
+    pytest tests/test_tier_b_atomicity.py::test_concurrent_enforcers_one_passes_one_pauses -v
+  done
+
+=== RUN 1 === PASSED in 9.53s
+=== RUN 2 === PASSED in 9.51s
+=== RUN 3 === PASSED in 9.56s
+=== RUN 4 === PASSED in 9.45s
+=== RUN 5 === PASSED in 9.49s
+=== RUN 6 === PASSED in 9.45s
+=== RUN 7 === PASSED in 9.49s
+=== RUN 8 === PASSED in 9.49s
+=== RUN 9 === PASSED in 9.48s
+=== RUN 10 === PASSED in 9.50s
+```
+
+10/10 GREEN. Mean ~9.50s per run (unchanged from pre-fold). Atomicity
+argument intact post-fold — the isolation-set fold tightens the failure
+surface (HARD-raise on hard-fail) without changing the success-path
+semantics that the ship-gate exercises.
+
+### Targeted Tier-B suite
+
+```
+$ pytest tests/test_tier_b_runtime.py tests/test_tier_b_atomicity.py tests/test_tier_b_reset.py -v
+============================= test session starts ==============================
+platform darwin -- Python 3.12.12, pytest-9.0.3, pluggy-1.6.0
+collected 21 items
+
+tests/test_tier_b_runtime.py::test_cap_constants_match_d8_ratification PASSED
+tests/test_tier_b_runtime.py::test_pass_under_caps PASSED
+tests/test_tier_b_runtime.py::test_per_action_cap_paused PASSED
+tests/test_tier_b_runtime.py::test_daily_cap_paused PASSED
+tests/test_tier_b_runtime.py::test_monthly_cap_paused PASSED
+tests/test_tier_b_runtime.py::test_novel_class_requires_self_cost PASSED
+tests/test_tier_b_runtime.py::test_novel_class_negative_self_cost_rejected PASSED
+tests/test_tier_b_runtime.py::test_novel_class_with_self_cost_passes PASSED
+tests/test_tier_b_runtime.py::test_unknown_registry_class_raises PASSED
+tests/test_tier_b_runtime.py::test_pool_wide_isolation_between_agents PASSED
+tests/test_tier_b_runtime.py::test_pending_row_persisted_on_pause PASSED
+tests/test_tier_b_atomicity.py::test_pass_writes_reservation_row PASSED
+tests/test_tier_b_atomicity.py::test_confirm_marks_committed PASSED
+tests/test_tier_b_atomicity.py::test_cancel_removes_reservation PASSED
+tests/test_tier_b_atomicity.py::test_cancel_after_confirm_is_noop PASSED
+tests/test_tier_b_atomicity.py::test_reservation_counts_toward_cap_within_ttl PASSED
+tests/test_tier_b_atomicity.py::test_concurrent_enforcers_one_passes_one_pauses PASSED
+tests/test_tier_b_atomicity.py::test_sweep_deletes_expired_orphans PASSED
+tests/test_tier_b_atomicity.py::test_sweep_leaves_committed_alone PASSED
+tests/test_tier_b_reset.py::test_reset_writes_audit_row_when_idle PASSED
+tests/test_tier_b_reset.py::test_reset_captures_last_month_totals PASSED
+
+======================== 21 passed in 150.50s (0:02:30) ========================
+```
+
+### Singleton CI guard
+
+```
+$ bash scripts/check_singletons.sh
+OK: No singleton violations found.
+```
+
+## Fold diff stat
+
+```
+ orchestrator/tier_b_runtime.py | 43 ++++++++++++++++++++++++++++--------------
+ tests/test_tier_b_atomicity.py | 10 +++++++---
+ 2 files changed, 36 insertions(+), 17 deletions(-)
+```
+
+## Fold commit
+
+`c64cc7f` on `b3/cortex-tier-b-atomicity-v1` — pushed to PR #182.
+
+Per AH1 SKILL.md narrow-fold-scope exemption: Gates 2 + 3 + 4 NOT re-fired
+post-fold (AH2 PASS already covers the post-fold perimeter; isolation-
+handling change has zero security surface).
+
+---
+
+**TO: AH1-App PL**
+- WHAT: PR #182 fold-fix shipped. Convergent MEDIUM (isolation-set
+  silent-defeat) closed via single try/finally with `isolation_set`
+  flag + HARD-raise on dual-path failure. Gate 4 M2 docstring
+  clarification folded in same commit.
+- LINKS: fold commit `c64cc7f` · PR
+  https://github.com/vallen300-bit/baker-master/pull/182 · branch
+  `b3/cortex-tier-b-atomicity-v1`
+- COST: ~25 min elapsed (matches AH1 ETA). Tests: 10/10 GREEN ship-gate
+  (~9.50s mean — unchanged) + 21/21 GREEN targeted Tier-B suite in
+  150.50s.
+- STATUS FLIP: `SHIPPED_FOLD_OK`. Ready for AH1 merge proposal to
+  Director.
+- NEXT: idle pending merge.
