@@ -9,6 +9,7 @@
 - [X / Twitter access](.claude/how-to/x-twitter.md) — `x.com` returns 402. Short tweets: syndication endpoint. Articles + threads + truncated-preview tweets: Chrome MCP via logged-in port-9222 (`navigate_page` + `evaluate_script`)
 - [Local research via Gemma 4](.claude/how-to/local-research-gemma.md) — free Ollama @ `localhost:11434`, structured note in ~30-60s, force a confidence section
 - [Chrome debug port 9222 recovery](.claude/how-to/chrome-debug-recovery.md) — auto-starts at login; if dead, `launchctl kickstart -k gui/$(id -u)/com.baker.chrome-debug`
+- [Chrome MCP stuck state](.claude/how-to/chrome-mcp-stuck-state.md) — `mcp__chrome__*` returns "selected page has been closed" on every call incl. `list_pages` → end + restart Code session (per-session stdio child, no central server)
 
 ## Adding a new how-to
 
