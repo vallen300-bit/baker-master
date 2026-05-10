@@ -1,0 +1,1532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="source" content="brisen-desk">
+<meta name="confidence" content="high">
+<meta name="provenance" content="Corinthia two-pager 2026-04-08 + Brisen-NVIDIA partnership HTML + Fireflies 2026-04-09 transcript + Researcher source-inventory 2026-05-10">
+<title>Brisen AI — The Operating System of Luxury Real Estate Development</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+
+:root {
+  --bg: #0a0a0f;
+  --surface: #12121a;
+  --surface2: #1a1a28;
+  --surface3: #1f1f30;
+  --accent: #6c63ff;
+  --blue: #0a6fdb;
+  --nvidia: #76B900;
+  --gold: #d4a853;
+  --green: #00d4aa;
+  --rose: #ff6b9d;
+  --text: #e8e6f0;
+  --text-dim: #8a87a0;
+  --text-faint: #5a576f;
+  --border: rgba(108,99,255,0.15);
+  --border-strong: rgba(108,99,255,0.35);
+  --border-gold: rgba(212,168,83,0.25);
+  --glow-accent: rgba(108,99,255,0.3);
+  --glow-gold: rgba(212,168,83,0.2);
+  --glow-nvidia: rgba(118,185,0,0.25);
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, sans-serif;
+  line-height: 1.7;
+  overflow-x: hidden;
+  padding-top: 36px;
+}
+
+/* ====== CONFIDENTIAL BANNER ====== */
+.conf-banner {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 1000;
+  background: linear-gradient(90deg, rgba(108,99,255,0.95), rgba(212,168,83,0.85), rgba(118,185,0,0.85));
+  padding: 9px 0;
+  text-align: center;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: #0a0a0f;
+  backdrop-filter: blur(20px);
+}
+
+/* ====== CONTAINER ====== */
+.container { max-width: 1280px; margin: 0 auto; padding: 0 3rem; }
+
+/* ====== HERO ====== */
+.hero {
+  min-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  text-align: left;
+  position: relative;
+  overflow: hidden;
+  padding: 4rem 3rem;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.hero::before {
+  content: '';
+  position: absolute;
+  top: -30%;
+  left: -10%;
+  width: 80%;
+  height: 130%;
+  background: radial-gradient(ellipse at 30% 50%, rgba(108,99,255,0.12) 0%, transparent 55%),
+              radial-gradient(ellipse at 80% 20%, rgba(212,168,83,0.08) 0%, transparent 50%),
+              radial-gradient(ellipse at 60% 90%, rgba(118,185,0,0.06) 0%, transparent 50%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.hero > * { position: relative; z-index: 1; }
+
+.hero-eyebrow {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 5px;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.hero-eyebrow::after {
+  content: '';
+  height: 1px;
+  width: 60px;
+  background: var(--gold);
+  opacity: 0.5;
+}
+
+.hero h1 {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: clamp(2.5rem, 5.5vw, 4.6rem);
+  font-weight: 600;
+  letter-spacing: -1.5px;
+  line-height: 1.05;
+  margin-bottom: 1.5rem;
+  max-width: 980px;
+}
+
+.hero h1 em {
+  font-style: italic;
+  color: var(--gold);
+  font-weight: 400;
+}
+
+.hero-sub {
+  font-size: 1.25rem;
+  color: var(--text-dim);
+  max-width: 760px;
+  line-height: 1.55;
+  margin-bottom: 2rem;
+  font-weight: 300;
+}
+
+.hero-thesis {
+  border-left: 2px solid var(--gold);
+  padding: 1rem 0 1rem 1.75rem;
+  font-size: 1.05rem;
+  color: var(--text);
+  max-width: 820px;
+  font-weight: 400;
+  line-height: 1.7;
+}
+
+.hero-thesis strong { color: var(--gold); font-weight: 600; }
+
+.hero-meta {
+  margin-top: 3rem;
+  display: flex;
+  gap: 3rem;
+  font-size: 0.78rem;
+  color: var(--text-faint);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.hero-meta span { display: flex; flex-direction: column; gap: 4px; }
+.hero-meta strong { color: var(--text); font-weight: 600; letter-spacing: 0.5px; text-transform: none; font-size: 0.95rem; }
+
+/* ====== SECTION ====== */
+section { padding: 6rem 0; position: relative; }
+section.tight { padding: 4rem 0; }
+
+.section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 3.5rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1.5rem;
+}
+
+.section-num {
+  font-family: 'Playfair Display', serif;
+  font-size: 0.9rem;
+  font-style: italic;
+  color: var(--gold);
+  letter-spacing: 2px;
+}
+
+.section-title {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(1.8rem, 3vw, 2.6rem);
+  font-weight: 600;
+  letter-spacing: -0.8px;
+  flex: 1;
+  padding: 0 2rem;
+}
+
+.section-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* ====== THE PROBLEM (concrete) ====== */
+.problem-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.25rem;
+  margin-bottom: 2rem;
+}
+
+.problem-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--rose);
+  padding: 1.5rem 1.75rem;
+  border-radius: 4px;
+}
+
+.problem-card h4 {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--rose);
+  margin-bottom: 0.5rem;
+}
+
+.problem-card p {
+  font-size: 0.95rem;
+  color: var(--text-dim);
+  line-height: 1.55;
+}
+
+.problem-card .euro {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-top: 0.5rem;
+  display: block;
+}
+
+/* ====== JOURNEY MAP ====== */
+.journey-map {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.75rem;
+  margin: 2rem 0 1rem;
+}
+
+.journey-phase {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1.5rem 1.25rem;
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.journey-phase:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-3px);
+}
+
+.journey-phase .ph-num {
+  font-family: 'Playfair Display', serif;
+  font-size: 2rem;
+  font-weight: 600;
+  color: var(--accent);
+  line-height: 1;
+  margin-bottom: 0.5rem;
+}
+
+.journey-phase .ph-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.4rem;
+}
+
+.journey-phase .ph-window {
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 0.75rem;
+}
+
+.journey-phase .ph-count {
+  font-size: 0.78rem;
+  color: var(--gold);
+  font-weight: 500;
+}
+
+.journey-phase[data-proven="true"] {
+  border-color: var(--nvidia);
+  background: linear-gradient(180deg, var(--surface), rgba(118,185,0,0.05));
+}
+
+.journey-phase[data-proven="true"] .ph-num { color: var(--nvidia); }
+
+.journey-legend {
+  display: flex;
+  justify-content: center;
+  gap: 2rem;
+  margin-top: 1rem;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.journey-legend span {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  display: inline-block;
+}
+.dot.proven { background: var(--nvidia); }
+.dot.designed { background: var(--accent); }
+.dot.future { background: var(--gold); }
+
+/* ====== PHASE SECTION ====== */
+.phase-section {
+  padding: 5rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.phase-header {
+  display: grid;
+  grid-template-columns: 120px 1fr 200px;
+  align-items: end;
+  gap: 2rem;
+  margin-bottom: 3rem;
+}
+
+.phase-mark {
+  font-family: 'Playfair Display', serif;
+  font-size: 5rem;
+  font-weight: 600;
+  color: var(--accent);
+  line-height: 0.9;
+  opacity: 0.85;
+}
+
+.phase-title-block h2 {
+  font-family: 'Playfair Display', serif;
+  font-size: 2.2rem;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+  margin-bottom: 0.4rem;
+}
+
+.phase-title-block .phase-subtitle {
+  color: var(--gold);
+  font-size: 0.95rem;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  font-weight: 500;
+}
+
+.phase-status {
+  text-align: right;
+  font-size: 0.72rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.phase-status .pill {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 12px;
+  background: rgba(108,99,255,0.12);
+  border: 1px solid var(--border-strong);
+  color: var(--accent);
+  font-weight: 600;
+  margin-top: 0.5rem;
+}
+
+.phase-status .pill.proven { background: rgba(118,185,0,0.12); border-color: rgba(118,185,0,0.4); color: var(--nvidia); }
+
+.phase-pain {
+  background: linear-gradient(135deg, rgba(255,107,157,0.08), rgba(255,107,157,0.02));
+  border-left: 3px solid var(--rose);
+  padding: 1.25rem 1.75rem;
+  border-radius: 0 6px 6px 0;
+  margin-bottom: 2.5rem;
+}
+
+.phase-pain .label {
+  font-size: 0.72rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--rose);
+  font-weight: 600;
+  display: block;
+  margin-bottom: 0.4rem;
+}
+
+.phase-pain .text {
+  color: var(--text);
+  font-size: 1.02rem;
+  line-height: 1.6;
+}
+
+/* ====== CAPABILITY CARDS ====== */
+.capability-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+}
+
+.capability-grid.single { grid-template-columns: 1fr; }
+.capability-grid.three { grid-template-columns: repeat(3, 1fr); }
+
+.cap-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2rem;
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.cap-card:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-2px);
+}
+
+.cap-card.proven {
+  border-color: rgba(118,185,0,0.3);
+  background: linear-gradient(180deg, var(--surface), rgba(118,185,0,0.04));
+}
+
+.cap-card.proven::before {
+  content: 'PRODUCTION';
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--nvidia);
+  background: rgba(118,185,0,0.15);
+  padding: 3px 8px;
+  border-radius: 3px;
+}
+
+.cap-name {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.4rem;
+  letter-spacing: -0.3px;
+}
+
+.cap-tagline {
+  font-size: 0.78rem;
+  color: var(--gold);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  font-weight: 500;
+  margin-bottom: 1rem;
+}
+
+.cap-desc {
+  font-size: 0.95rem;
+  color: var(--text-dim);
+  line-height: 1.65;
+  margin-bottom: 1.25rem;
+}
+
+.cap-mech {
+  font-size: 0.85rem;
+  color: var(--text-faint);
+  border-top: 1px dashed var(--border);
+  padding-top: 1rem;
+  margin-top: 1rem;
+}
+
+.cap-mech strong {
+  color: var(--text-dim);
+  font-weight: 600;
+  display: block;
+  margin-bottom: 0.3rem;
+  font-size: 0.72rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.cap-outcome {
+  display: inline-block;
+  background: rgba(212,168,83,0.1);
+  border: 1px solid var(--border-gold);
+  color: var(--gold);
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  margin-top: 1rem;
+}
+
+/* ====== ECOSYSTEM ====== */
+.ecosystem-intro {
+  font-size: 1.15rem;
+  color: var(--text-dim);
+  max-width: 920px;
+  margin-bottom: 3rem;
+  line-height: 1.7;
+}
+
+.ecosystem-intro strong { color: var(--gold); font-weight: 500; }
+
+.ecosystem-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+}
+
+.eco-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 1.5rem 1.25rem;
+  border-radius: 6px;
+  transition: all 0.3s ease;
+}
+
+.eco-card:hover { border-color: var(--border-strong); }
+
+.eco-role {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 0.6rem;
+}
+
+.eco-tool {
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 0.4rem;
+  line-height: 1.4;
+}
+
+.eco-note {
+  font-size: 0.82rem;
+  color: var(--text-faint);
+  line-height: 1.5;
+}
+
+/* ====== MOAT ====== */
+.moat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3rem;
+  align-items: start;
+}
+
+.moat-card {
+  background: linear-gradient(135deg, rgba(108,99,255,0.05), rgba(212,168,83,0.04));
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  padding: 2.5rem;
+}
+
+.moat-headline {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.8rem;
+  font-weight: 600;
+  margin-bottom: 1.5rem;
+  letter-spacing: -0.3px;
+  line-height: 1.25;
+}
+
+.moat-headline em { color: var(--gold); font-style: italic; }
+
+.role-list { list-style: none; }
+.role-list li {
+  padding: 0.85rem 0;
+  border-bottom: 1px dashed var(--border);
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 1.5rem;
+  font-size: 0.95rem;
+}
+
+.role-list li:last-child { border-bottom: none; }
+
+.role-list .role {
+  color: var(--gold);
+  font-weight: 600;
+  font-size: 0.78rem;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+.role-list .case { color: var(--text-dim); }
+
+/* ====== COMMERCIAL ====== */
+.tier-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+}
+
+.tier-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 2rem;
+  position: relative;
+  text-align: left;
+}
+
+.tier-card.featured {
+  border-color: var(--gold);
+  background: linear-gradient(180deg, rgba(212,168,83,0.05), var(--surface));
+}
+
+.tier-card.featured::before {
+  content: 'OWNER-PORTFOLIO SCALE';
+  position: absolute;
+  top: -10px;
+  left: 1.5rem;
+  background: var(--gold);
+  color: var(--bg);
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 2px;
+  padding: 4px 12px;
+  border-radius: 3px;
+}
+
+.tier-tier {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 0.75rem;
+}
+
+.tier-name {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+  letter-spacing: -0.3px;
+}
+
+.tier-desc {
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  line-height: 1.6;
+  margin-bottom: 1rem;
+  min-height: 80px;
+}
+
+.tier-fit {
+  font-size: 0.82rem;
+  color: var(--gold);
+  border-top: 1px solid var(--border);
+  padding-top: 1rem;
+}
+
+/* ====== INFRA ====== */
+.infra-block {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2.5rem;
+  align-items: center;
+}
+
+.infra-text h3 {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.8rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+  letter-spacing: -0.3px;
+}
+
+.infra-text p {
+  color: var(--text-dim);
+  font-size: 1rem;
+  margin-bottom: 1rem;
+  line-height: 1.7;
+}
+
+.infra-stack {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+}
+
+.infra-layer {
+  padding: 1rem 1.25rem;
+  border-radius: 4px;
+  margin-bottom: 0.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+}
+
+.infra-layer.app { background: rgba(212,168,83,0.1); border-left: 3px solid var(--gold); }
+.infra-layer.platform { background: rgba(108,99,255,0.08); border-left: 3px solid var(--accent); }
+.infra-layer.infra { background: rgba(118,185,0,0.08); border-left: 3px solid var(--nvidia); }
+
+.infra-layer .layer-name { font-weight: 600; }
+.infra-layer .layer-detail { color: var(--text-faint); font-size: 0.78rem; letter-spacing: 1px; text-transform: uppercase; }
+
+/* ====== VISION CLOSE ====== */
+.vision-close {
+  background: linear-gradient(135deg, rgba(108,99,255,0.08), rgba(212,168,83,0.05), rgba(118,185,0,0.04));
+  border-top: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+  padding: 6rem 0;
+  text-align: center;
+  margin-top: 4rem;
+}
+
+.vision-close .quote-mark {
+  font-family: 'Playfair Display', serif;
+  font-size: 5rem;
+  color: var(--gold);
+  line-height: 0.8;
+  margin-bottom: 1rem;
+  opacity: 0.5;
+}
+
+.vision-close h2 {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
+  font-weight: 400;
+  font-style: italic;
+  line-height: 1.4;
+  max-width: 920px;
+  margin: 0 auto 2rem;
+  letter-spacing: -0.3px;
+}
+
+.vision-close h2 strong {
+  font-style: normal;
+  font-weight: 600;
+  color: var(--gold);
+}
+
+.vision-attribution {
+  font-size: 0.85rem;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  font-weight: 500;
+}
+
+/* ====== FOOTER ====== */
+footer {
+  padding: 3rem 0;
+  border-top: 1px solid var(--border);
+  font-size: 0.78rem;
+  color: var(--text-faint);
+}
+
+.footer-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: 3rem;
+  padding-bottom: 2rem;
+}
+
+.footer-grid h5 {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text);
+  margin-bottom: 0.75rem;
+}
+
+.footer-grid p, .footer-grid li { font-size: 0.82rem; color: var(--text-faint); line-height: 1.6; }
+.footer-grid ul { list-style: none; }
+
+.footer-bottom {
+  border-top: 1px solid var(--border);
+  padding-top: 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+  letter-spacing: 1px;
+}
+
+/* ====== RESPONSIVE ====== */
+@media (max-width: 1024px) {
+  .container { padding: 0 2rem; }
+  .journey-map { grid-template-columns: repeat(2, 1fr); }
+  .capability-grid, .capability-grid.three { grid-template-columns: 1fr; }
+  .ecosystem-grid { grid-template-columns: repeat(2, 1fr); }
+  .moat-grid, .infra-block { grid-template-columns: 1fr; }
+  .tier-grid { grid-template-columns: 1fr; }
+  .phase-header { grid-template-columns: 1fr; }
+  .phase-mark { font-size: 3rem; }
+  .phase-status { text-align: left; }
+  .problem-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="conf-banner">Confidential — Brisen Group — Strategic Vision Draft</div>
+
+<!-- ====== HERO ====== -->
+<section class="hero">
+  <div class="hero-eyebrow">Brisen AI — Strategic Vision 2026</div>
+  <h1>The operating system of <em>luxury real estate development.</em></h1>
+  <p class="hero-sub">
+    Built by an owner-developer who has lived every phase as every counterparty —
+    on a EUR 250M Mandarin Oriental project, not in a lab.
+  </p>
+  <div class="hero-thesis">
+    <strong>The thesis:</strong> luxury real estate development is a five-year, multi-counterparty, multi-million-document journey.
+    The owner is the only party that sees all five phases. Every phase has proprietary data locked in PDFs, emails and one-off spreadsheets.
+    AI converts that data into money, time and decisions — phase by phase, counterparty by counterparty.
+    Brisen is the only operator that has been on every side of the table and can build the platform that knows it.
+  </div>
+  <div class="hero-meta">
+    <span><strong>22</strong>concrete capabilities</span>
+    <span><strong>5</strong>lifecycle phases</span>
+    <span><strong>9</strong>ecosystem roles</span>
+    <span><strong>3-tier</strong>commercial model</span>
+  </div>
+</section>
+
+<!-- ====== THE PROBLEM ====== -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <div class="section-num">01</div>
+      <h2 class="section-title">Why this category does not yet exist</h2>
+      <div class="section-label">The concrete gap</div>
+    </div>
+
+    <p class="ecosystem-intro">
+      Luxury hotel development is a EUR 50B annual market in Europe alone with essentially zero AI penetration —
+      <strong>17%</strong> in US hospitality, materially less in EU luxury. The reasons are structural and they are also
+      the reasons Brisen wins this category:
+    </p>
+
+    <div class="problem-grid">
+      <div class="problem-card">
+        <h4>Proprietary data is locked</h4>
+        <p>Brand standards, tender history, claims, design iterations all sit inside family-owned developer groups. Generic AI cannot reach it.</p>
+      </div>
+      <div class="problem-card">
+        <h4>Domain too complex for horizontal tools</h4>
+        <p>Brand standards × local building code × operator constraints × buyer expectations = no off-the-shelf SaaS handles it.</p>
+      </div>
+      <div class="problem-card">
+        <h4>Decision-makers trust only builders</h4>
+        <p>Owners trust people who have built what they are building. Tech vendors selling cold to owners get nowhere.</p>
+      </div>
+      <div class="problem-card">
+        <h4>Pain is real and recurring</h4>
+        <p>Subcontractor insolvency, claim disputes, buyer handover gaps, brand-standard misalignment — every project pays the same tax.<span class="euro">EUR 6M+ identified by AI on one EUR 250M project · 4.6% recovery</span></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====== JOURNEY MAP ====== -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <div class="section-num">02</div>
+      <h2 class="section-title">The five-phase journey</h2>
+      <div class="section-label">Where AI plugs in</div>
+    </div>
+
+    <p class="ecosystem-intro">
+      Every luxury hotel or branded-residence project moves through five phases.
+      Each phase has structured-but-unstructured data, named owner pains, and a concrete AI capability that converts pain into outcome.
+      <strong>Phase 4 is production today.</strong> The other four are the platform's growth path.
+    </p>
+
+    <div class="journey-map">
+      <div class="journey-phase">
+        <div class="ph-num">01</div>
+        <div class="ph-name">Land + Concept</div>
+        <div class="ph-window">Months 0-6</div>
+        <div class="ph-count">3 capabilities</div>
+      </div>
+      <div class="journey-phase">
+        <div class="ph-num">02</div>
+        <div class="ph-name">Design + Entitlement</div>
+        <div class="ph-window">Months 6-18</div>
+        <div class="ph-count">3 capabilities</div>
+      </div>
+      <div class="journey-phase">
+        <div class="ph-num">03</div>
+        <div class="ph-name">Tender + Procurement</div>
+        <div class="ph-window">Months 12-24</div>
+        <div class="ph-count">2 capabilities</div>
+      </div>
+      <div class="journey-phase" data-proven="true">
+        <div class="ph-num">04</div>
+        <div class="ph-name">Construction</div>
+        <div class="ph-window">Months 18-48</div>
+        <div class="ph-count">4 capabilities · production</div>
+      </div>
+      <div class="journey-phase">
+        <div class="ph-num">05</div>
+        <div class="ph-name">Operations + Lifecycle</div>
+        <div class="ph-window">Year 4 onward</div>
+        <div class="ph-count">4 capabilities</div>
+      </div>
+    </div>
+
+    <div class="journey-legend">
+      <span><span class="dot proven"></span>Production today (MO Vienna proof)</span>
+      <span><span class="dot designed"></span>Designed, pilot-ready</span>
+      <span><span class="dot future"></span>Roadmap, Year 2 build</span>
+    </div>
+  </div>
+</section>
+
+<!-- ====== PHASE 1 ====== -->
+<section class="phase-section">
+  <div class="container">
+    <div class="phase-header">
+      <div class="phase-mark">01</div>
+      <div class="phase-title-block">
+        <h2>Land + Concept</h2>
+        <div class="phase-subtitle">Capital, comp-sets, off-market signal</div>
+      </div>
+      <div class="phase-status">
+        Months 0-6<br>
+        <span class="pill">Designed</span>
+      </div>
+    </div>
+
+    <div class="phase-pain">
+      <span class="label">The pain</span>
+      <div class="text">
+        Underwriting a EUR 100M+ luxury asset today means 8-12 weeks of analyst time on Excel, comparables hunted by phone,
+        and a capital stack iterated three times because the operator changed the residence mix. By the time the model is closed,
+        the deal moved or the macro shifted.
+      </div>
+    </div>
+
+    <div class="capability-grid three">
+      <div class="cap-card">
+        <div class="cap-name">Capital-Stack Optimizer</div>
+        <div class="cap-tagline">Days, not months</div>
+        <p class="cap-desc">
+          Takes operator constraints (residence mix, F&B program, brand fees) + bank covenants + macro luxury-demand inputs.
+          Outputs optimal debt / mezz / equity blend per phase, sensitised to operator and lender side.
+        </p>
+        <div class="cap-mech">
+          <strong>How</strong>
+          MOHG / Corinthia / Aman fee schedules + Aukera / sparkasse / private-bank term-sheet patterns + Brisen's own closed-deal data, behind a constraint solver.
+        </div>
+        <div class="cap-outcome">Financial close in days · ready for committee</div>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-name">Site IRR Engine</div>
+        <div class="cap-tagline">One-click sensitivity</div>
+        <p class="cap-desc">
+          Integrates global comp-set ADRs, branded-residence prices per market (Vienna 25-30k/sqm, Dubai 40k+, Geneva private-bank-driven),
+          operator fee structures and local construction-cost indices into a single IRR model that responds in real time.
+        </p>
+        <div class="cap-mech">
+          <strong>How</strong>
+          Curated luxury-asset transaction database + STR/HVS-style comp scrape + construction-cost feed + Brisen's own actuals as ground truth.
+        </div>
+        <div class="cap-outcome">Re-underwrite a target in 20 minutes</div>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-name">Off-Market Deal Radar</div>
+        <div class="cap-tagline">Hear it first</div>
+        <p class="cap-desc">
+          Scrapes broker letters, distress filings, succession events, planning notices.
+          Cross-references against Brisen's relationship graph: which counterparty knows which seller, which advisor is closest.
+        </p>
+        <div class="cap-mech">
+          <strong>How</strong>
+          Public registry + insolvency gazette + Land Registry + Brisen contact graph, fused via signal classifier into a ranked target list.
+        </div>
+        <div class="cap-outcome">Solve "we heard about it too late"</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====== PHASE 2 ====== -->
+<section class="phase-section">
+  <div class="container">
+    <div class="phase-header">
+      <div class="phase-mark">02</div>
+      <div class="phase-title-block">
+        <h2>Design + Entitlement</h2>
+        <div class="phase-subtitle">Brand standards, code conflicts, permit timing</div>
+      </div>
+      <div class="phase-status">
+        Months 6-18<br>
+        <span class="pill">Designed</span>
+      </div>
+    </div>
+
+    <div class="phase-pain">
+      <span class="label">The pain</span>
+      <div class="text">
+        A 1,500-page brand manual interpreted by a team of consultants over six months. Brand standards collide with local code on month seven.
+        A permit slip of three months breaks the financing waterfall. Each iteration costs six-figure design rework.
+      </div>
+    </div>
+
+    <div class="capability-grid three">
+      <div class="cap-card">
+        <div class="cap-name">Brand-Standards Translator</div>
+        <div class="cap-tagline">From manual to tender-grade spec</div>
+        <p class="cap-desc">
+          Ingests the full brand book (MOHG, Corinthia, Aman, Six Senses).
+          Outputs procurement-grade tender specifications, design briefs, FF&E schedules and operational manuals — all cross-referenced and version-controlled.
+        </p>
+        <div class="cap-mech">
+          <strong>How</strong>
+          Brand manual ingestion + Brisen's MO Vienna interpretation library as ground truth + retrieval-augmented generation tuned to procurement language.
+        </div>
+        <div class="cap-outcome">6-month cycle reduced to weeks</div>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-name">Operator-vs-Code Conflict Detector</div>
+        <div class="cap-tagline">Kill conflicts before architecture</div>
+        <p class="cap-desc">
+          Runs brand standards against Austrian Bauordnung, German LBO, Dubai Civil Defence, Swiss cantonal codes.
+          Flags every conflict before the architect drafts a sheet — the most expensive class of re-design avoided.
+        </p>
+        <div class="cap-mech">
+          <strong>How</strong>
+          Code corpora per jurisdiction + brand-standard parsed claims, cross-referenced via structured rule extraction.
+        </div>
+        <div class="cap-outcome">Stop rework before drawings are issued</div>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-name">Permit Timeline Simulator</div>
+        <div class="cap-tagline">Realistic, not optimistic</div>
+        <p class="cap-desc">
+          Trained on actual permit cycles across Magistrat Wien, Bauamt Baden-Baden, Geneva DCTI, Dubai DDA.
+          Gives realistic forecasts not the developer's wish — feeds capital-stack timing and operator commitment.
+        </p>
+        <div class="cap-mech">
+          <strong>How</strong>
+          Permit dataset (public + Brisen actuals) trained against project-type + complexity vectors; Monte Carlo over historical variance.
+        </div>
+        <div class="cap-outcome">Capital-stack timing that survives reality</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====== PHASE 3 ====== -->
+<section class="phase-section">
+  <div class="container">
+    <div class="phase-header">
+      <div class="phase-mark">03</div>
+      <div class="phase-title-block">
+        <h2>Tender + Procurement</h2>
+        <div class="phase-subtitle">Bids, normalisation, supplier risk</div>
+      </div>
+      <div class="phase-status">
+        Months 12-24<br>
+        <span class="pill">Designed</span>
+      </div>
+    </div>
+
+    <div class="phase-pain">
+      <span class="label">The pain</span>
+      <div class="text">
+        Only 10-20% of LOIs convert to executed contracts (named in our own 15-Mar strategy session).
+        Bidders price different scopes. Comparing them is six weeks of QS time. Half the suppliers who win are not the ones who should — sometimes catastrophically (Hagenauer).
+      </div>
+    </div>
+
+    <div class="capability-grid">
+      <div class="cap-card">
+        <div class="cap-name">TenderMax</div>
+        <div class="cap-tagline">Brand-standards in, bid packages out</div>
+        <p class="cap-desc">
+          Translates brand-standard outputs into full bid packages. Normalises returned bids across contractors (different scopes, different assumptions, different exclusions)
+          into apples-to-apples comparison. Recommends optimal supplier mix for the project envelope.
+        </p>
+        <div class="cap-mech">
+          <strong>How</strong>
+          Spec library + bid-decomposition LLM + cost-database trained on Brisen + EU luxury comparables.
+        </div>
+        <div class="cap-outcome">LOI conversion from 10-20% to 40%+</div>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-name">Supplier Risk Profiler</div>
+        <div class="cap-tagline">Catch the next Hagenauer before contract award</div>
+        <p class="cap-desc">
+          Financial health, prior insolvencies, claims history, management turnover, bank-account changes, gazette filings.
+          A live risk score per bidder — the score that would have flagged Hagenauer 18 months early.
+        </p>
+        <div class="cap-mech">
+          <strong>How</strong>
+          Insolvency-gazette feed + Bonitätsdatenbank + Brisen's own claims history + pattern classifier on operational drift signals.
+        </div>
+        <div class="cap-outcome">Subcontractor insolvency caught upstream</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====== PHASE 4 — PRODUCTION ====== -->
+<section class="phase-section">
+  <div class="container">
+    <div class="phase-header">
+      <div class="phase-mark" style="color: var(--nvidia);">04</div>
+      <div class="phase-title-block">
+        <h2>Construction</h2>
+        <div class="phase-subtitle" style="color: var(--nvidia);">The proven layer · production today</div>
+      </div>
+      <div class="phase-status">
+        Months 18-48<br>
+        <span class="pill proven">Production</span>
+      </div>
+    </div>
+
+    <div class="phase-pain">
+      <span class="label">The pain</span>
+      <div class="text">
+        50,000+ pages of contracts, variations, invoices, correspondence. Subcontractor insolvency mid-project.
+        Schedules slip silently because contractor self-reports. Change orders are line-by-line battles where the side with better data wins.
+        Brisen lived it on MO Vienna — and built four products to fix it.
+      </div>
+    </div>
+
+    <div class="capability-grid">
+      <div class="cap-card proven">
+        <div class="cap-name">ClaimsMax</div>
+        <div class="cap-tagline">EUR 6M+ identified on EUR 250M asset · 4.6% recovery</div>
+        <p class="cap-desc">
+          Ingests the full project document stack — contracts, variations, invoices, correspondence, MOHG instructions.
+          Cross-references every change against entitlements. Identifies recoverable claims in 30 days that manual review would take six to twelve months to find.
+        </p>
+        <div class="cap-mech">
+          <strong>How</strong>
+          Multi-document retrieval + claim-pattern library + entitlement reasoning + cite-everything output that lawyers and arbitrators trust.
+        </div>
+        <div class="cap-outcome">EUR 2-5M per EUR 100M construction spend</div>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-name">SiteWatch</div>
+        <div class="cap-tagline">Cameras don't lie</div>
+        <p class="cap-desc">
+          Computer vision on continuous site cameras. Compares observed progress against planned schedule.
+          Replaces contractor self-report with objective verification — the most common cost-overrun mechanism in luxury construction.
+        </p>
+        <div class="cap-mech">
+          <strong>How</strong>
+          Vision models tuned to construction milestones + BIM/programme reference + change-detection over time.
+        </div>
+        <div class="cap-outcome">Schedule reality, not contractor narrative</div>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-name">Subcontractor Insolvency Early-Warning</div>
+        <div class="cap-tagline">60 days of warning, not 60 days of damage</div>
+        <p class="cap-desc">
+          Detects the Hagenauer pattern as it forms: slow invoices, late site attendance, management resignations, bank-account changes, supplier complaints.
+          Probability score updated weekly with directional alerts.
+        </p>
+        <div class="cap-mech">
+          <strong>How</strong>
+          Operational drift signals + financial-health overlay + pattern model trained on Brisen's own incident library.
+        </div>
+        <div class="cap-outcome">Time to switch contractors before failure</div>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-name">Change-Order Arbitrage Detector</div>
+        <div class="cap-tagline">Win every line-item negotiation</div>
+        <p class="cap-desc">
+          For every change order, flags which line has the weakest documentation — i.e. where the contractor will try to price up.
+          Hands the project manager line-by-line negotiation leverage before the meeting starts.
+        </p>
+        <div class="cap-mech">
+          <strong>How</strong>
+          Document completeness scoring + entitlement-pattern library + benchmark pricing per scope.
+        </div>
+        <div class="cap-outcome">3-7% of change-order value retained</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====== PHASE 5 ====== -->
+<section class="phase-section">
+  <div class="container">
+    <div class="phase-header">
+      <div class="phase-mark">05</div>
+      <div class="phase-title-block">
+        <h2>Operations + Lifecycle</h2>
+        <div class="phase-subtitle">Handover, residences, warranty, operator performance</div>
+      </div>
+      <div class="phase-status">
+        Year 4 onward<br>
+        <span class="pill">Designed</span>
+      </div>
+    </div>
+
+    <div class="phase-pain">
+      <span class="label">The pain</span>
+      <div class="text">
+        Handover triggers the EUR 250K+ buyer-dispute pattern (Cupial). Gewährleistung clocks expire silently. Operator GOP underperforms comp-set but the management fee is paid anyway.
+        Real-time portfolio visibility doesn't exist — owners get quarterly reports from operators six weeks late.
+      </div>
+    </div>
+
+    <div class="capability-grid">
+      <div class="cap-card">
+        <div class="cap-name">OwnerView</div>
+        <div class="cap-tagline">Real-time, not quarterly</div>
+        <p class="cap-desc">
+          Portfolio-wide dashboard: cost-per-key, programme compliance, contractor performance, GOP and RevPAR vs comp-set, brand fees earned vs delivered.
+          Real time, owner-controlled, drill-down to line items.
+        </p>
+        <div class="cap-mech">
+          <strong>How</strong>
+          PMS / SPA / accounting connectors + operator-data sovereignty layer + benchmarking corpus.
+        </div>
+        <div class="cap-outcome">Operator accountability the day it slips</div>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-name">Buyer-Dispute Prevention</div>
+        <div class="cap-tagline">Catch the Cupial gap before handover</div>
+        <p class="cap-desc">
+          Pre-handover defect AI: ingests punch-walks + brand standards + buyer SPA + Sonderwunsch agreements.
+          Flags every gap that will trigger a dispute — before the buyer's surveyor arrives.
+        </p>
+        <div class="cap-mech">
+          <strong>How</strong>
+          Image classification on defect categories + SPA + Sonderwunsch parsing + gap detection against entitlement.
+        </div>
+        <div class="cap-outcome">Stop EUR 250K+ buyer disputes upstream</div>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-name">Warranty / Gewährleistung Clock</div>
+        <div class="cap-tagline">Never lose a claim to a clock</div>
+        <p class="cap-desc">
+          Tracks every defect window for every component across every contract.
+          Automated claim-trigger alert before expiry. Solves the silent loss-of-rights pattern Brisen lived through.
+        </p>
+        <div class="cap-mech">
+          <strong>How</strong>
+          Contract clause extraction + defect log + jurisdiction-specific deadline rules.
+        </div>
+        <div class="cap-outcome">Zero claims lost to deadline</div>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-name">Operator-Performance Arbitrage</div>
+        <div class="cap-tagline">Renegotiate or rebrand from data</div>
+        <p class="cap-desc">
+          Benchmarks operator GOP, brand-standard compliance, marketing spend, F&B contribution, BSC scores against comp-set in real time.
+          The data set every renegotiation or rebrand decision should rest on.
+        </p>
+        <div class="cap-mech">
+          <strong>How</strong>
+          STR / HotStats / Brisen owner-network data + management-contract parsing + variance classifier.
+        </div>
+        <div class="cap-outcome">Owner posture vs operator with data</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====== ECOSYSTEM REFRAME ====== -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <div class="section-num">03</div>
+      <h2 class="section-title">The ecosystem reframe</h2>
+      <div class="section-label">Same data · every counterparty · sovereign per side</div>
+    </div>
+
+    <p class="ecosystem-intro">
+      The Apr-9 brainstorm flagged the missing concrete: <strong>"network of owners and operators"</strong>, <strong>"data camaraderie, separation, segmentation"</strong>.
+      The platform is not just owner-side. Every counterparty around the development gets a Brisen-tuned AI assistant on their slice of the data — segmented, permissioned, sovereign.
+      Network effect: each new participant makes the platform smarter for the owner without breaching anyone's data perimeter.
+    </p>
+
+    <div class="ecosystem-grid">
+      <div class="eco-card">
+        <div class="eco-role">Architect</div>
+        <div class="eco-tool">Brand-Standards Co-Pilot</div>
+        <div class="eco-note">Knows MOHG / Corinthia / Aman manuals by heart. Drafts to code, not to comment cycle.</div>
+      </div>
+      <div class="eco-card">
+        <div class="eco-role">General Contractor</div>
+        <div class="eco-tool">Bid-Win Optimiser</div>
+        <div class="eco-note">Pre-tender bid normalisation from the GC side. Higher win rate, sharper margin.</div>
+      </div>
+      <div class="eco-card">
+        <div class="eco-role">Subcontractor</div>
+        <div class="eco-tool">Claims-Defence AI</div>
+        <div class="eco-note">The other side of ClaimsMax. Documentation discipline that survives owner audit.</div>
+      </div>
+      <div class="eco-card">
+        <div class="eco-role">Operator</div>
+        <div class="eco-tool">Standards-Compliance Monitor</div>
+        <div class="eco-note">Brand-side dashboard: which property in the network drifted from standard, where.</div>
+      </div>
+      <div class="eco-card">
+        <div class="eco-role">Lender / Bank</div>
+        <div class="eco-tool">Covenant-Drift Watch</div>
+        <div class="eco-note">Real-time covenant + LTV monitoring. Renegotiate before workout, not during.</div>
+      </div>
+      <div class="eco-card">
+        <div class="eco-role">Residence Buyer</div>
+        <div class="eco-tool">Pre-Purchase Due-Diligence</div>
+        <div class="eco-note">Every defect, every dispute, every brand promise — transparent before signature.</div>
+      </div>
+      <div class="eco-card">
+        <div class="eco-role">Insurance</div>
+        <div class="eco-tool">Risk-Priced Premium Engine</div>
+        <div class="eco-note">Live project-risk profile feeds premium. Lower premium when SiteWatch is on.</div>
+      </div>
+      <div class="eco-card">
+        <div class="eco-role">Dispute Counsel</div>
+        <div class="eco-tool">Timeline Reconstruction</div>
+        <div class="eco-note">From 50,000 pages to courtroom-ready chronology in days. Lived on Hagenauer.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====== MOAT ====== -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <div class="section-num">04</div>
+      <h2 class="section-title">Why Brisen — the moat</h2>
+      <div class="section-label">Lived experience as a product</div>
+    </div>
+
+    <div class="moat-grid">
+      <div class="moat-card">
+        <div class="moat-headline">
+          Brisen has been every <em>counterparty.</em>
+          No technology company can replicate this.
+        </div>
+        <p class="cap-desc">
+          The data + the negotiation memory + the scar tissue from every role <em>are</em> the product.
+          Generic AI cannot reach where we have lived.
+        </p>
+      </div>
+
+      <div>
+        <ul class="role-list">
+          <li><span class="role">Owner-Developer</span><span class="case">EUR 250M Mandarin Oriental Vienna — full lifecycle in the dataset.</span></li>
+          <li><span class="role">Branded-Residence Buyer</span><span class="case">Multiple ultra-prime acquisitions — buyer-side defect playbook is ours.</span></li>
+          <li><span class="role">Claimant</span><span class="case">Hagenauer insolvency · EUR 13.2M+ subcontractor claims framework.</span></li>
+          <li><span class="role">Buyer-Side Defendant</span><span class="case">Cupial handover dispute · the buyer-dispute prevention pattern is reverse-engineered from being on both sides.</span></li>
+          <li><span class="role">JV Partner</span><span class="case">AO / Lilienmatt / MRCI — multi-stakeholder governance lived from inside.</span></li>
+          <li><span class="role">Operator-Customer</span><span class="case">MOHG management contract, daily — every brand-standard pain in the dataset.</span></li>
+          <li><span class="role">Insurance Counterparty</span><span class="case">Multi-million claims processed; risk pricing understood from the inside.</span></li>
+          <li><span class="role">Tax-Cross-Border Structurer</span><span class="case">CH / AT / DE / FR / CY / LU — what works, what doesn't, in our own books.</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====== COMMERCIAL ====== -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <div class="section-num">05</div>
+      <h2 class="section-title">Commercial structure</h2>
+      <div class="section-label">Three-tier · owner-aligned · pilot-to-platform path</div>
+    </div>
+
+    <p class="ecosystem-intro">
+      The Researcher inventory flagged the single biggest commercial gap — <strong>"post-pilot commercial structure not drafted in any source file."</strong>
+      The platform makes the structure obvious: three tiers, ordered by friction and alignment.
+    </p>
+
+    <div class="tier-grid">
+      <div class="tier-card">
+        <div class="tier-tier">Tier 1 · Pilot</div>
+        <div class="tier-name">Per-Project Licence</div>
+        <p class="tier-desc">
+          One project, one fee, defined scope (typically ClaimsMax + SiteWatch on an active or completed asset).
+          Designed for low procurement friction — Phase-1 entry point for new developer relationships.
+        </p>
+        <div class="tier-fit">Best fit · first engagement</div>
+      </div>
+
+      <div class="tier-card featured">
+        <div class="tier-tier">Tier 2 · Platform</div>
+        <div class="tier-name">Annual Subscription</div>
+        <p class="tier-desc">
+          Owner-portfolio licence across all active developments. All capabilities, all phases, sovereign deployment per group.
+          Predictable spend; platform improves continuously on owner's own data.
+        </p>
+        <div class="tier-fit">Best fit · 3+ active developments</div>
+      </div>
+
+      <div class="tier-card">
+        <div class="tier-tier">Tier 3 · Aligned</div>
+        <div class="tier-name">Success Share</div>
+        <p class="tier-desc">
+          Per recovered claim, per cost saved, per dispute prevented. Brisen earns when the owner wins.
+          Highest alignment, longest sales cycle, most defensible margin once landed.
+        </p>
+        <div class="tier-fit">Best fit · institutional owners</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====== INFRASTRUCTURE ====== -->
+<section>
+  <div class="container">
+    <div class="section-header">
+      <div class="section-num">06</div>
+      <h2 class="section-title">Infrastructure</h2>
+      <div class="section-label">NVIDIA-preferred · sovereign-deployable · vendor-resilient</div>
+    </div>
+
+    <div class="infra-block">
+      <div class="infra-text">
+        <h3>Three-layer architecture. NVIDIA at the bottom. Sovereign on top.</h3>
+        <p>
+          Brisen runs a three-layer stack — infrastructure, platform, applications.
+          NVIDIA is the preferred infrastructure partner (chips, NIM microservices, NeMo training pipelines) but the platform is engineered infrastructure-agnostic.
+        </p>
+        <p>
+          Each owner deploys sovereign: on-premise, private cloud, or Brisen-managed. Data never leaves the owner's perimeter.
+          This closes three of the Researcher's flagged gaps simultaneously — procurement security (Topic 10), NVIDIA single-vendor risk (Topic 8), and the data-moat thesis (Topic 5) become one coherent story.
+        </p>
+      </div>
+
+      <div class="infra-stack">
+        <div class="infra-layer app">
+          <span class="layer-name">Applications</span>
+          <span class="layer-detail">17 capabilities · per-phase</span>
+        </div>
+        <div class="infra-layer platform">
+          <span class="layer-name">Platform</span>
+          <span class="layer-detail">SLM library · agents · RAG · sovereign</span>
+        </div>
+        <div class="infra-layer infra">
+          <span class="layer-name">Infrastructure</span>
+          <span class="layer-detail">NVIDIA-preferred · multi-cloud · on-prem-capable</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====== VISION CLOSE ====== -->
+<div class="vision-close">
+  <div class="container">
+    <div class="quote-mark">"</div>
+    <h2>
+      <strong>Brisen is the operating system of luxury real estate development.</strong>
+      Every brick, every contract, every claim, every guest — one platform, one ontology, one set of agents.
+      <br><br>
+      Built by an owner. Powered by NVIDIA. Sovereign to the developer.
+    </h2>
+    <div class="vision-attribution">Brisen Group · Strategic Vision · May 2026</div>
+  </div>
+</div>
+
+<!-- ====== FOOTER ====== -->
+<footer>
+  <div class="container">
+    <div class="footer-grid">
+      <div>
+        <h5>Source Synthesis</h5>
+        <p>
+          This vision integrates four sources: the Brisen↔Corinthia two-pager (8 Apr 2026),
+          the Brisen↔NVIDIA partnership HTML (Mar 2026 GTC stack), the Apr-9 internal brainstorm transcript (Fireflies 01KNSK7HEQ6ZXFWPQ88XH87JHC),
+          and the Researcher's 10-topic source inventory (10 May 2026).
+        </p>
+      </div>
+      <div>
+        <h5>Open Gaps</h5>
+        <ul>
+          <li>Topic 9 — commercial terms (this doc proposes 3-tier)</li>
+          <li>Topic 10 — security artefacts (DPA / DPIA / RBAC)</li>
+          <li>Topic 8 — NVIDIA MOU not signed (Storer GTC pending)</li>
+          <li>Topics 2/3/4 — beyond ClaimsMax, demo-stage only</li>
+          <li>Topic 6 — €6M MO Vienna number internally validated only</li>
+        </ul>
+      </div>
+      <div>
+        <h5>Path</h5>
+        <p><code>wiki/matters/brisen/curated/2026-05-10-ai-for-luxury-developers-vision.html</code></p>
+        <p style="margin-top:0.6rem;">Tier A · Brisen Desk synthesis · confidence: high</p>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>Brisen Group · Confidential · 2026</span>
+      <span>Drafted by Brisen Desk · v1.0</span>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>

@@ -24,6 +24,7 @@ PL-2_HANDOVER.md
 # Session outputs (local artifacts, not deployed)
 # NOTE: outputs/ is production code (dashboard.py, static/) — do NOT ignore the folder itself
 strategy/
+!docs-site/strategy/
 pm/scheduled-tasks/
 
 # Generated deliverables in outputs/ — text artifacts archived, binaries ignored

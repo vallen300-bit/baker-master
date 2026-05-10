@@ -108,6 +108,18 @@
       ]
     },
     {
+      "name": "STRATEGY",
+      "slug": "strategy",
+      "presentations": [
+        {
+          "title": "AI for Luxury Real Estate Developers \u2014 Brisen Platform Vision",
+          "file": "ai-for-luxury-developers-vision.html",
+          "created": "2026-05-10",
+          "matter": "brisen"
+        }
+      ]
+    },
+    {
       "name": "NVIDIA",
       "slug": "nvidia",
       "presentations": [
