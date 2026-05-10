@@ -293,7 +293,8 @@ def _bootstrap_tier_b_schema(dsn: str) -> None:
             committed_at TIMESTAMPTZ,
             committer_agent TEXT,
             action_class TEXT,
-            self_cost_eur NUMERIC(12, 2)
+            self_cost_eur NUMERIC(12, 2),
+            reserved_at TIMESTAMPTZ
         )
         """,
         """
@@ -303,12 +304,18 @@ def _bootstrap_tier_b_schema(dsn: str) -> None:
             ADD COLUMN IF NOT EXISTS committed_at TIMESTAMPTZ,
             ADD COLUMN IF NOT EXISTS committer_agent TEXT,
             ADD COLUMN IF NOT EXISTS action_class TEXT,
-            ADD COLUMN IF NOT EXISTS self_cost_eur NUMERIC(12, 2)
+            ADD COLUMN IF NOT EXISTS self_cost_eur NUMERIC(12, 2),
+            ADD COLUMN IF NOT EXISTS reserved_at TIMESTAMPTZ
         """,
         """
         CREATE INDEX IF NOT EXISTS idx_baker_actions_tier_b_committed
             ON baker_actions (committed_at)
             WHERE tier = 'B' AND cost_eur IS NOT NULL
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_baker_actions_tier_b_reserved
+            ON baker_actions (reserved_at)
+            WHERE tier = 'B' AND cost_eur IS NOT NULL AND committed_at IS NULL
         """,
         """
         CREATE TABLE IF NOT EXISTS tier_b_action_classes (

@@ -45,6 +45,8 @@ def test_pass_under_caps(clean_baker_actions, register_class):
     assert decision.verdict == "PASS"
     assert decision.cost_eur == 1.00
     assert decision.pending_id is None
+    assert decision.reservation_id is not None
+    assert isinstance(decision.reservation_id, int)
 
 
 def test_per_action_cap_paused(clean_baker_actions, register_class):
@@ -141,6 +143,8 @@ def test_novel_class_with_self_cost_passes(clean_baker_actions):
     decision = enforce_tier_b(action)
     assert decision.verdict == "PASS"
     assert decision.cost_eur == 42.00
+    assert decision.reservation_id is not None
+    assert isinstance(decision.reservation_id, int)
 
 
 def test_unknown_registry_class_raises(clean_baker_actions):
