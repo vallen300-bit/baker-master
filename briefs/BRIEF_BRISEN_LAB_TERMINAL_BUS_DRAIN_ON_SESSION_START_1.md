@@ -3,9 +3,9 @@
 **Status:** V0.2 — pending Director ratify (V0.1 → V0.2 reviewer fixes folded 2026-05-11)
 **Author:** AH1 (terminal session, 2026-05-10 / 2026-05-11)
 **Reviewer:** AH2 cross-lane (auth-adjacent; no `/security-review` skill mandate — not Tier-A user-facing surface)
-**Target build lane:** B1 (idle, no brisen-lab context dependency)
+**Target build lane:** B2 (Director picked B2 over B1; B3 is busy)
 **Tier:** B (medium-low; ~3-4h)
-**Branch convention:** `b1/brisen-lab-bus-drain-on-session-start-1`
+**Branch convention:** `b2/brisen-lab-bus-drain-on-session-start-1`
 **Trigger:** AID provisioning end-to-end smoke 2026-05-10T21:55Z closed AID's bus delivery, but exposed the wake-mechanism gap (V0.2 §#3) — AH2 + B-codes + AID are provisioned but won't see bus messages without an active poll or hook drain. Without this brief, paste-block-via-Director-clipboard remains the only reliable delivery path for non-active terminals.
 
 ---
@@ -18,7 +18,7 @@ Four reviewer blockers folded:
 
 - **B1 CRITICAL — env vars on _emit pipe-tail don't reach the inline python3 block.** Original draft set `SLUG=... STATE_FILE=... | _emit`; those vars apply to `_emit` (a separate subprocess), not to the python3 -c block before the pipe. python3 would `KeyError` on `os.environ["SLUG"]` every drain, silently crashing the hook. Fix: prefix the python3 invocation with the env vars + plumb the curl response through `RESP=...` env-var instead of stdin (stdin is consumed by the pipe-to-`_emit` instead).
 - **B2 CRITICAL — non-atomic state-file write.** `open(state_file, "w")` could leave a partial/empty file if the process is killed mid-write. Next session reads `SINCE=""`, daemon coerces to `created_at > ''` (very old timestamp), drains entire history. Fix: `tempfile.mkstemp` + `os.replace()` (atomic on POSIX). On tmp-write failure: leave state file unchanged (re-drain next session beats silent cursor corruption).
-- **B3 BLOCKER — JSON snippet ended with `...` literal, not valid JSON.** If B1 copied the brief's snippet as the new file content, it would clobber `permissions`, `model`, `statusLine`, `enabledPlugins`, `extraKnownMarketplaces`, `skipDangerousModePermissionPrompt`, `theme`, `_comment` — every other top-level key. Fix: use `jq --argjson new ... '.hooks.SessionStart += [$new]'` to splice the new entry alongside Forge while preserving all other keys; backup + validate before swap.
+- **B3 BLOCKER — JSON snippet ended with `...` literal, not valid JSON.** If the builder copied the brief's snippet as the new file content, it would clobber `permissions`, `model`, `statusLine`, `enabledPlugins`, `extraKnownMarketplaces`, `skipDangerousModePermissionPrompt`, `theme`, `_comment` — every other top-level key. Fix: use `jq --argjson new ... '.hooks.SessionStart += [$new]'` to splice the new entry alongside Forge while preserving all other keys; backup + validate before swap.
 - **B4 MODERATE — 6s curl + ~3s op read could approach 10s hook timeout.** Render cold-starts and 1Password's first-call latency combined could trip host-level timeout before the hook's internal `exit 0` runs, potentially treating the hook as a failure. Fix: curl `--max-time 4`, hook timeout raised to 15s, `curl --max-time 4 + op read ~3s = ~7s worst-case` leaves >7s headroom.
 
 One non-blocker note also folded:
@@ -328,12 +328,12 @@ Expected: row visible with `to_terminals` containing `b1`, `acknowledged_at IS N
 
 ## Sequencing
 
-1. **B1 implements** the hook + settings.json patch + tests + verification (steps 1-4 above).
+1. **B2 implements** the hook + settings.json patch + tests + verification (steps 1-4 above).
 2. **AH2 cross-lane review** on the PR (auth-adjacent — new caller pattern using existing terminal keys; client-side only, no daemon code change).
 3. **Director ratifies** the user-global `~/.claude/settings.json` edit pre-merge (because it's outside the repo and affects EVERY Claude session on Director's Mac). Director should:
-   - Cmd+Q any active Claude sessions before B1 applies the user-global edit.
+   - Cmd+Q any active Claude sessions before B2 applies the user-global edit.
    - Start a fresh `bm-aihead1` session post-edit; confirm: (a) Forge hook still fires per its own startup log, (b) bus-drain hook fires (look for `[bus-drain]` status line OR drained-message context block).
-4. **Merge baker-master PR** with the brief itself + a `briefs/_reports/B1_BUS_DRAIN_<date>.md` ship report documenting the user-global file states pre-/post-edit.
+4. **Merge baker-master PR** with the brief itself + a `briefs/_reports/B2_BUS_DRAIN_<date>.md` ship report documenting the user-global file states pre-/post-edit.
 
 ## Estimated complexity
 

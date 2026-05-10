@@ -1,106 +1,98 @@
----
-status: PENDING
-brief: briefs/BRIEF_BRISEN_LAB_TERMINAL_BUS_DRAIN_ON_SESSION_START_1.md
-trigger_class: TIER_B_FLEET_INFRA
-dispatched_at: 2026-05-11
-dispatched_by: ai-head-1 (AH1)
-target: b1
-director_ratification: Director ratified 2026-05-11 in chat ("go ahead") after AID provisioning round-trip exposed V0.2 §#3 wake-mechanism gap; AH1 authored brief V0.1 → V0.2 (reviewer pass folded 4 blockers); Director's prior comment "AH2 + B-codes still via Director paste-block (not on bus yet)" relayed from parallel-AH1 instance flagged this as the next-shipping fleet-infra unblock.
-priority: P2
-phase: 1 of 1 (single PR)
-unblocks:
-  - Fleet-wide bus-as-default delivery: AH1/AH2/B1-B5/architect/AID/cortex all gain SessionStart inbox drain
-  - Director-clipboard-relay becomes fallback only (was primary delivery path for non-active terminals)
-  - V0.2 §#3 wake-mechanism pattern (2) ship; pattern (1) tmux-send-keys remains deferred
-expected_pr_count: 1 (baker-master, plus user-global hook file + settings.json edit outside the repo)
-expected_branch_name: b1/brisen-lab-bus-drain-on-session-start-1
-expected_complexity: low-medium (~3-4h)
-mandatory_2nd_pass: FALSE  # feature-dev:code-reviewer pass on brief done (4 blockers folded); /security-review NOT mandatory (fleet-internal auth, not user-facing Tier-A); AH2 cross-lane review on PR per autonomy charter §3
-last_heartbeat: null
-autopoll_eligible: true
----
+# CODE_1_PENDING — BRIEF_PLAUD_TRIGGER_FIX_1 — **COMPLETE**
 
-# CODE_1_PENDING — BRIEF_BRISEN_LAB_TERMINAL_BUS_DRAIN_ON_SESSION_START_1 — 2026-05-11
+**Status:** COMPLETE 2026-05-07
+**PR:** https://github.com/vallen300-bit/baker-master/pull/168 (OPEN — awaiting 5-gate review)
+**Branch:** `b1/plaud-trigger-fix-1` @ `4cf2651`
+**Ship report:** `briefs/_reports/B1_plaud_trigger_fix_1_20260507.md`
 
-**Brief:** `briefs/BRIEF_BRISEN_LAB_TERMINAL_BUS_DRAIN_ON_SESSION_START_1.md` (READ FIRST — 344 lines, V0.2 post-reviewer-fold, complete embedded hook script + jq splice command + 5-section verification including V0.2 reviewer-fix sanity checks)
-**Working dir:** `~/bm-b1`
-**Working branch:** `b1/brisen-lab-bus-drain-on-session-start-1`
+**Dispatched:** 2026-05-06
+**Tier:** B
 **Repo:** `vallen300-bit/baker-master`
+**Branch:** `b1/plaud-trigger-fix-1`
+**Brief:** `briefs/BRIEF_PLAUD_TRIGGER_FIX_1.md` (read first — full spec, 5 patches + 1 new test file, copy-paste-ready code blocks)
 
 ## Summary
 
-Wire V0.2 §#3 wake-mechanism pattern (2) — SessionStart hook drains V2 bus inbox for the current terminal's BAKER_ROLE slug on every Claude Code session-open, emits unread messages as `additionalContext`. Closes the delivery gap: AH2 + B-codes + AID are all provisioned on the bus (have keys + authority rows), but receivers don't see incoming traffic without an active poll OR a hook drain. AID's first successful round-trip 2026-05-10T22:05Z worked only because AID manually polled.
+Plaud transcripts arrived as header-only shells in DB for ~3 weeks (since 2026-04-17). Root cause confirmed by AH2-T 2026-05-06 eve: `backfill_plaud()` ingests recordings before Plaud finishes transcription; `trigger_state.mark_processed` then locks the source_id so incremental re-ingestion never picks up the completed transcript. No alarm fired (silent failure).
 
-**2 files to create + 1 user-global edit (NOT in the repo):**
+5-patch fix:
+1. `_extract_transcript_text` — warning when transaction URL absent or S3 segments empty (today: silent).
+2. `backfill_plaud()` line 519+ — add `is_trans` filter mirroring incremental path at line 297-299. **PRIMARY BUG FIX.**
+3. `check_new_plaud_recordings()` — stale-refresh lane: re-process `is_trans=True` recordings whose DB row has `length(full_transcript) < 200`, bypassing `is_processed` check (UPSERT via `store_meeting_transcript` ON CONFLICT).
+4. After successful store, if `duration > 5min AND body < 200 chars AND is_trans=True` → `report_failure("plaud", ...)` for loud regression alarm.
+5. New helper `_has_empty_db_row(source_id, threshold=200)` for stale-refresh check.
+6. Unit test in `tests/test_plaud_trigger.py` — covers backfill skip on `is_trans=False`, stale-refresh trigger, empty-body alert.
 
-1. **New hook file:** `~/.claude/hooks/session-start-bus-drain.sh` (user-global; NOT inside `baker-master`).
-   - Resolves BAKER_ROLE → slug (mirror `scripts/bus_post.sh` ROLE_TO_SLUG).
-   - Fetches `op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_<slug>/credential`.
-   - Reads `~/.brisen-lab-bus-last-seen-<slug>.txt` (24h-ago default on first run).
-   - GETs `https://brisen-lab.onrender.com/msg/<slug>?since=<last>&limit=50` with `X-Terminal-Key`.
-   - Emits formatted summary as `additionalContext` JSON envelope (≤30 messages rendered, overflow noted).
-   - Updates state file atomically via `tempfile.mkstemp` + `os.replace()`.
-   - Never blocks session start: all error paths emit a short status line + exit 0.
+## Pre-requisites
 
-2. **User-global `~/.claude/settings.json` edit:** `jq`-splice the new SessionStart entry alongside the existing Forge hook entry. Do NOT overwrite the file — it has 8 other top-level keys (`permissions`, `model`, `statusLine`, `enabledPlugins`, `extraKnownMarketplaces`, `skipDangerousModePermissionPrompt`, `theme`, `_comment`) that must survive. Exact jq command in brief §Implementation step 2.
+- baker-master main HEAD includes brief commit (PR #167). No env state, no blocking briefs.
+- B1 branch `b1/plaud-trigger-fix-1` from main.
 
-3. **In-repo: `tests/test_bus_drain_hook.py`** — unit tests covering the 5 failure paths + happy path. Test scaffolding only (the hook itself is user-global; the test stubs `curl` and `op` via env vars).
+## Acceptance criteria
 
-## CRITICAL — reviewer-caught issues already folded into V0.2 brief
-
-A `feature-dev:code-reviewer` pass on the brief itself (2026-05-11) caught 4 blockers + 1 token-budget note. ALL FOLDED INTO V0.2. If you encounter:
-
-- **`KeyError` on `os.environ["SLUG"]` inside the python3 invocation** — the brief's V0.1 draft set env vars on `_emit`'s pipe-tail (a separate subprocess that doesn't inherit them). V0.2 fix: env vars prefixed on the python3 invocation itself; curl response plumbed via `RESP=...` env-var instead of stdin. USE V0.2 SCRIPT VERBATIM.
-- **State file written via plain `open(state_file, "w")`** — non-atomic; mid-write kill leaves partial/empty file. V0.2 fix: `tempfile.mkstemp` + `os.replace()`. DO NOT skip.
-- **JSON config as a paste-snippet ending with `...`** — V0.1 draft would have clobbered every other top-level key. V0.2 fix: `jq --argjson new ... '.hooks.SessionStart += [$new]'` with backup + validate + atomic swap. USE jq, NOT file overwrite.
-- **6s curl + ~3s op read inside 10s hook timeout** — V0.2 fix: `curl --max-time 4`, hook timeout raised to `15`. Both already in brief.
-- **Rendering >200 messages → ~70KB additionalContext** — V0.2 fix: curl `limit=50` + rendering hard cap `RENDER_CAP=30`. Overflow note in header.
-
-## Scope discipline (single brief)
-
-This is single-phase. No follow-on briefs in this dispatch. Active-wake for currently-running terminals (V0.2 §#3 pattern 1: tmux send-keys) is **deferred** — flagged as known limitation §2 in brief.
-
-**Do NOT add:**
-- Auto-ACK on drain (drain emits as context; receiver explicitly ACKs).
-- Per-picker `.claude/settings.json` edits (user-global handles all sessions).
-- Changes to `scripts/bus_post.sh` / `bus_post.py` (orthogonal client-side post tooling).
-- Any change to `brisen-lab` daemon (`bus.py`, `auth_lab.py`, `db.py` are read-only consumers of existing GET endpoint).
+Per brief §ACs (read brief first; ACs codify each of the 5 patches + test coverage + sentinel alert wiring).
 
 ## Ship gate
 
-1. `bash -n ~/.claude/hooks/session-start-bus-drain.sh` — syntax check passes.
-2. `pytest tests/test_bus_drain_hook.py -v` — ≥6 tests pass (5 failure paths + 1 happy path).
-3. Live end-to-end smoke per brief §Verification step 2 — post from AH1 (`lead`) to `b1`, start fresh `~/bm-b1` session, drain renders in additionalContext within <8s.
-4. V0.2 reviewer-fix sanity per brief §Verification step 5 — all 4 folds verified live.
-5. PR description includes literal `pytest` stdout + literal `bash -n` exit code (no "passes by inspection" — Lesson #8).
-6. AH2 cross-lane review per autonomy charter §3 — auth-adjacent change, no `/security-review` mandate.
+Literal `pytest tests/test_plaud_trigger.py -v` GREEN — no by-inspection (Lesson #52). Plus `pytest` full-suite GREEN (no regressions).
 
-## Files touched
+## Note on broken recordings
 
-**Create (in-repo):**
-- `tests/test_bus_drain_hook.py`
-
-**Create (user-global, NOT in repo — Director ratifies edit pre-merge):**
-- `~/.claude/hooks/session-start-bus-drain.sh`
-
-**Modify (user-global, NOT in repo — Director ratifies edit pre-merge):**
-- `~/.claude/settings.json` (jq splice — backup + validate + atomic swap per brief)
-
-**Do NOT touch:**
-- `scripts/bus_post.sh` / `bus_post.py` (orthogonal — bus_post is for outbound POST; this hook is for inbound GET).
-- Per-picker `.claude/settings.json` (no edit needed; user-global handles all).
-- `brisen-lab/` repo (read-only consumer of existing GET /msg/<terminal>).
-- `BRISEN_LAB_TERMINAL_KEYS` Render env (already populated for all 13 slugs).
-- Other SessionStart hooks (`session-start-role.sh`, Forge hook — both continue firing independently).
-
-## Estimated complexity
-
-Low-Medium · ~3-4h · 1 PR (in-repo) + user-global edit (Director-ratified) · Tier-B fleet-infra. No `/security-review` mandate.
+4 Plaud recordings from 2026-04-17+ remain Plaud-side blocked per AH2-T diagnosis (transcription stuck — Director-side action needed). This brief is the **preventive fix** so the next time Plaud is healthy, recordings auto-recover via stale-refresh lane.
 
 ## Heartbeat
 
-Update `last_heartbeat: <UTC ISO>` in this mailbox file every 30 min during active work. Standard `b-code-dispatch-coordination.md` §3 protocol. Brief is small enough that 1-2 heartbeats should cover the full cycle.
+12h cadence binding (per SKILL.md `59f23c4` §B-code stall chase).
 
-## Prior CODE_1 task (archive reference)
+## Read first (MANDATORY)
 
-BRIEF_PLAUD_TRIGGER_FIX_1 — COMPLETE 2026-05-07 (PR #168 merged 2026-05-07T07:20Z; gate-1+3 fold I1+I2 folded same day per AH1-T autonomous dispatch). Mailbox hygiene rule applied — overwriting per `_ops/processes/b-code-dispatch-coordination.md` §3.
+1. `briefs/BRIEF_PLAUD_TRIGGER_FIX_1.md` — full spec
+2. `~/baker-vault/_ops/agents/b1/orientation.md` — role
+3. `~/.claude/projects/-Users-dimitry-Vallen-Dropbox-Dimitry-vallen-Baker-Project/memory/MEMORY.md` — canonical
+4. CLAUDE.md (this repo) — workflow + hard rules
+
+## Confirmation phrase
+
+`B1 oriented. Read: CODE_1_PENDING.md, MEMORY.md.`
+
+## Caller
+
+AH1-T (autonomous dispatch per Director instruction 2026-05-06 — task #2 from drain box).
+AH1-App authored brief (Steps 1-3); AH1-T commit + dispatch lane (Step 4-5).
+
+---
+
+## GATE-1+3 2nd-pass UPDATE — 2026-05-07 (fold before merge)
+
+**Source:** feature-dev:code-reviewer + code-architecture-reviewer 2nd-pass on PR #168 (HEAD `a11122f`). Both verdicts PASS-WITH-NITS-FOLD-NEEDED. 0 CRITICAL. Convergent on alarm-fatigue + multi-instance race; non-convergent watermark verification.
+
+**I1 (BOTH gates flagged — alarm fatigue / per-source_id dedup)**
+`triggers/plaud_trigger.py` empty-body sentinel fires every 15-min poll for the same broken recording until Plaud-side recovers. With 4 known-stuck recordings, this floods `report_failure("plaud", ...)` → `#cockpit` Slack. Fix: add per-`source_id` dedup before `report_failure` — fire once per recording per 24h. Implementation choice (B1 picks):
+- Option A: reuse `trigger_state` with synthetic key `f"plaud_empty_alarm_{source_id}"` + check `is_processed` before firing
+- Option B: in-memory dict with 24h TTL (lighter; lost on Render restart)
+- Option C: `sentinel_health` table-side dedup (heaviest but auditable)
+
+Also: gate 1 flagged that BOTH backfill path AND stale-refresh path can fire on the same `source_id` within one cycle (boot tick). Dedup must be cycle-aware OR call-site coalesced into a single helper that checks dedup once.
+
+Regression test: trigger empty-body condition twice in same test, assert `report_failure` called exactly once.
+
+**I2 (gate 3 flagged — multi-instance race on stale-refresh lane)**
+`triggers/plaud_trigger.py` stale-refresh path bypasses `is_processed`. Render rolling deploy runs 2 instances concurrently. If both poll the same stale row, both call `fetch_plaud_detail` + `store_meeting_transcript`. PG `ON CONFLICT(id) DO UPDATE` saves dedup at storage layer, but **Qdrant has no dedup** — `store_document()` uses fresh `uuid.uuid4()` per point ID, so duplicate Voyage embedding calls + duplicate Qdrant points result. Fix: wrap stale-refresh body in `pg_try_advisory_xact_lock(hashtext(source_id))` to serialize per-source. Skip iteration if lock not acquired (other instance owns it; will retry next cycle).
+
+Regression test: simulate two concurrent stale-refresh attempts on same source_id, assert second skips cleanly without Qdrant write.
+
+**I3 (gate 1 flagged — watermark verification, may not need patch)**
+Confirm stale-refresh lane does NOT advance the `trigger_state` watermark before all stale rows iterate. Verification-only — read current code path. If watermark management is purely in the existing incremental path's tail (post-loop), this is already correct and no patch needed. If stale-refresh advances watermark inside its loop, fix to leave watermark management to the incremental path's existing tail.
+
+Document finding in fold ship report (no patch needed if confirmed-already-correct).
+
+**Path forward (B1):**
+1. Apply I1 + I2 on `b1/plaud-trigger-fix-1` branch (HEAD `a11122f`)
+2. Verify I3 — read code, document outcome in ship report; patch only if broken
+3. Add 2 regression tests (one per I1/I2 patch)
+4. Live `pytest tests/test_plaud_trigger.py -v` GREEN — literal, no by-inspection
+5. Re-fire focused gate chain on fold diff only (gates 1 + 3)
+6. Update PR #168 ship report with new HEAD SHA + fold gate verdicts
+7. AH2 /security-review (gate 2) running in parallel; AH1-T merges after fold gates PASS + AH2 PASS
+
+**Anchor:** AH1-T autonomous fold dispatch per charter §3 (routine 2nd-pass cycle, mirrors PR #159 H1+M1+M2 fold pattern from CODE_1 prior dispatch).
