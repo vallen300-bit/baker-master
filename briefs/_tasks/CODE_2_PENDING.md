@@ -9,7 +9,7 @@ claimed_at: 2026-05-11T00:30Z
 claimed_by: B2
 shipped_at: 2026-05-11T00:50Z
 shipped_by: B2
-pr: TBD (gh pr create pending)
+pr: https://github.com/vallen300-bit/baker-master/pull/183
 report: briefs/_reports/B2_BUS_DRAIN_20260511.md
 director_ratification: Director ratified 2026-05-11 in chat ("go ahead") after AID provisioning round-trip exposed V0.2 §#3 wake-mechanism gap; AH1 authored brief V0.1 → V0.2 (reviewer pass folded 4 blockers + 1 token-budget note). Director redirected dispatch B1 → B2 same session ("can you dispatch to b2 instead? b3 is busy"). Director's prior comment "AH2 + B-codes still via Director paste-block (not on bus yet)" relayed from parallel-AH1 instance flagged this as the next-shipping fleet-infra unblock.
 priority: P2
