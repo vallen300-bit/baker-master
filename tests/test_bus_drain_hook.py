@@ -1,0 +1,318 @@
+"""Tests for SessionStart bus-drain hook.
+
+Brief: BRISEN_LAB_TERMINAL_BUS_DRAIN_ON_SESSION_START_1.
+
+Hook lives at tests/fixtures/session-start-bus-drain.sh (canonical) and is
+deployed user-global at ~/.claude/hooks/session-start-bus-drain.sh by Director
+pre-merge per brief Sequencing step 3. Drift detection: see
+test_user_global_matches_repo at the bottom of this file.
+
+Tests stub `curl` and `op` by prepending a tempdir to PATH. The tempdir holds
+shell stubs that echo a fixed response or fail per the test's scenario, so the
+hook exercises real bash + python3 + JSON parsing without network or 1Password.
+
+Coverage (per brief Quality Checkpoint #2 — 5 failure paths + happy path):
+  1. BAKER_ROLE unset → silent no-op (no additionalContext emitted).
+  2. `op read` failure (empty stdout) → "1Password fetch failed" status line.
+  3. Daemon unreachable (curl exit 7) → "daemon unreachable" status line.
+  4. Daemon returns malformed JSON → "bad daemon response" status line.
+  5. Empty inbox (messages: []) → quiet no-op (no additionalContext).
+  6. Happy path: 2 messages → rendered preview + state file written atomically.
+
+Plus drift-detection on Director's Mac (skipped in CI):
+  7. ~/.claude/hooks/session-start-bus-drain.sh matches the repo fixture.
+"""
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import stat
+import subprocess
+import textwrap
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+HOOK_FIXTURE = REPO_ROOT / "tests" / "fixtures" / "session-start-bus-drain.sh"
+USER_GLOBAL_HOOK = Path.home() / ".claude" / "hooks" / "session-start-bus-drain.sh"
+
+
+def _make_stub(path: Path, body: str) -> None:
+    """Write an executable shell stub at `path` with the given body."""
+    path.write_text(body)
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
+def _run_hook(env: dict, tmp_path: Path) -> subprocess.CompletedProcess:
+    """Run the hook fixture with HOME pointed at tmp_path so state file lands there."""
+    full_env = {
+        "PATH": env["PATH"],
+        "HOME": str(tmp_path),
+        # Default: in-flight test mode. BAKER_ROLE / BRISEN_LAB_DAEMON_URL come from env.
+    }
+    full_env.update({k: v for k, v in env.items() if k != "PATH"})
+    return subprocess.run(
+        ["bash", str(HOOK_FIXTURE)],
+        input="{}",  # Claude passes session metadata JSON; hook drains it.
+        capture_output=True,
+        text=True,
+        env=full_env,
+        timeout=10,
+    )
+
+
+@pytest.fixture
+def stubs_dir(tmp_path):
+    """Per-test tempdir holding curl + op stubs; prepended to PATH."""
+    d = tmp_path / "bin"
+    d.mkdir()
+    return d
+
+
+@pytest.fixture
+def base_env(stubs_dir, monkeypatch):
+    real_path = os.environ.get("PATH", "/usr/bin:/bin")
+    return {
+        "PATH": f"{stubs_dir}:{real_path}",
+        "BRISEN_LAB_DAEMON_URL": "https://test-daemon.invalid",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Failure path 1: BAKER_ROLE unset
+# ---------------------------------------------------------------------------
+
+def test_baker_role_unset_silent_noop(stubs_dir, base_env, tmp_path):
+    """No BAKER_ROLE → hook exits 0 with empty stdout (no additionalContext)."""
+    _make_stub(stubs_dir / "op", "#!/bin/bash\necho 'op should not be called'\nexit 99\n")
+    _make_stub(stubs_dir / "curl", "#!/bin/bash\necho 'curl should not be called'\nexit 99\n")
+
+    env = dict(base_env)
+    # BAKER_ROLE intentionally unset.
+    result = _run_hook(env, tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "", f"expected silent no-op, got: {result.stdout!r}"
+
+
+# ---------------------------------------------------------------------------
+# Failure path 2: 1Password fetch failure
+# ---------------------------------------------------------------------------
+
+def test_op_fetch_failure_emits_status(stubs_dir, base_env, tmp_path):
+    """`op read` returns empty → status line emitted, exit 0."""
+    _make_stub(stubs_dir / "op", "#!/bin/bash\nexit 1\n")
+    _make_stub(stubs_dir / "curl", "#!/bin/bash\necho 'curl should not be called'\nexit 99\n")
+
+    env = dict(base_env, BAKER_ROLE="b2")
+    result = _run_hook(env, tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    # JSON envelope wraps the status line as additionalContext.
+    payload = json.loads(result.stdout)
+    ctx = payload["hookSpecificOutput"]["additionalContext"]
+    assert "1Password fetch failed" in ctx
+    assert "slug=b2" in ctx
+
+
+# ---------------------------------------------------------------------------
+# Failure path 3: Daemon unreachable (curl non-zero exit)
+# ---------------------------------------------------------------------------
+
+def test_daemon_unreachable_emits_status(stubs_dir, base_env, tmp_path):
+    """curl returns non-zero (e.g. timeout) → 'daemon unreachable' status, exit 0."""
+    _make_stub(stubs_dir / "op", "#!/bin/bash\necho 'fake-key-1234'\n")
+    _make_stub(stubs_dir / "curl", "#!/bin/bash\nexit 28\n")  # 28 = curl timeout
+
+    env = dict(base_env, BAKER_ROLE="b2")
+    result = _run_hook(env, tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    ctx = payload["hookSpecificOutput"]["additionalContext"]
+    assert "daemon unreachable" in ctx
+    assert "timeout 4s" in ctx
+    assert "slug=b2" in ctx
+
+
+# ---------------------------------------------------------------------------
+# Failure path 4: Daemon returns malformed JSON
+# ---------------------------------------------------------------------------
+
+def test_bad_daemon_response_emits_status(stubs_dir, base_env, tmp_path):
+    """Daemon returns non-JSON (e.g. HTML 502 page) → 'bad daemon response', exit 0."""
+    _make_stub(stubs_dir / "op", "#!/bin/bash\necho 'fake-key-1234'\n")
+    _make_stub(stubs_dir / "curl", "#!/bin/bash\necho '<html>502 bad gateway</html>'\nexit 0\n")
+
+    env = dict(base_env, BAKER_ROLE="b2")
+    result = _run_hook(env, tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    ctx = payload["hookSpecificOutput"]["additionalContext"]
+    assert "bad daemon response" in ctx
+
+
+# ---------------------------------------------------------------------------
+# Failure path 5: Empty inbox
+# ---------------------------------------------------------------------------
+
+def test_empty_inbox_quiet_noop(stubs_dir, base_env, tmp_path):
+    """Daemon returns {messages: []} → silent no-op (no additionalContext)."""
+    _make_stub(stubs_dir / "op", "#!/bin/bash\necho 'fake-key-1234'\n")
+    _make_stub(stubs_dir / "curl", '#!/bin/bash\necho \'{"messages": []}\'\nexit 0\n')
+
+    env = dict(base_env, BAKER_ROLE="b2")
+    result = _run_hook(env, tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "", f"expected silent no-op, got: {result.stdout!r}"
+
+
+# ---------------------------------------------------------------------------
+# Failure path 5b: Daemon returns auth error JSON ({detail: ...})
+# ---------------------------------------------------------------------------
+
+def test_daemon_detail_error_emits_status(stubs_dir, base_env, tmp_path):
+    """Daemon returns 401 JSON {detail: 'unauthorized'} → 'daemon error' status, exit 0."""
+    _make_stub(stubs_dir / "op", "#!/bin/bash\necho 'wrong-key'\n")
+    _make_stub(
+        stubs_dir / "curl",
+        '#!/bin/bash\necho \'{"detail": "Unauthorized terminal key"}\'\nexit 0\n',
+    )
+
+    env = dict(base_env, BAKER_ROLE="b2")
+    result = _run_hook(env, tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    ctx = payload["hookSpecificOutput"]["additionalContext"]
+    assert "daemon error" in ctx
+    assert "Unauthorized" in ctx
+
+
+# ---------------------------------------------------------------------------
+# Happy path: 2 messages drained, state file written atomically
+# ---------------------------------------------------------------------------
+
+def test_happy_path_renders_and_writes_state(stubs_dir, base_env, tmp_path):
+    """2 messages → rendered preview + state file holds newest created_at."""
+    sample = {
+        "messages": [
+            {
+                "id": 100,
+                "thread_id": "t-abc",
+                "parent_id": None,
+                "from_terminal": "lead",
+                "to_terminals": ["b2"],
+                "topic": "bus/smoke",
+                "kind": "dispatch",
+                "body_preview": "first message body — short single line.",
+                "created_at": "2026-05-11T10:00:00Z",
+                "wake_attempted_at": None,
+                "acknowledged_at": None,
+                "deleted_at": None,
+                "tier_required": "B",
+            },
+            {
+                "id": 101,
+                "thread_id": "t-abc",
+                "parent_id": 100,
+                "from_terminal": "lead",
+                "to_terminals": ["b2"],
+                "topic": "bus/smoke",
+                "kind": "dispatch",
+                "body_preview": "second message body\nwith\nmultiple\nlines.",
+                "created_at": "2026-05-11T10:05:00Z",
+                "wake_attempted_at": None,
+                "acknowledged_at": "2026-05-11T10:06:00Z",
+                "deleted_at": None,
+                "tier_required": "B",
+            },
+        ]
+    }
+    body_json = json.dumps(sample).replace("'", "'\\''")
+    _make_stub(stubs_dir / "op", "#!/bin/bash\necho 'fake-key-1234'\n")
+    _make_stub(stubs_dir / "curl", f"#!/bin/bash\ncat <<'EOF'\n{json.dumps(sample)}\nEOF\nexit 0\n")
+
+    env = dict(base_env, BAKER_ROLE="b2")
+    result = _run_hook(env, tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    ctx = payload["hookSpecificOutput"]["additionalContext"]
+    assert "[bus-drain] 2 unread message(s) for b2" in ctx
+    assert "#100" in ctx
+    assert "#101" in ctx
+    assert "from lead" in ctx
+    assert "topic: bus/smoke" in ctx
+    # First message body shows on first line; second message multi-line note shows.
+    assert "first message body" in ctx
+    assert "more line(s)" in ctx  # second message has 3 extra lines
+    # ACK + reply hints.
+    assert "POST" in ctx and "/ack" in ctx
+    assert "bus_post.sh" in ctx
+
+    # State file exists, atomic-named, holds newest timestamp.
+    state_file = tmp_path / ".brisen-lab-bus-last-seen-b2.txt"
+    assert state_file.exists(), "state file should have been written"
+    assert state_file.read_text().strip() == "2026-05-11T10:05:00Z"
+
+    # No leftover .tmp files in HOME (atomic replace cleans up).
+    leftover_tmps = list(tmp_path.glob(".brisen-lab-bus-last-seen-tmp-*"))
+    assert leftover_tmps == [], f"leftover tmp files: {leftover_tmps}"
+
+
+# ---------------------------------------------------------------------------
+# Happy path 2: state file from previous run is consumed as `since` cursor
+# ---------------------------------------------------------------------------
+
+def test_existing_state_file_used_as_since(stubs_dir, base_env, tmp_path):
+    """Existing state file → its timestamp passed to curl as ?since=..."""
+    state_file = tmp_path / ".brisen-lab-bus-last-seen-b2.txt"
+    state_file.write_text("2026-05-10T22:00:00Z")
+
+    # Curl stub captures the URL it was called with into a sentinel file.
+    sentinel = tmp_path / "curl-args.txt"
+    _make_stub(
+        stubs_dir / "curl",
+        textwrap.dedent(f"""\
+            #!/bin/bash
+            # Capture the URL (last positional arg).
+            for a in "$@"; do echo "$a"; done > {sentinel}
+            echo '{{"messages": []}}'
+            exit 0
+        """),
+    )
+    _make_stub(stubs_dir / "op", "#!/bin/bash\necho 'fake-key-1234'\n")
+
+    env = dict(base_env, BAKER_ROLE="b2")
+    result = _run_hook(env, tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    captured = sentinel.read_text()
+    assert "since=2026-05-10T22:00:00Z" in captured, captured
+    assert "limit=50" in captured, captured  # token-budget fold
+
+
+# ---------------------------------------------------------------------------
+# Drift detection: deployed user-global hook matches the repo fixture.
+# Skipped on machines without ~/.claude/hooks/session-start-bus-drain.sh
+# (e.g. CI). Director's Mac runs this test post-deploy to catch drift.
+# ---------------------------------------------------------------------------
+
+def test_user_global_matches_repo():
+    if not USER_GLOBAL_HOOK.exists():
+        pytest.skip(
+            f"user-global hook not deployed at {USER_GLOBAL_HOOK} "
+            "(expected on CI; Director ratifies cp pre-merge)"
+        )
+    fixture_bytes = HOOK_FIXTURE.read_bytes()
+    deployed_bytes = USER_GLOBAL_HOOK.read_bytes()
+    assert fixture_bytes == deployed_bytes, (
+        "drift detected: ~/.claude/hooks/session-start-bus-drain.sh differs from "
+        "tests/fixtures/session-start-bus-drain.sh — re-run "
+        "`cp tests/fixtures/session-start-bus-drain.sh ~/.claude/hooks/session-start-bus-drain.sh`"
+    )
