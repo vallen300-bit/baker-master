@@ -21,6 +21,8 @@ ROLE="${BAKER_ROLE:-}"
 
 if [ -z "$ROLE" ]; then
   case "$REPO_ROOT" in
+    */bm-aihead1) ROLE="lead" ;;
+    */bm-aihead2) ROLE="aihead2" ;;
     */bm-b1) ROLE="b1" ;;
     */bm-b2) ROLE="b2" ;;
     */bm-b3) ROLE="b3" ;;
