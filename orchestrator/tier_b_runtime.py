@@ -202,16 +202,28 @@ class TierBRuntime:
         if conn is None:
             raise RuntimeError("no DB connection — cannot enforce Tier-B")
         old_iso = conn.isolation_level
+        isolation_set = False
         try:
-            conn.set_isolation_level(
-                psycopg2.extensions.ISOLATION_LEVEL_SERIALIZABLE
-            )
-        except Exception:
-            # Older psycopg2 / driver edge case — fall back to in-txn SET.
-            cur = conn.cursor()
-            cur.execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-            cur.close()
-        try:
+            try:
+                conn.set_isolation_level(
+                    psycopg2.extensions.ISOLATION_LEVEL_SERIALIZABLE
+                )
+                isolation_set = True
+            except Exception as primary_exc:
+                # Older psycopg2 / driver edge case — fall back to in-txn SET.
+                try:
+                    cur = conn.cursor()
+                    cur.execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                    cur.close()
+                    isolation_set = True
+                except Exception as fallback_exc:
+                    # HARD-fail: atomicity argument requires SERIALIZABLE. Do
+                    # NOT silently proceed at READ COMMITTED — cap can breach.
+                    raise RuntimeError(
+                        "failed to set SERIALIZABLE isolation: "
+                        f"primary={primary_exc!r}, fallback={fallback_exc!r}"
+                    ) from fallback_exc
+
             cur = conn.cursor()
 
             # Day-bucket cap read: committed today OR reserved-and-active.
@@ -338,11 +350,14 @@ class TierBRuntime:
             raise
         finally:
             # Restore the connection's isolation level before returning to the
-            # pool so the next caller is not surprised by SERIALIZABLE.
-            try:
-                conn.set_isolation_level(old_iso)
-            except Exception:
-                pass
+            # pool so the next caller is not surprised by SERIALIZABLE. Only
+            # touch isolation if we actually changed it; on hard-fail both
+            # paths above raise before mutating state.
+            if isolation_set:
+                try:
+                    conn.set_isolation_level(old_iso)
+                except Exception:
+                    pass
             self._store._put_conn(conn)
 
     # ------------------------------------------------------------------

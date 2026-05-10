@@ -204,9 +204,13 @@ def test_concurrent_enforcers_one_passes_one_pauses(
     rw-conflict on the second commit raises SerializationFailure; retry
     sees the now-€500 reserved total and PAUSEs.
 
-    Seed math: 5 × €99 = €495 committed today. We use test.synthetic
-    (€1) as the registered seed class (any class works for the seed
-    helper); the candidate test.five (€5) is what races.
+    Seed math: 5 × €99 = €495 committed today. The seed helper takes an
+    explicit ``eur_cost`` argument that is written directly onto each
+    seeded ``baker_actions`` row — it does NOT consult the registered
+    price for ``class_name``, so reusing ``test.synthetic`` here (whose
+    registered price is €1) is harmless: the helper writes €99/row. The
+    candidate ``test.five`` (€5) is what actually races through
+    ``enforce_tier_b()``, and IS resolved via the registry.
     """
     register_class("test.five", 5.00)
     # Seed €495 already committed today: 5 × €99.
