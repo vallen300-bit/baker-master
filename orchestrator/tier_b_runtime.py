@@ -81,11 +81,22 @@ class TierBRuntime:
     # ------------------------------------------------------------------
 
     def _resolve_cost(self, action: TierBAction) -> tuple[float, str]:
-        """Return ``(cost_eur, source_tag)``; ``source_tag`` ∈ {registry, self_declared}."""
+        """Resolve (cost_eur, source_tag) for an action.
+
+        ``source_tag`` ∈ {registry, self_declared}. Runs against a separate
+        pooled connection at default isolation — NOT inside enforce()'s
+        SERIALIZABLE txn. Registry rarely changes during a cycle so the
+        read-skew window is acceptable for V1.
+        """
         if action.action_class.startswith("novel:"):
             if action.self_cost_eur is None:
                 raise ValueError(
                     f"action_class={action.action_class!r} requires self_cost_eur"
+                )
+            if action.self_cost_eur < 0:
+                raise ValueError(
+                    f"self_cost_eur must be non-negative (got {action.self_cost_eur}); "
+                    f"negative values would bypass daily/monthly cap math"
                 )
             return float(action.self_cost_eur), "self_declared"
 
@@ -118,65 +129,25 @@ class TierBRuntime:
             self._store._put_conn(conn)
 
     # ------------------------------------------------------------------
-    # Counter math (read-driven)
-    # ------------------------------------------------------------------
-
-    def _current_totals(self) -> tuple[float, float]:
-        """Return ``(day_total_eur, month_total_eur)`` for committed Tier-B actions.
-
-        UTC calendar boundaries. Excludes paused (uncommitted) candidates.
-        """
-        conn = self._store._get_conn()
-        if conn is None:
-            raise RuntimeError("no DB connection — cannot read Tier-B totals")
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                """
-                SELECT COALESCE(SUM(cost_eur), 0)
-                  FROM baker_actions
-                 WHERE tier = 'B'
-                   AND cost_eur IS NOT NULL
-                   AND committed_at >= DATE_TRUNC('day', NOW() AT TIME ZONE 'UTC')
-                 LIMIT 100000
-                """
-            )
-            day_total = float(cur.fetchone()[0])
-
-            cur.execute(
-                """
-                SELECT COALESCE(SUM(cost_eur), 0)
-                  FROM baker_actions
-                 WHERE tier = 'B'
-                   AND cost_eur IS NOT NULL
-                   AND committed_at >= DATE_TRUNC('month', NOW() AT TIME ZONE 'UTC')
-                 LIMIT 100000
-                """
-            )
-            month_total = float(cur.fetchone()[0])
-
-            cur.close()
-            return day_total, month_total
-        except Exception:
-            try:
-                conn.rollback()
-            except Exception:
-                pass
-            raise
-        finally:
-            self._store._put_conn(conn)
-
-    # ------------------------------------------------------------------
     # Enforcement
     # ------------------------------------------------------------------
 
     def enforce(self, action: TierBAction) -> Decision:
         """Decide PASS or PAUSE_REQUIRED for a candidate Tier-B action.
 
-        Atomicity: cost-resolve, counter-read, and pending-insert run inside
-        one SERIALIZABLE transaction. Cap evaluation order: per-action →
-        daily → monthly. The first cap that would be exceeded wins.
+        V1 atomicity scope: single-call atomicity only. The SERIALIZABLE
+        transaction protects the read-then-insert sequence INSIDE one
+        enforce() call. It does NOT protect pool-wide atomicity across
+        concurrent callers — that requires the caller-pattern in B4
+        (caller's baker_actions INSERT must run inside the same txn).
+        See FIXME(B4) below.
         """
+        # FIXME(B4): close atomicity gap — pool-wide cap evasion possible when
+        # concurrent callers materialize. Two enforcers reading €499 day-total
+        # can both PASS because Postgres SSI sees no rw-conflict (PASS path
+        # commits without writing to baker_actions). Closure ratified Path A
+        # 2026-05-10; B4 brief carries hard acceptance criterion. See
+        # _ops/briefs/_precursor/B4_PRECURSOR_ATOMICITY_CLOSURE.md.
         cost_eur, source_tag = self._resolve_cost(action)
 
         conn = self._store._get_conn()

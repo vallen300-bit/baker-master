@@ -114,6 +114,23 @@ def test_novel_class_requires_self_cost(clean_baker_actions):
         enforce_tier_b(action)
 
 
+def test_novel_class_negative_self_cost_rejected(clean_baker_actions):
+    # Brief said "no @requires_pg needed — exits before any DB call." That's
+    # true of _resolve_cost's negative-check branch itself, but enforce_tier_b
+    # init triggers SentinelStoreBack._get_global_instance() which demands
+    # Voyage creds without the test-store patch. Use clean_baker_actions to
+    # match the sibling test_novel_class_requires_self_cost pattern; the
+    # ValueError still fires inside _resolve_cost, before any cap math runs.
+    action = TierBAction(
+        action_class="novel:cap_evasion_attempt",
+        committer_agent="b3",
+        payload={"test": "negative_cost"},
+        self_cost_eur=-50.0,
+    )
+    with pytest.raises(ValueError, match="non-negative"):
+        enforce_tier_b(action)
+
+
 def test_novel_class_with_self_cost_passes(clean_baker_actions):
     action = TierBAction(
         action_class="novel:custom_render_addon",
