@@ -366,3 +366,26 @@ Same applies to AI Head ↔ AI Head dispatches (use `aihead1`/`aihead2` labels p
 2. **Verify the trigger surface in the brief review pass** — reviewer must answer "can I run this smoke from a fresh terminal in <5 min?" If no, brief is incomplete.
 3. **Fallback options ranked**: (a) public API endpoint behind auth, (b) Render Shell exec command in the runbook, (c) local Python with prod env vars (document which env-var lives where), (d) pytest-equivalent (only acceptable for non-load-bearing or operationally-invasive paths, like the LID-DB outage in this brief's smoke #3).
 **Anchor:** `BRIEF_WHATSAPP_RECIPIENT_RESOLVER_FIX_1.md` v0.3 smoke verification 2026-05-08; AH2-T improvised local-Python-with-prod-env path.
+
+### 64. f-string with backslash-escaped quotes inside expression braces is a SyntaxError on Python <3.12 (2026-05-11)
+**Mistake:** `BRIEF_BRISEN_LAB_TERMINAL_BUS_DRAIN_ON_SESSION_START_1.md` V0.2 §Implementation embedded a `python3 -c '...'` script that used `f"... {d[\"detail\"]} ..."` / `f"... {m[\"id\"]} ..."` patterns throughout. Backslash-escaped quotes inside an f-string expression brace is a SyntaxError on Python 3.9-3.11 ("f-string expression part cannot include a backslash"). PEP 701 lifted this restriction only in Python 3.12. The hook would have parsed cleanly on Director's Mac (Python 3.12.12) but every downstream call would have errored — except `python3 -c` swallowed the SyntaxError into a non-zero exit, the SessionStart hook then emitted no `additionalContext`, and ALL drain attempts would have failed silently. No status line, no traceback, no audit trail. The feature would have shipped looking-working but doing nothing.
+**Pattern that fails:**
+```python
+print(f"... {d[\"key\"]} ...")    # SyntaxError on Python 3.9-3.11
+print(f"... {m[\"id\"]} ...")     # same
+```
+**Fixes (both work):**
+```python
+print("... {} ...".format(d["key"]))      # .format() syntax
+# OR alias first:
+v = d["key"]; print(f"... {v} ...")        # drop the inner quote
+```
+**Why it happened:** Brief author wrote the embedded script in a context where Python 3.12 was assumed available. `feature-dev:code-reviewer` brief-review pass did not catch the f-string-backslash-quote pattern — the review caught 4 other blockers + 1 token-budget note but missed this one. B2 hit the SyntaxError live during the first test run (`bash -x` exposed `SyntaxError: f-string expression part cannot include a backslash`), diagnosed, refactored every offending line to `.format()`, and shipped. Saved a silent-failure deployment.
+**Rule:** add to the brief-review checklist:
+```
+[ ] grep for f-strings with backslash-escaped quotes inside expression
+    braces in any embedded `python3 -c '...'` block; rewrite via
+    .format() OR alias the dict access to a local variable first
+```
+Pattern to grep: `f".*{[^}]*\\\\"` inside any embedded Python.
+**Anchor:** `BRIEF_BRISEN_LAB_TERMINAL_BUS_DRAIN_ON_SESSION_START_1.md` V0.2; PR #183 (2026-05-11); B2 implementation pass caught what the brief-reviewer pass missed.
