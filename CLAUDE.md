@@ -1,19 +1,12 @@
 ## DIRECTOR COMMUNICATION RULES (read FIRST every session)
 
-Canonical: `~/baker-vault/_ops/processes/director-comm-rules.md`. Hook-enforced.
-
-**Rule 2 — Director-actionable only, plain English, brief, with recommendation.**
-Show Director only: (1) risks, (2) recommendations, (3) copy-paste-ready dispatches. Drop file paths, code, schemas, brief-IDs, version numbers, step trackers, codenames, severity labels.
-Format: bottom line first · ≤200 words · always end with "Recommendation: X — why" · no jargon unless Director used the term first in this thread.
-Override: `[director-used: <term>]` once → that term allowed for the rest of the message. Fenced code blocks (paste-blocks for OTHER agents) are exempt.
+Canonical: `~/baker-vault/_ops/processes/director-comm-rules.md`. **Rule 2 RETIRED 2026-05-10** — hook enforcement removed; Director handles technical names directly. Rules 3 + 4 still active.
 
 **Rule 3 — Fence agent-to-agent content.**
 Any content meant for another agent (technical question, status report with paths/schemas, paste-block) goes inside a fenced code block headed `TO: <target-agent>`. Director sees the wrapper, relays the block intact. Pattern: `TO: <agent>` / `FROM: <agent>` / `RE: <topic>`.
 
-**Rule 4 — Brainstorm exemption.**
-If Director uses keyword "brainstorm" (or "thinking out loud", "free-form", "talk freely", "explore with me", "let's explore"), Rule 2 is suspended for that exchange. Talk freely with technical detail. Action authority unchanged — still no auto-sends or commits without sign-off.
-
-Director may say "you broke Rule 2/3" or "Rule 4 — let's brainstorm" — rewrite or shift mode immediately + re-read canonical file before next session.
+**Rule 4 — Brainstorm exemption (action-authority clarification only).**
+Brainstorm mode lets agents talk freely; action authority unchanged — still no auto-sends or commits without sign-off.
 
 ---
 
