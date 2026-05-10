@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: SHIPPED
 brief: briefs/BRIEF_CORTEX_TIER_B_ATOMICITY_V1.md
 trigger_class: TIER_B_DB_SCHEMA_PLUS_ATOMICITY_PLUS_CONCURRENCY
 dispatched_at: 2026-05-10
@@ -15,7 +15,15 @@ expected_branch_name: b3/cortex-tier-b-atomicity-v1
 expected_complexity: medium (~5h)
 mandatory_2nd_pass: TRUE  # Triggers #2 (DB schema/migrations/atomicity) + #3 (concurrency-ordering)
 hard_ship_gate: test_concurrent_enforcers_one_passes_one_pauses must pass deterministically 10/10 runs (Brief Quality Checkpoint #8)
-last_heartbeat: 2026-05-10T21:00Z (dispatch)
+last_heartbeat: 2026-05-10T22:00Z (ship report)
+shipped_pr: https://github.com/vallen300-bit/baker-master/pull/182
+shipped_commit: 3a8b4e5f42e7fe3523a24d0d4d7ede58bc9735f1
+shipped_at: 2026-05-10T22:00Z
+ship_report: briefs/_reports/B3_cortex_tier_b_atomicity_v1_20260510.md
+gate_1_pytest: GREEN (21 passed, 150.86s) + ship-gate 10/10 GREEN
+gate_2_security_review: pending
+gate_3_picker_architect: pending
+gate_4_code_reviewer: pending
 ---
 
 # B3 dispatch — CORTEX_TIER_B_ATOMICITY_V1 (Pattern B reservation-row)
