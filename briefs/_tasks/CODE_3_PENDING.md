@@ -1,5 +1,5 @@
 ---
-status: FOLD_FIX_REQUIRED
+status: SHIPPED_FOLD_OK
 brief: briefs/BRIEF_CORTEX_TIER_B_ATOMICITY_V1.md
 trigger_class: TIER_B_DB_SCHEMA_PLUS_ATOMICITY_PLUS_CONCURRENCY
 dispatched_at: 2026-05-10
@@ -13,9 +13,11 @@ unblocks:
 expected_pr_count: 1 (baker-master)
 expected_branch_name: b3/cortex-tier-b-atomicity-v1
 expected_complexity: medium (~5h)
-mandatory_2nd_pass: TRUE  # Triggers #2 (DB schema/migrations/atomicity) + #3 (concurrency-ordering)
-hard_ship_gate: test_concurrent_enforcers_one_passes_one_pauses must pass deterministically 10/10 runs (Brief Quality Checkpoint #8)
-last_heartbeat: 2026-05-10T22:30Z (fold-fix dispatch post-4-gate)
+mandatory_2nd_pass: TRUE  # Triggers #2 (DB schema/migrations/atomicity) + #3 (concurrency-ordering) — 4-gate chain CLEARED post-fold
+hard_ship_gate: PASS — 10/10 deterministic GREEN (post-fold), 21/21 Tier-B suite GREEN
+shipped_pr: https://github.com/vallen300-bit/baker-master/pull/182
+fold_commit: c64cc7f (isolation-set hard-fail edge case) + 6b13c14 (fold ship-report)
+last_heartbeat: 2026-05-10T22:50Z (B3 surfaced SHIPPED_FOLD_OK; parallel AH1 instance dispatched fold earlier; this AH1 session reconciled mailbox state)
 ---
 
 # UPDATE 2026-05-10T22:30Z — FOLD-FIX (post-4-gate review)
