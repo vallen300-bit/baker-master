@@ -197,3 +197,79 @@ OK: No singleton violations found.
 - COST: ~30 min B3 wall-time. 1 Neon-backed pytest pass + 1 baseline-vs-post-fold full-suite diff (~3.7 min each). No LLM spend.
 - NEXT: AH1 to re-fire review chain — AH2 /security-review + (optional) picker-architect re-pass + feature-dev:code-reviewer 2nd-pass on a996f53. Note: the new test signature deviates from brief (added clean_baker_actions fixture) — explained inline; reviewer please confirm acceptable. B3 standing by.
 ```
+
+---
+
+## UPDATE 2 (micro-fold) — 2026-05-10T~20:10Z
+
+**Trigger:** Mailbox `## UPDATE 2026-05-10T19:00Z — MICRO-FOLD (consistency, AH1)` — AH1 accepted fold #1 (a996f53) + test-fixture deviation, and re-opened for a single 2-line consistency edit B3 had flagged as honest gap: the module-level docstring at `orchestrator/tier_b_runtime.py:20-24` carried the same dishonest V1-atomicity claim that fold #1 fixed at the method docstring (`:175-179`). Closing this keeps the file internally consistent before AH2 `/security-review`.
+
+### Scope (1 item)
+
+Replace `orchestrator/tier_b_runtime.py:20-24` module-docstring "Atomicity:" paragraph with the V1-honest framing mirroring the method docstring:
+
+```
+Atomicity (V1): the SERIALIZABLE transaction inside ``enforce()`` protects
+the read-then-insert sequence within a SINGLE call only. It does NOT
+protect pool-wide atomicity across concurrent callers — two enforcers
+reading €499 day-total can both PASS because Postgres SSI sees no
+rw-conflict (PASS path commits without writing to baker_actions). Closing
+this gap requires the caller-pattern in B4 (caller's baker_actions INSERT
+must run inside the same txn). Tracked: FIXME(B4) inside ``enforce()`` +
+``_ops/briefs/_precursor/B4_PRECURSOR_ATOMICITY_CLOSURE.md``.
+```
+
+Diff: 8 insertions / 4 deletions, 1 file (docstring only — zero code-path change).
+
+### Ship gate
+
+**Tier-B suite (TEST_DATABASE_URL_BRISEN_LAB):**
+
+```
+$ pytest tests/test_tier_b_runtime.py tests/test_tier_b_reset.py tests/test_tier_b_status_endpoint.py -v
+============================= test session starts ==============================
+platform darwin -- Python 3.12.12, pytest-9.0.3, pluggy-1.6.0 -- /Users/dimitry/bm-b3/.venv-b3/bin/python3.12
+cachedir: .pytest_cache
+rootdir: /Users/dimitry/bm-b3
+plugins: langsmith-0.7.33, anyio-4.13.0
+collected 16 items
+
+tests/test_tier_b_runtime.py::test_cap_constants_match_d8_ratification PASSED [  6%]
+tests/test_tier_b_runtime.py::test_pass_under_caps PASSED                [ 12%]
+tests/test_tier_b_runtime.py::test_per_action_cap_paused PASSED          [ 18%]
+tests/test_tier_b_runtime.py::test_daily_cap_paused PASSED               [ 25%]
+tests/test_tier_b_runtime.py::test_monthly_cap_paused PASSED             [ 31%]
+tests/test_tier_b_runtime.py::test_novel_class_requires_self_cost PASSED [ 37%]
+tests/test_tier_b_runtime.py::test_novel_class_negative_self_cost_rejected PASSED [ 43%]
+tests/test_tier_b_runtime.py::test_novel_class_with_self_cost_passes PASSED [ 50%]
+tests/test_tier_b_runtime.py::test_unknown_registry_class_raises PASSED  [ 56%]
+tests/test_tier_b_runtime.py::test_pool_wide_isolation_between_agents PASSED [ 62%]
+tests/test_tier_b_runtime.py::test_pending_row_persisted_on_pause PASSED [ 68%]
+tests/test_tier_b_reset.py::test_reset_writes_audit_row_when_idle PASSED [ 75%]
+tests/test_tier_b_reset.py::test_reset_captures_last_month_totals PASSED [ 81%]
+tests/test_tier_b_status_endpoint.py::test_tier_b_status_shape PASSED    [ 87%]
+tests/test_tier_b_status_endpoint.py::test_tier_b_status_surfaces_pending_and_recent PASSED [ 93%]
+tests/test_tier_b_status_endpoint.py::test_tier_b_status_requires_api_key PASSED [100%]
+
+================== 16 passed, 4 warnings in 92.02s (0:01:32) ===================
+```
+
+**Singleton CI guard:** `bash scripts/check_singletons.sh` → `OK: No singleton violations found.`
+
+**Full-suite baseline:** `81 failed, 1797 passed, 1 skipped, 64 errors in 226.08s` — byte-identical failure set to fold-fix baseline cited in UPDATE 1. Zero new failures.
+
+### Commit + push
+
+- Commit: `f069ca6` on branch `b3/cortex-tier-b-runtime-v1`
+- Pushed to `origin/b3/cortex-tier-b-runtime-v1` (a77e4e0..f069ca6).
+- PR #179 picks up the new head automatically.
+
+### PL ship-report (micro-fold)
+
+```
+**TO: AH1-App PL**
+- WHAT: PR #179 micro-fold shipped. 1 item: module-level docstring at orchestrator/tier_b_runtime.py:20-24 replaced with V1-honest atomicity framing mirroring the method docstring (lines 175-179). 8 ins / 4 del, docstring only, zero code-path change.
+- LINKS: PR https://github.com/vallen300-bit/baker-master/pull/179 · branch b3/cortex-tier-b-runtime-v1 · micro-fold commit f069ca6 (range a77e4e0..f069ca6) · ship report briefs/_reports/B3_cortex_tier_b_runtime_v1_20260510.md (## UPDATE 2 appended).
+- COST: ~10 min B3 wall-time. 1 Neon-backed pytest pass (92s) + 1 full-suite baseline check (226s). No LLM spend.
+- NEXT: AH1 to fire AH2 /security-review on post-micro-fold diff per mailbox. B3 idle.
+```
