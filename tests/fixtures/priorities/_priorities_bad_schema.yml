@@ -1,0 +1,12 @@
+schema_version: 1
+ratified_at: '2026-04-29T18:45:00+02:00'
+categories:
+- active-deal
+matters:
+- slug: bad-row
+  when: urgent
+  importance: SOMETHING-BOGUS
+  category: active-deal
+  triaga_ref: Q1
+  description: importance value not in enum — must raise loud
+  notes: []

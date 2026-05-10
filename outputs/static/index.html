@@ -33,6 +33,8 @@
 <!-- SIDEBAR -->
 <div class="sidebar">
     <div class="sidebar-logo" onclick="switchTab('morning-brief')" style="cursor:pointer;">BAKER <img src="/static/baker-face-green.svg" alt="Baker" class="sidebar-logo-icon" /></div>
+    <!-- Cockpit fallback banner: shown when /matters-summary reports priorities-source unavailable (legacy_no_priorities) or schema-violation (error). Hidden by default; toggled by app.js loadMattersSummary. -->
+    <div id="cockpit-fallback-banner" style="display:none; margin:6px 10px 8px; padding:6px 9px; font-size:11px; line-height:1.35; color:#8a6d3b; background:#fcf6e0; border:1px solid #f0e1a8; border-radius:3px;"></div>
     <nav class="sidebar-nav">
 
         <!-- SIDEBAR-RESTRUCTURE-1: Projects section (expandable) -->
@@ -570,7 +572,7 @@
   })();
 </script>
 
-<script src="/static/app.js?v=110"></script>
+<script src="/static/app.js?v=112"></script>
 <script>
 // PWA-DESKTOP-1: Register service worker for installability
 if ('serviceWorker' in navigator) {

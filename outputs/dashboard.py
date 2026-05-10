@@ -47,6 +47,13 @@ from orchestrator.scan_prompt import SCAN_SYSTEM_PROMPT
 from orchestrator import action_handler as _ah
 from orchestrator.cortex_runner import maybe_run_cycle
 from kbl.cache_telemetry import log_cache_usage
+from kbl.priorities_registry import (
+    get_all as get_all_priorities,
+    is_active_priority as priority_is_active,
+    registry_version as priorities_registry_version,
+    registry_ratified_at as priorities_registry_ratified_at,
+)
+from kbl.slug_registry import describe as slug_describe, normalize as slug_normalize
 
 
 def _split_scan_system_for_cache(system_prompt: str) -> list:
@@ -3885,10 +3892,70 @@ def _generate_morning_proposals(client, top_fires: list, deadlines: list) -> lis
         return []
 
 
+_PROJECTS_CATEGORIES = frozenset({"active-deal", "legal-risk", "financial", "origination"})
+_OPERATIONS_CATEGORIES = frozenset({"tax", "admin-ops-pr", "private-assets", "personal-admin"})
+_IMPORTANCE_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "frozen": 4}
+
+
+def _safe_describe(slug: str) -> str:
+    """``slug_registry.describe()`` raises ``KeyError`` on unknown slug
+    (verified at ``kbl/slug_registry.py:215-220``). Wrap so cockpit still
+    renders when ``_priorities.yml`` references a slug not yet in
+    ``slugs.yml`` (separate-repo drift window)."""
+    try:
+        return slug_describe(slug)
+    except KeyError:
+        return slug
+
+
+def _build_legacy_response(cur) -> dict:
+    """Pre-cockpit-wiring sidebar shape. Runs ONLY when priorities_registry
+    returns empty (e.g. ``_priorities.yml`` missing or vault-mirror lag).
+    Preserves the legacy ``matter_registry``-bucketed sidebar so the panel
+    never goes blank."""
+    cur.execute("""
+        SELECT
+            COALESCE(a.matter_slug, '_ungrouped') AS matter_slug,
+            COUNT(*) AS item_count,
+            MIN(a.tier) AS worst_tier,
+            COUNT(*) FILTER (WHERE a.created_at >= NOW() - INTERVAL '24 hours') AS new_count,
+            COALESCE(mr.category, 'inbox') AS category
+        FROM alerts a
+        LEFT JOIN matter_registry mr ON LOWER(REPLACE(mr.matter_name, ' ', '-')) = LOWER(a.matter_slug)
+            OR LOWER(mr.matter_name) = LOWER(REPLACE(a.matter_slug, '-', ' '))
+        WHERE a.status = 'pending'
+        GROUP BY COALESCE(a.matter_slug, '_ungrouped'), COALESCE(mr.category, 'inbox')
+        ORDER BY item_count DESC
+        LIMIT 500
+    """)
+    all_matters = [dict(r) for r in cur.fetchall()]
+    inbox_count = sum(m['item_count'] for m in all_matters if m['matter_slug'] == '_ungrouped')
+    projects = [m for m in all_matters if m.get('category') == 'project']
+    operations = [m for m in all_matters if m.get('category') == 'operations']
+    inbox_items = [m for m in all_matters if m.get('category') == 'inbox' or m['matter_slug'] == '_ungrouped']
+    return {
+        "matters": all_matters,
+        "projects": projects,
+        "operations": operations,
+        "inbox": inbox_items,
+        "inbox_count": inbox_count,
+        "count": len(all_matters),
+        "priorities_version": None,
+        "priorities_ratified_at": None,
+        "fallback_mode": "legacy_no_priorities",
+    }
+
+
 @app.get("/api/dashboard/matters-summary", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
 async def get_matters_summary():
-    """
-    List matters with alert counts and worst active tier, for sidebar rendering.
+    """List matters for the cockpit sidebar.
+
+    Source of truth: ``baker-vault/wiki/_priorities.yml`` (Director-curated
+    Triaga ratifications). Alerts table provides ``item_count`` + ``new_count``
+    overlay. Slug labels come from ``slugs.yml`` via ``slug_registry.describe``.
+
+    Falls back to the pre-cockpit-wiring legacy shape if the priorities file
+    is missing or returns empty (vault-mirror lag).
     """
     try:
         store = _get_store()
@@ -3898,43 +3965,114 @@ async def get_matters_summary():
             raise HTTPException(status_code=503, detail="Database unavailable")
         try:
             cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-            # SIDEBAR-RESTRUCTURE-1: Get matters with alert stats + category from matter_registry
-            cur.execute("""
-                SELECT
-                    COALESCE(a.matter_slug, '_ungrouped') AS matter_slug,
-                    COUNT(*) AS item_count,
-                    MIN(a.tier) AS worst_tier,
-                    COUNT(*) FILTER (WHERE a.created_at >= NOW() - INTERVAL '24 hours') AS new_count,
-                    COALESCE(mr.category, 'inbox') AS category
-                FROM alerts a
-                LEFT JOIN matter_registry mr ON LOWER(REPLACE(mr.matter_name, ' ', '-')) = LOWER(a.matter_slug)
-                    OR LOWER(mr.matter_name) = LOWER(REPLACE(a.matter_slug, '-', ' '))
-                WHERE a.status = 'pending'
-                GROUP BY COALESCE(a.matter_slug, '_ungrouped'), COALESCE(mr.category, 'inbox')
-                ORDER BY item_count DESC
-            """)
-            all_matters = [dict(r) for r in cur.fetchall()]
-            # Inbox count = alerts with no matter_slug
-            inbox_count = sum(m['item_count'] for m in all_matters if m['matter_slug'] == '_ungrouped')
-            projects = [m for m in all_matters if m.get('category') == 'project']
-            operations = [m for m in all_matters if m.get('category') == 'operations']
-            inbox_items = [m for m in all_matters if m.get('category') == 'inbox' or m['matter_slug'] == '_ungrouped']
-            cur.close()
-            return {
-                "matters": all_matters,
-                "projects": projects,
-                "operations": operations,
-                "inbox": inbox_items,
-                "inbox_count": inbox_count,
-                "count": len(all_matters),
-            }
+            try:
+                priorities = get_all_priorities()
+                if not priorities:
+                    return _build_legacy_response(cur)
+
+                priority_slugs = {p.slug for p in priorities}
+
+                cur.execute("""
+                    SELECT
+                        COALESCE(NULLIF(a.matter_slug, ''), '_ungrouped') AS matter_slug,
+                        COUNT(*) AS item_count,
+                        MIN(a.tier) AS worst_tier,
+                        COUNT(*) FILTER (WHERE a.created_at >= NOW() - INTERVAL '24 hours') AS new_count
+                    FROM alerts a
+                    WHERE a.status = 'pending'
+                    GROUP BY COALESCE(NULLIF(a.matter_slug, ''), '_ungrouped')
+                    ORDER BY item_count DESC
+                    LIMIT 500
+                """)
+                alerts_by_slug = {r["matter_slug"]: dict(r) for r in cur.fetchall()}
+
+                # Build display rows for priorities (gate). Multi-row priorities
+                # for the same slug get folded — one row per slug, severity is
+                # the highest, category attributed to the highest-importance row.
+                seen_slugs: set[str] = set()
+                rows: list[dict] = []
+                for p in priorities:
+                    if p.slug in seen_slugs:
+                        continue
+                    seen_slugs.add(p.slug)
+                    norm = slug_normalize(p.slug) or p.slug
+                    alert = alerts_by_slug.get(norm) or alerts_by_slug.get(p.slug) or {}
+                    rows.append({
+                        "matter_slug": p.slug,
+                        "display_label": _safe_describe(p.slug),
+                        "severity": p.importance,
+                        "category": p.category,
+                        "triaga_ref": p.triaga_ref,
+                        "description": p.description,
+                        "item_count": alert.get("item_count", 0),
+                        "worst_tier": alert.get("worst_tier"),
+                        "new_count": alert.get("new_count", 0),
+                    })
+
+                # Inbox = alerts WITHOUT a corresponding priority slug.
+                inbox_rows: list[dict] = []
+                for slug, row in alerts_by_slug.items():
+                    if slug == "_ungrouped" or slug not in priority_slugs:
+                        inbox_rows.append({
+                            "matter_slug": slug,
+                            "display_label": _safe_describe(slug) if slug != "_ungrouped" else "General",
+                            "severity": "low",
+                            "category": "inbox",
+                            "triaga_ref": None,
+                            "description": "",
+                            "item_count": row["item_count"],
+                            "worst_tier": row["worst_tier"],
+                            "new_count": row["new_count"],
+                        })
+
+                projects = [r for r in rows if r["category"] in _PROJECTS_CATEGORIES]
+                operations = [r for r in rows if r["category"] in _OPERATIONS_CATEGORIES]
+
+                def _sort_key(r):
+                    return (
+                        _IMPORTANCE_RANK.get(r["severity"], 5),
+                        -(r["item_count"] or 0),
+                        r.get("triaga_ref") or "",
+                    )
+
+                projects.sort(key=_sort_key)
+                operations.sort(key=_sort_key)
+                inbox_rows.sort(key=lambda r: -(r["item_count"] or 0))
+
+                return {
+                    "matters": rows + inbox_rows,
+                    "projects": projects,
+                    "operations": operations,
+                    "inbox": inbox_rows,
+                    "inbox_count": sum(r["item_count"] for r in inbox_rows),
+                    "count": len(rows) + len(inbox_rows),
+                    "priorities_version": priorities_registry_version(),
+                    "priorities_ratified_at": priorities_registry_ratified_at(),
+                    "fallback_mode": None,
+                }
+            except HTTPException:
+                raise
+            except Exception:
+                # Per python-backend.md: rollback before any new query.
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                raise
+            finally:
+                cur.close()
         finally:
             store._put_conn(conn)
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"GET /api/dashboard/matters-summary failed: {e}")
-        return {"matters": [], "count": 0}
+        return {
+            "matters": [], "projects": [], "operations": [], "inbox": [],
+            "inbox_count": 0, "count": 0,
+            "priorities_version": None, "priorities_ratified_at": None,
+            "fallback_mode": "error",
+        }
 
 
 @app.get("/api/activity", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
@@ -10073,6 +10211,28 @@ async def trigger_trend_detection(background_tasks: BackgroundTasks):
     from orchestrator.trend_detector import run_trend_detection
     background_tasks.add_task(run_trend_detection)
     return {"status": "running", "message": "Trend detection started in background"}
+
+
+@app.post("/api/admin/priorities/reload", tags=["admin"], dependencies=[Depends(verify_api_key)])
+async def admin_priorities_reload():
+    """Drop the priorities-registry cache; next call re-reads ``_priorities.yml``.
+
+    Triggered after Director edits the YAML in the vault (in-process cache
+    would otherwise survive until the Render dyno restarts). Returns the
+    refreshed schema/version snapshot for confirmation.
+    """
+    from kbl import priorities_registry
+    try:
+        priorities_registry.reload()
+        return {
+            "reloaded_at": datetime.now(timezone.utc).isoformat(),
+            "schema_version": priorities_registry.registry_version(),
+            "ratified_at": priorities_registry.registry_ratified_at(),
+            "priority_count": len(priorities_registry.get_all()),
+        }
+    except Exception as e:
+        logger.error(f"/api/admin/priorities/reload failed: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.get("/api/admin/tier-b-status", tags=["admin"], dependencies=[Depends(verify_api_key)])

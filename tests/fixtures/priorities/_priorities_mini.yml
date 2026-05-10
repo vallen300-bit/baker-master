@@ -1,0 +1,60 @@
+schema_version: 1
+ratified_at: '2026-04-29T18:45:00+02:00'
+ratified_by: director
+categories:
+- active-deal
+- legal-risk
+- financial
+- origination
+- tax
+- admin-ops-pr
+- private-assets
+- personal-admin
+matters:
+- slug: hagenauer-rg7
+  when: urgent
+  importance: critical
+  category: active-deal
+  triaga_ref: Q1
+  description: GC takeover — complete hotel + residences build
+  notes: []
+- slug: hagenauer-rg7
+  when: urgent
+  importance: high
+  category: legal-risk
+  triaga_ref: Q2
+  description: Defend against Hagenauer administrator claims
+  notes:
+    - second priority row for the same slug — severity_for picks the
+      higher critical from Q1
+- slug: mrci
+  when: urgent
+  importance: high
+  category: active-deal
+  triaga_ref: Q6
+  description: Plan Balgerstrasse development, MRCI GmbH Baden-Baden
+  notes: []
+- slugs:
+  - lilienmatt
+  - annaberg
+  - aukera
+  when: asap
+  importance: medium
+  category: active-deal
+  triaga_ref: Q7
+  description: Move financing — multi-entity restructure
+  notes: []
+- slug: vie-tax
+  when: 4w
+  importance: low
+  category: tax
+  triaga_ref: Q12
+  description: Vienna tax return prep
+  notes: []
+- slug: dormant-research
+  when: someday
+  importance: frozen
+  category: admin-ops-pr
+  triaga_ref: Q40
+  description: Frozen item — should map to lgray dot
+  notes: []
