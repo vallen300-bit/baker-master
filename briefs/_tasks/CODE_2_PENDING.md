@@ -1,114 +1,75 @@
 ---
-status: SHIPPED
-brief: briefs/BRIEF_BRISEN_LAB_TERMINAL_BUS_DRAIN_ON_SESSION_START_1.md
-trigger_class: TIER_B_FLEET_INFRA
+status: PENDING
+brief: briefs/BRIEF_BUS_DRAIN_CURSOR_CAP_FIX_1.md
+trigger_class: TIER_B_FOLLOWUP_CORRECTNESS_FIX
 dispatched_at: 2026-05-11
 dispatched_by: ai-head-1 (AH1)
 target: b2
-claimed_at: 2026-05-11T00:30Z
-claimed_by: B2
-shipped_at: 2026-05-11T00:50Z
-shipped_by: B2
-pr: https://github.com/vallen300-bit/baker-master/pull/183
-report: briefs/_reports/B2_BUS_DRAIN_20260511.md
-director_ratification: Director ratified 2026-05-11 in chat ("go ahead") after AID provisioning round-trip exposed V0.2 §#3 wake-mechanism gap; AH1 authored brief V0.1 → V0.2 (reviewer pass folded 4 blockers + 1 token-budget note). Director redirected dispatch B1 → B2 same session ("can you dispatch to b2 instead? b3 is busy"). Director's prior comment "AH2 + B-codes still via Director paste-block (not on bus yet)" relayed from parallel-AH1 instance flagged this as the next-shipping fleet-infra unblock.
-priority: P2
-phase: 1 of 1 (single PR)
+director_ratification: Director ruled "ship now, fix later" on parent PR #183 cursor-cap data-loss bug (2026-05-11); Director "fire follow-ups" 2026-05-11 greenlit this dispatch end-to-end.
+priority: P3
+phase: 1 of 1 (single PR, follow-up to PR #183)
 unblocks:
-  - Fleet-wide bus-as-default delivery: AH1/AH2/B1-B5/architect/AID/cortex all gain SessionStart inbox drain
-  - Director-clipboard-relay becomes fallback only (was primary delivery path for non-active terminals)
-  - V0.2 §#3 wake-mechanism pattern (2) ship; pattern (1) tmux-send-keys remains deferred
-expected_pr_count: 1 (baker-master, plus user-global hook file + settings.json edit outside the repo)
-expected_branch_name: b2/brisen-lab-bus-drain-on-session-start-1
-expected_complexity: low-medium (~3-4h)
-mandatory_2nd_pass: FALSE  # feature-dev:code-reviewer pass on brief done (4 blockers folded); /security-review NOT mandatory (fleet-internal auth, not user-facing Tier-A); AH2 cross-lane review on PR per autonomy charter §3
-last_heartbeat: 2026-05-11T00:50Z
+  - Closes confirmed data-loss bug at session-start-bus-drain.sh:377 (silent loss of messages 31-50 in backlog drains)
+  - Removes line-161 unused-var nit AH2 flagged
+  - Adds regression test for cursor-cap behavior
+expected_pr_count: 1 (baker-master)
+expected_branch_name: b2/bus-drain-cursor-cap-fix-1
+expected_complexity: small (~30 min)
+mandatory_2nd_pass: FALSE  # 1-line semantic change in already-reviewed file (PR #183 cleared cross-lane + /security-review); no re-pass needed
+last_heartbeat: null
 autopoll_eligible: true
-gate_to_merge: AH2 cross-lane review per autonomy charter §3 + Director live-smoke post-deploy (fresh AH1 session) + Director ratification of user-global state
+gate_to_merge: AH2 cross-lane review per autonomy charter §3 (no Director smoke needed for a 1-line follow-up to already-deployed hook)
 ---
 
-# CODE_2_PENDING — BRIEF_BRISEN_LAB_TERMINAL_BUS_DRAIN_ON_SESSION_START_1 — 2026-05-11
+# CODE_2_PENDING — BRIEF_BUS_DRAIN_CURSOR_CAP_FIX_1 — 2026-05-11
 
-**Brief:** `briefs/BRIEF_BRISEN_LAB_TERMINAL_BUS_DRAIN_ON_SESSION_START_1.md` (READ FIRST — 344 lines, V0.2 post-reviewer-fold, complete embedded hook script + jq splice command + 5-section verification including V0.2 reviewer-fix sanity checks)
+**Brief:** `briefs/BRIEF_BUS_DRAIN_CURSOR_CAP_FIX_1.md` (READ FIRST — short brief, single-line fix + 1 test + 1 nit cleanup)
 **Working dir:** `~/bm-b2`
-**Working branch:** `b2/brisen-lab-bus-drain-on-session-start-1`
+**Working branch:** `b2/bus-drain-cursor-cap-fix-1` (branch from latest main `2cc97a7`)
 **Repo:** `vallen300-bit/baker-master`
 
 ## Summary
 
-Wire V0.2 §#3 wake-mechanism pattern (2) — SessionStart hook drains V2 bus inbox for the current terminal's BAKER_ROLE slug on every Claude Code session-open, emits unread messages as `additionalContext`. Closes the delivery gap: AH2 + B-codes + AID are all provisioned on the bus (have keys + authority rows), but receivers don't see incoming traffic without an active poll OR a hook drain. AID's first successful round-trip 2026-05-10T22:05Z worked only because AID manually polled.
+Follow-up to PR #183 (merged 2026-05-10T22:59Z) — fix the cursor-cap data-loss bug AH2 flagged on `/security-review`. When daemon returns 31-50 unread messages, cursor jumps past all of them after rendering only the first 30; messages 31-50 are silently lost.
 
-**2 files to create + 1 user-global edit (NOT in the repo):**
+**One-line fix:** `tests/fixtures/session-start-bus-drain.sh:377` — change `for m in msgs` to `for m in shown`. Cursor now advances to the rendered slice's max `created_at`, not the full fetched slice's max.
 
-1. **New hook file:** `~/.claude/hooks/session-start-bus-drain.sh` (user-global; NOT inside `baker-master`).
-   - Resolves BAKER_ROLE → slug (mirror `scripts/bus_post.sh` ROLE_TO_SLUG).
-   - Fetches `op://Baker API Keys/BRISEN_LAB_TERMINAL_KEY_<slug>/credential`.
-   - Reads `~/.brisen-lab-bus-last-seen-<slug>.txt` (24h-ago default on first run).
-   - GETs `https://brisen-lab.onrender.com/msg/<slug>?since=<last>&limit=50` with `X-Terminal-Key`.
-   - Emits formatted summary as `additionalContext` JSON envelope (≤30 messages rendered, overflow noted).
-   - Updates state file atomically via `tempfile.mkstemp` + `os.replace()`.
-   - Never blocks session start: all error paths emit a short status line + exit 0.
+**Daemon ASC confirmed** (`bus.py:349`) — so `shown = msgs[:30]` are the 30 oldest unread; next drain `since=msgs[29].created_at` returns `msgs[30:]` correctly.
 
-2. **User-global `~/.claude/settings.json` edit:** `jq`-splice the new SessionStart entry alongside the existing Forge hook entry. Do NOT overwrite the file — it has 8 other top-level keys (`permissions`, `model`, `statusLine`, `enabledPlugins`, `extraKnownMarketplaces`, `skipDangerousModePermissionPrompt`, `theme`, `_comment`) that must survive. Exact jq command in brief §Implementation step 2.
+**Plus:** drop the unused `body_json` at `tests/test_bus_drain_hook.py:647` + add `test_overflow_cursor_advances_to_rendered_max` regression test.
 
-3. **In-repo: `tests/test_bus_drain_hook.py`** — unit tests covering the 5 failure paths + happy path. Test scaffolding only (the hook itself is user-global; the test stubs `curl` and `op` via env vars).
-
-## CRITICAL — reviewer-caught issues already folded into V0.2 brief
-
-A `feature-dev:code-reviewer` pass on the brief itself (2026-05-11) caught 4 blockers + 1 token-budget note. ALL FOLDED INTO V0.2. If you encounter:
-
-- **`KeyError` on `os.environ["SLUG"]` inside the python3 invocation** — the brief's V0.1 draft set env vars on `_emit`'s pipe-tail (a separate subprocess that doesn't inherit them). V0.2 fix: env vars prefixed on the python3 invocation itself; curl response plumbed via `RESP=...` env-var instead of stdin. USE V0.2 SCRIPT VERBATIM.
-- **State file written via plain `open(state_file, "w")`** — non-atomic; mid-write kill leaves partial/empty file. V0.2 fix: `tempfile.mkstemp` + `os.replace()`. DO NOT skip.
-- **JSON config as a paste-snippet ending with `...`** — V0.1 draft would have clobbered every other top-level key. V0.2 fix: `jq --argjson new ... '.hooks.SessionStart += [$new]'` with backup + validate + atomic swap. USE jq, NOT file overwrite.
-- **6s curl + ~3s op read inside 10s hook timeout** — V0.2 fix: `curl --max-time 4`, hook timeout raised to `15`. Both already in brief.
-- **Rendering >200 messages → ~70KB additionalContext** — V0.2 fix: curl `limit=50` + rendering hard cap `RENDER_CAP=30`. Overflow note in header.
-
-## Scope discipline (single brief)
-
-This is single-phase. No follow-on briefs in this dispatch. Active-wake for currently-running terminals (V0.2 §#3 pattern 1: tmux send-keys) is **deferred** — flagged as known limitation §2 in brief.
-
-**Do NOT add:**
-- Auto-ACK on drain (drain emits as context; receiver explicitly ACKs).
-- Per-picker `.claude/settings.json` edits (user-global handles all sessions).
-- Changes to `scripts/bus_post.sh` / `bus_post.py` (orthogonal client-side post tooling).
-- Any change to `brisen-lab` daemon (`bus.py`, `auth_lab.py`, `db.py` are read-only consumers of existing GET endpoint).
+**Plus (post-merge):** re-deploy the user-global hook by cp'ing the fixed fixture to `~/.claude/hooks/session-start-bus-drain.sh`. The drift-detection test you added in PR #183 catches drift, so this step closes the loop.
 
 ## Ship gate
 
-1. `bash -n ~/.claude/hooks/session-start-bus-drain.sh` — syntax check passes.
-2. `pytest tests/test_bus_drain_hook.py -v` — ≥6 tests pass (5 failure paths + 1 happy path).
-3. Live end-to-end smoke per brief §Verification step 2 — post from AH1 (`lead`) to `b2`, start fresh `~/bm-b2` session, drain renders in additionalContext within <8s. (Brief uses b1 as the example slug in verification steps — substitute `b2` for your test runs since you're the implementer; either works since the hook is slug-agnostic.)
-4. V0.2 reviewer-fix sanity per brief §Verification step 5 — all 4 folds verified live.
-5. PR description includes literal `pytest` stdout + literal `bash -n` exit code (no "passes by inspection" — Lesson #8).
-6. AH2 cross-lane review per autonomy charter §3 — auth-adjacent change, no `/security-review` mandate.
+1. `bash -n ~/.claude/hooks/session-start-bus-drain.sh` — passes.
+2. `pytest tests/test_bus_drain_hook.py -v` — 10/10 (was 9/9 + 1 new regression test).
+3. PR description includes literal `pytest` stdout.
+4. AH2 cross-lane review — fast turnaround expected (cleared parent PR yesterday).
+5. After merge: cp `tests/fixtures/session-start-bus-drain.sh` to `~/.claude/hooks/session-start-bus-drain.sh` + verify drift-detection test passes.
 
 ## Files touched
 
-**Create (in-repo):**
-- `tests/test_bus_drain_hook.py`
+**Modify (in-repo):**
+- `tests/fixtures/session-start-bus-drain.sh` — line 377 (`msgs` → `shown`)
+- `tests/test_bus_drain_hook.py` — drop line 647 unused var + add 1 regression test
 
-**Create (user-global, NOT in repo — Director ratifies edit pre-merge):**
-- `~/.claude/hooks/session-start-bus-drain.sh`
-
-**Modify (user-global, NOT in repo — Director ratifies edit pre-merge):**
-- `~/.claude/settings.json` (jq splice — backup + validate + atomic swap per brief)
+**Modify (user-global, post-merge):**
+- `~/.claude/hooks/session-start-bus-drain.sh` — cp from fixed fixture
 
 **Do NOT touch:**
-- `scripts/bus_post.sh` / `bus_post.py` (orthogonal — bus_post is for outbound POST; this hook is for inbound GET).
-- Per-picker `.claude/settings.json` (no edit needed; user-global handles all).
-- `brisen-lab/` repo (read-only consumer of existing GET /msg/<terminal>).
-- `BRISEN_LAB_TERMINAL_KEYS` Render env (already populated for all 13 slugs).
-- Other SessionStart hooks (`session-start-role.sh`, Forge hook — both continue firing independently).
-- Anything cockpit-Phase-1-related (PR #180 is your prior task; this dispatch is unrelated — separate branch, separate scope).
+- `~/.claude/settings.json` — unchanged (hook path + timeout same)
+- `brisen-lab/` daemon — unchanged
+- Anything else in `session-start-bus-drain.sh` beyond line 377
 
 ## Estimated complexity
 
-Low-Medium · ~3-4h · 1 PR (in-repo) + user-global edit (Director-ratified) · Tier-B fleet-infra. No `/security-review` mandate.
+Small · ~30 min · 1 PR · Tier-B correctness follow-up. No `/security-review` re-pass.
 
 ## Heartbeat
 
-Update `last_heartbeat: <UTC ISO>` in this mailbox file every 30 min during active work. Standard `b-code-dispatch-coordination.md` §3 protocol. Brief is small enough that 1-2 heartbeats should cover the full cycle.
+12h cadence binding. Brief is small enough one heartbeat suffices.
 
 ## Prior CODE_2 task (archive reference)
 
-BRIEF_CORTEX_COCKPIT_SIDEBAR_WIRING — SHIPPED 2026-05-10 / 2026-05-11 (b2 reported SHIPPED in their picker; PR #180 OPEN on `b2/cortex-cockpit-sidebar-wiring`, awaiting AH2 `/security-review` Gate 2 verdict + AH1 merge). PR #180 review/merge runs in parallel with this new dispatch — separate branch, no scope overlap. Mailbox hygiene rule applied — overwriting per `_ops/processes/b-code-dispatch-coordination.md` §3.
+BRIEF_BRISEN_LAB_TERMINAL_BUS_DRAIN_ON_SESSION_START_1 — SHIPPED 2026-05-11 (PR #183 squash-merged at `2cc97a7` 2026-05-10T22:59Z). AH2 cross-lane CLEARED, `/security-review` CLEARED, Director ratified user-global state, Director skipped live smoke. Mailbox hygiene rule applied — overwriting per `_ops/processes/b-code-dispatch-coordination.md` §3.
