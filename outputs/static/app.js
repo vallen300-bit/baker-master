@@ -1536,6 +1536,22 @@ async function loadMattersSummary() {
         if (!resp.ok) return;
         const data = await resp.json();
 
+        // Surface degraded-source state so Director sees that the sidebar is
+        // running on the legacy fallback (priorities yml missing or invalid).
+        var banner = document.getElementById('cockpit-fallback-banner');
+        if (banner) {
+            if (data.fallback_mode === 'legacy_no_priorities') {
+                banner.textContent = 'Priorities source unavailable — showing legacy view';
+                banner.style.display = 'block';
+            } else if (data.fallback_mode === 'error') {
+                banner.textContent = 'Priorities source error — showing legacy view';
+                banner.style.display = 'block';
+            } else {
+                banner.style.display = 'none';
+                banner.textContent = '';
+            }
+        }
+
         // SIDEBAR-RESTRUCTURE-1: Render 3-tier sidebar
         _renderMatterSection('projectsSubList', data.projects || [], 'projectsCount');
         _renderMatterSection('operationsSubList', data.operations || [], 'operationsCount');

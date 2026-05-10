@@ -168,22 +168,100 @@ def test_missing_baker_vault_path_returns_empty(monkeypatch, caplog):
     assert any("BAKER_VAULT_PATH" in rec.getMessage() for rec in caplog.records)
 
 
-def test_malformed_yaml_raises_loud(tmp_path, monkeypatch):
-    """Schema violation -> PrioritiesRegistryError (NOT fail-soft)."""
+def test_malformed_yaml_fails_soft_and_logs_loud(tmp_path, monkeypatch, caplog):
+    """Schema violation: fail-soft (empty registry + LOUD error log)."""
     vault = _build_vault(tmp_path, BAD_SCHEMA_FIXTURE)
     monkeypatch.setenv("BAKER_VAULT_PATH", str(vault))
     pr.reload()
-    with pytest.raises(pr.PrioritiesRegistryError, match="importance"):
-        pr.get_all()
+    with caplog.at_level(logging.ERROR, logger="kbl.priorities_registry"):
+        result = pr.get_all()
+    assert result == []
+    err_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert any("SCHEMA VIOLATION" in r.getMessage() for r in err_records)
+    assert any("importance" in r.getMessage() for r in err_records)
 
 
-def test_unknown_importance_enum_raises_loud(tmp_path, monkeypatch):
-    """Same fixture, named explicitly per acceptance criterion."""
+def test_unknown_importance_enum_fails_soft(tmp_path, monkeypatch):
+    """Same fixture, named explicitly per acceptance criterion: fail-soft path."""
     vault = _build_vault(tmp_path, BAD_SCHEMA_FIXTURE)
     monkeypatch.setenv("BAKER_VAULT_PATH", str(vault))
     pr.reload()
-    with pytest.raises(pr.PrioritiesRegistryError):
-        pr.get_all()
+    assert pr.get_all() == []
+    assert pr.registry_version() is None
+    assert pr.registry_ratified_at() is None
+
+
+def test_parse_error_does_not_re_parse_on_subsequent_calls(tmp_path, monkeypatch, caplog):
+    """Parse-storm sentinel: a corrupt YAML must be parsed at most ONCE per
+    cache cycle. Many repeated get_all() calls under load were re-parsing
+    the file pre-fold and producing exception/log storms."""
+    vault = _build_vault(tmp_path, BAD_SCHEMA_FIXTURE)
+    monkeypatch.setenv("BAKER_VAULT_PATH", str(vault))
+    pr.reload()
+
+    parse_calls = []
+    real_parse = pr._parse_yaml
+
+    def _counting_parse(path):
+        parse_calls.append(path)
+        return real_parse(path)
+
+    monkeypatch.setattr(pr, "_parse_yaml", _counting_parse)
+
+    with caplog.at_level(logging.ERROR, logger="kbl.priorities_registry"):
+        for _ in range(50):
+            assert pr.get_all() == []
+
+    assert len(parse_calls) == 1, f"expected exactly one parse attempt, got {len(parse_calls)}"
+    # And the LOUD error log fires exactly once (sentinel warned-flag).
+    err_count = sum(
+        1 for r in caplog.records
+        if r.levelno >= logging.ERROR and "SCHEMA VIOLATION" in r.getMessage()
+    )
+    assert err_count == 1, f"expected one LOUD log, got {err_count}"
+
+
+def test_reload_clears_parse_error_warned_flag(tmp_path, monkeypatch, caplog):
+    """After reload(), a fresh schema-violation re-fires the LOUD log."""
+    vault = _build_vault(tmp_path, BAD_SCHEMA_FIXTURE)
+    monkeypatch.setenv("BAKER_VAULT_PATH", str(vault))
+    pr.reload()
+
+    with caplog.at_level(logging.ERROR, logger="kbl.priorities_registry"):
+        pr.get_all()  # first parse error -> 1 LOUD log
+        pr.reload()
+        pr.get_all()  # second parse error after reload -> another LOUD log
+
+    err_count = sum(
+        1 for r in caplog.records
+        if r.levelno >= logging.ERROR and "SCHEMA VIOLATION" in r.getMessage()
+    )
+    assert err_count == 2, f"expected two LOUD logs after reload(), got {err_count}"
+
+
+def test_loaded_flag_true_on_parsed_registry(mini_vault):
+    """A successful parse sets loaded=True; getters return the file values."""
+    pr.get_all()  # force lazy load
+    reg = pr._get_registry()
+    assert reg.loaded is True
+    assert pr.registry_version() == 1
+    assert pr.registry_ratified_at() == "2026-04-29T18:45:00+02:00"
+
+
+def test_loaded_flag_false_on_empty_registry_and_getters_return_none(tmp_path, monkeypatch):
+    """Fail-soft sentinels (missing file, parse error, missing env) keep
+    loaded=False. registry_version/ratified_at must return None even when
+    schema_version happens to be 0 on the empty sentinel."""
+    monkeypatch.setenv("BAKER_VAULT_PATH", str(tmp_path))  # no wiki/_priorities.yml
+    pr.reload()
+    pr.get_all()  # force lazy load
+    reg = pr._get_registry()
+    assert reg.loaded is False
+    assert reg.schema_version == 0  # sentinel value
+    # But the public getters must still return None — schema_version=0
+    # belongs to the sentinel, not a real ratified registry.
+    assert pr.registry_version() is None
+    assert pr.registry_ratified_at() is None
 
 
 def test_reload_re_reads_file(tmp_path, monkeypatch):

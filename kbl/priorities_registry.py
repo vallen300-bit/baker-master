@@ -52,6 +52,7 @@ _VALID_IMPORTANCE = frozenset(IMPORTANCE_ORDER)
 _lock = threading.Lock()
 _cache: Optional["_PrioritiesRegistry"] = None
 _missing_file_warned = False
+_parse_error_warned = False
 
 
 @dataclass(frozen=True)
@@ -72,6 +73,10 @@ class _PrioritiesRegistry:
     categories: frozenset[str]
     priorities: tuple[Priority, ...]               # exploded; one per (slug, row)
     by_slug: dict[str, tuple[Priority, ...]]       # slug -> all priorities for that slug
+    # loaded=True only after a successful _parse_yaml(); empty/fail-soft sentinels
+    # keep loaded=False so registry_version() / registry_ratified_at() return None
+    # even on a legitimate parsed file where schema_version happens to be 0.
+    loaded: bool = False
 
 
 class PrioritiesRegistryError(RuntimeError):
@@ -237,16 +242,19 @@ def _parse_yaml(path: Path) -> _PrioritiesRegistry:
         categories=categories,
         priorities=tuple(exploded),
         by_slug={k: tuple(v) for k, v in by_slug.items()},
+        loaded=True,
     )
 
 
 def _get_registry() -> _PrioritiesRegistry:
     """Return the cached registry; lazy-load on first call.
 
-    Fail-soft: if the file is missing, returns an empty registry and warns
-    once. Schema violations still raise loudly (different from file-missing).
+    Fail-soft on file-missing (empty registry, warn once) AND on schema
+    violation (empty sentinel cached so we don't re-parse on every call;
+    `reload()` clears the cache + retries). Director must see the LOUD
+    error log to fix the YAML.
     """
-    global _cache, _missing_file_warned
+    global _cache, _missing_file_warned, _parse_error_warned
     if _cache is None:
         with _lock:
             if _cache is None:
@@ -269,7 +277,20 @@ def _get_registry() -> _PrioritiesRegistry:
                     _cache = _empty_registry()
                     return _cache
 
-                _cache = _parse_yaml(path)
+                try:
+                    _cache = _parse_yaml(path)
+                except PrioritiesRegistryError as parse_err:
+                    # Schema violation: log LOUD (Director must fix YAML),
+                    # cache empty sentinel so we don't re-parse on every call
+                    # (parse-storm). reload() clears the cache + retries.
+                    if not _parse_error_warned:
+                        logger.error(
+                            "priorities_registry SCHEMA VIOLATION in %s: %s — sidebar in legacy fallback until reload()",
+                            path, parse_err,
+                        )
+                        _parse_error_warned = True
+                    _cache = _empty_registry()
+                    return _cache
     return _cache
 
 
@@ -278,10 +299,11 @@ def _get_registry() -> _PrioritiesRegistry:
 
 def reload() -> None:
     """Drop the cached registry; next call re-reads + re-validates the yml."""
-    global _cache, _missing_file_warned
+    global _cache, _missing_file_warned, _parse_error_warned
     with _lock:
         _cache = None
         _missing_file_warned = False
+        _parse_error_warned = False
 
 
 def get_all() -> list[Priority]:
@@ -336,12 +358,12 @@ def is_active_priority(slug: str) -> bool:
 
 
 def registry_version() -> Optional[int]:
-    """``schema_version`` from ``_priorities.yml`` (None if file missing)."""
+    """``schema_version`` from ``_priorities.yml`` (None if file missing/unparsed)."""
     reg = _get_registry()
-    return reg.schema_version if reg.priorities or reg.schema_version else None
+    return reg.schema_version if reg.loaded else None
 
 
 def registry_ratified_at() -> Optional[str]:
-    """``ratified_at`` from ``_priorities.yml`` (None if file missing)."""
+    """``ratified_at`` from ``_priorities.yml`` (None if file missing/unparsed)."""
     reg = _get_registry()
-    return reg.ratified_at if reg.priorities or reg.ratified_at else None
+    return reg.ratified_at if reg.loaded else None

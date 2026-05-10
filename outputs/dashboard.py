@@ -10213,6 +10213,28 @@ async def trigger_trend_detection(background_tasks: BackgroundTasks):
     return {"status": "running", "message": "Trend detection started in background"}
 
 
+@app.post("/api/admin/priorities/reload", tags=["admin"], dependencies=[Depends(verify_api_key)])
+async def admin_priorities_reload():
+    """Drop the priorities-registry cache; next call re-reads ``_priorities.yml``.
+
+    Triggered after Director edits the YAML in the vault (in-process cache
+    would otherwise survive until the Render dyno restarts). Returns the
+    refreshed schema/version snapshot for confirmation.
+    """
+    from kbl import priorities_registry
+    try:
+        priorities_registry.reload()
+        return {
+            "reloaded_at": datetime.now(timezone.utc).isoformat(),
+            "schema_version": priorities_registry.registry_version(),
+            "ratified_at": priorities_registry.registry_ratified_at(),
+            "priority_count": len(priorities_registry.get_all()),
+        }
+    except Exception as e:
+        logger.error(f"/api/admin/priorities/reload failed: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 @app.get("/api/admin/tier-b-status", tags=["admin"], dependencies=[Depends(verify_api_key)])
 async def admin_tier_b_status():
     """Live Tier-B autonomous-action budget state (CORTEX_TIER_B_RUNTIME_V1).

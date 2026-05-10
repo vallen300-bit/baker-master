@@ -272,3 +272,63 @@ def test_matters_summary_safe_describe_unknown_slug_returns_raw(client):
     hag = next(p for p in body["projects"] if p["matter_slug"] == "hagenauer-rg7")
     # _safe_describe falls back to raw slug.
     assert hag["display_label"] == "hagenauer-rg7"
+
+
+def test_admin_priorities_reload_invalidates_stale_cache(tmp_path, monkeypatch):
+    """POST /api/admin/priorities/reload picks up a YAML edit that happened
+    AFTER the cache was primed — needed when Director edits the YAML and
+    the in-process cache would otherwise survive until dyno restart."""
+    import shutil
+    from pathlib import Path as _Path
+    from fastapi.testclient import TestClient as _TestClient
+    from kbl import priorities_registry as pr
+
+    fixture_src = _Path(__file__).parent / "fixtures" / "priorities" / "_priorities_mini.yml"
+    wiki = tmp_path / "wiki"
+    wiki.mkdir(parents=True)
+    yml_path = wiki / "_priorities.yml"
+    shutil.copy(fixture_src, yml_path)
+    monkeypatch.setenv("BAKER_VAULT_PATH", str(tmp_path))
+    monkeypatch.setenv("BAKER_API_KEY", "test-key")
+
+    from outputs.dashboard import app, verify_api_key
+    app.dependency_overrides[verify_api_key] = lambda: None
+    try:
+        pr.reload()
+        # Prime cache against original fixture (schema_version=1).
+        assert pr.registry_version() == 1
+
+        # Director edits the YAML on disk — bump schema_version to 2.
+        yml_path.write_text(
+            "schema_version: 2\n"
+            "ratified_at: '2026-05-11T00:00:00Z'\n"
+            "categories: [active-deal]\n"
+            "matters:\n"
+            "  - slug: post-reload-row\n"
+            "    when: urgent\n"
+            "    importance: low\n"
+            "    category: active-deal\n"
+            "    triaga_ref: QX\n"
+            "    description: edited after cache prime\n"
+            "    notes: []\n",
+            encoding="utf-8",
+        )
+
+        # Without the reload endpoint, the in-process cache is still stale.
+        assert pr.registry_version() == 1
+
+        resp = _TestClient(app).post("/api/admin/priorities/reload")
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["schema_version"] == 2
+        assert body["ratified_at"] == "2026-05-11T00:00:00Z"
+        assert body["priority_count"] == 1
+        assert "reloaded_at" in body
+
+        # And the in-process registry is now fresh too.
+        assert pr.registry_version() == 2
+        assert pr.is_active_priority("post-reload-row") is True
+        assert pr.is_active_priority("mrci") is False  # was in original fixture
+    finally:
+        app.dependency_overrides.pop(verify_api_key, None)
+        pr.reload()
