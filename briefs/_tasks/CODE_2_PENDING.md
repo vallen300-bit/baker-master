@@ -1,91 +1,107 @@
 ---
-status: COMPLETE
-brief: briefs/BRIEF_WHATSAPP_RECIPIENT_RESOLVER_FIX_1.md
-trigger_class: TIER_A_INCIDENT_FIX_PII_LEAK_VECTOR
-dispatched_at: 2026-05-08T08:10Z
-dispatched_by: ai-head-b (terminal, incident-containment lane)
-director_ratification: "go" (2026-05-08T08:09Z chat verbatim, ratifying brief v0.3 + B2 / PR / manual-re-enable-gate dispatch)
-incident: waha-mis-route-marcus-pisani (2026-05-08)
-post_mortem: ~/baker-vault/_ops/incidents/2026-05-08-waha-mis-route-marcus-pisani.md
-brief_version: 0.3
+status: PENDING
+brief: briefs/BRIEF_CORTEX_COCKPIT_SIDEBAR_WIRING.md
+trigger_class: TIER_A_USER_FACING_RENDER_SURFACE
+dispatched_at: 2026-05-10
+dispatched_by: ai-head-1 (AH1)
+target: b2
+director_ratification: Director ratified Option (b) standalone brief 2026-05-10; AID scope-confirmed Phase 1 (render-only) 2026-05-10 conditional on Phase 2 follow-up; AID DISPATCH AUTHORIZED 2026-05-10 in scope-lock reply file `_01_INBOX_FROM_CLAUDE/2026-05-10-aid-to-ah1-cockpit-phase1-conditional-accept-phase2-required.md`
+priority: P1
+phase: 1 of 2 (Phase 2 = CORTEX_COCKPIT_GOLD_WRITES_1, AH1 authors next session)
+unblocks:
+  - Brisen Desk cockpit-vs-priorities-review 2026-05-10 findings A/B/C/D (naming drift, missing matters, Director-dismissed items, severity-from-volume)
+  - Phase 2 CORTEX_COCKPIT_GOLD_WRITES_1 (depends on Phase 1 merge for rendered sidebar to wire onto)
 expected_pr_count: 1 (baker-master)
-expected_branch_name: b2/whatsapp-recipient-resolver-fix-1
-gate_to_re_enable: this brief shipped + tested + Director's verbatim "re-enable whatsapp"
-shipped_at: 2026-05-08T08:30Z
-shipped_by: B2
-pr: https://github.com/vallen300-bit/baker-master/pull/173
-commit: 76d8c609
-report: briefs/_reports/B2_whatsapp_recipient_resolver_fix_1_20260508.md
+expected_branch_name: b2/cortex-cockpit-sidebar-wiring
+expected_complexity: medium (~5-7h)
+mandatory_2nd_pass: TRUE  # feature-dev:code-reviewer on brief done; /security-review on PR REQUIRED (Lesson #52, Tier-A user-facing surface)
+last_heartbeat: null
+autopoll_eligible: false
 ---
 
-# CODE_2_PENDING — WHATSAPP_RECIPIENT_RESOLVER_FIX_1 (COMPLETE — awaiting /security-review + merge gate)
+# CODE_2_PENDING — BRIEF_CORTEX_COCKPIT_SIDEBAR_WIRING — 2026-05-10
 
-**Dispatched:** 2026-05-08T08:10Z
-**Tier:** A (PII-leak-vector incident fix; Tier-A merge gates: `/security-review` PASS + AH-side ratify)
+**Brief:** `briefs/BRIEF_CORTEX_COCKPIT_SIDEBAR_WIRING.md` (READ FIRST — 665 lines, full spec, copy-pasteable code blocks, test plan, ship gate)
+**Working dir:** `~/bm-b2`
+**Working branch:** `b2/cortex-cockpit-sidebar-wiring`
 **Repo:** `vallen300-bit/baker-master`
-**Brief:** `briefs/BRIEF_WHATSAPP_RECIPIENT_RESOLVER_FIX_1.md` v0.3 — read it first, top to bottom, before opening any code. The brief contains copy-paste-ready code blocks, schema verbatim, grep-evidence block, parametrized test bodies, and an audit-row contract (`path_taken`).
 
-## Containment context — read before touching code
+## Summary
 
-Three Baker T1-Alert WhatsApp messages addressed to Director were silently mis-routed to counterparty Marcus Pisani's WhatsApp thread on the morning of 2026-05-08 between 00:02:28Z and 02:02:26Z. Item #3 was family-financial PII (Lana €650k tax tracking). Director observed at ~07:20Z; AH2-T containment GREEN at 07:32:39Z via Render env-var flip on `srv-d6dgsbctgctc73f55730`: `WAHA_BASE_URL=https://baker-waha-DISABLED-INCIDENT-2026-05-08.invalid`. Outbound WAHA is currently neutralized at the network layer.
+Render-only cockpit sidebar wiring. Today the sidebar (baker-master.onrender.com left panel) is a parallel list to the Triaga — ~60% of Director-ratified priorities missing, ~40% present under non-canonical labels, 1 Director-dismissed item still rendered (Kempinski), severity dots correlate with email volume not Triaga importance. This brief makes the sidebar a VIEW of `wiki/_priorities.yml` (Triaga source of truth) + `slugs.yml` (canonical labels).
 
-**Your job is to fix the root-cause bug so the WAHA outbound URL can be safely restored.** Do NOT attempt to flip `WAHA_BASE_URL` back during your work — the re-enable is gated on (a) your PR merging cleanly, (b) Director's verbatim phrase `"re-enable whatsapp"`, and (c) AH2-T running the 3-smoke verification.
+**4 changes:**
 
-Full incident dossier: `~/baker-vault/_ops/incidents/2026-05-08-waha-mis-route-marcus-pisani.md`.
+1. **New loader** `kbl/priorities_registry.py` — singleton mirroring `slug_registry.py` module-level cache + threading.Lock pattern (NOT `_get_global_instance()` — see brief §Risks for verbatim slug_registry pattern). Reads `${BAKER_VAULT_PATH}/wiki/_priorities.yml` (Director-curated, schema v1, 40 matters). Public API: get_all / get_by_slug / get_all_for_slug / severity_for / category_for / is_active_priority / registry_version / registry_ratified_at / reload. Fail-soft on file-missing (returns empty, logs warning once).
 
-## What to build
+2. **Backend** `outputs/dashboard.py:3888-3937` — rewrite `GET /api/dashboard/matters-summary`. Two-source merge: priorities (source of truth for projects/operations bucketing + severity field) + alerts (kept for item_count + inbox flat-bucket). Explicit `_build_legacy_response(cur)` else-branch runs when priorities loader returns empty (fail-soft fallback to current behavior). LIMIT 500 on alerts query. Response shape adds `display_label`, `severity` enum, `category`, `triaga_ref`, `priorities_version`, `priorities_ratified_at`, `fallback_mode`.
 
-**Single PR against `vallen300-bit/baker-master`:**
+3. **Frontend** `outputs/static/app.js:1554-1591` — `_renderMatterSection` reads `m.display_label` (canonical from API, falls back to title-cased slug for legacy rows) and `m.severity` enum (critical/high/medium/low/frozen → red/amber/blue/slate/lgray dot classes, all existing palette per `outputs/static/style.css:180-186`).
 
-- `outputs/whatsapp_sender.py` — patch per brief §"Patch — outputs/whatsapp_sender.py" (Changes 1-6). Adds: `_phone_root` helper, `DIRECTOR_PHONE_ROOTS` literal frozenset, module-import sanity assert, asymmetric `_recipient_id_compatible` with tri-state `_RecipientCheck` enum, `_lid_belongs_to_phone` returning `Optional[bool]`, `_alarm_slack_lid_db_degraded` Slack hook, recipient-id assertion + `path_taken` tagging in `send_whatsapp`. Director-target sends fail-closed on LID-DB error; non-Director DEGRADED falls through with Slack alarm.
-- `tests/test_whatsapp_sender_lid.py` — keep existing 6 tests passing; add the 7 new tests verbatim from brief §"New tests (7) — all must pass". Test A and Test A2 must use `@pytest.mark.parametrize("director_root", sorted(sender.DIRECTOR_PHONE_ROOTS))` so adding any new Director root automatically gets test coverage.
+4. **Cache-bust** `outputs/static/index.html` — bump `?v=N` query on `app.js` reference (iOS PWA hard caches; mandated by `.claude/rules/frontend.md`).
 
-**Out of scope (do NOT touch in this PR):**
-- `WAHA_BASE_URL`, `WHATSAPP_API_KEY`, or `DIRECTOR_WHATSAPP` constants (no value changes).
-- `baker_actions` table schema (the `path_taken` field lives inside the JSONB `payload` — no migration needed).
-- `whatsapp_lid_map` table population. The brief assumes the table is already populated (1,018 rows per memory). If the table is empty in your test environment, mock at the function boundary.
-- `outputs/slack_notifier.py` — `_alarm_slack_lid_db_degraded` calls `post_to_channel`, which already exists. Don't refactor slack_notifier.
-- `outputs/dashboard.py` — irrelevant to this fix.
+## CRITICAL — reviewer-caught issues already folded into brief
 
-## Acceptance criteria (10 items — all 10 must be green at PR-ready time)
+A `feature-dev:code-reviewer` pass on the brief itself (2026-05-10) caught 4 blockers + 1 quality nit. ALL FOLDED INTO THE BRIEF. If you encounter:
 
-Reproduced verbatim from brief §"Implementation acceptance criteria":
+- `slug_registry.describe(slug)` raising `KeyError` — yes, this is real (verified `kbl/slug_registry.py:215-220`). Brief specifies `_safe_describe()` helper. USE IT.
+- `priorities_registry_version` / `priorities_registry_ratified_at` — these come from `priorities_registry`, NOT `slug_registry`. Brief specifies explicit import + qualifier. DO NOT improvise.
+- Singleton pattern: copy `slug_registry.py`'s module-level cache + threading.Lock + `_get_registry()` verbatim. DO NOT invent `_get_global_instance()` method.
+- Fallback path: `_build_legacy_response(cur)` is an explicit else-branch. DO NOT skip it; one of the 15 tests exercises it.
+- CSS: NO new CSS rules required. The 5 dot classes (red/amber/blue/slate/lgray) all exist at `style.css:180-186`. Mapping is in brief Step 3.
 
-1. All 6 existing `test_whatsapp_sender_lid.py` tests pass.
-2. All 7 new tests pass (Test A, A2, C, D, E, F, G). Total parametrized instances ≥18.
-3. `python3 -c "import py_compile; py_compile.compile('outputs/whatsapp_sender.py', doraise=True)"` clean.
-4. PR description includes verbatim copy of **Test A, Test A2, AND Test E** code in the test plan checklist.
-5. Patch does NOT touch `WAHA_BASE_URL`, `WHATSAPP_API_KEY`, or `DIRECTOR_WHATSAPP`. Patch DOES add `DIRECTOR_PHONE_ROOTS = frozenset({"41799605092", "447588690632"})` adjacent to `DIRECTOR_WHATSAPP`, plus the module-import sanity assert.
-6. Patch does NOT remove `_log_send_to_baker_actions`. Patch DOES extend it with `path_taken: str` keyword argument; existing payload structure preserved (JSONB augment, not replace).
-7. `/security-review` skill PASS on the PR diff (Lesson #52 — Tier-A merges).
-8. PR description includes output of:
-   ```
-   grep -rn "_resolve_to_active_chat_id\|sendText\|baker-waha" outputs/ orchestrator/ tools/
-   ```
-   Expected: exactly one resolver call site at `outputs/whatsapp_sender.py:140`; one sendText egress at `:151`. No other matches in `outputs/`, `orchestrator/`, or `tools/`. **If any other caller surfaces, stop and escalate to AH2-T before proceeding** — the recipient-id assertion design assumes single-callsite gating.
-9. PR description embeds the `whatsapp_lid_map` schema verbatim per the brief schema block, and confirms `_lid_belongs_to_phone` SQL uses `f"{expected_phone_digits}@c.us"` for the `phone =` parameter.
-10. PR description lists which `path_taken` value covers which code branch and confirms Test G parametrizes over all 5 paths. No code branch may write zero or >1 audit rows for a given send invocation.
+## Scope discipline (Phase 1 only)
 
-## PR workflow
+This brief is **Phase 1** of a 2-phase split (AID scope-lock 2026-05-10):
 
-1. Create branch `b2/whatsapp-recipient-resolver-fix-1` off `main`.
-2. Apply the patch + tests per brief.
-3. Run `pytest tests/test_whatsapp_sender_lid.py -v` locally; all 6 existing + 7 new must pass (≥18 parametrized instances).
-4. Run the literal grep from acceptance criterion #8; paste output into PR description.
-5. Run `python3 -c "import py_compile; py_compile.compile('outputs/whatsapp_sender.py', doraise=True)"` clean.
-6. Push branch, open PR titled `fix(whatsapp): recipient-id assertion + Director-target asymmetric fail-closed (incident waha-mis-route-marcus-pisani-1)`.
-7. PR body must include the items from acceptance criteria #4, #8, #9, #10 (verbatim test code blocks + grep output + schema + path_taken table).
-8. End your chat ship report with the fenced PL paste-block per SKILL.md §"PL ship-report contract". PL paste-block topic: `incident/waha-mis-route-marcus-pisani-fix`.
+- **Phase 1 (THIS brief, b2)** — render hygiene. Sidebar reads `_priorities.yml` correctly + canonical labels + Triaga-driven severity. Director's clicks do NOT yet train Cortex.
+- **Phase 2 (separate brief, AH1 authors next session)** — `CORTEX_COCKPIT_GOLD_WRITES_1`. Wires Director sidebar interactions (ratify/dismiss/snooze/open) to emit Gold writes per B6 + I6. Depends on Phase 1 merging first.
 
-**On merge gate:** AH2-T runs `/security-review` on the PR diff (Lesson #52). Director ratifies merge. After merge, AH2-T executes the 3-smoke re-enable sequence per brief §"Re-enable sequence (after merge)".
+**Do NOT add Gold-write hooks in this PR.** That is Phase 2 scope. If you find yourself touching `signal_queue` writes or click → POST handlers, STOP and flag back.
 
-## Coordination notes
+## Ship gate
 
-- **Slack outbound is currently LIVE** (Director scope-narrowed the kill to WhatsApp only). `_alarm_slack_lid_db_degraded` will reach #cockpit during your tests if your test environment hits live Slack — patch it in tests as shown in brief Test D (`patch.object(sender, "_alarm_slack_lid_db_degraded")`).
-- **WAHA outbound is DEAD.** Don't try to live-fire `send_whatsapp` from your B2 dev environment — `WAHA_BASE_URL` on baker-master Render is scrambled, and Render env doesn't propagate to local dev. Test entirely via mocks per brief.
-- **Director's UK number (`447588690632`)** is in scope — appears in `DIRECTOR_PHONE_ROOTS` literal because the future Baker UK eSIM activation must not silently fail-open on the asymmetric Director-fail-closed branch. Pre-protected per reviewer HIGH-1 v0.3.
-- **PII handling:** the 3 mis-routed message contents are referenced by `baker_actions.id` (854, 855, 856) only. **Do not paste the message text into your PR description, commit messages, or chat ship report.** That handling is locked into the brief and post-mortem; B2 follows the same constraint.
+1. `pytest tests/test_priorities_registry.py tests/test_dashboard.py -v` — ≥15 net new tests pass.
+2. `python3 -c "import py_compile; py_compile.compile('outputs/dashboard.py', doraise=True); py_compile.compile('kbl/priorities_registry.py', doraise=True)"` — exit 0.
+3. Real-vault curl smoke (brief §Verification 3) — `projects[]` includes `mrci`, `lilienmatt`, `annaberg`, `aukera`, `franck-muller` (Triaga-active slugs WITHOUT pending alerts); does NOT include `kitz-kempinski` (Director-dismissed Q34); Hagenauer entry `severity: "critical"`.
+4. Fallback smoke (brief §Verification 7) — move `_priorities.yml` aside; reload; response has `fallback_mode: "legacy_no_priorities"`; sidebar renders legacy shape.
+5. Mobile viewport (375px iOS PWA) — sidebar collapses + new dot classes render.
+6. PR description includes literal `pytest` stdout (no "passes by inspection" — Lesson #8).
+7. **`/security-review` skill MANDATORY** before merge — Tier-A user-facing surface (Lesson #52).
+8. Cross-team review: AI Head B per autonomy charter §4.
 
-## PL ship-report
+## Files touched
 
-End your chat ship report with a fenced PL paste-block per SKILL.md §"PL ship-report contract". PL paste-block topic: `incident/waha-mis-route-marcus-pisani-fix`.
+**Create:**
+- `kbl/priorities_registry.py`
+- `tests/test_priorities_registry.py`
+- `tests/fixtures/priorities/_priorities_mini.yml`
+- `tests/fixtures/priorities/_priorities_bad_schema.yml`
+
+**Modify:**
+- `outputs/dashboard.py` (one endpoint, line 3888)
+- `outputs/static/app.js` (one function, line 1554)
+- `outputs/static/index.html` (cache-bust)
+- `tests/test_dashboard.py` (extend)
+
+**Do NOT touch:**
+- `baker-vault/wiki/_priorities.yml` (Director-curated)
+- `baker-vault/slugs.yml` (separate-repo PR-only)
+- `kbl/slug_registry.py` (use as-is)
+- `kbl/ingest_endpoint.py` (out of scope)
+- signal_queue tables (producer side unchanged — AID lock)
+- `matter_registry` (legacy fallback path)
+- `outputs/static/mobile.*` (V2 deferred)
+- Anything Gold-write-related (Phase 2 scope)
+
+## Estimated complexity
+
+Medium · ~5-7h · 1 PR · Tier-A user-facing surface.
+
+## Heartbeat
+
+Update `last_heartbeat: <UTC ISO>` in this mailbox file every 30 min during active work. Standard b-code-dispatch-coordination.md §3 protocol.
+
+## Prior CODE_2 task (archive reference)
+
+BRIEF_WHATSAPP_RECIPIENT_RESOLVER_FIX_1 — COMPLETE 2026-05-08 (incident-containment dispatch by ai-head-b). PR #173 merged 2026-05-08. Mailbox hygiene rule applied — overwriting per `_ops/processes/b-code-dispatch-coordination.md` §3.
