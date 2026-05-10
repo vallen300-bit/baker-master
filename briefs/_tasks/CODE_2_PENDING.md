@@ -1,10 +1,18 @@
 ---
-status: PENDING
+status: SHIPPED
 brief: briefs/BRIEF_CORTEX_COCKPIT_SIDEBAR_WIRING.md
 trigger_class: TIER_A_USER_FACING_RENDER_SURFACE
 dispatched_at: 2026-05-10
 dispatched_by: ai-head-1 (AH1)
 target: b2
+claimed_at: 2026-05-10T11:00Z
+claimed_by: B2
+shipped_at: 2026-05-10T11:30Z
+shipped_by: B2
+pr: https://github.com/vallen300-bit/baker-master/pull/180
+commit: f923f15292cc37c940fa56fce123ad54c19839d3
+report: briefs/_reports/B2_cortex_cockpit_sidebar_wiring_20260510.md
+gate_to_merge: /security-review PASS + AH B cross-team review + Director ratify + post-deploy verifications (real-vault smoke, fallback smoke, 375px PWA)
 director_ratification: Director ratified Option (b) standalone brief 2026-05-10; AID scope-confirmed Phase 1 (render-only) 2026-05-10 conditional on Phase 2 follow-up; AID DISPATCH AUTHORIZED 2026-05-10 in scope-lock reply file `_01_INBOX_FROM_CLAUDE/2026-05-10-aid-to-ah1-cockpit-phase1-conditional-accept-phase2-required.md`
 priority: P1
 phase: 1 of 2 (Phase 2 = CORTEX_COCKPIT_GOLD_WRITES_1, AH1 authors next session)
@@ -15,7 +23,7 @@ expected_pr_count: 1 (baker-master)
 expected_branch_name: b2/cortex-cockpit-sidebar-wiring
 expected_complexity: medium (~5-7h)
 mandatory_2nd_pass: TRUE  # feature-dev:code-reviewer on brief done; /security-review on PR REQUIRED (Lesson #52, Tier-A user-facing surface)
-last_heartbeat: null
+last_heartbeat: 2026-05-10T11:30Z
 autopoll_eligible: false
 ---
 
