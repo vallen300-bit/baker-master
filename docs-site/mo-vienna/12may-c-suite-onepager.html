@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="source" content="brisen-desk">
+<meta name="confidence" content="director-folder-reference">
+<meta name="provenance" content="Rolf Hubner Month End Review March 2026 + Apr 7 Plaud (financial review) + Eastdil engagement Apr 22 + Cornell stabilization curve (Hotel Stabilization deck Apr 10)">
+<meta name="purpose" content="Defensive reference one-pager for Director's folder at MOHG C-suite breakfast 12 May 2026. Do not volunteer; have ready if asked.">
+<title>MO Vienna — 12-month Performance & Outlook</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;600;700&display=swap');
+
+@page {
+  size: A4;
+  margin: 1.5cm 1.8cm;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --ink: #0f1729;
+  --ink-soft: #2a3349;
+  --ink-mid: #586075;
+  --ink-light: #8e94a3;
+  --line: #d8dae0;
+  --line-soft: #ecedf0;
+  --paper: #ffffff;
+  --paper-warm: #fafaf7;
+  --gold: #9c7a3a;
+  --gold-soft: #d4af6b;
+  --gold-bg: #f8f2e4;
+  --positive: #2f6b3a;
+  --positive-bg: #ecf3ed;
+  --watch: #8c6312;
+  --watch-bg: #fbf4e3;
+}
+
+body {
+  font-family: 'Inter', -apple-system, sans-serif;
+  color: var(--ink);
+  background: var(--paper);
+  font-size: 9.5pt;
+  line-height: 1.5;
+  padding: 1.5cm 1.8cm;
+  max-width: 210mm;
+  margin: 0 auto;
+}
+
+/* ====== HEADER ====== */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 1.5px solid var(--ink);
+  padding-bottom: 12px;
+  margin-bottom: 18px;
+}
+
+.header-left h1 {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 17pt;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  color: var(--ink);
+  line-height: 1.1;
+}
+
+.header-left .subtitle {
+  font-size: 8.5pt;
+  color: var(--ink-mid);
+  font-weight: 400;
+  margin-top: 3px;
+  letter-spacing: 0.2px;
+}
+
+.header-right {
+  text-align: right;
+  font-size: 7.5pt;
+  color: var(--ink-light);
+  line-height: 1.5;
+}
+
+.conf-tag {
+  display: inline-block;
+  font-size: 6.5pt;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--paper);
+  background: var(--ink);
+  padding: 3px 9px;
+  border-radius: 2px;
+  margin-bottom: 5px;
+}
+
+/* ====== HEADLINE ROW ====== */
+.headline {
+  background: var(--paper-warm);
+  border-left: 3px solid var(--gold);
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 9.5pt;
+  line-height: 1.55;
+}
+
+.headline strong { color: var(--gold); font-weight: 600; }
+
+/* ====== KPI GRID ====== */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.kpi {
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 9px 11px;
+  background: var(--paper);
+}
+
+.kpi-label {
+  font-size: 7pt;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--ink-light);
+  margin-bottom: 3px;
+}
+
+.kpi-number {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 14pt;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.05;
+  margin-bottom: 2px;
+}
+
+.kpi-detail {
+  font-size: 7.5pt;
+  color: var(--ink-mid);
+  line-height: 1.4;
+}
+
+.kpi-trend {
+  font-size: 7pt;
+  font-weight: 600;
+  margin-top: 3px;
+}
+
+.kpi-trend.up { color: var(--positive); }
+.kpi-trend.watch { color: var(--watch); }
+.kpi-trend.flat { color: var(--ink-mid); }
+
+/* ====== SECTION ====== */
+h2 {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 11pt;
+  font-weight: 600;
+  color: var(--ink);
+  margin-top: 16px;
+  margin-bottom: 8px;
+  padding-bottom: 3px;
+  border-bottom: 1px solid var(--line);
+  letter-spacing: -0.2px;
+}
+
+h3 {
+  font-size: 8.5pt;
+  font-weight: 600;
+  color: var(--ink-soft);
+  margin-top: 10px;
+  margin-bottom: 4px;
+  letter-spacing: 0.2px;
+}
+
+p { margin-bottom: 6px; font-size: 9.5pt; color: var(--ink-soft); }
+
+/* ====== TWO COL ====== */
+.two-col {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  gap: 20px;
+  margin-bottom: 12px;
+}
+
+/* ====== STABILIZATION CURVE ====== */
+.curve-box {
+  background: var(--paper-warm);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 10px 12px;
+  font-size: 9pt;
+}
+
+.curve-box h3 {
+  margin-top: 0;
+  font-size: 8.5pt;
+  color: var(--ink);
+}
+
+.curve-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px dotted var(--line);
+  font-size: 8.5pt;
+}
+
+.curve-row:last-child { border-bottom: none; }
+
+.curve-row .stage {
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.curve-row .pos {
+  color: var(--ink-mid);
+}
+
+.curve-row.current {
+  background: var(--gold-bg);
+  margin: 2px -6px;
+  padding: 4px 6px;
+  border-radius: 2px;
+}
+
+.curve-row.current .stage,
+.curve-row.current .pos {
+  color: var(--gold);
+  font-weight: 700;
+}
+
+/* ====== LIST ====== */
+ul.tight {
+  list-style: none;
+  font-size: 9pt;
+  padding-left: 0;
+}
+
+ul.tight li {
+  padding: 4px 0;
+  padding-left: 14px;
+  position: relative;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+
+ul.tight li::before {
+  content: "—";
+  position: absolute;
+  left: 0;
+  color: var(--gold);
+  font-weight: 600;
+}
+
+ul.tight li strong { color: var(--ink); font-weight: 600; }
+
+/* ====== TABLE ====== */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 8.5pt;
+  margin: 6px 0 10px;
+}
+
+th {
+  background: var(--ink);
+  color: var(--paper);
+  text-align: left;
+  padding: 5px 8px;
+  font-weight: 600;
+  font-size: 7.5pt;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+td {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: top;
+  color: var(--ink-soft);
+}
+
+tr:last-child td { border-bottom: none; }
+
+td.num { text-align: right; font-variant-numeric: tabular-nums; font-weight: 500; color: var(--ink); }
+
+/* ====== STATUS PILLS ====== */
+.pill {
+  display: inline-block;
+  font-size: 7pt;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 1.5px 6px;
+  border-radius: 8px;
+}
+.pill.positive { background: var(--positive-bg); color: var(--positive); }
+.pill.watch { background: var(--watch-bg); color: var(--watch); }
+.pill.neutral { background: var(--line-soft); color: var(--ink-mid); }
+
+/* ====== FOOTER ====== */
+.footer {
+  margin-top: 14px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  font-size: 7pt;
+  color: var(--ink-light);
+  display: flex;
+  justify-content: space-between;
+  letter-spacing: 0.3px;
+}
+
+@media print {
+  body { padding: 0; }
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="header-left">
+    <span class="conf-tag">Confidential — Internal Reference</span>
+    <h1>Mandarin Oriental Vienna</h1>
+    <div class="subtitle">12-month performance · stabilization arc · forward outlook</div>
+  </div>
+  <div class="header-right">
+    Prepared for D. Vallen<br>
+    12 May 2026 · Brisen Group<br>
+    Reference document — not for distribution
+  </div>
+</div>
+
+<!-- HEADLINE -->
+<div class="headline">
+  <strong>Where we are:</strong> 18 months into the stabilization curve, ADR breaking expectations (December 2025: €1,300), occupancy ramping per industry norms (30-40% Q1, building through H2). Bottom-line still negative as expected at this point in a luxury-launch curve. Capital plan in place; HMA performing; residence pipeline active. The asset is on the trajectory it should be — not ahead, not behind.
+</div>
+
+<!-- KPI GRID -->
+<div class="kpi-grid">
+  <div class="kpi">
+    <div class="kpi-label">ADR · Dec 2025</div>
+    <div class="kpi-number">€1,300</div>
+    <div class="kpi-detail">Above MOHG launch forecast</div>
+    <div class="kpi-trend up">▲ Outperforming</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Q1 2026 Occupancy</div>
+    <div class="kpi-number">30-40%</div>
+    <div class="kpi-detail">Vienna luxury Q1 norm; H2 build expected</div>
+    <div class="kpi-trend flat">— On curve</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Monthly burn</div>
+    <div class="kpi-number">€200k</div>
+    <div class="kpi-detail">Year-2 stabilization phase</div>
+    <div class="kpi-trend watch">● Funded</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Residence pipeline</div>
+    <div class="kpi-number">€72M</div>
+    <div class="kpi-detail">Unsold inventory · active marketing</div>
+    <div class="kpi-trend flat">— Pipeline open</div>
+  </div>
+</div>
+
+<!-- BODY -->
+<div class="two-col">
+
+  <!-- LEFT -->
+  <div>
+    <h2>Stabilization curve · where MO Vienna sits</h2>
+    <div class="curve-box">
+      <h3>Cornell / HVS luxury-launch reference (24-36 months to stabilized RevPAR)</h3>
+      <div class="curve-row">
+        <span class="stage">Year 0 — Opening</span>
+        <span class="pos">Soft launch · ramp begins</span>
+      </div>
+      <div class="curve-row">
+        <span class="stage">Year 1 — Initial ramp</span>
+        <span class="pos">~40-55% of stabilized RevPAR</span>
+      </div>
+      <div class="curve-row current">
+        <span class="stage">Year 2 — Now (MO Vienna)</span>
+        <span class="pos">~60-75% of stabilized · ADR ahead</span>
+      </div>
+      <div class="curve-row">
+        <span class="stage">Year 3 — Stabilization</span>
+        <span class="pos">85-100% of stabilized RevPAR</span>
+      </div>
+      <div class="curve-row">
+        <span class="stage">Year 4+ — Stabilized</span>
+        <span class="pos">RevPAR at brand-standard maturity</span>
+      </div>
+    </div>
+
+    <h2>What's working</h2>
+    <ul class="tight">
+      <li><strong>ADR positioning:</strong> December 2025 €1,300 — exceeded MOHG launch projections. Brand-equity transfer is real.</li>
+      <li><strong>Residence pricing:</strong> €25-30k/sqm Vienna prime band held through 2025; Innere Stadt premium intact.</li>
+      <li><strong>HMA framework:</strong> Operating; transparency on monthly results maintained with Rolf Hübner team + MOHG GM Mario Habicher.</li>
+      <li><strong>Senior debt:</strong> Aukera relationship strong; €2M working-capital extension in process. Annaberg term sheet signed April — structural validation of Brisen as borrower.</li>
+      <li><strong>Asset thesis:</strong> Eastdil engaged Apr 2026 for market read; site visit completed (28 April, Wenk + Salloum + Schueler). Market interest active.</li>
+    </ul>
+  </div>
+
+  <!-- RIGHT -->
+  <div>
+    <h2>What we are managing</h2>
+    <ul class="tight">
+      <li><strong>Q1 occupancy 30-40%:</strong> Vienna luxury Q1 is structurally soft; Q2 building per comp set; on-curve, not below.</li>
+      <li><strong>Year-2 burn €200k/mo:</strong> Funded through €7M capital plan (€5M MOHG + €2M Aukera). Not a liquidity event.</li>
+      <li><strong>Capex overhang €12M:</strong> Subcontractor insolvencies (Hagenauer cohort). Legal recovery in train; not impairing operations.</li>
+      <li><strong>F&B economics:</strong> Restaurant + bar visibility improvements in flight; menu repriced (cap €48); tasting cycle underway.</li>
+      <li><strong>Residence inventory velocity:</strong> Pipeline open; commercial team active. Tatvani-comparable positioning option being assessed.</li>
+    </ul>
+
+    <h2>12-month outlook</h2>
+    <table>
+      <tr>
+        <th>Lever</th>
+        <th>Status</th>
+      </tr>
+      <tr>
+        <td>RevPAR growth H2 2026</td>
+        <td><span class="pill positive">On track</span></td>
+      </tr>
+      <tr>
+        <td>Aukera working-capital line</td>
+        <td><span class="pill positive">In process</span></td>
+      </tr>
+      <tr>
+        <td>MOHG fee-treatment dialogue</td>
+        <td><span class="pill neutral">Open</span></td>
+      </tr>
+      <tr>
+        <td>Residence sales velocity</td>
+        <td><span class="pill watch">Active mgmt</span></td>
+      </tr>
+      <tr>
+        <td>Capex recovery (Hagenauer)</td>
+        <td><span class="pill watch">In train</span></td>
+      </tr>
+      <tr>
+        <td>Eastdil market read</td>
+        <td><span class="pill neutral">Indicative</span></td>
+      </tr>
+    </table>
+  </div>
+
+</div>
+
+<!-- BOTTOM CONTEXT -->
+<h2>Framing for today's conversation</h2>
+<p style="font-size: 9pt;">
+  MO Vienna is exactly where a year-2 luxury launch should be on the Cornell / HVS curve. ADR is ahead of forecast — brand equity is real. Occupancy will build through H2 per industry norm. The €200k monthly burn is funded, expected, and bounded. Residence pipeline is open. Aukera + MOHG capital plan is structurally in place. Eastdil engagement is a market read, not a decision. The trajectory is the one we underwrote.
+</p>
+
+<div class="footer">
+  <span>Brisen Group · Confidential · MOVIE matter · 12 May 2026</span>
+  <span>Reference one-pager · Brisen Desk synthesis · do not distribute</span>
+</div>
+
+</body>
+</html>

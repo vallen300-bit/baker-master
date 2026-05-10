@@ -12,6 +12,7 @@
 #                             B1-B5/b1-b5 → b1-b5
 #                             architect → architect
 #                             cortex → cortex
+#                             aid/AID → aid
 #   BRISEN_LAB_DAEMON_URL   — optional. Default: https://brisen-lab.onrender.com
 #
 # Exits non-zero on any failure with descriptive stderr.
@@ -38,12 +39,12 @@ TOPIC="${3:-}"
 # BRISEN_LAB_DIRECTOR_RECIPIENT_BLOCKED. Single control point — flipping the
 # daemon flag is now the only kill-switch (no script-layer drift).
 
-# Validate against canonical 12-slug registry (now includes director).
+# Validate against canonical 13-slug registry (Director ratified aid 2026-05-10).
 case "$RECIPIENT" in
-    director|cowork-ah1|lead|deputy|architect|b1|b2|b3|b4|b5|cortex|daemon) ;;
+    director|cowork-ah1|lead|deputy|architect|b1|b2|b3|b4|b5|cortex|daemon|aid) ;;
     *)
         echo "ERROR: unknown slug: $RECIPIENT" >&2
-        echo "  Valid: director cowork-ah1 lead deputy architect b1 b2 b3 b4 b5 cortex daemon" >&2
+        echo "  Valid: director cowork-ah1 lead deputy architect b1 b2 b3 b4 b5 cortex daemon aid" >&2
         exit 1
         ;;
 esac
@@ -60,9 +61,10 @@ case "${BAKER_ROLE:-}" in
     B5|b5)                         SENDER=b5 ;;
     architect|ARCHITECT)          SENDER=architect ;;
     cortex|CORTEX)                 SENDER=cortex ;;
+    aid|AID)                       SENDER=aid ;;
     *)
         echo "ERROR: BAKER_ROLE not set or unrecognized: '${BAKER_ROLE:-}'" >&2
-        echo "  Valid: AH1, AH2, B1-B5, architect, cortex" >&2
+        echo "  Valid: AH1, AH2, B1-B5, architect, cortex, aid" >&2
         exit 1
         ;;
 esac
