@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>K6S — Monday Call Brief (Marcus Pisani + Richard Stone)</title>
+<style>
+  :root {
+    --bg: #f6f5f2;
+    --paper: #ffffff;
+    --ink: #1a1a1a;
+    --ink-soft: #4a4a4a;
+    --ink-mute: #777777;
+    --rule: #d8d6d2;
+    --rule-soft: #ececea;
+    --accent: #4a6b3a;
+    --accent-bg: #f5f7f4;
+    --warn: #8a2a2a;
+    --warn-bg: #f4eae9;
+    --hold: #6b4a1f;
+    --hold-bg: #f4ede0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.55;
+    padding: 32px 24px 80px 24px;
+  }
+  .paper {
+    max-width: 800px;
+    margin: 0 auto;
+    background: var(--paper);
+    padding: 44px 56px 56px 56px;
+    border: 1px solid var(--rule);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  header {
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 16px;
+    margin-bottom: 22px;
+  }
+  .eyebrow {
+    text-transform: uppercase;
+    letter-spacing: 2.4px;
+    font-size: 10.5px;
+    color: var(--ink-mute);
+    font-weight: 600;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.2px;
+    margin: 6px 0 4px 0;
+  }
+  .meta {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-top: 8px;
+  }
+  .meta b { color: var(--ink); font-weight: 600; }
+  h2 {
+    font-size: 12.5px;
+    text-transform: uppercase;
+    letter-spacing: 1.6px;
+    margin: 24px 0 6px 0;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--rule);
+    color: var(--ink);
+    font-weight: 700;
+  }
+  .bottomline {
+    background: var(--accent-bg);
+    border-left: 3px solid var(--accent);
+    padding: 12px 16px;
+    margin: 12px 0 4px 0;
+    font-size: 13.5px;
+  }
+  .bottomline b { color: var(--ink); }
+  .killbox {
+    background: var(--warn-bg);
+    border-left: 3px solid var(--warn);
+    padding: 12px 16px;
+    margin: 10px 0;
+    font-size: 13.5px;
+  }
+  .holdbox {
+    background: var(--hold-bg);
+    border-left: 3px solid var(--hold);
+    padding: 12px 16px;
+    margin: 10px 0;
+    font-size: 13.5px;
+  }
+  ul, ol { margin: 6px 0 4px 22px; }
+  li { margin: 3px 0; }
+  .qrow {
+    display: grid;
+    grid-template-columns: 26px 1fr;
+    gap: 10px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--rule-soft);
+  }
+  .qrow:last-child { border-bottom: none; }
+  .qnum {
+    font-weight: 700;
+    color: var(--ink);
+    font-size: 14px;
+  }
+  .qtxt b { color: var(--ink); }
+  .qwhy {
+    color: var(--ink-mute);
+    font-size: 12.5px;
+    font-style: italic;
+    margin-top: 2px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 6px 0;
+    font-size: 13px;
+  }
+  td, th {
+    text-align: left;
+    padding: 5px 8px 5px 0;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+  }
+  th { font-weight: 600; color: var(--ink); font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; }
+  .tag {
+    display: inline-block;
+    font-size: 10.5px;
+    font-weight: 600;
+    background: #f0efeb;
+    color: var(--ink);
+    padding: 2px 6px;
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    margin: 0 3px 0 0;
+  }
+  .gap {
+    color: var(--warn);
+    font-weight: 600;
+    font-size: 12px;
+  }
+  footer {
+    margin-top: 26px;
+    padding-top: 12px;
+    border-top: 1px solid var(--rule);
+    font-size: 11.5px;
+    color: var(--ink-mute);
+    line-height: 1.5;
+  }
+  @media print { body { background: #fff; padding: 0; } .paper { box-shadow: none; border: none; padding: 24px; } }
+</style>
+</head>
+<body>
+<div class="paper">
+
+<header>
+  <div class="eyebrow">Brisen Desk · Call Brief</div>
+  <h1>K6S — Monday 11 May, 10:30 UK</h1>
+  <div class="meta">
+    <div><b>With:</b> Marcus Pisani + Richard Stone (ex-Reuben Brothers)</div>
+    <div><b>Matter:</b> <code>kitzbuhel-six-senses</code></div>
+    <div><b>Author:</b> Brisen Desk · 10 May 2026</div>
+  </div>
+</header>
+
+<h2>Posture</h2>
+<div class="bottomline">
+  <b>Position Brisen as a credible GP co-developer, not a passive cheque.</b> We know this asset already — Six Senses out, Lindner partial-build, Steininger ownership complications, Roundshield withdrew, Frank Wagner €10M+ in. Demonstrate that knowledge calmly. Let Richard explain the "cleanup" and read whether his story matches the parties we already know about.
+</div>
+
+<h2>What we know — use selectively to anchor credibility</h2>
+<table>
+  <tr><th>Element</th><th>Known fact</th><th>Source</th></tr>
+  <tr><td>Brand</td><td>Six Senses HMA <b>terminated</b>. Asset is brand-free. (Closed topic — nothing to discuss further about Six Senses; only the fact of termination matters.)</td><td>Director · multiple Q1 2026 meetings</td></tr>
+  <tr><td>Site</td><td>88-99 keys hotel + ~48 branded residences; 15-20 min from Kitzbühel town; main road covered by tunnel so apartments have clean mountain views</td><td>Marcus teaser PDF · 26 Jan 2026 site debrief</td></tr>
+  <tr><td>Developer</td><td>Lindner — €32M registered against the land (not €25M, not €35M); contract is <b>sliced</b>, terminable; built 2 apartment buildings + cellars + road tunnel + hotel groundwork only (half-hill excavated, no hotel structure)</td><td>26 Jan 2026 meeting</td></tr>
+  <tr><td>Ownership trinity</td><td><b>Steininger family + Wieser + Werner</b> (German). <b>Wieser is the local keystone</b> — owns the chairlift parking + the personnel-house land + holds local-authority influence. Roundshield walked because Wieser refused to sell; now Wieser reportedly wants to sell.</td><td>26 Jan 2026 meeting</td></tr>
+  <tr><td>Steininger litigation</td><td>2018 Walter → Michael Steininger share transfer is central; Brisen has letters with managing directors that shares cannot be transferred per court orders — separate leverage</td><td>12 Jan + 4 Feb 2026 meetings</td></tr>
+  <tr><td>Major shareholder</td><td>Frank Wagner — €10M+ since 2020; control + structured-data focus</td><td>5 Feb 2026 meeting</td></tr>
+  <tr><td>Departed investor</td><td>Roundshield — withdrew; opened the seat for an incoming investor</td><td>12 Jan 2026 meeting</td></tr>
+  <tr><td>Creditors</td><td>Lindner claims, Fair Fund, plus CHF 800K escrow deadlock with subcontractors (waiver issue); buyer money used under BTVG/PTBG to overbridge</td><td>5 Feb + 12 Jan + 26 Jan</td></tr>
+  <tr><td>Permits</td><td><b>Main construction permit lapsed September 2024</b>. Prolonged repeatedly since 2018. Local Tirol political sentiment turned against further prolongation — "ugly construction site for years." Status under Richard's cleanup unknown.</td><td>4 Feb 2026 meeting (Eric)</td></tr>
+  <tr><td>Sales</td><td>14 apartments sold; buyers stopped paying once hotel financing stalled (BTVG stage-release wall); €25K/sqm asking price; design "reads ~20 years old" — chalets land better than slab apartments</td><td>26 Jan 2026 meeting</td></tr>
+  <tr><td>Construction labour</td><td>No Austrian labour pool; crews live in containers on site; personnel house planned but not built — and the land sits with Wieser, not in the Steininger deal</td><td>26 Jan 2026 meeting</td></tr>
+  <tr><td>Numbers (their teaser vs ours)</td><td>GDV €340-370M · total cost €180-280M (incl. underground garage allocation games on the €130M/99-key hotel) · €150M fresh money needed; sales stalled at 14 apts</td><td>5 Feb + Marcus teaser</td></tr>
+  <tr><td>DD assessment</td><td>External legal DD (Mohr Dietrich) called the project "a complete mess"; Brisen modelled the engagement as <b>strategic-review workout</b>, not build-to-completion commitment — six-month restructuring with optionality to sell parts, wind up, or develop</td><td>4 Feb 2026 meeting</td></tr>
+</table>
+
+<h2>Credibility drops — Tier 1 (deploy 2 or 3, framed as questions)</h2>
+<table>
+  <tr><th style="width:24%">Topic</th><th>Drop / question</th></tr>
+  <tr>
+    <td><b>Ownership trinity</b></td>
+    <td>"As I understand it, ownership is split between the Steininger family, Wieser, and Werner — the German shareholder. The reason Roundshield walked was that Wieser refused to sell. Has that posture changed?"</td>
+  </tr>
+  <tr>
+    <td><b>Wieser chokepoints</b></td>
+    <td>"Wieser personally owns the chairlift parking and the personnel-house land — both of which the hotel depends on for ski-in/ski-out access and workforce housing. Is that part of what's consolidated in your cleanup?"</td>
+  </tr>
+  <tr>
+    <td><b>Permit lapse</b></td>
+    <td>"The main construction permit lapsed in September last year. Tirol authorities had prolonged it since 2018 but local political sentiment turned. Has your group secured a fresh permit, or is it under prolongation?"</td>
+  </tr>
+  <tr>
+    <td><b>Lindner €32M sliced</b></td>
+    <td>"Lindner has €32M registered against the land but the contract is sliced — terminable. What's the agreed exit number with Lindner, and is the BTVG escrow released?"</td>
+  </tr>
+  <tr>
+    <td><b>Steininger litigation</b></td>
+    <td><i>Hold unless Richard signals strength.</i> "There's a separate 2018 Michael-Steininger share-transfer matter we have visibility on. Worth us calibrating whether that affects your cleanup."</td>
+  </tr>
+</table>
+
+<h2>Credibility drops — Tier 2 (specific facts, 1–2 if needed)</h2>
+<ul>
+  <li>14 apartments sold; buyers stopped paying when the hotel financing stalled (BTVG stage-release wall).</li>
+  <li>~48 residential units total, not 43. Two apartment buildings physically complete; hotel still at groundwork stage — about half the hill excavated.</li>
+  <li>The €130M / 99-key hotel cost is loaded with the shared underground garage allocation. Re-allocate to residential and the true cost-per-key drops materially.</li>
+  <li>Apartment design reads ~20 years old. Chalets land better than the slab apartments. Brand re-positioning needs a façade and interior pass.</li>
+  <li>Crews live in containers — no Austrian labour pool, all foreign.</li>
+</ul>
+
+<h2>Credibility drops — Tier 3 (operational depth, only if asked)</h2>
+<ul>
+  <li>"We engaged independent technical DD via Dresden ZOMO separately from Lindner's own data room."</li>
+  <li>"We framed our engagement as a strategic-review workout — six-month restructuring with optionality to sell parts, wind up, or develop, not a build-to-completion commitment."</li>
+  <li>"The Austrian buyer-residency mechanic — the 'buy-the-company' workaround Lindner used for foreign buyers — changed about two years ago. Worth understanding how the existing 14 buyers are structured."</li>
+</ul>
+
+<h2>Five questions (in order)</h2>
+
+<div class="qrow">
+  <div class="qnum">1.</div>
+  <div class="qtxt">
+    <b>What's signed vs aspirational on the cleanup — and by when?</b>
+    <div class="qwhy">We know the parties (Steininger, Lindner, Fair Fund, Frank Wagner, Roundshield-exit, sub-contractor escrow). Ask Richard to list them by name and say which agreements are paper-signed vs MoU vs aspirational. This is the single load-bearing test of his credibility.</div>
+  </div>
+</div>
+
+<div class="qrow">
+  <div class="qnum">2.</div>
+  <div class="qtxt">
+    <b>What's Richard's group putting in as principal capital, and what's the proposed capital stack?</b>
+    <div class="qwhy">Tests his "we co-invest" claim directly. If he can't name a number and a stack, he's a broker. If he can, he's a principal-adjacent partner.</div>
+  </div>
+</div>
+
+<div class="qrow">
+  <div class="qnum">3.</div>
+  <div class="qtxt">
+    <b>Why now, and who else has seen it?</b>
+    <div class="qwhy">Reads auction tension. The asset showing up via a WhatsApp intro rather than a JLL/Eastdil marketed process tells us either the cleanup isn't done, or it can't be run openly for legal reasons. Worth knowing which.</div>
+  </div>
+</div>
+
+<div class="qrow">
+  <div class="qnum">4.</div>
+  <div class="qtxt">
+    <b>What does Richard need from Brisen specifically — capital, or operating expertise / brand?</b>
+    <div class="qwhy">Determines whether GP-co-developer (our target option) is on the menu, or if he's looking for an LP cheque. If operating + brand, we have material edge; if just capital, less interesting.</div>
+  </div>
+</div>
+
+<div class="qrow">
+  <div class="qnum">5.</div>
+  <div class="qtxt">
+    <b>Richard's last principal deals — what did he lead, not introduce?</b>
+    <div class="qwhy"><span class="gap">Information gap:</span> Richard Stone has no public footprint on Reuben-Brothers principal track. Reuben has 3 unnamed principals + 4 partners. Ask directly — what closed where, with what stake. CV reference vs principal track matters for GP partnership.</div>
+  </div>
+</div>
+
+<h2>Hotel-building experience to reference</h2>
+<ul>
+  <li>MO Vienna — operating asset, MOHG operator.</li>
+  <li>Annaberg / Balgerstrasse — Baden-Baden development.</li>
+  <li>Hagenauer-RG7 — live alpine-style build in Vienna.</li>
+</ul>
+
+<h2>NVIDIA-Corinthia AI hook — held in reserve</h2>
+<div class="holdbox">
+  <b>Hold until the right moment. Do NOT lead with it.</b> Deploy only if Richard or Marcus opens on brand-replacement strategy or differentiation. Then introduce the NVIDIA-AI hotel concept as Brisen's differentiated angle — "we have a separate track with NVIDIA + Corinthia on AI-enabled luxury hotels; that could be a brand-differentiation play for K6S if positioning supports it." Lower-capital, higher-value contribution.
+</div>
+
+<h2>Do NOT volunteer</h2>
+<div class="killbox">
+  <ol>
+    <li><b>Brisen capital position</b> — no numbers, no liquidity reference, no AO cap-call status.</li>
+    <li><b>AO pipeline</b> — Oskolkov is a separate matter; no mention of his deals or his calls.</li>
+    <li><b>MOVIE-exit timing</b> — Laura Wenk / Eastdil track is off-limits.</li>
+    <li><b>NVIDIA-Corinthia status with Corinthia</b> — if AI hook deploys, frame as Brisen-side initiative, not "Corinthia has agreed to X."</li>
+  </ol>
+</div>
+
+<h2>Walk-away framing</h2>
+<ul>
+  <li>Information-gathering only. <b>No commitment on the call.</b></li>
+  <li>If interest is real, ask Richard to send a written 1-pager: parties + signed/aspirational status + cap stack + his group's principal cheque + three last closed deals. We respond after.</li>
+  <li>Marcus's relationship is honoured by taking the call seriously. We do not have to take the deal.</li>
+</ul>
+
+<footer>
+  Brisen Desk · synthesis from <code>wiki/matters/kitzbuhel-six-senses/</code> + Fireflies meetings (12 Jan · 21 Jan · 26 Jan · 4 Feb · 5 Feb · 25 Feb · 31 Mar 2026; full transcripts pulled) + Marcus Pisani WhatsApp 6-8 May 2026 + Steininger fold disposition (RA-21 2026-04-26) + <code>oskolkov/agenda.md</code> parked-matter reference. Richard Stone public-web search returned no principal track — flagged for direct ask (Q5). Name correction applied 2026-05-10: Wieser (not Visa — Fireflies transcription error). Matter-internal execution remains with Origination Desk if pursued.
+</footer>
+
+</div>
+</body>
+</html>
