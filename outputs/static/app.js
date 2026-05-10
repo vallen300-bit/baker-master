@@ -1560,15 +1560,39 @@ function _renderMatterSection(containerId, matters, countId) {
         var m = matters[i];
         var slug = m.matter_slug || '_ungrouped';
         if (slug === '_ungrouped' && containerId !== 'inboxSubList') continue;
-        var label = slug === '_ungrouped' ? 'General'
-            : slug.replace(/_/g, ' ').replace(/[-]/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
-        var dotClass = (m.worst_tier && m.worst_tier <= 2) ? 'red' : 'slate';
+
+        // Canonical label from API (slug_registry.describe via _safe_describe);
+        // fall back to title-cased slug for legacy fallback_mode rows that
+        // omit display_label.
+        var label = m.display_label
+            || (slug === '_ungrouped' ? 'General'
+                : slug.replace(/_/g, ' ').replace(/[-]/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); }));
+        if (label.length > 60) label = label.substring(0, 57) + '...';
+
+        // Severity dot from Triaga importance (priority-driven). Falls back
+        // to legacy worst_tier mapping when severity is absent (legacy
+        // fallback_mode response).
+        var dotClass;
+        if (m.severity) {
+            switch (m.severity) {
+                case 'critical': dotClass = 'red'; break;
+                case 'high':     dotClass = 'amber'; break;
+                case 'medium':   dotClass = 'blue'; break;
+                case 'low':      dotClass = 'slate'; break;
+                case 'frozen':   dotClass = 'lgray'; break;
+                default:         dotClass = 'slate';
+            }
+        } else {
+            dotClass = (m.worst_tier && m.worst_tier <= 2) ? 'red' : 'slate';
+        }
+
         totalCount += m.item_count || 0;
 
         var item = document.createElement('div');
         item.className = 'nav-item';
         item.dataset.tab = 'matters';
         item.dataset.matter = slug;
+        if (m.triaga_ref) item.dataset.triagaRef = m.triaga_ref;
 
         var dot = document.createElement('span');
         dot.className = 'nav-dot ' + dotClass;
@@ -1577,7 +1601,11 @@ function _renderMatterSection(containerId, matters, countId) {
         var lbl = document.createElement('span');
         lbl.className = 'nav-label';
         lbl.textContent = label;
-        item.title = label + ' (' + m.item_count + ')';
+        var titleParts = [label];
+        if (m.triaga_ref) titleParts.push('Triaga ' + m.triaga_ref);
+        if (m.description) titleParts.push(m.description);
+        titleParts.push('items: ' + (m.item_count || 0));
+        item.title = titleParts.join(' · ');
         item.appendChild(lbl);
 
         var cnt = document.createElement('span');
