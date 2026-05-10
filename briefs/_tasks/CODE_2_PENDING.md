@@ -1,10 +1,16 @@
 ---
-status: PENDING
+status: SHIPPED
 brief: briefs/BRIEF_BRISEN_LAB_TERMINAL_BUS_DRAIN_ON_SESSION_START_1.md
 trigger_class: TIER_B_FLEET_INFRA
 dispatched_at: 2026-05-11
 dispatched_by: ai-head-1 (AH1)
 target: b2
+claimed_at: 2026-05-11T00:30Z
+claimed_by: B2
+shipped_at: 2026-05-11T00:50Z
+shipped_by: B2
+pr: TBD (gh pr create pending)
+report: briefs/_reports/B2_BUS_DRAIN_20260511.md
 director_ratification: Director ratified 2026-05-11 in chat ("go ahead") after AID provisioning round-trip exposed V0.2 §#3 wake-mechanism gap; AH1 authored brief V0.1 → V0.2 (reviewer pass folded 4 blockers + 1 token-budget note). Director redirected dispatch B1 → B2 same session ("can you dispatch to b2 instead? b3 is busy"). Director's prior comment "AH2 + B-codes still via Director paste-block (not on bus yet)" relayed from parallel-AH1 instance flagged this as the next-shipping fleet-infra unblock.
 priority: P2
 phase: 1 of 1 (single PR)
@@ -16,8 +22,9 @@ expected_pr_count: 1 (baker-master, plus user-global hook file + settings.json e
 expected_branch_name: b2/brisen-lab-bus-drain-on-session-start-1
 expected_complexity: low-medium (~3-4h)
 mandatory_2nd_pass: FALSE  # feature-dev:code-reviewer pass on brief done (4 blockers folded); /security-review NOT mandatory (fleet-internal auth, not user-facing Tier-A); AH2 cross-lane review on PR per autonomy charter §3
-last_heartbeat: null
+last_heartbeat: 2026-05-11T00:50Z
 autopoll_eligible: true
+gate_to_merge: AH2 cross-lane review per autonomy charter §3 + Director live-smoke post-deploy (fresh AH1 session) + Director ratification of user-global state
 ---
 
 # CODE_2_PENDING — BRIEF_BRISEN_LAB_TERMINAL_BUS_DRAIN_ON_SESSION_START_1 — 2026-05-11
