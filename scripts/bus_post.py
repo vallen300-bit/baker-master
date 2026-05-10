@@ -26,7 +26,7 @@ DAEMON_URL = os.environ.get("BRISEN_LAB_DAEMON_URL", "https://brisen-lab.onrende
 VALID_SLUGS = {
     "director", "cowork-ah1", "lead", "deputy", "architect",
     "b1", "b2", "b3", "b4", "b5",
-    "cortex", "daemon",
+    "cortex", "daemon", "aid",
 }
 
 ROLE_TO_SLUG = {
@@ -39,6 +39,7 @@ ROLE_TO_SLUG = {
     "B5": "b5", "b5": "b5",
     "architect": "architect", "ARCHITECT": "architect",
     "cortex": "cortex", "CORTEX": "cortex",
+    "aid": "aid", "AID": "aid",
 }
 
 
@@ -47,7 +48,7 @@ def _resolve_sender() -> str:
     if role not in ROLE_TO_SLUG:
         sys.exit(
             f"ERROR: BAKER_ROLE not set or unrecognized: {role!r}. "
-            f"Valid: AH1, AH2, B1-B5, architect, cortex"
+            f"Valid: AH1, AH2, B1-B5, architect, cortex, aid"
         )
     return ROLE_TO_SLUG[role]
 
