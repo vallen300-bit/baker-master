@@ -18,10 +18,14 @@ Cost source (Q2 mixed model):
     Fallback : committer self-declares with ``action_class='novel:<descriptor>'``
                + ``self_cost_eur`` (flagged for AID monthly review)
 
-Atomicity: cost-resolve, counter-read, and pending-insert all run inside a
-single SERIALIZABLE transaction so two simultaneous committers can't both
-see headroom and together exceed cap. Postgres surfaces serialization
-failures as exceptions; the caller is expected to retry.
+Atomicity (V1): the SERIALIZABLE transaction inside ``enforce()`` protects
+the read-then-insert sequence within a SINGLE call only. It does NOT
+protect pool-wide atomicity across concurrent callers — two enforcers
+reading €499 day-total can both PASS because Postgres SSI sees no
+rw-conflict (PASS path commits without writing to baker_actions). Closing
+this gap requires the caller-pattern in B4 (caller's baker_actions INSERT
+must run inside the same txn). Tracked: FIXME(B4) inside ``enforce()`` +
+``_ops/briefs/_precursor/B4_PRECURSOR_ATOMICITY_CLOSURE.md``.
 """
 from __future__ import annotations
 
