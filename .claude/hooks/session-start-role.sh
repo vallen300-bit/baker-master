@@ -21,13 +21,13 @@ ROLE="${BAKER_ROLE:-}"
 
 if [ -z "$ROLE" ]; then
   case "$REPO_ROOT" in
-    */bm-aihead1) ROLE="lead" ;;
-    */bm-aihead2) ROLE="aihead2" ;;
-    */bm-b1) ROLE="b1" ;;
-    */bm-b2) ROLE="b2" ;;
-    */bm-b3) ROLE="b3" ;;
-    */bm-b4) ROLE="b4" ;;
-    */bm-b5) ROLE="b5" ;;
+    */bm-aihead1|*/bm-aihead1/.claude/worktrees/*) ROLE="lead" ;;
+    */bm-aihead2|*/bm-aihead2/.claude/worktrees/*) ROLE="aihead2" ;;
+    */bm-b1|*/bm-b1/.claude/worktrees/*) ROLE="b1" ;;
+    */bm-b2|*/bm-b2/.claude/worktrees/*) ROLE="b2" ;;
+    */bm-b3|*/bm-b3/.claude/worktrees/*) ROLE="b3" ;;
+    */bm-b4|*/bm-b4/.claude/worktrees/*) ROLE="b4" ;;
+    */bm-b5|*/bm-b5/.claude/worktrees/*) ROLE="b5" ;;
     *)      ROLE="" ;;
   esac
 fi

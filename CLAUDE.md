@@ -64,7 +64,7 @@ Director may say "you broke Rule 2/3" or "Rule 4 — let's brainstorm" — rewri
 >
 > **First-message confirmation phrase (evidence-bound, exact):** `"AH2 oriented (Tier 0). Read: aihead2/orientation.md, ai-head/SKILL.md, MEMORY.md. Tier 1+ on demand."`
 >
-> Block applies ONLY when cwd basename resolves to `bm-aihead2` (i.e., session opened via the AH2 picker symlink). B-code sessions follow the B-code block above; AH1 sessions follow the AH1 block below.
+> Block applies when cwd path is `/Users/dimitry/bm-aihead2` OR a Cowork-spawned worktree under it (`bm-aihead2/.claude/worktrees/<name>`). Pre-2026-05-10 the check was strict basename only, which broke when Cowork forced worktree-mode and spawned sessions under `.claude/worktrees/`. B-code sessions follow the B-code block above; AH1 sessions follow the AH1 block below.
 
 > **AI Head A1 (AH1) opening this dir via picker symlink** (`~/Vallen Dropbox/Dimitry vallen/bm-aihead1/` → `~/bm-aihead1/`, ratified 2026-05-08 to mirror AH2 pattern + drop session start cost from ~12% to ~6% by retiring the heavy `~/Desktop/baker-code` auto-memory slug) — MANDATORY before any reply (Tier 0/1/2/3 access model, ratified 2026-05-09 — `_ops/processes/cross-agent-knowledge-dispatch.md`):
 >
@@ -103,7 +103,7 @@ Director may say "you broke Rule 2/3" or "Rule 4 — let's brainstorm" — rewri
 >
 > AH1 picker has NO auto-memory directory (Director-ratified 2026-05-08 PM, mirror AH2 — drops start cost to ~6%). All historical session handovers + feedback + project memories live in baker-vault `_ops/agents/aihead1/handover-archive/YYYY-MM/` + `_ops/agents/aihead1/auto-memory-archive-20260508/`. Read on demand. Latest in-flight state lives in `_ops/agents/aihead1/operating.md` + `ARCHIVE.md` (canonical, no MEMORY.md). SessionEnd hook at `.claude/hooks/aihead1-session-end.sh` warns on uncommitted/unpushed `_ops/agents/aihead1/` state.
 >
-> Block applies ONLY when cwd basename resolves to `bm-aihead1` (i.e., session opened via the AH1 picker symlink). Pre-2026-05-08 AH1 sessions opened directly at `~/Desktop/baker-code` and used the heavier auto-memory slug there — that fallback path remains operational but new sessions should use the picker.
+> Block applies when cwd path is `/Users/dimitry/bm-aihead1` OR a Cowork-spawned worktree under it (`bm-aihead1/.claude/worktrees/<name>`). Pre-2026-05-10 the check was strict basename only, which broke when Cowork forced worktree-mode on the standalone clone and spawned sessions under `.claude/worktrees/`. Pre-2026-05-08 AH1 sessions opened directly at `~/Desktop/baker-code` and used the heavier auto-memory slug there — that fallback path remains operational but new sessions should use the picker.
 
 @.claude/how-to/INDEX.md
 
