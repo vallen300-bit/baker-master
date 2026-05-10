@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_CORTEX_TIER_B_RUNTIME_V1.md
 trigger_class: TIER_B_DB_SCHEMA_PLUS_ATOMICITY_PLUS_EXTERNAL_SURFACE
 dispatched_at: 2026-05-10
@@ -15,7 +15,15 @@ expected_pr_count: 1 (baker-master)
 expected_branch_name: b3/cortex-tier-b-runtime-v1
 expected_complexity: medium (~6-8h)
 mandatory_2nd_pass: TRUE  # Triggers #2 (DB schema/migrations/atomicity) + #3 (concurrency-ordering) + #4 (external-surface endpoint)
-last_heartbeat: null
+last_heartbeat: 2026-05-10T17:23Z (ship report)
+shipped_pr: https://github.com/vallen300-bit/baker-master/pull/179
+shipped_commit: c5c5e4198253716e2b758a82f99df69adca032f7
+shipped_at: 2026-05-10T17:23Z
+ship_report: briefs/_reports/B3_cortex_tier_b_runtime_v1_20260510.md
+gate_1_pytest: GREEN (15 passed, 4 warnings, 87s)
+gate_2_security_review: pending
+gate_3_picker_architect: pending
+gate_4_code_reviewer: pending
 ---
 
 # CODE_3_PENDING — BRIEF_CORTEX_TIER_B_RUNTIME_V1 — 2026-05-10

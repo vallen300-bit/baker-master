@@ -29,6 +29,17 @@ if [ -n "$ROGUE_STOREBACK" ]; then
   ERRORS=$((ERRORS + 1))
 fi
 
+# CORTEX_TIER_B_RUNTIME_V1: TierBRuntime() — same singleton policy.
+ROGUE_TIERB=$(grep -rn 'TierBRuntime()' --include='*.py' \
+  --exclude-dir=tests --exclude-dir=scripts --exclude-dir=briefs --exclude-dir=.claude \
+  . 2>/dev/null | grep -v '_get_global_instance\|_allow_direct\|_instance = cls()' || true)
+
+if [ -n "$ROGUE_TIERB" ]; then
+  echo "ERROR: Direct TierBRuntime() instantiation found (use _get_global_instance()):"
+  echo "$ROGUE_TIERB"
+  ERRORS=$((ERRORS + 1))
+fi
+
 if [ $ERRORS -gt 0 ]; then
   echo ""
   echo "FAILED: $ERRORS singleton violation(s) found."

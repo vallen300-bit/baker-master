@@ -1035,6 +1035,19 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info("Proactive sentinels DISABLED (PROACTIVE_SENTINEL_ENABLED=false)")
 
+    # CORTEX_TIER_B_RUNTIME_V1: calendar-month Tier B counter-reset audit.
+    # Fires 1st of each month at 00:00 UTC. Reset is logical (counters are
+    # read-driven from baker_actions); the audit row proves the boundary fired.
+    from triggers.tier_b_reset import tier_b_counter_reset
+    scheduler.add_job(
+        tier_b_counter_reset,
+        CronTrigger(day=1, hour=0, minute=0, timezone="UTC"),
+        id="tier_b_counter_reset",
+        name="Tier B counter reset (calendar-month, UTC)",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: tier_b_counter_reset (cron: 1st of month 00:00 UTC)")
+
 
 def _kbl_pipeline_tick_job():
     """APScheduler wrapper around ``kbl.pipeline_tick.main``.

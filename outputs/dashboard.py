@@ -10075,6 +10075,118 @@ async def trigger_trend_detection(background_tasks: BackgroundTasks):
     return {"status": "running", "message": "Trend detection started in background"}
 
 
+@app.get("/api/admin/tier-b-status", tags=["admin"], dependencies=[Depends(verify_api_key)])
+async def admin_tier_b_status():
+    """Live Tier-B autonomous-action budget state (CORTEX_TIER_B_RUNTIME_V1).
+
+    Read-only. Returns caps + current day/month totals + headroom + pending
+    ratify queue snapshot + recent committed Tier-B actions.
+    """
+    from memory.store_back import SentinelStoreBack
+    from orchestrator.tier_b_runtime import (
+        DAILY_POOL_CAP_EUR,
+        MONTHLY_POOL_CAP_EUR,
+        PER_ACTION_CAP_EUR,
+    )
+
+    store = SentinelStoreBack._get_global_instance()
+    conn = store._get_conn()
+    if conn is None:
+        return JSONResponse({"error": "no DB connection"}, status_code=503)
+    try:
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            SELECT COALESCE(SUM(cost_eur), 0)
+              FROM baker_actions
+             WHERE tier = 'B' AND cost_eur IS NOT NULL
+               AND committed_at >= DATE_TRUNC('day', NOW() AT TIME ZONE 'UTC')
+             LIMIT 100000
+            """
+        )
+        day_total = float(cur.fetchone()[0])
+
+        cur.execute(
+            """
+            SELECT COALESCE(SUM(cost_eur), 0)
+              FROM baker_actions
+             WHERE tier = 'B' AND cost_eur IS NOT NULL
+               AND committed_at >= DATE_TRUNC('month', NOW() AT TIME ZONE 'UTC')
+             LIMIT 100000
+            """
+        )
+        month_total = float(cur.fetchone()[0])
+
+        cur.execute(
+            """
+            SELECT id, cost_eur, action_class, committer_agent, reason_paused, created_at
+              FROM tier_b_pending
+             WHERE status = 'pending'
+             ORDER BY created_at DESC
+             LIMIT 50
+            """
+        )
+        pending = [
+            {
+                "id": int(r[0]),
+                "cost_eur": float(r[1]),
+                "action_class": r[2],
+                "committer_agent": r[3],
+                "reason_paused": r[4],
+                "created_at": r[5].isoformat() if r[5] else None,
+            }
+            for r in cur.fetchall()
+        ]
+
+        cur.execute(
+            """
+            SELECT id, cost_eur, action_class, committer_agent, committed_at
+              FROM baker_actions
+             WHERE tier = 'B' AND cost_eur IS NOT NULL
+             ORDER BY committed_at DESC NULLS LAST
+             LIMIT 20
+            """
+        )
+        recent = [
+            {
+                "id": int(r[0]),
+                "cost_eur": float(r[1]),
+                "action_class": r[2],
+                "committer_agent": r[3],
+                "committed_at": r[4].isoformat() if r[4] else None,
+            }
+            for r in cur.fetchall()
+        ]
+
+        cur.close()
+
+        return JSONResponse({
+            "caps": {
+                "per_action_eur": PER_ACTION_CAP_EUR,
+                "daily_pool_eur": DAILY_POOL_CAP_EUR,
+                "monthly_pool_eur": MONTHLY_POOL_CAP_EUR,
+            },
+            "current": {
+                "day_total_eur": day_total,
+                "month_total_eur": month_total,
+                "day_remaining_eur": max(0.0, DAILY_POOL_CAP_EUR - day_total),
+                "month_remaining_eur": max(0.0, MONTHLY_POOL_CAP_EUR - month_total),
+            },
+            "pending": pending,
+            "recent_committed": recent,
+        })
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.error(f"/api/admin/tier-b-status failed: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+    finally:
+        store._put_conn(conn)
+
+
 @app.get("/api/chains", tags=["chains"], dependencies=[Depends(verify_api_key)])
 async def get_chains(limit: int = 20):
     """Get chain execution history from baker_tasks."""
