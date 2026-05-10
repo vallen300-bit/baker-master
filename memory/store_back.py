@@ -66,6 +66,9 @@ class SentinelStoreBack:
         # Ensure ClickUp tables exist
         self._ensure_clickup_tables()
 
+        # CORTEX_TIER_B_RUNTIME_V1: Tier B runtime tables (depend on baker_actions)
+        self._ensure_tier_b_runtime_tables()
+
         # Ensure deep_analyses table exists
         self._ensure_deep_analyses_table()
 
@@ -1042,14 +1045,117 @@ class SentinelStoreBack:
                     trigger_source TEXT,
                     created_at TIMESTAMPTZ DEFAULT NOW(),
                     success BOOLEAN DEFAULT TRUE,
-                    error_message TEXT
+                    error_message TEXT,
+                    tier TEXT,
+                    cost_eur NUMERIC(12, 2),
+                    committed_at TIMESTAMPTZ,
+                    committer_agent TEXT,
+                    action_class TEXT,
+                    self_cost_eur NUMERIC(12, 2)
                 )
+            """)
+            # CORTEX_TIER_B_RUNTIME_V1: idempotent additive ALTER for envs where
+            # baker_actions pre-existed without Tier-B columns. Mirrors
+            # migrations/20260510_baker_actions_tier_b_runtime.sql.
+            cur.execute("""
+                ALTER TABLE baker_actions
+                    ADD COLUMN IF NOT EXISTS tier TEXT,
+                    ADD COLUMN IF NOT EXISTS cost_eur NUMERIC(12, 2),
+                    ADD COLUMN IF NOT EXISTS committed_at TIMESTAMPTZ,
+                    ADD COLUMN IF NOT EXISTS committer_agent TEXT,
+                    ADD COLUMN IF NOT EXISTS action_class TEXT,
+                    ADD COLUMN IF NOT EXISTS self_cost_eur NUMERIC(12, 2)
             """)
             conn.commit()
             cur.close()
             logger.info("ClickUp tables verified (clickup_tasks, baker_actions)")
         except Exception as e:
             logger.warning(f"Could not ensure ClickUp tables: {e}")
+        finally:
+            self._put_conn(conn)
+
+    # -------------------------------------------------------
+    # Tier B runtime table initialization (CORTEX_TIER_B_RUNTIME_V1)
+    # -------------------------------------------------------
+
+    def _ensure_tier_b_runtime_tables(self):
+        """Bootstrap Tier B runtime tables.
+
+        Mirrors migrations/20260510_baker_actions_tier_b_runtime.sql so envs
+        that come up via bootstrap (rather than the migration runner) get the
+        same shape. Brief Standard #4 — migration-vs-bootstrap drift trap.
+        """
+        conn = self._get_conn()
+        if not conn:
+            logger.warning("No DB connection — cannot ensure tier_b_* tables")
+            return
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS tier_b_action_classes (
+                    id SERIAL PRIMARY KEY,
+                    class_name TEXT NOT NULL UNIQUE,
+                    eur_cost NUMERIC(12, 2) NOT NULL,
+                    description TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    deprecated_at TIMESTAMPTZ
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS tier_b_pending (
+                    id SERIAL PRIMARY KEY,
+                    action_payload JSONB NOT NULL,
+                    cost_eur NUMERIC(12, 2) NOT NULL,
+                    action_class TEXT NOT NULL,
+                    committer_agent TEXT NOT NULL,
+                    reason_paused TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    ratified_at TIMESTAMPTZ,
+                    ratified_by TEXT,
+                    decision_payload JSONB,
+                    expired_at TIMESTAMPTZ,
+                    CONSTRAINT tier_b_pending_status_check
+                        CHECK (status IN ('pending', 'ratified', 'rejected', 'expired'))
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS tier_b_counter_resets (
+                    id SERIAL PRIMARY KEY,
+                    reset_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    period_label TEXT NOT NULL,
+                    final_day_total NUMERIC(12, 2),
+                    final_month_total NUMERIC(12, 2),
+                    actions_count INTEGER
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_tier_b_pending_status
+                    ON tier_b_pending (status, created_at)
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_baker_actions_tier_b_committed
+                    ON baker_actions (committed_at)
+                    WHERE tier = 'B' AND cost_eur IS NOT NULL
+            """)
+            # Seed the registry so a fresh env can resolve known classes
+            # immediately. Mirrors migration step 5.
+            cur.execute("""
+                INSERT INTO tier_b_action_classes (class_name, eur_cost, description)
+                VALUES
+                    ('render.deploy.web_service.starter',  7.00,  'Render Starter web service spawn (monthly billing approximation, daily-amortized = €0.23)'),
+                    ('render.deploy.web_service.standard', 25.00, 'Render Standard web service spawn (monthly billing approximation)'),
+                    ('render.env.flip',                    0.00,  'Render env-var flip; zero direct cost; logged for audit'),
+                    ('vendor.subscription.monthly',        50.00, 'Generic monthly SaaS subscription default; override with specific class as registry grows'),
+                    ('test.synthetic',                     1.00,  'Test-only class for integration tests')
+                ON CONFLICT (class_name) DO NOTHING
+            """)
+            conn.commit()
+            cur.close()
+            logger.info("Tier B runtime tables verified")
+        except Exception as e:
+            conn.rollback()
+            logger.warning(f"Could not ensure tier_b_* tables: {e}")
         finally:
             self._put_conn(conn)
 
