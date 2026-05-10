@@ -212,3 +212,54 @@ End with the PL ship-report paste-block per SKILL.md.
 
 12h cadence. ~30 min expected, so probably one heartbeat at fold-complete + ship-report-append.
 
+---
+
+## UPDATE 2026-05-10T19:00Z — MICRO-FOLD (consistency, AH1)
+
+**Status:** RE-OPENED for one 2-line edit. Fold #1 (commit `a996f53`) shipped clean — pytest 16/16, check_singletons.sh OK, refutations honored. B3 surfaced an honest gap I should have caught when writing the fold scope: I line-cited the **method** docstring at `tier_b_runtime.py:175-179` but missed the **module-level** docstring at `tier_b_runtime.py:20-24` which carries the same dishonest atomicity claim verbatim.
+
+**Accept B3's test-fixture deviation** (Flag 1): adding `clean_baker_actions` to `test_novel_class_negative_self_cost_rejected` matches the sibling `test_novel_class_requires_self_cost` pattern because `TierBRuntime._get_global_instance()` triggers SentinelStoreBack singleton init which demands Voyage creds. Inline comment is clear. No change needed on that test.
+
+### Micro-fold scope (1 item, ~5 min)
+
+Replace `orchestrator/tier_b_runtime.py` lines 20-24 (module-level docstring atomicity paragraph):
+
+**Current (dishonest):**
+```
+Atomicity: cost-resolve, counter-read, and pending-insert all run inside a
+single SERIALIZABLE transaction so two simultaneous committers can't both
+see headroom and together exceed cap. Postgres surfaces serialization
+failures as exceptions; the caller is expected to retry.
+```
+
+**Replace with:**
+```
+Atomicity (V1): the SERIALIZABLE transaction inside ``enforce()`` protects
+the read-then-insert sequence within a SINGLE call only. It does NOT
+protect pool-wide atomicity across concurrent callers — two enforcers
+reading €499 day-total can both PASS because Postgres SSI sees no
+rw-conflict (PASS path commits without writing to baker_actions). Closing
+this gap requires the caller-pattern in B4 (caller's baker_actions INSERT
+must run inside the same txn). Tracked: FIXME(B4) inside ``enforce()`` +
+``_ops/briefs/_precursor/B4_PRECURSOR_ATOMICITY_CLOSURE.md``.
+```
+
+### Ship gate for micro-fold
+
+- `pytest tests/test_tier_b_runtime.py tests/test_tier_b_reset.py tests/test_tier_b_status_endpoint.py -v` — same 16/16 GREEN as fold #1
+- `bash scripts/check_singletons.sh` — OK
+- Full suite — no new failures (baseline still 81 failed identical set)
+
+### Ship report
+
+Append a short `## UPDATE 2 (micro-fold)` section to `briefs/_reports/B3_cortex_tier_b_runtime_v1_20260510.md` with the new commit hash + literal pytest one-liner. End with PL paste-block.
+
+### Why this matters
+
+Path A ratification was "ship fold of other items honestly." Method docstring honest + module docstring still dishonest = a fresh reader opening the file sees the wrong mental model first. Closing this makes the file internally consistent before AH2 `/security-review` runs.
+
+### After this lands
+
+AH1 fires AH2 `/security-review` on the post-micro-fold diff. Don't wait — fold + report + push, then idle.
+
+
