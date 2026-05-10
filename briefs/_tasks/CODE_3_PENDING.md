@@ -95,3 +95,120 @@ End your chat ship report with a fenced PL paste-block per SKILL.md §"PL ship-r
 - COST: <$X / time / N cycles, or "n/a">
 - NEXT: <next blocker, dispatch, or "ready for next">
 ```
+
+---
+
+## UPDATE 2026-05-10T18:30Z — FOLD-FIX SCOPE (Path A ratified, AID via Director)
+
+**Status:** RE-OPENED. Gate 3 (picker-architect) returned PASS-WITH-NITS; Gate 4 (`feature-dev:code-reviewer`) returned FAIL. AH1 verified findings against shipped source on `origin/b3/cortex-tier-b-runtime-v1` @ `c5c5e41` — 2 genuine HIGHs to fold, 2 reviewer false-positives refuted.
+
+**Director ratified Path A 2026-05-10:** defer atomicity redesign to B4 brief; ship fold of other items; unblock cascade.
+
+**Continue on same branch `b3/cortex-tier-b-runtime-v1`. PR #179 stays open — fold commits append.**
+
+### Fold scope (5 items, ~30 min)
+
+1. **Atomicity-claim docstring honesty** — replace dishonest claim at `orchestrator/tier_b_runtime.py:175-179` (the `enforce()` method docstring currently reads *"cost-resolve, counter-read, and pending-insert run inside one SERIALIZABLE transaction… two simultaneous committers can't both see headroom and together exceed cap"*). Replace with:
+
+   ```
+   """Decide PASS or PAUSE_REQUIRED for a candidate Tier-B action.
+
+   V1 atomicity scope: single-call atomicity only. The SERIALIZABLE
+   transaction protects the read-then-insert sequence INSIDE one
+   enforce() call. It does NOT protect pool-wide atomicity across
+   concurrent callers — that requires the caller-pattern in B4
+   (caller's baker_actions INSERT must run inside the same txn).
+   See FIXME(B4) below.
+   """
+   ```
+
+2. **Add FIXME comment** inside `enforce()` body (top of method, after the docstring):
+
+   ```python
+   # FIXME(B4): close atomicity gap — pool-wide cap evasion possible when
+   # concurrent callers materialize. Two enforcers reading €499 day-total
+   # can both PASS because Postgres SSI sees no rw-conflict (PASS path
+   # commits without writing to baker_actions). Closure ratified Path A
+   # 2026-05-10; B4 brief carries hard acceptance criterion. See
+   # _ops/briefs/_precursor/B4_PRECURSOR_ATOMICITY_CLOSURE.md.
+   ```
+
+3. **Negative `self_cost_eur` guard** at `orchestrator/tier_b_runtime.py` `_resolve_cost()` (around lines 83-90). Add after the `if action.self_cost_eur is None` check, before the `return`:
+
+   ```python
+   if action.self_cost_eur < 0:
+       raise ValueError(
+           f"self_cost_eur must be non-negative (got {action.self_cost_eur}); "
+           f"negative values would bypass daily/monthly cap math"
+       )
+   ```
+
+   **Plus 1 unit test** in `tests/test_tier_b_runtime.py` confirming the guard fires:
+
+   ```python
+   def test_novel_class_negative_self_cost_rejected():
+       action = TierBAction(
+           action_class="novel:cap_evasion_attempt",
+           committer_agent="b3",
+           payload={"test": "negative_cost"},
+           self_cost_eur=-50.0,
+       )
+       with pytest.raises(ValueError, match="non-negative"):
+           enforce_tier_b(action)
+   ```
+
+   (No `@requires_pg` needed — this test exits before any DB call. Place near `test_novel_class_requires_self_cost`.)
+
+4. **Remove `_current_totals()` dead code** — `orchestrator/tier_b_runtime.py` lines 124-167 (the method body). `enforce()` inlines the same SUM queries; `/api/admin/tier-b-status` also inlines them; nothing calls `_current_totals()`. Delete the method.
+
+5. **`_resolve_cost()` docstring honesty** (architect nit) — `_resolve_cost()` opens its own connection at default isolation and runs OUTSIDE the SERIALIZABLE block in `enforce()`. Add a brief docstring note:
+
+   ```
+   """Resolve (cost_eur, source_tag) for an action.
+
+   Runs against a separate pooled connection at default isolation —
+   NOT inside enforce()'s SERIALIZABLE txn. Registry rarely changes
+   during a cycle so the read-skew window is acceptable for V1.
+   """
+   ```
+
+### Explicit refutation block (do NOT touch these)
+
+Reviewer flagged two HIGHs that don't exist in shipped source. AH1 verified against `origin/b3/cortex-tier-b-runtime-v1`. **Do not chase these:**
+
+- **"`check_singletons.sh` missing TierBRuntime check"** — REFUTED. Script DOES include the TierBRuntime block at lines 31-42 (added per ship report risk #4). No change needed.
+- **"NameError in `test_tier_b_reset.py` finally block"** — REFUTED. `cur.close()` is inside the `try` block; `finally:` only calls `tier_b_test_store._put_conn(conn)`. No `cur` reference in finally. No NameError possible. No change needed.
+
+### Out of scope for this fold
+
+- **Atomicity redesign** — deferred to B4 per Path A ratification. Do NOT redesign `enforce()` signature; keep SERIALIZABLE infra in place for V2.
+- **AH2 `/security-review`** — held by AH1 until fold lands. Don't dispatch it; AH1 will fire after fold confirmed.
+- **Endpoint DRY refactor** (architect Low #6 — `/api/admin/tier-b-status` re-implements counter queries) — defer; cleaning this in the same brief as #4 dead-code removal would mean callers reach for a method that doesn't exist. If `_current_totals()` is deleted, no caller can reuse it. Skip.
+- **Concurrent-commit test** (architect Med #3 coverage gap) — would expose the atomicity gap; deferred to B4 closure with the redesign.
+
+### Ship gate for fold
+
+Literal `pytest tests/test_tier_b_runtime.py tests/test_tier_b_reset.py tests/test_tier_b_status_endpoint.py -v` GREEN. Expect 16 passing (15 existing + 1 new negative-cost test). Plus full suite: no new failures.
+
+Plus `bash scripts/check_singletons.sh` GREEN.
+
+### AID-side already filed (do not re-file)
+
+- Risk register D5 entry: Tier B atomicity gap (open until B4 merges)
+- Tracker B3 row tagged "atomicity-debt → B4"
+- B4 precursor note: `_ops/briefs/_precursor/B4_PRECURSOR_ATOMICITY_CLOSURE.md` (hard acceptance criterion for B4 — cannot merge without closure)
+
+### Ship report for fold
+
+Append a `## UPDATE` section to your existing `briefs/_reports/B3_cortex_tier_b_runtime_v1_20260510.md` with:
+- New commits (hashes)
+- Literal pytest output (showing 16/16 + new test name)
+- Literal `check_singletons.sh` output
+- Confirmation that all 5 fold items shipped + 2 refutations honored (untouched)
+
+End with the PL ship-report paste-block per SKILL.md.
+
+### Heartbeat — same policy
+
+12h cadence. ~30 min expected, so probably one heartbeat at fold-complete + ship-report-append.
+
