@@ -12,6 +12,7 @@
 #                             B1-B5/b1-b5 → b1-b5
 #                             architect → architect
 #                             cortex → cortex
+#                             aid/AID → aid
 #   BRISEN_LAB_DAEMON_URL   — optional. Default: https://brisen-lab.onrender.com
 #
 # Exits non-zero on any failure with descriptive stderr.

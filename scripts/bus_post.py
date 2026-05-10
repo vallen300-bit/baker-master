@@ -4,6 +4,7 @@
 Usage:
     bus_post.py --to lead --body "..." [--topic ...] [--parent-id N] [--kind dispatch] [--tier B]
     bus_post.py --to lead,deputy --body "..."  # multiple recipients
+    BAKER_ROLE=aid bus_post.py --to lead --body "..."  # AID-Terminal sender
 
 Companion to scripts/bus_post.sh. Use the .sh for one-liner dispatches; the
 .py when you need parent_id chains, multi-recipient broadcasts, or multiline
