@@ -16,8 +16,15 @@ expected_complexity: medium (~5h)
 mandatory_2nd_pass: TRUE  # Triggers #2 (DB schema/migrations/atomicity) + #3 (concurrency-ordering) — 4-gate chain CLEARED post-fold
 hard_ship_gate: PASS — 10/10 deterministic GREEN (post-fold), 21/21 Tier-B suite GREEN
 shipped_pr: https://github.com/vallen300-bit/baker-master/pull/182
+shipped_commit: 3a8b4e5f42e7fe3523a24d0d4d7ede58bc9735f1
+shipped_at: 2026-05-10T22:00Z
 fold_commit: c64cc7f (isolation-set hard-fail edge case) + 6b13c14 (fold ship-report)
-last_heartbeat: 2026-05-10T22:50Z (B3 surfaced SHIPPED_FOLD_OK; parallel AH1 instance dispatched fold earlier; this AH1 session reconciled mailbox state)
+ship_report: briefs/_reports/B3_cortex_tier_b_atomicity_v1_20260510.md
+gate_1_pytest: GREEN (21 passed, 150.86s) + ship-gate 10/10 GREEN
+gate_2_security_review: PASS (AH2, pre-fold; narrow-fold exemption applies)
+gate_3_picker_architect: PASS_WITH_CONCERNS (atomicity SOUND; M1 folded as c64cc7f)
+gate_4_code_reviewer: PASS_WITH_CONCERNS (same M1, folded)
+last_heartbeat: 2026-05-10T22:55Z (AH1 merge-conflict resolution pre-squash-merge)
 ---
 
 # UPDATE 2026-05-10T22:30Z — FOLD-FIX (post-4-gate review)

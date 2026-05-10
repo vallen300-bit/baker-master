@@ -1048,6 +1048,19 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: tier_b_counter_reset (cron: 1st of month 00:00 UTC)")
 
+    # BRIEF_CORTEX_TIER_B_ATOMICITY_V1: Pattern B sweep.
+    # Every 5 min, delete orphan reservations past the 15-min TTL so
+    # crashed callers don't leave budget tied up forever.
+    from triggers.tier_b_reservation_sweep import tier_b_reservation_sweep
+    scheduler.add_job(
+        tier_b_reservation_sweep,
+        IntervalTrigger(minutes=5),
+        id="tier_b_reservation_sweep",
+        name="Tier B reservation sweep (orphan reaper)",
+        coalesce=True, max_instances=1, replace_existing=True,
+    )
+    logger.info("Registered: tier_b_reservation_sweep (every 5 min)")
+
 
 def _kbl_pipeline_tick_job():
     """APScheduler wrapper around ``kbl.pipeline_tick.main``.
