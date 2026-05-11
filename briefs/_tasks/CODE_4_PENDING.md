@@ -1,15 +1,53 @@
 ---
-status: FOLD_V0_3_REQUESTED
+status: COMPLETE
 brief: briefs/BRIEF_BRISEN_LAB_RENDER_CONFIG_READ_1.md
 trigger_class: TIER_B_AUTH_SURFACE_PLUS_NEW_ENV_VAR
 dispatched_at: 2026-05-11
 dispatched_by: ai-head-a
 claimed_by: b4
-brief_revisions: V0.1 + V0.2 fold + V0.3 fold (Gate 4 V0.2 fault-tolerance fix)
+brief_revisions: V0.1 + V0.2 fold + V0.3 fold (4-gate + Gate 4 fault-tolerance fold)
 pr: https://github.com/vallen300-bit/brisen-lab/pull/9
 pr_head_v0_1: 3e2fc3c8213b282cc763d81882eddc19adb61824
 pr_head_v0_2: 58d17c4cd3758c83ac0518eabf9496be1d863511
+pr_head_v0_3: b2eef4f05e971ae3c9b678ff0a97073fb4b418a3
+merged_at: 2026-05-11T11:05:22Z
+merge_commit: 96ed2702ef7a2a0ff77410452cfe45eba10eb103
+post_merge_deploy: dep-d80rft67r5hc739squeg
+env_var_put: RENDER_API_KEY on srv-d7q7kvlckfvc739l2e8g 2026-05-11 ~11:05Z
+aid_close_out_msg: 84
 ---
+
+## COMPLETE — 2026-05-11 ~11:08Z
+
+All ACs A1-A18 GREEN. 6/6 live smoke tests pass:
+1. AID list services → 200 (count=4)
+2. AID env-vars on baker-master → 200 (count=67, BAKER_VAULT_PATH visible at correct value)
+3. lead list services → 200
+4. b1 list services → 403 not_authorized_for_render_config
+5. no key → 401 bad_terminal_key
+6. malformed service-id → 400 invalid_service_id
+
+Gate chain summary across V0.1→V0.3:
+- V0.1: 4 gates ran (B4 pytest + AH2 /security-review + AH1 architect + AH1 code-reviewer 2nd-pass)
+  - Gate 2 HIGH: audit emission gap → folded as F1 in V0.2
+  - Gates 2/3/4 convergent MEDs: service_id regex, httpx-level tests, allow_director dead kwarg → folded as F2/F3/F4 in V0.2
+- V0.2: Gates 1 + 4 re-ran (Gate 2 idle past ultimatum; Gate 3 skipped — V0.1 shape unchanged)
+  - Gate 4 MED M1: audit_emitter not fault-tolerant → folded as F5 in V0.3
+- V0.3: Gates 1 + 4 re-ran (Gate 2 skipped per V0.3 plan)
+  - Gate 4 PASS — clean
+
+Deferred (NOT in this brief):
+- Depends-layer whitelist via Policy enum (architect MED, structural)
+- Split env-vars endpoint into keys-only + per-key-audited (Gate 2 MED#3 design)
+- httpx client pooling
+- Pagination truncated flag
+- print() → structured logger with otel context
+- Regex anchor cosmetic cleanup (Gate 4 V0.2 LOW)
+
+Post-merge:
+- Bus msg #84 to AID — endpoint live + example queries + service IDs.
+- Closes original AID ask (msg #59 thread): Render-MCP gap.
+
 
 ## V0.3 FOLD — 2026-05-11 ~10:35Z (Director-ratified "go" on AH1's recommendation)
 
