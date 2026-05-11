@@ -1,98 +1,138 @@
-# CODE_1_PENDING — BRIEF_PLAUD_TRIGGER_FIX_1 — **COMPLETE**
+---
+status: PENDING
+brief: briefs/_tasks/CODE_1_PENDING.md (this file IS the brief — small scope)
+trigger_class: TIER_B_USER_GLOBAL_HOOK_INSTALL
+dispatched_at: 2026-05-11
+dispatched_by: ai-head-1 (AH1)
+target: b1
+director_ratification: Director 2026-05-11 ~15:30Z "go ahead. After we finish, let's proceed with installing codex as a judge" + "Send to B code build whenever you're ready. By bus."
+priority: P1
+phase: 1 of 1 (single PR)
+unblocks:
+  - Mechanical enforcement of "always include Recommendation" rule (today's repeated slip)
+  - Mechanical enforcement of "fail loud" rule (sharper communication framing)
+expected_pr_count: 1 (baker-master)
+expected_branch_name: b1/stop-hooks-recommendation-and-fail-loud-1
+expected_complexity: small (~2h)
+mandatory_2nd_pass: FALSE  # scope <100 LOC bash, no auth/DB/concurrency surface; AH1 judgment per SKILL.md §Code-reviewer 2nd-pass Protocol
+gate_to_merge: AH2 cross-lane review (no /security-review — diff is bash + json fixtures, no code path)
+last_heartbeat: null
+heartbeat_cadence_hours: 12
+---
 
-**Status:** COMPLETE 2026-05-07
-**PR:** https://github.com/vallen300-bit/baker-master/pull/168 (OPEN — awaiting 5-gate review)
-**Branch:** `b1/plaud-trigger-fix-1` @ `4cf2651`
-**Ship report:** `briefs/_reports/B1_plaud_trigger_fix_1_20260507.md`
+# CODE_1_PENDING — STOP_HOOKS_RECOMMENDATION_AND_FAIL_LOUD_1 — 2026-05-11
 
-**Dispatched:** 2026-05-06
-**Tier:** B
-**Repo:** `vallen300-bit/baker-master`
-**Branch:** `b1/plaud-trigger-fix-1`
-**Brief:** `briefs/BRIEF_PLAUD_TRIGGER_FIX_1.md` (read first — full spec, 5 patches + 1 new test file, copy-paste-ready code blocks)
+## Goal
 
-## Summary
+Two Stop hooks that mechanically catch the two slip modes Director keeps catching:
 
-Plaud transcripts arrived as header-only shells in DB for ~3 weeks (since 2026-04-17). Root cause confirmed by AH2-T 2026-05-06 eve: `backfill_plaud()` ingests recordings before Plaud finishes transcription; `trigger_state.mark_processed` then locks the source_id so incremental re-ingestion never picks up the completed transcript. No alarm fired (silent failure).
+1. **`recommendation-check.sh`** — scans the model's final response for `Recommendation:` line. If absent AND the response contains question marks or numbered options, emits a warning JSON to surface the gap.
+2. **`fail-loud-check.sh`** — scans the model's final response for "completed" / "done" / "tests pass" / "shipped" claims. If found AND no explicit verification phrase ("0 skipped" / "X edge cases verified" / "literal pytest output: ...") in the same response, emits a warning.
 
-5-patch fix:
-1. `_extract_transcript_text` — warning when transaction URL absent or S3 segments empty (today: silent).
-2. `backfill_plaud()` line 519+ — add `is_trans` filter mirroring incremental path at line 297-299. **PRIMARY BUG FIX.**
-3. `check_new_plaud_recordings()` — stale-refresh lane: re-process `is_trans=True` recordings whose DB row has `length(full_transcript) < 200`, bypassing `is_processed` check (UPSERT via `store_meeting_transcript` ON CONFLICT).
-4. After successful store, if `duration > 5min AND body < 200 chars AND is_trans=True` → `report_failure("plaud", ...)` for loud regression alarm.
-5. New helper `_has_empty_db_row(source_id, threshold=200)` for stale-refresh check.
-6. Unit test in `tests/test_plaud_trigger.py` — covers backfill skip on `is_trans=False`, stale-refresh trigger, empty-body alert.
+Both are advisory (warn, not block) on first build. Director may flip to blocking later.
 
-## Pre-requisites
+## Why
 
-- baker-master main HEAD includes brief commit (PR #167). No env state, no blocking briefs.
-- B1 branch `b1/plaud-trigger-fix-1` from main.
+Today's session hit the recommendation slip on Q8 (caught manually by Director) AND has historically hit "completed" claims that turned out to be partial. Mnilax X article (May 2026, 30-codebase 6-week test) shows: rules in CLAUDE.md get ~80% compliance even when well-tuned. Hooks bring mechanically-checkable rules to ~100%. See `~/.claude/projects/-Users-dimitry-bm-aihead1/memory/feedback_always_include_recommendation.md` + project CLAUDE.md §"ENGINEERING RULES" Fail-loud rule for source.
+
+## Files to create / modify
+
+**New (canonical sources in baker-master):**
+- `tests/fixtures/recommendation-check.sh` — Stop hook bash script (~30 LOC). Reads stop-event JSON from stdin, parses `transcript_path`, reads last assistant message, applies the regex check, emits `{"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": "<warning text>"}}` when gap detected. Exits 0 on every path.
+- `tests/fixtures/fail-loud-check.sh` — same pattern.
+- `tests/test_stop_hooks.py` — pytest with parametrized cases: (a) recommendation-check emits warning when assistant message has question + no Recommendation, (b) recommendation-check stays silent when Recommendation present, (c) fail-loud emits when "completed" with no verification phrase, (d) fail-loud stays silent when verification phrase present, (e) drift-detection test diff'ing fixtures against `~/.claude/hooks/<name>.sh` if those exist.
+
+**Modify:**
+- `~/.claude/settings.json` (user-global, OUTSIDE the repo) — register both hooks under `hooks.Stop` array. Pre-merge cp pattern: B1 cp's the fixtures to `~/.claude/hooks/<name>.sh` AND splices settings.json BEFORE merge so the drift-detection test passes locally. Pattern reference: `~/.claude/hooks/session-start-bus-drain.sh` (already cp'd this morning per BRIEF_BRISEN_LAB_TERMINAL_BUS_DRAIN_ON_SESSION_START_1).
+
+**Do NOT touch:**
+- `outputs/dashboard.py` — orthogonal
+- `kbl/`, `models/`, `triggers/`, `tools/`, `migrations/` — orthogonal
+- Existing user-global hooks (`session-start-bus-drain.sh`) — separate concern
+
+## Hook contract details
+
+**Stop event input (from stdin, JSON):**
+```json
+{
+  "hook_event_name": "Stop",
+  "session_id": "...",
+  "transcript_path": "/path/to/transcript.jsonl",
+  "cwd": "..."
+}
+```
+
+**Hook output (stdout, JSON):**
+- Emit `{"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": "<warning>"}}` when slip detected.
+- Empty output (or no print) when clean.
+- ALWAYS exit 0. Never block. Never crash. Never timeout (max 4s).
+
+**Reading the last assistant message:**
+- Parse `transcript_path` (JSONL — each line is a turn).
+- Walk backwards from EOF, find last line where `type == "assistant"`, extract `message.content[].text` joined.
+- Skip if no assistant message found.
+
+**Recommendation-check regex:**
+- TRIGGER condition: assistant text contains either `?` OR a numbered list (`^\d+\.` regex) OR phrase like "options" / "choose" / "which".
+- ABSENT condition: assistant text does NOT contain `Recommendation:` (case-insensitive, line-anchored).
+- WARN message: `Stop-hook: assistant response asks a question or presents options but contains no 'Recommendation:' line. Per project CLAUDE.md HARD RULE 2, every multi-option / multi-Q reply ends with explicit Recommendation.`
+
+**Fail-loud-check regex:**
+- TRIGGER condition: assistant text contains any of (case-insensitive): "completed", "done", "tests pass", "shipped", "merged", "all green".
+- ABSENT condition: assistant text does NOT contain ANY of: digits + "skipped", "verified", "literal", "0 fail", "no edge case missed".
+- WARN message: `Stop-hook: assistant response claims completion / pass / ship but contains no explicit verification phrase. Per project CLAUDE.md ENGINEERING RULES Fail-loud, surface uncertainty rather than hiding it.`
 
 ## Acceptance criteria
 
-Per brief §ACs (read brief first; ACs codify each of the 5 patches + test coverage + sentinel alert wiring).
+| AC | Test | Verification |
+|---|---|---|
+| A1 | `tests/fixtures/recommendation-check.sh` exists, exec bit set, exits 0 on every path | `chmod +x` confirmed, file exists, `bash -n` syntax check passes |
+| A2 | recommendation-check warns on slip case | `tests/test_stop_hooks.py::test_recommendation_check_warns_on_question_without_recommendation` GREEN |
+| A3 | recommendation-check silent on clean case | `test_recommendation_check_silent_with_recommendation_line` GREEN |
+| A4 | `tests/fixtures/fail-loud-check.sh` exists, exec bit set, exits 0 on every path | same as A1 |
+| A5 | fail-loud warns on slip case | `test_fail_loud_warns_on_completed_without_verification` GREEN |
+| A6 | fail-loud silent on clean case | `test_fail_loud_silent_with_verification_phrase` GREEN |
+| A7 | Both hooks registered in user-global `~/.claude/settings.json` Stop array | manual verification — B1 splices + commits a settings.json snapshot to `tests/fixtures/settings-stop-hooks-snapshot.json` for drift detection |
+| A8 | Drift-detection test passes | `test_drift_detection` diffs `tests/fixtures/<name>.sh` vs `~/.claude/hooks/<name>.sh`, GREEN |
+| A9 | Full suite no regressions | `pytest tests/ -v` GREEN, no other test broken |
+| A10 | Live behavior verified — open a fresh AH1 session, intentionally write a Director-facing reply with options + no Recommendation; hook should warn in early system context | Manual smoke test, B1 documents in PR description |
 
-## Ship gate
+## Sequencing
 
-Literal `pytest tests/test_plaud_trigger.py -v` GREEN — no by-inspection (Lesson #52). Plus `pytest` full-suite GREEN (no regressions).
+1. `cd ~/bm-b1 && git fetch origin main && git checkout main && git pull --ff-only`. Confirm HEAD `1aa778e` or newer.
+2. Branch: `git checkout -b b1/stop-hooks-recommendation-and-fail-loud-1`.
+3. Write `tests/fixtures/recommendation-check.sh` (~30 LOC) + `tests/fixtures/fail-loud-check.sh` (~30 LOC). Reference: `tests/fixtures/session-start-bus-drain.sh` for the hook contract pattern (`_emit` helper, JSON envelope, `cat >/dev/null` stdin drain on no-op paths).
+4. Write `tests/test_stop_hooks.py` — pytest with the 8 cases above.
+5. `pytest tests/test_stop_hooks.py -v` GREEN.
+6. `pytest tests/ -v` GREEN (no regressions).
+7. `chmod +x tests/fixtures/recommendation-check.sh tests/fixtures/fail-loud-check.sh`.
+8. Pre-merge cp: `cp tests/fixtures/recommendation-check.sh ~/.claude/hooks/recommendation-check.sh && cp tests/fixtures/fail-loud-check.sh ~/.claude/hooks/fail-loud-check.sh`. Run drift-detection test locally to confirm.
+9. Splice both hooks into `~/.claude/settings.json` Stop array via `jq` (NOT raw edit — preserve existing keys). Save snapshot to `tests/fixtures/settings-stop-hooks-snapshot.json`.
+10. A10 manual smoke test — open a fresh AH1 session in another terminal, write a sample Director-facing message, confirm hook output appears.
+11. Open PR to baker-master `main`. Title: `feat(hooks): Stop hooks for recommendation enforcement + fail-loud claim verification (STOP_HOOKS_RECOMMENDATION_AND_FAIL_LOUD_1)`.
+12. Ship via bus to /msg/lead with brief PR summary + commit SHA + literal pytest output. NO fenced PL paste-block (Rule retired 2026-05-11 per `feedback_no_pl_ship_report_paste_block.md`). NO wake-paste at end of dispatch (Rule 0.5 retired 2026-05-11 per `feedback_no_wake_paste_b_code_dispatch.md`).
 
-## Note on broken recordings
+## Critical do-NOTs
 
-4 Plaud recordings from 2026-04-17+ remain Plaud-side blocked per AH2-T diagnosis (transcription stuck — Director-side action needed). This brief is the **preventive fix** so the next time Plaud is healthy, recordings auto-recover via stale-refresh lane.
+- Do NOT make either hook BLOCKING on first build. Both warn-only. Director will flip to blocking later if compliance still erodes.
+- Do NOT exceed 4s wall time per hook (Claude Code hook timeout). Keep regex checks simple; skip transcript walk if file >10MB (degrade gracefully).
+- Do NOT crash or non-zero exit. Every path exits 0. Errors emit short status to additionalContext, not stderr-blocking.
+- Do NOT splice settings.json with raw text edit — use `jq` to preserve other keys (Forge, bus-drain, future hooks).
+- Do NOT touch `~/.claude/hooks/session-start-bus-drain.sh` — separate hook, separate fixture, separate concern.
+- Do NOT add the hooks to `bm-b<N>/.claude/settings.json` — user-global only. Picker scopes don't carry hooks today.
 
-## Heartbeat
+## Anchor
 
-12h cadence binding (per SKILL.md `59f23c4` §B-code stall chase).
+- Director directive 2026-05-11 ~15:30Z "go ahead" + "Send to B code build whenever you're ready. By bus."
+- Mnilax X article: `https://x.com/Mnilax/status/2053116311132155938` (30-codebase 6-week test, 41% → 3% mistake rate with rule + hook combo)
+- Recommendation slip incident: today's Q8 codex-judge surfacing where Q5/Q6/Q7 had defaults but Q8 dropped the recommendation; Director caught it
+- Fail-loud framing: project CLAUDE.md §"ENGINEERING RULES" added today (commit `1aa778e`)
+- Bus-drain hook reference pattern: `tests/fixtures/session-start-bus-drain.sh` + `~/.claude/hooks/session-start-bus-drain.sh` (drift-detection precedent)
 
-## Read first (MANDATORY)
-
-1. `briefs/BRIEF_PLAUD_TRIGGER_FIX_1.md` — full spec
-2. `~/baker-vault/_ops/agents/b1/orientation.md` — role
-3. `~/.claude/projects/-Users-dimitry-Vallen-Dropbox-Dimitry-vallen-Baker-Project/memory/MEMORY.md` — canonical
-4. CLAUDE.md (this repo) — workflow + hard rules
-
-## Confirmation phrase
-
-`B1 oriented. Read: CODE_1_PENDING.md, MEMORY.md.`
-
-## Caller
-
-AH1-T (autonomous dispatch per Director instruction 2026-05-06 — task #2 from drain box).
-AH1-App authored brief (Steps 1-3); AH1-T commit + dispatch lane (Step 4-5).
+— AH1 (lead, AH1-Terminal)
 
 ---
 
-## GATE-1+3 2nd-pass UPDATE — 2026-05-07 (fold before merge)
+## Prior CODE_1 task (archive reference)
 
-**Source:** feature-dev:code-reviewer + code-architecture-reviewer 2nd-pass on PR #168 (HEAD `a11122f`). Both verdicts PASS-WITH-NITS-FOLD-NEEDED. 0 CRITICAL. Convergent on alarm-fatigue + multi-instance race; non-convergent watermark verification.
-
-**I1 (BOTH gates flagged — alarm fatigue / per-source_id dedup)**
-`triggers/plaud_trigger.py` empty-body sentinel fires every 15-min poll for the same broken recording until Plaud-side recovers. With 4 known-stuck recordings, this floods `report_failure("plaud", ...)` → `#cockpit` Slack. Fix: add per-`source_id` dedup before `report_failure` — fire once per recording per 24h. Implementation choice (B1 picks):
-- Option A: reuse `trigger_state` with synthetic key `f"plaud_empty_alarm_{source_id}"` + check `is_processed` before firing
-- Option B: in-memory dict with 24h TTL (lighter; lost on Render restart)
-- Option C: `sentinel_health` table-side dedup (heaviest but auditable)
-
-Also: gate 1 flagged that BOTH backfill path AND stale-refresh path can fire on the same `source_id` within one cycle (boot tick). Dedup must be cycle-aware OR call-site coalesced into a single helper that checks dedup once.
-
-Regression test: trigger empty-body condition twice in same test, assert `report_failure` called exactly once.
-
-**I2 (gate 3 flagged — multi-instance race on stale-refresh lane)**
-`triggers/plaud_trigger.py` stale-refresh path bypasses `is_processed`. Render rolling deploy runs 2 instances concurrently. If both poll the same stale row, both call `fetch_plaud_detail` + `store_meeting_transcript`. PG `ON CONFLICT(id) DO UPDATE` saves dedup at storage layer, but **Qdrant has no dedup** — `store_document()` uses fresh `uuid.uuid4()` per point ID, so duplicate Voyage embedding calls + duplicate Qdrant points result. Fix: wrap stale-refresh body in `pg_try_advisory_xact_lock(hashtext(source_id))` to serialize per-source. Skip iteration if lock not acquired (other instance owns it; will retry next cycle).
-
-Regression test: simulate two concurrent stale-refresh attempts on same source_id, assert second skips cleanly without Qdrant write.
-
-**I3 (gate 1 flagged — watermark verification, may not need patch)**
-Confirm stale-refresh lane does NOT advance the `trigger_state` watermark before all stale rows iterate. Verification-only — read current code path. If watermark management is purely in the existing incremental path's tail (post-loop), this is already correct and no patch needed. If stale-refresh advances watermark inside its loop, fix to leave watermark management to the incremental path's existing tail.
-
-Document finding in fold ship report (no patch needed if confirmed-already-correct).
-
-**Path forward (B1):**
-1. Apply I1 + I2 on `b1/plaud-trigger-fix-1` branch (HEAD `a11122f`)
-2. Verify I3 — read code, document outcome in ship report; patch only if broken
-3. Add 2 regression tests (one per I1/I2 patch)
-4. Live `pytest tests/test_plaud_trigger.py -v` GREEN — literal, no by-inspection
-5. Re-fire focused gate chain on fold diff only (gates 1 + 3)
-6. Update PR #168 ship report with new HEAD SHA + fold gate verdicts
-7. AH2 /security-review (gate 2) running in parallel; AH1-T merges after fold gates PASS + AH2 PASS
-
-**Anchor:** AH1-T autonomous fold dispatch per charter §3 (routine 2nd-pass cycle, mirrors PR #159 H1+M1+M2 fold pattern from CODE_1 prior dispatch).
+BRIEF_PLAUD_TRIGGER_FIX_1 — COMPLETE 2026-05-07. PR #168 merged 2026-05-07 ~07:20Z. 5-patch fix for Plaud transcripts arriving as header-only DB shells (silent failure since 2026-04-17). Ship report: `briefs/_reports/B1_plaud_trigger_fix_1_20260507.md`.
