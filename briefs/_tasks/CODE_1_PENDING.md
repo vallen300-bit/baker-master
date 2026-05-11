@@ -1,6 +1,12 @@
 ---
-status: PENDING
-brief: briefs/_tasks/CODE_1_PENDING.md (this file IS the brief — small scope)
+status: COMPLETE
+merged_pr: https://github.com/vallen300-bit/baker-master/pull/186
+merged_at: 2026-05-11T21:11:36Z
+merge_commit: bff986e4594a506ee852e80bd59078468c24608f
+ship_branch: b1/stop-hooks-recommendation-and-fail-loud-1 @ 5852e7f
+ah2_verdict: PASS-WITH-NITS via bus msg #118 thread 92393c72 (3 LOW nits captured for future iteration)
+hooks_live: ~/.claude/hooks/recommendation-check.sh + ~/.claude/hooks/fail-loud-check.sh (both registered in user-global settings.json Stop array, active fleet-wide)
+brief: briefs/_tasks/CODE_1_PENDING.md (this file WAS the brief — small scope)
 trigger_class: TIER_B_USER_GLOBAL_HOOK_INSTALL
 dispatched_at: 2026-05-11
 dispatched_by: ai-head-1 (AH1)
