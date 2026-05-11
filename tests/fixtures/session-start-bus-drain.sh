@@ -79,9 +79,18 @@ if [ -z "${SINCE:-}" ]; then
 fi
 
 # --- GET /msg/<slug>?since=<since>&limit=50 ---
+#
+# CURSOR-FORMAT-FIX (AH2 finding 2026-05-11): $SINCE contains an ISO-8601
+# timestamp with literal `+00:00` offset (daemon returns offset-format, not
+# Z-suffix). Raw URL interpolation causes curl to send `+` as space (URL
+# spec), daemon parses garbled timestamp -> 500. Use -G + --data-urlencode
+# so curl URL-encodes the cursor properly. Cursor stays in offset format on
+# disk; this fix is read-side only — no state-file sweep needed.
 
-RESP="$(curl -sS --max-time 4 -H "X-Terminal-Key: ${KEY}" \
-        "${DAEMON_URL}/msg/${SLUG}?since=${SINCE}&limit=50" 2>/dev/null)" || {
+RESP="$(curl -sS --max-time 4 -G -H "X-Terminal-Key: ${KEY}" \
+        --data-urlencode "since=${SINCE}" \
+        --data-urlencode "limit=50" \
+        "${DAEMON_URL}/msg/${SLUG}" 2>/dev/null)" || {
     printf '[bus-drain] daemon unreachable (timeout 4s) for slug=%s — skipping.\n' "$SLUG" | _emit
     exit 0
 }
