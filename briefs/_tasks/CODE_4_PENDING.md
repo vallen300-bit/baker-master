@@ -22,6 +22,13 @@ ship_target: 2026-05-22 B4 finish → 2026-05-24 smoke → 2026-05-25 shadow wee
 last_heartbeat: null
 gate_to_merge: AH2 /security-review + picker-architect + feature-dev:code-reviewer 2nd-pass + Director ratification of A16 self-test verdict
 xlane_aid_msg: 87 (thread 62ddee32-cc15-4278-967b-83514854fbf6)
+director_q5_q8_answers:
+  q5_judge_scope: baker-master only
+  q6_data_residency: US default + no-training toggle (no ZDR, no EU)
+  q7_outcome_loop: advisory only, no feedback loop
+  q8_bot_identity: keep distinct (ah1-bot, b1-bot..b4-bot) — AH1 recommendation followed
+  ratified_at: 2026-05-11T~14:20Z (Director chat)
+hb4_status: CLEARED 2026-05-11 (Q5-Q8 answered)
 ---
 
 # CODE_4_PENDING — BRIEF_CODEX_JUDGE_INTEGRATION_IMPL_1 — STAGED 2026-05-11
@@ -43,7 +50,7 @@ Repo touched: `baker-master` only. AID's picker repo + bus-host config out of sc
 | HB1 | `CODEX_API_KEY` procurement (1Password "AI Infrastructure" + baker-master repo secret); $200/mo cap; "no training" toggle confirmed; OpenAI Python SDK floor version confirmed (brief says `openai>=1.40.0,<2.0.0` provisional) | AID | 2026-05-13 | open |
 | HB2 | Bot accounts `ah1-bot`, `b1-bot`, `b2-bot`, `b3-bot`, `b4-bot` provisioned; allowlist file `.github/codex-judge-allowlist.yml` populated | AH1 + AID (shared) | 2026-05-14 | open |
 | HB3 | AID cross-lane reply on caveat 4 (bus-host monitoring + secondary log-pull path) — bus msg #87 thread `62ddee32-cc15-4278-967b-83514854fbf6` | AID | 2026-05-12 | sent (awaiting AID) |
-| HB4 | Director Q5-Q8 answers (judge repo scope; OpenAI data-residency / ZDR; outcome→tuning loop; matter-confidentiality on bot-PR AI-author identity) — Q6 + Q8 may shift data-residency posture | Director | TBD | open |
+| HB4 | Director Q5-Q8 answers (judge repo scope; OpenAI data-residency / ZDR; outcome→tuning loop; matter-confidentiality on bot-PR AI-author identity) — Q6 + Q8 may shift data-residency posture | Director | 2026-05-11 | **CLEARED** — Q5: baker-master only; Q6: US + no-training (no ZDR); Q7: advisory only, no loop; Q8: keep distinct bot accounts |
 | HB5 | AID delivers `_ops/scripts/codex_judge_prompt.md` v1.0 (system-instruction template; brief HARD-BLOCKER prereq #5; without it B4's A16 self-test produces stub verdicts) | AID | 2026-05-14 | open |
 
 ## Wake-paste sequence (when all 5 clear)
