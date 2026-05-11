@@ -26,6 +26,12 @@ declare -a TERMINALS=(
   "b4:/Users/dimitry/bm-b4"
 )
 
+# Test-only override: if TERMINALS_OVERRIDE is set, replace the array. Format:
+# "alias1:/path/to/repo1 alias2:/path/to/repo2" (space-separated entries).
+if [[ -n "${TERMINALS_OVERRIDE:-}" ]]; then
+  TERMINALS=($TERMINALS_OVERRIDE)
+fi
+
 # PR lookup toggle (disabled in tests to avoid gh dependency / network).
 PR_LOOKUP_ENABLED="${PR_LOOKUP_ENABLED:-1}"
 
