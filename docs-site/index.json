@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-05-07",
+  "updated_at": "2026-05-11",
   "folders": [
     {
       "name": "ORIGINATION",
@@ -111,6 +111,18 @@
       "name": "STRATEGY",
       "slug": "strategy",
       "presentations": [
+        {
+          "title": "Brisen AI \u2014 Business Plan v1 (May 2026)",
+          "file": "strategy/business-plan-v1.html",
+          "created": "2026-05-11",
+          "matter": "brisen"
+        },
+        {
+          "title": "An Owner's Proposal \u2014 Brisen \u00d7 Mandarin Oriental (12 May 2026)",
+          "file": "strategy/mohg-pitch.html",
+          "created": "2026-05-11",
+          "matter": "brisen"
+        },
         {
           "title": "AI for Luxury Real Estate Developers \u2014 Brisen Platform Vision",
           "file": "ai-for-luxury-developers-vision.html",

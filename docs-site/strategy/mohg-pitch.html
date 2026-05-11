@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="source" content="brisen-desk">
+<meta name="confidence" content="high">
+<meta name="provenance" content="Brisen Desk roadmap v3 + 17 Director ratifications 2026-05-11 — Customer #2 path locked as MOHG corporate licence extension off MO Vienna deployment">
+<title>An Owner's Proposal — Brisen × Mandarin Oriental</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+
+:root {
+  --bg: #0a0a0f;
+  --surface: #12121a;
+  --surface2: #1a1a28;
+  --accent: #6c63ff;
+  --mo-gold: #d4a853;
+  --mo-gold-dim: rgba(212,168,83,0.15);
+  --mo-gold-glow: rgba(212,168,83,0.25);
+  --mo-deep: #6b1d2c;
+  --blue: #0a6fdb;
+  --nvidia: #76B900;
+  --green: #00d4aa;
+  --text: #e8e6f0;
+  --text-dim: #8a87a0;
+  --text-faint: #5a576f;
+  --border: rgba(212,168,83,0.20);
+  --border-strong: rgba(212,168,83,0.40);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, sans-serif;
+  line-height: 1.7;
+  overflow-x: hidden;
+  padding-top: 36px;
+}
+.conf-banner {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+  background: linear-gradient(90deg, rgba(212,168,83,0.95), rgba(107,29,44,0.95));
+  padding: 9px 0; text-align: center;
+  font-size: 0.66rem; font-weight: 700; letter-spacing: 4px;
+  text-transform: uppercase; color: #fff;
+  backdrop-filter: blur(20px);
+}
+.container { max-width: 980px; margin: 0 auto; padding: 0 2rem; }
+
+/* HERO */
+.hero {
+  min-height: 88vh; display: flex; flex-direction: column;
+  justify-content: center; align-items: center; text-align: center;
+  position: relative; overflow: hidden; padding: 4rem 2rem;
+}
+.hero::before {
+  content: ''; position: absolute; top: -50%; left: -50%;
+  width: 200%; height: 200%;
+  background: radial-gradient(ellipse at 50% 30%, rgba(212,168,83,0.08) 0%, transparent 50%),
+              radial-gradient(ellipse at 50% 70%, rgba(107,29,44,0.06) 0%, transparent 50%);
+  animation: heroGlow 22s ease-in-out infinite alternate;
+}
+@keyframes heroGlow {
+  0% { transform: translate(0,0); }
+  100% { transform: translate(-4%,4%); }
+}
+.hero-tag {
+  position: relative; display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 22px;
+  background: var(--mo-gold-dim);
+  border: 1px solid var(--border-strong);
+  border-radius: 100px;
+  font-size: 0.78rem; font-weight: 600; letter-spacing: 3px;
+  text-transform: uppercase; color: var(--mo-gold);
+  margin-bottom: 2.5rem;
+}
+.hero h1 {
+  position: relative;
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(2.2rem, 5.5vw, 3.8rem);
+  font-weight: 700; line-height: 1.1;
+  margin-bottom: 1.2rem;
+  background: linear-gradient(135deg, #fff 0%, var(--mo-gold) 80%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  max-width: 800px;
+}
+.hero .sub {
+  position: relative;
+  font-family: 'Playfair Display', serif; font-style: italic;
+  font-size: clamp(1.05rem, 2vw, 1.35rem);
+  color: var(--text-dim); margin-bottom: 0.5rem;
+}
+.hero .sub2 {
+  position: relative;
+  font-size: 0.95rem; color: var(--text-dim);
+  margin-bottom: 2rem; opacity: 0.75;
+}
+.hero-tagline {
+  position: relative;
+  font-size: 1.1rem; font-weight: 500;
+  color: var(--text); max-width: 720px;
+  margin: 0 auto 2.5rem;
+  line-height: 1.6;
+}
+.hero-meta {
+  position: relative;
+  font-size: 0.7rem; letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--text-faint); opacity: 0.7;
+  margin-top: 2rem;
+}
+
+/* SECTIONS */
+section.chapter {
+  max-width: 900px; margin: 0 auto;
+  padding: 4rem 2rem; scroll-margin-top: 40px;
+}
+.section-header {
+  margin-bottom: 2.5rem; text-align: left;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1.2rem;
+}
+.section-num {
+  display: inline-block;
+  font-family: 'Playfair Display', serif;
+  font-size: 0.9rem; font-weight: 700;
+  color: var(--mo-gold); letter-spacing: 4px;
+  margin-bottom: 0.4rem;
+}
+.section-header h2 {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  font-weight: 700; line-height: 1.25;
+}
+.section-header .subtitle {
+  color: var(--text-dim); font-size: 1rem;
+  font-style: italic;
+  font-family: 'Playfair Display', serif;
+  margin-top: 0.3rem;
+}
+
+.prose p { margin-bottom: 1.3rem; font-size: 1.02rem; }
+.prose p.lead {
+  font-size: 1.18rem; line-height: 1.6;
+  color: var(--text); font-weight: 500;
+  border-left: 3px solid var(--mo-gold);
+  padding-left: 1.5rem; margin-bottom: 2rem;
+}
+.prose strong { color: var(--text); font-weight: 700; }
+.prose em { color: var(--mo-gold); font-style: normal; font-weight: 500; }
+.prose ul { margin: 0.5rem 0 1.5rem 1.5rem; }
+.prose ul li { margin-bottom: 0.7rem; color: var(--text-dim); }
+.prose ul li strong { color: var(--text); }
+
+/* PRODUCT TABLE */
+.table-wrap { overflow-x: auto; margin: 1.5rem 0; }
+table.pitch {
+  width: 100%; border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: 14px;
+  overflow: hidden; font-size: 0.93rem;
+}
+table.pitch th, table.pitch td {
+  padding: 0.9rem 1.1rem; text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+table.pitch th {
+  background: var(--surface2);
+  color: var(--text); font-weight: 700;
+  font-size: 0.72rem; letter-spacing: 1.2px; text-transform: uppercase;
+}
+table.pitch td { color: var(--text-dim); }
+table.pitch tr:last-child td { border-bottom: 0; }
+table.pitch td strong { color: var(--text); }
+table.pitch td.gold { color: var(--mo-gold); font-weight: 600; }
+
+/* CALLOUT */
+.callout {
+  background: linear-gradient(135deg, var(--mo-gold-dim), rgba(107,29,44,0.08));
+  border: 1px solid var(--border-strong);
+  border-radius: 16px; padding: 2rem;
+  margin: 2rem 0;
+}
+.callout-label {
+  font-size: 0.7rem; letter-spacing: 3px;
+  text-transform: uppercase; font-weight: 700;
+  color: var(--mo-gold); margin-bottom: 0.7rem;
+}
+.callout p { color: var(--text); font-size: 1.05rem; margin: 0; }
+.callout p strong { color: var(--mo-gold); }
+
+/* THE ASK */
+.ask {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 18px; padding: 2.5rem;
+  margin: 2rem 0;
+  position: relative;
+  overflow: hidden;
+}
+.ask::before {
+  content: ''; position: absolute;
+  top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--mo-gold), var(--mo-deep), var(--mo-gold));
+}
+.ask-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 2rem; margin-top: 1.5rem;
+}
+@media (max-width: 700px) { .ask-grid { grid-template-columns: 1fr; } }
+.ask-col h4 {
+  font-family: 'Playfair Display', serif;
+  font-size: 0.95rem; letter-spacing: 3px;
+  text-transform: uppercase; color: var(--mo-gold);
+  margin-bottom: 1rem; font-weight: 600;
+}
+.ask-col ul { list-style: none; margin: 0; }
+.ask-col ul li {
+  padding: 0.65rem 0 0.65rem 1.4rem;
+  position: relative;
+  font-size: 0.95rem; color: var(--text-dim);
+  border-bottom: 1px dashed rgba(212,168,83,0.10);
+}
+.ask-col ul li:last-child { border-bottom: 0; }
+.ask-col ul li::before {
+  content: '◆'; position: absolute; left: 0;
+  color: var(--mo-gold); font-size: 0.7rem; top: 0.95rem;
+}
+.ask-col ul li strong { color: var(--text); }
+
+/* SIGNATURE */
+.signature {
+  max-width: 900px; margin: 5rem auto 2rem; padding: 0 2rem;
+  text-align: left;
+}
+.signature p { color: var(--text-dim); font-size: 0.92rem; margin-bottom: 0.4rem; }
+.signature .name {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.4rem; color: var(--text);
+  margin-top: 1.5rem;
+}
+.signature .title { color: var(--text-dim); font-size: 0.88rem; }
+.signature .org { color: var(--mo-gold); font-size: 0.78rem; letter-spacing: 2px; text-transform: uppercase; margin-top: 0.4rem; }
+
+footer {
+  max-width: 900px; margin: 3rem auto 2rem; padding: 2rem;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 0.72rem; color: var(--text-faint); letter-spacing: 1px;
+}
+
+.divider {
+  max-width: 900px; margin: 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
+}
+
+@media print {
+  .conf-banner { display: none; }
+  body { padding-top: 0; background: #fff; color: #111; }
+  .hero { min-height: auto; padding: 2rem; }
+  .ask, .callout, table.pitch { break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+
+<div class="conf-banner">Confidential · Brisen Group → Mandarin Oriental · May 2026</div>
+
+<!-- HERO -->
+<header class="hero">
+  <div class="hero-tag">An Owner's Proposal · Brisen × Mandarin Oriental</div>
+  <h1>From One Mandarin Oriental Owner<br/>to the Group</h1>
+  <p class="sub">Extending what already works at Mandarin Oriental Vienna into MOHG's broader portfolio</p>
+  <p class="hero-tagline">
+    Brisen Group owns Mandarin Oriental Vienna. In the course of operating the asset we built an AI product — ClaimsMax — that has materially defended a €6 million contractor claim and is producing audited results today. We would like to extend that capability to Mandarin Oriental Hotel Group at the corporate level, against the MOHG-operated portfolio.
+  </p>
+  <p class="hero-meta">For the meeting on 12 May 2026 · Strictly Confidential</p>
+</header>
+
+<div class="divider"></div>
+
+<!-- 1. PROPOSITION -->
+<section class="chapter">
+  <div class="section-header">
+    <span class="section-num">PART 01</span>
+    <h2>The Proposition in One Paragraph</h2>
+    <p class="subtitle">What we are asking — bottom line first</p>
+  </div>
+  <div class="prose">
+    <p class="lead">
+      We propose a corporate-level licence extension between Brisen AI Holdings (Geneva) and Mandarin Oriental Hotel Group, granting MOHG access to ClaimsMax — and to the three additional development-side AI products in our roadmap — across the MOHG-operated portfolio. Structure: a contractual extension off the deployment that already operates at MO Vienna, rather than a fresh procurement engagement. Year-1 fee: <strong>€80,000</strong>. Year-2 onward: usage-based or per-property uplift. Term: rolling 12 months with mutual review.
+    </p>
+    <p>
+      We are bringing this to the Group because <em>we are owners ourselves</em>, the product is operationally proven on a Mandarin Oriental asset, and the natural next deployment is at the brand level rather than property-by-property. We believe Mandarin Oriental should be the first hotel group at which this capability is institutionalized.
+    </p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- 2. WHAT WE'VE BUILT -->
+<section class="chapter">
+  <div class="section-header">
+    <span class="section-num">PART 02</span>
+    <h2>What We Have Built — The MO Vienna Proof</h2>
+    <p class="subtitle">Production, not pilot · operational, not theoretical</p>
+  </div>
+  <div class="prose">
+    <p>
+      As MOHG knows, Brisen Group's MO Vienna development encountered a substantial general-contractor dispute, including an insolvency event and a contractor claim in the order of <strong>€6 million</strong>. The defence of that claim was assembled, document-by-document, with the support of an AI product Brisen developed internally: <em>ClaimsMax</em>.
+    </p>
+    <p>
+      ClaimsMax ingests the full corpus of a development project — contracts, addenda, invoices, RFIs, change orders, correspondence, expert reports — and produces audit-ready investigation reports identifying every line of the contractor's claim that is unsupported, double-counted, mis-categorized, or contrary to the executed agreement. It is not a research assistant; it is a litigation-grade product.
+    </p>
+    <p>
+      ClaimsMax has been operating against the Hagenauer claim corpus continuously. External professionals — including external legal counsel — log in directly to view investigation reports. The product is past pilot stage; it is in production, on a real Mandarin Oriental asset, against a real €6M claim, with documented results.
+    </p>
+    <p>
+      ClaimsMax is the first of four products in a development-side AI suite. The other three are positioned to address the next-most-painful operational moments in any luxury hospitality development:
+    </p>
+  </div>
+
+  <div class="table-wrap">
+    <table class="pitch">
+      <thead>
+        <tr><th>Product</th><th>Status</th><th>What it does</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>ClaimsMax</strong></td><td class="gold">Production</td><td>Contractor claim analysis · defence · litigation support · against the project's full document corpus</td></tr>
+        <tr><td><strong>TenderMax</strong></td><td>Demoable Month 6</td><td>Tender package analysis · contractor pattern intelligence · bid normalization for development procurement</td></tr>
+        <tr><td><strong>OwnerView</strong></td><td>Demoable Month 9</td><td>Live ownership dashboard consolidating operator reports · GC progress · capex burn · financing covenants for non-resident owners</td></tr>
+        <tr><td><strong>SiteWatch</strong></td><td>Demoable Month 12</td><td>Computer-vision construction supervision on the NVIDIA Physical-AI stack · weekly progress + safety + quality reporting</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- 3. WHY MANDARIN ORIENTAL -->
+<section class="chapter">
+  <div class="section-header">
+    <span class="section-num">PART 03</span>
+    <h2>Why Mandarin Oriental — and Why Now</h2>
+    <p class="subtitle">An owner-to-group conversation, not a vendor sales motion</p>
+  </div>
+  <div class="prose">
+    <p>
+      Mandarin Oriental is the right first-Group partner for three reasons that have nothing to do with revenue and everything to do with fit.
+    </p>
+    <ul>
+      <li><strong>We are inside the relationship already.</strong> MO Vienna runs ClaimsMax today. There is no procurement diligence to perform — the operational evidence sits in the asset. The extension can be a contractual addendum, not a new vendor onboarding.</li>
+      <li><strong>The product was designed against a Mandarin Oriental project.</strong> Every product judgement in ClaimsMax was shaped by the contractual structures, operator-developer dynamics, and luxury construction standards present at MO Vienna. It speaks Mandarin Oriental's language because Mandarin Oriental's language is the language it was built in.</li>
+      <li><strong>The window is open.</strong> No European competitor at Series A or beyond has built development-side AI for luxury hospitality. The first hotel group to institutionalize this capability owns a reputational position in front of the next decade of brand competition.</li>
+    </ul>
+    <p>
+      We are also conscious of where Mandarin Oriental has already invested in AI — on the brand and guest-experience side, including the Kleitman commentary in early 2026. Our offer is complementary, not competitive: the development-side slot Group has not yet filled.
+    </p>
+  </div>
+
+  <div class="callout">
+    <div class="callout-label">A note on positioning</div>
+    <p>
+      This is not a vendor pitch. Brisen Group is a Mandarin Oriental hotel owner. The conversation we are seeking is <strong>owner-to-Group</strong>, not seller-to-buyer. If the Group sees fit to institutionalize a capability one of its owners has already built and proven, the path is faster than any third-party procurement route would allow.
+    </p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- 4. THE PROPOSAL -->
+<section class="chapter">
+  <div class="section-header">
+    <span class="section-num">PART 04</span>
+    <h2>The Proposal · The Ask</h2>
+    <p class="subtitle">Concrete structure · concrete numbers · concrete commitments</p>
+  </div>
+
+  <div class="ask">
+    <div class="ask-grid">
+      <div class="ask-col">
+        <h4>What we offer Mandarin Oriental</h4>
+        <ul>
+          <li><strong>Corporate-level access</strong> to ClaimsMax across the MOHG-operated portfolio — properties chosen by MOHG.</li>
+          <li><strong>Priority deployment</strong> of TenderMax, OwnerView, and SiteWatch as they become production-ready (Months 6 / 9 / 12).</li>
+          <li><strong>Named Mandarin Oriental advisory seat</strong> on the Brisen AI product council — direct input into roadmap priorities.</li>
+          <li><strong>Co-development model</strong> on MOHG-specific operational features, with IP shared on a basis to be agreed.</li>
+          <li><strong>No procurement re-diligence</strong> — the deal is structured as an extension of the existing MO Vienna operational deployment.</li>
+        </ul>
+      </div>
+      <div class="ask-col">
+        <h4>What we ask in return</h4>
+        <ul>
+          <li><strong>Year-1 licence fee: €80,000</strong> — payable to Brisen AI Holdings (Geneva).</li>
+          <li><strong>12-month rolling term</strong> with mutual review at Month 10.</li>
+          <li><strong>Year-2 structure</strong> to be agreed at review: usage-based, per-property uplift, or step-up flat fee.</li>
+          <li><strong>One named MOHG operational sponsor</strong> to anchor information flow into the product team.</li>
+          <li><strong>Right to reference the relationship</strong> on the Brisen AI investor and partnership materials, subject to MOHG approval of any specific public reference.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="prose" style="margin-top:2rem;">
+    <p>
+      The €80,000 Year-1 figure is set deliberately below standard enterprise-AI licensing — this is not the commercial peak of the relationship; it is the entry point. We believe the value to MOHG, even in the first year, will materially exceed the fee, and the structure is designed so that Year-2 economics align with the realized value at review.
+    </p>
+    <p>
+      Counsel selection, contractual mechanics, and IP-sharing detail can be finalized within four weeks of an indication of interest. We are prepared to share the v1 ClaimsMax investigation report (redacted) from the MO Vienna deployment under NDA so that MOHG can evaluate the product against a real Mandarin Oriental case before signing anything.
+    </p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- 5. NEXT STEPS -->
+<section class="chapter">
+  <div class="section-header">
+    <span class="section-num">PART 05</span>
+    <h2>Next Steps</h2>
+    <p class="subtitle">A practical sequence for the next four weeks</p>
+  </div>
+  <div class="prose">
+    <ul>
+      <li><strong>Week 1</strong> · This meeting. Director Vallen presents the proposition; MOHG indicates initial reaction and identifies internal sponsor on the development / innovation side.</li>
+      <li><strong>Week 2</strong> · Redacted ClaimsMax investigation report from the MO Vienna deployment shared under NDA. Brisen team available for a working session with MOHG operational sponsor.</li>
+      <li><strong>Week 3</strong> · MOHG internal review. Brisen drafts term-sheet outline against MOHG operational preferences.</li>
+      <li><strong>Week 4</strong> · Term-sheet exchange. Targeted signature window: end of June 2026.</li>
+    </ul>
+  </div>
+
+  <div class="callout">
+    <div class="callout-label">The Bigger Picture</div>
+    <p>
+      Brisen AI is building, with Corinthia as anchor reference customer and with NVIDIA Inception Premier in application, the European AI partner for luxury hospitality development. Mandarin Oriental is the natural first hotel group to institutionalize the capability — because one of its owners already has. <strong>The 12 May meeting is the first step in that conversation.</strong>
+    </p>
+  </div>
+</section>
+
+<!-- SIGNATURE -->
+<div class="signature">
+  <p>With respect and in confidence,</p>
+  <div class="name">Dimitry Vallen</div>
+  <div class="title">Chairman, Brisen Group · Owner, Mandarin Oriental Vienna</div>
+  <div class="org">Brisen Capital SA · Geneva</div>
+</div>
+
+<footer>
+  <p>Brisen Group · 6th Floor, 15 Rue du Cendrier, CH-1201 Geneva · dvallen@brisengroup.com</p>
+  <p style="margin-top:0.4rem;">Strictly confidential. Distribution by named recipient only.</p>
+</footer>
+
+</body>
+</html>

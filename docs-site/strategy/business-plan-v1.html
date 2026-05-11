@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="source" content="brisen-desk">
+<meta name="confidence" content="high">
+<meta name="provenance" content="17 Director ratifications 2026-05-11 + Baker Deal Analyst dual-track output + Brisen Desk roadmap v3">
+<title>Brisen AI — Business Plan v1 (May 2026)</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+
+:root {
+  --bg: #0a0a0f;
+  --surface: #12121a;
+  --surface2: #1a1a28;
+  --surface3: #1f1f30;
+  --accent: #6c63ff;
+  --blue: #0a6fdb;
+  --blue-dim: rgba(10,111,219,0.15);
+  --blue-glow: rgba(10,111,219,0.3);
+  --nvidia: #76B900;
+  --nvidia-dim: rgba(118,185,0,0.15);
+  --nvidia-glow: rgba(118,185,0,0.3);
+  --gold: #d4a853;
+  --gold-dim: rgba(212,168,83,0.15);
+  --green: #00d4aa;
+  --rose: #ff6b9d;
+  --red: #ff5470;
+  --text: #e8e6f0;
+  --text-dim: #8a87a0;
+  --text-faint: #5a576f;
+  --border: rgba(108,99,255,0.15);
+  --border-strong: rgba(108,99,255,0.35);
+  --border-gold: rgba(212,168,83,0.25);
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', -apple-system, sans-serif;
+  line-height: 1.7;
+  overflow-x: hidden;
+  padding-top: 36px;
+}
+.conf-banner {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+  background: linear-gradient(90deg, rgba(10,111,219,0.95), rgba(118,185,0,0.95));
+  padding: 9px 0; text-align: center;
+  font-size: 0.66rem; font-weight: 700; letter-spacing: 4px;
+  text-transform: uppercase; color: #fff;
+  backdrop-filter: blur(20px);
+}
+.container { max-width: 1200px; margin: 0 auto; padding: 0 2rem; }
+
+/* HERO */
+.hero {
+  min-height: 92vh; display: flex; flex-direction: column;
+  justify-content: center; align-items: center; text-align: center;
+  position: relative; overflow: hidden; padding: 4rem 2rem;
+}
+.hero::before {
+  content: ''; position: absolute; top: -50%; left: -50%;
+  width: 200%; height: 200%;
+  background: radial-gradient(ellipse at 30% 50%, rgba(10,111,219,0.10) 0%, transparent 50%),
+              radial-gradient(ellipse at 70% 50%, rgba(118,185,0,0.08) 0%, transparent 50%),
+              radial-gradient(ellipse at 50% 20%, rgba(212,168,83,0.06) 0%, transparent 40%);
+  animation: heroGlow 18s ease-in-out infinite alternate;
+}
+@keyframes heroGlow {
+  0% { transform: translate(0,0); }
+  100% { transform: translate(-5%,5%); }
+}
+.hero-tag {
+  position: relative; display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 22px;
+  background: linear-gradient(135deg, var(--blue-dim), var(--nvidia-dim));
+  border: 1px solid rgba(10,111,219,0.3);
+  border-radius: 100px;
+  font-size: 0.8rem; font-weight: 600; letter-spacing: 3px;
+  text-transform: uppercase; color: var(--blue);
+  margin-bottom: 2.5rem;
+}
+.hero h1 {
+  position: relative;
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(2.4rem, 6vw, 4.2rem);
+  font-weight: 700; line-height: 1.1;
+  margin-bottom: 1rem;
+  background: linear-gradient(135deg, #fff 0%, var(--blue) 50%, var(--nvidia) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.hero .sub {
+  position: relative;
+  font-family: 'Playfair Display', serif; font-style: italic;
+  font-size: clamp(1.05rem, 2vw, 1.4rem);
+  color: var(--text-dim); margin-bottom: 0.5rem;
+}
+.hero .sub2 {
+  position: relative;
+  font-size: 0.95rem; color: var(--text-dim);
+  margin-bottom: 2rem; opacity: 0.7;
+}
+.hero-tagline {
+  position: relative;
+  font-size: 1.15rem; font-weight: 600;
+  color: var(--nvidia); max-width: 700px;
+  margin-bottom: 3rem; letter-spacing: 0.3px;
+}
+.hero-stats {
+  position: relative; display: flex; gap: 3.5rem;
+  flex-wrap: wrap; justify-content: center;
+}
+.hero-stat { text-align: center; }
+.hero-stat .num {
+  font-size: 2.3rem; font-weight: 800;
+  background: linear-gradient(135deg, var(--blue), var(--nvidia));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.hero-stat .label {
+  font-size: 0.68rem; text-transform: uppercase;
+  letter-spacing: 1.8px; color: var(--text-dim);
+  margin-top: 4px;
+}
+.hero-conf {
+  position: relative; margin-top: 3rem;
+  font-size: 0.7rem; letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim); opacity: 0.5;
+}
+
+/* TOC */
+.toc {
+  max-width: 1100px; margin: 4rem auto;
+  padding: 2.5rem 3rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+}
+.toc h3 {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.2rem; margin-bottom: 1.5rem;
+  color: var(--gold);
+}
+.toc ol {
+  list-style: none; counter-reset: toc;
+  display: grid; grid-template-columns: repeat(2, 1fr);
+  gap: 0.7rem 2rem;
+}
+.toc li {
+  counter-increment: toc;
+  font-size: 0.95rem; color: var(--text-dim);
+  padding-left: 2rem; position: relative;
+}
+.toc li::before {
+  content: counter(toc, decimal-leading-zero);
+  position: absolute; left: 0;
+  color: var(--blue); font-weight: 700; font-size: 0.85rem;
+  font-family: 'Playfair Display', serif;
+}
+.toc li a { color: inherit; text-decoration: none; transition: color 0.2s; }
+.toc li a:hover { color: var(--text); }
+@media (max-width: 768px) { .toc ol { grid-template-columns: 1fr; } }
+
+/* SECTIONS */
+section.chapter {
+  max-width: 1100px; margin: 0 auto;
+  padding: 5rem 2rem; scroll-margin-top: 40px;
+}
+.section-header {
+  margin-bottom: 3rem; text-align: left;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1.5rem;
+}
+.section-num {
+  display: inline-block;
+  font-family: 'Playfair Display', serif;
+  font-size: 0.95rem; font-weight: 700;
+  color: var(--blue); letter-spacing: 4px;
+  margin-bottom: 0.5rem;
+}
+.section-header h2 {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(1.7rem, 3.5vw, 2.5rem);
+  font-weight: 700; line-height: 1.2;
+  margin-bottom: 0.5rem;
+}
+.section-header .subtitle {
+  color: var(--text-dim); font-size: 1.05rem;
+  font-style: italic;
+  font-family: 'Playfair Display', serif;
+}
+
+/* PROSE */
+.prose p { margin-bottom: 1.3rem; font-size: 1.02rem; }
+.prose p.lead {
+  font-size: 1.18rem; line-height: 1.6;
+  color: var(--text); font-weight: 500;
+  border-left: 3px solid var(--blue);
+  padding-left: 1.5rem; margin-bottom: 2rem;
+}
+.prose strong { color: var(--text); font-weight: 700; }
+.prose em { color: var(--gold); font-style: normal; font-weight: 500; }
+.prose ul { margin: 1rem 0 1.5rem 1.5rem; }
+.prose ul li { margin-bottom: 0.6rem; color: var(--text-dim); }
+.prose ul li strong { color: var(--text); }
+
+/* CARDS */
+.cards { display: grid; gap: 1.5rem; margin: 2rem 0; }
+.cards-3 { grid-template-columns: repeat(3, 1fr); }
+.cards-2 { grid-template-columns: repeat(2, 1fr); }
+.cards-4 { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 900px) {
+  .cards-3, .cards-2, .cards-4 { grid-template-columns: 1fr; }
+}
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 2rem;
+  transition: transform 0.3s, box-shadow 0.3s;
+}
+.card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 18px 50px rgba(0,0,0,0.3), 0 0 30px var(--blue-glow);
+}
+.card.gold { border-color: var(--border-gold); }
+.card.gold:hover { box-shadow: 0 18px 50px rgba(0,0,0,0.3), 0 0 30px rgba(212,168,83,0.3); }
+.card.nvidia { border-color: rgba(118,185,0,0.25); }
+.card.nvidia:hover { box-shadow: 0 18px 50px rgba(0,0,0,0.3), 0 0 30px var(--nvidia-glow); }
+.card-title {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.25rem; font-weight: 700;
+  color: var(--text); margin-bottom: 0.5rem;
+}
+.card-tag {
+  font-size: 0.65rem; letter-spacing: 2px;
+  text-transform: uppercase; color: var(--blue);
+  margin-bottom: 0.8rem; font-weight: 600;
+}
+.card-tag.nv { color: var(--nvidia); }
+.card-tag.gold { color: var(--gold); }
+.card-body { color: var(--text-dim); font-size: 0.95rem; line-height: 1.65; }
+
+/* PRODUCT GRID */
+.product { padding: 1.8rem; }
+.product-name {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.4rem; font-weight: 700;
+  margin-bottom: 0.3rem;
+  background: linear-gradient(135deg, var(--blue), var(--nvidia));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.product-status {
+  display: inline-block; padding: 4px 12px; border-radius: 12px;
+  font-size: 0.68rem; letter-spacing: 1.5px; text-transform: uppercase;
+  font-weight: 700; margin-bottom: 1rem;
+}
+.status-live { background: rgba(0,212,170,0.15); color: var(--green); }
+.status-build { background: rgba(212,168,83,0.15); color: var(--gold); }
+
+/* TABLES */
+.table-wrap { overflow-x: auto; margin: 1.5rem 0; }
+table.bp {
+  width: 100%; border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--border); border-radius: 14px;
+  overflow: hidden; font-size: 0.92rem;
+}
+table.bp th, table.bp td {
+  padding: 0.85rem 1.1rem; text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+table.bp th {
+  background: var(--surface2);
+  color: var(--text); font-weight: 700;
+  font-size: 0.75rem; letter-spacing: 1px; text-transform: uppercase;
+}
+table.bp td { color: var(--text-dim); }
+table.bp tr:last-child td { border-bottom: 0; }
+table.bp tr.total td { background: var(--surface2); color: var(--text); font-weight: 700; }
+table.bp td.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.bp td strong { color: var(--text); }
+
+/* CALLOUT */
+.callout {
+  background: linear-gradient(135deg, var(--blue-dim), var(--nvidia-dim));
+  border: 1px solid var(--border-strong);
+  border-radius: 16px; padding: 2rem;
+  margin: 2rem 0;
+}
+.callout.gold {
+  background: linear-gradient(135deg, var(--gold-dim), rgba(212,168,83,0.05));
+  border-color: var(--border-gold);
+}
+.callout-label {
+  font-size: 0.7rem; letter-spacing: 3px;
+  text-transform: uppercase; font-weight: 700;
+  color: var(--blue); margin-bottom: 0.5rem;
+}
+.callout.gold .callout-label { color: var(--gold); }
+.callout p { color: var(--text); font-size: 1.05rem; margin: 0; }
+
+/* RISK BADGES */
+.risk-red { color: var(--red); font-weight: 700; }
+.risk-amber { color: var(--gold); font-weight: 700; }
+
+/* KILL GATE TABLE — emphasis */
+table.kill td:first-child { color: var(--text); font-weight: 700; font-family: 'Playfair Display', serif; }
+
+/* FOOTER */
+footer {
+  max-width: 1100px; margin: 6rem auto 3rem; padding: 3rem 2rem 0;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-size: 0.78rem; color: var(--text-faint); letter-spacing: 1px;
+}
+footer strong { color: var(--text-dim); }
+
+/* DIVIDER */
+.divider {
+  max-width: 1100px; margin: 0 auto;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--border-strong), transparent);
+}
+
+@media print {
+  .conf-banner { display: none; }
+  body { padding-top: 0; background: #fff; color: #111; }
+  .hero { min-height: auto; }
+  .card, table.bp, .callout { break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+
+<div class="conf-banner">Strictly Confidential · Brisen Group · Business Plan v1 · May 2026</div>
+
+<!-- HERO -->
+<header class="hero">
+  <div class="hero-tag">Brisen AI · The European AI Partner for Luxury Hospitality Development</div>
+  <h1>Building the Operating<br/>System of Luxury<br/>Real Estate Development</h1>
+  <p class="sub">Business Plan v1 — May 2026</p>
+  <p class="sub2">12-month roadmap · €3M raise · 30-month flip optionality</p>
+  <p class="hero-tagline">Owner-operator empathy + production-grade AI IP + NVIDIA Inception Premier credential + Corinthia anchor — a combination no European Series A+ competitor holds today.</p>
+  <div class="hero-stats">
+    <div class="hero-stat"><div class="num">4</div><div class="label">Products in Suite</div></div>
+    <div class="hero-stat"><div class="num">€3M</div><div class="label">Y1 Outside Equity</div></div>
+    <div class="hero-stat"><div class="num">~€67M</div><div class="label">30-mo Weighted EV</div></div>
+    <div class="hero-stat"><div class="num">~€20-22M</div><div class="label">Director-Net Exit</div></div>
+  </div>
+  <div class="hero-conf">17 Director Ratifications · 45 cited sources · Deal-Analyst-anchored</div>
+</header>
+
+<!-- TOC -->
+<div class="toc">
+  <h3>Contents</h3>
+  <ol>
+    <li><a href="#exec">Executive Summary</a></li>
+    <li><a href="#company">The Company</a></li>
+    <li><a href="#market">Market &amp; Opportunity</a></li>
+    <li><a href="#product">Product — The 4-Product Suite</a></li>
+    <li><a href="#gtm">Go-to-Market &amp; Customers</a></li>
+    <li><a href="#team">Team &amp; Cap Table</a></li>
+    <li><a href="#financials">Financials &amp; Unit Economics</a></li>
+    <li><a href="#fundraise">Fundraise &amp; Use of Funds</a></li>
+    <li><a href="#risks">Risks &amp; Kill-Gates</a></li>
+    <li><a href="#exit">Exit Pathway</a></li>
+  </ol>
+</div>
+
+<div class="divider"></div>
+
+<!-- 1. EXECUTIVE SUMMARY -->
+<section class="chapter" id="exec">
+  <div class="section-header">
+    <span class="section-num">CHAPTER 01</span>
+    <h2>Executive Summary</h2>
+    <p class="subtitle">What we are building, why it works, and what the next 12 months prove</p>
+  </div>
+  <div class="prose">
+    <p class="lead">Brisen AI is an independent product company building the European AI partner for luxury hospitality development. Anchored by Corinthia as a reference customer, credentialed by NVIDIA Inception Premier, and commercially proven by a paid Mandarin Oriental Hotel Group corporate licence extension by year-end 2026.</p>
+
+    <p><strong>The opportunity.</strong> Luxury hotel development and ownership runs on spreadsheets, PDFs, and consultant memory. No European competitor at Series A or later has built an AI product suite for the developer-operator side of the industry. Brand-AI tools exist (guest experience, revenue management); development-AI tools do not. The white space is global and unclaimed.</p>
+
+    <p><strong>The asset we already have.</strong> Brisen Group's Mandarin Oriental Vienna (MO Vienna) development gave us an asset most software companies never get: a production loss in a real €6M dispute, a counterparty in insolvency, and a defensible recovery built on ClaimsMax — an AI product Brisen already deployed and operationalised. ClaimsMax is live, in the wild, and demonstrably attributable to the recovery outcome.</p>
+
+    <p><strong>The vertical-creation play.</strong> ClaimsMax is the production proof point. Around it we are building three more products — TenderMax, OwnerView, SiteWatch — that together cover the four hardest operational pain points in luxury hospitality development: claims defence, tender governance, ownership oversight, construction supervision. Each product addresses a multi-million-euro line item on every luxury development P&amp;L. The suite is positioned as a single AI partnership a luxury developer-operator signs once, not four separate tools.</p>
+
+    <p><strong>The proof customers.</strong> Customer #1 is <em>Corinthia</em> (Pisani family) — reference customer, free Y1 pilot on Corinthia Rome, paid Y2 conversion. Customer #2 is <em>Mandarin Oriental Hotel Group corporate</em>, structured as a licence extension off the existing MO Vienna deployment, covering MOHG-operated portfolio. Customer #2 is the kill-criterion driver — it must sign by 31 December 2026 to clear the vertical's €100K external revenue gate. Customer #3+ pipeline flows from peer luxury developer-operators reached via Corinthia / Pisani warm-introduction channel (Aman, Kempinski, Rosewood, Six Senses, Four Seasons, Belmond, One&amp;Only).</p>
+
+    <p><strong>The economics.</strong> €1.01M Year-1 base-case spend produces €180K external revenue (€100K MO Vienna → Brisen AI Holdings inter-company licence for ClaimsMax-on-Hagenauer corpus access + €80K MOHG corporate licence extension). The kill gate — &gt;€1M spent / &lt;€100K revenue by 2026-12-31 — clears the revenue threshold by an €80K margin but the spend threshold by only €10K. Discipline matters every line.</p>
+
+    <p><strong>The capital structure.</strong> €3M outside-equity raise, two-tranche. Tranche 1: €1.5M post-money SAFE at €15M cap, closing 2026-Q2. Tranche 2: €1.5M priced Series Seed at €25-35M pre-money, closing 2026-Q4 post Customer #2 signature. Two-tranche structure preserves founder equity by pricing the second tranche on a paying-customer proof point rather than no-ARR projections.</p>
+
+    <p><strong>The flip math.</strong> Probability-weighted 30-month exit ~€67M EV across five distinct pathways (hospitality-tech consolidator, ConTech consolidator, NVIDIA acqui-hire, IP-only licence, independent Series A 2027). Director net at exit, post Series A 2027 dilution and Swiss tax: ~€20-22M. This makes the vertical a real-money decision, not a side bet.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- 2. COMPANY -->
+<section class="chapter" id="company">
+  <div class="section-header">
+    <span class="section-num">CHAPTER 02</span>
+    <h2>The Company</h2>
+    <p class="subtitle">What Brisen AI is, what makes it defensible, and why now</p>
+  </div>
+  <div class="prose">
+    <p class="lead">Brisen AI is an independent product company being spun out of Brisen Group's operating experience as a luxury hotel developer and owner. The IP holds in a dedicated entity (Brisen AI Holdings, CH Geneva) to keep the company audit-ready, separable, and acquisition-eligible from Day 1.</p>
+
+    <p><strong>The owner-operator advantage.</strong> Most enterprise AI companies are sold <em>to</em> developers and operators by founders who have never built or run a hotel. Brisen is the inverse: we are the developer and operator, and we are building the AI we wished existed during MO Vienna. That asymmetry — owner-side product judgement, on real money, on real adversaries — is the moat. It compounds with every new MO Vienna-like episode we run through the products.</p>
+
+    <p><strong>The four moats:</strong></p>
+    <ul>
+      <li><strong>Domain depth.</strong> Director Vallen owns MO Vienna; the Brisen Group portfolio spans active assets across CH / AT / DE / FR / CY / LU. Product judgement comes from a real P&amp;L, not from interviews.</li>
+      <li><strong>Production proof.</strong> ClaimsMax is deployed against a live €6M Hagenauer claim with documented outcomes. We are not pitching from a deck; we are pitching from a case study.</li>
+      <li><strong>NVIDIA credential pathway.</strong> Inception Premier (in application) opens GPU economics, GTC visibility, and Physical-AI showcase — the exact credibility infrastructure a Day-1 European startup cannot manufacture.</li>
+      <li><strong>Corinthia anchor channel.</strong> Pisani family relationship is the warm-intro channel to peer luxury developer-operators no outbound sales motion can replicate.</li>
+    </ul>
+
+    <p><strong>Entity structure.</strong> Brisen AI Holdings will be incorporated in Geneva. IP — including ClaimsMax — assigns from Ellie Technologies (Philip Vallen) to Brisen AI Holdings against a 25% equity grant. Director Vallen holds 60% pre-money; Edita Vallen and family hold 15%. Inter-company mechanics route €100K Year-1 from the MO Vienna entity to Brisen AI Holdings as a clean ClaimsMax-on-Hagenauer-corpus licence fee.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- 3. MARKET -->
+<section class="chapter" id="market">
+  <div class="section-header">
+    <span class="section-num">CHAPTER 03</span>
+    <h2>Market &amp; Opportunity</h2>
+    <p class="subtitle">Why this vertical, why this moment, why no one else has it</p>
+  </div>
+  <div class="prose">
+    <p class="lead">Luxury hospitality development is a multi-billion-euro global industry where every single project is hand-managed, every cost line is contested by counterparties, and every operator-developer has been failed by generic ConTech. The slot Brisen AI fills did not exist five years ago and is wide open today.</p>
+
+    <p><strong>Segment.</strong> Luxury and ultra-luxury hospitality development — defined as new-build or major-refurbishment hotel projects with $50M+ capex, branded operator (or candidate for one), developer-owner ownership structure separate from operator. Europe is the launch geography. MENA, China, US follow as Corinthia and MOHG footprint pulls product into those markets.</p>
+
+    <p><strong>Why now.</strong> Three forces converge in 2026:</p>
+    <ul>
+      <li><strong>Construction inflation</strong> has made claim defence, tender governance, and budget oversight existentially valuable to luxury developers. Single-digit-percentage savings on a €100M development are €5-10M absolute, line-for-line.</li>
+      <li><strong>NVIDIA's Physical-AI push</strong> via Inception Premier opens credentialing infrastructure no software company could buy on its own. The window to be the named European partner is open in 2026.</li>
+      <li><strong>Operator AI fatigue.</strong> Hotel groups have invested heavily in guest-facing and revenue-management AI; almost nothing has flowed to the development side. Operators are receptive to development-side AI from owners who already speak their language.</li>
+    </ul>
+
+    <p><strong>The competitive landscape.</strong> A global scan finds no European Series A+ owner-developer AI product. ConTech players (Procore, Autodesk, Buildots) are general-purpose and serve the construction manager; not the developer-owner. Hospitality SaaS (IDeaS, Revinate, Duetto, AccorTech) serves the operator; not the developer. Generative-AI consulting firms sell hours, not product. <em>The seat for "AI partner to luxury hospitality development" is open — and no incumbent is positioned to take it.</em></p>
+
+    <p><strong>Total addressable market.</strong> ~120 active luxury hospitality developer-operator entities globally; ~40 in Europe. Average annual development pipeline 2-5 properties each, average development capex $80-300M per property. Even a 4-product suite priced at €80-200K per developer-operator per year delivers €10-25M ARR at modest market penetration. The 30-month flip path doesn't require domination — it requires anchor + early traction.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- 4. PRODUCT -->
+<section class="chapter" id="product">
+  <div class="section-header">
+    <span class="section-num">CHAPTER 04</span>
+    <h2>Product — The 4-Product Suite</h2>
+    <p class="subtitle">Four hardest pain points in luxury hospitality development, one AI partnership</p>
+  </div>
+  <div class="prose">
+    <p class="lead">The product portfolio is built around the moments where money is most at risk in a luxury hospitality development: claim defence, tender governance, ownership reporting, on-site construction supervision. Each product is a stand-alone tool; together they form the operating system.</p>
+  </div>
+  <div class="cards cards-2">
+    <div class="card product nvidia">
+      <div class="product-name">ClaimsMax</div>
+      <span class="product-status status-live">Live · Production</span>
+      <div class="card-body">
+        AI-powered contractor claim analysis, defence, and litigation support. Anchors the suite. Deployed against the €6M Hagenauer claim at MO Vienna with documented outcome. Already drawing external user attention (E+H legal counsel logging in to view investigation reports). Year-1 revenue: €100K MO Vienna inter-company licence + €80K MOHG corporate licence extension.
+      </div>
+    </div>
+    <div class="card product gold">
+      <div class="product-name">TenderMax</div>
+      <span class="product-status status-build">Demoable by Month 6</span>
+      <div class="card-body">
+        Tender analysis, bid normalization, and counterparty-pattern intelligence for development procurement. Cross-references historical contractor behaviour against current bid sheets. Designed to be the first AI artefact a developer-operator's procurement team uses before opening a tender package.
+      </div>
+    </div>
+    <div class="card product gold">
+      <div class="product-name">OwnerView</div>
+      <span class="product-status status-build">Demoable by Month 9</span>
+      <div class="card-body">
+        Ownership-side reporting layer that consolidates operator-issued reports, GC progress, financing covenants, and capex burn into a single live view for non-resident owners. Built for absentee owner-developers running multi-jurisdiction portfolios who cannot fly to site every week.
+      </div>
+    </div>
+    <div class="card product gold">
+      <div class="product-name">SiteWatch</div>
+      <span class="product-status status-build">Demoable by Month 12</span>
+      <div class="card-body">
+        Computer-vision construction supervision powered by NVIDIA Physical-AI stack. Inception Premier-gated: descoped from the Y1 suite if Premier slips past 2026-08-11 (GPU economics fail without $100K AWS credits + 30% off DGX Cloud). On-track delivery makes it the suite's flagship NVIDIA-showcase artefact.
+      </div>
+    </div>
+  </div>
+  <div class="callout">
+    <div class="callout-label">Product Economics, Year 1</div>
+    <p>Total Y1 product build budget: <strong>€510K</strong> across the four products (ClaimsMax €130K hardening · TenderMax €170K · OwnerView €100K · SiteWatch €110K). External revenue Y1: <strong>€180K base case</strong> — all from ClaimsMax. 84% of build budget produces 0% of Y1 revenue. <em>ClaimsMax carries the kill-gate math; TenderMax / OwnerView / SiteWatch are funded roadmap, not vapor.</em></p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- 5. GTM -->
+<section class="chapter" id="gtm">
+  <div class="section-header">
+    <span class="section-num">CHAPTER 05</span>
+    <h2>Go-to-Market &amp; Customers</h2>
+    <p class="subtitle">Two anchor customers, peer-luxury warm-intro funnel, no outbound sales</p>
+  </div>
+  <div class="prose">
+    <p class="lead">The GTM motion is relationship-driven, not outbound. Customer #1 (Corinthia) anchors the reference. Customer #2 (MOHG corporate) shortcuts procurement by extending an existing MO Vienna deployment. Customer #3+ flow through Corinthia / Pisani warm-introduction channel to peer luxury developer-operators. No SDR motion, no demand-gen funnel — direct senior-to-senior conversations leveraging existing trust.</p>
+  </div>
+
+  <div class="table-wrap">
+    <table class="bp">
+      <thead>
+        <tr><th>#</th><th>Customer</th><th>Role</th><th>Structure</th><th class="num">Y1 Rev</th><th class="num">Y2 Rev</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>1</strong></td><td><strong>Corinthia</strong> (Pisani family)</td><td>Developer-operator</td><td>Reference customer · Free pilot on Corinthia Rome · Paid conversion Y2</td><td class="num">€0</td><td class="num">€80-120K</td></tr>
+        <tr><td><strong>2</strong></td><td><strong>MOHG corporate</strong></td><td>Developer-operator</td><td>Licence extension off MO Vienna · Covers MOHG portfolio</td><td class="num"><strong>€80K</strong></td><td class="num">€80-120K</td></tr>
+        <tr><td>3+</td><td>Aman / Kempinski / Rosewood / Six Senses / Four Seasons / Belmond / One&amp;Only</td><td>Developer-operators</td><td>Via Corinthia / Pisani warm intros</td><td class="num">€0</td><td class="num">TBD</td></tr>
+        <tr><td>Int.</td><td>MO Vienna (Hagenauer corpus)</td><td>Brisen-internal</td><td>Inter-company licence MO Vienna → Brisen AI Holdings</td><td class="num"><strong>€100K</strong></td><td class="num">recurring</td></tr>
+        <tr class="total"><td colspan="4">Total Y1 external revenue</td><td class="num"><strong>€180K</strong></td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="prose">
+    <p><strong>Customer #1 — Corinthia (Pisani family).</strong> Reference customer. Free Year-1 pilot on Corinthia Rome (~€100M asset). ClaimsMax deployed first; TenderMax and OwnerView follow as they become demoable. Paid Year-2 conversion structured against claims-share or per-project licence (€80-120K). Term-sheet outline drafted by 2026-06-08; must include the paid-Y2 commercial mechanic. Pisani family relationship also provides the warm-intro channel into peer luxury developer-operators (Customer #3+ funnel).</p>
+
+    <p><strong>Customer #2 — Mandarin Oriental Hotel Group corporate.</strong> The kill-criterion driver. Door is Brisen's <em>own</em> MOHG operating relationship through MO Vienna — not the Corinthia / Pisani channel. Procurement is shortcut by framing the deal as an extension of the existing ClaimsMax deployment already running at MO Vienna, rather than a fresh corporate-portfolio sale that would require full MOHG procurement diligence. Target structure: €80K Year-1 licence extension covering MOHG-operated portfolio access to the ClaimsMax product. Target signature: 2026-12-31 (the kill-criterion hard gate).</p>
+
+    <p><strong>Customer #3+ pipeline.</strong> Peer luxury developer-operators reached via Corinthia / Pisani warm introductions: Aman (Doronin), Kempinski, Rosewood, Six Senses, Four Seasons, Belmond, One&amp;Only. Y2 revenue lines unanchored at plan time — sequencing depends on Pisani brokering rhythm post Customer #1 paid conversion. Each candidate added to this funnel must clear a counterparty-role test: <em>developer-operator only.</em> Lenders, Corinthia's third-party clients, and any non-buyer counterparties are excluded by definition.</p>
+
+    <p><strong>The internal customer.</strong> MO Vienna (the Brisen Group asset) pays Brisen AI Holdings a €100K Year-1 inter-company licence fee for ClaimsMax-on-Hagenauer-corpus access. This is the cleanest possible monetization of an asset Brisen already controls: the data corpus, the dispute, the AI product. Clean intercompany — auditable for any future buyer.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- 6. TEAM -->
+<section class="chapter" id="team">
+  <div class="section-header">
+    <span class="section-num">CHAPTER 06</span>
+    <h2>Team &amp; Cap Table</h2>
+    <p class="subtitle">Owner-operators as founders, IP contributor as named co-equity</p>
+  </div>
+  <div class="prose">
+    <p class="lead">Brisen AI is founder-led by Director Vallen with a co-equity IP contributor (Philip Vallen / Ellie Technologies) and Brisen Group operational leadership extending into the company. Day-1 hires are explicitly gated on Tranche 1 SAFE closing — investor diligence will see a real team, not a wish-list org chart.</p>
+  </div>
+  <div class="cards cards-3">
+    <div class="card">
+      <div class="card-tag">CEO · Founder</div>
+      <div class="card-title">Dimitry Vallen</div>
+      <div class="card-body">Chairman, Brisen Group. Owner-developer of Mandarin Oriental Vienna. 30 years of asset acquisition, structuring, and ownership across CH / AT / DE / FR / CY / LU. Sets product judgement, drives senior-to-senior customer conversations, leads fundraise.</div>
+    </div>
+    <div class="card">
+      <div class="card-tag">COO · LCG Signatory</div>
+      <div class="card-title">Edita Vallen</div>
+      <div class="card-body">Co-shareholder LCG SA (the Brisen Group holding vehicle). Operational control across active Brisen portfolio. Brings the ownership-side empathy critical to OwnerView's product design.</div>
+    </div>
+    <div class="card nvidia">
+      <div class="card-tag nv">IP Contributor · de facto CTO</div>
+      <div class="card-title">Philip Vallen / Ellie Technologies</div>
+      <div class="card-body">Built and operates ClaimsMax. Engineering arm. 25% equity grant in Brisen AI Holdings against full IP assignment. Continues to bear technical risk as arm's-length engineering vehicle; named on cap table for institutional credibility.</div>
+    </div>
+  </div>
+  <div class="cards cards-2">
+    <div class="card">
+      <div class="card-tag">CFO Support</div>
+      <div class="card-title">Balazs Csepregi</div>
+      <div class="card-body">Internal Brisen financial modelling. Will lead financial reporting through the Y1 sprint and Tranche 1 SAFE close. Continuity from Brisen Group operational finance into Brisen AI Holdings auditable books.</div>
+    </div>
+    <div class="card gold">
+      <div class="card-tag gold">Gated Hires</div>
+      <div class="card-title">AI Product Lead + Engineer</div>
+      <div class="card-body">Gated on Tranche 1 SAFE close. AI Product Lead onboards Month 7 to own product roadmap (TenderMax / OwnerView / SiteWatch). Engineer onboards Month 9 to harden ClaimsMax production stack. Both hires preserve the founder-led discipline through the kill gate, then scale post-gate.</div>
+    </div>
+  </div>
+  <div class="prose">
+    <p><strong>Advisor board (in formation).</strong> Three named slots: NVIDIA relationship anchor (Storer post Premier-execution), one hospitality C-suite operator, one ConTech executive. The board is positioned as the credibility layer institutional Tranche 2 lead investors will look for at priced Series Seed.</p>
+  </div>
+
+  <h3 style="font-family:'Playfair Display',serif;font-size:1.4rem;margin:2.5rem 0 1.2rem;color:var(--gold);">Cap Table — Three Stages</h3>
+  <div class="table-wrap">
+    <table class="bp">
+      <thead>
+        <tr><th>Holder</th><th class="num">Pre-round</th><th class="num">Post-€3M raise</th><th class="num">Post-Series A 2027</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Director (Dimitry Vallen)</strong></td><td class="num">60%</td><td class="num">~50%</td><td class="num"><strong>~38-42%</strong></td></tr>
+        <tr><td>Edita Vallen / family</td><td class="num">15%</td><td class="num">~12%</td><td class="num">~10%</td></tr>
+        <tr><td>Ellie / Philip Vallen (IP)</td><td class="num">25%</td><td class="num">~20.6%</td><td class="num">~17%</td></tr>
+        <tr><td>Option pool</td><td class="num">—</td><td class="num">7.5%</td><td class="num">~10%</td></tr>
+        <tr><td>New investors (SAFE + Seed)</td><td class="num">—</td><td class="num">~10.7%</td><td class="num">~10.7%</td></tr>
+        <tr><td>Series A investors (2027)</td><td class="num">—</td><td class="num">—</td><td class="num">~25%</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- 7. FINANCIALS -->
+<section class="chapter" id="financials">
+  <div class="section-header">
+    <span class="section-num">CHAPTER 07</span>
+    <h2>Financials &amp; Unit Economics</h2>
+    <p class="subtitle">Year-1 spend, revenue, and net burn — base, optimistic, pessimistic</p>
+  </div>
+  <div class="prose">
+    <p class="lead">€1.01M base-case Year-1 cash spend. €180K base-case Year-1 revenue. €0.83M base-case Year-1 net burn — covered comfortably by the €1.5M Tranche 1 SAFE. The kill gate clears revenue by €80K margin and spend by €10K margin. Every line below is anchored to a Deal Analyst-validated cost number.</p>
+  </div>
+
+  <div class="table-wrap">
+    <table class="bp">
+      <thead>
+        <tr><th>Cost line</th><th class="num">Base</th><th class="num">Optimistic</th><th class="num">Pessimistic</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Ellie / Philip engineering</td><td class="num">€420K</td><td class="num">€600K</td><td class="num">€300K</td></tr>
+        <tr><td>Internal team (Edita + Balazs partial)</td><td class="num">€100K</td><td class="num">€100K</td><td class="num">€100K</td></tr>
+        <tr><td>New hires (AI-Product Lead M7 + Engineer M9)</td><td class="num">€60K</td><td class="num">€120K</td><td class="num">€0</td></tr>
+        <tr><td>Cloud + GPU (post-Inception credits)</td><td class="num">€72K</td><td class="num">€36K</td><td class="num">€60K</td></tr>
+        <tr><td>Sales + marketing (NVIDIA GTC · ULI Europe · IHIF)</td><td class="num">€180K</td><td class="num">€300K</td><td class="num">€60K</td></tr>
+        <tr><td>Legal + finance + entity + IP transfer</td><td class="num">€70K</td><td class="num">€70K</td><td class="num">€70K</td></tr>
+        <tr><td>Compliance (SOC 2 Type II, GDPR DPA)</td><td class="num">€35K</td><td class="num">€50K</td><td class="num">€15K</td></tr>
+        <tr><td>Insurance (D&amp;O · cyber · E&amp;O)</td><td class="num">€25K</td><td class="num">€30K</td><td class="num">€25K</td></tr>
+        <tr><td>Office + travel + admin</td><td class="num">€48K</td><td class="num">€72K</td><td class="num">€24K</td></tr>
+        <tr class="total"><td><strong>Total Y1 cash spend</strong></td><td class="num"><strong>€1.01M</strong></td><td class="num"><strong>€1.38M</strong></td><td class="num"><strong>€0.65M</strong></td></tr>
+        <tr><td>Y1 external revenue</td><td class="num"><strong>€180K</strong></td><td class="num">€380K</td><td class="num">€0</td></tr>
+        <tr class="total"><td><strong>Y1 net cash burn</strong></td><td class="num"><strong>€0.83M</strong></td><td class="num">€1.00M</td><td class="num">€0.65M</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="callout gold">
+    <div class="callout-label">Kill-Gate Math</div>
+    <p>Kill criterion: <strong>&gt;€1M spent / &lt;€100K external revenue by 2026-12-31</strong>. Base case clears the revenue gate by €80K (€180K revenue vs €100K threshold) and the spend gate by €10K (€1.01M spend vs €1M cap). The spend gate is RED-tight — single-line discipline is mandatory throughout Year 1.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- 8. FUNDRAISE -->
+<section class="chapter" id="fundraise">
+  <div class="section-header">
+    <span class="section-num">CHAPTER 08</span>
+    <h2>Fundraise &amp; Use of Funds</h2>
+    <p class="subtitle">€3M outside equity, two-tranche, kill-gate de-risked</p>
+  </div>
+  <div class="prose">
+    <p class="lead">€3M raise structured as two tranches. Tranche 1 (€1.5M SAFE) closes 2026-Q2 to fund the kill-gate sprint without pricing on no-ARR projections. Tranche 2 (€1.5M priced Seed) closes 2026-Q4 on the proof point of Customer #2 (MOHG) signature, at €25-35M pre-money. Two-tranche structure preserves founder equity through de-risking events.</p>
+  </div>
+  <div class="cards cards-2">
+    <div class="card">
+      <div class="card-tag">Tranche 1 · Close 2026-Q2</div>
+      <div class="card-title">€1.5M Post-Money SAFE</div>
+      <div class="card-body">
+        Cap: €15M post-money (anchored to 2026 European AI/ML pre-seed median). Discount: 20% to next priced round. Target investors: Director-network angels + 1-2 NVIDIA Inception VC Alliance partners.
+        <br/><br/>
+        <strong>Why a SAFE.</strong> Funds the sprint without forcing a valuation negotiation on pre-revenue projections. Pricing pressure deferred to Tranche 2 where the conversation is anchored to a paying-customer proof point.
+      </div>
+    </div>
+    <div class="card nvidia">
+      <div class="card-tag nv">Tranche 2 · Close 2026-Q4</div>
+      <div class="card-title">€1.5M Priced Series Seed</div>
+      <div class="card-body">
+        Pre-money: €25-35M (vertical AI Series Seed premium applies post-paying-customer). Lead investor profile: European AI-vertical specialist (Frst, Air Street, La Famiglia) OR NVIDIA Inception VC partner (Felicis, Lightspeed, Coatue).
+        <br/><br/>
+        <strong>Trigger.</strong> MOHG corporate licence signature is the priced-round trigger. If MOHG slips past Q4, Tranche 2 is delayed; founder runway re-modeled from MO Vienna inter-company licence.
+      </div>
+    </div>
+  </div>
+
+  <h3 style="font-family:'Playfair Display',serif;font-size:1.4rem;margin:2.5rem 0 1.2rem;color:var(--gold);">Use of Funds — €3M total raise across 12 months</h3>
+  <div class="table-wrap">
+    <table class="bp">
+      <thead>
+        <tr><th>Allocation</th><th class="num">% of raise</th><th class="num">€</th><th>Purpose</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Product engineering</td><td class="num">~32%</td><td class="num">€960K</td><td>ClaimsMax production · TenderMax · OwnerView · SiteWatch builds</td></tr>
+        <tr><td>Team + new hires</td><td class="num">~22%</td><td class="num">€660K</td><td>Internal team carry + AI Product Lead M7 + Engineer M9</td></tr>
+        <tr><td>Customer + GTM</td><td class="num">~17%</td><td class="num">€510K</td><td>Corinthia pilot deployment + MOHG sign + NVIDIA GTC + ULI Europe + IHIF presence</td></tr>
+        <tr><td>Infrastructure (cloud + GPU)</td><td class="num">~7%</td><td class="num">€210K</td><td>Post-Inception-Premier cloud cost — net of $100K credits + 30% DGX Cloud discount</td></tr>
+        <tr><td>Legal + compliance + IP</td><td class="num">~7%</td><td class="num">€220K</td><td>Brisen AI Holdings setup, IP assignment, SOC 2 Type II, GDPR DPA</td></tr>
+        <tr><td>Reserve / runway buffer</td><td class="num">~15%</td><td class="num">€440K</td><td>Q4 2026 → Q2 2027 bridge runway pre-Series A</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- 9. RISKS / KILL GATES -->
+<section class="chapter" id="risks">
+  <div class="section-header">
+    <span class="section-num">CHAPTER 09</span>
+    <h2>Risks &amp; Kill-Gates</h2>
+    <p class="subtitle">Calendarized stop conditions and the discipline behind them</p>
+  </div>
+  <div class="prose">
+    <p class="lead">Every major commitment in this plan has a calendared kill-gate. If the gate fires, the vertical is wound down to ClaimsMax-only carrying the MO Vienna case study — preserving the IP value with zero further capital exposure. The kill-gate discipline is non-negotiable; it is the only mechanism protecting Brisen Group capital if customer traction does not materialize.</p>
+  </div>
+
+  <div class="table-wrap">
+    <table class="bp kill">
+      <thead>
+        <tr><th>Date</th><th>Gate</th><th>Test</th><th>Action if triggered</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>2026-07-08</td><td>MOU expiry</td><td>Corinthia LOI signed?</td><td>Re-open North Star question (vertical vs ClaimsMax-only)</td></tr>
+        <tr><td>2026-08-11</td><td>Month 3</td><td>Inception Premier executed?</td><td>Descope SiteWatch · reframe as 3-product suite</td></tr>
+        <tr><td>2026-09-30</td><td>Month 4-5</td><td>SAFE Tranche 1 closed?</td><td>Switch to convertible note or extend Director-funded runway</td></tr>
+        <tr><td>2026-11-15</td><td>Month 6</td><td>TenderMax v0 demoable + MOHG LOI?</td><td>60-day extension before kill review</td></tr>
+        <tr><td><strong>2026-12-31</strong></td><td><strong>HARD KILL</strong></td><td><strong>&gt;€1M spent / &lt;€100K revenue?</strong></td><td><strong>KILL the vertical — wind down to ClaimsMax-only</strong></td></tr>
+        <tr><td>2027-Q1</td><td>Tranche 2 close window</td><td>Priced Seed closed at €25-35M pre-money?</td><td>Re-evaluate 30-mo flip path</td></tr>
+        <tr><td>2027-05-11</td><td>12-month review</td><td>ARR ≥ €30K MRR run-rate?</td><td>Plan H2 scaling or narrow scope</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3 style="font-family:'Playfair Display',serif;font-size:1.4rem;margin:2.5rem 0 1.2rem;color:var(--gold);">Material Risks &amp; Mitigations</h3>
+  <div class="table-wrap">
+    <table class="bp">
+      <thead>
+        <tr><th>Risk</th><th>Rating</th><th>Mitigation</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>MOHG slips past Q4 2026</td><td class="risk-red">RED</td><td>Single-thread, no parallel hedge — Director-accepted. Existing-relationship-extension framing shortcuts procurement diligence.</td></tr>
+        <tr><td>Kill-criterion spend margin only €10K</td><td class="risk-red">RED</td><td>Tranche 1 SAFE close by 2026-Q2; line-item discipline through year-end.</td></tr>
+        <tr><td>SiteWatch GPU economics without Inception Premier</td><td class="risk-red">RED</td><td>Month-3 hard gate (2026-08-11): descope SiteWatch if Premier slips.</td></tr>
+        <tr><td>Investor underwrites Director-only team</td><td class="risk-amber">AMBER</td><td>Cap table with named IP contributor (Ellie 25%), Edita COO, advisor board in formation.</td></tr>
+        <tr><td>3 of 4 products concept-only at plan time</td><td class="risk-amber">AMBER</td><td>Demoable cadence: TenderMax M6, OwnerView M9, SiteWatch M12.</td></tr>
+        <tr><td>NVIDIA Premier execution overdue</td><td class="risk-amber">AMBER</td><td>Director-direct cold email to Storer this week; senior-to-senior re-open.</td></tr>
+        <tr><td>Corinthia free-pilot → paid-Y2 mechanic undefined</td><td class="risk-amber">AMBER</td><td>Term-sheet draft by 2026-06-08 must include paid-Y2 structure.</td></tr>
+        <tr><td>Strategic acquirer window narrowing</td><td class="risk-amber">AMBER</td><td>Five distinct exit paths preserved; no single-acquirer dependency.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- 10. EXIT -->
+<section class="chapter" id="exit">
+  <div class="section-header">
+    <span class="section-num">CHAPTER 10</span>
+    <h2>Exit Pathway</h2>
+    <p class="subtitle">30-month flip optionality preserved · 5 distinct paths · ~€67M weighted EV</p>
+  </div>
+  <div class="prose">
+    <p class="lead">The 30-month flip path is built around five distinct exit pathways — no single-acquirer dependency. Probability-weighted exit EV of ~€67M produces a Director-net of ~€20-22M after Series A 2027 dilution and Swiss tax. Independent continuation (Series A → Series B) is preserved as the high-upside option.</p>
+  </div>
+  <div class="table-wrap">
+    <table class="bp">
+      <thead>
+        <tr><th>Path</th><th class="num">EV (€)</th><th class="num">Probability</th><th class="num">Weighted</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>NVIDIA strategic acqui-hire (Run:ai-style)</td><td class="num">€40-80M</td><td class="num">15%</td><td class="num">€9.0M</td></tr>
+        <tr><td>Hospitality-tech consolidator (IDeaS · Revinate · Duetto · AccorTech)</td><td class="num">€60-120M</td><td class="num">30%</td><td class="num">€27.0M</td></tr>
+        <tr><td>ConTech consolidator (Procore · Autodesk · Buildots)</td><td class="num">€60-120M</td><td class="num">25%</td><td class="num">€22.5M</td></tr>
+        <tr><td>IP-only licence to single buyer</td><td class="num">€15-30M</td><td class="num">15%</td><td class="num">€3.4M</td></tr>
+        <tr><td>Continue independent (Series A 2027 · Series B 2028)</td><td class="num">€100-200M+</td><td class="num">10%</td><td class="num">€15.0M</td></tr>
+        <tr><td>Kill (no exit)</td><td class="num">€0</td><td class="num">5%</td><td class="num">€0</td></tr>
+        <tr class="total"><td><strong>Weighted EV</strong></td><td></td><td></td><td class="num"><strong>~€67M</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="callout">
+    <div class="callout-label">Director-Net at 30-month Exit</div>
+    <p>~€67M weighted EV × ~40% Director ownership post-Series-A 2027 × ~78% post-Swiss-tax = <strong>~€20-22M Director net at 30-month flip.</strong> This is a real-money outcome — making the vertical-creation play a meaningful capital decision, not a side bet.</p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<footer>
+  <p><strong>Brisen AI · Business Plan v1 · May 2026</strong></p>
+  <p style="margin-top:0.6rem;">17 Director ratifications anchored · 45 cited sources via Baker Deal Analyst · Built on Brisen Desk roadmap v3</p>
+  <p style="margin-top:0.4rem;">Strictly confidential. Distribution by named recipient only.</p>
+</footer>
+
+</body>
+</html>
