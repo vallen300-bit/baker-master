@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.baker.forge-snapshot-push</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/dimitry/Desktop/baker-code/scripts/forge_snapshot_push.sh</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>30</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/dimitry/Library/Logs/forge-snapshot-push.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/dimitry/Library/Logs/forge-snapshot-push.err.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>FORGE_KEY</key>
+    <string>__FORGE_KEY__</string>
+    <key>LAB_URL</key>
+    <string>https://brisen-lab.onrender.com</string>
+  </dict>
+</dict>
+</plist>
