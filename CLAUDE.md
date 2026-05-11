@@ -19,6 +19,20 @@ Director may say "you broke Rule 1/2/3" or "Rule 4 — let's brainstorm" — rew
 
 ---
 
+## ENGINEERING RULES (Mnilax-tested across 30 codebases, ratified Director 2026-05-11)
+
+**Use AI for judgment, not deterministic work.** Use the model for: classification, drafting, summarization, extraction. NOT for: routing, retries, status-code handling, deterministic transforms. If code can answer the question, code answers it. (Anchor: codex-judge over-engineering 2026-05-11 — built a $200/mo automated judge before realizing manual paste-block delivers same value.)
+
+**Token budgets are not advisory.** Per-task: 4,000 tokens. Per-session: 30,000 tokens. If approaching budget, summarize and start fresh. Do not silently overrun. Surface the breach. (Anchor: picker-meter discussion 2026-05-08 — context bloat erodes attention.)
+
+**Surface conflicts, don't average them.** If two patterns / two agents / two design choices disagree, pick one (more recent, more tested, clearer ratification). Explain why. Flag the other for cleanup. Blended "average" output that satisfies both is the worst output. (Anchor: parallel-AH1 instances making conflicting commits 2026-05-11; AID design spec contradicting his own CONTRACT v1.1 same day.)
+
+**Fail loud.** "Completed" is wrong if anything was skipped silently. "Tests pass" is wrong if any were skipped. "Done" is wrong if you didn't verify the edge case asked about. Default to surfacing uncertainty, not hiding it. (Anchor: extends existing "fault-tolerant or it doesn't ship" hard rule with sharper communication framing.)
+
+Source: `https://x.com/Mnilax/status/2053116311132155938` (May 2026, 30-codebase 6-week test: mistake rate 41% → 3% with 12 well-chosen rules; >200 lines = compliance erodes; >14 rules = compliance crashes 76% → 52%).
+
+---
+
 # Baker / Sentinel — Repo CLAUDE.md
 
 > **Code Brisens (B1 / B2 / B3 / B4) opening this dir — MANDATORY before any reply:**
