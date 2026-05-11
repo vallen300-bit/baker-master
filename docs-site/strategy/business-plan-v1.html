@@ -310,6 +310,101 @@ table.bp td strong { color: var(--text); }
 /* KILL GATE TABLE — emphasis */
 table.kill td:first-child { color: var(--text); font-weight: 700; font-family: 'Playfair Display', serif; }
 
+/* PRODUCT DEEP-DIVE BLOCKS (Chapter 4 expansion) */
+.product-deep {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 2.5rem 2.5rem 2rem;
+  margin: 2rem 0;
+  position: relative;
+  overflow: hidden;
+}
+.product-deep::before {
+  content: ''; position: absolute;
+  top: 0; left: 0; right: 0; height: 3px;
+  background: linear-gradient(90deg, var(--blue), var(--nvidia));
+}
+.product-deep.live::before { background: linear-gradient(90deg, var(--green), var(--nvidia)); }
+.product-deep.gold::before { background: linear-gradient(90deg, var(--gold), var(--blue)); }
+.product-deep.nvidia::before { background: linear-gradient(90deg, var(--nvidia), var(--accent)); }
+.product-deep .head {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 1rem; margin-bottom: 0.6rem; flex-wrap: wrap;
+}
+.product-deep .name {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(1.7rem, 3vw, 2.1rem);
+  font-weight: 700; line-height: 1.1;
+  background: linear-gradient(135deg, #fff 0%, var(--gold) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.product-deep .tag {
+  font-size: 0.68rem; letter-spacing: 2px; text-transform: uppercase;
+  font-weight: 700; padding: 6px 14px; border-radius: 12px;
+  white-space: nowrap;
+}
+.product-deep .tag.live { background: rgba(0,212,170,0.15); color: var(--green); }
+.product-deep .tag.build { background: rgba(212,168,83,0.15); color: var(--gold); }
+.product-deep .one-liner {
+  font-family: 'Playfair Display', serif; font-style: italic;
+  font-size: 1.1rem; color: var(--text-dim);
+  margin-bottom: 1.5rem; line-height: 1.5;
+}
+.product-deep h4 {
+  font-family: 'Inter', sans-serif;
+  font-size: 0.7rem; letter-spacing: 3px;
+  text-transform: uppercase; color: var(--gold);
+  margin: 1.4rem 0 0.6rem; font-weight: 700;
+}
+.product-deep p { font-size: 0.97rem; color: var(--text-dim); margin-bottom: 1rem; line-height: 1.65; }
+.product-deep p strong { color: var(--text); }
+.product-deep p em { color: var(--gold); font-style: normal; font-weight: 500; }
+.product-deep .stat-row {
+  display: flex; gap: 2rem; flex-wrap: wrap;
+  margin: 1.2rem 0 0.5rem;
+  padding: 1rem 1.2rem;
+  background: var(--surface2);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.product-deep .stat { flex: 1; min-width: 140px; }
+.product-deep .stat .num {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.3rem; font-weight: 700;
+  background: linear-gradient(135deg, var(--blue), var(--nvidia));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  line-height: 1.1;
+}
+.product-deep .stat .lbl {
+  font-size: 0.68rem; letter-spacing: 1.5px; text-transform: uppercase;
+  color: var(--text-dim); margin-top: 4px;
+}
+
+/* THREE-WAY OWNER/OP/GC TABLE */
+table.three-way {
+  width: 100%; border-collapse: collapse;
+  margin: 1.5rem 0; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 14px;
+  overflow: hidden; font-size: 0.93rem;
+}
+table.three-way th, table.three-way td {
+  padding: 1rem 1.1rem; text-align: left;
+  border-bottom: 1px solid var(--border); vertical-align: top;
+}
+table.three-way th {
+  background: var(--surface2);
+  color: var(--text); font-weight: 700;
+  font-size: 0.74rem; letter-spacing: 1.5px; text-transform: uppercase;
+}
+table.three-way td { color: var(--text-dim); }
+table.three-way td.role { color: var(--text); font-weight: 700; font-family: 'Playfair Display', serif; }
+table.three-way tr:last-child td { border-bottom: 0; }
+table.three-way tr.owner td { background: rgba(108,99,255,0.05); }
+table.three-way tr.owner td.role { color: var(--gold); }
+
 /* FOOTER */
 footer {
   max-width: 1100px; margin: 6rem auto 3rem; padding: 3rem 2rem 0;
@@ -459,44 +554,185 @@ footer strong { color: var(--text-dim); }
   <div class="section-header">
     <span class="section-num">CHAPTER 04</span>
     <h2>Product — The 4-Product Suite</h2>
-    <p class="subtitle">Four hardest pain points in luxury hospitality development, one AI partnership</p>
+    <p class="subtitle">Four hardest moments in luxury hospitality development, one owner-side operating system</p>
   </div>
+
   <div class="prose">
-    <p class="lead">The product portfolio is built around the moments where money is most at risk in a luxury hospitality development: claim defence, tender governance, ownership reporting, on-site construction supervision. Each product is a stand-alone tool; together they form the operating system.</p>
+    <p class="lead">The product portfolio is built around the four moments where capital is most at risk in a luxury hospitality development: <em>claim defence, tender governance, ownership reporting, on-site construction supervision.</em> Each product is independently valuable; together they form what we believe will become the <strong>Capital and Lifecycle Operating System</strong> of the luxury developer-owner — the system of record that sits above the General Contractor's tools and the Operator's reports, and remains under the owner's control through to exit.</p>
+
+    <p>The thesis is grounded in a structural shift the industry is living through right now. <strong>The AI-in-Construction market grew from $5.1B in 2025 toward $33.3B by 2033 (26.4% CAGR)</strong>, but virtually all of that growth is flowing into General-Contractor tools (Procore, Buildots, Autodesk, OpenSpace, Doxel) or Operator tools (Marriott's $1.2B AI replatform, MOHG's IRIS digital platform driving +54% F&amp;B revenue across portfolio). McKinsey estimates generative AI will deliver $110-180B of net-new value to real estate — but the developer-owner, the party who actually deploys the capital, has been left without a defensive AI capability of their own.</p>
+
+    <p>When Trimble acquired Document Crunch in April 2026, the meaning was clear: <em>the incumbents are arming the General Contractor against the Owner.</em> GCs now have AI to flag predatory clauses in tender packages, justify change orders, and document delay claims in detail an analog QS team cannot match. The Owner brings analog legal review to a digital gunfight. This is the "Owner Air Gap" — and our 4-product suite is the systematic answer to it.</p>
   </div>
-  <div class="cards cards-2">
-    <div class="card product nvidia">
-      <div class="product-name">ClaimsMax</div>
-      <span class="product-status status-live">Live · Production</span>
-      <div class="card-body">
-        AI-powered contractor claim analysis, defence, and litigation support. Anchors the suite. Deployed against the €6M Hagenauer claim at MO Vienna with documented outcome. Already drawing external user attention (E+H legal counsel logging in to view investigation reports). Year-1 revenue: €100K MO Vienna inter-company licence + €80K MOHG corporate licence extension.
-      </div>
-    </div>
-    <div class="card product gold">
-      <div class="product-name">TenderMax</div>
-      <span class="product-status status-build">Demoable by Month 6</span>
-      <div class="card-body">
-        Tender analysis, bid normalization, and counterparty-pattern intelligence for development procurement. Cross-references historical contractor behaviour against current bid sheets. Designed to be the first AI artefact a developer-operator's procurement team uses before opening a tender package.
-      </div>
-    </div>
-    <div class="card product gold">
-      <div class="product-name">OwnerView</div>
-      <span class="product-status status-build">Demoable by Month 9</span>
-      <div class="card-body">
-        Ownership-side reporting layer that consolidates operator-issued reports, GC progress, financing covenants, and capex burn into a single live view for non-resident owners. Built for absentee owner-developers running multi-jurisdiction portfolios who cannot fly to site every week.
-      </div>
-    </div>
-    <div class="card product gold">
-      <div class="product-name">SiteWatch</div>
-      <span class="product-status status-build">Demoable by Month 12</span>
-      <div class="card-body">
-        Computer-vision construction supervision powered by NVIDIA Physical-AI stack. Inception Premier-gated: descoped from the Y1 suite if Premier slips past 2026-08-11 (GPU economics fail without $100K AWS credits + 30% off DGX Cloud). On-track delivery makes it the suite's flagship NVIDIA-showcase artefact.
-      </div>
-    </div>
+
+  <h3 style="font-family:'Playfair Display',serif;font-size:1.4rem;margin:2.5rem 0 1rem;color:var(--gold);">Owner / Operator / General Contractor — three different AI mandates</h3>
+
+  <div class="table-wrap">
+    <table class="three-way">
+      <thead>
+        <tr><th>Layer</th><th>What their AI does</th><th>Public proof in 2026</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="role">Operator AI<br/><span style="font-weight:400;font-size:0.75rem;color:var(--text-dim);font-family:Inter;">(brand, guest, NOI)</span></td>
+          <td>Loyalty replatform, central reservations, guest personalization, revenue management, F&amp;B optimization. Maximizes operator margin under the HMA.</td>
+          <td>Marriott $1.2B AI/tech replatform. MOHG IRIS digital platform: <strong>+54% F&amp;B room-service revenue</strong> across portfolio. Hilton, IHG, Accor all deploying.</td>
+        </tr>
+        <tr>
+          <td class="role">GC AI<br/><span style="font-weight:400;font-size:0.75rem;color:var(--text-dim);font-family:Inter;">(execution, margin)</span></td>
+          <td>RFI automation, schedule adherence, computer-vision progress capture, contract clause-mining. Protects GC margin and justifies GMP variations.</td>
+          <td>Procore embedded AI for RFIs + contract search. Buildots CV cuts delays up to 50%. Trimble × Document Crunch (April 2026) embedded contract-risk AI. OpenSpace acquired Disperse (Nov 2025).</td>
+        </tr>
+        <tr class="owner">
+          <td class="role">Owner-Developer AI<br/><span style="font-weight:400;font-size:0.75rem;color:var(--text-dim);font-family:Inter;">(capital, lifecycle)</span></td>
+          <td>Claim defence, tender governance, capital oversight, brand-standard verification. <em>Independent of GC and Operator. Trained on the documents the GC and Operator never see.</em></td>
+          <td><strong>White space.</strong> Zero Series-A+ owner-vertical AI companies exist globally (verified May 2026: exhaustive Grok DeepSearch + Knight Frank + Savills branded-residence reports). Brisen is building the first.</td>
+        </tr>
+      </tbody>
+    </table>
   </div>
-  <div class="callout">
-    <div class="callout-label">Product Economics, Year 1</div>
-    <p>Total Y1 product build budget: <strong>€510K</strong> across the four products (ClaimsMax €130K hardening · TenderMax €170K · OwnerView €100K · SiteWatch €110K). External revenue Y1: <strong>€180K base case</strong> — all from ClaimsMax. 84% of build budget produces 0% of Y1 revenue. <em>ClaimsMax carries the kill-gate math; TenderMax / OwnerView / SiteWatch are funded roadmap, not vapor.</em></p>
+
+  <div class="prose">
+    <p style="margin-bottom:2rem;"><strong>The data moat sits in the Owner's hands, not the GC's.</strong> Hotel Management Agreements, 2,000-page operator brand-standard manuals, mezzanine-debt term sheets, capital-stack waterfall structures, historical Cap-Rate exit data — none of this is ever uploaded to the GC's project-management software. Trimble and Procore physically <em>cannot</em> train their AI against it. The Owner-Developer who builds AI on this data layer holds a structural moat that horizontal incumbents cannot ever close.</p>
+  </div>
+
+  <!-- ============ PRODUCT 1 — ClaimsMax ============ -->
+  <div class="product-deep live">
+    <div class="head">
+      <div>
+        <div class="name">ClaimsMax</div>
+        <div class="one-liner">Adversarial AI claim defence — turning 50,000+ pages of project history into defendable positions in 30 days, not 6-12 months.</div>
+      </div>
+      <span class="tag live">Production · Live</span>
+    </div>
+
+    <h4>The pain</h4>
+    <p>Global construction-dispute volumes grew approximately <strong>163% over the past decade</strong>. In luxury hospitality, with HVS reporting the median luxury hotel development cost above <strong>$1,057,000 per key</strong> in 2025 (and many new luxury projects exceeding $2M per key), even a small percentage of contested claims translates into millions of euros of exposure on every project. The status quo defence — outside counsel + Quantity Surveyors + manual document review — runs 6 to 12 months per major claim, fees in the high six figures, and still leaves owners reactive rather than positioned.</p>
+
+    <h4>What the product does</h4>
+    <p>ClaimsMax ingests the full corpus of a development project — executed contract and addenda, RFIs, change orders, invoices, correspondence, expert reports, monthly QS valuations, programme records — and produces audit-ready Investigation Reports that identify every contested line of a contractor's claim, mapped against (a) the executed scope, (b) the operator's brand-standard manual, (c) historical pricing benchmarks, and (d) the contract's variation mechanics. Output is litigation-grade: every flag carries a paragraph reference, a source citation, and a recommended position.</p>
+
+    <h4>Production proof — MO Vienna / Hagenauer</h4>
+    <p>ClaimsMax has been operating against the live Hagenauer claim corpus at MO Vienna since deployment. <strong>The €6M claim has been cut to €222K outstanding (ex retention €1.8M)</strong> with full audit-trail. External legal counsel — E+H, the engaged law firm — log into <em>claimsmax.co.uk</em> directly to view Investigation Reports as the dispute progresses. This is not pilot data: it is a continuously operating product on a real Mandarin Oriental asset against a real adversary in real insolvency proceedings.</p>
+
+    <div class="stat-row">
+      <div class="stat"><div class="num">~€6M</div><div class="lbl">claim defended</div></div>
+      <div class="stat"><div class="num">30 days</div><div class="lbl">vs 6-12 mo manual</div></div>
+      <div class="stat"><div class="num">2-5%</div><div class="lbl">industry under-claim rate</div></div>
+      <div class="stat"><div class="num">€2-5M</div><div class="lbl">recoverable per €100M asset</div></div>
+    </div>
+
+    <h4>Why it wins</h4>
+    <p>Existing legal-tech AI (Harvey, LegalMation, Document Crunch, eDiscovery platforms) is generalist contract intelligence. None is trained on luxury hospitality development corpora; none ships embedded with operator brand-standard reasoning; none operates on the owner's side of the table against a GC's AI-armed claim assembly. ClaimsMax does. <strong>42% of law firms expect their use of AI to increase in 2026</strong> — the surrounding adoption wave validates the category; the verticalization is the moat.</p>
+
+    <h4>Year-1 commercial reality</h4>
+    <p>€100K Year-1 inter-company licence (MO Vienna → Brisen AI Holdings, covering the Hagenauer corpus extension). €80K Year-1 corporate licence extension to MOHG covering Group portfolio. The combined €180K is the entire Year-1 external revenue line of the company — ClaimsMax carries the kill-gate math. Year-2 path: paid Corinthia conversion (€80-120K) + MOHG step-up + per-project deployments to peer luxury developer-operators (Aman, Kempinski, Rosewood) via Pisani warm intros.</p>
+  </div>
+
+  <!-- ============ PRODUCT 2 — TenderMax ============ -->
+  <div class="product-deep gold">
+    <div class="head">
+      <div>
+        <div class="name">TenderMax</div>
+        <div class="one-liner">The Owner's tender shield — turning 1,500-page brand standards into procurement intelligence the GC cannot pad against.</div>
+      </div>
+      <span class="tag build">Demoable Month 6</span>
+    </div>
+
+    <h4>The pain</h4>
+    <p>Brand-standard manuals for ultra-luxury operators (Mandarin Oriental, Aman, Six Senses, Belmond) routinely run 1,500 to 2,000 pages. The hand-off into tender packages is currently a 12-month, consultant-heavy translation process that introduces interpretation errors, missed specifications, and procurement scope gaps the GC subsequently exploits. <strong>Document Crunch — now Trimble-embedded since April 2026 — gives the GC an AI that flags &ldquo;predatory clauses&rdquo; in the Owner's tender and helps prepare delay-claim language before construction starts.</strong> The Owner currently has no AI to defend the inverse: no automated check that the GC's bid actually prices the brand-standard correctly, no automated cross-reference against historical contractor behaviour, no detection of scope omissions.</p>
+
+    <h4>What the product does</h4>
+    <p>TenderMax ingests (a) the operator's brand-standard manual at full granularity, (b) the architectural and MEP design packages, (c) historical contractor pricing across comparable luxury projects, (d) the tender package and contractor bids as submitted, and produces three outputs: a <strong>compliance map</strong> (every brand-standard requirement traced to a tender line item), a <strong>normalized bid comparison</strong> (each contractor's bid restated against the same scope baseline), and an <strong>asymmetry report</strong> (every clause where the contractor's submission departs from the tender, historical pricing, or brand standard).</p>
+
+    <h4>Why it wins</h4>
+    <p>Trimble will not train its AI to validate tender submissions against Mandarin Oriental F&amp;B technical specifications — the TAM is too narrow for a horizontal player. Procore's AI is built for the GC's project manager, not the Owner's Development Director. Generic procurement-AI tools (zip-code RFP platforms, SaaS bid-management products) operate at the wrong level of granularity. <em>The owner-side luxury-hospitality tender layer is uncontested.</em> TenderMax aims for an internal target of <strong>40-60% reduction</strong> in tender preparation time (from 12 months to 5-7 months) and <strong>10-15% reduction in misalignment-driven CapEx leakage</strong> — both figures conservative against a $1M+/key luxury baseline.</p>
+
+    <div class="stat-row">
+      <div class="stat"><div class="num">1,500-2,000</div><div class="lbl">brand-std manual pages</div></div>
+      <div class="stat"><div class="num">12 → 5-7 mo</div><div class="lbl">tender prep target</div></div>
+      <div class="stat"><div class="num">10-15%</div><div class="lbl">CapEx leakage targeted</div></div>
+      <div class="stat"><div class="num">Month 6</div><div class="lbl">v0 demoable</div></div>
+    </div>
+
+    <h4>Build path</h4>
+    <p>Y1 build budget: €170K. v0 demoable by Month 6 (TenderMax against a synthetic luxury-tender package), v1 by Month 9 (TenderMax against the live next-Brisen tender or a Corinthia-Pisani project depending on customer-#1 deployment sequencing). The deliberate sequencing — ClaimsMax production first, TenderMax demoable second — reflects that <strong>claim defence is the moment owners are most willing to spend on AI today</strong> (the cost is incurred whether or not AI helps), while tender governance is the moment that becomes urgent <em>after</em> owners experience the GC's AI advantage at construction kickoff. The Owner Air Gap thesis predicts TenderMax demand inflects in late 2026, validating our Month-6 cadence.</p>
+  </div>
+
+  <!-- ============ PRODUCT 3 — OwnerView ============ -->
+  <div class="product-deep nvidia">
+    <div class="head">
+      <div>
+        <div class="name">OwnerView</div>
+        <div class="one-liner">The Owner's system of record — replacing the GC's dashboard and the Operator's quarterly reports with an independent, owner-controlled view of the asset.</div>
+      </div>
+      <span class="tag build">Demoable Month 9</span>
+    </div>
+
+    <h4>The pain</h4>
+    <p>The status quo for a multi-jurisdiction luxury hotel owner is reporting they do not control. The General Contractor's Procore dashboard tells the GC's story (schedule, cost, RFIs — framed to protect GC margin). The Operator's quarterly report tells the Operator's story (RevPAR, GOP, brand compliance — framed under the HMA's incentive structure). Neither party is an objective system of record for the Owner. For an absentee multi-asset owner running portfolios across CH / AT / DE / FR / CY / LU, the consequence is loss of grip on the asset between reporting cycles, no comparable cost-per-key benchmarking across currencies and construction indices, and quarterly surprises that compound by exit.</p>
+
+    <h4>What the product does</h4>
+    <p>OwnerView consolidates four independent data streams — operator-issued reports, GC progress data (ingested via API from the GC's Procore / Trimble / Autodesk Construction Cloud), financing-covenant compliance status, and direct capex burn against budget — into a single live owner-controlled dashboard. The product cross-normalizes cost-per-key across geographies (FX adjustment + local construction-cost-index normalization), benchmarks contractor performance across portfolio, and surfaces covenant breaches before they become disclosure events. <strong>The Brisen-internal RG7 CEO Dashboard at MO Vienna is the closest live analogue</strong> — single-asset, but proves the data architecture works. OwnerView scales this to portfolio.</p>
+
+    <h4>Why it wins</h4>
+    <p>The IDeaS / Revinate / Duetto / AccorTech category serves the Operator's revenue function — irrelevant to the Owner-Developer. The Yardi / MRI / RealPage category serves residential / commercial property management — irrelevant to luxury hotel development. <strong>No owner-side luxury hospitality reporting product exists.</strong> The Procore-as-OS analog provides the architectural lesson — Single Source of Truth + open API ingestion — but inverts the user: this is <em>Boardroom UI, not Jobsite UI</em>. The buyer is the Chief Investment Officer, the Development Director, the family-office principal. Pricing is high-touch enterprise (annual platform fee, not per-seat); GTM is white-glove, brokered through Pisani-family-style warm introductions, not viral mid-market.</p>
+
+    <div class="stat-row">
+      <div class="stat"><div class="num">4</div><div class="lbl">independent data streams</div></div>
+      <div class="stat"><div class="num">Portfolio</div><div class="lbl">cost-per-key normalization</div></div>
+      <div class="stat"><div class="num">Owner</div><div class="lbl">controlled (not GC or Op)</div></div>
+      <div class="stat"><div class="num">Month 9</div><div class="lbl">v0 demoable</div></div>
+    </div>
+
+    <h4>Build path</h4>
+    <p>Y1 build budget: €100K. v0 demoable by Month 9 against the Brisen Group's own multi-asset portfolio (MO Vienna + Annaberg + Balgerstrasse) as the first multi-tenancy proof. The Owner Air Gap framework predicts OwnerView demand emerges most sharply in <strong>2027</strong>, when sovereign-wealth-fund and family-office allocators face their first Audit Cycle in which AI-augmented GC reporting outpaces their own analog oversight — a moment Brisen will be positioned for with a 12-month head start.</p>
+  </div>
+
+  <!-- ============ PRODUCT 4 — SiteWatch ============ -->
+  <div class="product-deep nvidia">
+    <div class="head">
+      <div>
+        <div class="name">SiteWatch</div>
+        <div class="one-liner">Owner-deployed computer-vision site supervision — replacing the contractor's weekly self-report with continuous, independent observation.</div>
+      </div>
+      <span class="tag build">Demoable Month 12 · Inception Premier-gated</span>
+    </div>
+
+    <h4>The pain</h4>
+    <p>The Owner's view of weekly construction progress is the GC's self-reported PowerPoint slide. There is no independent verification of progress, quality of installation against brand standard, or safety compliance unless the Owner flies a representative to site. Buildots, OpenSpace, and Doxel exist in the market — but every one of them is GC-deployed and GC-operated. The data they capture is the GC's data, framed for the GC's GMP defence. An owner asking a GC to give them access to the GC's own Buildots dashboard for forensic audit is asking the GC to surrender its strongest negotiating asset.</p>
+
+    <h4>What the product does</h4>
+    <p>SiteWatch is owner-deployed site cameras (fixed installations at critical zones + periodic 360° hardhat captures during Owner site visits), fed through NVIDIA's Physical-AI stack — <strong>Omniverse digital twin + Isaac Sim for scenario modelling + DGX Cloud for inference + Jetson at the edge for on-site processing</strong> — to produce continuous comparison of observed reality against (a) the BIM model, (b) the construction programme, and (c) the operator's brand-standard installation tolerances (marble alignment, lighting lux levels, MEP installations). Outputs are weekly Owner-side site reports independent of any contractor input — flagging deviations, predicting downstream rework, and surfacing safety concerns before the GC's self-report catches them.</p>
+
+    <h4>Why it wins</h4>
+    <p>The GC-side CV market is already crowded (Buildots claims to catch delays "3 weeks early"; OpenSpace acquired Disperse in late 2025; Doxel deploys autonomous robots and drones). The Owner-side equivalent does not exist. SiteWatch is the suite's NVIDIA flagship — it is the GPU-heavy, Physical-AI product that justifies NVIDIA's Inception Premier credential and provides the GTC-floor showcase moment. The vertical specificity (brand-standard tolerance reasoning, owner-side adversarial framing, multi-asset luxury context) is what generic ConTech CV does not deliver.</p>
+
+    <div class="stat-row">
+      <div class="stat"><div class="num">NVIDIA</div><div class="lbl">Physical-AI showcase</div></div>
+      <div class="stat"><div class="num">$5.1B → $33.3B</div><div class="lbl">AI-in-Construction (2025→2033)</div></div>
+      <div class="stat"><div class="num">26.4%</div><div class="lbl">category CAGR</div></div>
+      <div class="stat"><div class="num">Month 12</div><div class="lbl">v0 demoable</div></div>
+    </div>
+
+    <h4>Build path &amp; Inception-Premier dependency</h4>
+    <p>Y1 build budget: €110K. SiteWatch is the one product in the suite explicitly gated on the NVIDIA Inception Premier execution by 2026-08-11 (Month-3 hard gate). The reason is GPU economics: without Inception Premier's <strong>$100K AWS credits + 30% off DGX Cloud rates</strong>, the Y1 SiteWatch infrastructure cost rises ~€85-100K above plan — which alone would breach the €1M kill-gate. If Premier slips, SiteWatch is descoped and the company re-pitches as a 3-product suite. We treat that outcome as a clean operational option, not a failure mode: ClaimsMax + TenderMax + OwnerView are individually sufficient to anchor the platform thesis. SiteWatch is the upside leg.</p>
+  </div>
+
+  <!-- ============ WHY A SUITE ============ -->
+  <h3 style="font-family:'Playfair Display',serif;font-size:1.4rem;margin:3rem 0 1rem;color:var(--gold);">Why a suite, not four tools — the Capital and Lifecycle OS thesis</h3>
+
+  <div class="prose">
+    <p>Each of the four products is independently valuable. <strong>Together they compound.</strong> Each product captures the corpus the next product depends on: ClaimsMax ingests the contract / RFI / change-order corpus that TenderMax learns from to detect tender-stage asymmetries; TenderMax produces the scope baseline that SiteWatch compares observed reality against; OwnerView consolidates the financial and progress data both ClaimsMax and SiteWatch feed; and the loop closes when ClaimsMax (on the next dispute, the next project) leverages every prior project's litigated outcomes to defend more accurately. <em>Four tools share data and improve each other. That is what makes this a platform, not a toolkit.</em></p>
+
+    <p>The Procore analogy is instructive but inverted: Procore became the GC's operating system by becoming the Single Source of Truth for the jobsite, then monetizing the network effect of every subcontractor, architect, and inspector being forced to log in. <strong>Brisen AI inverts the target audience.</strong> Our user is not the superintendent in the mud; our user is the Chief Investment Officer in the boardroom. Our Single Source of Truth is not jobsite progress; it is the asset's full capital and lifecycle history, owned by the Owner, defended against GC and Operator counterparties. <em>Procore is Jobsite UI. Brisen AI is Boardroom UI.</em></p>
+
+    <p>The 2026-2028 category trajectory points to this pattern as inevitable, not speculative. <strong>Phase 1 (2026): horizontal consolidation</strong> — Trimble, Procore, Autodesk acquiring point AI tools (Trimble × Document Crunch April 2026 is the marker event). <strong>Phase 2 (mid-2026 to mid-2027): the Owner Air Gap Crisis</strong> — owner-developers feel the asymmetry between AI-armed GCs and analog Owners; change-order approval rates spike unfavourably. <strong>Phase 3 (late-2027 to 2028): Sovereign Owner OS</strong> — Tier-1 capital allocators fund and adopt vertical owner-side platforms as standard. The 2028 standard becomes a two-tier tech stack: Execution Layer (Trimble / Procore) plus Governance Layer (the owner OS). Brisen is positioning to be that Governance Layer for luxury hospitality, with the 30-month plan deliberately timed to anchor the category before Phase-3 demand inflects.</p>
+  </div>
+
+  <div class="callout gold">
+    <div class="callout-label">Product Economics, Year 1 — and why the math works</div>
+    <p>Total Y1 product build budget: <strong>€510K</strong> (ClaimsMax €130K production-harden · TenderMax €170K · OwnerView €100K · SiteWatch €110K). Y1 external revenue: <strong>€180K base case</strong> — all from ClaimsMax (€100K MO Vienna inter-company + €80K MOHG corporate). <strong>84% of build budget produces 0% of Y1 revenue</strong> — but that is the platform thesis at work: ClaimsMax carries kill-gate math while TenderMax, OwnerView, and SiteWatch lock the platform position before Phase-2 demand inflects. <em>The four products are not vapor on a slide; they are the funded sequencing of an owner-side category before competitors arrive to contest it.</em></p>
   </div>
 </section>
 
