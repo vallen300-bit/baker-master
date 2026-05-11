@@ -24,6 +24,7 @@ gate_to_merge: AH2 /security-review + picker-architect + feature-dev:code-review
 xlane_aid_msg: 87 (original — over-scoped per pre-CONTRACT-v1.1 design spec; superseded)
 xlane_aid_q5_q8_msg: 97 (thread ae569f76)
 xlane_aid_rescope_msg: 99 (thread 94a79c67 — corrected ownership matrix per CONTRACT v1.1)
+xlane_aid_hb5_reshape_msg: 107 (thread 674cfeff — HB5 content shifted to ChatGPT-paste template, no API)
 director_q5_q8_answers:
   q5_judge_scope: baker-master only
   q6_data_residency: US default + no-training toggle (no ZDR, no EU)
@@ -31,7 +32,12 @@ director_q5_q8_answers:
   q8_bot_identity: keep distinct (ah1-bot, b1-bot..b4-bot) — AH1 recommendation followed
   ratified_at: 2026-05-11T~14:20Z (Director chat)
 hb4_status: CLEARED 2026-05-11 (Q5-Q8 answered)
-ownership_rescope_2026_05_11: per Director directive 2026-05-11 ~14:45Z — AID is design-time only post CONTRACT v1.1. Procurement → Director, accounts → Director, infra build → AH1. AID retains only HB5 (prompt-file).
+delivery_mechanism_2026_05_11: Director ratified MANUAL paste-block via ChatGPT Plus subscription. NO OpenAI API account. NO GitHub Action. NO bot accounts. AH1 surfaces "consult Codex?" on trigger-class PRs; Director relays via ChatGPT, pastes verdict back, AH1 summarizes in PR description.
+hb1_status: DROPPED 2026-05-11 — no API procurement needed (ChatGPT Plus path)
+hb2_status: DROPPED 2026-05-11 — no bot accounts needed (manual relay, no automated firing)
+hb3_status: DROPPED 2026-05-11 — no caveat 4 build (no automation surface)
+caveat_5_status: DROPPED 2026-05-11 — no API key to rotate
+ownership_rescope_2026_05_11: per Director directive 2026-05-11 ~14:45Z — AID is design-time only post CONTRACT v1.1. With ChatGPT Plus pivot, only HB5 remains for AID (reshaped to ChatGPT-paste template per bus msg #107).
 ---
 
 # CODE_4_PENDING — BRIEF_CODEX_JUDGE_INTEGRATION_IMPL_1 — STAGED 2026-05-11
@@ -46,19 +52,23 @@ Brief location: `~/baker-vault/_ops/briefs/CODEX_JUDGE_INTEGRATION_IMPL_1.md` (7
 
 Repo touched: `baker-master` only. AID's picker repo + bus-host config out of scope (AID's lane).
 
-## Hard blockers — all 5 must clear before STAGED → PENDING flip
+## Hard blockers — STAGED status entirely re-shaped 2026-05-11 ~15:45Z (Director ratified ChatGPT Plus path)
 
-**Ownership matrix CORRECTED 2026-05-11 ~14:45Z** per Director directive — pre-CONTRACT-v1.1 design spec assigned procurement / accounts / infra-build to AID; that's wrong post-CONTRACT v1.1 (AID is design-time only). Re-cut below.
+**MAJOR PIVOT — Director ratified manual paste-block via ChatGPT Plus subscription.** No OpenAI API account, no GitHub Action automation, no bot accounts, no procurement. AH1 surfaces "consult Codex?" on trigger-class PRs; Director relays via ChatGPT Plus; pastes verdict back; AH1 summarizes in PR description for audit trail.
 
-| # | Blocker | Owner (corrected) | Target date | Status |
+This collapses the brief from a 745-line GH Action build (~30h B4 work + $200/mo + 5 bot accounts + procurement) to a 1-page operating rule + paste template.
+
+| # | Blocker | Owner | Target date | Status |
 |---|---|---|---|---|
-| HB1 | `CODEX_API_KEY` procurement (OpenAI account / billing setup / $200/mo cap / "no training" toggle / API key generation); then 1Password "AI Infrastructure" storage + baker-master repo secret + OpenAI Python SDK floor version confirmation (`openai>=1.40.0,<2.0.0` provisional) | **Director** (account/billing/key gen) + **AH1** (1Password + repo secret storage once key in hand) | 2026-05-13 | open — Director action item surfaced in chat |
-| HB2 | Bot accounts `ah1-bot`, `b1-bot`, `b2-bot`, `b3-bot`, `b4-bot` provisioned (5 GitHub accounts in vallen300-bit org); allowlist file `.github/codex-judge-allowlist.yml` populated | **Director** (org-admin account creation only he can do) + **AH1** (allowlist YAML once accounts exist) | 2026-05-14 | open — Director action item surfaced in chat |
-| HB3 | Caveat 4 design + build (bus-host monitoring + secondary log-pull path) | **AH1** (engineering). Optional: AID may hand AH1 a 1-page design sketch if Director asks; not required | 2026-05-14 | open — AH1 will draft + dispatch to a B-code per standard pattern |
-| HB4 | Director Q5-Q8 answers (judge repo scope; OpenAI data-residency / ZDR; outcome→tuning loop; matter-confidentiality on bot-PR AI-author identity) | Director | 2026-05-11 | **CLEARED** — Q5: baker-master only; Q6: US + no-training (no ZDR); Q7: advisory only, no loop; Q8: keep distinct bot accounts |
-| HB5 | AID delivers `_ops/scripts/codex_judge_prompt.md` v1.0 (system-instruction template; without it B4's A16 self-test produces stub verdicts) | **AID** — sole remaining ask on AID's lane (prompt engineering = AID's library scope per Tier-0 routing) | 2026-05-14 | open — corrected xlane bus msg #99 thread `94a79c67` |
+| HB1 | OpenAI API procurement | n/a | n/a | **DROPPED 2026-05-11** — ChatGPT Plus subscription replaces API |
+| HB2 | 5 GitHub bot accounts + allowlist | n/a | n/a | **DROPPED 2026-05-11** — manual relay, no automated firing |
+| HB3 | Caveat 4 (bus-host monitoring + secondary log-pull) | n/a | n/a | **DROPPED 2026-05-11** — no automation surface |
+| HB4 | Director Q5-Q8 answers | Director | 2026-05-11 | **CLEARED** — Q5: baker-master only; Q6: US + no-training; Q7: advisory only, no loop; Q8: keep distinct (moot post-pivot) |
+| HB5 | AID delivers prompt-paste template (RESHAPED — was system-instruction for API, now ChatGPT human-paste markdown) | **AID** — sole remaining ask on AID's lane | 2026-05-14 | open — reshape ask sent via bus msg #107 thread `674cfeff` |
 
-**Caveat 5** (Codex API key 90d rotation) stays with AID long-term as program/operational ownership (Dennis Egorenkov coordination if needed) — that's not engineering, that's program management which IS in AID's lane.
+**Caveat 5** (90d API key rotation): DROPPED — no API key exists to rotate.
+
+**B4 dispatch is no longer the ship vehicle.** Once HB5 lands, AH1 commits the operating rule + paste template directly (small AH-Tier-A change to baker-master). No B-code build required for the codex-judge install itself. STAGED status persists only as a marker until HB5 lands; mailbox closes when AH1 ships the operating rule.
 
 ## Wake-paste sequence (when all 5 clear)
 
