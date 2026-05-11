@@ -3896,6 +3896,16 @@ _PROJECTS_CATEGORIES = frozenset({"active-deal", "legal-risk", "financial", "ori
 _OPERATIONS_CATEGORIES = frozenset({"tax", "admin-ops-pr", "private-assets", "personal-admin"})
 _IMPORTANCE_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3, "frozen": 4}
 
+# Legacy alert-table display labels → canonical priority slug. Tier-2 fallback
+# for free-text labels NOT already aliased in baker-vault/slugs.yml. Consulted
+# after slug_registry.normalize() (Tier 1). Verified entries only — each value
+# present in baker-vault/slugs.yml (repo CLAUDE.md hard rule: no slugs.yml edits
+# from this repo). Unknown free-text labels stay in inbox (safe default).
+LEGACY_DISPLAY_LABEL_ALIASES: dict[str, str] = {
+    "Oskolkov-RG7": "hagenauer-rg7",
+    "Mandarin Oriental Sales": "mo-vie-exit",
+}
+
 
 def _safe_describe(slug: str) -> str:
     """``slug_registry.describe()`` raises ``KeyError`` on unknown slug
@@ -3946,6 +3956,61 @@ def _build_legacy_response(cur) -> dict:
     }
 
 
+def _canonicalize_alert_slug(raw: str) -> Optional[str]:
+    """Map a raw ``alerts.matter_slug`` to its canonical priority slug.
+
+    Tier 1: ``slug_registry.normalize()`` — catches aliases in ``slugs.yml``
+            (e.g. ``movie_am`` → ``mo-vie-am``, ``hagenauer`` → ``hagenauer-rg7``).
+    Tier 2: ``LEGACY_DISPLAY_LABEL_ALIASES`` — free-text labels not in slugs.yml.
+
+    Returns ``None`` for unmappable strings; caller routes those to the inbox.
+    Preserves ``_ungrouped`` sentinel as ``None`` (inbox).
+    """
+    if not raw or raw == "_ungrouped":
+        return None
+    canonical = slug_normalize(raw)
+    if canonical:
+        return canonical
+    return LEGACY_DISPLAY_LABEL_ALIASES.get(raw)
+
+
+def _fold_alerts_to_canonical(alerts_by_slug: dict) -> tuple[dict, dict]:
+    """Fold raw-slug alert aggregations into canonical-slug aggregations.
+
+    Returns ``(canonical_folded, unmapped)``. When multiple raw slugs collapse
+    to the same canonical, ``item_count`` and ``new_count`` are summed and
+    ``worst_tier`` takes the MIN (lower tier = more severe; ``None`` does not
+    overwrite a real tier). Unmapped rows (incl. ``_ungrouped``) are returned
+    unchanged for inbox routing.
+    """
+    canonical_folded: dict = {}
+    unmapped: dict = {}
+
+    for raw_slug, row in alerts_by_slug.items():
+        canonical = _canonicalize_alert_slug(raw_slug)
+        if canonical is None:
+            unmapped[raw_slug] = row
+            continue
+
+        if canonical in canonical_folded:
+            existing = canonical_folded[canonical]
+            existing["item_count"] = (existing.get("item_count") or 0) + (row.get("item_count") or 0)
+            existing["new_count"] = (existing.get("new_count") or 0) + (row.get("new_count") or 0)
+            row_tier = row.get("worst_tier")
+            existing_tier = existing.get("worst_tier")
+            if row_tier is not None and (existing_tier is None or row_tier < existing_tier):
+                existing["worst_tier"] = row_tier
+        else:
+            canonical_folded[canonical] = {
+                "matter_slug": canonical,
+                "item_count": row.get("item_count") or 0,
+                "new_count": row.get("new_count") or 0,
+                "worst_tier": row.get("worst_tier"),
+            }
+
+    return canonical_folded, unmapped
+
+
 @app.get("/api/dashboard/matters-summary", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
 async def get_matters_summary():
     """List matters for the cockpit sidebar.
@@ -3986,6 +4051,11 @@ async def get_matters_summary():
                 """)
                 alerts_by_slug = {r["matter_slug"]: dict(r) for r in cur.fetchall()}
 
+                # Fold raw alert slugs to canonical priority slugs (handles
+                # legacy aliases like ``movie_am`` → ``mo-vie-am`` and free-text
+                # labels like ``"Oskolkov-RG7"`` → ``hagenauer-rg7``).
+                canonical_alerts, unmapped_alerts = _fold_alerts_to_canonical(alerts_by_slug)
+
                 # Build display rows for priorities (gate). Multi-row priorities
                 # for the same slug get folded — one row per slug, severity is
                 # the highest, category attributed to the highest-importance row.
@@ -3995,8 +4065,7 @@ async def get_matters_summary():
                     if p.slug in seen_slugs:
                         continue
                     seen_slugs.add(p.slug)
-                    norm = slug_normalize(p.slug) or p.slug
-                    alert = alerts_by_slug.get(norm) or alerts_by_slug.get(p.slug) or {}
+                    alert = canonical_alerts.get(p.slug, {})
                     rows.append({
                         "matter_slug": p.slug,
                         "display_label": _safe_describe(p.slug),
@@ -4009,13 +4078,28 @@ async def get_matters_summary():
                         "new_count": alert.get("new_count", 0),
                     })
 
-                # Inbox = alerts WITHOUT a corresponding priority slug.
+                # Inbox = (a) unmapped raw-slug alerts (incl. ``_ungrouped``) +
+                # (b) canonical-folded alerts whose canonical slug is NOT a
+                # priority. Preserves "General" semantics + catches canonical
+                # slugs that lack a priority row.
                 inbox_rows: list[dict] = []
-                for slug, row in alerts_by_slug.items():
-                    if slug == "_ungrouped" or slug not in priority_slugs:
+                for slug, row in unmapped_alerts.items():
+                    inbox_rows.append({
+                        "matter_slug": slug,
+                        "display_label": _safe_describe(slug) if slug != "_ungrouped" else "General",
+                        "severity": "low",
+                        "category": "inbox",
+                        "triaga_ref": None,
+                        "description": "",
+                        "item_count": row["item_count"],
+                        "worst_tier": row["worst_tier"],
+                        "new_count": row["new_count"],
+                    })
+                for slug, row in canonical_alerts.items():
+                    if slug not in priority_slugs:
                         inbox_rows.append({
                             "matter_slug": slug,
-                            "display_label": _safe_describe(slug) if slug != "_ungrouped" else "General",
+                            "display_label": _safe_describe(slug),
                             "severity": "low",
                             "category": "inbox",
                             "triaga_ref": None,
