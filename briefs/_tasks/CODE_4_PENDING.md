@@ -1,13 +1,69 @@
 ---
-status: FOLD_V0_2_REQUESTED
+status: FOLD_V0_3_REQUESTED
 brief: briefs/BRIEF_BRISEN_LAB_RENDER_CONFIG_READ_1.md
 trigger_class: TIER_B_AUTH_SURFACE_PLUS_NEW_ENV_VAR
 dispatched_at: 2026-05-11
 dispatched_by: ai-head-a
 claimed_by: b4
-brief_revisions: V0.1 + V0.2 fold (4-gate consolidation)
+brief_revisions: V0.1 + V0.2 fold + V0.3 fold (Gate 4 V0.2 fault-tolerance fix)
 pr: https://github.com/vallen300-bit/brisen-lab/pull/9
 pr_head_v0_1: 3e2fc3c8213b282cc763d81882eddc19adb61824
+pr_head_v0_2: 58d17c4cd3758c83ac0518eabf9496be1d863511
+---
+
+## V0.3 FOLD — 2026-05-11 ~10:35Z (Director-ratified "go" on AH1's recommendation)
+
+V0.2 re-gate chain result:
+- Gate 1 (B4 pytest V0.2): GREEN — 25/25 test_render_config.py + 109/1-skipped full suite
+- Gate 2 (AH2 /security-review V0.2): NOT RUN — AH2 idle past 5-10 min ultimatum window; AH1 proceeding per AID v1.1 §4. AH2's V0.1 findings already folded in V0.2 + verified by Gate 4 V0.2.
+- Gate 4 (feature-dev:code-reviewer V0.2, agent a3eb6c980ee943215): PASS-WITH-NITS — 1 MED + 1 LOW. All 4 V0.2 fold items (F1-F4) VERIFIED landed correctly in code.
+
+### Required fold item (1 only)
+
+**F5 (Gate 4 V0.2 MED M1 — audit_emitter not fault-tolerant).**
+
+`render_config.py` `list_services` (~L153-161) and `get_env_vars` (~L191-200) call `await audit_emitter(...)` AFTER the Render API success path and BEFORE the `return out`. The call has NO try/except. If the bus/DB layer behind `audit_emitter` throws (network blip, queue full, transient psycopg2 error), the handler returns 500 to the caller even though the Render read succeeded and `out` is fully built. Violates CLAUDE.md hard rule: "All DB/API calls wrapped in try/except — fault-tolerant or it doesn't ship."
+
+Fix:
+- Wrap each `await audit_emitter(...)` in `try / except Exception as e:`. Log with `print("[render_config] audit emit failed: ...", file=sys.stderr, flush=True)` — same pattern used at `render_config.py` L102 for httpx network errors. Continue after; do NOT raise.
+- Audit failure must NOT block the response — the read data is already valid in `out`. Failure to audit is a separate-concern observability gap, not a request-level failure.
+
+Test: 1 new — `test_envvars_read_returns_200_when_audit_emitter_raises`. Mock `audit_emitter` to raise `RuntimeError("bus down")`. Assert handler returns 200 + the env_vars body, AND captures stderr containing "audit emit failed". Mirror for `test_services_read_returns_200_when_audit_emitter_raises` if cheap (single fixture parametrization).
+
+### NOT folded (Gate 4 V0.2 LOW L1, deferred)
+
+- Regex anchor cleanup `re.compile(r"^srv-[A-Za-z0-9_-]+$")` + `fullmatch()`: anchors redundant with fullmatch. Cosmetic. Defer indefinitely — not worth a fold cycle.
+
+### Acceptance criteria (V0.3)
+
+| AC | Source | Verification |
+|---|---|---|
+| **A16** | F5 audit_emitter try/except wrap | `test_envvars_read_returns_200_when_audit_emitter_raises` + `test_services_read_returns_200_when_audit_emitter_raises` GREEN; stderr contains "audit emit failed" |
+| **A17** | Audit emit failures do NOT alter response body | the 200 response body in the failure test = the same body returned in the success test (matches normal-path shape) |
+| **A18** | Full suite no regressions | `pytest tests/ -v` GREEN |
+
+### Post-fold re-gate chain (V0.3)
+
+- Gate 1: B4 pytest GREEN (literal)
+- Gate 4: AH1 feature-dev:code-reviewer 3rd-pass on V0.3 diff (verify M1 fix + no scope creep)
+- Gate 2: SKIPPED — V0.3 is a 3-line fault-tolerance patch on already-AH2-cleared surface (audit emission shape from V0.2 is unchanged; only the failure-handling around the existing call site)
+
+### Sequencing
+
+1. `cd ~/bm-b4-brisen-lab && git fetch origin && git checkout b4/render-config-read-1 && git pull --ff-only`.
+2. Edit `render_config.py` — wrap both `await audit_emitter(...)` calls in try/except per F5.
+3. Add the 1-2 new tests to `tests/test_render_config.py`.
+4. `pytest tests/test_render_config.py -v` GREEN (expect ~26-27 tests post-fold).
+5. `pytest tests/ -v` GREEN.
+6. Push to `b4/render-config-read-1`. PR #9 auto-updates.
+7. Ship report to /msg/lead per AH1 routing.
+
+### Anchors
+
+- Director ratification: 2026-05-11 ~10:35Z "go" on AH1's V0.3 recommendation
+- Gate 4 V0.2 verdict: feature-dev:code-reviewer agent `a3eb6c980ee943215`
+- AID CONTRACT v1.1 §4 — gate sequencing + fold scope is AH1's
+
 ---
 
 ## V0.2 FOLD — 2026-05-11 ~09:30Z (Director-ratified "go" on AH1's recommendation)
