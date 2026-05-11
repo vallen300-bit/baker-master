@@ -1,11 +1,12 @@
-# CODE_3_PENDING — BRISEN_LAB_FORGE_PUSH_REVIVE_1 — 2026-05-11
+# CODE_3_PENDING — BRISEN_LAB_FORGE_PUSH_FOLD_1 — 2026-05-11
 
-**Brief:** `briefs/BRIEF_BRISEN_LAB_FORGE_PUSH_REVIVE_1.md`
-**Repo:** `baker-master` (this repo — adds Mac Mini-side scripts under `scripts/`)
+**Brief:** `briefs/BRIEF_BRISEN_LAB_FORGE_PUSH_FOLD_1.md`
+**Repo:** `baker-master` (this repo)
 **Working dir:** `~/bm-b3` (your primary clone)
-**Branch:** create new `b3/brisen-lab-forge-push-revive-1` off latest `main`
+**Branch:** create new `b3/brisen-lab-forge-push-fold-1` off latest `main`
+**Base SHA:** `0189390` or newer (PR #187 squash, post-merge)
 
-**Supersedes:** prior CODE_3 slot (BRIEF_CORTEX_TIER_B_ATOMICITY_V1, status SHIPPED_FOLD_OK 2026-05-10, PR #182 merged). That work is complete and archived in git history.
+**Supersedes:** prior CODE_3 slot (BRIEF_BRISEN_LAB_FORGE_PUSH_REVIVE_1, PR #187 merged + daemon live on Mac Mini).
 
 ## Pre-step (mandatory)
 ```bash
@@ -13,32 +14,34 @@ cd ~/bm-b3
 git fetch origin main
 git checkout main
 git pull --ff-only
-git checkout -b b3/brisen-lab-forge-push-revive-1
+# verify PR #187 is in: should see scripts/forge_snapshot_push.sh
+git log --oneline -5 | grep BRISEN_LAB_FORGE_PUSH_REVIVE_1
+git checkout -b b3/brisen-lab-forge-push-fold-1
 ```
 
-## Scope (~2h)
-Read the brief at `briefs/BRIEF_BRISEN_LAB_FORGE_PUSH_REVIVE_1.md`. Mac Mini-side daemon that POSTs snapshot data to `https://brisen-lab.onrender.com/api/snapshot` every 30s. The endpoint is alive — only the writer died. Four new files:
+## Scope (~1h, 3 fixes)
+Read the brief at `briefs/BRIEF_BRISEN_LAB_FORGE_PUSH_FOLD_1.md`. Three folds on PR #187:
 
-1. `scripts/forge_snapshot_push.sh` — worker script (~120 lines bash).
-2. `scripts/launchd/com.baker.forge-snapshot-push.plist` — launchd template with `__FORGE_KEY__` placeholder.
-3. `scripts/install_forge_push.sh` — installer with idempotent unload+reload.
-4. `tests/test_forge_snapshot_push.sh` — smoke test (script does not crash + state collection succeeds in tmpdir).
+1. **TCC fix** — installer deploys worker script to `~/Library/Application Support/baker/` (instead of running launchd against repo path under `~/Desktop` which TCC blocks). Plist gets `__WORKER_PATH__` placeholder substituted by installer. Mirrors the canonical/deployed pattern of the stop hooks.
+2. **`sed` → Python substitution** — `install_forge_push.sh` replaces the `sed "s|...|..."` pattern with `python3 ... str.replace(...)`. Unconditionally safe regardless of FORGE_KEY content.
+3. **Smoke test exercises the fake fixture** — add `TERMINALS_OVERRIDE` env var to the worker script (5 lines), rewrite the test to set it pointing at a fake `$TMPDIR/fake-b9` repo + assert the script processed ONLY the override, not the 6 production aliases.
 
 ## Ship requirements
-- `bash -n` syntax-clean on all 3 shell scripts.
-- `bash tests/test_forge_snapshot_push.sh` passes.
-- Manual dry-run section in brief is achievable (you should run it).
-- PR title: `feat(scripts): revive Mac Mini → Brisen Lab forge_snapshots writer (BRISEN_LAB_FORGE_PUSH_REVIVE_1)`.
-- Bus-post on ship: `BAKER_ROLE=b3 ~/Desktop/baker-code/scripts/bus_post.sh lead "<ship summary with PR link + commit + bash -n output>" ship/BRISEN_LAB_FORGE_PUSH_REVIVE_1`.
+- `bash -n` syntax-clean on `install_forge_push.sh` and `forge_snapshot_push.sh`.
+- `bash tests/test_forge_snapshot_push.sh` passes (now actually verifies fixture override).
+- `grep -c 'sed' scripts/install_forge_push.sh` = 0.
+- `grep '__WORKER_PATH__' scripts/launchd/com.baker.forge-snapshot-push.plist` = 1 match.
+- PR title: `feat(scripts): forge-push fold — TCC deploy, Python substitution, fixture-exercising smoke test (BRISEN_LAB_FORGE_PUSH_FOLD_1)`.
+- Bus-post on ship: `BAKER_ROLE=b3 ~/Desktop/baker-code/scripts/bus_post.sh lead "<ship summary>" ship/BRISEN_LAB_FORGE_PUSH_FOLD_1`.
 
 ## What NOT to do
-- Do NOT install the launchd agent yourself — that's AH1's post-merge step on Mac Mini (you'd need AH1's shell env to substitute FORGE_KEY).
-- Do NOT touch `brisen-lab-staging/app.py` — endpoint already works.
-- Do NOT commit FORGE_KEY value anywhere. Only the `__FORGE_KEY__` placeholder in the template.
-- No fenced `**TO: AH1-App PL**` paste-block at end of ship report (PL ship-report contract RETIRED 2026-05-11).
-- No fenced wake-paste (Rule 0.5 RETIRED 2026-05-11). Bus-post is the wake.
+- Do NOT reinstall the daemon yourself — that's AH1's post-merge step on Mac Mini.
+- Do NOT touch `app.py` or `db.py` on brisen-lab side — pure Mac Mini change.
+- Do NOT add fenced `**TO: AH1-App PL**` paste-block (PL ship-report contract RETIRED 2026-05-11).
+- Do NOT add wake-paste (Rule 0.5 RETIRED 2026-05-11). Bus is the wake.
+- Do NOT rename or move the canonical repo script — only the installer changes how it's deployed.
 
 ## Heartbeat
-12h cadence binding per SKILL.md. If you hit a blocker, bus-post `blocker/BRISEN_LAB_FORGE_PUSH_REVIVE_1` to `lead`.
+12h cadence. If you hit a blocker, bus-post `blocker/BRISEN_LAB_FORGE_PUSH_FOLD_1` to `lead`.
 
 — lead (AH1)
