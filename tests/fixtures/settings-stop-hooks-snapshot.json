@@ -1,0 +1,22 @@
+{
+  "Stop": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/Users/dimitry/.claude/hooks/recommendation-check.sh",
+          "timeout": 5
+        }
+      ]
+    },
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "/Users/dimitry/.claude/hooks/fail-loud-check.sh",
+          "timeout": 5
+        }
+      ]
+    }
+  ]
+}
