@@ -1,12 +1,99 @@
 ---
-status: PENDING
+status: FOLD_V0_2_REQUESTED
 brief: briefs/BRIEF_BRISEN_LAB_RENDER_CONFIG_READ_1.md
 trigger_class: TIER_B_AUTH_SURFACE_PLUS_NEW_ENV_VAR
 dispatched_at: 2026-05-11
 dispatched_by: ai-head-a
-claimed_by: null
-brief_revisions: V0.1
+claimed_by: b4
+brief_revisions: V0.1 + V0.2 fold (4-gate consolidation)
+pr: https://github.com/vallen300-bit/brisen-lab/pull/9
+pr_head_v0_1: 3e2fc3c8213b282cc763d81882eddc19adb61824
 ---
+
+## V0.2 FOLD — 2026-05-11 ~09:30Z (Director-ratified "go" on AH1's recommendation)
+
+4-gate consolidation on PR #9:
+- Gate 1 (B4 pytest): GREEN
+- Gate 2 (AH2 /security-review, msg #72): PASS-WITH-CONCERNS — 1 HIGH + 3 MED + 1 LOW
+- Gate 3 (architect, agent addb10afec991e8ac): PASS-WITH-CONCERNS — 3 MED + 3 LOW
+- Gate 4 (feature-dev:code-reviewer, agent a771b185e0d5c0e1f): PASS-WITH-NITS — 1 HIGH + 2 MED + 2 LOW
+
+### Required fold items (all 4 must land in V0.2)
+
+**F1 (Gate 2 HIGH — audit emission on env-vars reads).**
+`/render/services/{id}/env-vars` returns plaintext production secrets (Anthropic / Voyage / Neon / Render bearer) but emits no `bus_audit` row. Other endpoints on brisen-lab already audit via `bus.make_audit_emitter` (wired at `app.py:94`). Compromise of any one whitelisted terminal key = silent exfil with zero trail.
+
+Fix:
+- Pass `audit_emitter` (the `await bus.make_audit_emitter(_broadcast)` return value already created at `app.py:92`) into `render_config.register()` — same signature pattern as `bus.register(app, _broadcast)` but with `audit_emitter` instead of broadcast_fn.
+- Inside `get_env_vars` handler (POST-success, BEFORE the `return`): emit an audit row with shape `{kind: "audit", topic: "render-config/env-vars-read", from: ctx.slug, service_id: service_id, env_var_count: len(out), ts: <iso>}`. Use the existing audit_emitter signature — read `bus.make_audit_emitter` source to confirm shape.
+- Add audit emission to `list_services` too (lower-stakes, but symmetric — single-pattern across both routes).
+- Tests: 2 new — `test_envvars_read_emits_audit` + `test_services_read_emits_audit`. Mock the audit_emitter on the registered route fixture; assert one call with expected shape per request. NO secret values land in the audit row — only counts + service_id + slug.
+
+**F2 (convergent across Gates 2 MED#1 + 3 LOW + 4 MED M1 — service_id regex tighten).**
+Current guard at `render_config.py:170` is `startswith("srv-") + len<=64 + no "/"`. Misses `?`, `&`, `#`, `%`, whitespace. `srv-aaa?injected=1` slips through, httpx ends up calling a different Render endpoint with garbled query.
+
+Fix:
+- Replace the 3-clause check with `re.fullmatch(r"^srv-[A-Za-z0-9_-]+$", service_id)`. Render service IDs are alphanumeric ULID-ish; this regex covers them and fails-closed on anything else.
+- Tests: keep existing `test_envvars_invalid_service_id_*` tests but ADD: `test_envvars_invalid_service_id_with_query_char` (e.g., `srv-aaa?injected=1` → 400), `test_envvars_invalid_service_id_with_hash` (`srv-aaa#frag` → 400), `test_envvars_invalid_service_id_with_percent` (`srv-aaa%20foo` → 400).
+
+**F3 (convergent across Gates 2 MED#2 + 4 MED M2 — httpx-level error mapping tests).**
+Current tests at `tests/test_render_config.py:191-211` mock `render_config._render_get` directly. They prove FastAPI passes the pre-built `HTTPException` through; they do NOT exercise the actual `httpx.TimeoutException → 504` / `httpx.HTTPError → 502` code paths inside `_render_get`.
+
+Fix:
+- Add 2 tests at `httpx.AsyncClient.get` level using `patch("httpx.AsyncClient.get", side_effect=httpx.TimeoutException("t"))` and `httpx.HTTPError("net")`. Call `_render_get` directly via `asyncio.run(...)`; assert raised `HTTPException` status codes are 504 and 502 respectively. (Pattern in brief §Feature 2 Key Constraints already calls for this — it was missed in V0.1.)
+
+**F4 (Gate 4 H1 + Gate 2 LOW — `allow_director=False` dead code).**
+`authz.py:161-162` returns `CallerContext` immediately on `AUTH_ONLY` policy without ever consulting `allow_director`. The `allow_director=False` kwarg on both `Depends(authz(...))` calls in `render_config.py` is structurally inert; whitelist is the sole Director block.
+
+Fix (minimum — cosmetic; pick ONE of the two):
+- **Option A (preferred):** drop `allow_director=False` arg from both `Depends(authz(Policy.AUTH_ONLY))` calls. Add a 1-line comment above each: `# Director is blocked by _require_whitelist(ctx) — authz(AUTH_ONLY) does not honor allow_director.`
+- **Option B:** extend `authz.py` to honor `allow_director` under AUTH_ONLY (adds an `if not allow_director and is_director: raise 403` check before the early return). Bigger diff, touches the auth surface — defer unless Director wants it now.
+
+Default: ship Option A. Do NOT touch `authz.py` in this fold.
+
+### Deferred (NOT in V0.2, follow-up brief candidates)
+
+- Depends-layer whitelist via new `Policy` enum (Gates 3 MED2 + structural side of Gate 4 H1) — refactor scope; current whitelist invariant test guards widening.
+- Split `/render/services/{id}/env-vars` into keys-only + per-key-audited (Gate 2 MED#3 design proposal).
+- httpx client pooling (Gate 3 LOW).
+- Pagination `truncated: true` flag at limit=100 (Gate 3 LOW).
+- `print()` → structured logger with otel context (Gate 3 LOW).
+
+### Acceptance criteria (V0.2)
+
+| AC | Source | Verification |
+|---|---|---|
+| **A10** | F1 audit emit on env-vars reads | `test_envvars_read_emits_audit` + `test_services_read_emits_audit` GREEN; live smoke (post-merge) shows 1 `bus_audit` row per call |
+| **A11** | F2 regex tightening | new tests `test_envvars_invalid_service_id_with_{query,hash,percent}` GREEN |
+| **A12** | F3 httpx-level error mapping tests | new `test_render_get_timeout_maps_to_504` + `test_render_get_http_error_maps_to_502` GREEN, calling `httpx.AsyncClient.get` side_effect |
+| **A13** | F4 allow_director arg dropped + comments added | grep `allow_director` in `render_config.py` returns 0 hits (in handler args) + 2 comments in place |
+| **A14** | Full suite no regressions | `pytest tests/ -v` GREEN |
+| **A15** | No new secret leakage paths | audit row contains slug + service_id + count, NO env-var values |
+
+### Post-fold re-gate chain
+
+- Gate 1: B4 pytest GREEN (literal)
+- Gate 2: AH2 /security-review on V0.2 diff (focus: audit emission shape + regex tightening)
+- Gate 4: AH1 feature-dev:code-reviewer 2nd-pass on V0.2 diff (Gate 3 architect cleared shape on V0.1; only re-run if F1 changes the architecture, which it should not)
+
+### Sequencing
+
+1. `cd ~/bm-b4-brisen-lab && git fetch origin && git checkout b4/render-config-read-1 && git pull --ff-only` (rebase if upstream b4/render-config-read-1 was force-pushed; ours has not been).
+2. Read `bus.py` `make_audit_emitter` source to confirm audit shape + call signature before wiring F1.
+3. Implement F1 → F2 → F3 → F4 in order. F1 is the heaviest; the rest are 1-line edits + tests.
+4. `pytest tests/test_render_config.py -v` GREEN (expect ~24 tests post-fold).
+5. `pytest tests/ -v` GREEN.
+6. Push to `b4/render-config-read-1`. PR #9 auto-updates.
+7. Ship via bus paste to /msg/lead per AH1 routing correction (NOT /msg/cowork-ah1). PL ship-report contract per SKILL.md.
+
+### Anchors
+
+- Director ratification: 2026-05-11 ~09:30Z "go" on AH1's V0.2 fold recommendation
+- AH2 Gate 2 verdict: bus msg #72 (full body via `GET /event/72/full`)
+- Gate 3 verdict: code-architecture-reviewer agent `addb10afec991e8ac`
+- Gate 4 verdict: feature-dev:code-reviewer agent `a771b185e0d5c0e1f`
+- AID CONTRACT v1.1 (msg #68): AH1 owns gate sequencing + fold scope per §4
+
 
 # CODE_4_PENDING — BRIEF_BRISEN_LAB_RENDER_CONFIG_READ_1 — 2026-05-11
 
