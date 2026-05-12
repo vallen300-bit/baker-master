@@ -248,15 +248,19 @@ def _sync_loop(interval_seconds: int) -> None:
     pending tick promptly during tests / shutdown. Exceptions inside
     ``sync_tick`` are already swallowed-as-WARN by that function;
     defensive ``try`` here guards against unexpected raises (git binary
-    missing, etc.) so the loop never dies silently.
+    missing, etc.) so the loop never dies silently. Uses
+    ``logger.exception`` (not ``warning``) so the traceback is captured —
+    silent-warn was the failure mode architect M1 / 2nd-pass L1 flagged on
+    PR #193 and is the prime suspect for why the non-lock replica's
+    ``vault_sync_thread_alive`` came back False in prod telemetry.
     """
     while True:
         if _sync_thread_stop.wait(timeout=interval_seconds):
             return
         try:
             sync_tick()
-        except Exception as e:  # pragma: no cover — defensive
-            logger.warning("vault_mirror: sync_loop tick raised: %s", e)
+        except Exception:
+            logger.exception("vault_mirror: sync_loop tick raised")
 
 
 def start_sync_thread(interval_seconds: Optional[int] = None) -> threading.Thread:
@@ -291,13 +295,19 @@ def start_sync_thread(interval_seconds: Optional[int] = None) -> threading.Threa
 
 
 def stop_sync_thread(timeout: float = 5.0) -> None:
-    """Signal the sync thread to exit and join. Used by tests + shutdown."""
+    """Signal the sync thread to exit and join. Used by tests + shutdown.
+
+    Holds ``_sync_thread_lock`` for symmetry with ``start_sync_thread`` —
+    without it a concurrent start+stop race could observe a stale handle.
+    Architect M1 / 2nd-pass MEDIUM (PR #193 follow-up).
+    """
     global _sync_thread
-    _sync_thread_stop.set()
-    thread = _sync_thread
-    if thread is not None and thread.is_alive():
-        thread.join(timeout=timeout)
-    _sync_thread = None
+    with _sync_thread_lock:
+        _sync_thread_stop.set()
+        thread = _sync_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=timeout)
+        _sync_thread = None
 
 
 def _head_commit_sha() -> Optional[str]:
@@ -326,12 +336,25 @@ def _last_commit_for_path(rel_path: str) -> Optional[str]:
 
 
 def mirror_status() -> dict:
-    """Return ``{vault_mirror_last_pull, vault_mirror_commit_sha}`` for /health."""
+    """Return ``{vault_mirror_last_pull, vault_mirror_commit_sha, vault_sync_thread_alive}`` for /health.
+
+    ``vault_sync_thread_alive`` (added VAULT_MIRROR_NON_LOCK_REPLICA_HOTFIX_1
+    2026-05-12): per-replica liveness signal. PR #193 moved the refresh into a
+    per-process daemon thread; production telemetry showed the non-lock replica
+    silently lacked the thread (spawn or first tick failing, exception swallowed
+    by the defensive guard in ``_sync_loop``). Surfacing the bool on every
+    /health hit lets operators distinguish "thread None" (spawn never happened)
+    from "thread !alive" (loop died) from "thread alive but stale last_pull"
+    (loop ticking but git failing).
+    """
     return {
         "vault_mirror_last_pull": (
             _last_pull_at.isoformat() if _last_pull_at else None
         ),
         "vault_mirror_commit_sha": _head_commit_sha(),
+        "vault_sync_thread_alive": (
+            _sync_thread is not None and _sync_thread.is_alive()
+        ),
     }
 
 

@@ -533,7 +533,21 @@ def _ensure_vault_mirror() -> None:
     """
     from vault_mirror import ensure_mirror, start_sync_thread
     ensure_mirror()
-    start_sync_thread()
+    # VAULT_MIRROR_NON_LOCK_REPLICA_HOTFIX_1 (2026-05-12): the per-process
+    # daemon thread MUST spawn on every replica or that replica's mirror
+    # stays at the startup-clone state. Production telemetry post-PR #193
+    # showed the non-lock replica silently lacking the thread. Log loudly
+    # on either failure path so the next /health poll (which now exposes
+    # ``vault_sync_thread_alive``) has a matching log trail for root-cause.
+    try:
+        thread = start_sync_thread()
+        logger.info(
+            "vault_mirror: start_sync_thread returned alive=%s name=%s",
+            thread.is_alive(),
+            thread.name,
+        )
+    except Exception:
+        logger.exception("vault_mirror: start_sync_thread raised at startup")
 
 
 # Boot-time backfill helper lives in triggers/backfill_runner.py so it's
@@ -1435,7 +1449,11 @@ async def health_check():
     except Exception:
         pass
 
-    vault_mirror_status = {"vault_mirror_last_pull": None, "vault_mirror_commit_sha": None}
+    vault_mirror_status = {
+        "vault_mirror_last_pull": None,
+        "vault_mirror_commit_sha": None,
+        "vault_sync_thread_alive": False,
+    }
     try:
         from vault_mirror import mirror_status
         vault_mirror_status = mirror_status()
@@ -1455,6 +1473,9 @@ async def health_check():
         "sentinels_down_list": sentinels_down_list,
         "vault_mirror_last_pull": vault_mirror_status["vault_mirror_last_pull"],
         "vault_mirror_commit_sha": vault_mirror_status["vault_mirror_commit_sha"],
+        "vault_sync_thread_alive": vault_mirror_status.get(
+            "vault_sync_thread_alive", False
+        ),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
