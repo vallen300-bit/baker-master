@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="source" content="movie-desk">
 <meta name="confidence" content="director-review-draft">
-<meta name="provenance" content="Director conversation 12 May 2026 (ClickUp MCP delete-gap → architectural review); Baker memory MEMORY.md (Notion MCP duplicate bug, Todoist v1 migration, APScheduler embedded scheduler live); MOVIE Desk MOHG meeting prep session 12 May.">
+<meta name="provenance" content="Director conversation 12 May 2026 (ClickUp MCP delete-gap → architectural review); Baker memory MEMORY.md (Notion MCP duplicate bug, Todoist v1 migration, APScheduler embedded scheduler live); MOVIE Desk MOHG meeting prep session 12 May; Baden-Baden Desk proposal 12 May (hard counterparty deadlines via baker_add_deadline for cross-session nudges) — folded into three-tier taxonomy.">
 <meta name="purpose" content="Director review document on scheduled-tasks architecture for the Brisen agent fleet. To be handed to AH1 for engineering evaluation after Director's ratification of frame and recommendation.">
 <title>Scheduled Tasks — Architecture Review</title>
 <style>
@@ -373,7 +373,7 @@ body {
 
 <div class="tldr">
   <div class="tldr-title">Bottom line</div>
-  We do not need a third-party task manager. The agent fleet needs a <strong>structured, queryable, agent-readable store</strong> for tasks and scheduled jobs — and we already have it (the baker-vault). Build the scheduling layer on top of vault markdown, with AI agents as the readers and <strong>Baker as the single Director-facing messenger</strong>. Recommendation: <strong>Obsidian-vault markdown as the canonical source of truth + Baker-native scheduler (APScheduler) for time-based triggers + Baker Slack DM as the only notification surface to the Director.</strong> Drop ClickUp. Keep Google Calendar for time-blocked meetings only. Director never opens Obsidian or Todoist for pings — Baker surfaces the right items in Slack at the right moment, curated by agents that have already read the queue.
+  We do not need a third-party task manager. The agent fleet needs a <strong>structured, queryable, agent-readable store</strong> for tasks and scheduled jobs — and we already have it (the baker-vault, plus Baker's existing deadline system). Three storage tiers, one messenger: <strong>(1) Obsidian-vault markdown</strong> as canonical source of truth for soft per-desk tasks; <strong>(2) Baker deadline system</strong> (<code>baker_add_deadline</code>) for hard counterparty deadlines that must nudge cross-session; <strong>(3) Baker APScheduler</strong> for recurring agent jobs. All three surface to the Director via the single <strong>Baker → Slack DM</strong> channel. Drop ClickUp. Keep Google Calendar for time-blocked meetings only. Director never opens Obsidian / Todoist / ClickUp for pings — Baker is the only messenger.
 </div>
 
 <!-- ============================================== -->
@@ -384,11 +384,11 @@ body {
   <h2>What we are trying to solve, and what is breaking</h2>
 
   <h3>What the agent fleet needs</h3>
-  <p>Across the desk fleet (MOVIE Desk, AO Desk, Hagenauer Desk, Baden-Baden Desk, AI Head, AI Dennis, future desks), there are three distinct scheduling needs that today are not consistently met:</p>
+  <p>Across the desk fleet (MOVIE Desk, AO Desk, Hagenauer Desk, Baden-Baden Desk, AI Head, AI Dennis, future desks), there are <strong>three distinct kinds of scheduled item</strong> — each with different storage and surfacing requirements. Today none is consistently met.</p>
   <ul>
-    <li><strong>One-shot future tasks</strong> — "tomorrow morning, debrief Director on the MOHG meeting"; "Friday, send draft to Mario"; "by 19 May, file Q1 bank report." These need a place to live, a due date, and a single agent owner.</li>
-    <li><strong>Recurring agent jobs</strong> — "every Monday 09:00, MOVIE Desk produces weekly status"; "monthly, reconcile residence-fee ledger"; "weekly, sweep counterparty inbox for stale threads." These need a cron-like trigger and a destination agent.</li>
-    <li><strong>Long-running matter follow-ups</strong> — "if Royal Suite still unfinished by 30 June, escalate"; "if no Eastdil bidder feedback within 14 days, ping Laura." These need a condition or deadline, plus an agent that periodically checks.</li>
+    <li><strong>Soft per-desk tasks</strong> — "tomorrow morning, debrief Director on the MOHG meeting"; "Friday, send draft to Mario"; "this week, review the Sonderwunsch list." Per-desk, per-matter, agent-owned. Read at session start; closed when the agent acts. These need a place that lives next to the matter context.</li>
+    <li><strong>Hard counterparty deadlines</strong> — "Skliar response due 30.06.2026"; "Aukera covenant test 30.09.2026"; "Eastdil HMA extract owed 16 May"; "residence fee deferral year-end 31.12.2026." Externally fixed dates with counterparty consequences. Must nudge <em>cross-session</em>, regardless of which desk happens to be open. Need a system-wide store that surfaces to Director independently of any one Desk being active. <em>This category surfaced via Baden-Baden Desk proposal 12 May; previously missing from the architecture.</em></li>
+    <li><strong>Recurring agent jobs</strong> — "every Monday 09:00, MOVIE Desk produces weekly status"; "monthly, reconcile residence-fee ledger"; "weekly, sweep counterparty inbox for stale threads." Cron-like triggers that fire an agent on a schedule.</li>
   </ul>
 
   <h3>What is breaking today</h3>
@@ -448,7 +448,7 @@ body {
   <span class="section-num">Section 3 · Options evaluated</span>
   <h2>What is on the table</h2>
 
-  <p>Seven candidates evaluated against the five-step lifecycle, plus the Director's stated frame (he does not attend to the schedule; agents do).</p>
+  <p>Eight candidates evaluated against the five-step lifecycle, plus the Director's stated frame (Baker is the messenger; agents read the schedule; Director receives a single curated Slack stream).</p>
 
   <!-- OBSIDIAN VAULT -->
   <div class="option">
@@ -484,11 +484,43 @@ body {
     </div>
   </div>
 
-  <!-- BAKER SCHEDULER -->
+  <!-- BAKER DEADLINE SYSTEM (NEW, surfaced by Baden-Baden Desk 12 May) -->
   <div class="option">
     <div class="option-head">
-      <span class="name">B · Baker-native scheduler (APScheduler + Postgres)</span>
+      <span class="name">B · Baker deadline system (<code style="font-size:9.5pt;color:#f8f2e4;">baker_add_deadline</code>)</span>
       <span class="badge recommend">Recommend (paired with A)</span>
+    </div>
+    <div class="option-body">
+      <div class="what-it-is">Existing Baker primitive for hard, date-fixed deadlines. Tools: <code>mcp__baker__baker_add_deadline</code> to register, <code>baker_deadlines</code> to query. State in Postgres. Surfaces cross-session via Baker's existing nudge logic (Slack DM at the right cadence ahead of the deadline). <em>Surfaced by Baden-Baden Desk 12 May as the right home for counterparty deadlines that must fire regardless of which desk is in session.</em></div>
+      <div class="pros-cons">
+        <div class="pros">
+          <div class="label">Pros</div>
+          <ul>
+            <li><strong>Cross-session nudges.</strong> Skliar 30.06.2026 fires even if Baden-Baden Desk hasn't been opened for weeks. The deadline owns its own surfacing logic — does not depend on a desk being active.</li>
+            <li>Already in production. No new infrastructure.</li>
+            <li>Full CRUD via Baker MCP. Add, query, dismiss, close.</li>
+            <li>Logged to Baker's audit trail by default.</li>
+            <li>Pairs cleanly with vault tasks: the deadline is the trigger; the vault is the context.</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <div class="label">Cons</div>
+          <ul>
+            <li>Best for fixed dates, not "by Friday-ish" tasks (those belong in the vault).</li>
+            <li>Need an explicit rule for what counts as "hard deadline" — otherwise the channel pollutes with soft items.</li>
+            <li>Existing surfacing cadence (lead-time before deadline, escalation pattern) needs confirmation — may need refinement for desk-fleet use.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="fit-line"><strong>Fit:</strong> the right home for hard counterparty deadlines (court dates, contract expiries, regulatory deadlines, covenant tests, statutory cut-offs). Use rule: "if missing this date has a counterparty consequence, it goes here. If it's an internal action that can flex by days, it goes in the vault."</div>
+    </div>
+  </div>
+
+  <!-- APSCHEDULER -->
+  <div class="option">
+    <div class="option-head">
+      <span class="name">C · Baker-native scheduler (APScheduler + Postgres)</span>
+      <span class="badge recommend">Recommend (paired with A + B)</span>
     </div>
     <div class="option-body">
       <div class="what-it-is">Recurring jobs and time-based triggers run via APScheduler on Render. Job definitions live in Baker code (or a YAML registry); state in Postgres. Already in production for AI Head weekly audit, Sunday digest, Todoist polling, cache TTL.</div>
@@ -519,7 +551,7 @@ body {
   <!-- GOOGLE CALENDAR -->
   <div class="option">
     <div class="option-head">
-      <span class="name">C · Google Calendar (via MCP)</span>
+      <span class="name">D · Google Calendar (via MCP)</span>
       <span class="badge viable">Keep — narrow scope</span>
     </div>
     <div class="option-body">
@@ -550,7 +582,7 @@ body {
   <!-- TODOIST -->
   <div class="option">
     <div class="option-head">
-      <span class="name">D · Todoist (via MCP)</span>
+      <span class="name">E · Todoist (via MCP)</span>
       <span class="badge viable">Viable for personal-life tasks only</span>
     </div>
     <div class="option-body">
@@ -581,7 +613,7 @@ body {
   <!-- CLICKUP -->
   <div class="option">
     <div class="option-head">
-      <span class="name">E · ClickUp (via MCP)</span>
+      <span class="name">F · ClickUp (via MCP)</span>
       <span class="badge reject">Drop</span>
     </div>
     <div class="option-body">
@@ -612,7 +644,7 @@ body {
   <!-- NOTION -->
   <div class="option">
     <div class="option-head">
-      <span class="name">F · Notion (via MCP)</span>
+      <span class="name">G · Notion (via MCP)</span>
       <span class="badge reject">Reject — broken</span>
     </div>
     <div class="option-body">
@@ -638,7 +670,7 @@ body {
   <!-- LINEAR -->
   <div class="option">
     <div class="option-head">
-      <span class="name">G · Linear (via MCP)</span>
+      <span class="name">H · Linear (via MCP)</span>
       <span class="badge reject">Wrong tool</span>
     </div>
     <div class="option-body">
@@ -674,13 +706,14 @@ body {
   <h2>The architecture, plainly stated</h2>
 
   <div class="recommendation">
-    <div class="rec-title">Obsidian vault + Baker scheduler + Baker Slack DM as the only ping surface.</div>
-    <p><strong>Source of truth:</strong> tasks live as markdown files in the baker-vault, organised per desk and per matter. Frontmatter carries due date, priority, owner agent, status, and links to context. Agents have full filesystem CRUD. Director views in Obsidian when he wants — he is not expected to attend to it for awareness.</p>
-    <p><strong>Time triggers:</strong> Baker's existing APScheduler reads the vault on cron schedules (daily 06:00 UTC scan for today's items; weekly desk reviews; monthly reconciliations) and fires the owning desk with the right task in hand. State is logged to <code>baker_actions</code>.</p>
-    <p><strong>Director-facing pings come from Baker, never from the data store.</strong> Baker reads the vault, decides what is worth surfacing (due today, overdue, escalation thresholds crossed), and sends a curated Slack DM to the Director. Director does not get pinged by Obsidian. Does not get pinged by Todoist. Does not get pinged by ClickUp. Single notification channel: Baker → Slack DM. Director can configure cadence (per-desk daily digest at 07:00; same-day push only for high-priority items; nothing else).</p>
+    <div class="rec-title">Three storage tiers, one messenger.</div>
+    <p><strong>Tier 1 — Soft per-desk tasks → Obsidian vault.</strong> Tasks live as markdown files in baker-vault, organised per desk and per matter. Frontmatter carries due date, priority, owner agent, status, and links to context. Agents have full filesystem CRUD. Read at session start. Closed when the agent acts.</p>
+    <p><strong>Tier 2 — Hard counterparty deadlines → Baker deadline system (<code>baker_add_deadline</code>).</strong> Externally fixed dates with counterparty consequences (Skliar 30.06.2026, Aukera covenant tests, Eastdil-owed extracts, regulatory cut-offs, residence-fee year-end). These must fire cross-session — regardless of which desk is open. Baker's existing deadline primitive handles registration, query, and nudge cadence. Surfaced by Baden-Baden Desk 12 May; folded into the architecture today.</p>
+    <p><strong>Tier 3 — Recurring agent jobs → Baker APScheduler.</strong> Cron-like triggers ("every Monday 09:00 produce weekly status"; "monthly reconcile residence-fee ledger"). Already in production for AI Head weekly audit + Sunday digest. Fires the owning agent with the right context.</p>
+    <p><strong>Director-facing pings come from Baker, never from the data stores.</strong> Baker reads the vault, the deadline table, and APScheduler state — decides what is worth surfacing — sends a curated Slack DM. Director does not get pinged by Obsidian. Does not get pinged by Todoist. Does not get pinged by ClickUp. Single channel: Baker → Slack DM. Cadence configurable (per-desk daily digest at 07:00; same-day push for high-priority hard deadlines; weekly Sunday roll-up).</p>
     <p><strong>Calendar:</strong> Google Calendar reserved for time-blocked meetings only. Agent-drafted; Director-ratified; agent creates the event.</p>
     <p><strong>What we drop:</strong> ClickUp as scheduling infrastructure. Existing data stays in place; new desk work stops accumulating there. Notion remains off the table until the duplicate bug is upstream-fixed.</p>
-    <p><strong>What Director sees:</strong> a curated Slack DM from Baker at agreed cadence — the items that genuinely need his attention, with one-click links to the relevant matter context and the draft (if any) ready for ratification. Never the raw queue. Never a third-party app's native pings.</p>
+    <p><strong>What Director sees:</strong> a curated Slack DM from Baker at agreed cadence — the items that genuinely need his attention, with one-click links to matter context and any draft ready for ratification. Never the raw queue. Never a third-party app's native pings.</p>
   </div>
 
   <h3>Why this is the right answer</h3>
@@ -716,8 +749,9 @@ body {
     <li><strong>Obsidian Tasks + DataView plugin install.</strong> Standardising on these plugins for Director's view, or staying plugin-free and querying via grep? Plugin-free is more robust; plugins are nicer for visual scan.</li>
     <li><strong>Recurring jobs registry.</strong> If recurring patterns live in markdown frontmatter (per-task), or in a central YAML registry, or in APScheduler code — choose one. Recommendation: YAML registry at <code>_ops/processes/schedule-registry.yml</code>, AH1-owned, AI Head can propose changes, Director ratifies.</li>
     <li><strong>Migration of the one live task.</strong> Tomorrow's MOHG debrief task is currently in ClickUp. Migrate to vault now, or wait until the architecture is built? Recommendation: build the minimum vault schema today, migrate the one task, prove the pattern. ClickUp space remains as legacy until manually cleared.</li>
-    <li><strong>Baker Slack DM cadence + format.</strong> Director's frame: Baker is the messenger; Obsidian / Todoist / ClickUp are not. Confirm: (a) daily 07:00 per-desk "due today" digest, one DM per desk; (b) same-day push for high-priority items only (threshold to be defined); (c) Sunday weekly digest with overdue + upcoming items per desk. Format: bullet list with matter-slug prefix and inline Obsidian link. Existing Sunday digest infrastructure is the place to extend, not rebuild.</li>
-    <li><strong>Scope of v1.</strong> Recommendation: ship v1 with just (a) vault schema, (b) one daily scanner job, (c) one task migrated. Plugins, registry, digest — defer to v2 once v1 is stable.</li>
+    <li><strong>Baker deadline system integration.</strong> New since v1 of this doc, per Baden-Baden Desk proposal. Confirm: (a) the rule for "what counts as a hard deadline" (recommend: counterparty consequence on miss); (b) the existing nudge cadence in <code>baker_add_deadline</code> (lead-time before deadline, escalation pattern) and whether it needs refinement for desk-fleet use; (c) whether deadline-table state should be queryable from inside Obsidian via a daily auto-generated <code>_ops/agents/&lt;desk&gt;/upcoming-deadlines.md</code> mirror, so desks see their own deadlines at session start. AH1 to validate that the deadline channel surfacing is already routed via Slack DM (per Baker's existing primitive) — if so, no new messenger work needed.</li>
+    <li><strong>Baker Slack DM cadence + format.</strong> Director's frame: Baker is the messenger; Obsidian / Todoist / ClickUp are not. Confirm: (a) daily 07:00 per-desk "due today" digest covering both vault tasks and approaching hard deadlines, one DM per desk; (b) same-day push for high-priority items only (threshold to be defined); (c) Sunday weekly digest with overdue + upcoming items per desk. Format: bullet list with matter-slug prefix and inline Obsidian link. Existing Sunday digest infrastructure is the place to extend, not rebuild.</li>
+    <li><strong>Scope of v1.</strong> Recommendation: ship v1 with just (a) vault schema, (b) one daily scanner job, (c) one task migrated to vault, (d) one hard deadline registered in <code>baker_add_deadline</code> (recommend: 31.12.2026 residence fee deferral year-end as the test case for MOVIE Desk). Plugins, registry, full digest, multi-desk rollout — defer to v2 once v1 is stable.</li>
   </ol>
 </div>
 
