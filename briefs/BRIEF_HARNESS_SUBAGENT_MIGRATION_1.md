@@ -100,17 +100,23 @@ cp -r ~/.claude/agents ~/.claude/agents.bak-2026-05-12
 
 `~/.claude/agents/` is NOT in any git repo. Without this backup, the overwrite in step 2 is irreversible. Verify backup exists before any further step.
 
-### Step 2 — Reconcile 12 forked pairs (winner = picker version)
+### Step 2 — Reconcile 12 forked pairs (winner = picker version, audited)
 
 For each of the 12 names in the forked-pairs list:
 
 1. Open both files: `~/bm-aihead1/.claude/agents/<name>.md` and `~/.claude/agents/<name>.md`
 2. Run `diff -u` to capture divergence
 3. **Default decision: picker version wins** (per code-architecture-reviewer finding — picker is the intentional shorter "Triggers: …" style; user-global is older verbose "<example>"-block style)
-4. Copy picker version OVER user-global: `cp ~/bm-aihead1/.claude/agents/<name>.md ~/.claude/agents/<name>.md`
-5. Record the diff in the PR description for audit
+4. **Wrong-direction abort gate (MANDATORY).** Before overwriting, inspect each diff. ABORT and surface to AH1 — do NOT overwrite — if any of the following apply to a specific pair:
+   - User-global file's mtime is more recent than picker file's mtime (`stat -f "%m"` comparison)
+   - User-global contains a `description` block, `<example>`, `when_to_use`, or frontmatter field NOT present in picker (suggests user-global has content picker lost)
+   - User-global references a tool/skill/integration that picker doesn't (suggests divergent intentional edits)
+   - File contents differ in semantically meaningful sections — not just whitespace / formatting / "Triggers" reformulation
+   If any pair triggers the abort gate: pause migration, write the diff to a tracking file `briefs/_reports/HARNESS_SUBAGENT_MIGRATION_1_DIFF_AUDIT.md`, surface to AH1 for explicit winner-pick. Do NOT proceed to step 6 deletion until all 12 pairs are explicitly resolved.
+5. Copy picker version OVER user-global: `cp ~/bm-aihead1/.claude/agents/<name>.md ~/.claude/agents/<name>.md`
+6. Record the diff for every pair in the PR description for audit — even the ones that passed the abort gate. The PR description must show all 12 diffs explicitly. Reviewer's job is to confirm no pair should have aborted.
 
-Exceptions: if any picker file contains a clearly broken/stale element (e.g., `baker-pm.md`-style hardcoded path), flag and pause for AH1 review before overwriting.
+Exceptions: if any picker file contains a clearly broken/stale element (e.g., `baker-pm.md`-style hardcoded path), flag and pause for AH1 review before overwriting. (`baker-pm.md` itself is handled in step 3.)
 
 ### Step 3 — Fix `baker-pm.md` hardcoded path
 
@@ -175,9 +181,11 @@ Hook installable via `git config core.hooksPath .githooks` (already standard in 
 5. `grep '.claude/agents/' ~/bm-*/. gitignore` shows the entry in each picker
 6. Pre-commit hook blocks: `cd ~/bm-b1 && touch .claude/agents/test.md && git add .claude/agents/test.md && git commit -m test` → rejected with clear message
 7. Fresh session open from each of 6 pickers succeeds with the picker's confirmation phrase
-8. `Agent(subagent_type=baker-legal)` invokes from a B-code picker (test with any trivial prompt)
-9. Invocation-matrix audit (step 5) returns no orphaned types
-10. PR diff cleanly shows 132 picker file deletions + 10 user-global additions + path-fix in `baker-pm.md` + `.gitignore` entries + pre-commit hook
+8. **Brisen-internal subagent invocation post-delete:** `Agent(subagent_type=baker-legal)` invokes successfully from a B-code picker (test with any trivial prompt)
+9. **Plugin subagent invocation post-delete (new — guards against picker-directory existence dependency):** `Agent(subagent_type="feature-dev:code-reviewer")` invokes successfully from each of the 6 pickers (one smoke prompt per picker; "review this empty file" is fine). All 6 must succeed. If ANY fails, the migration is broken — revert step 6 deletion before proceeding to ship.
+10. Invocation-matrix audit (step 5) returns no orphaned types
+11. **Wrong-direction overwrite audit (new):** PR description contains all 12 forked-pair diffs explicitly. Each diff annotated with "overwrite direction: picker → user-global" + "abort gate: PASS | TRIGGERED-and-resolved". No pair shipped with un-surfaced divergence.
+12. PR diff cleanly shows 132 picker file deletions + 10 user-global additions + path-fix in `baker-pm.md` + `.gitignore` entries + pre-commit hook
 
 ## Test plan
 
@@ -191,8 +199,9 @@ Hook installable via `git config core.hooksPath .githooks` (already standard in 
 1. Open fresh AH1 session via picker — confirm orientation phrase
 2. Open fresh AH2 session — same
 3. Open fresh B1-B4 sessions — same (4 separate verifications)
-4. Invoke one subagent from each picker as a smoke test (B-code chooses convenient subagent_type per picker context)
-5. Try the pre-commit hook block test from criterion 6
+4. Invoke one Brisen-internal subagent from each picker (smoke test for acceptance #8) — B-code chooses convenient subagent_type per picker context
+5. **Invoke `feature-dev:code-reviewer` from each of the 6 pickers** (acceptance #9 — plugin subagent path resolution test). Smoke prompt: "review this empty file" or equivalent. Capture pass/fail per picker in ship report.
+6. Try the pre-commit hook block test from criterion 6
 
 ## Ship gate
 
@@ -227,6 +236,8 @@ Hook installable via `git config core.hooksPath .githooks` (already standard in 
 - **Reversibility:** single `git revert` on the merge restores picker files. User-global overwrite reverses via `rm -rf ~/.claude/agents/ && mv ~/.claude/agents.bak-2026-05-12 ~/.claude/agents/`. Pre-commit hook removable via single commit.
 - **Blast radius if step 6 deletes before step 4 lands:** any fresh session in a picker where a still-needed subagent was picker-only would 404 on invoke. Mitigation: steps 4 + 6 ATOMIC in one git operation (single commit per picker).
 - **B-code subagent-type runtime behavior on missing registry entry:** verified by code-architecture-reviewer — hard validation error, surfaced (not silent). Blast radius bounded.
+- **Plugin subagent path-resolution dependency on picker `.claude/agents/` existing as directory:** UNVERIFIED. Claude Code may use the picker dir for path resolution of plugin-namespaced subagents (`feature-dev:*`, `claude_ai_*`) even though those subagents live elsewhere. AH1 currently averages 100+ plugin-subagent invocations per 30 days (`feature-dev:code-reviewer` × 74, `feature-dev:code-architect` × 17, `security-code-reviewer` × 16). If this dependency exists, the heaviest tools of the agent fleet 404 after step 6. **Mitigation:** acceptance criterion #9 invokes `feature-dev:code-reviewer` from all 6 pickers post-merge as a hard gate. If any picker fails, revert before merge confirmation. Cost: 6 × ~10s = ~1 min added to ship gate.
+- **Wrong-direction overwrite for one specific forked pair:** UNVERIFIED. AH1's "picker is always newer" assumption is based on the local code-architecture-reviewer's spot-check, not a complete audit. If user-global is actually the right winner for ONE pair (e.g., recent user-global edit AH1 missed), overwriting regresses that subagent's behavior. **Mitigation:** step 2's wrong-direction abort gate + acceptance criterion #11 require all 12 diffs in PR description with explicit overwrite-direction annotation. Reviewer's job to confirm no pair should have aborted.
 - **Cosmetic:** russo-* now visible from B-code pickers. Reviewer flagged this as LOW — accept.
 
 ## Out of scope (do NOT touch)
