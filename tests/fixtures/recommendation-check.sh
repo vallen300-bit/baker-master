@@ -78,9 +78,11 @@ if not text.strip():
 has_question = "?" in text
 has_numbered = bool(re.search(r"^\s*\d+\.", text, flags=re.MULTILINE))
 lower = text.lower()
-# Trigger phrases tightened 2026-05-12 (Director-observed false-positive on
-# bare "which" used as relative pronoun — "the clones which scored 0...").
-# Require explicit options-ask phrasing rather than bare keyword matches.
+# Trigger phrases tightened 2026-05-12 (Director-observed two false-positives):
+#   1) bare "which" used as relative pronoun ("clones which scored 0")
+#   2) numbered lists used as status summaries (not options asks)
+# Now require EXPLICIT options-ask phrasing. Numbered list alone is NOT a
+# trigger — it must accompany a question or option-phrase to fire.
 option_patterns = [
     r"\bchoose\s+(?:between|one|from)\b",
     r"\b(?:which|what)\s+(?:option|one|approach|path|do you)\b",
@@ -89,7 +91,9 @@ option_patterns = [
     r"\b(?:a\s+or\s+b|either\s+\w+\s+or\s+\w+)\b",  # "A or B" / "either X or Y"
 ]
 has_option_phrase = any(re.search(p, lower) for p in option_patterns)
-trigger = has_question or has_numbered or has_option_phrase
+# Numbered list ONLY counts when paired with question / option-phrase.
+# Bare numbered list (status summary, step list, breakdown) → no trigger.
+trigger = has_question or has_option_phrase
 if not trigger:
     sys.exit(0)
 
