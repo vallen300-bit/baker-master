@@ -97,6 +97,20 @@ All 8 brief-required tests PASS. 2 extra path-traversal cases added for `/securi
 - WhatsApp fallback (Slack-only v1)
 - YAML registry ↔ APScheduler runtime reconciliation
 
+## V0.1 fold — architecture-review amendments A-E (commit `7d2bc6e`)
+
+Folded the UPDATE section from brief `468119c` (Director-ratified 2026-05-13):
+
+- **A** New table `scanner_run_log` (migration `20260513_scanner_run_log.sql`) + per-run INSERT with desks/tasks/deadlines/dm_sent/dm_error_msg/error_count.
+- **B** 3-day empty-streak sentinel: fires exactly once at `streak == EMPTY_STREAK_THRESHOLD` (=3). Re-fire suppressed naturally by streak > threshold.
+- **C** `today-*.md` 90-day retention prune at top of every run.
+- **D** Slack send wrapped in `_send_dm_with_capture` returning `(ok, err)`; on failure writes `_scanner-state/last-error-YYYY-MM-DD.txt`; on next-successful send applies recovery prefix and clears error files.
+- **E** `_unassigned` deadlines query (`assigned_to IS NULL`) + synthetic `⚪ _unassigned` section in consolidated DM.
+
+Test count: 10 → 16 (8 brief original + 2 path-traversal + 5 amendment + 1 extra recovery). All 16 PASS.
+
+Bus-posts: `ship/APSCHEDULER_VAULT_SCANNER_V1` (msg #195) + `ship/APSCHEDULER_VAULT_SCANNER_V1-v0-1` (msg #198). UPDATE message #193 acked.
+
 ## Bus-post
 
 Per brief §Bus-post on ship + B3 orientation §Communication. Bus key not in local keychain in this session — paste-block for relay:
