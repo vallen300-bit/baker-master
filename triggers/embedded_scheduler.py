@@ -1051,6 +1051,36 @@ def _register_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Registered: tier_b_reservation_sweep (every 5 min)")
 
+    # BRIEF_APSCHEDULER_VAULT_SCANNER_V1: daily 06:00 UTC vault soft-task +
+    # hard-deadline scanner. Writes per-desk today-YYYY-MM-DD.md + today.md +
+    # upcoming-deadlines.md mirror files; pushes ONE consolidated Slack DM to
+    # Director (per-desk urgent DM only on critical-priority overdue or
+    # is_critical hard deadline overdue). Singleton-replica execution via
+    # the existing scheduler_lease.py advisory lock. Env gate
+    # VAULT_SCANNER_ENABLED (default true) for kill-switch without redeploy.
+    _vault_scanner_enabled = _os.environ.get("VAULT_SCANNER_ENABLED", "true").lower()
+    if _vault_scanner_enabled not in ("false", "0", "no", "off"):
+        scheduler.add_job(
+            _vault_scanner_job,
+            CronTrigger(hour=6, minute=0, timezone="UTC"),
+            id="vault_scanner_daily",
+            name="Vault task + deadline scanner (06:00 UTC daily)",
+            coalesce=True, max_instances=1, replace_existing=True,
+            misfire_grace_time=3600,
+        )
+        logger.info("Registered: vault_scanner_daily (06:00 UTC)")
+
+        # Idempotent startup catch-up: if Render restarted/deployed after
+        # 06:00 UTC and no marker file exists for today, fire once now.
+        try:
+            from triggers.vault_scanner import startup_catchup
+            if startup_catchup():
+                logger.info("vault_scanner_daily: startup catch-up fired")
+        except Exception:
+            logger.exception("vault_scanner_daily: startup catch-up raised")
+    else:
+        logger.info("Skipped: vault_scanner_daily (VAULT_SCANNER_ENABLED=false)")
+
 
 def _kbl_pipeline_tick_job():
     """APScheduler wrapper around ``kbl.pipeline_tick.main``.
@@ -1140,6 +1170,27 @@ def _ai_head_weekly_audit_job():
         logger.info("ai_head_weekly_audit: %s", result)
     except Exception as e:
         logger.warning("ai_head_weekly_audit: run raised: %s", e)
+
+
+def _vault_scanner_job():
+    """APScheduler wrapper: daily 06:00 UTC vault scanner.
+
+    BRIEF_APSCHEDULER_VAULT_SCANNER_V1. Lazy-imports the runner; swallows
+    top-level exceptions as WARN so a single bad day doesn't knock out
+    the scheduler. ``run_scan`` is internally fault-tolerant per step
+    (DB unavailable, malformed frontmatter, Slack failure all degrade
+    gracefully without raising).
+    """
+    try:
+        from triggers.vault_scanner import run_scan
+    except Exception as e:
+        logger.error("vault_scanner_daily: import failed: %s", e)
+        return
+    try:
+        result = run_scan()
+        logger.info("vault_scanner_daily: %s", result)
+    except Exception as e:
+        logger.warning("vault_scanner_daily: run raised: %s", e)
 
 
 def _matter_config_drift_weekly_job():
