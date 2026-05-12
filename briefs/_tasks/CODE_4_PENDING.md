@@ -1,12 +1,61 @@
 ---
-status: PENDING
+status: REQUEST_CHANGES
 brief: briefs/BRIEF_HARNESS_SUBAGENT_MIGRATION_1.md
 trigger_class: TIER_B_HARNESS_OPTIMIZATION
 dispatched_at: 2026-05-12
 dispatched_by: aihead1
 estimated_effort: 2-3h
 supersedes: TIER_B_MODEL_DEPRECATION_SWEEP (COMPLETE, PR #192 merged 31454dc)
+update_at: 2026-05-12
+update_reason: PR #194 gate chain returned 1 CRITICAL + 2 HIGH + 1 MEDIUM (see PR comment 4435153131 + UPDATE block below)
 ---
+
+## UPDATE — 2026-05-12 — REQUEST_CHANGES on PR #194
+
+Picker-architect (1 issue @ ≥80) + `feature-dev:code-reviewer` 2nd-pass converged. Fast-follow commit on `b4/harness-subagent-migration` required. **Do NOT open a new PR.**
+
+### CRITICAL — Acceptance #9 not satisfied pre-merge
+
+Brief's hard ship gate: invoke `Agent(subagent_type="feature-dev:code-reviewer")` from **all 6 pickers** post-step-6, BEFORE declaring ship. PR description verifies only `bm-b4` and defers the remaining 5 to post-merge — direct breach of the pre-mortem mitigation criterion.
+
+**Fix:** invoke `feature-dev:code-reviewer` from each of `bm-aihead1`, `bm-aihead2`, `bm-b1`, `bm-b2`, `bm-b3`. Paste explicit per-picker pass/fail into PR description. If ANY fails → revert step 6 (restore picker `.claude/agents/` directories) BEFORE re-requesting review.
+
+### HIGH — `.githooks/pre-commit` header/behavior mismatch (picker-architect 85-score confirmed)
+
+L1-11 header says "enforce migration immutability" + documents two bypass paths (`Migration-edit-authorized:` trailer, `BAKER_MIGRATION_EDIT_AUTHORIZED=1`). New `.claude/agents/*.md` check at L18-26 has no bypass and runs BEFORE `exec "$CHECK"`. Developer reading header assumes bypasses apply, gets blocked, falls back to `--no-verify` — bypasses both.
+
+**Fix:** Add subheader before L18: `# Part 2: subagent location enforcement (NO BYPASS — add to ~/.claude/agents/, not picker)`. Add explicit line in file header stating existing migration-edit bypasses do NOT cover this check.
+
+### HIGH — `--diff-filter=A` misses renames
+
+`git mv some-file.md .claude/agents/foo.md` uses filter `R`, slipping past. Combined with `.gitignore` removal or `git add -f`, rename evades.
+
+**Fix:** Change to `--diff-filter=ACRD` or drop the filter and grep the diff output for the path pattern.
+
+### MEDIUM — `CLAUDE.md` L293 stale pointer
+
+Current `- **Specialized agents:** .claude/agents/` references a deleted directory.
+
+**Fix:** Update to `- **Specialized agents:** ~/.claude/agents/ (user-global — not in repo per HARNESS_SUBAGENT_MIGRATION_1)`.
+
+### Heartbeat
+
+Per AH1 SKILL.md §B-code stall chase: ~30-45 min fast-follow window. Single heartbeat OK; bus-post `heartbeat/HARNESS_SUBAGENT_MIGRATION_1` if you cross the hour mark before pushing.
+
+### Re-trigger gate chain
+
+After fast-follow commit + push, bus-post `ship/HARNESS_SUBAGENT_MIGRATION_1-v0-2` to `lead`. AH1 re-runs:
+1. Static review of fast-follow diff
+2. `/security-review` inline
+3. `feature-dev:code-reviewer` 2nd-pass on new head SHA
+
+Merge gates clear ALL or revert.
+
+### Anchors
+
+- PR comment: https://github.com/vallen300-bit/baker-master/pull/194#issuecomment-4435153131
+- Picker-architect comment: https://github.com/vallen300-bit/baker-master/pull/194#issuecomment-4435130106
+- Brief: `briefs/BRIEF_HARNESS_SUBAGENT_MIGRATION_1.md` @ `d1a514c`
 
 # CODE_4 — HARNESS_SUBAGENT_MIGRATION_1 — 2026-05-12
 
