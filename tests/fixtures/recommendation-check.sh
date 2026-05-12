@@ -78,8 +78,18 @@ if not text.strip():
 has_question = "?" in text
 has_numbered = bool(re.search(r"^\s*\d+\.", text, flags=re.MULTILINE))
 lower = text.lower()
-has_option_word = any(w in lower for w in ("options", "choose", "which"))
-trigger = has_question or has_numbered or has_option_word
+# Trigger phrases tightened 2026-05-12 (Director-observed false-positive on
+# bare "which" used as relative pronoun — "the clones which scored 0...").
+# Require explicit options-ask phrasing rather than bare keyword matches.
+option_patterns = [
+    r"\bchoose\s+(?:between|one|from)\b",
+    r"\b(?:which|what)\s+(?:option|one|approach|path|do you)\b",
+    r"\boption[s]?\s*[:\?]",   # "Option:" header / "Options?" question
+    r"\b(?:option\s+[ab1-9]|path\s+[ab1-9])\b",  # "Option A/B/1/2"
+    r"\b(?:a\s+or\s+b|either\s+\w+\s+or\s+\w+)\b",  # "A or B" / "either X or Y"
+]
+has_option_phrase = any(re.search(p, lower) for p in option_patterns)
+trigger = has_question or has_numbered or has_option_phrase
 if not trigger:
     sys.exit(0)
 
