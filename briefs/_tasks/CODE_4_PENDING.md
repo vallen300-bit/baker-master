@@ -1,115 +1,69 @@
 ---
-status: COMPLETE
-brief: inline
-trigger_class: TIER_B_MODEL_DEPRECATION_SWEEP
+status: PENDING
+brief: briefs/BRIEF_HARNESS_SUBAGENT_MIGRATION_1.md
+trigger_class: TIER_B_HARNESS_OPTIMIZATION
 dispatched_at: 2026-05-12
 dispatched_by: aihead1
-estimated_effort: 30-45 min
-shipped_at: 2026-05-12
-shipped_pr: 192
-merged_commit: 31454dc
-ship_report: briefs/_reports/B4_model_deprecation_sweep_1_20260512.md
-gates_cleared: ah1_static + inline_security_review + code_reviewer_2nd_pass (PASS, 1 MEDIUM non-blocking)
+estimated_effort: 2-3h
+supersedes: TIER_B_MODEL_DEPRECATION_SWEEP (COMPLETE, PR #192 merged 31454dc)
 ---
 
-# CODE_4 — MODEL_DEPRECATION_SWEEP_1 — 2026-05-12
+# CODE_4 — HARNESS_SUBAGENT_MIGRATION_1 — 2026-05-12
 
-## Problem
+## Wake summary
 
-Anthropic deprecated Claude Opus 4 (`claude-opus-4-20250514`) and Claude Sonnet 4 (`claude-sonnet-4-20250514`) on 2026-04-14. Retirement: **2026-06-15** (34 days from dispatch). Any live API call to these IDs after that date will hard-error.
+Collapse Brisen subagent definitions to user-global `~/.claude/agents/`. Delete picker `.claude/agents/` directories across all 6 pickers. Add drift-prevention guardrails (gitignore + pre-commit hook).
 
-Baker codebase still references both retired IDs. Sweep them.
+## Where to read the brief
 
-Source: https://platform.claude.com/docs/en/release-notes/api entry "Apr 14, 2026" + https://platform.claude.com/docs/en/about-claude/model-deprecations.
+**Authoritative spec:** `briefs/BRIEF_HARNESS_SUBAGENT_MIGRATION_1.md` on `main` @ `d1a514c`. Read it fully before starting — it's the source of truth for all 8 steps, acceptance criteria, abort gates, and risk-mitigation tests. This mailbox file is the WAKE only; the brief itself is the contract.
 
-## Scope — exhaustive (verified via grep before dispatch)
+## Hard gates before starting
 
-**File 1: `orchestrator/memory_consolidator.py` line 49**
+1. Pull latest main in your working clone (`git -C ~/bm-b4 pull --ff-only origin main`)
+2. Verify the brief file exists and is the `d1a514c` version (frontmatter says `Status: DRAFT (pending Director ratify)` — that's stale; Director ratified 2026-05-12, you may flip it to RATIFIED in your PR)
+3. Confirm orientation: read brief §"Two-pass review trail" so you understand WHY the simplified plan is what it is
 
-Current:
-```python
-# Model for Tier 2 compression (Opus — lossless critical details)
-TIER2_MODEL = "claude-opus-4-20250514"
-```
+## 8 steps (per brief §"Scope")
 
-Replace with:
-```python
-# Model for Tier 2 compression (Opus — lossless critical details)
-TIER2_MODEL = "claude-opus-4-6"
-```
+1. **Backup user-global** (NON-REVERSIBLE without this) — `cp -r ~/.claude/agents ~/.claude/agents.bak-2026-05-12`. Verify before any further step.
+2. **Reconcile 12 forked pairs** WITH the wrong-direction abort gate. All 12 diffs captured in PR description.
+3. **Fix `baker-pm.md` hardcoded path** at lines 242 + 269. Choose option A (path replace to bm-aihead1) if `~/bm-aihead1/.claude/agent-memory/baker-pm/` exists; option B (strip block) if absent.
+4. **Migrate 10 picker-only** to user-global.
+5. **Invocation-matrix audit** — `find ~/.claude/projects -name "*.jsonl" -mtime -30 | xargs grep -h '"subagent_type":' | grep -oE '"subagent_type":"[^"]+"' | sort -u`. Confirm every type either lives in `~/.claude/agents/` (after steps 2+4) OR is plugin-namespaced/built-in (out of scope).
+6. **Delete `.claude/agents/`** across all 6 pickers — atomic with step 4 in a single git operation per picker.
+7. **`.gitignore` `.claude/agents/`** in each picker.
+8. **Pre-commit hook** rejecting `.claude/agents/*.md` additions.
 
-Rationale: like-for-like Opus replacement. Matches surrounding production Cortex paths (`PHASE3A_MODEL` / `PHASE3B_MODEL_FOR_COST` / `PHASE3C_MODEL` / `capability_runner.py:317` all `claude-opus-4-6`). This is NOT a 4.6→4.7 model bump — that's a separate eval-gated brief on the Cortex roadmap (M4).
+## Acceptance criteria (12 — see brief §"Acceptance criteria")
 
-`TIER3_MODEL` on line 51 (`gemini-2.5-pro`) is already migrated — no action.
+All 12 must PASS. Two are AH1's pre-mortem mitigations and are HARD GATES:
 
-**File 2: `orchestrator/cost_monitor.py` line 29**
-
-Current (inside `MODEL_COSTS` dict, lines 25-34):
-```python
-MODEL_COSTS = {
-    # Anthropic
-    "claude-opus-4-6": {"input": 15.00, "output": 75.00},
-    "claude-sonnet-4-6": {"input": 3.00, "output": 15.00},
-    "claude-sonnet-4-20250514": {"input": 3.00, "output": 15.00},   # ← DELETE THIS LINE
-    "claude-haiku-4-5-20251001": {"input": 0.80, "output": 4.00},
-    # Gemini
-    "gemini-2.5-flash": {"input": 0.30, "output": 2.50},
-    "gemini-2.5-pro": {"input": 1.25, "output": 10.00},
-}
-```
-
-Action: **delete the `"claude-sonnet-4-20250514"` line entirely**. `claude-sonnet-4-6` entry (line 28) covers current Sonnet 4 family pricing; `DEFAULT_COSTS` on line 35 is the fallback if any code still references an unknown ID.
-
-## Out of scope — DO NOT TOUCH
-
-- `briefs/BRIEF_GEMINI_MIGRATION_1.md` + `briefs/BRIEF_THREE_TIER_MEMORY.md` — reference retired IDs in document body. **Append-only audit trail per project CLAUDE.md.** Leave alone.
-- Cortex Phase 3 paths still on `claude-opus-4-6` — separate brief (M4 eval-gated).
-- Main config `config/settings.py:47` `model: str = "claude-opus-4-6"` — current, not retired.
-- Any `_20250514`-suffixed references in test fixtures / golden sets — leave; tests asserting on retired-ID strings are their own brief.
-
-## Acceptance criteria
-
-1. `grep -rn "claude-opus-4-20250514" --include="*.py" .` returns **zero matches**
-2. `grep -rn "claude-sonnet-4-20250514" --include="*.py" .` returns **zero matches**
-3. Literal `pytest` green — no "by inspection"
-4. `python3 -c "from orchestrator.memory_consolidator import TIER2_MODEL; assert TIER2_MODEL == 'claude-opus-4-6'; print('OK')"` prints `OK`
-5. `python3 -c "from orchestrator.cost_monitor import MODEL_COSTS; assert 'claude-sonnet-4-20250514' not in MODEL_COSTS; assert 'claude-sonnet-4-6' in MODEL_COSTS; print('OK')"` prints `OK`
-
-## Test plan
-
-1. Run targeted: `pytest tests/test_memory_consolidator.py tests/test_cost_monitor.py -v` (or whatever exists)
-2. Run full: `pytest`
-3. Smoke compile: `python3 -c "import py_compile; py_compile.compile('orchestrator/memory_consolidator.py', doraise=True); py_compile.compile('orchestrator/cost_monitor.py', doraise=True)"`
+- **#9 (plugin subagent path-resolution):** invoke `Agent(subagent_type="feature-dev:code-reviewer")` from all 6 pickers post-merge. ALL 6 must succeed. If ANY fails → revert step 6 deletion before declaring ship.
+- **#11 (wrong-direction overwrite audit):** PR description must show all 12 forked-pair diffs explicitly with overwrite-direction annotation. No silent overwrites.
 
 ## Ship gate
 
-- Literal `pytest` green output pasted in ship report
-- `/security-review` clean (will be triggered by AH1 on PR)
-- Commit message: `fix(model-deprecation): retire claude-opus-4 + claude-sonnet-4 references (MODEL_DEPRECATION_SWEEP_1)`
-- PR title: `fix(model-deprecation): retire June 15 model IDs (MODEL_DEPRECATION_SWEEP_1)`
-
-## Code Brief Standards verification
-
-- **API version:** Anthropic Messages API, current
-- **Deprecation check date:** 2026-05-12 (this brief)
-- **Fallback note:** none required — replacement IDs are current GA; cost_monitor delete falls through to `DEFAULT_COSTS` if any code path still calls the retired ID
-- **Migration-vs-bootstrap DDL check:** N/A (no schema change)
-- **Singleton pattern `_get_global_instance()`:** N/A (no instantiation touched)
-- **`file:line` citation:** both line refs verified by AH1 Read tool 2026-05-12 before dispatch (memory_consolidator.py:49 + cost_monitor.py:29)
-- **Post-merge script handoff:** N/A (no script invocation)
-- **Invocation-path audit (Amendment H):** N/A (no capability_sets touched)
-
-## Tier classification
-
-**Tier B** — production code change touching model API surface + cost-tracking dict. PR triggers:
-1. AH1 static review
-2. `/security-review` skill
-3. `feature-dev:code-reviewer` 2nd-pass (per SKILL.md §"Code-reviewer 2nd-pass Protocol", trigger 4: PR touches external-surface API or model perimeter)
-
-## Bus-post on ship
-
-Per `_ops/processes/agent-bus-posting-contract.md` (ratified 2026-05-11): post `ship/MODEL_DEPRECATION_SWEEP_1` to `lead` bus topic with PR# + commit anchor when merged.
+Per brief §"Ship gate":
+- Literal pytest green output pasted in ship report (if any test touches subagent registry — likely none)
+- All 12 acceptance criteria PASS — paste explicit output per criterion
+- All 6 fresh-session smoke tests succeed
+- Backup directory `~/.claude/agents.bak-2026-05-12/` confirmed present with 12 files
+- Commit message: `feat(harness): collapse subagents to user-global (HARNESS_SUBAGENT_MIGRATION_1)`
+- PR title: same
+- Bus-post `ship/HARNESS_SUBAGENT_MIGRATION_1` to lead on PR open
 
 ## Heartbeat cadence
 
-Per AH1 SKILL.md §B-code stall chase: heartbeat every 12h minimum while building. This brief should ship same-day; expect single heartbeat on PR-open.
+Per AH1 SKILL.md §B-code stall chase: minimum every 12h while building. Brief is 2-3h scope; expect 1-2 heartbeats total. First heartbeat: after step 1 backup confirmation.
+
+## Bus-post on ship
+
+Per `_ops/processes/agent-bus-posting-contract.md` (ratified 2026-05-11): post `ship/HARNESS_SUBAGENT_MIGRATION_1` to `lead` bus topic with PR# + commit anchor when PR is open.
+
+## Anchors
+
+- Director ratified dispatch to B4 2026-05-12
+- Brief draft commit: `5b99afb`
+- Brief mitigations folded: `d1a514c`
+- Prior B4 dispatch (MODEL_DEPRECATION_SWEEP_1) shipped clean — PR #192 merged 31454dc; mailbox flipped COMPLETE 2a9380d
