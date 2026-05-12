@@ -38,6 +38,9 @@ outputs/share-site/
 # Claude Code worktrees (parallel sessions)
 .claude/worktrees/
 
+# Subagent definitions live at user-global ~/.claude/agents/ post-HARNESS_SUBAGENT_MIGRATION_1
+.claude/agents/
+
 # Python venv (local dev only — CI and Render create their own)
 .venv*/
 venv/

@@ -15,6 +15,17 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
+# Reject any addition under .claude/agents/ — subagents live at user-global
+# ~/.claude/agents/ post-HARNESS_SUBAGENT_MIGRATION_1 (2026-05-12).
+AGENT_ADDS="$(git diff --cached --name-only --diff-filter=A | grep -E '^\.claude/agents/.+\.md$' || true)"
+if [ -n "$AGENT_ADDS" ]; then
+  echo "[pre-commit] BLOCKED: subagent definitions must live at ~/.claude/agents/ (user-global), not in picker .claude/agents/." >&2
+  echo "[pre-commit] Offending paths:" >&2
+  echo "$AGENT_ADDS" | sed 's/^/  - /' >&2
+  echo "[pre-commit] Move the file to ~/.claude/agents/<name>.md and re-stage." >&2
+  exit 1
+fi
+
 CHECK="scripts/check_applied_migrations.sh"
 if [ ! -x "$CHECK" ]; then
   echo "[pre-commit] $CHECK missing or non-executable; skipping migration immutability check" >&2
