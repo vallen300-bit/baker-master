@@ -45,7 +45,7 @@ fi
 # Also exclude .githooks/ — the enforcement code itself necessarily contains the literal strings.
 # ---------------------------------------------------------------------------
 RETIRED_IDS_REGEX='claude-(opus-4|sonnet-4)-20250514'
-EXCLUDE_PATHS_REGEX='^briefs/|^tasks/lessons\.md$|^docs-site/|^\.githooks/'
+EXCLUDE_PATHS_REGEX='^briefs/|^tasks/lessons\.md$|^docs-site/|^\.githooks/pre-commit$'
 
 FILES_WITH_HITS="$(git diff --cached --name-only --diff-filter=ACMR | while read -r f; do
   [ -z "$f" ] && continue
@@ -62,7 +62,7 @@ if [ -n "$FILES_WITH_HITS" ]; then
   echo "[pre-commit] Anthropic retirement: 2026-06-15. Use claude-opus-4-6 / claude-opus-4-7 / claude-sonnet-4-5 / claude-sonnet-4-6." >&2
   echo "[pre-commit] Files with hits:" >&2
   echo "$FILES_WITH_HITS" | sed 's/^/  - /' >&2
-  echo "[pre-commit] NO BYPASS. Exclusions: briefs/, tasks/lessons.md, docs-site/, .githooks/ (historical/audit-trail + enforcement code)." >&2
+  echo "[pre-commit] NO BYPASS. Exclusions: briefs/, tasks/lessons.md, docs-site/, .githooks/pre-commit (historical/audit-trail + enforcement code)." >&2
   exit 1
 fi
 
