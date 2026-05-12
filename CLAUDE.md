@@ -290,5 +290,5 @@ Env: `BAKER_VAULT_PATH` must point at vault checkout. 34 canonical slugs @ versi
 - **Baker MCP API patterns:** `.claude/docs/baker-mcp-api.md`
 - **Critical IDs** (workspaces, lists, contacts): `.claude/docs/critical-ids.md`
 - **Path-scoped rules:** `.claude/rules/`
-- **Specialized agents:** `.claude/agents/`
+- **Specialized agents:** `~/.claude/agents/` (user-global — not in repo per HARNESS_SUBAGENT_MIGRATION_1)
 - **Full architecture diagrams:** `CLAUDE_REFERENCE.md`
