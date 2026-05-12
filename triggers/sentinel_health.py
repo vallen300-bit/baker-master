@@ -692,8 +692,8 @@ def poll_waha_session():
     Catches session death even when no messages are flowing.
     """
     try:
-        from triggers.waha_client import get_session_status
-        result = get_session_status()
+        from triggers.waha_client import get_session_status, monitor_headers
+        result = get_session_status(_headers_override=monitor_headers())
     except Exception as e:
         logger.error(f"WAHA session poll: import/call failed: {e}")
         report_failure("waha_session_poll", str(e))
