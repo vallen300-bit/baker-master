@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="source" content="movie-desk">
+<meta name="confidence" content="director-ratified-frame">
+<meta name="provenance" content="Rolf Hubner Month End Review March 2026 (20 Apr) + Balazs 11 May debrief (Christian Gradnitzer / Atelier 7 + Laurent-Francesco meeting + Eastdil materials send) + Director ratification 12 May (David Nicholas retired, owner posture, four-question structure)">
+<meta name="purpose" content="Director's talking-points pack for MOHG senior meeting 12 May 2026. Owner posture; four-question structure; mutual-commitment frame.">
+<title>MOHG Senior Meeting — Talking Points (12 May 2026)</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;600;700&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --ink: #0f1729;
+  --ink-soft: #2a3349;
+  --ink-mid: #586075;
+  --ink-light: #8e94a3;
+  --line: #d8dae0;
+  --line-soft: #ecedf0;
+  --paper: #ffffff;
+  --paper-warm: #fafaf7;
+  --gold: #9c7a3a;
+  --gold-soft: #d4af6b;
+  --gold-bg: #f8f2e4;
+  --positive: #2f6b3a;
+  --positive-bg: #ecf3ed;
+  --watch: #8c6312;
+  --watch-bg: #fbf4e3;
+  --owner: #6b3a3a;
+  --owner-bg: #f5e9e9;
+}
+
+body {
+  font-family: 'Inter', -apple-system, sans-serif;
+  color: var(--ink);
+  background: var(--paper-warm);
+  font-size: 10.5pt;
+  line-height: 1.55;
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 28px 32px 60px;
+}
+
+/* ====== HEADER ====== */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 1.5px solid var(--ink);
+  padding-bottom: 14px;
+  margin-bottom: 22px;
+}
+
+.header-left h1 {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 22pt;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  color: var(--ink);
+  line-height: 1.1;
+}
+
+.header-left .subtitle {
+  font-size: 10pt;
+  color: var(--ink-mid);
+  font-weight: 400;
+  margin-top: 4px;
+  letter-spacing: 0.2px;
+}
+
+.header-right {
+  text-align: right;
+  font-size: 8.5pt;
+  color: var(--ink-light);
+  line-height: 1.6;
+}
+
+.conf-tag {
+  display: inline-block;
+  font-size: 7pt;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--paper);
+  background: var(--owner);
+  padding: 3px 9px;
+  border-radius: 2px;
+  margin-bottom: 6px;
+}
+
+/* ====== POSTURE BAR ====== */
+.posture {
+  background: var(--owner-bg);
+  border-left: 4px solid var(--owner);
+  padding: 14px 18px;
+  margin-bottom: 26px;
+  font-size: 10pt;
+  line-height: 1.6;
+}
+
+.posture strong { color: var(--owner); font-weight: 600; }
+
+.posture .posture-title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 11pt;
+  font-weight: 700;
+  color: var(--owner);
+  margin-bottom: 4px;
+}
+
+/* ====== SECTION ====== */
+.section {
+  margin-bottom: 32px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 22px 26px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+}
+
+.section-num {
+  display: inline-block;
+  font-size: 7.5pt;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 6px;
+}
+
+.section h2 {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 18pt;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.2;
+  margin-bottom: 4px;
+  letter-spacing: -0.3px;
+}
+
+.section h2 em {
+  font-style: italic;
+  color: var(--owner);
+  font-weight: 600;
+}
+
+.section .frame {
+  font-size: 10pt;
+  color: var(--ink-mid);
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px dotted var(--line);
+  font-style: italic;
+}
+
+.section h3 {
+  font-size: 9.5pt;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--ink-mid);
+  margin-top: 18px;
+  margin-bottom: 8px;
+}
+
+/* ====== TALKING POINTS ====== */
+ul.talking {
+  list-style: none;
+  padding-left: 0;
+}
+
+ul.talking li {
+  padding: 10px 0 10px 22px;
+  position: relative;
+  font-size: 10.5pt;
+  color: var(--ink-soft);
+  line-height: 1.55;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+ul.talking li:last-child { border-bottom: none; }
+
+ul.talking li::before {
+  content: "▸";
+  position: absolute;
+  left: 0;
+  color: var(--gold);
+  font-weight: 700;
+  top: 10px;
+}
+
+ul.talking li .say {
+  display: block;
+  font-style: italic;
+  color: var(--ink);
+  margin-bottom: 3px;
+}
+
+ul.talking li .note {
+  display: block;
+  font-size: 9pt;
+  color: var(--ink-light);
+  font-style: normal;
+  margin-top: 2px;
+}
+
+/* ====== FACTS BOX ====== */
+.facts {
+  background: var(--paper-warm);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--gold);
+  padding: 12px 16px;
+  margin: 14px 0;
+  font-size: 9.5pt;
+  line-height: 1.55;
+}
+
+.facts .facts-title {
+  font-weight: 700;
+  font-size: 8.5pt;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  color: var(--gold);
+  margin-bottom: 5px;
+}
+
+.facts strong { color: var(--ink); font-weight: 600; }
+
+/* ====== APPENDIX ====== */
+.appendix {
+  margin-top: 24px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 18px 22px;
+}
+
+.appendix h2 {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 13pt;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 6px;
+}
+
+.appendix .lead {
+  font-size: 9.5pt;
+  color: var(--ink-mid);
+  margin-bottom: 14px;
+  font-style: italic;
+}
+
+.probe {
+  border-bottom: 1px dotted var(--line);
+  padding: 10px 0;
+}
+
+.probe:last-child { border-bottom: none; }
+
+.probe .q {
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 9.5pt;
+  margin-bottom: 4px;
+}
+
+.probe .q::before {
+  content: "If they ask: ";
+  color: var(--gold);
+  font-weight: 700;
+  font-size: 8pt;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-right: 6px;
+}
+
+.probe .a {
+  font-size: 9.5pt;
+  color: var(--ink-soft);
+  font-style: italic;
+  padding-left: 14px;
+  border-left: 2px solid var(--gold-soft);
+}
+
+/* ====== FOOTER ====== */
+.footer {
+  margin-top: 26px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 8pt;
+  color: var(--ink-light);
+  display: flex;
+  justify-content: space-between;
+  letter-spacing: 0.3px;
+}
+
+/* ====== PRINT ====== */
+@media print {
+  body { background: var(--paper); max-width: 100%; padding: 1cm 1.5cm; font-size: 9.5pt; }
+  .section { box-shadow: none; page-break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <span class="conf-tag">Owner — Talking Points</span>
+    <h1>MOHG Senior Meeting</h1>
+    <div class="subtitle">Four-question structure · Owner posture · 12 May 2026</div>
+  </div>
+  <div class="header-right">
+    Prepared for D. Vallen<br>
+    MOVIE Desk · 12 May 2026<br>
+    Reference document — not for distribution
+  </div>
+</div>
+
+<div class="posture">
+  <div class="posture-title">Owner posture for the room</div>
+  Graceful but unflinching. I am not asking them to fix the asset. I am asking them to tell me how they will, in their words, with named consequences for missing. The cost of waiting is mine — and I will not absorb it silently. Name MOHG's design ownership once, clearly, then move forward. Let them propose timing and milestones. Reserve owner-side levers (residence fees, capex approvals, exit optionality) for the trade conversation.
+</div>
+
+<!-- ===================== SECTION 1 ===================== -->
+<div class="section">
+  <span class="section-num">Question 1 of 4 · Is there a problem?</span>
+  <h2>"Let's name what's true."</h2>
+  <div class="frame">The honest answer is yes. We name it once, calmly, without litigating. The room knows it; they need to hear that I know it.</div>
+
+  <h3>What to say</h3>
+  <ul class="talking">
+    <li>
+      <span class="say">"Before we go through topics, let me name where we are. The hotel is not where it should be in its first operating year. I want to be open about that, and I want to hear how you see it."</span>
+      <span class="note">Opens the room with honesty; invites them to mirror it.</span>
+    </li>
+    <li>
+      <span class="say">"March was the best month yet — and the EBITDA was still negative €527k. F&amp;B is at a structural loss against a breakeven budget. The full-year forecast is €700k below the budget we underwrote, with December alone carrying €2.7M of EBITDA."</span>
+      <span class="note">Numbers stated once. Not litigated.</span>
+    </li>
+    <li>
+      <span class="say">"The Royal Suite cost us a €140k UAE delegation in March because it wasn't finished. Two outlets — Dining and The Café — are below the brand-standard quality threshold. The cost base is sized for a budget revenue I no longer believe."</span>
+      <span class="note">Three concrete manifestations; no more.</span>
+    </li>
+    <li>
+      <span class="say">"I know you see it too. Christian's brief, the residence-fee deferral conversation, the questions about a potential sale — these all point the same direction. I respect that you're already moving."</span>
+      <span class="note">Names their behaviours back to them; lets them feel acknowledged rather than caught.</span>
+    </li>
+  </ul>
+
+  <div class="facts">
+    <div class="facts-title">Numbers in your back pocket</div>
+    March 2026: <strong>Occupancy 37.8%</strong> · <strong>ADR €527</strong> · <strong>Revenue €1,475k</strong> · <strong>EBITDA −€527k</strong> (+€91k vs Feb). FY forecast <strong>€3.6M EBITDA vs €4.3M budget</strong>. Beverage cost <strong>30.5% vs 20% budget</strong> · Food cost <strong>26.1% vs 27.6% budget</strong> (credit). Fixed cost base <strong>~€1.5M/month</strong>. May forecast <strong>−€1.4M revenue gap to budget</strong>.
+  </div>
+</div>
+
+<!-- ===================== SECTION 2 ===================== -->
+<div class="section">
+  <span class="section-num">Question 2 of 4 · What is the cause?</span>
+  <h2>"We followed your design.<br><em>Now we are rebuilding it together.</em>"</h2>
+  <div class="frame">Name the architectural cause once, gracefully, without making it personal. David Nicholas retired with our thanks. The concept is MOHG's. The fix is MOHG-led. The cost of the fix is MOHG-side.</div>
+
+  <h3>What to say</h3>
+  <ul class="talking">
+    <li>
+      <span class="say">"The F&amp;B concept we built was designed by David Nicholas, your senior. We followed MOHG specification. The fragmented four-outlet model is what we funded — and it is what is now driving inventory complexity, staffing inefficiency, and a beverage cost at 30.5% versus a 20% budget."</span>
+      <span class="note">States the architectural origin once. Calmly. Past tense on David.</span>
+    </li>
+    <li>
+      <span class="say">"David retired with our gratitude. He gave the property a strong design intent. Christian's brief — unifying the outlets into Atelier 7 — is, with respect, MOHG rebuilding what MOHG specified. We support that direction. We want to be clear about who owns it."</span>
+      <span class="note">Gracious frame; names what Christian's pitch implicitly admits.</span>
+    </li>
+    <li>
+      <span class="say">"The cost base is sized for the budget your commercial team built — not for the revenue we have. That is operator-side architecture too. I am not asking that anyone be blamed; I am asking that everyone be clear where the responsibility for fixing it sits."</span>
+      <span class="note">Extends the architecture frame from F&amp;B to cost base.</span>
+    </li>
+    <li>
+      <span class="say">"Where I see the owner's responsibility: funding what was specified, on time. Where I see the operator's responsibility: designing something that works, staffing it to the revenue the market gives us, and showing operational accountability on the property — including basic discipline on reporting and quality."</span>
+      <span class="note">Clean split of accountability — measured, not adversarial.</span>
+    </li>
+  </ul>
+
+  <div class="facts">
+    <div class="facts-title">If they push back</div>
+    Don't litigate David. <em>"He retired with our gratitude; we honour his work."</em> Don't extend the blame frame. The point is made once. Move to Question 3 — the future.
+  </div>
+</div>
+
+<!-- ===================== SECTION 3 ===================== -->
+<div class="section">
+  <span class="section-num">Question 3 of 4 · Where do we want to be, and when?</span>
+  <h2>"Tell me where this asset stabilises<br><em>— and when.</em>"</h2>
+  <div class="frame">I name my destination once. Then I stop talking. I let MOHG propose timing, milestones, and how their plan delivers. I listen. I don't write the answers for them.</div>
+
+  <h3>What to say</h3>
+  <ul class="talking">
+    <li>
+      <span class="say">"Here is what I, as the owner, need to see. F&amp;B GOP positive. Beverage cost back in the budgeted band. Cost base proportionate to the actual revenue ramp, with no quality compromise. Royal Suite operational. Quality scores at brand standard at every outlet. Residence fees flowing. Operator fees flowing. The asset on a trajectory that matches the underwriting."</span>
+      <span class="note">The destination. Stated once. Cleanly.</span>
+    </li>
+    <li>
+      <span class="say">"What I need from MOHG today is not a list of comments. I need your timing. When will F&amp;B GOP turn? When will beverage cost normalise? When will the Royal Suite be sellable? When will the cost ratio be where it should be? When will Slide 9 be populated for every outlet below threshold?"</span>
+      <span class="note">Five direct timing questions. They answer.</span>
+    </li>
+    <li>
+      <span class="say">"I am not asking you to fix this. I am asking you to tell me how you will, in your words, with dates you will stand behind."</span>
+      <span class="note">The Director's principle, said clearly.</span>
+    </li>
+    <li>
+      <span class="say">"Take the time you need. If you want to come back to me with that in two weeks, that is fine. What I need is that the answer is concrete — month-named, owner-named, consequence-named if missed."</span>
+      <span class="note">Time-and-space generous; specificity-and-accountability not.</span>
+    </li>
+  </ul>
+
+  <div class="facts">
+    <div class="facts-title">The five questions, named</div>
+    <strong>(1)</strong> F&amp;B GOP positive — by when? · <strong>(2)</strong> Beverage cost at 22% or below — by when? · <strong>(3)</strong> Royal Suite operational and sellable — by when? · <strong>(4)</strong> Cost ratio at target band against actual revenue — by when? · <strong>(5)</strong> Slide 9 fully populated for every outlet below 90 — starting which pack?
+  </div>
+</div>
+
+<!-- ===================== SECTION 4 ===================== -->
+<div class="section">
+  <span class="section-num">Question 4 of 4 · How do we get there?</span>
+  <h2>"Plans don't fix this.<br><em>Trades do.</em>"</h2>
+  <div class="frame">Their plan; our backing; consequences both directions. Every commitment carries a counter-commitment. This is how MOHG feels the timeline — not because we threaten, but because the structure makes the timing matter to them as it matters to us.</div>
+
+  <h3>What to say</h3>
+  <ul class="talking">
+    <li>
+      <span class="say">"Christian has my support. Full operational authority over property F&amp;B — concept, staffing, service. He needs a clear reporting line and the freedom to act. We back the Atelier 7 direction in principle."</span>
+      <span class="note">Authority granted. Direction endorsed. No paper-plan request.</span>
+    </li>
+    <li>
+      <span class="say">"On the capex for design correction — the curtain, the marketing refresh, the activation programme — those are MOHG-side investments, not owner-side. We funded the original concept per MOHG specification. The cost of redesigning it sits with the operator."</span>
+      <span class="note">Edita's no on the curtain, reframed as principle, not preference.</span>
+    </li>
+    <li>
+      <span class="say">"On residence fees — you have said you will not push till year-end. I appreciate that. The residence fee conversation reopens favourably when the F&amp;B and cost-base milestones hit. It stays on hold if they don't. That is the trade, plainly stated."</span>
+      <span class="note">Names the linkage explicitly. Not as a threat — as a logic.</span>
+    </li>
+    <li>
+      <span class="say">"On reporting — endorse Rolf's template note publicly. April pack adopts owner-and-by-when on every action. Slide 9 fully populated. The two known typos on March pack corrected for the record. Nineteenth of May meeting holds."</span>
+      <span class="note">Cheap operational ask. Public endorsement strengthens Rolf bilaterally with Matthias.</span>
+    </li>
+    <li>
+      <span class="say">"On the broader question — yes, I evaluate options as any owner does. There is no formal process today. When there is one, you will be the first to know. Any process would prioritise an aligned long-term partner; that is in everyone's interest."</span>
+      <span class="note">If they fish on the sale — the pre-agreed one-line posture. Said once, calmly, then move on.</span>
+    </li>
+  </ul>
+
+  <div class="facts">
+    <div class="facts-title">Where the leverage actually sits</div>
+    Residence fees withheld (~€1M+ of ~€5M expected) — held, not threatened. Capex approval pipeline (Royal Suite, FF&amp;E, brand programme) — flexible. Public framing of MOHG response — costs nothing, signals up to MOHG group. Exit optionality — visible (Eastdil engaged), unspoken. Each lever is most valuable when not yet exercised.
+  </div>
+</div>
+
+<!-- ===================== APPENDIX ===================== -->
+<div class="appendix">
+  <h2>Appendix — One-line replies for likely probes</h2>
+  <div class="lead">Pre-agreed responses for topics that may come up sideways. Say once, calmly, move on.</div>
+
+  <div class="probe">
+    <div class="q">"Are you exploring a sale?"</div>
+    <div class="a">"I evaluate options as any owner does. No formal process today. When there is one, you will be the first to know. Any process would prioritise an aligned long-term partner."</div>
+  </div>
+
+  <div class="probe">
+    <div class="q">"When can we expect the residence fees?"</div>
+    <div class="a">"We revisit alongside the F&amp;B and cost-base milestones we agree today. The conversation moves when the milestones move."</div>
+  </div>
+
+  <div class="probe">
+    <div class="q">"Can owner co-fund the F&amp;B activation programme?"</div>
+    <div class="a">"We funded what David specified. The redesign is operator-led; the capex for the redesign is operator-side. We are open to discussing performance-tied co-investment after the first two milestones hit."</div>
+  </div>
+
+  <div class="probe">
+    <div class="q">"Rolf mentioned 'good conversations with Claude' — how are you using AI on the asset?"</div>
+    <div class="a">"It's a productivity tool we use for owner-side reporting and analysis. Genuinely helpful. If MOHG would find a deeper exchange useful, let's set a separate session with Francesco — happy to share what we are learning."</div>
+  </div>
+
+  <div class="probe">
+    <div class="q">"Prague is also slow — coincidence or pattern?"</div>
+    <div class="a">"Not a topic for today's room. We'll take Prague separately — operator-side, separate channel."</div>
+  </div>
+
+  <div class="probe">
+    <div class="q">"What if April / May numbers come in worse than forecast?"</div>
+    <div class="a">"That is exactly why we are having this conversation now. The milestones we agree today are designed to hold under worse-than-forecast scenarios too — that is what makes them meaningful."</div>
+  </div>
+</div>
+
+<div class="footer">
+  <span>Brisen Group · MOVIE Desk · Confidential · 12 May 2026</span>
+  <span>Director talking-points pack · do not distribute</span>
+</div>
+
+</body>
+</html>
