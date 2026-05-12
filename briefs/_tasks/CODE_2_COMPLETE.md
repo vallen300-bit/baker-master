@@ -1,79 +1,50 @@
 ---
-status: COMPLETE
-brief: briefs/BRIEF_WAHA_2026_4_UPGRADE_AND_KEY_SPLIT_1.md
-trigger_class: TIER_B_AUTH_AND_EXTERNAL_PERIMETER
-dispatched_at: 2026-05-12
+status: PENDING
+brief: inline
+trigger_class: TIER_B_FRONTEND_SSE_BACKEND_FIX
+dispatched_at: 2026-05-13
 dispatched_by: ai-head-1 (AH1)
 target: b2
-scope_for_b2: PHASE 2 CODE PR ONLY — the 5-file diff specified in §"Fix/Feature 2 §Implementation Step 2.3". Phase 1 (WAHA Render image bump) is an AH1-side ops action, NOT B-code work. Phase 2 env-var rotation on Render (Step 2.4) is also AH1-side post-merge.
-working_branch: feat/waha-2026-4-key-split
+director_ratification: Director 2026-05-13 "sent dispatch by bus to all the workers to deal with all of the issues step by step"
+priority: P2
+phase: 1 of 1
+expected_pr_count: 1 (brisen-lab)
+expected_branch: b2/brisen-lab-sse-daemon-last-seen-fix-1
+expected_complexity: low (~10-30 min)
+mandatory_2nd_pass: FALSE
+hard_ship_gate: literal `python3 -m pytest tests/ -v` GREEN (if tests exist for app.py SSE) OR manual smoke (force a daemon-tick, watch dashboard cards stay green across 3 consecutive SSE cycles 30s apart without flicker) pasted in PR description
 gates_required:
-  - gate_1_pytest: literal `pytest tests/test_whatsapp_sender_lid.py tests/test_hot_md_weekly_nudge.py -v` GREEN (no "pass by inspection")
-  - gate_2_security_review: AH2 runs `/security-review` on diff — touches API keys + external perimeter, mandatory per SKILL.md
-  - gate_3_ah2_cross_lane: AH2 static read of diff
-  - gate_4_code_reviewer_2nd_pass: REQUIRED — triggers on trigger-class TIER_B_AUTH_AND_EXTERNAL_PERIMETER (auth/secrets + external-surface, per SKILL.md §Code-reviewer 2nd-pass Protocol triggers 1+4)
-acceptance_criteria:
-  - Five files modified per brief §Step 2.3 (config/settings.py, triggers/waha_client.py, outputs/whatsapp_sender.py, triggers/sentinel_health.py:696, scripts/extract_whatsapp.py:475-476)
-  - Fallback chain present in all 3 read paths (_headers, monitor_headers, whatsapp_sender) — load-bearing for rollback
-  - _assert_waha_scoped_keys() try/except wrapped, checks all 3 scoped keys including MONITOR
-  - sentinel_health.py:696 call-site edited, NOT line 695 (brief explicit on this — wrong line corrupts the import)
-  - monitor_headers is public (no leading underscore)
-  - py_compile clean on all 5 files
-  - pytest green literal output captured in ship report
-ship_gate: PR opened with green pytest output literally pasted, all 4 gates flagged readiness, AH1 owns post-merge Render env-var rotation as separate Tier-B
-do_not_touch:
-  - triggers/waha_webhook.py (webhook auth uses WAHA_WEBHOOK_SECRET, unrelated)
-  - WAHA_BASE_URL (kill-switch lever — keep clean)
-  - DIRECTOR_WHATSAPP / DIRECTOR_PHONE_ROOTS (recipient resolver constants)
-  - migrations/ (no schema change in this brief)
-  - tasks/lessons.md existing entries (append-only)
-out_of_scope_hard_no:
-  - Phase 1 Render image bump (AH1 ops)
-  - Phase 2 Step 2.1 key provisioning via POST /api/keys (AH1 ops)
-  - Phase 2 Step 2.4 Render env-var rotation (AH1 Tier-B post-merge)
-  - WAHA MCP-server adoption (Director-ratified out-of-scope)
-  - Query-param auth (?x-api-key=) introduction
+  - AH2 /security-review
+  - picker-architect
+last_heartbeat: null
+heartbeat_cadence: 12h max
 ---
 
-# CODE_2_PENDING — BRIEF_WAHA_2026_4_UPGRADE_AND_KEY_SPLIT_1 — DISPATCHED 2026-05-12
+# CODE_2_PENDING — BRISEN_LAB_SSE_DAEMON_LAST_SEEN_FIX_1 — 2026-05-13
 
-## What to build
+**Repo:** brisen-lab (clone at `~/bm-b2-brisen-lab` — clone fresh if needed: `git clone https://github.com/vallen300-bit/brisen-lab.git ~/bm-b2-brisen-lab`)
+**Branch:** `b2/brisen-lab-sse-daemon-last-seen-fix-1`
+**Base SHA:** latest brisen-lab main (post PR #14 `4fba231`)
 
-Phase 2 code PR only: 5-file diff per brief §"Fix/Feature 2 → Implementation Step 2.3".
+## Problem
 
-The brief is two phases, but B2's scope is Phase 2 code only. Read the brief in full to understand context, but produce ONLY the code PR — do not attempt the Render image bump (Phase 1) or the env-var rotation (Step 2.4). Those are AH1-side ops actions.
+PR #14 (`4fba231`) shipped a hotfix where the frontend stamps `daemon_last_seen` on SSE snapshot receipt — because the SSE `_broadcast` payload doesn't include the field, but `/api/state` does. Cards flickered green→grey between SSE pushes and `/api/state` polls.
 
-## Anchors
+**Architect-flagged on PR #14:** include `daemon_last_seen` at write time in `brisen-lab/app.py:350` `_broadcast` payload. Single source of truth on the backend instead of frontend receipt-time stamp.
 
-- Brief: `briefs/BRIEF_WAHA_2026_4_UPGRADE_AND_KEY_SPLIT_1.md`
-- Reviewer + architect pre-passes already folded into the brief (PASS-WITH-NITS → all nits folded before dispatch). Notable: rollback fallback chain is now MANDATORY in `_headers()` + `monitor_headers()` + `whatsapp_sender.py`; sentinel_health.py edit is at **line 696** (the call), NOT 695 (the import).
-- Lessons applied: #45 (env-var silent drop → Step 2.4 verification AH1-side), #61 (probe third-party first → AH1 pre-flight), #63 (no public surface for ad-hoc send → Mac Mini SSH trigger documented).
-- Trigger class TIER_B_AUTH_AND_EXTERNAL_PERIMETER fires code-reviewer 2nd-pass per SKILL.md (triggers 1 + 4: auth/scope + API keys).
+## Acceptance criteria
 
-## Branch + PR
+1. `_broadcast` in `brisen-lab/app.py` includes `daemon_last_seen` (read from same source `/api/state` uses) in every SSE payload it pushes.
+2. Frontend receipt-time stamp removed (it becomes vestigial — backend is authoritative).
+3. Cards holds green/grey truthfully across multiple 30s SSE cycles without `/api/state` poll being needed.
+4. Manual smoke: force a forge daemon tick, watch dashboard, confirm no flicker across 3 consecutive SSE cycles.
 
-- Create branch `feat/waha-2026-4-key-split` off `main`.
-- PR title: `feat(waha): split admin key into 3 scoped keys with rollback fallback chain (BRIEF_WAHA_2026_4_UPGRADE_AND_KEY_SPLIT_1)`.
-- PR body: copy the §"Files Modified" + §"Quality Checkpoints" sections from the brief, plus literal pytest output.
+## Ship gate
 
-## Heartbeat cadence
+Literal `pytest tests/ -v` GREEN if tests exist for `app.py` SSE paths; if not, paste the manual smoke evidence (3 timestamps + card state) in PR description.
 
-Per SKILL.md §"B-code stall chase" — minimum 12h heartbeat while claimed/in_progress. Post via:
+## Bus-post on ship
+
 ```
-BAKER_ROLE=b2 ~/Desktop/baker-code/scripts/bus_post.sh lead "<status one-liner>" heartbeat/waha-2026-4-key-split
+BAKER_ROLE=b2 ~/Desktop/baker-code/scripts/bus_post.sh lead "SHIP: BRISEN_LAB_SSE_DAEMON_LAST_SEEN_FIX_1 — PR #<N> open. Backend SSE payload now includes daemon_last_seen; frontend receipt-time stamp removed. Ship gate: <pytest/smoke>." ship/brisen-lab-sse-daemon-last-seen-fix-1
 ```
-
-## Bus contract — required posts
-
-- `orient/waha-2026-4-key-split` to `lead` on first session-start in this dispatch window (one-liner: brief read + branch checked out + no surprises).
-- `heartbeat/waha-2026-4-key-split` to `lead` every 12h while building.
-- `ship/waha-2026-4-key-split` to `lead` on PR open with link + commit SHA + gate readiness.
-- `blocker/waha-2026-4-key-split` to `lead` if stuck (env, design Q, ambiguity).
-
-## Out of scope (will be REQUEST_CHANGES if attempted)
-
-- WAHA Render image bump (Phase 1 — AH1 ops)
-- POST /api/keys provisioning (AH1 ops, runs the pre-flight + production provisioning)
-- Render env-var rotation (AH1 Tier-B post-merge)
-- WAHA MCP-server adoption (Director-ratified out-of-scope)
-- Removing the legacy `api_key` fallback chain (separate fold-back PR after +7 days)

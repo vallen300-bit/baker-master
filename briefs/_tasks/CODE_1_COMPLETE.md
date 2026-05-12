@@ -1,144 +1,110 @@
 ---
 status: COMPLETE
-merged_pr: https://github.com/vallen300-bit/baker-master/pull/186
-merged_at: 2026-05-11T21:11:36Z
-merge_commit: bff986e4594a506ee852e80bd59078468c24608f
-ship_branch: b1/stop-hooks-recommendation-and-fail-loud-1 @ 5852e7f
-ah2_verdict: PASS-WITH-NITS via bus msg #118 thread 92393c72 (3 LOW nits captured for future iteration)
-hooks_live: ~/.claude/hooks/recommendation-check.sh + ~/.claude/hooks/fail-loud-check.sh (both registered in user-global settings.json Stop array, active fleet-wide)
-brief: briefs/_tasks/CODE_1_PENDING.md (this file WAS the brief — small scope)
-trigger_class: TIER_B_USER_GLOBAL_HOOK_INSTALL
-dispatched_at: 2026-05-11
+completed_at: 2026-05-12T21:45:06+00:00
+pr: 195
+pr_url: https://github.com/vallen300-bit/baker-master/pull/195
+branch: b1/vault-mirror-non-lock-replica-hotfix-1
+commit: cb6c9a7
+ship_report: briefs/_reports/B1_vault_mirror_non_lock_replica_hotfix_ship_20260512.md
+ship_gate_pytest: GREEN (tests/test_vault_mirror.py 9/9)
+ship_gate_health_poll: PENDING auto-deploy (B1 cannot drive Render redeploy)
+bus_post_message_id: 179
+brief: inline
+trigger_class: TIER_B_CONCURRENCY_PRIMITIVE_HOTFIX
+dispatched_at: 2026-05-12
 dispatched_by: ai-head-1 (AH1)
 target: b1
-director_ratification: Director 2026-05-11 ~15:30Z "go ahead. After we finish, let's proceed with installing codex as a judge" + "Send to B code build whenever you're ready. By bus."
+director_ratification: Director 2026-05-12 21:38Z "go" (post AH1 8x /health re-poll T+17min showing non-lock replica vault_last=None)
 priority: P1
-phase: 1 of 1 (single PR)
-unblocks:
-  - Mechanical enforcement of "always include Recommendation" rule (today's repeated slip)
-  - Mechanical enforcement of "fail loud" rule (sharper communication framing)
+phase: 1 of 1
 expected_pr_count: 1 (baker-master)
-expected_branch_name: b1/stop-hooks-recommendation-and-fail-loud-1
-expected_complexity: small (~2h)
-mandatory_2nd_pass: FALSE  # scope <100 LOC bash, no auth/DB/concurrency surface; AH1 judgment per SKILL.md §Code-reviewer 2nd-pass Protocol
-gate_to_merge: AH2 cross-lane review (no /security-review — diff is bash + json fixtures, no code path)
+expected_branch: b1/vault-mirror-non-lock-replica-hotfix-1
+expected_complexity: low-medium (~30-60 min)
+mandatory_2nd_pass: TRUE  # concurrency primitive + production-broken-now
+hard_ship_gate: |
+  8x rapid /health poll across replicas (15s spacing). ALL replicas MUST show:
+  (a) vault_sync_thread_alive: true (NEW key)
+  (b) vault_mirror_last_pull advancing past startup time
+  Paste raw output in PR description.
+gates_required:
+  - AH2 /security-review
+  - picker-architect (paste-block; architect not bus-attached pre-BRIEF_ARCHITECT_TERMINAL_1)
+  - AH1 feature-dev:code-reviewer 2nd-pass (mandatory per SKILL.md trigger #3 — concurrency primitive)
 last_heartbeat: null
-heartbeat_cadence_hours: 12
+heartbeat_cadence: 12h max (but expected ship ≤2h)
 ---
 
-# CODE_1_PENDING — STOP_HOOKS_RECOMMENDATION_AND_FAIL_LOUD_1 — 2026-05-11
+# CODE_1_PENDING — VAULT_MIRROR_NON_LOCK_REPLICA_HOTFIX_1 — 2026-05-12
 
-## Goal
+**Repo:** baker-master (`~/bm-b1`)
+**Branch:** `b1/vault-mirror-non-lock-replica-hotfix-1`
+**Base SHA:** `git pull --ff-only origin main` first (current main = `3c8acd2` — your prior PR #193 merge)
 
-Two Stop hooks that mechanically catch the two slip modes Director keeps catching:
+## Problem
 
-1. **`recommendation-check.sh`** — scans the model's final response for `Recommendation:` line. If absent AND the response contains question marks or numbered options, emits a warning JSON to surface the gap.
-2. **`fail-loud-check.sh`** — scans the model's final response for "completed" / "done" / "tests pass" / "shipped" claims. If found AND no explicit verification phrase ("0 skipped" / "X edge cases verified" / "literal pytest output: ...") in the same response, emits a warning.
+PR #193 (your prior ship) moved `vault_sync_tick` from singleton-locked APScheduler → per-process daemon thread spawned in `_ensure_vault_mirror()` at FastAPI startup. Intent: every replica refreshes its own mirror independently.
 
-Both are advisory (warn, not block) on first build. Director may flip to blocking later.
+**Production observation (AH1 8x /health re-poll T+17min post-deploy `3c8acd2`):**
 
-## Why
+```
+Deploy 3c8acd25 LIVE 21:18:49Z. Load balancer alternates 2 replicas:
 
-Today's session hit the recommendation slip on Q8 (caught manually by Director) AND has historically hit "completed" claims that turned out to be partial. Mnilax X article (May 2026, 30-codebase 6-week test) shows: rules in CLAUDE.md get ~80% compliance even when well-tuned. Hooks bring mechanically-checkable rules to ~100%. See `~/.claude/projects/-Users-dimitry-bm-aihead1/memory/feedback_always_include_recommendation.md` + project CLAUDE.md §"ENGINEERING RULES" Fail-loud rule for source.
+LOCK-HOLDER REPLICA (sched=running, jobs=61):
+  vault_last advances: 21:21:34 → 21:26:35 → 21:36:36 ✓
 
-## Files to create / modify
-
-**New (canonical sources in baker-master):**
-- `tests/fixtures/recommendation-check.sh` — Stop hook bash script (~30 LOC). Reads stop-event JSON from stdin, parses `transcript_path`, reads last assistant message, applies the regex check, emits `{"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": "<warning text>"}}` when gap detected. Exits 0 on every path.
-- `tests/fixtures/fail-loud-check.sh` — same pattern.
-- `tests/test_stop_hooks.py` — pytest with parametrized cases: (a) recommendation-check emits warning when assistant message has question + no Recommendation, (b) recommendation-check stays silent when Recommendation present, (c) fail-loud emits when "completed" with no verification phrase, (d) fail-loud stays silent when verification phrase present, (e) drift-detection test diff'ing fixtures against `~/.claude/hooks/<name>.sh` if those exist.
-
-**Modify:**
-- `~/.claude/settings.json` (user-global, OUTSIDE the repo) — register both hooks under `hooks.Stop` array. Pre-merge cp pattern: B1 cp's the fixtures to `~/.claude/hooks/<name>.sh` AND splices settings.json BEFORE merge so the drift-detection test passes locally. Pattern reference: `~/.claude/hooks/session-start-bus-drain.sh` (already cp'd this morning per BRIEF_BRISEN_LAB_TERMINAL_BUS_DRAIN_ON_SESSION_START_1).
-
-**Do NOT touch:**
-- `outputs/dashboard.py` — orthogonal
-- `kbl/`, `models/`, `triggers/`, `tools/`, `migrations/` — orthogonal
-- Existing user-global hooks (`session-start-bus-drain.sh`) — separate concern
-
-## Hook contract details
-
-**Stop event input (from stdin, JSON):**
-```json
-{
-  "hook_event_name": "Stop",
-  "session_id": "...",
-  "transcript_path": "/path/to/transcript.jsonl",
-  "cwd": "..."
-}
+NON-LOCK REPLICA (sched=stopped, jobs=0):
+  vault_last=None across 6 hits (21:24:03 / 21:25:36 / 21:27:40 / 21:36:15 / 21:36:30 / 21:37:33 / 21:37:49)
+  ✗ Per-process daemon thread NOT running on this replica
 ```
 
-**Hook output (stdout, JSON):**
-- Emit `{"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": "<warning>"}}` when slip detected.
-- Empty output (or no print) when clean.
-- ALWAYS exit 0. Never block. Never crash. Never timeout (max 4s).
+`vault_sha=8590d4ac` on all hits — both replicas DID do the initial `ensure_mirror()` clone at startup, but only the lock-holder is doing periodic refresh. Original bug (Director's YAML edits propagate ~50% of requests) is still present.
 
-**Reading the last assistant message:**
-- Parse `transcript_path` (JSONL — each line is a turn).
-- Walk backwards from EOF, find last line where `type == "assistant"`, extract `message.content[].text` joined.
-- Skip if no assistant message found.
+## Hypotheses (rank)
 
-**Recommendation-check regex:**
-- TRIGGER condition: assistant text contains either `?` OR a numbered list (`^\d+\.` regex) OR phrase like "options" / "choose" / "which".
-- ABSENT condition: assistant text does NOT contain `Recommendation:` (case-insensitive, line-anchored).
-- WARN message: `Stop-hook: assistant response asks a question or presents options but contains no 'Recommendation:' line. Per project CLAUDE.md HARD RULE 2, every multi-option / multi-Q reply ends with explicit Recommendation.`
+1. **Silent exception in `start_sync_thread()` on non-lock replica** — most likely. Exactly the gap architect M1 + 2nd-pass L1 flagged: thread spawn (or first tick) throws an exception, caught and swallowed, thread dies, `/health` has no signal.
+2. `_ensure_vault_mirror()` startup hook ordering — maybe singleton-lock check fires before `start_sync_thread()` on non-lock replica path.
+3. Some environment difference between lock-holder replica and non-lock replica (env var, FS permissions, port binding side-effect) that breaks the spawn on non-lock only.
+4. `start_sync_thread()` IS spawned but `_sync_loop` exits early due to a guard that only passes on lock-holder.
 
-**Fail-loud-check regex:**
-- TRIGGER condition: assistant text contains any of (case-insensitive): "completed", "done", "tests pass", "shipped", "merged", "all green".
-- ABSENT condition: assistant text does NOT contain ANY of: digits + "skipped", "verified", "literal", "0 fail", "no edge case missed".
-- WARN message: `Stop-hook: assistant response claims completion / pass / ship but contains no explicit verification phrase. Per project CLAUDE.md ENGINEERING RULES Fail-loud, surface uncertainty rather than hiding it.`
+## Required deliverables (2-part scope)
+
+### Part A — Observability primitive FIRST (folds 2nd-pass L1 + architect MEDIUM N1)
+
+Before fixing, add the diagnostic primitive so you (and future operators) can see thread liveness on every replica:
+
+1. `outputs/dashboard.py:mirror_status()` returns dict adds: `"vault_sync_thread_alive": _sync_thread is not None and _sync_thread.is_alive()`
+2. Surface in `/health` JSON next to `vault_mirror_last_pull`
+3. Deploy this BEFORE the fix — then re-poll across replicas to confirm WHICH hypothesis matches (thread None? thread .is_alive() false? thread alive but loop not ticking?)
+
+### Part B — Fix the spawn / loop failure
+
+Based on Part A evidence:
+- If thread is None on non-lock → spawn never happens. Trace startup hook firing on non-lock replica; add exception logging before/after `start_sync_thread()` call in `_ensure_vault_mirror()`.
+- If thread exists but not alive → spawn succeeded, loop died. Add explicit `logger.exception` in `_sync_loop`'s except block (currently silent per architect M1 / 2nd-pass L1).
+- If thread alive but not ticking → first iteration is blocking on something; verify `ensure_mirror()` completes synchronously before `start_sync_thread()` (`_ensure_vault_mirror()` ordering).
+
+### Part C — Fold 2nd-pass + architect NITs (since you're in this file anyway)
+
+1. **M1 lock-symmetry** (2nd-pass MEDIUM escalation, architect+AH2 LOW): wrap `stop_sync_thread` body in `with _sync_thread_lock:` per 2nd-pass fix snippet.
+2. **L2 timing test slack** (architect+AH2 LOW): bump `test_sync_thread_invokes_sync_tick_on_interval` to 0.1s interval + 1.0s wait + `>=3` calls.
+3. **L4 concurrent-idempotency test** (architect LOW): add `test_start_sync_thread_concurrent_idempotent` using `threading.Barrier(2)` + 20-iteration loop, assert exactly one thread spawned.
+4. (Architect N1 PR #191 — parametrized Case G — out of scope, file follow-up only.)
 
 ## Acceptance criteria
 
-| AC | Test | Verification |
-|---|---|---|
-| A1 | `tests/fixtures/recommendation-check.sh` exists, exec bit set, exits 0 on every path | `chmod +x` confirmed, file exists, `bash -n` syntax check passes |
-| A2 | recommendation-check warns on slip case | `tests/test_stop_hooks.py::test_recommendation_check_warns_on_question_without_recommendation` GREEN |
-| A3 | recommendation-check silent on clean case | `test_recommendation_check_silent_with_recommendation_line` GREEN |
-| A4 | `tests/fixtures/fail-loud-check.sh` exists, exec bit set, exits 0 on every path | same as A1 |
-| A5 | fail-loud warns on slip case | `test_fail_loud_warns_on_completed_without_verification` GREEN |
-| A6 | fail-loud silent on clean case | `test_fail_loud_silent_with_verification_phrase` GREEN |
-| A7 | Both hooks registered in user-global `~/.claude/settings.json` Stop array | manual verification — B1 splices + commits a settings.json snapshot to `tests/fixtures/settings-stop-hooks-snapshot.json` for drift detection |
-| A8 | Drift-detection test passes | `test_drift_detection` diffs `tests/fixtures/<name>.sh` vs `~/.claude/hooks/<name>.sh`, GREEN |
-| A9 | Full suite no regressions | `pytest tests/ -v` GREEN, no other test broken |
-| A10 | Live behavior verified — open a fresh AH1 session, intentionally write a Director-facing reply with options + no Recommendation; hook should warn in early system context | Manual smoke test, B1 documents in PR description |
+1. `/health` exposes `vault_sync_thread_alive: bool` on every replica.
+2. After fix deploys, 8x rapid /health poll (15s spacing) across replicas shows `vault_sync_thread_alive: true` AND `vault_mirror_last_pull` is ≤5 min old on EVERY replica hit (not just lock-holder).
+3. `stop_sync_thread` acquires `_sync_thread_lock`.
+4. Timing test bumped to 0.1s/1.0s/≥3.
+5. New concurrent-idempotency test added + GREEN.
+6. `_sync_loop` exception handler now logs (no longer silent — per architect M1 / 2nd-pass L1 framing).
 
-## Sequencing
+## Ship gate
 
-1. `cd ~/bm-b1 && git fetch origin main && git checkout main && git pull --ff-only`. Confirm HEAD `1aa778e` or newer.
-2. Branch: `git checkout -b b1/stop-hooks-recommendation-and-fail-loud-1`.
-3. Write `tests/fixtures/recommendation-check.sh` (~30 LOC) + `tests/fixtures/fail-loud-check.sh` (~30 LOC). Reference: `tests/fixtures/session-start-bus-drain.sh` for the hook contract pattern (`_emit` helper, JSON envelope, `cat >/dev/null` stdin drain on no-op paths).
-4. Write `tests/test_stop_hooks.py` — pytest with the 8 cases above.
-5. `pytest tests/test_stop_hooks.py -v` GREEN.
-6. `pytest tests/ -v` GREEN (no regressions).
-7. `chmod +x tests/fixtures/recommendation-check.sh tests/fixtures/fail-loud-check.sh`.
-8. Pre-merge cp: `cp tests/fixtures/recommendation-check.sh ~/.claude/hooks/recommendation-check.sh && cp tests/fixtures/fail-loud-check.sh ~/.claude/hooks/fail-loud-check.sh`. Run drift-detection test locally to confirm.
-9. Splice both hooks into `~/.claude/settings.json` Stop array via `jq` (NOT raw edit — preserve existing keys). Save snapshot to `tests/fixtures/settings-stop-hooks-snapshot.json`.
-10. A10 manual smoke test — open a fresh AH1 session in another terminal, write a sample Director-facing message, confirm hook output appears.
-11. Open PR to baker-master `main`. Title: `feat(hooks): Stop hooks for recommendation enforcement + fail-loud claim verification (STOP_HOOKS_RECOMMENDATION_AND_FAIL_LOUD_1)`.
-12. Ship via bus to /msg/lead with brief PR summary + commit SHA + literal pytest output. NO fenced PL paste-block (Rule retired 2026-05-11 per `feedback_no_pl_ship_report_paste_block.md`). NO wake-paste at end of dispatch (Rule 0.5 retired 2026-05-11 per `feedback_no_wake_paste_b_code_dispatch.md`).
+Literal `pytest tests/test_vault_mirror.py -v` GREEN + the 8x /health poll output across replicas pasted in PR description (must show all replicas hit have `vault_sync_thread_alive: true` and advancing `vault_mirror_last_pull`).
 
-## Critical do-NOTs
+## Bus-post on ship
 
-- Do NOT make either hook BLOCKING on first build. Both warn-only. Director will flip to blocking later if compliance still erodes.
-- Do NOT exceed 4s wall time per hook (Claude Code hook timeout). Keep regex checks simple; skip transcript walk if file >10MB (degrade gracefully).
-- Do NOT crash or non-zero exit. Every path exits 0. Errors emit short status to additionalContext, not stderr-blocking.
-- Do NOT splice settings.json with raw text edit — use `jq` to preserve other keys (Forge, bus-drain, future hooks).
-- Do NOT touch `~/.claude/hooks/session-start-bus-drain.sh` — separate hook, separate fixture, separate concern.
-- Do NOT add the hooks to `bm-b<N>/.claude/settings.json` — user-global only. Picker scopes don't carry hooks today.
-
-## Anchor
-
-- Director directive 2026-05-11 ~15:30Z "go ahead" + "Send to B code build whenever you're ready. By bus."
-- Mnilax X article: `https://x.com/Mnilax/status/2053116311132155938` (30-codebase 6-week test, 41% → 3% mistake rate with rule + hook combo)
-- Recommendation slip incident: today's Q8 codex-judge surfacing where Q5/Q6/Q7 had defaults but Q8 dropped the recommendation; Director caught it
-- Fail-loud framing: project CLAUDE.md §"ENGINEERING RULES" added today (commit `1aa778e`)
-- Bus-drain hook reference pattern: `tests/fixtures/session-start-bus-drain.sh` + `~/.claude/hooks/session-start-bus-drain.sh` (drift-detection precedent)
-
-— AH1 (lead, AH1-Terminal)
-
----
-
-## Prior CODE_1 task (archive reference)
-
-BRIEF_PLAUD_TRIGGER_FIX_1 — COMPLETE 2026-05-07. PR #168 merged 2026-05-07 ~07:20Z. 5-patch fix for Plaud transcripts arriving as header-only DB shells (silent failure since 2026-04-17). Ship report: `briefs/_reports/B1_plaud_trigger_fix_1_20260507.md`.
+```
+BAKER_ROLE=b1 ~/Desktop/baker-code/scripts/bus_post.sh lead "SHIP: VAULT_MIRROR_NON_LOCK_REPLICA_HOTFIX_1 — PR #<N> open. Root cause: <one-line>. /health now exposes vault_sync_thread_alive on all replicas. Lock-symmetry + timing-test-slack + concurrent-idempotency test folded. Ship gate: pytest GREEN + 8x /health poll showing all-replica refresh." ship/vault-mirror-non-lock-replica-hotfix-1
+```
