@@ -38,6 +38,18 @@ Current `- **Specialized agents:** .claude/agents/` references a deleted directo
 
 **Fix:** Update to `- **Specialized agents:** ~/.claude/agents/ (user-global — not in repo per HARNESS_SUBAGENT_MIGRATION_1)`.
 
+### NEW — Step 9 SCOPE AMENDMENT (Director-ratified 2026-05-13)
+
+Fold a Part 3 into the same `.githooks/pre-commit` hook (no new file): reject staged content containing `claude-opus-4-20250514` or `claude-sonnet-4-20250514`. Exclusions: `briefs/`, `tasks/lessons.md`, `docs-site/`.
+
+**Why ride this PR rather than separate:** the hook surface is already being modified in PR #194, single review cycle covers both, and this hardens what MODEL_DEPRECATION_SWEEP_1 manually fixed yesterday (commit `31454dc`).
+
+**Full spec + implementation pattern:** see brief §"Step 9" + acceptance criterion #13. Brief updated in same commit as this mailbox UPDATE.
+
+**Header convention (matches Step 8 / Part 2 design):** subheader `# Part 3: retired Anthropic model ID enforcement (NO BYPASS — use claude-opus-4-6/4-7 or claude-sonnet-4-5/4-6)`. File header must clarify existing migration-edit bypasses do NOT cover Part 2 OR Part 3.
+
+**Acceptance criterion #13:** test commit with retired ID in `orchestrator/test_retired_id.py` → expect rejection; test commit with same string in `briefs/test.md` → expect success (then revert both).
+
 ### Heartbeat
 
 Per AH1 SKILL.md §B-code stall chase: ~30-45 min fast-follow window. Single heartbeat OK; bus-post `heartbeat/HARNESS_SUBAGENT_MIGRATION_1` if you cross the hour mark before pushing.

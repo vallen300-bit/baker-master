@@ -172,6 +172,50 @@ Add a hook in `.githooks/` rejecting any commit that introduces `.claude/agents/
 
 Hook installable via `git config core.hooksPath .githooks` (already standard in Brisen repos per CLAUDE.md session-start).
 
+### Step 9 — Pre-commit hook rejecting retired Anthropic model IDs (SCOPE AMENDMENT 2026-05-13)
+
+**Director-ratified amendment 2026-05-13.** Folded into this brief mid-flight after `claude-automation-recommender` skill surfaced the gap. Rides PR #194's existing `.githooks/pre-commit` surface (no new file).
+
+Add a Part 3 to `.githooks/pre-commit` rejecting any staged content that introduces strings matching the retired Anthropic model IDs (Anthropic deprecation 2026-04-14, retirement 2026-06-15):
+- `claude-opus-4-20250514`
+- `claude-sonnet-4-20250514`
+
+**Exclusions (legitimate historical references):** `briefs/`, `tasks/lessons.md`, `docs-site/` — append-only audit trail and historical briefs may reference retired IDs as documentation.
+
+**Header convention (consistent with Part 2's no-bypass design):** Part 3 subheader must state: `# Part 3: retired Anthropic model ID enforcement (NO BYPASS — use claude-opus-4-6/4-7 or claude-sonnet-4-5/4-6)`. File header must clarify existing migration-edit bypasses do NOT cover Part 2 OR Part 3.
+
+**Implementation pattern (suggested — B-code may refine):**
+```bash
+# Part 3: retired Anthropic model ID enforcement
+# Anthropic deprecation 2026-04-14, retirement 2026-06-15.
+# NO BYPASS — use claude-opus-4-6/4-7 or claude-sonnet-4-5/4-6.
+# Exclude historical/audit-trail paths: briefs/, tasks/lessons.md, docs-site/.
+
+RETIRED_IDS_REGEX='claude-(opus-4|sonnet-4)-20250514'
+EXCLUDE_PATHS='^briefs/|^tasks/lessons\.md$|^docs-site/'
+
+FILES_WITH_HITS="$(git diff --cached --name-only --diff-filter=ACMR | while read f; do
+  if [ -f "$f" ] && git diff --cached -- "$f" | grep -E '^\+' | grep -qE "$RETIRED_IDS_REGEX"; then
+    echo "$f"
+  fi
+done | grep -vE "$EXCLUDE_PATHS" || true)"
+
+if [ -n "$FILES_WITH_HITS" ]; then
+  echo "ERROR: Retired Anthropic model ID detected (claude-opus-4-20250514 or claude-sonnet-4-20250514)"
+  echo "Anthropic retirement: 2026-06-15."
+  echo "Use claude-opus-4-6 / claude-opus-4-7 / claude-sonnet-4-5 / claude-sonnet-4-6."
+  echo "Files with hits:"
+  echo "$FILES_WITH_HITS"
+  echo ""
+  echo "NO BYPASS for this check. Exclusions: briefs/, tasks/lessons.md, docs-site/ (historical/audit-trail)."
+  exit 1
+fi
+```
+
+**Why this is a sweep-hardening step, not scope creep:**
+- 2026-05-12 MODEL_DEPRECATION_SWEEP_1 manually removed the two retired IDs from the runtime codebase. Without enforcement, future code can re-introduce them silently before the June 15 hard-fail. This step closes that window.
+- Same `.githooks/pre-commit` file as Step 8 — single review surface, single test cycle.
+
 ## Acceptance criteria
 
 1. `~/.claude/agents.bak-2026-05-12/` exists and contains 12 files (the original user-global state)
@@ -186,6 +230,7 @@ Hook installable via `git config core.hooksPath .githooks` (already standard in 
 10. Invocation-matrix audit (step 5) returns no orphaned types
 11. **Wrong-direction overwrite audit (new):** PR description contains all 12 forked-pair diffs explicitly. Each diff annotated with "overwrite direction: picker → user-global" + "abort gate: PASS | TRIGGERED-and-resolved". No pair shipped with un-surfaced divergence.
 12. PR diff cleanly shows 132 picker file deletions + 10 user-global additions + path-fix in `baker-pm.md` + `.gitignore` entries + pre-commit hook
+13. **Retired-model-ID block (SCOPE AMENDMENT 2026-05-13):** Pre-commit hook Part 3 blocks staged content containing `claude-opus-4-20250514` or `claude-sonnet-4-20250514`. Verify by attempting a test commit with a retired ID in a non-excluded path (`echo 'TEST=\"claude-opus-4-20250514\"' >> orchestrator/test_retired_id.py && git add . && git commit -m test`) — expect rejection with the documented error message. Also verify exclusions work: same string in `briefs/test.md` should commit successfully (then revert).
 
 ## Test plan
 
