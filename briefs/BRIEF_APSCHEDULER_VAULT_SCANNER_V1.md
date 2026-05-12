@@ -349,3 +349,158 @@ Director "go" 2026-05-13 (this session) post AH1 engineering eval. Specifically 
 - Branch: `b3/apscheduler-vault-scanner-1`
 - Coordinates with Brief 1 (b2): merge order matters — Brief 1 must merge BEFORE this brief's scanner can run successfully (no `tasks/active/` to scan otherwise). If b3 lands first, gate behind `VAULT_SCANNER_ENABLED=false` Render env until Brief 1 lands.
 - Coordinates with Brief 3 (b4): no hard dependency; Brief 3 registers ONE deadline that this scanner picks up. If Brief 3 lands first, scanner just sees zero deadlines on first run — fine.
+
+---
+
+## UPDATE — 2026-05-13 — architecture-review amendments (Director-ratified this session)
+
+Four small amendments folded in post-architecture-review, all observability / failure-mode hardening. Adds ~30 min to estimated effort (~4h → ~4.5h). No scope creep — each amendment is a defensive surface, not a new feature.
+
+### Amendment A — `scanner_run_log` row per run (concern #3)
+
+Add a one-row-per-scan log to the existing `deadlines` DB (new table `scanner_run_log`). Lets the dashboard surface "last successful scan: HH:MM ago" and lets future sentinels alert on empty-digest streaks.
+
+**New migration** in `migrations/` (use the next available ordinal):
+
+```sql
+CREATE TABLE IF NOT EXISTS scanner_run_log (
+    id SERIAL PRIMARY KEY,
+    run_ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    desks_scanned INTEGER NOT NULL DEFAULT 0,
+    tasks_found INTEGER NOT NULL DEFAULT 0,
+    deadlines_found INTEGER NOT NULL DEFAULT 0,
+    dm_sent BOOLEAN NOT NULL DEFAULT FALSE,
+    dm_error_msg TEXT,
+    error_count INTEGER NOT NULL DEFAULT 0,
+    notes TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_scanner_run_log_run_ts ON scanner_run_log (run_ts DESC);
+```
+
+Scanner writes ONE row per run, at the END (success or failure). On failure, `notes` contains last 500 chars of the traceback. `dm_error_msg` populated only if Slack send was attempted but failed.
+
+**Migration discipline:** verify with `SELECT column_name FROM information_schema.columns WHERE table_name = 'scanner_run_log'` before any first insert. Grep `memory/store_back.py` for any pre-existing bootstrap DDL on this table name (migration-vs-bootstrap drift trap, Lesson #18). Should be none — new table.
+
+### Amendment B — 3-day empty-digest streak sentinel (concern #3)
+
+After writing the `scanner_run_log` row, query:
+
+```sql
+SELECT COUNT(*) AS empty_streak
+FROM scanner_run_log
+WHERE run_ts >= NOW() - INTERVAL '3 days'
+  AND tasks_found = 0
+  AND deadlines_found = 0
+  AND error_count = 0
+LIMIT 4;
+```
+
+If `empty_streak >= 3` consecutive successful scans with zero findings: send a separate Slack DM to Director:
+
+> "⚠️ Vault scanner: 3 consecutive scans found zero tasks + zero deadlines across all desks. Either nothing's queued OR frontmatter parser regression. Check `~/baker-vault/_ops/agents/<desk>/tasks/active/` to verify."
+
+One-shot per streak (don't re-alert at day 4, 5, 6). Reset counter implicit (next non-empty run breaks streak).
+
+### Amendment C — Retention prune for `today-*.md` files (concern #4)
+
+At the top of each scan run (before the per-desk loop):
+
+```python
+import glob
+from datetime import datetime, timezone, timedelta
+cutoff = (datetime.now(timezone.utc) - timedelta(days=90)).date()
+for desk_dir in glob.glob(os.path.join(agents_dir, "*")):
+    if not os.path.isdir(desk_dir):
+        continue
+    desk_name = os.path.basename(desk_dir)
+    # Path-traversal validation per existing rule
+    if not re.match(r"^[a-z0-9-]+$", desk_name):
+        continue
+    for today_file in glob.glob(os.path.join(desk_dir, "today-*.md")):
+        # Parse date from filename: today-YYYY-MM-DD.md
+        m = re.match(r"^today-(\d{4}-\d{2}-\d{2})\.md$", os.path.basename(today_file))
+        if not m:
+            continue
+        try:
+            file_date = datetime.strptime(m.group(1), "%Y-%m-%d").date()
+        except ValueError:
+            continue
+        if file_date < cutoff:
+            try:
+                os.remove(today_file)
+            except OSError as e:
+                logger.warning("vault_scanner: prune failed for %s: %s", today_file, e)
+```
+
+Keep `today.md` (stable name, always overwritten) + last 90 dated copies.
+
+Add a test: create 120 dated files spanning 4 months, verify only last 90 survive after one scan run.
+
+### Amendment D — Slack-send try/except with last-error file (concern #2)
+
+Wrap the Slack DM send in try/except. On exception:
+
+```python
+try:
+    slack_send(channel=director_dm, blocks=blocks)
+    dm_sent = True
+    dm_error_msg = None
+except Exception as e:
+    dm_sent = False
+    dm_error_msg = f"{type(e).__name__}: {e}"
+    error_path = os.path.expanduser(
+        f"~/baker-vault/_ops/agents/_scanner-state/last-error-{datetime.now(timezone.utc).date().isoformat()}.txt"
+    )
+    try:
+        with open(error_path, "w") as f:
+            f.write(f"{datetime.now(timezone.utc).isoformat()}\n{dm_error_msg}\n")
+    except OSError:
+        pass
+    logger.error("vault_scanner: Slack DM send failed: %s", dm_error_msg)
+```
+
+Both fields land in `scanner_run_log`. On the NEXT successful run, scanner checks for `last-error-*.txt` files from the previous 3 days; if any exist, the consolidated DM gets a prefix line:
+
+> "⚠️ Previous N scans had send errors — see _scanner-state/last-error-*.txt"
+
+Then deletes the error files (one-shot surface). This way Director sees the silent-failure window when the channel recovers.
+
+### Amendment E — Unassigned deadlines bucket (concern #1, scanner-side)
+
+Modify the per-desk deadline query: ALSO run a once-per-scan query for `assigned_to IS NULL`:
+
+```sql
+SELECT id, description, due_date, priority, severity, matter_slug,
+       last_reminded_at, reminder_stage, is_critical
+FROM deadlines
+WHERE status = 'active'
+  AND assigned_to IS NULL
+  AND (due_date IS NULL OR due_date <= NOW() + INTERVAL '30 days')
+ORDER BY due_date NULLS LAST, priority
+LIMIT 500;
+```
+
+Surface these in a synthetic `_unassigned` section in the consolidated Slack DM, after the per-desk sections. Format:
+
+```
+⚪ _unassigned (N hard deadlines without desk attribution)
+  Overdue: <count>
+  Due this week: <count>
+  Backfill: pending Brief 3 audit (see _ops/processes/deadline-system-contract-v1.md when shipped)
+```
+
+This guarantees unassigned hard deadlines are never silent.
+
+### Test plan additions
+
+- Test 9: `scanner_run_log` row written on success (assert all columns populated correctly)
+- Test 10: `scanner_run_log` row written on Slack send failure (dm_sent=false, dm_error_msg populated)
+- Test 11: Empty-streak sentinel fires after 3 consecutive empty scans, only ONCE (idempotent across same streak)
+- Test 12: `today-*.md` pruning: create 120 dated files, verify exactly 90 most-recent survive
+- Test 13: `_unassigned` deadline bucket appears in DM when `assigned_to IS NULL` rows exist
+
+Total test count: 13 (was 8). Update ship gate accordingly: `pytest tests/test_vault_scanner.py -v` must show all 13 GREEN.
+
+### Ratification anchor
+
+Director "ratified" 2026-05-13 (this session) post AH1 architecture-review verdict "accept-with-changes." Two HIGH + three MEDIUM concerns surfaced; all five folded as amendments A–E above. No scope creep beyond ~30 min added effort.

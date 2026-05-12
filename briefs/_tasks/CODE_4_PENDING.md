@@ -5,15 +5,26 @@ trigger_class: TIER_B_AUDIT_PLUS_DB_WRITE
 dispatched_at: 2026-05-13
 dispatched_by: ai-head-1 (AH1)
 target: b4
+update_at: 2026-05-13
+update_reason: |
+  Post AH1 architecture-review (Director-ratified same session, verdict
+  "accept-with-changes"). One amendment folded as
+  "## UPDATE — 2026-05-13" section in brief end. Adds ~15 min effort.
+  Closes 1 HIGH concern (assigned_to population gap -> scanner silent
+  under-reporting). Q5 now requires quantitative output (% population
+  rate) + v1.5 backfill trigger if P < 50%.
+  READ the UPDATE section FIRST.
 director_ratification: |
   Director 2026-05-13 "go" — post AH1 engineering eval of MOVIE Desk
   scheduled-tasks architecture review. Three-tier frame ratified.
   This brief is 3 of 3 in v1 dispatch.
+  Director "ratified" 2026-05-13 same session — architecture-review
+  amendment (above) folded in pre-build.
 priority: P2
 phase: 1 of 1
 expected_pr_count: 0 (audit doc commits to baker-vault directly; DB write is runtime via MCP)
 expected_branch: none (vault direct-push; no baker-master PR)
-expected_complexity: low (~2h B-code; grep + write doc + 1 MCP call + 1 SQL UPDATE)
+expected_complexity: low (~2.25h B-code; grep + write doc + 1 MCP call + 1 SQL UPDATE + 1 quantitative Q5 query + conditional v1.5 trigger)
 mandatory_2nd_pass: FALSE
 hard_ship_gate: |
   1. `_ops/processes/deadline-system-contract-v1.md` committed to
@@ -27,6 +38,10 @@ hard_ship_gate: |
      Must return exactly one row, all fields populated.
   3. AH1 spot-check: 3 random file:line citations from the audit doc
      resolve to the actual claimed content.
+  4. Q5 quantitative output: literal SQL + literal row output pasted in
+     the audit doc (assigned_to + matter_slug population percentages).
+     If P < 50%, the v1.5 follow-up section is appended to the audit
+     doc per brief UPDATE.
 scope: |
   baker-vault: ONE new doc at _ops/processes/deadline-system-contract-v1.md.
   Baker DB: insert + update ONE row in `deadlines` table (residence-fee

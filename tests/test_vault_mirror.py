@@ -185,6 +185,187 @@ def test_start_sync_thread_concurrent_idempotent():
         assert spawned[0].is_alive()
 
 
+def test_stop_sync_thread_does_not_block_concurrent_start():
+    """Concurrent ``start_sync_thread`` must not wait on stop's join.
+
+    Fix 1 (VAULT_MIRROR_THREAD_LIFECYCLE_HYGIENE_1 / PR #195 follow-up
+    L1): ``stop_sync_thread`` detaches ``_sync_thread = None`` inside
+    the lock and joins the local handle OUTSIDE the lock. A concurrent
+    ``start_sync_thread`` therefore acquires the lock right after the
+    detach, observes ``_sync_thread is None``, and spawns a fresh thread
+    without waiting for the (potentially up-to-``timeout``-seconds) join.
+
+    Test pins this property by making ``sync_tick`` block until released,
+    forcing the stop's join to wait. While the join is in flight, the
+    concurrent start must come back fast and with a NEW thread instance
+    (not the dying one).
+    """
+    tick_started = threading.Event()
+    tick_release = threading.Event()
+
+    def _slow_tick():
+        tick_started.set()
+        # Block until released — simulates a slow git pull mid-join.
+        tick_release.wait(timeout=5.0)
+
+    try:
+        with patch.object(vault_mirror, "sync_tick", side_effect=_slow_tick):
+            thread_a = vault_mirror.start_sync_thread(interval_seconds=0.01)
+            assert tick_started.wait(timeout=2.0), (
+                "thread A never entered sync_tick"
+            )
+
+            start_thread_holder: list[threading.Thread] = []
+            start_elapsed_ms: list[float] = []
+            start_done = threading.Event()
+
+            def _stop_runner():
+                vault_mirror.stop_sync_thread(timeout=5.0)
+
+            def _start_runner():
+                # Brief sleep to let stop acquire+release lock + detach
+                # before this racer tries to spawn.
+                time.sleep(0.02)
+                t0 = time.monotonic()
+                thread_b = vault_mirror.start_sync_thread(interval_seconds=60)
+                start_elapsed_ms.append((time.monotonic() - t0) * 1000.0)
+                start_thread_holder.append(thread_b)
+                start_done.set()
+
+            s_thread = threading.Thread(target=_stop_runner)
+            st_thread = threading.Thread(target=_start_runner)
+            s_thread.start()
+            st_thread.start()
+
+            assert start_done.wait(timeout=2.0), (
+                "start_sync_thread never returned — likely blocked on join"
+            )
+
+            # CI-safety pad over brief's 50ms target — the property
+            # under test is "lock released before join" which translates
+            # to <1ms in the ideal case; anything below ~200ms proves we
+            # are not waiting on the up-to-5s join. Anything above 1s
+            # means the lock was held across join (regression).
+            assert start_elapsed_ms[0] < 200.0, (
+                "start_sync_thread blocked on stop's join: "
+                f"{start_elapsed_ms[0]:.1f}ms (regression: lock held "
+                "across join)"
+            )
+            assert start_thread_holder[0] is not thread_a, (
+                "start_sync_thread should return a NEW thread instance, "
+                "not the dying handle A"
+            )
+
+            # Release the slow sync_tick so thread A can exit and stop's
+            # join completes before fixture teardown.
+            tick_release.set()
+            s_thread.join(timeout=5.0)
+            st_thread.join(timeout=5.0)
+    finally:
+        tick_release.set()
+
+
+def test_per_thread_stop_event_isolation():
+    """Fresh ``threading.Event`` per spawn — no cross-instance leakage.
+
+    Fix 1 (VAULT_MIRROR_THREAD_LIFECYCLE_HYGIENE_1): each
+    ``start_sync_thread`` allocates a NEW ``_sync_thread_stop`` Event and
+    passes it into ``_sync_loop`` via args. A successor thread therefore
+    listens to its own event; setting the predecessor's old event does
+    not also stop the successor.
+
+    Pre-fix failure mode: module-level Event was shared. Sequence
+    ``start → stop → start → set old event`` would have signalled the
+    NEW thread to exit because both shared the same Event instance.
+    """
+    with patch.object(vault_mirror, "sync_tick"):
+        thread_a = vault_mirror.start_sync_thread(interval_seconds=0.05)
+        event_a = vault_mirror._sync_thread_stop
+
+        vault_mirror.stop_sync_thread(timeout=2.0)
+        # A exited because stop_sync_thread set event_a.
+        thread_a.join(timeout=2.0)
+        assert not thread_a.is_alive(), "A should have exited after stop"
+
+        thread_b = vault_mirror.start_sync_thread(interval_seconds=0.05)
+        event_b = vault_mirror._sync_thread_stop
+
+        assert event_a is not event_b, (
+            "successor must have its OWN Event instance — pre-fix would "
+            "share one module global"
+        )
+
+        # Setting the PRIOR event must not stop B.
+        event_a.set()
+        time.sleep(0.2)
+        assert thread_b.is_alive(), (
+            "B was stopped by predecessor's event — cross-instance signal "
+            "leakage (regression)"
+        )
+
+        # Setting B's own event DOES stop B.
+        event_b.set()
+        thread_b.join(timeout=2.0)
+        assert not thread_b.is_alive()
+
+
+def test_mirror_status_toctou_safety():
+    """``mirror_status`` must not raise under concurrent stop/start churn.
+
+    Fix 2 (VAULT_MIRROR_THREAD_LIFECYCLE_HYGIENE_1 / PR #195 follow-up
+    L2): ``mirror_status`` snapshots ``_sync_thread`` to a local before
+    calling ``.is_alive()``. Without the snapshot a concurrent
+    ``stop_sync_thread`` nulling ``_sync_thread`` between the
+    is-not-None check and the is_alive() call raises AttributeError,
+    swallowed by /health's outer try/except → one-poll false-negative
+    for ``vault_sync_thread_alive``.
+
+    Tight loop pits a poller against a stop+start churner for 500
+    iterations. Must surface zero AttributeErrors and always return a
+    bool.
+    """
+    iterations = 500
+    with patch.object(vault_mirror, "sync_tick"):
+        vault_mirror.start_sync_thread(interval_seconds=60)
+
+        observations: list[object] = []
+        errors: list[BaseException] = []
+        stop_polling = threading.Event()
+
+        def _poller():
+            while not stop_polling.is_set():
+                try:
+                    status = vault_mirror.mirror_status()
+                    observations.append(status["vault_sync_thread_alive"])
+                except BaseException as exc:  # noqa: BLE001 — capture for assert
+                    errors.append(exc)
+
+        def _churner():
+            for _ in range(iterations):
+                vault_mirror.stop_sync_thread(timeout=2.0)
+                vault_mirror.start_sync_thread(interval_seconds=60)
+
+        poll_thread = threading.Thread(target=_poller)
+        churn_thread = threading.Thread(target=_churner)
+        poll_thread.start()
+        churn_thread.start()
+
+        churn_thread.join(timeout=30.0)
+        assert not churn_thread.is_alive(), "churner stalled past 30s"
+        stop_polling.set()
+        poll_thread.join(timeout=5.0)
+
+    assert not errors, (
+        f"mirror_status raised under TOCTOU race: {errors[:3]} "
+        f"(regression: lost local-snapshot guard)"
+    )
+    assert observations, "poller never observed a status"
+    assert all(isinstance(v, bool) for v in observations), (
+        "vault_sync_thread_alive must always be a bool — got "
+        f"non-bool in sample: {[v for v in observations if not isinstance(v, bool)][:3]}"
+    )
+
+
 def test_mirror_status_exposes_thread_liveness():
     """``mirror_status`` must surface ``vault_sync_thread_alive`` for /health.
 

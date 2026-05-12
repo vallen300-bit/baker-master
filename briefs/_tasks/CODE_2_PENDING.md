@@ -1,5 +1,9 @@
 ---
-status: PENDING
+status: COMPLETE
+completed_at: 2026-05-13
+shipped_commit: 7cf5718
+shipped_repo: baker-vault (origin/main — direct push, no PR)
+ship_report: briefs/_reports/B2_vault_tasks_schema_v1_20260513.md
 brief: briefs/BRIEF_VAULT_TASKS_SCHEMA_V1.md
 trigger_class: TIER_B_VAULT_SCHEMA_INFRA
 dispatched_at: 2026-05-13
