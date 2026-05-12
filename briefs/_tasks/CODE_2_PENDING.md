@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_WAHA_2026_4_UPGRADE_AND_KEY_SPLIT_1.md
 trigger_class: TIER_B_AUTH_AND_EXTERNAL_PERIMETER
 dispatched_at: 2026-05-12
