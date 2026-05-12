@@ -525,9 +525,15 @@ def _ensure_vault_mirror() -> None:
     ``RuntimeError`` only on initial-clone failure. Propagate so
     FastAPI's lifespan aborts startup per brief §1 — a missing mirror
     must not go unnoticed. B3 review S1a (2026-04-20).
+
+    Also starts the per-process refresh daemon thread (VAULT_MIRROR_SYNC_TICK_DIAGNOSE_1,
+    2026-05-13). Each Render replica must refresh its own local FS mirror —
+    the prior APScheduler job was singleton-locked so only one replica
+    pulled, leaving N-1 replicas stale.
     """
-    from vault_mirror import ensure_mirror
+    from vault_mirror import ensure_mirror, start_sync_thread
     ensure_mirror()
+    start_sync_thread()
 
 
 # Boot-time backfill helper lives in triggers/backfill_runner.py so it's

@@ -967,22 +967,12 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info("Skipped: wiki_lint_weekly (WIKI_LINT_ENABLED=false)")
 
-    # SOT_OBSIDIAN_1_PHASE_D: pull the baker-vault mirror so Cowork's
-    # MCP vault-read tools stay fresh. Default 300 s, floor 60 s
-    # enforced inside ``vault_mirror.sync_interval_seconds``.
-    try:
-        from vault_mirror import sync_interval_seconds as _vault_interval
-        _vault_sync_seconds = _vault_interval()
-    except Exception:
-        _vault_sync_seconds = 300
-    scheduler.add_job(
-        _vault_sync_tick_job,
-        IntervalTrigger(seconds=_vault_sync_seconds),
-        id="vault_sync_tick", name="Vault mirror pull (baker-vault _ops/)",
-        coalesce=True, max_instances=1, replace_existing=True,
-        misfire_grace_time=120,
-    )
-    logger.info(f"Registered: vault_sync_tick (every {_vault_sync_seconds}s)")
+    # VAULT_MIRROR_SYNC_TICK_DIAGNOSE_1 (2026-05-13): vault mirror refresh
+    # is now a per-process daemon thread spawned in ``vault_mirror.start_sync_thread``
+    # at FastAPI startup. It is NOT registered here because the
+    # ``BackgroundScheduler`` is gated by the cross-process singleton lock —
+    # only the lock-holding Render replica would run the job, leaving every
+    # other replica with a stale local FS mirror (the bug this brief fixed).
 
     # ROADMAP_DRIFT_CLICKUP_SENTINEL_1: daily 06:00 UTC drift sentinel.
     # Compares cortex-roadmap-current.yml last-edit vs PR merge cadence on
@@ -1234,21 +1224,6 @@ def _wiki_lint_weekly_job():
         logger.info("wiki_lint_weekly: %s", result)
     except Exception as e:
         logger.warning("wiki_lint_weekly: run raised: %s", e)
-
-
-def _vault_sync_tick_job():
-    """APScheduler wrapper around ``vault_mirror.sync_tick``.
-
-    ``sync_tick`` already swallows pull failures as WARN; any raise
-    here is genuinely unexpected (git binary missing, disk full, etc.)
-    — let APScheduler's listener surface it.
-    """
-    try:
-        from vault_mirror import sync_tick
-        sync_tick()
-    except Exception as e:
-        logger.error("vault_sync_tick raised: %s", e, exc_info=True)
-        raise
 
 
 def _run_wiki_lint():
