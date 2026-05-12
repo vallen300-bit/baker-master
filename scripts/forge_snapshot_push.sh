@@ -113,18 +113,33 @@ pick_active_clone() {
       [[ -d "$repo/.git" ]] || continue
       score=0
 
-      # Mailbox presence (b-codes only). PENDING scores highest (active dispatch);
-      # COMPLETE scores +50 so the post-merge clone still beats a candidate with
-      # NO mailbox at all on the recency tiebreaker. Bug seen 2026-05-12 evening:
-      # after mailbox flip to COMPLETE, both candidates tied at 0 → picker
-      # oscillated to the sibling clone (no briefs dir) → reported mailbox=empty,
-      # cards flipped grey. Anchor: Director-observed b1/b2/b3 going empty
-      # ~30s post-rename. Fix: any-mailbox is a positive signal of "this is the
-      # working clone for this b-code"; pending outranks complete.
-      if [[ -n "$n" && -f "$repo/briefs/_tasks/CODE_${n}_PENDING.md" ]]; then
-        score=$((score + 100))
-      elif [[ -n "$n" && -f "$repo/briefs/_tasks/CODE_${n}_COMPLETE.md" ]]; then
-        score=$((score + 50))
+      # Mailbox presence + classification (b-codes only). pending/in_progress
+      # score +100 (active dispatch); staged/complete score +50 (active clone in
+      # holding or post-merge state); dropped scores +25 (drained but still the
+      # working clone — better than an empty sibling). Frontmatter `status:` is
+      # authoritative via classify_mailbox, so a filename `_PENDING` carrying
+      # `status: STAGED` is scored as staged (not pending) — fixing the b4
+      # 2026-05-12 drift. Bug seen 2026-05-12 evening: after mailbox flip to
+      # COMPLETE, both candidates tied at 0 → picker oscillated to the sibling
+      # clone (no briefs dir) → reported mailbox=empty, cards flipped grey.
+      # Anchor: Director-observed b1/b2/b3 going empty ~30s post-rename. Fix:
+      # any-mailbox is a positive signal of "this is the working clone for this
+      # b-code"; pending outranks complete; dropped still outranks empty.
+      # Note: avoiding `case ... in a|b)` syntax inside this $(...) — bash 3.2
+      # (macOS default; Mac Mini runs this) has a known parser bug rejecting
+      # alternation patterns in case statements when they sit inside command
+      # substitution. if/elif chain is functionally identical and parses clean.
+      if [[ -n "$n" ]]; then
+        local mbox_class mbox_status
+        mbox_class="$(classify_mailbox "$repo" "$n")"
+        mbox_status="${mbox_class%%|*}"
+        if [[ "$mbox_status" == "pending" || "$mbox_status" == "in_progress" ]]; then
+          score=$((score + 100))
+        elif [[ "$mbox_status" == "staged" || "$mbox_status" == "complete" ]]; then
+          score=$((score + 50))
+        elif [[ "$mbox_status" == "dropped" ]]; then
+          score=$((score + 25))
+        fi
       fi
 
       # Open PR on current branch (skip in test mode)
@@ -162,6 +177,67 @@ pick_active_clone() {
     best_path="${paths_csv%%,*}"
   fi
   echo "$best_path"
+}
+
+# extract_frontmatter_status — read YAML frontmatter `status:` field.
+# Returns the value uppercased + trimmed, or empty if no frontmatter / no
+# status field. Authoritative over filename suffix in classify_mailbox per
+# FORGE_DAEMON_FRONTMATTER_STATUS_AUTHORITATIVE_1 — anchor: b4 CODE_4_PENDING.md
+# carried `status: STAGED` (Director pivot 2026-05-11) but filename was still
+# `_PENDING`, so the prior filename-only classifier reported pending → red
+# card lied. Reusing the same awk frontmatter-block walker as extract_brief_name.
+extract_frontmatter_status() {
+  local f="$1"
+  [[ -f "$f" ]] || { echo ""; return; }
+  awk 'BEGIN{c=0} /^---$/{c++; if(c==2) exit; next} c==1 && /^status:[[:space:]]*/{print; exit}' "$f" 2>/dev/null \
+    | sed -E 's/^status:[[:space:]]*//; s/[[:space:]]*$//' \
+    | tr '[:lower:]' '[:upper:]' \
+    | head -1
+}
+
+# classify_mailbox — find the b-code's mailbox file (if any) and return final
+# classification. Frontmatter `status:` is authoritative; filename suffix is
+# fallback when frontmatter is absent or carries an unknown value. Echoes
+# "<status>|<path>": status in lowercase ({pending,in_progress,staged,
+# complete,dropped,empty}); path is absolute (empty when no mailbox file).
+#
+# Filename-suffix priority when multiple files coexist mid-transition:
+#   PENDING > IN_PROGRESS > STAGED > COMPLETE > DROPPED
+# (Active states outrank terminal states; matches the prior PENDING-then-COMPLETE
+# behaviour.)
+classify_mailbox() {
+  local repo="$1"
+  local n="$2"
+  local f="" filename_status="" fm_status="" final_status=""
+  local suffix candidate
+  for suffix in PENDING IN_PROGRESS STAGED COMPLETE DROPPED; do
+    candidate="$repo/briefs/_tasks/CODE_${n}_${suffix}.md"
+    if [[ -f "$candidate" ]]; then
+      f="$candidate"
+      filename_status="$(echo "$suffix" | tr '[:upper:]' '[:lower:]')"
+      break
+    fi
+  done
+
+  if [[ -z "$f" ]]; then
+    echo "empty|"
+    return
+  fi
+
+  fm_status="$(extract_frontmatter_status "$f")"
+  if [[ -n "$fm_status" ]]; then
+    case "$fm_status" in
+      PENDING)     final_status="pending" ;;
+      IN_PROGRESS) final_status="in_progress" ;;
+      STAGED)      final_status="staged" ;;
+      COMPLETE)    final_status="complete" ;;
+      DROPPED)     final_status="dropped" ;;
+      *)           final_status="$filename_status" ;;
+    esac
+  else
+    final_status="$filename_status"
+  fi
+  echo "${final_status}|${f}"
 }
 
 # extract_brief_name — three-step fallback parser. Returns up to 200 chars.
@@ -218,25 +294,22 @@ snapshot_one() {
   sha="$(git -C "$repo" log -1 --format='%H' 2>/dev/null | cut -c1-12 || echo '')"
   subject="$(git -C "$repo" log -1 --format='%s' 2>/dev/null || echo '')"
 
-  # Mailbox state. b-codes have CODE_N_PENDING / CODE_N_COMPLETE; lead/deputy
-  # do not have mailbox slots. Derive N from alias suffix for b-codes; else n/a.
+  # Mailbox state. b-codes have CODE_N_{PENDING,IN_PROGRESS,STAGED,COMPLETE,
+  # DROPPED}.md slots; lead/deputy do not. classify_mailbox finds the active
+  # file (filename priority order) and applies frontmatter `status:` as the
+  # authoritative classification — so a `_PENDING` filename carrying
+  # `status: DROPPED` reports as dropped (the b4 drift this brief fixes).
   local mailbox_status="n/a"
   local mailbox_brief_name=""
   local mailbox_path=""
   if [[ "$alias" =~ ^b([1-9])$ ]]; then
     local n="${BASH_REMATCH[1]}"
-    local pending="$repo/briefs/_tasks/CODE_${n}_PENDING.md"
-    local complete="$repo/briefs/_tasks/CODE_${n}_COMPLETE.md"
-    if [[ -f "$pending" ]]; then
-      mailbox_status="pending"
-      mailbox_path="$pending"
-      mailbox_brief_name="$(extract_brief_name "$pending")"
-    elif [[ -f "$complete" ]]; then
-      mailbox_status="complete"
-      mailbox_path="$complete"
-      mailbox_brief_name="$(extract_brief_name "$complete")"
-    else
-      mailbox_status="empty"
+    local mbox_class
+    mbox_class="$(classify_mailbox "$repo" "$n")"
+    mailbox_status="${mbox_class%%|*}"
+    mailbox_path="${mbox_class#*|}"
+    if [[ -n "$mailbox_path" ]]; then
+      mailbox_brief_name="$(extract_brief_name "$mailbox_path")"
     fi
   fi
 
