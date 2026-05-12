@@ -34,10 +34,15 @@ import yaml
 logger = logging.getLogger("sentinel.vault_scanner")
 
 DESK_NAME_RE = re.compile(r"^[a-z0-9-]+$")
+TODAY_FILE_RE = re.compile(r"^today-(\d{4}-\d{2}-\d{2})\.md$")
+LAST_ERROR_RE = re.compile(r"^last-error-(\d{4}-\d{2}-\d{2})\.txt$")
 DIRECTOR_DM_CHANNEL = "D0AFY28N030"
 MAX_DEADLINES_QUERY_LIMIT = 500
 MARKER_PRUNE_DAYS = 7
 URGENT_DM_RATE_KEY_SUFFIX = ".urgent.marker"
+TODAY_FILE_RETENTION_DAYS = 90      # Amendment C
+EMPTY_STREAK_THRESHOLD = 3          # Amendment B — fire sentinel at exactly this run count
+LAST_ERROR_LOOKBACK_DAYS = 3        # Amendment D — recovery-prefix window
 
 
 def _vault_root() -> Path:
@@ -464,16 +469,367 @@ def _prune_old_markers(today: date) -> None:
 
 
 def _send_consolidated_dm(body: str) -> bool:
+    """Backwards-compat wrapper for urgent-DM path; returns ok flag only."""
+    ok, _err = _send_dm_with_capture(body)
+    return ok
+
+
+def _send_dm_with_capture(body: str) -> tuple[bool, Optional[str]]:
+    """Send to Director DM; return (ok, error_msg_or_None).
+
+    Amendment D: we want to know WHY a send failed so we can surface it in
+    the next successful run's recovery prefix + record it in scanner_run_log.
+    """
     try:
         from outputs.slack_notifier import post_to_channel
     except Exception as e:
+        msg = f"ImportError: {type(e).__name__}: {e}"
         logger.warning("vault_scanner: slack import failed: %s", e)
-        return False
+        return False, msg
     try:
-        return bool(post_to_channel(DIRECTOR_DM_CHANNEL, body))
+        ok = bool(post_to_channel(DIRECTOR_DM_CHANNEL, body))
+        if ok:
+            return True, None
+        return False, "post_to_channel returned False (token missing or Slack API failed — see slack_notifier log)"
     except Exception as e:
+        msg = f"{type(e).__name__}: {e}"
         logger.warning("vault_scanner: post_to_channel raised: %s", e)
+        return False, msg
+
+
+# ---------------------------------------------------------------------------
+# Amendment C — today-*.md retention prune
+# ---------------------------------------------------------------------------
+def _prune_today_files(agents_dir: Path, today: date) -> int:
+    """Delete today-YYYY-MM-DD.md files older than TODAY_FILE_RETENTION_DAYS.
+
+    Returns number of files pruned. Walks only desks that pass the same
+    path-traversal regex as ``_discover_desks``; ignores stable ``today.md``.
+    """
+    cutoff = today - timedelta(days=TODAY_FILE_RETENTION_DAYS)
+    pruned = 0
+    if not agents_dir.is_dir():
+        return 0
+    try:
+        entries = sorted(os.listdir(agents_dir))
+    except OSError as e:
+        logger.warning("vault_scanner: prune listdir failed: %s", e)
+        return 0
+    for name in entries:
+        if name.startswith("_") or name.startswith("."):
+            continue
+        if not _is_safe_desk_dir(agents_dir, name):
+            continue
+        desk_dir = agents_dir / name
+        try:
+            for child in desk_dir.iterdir():
+                if not child.is_file():
+                    continue
+                m = TODAY_FILE_RE.match(child.name)
+                if not m:
+                    continue
+                try:
+                    file_date = date.fromisoformat(m.group(1))
+                except ValueError:
+                    continue
+                # Keep the most recent TODAY_FILE_RETENTION_DAYS files
+                # (days 0..N-1); prune anything at or older than the cutoff.
+                if file_date <= cutoff:
+                    try:
+                        child.unlink(missing_ok=True)
+                        pruned += 1
+                    except OSError as e:
+                        logger.warning(
+                            "vault_scanner: prune failed for %s: %s", child, e
+                        )
+        except OSError as e:
+            logger.warning(
+                "vault_scanner: prune iterdir failed for %s: %s", desk_dir, e
+            )
+    return pruned
+
+
+# ---------------------------------------------------------------------------
+# Amendment D — last-error recovery prefix
+# ---------------------------------------------------------------------------
+def _read_recovery_prefix(state_dir: Path, today: date) -> Optional[str]:
+    """Return a one-line recovery prefix if any last-error-*.txt from the
+    past LAST_ERROR_LOOKBACK_DAYS exists; else None.
+    """
+    if not state_dir.is_dir():
+        return None
+    cutoff = today - timedelta(days=LAST_ERROR_LOOKBACK_DAYS)
+    matched: list[Path] = []
+    try:
+        for child in state_dir.iterdir():
+            if not child.is_file():
+                continue
+            m = LAST_ERROR_RE.match(child.name)
+            if not m:
+                continue
+            try:
+                file_date = date.fromisoformat(m.group(1))
+            except ValueError:
+                continue
+            if cutoff <= file_date <= today:
+                matched.append(child)
+    except OSError as e:
+        logger.warning("vault_scanner: recovery scan failed: %s", e)
+        return None
+    if not matched:
+        return None
+    return (
+        f"⚠️ Previous {len(matched)} scan(s) had send errors — "
+        "see _scanner-state/last-error-*.txt"
+    )
+
+
+def _clear_recovery_errors(state_dir: Path) -> int:
+    """Delete all last-error-*.txt files (called on successful DM send).
+    Returns count cleared.
+    """
+    if not state_dir.is_dir():
+        return 0
+    cleared = 0
+    try:
+        for child in state_dir.iterdir():
+            if not child.is_file():
+                continue
+            if LAST_ERROR_RE.match(child.name):
+                try:
+                    child.unlink(missing_ok=True)
+                    cleared += 1
+                except OSError as e:
+                    logger.warning(
+                        "vault_scanner: clear recovery file failed for %s: %s",
+                        child, e,
+                    )
+    except OSError as e:
+        logger.warning("vault_scanner: clear recovery iterdir failed: %s", e)
+    return cleared
+
+
+def _write_last_error(state_dir: Path, today: date, err_msg: str) -> None:
+    """Write last-error-YYYY-MM-DD.txt with timestamp + error message."""
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        path = state_dir / f"last-error-{today.isoformat()}.txt"
+        ts = datetime.now(timezone.utc).isoformat()
+        path.write_text(f"{ts}\n{err_msg}\n", encoding="utf-8")
+    except OSError as e:
+        logger.warning("vault_scanner: write last-error failed: %s", e)
+
+
+# ---------------------------------------------------------------------------
+# Amendment E — _unassigned deadlines bucket
+# ---------------------------------------------------------------------------
+def _query_unassigned_deadlines() -> list[dict]:
+    """Run a single SELECT for active deadlines with NULL assigned_to.
+
+    Surfaces hard deadlines that lack desk attribution so they're never
+    silently dropped from the daily digest.
+    """
+    try:
+        from models.deadlines import get_conn, put_conn
+    except Exception as e:
+        logger.warning("vault_scanner: deadlines import failed (_unassigned): %s", e)
+        return []
+    conn = get_conn()
+    if conn is None:
+        return []
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                SELECT id, description, due_date, priority, severity, matter_slug,
+                       last_reminded_at, reminder_stage, is_critical
+                FROM deadlines
+                WHERE status = 'active'
+                  AND assigned_to IS NULL
+                  AND (due_date IS NULL OR due_date <= NOW() + INTERVAL '30 days')
+                ORDER BY due_date NULLS LAST, priority
+                LIMIT %s
+                """,
+                (MAX_DEADLINES_QUERY_LIMIT,),
+            )
+            rows = cur.fetchall()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning("vault_scanner: _unassigned query failed: %s", e)
+            return []
+        finally:
+            cur.close()
+        out: list[dict] = []
+        for r in rows:
+            due_dt = r[2]
+            due_d = due_dt.date() if isinstance(due_dt, datetime) else _coerce_date(due_dt)
+            out.append({
+                "id": r[0],
+                "description": r[1],
+                "due_date": due_d,
+                "priority": r[3] or "normal",
+                "severity": r[4],
+                "matter_slug": r[5],
+                "assigned_to": None,
+                "last_reminded_at": r[6],
+                "reminder_stage": r[7],
+                "is_critical": bool(r[8]) if r[8] is not None else False,
+            })
+        return out
+    finally:
+        try:
+            put_conn(conn)
+        except Exception:
+            pass
+
+
+def _format_unassigned_section(rows: list[dict], today: date) -> str:
+    """Synthetic ⚪ _unassigned section appended to the consolidated DM."""
+    buckets = _bucket_deadlines(rows, today)
+    n_overdue = len(buckets["overdue"])
+    n_week = len(buckets["due_this_week"]) + len(buckets["due_today"])
+    lines = [
+        f"⚪ _unassigned ({len(rows)} hard deadlines without desk attribution)",
+        f"  Overdue: {n_overdue}",
+        f"  Due this week: {n_week}",
+        "  Backfill: pending Brief 3 audit "
+        "(see _ops/processes/deadline-system-contract-v1.md when shipped)",
+    ]
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Amendment A + B — scanner_run_log row + empty-streak sentinel
+# ---------------------------------------------------------------------------
+def _record_run_log(
+    *,
+    desks_scanned: int,
+    tasks_found: int,
+    deadlines_found: int,
+    dm_sent: bool,
+    dm_error_msg: Optional[str],
+    error_count: int,
+    notes: Optional[str],
+) -> Optional[int]:
+    """Insert one row into scanner_run_log. Returns row id, or None on failure.
+
+    Fault-tolerant: any DB error returns None and logs WARN (scanner must not
+    crash on observability side-effect).
+    """
+    try:
+        from models.deadlines import get_conn, put_conn
+    except Exception as e:
+        logger.warning("vault_scanner: run_log import failed: %s", e)
+        return None
+    conn = get_conn()
+    if conn is None:
+        return None
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                INSERT INTO scanner_run_log
+                    (desks_scanned, tasks_found, deadlines_found,
+                     dm_sent, dm_error_msg, error_count, notes)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (
+                    desks_scanned, tasks_found, deadlines_found,
+                    dm_sent, dm_error_msg, error_count,
+                    notes[:1000] if isinstance(notes, str) else notes,
+                ),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            return row[0] if row else None
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning("vault_scanner: scanner_run_log INSERT failed: %s", e)
+            return None
+        finally:
+            cur.close()
+    finally:
+        try:
+            put_conn(conn)
+        except Exception:
+            pass
+
+
+def _empty_streak_count() -> int:
+    """Return how many of the most-recent runs (newest-first, capped at 4)
+    are 'empty' (tasks=0, deadlines=0, error_count=0). Used by Amendment B
+    one-shot sentinel: fire ONLY when this returns exactly EMPTY_STREAK_THRESHOLD.
+    """
+    try:
+        from models.deadlines import get_conn, put_conn
+    except Exception as e:
+        logger.warning("vault_scanner: streak import failed: %s", e)
+        return 0
+    conn = get_conn()
+    if conn is None:
+        return 0
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                SELECT tasks_found, deadlines_found, error_count
+                FROM scanner_run_log
+                WHERE run_ts >= NOW() - INTERVAL '7 days'
+                ORDER BY run_ts DESC
+                LIMIT 4
+                """
+            )
+            rows = cur.fetchall()
+        except Exception as e:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            logger.warning("vault_scanner: streak query failed: %s", e)
+            return 0
+        finally:
+            cur.close()
+        streak = 0
+        for tasks, deadlines, errs in rows:
+            if (tasks or 0) == 0 and (deadlines or 0) == 0 and (errs or 0) == 0:
+                streak += 1
+            else:
+                break
+        return streak
+    finally:
+        try:
+            put_conn(conn)
+        except Exception:
+            pass
+
+
+def _maybe_send_empty_streak_sentinel(streak: int) -> bool:
+    """If streak == EMPTY_STREAK_THRESHOLD exactly, fire ONE Slack DM.
+
+    Returns True iff a sentinel DM was sent. >= threshold+1 means we already
+    fired (one-shot per streak); 0 < streak < threshold means streak still
+    building.
+    """
+    if streak != EMPTY_STREAK_THRESHOLD:
         return False
+    body = (
+        f"⚠️ Vault scanner: {EMPTY_STREAK_THRESHOLD} consecutive scans found "
+        "zero tasks + zero deadlines across all desks. Either nothing's "
+        "queued OR frontmatter parser regression. Check "
+        "~/baker-vault/_ops/agents/<desk>/tasks/active/ to verify."
+    )
+    ok, _err = _send_dm_with_capture(body)
+    return ok
 
 
 def run_scan() -> dict:
@@ -482,12 +838,25 @@ def run_scan() -> dict:
     Idempotent within a UTC day via marker file: a second call on the same
     UTC date skips the consolidated DM (mirror files are still refreshed —
     they're cheap and disk-only).
+
+    Amendments folded:
+      A) Writes one row to ``scanner_run_log`` at end of every run.
+      B) After log write, queries the empty-streak; fires a one-shot Slack
+         sentinel if exactly EMPTY_STREAK_THRESHOLD consecutive empty runs.
+      C) Prunes ``today-YYYY-MM-DD.md`` files older than 90 days at the top
+         of every run (paired with marker prune).
+      D) Consolidated DM send wrapped in capture; on failure writes
+         ``_scanner-state/last-error-YYYY-MM-DD.txt``; on next successful
+         send, prefixes body with recovery line and clears error files.
+      E) Once per scan, queries ``assigned_to IS NULL`` deadlines and
+         appends a synthetic ``⚪ _unassigned`` section to the DM.
     """
     now = datetime.now(timezone.utc)
     today = now.date()
     vault = _vault_root()
     agents_dir = _agents_dir()
     state_dir = _scanner_state_dir()
+    error_count = 0  # for scanner_run_log
 
     summary: dict = {
         "today": today.isoformat(),
@@ -496,6 +865,11 @@ def run_scan() -> dict:
         "consolidated_dm_sent": False,
         "urgent_dms_sent": [],
         "skipped_reason": None,
+        "scanner_run_log_id": None,
+        "empty_streak_sentinel_sent": False,
+        "today_files_pruned": 0,
+        "recovery_prefix_applied": False,
+        "dm_error_msg": None,
     }
 
     if not agents_dir.is_dir():
@@ -509,18 +883,19 @@ def run_scan() -> dict:
         logger.warning("vault_scanner: state_dir mkdir failed: %s", e)
 
     _prune_old_markers(today)
+    # Amendment C — prune today-*.md files older than 90 days BEFORE the
+    # per-desk loop so today's writes are never affected.
+    try:
+        summary["today_files_pruned"] = _prune_today_files(agents_dir, today)
+    except Exception as e:
+        logger.warning("vault_scanner: today-file prune raised: %s", e)
+        error_count += 1
 
     desks = _discover_desks(agents_dir)
-    if not desks:
-        logger.info("vault_scanner: no desks with tasks/active/ — early return")
-        summary["skipped_reason"] = "no_desks"
-        # Still drop a marker so a same-day retry skips DM rate-cap-wise (no DM
-        # to send anyway, so cap is naturally respected). Don't write marker
-        # here because no DM was sent — keeps marker semantically "consolidated
-        # DM already happened today".
-        return summary
-
     per_desk: dict[str, dict] = {}
+    total_tasks = 0
+    total_deadlines = 0
+
     for desk in desks:
         desk_dir = agents_dir / desk
         task_buckets = _scan_tasks(desk_dir, today)
@@ -532,6 +907,8 @@ def run_scan() -> dict:
             "deadline_rows": deadline_rows,
         }
         summary["desks_scanned"].append(desk)
+        total_tasks += sum(len(v) for v in task_buckets.values())
+        total_deadlines += len(deadline_rows)
 
         if _has_any_items(task_buckets, deadline_buckets):
             today_md = _render_today_md(
@@ -546,6 +923,7 @@ def run_scan() -> dict:
                 summary["files_written"].extend([str(today_path), str(stable_path)])
             except OSError as e:
                 logger.warning("vault_scanner: write today file failed for %s: %s", desk, e)
+                error_count += 1
 
         upcoming_path = desk_dir / "upcoming-deadlines.md"
         upcoming_md = _render_upcoming_md(
@@ -556,23 +934,48 @@ def run_scan() -> dict:
             summary["files_written"].append(str(upcoming_path))
         except OSError as e:
             logger.warning("vault_scanner: write upcoming file failed for %s: %s", desk, e)
+            error_count += 1
 
-    # Consolidated DM — rate-capped by marker
+    # Amendment E — _unassigned deadlines (once per scan)
+    unassigned_rows = _query_unassigned_deadlines()
+    total_deadlines += len(unassigned_rows)
+
+    # Consolidated DM — rate-capped by marker; failure-captured for log
     marker = _consolidated_marker_path(today)
+    dm_error_msg: Optional[str] = None
     if marker.exists():
         logger.info("vault_scanner: consolidated DM already sent today (%s)", today)
+    elif not desks and not unassigned_rows:
+        logger.info(
+            "vault_scanner: no desks discovered + no _unassigned rows — skip DM"
+        )
+        summary["skipped_reason"] = "no_desks"
     else:
-        body = _consolidated_dm_body(today=today, per_desk=per_desk)
-        ok = _send_consolidated_dm(body)
+        body_parts = [_consolidated_dm_body(today=today, per_desk=per_desk)]
+        if unassigned_rows:
+            body_parts.append("")
+            body_parts.append(_format_unassigned_section(unassigned_rows, today))
+        body = "\n".join(body_parts)
+        # Amendment D — recovery prefix if any prior error files
+        prefix = _read_recovery_prefix(state_dir, today)
+        if prefix:
+            body = prefix + "\n\n" + body
+            summary["recovery_prefix_applied"] = True
+        ok, err = _send_dm_with_capture(body)
         if ok:
             try:
                 marker.touch()
-                summary["consolidated_dm_sent"] = True
             except OSError as e:
                 logger.warning("vault_scanner: marker touch failed: %s", e)
-                summary["consolidated_dm_sent"] = True  # DM did go out
+            summary["consolidated_dm_sent"] = True
+            # Clear any recovery error files now that send succeeded
+            _clear_recovery_errors(state_dir)
         else:
-            logger.warning("vault_scanner: consolidated DM send returned False")
+            dm_error_msg = err
+            error_count += 1
+            _write_last_error(state_dir, today, err or "unknown")
+            summary["dm_error_msg"] = err
+            logger.warning("vault_scanner: consolidated DM send failed: %s", err)
 
     # Per-desk urgent DM (separate rate cap per desk per day)
     for desk, d in per_desk.items():
@@ -594,13 +997,36 @@ def run_scan() -> dict:
             except OSError as e:
                 logger.warning("vault_scanner: urgent marker touch failed (%s): %s", desk, e)
             summary["urgent_dms_sent"].append(desk)
+        else:
+            error_count += 1
+
+    # Amendment A — write scanner_run_log row at end of run
+    log_id = _record_run_log(
+        desks_scanned=len(summary["desks_scanned"]),
+        tasks_found=total_tasks,
+        deadlines_found=total_deadlines,
+        dm_sent=summary["consolidated_dm_sent"],
+        dm_error_msg=dm_error_msg,
+        error_count=error_count,
+        notes=None,
+    )
+    summary["scanner_run_log_id"] = log_id
+
+    # Amendment B — empty-streak sentinel (one-shot per streak)
+    if total_tasks == 0 and total_deadlines == 0 and error_count == 0:
+        streak = _empty_streak_count()
+        if _maybe_send_empty_streak_sentinel(streak):
+            summary["empty_streak_sentinel_sent"] = True
 
     logger.info(
-        "vault_scanner: scanned %d desks; wrote %d files; consolidated_dm=%s; urgent=%s",
+        "vault_scanner: scanned %d desks; wrote %d files; "
+        "consolidated_dm=%s; urgent=%s; pruned=%d; run_log_id=%s",
         len(summary["desks_scanned"]),
         len(summary["files_written"]),
         summary["consolidated_dm_sent"],
         summary["urgent_dms_sent"],
+        summary["today_files_pruned"],
+        summary["scanner_run_log_id"],
     )
     return summary
 

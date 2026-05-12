@@ -292,3 +292,241 @@ def test_path_traversal_dotdot_desk_rejected(vault, no_db, stub_slack):
     assert _is_safe_desk_dir(vault["agents"], "movie..desk") is False
     assert _is_safe_desk_dir(vault["agents"], "Movie-Desk") is False  # uppercase rejected
     assert _is_safe_desk_dir(vault["agents"], "movie/desk") is False  # slash rejected
+
+
+# ===========================================================================
+# UPDATE 2026-05-13 — architecture-review amendments A-E
+# ===========================================================================
+
+@pytest.fixture
+def fake_db(monkeypatch):
+    """Stub get_conn/put_conn with a recording fake connection.
+
+    Captures every (sql, params) tuple in ``calls`` and lets the test
+    pre-load results via ``add_result(rows)`` (FIFO queue). Each cursor
+    fetchone/fetchall pops one queued result. Returns the controller dict
+    so tests can both seed and inspect.
+    """
+    calls: list[tuple[str, tuple]] = []
+    results: list = []
+    last_rowid = {"v": 100}
+
+    class _Cur:
+        def __init__(self):
+            self._last_row: object = None
+            self._last_rows: list = []
+
+        def execute(self, sql, params=()):
+            calls.append((sql, tuple(params) if params else ()))
+            if "INSERT INTO scanner_run_log" in sql:
+                last_rowid["v"] += 1
+                self._last_row = (last_rowid["v"],)
+                self._last_rows = [self._last_row]
+                return
+            if results:
+                rows = results.pop(0)
+                self._last_rows = list(rows)
+                self._last_row = rows[0] if rows else None
+            else:
+                self._last_rows = []
+                self._last_row = None
+
+        def fetchone(self):
+            return self._last_row
+
+        def fetchall(self):
+            return list(self._last_rows)
+
+        def close(self):
+            pass
+
+    class _Conn:
+        def cursor(self):
+            return _Cur()
+
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+    import models.deadlines as dl
+    monkeypatch.setattr(dl, "get_conn", lambda: _Conn())
+    monkeypatch.setattr(dl, "put_conn", lambda conn: None)
+
+    def add_result(rows):
+        results.append(rows)
+
+    return {"calls": calls, "add_result": add_result, "last_rowid": last_rowid}
+
+
+# Test 9 — scanner_run_log INSERT happens at end of successful run
+def test_9_scanner_run_log_row_on_success(vault, fake_db, stub_slack):
+    from triggers.vault_scanner import run_scan
+    desk_dir = _make_desk(vault["agents"], "movie-desk")
+    today = datetime.now(timezone.utc).date()
+    _write_task(desk_dir, slug="t", title="T", due=today, priority="normal")
+    # Pre-load: query_deadlines (per-desk), unassigned query, empty_streak query
+    fake_db["add_result"]([])  # deadlines for movie-desk
+    fake_db["add_result"]([])  # _unassigned
+    # streak query won't run because tasks_found > 0
+    result = run_scan()
+    assert result["consolidated_dm_sent"] is True
+    assert result["scanner_run_log_id"] is not None
+    insert_calls = [c for c in fake_db["calls"] if "INSERT INTO scanner_run_log" in c[0]]
+    assert len(insert_calls) == 1
+    params = insert_calls[0][1]
+    # (desks_scanned, tasks_found, deadlines_found, dm_sent, dm_error_msg, error_count, notes)
+    assert params[0] == 1                # desks_scanned
+    assert params[1] >= 1                # tasks_found
+    assert params[2] == 0                # deadlines_found (DB returned [])
+    assert params[3] is True             # dm_sent
+    assert params[4] is None             # dm_error_msg
+    assert params[5] == 0                # error_count
+
+
+# Test 10 — scanner_run_log row records DM failure
+def test_10_scanner_run_log_row_on_dm_failure(vault, fake_db, monkeypatch):
+    # Stub slack to FAIL
+    import outputs.slack_notifier as sn
+    monkeypatch.setattr(sn, "post_to_channel", lambda *a, **kw: False)
+    from triggers.vault_scanner import run_scan
+    desk_dir = _make_desk(vault["agents"], "movie-desk")
+    today = datetime.now(timezone.utc).date()
+    _write_task(desk_dir, slug="t", title="T", due=today, priority="normal")
+    fake_db["add_result"]([])  # deadlines
+    fake_db["add_result"]([])  # _unassigned
+    result = run_scan()
+    assert result["consolidated_dm_sent"] is False
+    assert result["dm_error_msg"] is not None
+    insert_calls = [c for c in fake_db["calls"] if "INSERT INTO scanner_run_log" in c[0]]
+    assert len(insert_calls) == 1
+    params = insert_calls[0][1]
+    assert params[3] is False            # dm_sent
+    assert params[4] is not None         # dm_error_msg populated
+    assert params[5] >= 1                # error_count incremented
+    # last-error file written to _scanner-state/
+    state = vault["agents"] / "_scanner-state"
+    err_files = list(state.glob("last-error-*.txt"))
+    assert len(err_files) == 1
+
+
+# Test 11 — empty-streak sentinel fires at exactly threshold, idempotent across same streak
+def test_11_empty_streak_sentinel_one_shot(vault, fake_db, stub_slack):
+    """When the empty-streak query returns >= threshold rows in the prior
+    window, sentinel fires once. Subsequent identical streaks (count grows
+    past threshold) do NOT re-fire.
+    """
+    from triggers.vault_scanner import (
+        run_scan, EMPTY_STREAK_THRESHOLD,
+    )
+    _make_desk(vault["agents"], "movie-desk")  # empty (no tasks)
+
+    # First run — pre-load: deadlines [], _unassigned [], streak query.
+    # Streak query runs AFTER scanner_run_log INSERT, so the just-inserted
+    # current run shows up first in DESC order. Seed: THRESHOLD empty rows
+    # (this run + prior empties) + 1 non-empty row that broke the prior
+    # streak. _empty_streak_count walks newest-first, breaks at non-empty,
+    # returns exactly THRESHOLD → sentinel fires.
+    fake_db["add_result"]([])  # per-desk deadlines
+    fake_db["add_result"]([])  # _unassigned
+    empties = [(0, 0, 0)] * EMPTY_STREAK_THRESHOLD
+    fake_db["add_result"](empties + [(1, 0, 0)])
+    r1 = run_scan()
+    assert r1["empty_streak_sentinel_sent"] is True
+
+    # Clear day marker to allow a 2nd scan to send consolidated DM in same UTC day
+    marker = vault["agents"] / "_scanner-state" / f"last-run-{datetime.now(timezone.utc).date().isoformat()}.marker"
+    if marker.exists():
+        marker.unlink()
+
+    # Second run — same streak, but now LIMIT-4 returns more than THRESHOLD
+    # contiguous empties → streak == THRESHOLD+1 → sentinel does NOT re-fire.
+    fake_db["add_result"]([])  # per-desk deadlines
+    fake_db["add_result"]([])  # _unassigned
+    over_threshold = [(0, 0, 0)] * (EMPTY_STREAK_THRESHOLD + 1)
+    fake_db["add_result"](over_threshold)
+    r2 = run_scan()
+    assert r2["empty_streak_sentinel_sent"] is False
+
+
+# Test 12 — today-*.md pruning: 120 dated files reduced to 90 most-recent
+def test_12_today_files_prune_90_day_retention(vault, no_db, stub_slack):
+    from triggers.vault_scanner import run_scan, TODAY_FILE_RETENTION_DAYS
+    desk_dir = _make_desk(vault["agents"], "movie-desk")
+    today = datetime.now(timezone.utc).date()
+    # Create 120 dated files: days 0..119 in the past
+    for i in range(120):
+        d = today - timedelta(days=i)
+        p = desk_dir / f"today-{d.isoformat()}.md"
+        p.write_text(f"---\ngenerated: {d}\n---\n", encoding="utf-8")
+    # Sanity: 120 files exist
+    pre = list(desk_dir.glob("today-*.md"))
+    assert len(pre) == 120
+    # No tasks to avoid generating a new today file inside the test (would push to 121)
+    # Run scan triggers prune at top
+    run_scan()
+    post = list(desk_dir.glob("today-*.md"))
+    # files older than TODAY_FILE_RETENTION_DAYS removed; today's file kept
+    # files at days 0..TODAY_FILE_RETENTION_DAYS-1 survive (i.e. TODAY_FILE_RETENTION_DAYS files)
+    assert len(post) == TODAY_FILE_RETENTION_DAYS
+    # Verify the oldest surviving is exactly (TODAY_FILE_RETENTION_DAYS - 1) days ago
+    oldest_keep = today - timedelta(days=TODAY_FILE_RETENTION_DAYS - 1)
+    assert (desk_dir / f"today-{oldest_keep.isoformat()}.md").exists()
+    # And the cutoff day itself is pruned
+    pruned_day = today - timedelta(days=TODAY_FILE_RETENTION_DAYS)
+    assert not (desk_dir / f"today-{pruned_day.isoformat()}.md").exists()
+
+
+# Test 13 — _unassigned deadlines bucket appears in DM when assigned_to IS NULL rows exist
+def test_13_unassigned_bucket_in_dm(vault, fake_db, stub_slack):
+    from triggers.vault_scanner import run_scan
+    desk_dir = _make_desk(vault["agents"], "movie-desk")
+    today = datetime.now(timezone.utc).date()
+    _write_task(desk_dir, slug="t", title="T", due=today, priority="normal")
+    fake_db["add_result"]([])  # per-desk deadlines
+    # _unassigned query returns 2 rows — one overdue, one due this week
+    fake_db["add_result"]([
+        (901, "Unassigned overdue deadline", datetime.now(timezone.utc) - timedelta(days=2),
+         "high", "firm", None, None, None, False),
+        (902, "Unassigned due-this-week deadline", datetime.now(timezone.utc) + timedelta(days=3),
+         "normal", "firm", "mo-vie", None, None, False),
+    ])
+    result = run_scan()
+    assert result["consolidated_dm_sent"] is True
+    assert len(stub_slack) == 1
+    _channel, body = stub_slack[0]
+    assert "_unassigned" in body
+    assert "without desk attribution" in body
+    assert "Overdue: 1" in body or "Overdue: 1\n" in body
+    # _unassigned rows counted toward deadlines_found in scanner_run_log
+    insert_calls = [c for c in fake_db["calls"] if "INSERT INTO scanner_run_log" in c[0]]
+    assert len(insert_calls) == 1
+    params = insert_calls[0][1]
+    assert params[2] >= 2  # deadlines_found includes the 2 _unassigned rows
+
+
+# Test 14 — Amendment D recovery prefix on next-successful run, then cleared
+def test_14_recovery_prefix_then_cleared(vault, fake_db, stub_slack):
+    """If a last-error-YYYY-MM-DD.txt exists in _scanner-state/ from a recent
+    failed run, the NEXT successful consolidated DM is prefixed and the
+    error files are deleted afterwards.
+    """
+    from triggers.vault_scanner import run_scan
+    desk_dir = _make_desk(vault["agents"], "movie-desk")
+    today = datetime.now(timezone.utc).date()
+    _write_task(desk_dir, slug="t", title="T", due=today, priority="normal")
+    # Pre-seed a last-error file from yesterday
+    state = vault["agents"] / "_scanner-state"
+    state.mkdir(parents=True, exist_ok=True)
+    err_path = state / f"last-error-{(today - timedelta(days=1)).isoformat()}.txt"
+    err_path.write_text("2026-05-12T06:00:00+00:00\nTimeout: connection closed\n", encoding="utf-8")
+    fake_db["add_result"]([])  # per-desk deadlines
+    fake_db["add_result"]([])  # _unassigned
+    result = run_scan()
+    assert result["consolidated_dm_sent"] is True
+    assert result["recovery_prefix_applied"] is True
+    _channel, body = stub_slack[0]
+    assert "Previous" in body and "send errors" in body
+    # error file cleared
+    assert not err_path.exists()
