@@ -1,0 +1,730 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="source" content="movie-desk">
+<meta name="confidence" content="director-review-draft">
+<meta name="provenance" content="Director conversation 12 May 2026 (ClickUp MCP delete-gap → architectural review); Baker memory MEMORY.md (Notion MCP duplicate bug, Todoist v1 migration, APScheduler embedded scheduler live); MOVIE Desk MOHG meeting prep session 12 May.">
+<meta name="purpose" content="Director review document on scheduled-tasks architecture for the Brisen agent fleet. To be handed to AH1 for engineering evaluation after Director's ratification of frame and recommendation.">
+<title>Scheduled Tasks — Architecture Review</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;600;700&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --ink: #0f1729;
+  --ink-soft: #2a3349;
+  --ink-mid: #586075;
+  --ink-light: #8e94a3;
+  --line: #d8dae0;
+  --line-soft: #ecedf0;
+  --paper: #ffffff;
+  --paper-warm: #fafaf7;
+  --gold: #9c7a3a;
+  --gold-soft: #d4af6b;
+  --gold-bg: #f8f2e4;
+  --positive: #2f6b3a;
+  --positive-bg: #ecf3ed;
+  --watch: #8c6312;
+  --watch-bg: #fbf4e3;
+  --bad: #a23a3a;
+  --bad-bg: #f5e2e2;
+  --owner: #6b3a3a;
+  --owner-bg: #f5e9e9;
+}
+
+body {
+  font-family: 'Inter', -apple-system, sans-serif;
+  color: var(--ink);
+  background: var(--paper-warm);
+  font-size: 10.5pt;
+  line-height: 1.6;
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 28px 32px 60px;
+}
+
+/* HEADER */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 1.5px solid var(--ink);
+  padding-bottom: 14px;
+  margin-bottom: 22px;
+}
+
+.header-left h1 {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 22pt;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  color: var(--ink);
+  line-height: 1.1;
+}
+
+.header-left .subtitle {
+  font-size: 10pt;
+  color: var(--ink-mid);
+  font-weight: 400;
+  margin-top: 4px;
+  letter-spacing: 0.2px;
+}
+
+.header-right {
+  text-align: right;
+  font-size: 8.5pt;
+  color: var(--ink-light);
+  line-height: 1.6;
+}
+
+.conf-tag {
+  display: inline-block;
+  font-size: 7pt;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--paper);
+  background: var(--ink);
+  padding: 3px 9px;
+  border-radius: 2px;
+  margin-bottom: 6px;
+}
+
+/* TL;DR */
+.tldr {
+  background: var(--gold-bg);
+  border-left: 4px solid var(--gold);
+  padding: 14px 18px;
+  margin-bottom: 26px;
+  font-size: 10pt;
+}
+
+.tldr .tldr-title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 11pt;
+  font-weight: 700;
+  color: var(--gold);
+  margin-bottom: 6px;
+}
+
+.tldr strong { color: var(--ink); font-weight: 600; }
+
+/* SECTION */
+.section {
+  margin-bottom: 26px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 22px 26px;
+}
+
+.section-num {
+  display: inline-block;
+  font-size: 7.5pt;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--gold);
+  margin-bottom: 6px;
+}
+
+.section h2 {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 16pt;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.2;
+  margin-bottom: 12px;
+  letter-spacing: -0.3px;
+}
+
+.section h3 {
+  font-size: 11pt;
+  font-weight: 600;
+  color: var(--ink-soft);
+  margin-top: 18px;
+  margin-bottom: 6px;
+}
+
+.section p { margin-bottom: 10px; color: var(--ink-soft); }
+
+.section ul, .section ol {
+  margin: 8px 0 12px 22px;
+  color: var(--ink-soft);
+}
+
+.section li { margin-bottom: 5px; }
+
+.section strong { color: var(--ink); font-weight: 600; }
+
+/* STEP CARDS */
+.steps {
+  counter-reset: step;
+  margin: 14px 0;
+}
+
+.step {
+  position: relative;
+  padding: 12px 14px 12px 50px;
+  border-left: 2px solid var(--gold-soft);
+  margin-bottom: 8px;
+  background: var(--paper-warm);
+  border-radius: 0 4px 4px 0;
+}
+
+.step::before {
+  counter-increment: step;
+  content: counter(step);
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  background: var(--gold);
+  color: var(--paper);
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: 11pt;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Playfair Display', Georgia, serif;
+}
+
+.step h4 {
+  font-size: 10pt;
+  font-weight: 700;
+  color: var(--ink);
+  margin-bottom: 4px;
+}
+
+.step .what {
+  font-size: 9.5pt;
+  color: var(--ink-soft);
+  margin-bottom: 4px;
+}
+
+.step .why {
+  font-size: 8.5pt;
+  color: var(--ink-mid);
+  font-style: italic;
+}
+
+/* OPTION CARDS */
+.option {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  margin-bottom: 14px;
+  background: var(--paper-warm);
+  overflow: hidden;
+}
+
+.option-head {
+  background: var(--ink);
+  color: var(--paper);
+  padding: 10px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.option-head .name {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 12pt;
+  font-weight: 700;
+}
+
+.option-head .badge {
+  font-size: 7.5pt;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 2px;
+}
+
+.badge.recommend { background: var(--positive); color: var(--paper); }
+.badge.viable { background: var(--watch); color: var(--paper); }
+.badge.reject { background: var(--bad); color: var(--paper); }
+
+.option-body {
+  padding: 12px 16px;
+  font-size: 9.5pt;
+}
+
+.option-body .what-it-is {
+  margin-bottom: 8px;
+  color: var(--ink-soft);
+}
+
+.pros-cons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin: 8px 0;
+}
+
+.pros, .cons {
+  font-size: 9pt;
+}
+
+.pros { border-left: 2px solid var(--positive); padding-left: 10px; }
+.cons { border-left: 2px solid var(--bad); padding-left: 10px; }
+
+.pros .label, .cons .label {
+  font-size: 7.5pt;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.pros .label { color: var(--positive); }
+.cons .label { color: var(--bad); }
+
+.pros ul, .cons ul { margin: 0 0 0 14px; padding: 0; }
+.pros li, .cons li { margin-bottom: 3px; color: var(--ink-soft); }
+
+.fit-line {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dotted var(--line);
+  font-size: 9pt;
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+.fit-line strong { font-style: normal; color: var(--ink); }
+
+/* RECOMMENDATION */
+.recommendation {
+  background: var(--positive-bg);
+  border-left: 4px solid var(--positive);
+  padding: 18px 22px;
+  margin: 20px 0;
+  font-size: 10pt;
+}
+
+.recommendation .rec-title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 14pt;
+  font-weight: 700;
+  color: var(--positive);
+  margin-bottom: 8px;
+}
+
+.recommendation strong { color: var(--ink); }
+
+/* AH1 BOX */
+.ah1 {
+  background: var(--owner-bg);
+  border: 1px solid var(--owner);
+  border-radius: 4px;
+  padding: 18px 22px;
+  margin-top: 24px;
+}
+
+.ah1 h2 {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 14pt;
+  font-weight: 700;
+  color: var(--owner);
+  margin-bottom: 10px;
+}
+
+.ah1 ol li { margin-bottom: 8px; color: var(--ink-soft); }
+
+.ah1 ol li strong { color: var(--ink); }
+
+/* FOOTER */
+.footer {
+  margin-top: 26px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 8pt;
+  color: var(--ink-light);
+  display: flex;
+  justify-content: space-between;
+}
+
+@media print {
+  body { background: var(--paper); max-width: 100%; padding: 1cm 1.5cm; font-size: 9.5pt; }
+  .section, .option { box-shadow: none; page-break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <span class="conf-tag">Architecture Review — Director Draft</span>
+    <h1>Scheduled Tasks for Agent Fleet</h1>
+    <div class="subtitle">Problem · Lifecycle · Options · Recommendation · Engineering handoff</div>
+  </div>
+  <div class="header-right">
+    Prepared by MOVIE Desk<br>
+    12 May 2026<br>
+    Director review → AH1 engineering eval
+  </div>
+</div>
+
+<div class="tldr">
+  <div class="tldr-title">Bottom line</div>
+  We do not need a third-party task manager. The agent fleet needs a <strong>structured, queryable, agent-readable store</strong> for tasks and scheduled jobs — and we already have it (the baker-vault). Build the scheduling layer on top of vault markdown, with AI agents as the readers. Recommendation: <strong>Obsidian-vault markdown as the canonical source of truth + Baker-native scheduler (APScheduler) for time-based triggers + ScheduleWakeup pattern for self-paced agent loops.</strong> Drop ClickUp. Keep Google Calendar for time-blocked meetings only. Director never attends to the schedule directly — agents read it, act on it, and surface only completed work and ratification asks.
+</div>
+
+<!-- ============================================== -->
+<!-- §1 PROBLEM                                     -->
+<!-- ============================================== -->
+<div class="section">
+  <span class="section-num">Section 1 · The problem</span>
+  <h2>What we are trying to solve, and what is breaking</h2>
+
+  <h3>What the agent fleet needs</h3>
+  <p>Across the desk fleet (MOVIE Desk, AO Desk, Hagenauer Desk, Baden-Baden Desk, AI Head, AI Dennis, future desks), there are three distinct scheduling needs that today are not consistently met:</p>
+  <ul>
+    <li><strong>One-shot future tasks</strong> — "tomorrow morning, debrief Director on the MOHG meeting"; "Friday, send draft to Mario"; "by 19 May, file Q1 bank report." These need a place to live, a due date, and a single agent owner.</li>
+    <li><strong>Recurring agent jobs</strong> — "every Monday 09:00, MOVIE Desk produces weekly status"; "monthly, reconcile residence-fee ledger"; "weekly, sweep counterparty inbox for stale threads." These need a cron-like trigger and a destination agent.</li>
+    <li><strong>Long-running matter follow-ups</strong> — "if Royal Suite still unfinished by 30 June, escalate"; "if no Eastdil bidder feedback within 14 days, ping Laura." These need a condition or deadline, plus an agent that periodically checks.</li>
+  </ul>
+
+  <h3>What is breaking today</h3>
+  <ul>
+    <li><strong>ClickUp via MCP is one-way.</strong> Create, update, move — yes. Delete folder or list — no tool exposed. Confirmed today during MOVIE Desk setup. Long-term this turns the Director into a manual janitor for AI-created clutter. Unacceptable.</li>
+    <li><strong>Notion via MCP is broken.</strong> Memory creates duplicates instead of editing (recorded in Baker MEMORY.md). Off the list.</li>
+    <li><strong>Todoist via MCP works but is personal-task-shaped.</strong> Full CRUD via API v1. Single-project hierarchy. No native concept of agents, matters, or curated context. Strong mobile UX — which the Director has explicitly said he does not need to attend to.</li>
+    <li><strong>Google Calendar via MCP works</strong> but is time-blocked-event-shaped. Wrong tool for "by Friday" tasks; right tool for "10:00 Tuesday meeting."</li>
+    <li><strong>ClickUp / Todoist / Notion all introduce a third-party hop</strong> between the agent's filesystem (where context lives) and the task store. Every hop is a place where MCP gaps appear (delete, query, update, sync).</li>
+  </ul>
+
+  <p><strong>The underlying issue.</strong> We have been trying to pick a SaaS task manager and bolt the agent fleet onto it. The agent fleet's centre of gravity is the baker-vault (markdown, git-tracked, AI has direct filesystem control). Every time we route tasks through a SaaS tool, we lose agent control at the boundary. The right architecture flips this: the vault is the source of truth, the SaaS tools (if any) are downstream surfaces.</p>
+</div>
+
+<!-- ============================================== -->
+<!-- §2 LIFECYCLE                                   -->
+<!-- ============================================== -->
+<div class="section">
+  <span class="section-num">Section 2 · Lifecycle of a scheduled task</span>
+  <h2>The five steps every task goes through</h2>
+
+  <p>Any architecture must support each step cleanly. Most tools are strong at 2–3 steps and weak at the rest — which is what creates seams in practice.</p>
+
+  <div class="steps">
+    <div class="step">
+      <h4>Creation</h4>
+      <div class="what">An agent (or the Director, by speaking to an agent) declares a task: title, due date or recurrence, owner agent, expected output, references to context.</div>
+      <div class="why">Where the task is born determines who can act on it later. If the agent creates it but cannot read it back, the system fails.</div>
+    </div>
+    <div class="step">
+      <h4>Storage</h4>
+      <div class="what">The task lives somewhere queryable. Ideally with the context it relates to — emails, decisions, matter state — not in a separate silo.</div>
+      <div class="why">Tasks decay value when separated from their context. A task that reads "debrief MOHG meeting" is worth ten times more when it sits next to the meeting agenda, the talking points, and the prior decisions log.</div>
+    </div>
+    <div class="step">
+      <h4>Reading at the right time</h4>
+      <div class="what">A scheduler or agent picks up the task when it is due — at session start, on cron trigger, on autonomous loop, or on inbound event (new email, ratification).</div>
+      <div class="why">The Director's principle: he does not attend to the schedule. The agent reads it. The system must therefore support agent-side queries: "what is due today?", "what is overdue?", "what is mine?"</div>
+    </div>
+    <div class="step">
+      <h4>Execution</h4>
+      <div class="what">The owner agent runs the task: drafts a brief, sends a paste-block, produces a debrief, files a ratification request. Output lands in the vault and is surfaced to the Director via the agreed channel.</div>
+      <div class="why">Execution must be auditable. Every task touches at least one file write, one decision-log entry, one ratification record.</div>
+    </div>
+    <div class="step">
+      <h4>Closure and audit trail</h4>
+      <div class="what">The agent marks the task complete (or cancelled, or deferred), with a one-line outcome and a link to what was produced. The closed task remains in the vault as history.</div>
+      <div class="why">Without closure, the queue grows. Without an audit trail, the Director cannot challenge or trust the system. Both must work via filesystem operations the agent fully controls.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================== -->
+<!-- §3 OPTIONS                                     -->
+<!-- ============================================== -->
+<div class="section">
+  <span class="section-num">Section 3 · Options evaluated</span>
+  <h2>What is on the table</h2>
+
+  <p>Seven candidates evaluated against the five-step lifecycle, plus the Director's stated frame (he does not attend to the schedule; agents do).</p>
+
+  <!-- OBSIDIAN VAULT -->
+  <div class="option">
+    <div class="option-head">
+      <span class="name">A · Obsidian vault markdown (filesystem)</span>
+      <span class="badge recommend">Recommend</span>
+    </div>
+    <div class="option-body">
+      <div class="what-it-is">Tasks as markdown files in <code>baker-vault/_ops/agents/&lt;desk&gt;/tasks/</code>, with frontmatter (due, priority, owner, status, references). Agents read, write, update, delete directly via filesystem. Director views in Obsidian.</div>
+      <div class="pros-cons">
+        <div class="pros">
+          <div class="label">Pros</div>
+          <ul>
+            <li><strong>Full agent control.</strong> Read, write, edit, delete — no MCP gap. Filesystem is the API.</li>
+            <li>Tasks sit next to the matter context they reference. Click a link, get everything.</li>
+            <li>Git-tracked. Every state change auditable.</li>
+            <li>DataView / Tasks plugins give queryable dashboards inside Obsidian.</li>
+            <li>Already the Baker substrate. No new system to maintain.</li>
+            <li>No third-party dependency. No vendor risk. No MCP version risk.</li>
+            <li>Director-facing reading surface (Obsidian app on Mac) is already in place.</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <div class="label">Cons</div>
+          <ul>
+            <li>Mobile UX is weaker than Todoist. Mitigated by Director's stated frame: he is not the consumer of the schedule.</li>
+            <li>No native push notifications. Mitigated by the same.</li>
+            <li>Tasks plugin / DataView add useful querying but introduce small plugin-maintenance overhead.</li>
+            <li>If many agents write concurrently, baker-vault shared-FS race conditions are a known historical issue (mitigated by branch-per-agent worktrees).</li>
+          </ul>
+        </div>
+      </div>
+      <div class="fit-line"><strong>Fit:</strong> primary store for matter-anchored tasks and follow-ups. Lifecycle steps 1–5 all native. The Director's frame ("agents read the schedule, not me") fits this option uniquely well.</div>
+    </div>
+  </div>
+
+  <!-- BAKER SCHEDULER -->
+  <div class="option">
+    <div class="option-head">
+      <span class="name">B · Baker-native scheduler (APScheduler + Postgres)</span>
+      <span class="badge recommend">Recommend (paired with A)</span>
+    </div>
+    <div class="option-body">
+      <div class="what-it-is">Recurring jobs and time-based triggers run via APScheduler on Render. Job definitions live in Baker code (or a YAML registry); state in Postgres. Already in production for AI Head weekly audit, Sunday digest, Todoist polling, cache TTL.</div>
+      <div class="pros-cons">
+        <div class="pros">
+          <div class="label">Pros</div>
+          <ul>
+            <li>Already running. No new infrastructure.</li>
+            <li>Cron-precise triggers (e.g. Monday 09:00 UTC).</li>
+            <li>Jobs fire agent runs directly — no human in the loop.</li>
+            <li>Tier B authority charter already governs what APScheduler jobs are allowed to do.</li>
+            <li>Fully auditable via <code>baker_actions</code> rows.</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <div class="label">Cons</div>
+          <ul>
+            <li>Job registry is engineer-edited (YAML or code) — not a Director surface. AH1 / B-codes own changes.</li>
+            <li>No Director-facing view of "what's scheduled." Mitigated by a small auto-generated digest.</li>
+            <li>Requires the agent it fires to actually be runnable on a Render trigger (today this means Codex agents, not Claude desktop sessions).</li>
+          </ul>
+        </div>
+      </div>
+      <div class="fit-line"><strong>Fit:</strong> right tool for recurring agent jobs and time-based triggers. Pairs with Option A: APScheduler reads Obsidian tasks at the scheduled time and fires the right desk. Wraps lifecycle step 3 (reading at the right time) for recurring patterns.</div>
+    </div>
+  </div>
+
+  <!-- GOOGLE CALENDAR -->
+  <div class="option">
+    <div class="option-head">
+      <span class="name">C · Google Calendar (via MCP)</span>
+      <span class="badge viable">Keep — narrow scope</span>
+    </div>
+    <div class="option-body">
+      <div class="what-it-is">Native calendar events. Full CRUD via MCP. Already integrated. Already where Director has time-blocked meetings.</div>
+      <div class="pros-cons">
+        <div class="pros">
+          <div class="label">Pros</div>
+          <ul>
+            <li>Full CRUD via MCP (create, update, move, delete).</li>
+            <li>Director sees it natively in the same calendar he already uses.</li>
+            <li>Right tool for time-blocked items (meetings, calls, on-site visits).</li>
+            <li>Supports recurrence, reminders, invitees.</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <div class="label">Cons</div>
+          <ul>
+            <li>Wrong tool for non-time-blocked tasks ("by Friday", "after Q2 results"). Not queryable as a task list.</li>
+            <li>Calendar is a Director-attended surface. Agents writing to it pollutes Director's day view.</li>
+            <li>No matter-context anchoring.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="fit-line"><strong>Fit:</strong> meetings and time-blocked items only. Agent draft a meeting → Director ratifies → agent creates event. Do not use as a general task store.</div>
+    </div>
+  </div>
+
+  <!-- TODOIST -->
+  <div class="option">
+    <div class="option-head">
+      <span class="name">D · Todoist (via MCP)</span>
+      <span class="badge viable">Viable for personal-life tasks only</span>
+    </div>
+    <div class="option-body">
+      <div class="what-it-is">SaaS task manager with full CRUD via API v1. Already MCP-integrated. Baker indexes every 30 minutes. Director uses it for personal tasks today.</div>
+      <div class="pros-cons">
+        <div class="pros">
+          <div class="label">Pros</div>
+          <ul>
+            <li>Full CRUD via MCP. No gaps.</li>
+            <li>Excellent mobile UX, native push, widgets.</li>
+            <li>Baker already polling and indexing.</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <div class="label">Cons</div>
+          <ul>
+            <li><strong>Director-attended by design.</strong> The whole UX is built for the human user to read and tick. The Director's frame is the opposite — he does not want to attend to the schedule.</li>
+            <li>Flat project hierarchy. No matter-context anchoring.</li>
+            <li>Single-user. Agents cannot easily own tasks the way they can in the vault.</li>
+            <li>Adds a third-party hop between agent filesystem and task store.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="fit-line"><strong>Fit:</strong> keep for the Director's personal-life tasks. Do not use for desk fleet work.</div>
+    </div>
+  </div>
+
+  <!-- CLICKUP -->
+  <div class="option">
+    <div class="option-head">
+      <span class="name">E · ClickUp (via MCP)</span>
+      <span class="badge reject">Drop</span>
+    </div>
+    <div class="option-body">
+      <div class="what-it-is">Project management SaaS. Full CRUD on tasks via MCP. Folders and lists are create-only — no delete tool exposed.</div>
+      <div class="pros-cons">
+        <div class="pros">
+          <div class="label">Pros</div>
+          <ul>
+            <li>Hierarchical structure (space → folder → list → task) fits multi-desk taxonomy in principle.</li>
+            <li>Tasks have rich custom fields, priorities, statuses.</li>
+            <li>Already populated with legacy Brisen data.</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <div class="label">Cons</div>
+          <ul>
+            <li><strong>Delete gap.</strong> No MCP tool to remove folders or lists. Confirmed 12 May 2026. Every AI-created mistake becomes Director's manual janitor job.</li>
+            <li>No filesystem-level write. Agents must reach through MCP for every operation.</li>
+            <li>Director must learn ClickUp UI to do cleanup — not a strategy-time activity.</li>
+            <li>Existing Brisen ClickUp content is legacy and partly stale; cleaning it is a separate project.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="fit-line"><strong>Fit:</strong> drop as scheduling infrastructure. Keep existing legacy data in place (no migration); stop accumulating new desk work there.</div>
+    </div>
+  </div>
+
+  <!-- NOTION -->
+  <div class="option">
+    <div class="option-head">
+      <span class="name">F · Notion (via MCP)</span>
+      <span class="badge reject">Reject — broken</span>
+    </div>
+    <div class="option-body">
+      <div class="what-it-is">Document and database SaaS. MCP integration exists but has a known bug.</div>
+      <div class="pros-cons">
+        <div class="pros">
+          <div class="label">Pros</div>
+          <ul><li>Strong document + database hybrid model.</li></ul>
+        </div>
+        <div class="cons">
+          <div class="label">Cons</div>
+          <ul>
+            <li><strong>Update operation creates duplicates instead of editing.</strong> Recorded in Baker MEMORY.md.</li>
+            <li>Any agent that writes will pollute the workspace.</li>
+            <li>Vendor MCP fix timeline unknown.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="fit-line"><strong>Fit:</strong> off the table until the duplicate bug is fixed upstream.</div>
+    </div>
+  </div>
+
+  <!-- LINEAR -->
+  <div class="option">
+    <div class="option-head">
+      <span class="name">G · Linear (via MCP)</span>
+      <span class="badge reject">Wrong tool</span>
+    </div>
+    <div class="option-body">
+      <div class="what-it-is">Engineering issue tracker. Full CRUD via API. MCP available.</div>
+      <div class="pros-cons">
+        <div class="pros">
+          <div class="label">Pros</div>
+          <ul>
+            <li>Full CRUD.</li>
+            <li>Strong workflow states, projects, cycles.</li>
+            <li>Good API.</li>
+          </ul>
+        </div>
+        <div class="cons">
+          <div class="label">Cons</div>
+          <ul>
+            <li>Designed for software engineering teams. The vocabulary (issues, epics, cycles, projects) does not map to asset-management work.</li>
+            <li>Adds a third-party hop with no matter-context anchoring.</li>
+            <li>Director would not naturally read it.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="fit-line"><strong>Fit:</strong> possibly relevant for Baker engineering tracking. Not for desk-fleet operations.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================== -->
+<!-- §4 RECOMMENDATION                              -->
+<!-- ============================================== -->
+<div class="section">
+  <span class="section-num">Section 4 · Recommendation</span>
+  <h2>The architecture, plainly stated</h2>
+
+  <div class="recommendation">
+    <div class="rec-title">Obsidian vault + Baker scheduler. Drop ClickUp. Keep Calendar narrow.</div>
+    <p><strong>Source of truth:</strong> tasks live as markdown files in the baker-vault, organised per desk and per matter. Frontmatter carries due date, priority, owner agent, status, and links to context. Agents have full filesystem CRUD. Director views in Obsidian when he wants — he is not expected to.</p>
+    <p><strong>Time triggers:</strong> Baker's existing APScheduler reads the vault on cron schedules (daily 06:00 UTC scan for today's items; weekly desk reviews; monthly reconciliations) and fires the owning desk with the right task in hand. State is logged to <code>baker_actions</code>.</p>
+    <p><strong>Calendar:</strong> Google Calendar reserved for time-blocked meetings only. Agent-drafted; Director-ratified; agent creates the event.</p>
+    <p><strong>What we drop:</strong> ClickUp as scheduling infrastructure. Existing data stays in place; new desk work stops accumulating there. Notion remains off the table until the duplicate bug is upstream-fixed.</p>
+    <p><strong>What Director sees:</strong> nothing scheduled, by design. He sees the <em>outcomes</em> — drafts to ratify, decisions to confirm, briefs to read. Never the queue itself, unless he asks.</p>
+  </div>
+
+  <h3>Why this is the right answer</h3>
+  <ul>
+    <li><strong>It eliminates the MCP gap problem permanently.</strong> Filesystem is the API. No vendor can break delete.</li>
+    <li><strong>It collocates tasks with their context.</strong> The MOVIE Desk debrief task sits one folder away from the OPERATING.md state and the talking-points pack. Context is one click away.</li>
+    <li><strong>It matches the Director's stated frame.</strong> He does not attend to the schedule. The vault is for agents to read. That is exactly what an Obsidian vault is.</li>
+    <li><strong>It uses infrastructure that already exists.</strong> APScheduler is running. Vault is git-tracked. Slack notification path exists. No new system to maintain.</li>
+    <li><strong>It scales across the fleet.</strong> Every desk (MOVIE, AO, Hagenauer, Baden-Baden, future) uses the same pattern. No per-desk SaaS configuration drift.</li>
+  </ul>
+
+  <h3>What this does not solve, and why that is fine</h3>
+  <ul>
+    <li><strong>Mobile push reminders for the Director — by design.</strong> Director said he does not want to be pinged. Removed from scope.</li>
+    <li><strong>Cross-team task assignment outside the agent fleet.</strong> If Edita or Balazs ever need to be assigned a task, do it via email — not by adding them to the vault.</li>
+  </ul>
+</div>
+
+<!-- ============================================== -->
+<!-- §5 AH1 ENGINEERING HANDOFF                     -->
+<!-- ============================================== -->
+<div class="ah1">
+  <h2>For AH1 — engineering eval points</h2>
+
+  <p style="font-size: 9.5pt; color: var(--ink-soft); font-style: italic; margin-bottom: 12px;">Director will route this section to AH1 for engineering evaluation after Director ratification of the recommendation. The questions below are what MOVIE Desk would want answered before MOVIE Desk relies on the new architecture day-to-day.</p>
+
+  <ol>
+    <li><strong>Vault folder schema.</strong> Where do tasks live? Proposed: <code>baker-vault/_ops/agents/&lt;desk&gt;/tasks/YYYY-MM-DD-&lt;slug&gt;.md</code>, one file per task, with frontmatter. Alternative: a single <code>tasks.md</code> per desk with checkbox items. Per-file is more agent-friendly (atomic writes, no concurrent-edit races). Per-file is your call.</li>
+    <li><strong>Frontmatter schema.</strong> Minimum proposed: <code>due</code>, <code>priority</code>, <code>owner_agent</code>, <code>matter_slug</code>, <code>status</code>, <code>created</code>, <code>references</code>. Optional: <code>recurrence</code> (cron string or natural-language), <code>auto_close</code>, <code>blocked_by</code>. Confirm fields + types.</li>
+    <li><strong>APScheduler integration.</strong> The vault-scanner job: how often does it run, what does it do when it finds a due task? Proposed: 06:00 UTC daily scan, posts a per-desk "due today" summary to <code>_ops/agents/&lt;desk&gt;/today.md</code> + drops Slack DM only if asked. No automatic agent dispatch on time-trigger today — desks are session-launched.</li>
+    <li><strong>Concurrent-write hygiene.</strong> Existing scar: <code>baker-vault shared-FS race</code> on multi-agent concurrent writes (2026-04-30 incident). Does per-file task storage solve it cleanly, or do we still need atomic single-shell commits / per-agent worktrees for the tasks directory?</li>
+    <li><strong>Task closure protocol.</strong> When an agent completes a task, what changes? Proposed: <code>status: closed</code>, <code>closed_at</code>, <code>outcome</code> link to produced artefact. Or move file to <code>tasks/closed/</code>? Affects how DataView queries are written.</li>
+    <li><strong>Obsidian Tasks + DataView plugin install.</strong> Standardising on these plugins for Director's view, or staying plugin-free and querying via grep? Plugin-free is more robust; plugins are nicer for visual scan.</li>
+    <li><strong>Recurring jobs registry.</strong> If recurring patterns live in markdown frontmatter (per-task), or in a central YAML registry, or in APScheduler code — choose one. Recommendation: YAML registry at <code>_ops/processes/schedule-registry.yml</code>, AH1-owned, AI Head can propose changes, Director ratifies.</li>
+    <li><strong>Migration of the one live task.</strong> Tomorrow's MOHG debrief task is currently in ClickUp. Migrate to vault now, or wait until the architecture is built? Recommendation: build the minimum vault schema today, migrate the one task, prove the pattern. ClickUp space remains as legacy until manually cleared.</li>
+    <li><strong>Director-facing surface for "what's pending."</strong> Director said he does not need to be pinged. But should there be a Sunday digest of open items per desk — yes/no? If yes, route via existing Sunday digest. If no, drop.</li>
+    <li><strong>Scope of v1.</strong> Recommendation: ship v1 with just (a) vault schema, (b) one daily scanner job, (c) one task migrated. Plugins, registry, digest — defer to v2 once v1 is stable.</li>
+  </ol>
+</div>
+
+<div class="footer">
+  <span>Brisen Group · MOVIE Desk · Architecture Review · 12 May 2026</span>
+  <span>Director draft · AH1 engineering eval pending</span>
+</div>
+
+</body>
+</html>
