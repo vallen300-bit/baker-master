@@ -75,9 +75,17 @@ except Exception:
 if not text.strip():
     sys.exit(0)
 
-has_question = "?" in text
-has_numbered = bool(re.search(r"^\s*\d+\.", text, flags=re.MULTILINE))
-lower = text.lower()
+# Strip code-spans and fenced code blocks before scanning. URLs and code
+# (e.g. "app.js?v=7") contain literal "?" that are NOT questions; same goes
+# for option-pattern words inside command examples. Director-observed 2026-05-12
+# third false-positive: cache-bust query string in inline backticks triggered
+# the has_question check.
+prose = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+prose = re.sub(r"`[^`]*`", "", prose)
+
+has_question = "?" in prose
+has_numbered = bool(re.search(r"^\s*\d+\.", prose, flags=re.MULTILINE))
+lower = prose.lower()
 # Trigger phrases tightened 2026-05-12 (Director-observed two false-positives):
 #   1) bare "which" used as relative pronoun ("clones which scored 0")
 #   2) numbered lists used as status summaries (not options asks)
@@ -97,6 +105,8 @@ trigger = has_question or has_option_phrase
 if not trigger:
     sys.exit(0)
 
+# Recommendation check runs against ORIGINAL text (not stripped) so
+# Recommendation lines inside code blocks still count.
 has_rec = bool(re.search(r"^\s*\**\s*recommendation\s*:", text, flags=re.MULTILINE | re.IGNORECASE))
 if has_rec:
     sys.exit(0)
