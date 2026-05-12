@@ -113,9 +113,18 @@ pick_active_clone() {
       [[ -d "$repo/.git" ]] || continue
       score=0
 
-      # Pending mailbox (b-codes only)
+      # Mailbox presence (b-codes only). PENDING scores highest (active dispatch);
+      # COMPLETE scores +50 so the post-merge clone still beats a candidate with
+      # NO mailbox at all on the recency tiebreaker. Bug seen 2026-05-12 evening:
+      # after mailbox flip to COMPLETE, both candidates tied at 0 → picker
+      # oscillated to the sibling clone (no briefs dir) → reported mailbox=empty,
+      # cards flipped grey. Anchor: Director-observed b1/b2/b3 going empty
+      # ~30s post-rename. Fix: any-mailbox is a positive signal of "this is the
+      # working clone for this b-code"; pending outranks complete.
       if [[ -n "$n" && -f "$repo/briefs/_tasks/CODE_${n}_PENDING.md" ]]; then
         score=$((score + 100))
+      elif [[ -n "$n" && -f "$repo/briefs/_tasks/CODE_${n}_COMPLETE.md" ]]; then
+        score=$((score + 50))
       fi
 
       # Open PR on current branch (skip in test mode)
