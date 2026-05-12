@@ -14,7 +14,7 @@ logger = logging.getLogger("baker.output.whatsapp")
 
 WAHA_BASE_URL = os.getenv("WAHA_BASE_URL", "https://baker-waha.onrender.com")
 WAHA_SESSION = os.getenv("WAHA_SESSION", "default")
-WAHA_API_KEY = os.getenv("WHATSAPP_API_KEY", "")
+WAHA_API_KEY = os.getenv("WAHA_API_KEY_SEND", "") or os.getenv("WHATSAPP_API_KEY", "")
 DIRECTOR_WHATSAPP = "41799605092@c.us"  # Director's number, no + prefix
 
 

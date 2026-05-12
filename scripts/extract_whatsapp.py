@@ -472,8 +472,8 @@ def backfill_whatsapp():
     """
     global _backfill_running
 
-    if not config.waha.api_key:
-        logger.info("WhatsApp backfill: WHATSAPP_API_KEY not set, skipping")
+    if not (config.waha.api_key_read or config.waha.api_key):
+        logger.info("WhatsApp backfill: WAHA_API_KEY_READ / WHATSAPP_API_KEY not set, skipping")
         return
 
     if _backfill_running:

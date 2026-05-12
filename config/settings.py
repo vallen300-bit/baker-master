@@ -232,8 +232,15 @@ class SlackConfig:
 class WahaConfig:
     base_url: str = os.getenv("WAHA_BASE_URL", "https://baker-waha.onrender.com")
     session: str = os.getenv("WAHA_SESSION", "default")
-    api_key: str = os.getenv("WHATSAPP_API_KEY", "")
+    # Scoped keys (WAHA 2026.4+). Each consumer reads its scope-matched key.
+    api_key_read: str = os.getenv("WAHA_API_KEY_READ", "")
+    api_key_send: str = os.getenv("WAHA_API_KEY_SEND", "")
+    api_key_monitor: str = os.getenv("WAHA_API_KEY_MONITOR", "")
     webhook_secret: str = os.getenv("WAHA_WEBHOOK_SECRET", "")
+    # Legacy admin key — kept ONLY for fallback chain in code paths +
+    # ad-hoc ops/CLI scripts. Will be removed in fold-back PR after 7 days
+    # of stable scoped-key operation.
+    api_key: str = os.getenv("WHATSAPP_API_KEY", "")
 
 
 @dataclass
@@ -367,3 +374,37 @@ class SentinelConfig:
 
 # Global config instance
 config = SentinelConfig()
+
+
+def _assert_waha_scoped_keys() -> None:
+    """WAHA-KEY-SPLIT-1: surface missing scoped keys as a soft warning.
+
+    Production code paths fall back to the legacy WHATSAPP_API_KEY admin key
+    when scoped keys are absent (see triggers/waha_client.py and
+    outputs/whatsapp_sender.py). The fallback is load-bearing for fast rollback
+    via Render env-var flip — so a missing scoped key is a warning, not a hard
+    fail. Hard fail would brick Baker during the rollout window before Step 2.4
+    env-var rotation lands.
+    """
+    try:
+        if os.getenv("WAHA_REQUIRE_SCOPED_KEYS", "true").lower() != "true":
+            return
+        missing = [
+            n for n, v in [
+                ("WAHA_API_KEY_READ", config.waha.api_key_read),
+                ("WAHA_API_KEY_SEND", config.waha.api_key_send),
+                ("WAHA_API_KEY_MONITOR", config.waha.api_key_monitor),
+            ] if not v
+        ]
+        if missing:
+            import logging
+            logging.getLogger("baker.config").warning(
+                f"WAHA scoped keys missing: {missing}. "
+                f"Code paths fall back to legacy WHATSAPP_API_KEY when scoped keys absent."
+            )
+    except Exception:
+        # Never raise from a soft warning. Brick-safety > observability here.
+        pass
+
+
+_assert_waha_scoped_keys()

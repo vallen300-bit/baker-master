@@ -23,9 +23,33 @@ _LOCAL_URL_PREFIX = "http://0.0.0.0:10000"
 
 
 def _headers() -> dict:
+    """Read-scope header. Fallback chain: api_key_read -> legacy api_key.
+
+    The legacy fallback is INTENTIONAL and load-bearing for fast rollback:
+    if WAHA_API_KEY_READ is unset (rotation failure or rollback flip), Baker
+    keeps working under the legacy admin key. Fold-back PR will remove this
+    chain after 7 days of stable scoped-key operation.
+    """
     h = {}
-    if config.waha.api_key:
-        h["X-Api-Key"] = config.waha.api_key
+    key = config.waha.api_key_read or config.waha.api_key
+    if key:
+        h["X-Api-Key"] = key
+    return h
+
+
+def monitor_headers() -> dict:
+    """Health-probe scope header. Fallback chain: monitor -> read -> legacy.
+
+    monitor -> read fallback is INTENTIONAL and does NOT expand blast radius
+    (both scopes are read-only). The read -> legacy fallback exists for the
+    same rollback reason as _headers().
+    """
+    h = {}
+    key = (config.waha.api_key_monitor
+           or config.waha.api_key_read
+           or config.waha.api_key)
+    if key:
+        h["X-Api-Key"] = key
     return h
 
 
@@ -40,16 +64,19 @@ def _rewrite_media_url(url: str) -> str:
 # Session status (WAHA-SILENT-GUARD-1)
 # ------------------------------------------------------------------
 
-def get_session_status(session: str = None) -> dict:
+def get_session_status(session: str = None, _headers_override=None) -> dict:
     """WAHA-SILENT-GUARD-1: Check WAHA session status.
     Returns {"status": "WORKING", ...} or {"error": "..."}.
+
+    `_headers_override` lets callers pass a different scope's header builder
+    (e.g. monitor_headers()) without forking this function.
     """
     if session is None:
         session = config.waha.session
     try:
         resp = httpx.get(
             f"{config.waha.base_url}/api/sessions/{session}",
-            headers=_headers(),
+            headers=(_headers_override if _headers_override is not None else _headers()),
             timeout=10,
         )
         if resp.status_code == 200:
