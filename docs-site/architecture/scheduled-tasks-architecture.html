@@ -373,7 +373,7 @@ body {
 
 <div class="tldr">
   <div class="tldr-title">Bottom line</div>
-  We do not need a third-party task manager. The agent fleet needs a <strong>structured, queryable, agent-readable store</strong> for tasks and scheduled jobs — and we already have it (the baker-vault). Build the scheduling layer on top of vault markdown, with AI agents as the readers. Recommendation: <strong>Obsidian-vault markdown as the canonical source of truth + Baker-native scheduler (APScheduler) for time-based triggers + ScheduleWakeup pattern for self-paced agent loops.</strong> Drop ClickUp. Keep Google Calendar for time-blocked meetings only. Director never attends to the schedule directly — agents read it, act on it, and surface only completed work and ratification asks.
+  We do not need a third-party task manager. The agent fleet needs a <strong>structured, queryable, agent-readable store</strong> for tasks and scheduled jobs — and we already have it (the baker-vault). Build the scheduling layer on top of vault markdown, with AI agents as the readers and <strong>Baker as the single Director-facing messenger</strong>. Recommendation: <strong>Obsidian-vault markdown as the canonical source of truth + Baker-native scheduler (APScheduler) for time-based triggers + Baker Slack DM as the only notification surface to the Director.</strong> Drop ClickUp. Keep Google Calendar for time-blocked meetings only. Director never opens Obsidian or Todoist for pings — Baker surfaces the right items in Slack at the right moment, curated by agents that have already read the queue.
 </div>
 
 <!-- ============================================== -->
@@ -468,20 +468,19 @@ body {
             <li>DataView / Tasks plugins give queryable dashboards inside Obsidian.</li>
             <li>Already the Baker substrate. No new system to maintain.</li>
             <li>No third-party dependency. No vendor risk. No MCP version risk.</li>
-            <li>Director-facing reading surface (Obsidian app on Mac) is already in place.</li>
+            <li>Director-facing reading surface (Obsidian app on Mac) is already in place — used by Director on demand, not required for pings.</li>
+            <li><strong>Notification responsibility lives with Baker, not Obsidian.</strong> Baker reads the vault and pings the Director via Slack. Obsidian is the data store; it is never the messenger.</li>
           </ul>
         </div>
         <div class="cons">
           <div class="label">Cons</div>
           <ul>
-            <li>Mobile UX is weaker than Todoist. Mitigated by Director's stated frame: he is not the consumer of the schedule.</li>
-            <li>No native push notifications. Mitigated by the same.</li>
             <li>Tasks plugin / DataView add useful querying but introduce small plugin-maintenance overhead.</li>
             <li>If many agents write concurrently, baker-vault shared-FS race conditions are a known historical issue (mitigated by branch-per-agent worktrees).</li>
           </ul>
         </div>
       </div>
-      <div class="fit-line"><strong>Fit:</strong> primary store for matter-anchored tasks and follow-ups. Lifecycle steps 1–5 all native. The Director's frame ("agents read the schedule, not me") fits this option uniquely well.</div>
+      <div class="fit-line"><strong>Fit:</strong> primary store for matter-anchored tasks and follow-ups. Lifecycle steps 1–5 all native. Director's stated frame ("I don't want to be pinged by Obsidian / Todoist / ClickUp — I can be pinged by Baker") fits this option uniquely well, because Obsidian is data not messenger and Baker is the single Director-facing channel.</div>
     </div>
   </div>
 
@@ -675,26 +674,27 @@ body {
   <h2>The architecture, plainly stated</h2>
 
   <div class="recommendation">
-    <div class="rec-title">Obsidian vault + Baker scheduler. Drop ClickUp. Keep Calendar narrow.</div>
-    <p><strong>Source of truth:</strong> tasks live as markdown files in the baker-vault, organised per desk and per matter. Frontmatter carries due date, priority, owner agent, status, and links to context. Agents have full filesystem CRUD. Director views in Obsidian when he wants — he is not expected to.</p>
+    <div class="rec-title">Obsidian vault + Baker scheduler + Baker Slack DM as the only ping surface.</div>
+    <p><strong>Source of truth:</strong> tasks live as markdown files in the baker-vault, organised per desk and per matter. Frontmatter carries due date, priority, owner agent, status, and links to context. Agents have full filesystem CRUD. Director views in Obsidian when he wants — he is not expected to attend to it for awareness.</p>
     <p><strong>Time triggers:</strong> Baker's existing APScheduler reads the vault on cron schedules (daily 06:00 UTC scan for today's items; weekly desk reviews; monthly reconciliations) and fires the owning desk with the right task in hand. State is logged to <code>baker_actions</code>.</p>
+    <p><strong>Director-facing pings come from Baker, never from the data store.</strong> Baker reads the vault, decides what is worth surfacing (due today, overdue, escalation thresholds crossed), and sends a curated Slack DM to the Director. Director does not get pinged by Obsidian. Does not get pinged by Todoist. Does not get pinged by ClickUp. Single notification channel: Baker → Slack DM. Director can configure cadence (per-desk daily digest at 07:00; same-day push only for high-priority items; nothing else).</p>
     <p><strong>Calendar:</strong> Google Calendar reserved for time-blocked meetings only. Agent-drafted; Director-ratified; agent creates the event.</p>
     <p><strong>What we drop:</strong> ClickUp as scheduling infrastructure. Existing data stays in place; new desk work stops accumulating there. Notion remains off the table until the duplicate bug is upstream-fixed.</p>
-    <p><strong>What Director sees:</strong> nothing scheduled, by design. He sees the <em>outcomes</em> — drafts to ratify, decisions to confirm, briefs to read. Never the queue itself, unless he asks.</p>
+    <p><strong>What Director sees:</strong> a curated Slack DM from Baker at agreed cadence — the items that genuinely need his attention, with one-click links to the relevant matter context and the draft (if any) ready for ratification. Never the raw queue. Never a third-party app's native pings.</p>
   </div>
 
   <h3>Why this is the right answer</h3>
   <ul>
     <li><strong>It eliminates the MCP gap problem permanently.</strong> Filesystem is the API. No vendor can break delete.</li>
     <li><strong>It collocates tasks with their context.</strong> The MOVIE Desk debrief task sits one folder away from the OPERATING.md state and the talking-points pack. Context is one click away.</li>
-    <li><strong>It matches the Director's stated frame.</strong> He does not attend to the schedule. The vault is for agents to read. That is exactly what an Obsidian vault is.</li>
-    <li><strong>It uses infrastructure that already exists.</strong> APScheduler is running. Vault is git-tracked. Slack notification path exists. No new system to maintain.</li>
+    <li><strong>It matches the Director's stated frame.</strong> He does not attend to the data store; Baker reads the data and pings him through the one channel he already lives in (Slack). One messenger, one signal stream, zero per-app notification cruft.</li>
+    <li><strong>It uses infrastructure that already exists.</strong> APScheduler is running. Vault is git-tracked. Baker → Slack DM path is in production for the Sunday digest and the AI Head weekly audit. No new system to maintain.</li>
     <li><strong>It scales across the fleet.</strong> Every desk (MOVIE, AO, Hagenauer, Baden-Baden, future) uses the same pattern. No per-desk SaaS configuration drift.</li>
   </ul>
 
   <h3>What this does not solve, and why that is fine</h3>
   <ul>
-    <li><strong>Mobile push reminders for the Director — by design.</strong> Director said he does not want to be pinged. Removed from scope.</li>
+    <li><strong>Third-party native push (Obsidian / Todoist / ClickUp).</strong> Explicitly out of scope. Baker owns the messenger role.</li>
     <li><strong>Cross-team task assignment outside the agent fleet.</strong> If Edita or Balazs ever need to be assigned a task, do it via email — not by adding them to the vault.</li>
   </ul>
 </div>
@@ -716,7 +716,7 @@ body {
     <li><strong>Obsidian Tasks + DataView plugin install.</strong> Standardising on these plugins for Director's view, or staying plugin-free and querying via grep? Plugin-free is more robust; plugins are nicer for visual scan.</li>
     <li><strong>Recurring jobs registry.</strong> If recurring patterns live in markdown frontmatter (per-task), or in a central YAML registry, or in APScheduler code — choose one. Recommendation: YAML registry at <code>_ops/processes/schedule-registry.yml</code>, AH1-owned, AI Head can propose changes, Director ratifies.</li>
     <li><strong>Migration of the one live task.</strong> Tomorrow's MOHG debrief task is currently in ClickUp. Migrate to vault now, or wait until the architecture is built? Recommendation: build the minimum vault schema today, migrate the one task, prove the pattern. ClickUp space remains as legacy until manually cleared.</li>
-    <li><strong>Director-facing surface for "what's pending."</strong> Director said he does not need to be pinged. But should there be a Sunday digest of open items per desk — yes/no? If yes, route via existing Sunday digest. If no, drop.</li>
+    <li><strong>Baker Slack DM cadence + format.</strong> Director's frame: Baker is the messenger; Obsidian / Todoist / ClickUp are not. Confirm: (a) daily 07:00 per-desk "due today" digest, one DM per desk; (b) same-day push for high-priority items only (threshold to be defined); (c) Sunday weekly digest with overdue + upcoming items per desk. Format: bullet list with matter-slug prefix and inline Obsidian link. Existing Sunday digest infrastructure is the place to extend, not rebuild.</li>
     <li><strong>Scope of v1.</strong> Recommendation: ship v1 with just (a) vault schema, (b) one daily scanner job, (c) one task migrated. Plugins, registry, digest — defer to v2 once v1 is stable.</li>
   </ol>
 </div>
