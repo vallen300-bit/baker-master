@@ -1,5 +1,14 @@
 ---
-status: PENDING
+status: COMPLETE
+completed_at: 2026-05-12T21:45:06+00:00
+pr: 195
+pr_url: https://github.com/vallen300-bit/baker-master/pull/195
+branch: b1/vault-mirror-non-lock-replica-hotfix-1
+commit: cb6c9a7
+ship_report: briefs/_reports/B1_vault_mirror_non_lock_replica_hotfix_ship_20260512.md
+ship_gate_pytest: GREEN (tests/test_vault_mirror.py 9/9)
+ship_gate_health_poll: PENDING auto-deploy (B1 cannot drive Render redeploy)
+bus_post_message_id: 179
 brief: inline
 trigger_class: TIER_B_CONCURRENCY_PRIMITIVE_HOTFIX
 dispatched_at: 2026-05-12
