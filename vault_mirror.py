@@ -241,11 +241,14 @@ def _record_pull() -> None:
     _last_pull_at = datetime.now(timezone.utc)
 
 
-def _sync_loop(interval_seconds: int) -> None:
+def _sync_loop(interval_seconds: int, stop_event: threading.Event) -> None:
     """Daemon-thread body: sleep, then ``sync_tick``, repeat until stop.
 
-    Uses ``Event.wait`` for the sleep so ``stop_sync_thread`` can cut a
-    pending tick promptly during tests / shutdown. Exceptions inside
+    Uses ``stop_event.wait`` for the sleep so ``stop_sync_thread`` can cut a
+    pending tick promptly during tests / shutdown. The Event is passed in
+    explicitly (per-thread) rather than read from the module global so a
+    successor thread spawned after ``stop_sync_thread`` sees its own,
+    isolated signal — no cross-instance leakage. Exceptions inside
     ``sync_tick`` are already swallowed-as-WARN by that function;
     defensive ``try`` here guards against unexpected raises (git binary
     missing, etc.) so the loop never dies silently. Uses
@@ -255,7 +258,7 @@ def _sync_loop(interval_seconds: int) -> None:
     ``vault_sync_thread_alive`` came back False in prod telemetry.
     """
     while True:
-        if _sync_thread_stop.wait(timeout=interval_seconds):
+        if stop_event.wait(timeout=interval_seconds):
             return
         try:
             sync_tick()
@@ -273,17 +276,20 @@ def start_sync_thread(interval_seconds: Optional[int] = None) -> threading.Threa
 
     Returns the live thread for testability.
     """
-    global _sync_thread
+    global _sync_thread, _sync_thread_stop
     with _sync_thread_lock:
         if _sync_thread is not None and _sync_thread.is_alive():
             return _sync_thread
         interval = (
             interval_seconds if interval_seconds is not None else sync_interval_seconds()
         )
-        _sync_thread_stop.clear()
+        # Fresh stop event per spawn — eliminates cross-instance signal
+        # leakage between a stopping thread and its successor. Architect
+        # M1 / 2nd-pass L1 (PR #195 follow-up).
+        _sync_thread_stop = threading.Event()
         _sync_thread = threading.Thread(
             target=_sync_loop,
-            args=(interval,),
+            args=(interval, _sync_thread_stop),
             name="vault_mirror_sync",
             daemon=True,
         )
@@ -297,17 +303,21 @@ def start_sync_thread(interval_seconds: Optional[int] = None) -> threading.Threa
 def stop_sync_thread(timeout: float = 5.0) -> None:
     """Signal the sync thread to exit and join. Used by tests + shutdown.
 
-    Holds ``_sync_thread_lock`` for symmetry with ``start_sync_thread`` —
-    without it a concurrent start+stop race could observe a stale handle.
-    Architect M1 / 2nd-pass MEDIUM (PR #193 follow-up).
+    Atomic-swap: snapshot + detach inside lock, signal + join the local
+    handle outside lock so concurrent ``start_sync_thread`` is not
+    blocked by the up-to-``timeout``-second join wait. Per-thread stop
+    Event (each ``start_sync_thread`` allocates a fresh one) prevents
+    signal-state leakage between a stopping thread and its successor.
+    Architect M1 / 2nd-pass L1 (PR #195 follow-up).
     """
     global _sync_thread
     with _sync_thread_lock:
-        _sync_thread_stop.set()
+        stop_event = _sync_thread_stop
         thread = _sync_thread
-        if thread is not None and thread.is_alive():
-            thread.join(timeout=timeout)
-        _sync_thread = None
+        _sync_thread = None  # detach inside lock — concurrent start sees None
+    stop_event.set()  # signal outside lock — wakes _sync_loop's wait()
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=timeout)  # join outside lock — no concurrent-start block
 
 
 def _head_commit_sha() -> Optional[str]:
@@ -347,13 +357,23 @@ def mirror_status() -> dict:
     from "thread !alive" (loop died) from "thread alive but stale last_pull"
     (loop ticking but git failing).
     """
+    # Local snapshot — eliminates TOCTOU between the is-not-None check
+    # and the is_alive() call. Concurrent ``stop_sync_thread`` can null
+    # ``_sync_thread`` between the two; without snapshot the second
+    # access raises AttributeError, swallowed by /health's outer
+    # try/except and surfacing as a one-poll false-negative. No lock
+    # needed — CPython attribute reads are GIL-atomic and ``mirror_status``
+    # is hot on the /health path; lock contention with thread-lifecycle
+    # ops would serialize health behind start/stop. Architect M1 /
+    # 2nd-pass L2 (PR #195 follow-up).
+    thread = _sync_thread
     return {
         "vault_mirror_last_pull": (
             _last_pull_at.isoformat() if _last_pull_at else None
         ),
         "vault_mirror_commit_sha": _head_commit_sha(),
         "vault_sync_thread_alive": (
-            _sync_thread is not None and _sync_thread.is_alive()
+            thread is not None and thread.is_alive()
         ),
     }
 
