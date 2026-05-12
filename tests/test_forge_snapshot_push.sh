@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Smoke test for forge_snapshot_push.sh state collection.
 #
-# Five fixtures exercise the daemon end-to-end without POSTing to a real
+# Seven fixtures exercise the daemon end-to-end without POSTing to a real
 # endpoint (LAB_URL="http://127.0.0.1:1" → curl exits 000; we only validate
 # state-collection, not HTTP transport):
 #
@@ -10,8 +10,11 @@
 #   Case C — two-clone alias picks pending-mailbox clone over older single
 #   Case D — two-clone alias falls back to recency tiebreaker when neither has mailbox
 #   Case E — two non-git candidate paths fall back to first; daemon still POSTs
+#   Case F — two-clone alias picks COMPLETE-mailbox clone over empty sibling (+50 > 0)
+#   Case G — frontmatter `status: DROPPED` authoritative over filename `_PENDING` suffix
 #
 # Cases B/C/D/E added in BRISEN_LAB_CARD_STATE_FIX_1 (Fix 4.1).
+# Cases F/G added in FORGE_DAEMON_FRONTMATTER_STATUS_AUTHORITATIVE_1.
 
 set -euo pipefail
 
@@ -221,5 +224,85 @@ grep -q "\[forge-push\] b9: repo missing at $CASE_E_DIR_A, skipping" "$OUT_E" \
 assert_no_prod_aliases "$OUT_E"
 echo "PASS: Case E — two non-git candidate paths fall back to first; daemon still emits stderr without crash."
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Case F — two-clone alias picks COMPLETE-mailbox clone over empty sibling.
+# Anchor: hotfix f5012a9 (2026-05-12 eve) added COMPLETE → +50 scoring so the
+# post-merge clone doesn't tie at 0 with a no-mailbox sibling and oscillate
+# off via recency tiebreaker. The fix shipped; this fixture locks it down.
+# ─────────────────────────────────────────────────────────────────────────────
+CASE_F_REPO_A="$TMP/case-f-clone-a"  # has CODE_9_COMPLETE.md (older commit)
+CASE_F_REPO_B="$TMP/case-f-clone-b"  # empty mailbox, newer commit
+mkdir -p "$CASE_F_REPO_A/briefs/_tasks" "$CASE_F_REPO_B"
+(
+  cd "$CASE_F_REPO_A"
+  git init -q
+  git config user.email "test@example.com"
+  git config user.name "Test"
+  cat > briefs/_tasks/CODE_9_COMPLETE.md <<'YAML'
+---
+status: COMPLETE
+brief: COMPLETED_BRIEF_1
+---
+YAML
+  git add .
+  GIT_AUTHOR_DATE="2026-05-12T08:00:00Z" GIT_COMMITTER_DATE="2026-05-12T08:00:00Z" \
+    git commit -q -m "fixture F-A commit (COMPLETE mailbox, older)"
+)
+(
+  cd "$CASE_F_REPO_B"
+  git init -q
+  git config user.email "test@example.com"
+  git config user.name "Test"
+  echo "noop" > README.md
+  git add .
+  GIT_AUTHOR_DATE="2026-05-14T08:00:00Z" GIT_COMMITTER_DATE="2026-05-14T08:00:00Z" \
+    git commit -q -m "fixture F-B commit (newer, empty mailbox)"
+)
+OUT_F="$TMP/case-f.log"
+run_daemon "f" "b9:$CASE_F_REPO_A,$CASE_F_REPO_B" > "$OUT_F"
+status_f="$(extract_payload_field "$OUT_F" b9 mailbox_status)"
+brief_f="$(extract_payload_field "$OUT_F" b9 mailbox_brief_name)"
+[[ "$status_f" == "complete" && "$brief_f" == "COMPLETED_BRIEF_1" ]] \
+  || { echo "FAIL: Case F — picked wrong clone: mailbox_status='$status_f' brief='$brief_f' (expected complete/COMPLETED_BRIEF_1; COMPLETE +50 must beat empty +0 even with newer recency)" >&2; cat "$OUT_F" >&2; exit 1; }
+assert_no_prod_aliases "$OUT_F"
+echo "PASS: Case F — two-clone alias picks COMPLETE-mailbox clone over empty sibling."
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case G — frontmatter `status: DROPPED` authoritative over filename `_PENDING`.
+# Anchor: b4 CODE_4_PENDING.md carried `status: STAGED` (Director pivot
+# 2026-05-11) but filename was still `_PENDING` → daemon's filename-only
+# classifier reported pending → red card lied. This fixture asserts the new
+# frontmatter-authoritative path (also exercises the dropped classification
+# end-to-end, which previously had no representation in the daemon vocabulary).
+# ─────────────────────────────────────────────────────────────────────────────
+CASE_G_REPO="$TMP/case-g-b9"
+mkdir -p "$CASE_G_REPO/briefs/_tasks"
+(
+  cd "$CASE_G_REPO"
+  git init -q
+  git config user.email "test@example.com"
+  git config user.name "Test"
+  cat > briefs/_tasks/CODE_9_PENDING.md <<'YAML'
+---
+status: DROPPED
+brief: DROPPED_VIA_FRONTMATTER_1
+target: b9
+---
+# CODE_9_PENDING — filename says PENDING but frontmatter says DROPPED
+YAML
+  git add .
+  git commit -q -m "fixture G commit (frontmatter drift)"
+)
+OUT_G="$TMP/case-g.log"
+run_daemon "g" "b9:$CASE_G_REPO" > "$OUT_G"
+status_g="$(extract_payload_field "$OUT_G" b9 mailbox_status)"
+brief_g="$(extract_payload_field "$OUT_G" b9 mailbox_brief_name)"
+[[ "$status_g" == "dropped" ]] \
+  || { echo "FAIL: Case G — frontmatter status DROPPED not applied: mailbox_status='$status_g' (expected 'dropped'; filename _PENDING suffix must NOT override frontmatter)" >&2; cat "$OUT_G" >&2; exit 1; }
+[[ "$brief_g" == "DROPPED_VIA_FRONTMATTER_1" ]] \
+  || { echo "FAIL: Case G — brief extraction broken: '$brief_g' (expected 'DROPPED_VIA_FRONTMATTER_1')" >&2; exit 1; }
+assert_no_prod_aliases "$OUT_G"
+echo "PASS: Case G — frontmatter status: DROPPED authoritative over filename _PENDING suffix."
+
 echo ""
-echo "All 5 cases PASS."
+echo "All 7 cases PASS."
