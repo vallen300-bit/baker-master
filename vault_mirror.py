@@ -58,9 +58,19 @@ OPS_PREFIX = "_ops/"
 
 # Module-level last-pull timestamp for /health.
 _last_pull_at: Optional[datetime] = None
-# Serialize git ops — ensure_mirror + sync_tick don't race if scheduler
-# fires mid-startup.
+# Serialize git ops — ensure_mirror + sync_tick don't race if the
+# per-process sync thread fires mid-startup.
 _git_lock = threading.Lock()
+
+# Per-process sync thread state. The thread refreshes the local FS mirror
+# every ``sync_interval_seconds`` so each Render replica stays current
+# independent of the singleton scheduler lock. Previously the refresh
+# was an APScheduler job inside ``triggers.embedded_scheduler`` —
+# singleton-locked, which meant only the lock-holding replica pulled and
+# every other replica served stale ``baker_vault_read`` results.
+_sync_thread: Optional[threading.Thread] = None
+_sync_thread_stop = threading.Event()
+_sync_thread_lock = threading.Lock()
 
 
 # --------------------------------------------------------------------------
@@ -229,6 +239,65 @@ def sync_tick() -> None:
 def _record_pull() -> None:
     global _last_pull_at
     _last_pull_at = datetime.now(timezone.utc)
+
+
+def _sync_loop(interval_seconds: int) -> None:
+    """Daemon-thread body: sleep, then ``sync_tick``, repeat until stop.
+
+    Uses ``Event.wait`` for the sleep so ``stop_sync_thread`` can cut a
+    pending tick promptly during tests / shutdown. Exceptions inside
+    ``sync_tick`` are already swallowed-as-WARN by that function;
+    defensive ``try`` here guards against unexpected raises (git binary
+    missing, etc.) so the loop never dies silently.
+    """
+    while True:
+        if _sync_thread_stop.wait(timeout=interval_seconds):
+            return
+        try:
+            sync_tick()
+        except Exception as e:  # pragma: no cover — defensive
+            logger.warning("vault_mirror: sync_loop tick raised: %s", e)
+
+
+def start_sync_thread(interval_seconds: Optional[int] = None) -> threading.Thread:
+    """Start the per-process daemon thread that periodically pulls the mirror.
+
+    Idempotent — a second call returns the existing live thread. Spawned
+    once per process at FastAPI startup. Runs on EVERY Render replica
+    (independent of the singleton scheduler lock) so each replica's
+    local FS mirror stays current.
+
+    Returns the live thread for testability.
+    """
+    global _sync_thread
+    with _sync_thread_lock:
+        if _sync_thread is not None and _sync_thread.is_alive():
+            return _sync_thread
+        interval = (
+            interval_seconds if interval_seconds is not None else sync_interval_seconds()
+        )
+        _sync_thread_stop.clear()
+        _sync_thread = threading.Thread(
+            target=_sync_loop,
+            args=(interval,),
+            name="vault_mirror_sync",
+            daemon=True,
+        )
+        _sync_thread.start()
+        logger.info(
+            "vault_mirror: per-process sync thread started (every %ss)", interval
+        )
+        return _sync_thread
+
+
+def stop_sync_thread(timeout: float = 5.0) -> None:
+    """Signal the sync thread to exit and join. Used by tests + shutdown."""
+    global _sync_thread
+    _sync_thread_stop.set()
+    thread = _sync_thread
+    if thread is not None and thread.is_alive():
+        thread.join(timeout=timeout)
+    _sync_thread = None
 
 
 def _head_commit_sha() -> Optional[str]:
