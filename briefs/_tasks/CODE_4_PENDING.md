@@ -1,5 +1,5 @@
 ---
-status: REQUEST_CHANGES
+status: COMPLETE
 brief: briefs/BRIEF_HARNESS_SUBAGENT_MIGRATION_1.md
 trigger_class: TIER_B_HARNESS_OPTIMIZATION
 dispatched_at: 2026-05-12
@@ -7,7 +7,13 @@ dispatched_by: aihead1
 estimated_effort: 2-3h
 supersedes: TIER_B_MODEL_DEPRECATION_SWEEP (COMPLETE, PR #192 merged 31454dc)
 update_at: 2026-05-12
-update_reason: PR #194 gate chain returned 1 CRITICAL + 2 HIGH + 1 MEDIUM (see PR comment 4435153131 + UPDATE block below)
+update_reason: PR #194 gate chain returned 1 CRITICAL + 2 HIGH + 1 MEDIUM v0-1; B4 fast-follow v0-2 (4339189) folded all 5 fixes incl Step 9 scope amendment
+shipped_at: 2026-05-13
+shipped_pr: 194
+v0_2_head: 4339189
+merged_commit: d94a190
+v0_2_gates_cleared: ah1_static + inline_security_review + feature-dev:code-reviewer_2nd_pass (PASS-WITH-NITS, 1 MEDIUM fast-follow + 1 LOW post-merge-action)
+post_merge_followup: narrow .githooks/ Part 3 exclusion from directory-wide to ^\.githooks/pre-commit$ (MEDIUM); 6-picker fresh-session sweep (LOW)
 ---
 
 ## UPDATE — 2026-05-12 — REQUEST_CHANGES on PR #194
