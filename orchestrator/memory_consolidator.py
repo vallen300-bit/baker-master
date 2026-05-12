@@ -46,7 +46,7 @@ MAX_INTERACTIONS_PER_SUMMARY = 100
 # Minimum interactions to bother summarizing
 MIN_INTERACTIONS_FOR_SUMMARY = 3
 # Model for Tier 2 compression (Opus — lossless critical details)
-TIER2_MODEL = "claude-opus-4-20250514"
+TIER2_MODEL = "claude-opus-4-6"
 # Model for Tier 3 compression (Gemini Pro — strategic synthesis)
 TIER3_MODEL = "gemini-2.5-pro"
 
