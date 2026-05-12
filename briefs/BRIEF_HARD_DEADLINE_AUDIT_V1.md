@@ -201,3 +201,69 @@ Director "go" 2026-05-13 (this session). Specifically:
 - Auditor + registrar: **b4**
 - Branch: `b4/hard-deadline-audit-1` (for the vault doc commit only; no baker-master branch needed)
 - Independent of Brief 1 + Brief 2 timing. Brief 2's scanner will pick up the test deadline whenever it runs after Brief 3 lands.
+
+---
+
+## UPDATE — 2026-05-13 — architecture-review amendment (Director-ratified this session)
+
+One amendment, folded post-architecture-review. Adds ~15 min to audit effort (~2h → ~2.25h). Closes a HIGH-severity coupling concern.
+
+### Amendment — Q5 must surface `assigned_to` population rate as a percent + v1.5 backfill trigger
+
+The audit's Q5 ("Assignment + matter routing") originally asked "how is `assigned_to` set" + "which agent reads it." Director-ratified amendment makes the QUANTITATIVE answer mandatory.
+
+**Required output for Q5:**
+
+```
+- Total active deadlines (status='active'): N
+- Deadlines with assigned_to populated (non-null, non-empty): X (P%)
+- Deadlines without assigned_to: Y (Q%)
+- Deadlines with matter_slug populated: M (R%)
+- Top-5 most common assigned_to values (count): ...
+- Top-5 most common matter_slug values (count): ...
+```
+
+Run literally — paste the SQL and the literal output rows. Brief Authoring Standards rule 7 applies (cite the query).
+
+```sql
+SELECT
+    COUNT(*) FILTER (WHERE status = 'active') AS total_active,
+    COUNT(*) FILTER (WHERE status = 'active' AND assigned_to IS NOT NULL AND assigned_to != '') AS with_assignee,
+    COUNT(*) FILTER (WHERE status = 'active' AND (assigned_to IS NULL OR assigned_to = '')) AS without_assignee,
+    COUNT(*) FILTER (WHERE status = 'active' AND matter_slug IS NOT NULL AND matter_slug != '') AS with_matter_slug
+FROM deadlines;
+```
+
+Compute P, Q, R as percentages of total_active.
+
+### v1.5 backfill trigger
+
+After registering the test deadline (Part 2), if **P < 50%** (less than half of active deadlines have `assigned_to` populated):
+
+1. **Do NOT** attempt to backfill within this brief — out of scope.
+2. **DO** add a clearly-marked v1.5 follow-up entry at the END of the audit doc:
+
+```markdown
+## v1.5 FOLLOW-UP — `assigned_to` backfill required
+
+Population rate at audit time (2026-05-13): X / N = P%.
+
+Threshold P < 50% triggers immediate v1.5 work BEFORE vault_scanner_daily
+fleet-wide rollout. Otherwise the scanner's per-desk query under-reports
+desk deadlines while real ones live in the `_unassigned` synthetic bucket.
+
+Proposed v1.5 brief: `BRIEF_DEADLINE_ASSIGNED_TO_BACKFILL_1`. Scope:
+- Heuristic backfill from `matter_slug` → desk via `_desk-matter-map.yml`
+- Manual review queue for deadlines with neither `assigned_to` NOR `matter_slug`
+- Director ratification of the desk assignments before bulk UPDATE
+
+Surface to AH1 immediately on audit completion if triggered.
+```
+
+If **P >= 50%**, note "v1.5 backfill not triggered — population rate adequate" and proceed without the addendum.
+
+This makes the audit actionable instead of merely descriptive.
+
+### Ratification anchor
+
+Director "ratified" 2026-05-13 (this session) post AH1 architecture-review verdict "accept-with-changes." Concern #1 (`assigned_to` population gap → scanner silent under-reporting) closed by (a) scanner-side `_unassigned` bucket in Brief 2 Amendment E, AND (b) this brief's quantitative-output requirement + v1.5 backfill trigger.
