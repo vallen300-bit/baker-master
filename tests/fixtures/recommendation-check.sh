@@ -7,8 +7,16 @@
 # Drift detectable via:
 #   diff ~/.claude/hooks/recommendation-check.sh tests/fixtures/recommendation-check.sh
 #
-# Contract: never block. Exit 0 on every path. ≤4s wall time. Skip transcript
-# walk if file >10MB. Errors stay silent (no additionalContext spam).
+# Contract (revised 2026-05-12 Director-authorized — token economy fix):
+# - On violation: emit valid Stop-hook JSON `{"decision":"block","reason":...}`.
+#   Blocks the Stop event + feeds `reason` back to model so it rewrites WITH
+#   the Recommendation line. Costs +1 turn per violation, but the rewrite is
+#   itself terse and the hook stops firing once Recommendation is present.
+# - On pass: emit nothing. Exit 0. Zero context-window cost.
+# - Schema-invalid `hookSpecificOutput.additionalContext` removed (Stop hooks
+#   don't support that field — Claude Code rejected with a 30-line error block
+#   on every Stop, ~250 tokens × N turns of pure noise).
+# - ≤4s wall time. Skip transcript walk if file >10MB. Errors stay silent.
 #
 # Anchor: project CLAUDE.md HARD RULE 2 — every multi-option / multi-Q reply
 # ends with explicit Recommendation. Mnilax (May 2026): hooks lift compliance
@@ -86,7 +94,7 @@ if [ -n "$WARNING" ]; then
     printf '%s' "$WARNING" | python3 -c '
 import json, sys
 text = sys.stdin.read()
-print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": text}}))
+print(json.dumps({"decision": "block", "reason": text}))
 ' 2>/dev/null || true
 fi
 

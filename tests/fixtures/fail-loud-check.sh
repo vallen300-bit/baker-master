@@ -7,8 +7,18 @@
 # Drift detectable via:
 #   diff ~/.claude/hooks/fail-loud-check.sh tests/fixtures/fail-loud-check.sh
 #
-# Contract: never block. Exit 0 on every path. ≤4s wall time. Skip transcript
-# walk if file >10MB.
+# Contract (revised 2026-05-12 Director-authorized — token economy fix):
+# - On violation: emit valid Stop-hook JSON `{"decision":"block","reason":...}`.
+#   Blocks the Stop event + feeds `reason` back to model so it rewrites WITH
+#   an explicit verification phrase (or removes the unverified claim).
+# - On pass: emit nothing. Exit 0. Zero context-window cost.
+# - Schema-invalid `hookSpecificOutput.additionalContext` removed (Stop hooks
+#   don't support that field — Claude Code rejected with a 30-line error block
+#   on every Stop, ~250 tokens × N turns of pure noise).
+# - Trigger tightened (same revision): "completed" / "done" / "shipped" /
+#   "merged" removed from claim_words — those are routine status updates, not
+#   pass-claims. Only "tests pass" / "all green" still fire fail-loud.
+# - ≤4s wall time. Skip transcript walk if file >10MB.
 #
 # Anchor: project CLAUDE.md ENGINEERING RULES Fail-loud — surface uncertainty,
 # don't hide it. "Completed" is wrong if anything was skipped silently.
@@ -65,7 +75,12 @@ if not text.strip():
     sys.exit(0)
 
 lower = text.lower()
-claim_words = ("completed", "done", "tests pass", "shipped", "merged", "all green")
+# Trigger ONLY on testing/CI pass-claims. Removed (2026-05-12 Director-authorized):
+# "completed", "done", "shipped", "merged" — those are routine status updates,
+# not assertions about test outcomes; firing on them produced false-positives on
+# every ship/merge turn and would cascade into token-multiplying rewrites under
+# the new block-on-violation contract.
+claim_words = ("tests pass", "all green", "all tests pass", "tests passed")
 trigger = any(w in lower for w in claim_words)
 if not trigger:
     sys.exit(0)
@@ -87,7 +102,7 @@ if [ -n "$WARNING" ]; then
     printf '%s' "$WARNING" | python3 -c '
 import json, sys
 text = sys.stdin.read()
-print(json.dumps({"hookSpecificOutput": {"hookEventName": "Stop", "additionalContext": text}}))
+print(json.dumps({"decision": "block", "reason": text}))
 ' 2>/dev/null || true
 fi
 
