@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_BRISEN_LAB_CARD_STATE_FIX_1.md
 trigger_class: TIER_B_FRONTEND_PLUS_DAEMON_LOGIC
 dispatched_at: 2026-05-13
