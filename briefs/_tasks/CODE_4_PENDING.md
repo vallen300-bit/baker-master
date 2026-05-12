@@ -1,10 +1,15 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: inline
 trigger_class: TIER_B_MODEL_DEPRECATION_SWEEP
 dispatched_at: 2026-05-12
 dispatched_by: aihead1
 estimated_effort: 30-45 min
+shipped_at: 2026-05-12
+shipped_pr: 192
+merged_commit: 31454dc
+ship_report: briefs/_reports/B4_model_deprecation_sweep_1_20260512.md
+gates_cleared: ah1_static + inline_security_review + code_reviewer_2nd_pass (PASS, 1 MEDIUM non-blocking)
 ---
 
 # CODE_4 — MODEL_DEPRECATION_SWEEP_1 — 2026-05-12
