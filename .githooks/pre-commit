@@ -1,20 +1,74 @@
 #!/usr/bin/env bash
-# Baker pre-commit: enforce migration immutability.
+# Baker pre-commit — three independent checks.
+#
+# Part 1: migration immutability         (HAS BYPASS — see below)
+# Part 2: subagent location enforcement  (NO BYPASS — add to ~/.claude/agents/, not picker)
+# Part 3: retired Anthropic model ID enforcement
+#                                        (NO BYPASS — use claude-opus-4-6/4-7 or claude-sonnet-4-5/4-6)
 #
 # Activation (one-time per clone):
 #   git config core.hooksPath .githooks
 #
-# Bypass paths (in order of precedence):
+# Bypass paths (PART 1 ONLY — do NOT cover Parts 2 or 3):
 #   1. "Migration-edit-authorized: <reason>" trailer in commit message.
 #      Detected via .git/COMMIT_EDITMSG (works for editor and `-F` flows).
 #   2. BAKER_MIGRATION_EDIT_AUTHORIZED=1 environment variable.
 #      Required for `git commit -m "..."` flow because git does not write
 #      COMMIT_EDITMSG before pre-commit fires when -m is used.
+#
+# Parts 2 and 3 have NO bypass by design. If you genuinely need to commit a
+# `.claude/agents/*.md` file or a retired model ID string, surface the case
+# to AH1; do not use `--no-verify` (project hard rule).
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPO_ROOT"
 
+# ---------------------------------------------------------------------------
+# Part 2: subagent location enforcement (NO BYPASS — add to ~/.claude/agents/, not picker)
+# Subagents live at user-global ~/.claude/agents/ post-HARNESS_SUBAGENT_MIGRATION_1 (2026-05-12).
+# Filter `ACR` catches Added (A), Copied (C), Renamed (R) — closes the `git mv` rename gap.
+# ---------------------------------------------------------------------------
+AGENT_ADDS="$(git diff --cached --name-only --diff-filter=ACR | grep -E '^\.claude/agents/.+\.md$' || true)"
+if [ -n "$AGENT_ADDS" ]; then
+  echo "[pre-commit] BLOCKED (Part 2): subagent definitions must live at ~/.claude/agents/ (user-global), not in picker .claude/agents/." >&2
+  echo "[pre-commit] Offending paths:" >&2
+  echo "$AGENT_ADDS" | sed 's/^/  - /' >&2
+  echo "[pre-commit] Move the file to ~/.claude/agents/<name>.md and re-stage. NO BYPASS — Part 1 bypasses do not cover Part 2." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Part 3: retired Anthropic model ID enforcement (NO BYPASS — use claude-opus-4-6/4-7 or claude-sonnet-4-5/4-6)
+# Anthropic deprecation 2026-04-14, retirement 2026-06-15.
+# Exclude historical/audit-trail paths: briefs/, tasks/lessons.md, docs-site/.
+# Also exclude .githooks/ — the enforcement code itself necessarily contains the literal strings.
+# ---------------------------------------------------------------------------
+RETIRED_IDS_REGEX='claude-(opus-4|sonnet-4)-20250514'
+EXCLUDE_PATHS_REGEX='^briefs/|^tasks/lessons\.md$|^docs-site/|^\.githooks/'
+
+FILES_WITH_HITS="$(git diff --cached --name-only --diff-filter=ACMR | while read -r f; do
+  [ -z "$f" ] && continue
+  if echo "$f" | grep -qE "$EXCLUDE_PATHS_REGEX"; then
+    continue
+  fi
+  if git diff --cached -- "$f" | grep -E '^\+' | grep -vE '^\+\+\+ ' | grep -qE "$RETIRED_IDS_REGEX"; then
+    echo "$f"
+  fi
+done || true)"
+
+if [ -n "$FILES_WITH_HITS" ]; then
+  echo "[pre-commit] BLOCKED (Part 3): retired Anthropic model ID detected (claude-opus-4-20250514 or claude-sonnet-4-20250514)." >&2
+  echo "[pre-commit] Anthropic retirement: 2026-06-15. Use claude-opus-4-6 / claude-opus-4-7 / claude-sonnet-4-5 / claude-sonnet-4-6." >&2
+  echo "[pre-commit] Files with hits:" >&2
+  echo "$FILES_WITH_HITS" | sed 's/^/  - /' >&2
+  echo "[pre-commit] NO BYPASS. Exclusions: briefs/, tasks/lessons.md, docs-site/, .githooks/ (historical/audit-trail + enforcement code)." >&2
+  exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Part 1: migration immutability (HAS BYPASS — see file header)
+# ---------------------------------------------------------------------------
 CHECK="scripts/check_applied_migrations.sh"
 if [ ! -x "$CHECK" ]; then
   echo "[pre-commit] $CHECK missing or non-executable; skipping migration immutability check" >&2
