@@ -179,6 +179,39 @@ pick_active_clone() {
   echo "$best_path"
 }
 
+# sync_clone_to_main — ensure the chosen clone has a fresh `origin/main` ref
+# so classify_mailbox can read mailbox state from upstream even when the
+# clone is mid-feature-branch (BRISEN_LAB_CARD_STATE_FIX_2 Fix 2).
+#
+# Anchor: 2026-05-13 — AH1 committed `36708ff` (mailbox(b4) → COMPLETE) from
+# ~/bm-aihead1; ~/bm-b4 lagged 3 commits, so the daemon classified b4 as
+# pending → "Working at: hard-deadline-audit-1" stayed for >10h after ship.
+#
+# Behaviour:
+#   - On main / master: `fetch` + `merge --ff-only` so the local working copy
+#     mirrors origin/main and `cat` reads see fresh frontmatter.
+#   - On a feature branch: `fetch origin main` ONLY — mailbox reads use
+#     `git show origin/main:...` (classify_mailbox branch-aware path).
+#   - Quiet on every output stream; never raises a failure. A failed fetch /
+#     non-fast-forward merge leaves origin/main at last-known state, which is
+#     still better than the local-feature-branch read.
+sync_clone_to_main() {
+  local repo="$1"
+  [[ -d "$repo/.git" ]] || return 0
+  local current_branch
+  current_branch="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+
+  # Quiet fetch in every case — feeds both classify_mailbox's `git show
+  # origin/main:` path AND the optional ff-pull below.
+  git -C "$repo" fetch origin main --quiet 2>/dev/null || true
+
+  if [[ "$current_branch" == "main" || "$current_branch" == "master" ]]; then
+    # ff-only — never touch local work. Falls through silently if not fast-
+    # forwardable (e.g. local has unpushed commits).
+    git -C "$repo" merge --ff-only origin/main --quiet 2>/dev/null || true
+  fi
+}
+
 # extract_frontmatter_status — read YAML frontmatter `status:` field.
 # Returns the value uppercased + trimmed, or empty if no frontmatter / no
 # status field. Authoritative over filename suffix in classify_mailbox per
@@ -190,6 +223,17 @@ extract_frontmatter_status() {
   local f="$1"
   [[ -f "$f" ]] || { echo ""; return; }
   awk 'BEGIN{c=0} /^---$/{c++; if(c==2) exit; next} c==1 && /^status:[[:space:]]*/{print; exit}' "$f" 2>/dev/null \
+    | sed -E 's/^status:[[:space:]]*//; s/[[:space:]]*$//' \
+    | tr '[:lower:]' '[:upper:]' \
+    | head -1
+}
+
+# extract_frontmatter_status_from_content — same as extract_frontmatter_status
+# but reads from a content string passed via stdin (not a file). Used by
+# classify_mailbox when reading mailbox state via `git show origin/main:...`
+# on a feature-branch clone, where there's no local file to point awk at.
+extract_frontmatter_status_from_content() {
+  awk 'BEGIN{c=0} /^---$/{c++; if(c==2) exit; next} c==1 && /^status:[[:space:]]*/{print; exit}' 2>/dev/null \
     | sed -E 's/^status:[[:space:]]*//; s/[[:space:]]*$//' \
     | tr '[:lower:]' '[:upper:]' \
     | head -1
@@ -210,21 +254,74 @@ classify_mailbox() {
   local n="$2"
   local f="" filename_status="" fm_status="" final_status=""
   local suffix candidate
+
+  # BRISEN_LAB_CARD_STATE_FIX_2 Fix 2: when the clone is on a feature branch,
+  # local main is frequently stale (B-codes don't auto-pull). Read mailbox
+  # state from origin/main instead. sync_clone_to_main() runs before this
+  # call to keep the cached origin/main ref fresh.
+  local current_branch
+  current_branch="$(git -C "$repo" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+  local read_from_origin_main=0
+  if [[ "$current_branch" != "main" && "$current_branch" != "master" && "$current_branch" != "?" ]]; then
+    read_from_origin_main=1
+  fi
+
+  # First pass: find the active suffix using the local working copy. Same
+  # suffix priority order on both branches — `_PENDING.md` wins over
+  # `_COMPLETE.md` etc. when both files coexist mid-transition.
   for suffix in PENDING IN_PROGRESS STAGED COMPLETE DROPPED; do
     candidate="$repo/briefs/_tasks/CODE_${n}_${suffix}.md"
-    if [[ -f "$candidate" ]]; then
-      f="$candidate"
-      filename_status="$(echo "$suffix" | tr '[:upper:]' '[:lower:]')"
-      break
+    if [[ "$read_from_origin_main" == "1" ]]; then
+      # Probe origin/main for the same filename; if any of the 5 candidates
+      # exists in origin/main, pick the highest-priority one.
+      if git -C "$repo" cat-file -e "origin/main:briefs/_tasks/CODE_${n}_${suffix}.md" 2>/dev/null; then
+        f="$candidate"
+        filename_status="$(echo "$suffix" | tr '[:upper:]' '[:lower:]')"
+        break
+      fi
+    else
+      if [[ -f "$candidate" ]]; then
+        f="$candidate"
+        filename_status="$(echo "$suffix" | tr '[:upper:]' '[:lower:]')"
+        break
+      fi
     fi
   done
+
+  if [[ -z "$f" ]]; then
+    # Feature-branch fallback: if origin/main lookup found nothing (e.g.
+    # origin/main never fetched, or no mailbox file at all upstream), try
+    # the local file once more so a freshly-cloned worktree still classifies
+    # correctly before its first fetch.
+    if [[ "$read_from_origin_main" == "1" ]]; then
+      for suffix in PENDING IN_PROGRESS STAGED COMPLETE DROPPED; do
+        candidate="$repo/briefs/_tasks/CODE_${n}_${suffix}.md"
+        if [[ -f "$candidate" ]]; then
+          f="$candidate"
+          filename_status="$(echo "$suffix" | tr '[:upper:]' '[:lower:]')"
+          read_from_origin_main=0  # local fallback won — read content from disk
+          break
+        fi
+      done
+    fi
+  fi
 
   if [[ -z "$f" ]]; then
     echo "empty|"
     return
   fi
 
-  fm_status="$(extract_frontmatter_status "$f")"
+  if [[ "$read_from_origin_main" == "1" ]]; then
+    # Stream the file content out of origin/main and pipe through the
+    # content-mode frontmatter parser. Path is repo-relative. Re-uppercase
+    # filename_status via `tr` (avoid bash-4 `${var^^}` — macOS ships 3.2).
+    local rel_path="briefs/_tasks/CODE_${n}_$(echo "$filename_status" | tr '[:lower:]' '[:upper:]').md"
+    fm_status="$(git -C "$repo" show "origin/main:${rel_path}" 2>/dev/null \
+      | extract_frontmatter_status_from_content)"
+  else
+    fm_status="$(extract_frontmatter_status "$f")"
+  fi
+
   if [[ -n "$fm_status" ]]; then
     case "$fm_status" in
       PENDING)     final_status="pending" ;;
@@ -387,11 +484,18 @@ print(json.dumps({
 }
 
 # Iterate. Per-terminal failures are isolated. pick_active_clone() chooses the
-# right clone per alias before snapshot_one() reads its state.
+# right clone per alias; sync_clone_to_main() then refreshes origin/main so
+# classify_mailbox can read upstream state even when the clone is on a
+# feature branch (BRISEN_LAB_CARD_STATE_FIX_2 Fix 2).
+#
+# Disable per-cycle sync via FORGE_SYNC_DISABLED=1 in test fixtures.
 for entry in "${TERMINALS[@]}"; do
   alias="${entry%%:*}"
   paths_csv="${entry#*:}"
   repo="$(pick_active_clone "$alias" "$paths_csv")"
+  if [[ "${FORGE_SYNC_DISABLED:-0}" != "1" ]]; then
+    sync_clone_to_main "$repo" || true
+  fi
   snapshot_one "$alias" "$repo" || true
 done
 
