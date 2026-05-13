@@ -304,5 +304,365 @@ brief_g="$(extract_payload_field "$OUT_G" b9 mailbox_brief_name)"
 assert_no_prod_aliases "$OUT_G"
 echo "PASS: Case G — frontmatter status: DROPPED authoritative over filename _PENDING suffix."
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Case H — BRISEN_LAB_CARD_STATE_FIX_2 Fix 2: B-code on feature branch, local
+# main lags origin/main, origin/main has COMPLETE mailbox. Classifier MUST
+# read from origin/main (not the local file from the feature branch) and
+# return "complete".
+#
+# Anchor: 2026-05-13 — AH1 committed mailbox(b4) → COMPLETE from ~/bm-aihead1;
+# ~/bm-b4 was on a feature branch with stale local main, so the daemon
+# reported "Working at: hard-deadline-audit-1" for >10h post-ship.
+# ─────────────────────────────────────────────────────────────────────────────
+CASE_H_ORIGIN="$TMP/case-h-origin.git"
+CASE_H_CLONE="$TMP/case-h-clone"
+git init -q --bare "$CASE_H_ORIGIN"
+
+# Seed origin/main with a PENDING mailbox, push.
+SEED_DIR="$TMP/case-h-seed"
+mkdir -p "$SEED_DIR/briefs/_tasks"
+(
+  cd "$SEED_DIR"
+  git init -q -b main
+  git config user.email "test@example.com"
+  git config user.name "Test"
+  cat > briefs/_tasks/CODE_9_PENDING.md <<'YAML'
+---
+status: PENDING
+brief: STILL_RUNNING_BRIEF_1
+target: b9
+---
+YAML
+  git add .
+  git commit -q -m "seed: PENDING mailbox"
+  git remote add origin "$CASE_H_ORIGIN"
+  git push -q origin main
+)
+
+# Clone into CASE_H_CLONE (pulls origin/main at PENDING).
+git clone -q --branch main "$CASE_H_ORIGIN" "$CASE_H_CLONE"
+(
+  cd "$CASE_H_CLONE"
+  git config user.email "test@example.com"
+  git config user.name "Test"
+  # Move to a feature branch BEFORE origin/main flips.
+  git checkout -q -b b9/some-feature
+  echo "feature-branch-work" > feature.txt
+  git add feature.txt
+  git commit -q -m "feature commit"
+)
+
+# Now flip origin/main → COMPLETE behind the clone's back.
+(
+  cd "$SEED_DIR"
+  cat > briefs/_tasks/CODE_9_PENDING.md <<'YAML'
+---
+status: COMPLETE
+brief: STILL_RUNNING_BRIEF_1
+target: b9
+---
+YAML
+  git add briefs/_tasks/CODE_9_PENDING.md
+  git commit -q -m "flip mailbox → COMPLETE"
+  git push -q origin main
+)
+
+# Crucial: the test must NOT auto-sync the clone (because sync_clone_to_main
+# runs origin fetch + ff-pull and would update the clone). We want to verify
+# the script ALSO does sync_clone_to_main itself, so let it run normally —
+# but verify that EVEN IF FORGE_SYNC_DISABLED=1 short-circuits the sync,
+# classify_mailbox still pulls from origin/main using the clone's existing
+# remote-tracking ref.
+#
+# Step 1: pre-fetch the clone so origin/main remote-tracking ref carries
+# the COMPLETE flip (mimics what sync_clone_to_main would do at the top of
+# the iteration), then run with FORGE_SYNC_DISABLED=1 to prove the
+# classify_mailbox branch path reads from origin/main without help.
+git -C "$CASE_H_CLONE" fetch -q origin main
+
+OUT_H="$TMP/case-h.log"
+LAB_URL="http://127.0.0.1:1" \
+FORGE_KEY="test-key" \
+PR_LOOKUP_ENABLED=0 \
+DEBUG_DUMP_PAYLOAD=1 \
+LOCK_DIR="$TMP/lock-h" \
+TERMINALS_OVERRIDE="b9:$CASE_H_CLONE" \
+FORGE_SYNC_DISABLED=1 \
+bash "$SCRIPT" > "$OUT_H" 2>&1 || true
+
+status_h="$(extract_payload_field "$OUT_H" b9 mailbox_status)"
+brief_h="$(extract_payload_field "$OUT_H" b9 mailbox_brief_name)"
+[[ "$status_h" == "complete" ]] \
+  || { echo "FAIL: Case H — feature-branch read from origin/main: mailbox_status='$status_h' (expected 'complete'; classify_mailbox must read upstream)" >&2; cat "$OUT_H" >&2; exit 1; }
+[[ "$brief_h" == "STILL_RUNNING_BRIEF_1" ]] \
+  || { echo "FAIL: Case H — brief from origin/main: '$brief_h' (expected 'STILL_RUNNING_BRIEF_1')" >&2; exit 1; }
+assert_no_prod_aliases "$OUT_H"
+echo "PASS: Case H — feature-branch clone reads mailbox state from origin/main."
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case I — Regression check on FIX_1: clone is on main and matches origin/main.
+# Classifier MUST still return the frontmatter status from the local file.
+# This locks down that the feature-branch path does not corrupt the main-branch
+# read.
+# ─────────────────────────────────────────────────────────────────────────────
+CASE_I_REPO="$TMP/case-i-b9"
+mkdir -p "$CASE_I_REPO/briefs/_tasks"
+(
+  cd "$CASE_I_REPO"
+  git init -q -b main
+  git config user.email "test@example.com"
+  git config user.name "Test"
+  cat > briefs/_tasks/CODE_9_PENDING.md <<'YAML'
+---
+status: PENDING
+brief: ON_MAIN_BRIEF_1
+target: b9
+---
+YAML
+  git add .
+  git commit -q -m "fixture I: on main, PENDING"
+)
+OUT_I="$TMP/case-i.log"
+run_daemon "i" "b9:$CASE_I_REPO" > "$OUT_I"
+status_i="$(extract_payload_field "$OUT_I" b9 mailbox_status)"
+brief_i="$(extract_payload_field "$OUT_I" b9 mailbox_brief_name)"
+[[ "$status_i" == "pending" ]] \
+  || { echo "FAIL: Case I — on-main regression: mailbox_status='$status_i' (expected 'pending'; FIX_1 frontmatter-authoritative path must still work)" >&2; cat "$OUT_I" >&2; exit 1; }
+[[ "$brief_i" == "ON_MAIN_BRIEF_1" ]] \
+  || { echo "FAIL: Case I — on-main brief extraction: '$brief_i' (expected 'ON_MAIN_BRIEF_1')" >&2; exit 1; }
+assert_no_prod_aliases "$OUT_I"
+echo "PASS: Case I — on-main clone uses local frontmatter (FIX_1 regression check)."
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case H' — BRISEN_LAB_CARD_STATE_FIX_2-v0-2 MEDIUM 1: integration check that
+# sync_clone_to_main + classify_mailbox work end-to-end WITHOUT FORGE_SYNC_DISABLED
+# and WITHOUT pre-fetching origin/main. The script must do the fetch itself.
+#
+# Case H pre-fetched + ran with FORGE_SYNC_DISABLED=1 so it only exercised the
+# branch-aware read path. This case proves the full pipeline.
+# ─────────────────────────────────────────────────────────────────────────────
+CASE_HP_ORIGIN="$TMP/case-hp-origin.git"
+CASE_HP_CLONE="$TMP/case-hp-clone"
+git init -q --bare "$CASE_HP_ORIGIN"
+
+SEED_HP_DIR="$TMP/case-hp-seed"
+mkdir -p "$SEED_HP_DIR/briefs/_tasks"
+(
+  cd "$SEED_HP_DIR"
+  git init -q -b main
+  git config user.email "test@example.com"
+  git config user.name "Test"
+  cat > briefs/_tasks/CODE_9_PENDING.md <<'YAML'
+---
+status: PENDING
+brief: INTEGRATION_CHECK_BRIEF_1
+target: b9
+---
+YAML
+  git add .
+  git commit -q -m "seed: PENDING mailbox"
+  git remote add origin "$CASE_HP_ORIGIN"
+  git push -q origin main
+)
+
+git clone -q --branch main "$CASE_HP_ORIGIN" "$CASE_HP_CLONE"
+(
+  cd "$CASE_HP_CLONE"
+  git config user.email "test@example.com"
+  git config user.name "Test"
+  git checkout -q -b b9/feature-hp
+  echo "feature-work-hp" > feature.txt
+  git add feature.txt
+  git commit -q -m "feature commit hp"
+)
+
+# Flip origin/main → COMPLETE behind the clone's back; clone is NOT pre-fetched.
+(
+  cd "$SEED_HP_DIR"
+  cat > briefs/_tasks/CODE_9_PENDING.md <<'YAML'
+---
+status: COMPLETE
+brief: INTEGRATION_CHECK_BRIEF_1
+target: b9
+---
+YAML
+  git add briefs/_tasks/CODE_9_PENDING.md
+  git commit -q -m "flip mailbox → COMPLETE"
+  git push -q origin main
+)
+
+# Run daemon WITH sync enabled (no FORGE_SYNC_DISABLED) — sync_clone_to_main
+# must do the fetch itself before classify_mailbox needs origin/main.
+OUT_HP="$TMP/case-hp.log"
+LAB_URL="http://127.0.0.1:1" \
+FORGE_KEY="test-key" \
+PR_LOOKUP_ENABLED=0 \
+DEBUG_DUMP_PAYLOAD=1 \
+LOCK_DIR="$TMP/lock-hp" \
+TERMINALS_OVERRIDE="b9:$CASE_HP_CLONE" \
+bash "$SCRIPT" > "$OUT_HP" 2>&1 || true
+
+status_hp="$(extract_payload_field "$OUT_HP" b9 mailbox_status)"
+brief_hp="$(extract_payload_field "$OUT_HP" b9 mailbox_brief_name)"
+[[ "$status_hp" == "complete" ]] \
+  || { echo "FAIL: Case H' — sync_clone_to_main+classify_mailbox integration: mailbox_status='$status_hp' (expected 'complete'; daemon must fetch origin/main itself)" >&2; cat "$OUT_HP" >&2; exit 1; }
+[[ "$brief_hp" == "INTEGRATION_CHECK_BRIEF_1" ]] \
+  || { echo "FAIL: Case H' — brief after sync+classify: '$brief_hp' (expected 'INTEGRATION_CHECK_BRIEF_1')" >&2; cat "$OUT_HP" >&2; exit 1; }
+assert_no_prod_aliases "$OUT_HP"
+echo "PASS: Case H' — sync_clone_to_main + classify_mailbox integrate end-to-end without pre-fetch."
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case J — BRISEN_LAB_CARD_STATE_FIX_2-v0-2 HIGH: feature-branch clone with
+# NO local mailbox file; origin/main has the mailbox with frontmatter `brief:`.
+# Classifier must source via origin/main AND extract_brief_name_from_content
+# must populate mailbox_brief_name from upstream content.
+#
+# Anchor (real-world trigger): B-code creates feature branch BEFORE AH1
+# dispatches a brief to main. The feature branch's working tree never receives
+# the new CODE_N_PENDING.md. Pre-fix: blank card subtitle because
+# extract_brief_name short-circuited on the missing local file.
+# ─────────────────────────────────────────────────────────────────────────────
+CASE_J_ORIGIN="$TMP/case-j-origin.git"
+CASE_J_CLONE="$TMP/case-j-clone"
+git init -q --bare "$CASE_J_ORIGIN"
+
+# Step 1: seed origin/main WITHOUT any mailbox. Clone, branch off — clone never
+# sees a mailbox file in its working tree.
+SEED_J_DIR="$TMP/case-j-seed"
+mkdir -p "$SEED_J_DIR"
+(
+  cd "$SEED_J_DIR"
+  git init -q -b main
+  git config user.email "test@example.com"
+  git config user.name "Test"
+  echo "initial" > README.md
+  git add .
+  git commit -q -m "seed: no mailbox yet"
+  git remote add origin "$CASE_J_ORIGIN"
+  git push -q origin main
+)
+
+git clone -q --branch main "$CASE_J_ORIGIN" "$CASE_J_CLONE"
+(
+  cd "$CASE_J_CLONE"
+  git config user.email "test@example.com"
+  git config user.name "Test"
+  git checkout -q -b b9/feature-j
+  echo "feature-pre-dispatch" > feature.txt
+  git add feature.txt
+  git commit -q -m "feature commit before mailbox exists"
+)
+
+# Step 2: seed dir adds the mailbox + pushes. Clone has stale main + feature branch.
+(
+  cd "$SEED_J_DIR"
+  mkdir -p briefs/_tasks
+  cat > briefs/_tasks/CODE_9_PENDING.md <<'YAML'
+---
+status: PENDING
+brief: ORIGIN_ONLY_BRIEF_1
+target: b9
+---
+YAML
+  git add briefs/_tasks/CODE_9_PENDING.md
+  git commit -q -m "add mailbox after feature branch was cut"
+  git push -q origin main
+)
+
+OUT_J="$TMP/case-j.log"
+LAB_URL="http://127.0.0.1:1" \
+FORGE_KEY="test-key" \
+PR_LOOKUP_ENABLED=0 \
+DEBUG_DUMP_PAYLOAD=1 \
+LOCK_DIR="$TMP/lock-j" \
+TERMINALS_OVERRIDE="b9:$CASE_J_CLONE" \
+bash "$SCRIPT" > "$OUT_J" 2>&1 || true
+
+# Sanity: confirm there's no local file (the path classify_mailbox returns
+# points at a path that doesn't exist on disk; without the HIGH fix the
+# brief-name extraction would return empty).
+[[ ! -f "$CASE_J_CLONE/briefs/_tasks/CODE_9_PENDING.md" ]] \
+  || { echo "FAIL: Case J fixture broken — local file should not exist" >&2; exit 1; }
+
+status_j="$(extract_payload_field "$OUT_J" b9 mailbox_status)"
+brief_j="$(extract_payload_field "$OUT_J" b9 mailbox_brief_name)"
+[[ "$status_j" == "pending" ]] \
+  || { echo "FAIL: Case J — feature branch with no local mailbox, origin/main has it: status='$status_j' (expected 'pending')" >&2; cat "$OUT_J" >&2; exit 1; }
+[[ "$brief_j" == "ORIGIN_ONLY_BRIEF_1" ]] \
+  || { echo "FAIL: Case J HIGH — extract_brief_name_from_content not invoked: brief='$brief_j' (expected 'ORIGIN_ONLY_BRIEF_1' streamed from origin/main)" >&2; cat "$OUT_J" >&2; exit 1; }
+assert_no_prod_aliases "$OUT_J"
+echo "PASS: Case J — feature branch with no local file extracts brief from origin/main."
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Case K — BRISEN_LAB_CARD_STATE_FIX_2-v0-2 MEDIUM 2: cold-clone fallback.
+# Feature-branch clone with NO origin/main remote-tracking ref (never fetched)
+# and a local mailbox file present from the initial clone. classify_mailbox
+# must fall through to the local file (lines 291-307 fallback path).
+# ─────────────────────────────────────────────────────────────────────────────
+CASE_K_ORIGIN="$TMP/case-k-origin.git"
+CASE_K_CLONE="$TMP/case-k-clone"
+git init -q --bare "$CASE_K_ORIGIN"
+
+SEED_K_DIR="$TMP/case-k-seed"
+mkdir -p "$SEED_K_DIR/briefs/_tasks"
+(
+  cd "$SEED_K_DIR"
+  git init -q -b main
+  git config user.email "test@example.com"
+  git config user.name "Test"
+  cat > briefs/_tasks/CODE_9_PENDING.md <<'YAML'
+---
+status: IN_PROGRESS
+brief: COLD_CLONE_LOCAL_FALLBACK_1
+target: b9
+---
+YAML
+  git add .
+  git commit -q -m "seed K"
+  git remote add origin "$CASE_K_ORIGIN"
+  git push -q origin main
+)
+
+git clone -q --branch main "$CASE_K_ORIGIN" "$CASE_K_CLONE"
+(
+  cd "$CASE_K_CLONE"
+  git config user.email "test@example.com"
+  git config user.name "Test"
+  git checkout -q -b b9/feature-k
+  echo "feature-k" > feature.txt
+  git add feature.txt
+  git commit -q -m "feature k"
+)
+
+# Strip the origin/main remote-tracking ref to simulate a cold clone state.
+# Also wipe packed-refs (where the ref may live after gc). After this, no
+# `origin/main` reference is reachable — `git cat-file -e origin/main:...`
+# will return non-zero for every probe. Re-point origin to a dead URL so
+# sync_clone_to_main's fetch can't refresh it during the daemon run.
+rm -f "$CASE_K_CLONE/.git/refs/remotes/origin/main"
+[[ -f "$CASE_K_CLONE/.git/packed-refs" ]] && \
+  grep -v "refs/remotes/origin/main" "$CASE_K_CLONE/.git/packed-refs" \
+    > "$CASE_K_CLONE/.git/packed-refs.new" && \
+  mv "$CASE_K_CLONE/.git/packed-refs.new" "$CASE_K_CLONE/.git/packed-refs"
+git -C "$CASE_K_CLONE" remote set-url origin "file:///dev/null/does-not-exist.git"
+
+OUT_K="$TMP/case-k.log"
+LAB_URL="http://127.0.0.1:1" \
+FORGE_KEY="test-key" \
+PR_LOOKUP_ENABLED=0 \
+DEBUG_DUMP_PAYLOAD=1 \
+LOCK_DIR="$TMP/lock-k" \
+TERMINALS_OVERRIDE="b9:$CASE_K_CLONE" \
+bash "$SCRIPT" > "$OUT_K" 2>&1 || true
+
+status_k="$(extract_payload_field "$OUT_K" b9 mailbox_status)"
+brief_k="$(extract_payload_field "$OUT_K" b9 mailbox_brief_name)"
+[[ "$status_k" == "in_progress" ]] \
+  || { echo "FAIL: Case K — cold-clone fallback: status='$status_k' (expected 'in_progress' from local file)" >&2; cat "$OUT_K" >&2; exit 1; }
+[[ "$brief_k" == "COLD_CLONE_LOCAL_FALLBACK_1" ]] \
+  || { echo "FAIL: Case K — local fallback brief: '$brief_k' (expected 'COLD_CLONE_LOCAL_FALLBACK_1')" >&2; cat "$OUT_K" >&2; exit 1; }
+assert_no_prod_aliases "$OUT_K"
+echo "PASS: Case K — cold-clone (no origin/main ref) falls back to local mailbox file."
+
 echo ""
-echo "All 7 cases PASS."
+echo "All 12 cases PASS."
