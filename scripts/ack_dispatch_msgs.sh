@@ -22,6 +22,12 @@
 #   - Single-ack per message (one log line per id) — bulk-ack signature exists
 #     but the documented per-id path is the audit-friendly default.
 
+# `set -u + pipefail` without `-e` is deliberate (BRISEN_LAB_CARD_STATE_FIX_2-v0-2 LOW):
+# the script must NEVER abort a ship — every network/HTTP failure path falls
+# through to a logged non-fatal continuation. `-u` still catches typos in
+# variable names; `pipefail` still surfaces a failing left-of-pipe to the
+# command-substitution exit code so the `|| { ... }` guards downstream can
+# detect it; `-e` would short-circuit those guards and break the contract.
 set -u
 set -o pipefail
 
@@ -88,7 +94,12 @@ if [[ -z "$KEY" ]]; then
 fi
 
 # Drain own inbox (limit 50 — well above per-brief topic count of ~5).
-INBOX="$(curl -fsS --connect-timeout 5 --max-time 15 \
+# No `-f`: parity with per-ack POST below. `-f` swallows 4xx and emits exit-22,
+# which would collapse the response body and lose the HTTP code we'd want for
+# diagnosis. Without `-f`, curl returns 0 on 4xx and writes the body to stdout;
+# the python parser then sees a non-`messages` JSON (e.g. `{"detail": "..."}`)
+# and yields zero matches, which routes through the "no unacked messages" exit.
+INBOX="$(curl -sS --connect-timeout 5 --max-time 15 \
     -H "X-Terminal-Key: ${KEY}" \
     "${DAEMON_URL}/msg/${SENDER}?limit=50" 2>/dev/null)" || {
     echo "[ack] inbox fetch failed (network/HTTP) — non-fatal, continuing as zero-match" >&2
@@ -145,10 +156,14 @@ if [[ -z "$MATCHING_IDS" ]]; then
     exit 0
 fi
 
+# Split into an array to avoid relying on unquoted word-splitting (BRISEN_LAB_CARD_STATE_FIX_2-v0-2 LOW).
+# `read -ra` is IFS-defensive and gives an explicit iteration count without `wc -w`.
+declare -a ACK_IDS=()
+read -ra ACK_IDS <<< "$MATCHING_IDS"
+
 ACKED=0
-TOTAL=0
-for id in $MATCHING_IDS; do
-    TOTAL=$((TOTAL + 1))
+TOTAL=${#ACK_IDS[@]}
+for id in "${ACK_IDS[@]}"; do
     # No -f here: -f turns 4xx into exit 22 + suppresses the body, which
     # would mask the real HTTP code via the `|| HTTP="000"` fallback. We want
     # to log the actual HTTP code for diagnosis on 4xx.

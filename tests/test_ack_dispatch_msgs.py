@@ -261,3 +261,47 @@ def test_single_ack_http_error_is_non_fatal(tmp_path):
     assert "acked 0 of 2 messages" in result.stdout
     # Per-message log line emitted on stderr.
     assert "HTTP 403" in result.stderr
+
+
+# ---------------------------------------------------------------------------
+# T6 — `op` binary absent from PATH: exit 2 with the same 1Password-fetch
+# diagnostic the live path uses (BRISEN_LAB_CARD_STATE_FIX_2-v0-2 LOW).
+#
+# Anchor: prior tests injected an `op` shim that exited 1, but never covered
+# the "command not found" case which is what a clean CI runner / Render box
+# would actually produce. With set -u + pipefail and no -e, the missing-
+# binary exit code (127) must still propagate through `$(op read ...) || { ... }`.
+# ---------------------------------------------------------------------------
+
+
+def test_op_binary_absent_from_path_exits_2(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    # Provide curl so any earlier-path failure cannot pass for the op miss.
+    _write_fake_curl(tmp_path, inbox_payload=_inbox_with_messages([]), ack_status=200)
+
+    # Minimal PATH excluding common op install dirs (/opt/homebrew/bin, /usr/local/bin).
+    # Keep /usr/bin + /bin for bash, python3, sed, awk, tr.
+    minimal_path = f"{bin_dir}:/usr/bin:/bin"
+
+    full_env = {
+        "PATH": minimal_path,
+        "HOME": str(tmp_path),  # block ~/.config/op or similar
+        "BAKER_ROLE": "b1",
+        # Belt + suspenders: clear any inherited override.
+    }
+    full_env.pop("BRISEN_LAB_TERMINAL_KEY_OVERRIDE", None)
+
+    result = subprocess.run(
+        ["bash", str(_SCRIPT), "--brief-slug", "ZOMBIE_TEST_1"],
+        env=full_env,
+        capture_output=True,
+        text=True,
+        cwd=str(_REPO),
+    )
+
+    assert result.returncode == 2, (
+        f"expected exit 2 (1Password fetch failed); got {result.returncode}\n"
+        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    assert "1Password fetch failed" in result.stderr

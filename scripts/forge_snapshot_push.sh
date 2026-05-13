@@ -307,7 +307,8 @@ classify_mailbox() {
   fi
 
   if [[ -z "$f" ]]; then
-    echo "empty|"
+    # Three-field output for parser consistency with snapshot_one's IFS='|' read.
+    echo "empty||"
     return
   fi
 
@@ -334,7 +335,15 @@ classify_mailbox() {
   else
     final_status="$filename_status"
   fi
-  echo "${final_status}|${f}"
+  # Third field communicates source-of-truth to snapshot_one so extract_brief_name
+  # uses the matching reader (file-mode vs content-from-origin-main mode).
+  # BRISEN_LAB_CARD_STATE_FIX_2-v0-2 HIGH: prior 2-field output left snapshot_one
+  # blind to feature-branch-without-local-file case → blank card subtitle.
+  local source="local"
+  if [[ "$read_from_origin_main" == "1" ]]; then
+    source="origin_main"
+  fi
+  echo "${final_status}|${f}|${source}"
 }
 
 # extract_brief_name — three-step fallback parser. Returns up to 200 chars.
@@ -377,6 +386,42 @@ extract_brief_name() {
   echo "(unparseable)"
 }
 
+# extract_brief_name_from_content — same fallback chain as extract_brief_name
+# but reads from stdin. Used by snapshot_one when classify_mailbox sourced the
+# mailbox from origin/main (feature-branch clone, no local file present yet).
+# BRISEN_LAB_CARD_STATE_FIX_2-v0-2 HIGH: previously extract_brief_name was
+# called on the local path and silently returned empty when the file didn't
+# exist locally → blank card subtitle even though origin/main had a brief.
+extract_brief_name_from_content() {
+  local content
+  content="$(cat)"
+  [[ -z "$content" ]] && { echo ""; return; }
+
+  # Step 1: YAML frontmatter `brief:` field.
+  local brief_line
+  brief_line="$(printf '%s\n' "$content" \
+    | awk 'BEGIN{c=0} /^---$/{c++; if(c==2) exit; next} c==1 && /^brief:[[:space:]]*/{print; exit}' \
+    | sed -E 's/^brief:[[:space:]]*//; s/[[:space:]]*$//' \
+    | head -1)"
+  if [[ -n "$brief_line" ]]; then
+    local base
+    base="$(basename "${brief_line%.md}")"
+    echo "$base" | head -c 200
+    return
+  fi
+
+  # Step 2: first '# ' heading.
+  local heading
+  heading="$(printf '%s\n' "$content" | grep -m1 '^# ' | sed 's/^# *//' | head -c 200)"
+  if [[ -n "$heading" ]]; then
+    echo "$heading"
+    return
+  fi
+
+  # Step 3: explicit failure marker.
+  echo "(unparseable)"
+}
+
 snapshot_one() {
   local alias="$1"
   local repo="$2"
@@ -399,14 +444,24 @@ snapshot_one() {
   local mailbox_status="n/a"
   local mailbox_brief_name=""
   local mailbox_path=""
+  local mailbox_source=""
   if [[ "$alias" =~ ^b([1-9])$ ]]; then
     local n="${BASH_REMATCH[1]}"
     local mbox_class
     mbox_class="$(classify_mailbox "$repo" "$n")"
-    mailbox_status="${mbox_class%%|*}"
-    mailbox_path="${mbox_class#*|}"
+    # classify_mailbox now emits 3 fields: status|path|source. source ∈ {local,origin_main}.
+    # BRISEN_LAB_CARD_STATE_FIX_2-v0-2 HIGH: route brief-name extraction to the
+    # matching reader so feature-branch clones without the local file still
+    # surface the brief.
+    IFS='|' read -r mailbox_status mailbox_path mailbox_source <<< "$mbox_class"
     if [[ -n "$mailbox_path" ]]; then
-      mailbox_brief_name="$(extract_brief_name "$mailbox_path")"
+      if [[ "$mailbox_source" == "origin_main" ]]; then
+        local rel_path="${mailbox_path#${repo}/}"
+        mailbox_brief_name="$(git -C "$repo" show "origin/main:${rel_path}" 2>/dev/null \
+          | extract_brief_name_from_content)"
+      else
+        mailbox_brief_name="$(extract_brief_name "$mailbox_path")"
+      fi
     fi
   fi
 
