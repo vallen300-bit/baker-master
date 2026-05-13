@@ -1,5 +1,13 @@
 ---
-status: PENDING
+status: COMPLETE
+completed_at: 2026-05-12T23:39:50Z
+merge_commit: 31158996a820d0c1e412160fd8ed3cc4e524d6fd
+pr: 198
+ship_report: briefs/_reports/B4_hard_deadline_audit_v1_20260513.md
+vault_audit_doc: _ops/processes/deadline-system-contract-v1.md @ 32e42ec (baker-vault main)
+db_row: deadlines.id = 1524 (residence-fee deferral 31.12.2026; movie-desk / mo-vie-am)
+hard_ship_gate: PASS (4/4 — see ship report)
+v1_5_trigger: FIRED — P=2.9% << 50% → triggered CODE_3_PENDING (DEADLINE_ASSIGNED_TO_BACKFILL_1, shipped PR #199)
 brief: briefs/BRIEF_HARD_DEADLINE_AUDIT_V1.md
 trigger_class: TIER_B_AUDIT_PLUS_DB_WRITE
 dispatched_at: 2026-05-13
