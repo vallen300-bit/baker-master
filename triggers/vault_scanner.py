@@ -492,7 +492,7 @@ def _send_dm_with_capture(body: str) -> tuple[bool, Optional[str]]:
             return True, None
         return False, "post_to_channel returned False (token missing or Slack API failed — see slack_notifier log)"
     except Exception as e:
-        msg = f"{type(e).__name__}: {e}"
+        msg = f"{type(e).__name__}: {e}"[:500]
         logger.warning("vault_scanner: post_to_channel raised: %s", e)
         return False, msg
 
@@ -786,8 +786,9 @@ def _empty_streak_count() -> int:
                 FROM scanner_run_log
                 WHERE run_ts >= NOW() - INTERVAL '7 days'
                 ORDER BY run_ts DESC
-                LIMIT 4
-                """
+                LIMIT %s
+                """,
+                (EMPTY_STREAK_THRESHOLD + 1,),
             )
             rows = cur.fetchall()
         except Exception as e:
@@ -1036,7 +1037,7 @@ def startup_catchup() -> bool:
     run one scan now. Returns True iff a catch-up scan ran."""
     now = datetime.now(timezone.utc)
     today = now.date()
-    if now.time() < datetime.min.time().replace(hour=6):
+    if now.hour < 6:
         return False
     marker = _consolidated_marker_path(today)
     if marker.exists():
