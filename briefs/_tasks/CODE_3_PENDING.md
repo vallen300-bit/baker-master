@@ -91,3 +91,81 @@ WHERE table_name = 'deadline_feedback' ORDER BY ordinal_position;
 SELECT feedback_type, COUNT(*) FROM deadline_feedback GROUP BY feedback_type;
 -- Probably 0 rows pre-traffic. That's fine — confirms table exists + index works.
 ```
+
+---
+
+## UPDATE — 2026-05-13 — AH1 fix request (post-review chain)
+
+**Status:** FIX_REQUESTED (re-open mailbox on PR branch `b3-deadline-feedback-loop`).
+**Trigger:** Review chain on PR #203 cleared /security-review (NO_FINDINGS) but surfaced 2 HIGH findings — 1 from picker-architect, 1 from `feature-dev:code-reviewer`. Both legit + cross-confirmed. Fix loop before merge.
+
+### Fix A (HIGH — operation-ordering gap on new `/feedback` endpoint)
+
+**Where:** `outputs/dashboard.py` — new `deadline_feedback_api()` around lines 7242–7322 (post-merge ranges, find by function name).
+
+**Defect:** `insert_feedback(...)` and `update_deadline(...)` execute in the SAME outer `try` block. The augmented `/dismiss` + `/complete` correctly wrap the feedback call in an **inner** `try/except` so a failure there cannot block the status flip. The new `/feedback` endpoint does NOT mirror that pattern — an unexpected raise from `insert_feedback` (despite its internal try/except) would be caught by the outer `except Exception`, return a 500, and **skip the status flip entirely**. Director clicks "Not a Deadline", sees an error, card stays visible, no corpus row written. Echoes PR #1 brisen-lab operation-ordering scar.
+
+**Fix:** wrap the `insert_feedback(...)` call inside `deadline_feedback_api` in its own inner `try/except`, matching the pattern in `/dismiss` and `/complete`:
+
+```python
+fid = None
+try:
+    fid = insert_feedback(
+        deadline_id=deadline_id,
+        feedback_type=feedback_type,
+        original_matter_slug=dl.get("matter_slug"),
+        corrected_matter_slug=corrected_slug,
+        original_description=dl.get("description") or "",
+        original_source_type=dl.get("source_type"),
+        director_note=None,
+    )
+except Exception as fe:
+    logger.warning(f"deadline_feedback ({feedback_type}) write failed for {deadline_id}: {fe}")
+
+# Side-effect status flip runs unconditionally — corpus write must NEVER block it.
+if feedback_type == "confirm":
+    update_deadline(...)
+# ... etc
+```
+
+Brief's hard constraint: *"failures inside it return `None` + log; they MUST NOT raise to the calling endpoint."* Apply the same belt-and-suspenders here.
+
+### Fix B (HIGH — observability gap on corpus-write degradation)
+
+**Where:** `outputs/dashboard.py` — three call sites that write feedback rows: `/dismiss` (~line 6864), `/complete` (~line 6895), `/feedback` (new endpoint).
+
+**Defect:** When `insert_feedback` returns `None` (degraded DB path) or its outer wrapper catches an exception, the failure is `logger.warning(...)` only. No counter, no metric, no `/api/health` signal. Phase 3 classifier upgrade `SIGNAL_CLASSIFIER_TIER2_1` is **gated on "2+ weeks of clicks land here"** — a silent regression (schema drift, connection pool exhaustion, migration unapplied) invalidates that corpus window with zero visibility to Director.
+
+**Fix:** add a module-level counter that increments on every feedback-write failure path, exposed via the existing health surface. Two acceptable approaches — pick one:
+
+1. **Counter on `models/deadline_feedback.py`** (preferred — single owner of the write):
+   - Add module-level `_WRITE_FAILURES: int = 0` + `_LAST_FAILURE_AT: Optional[datetime] = None`.
+   - Increment in the existing `except` blocks of `insert_feedback` (the `if feedback_type not in VALID_FEEDBACK_TYPES` branch, the `if not conn` branch, and the `except Exception as e` branch).
+   - Export `get_write_failure_stats() -> dict` returning `{"count": _WRITE_FAILURES, "last_failure_at": _LAST_FAILURE_AT}`.
+   - In `outputs/dashboard.py` `/api/health` endpoint (find existing function), add a `"deadline_feedback": {...}` key sourced from `get_write_failure_stats()`. Non-fatal — health stays "ok" even if counter > 0; surface is sufficient.
+
+2. **Reuse existing metrics primitive** if there's already a `BAKER_METRICS` dict or similar in `outputs/dashboard.py` — increment `BAKER_METRICS["deadline_feedback_write_failures"]` instead. Grep first; only adopt if it exists.
+
+Add **one** unit test: feedback write that goes through the degraded `if not conn` path increments the counter by exactly 1. Live-PG not required — monkeypatch `get_conn` to return `None` like the existing `test_insert_feedback_returns_none_on_no_connection`.
+
+### Out of scope for this fix loop
+
+Architect's 3 MED findings (slug-registry empty-on-error, `_activeSlugs` no-TTL, DB CHECK vs app whitelist duplication) and 1 LOW (helper extraction) are **NOT** part of this fix request. Capture as phase-3 follow-ups if needed.
+
+### Re-ship gate
+
+1. Re-run `pytest tests/test_deadline_feedback.py -v` — paste literal output, all prior-passing tests still pass + 1 new failure-counter test passes.
+2. `bash scripts/check_singletons.sh` PASS.
+3. `py_compile` clean on modified files.
+4. Push to existing branch `b3-deadline-feedback-loop` (no new branch — same PR #203 picks up the new commit).
+5. Bus-post on push:
+   ```bash
+   BAKER_ROLE=b3 ~/Desktop/baker-code/scripts/bus_post.sh lead \
+     "PR #203 UPDATED — Fix A (inner try/except on /feedback) + Fix B (write-failure counter exposed via /api/health). <K>/<K> tests PASS." \
+     fix/DEADLINE_FEEDBACK_LOOP_1
+   ```
+6. AH1 re-runs `feature-dev:code-reviewer` on the delta only, then merges.
+
+### Why no Fix C/D/etc.
+
+Auth, SQL parameterization, XSS discipline, migration safety, CSRF, type-match drift — all clean across three independent reviewers. Don't touch them.
