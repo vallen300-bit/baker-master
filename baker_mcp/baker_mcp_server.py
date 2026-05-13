@@ -1649,12 +1649,27 @@ def _dispatch(name: str, args: dict) -> str:
 
         # CORTEX-PHASE-2B-II: Route through event bus when flag ON
         _use_cortex = False
+        _store = None
         try:
             from memory.store_back import SentinelStoreBack
             _store = SentinelStoreBack._get_global_instance()
             _use_cortex = _store.get_cortex_config('tool_router_enabled', False)
         except Exception:
             pass
+
+        # DEADLINE_MATTER_SLUG_BACKFILL_1 Scope A3: classify before write so
+        # the MCP-tool door no longer bypasses the slug classifier.
+        _matter_slug = None
+        try:
+            from orchestrator.pipeline import _match_matter_slug
+            from kbl import slug_registry
+            if _store is None:
+                from memory.store_back import SentinelStoreBack
+                _store = SentinelStoreBack._get_global_instance()
+            _matter_name = _match_matter_slug(description, source_snippet or "", _store)
+            _matter_slug = slug_registry.normalize(_matter_name)
+        except Exception:
+            _matter_slug = None
 
         if _use_cortex:
             from models.cortex import cortex_create_deadline
@@ -1667,6 +1682,7 @@ def _dispatch(name: str, args: dict) -> str:
                 priority=priority,
                 source_id="mcp",
                 source_snippet=source_snippet,
+                matter_slug=_matter_slug,
             )
             if dl_id:
                 return f"Deadline created via Cortex (id={dl_id}, priority={priority}):\n  {description}\n  Due: {due_date}"
@@ -1675,11 +1691,11 @@ def _dispatch(name: str, args: dict) -> str:
             # Legacy path (feature flag OFF)
             row = _write(
                 """
-                INSERT INTO deadlines (description, due_date, source_type, source_id, source_snippet, confidence, priority, status)
-                VALUES (%s, %s, 'cowork_session', 'mcp', %s, %s, %s, 'active')
+                INSERT INTO deadlines (description, due_date, source_type, source_id, source_snippet, confidence, priority, status, matter_slug)
+                VALUES (%s, %s, 'cowork_session', 'mcp', %s, %s, %s, 'active', %s)
                 RETURNING id, description, due_date, priority
                 """,
-                (description, due_date, source_snippet, confidence, priority),
+                (description, due_date, source_snippet, confidence, priority, _matter_slug),
             )
             if row:
                 return f"Deadline created (id={row['id']}, priority={row['priority']}):\n  {row['description']}\n  Due: {row['due_date']}"

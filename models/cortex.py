@@ -461,6 +461,7 @@ def cortex_create_deadline(
     priority: str = "normal",
     source_id: str = None,
     source_snippet: str = None,
+    matter_slug: str = None,
 ) -> Optional[int]:
     """
     Create a deadline through the Cortex event bus.
@@ -492,6 +493,7 @@ def cortex_create_deadline(
         priority=priority,
         source_id=source_id,
         source_snippet=source_snippet,
+        matter_slug=matter_slug,
     )
     if not dl_id:
         return None

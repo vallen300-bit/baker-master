@@ -545,11 +545,21 @@ def _sync_clickup_deadline(task_id, task_name, due_date, list_name, space_name, 
                            (due_date, deadline_id, due_date))
         elif not is_done:
             description = f"[{space_name}/{list_name}] {task_name}"
+            # DEADLINE_MATTER_SLUG_BACKFILL_1 Scope A4: classify before write
+            # so the ClickUp-trigger door no longer bypasses the slug classifier.
+            _matter_slug = None
+            try:
+                from orchestrator.pipeline import _match_matter_slug
+                from kbl import slug_registry
+                _matter_name = _match_matter_slug(description, source_tag or "", store)
+                _matter_slug = slug_registry.normalize(_matter_name)
+            except Exception:
+                _matter_slug = None
             cur.execute("""
-                INSERT INTO deadlines (description, due_date, priority, source_snippet, source_type, source_id, status, confidence)
-                VALUES (%s, %s, %s, %s, %s, %s, 'active', 'high')
-            """, (description, due_date, 'normal', source_tag, 'clickup', f"clickup:{task_id}"))
-            logger.info(f"ClickUp deadline synced: {task_name} due {due_date}")
+                INSERT INTO deadlines (description, due_date, priority, source_snippet, source_type, source_id, status, confidence, matter_slug)
+                VALUES (%s, %s, %s, %s, %s, %s, 'active', 'high', %s)
+            """, (description, due_date, 'normal', source_tag, 'clickup', f"clickup:{task_id}", _matter_slug))
+            logger.info(f"ClickUp deadline synced: {task_name} due {due_date} (matter_slug={_matter_slug})")
 
         conn.commit()
         cur.close()

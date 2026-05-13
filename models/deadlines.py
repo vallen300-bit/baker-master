@@ -271,6 +271,7 @@ def insert_deadline(
     source_id: str = None,
     source_snippet: str = None,
     status: str = None,
+    matter_slug: str = None,
 ) -> Optional[int]:
     """Insert a new deadline. Returns the new ID or None on error.
     DEADLINE-DEDUP-1: Checks for similar active deadline on same date before inserting."""
@@ -289,11 +290,11 @@ def insert_deadline(
         cur.execute("""
             INSERT INTO deadlines
                 (description, due_date, source_type, source_id, source_snippet,
-                 confidence, priority, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 confidence, priority, status, matter_slug)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (description, due_date, source_type, source_id,
-              source_snippet or "", confidence, priority, status))
+              source_snippet or "", confidence, priority, status, matter_slug))
         row = cur.fetchone()
         conn.commit()
         cur.close()
