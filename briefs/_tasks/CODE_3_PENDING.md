@@ -1,5 +1,5 @@
 ---
-status: PENDING
+status: COMPLETE
 brief: briefs/BRIEF_DEADLINE_FEEDBACK_LOOP_1.md
 brief_id: DEADLINE_FEEDBACK_LOOP_1
 trigger_class: TIER_B_DB_MIGRATION_+_DASHBOARD_UI_+_ENDPOINT
@@ -9,6 +9,12 @@ target: b3
 mandatory_2nd_pass: true
 security_review_required: true
 effort_estimate: ~4h
+completed_at: 2026-05-13
+pr: 203
+pr_state: OPEN (AWAITING_REVIEW — AH1/AH2 own merge)
+ship_commit: c6bf0c6
+report: briefs/_reports/B3_DEADLINE_FEEDBACK_LOOP_1_20260513.md
+bus_msg: 226
 predecessor:
   brief: briefs/BRIEF_DEADLINE_SIGNAL_HYGIENE_1.md
   pr: 202
