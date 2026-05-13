@@ -5,12 +5,49 @@ pr: 203
 pr_url: https://github.com/vallen300-bit/baker-master/pull/203
 branch: b3-deadline-feedback-loop
 commit: c6bf0c6
+fix_loop_commit: 11033df
 brief_commit: eda284e
 mailbox_commit: 3f1bfd3
 predecessor_pr: 202 (merged 6c31b05)
-state: AWAITING_REVIEW
+state: FIX_LOOP_SHIPPED
 bus_msg: 226
+fix_loop_bus_msg: 228
 shipped_at: 2026-05-13T11:01Z
+fix_loop_shipped_at: 2026-05-13T20:14Z
+---
+
+## Fix-loop delta (2026-05-13T20:14Z, commit 11033df)
+
+Two HIGH findings from the review chain (picker-architect + feature-dev:code-reviewer, both cross-confirmed by AH1) addressed:
+
+- **Fix A — operation-ordering on `/feedback`.** `deadline_feedback_api` (`outputs/dashboard.py`) now wraps the `insert_feedback(...)` call in an inner `try/except` mirroring `/dismiss` + `/complete`. A raise from the corpus write no longer 500s the endpoint or blocks the status flip. The outer `try/except` continues to catch unrelated failures.
+- **Fix B — observability counter on corpus-write degradation.** Added module-level `_WRITE_FAILURES` + `_LAST_FAILURE_AT` in `models/deadline_feedback.py`, exported via `get_write_failure_stats()`. Increment in all three failure branches (invalid type, no connection, exception catch). Surfaced via `/api/health` under `"deadline_feedback"` key — non-fatal, status stays "healthy" even if count > 0. Test added: `test_degraded_write_increments_failure_counter` monkeypatches `get_conn → None`, asserts counter bumps by exactly 1.
+
+Architect's 3 MED + 1 LOW findings (slug-registry empty-on-error, `_activeSlugs` no-TTL, DB CHECK vs app whitelist duplication, helper extraction) explicitly **out of scope** per AH1 fix request — phase-3 follow-ups.
+
+### Ship gate (fix loop)
+
+```
+$ python3.12 -m pytest tests/test_deadline_feedback.py -v
+tests/test_deadline_feedback.py::test_valid_feedback_types_whitelist PASSED [ 10%]
+tests/test_deadline_feedback.py::test_insert_feedback_rejects_invalid_type PASSED [ 20%]
+tests/test_deadline_feedback.py::test_unknown_slug_normalize_returns_none SKIPPED [ 30%]
+tests/test_deadline_feedback.py::test_insert_feedback_returns_none_on_no_connection PASSED [ 40%]
+tests/test_deadline_feedback.py::test_degraded_write_increments_failure_counter PASSED [ 50%]
+tests/test_deadline_feedback.py::test_insert_feedback_round_trip SKIPPED [ 60%]
+tests/test_deadline_feedback.py::test_endpoint_writes_corpus_row SKIPPED [ 70%]
+tests/test_deadline_feedback.py::test_endpoint_rejects_unknown_feedback_type SKIPPED [ 80%]
+tests/test_deadline_feedback.py::test_dismiss_endpoint_writes_mute_corpus_row SKIPPED [ 90%]
+tests/test_deadline_feedback.py::test_complete_endpoint_writes_confirm_corpus_row SKIPPED [100%]
+========================= 4 passed, 6 skipped in 0.04s =========================
+```
+
+- `bash scripts/check_singletons.sh` → `OK: No singleton violations found.`
+- `py_compile` clean on `models/deadline_feedback.py` + `outputs/dashboard.py`.
+- 6 skips: live-PG tests (`TEST_DATABASE_URL` absent) + 1 vault test (`BAKER_VAULT_PATH` absent); same skip-set as initial ship, all run in CI when env provisions Neon branch.
+
+AH1 owns the delta re-review + merge.
+
 ---
 
 # B3 Ship Report — DEADLINE_FEEDBACK_LOOP_1

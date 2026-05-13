@@ -11,10 +11,12 @@ security_review_required: true
 effort_estimate: ~4h
 completed_at: 2026-05-13
 pr: 203
-pr_state: OPEN (AWAITING_REVIEW — AH1/AH2 own merge)
+pr_state: OPEN (FIX_LOOP_SHIPPED — awaiting AH1 re-review on delta)
 ship_commit: c6bf0c6
+fix_loop_commit: 11033df
 report: briefs/_reports/B3_DEADLINE_FEEDBACK_LOOP_1_20260513.md
 bus_msg: 226
+fix_loop_bus_msg: 228
 predecessor:
   brief: briefs/BRIEF_DEADLINE_SIGNAL_HYGIENE_1.md
   pr: 202
