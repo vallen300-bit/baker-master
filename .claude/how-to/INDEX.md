@@ -8,6 +8,7 @@
 
 - [X / Twitter access](.claude/how-to/x-twitter.md) — `x.com` returns 402. Short tweets: syndication endpoint. Articles + threads + truncated-preview tweets: Chrome MCP via logged-in port-9222 (`navigate_page` + `evaluate_script`)
 - [Local research via Gemma 4](.claude/how-to/local-research-gemma.md) — free Ollama @ `localhost:11434`, structured note in ~30-60s, force a confidence section
+- [Perplexity Ask API](~/baker-vault/_ops/how-to/perplexity-api.md) — cited synthesis via MCP, ~$0.01-0.05/query, replaces 3-5 chained WebSearch+WebFetch calls. Wired in Researcher + AID-T pickers; others escalate via cross-agent dispatch.
 - [Chrome debug port 9222 recovery](.claude/how-to/chrome-debug-recovery.md) — auto-starts at login; if dead, `launchctl kickstart -k gui/$(id -u)/com.baker.chrome-debug`
 
 ## Adding a new how-to
