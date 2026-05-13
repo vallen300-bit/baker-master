@@ -1,5 +1,12 @@
 ---
-status: PENDING
+status: COMPLETE
+completed_at: 2026-05-13T07:02:35Z
+merge_commit: 7e0751619621aba510c9c29bdbe5952871f4bfc3
+pr: 199
+env_flip: VAULT_SCANNER_ENABLED=true (baker-master, 2026-05-13 post-merge)
+apply_decision: SKIP — M=0 bucket; scanner Amendment E _unassigned bucket carries U=69 as operational safety net
+vault_commit_pending: _ops/processes/deadline-system-contract-v1.md v1.5 execution log (CHANDA Inv 9 — Director/Mac-Mini commit required)
+v2_followup: _apply_updates per-row rollback can silently drop earlier successful UPDATEs on mid-batch error (savepoints or chunked batch fix); + extractor matter_slug population (separate brief)
 brief: briefs/BRIEF_DEADLINE_ASSIGNED_TO_BACKFILL_1.md
 trigger_class: TIER_B_AUDIT_TRIGGERED_BACKFILL_AND_NITS
 dispatched_at: 2026-05-13
