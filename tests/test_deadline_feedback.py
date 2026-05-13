@@ -59,6 +59,31 @@ def test_insert_feedback_returns_none_on_no_connection(monkeypatch):
     assert result is None
 
 
+def test_degraded_write_increments_failure_counter(monkeypatch):
+    """Fix B: degraded `get_conn → None` path bumps the observability counter by exactly 1."""
+    from models import deadline_feedback as df_mod
+    from models.deadline_feedback import (
+        insert_feedback, get_write_failure_stats, reset_write_failure_stats,
+    )
+
+    reset_write_failure_stats()
+    assert get_write_failure_stats()["count"] == 0
+
+    monkeypatch.setattr(df_mod, "get_conn", lambda: None)
+    monkeypatch.setattr(df_mod, "put_conn", lambda c: None)
+    result = insert_feedback(
+        deadline_id=1, feedback_type="mute",
+        original_matter_slug=None, corrected_matter_slug=None,
+        original_description="counter probe", original_source_type="test",
+    )
+    assert result is None
+    stats = get_write_failure_stats()
+    assert stats["count"] == 1
+    assert stats["last_failure_at"] is not None
+    # Cleanup so other tests see baseline.
+    reset_write_failure_stats()
+
+
 @pytest.mark.skipif(not os.getenv("TEST_DATABASE_URL"), reason="needs live PG")
 def test_insert_feedback_round_trip():
     """Live-PG: insert + read back."""

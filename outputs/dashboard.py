@@ -2092,9 +2092,19 @@ async def api_health():
             "fail_count": r.get("consecutive_failures", 0),
         })
 
+    # DEADLINE_FEEDBACK_LOOP_1 Fix B: surface corpus-write degradation. Phase 3
+    # classifier upgrade is gated on this corpus accumulating — silent regression
+    # would invalidate the training window. Non-fatal (status stays healthy).
+    try:
+        from models.deadline_feedback import get_write_failure_stats
+        deadline_feedback_stats = get_write_failure_stats()
+    except Exception:
+        deadline_feedback_stats = {"count": 0, "last_failure_at": None}
+
     return {
         "status": "degraded" if any_down else "healthy",
         "sentinels": sentinels,
+        "deadline_feedback": deadline_feedback_stats,
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -7292,16 +7302,23 @@ async def deadline_feedback_api(deadline_id: int, request: Request):
                     f"{corrected_slug_raw!r} on deadline {deadline_id} — corpus row will store NULL"
                 )
 
-        # Snapshot fields off the deadline row at click time
-        fid = insert_feedback(
-            deadline_id=deadline_id,
-            feedback_type=feedback_type,
-            original_matter_slug=dl.get("matter_slug"),
-            corrected_matter_slug=corrected_slug,
-            original_description=dl.get("description") or "",
-            original_source_type=dl.get("source_type"),
-            director_note=None,
-        )
+        # Snapshot fields off the deadline row at click time.
+        # Inner try/except mirrors /dismiss + /complete: a raise from insert_feedback
+        # (despite its internal try/except) must NEVER block the status flip, otherwise
+        # the user sees a 500 and the card stays visible with no corpus row written.
+        fid = None
+        try:
+            fid = insert_feedback(
+                deadline_id=deadline_id,
+                feedback_type=feedback_type,
+                original_matter_slug=dl.get("matter_slug"),
+                corrected_matter_slug=corrected_slug,
+                original_description=dl.get("description") or "",
+                original_source_type=dl.get("source_type"),
+                director_note=None,
+            )
+        except Exception as fe:
+            logger.warning(f"deadline_feedback ({feedback_type}) write failed for {deadline_id}: {fe}")
 
         # Side-effect status flip (verb-specific). wrong_matter does NOT flip status.
         if feedback_type == "confirm":
