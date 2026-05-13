@@ -1,5 +1,12 @@
 ---
-status: PENDING
+status: COMPLETE
+completed_at: 2026-05-13T09:28:29Z
+merge_commit_baker_master: 37e9c71dd8
+merge_commit_brisen_lab: 2ff2d17bde
+pr_baker_master: 201
+pr_brisen_lab: 16
+ship_reports: B3 v0-1 + B1 v0-2 (4-gate chain twice; v0-2 PASS clean)
+gates_v0_2: feature-dev:code-reviewer x2 PASS — all 5 v0-1 findings closed, no regressions
 brief: briefs/BRIEF_BRISEN_LAB_CARD_STATE_FIX_2.md
 brief_id: BRISEN_LAB_CARD_STATE_FIX_2
 trigger_class: TIER_B_GLANCE_UX_PLUS_BUS_HYGIENE_FAST_FOLLOW
