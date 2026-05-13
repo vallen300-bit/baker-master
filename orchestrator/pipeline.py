@@ -84,7 +84,12 @@ def _match_matter_slug(title: str, body: str, store: SentinelStoreBack) -> Optio
                 best_score = score
                 best_match = matter.get("matter_name")
 
-        if best_score >= 1:  # Even a single person-name match is meaningful
+        # Threshold raised from 1 → 3 per DEADLINE_SIGNAL_HYGIENE_1: a single
+        # weak-signal keyword hit produced ~42% false-positive rate (Director
+        # dropped 14/33 in 2026-05-13 retroactive backfill). A score >= 3 means:
+        # matter name (3pts) OR keyword + person-partial (2+1) OR 2 keywords
+        # (2+2 capped at 3) — all genuine multi-signal matches.
+        if best_score >= 3:
             return best_match
         return None
     except Exception as e:

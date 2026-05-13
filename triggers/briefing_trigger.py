@@ -253,13 +253,19 @@ def _gather_pm_briefing_context(pm_slug: str) -> str:
                 dl_where = " OR ".join(
                     "description ILIKE %s" for _ in deadline_patterns
                 )
+                # DEADLINE_SIGNAL_HYGIENE_1 Scope B: exclude closed-matter deadlines
+                # from briefing DM trigger.
+                dl_where_d = dl_where.replace("description ILIKE", "d.description ILIKE")
                 cur.execute(f"""
-                    SELECT description, due_date
-                    FROM deadlines
-                    WHERE status = 'active'
-                      AND due_date <= NOW() + INTERVAL '14 days'
-                      AND ({dl_where})
-                    ORDER BY due_date
+                    SELECT d.description, d.due_date
+                    FROM deadlines d
+                    LEFT JOIN matter_registry m
+                      ON LOWER(REPLACE(m.matter_name, ' ', '-')) = LOWER(d.matter_slug)
+                    WHERE d.status = 'active'
+                      AND (d.matter_slug IS NULL OR m.status IS NULL OR m.status = 'active')
+                      AND d.due_date <= NOW() + INTERVAL '14 days'
+                      AND ({dl_where_d})
+                    ORDER BY d.due_date
                     LIMIT 5
                 """, tuple(f"%%{p}%%" for p in deadline_patterns))
                 deadlines = cur.fetchall()

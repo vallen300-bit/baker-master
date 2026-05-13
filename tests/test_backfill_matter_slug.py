@@ -346,3 +346,104 @@ def test_apply_blocked_by_dry_run_only_env(monkeypatch, tmp_path):
 
     rc = bms.main(["--apply", str(ratified)])
     assert rc == 2
+
+
+# ---------------------------------------------------------------------------
+# T6 + T7 — DEADLINE_SIGNAL_HYGIENE_1 Scope C: --cleanup-strays
+# ---------------------------------------------------------------------------
+
+
+def test_cleanup_strays_partitions_fixable_vs_null_out(monkeypatch):
+    """The two stray rows from the brief (Oskolkov-RG7 + Financing...) test
+    both branches: one normalizes to a canonical slug (fixable), one doesn't
+    (null_out)."""
+    import importlib
+
+    bms = importlib.import_module("backfill_matter_slug")
+
+    # Fake canonical_slugs() — a small registry.
+    monkeypatch.setattr(
+        bms.slug_registry,
+        "canonical_slugs",
+        lambda: {"hagenauer-rg7", "cupial", "mo-vie"},
+    )
+
+    # Fake normalize — Oskolkov-RG7 → hagenauer-rg7 (re-classified);
+    # 'Financing Vienna' → None (no canonical match).
+    def _fake_normalize(raw):
+        if raw == "Oskolkov-RG7":
+            return "hagenauer-rg7"
+        return None
+
+    monkeypatch.setattr(bms.slug_registry, "normalize", _fake_normalize)
+
+    rows = [
+        (501, "Oskolkov-RG7", "stray row 1"),
+        (502, "Financing Vienna & Baden-Baden", "stray row 2"),
+        (503, "cupial", "canonical — not a stray"),
+    ]
+    fixable, null_out = bms._classify_strays(rows)
+
+    assert (501, "Oskolkov-RG7", "hagenauer-rg7") in fixable
+    assert (502, "Financing Vienna & Baden-Baden", None) in null_out
+    # 503 is canonical and must NOT appear in either bucket.
+    assert all(r[0] != 503 for r in fixable + null_out)
+
+
+def test_cleanup_strays_dry_run_writes_proposal(monkeypatch, tmp_path, capsys):
+    """`--cleanup-strays` (no --apply) must write a markdown proposal file
+    listing fixable + null_out buckets, AND must not write to DB."""
+    import importlib
+
+    bms = importlib.import_module("backfill_matter_slug")
+
+    monkeypatch.setattr(
+        bms,
+        "_query_stray_matter_slugs",
+        lambda: [
+            (501, "Oskolkov-RG7", "row 1"),
+            (502, "Financing Vienna & Baden-Baden", "row 2"),
+        ],
+    )
+    monkeypatch.setattr(
+        bms.slug_registry,
+        "canonical_slugs",
+        lambda: {"hagenauer-rg7", "cupial"},
+    )
+    monkeypatch.setattr(
+        bms.slug_registry,
+        "normalize",
+        lambda r: "hagenauer-rg7" if r == "Oskolkov-RG7" else None,
+    )
+
+    # Redirect proposal output to tmp_path.
+    real_path = bms.Path
+    monkeypatch.setattr(
+        bms,
+        "Path",
+        lambda p: (
+            tmp_path / real_path(p).name
+            if str(p).startswith("/tmp/cleanup_stray_")
+            else real_path(p)
+        ),
+    )
+
+    # If _apply_stray_cleanup were called we'd fail — dry run must not write.
+    monkeypatch.setattr(
+        bms,
+        "_apply_stray_cleanup",
+        lambda f, n: pytest.fail("_apply_stray_cleanup invoked during dry-run"),
+    )
+
+    rc = bms.main(["--cleanup-strays"])
+    assert rc == 0
+
+    out = capsys.readouterr().out.strip().splitlines()
+    proposal_path = real_path(out[-1])
+    assert proposal_path.exists()
+    body = proposal_path.read_text(encoding="utf-8")
+    assert "Bucket F — Fixable" in body
+    assert "Bucket N — Null-out" in body
+    assert "Oskolkov-RG7" in body
+    assert "hagenauer-rg7" in body
+    assert "Financing Vienna" in body

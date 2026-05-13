@@ -474,6 +474,20 @@ def cortex_create_deadline(
     from models.deadlines import insert_deadline
     from datetime import datetime, timezone
 
+    # DEADLINE_SIGNAL_HYGIENE_1 Scope A4: pre-classifier noise filter.
+    # Belt-and-suspenders — insert_deadline() also filters, but checking here
+    # short-circuits the DB conn acquisition + datetime normalisation.
+    try:
+        from kbl.noise_patterns import is_noise
+        if is_noise(description, source_snippet):
+            logger.info(
+                "cortex_create_deadline rejected as noise: src_type=%s desc=%s",
+                source_type, (description or "")[:80],
+            )
+            return None
+    except ImportError:
+        pass
+
     # Normalize due_date to datetime
     if isinstance(due_date, str):
         try:

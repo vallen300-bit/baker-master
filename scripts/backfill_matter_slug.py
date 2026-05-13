@@ -289,20 +289,214 @@ def _apply_updates(pairs: list[tuple[int, str]]) -> dict:
     return {"affected": affected, "skipped": skipped, "failed": failed}
 
 
+def _query_stray_matter_slugs() -> list[tuple]:
+    """SELECT rows where matter_slug is non-NULL but not in the canonical set.
+
+    Returns rows of (id, matter_slug, description). DEADLINE_SIGNAL_HYGIENE_1
+    Scope C: pre-apply audit, surfaces raw matter_name leaks (e.g.
+    'Oskolkov-RG7', 'Financing Vienna & Baden-Baden') that bypassed the
+    canonical-slug normalize() return.
+    """
+    conn = get_conn()
+    if conn is None:
+        raise RuntimeError("get_conn returned None — DB unreachable")
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                SELECT id, matter_slug, description
+                FROM deadlines
+                WHERE matter_slug IS NOT NULL
+                  AND matter_slug != ''
+                ORDER BY id
+                LIMIT %s
+                """,
+                (QUERY_LIMIT,),
+            )
+            rows = cur.fetchall()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            cur.close()
+        return list(rows)
+    finally:
+        try:
+            put_conn(conn)
+        except Exception:
+            pass
+
+
+def _classify_strays(rows: list[tuple]) -> tuple[list, list]:
+    """Partition stray rows into (fixable, null_out).
+
+    fixable = (id, current_slug, normalized_slug) — re-normalize() produces
+              a canonical slug; UPDATE deadlines SET matter_slug = normalized.
+    null_out = (id, current_slug, None) — no canonical match; UPDATE
+              deadlines SET matter_slug = NULL.
+    """
+    canonical = slug_registry.canonical_slugs()
+    fixable: list[tuple] = []
+    null_out: list[tuple] = []
+    for rid, current_slug, _desc in rows:
+        if current_slug in canonical:
+            continue  # already canonical — not a stray
+        normalized = slug_registry.normalize(current_slug)
+        if normalized and normalized in canonical:
+            fixable.append((rid, current_slug, normalized))
+        else:
+            null_out.append((rid, current_slug, None))
+    return fixable, null_out
+
+
+def _write_stray_proposal(
+    fixable: list[tuple], null_out: list[tuple], path: Path
+) -> None:
+    """Emit a markdown proposal file for stray cleanup (mirrors backfill format)."""
+    lines: list[str] = []
+    lines.append("# DEADLINE_SIGNAL_HYGIENE_1 — Scope C stray cleanup proposal")
+    lines.append("")
+    lines.append(
+        f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}"
+    )
+    lines.append(
+        f"Total stray rows: {len(fixable) + len(null_out)} "
+        f"(fixable={len(fixable)}, null_out={len(null_out)})"
+    )
+    lines.append("")
+    lines.append("## Bucket F — Fixable (UPDATE matter_slug = canonical)")
+    lines.append("")
+    if fixable:
+        lines.append("| id | current_slug | proposed_slug |")
+        lines.append("|----|--------------|---------------|")
+        for rid, current, proposed in fixable:
+            lines.append(f"| {rid} | `{current}` | `{proposed}` |")
+    else:
+        lines.append("_(none)_")
+    lines.append("")
+    lines.append("## Bucket N — Null-out (UPDATE matter_slug = NULL)")
+    lines.append("")
+    if null_out:
+        lines.append("| id | current_slug |")
+        lines.append("|----|--------------|")
+        for rid, current, _ in null_out:
+            lines.append(f"| {rid} | `{current}` |")
+    else:
+        lines.append("_(none)_")
+    lines.append("")
+    lines.append(
+        "Apply via: `python3 scripts/backfill_matter_slug.py "
+        "--cleanup-strays --apply` (Director-gated)"
+    )
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _apply_stray_cleanup(
+    fixable: list[tuple], null_out: list[tuple]
+) -> dict:
+    """Per-row SAVEPOINT pattern. Idempotent re-runs are safe because the
+    next dry-run re-classifies and only acts on remaining strays.
+    """
+    conn = get_conn()
+    if conn is None:
+        raise RuntimeError("get_conn returned None — DB unreachable")
+    affected = 0
+    failed: list[tuple] = []
+    try:
+        cur = conn.cursor()
+        try:
+            for rid, _current, proposed in fixable:
+                try:
+                    cur.execute("SAVEPOINT row_sp")
+                    cur.execute(
+                        "UPDATE deadlines SET matter_slug = %s, updated_at = NOW() "
+                        "WHERE id = %s AND matter_slug IS NOT NULL "
+                        "  AND matter_slug NOT IN (SELECT %s)",
+                        (proposed, rid, proposed),
+                    )
+                    cur.execute("RELEASE SAVEPOINT row_sp")
+                    affected += 1
+                except Exception as e:
+                    cur.execute("ROLLBACK TO SAVEPOINT row_sp")
+                    failed.append((rid, str(e)[:120]))
+            for rid, _current, _ in null_out:
+                try:
+                    cur.execute("SAVEPOINT row_sp")
+                    cur.execute(
+                        "UPDATE deadlines SET matter_slug = NULL, updated_at = NOW() "
+                        "WHERE id = %s AND matter_slug IS NOT NULL",
+                        (rid,),
+                    )
+                    cur.execute("RELEASE SAVEPOINT row_sp")
+                    affected += 1
+                except Exception as e:
+                    cur.execute("ROLLBACK TO SAVEPOINT row_sp")
+                    failed.append((rid, str(e)[:120]))
+            try:
+                conn.commit()
+            except Exception as e:
+                logger.warning("commit failed: %s", e)
+        finally:
+            cur.close()
+    finally:
+        try:
+            put_conn(conn)
+        except Exception:
+            pass
+    return {"affected": affected, "failed": failed}
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Backfill deadlines.matter_slug via classifier (dry-run by default)",
     )
     p.add_argument(
-        "--apply", metavar="RATIFIED_FILE",
+        "--apply", metavar="RATIFIED_FILE", nargs="?", const="",
         help="Path to Director-ratified mapping file; runs UPDATEs. "
-             "Default is DRY RUN (no --apply).",
+             "Default is DRY RUN (no --apply). With --cleanup-strays, "
+             "--apply may be passed without a path (the proposal file is "
+             "implicit — Director ratification is via 1Password / paste).",
+    )
+    p.add_argument(
+        "--cleanup-strays", action="store_true",
+        help="DEADLINE_SIGNAL_HYGIENE_1 Scope C: identify rows where "
+             "matter_slug is non-NULL but not canonical; dry-run produces "
+             "proposal of fixable + null_out buckets.",
     )
     return p
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = _build_arg_parser().parse_args(argv)
+
+    # DEADLINE_SIGNAL_HYGIENE_1 Scope C path — separate from main backfill.
+    if args.cleanup_strays:
+        rows = _query_stray_matter_slugs()
+        fixable, null_out = _classify_strays(rows)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        out_path = Path(f"/tmp/cleanup_stray_matter_slugs_{ts}.md")
+        _write_stray_proposal(fixable, null_out, out_path)
+        logger.info(
+            "Scope C DRY RUN: %d stray | F=%d N=%d → %s",
+            len(fixable) + len(null_out), len(fixable), len(null_out), out_path,
+        )
+        print(str(out_path))
+        if args.apply is not None and args.apply == "":
+            # --cleanup-strays --apply with no path → Director-gated execution.
+            if os.environ.get("BAKER_BACKFILL_DRY_RUN_ONLY") == "1":
+                logger.error("BAKER_BACKFILL_DRY_RUN_ONLY=1 — --apply blocked")
+                return 2
+            summary = _apply_stray_cleanup(fixable, null_out)
+            logger.info(
+                "Scope C APPLY summary: affected=%d failed=%d",
+                summary["affected"], len(summary["failed"]),
+            )
+            return 0 if not summary["failed"] else 1
+        return 0
 
     if args.apply:
         # Safety rail 4: env-var kill switch

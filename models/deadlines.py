@@ -281,6 +281,21 @@ def insert_deadline(
     if not conn:
         return None
     try:
+        # DEADLINE_SIGNAL_HYGIENE_1 Scope A3: pre-classifier noise filter.
+        # Reject SaaS billing / promo / training / delivery / generic forecast
+        # noise before any DB row is created. is_noise() is conservative —
+        # concrete matter language is intentionally not pattern-matched.
+        try:
+            from kbl.noise_patterns import is_noise
+            if is_noise(description, source_snippet):
+                logger.info(
+                    "deadline rejected as noise (pre-classifier): src_type=%s desc=%s",
+                    source_type, (description or "")[:80],
+                )
+                return None  # finally: put_conn(conn) runs
+        except ImportError:
+            pass  # noise_patterns optional; degrade gracefully
+
         cur = conn.cursor()
         # DEADLINE-DEDUP-1: Check for existing similar deadline on same date
         existing_id = _deadline_dedup_check(cur, description, due_date)

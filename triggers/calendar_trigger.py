@@ -275,12 +275,17 @@ def _assemble_meeting_context(meeting: dict, store) -> str:
                             parts.append(f"    - {tc['name']} ({tc.get('contact_role', '')}) — {tc.get('notes', '')[:100]}")
 
                     # Related obligations
+                    # DEADLINE_SIGNAL_HYGIENE_1 Scope B: exclude closed-matter deadlines
+                    # from trip-context obligation pull.
                     cur.execute("""
-                        SELECT description, due_date, severity, priority
-                        FROM deadlines
-                        WHERE status = 'active'
-                          AND (LOWER(description) ILIKE %s OR LOWER(description) ILIKE %s)
-                        ORDER BY due_date
+                        SELECT d.description, d.due_date, d.severity, d.priority
+                        FROM deadlines d
+                        LEFT JOIN matter_registry m
+                          ON LOWER(REPLACE(m.matter_name, ' ', '-')) = LOWER(d.matter_slug)
+                        WHERE d.status = 'active'
+                          AND (d.matter_slug IS NULL OR m.status IS NULL OR m.status = 'active')
+                          AND (LOWER(d.description) ILIKE %s OR LOWER(d.description) ILIKE %s)
+                        ORDER BY d.due_date
                         LIMIT 5
                     """, (f"%{trip.get('destination', '').lower()}%",
                           f"%{(trip.get('event_name') or '').lower()}%" if trip.get('event_name') else '%ZZZNEVERMATCH%'))
