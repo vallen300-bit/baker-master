@@ -1,77 +1,67 @@
 ---
-status: COMPLETE
-brief: briefs/BRIEF_DEADLINE_MATTER_SLUG_BACKFILL_1.md
-brief_id: DEADLINE_MATTER_SLUG_BACKFILL_1
-trigger_class: TIER_B_BACKFILL_+_WRITE_PATH_CLOSURE
+status: PENDING
+brief: briefs/BRIEF_BRISEN_LAB_CARD_STATE_FIX_2.md
+brief_id: BRISEN_LAB_CARD_STATE_FIX_2
+trigger_class: TIER_B_GLANCE_UX_PLUS_BUS_HYGIENE
 dispatched_at: 2026-05-13
 dispatched_by: ai-head-1 (AH1)
 target: b3
-mandatory_2nd_pass: false
-security_review_required: false
-effort_estimate: ~3h
+mandatory_2nd_pass: true
+security_review_required: true
+effort_estimate: ~3-4h
 predecessor:
-  brief: briefs/BRIEF_DEADLINE_ASSIGNED_TO_BACKFILL_1.md
-  pr: 199
-  merge_commit: 7e0751619621aba510c9c29bdbe5952871f4bfc3
+  brief: briefs/BRIEF_DEADLINE_MATTER_SLUG_BACKFILL_1.md
+  pr: 200
+  merge_commit: 761b07d
 director_ratification: |
-  2026-05-13: "keep off, build a matter slug" — green light for the matter_slug
-  capability (Scope A write-path closure + Scope B retroactive backfill). Scanner
-  stays OFF (VAULT_SCANNER_ENABLED=false, flipped back from b3's post-merge true
-  by AH1 in same Director turn). Scanner re-enables only after Director ratifies
-  the Scope B dry-run M-bucket.
-scope_summary:
-  scope_a: |
-    Wire _match_matter_slug() into 3 deadline write-paths currently bypassing it:
-      A1. models/deadlines.insert_deadline() — add matter_slug param
-      A2. models/cortex.cortex_create_deadline() — pass-through param
-      A3. baker_mcp/baker_mcp_server.py baker_add_deadline — compute before MCP call
-      A4. triggers/clickup_trigger.py — compute + add to direct INSERT
-  scope_b: |
-    scripts/backfill_matter_slug.py — dry-run-default backfill of 69 NULL rows.
-    Mirror b3's prior backfill_assigned_to.py pattern (3 safety rails + idempotent
-    WHERE matter_slug IS NULL). Per-row SAVEPOINT pattern fixes the predecessor
-    v2_followup (mid-batch error drops prior successful UPDATEs).
-  part_h: |
-    Invocation-path audit table in brief enumerates all 10 doors with pre/post
-    status. Scope A closes doors 5-8.
-ship_gate: literal pytest -v output paste in ship report; check_singletons PASS
-bus_topic: ship/DEADLINE_MATTER_SLUG_BACKFILL_1
+  Director 2026-05-13 "Follow your recommendation" (twice — first on the bundled-vs-split
+  brief question, then on the dispatch-order recommendation after parallel-AH1's
+  DEADLINE_MATTER_SLUG_BACKFILL_1 self-cleared via PR #200).
+priority: P2
+phase: 1 of 1
+expected_pr_count: 3 (baker-master + brisen-lab + baker-vault direct-push)
+expected_branch_baker_master: b3/brisen-lab-card-state-fix-2
+expected_branch_brisen_lab: b3/brisen-lab-card-state-fix-2
+expected_complexity: medium (~3-4h; new bash helper + bash daemon patch + JS poll loop + process-doc update + 3 test files)
+mandatory_gates:
+  - AH2 /security-review on baker-master PR (helper script reads `op` credentials)
+  - picker-architect (code-architecture-reviewer) on all 3 PRs
+  - feature-dev:code-reviewer 2nd-pass on all 3 PRs — MANDATORY per Tier-B trigger #4 (external surface)
+hard_ship_gate: |
+  1. Literal `pytest` PASS for tests/test_ack_dispatch_msgs.py.
+  2. Literal bash-test PASS for tests/test_forge_snapshot_push.sh feature-branch + stale-main case.
+  3. Manual end-to-end verification of all three fixes per brief §Quality Checkpoints 3-5.
+  4. Mirror install of forge_snapshot_push.sh to `/Users/dimitry/Library/Application Support/baker/` + launchctl kickstart (executed by B3 with literal output in ship report).
+scope: |
+  Three orthogonal fixes bundled by shared surface (glance-UX truth pipeline):
+  Fix 1 — Worker ack-on-ship hygiene (new `scripts/ack_dispatch_msgs.sh` + process-doc update).
+  Fix 2 — Forge daemon stale-local-clone read (git fetch + ff-pull before classify; `git show origin/main:...` on feature branches).
+  Fix 3 — Lab UI badge SSE-reconnect staleness (60s sanity poll in app.js).
+coordination: |
+  B3's prior dispatch DEADLINE_MATTER_SLUG_BACKFILL_1 shipped via PR #200 (`761b07d`) and
+  mailbox closed at `fbd2bcc` BEFORE this dispatch landed. B3 inbox drained (id=207 acked
+  by AH1 2026-05-13 ~10:05Z as one-off pre-FIX_1 cleanup). Clean board.
+ship_report_to: |
+  Bus-post to `lead` on completion with topic `ship/BRISEN_LAB_CARD_STATE_FIX_2`.
+  Include literal pytest/bash output + 4-gate verdicts in the post.
 ---
 
-# CODE_3_PENDING — DEADLINE_MATTER_SLUG_BACKFILL_1
+# Dispatch notice
 
-Read `briefs/BRIEF_DEADLINE_MATTER_SLUG_BACKFILL_1.md` for full spec.
+Read `briefs/BRIEF_BRISEN_LAB_CARD_STATE_FIX_2.md` end-to-end before starting.
 
-## Confirmation phrase
+Pre-flight:
+1. `cd ~/bm-b3 && git fetch origin && git checkout main && git pull --ff-only origin main`.
+2. Verify clean working tree on b3 (no leftover work from prior brief).
+3. For the brisen-lab PR: clone or update `~/bm-b3-brisen-lab` (FIX_1 worktree pattern). If absent, `git clone git@github.com:vallen300-bit/brisen-lab.git ~/bm-b3-brisen-lab`.
+4. For the baker-vault PR: use `/tmp/baker-vault-b3-card-fix-2` fresh clone to avoid shared-FS race (lesson 2026-04-30 anchor in brief).
 
-On session start, reply: `"B3 oriented. Read: CODE_3_PENDING.md, MEMORY.md."`
+Build discipline:
+- Three PRs. Sequence: baker-master first (ack helper + forge daemon patch + tests), then brisen-lab (JS poll), then baker-vault (process-doc update — direct push to main per CHANDA Inv 9, no PR).
+- Run the 4-gate chain on EACH of the 2 PRs (baker-master + brisen-lab). 2nd-pass MANDATORY per Tier-B trigger #4 (external surface — daemon + post-commit hooks across all clones + UI consumer).
+- Heartbeat every 12h via mailbox UPDATE entry if mid-flight beyond first cycle.
 
-## Working dir
-`~/bm-b3` — branch off `main` after `git pull --ff-only`. Suggested branch name: `b3-matter-slug-backfill`.
-
-## What ships
-1. **Scope A** — 4 file edits (models/deadlines.py, models/cortex.py, baker_mcp/baker_mcp_server.py, triggers/clickup_trigger.py) + new test file `tests/test_deadline_matter_slug_writepath.py` (≥4 tests).
-2. **Scope B** — new `scripts/backfill_matter_slug.py` mirroring `scripts/backfill_assigned_to.py` with the per-row savepoint fix + new test file `tests/test_backfill_matter_slug.py` (≥4 tests).
-3. **Dry-run executed** before opening PR. Proposal file committed at `briefs/_reports/B3_backfill_matter_slug_<UTC-ts>.md`.
-4. **Ship report** at `briefs/_reports/B3_DEADLINE_MATTER_SLUG_BACKFILL_1_<date>.md` with literal pytest paste + bucket counts.
-
-## What does NOT ship (AH1 owns)
-- Executing `--apply` against production. AH1 surfaces M-bucket to Director, ratifies, then applies from a fresh `git pull --rebase origin main` checkout.
-- Render env flip back to `VAULT_SCANNER_ENABLED=true`. AH1 executes after successful `--apply`.
-- Vault append (deadline-system-contract-v1.md v1.6 execution log) — stage uncommitted; Mac-Mini / Director commits per CHANDA Inv 9.
-
-## Bus post on ship
-```bash
-BAKER_ROLE=b3 ~/Desktop/baker-code/scripts/bus_post.sh lead \
-  "PR #<N> OPEN — DEADLINE_MATTER_SLUG_BACKFILL_1 (Scope A write-path closure + Scope B backfill). <K>/<K> tests PASS. check_singletons PASS. Dry-run executed: bucket counts M=<m>/A=<a>/U=<u>. PR: https://github.com/vallen300-bit/baker-master/pull/<N>. Ship report: briefs/_reports/B3_DEADLINE_MATTER_SLUG_BACKFILL_1_<date>.md . Dry-run output preserved: briefs/_reports/B3_backfill_matter_slug_<ts>.md ." \
-  ship/DEADLINE_MATTER_SLUG_BACKFILL_1
-```
-
-## Predecessor lessons carried forward
-1. Per-row SAVEPOINT pattern (your prior v2_followup) — fixes mid-batch error drop bug
-2. 3 safety rails on `--apply` (file <24h, all-rows-populated, env override) — copy verbatim from backfill_assigned_to.py
-3. Idempotent WHERE clause (`matter_slug IS NULL`) — re-runnable safely
-4. Singleton hook compliance — `SentinelStoreBack._get_global_instance()` only
-5. No DDL — column exists already as TEXT nullable (verified models/deadlines.py:99)
-6. /security-review NOT required (no external surface)
-7. mandatory_2nd_pass FALSE (no auth, no DB schema, no operation-ordering primitive)
+End-of-work:
+- Bus-post to `lead` with topic `ship/BRISEN_LAB_CARD_STATE_FIX_2`.
+- Body: 4-gate verdicts per PR + literal pytest paste + manual-test outputs for all 5 Quality Checkpoints + mirror-install confirmation.
+- Mailbox flip `CODE_3_PENDING.md` → frontmatter `status: COMPLETE` with PR refs; ack this dispatch's wake-ping (id will be visible in your inbox post-bus-post-from-lead — use the NEW `scripts/ack_dispatch_msgs.sh` against your own brief slug as the FIRST verification step of Fix 1 dogfooding).
