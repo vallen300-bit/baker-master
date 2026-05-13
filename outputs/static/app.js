@@ -2976,6 +2976,9 @@ function _landingTriageBar(aid, title, body, cardType, itemId) {
         html += '<button class="triage-pill" onclick="event.stopPropagation();_landingMarkNotCritical(' + itemId + ',this)">⚡ Not Critical</button>';
     } else if (cardType === 'deadline') {
         html += '<button class="triage-pill" style="background:var(--green);color:#fff;border-color:var(--green);" onclick="event.stopPropagation();_landingMarkDone(' + itemId + ',this)">✓ Mark Done</button>';
+        // DEADLINE_FEEDBACK_LOOP_1: 2 new feedback verbs for phase-3 training corpus
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_deadlineWrongMatter(' + itemId + ',this)">⚠ Wrong Matter</button>';
+        html += '<button class="triage-pill" onclick="event.stopPropagation();_deadlineWrongDeadline(' + itemId + ',this)">✗ Not a Deadline</button>';
     } else if (cardType === 'meeting') {
         // MEETING-TRIAGE-1: Confirmed / Declined / Prep me
         html += '<button class="triage-pill" style="background:var(--green);color:#fff;border-color:var(--green);" onclick="event.stopPropagation();_meetingSetStatus(' + itemId + ',\'confirmed\',this)">✓ Confirmed</button>';
@@ -3104,6 +3107,128 @@ function _landingMarkDone(deadlineId, btn) {
         if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
         _showToast('Marked as done \u2713');
     });
+}
+
+// DEADLINE_FEEDBACK_LOOP_1: Wrong Matter — inline matter-slug dropdown.
+// Uses document.createElement + textContent + appendChild (no innerHTML on
+// dynamic content) per XSS discipline. Slug values come from /api/slug-registry
+// — canonical strings from a YAML registry, NOT user input — but DOM construction
+// is the correct default regardless of current safety.
+function _deadlineWrongMatter(deadlineId, btn) {
+    var card = btn.closest('.card');
+    if (!card) return;
+    var dropId = 'wrong-matter-drop-' + deadlineId;
+    var existing = document.getElementById(dropId);
+    if (existing) {
+        existing.style.display = existing.style.display === 'none' ? 'flex' : 'none';
+        return;
+    }
+    _ensureActiveSlugsLoaded().then(function(slugs) {
+        var row = document.createElement('div');
+        row.id = dropId;
+        row.style.display = 'flex';
+        row.style.gap = '6px';
+        row.style.padding = '8px 16px 12px';
+        row.style.alignItems = 'center';
+        row.style.flexWrap = 'wrap';
+
+        var label = document.createElement('span');
+        label.style.fontSize = '12px';
+        label.style.color = 'var(--text2)';
+        label.textContent = 'Correct matter:';
+        row.appendChild(label);
+
+        var select = document.createElement('select');
+        select.id = 'wrong-matter-select-' + deadlineId;
+        select.style.padding = '4px 8px';
+        select.style.border = '1px solid var(--border)';
+        select.style.borderRadius = '6px';
+        select.style.fontSize = '12px';
+        select.style.fontFamily = 'var(--font)';
+
+        var placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = '— select —';
+        select.appendChild(placeholder);
+
+        for (var i = 0; i < slugs.length; i++) {
+            var opt = document.createElement('option');
+            opt.value = slugs[i];           // attribute setter — safe
+            opt.textContent = slugs[i];     // textContent — XSS-safe
+            select.appendChild(opt);
+        }
+        row.appendChild(select);
+
+        var submit = document.createElement('button');
+        submit.className = 'triage-pill';
+        submit.style.background = 'var(--blue)';
+        submit.style.color = '#fff';
+        submit.style.borderColor = 'var(--blue)';
+        submit.textContent = 'Submit';
+        submit.addEventListener('click', function(ev) {
+            ev.stopPropagation();
+            _deadlineSubmitWrongMatter(deadlineId, submit);
+        });
+        row.appendChild(submit);
+
+        var detail = card.querySelector('.triage-detail');
+        if (detail) {
+            detail.appendChild(row);
+        } else {
+            card.appendChild(row);
+        }
+    });
+}
+
+// DEADLINE_FEEDBACK_LOOP_1: Submit wrong-matter correction.
+function _deadlineSubmitWrongMatter(deadlineId, btn) {
+    var sel = document.getElementById('wrong-matter-select-' + deadlineId);
+    var correctedSlug = sel ? sel.value : '';
+    if (!correctedSlug) {
+        _showToast('Pick a matter first');
+        return;
+    }
+    bakerFetch('/api/deadlines/' + deadlineId + '/feedback', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({feedback_type: 'wrong_matter', corrected_matter_slug: correctedSlug})
+    }).then(function() {
+        // Don't remove the card — wrong_matter is a label correction; the
+        // deadline stays visible.
+        var drop = document.getElementById('wrong-matter-drop-' + deadlineId);
+        if (drop) drop.remove();
+        _showToast('Matter corrected \u2192 ' + correctedSlug);
+    });
+}
+
+// DEADLINE_FEEDBACK_LOOP_1: Not a Deadline — flag extraction error + dismiss.
+function _deadlineWrongDeadline(deadlineId, btn) {
+    var card = btn.closest('.card');
+    bakerFetch('/api/deadlines/' + deadlineId + '/feedback', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({feedback_type: 'wrong_deadline'})
+    }).then(function() {
+        if (card) { card.style.opacity = '0.3'; setTimeout(function() { card.remove(); }, 500); }
+        _showToast('Flagged: not a deadline');
+    });
+}
+
+// DEADLINE_FEEDBACK_LOOP_1: Cache active slugs on first dropdown open.
+function _ensureActiveSlugsLoaded() {
+    if (window._activeSlugs && window._activeSlugs.length > 0) {
+        return Promise.resolve(window._activeSlugs);
+    }
+    return bakerFetch('/api/slug-registry?status=active', {method: 'GET'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            window._activeSlugs = (data.slugs || []).sort();
+            return window._activeSlugs;
+        })
+        .catch(function() {
+            window._activeSlugs = [];
+            return [];
+        });
 }
 
 function _landingCancelMeeting(meetingId, btn) {

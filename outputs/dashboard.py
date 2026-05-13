@@ -6852,12 +6852,26 @@ async def get_deadlines(
 
 @app.post("/api/deadlines/{deadline_id}/dismiss", tags=["deadlines"], dependencies=[Depends(verify_api_key)])
 async def dismiss_deadline_api(deadline_id: int):
-    """Dismiss a deadline."""
+    """Dismiss a deadline. Also writes a 'mute' feedback row for the phase-3 training corpus."""
     try:
         from models.deadlines import update_deadline, get_deadline_by_id
+        from models.deadline_feedback import insert_feedback
         dl = get_deadline_by_id(deadline_id)
         if not dl:
             raise HTTPException(status_code=404, detail=f"Deadline {deadline_id} not found")
+        # DEADLINE_FEEDBACK_LOOP_1: corpus row first; failure here must NOT block the dismiss
+        try:
+            insert_feedback(
+                deadline_id=deadline_id,
+                feedback_type="mute",
+                original_matter_slug=dl.get("matter_slug"),
+                corrected_matter_slug=None,
+                original_description=dl.get("description") or "",
+                original_source_type=dl.get("source_type"),
+                director_note=None,
+            )
+        except Exception as fe:
+            logger.warning(f"deadline_feedback (mute) write failed for {deadline_id}: {fe}")
         update_deadline(deadline_id, status="dismissed", dismissed_reason="Dismissed via dashboard")
         return {"status": "dismissed", "id": deadline_id}
     except HTTPException:
@@ -6869,12 +6883,26 @@ async def dismiss_deadline_api(deadline_id: int):
 
 @app.post("/api/deadlines/{deadline_id}/complete", tags=["deadlines"], dependencies=[Depends(verify_api_key)])
 async def complete_deadline_api(deadline_id: int):
-    """Mark a deadline as completed."""
+    """Mark a deadline as completed. Also writes a 'confirm' feedback row for the phase-3 training corpus."""
     try:
         from models.deadlines import update_deadline, get_deadline_by_id
+        from models.deadline_feedback import insert_feedback
         dl = get_deadline_by_id(deadline_id)
         if not dl:
             raise HTTPException(status_code=404, detail=f"Deadline {deadline_id} not found")
+        # DEADLINE_FEEDBACK_LOOP_1: corpus row first; failure here must NOT block the complete
+        try:
+            insert_feedback(
+                deadline_id=deadline_id,
+                feedback_type="confirm",
+                original_matter_slug=dl.get("matter_slug"),
+                corrected_matter_slug=None,
+                original_description=dl.get("description") or "",
+                original_source_type=dl.get("source_type"),
+                director_note=None,
+            )
+        except Exception as fe:
+            logger.warning(f"deadline_feedback (confirm) write failed for {deadline_id}: {fe}")
         update_deadline(deadline_id, status="completed", dismissed_reason="Completed via dashboard")
         return {"status": "completed", "id": deadline_id}
     except HTTPException:
@@ -7212,6 +7240,98 @@ async def update_deadline(deadline_id: int, request: Request):
     except Exception as e:
         logger.error(f"PATCH /api/deadlines/{deadline_id} failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/deadlines/{deadline_id}/feedback", tags=["deadlines"], dependencies=[Depends(verify_api_key)])
+async def deadline_feedback_api(deadline_id: int, request: Request):
+    """DEADLINE_FEEDBACK_LOOP_1: capture labeled Director click for phase-3 training corpus.
+
+    Body shape:
+        {
+            "feedback_type": "confirm" | "mute" | "wrong_matter" | "wrong_deadline",
+            "corrected_matter_slug": "hagenauer-rg7"  # optional, only for wrong_matter
+        }
+
+    Side effects:
+        - confirm:        status -> completed   (mirrors /complete endpoint)
+        - mute:           status -> dismissed   (mirrors /dismiss endpoint)
+        - wrong_matter:   no status flip; matter_slug NOT mutated on deadlines table
+                          (row stays visible — Director is correcting the classifier
+                          label, not removing the row from view)
+        - wrong_deadline: status -> dismissed with reason 'wrong_deadline'
+                          (this isn't a deadline — remove from view but tag the
+                          dismiss reason distinctly so phase 3 sees it)
+    """
+    try:
+        payload = await request.json()
+        feedback_type = payload.get("feedback_type")
+        corrected_slug_raw = payload.get("corrected_matter_slug")
+
+        from models.deadlines import get_deadline_by_id, update_deadline
+        from models.deadline_feedback import insert_feedback, VALID_FEEDBACK_TYPES
+        from kbl.slug_registry import normalize as slug_normalize
+
+        if feedback_type not in VALID_FEEDBACK_TYPES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"feedback_type must be one of {sorted(VALID_FEEDBACK_TYPES)}",
+            )
+
+        dl = get_deadline_by_id(deadline_id)
+        if not dl:
+            raise HTTPException(status_code=404, detail=f"Deadline {deadline_id} not found")
+
+        # Validate corrected slug for wrong_matter (canonical or known alias).
+        # Hallucinated slugs become None; the click still records but with NULL.
+        corrected_slug = None
+        if feedback_type == "wrong_matter" and corrected_slug_raw:
+            corrected_slug = slug_normalize(corrected_slug_raw)
+            if corrected_slug is None:
+                logger.warning(
+                    f"deadline_feedback: wrong_matter received unknown slug "
+                    f"{corrected_slug_raw!r} on deadline {deadline_id} — corpus row will store NULL"
+                )
+
+        # Snapshot fields off the deadline row at click time
+        fid = insert_feedback(
+            deadline_id=deadline_id,
+            feedback_type=feedback_type,
+            original_matter_slug=dl.get("matter_slug"),
+            corrected_matter_slug=corrected_slug,
+            original_description=dl.get("description") or "",
+            original_source_type=dl.get("source_type"),
+            director_note=None,
+        )
+
+        # Side-effect status flip (verb-specific). wrong_matter does NOT flip status.
+        if feedback_type == "confirm":
+            update_deadline(deadline_id, status="completed",
+                            dismissed_reason="Completed via dashboard feedback")
+        elif feedback_type == "mute":
+            update_deadline(deadline_id, status="dismissed",
+                            dismissed_reason="Muted via dashboard feedback")
+        elif feedback_type == "wrong_deadline":
+            update_deadline(deadline_id, status="dismissed",
+                            dismissed_reason="wrong_deadline")
+
+        return {"status": "ok", "feedback_id": fid, "deadline_id": deadline_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"/api/deadlines/{deadline_id}/feedback failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/slug-registry", tags=["registry"], dependencies=[Depends(verify_api_key)])
+async def slug_registry_api(status: str = Query("active", regex="^(active|all)$")):
+    """DEADLINE_FEEDBACK_LOOP_1: serve canonical slug list for the wrong-matter dropdown."""
+    try:
+        from kbl.slug_registry import active_slugs, canonical_slugs
+        slugs = sorted(active_slugs() if status == "active" else canonical_slugs())
+        return {"slugs": slugs, "count": len(slugs), "status_filter": status}
+    except Exception as e:
+        logger.error(f"/api/slug-registry failed: {e}")
+        return {"slugs": [], "count": 0, "error": str(e)}
 
 
 @app.post("/api/commitments/{commitment_id}/dismiss", tags=["dashboard-v3"], dependencies=[Depends(verify_api_key)])
