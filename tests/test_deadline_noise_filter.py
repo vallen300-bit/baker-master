@@ -32,7 +32,13 @@ sys.path.insert(0, str(_REPO))
         "Register for AML analysis course",
         "Special subscription offer for Reuters readers",
         "Make payment to American Express",
-        "Delivery of new MacBook Pro",
+        # M1 tightened — must still match real consumer logistics.
+        "Amazon delivery scheduled for tomorrow",
+        "Delivery of your package on Friday",
+        "Package out for delivery",
+        # M2 — credit-card statement billing (kept as noise).
+        "Credit card payment due 25th",
+        "Credit card statement Apr 2026",
         "Mother's Day gifts",
         "Discuss Q1/YTD and forecast",
         "20% discount on premium plan",
@@ -61,6 +67,19 @@ def test_is_noise_true_positives(description):
         "Review MOHG draft amendment",
         "Send Wertheimer counter-proposal",
         "Eastdil pitch meeting prep",
+        # 2026-05-13 REQUEST_CHANGES regression cases (M1 + M2):
+        # legitimate deal-doc nouns commonly preceded by "delivery of"
+        # MUST pass the noise filter.
+        "Delivery of closing documents to notary",
+        "Delivery of title deed by Friday",
+        "Delivery of guarantee letter to bank",
+        "Delivery of executed share purchase agreement",
+        # M2 — commercial invoices (Balgerstrasse / Cupial / Heidenauer)
+        # MUST pass through.
+        "Pay Heidenauer invoice 2024-07",
+        "Process Cupial commercial invoice 1184-A",
+        "Approve Balgerstrasse contractor invoice payment",
+        "Invoice payment due for general contractor",
     ],
 )
 def test_is_noise_true_negatives(description):

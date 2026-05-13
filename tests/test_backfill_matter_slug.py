@@ -447,3 +447,177 @@ def test_cleanup_strays_dry_run_writes_proposal(monkeypatch, tmp_path, capsys):
     assert "Oskolkov-RG7" in body
     assert "hagenauer-rg7" in body
     assert "Financing Vienna" in body
+
+
+# ---------------------------------------------------------------------------
+# T8 — DEADLINE_SIGNAL_HYGIENE_1 Scope C H1 (2026-05-13 REQUEST_CHANGES):
+# --apply must require the ratified proposal file path + 24h staleness +
+# parse the file (NO re-derive at exec time).
+# ---------------------------------------------------------------------------
+
+
+def _write_stray_proposal_file(path: Path, fixable: list, null_out: list) -> None:
+    """Write a fixture proposal file in the same format _write_stray_proposal
+    emits, so the parser round-trips."""
+    lines = [
+        "# DEADLINE_SIGNAL_HYGIENE_1 — Scope C stray cleanup proposal",
+        "",
+        "## Bucket F — Fixable (UPDATE matter_slug = canonical)",
+        "",
+    ]
+    if fixable:
+        lines.append("| id | current_slug | proposed_slug |")
+        lines.append("|----|--------------|---------------|")
+        for rid, current, proposed in fixable:
+            lines.append(f"| {rid} | `{current}` | `{proposed}` |")
+    else:
+        lines.append("_(none)_")
+    lines += ["", "## Bucket N — Null-out (UPDATE matter_slug = NULL)", ""]
+    if null_out:
+        lines.append("| id | current_slug |")
+        lines.append("|----|--------------|")
+        for rid, current, _ in null_out:
+            lines.append(f"| {rid} | `{current}` |")
+    else:
+        lines.append("_(none)_")
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def test_cleanup_strays_apply_missing_path_returns_2(monkeypatch, tmp_path):
+    """--cleanup-strays --apply with a non-existent file path must exit 2."""
+    import importlib
+
+    bms = importlib.import_module("backfill_matter_slug")
+
+    # If get_conn were called we'd fail — the staleness/parse gate must trip first.
+    monkeypatch.setattr(
+        bms,
+        "get_conn",
+        lambda: pytest.fail("get_conn must not be called on missing-path"),
+    )
+
+    rc = bms.main(["--cleanup-strays", "--apply", str(tmp_path / "nonexistent.md")])
+    assert rc == 2
+
+
+def test_cleanup_strays_apply_stale_file_returns_2(monkeypatch, tmp_path):
+    """A ratified file >24h old must be rejected (staleness rail)."""
+    import importlib
+    import os
+    import time as _time
+
+    bms = importlib.import_module("backfill_matter_slug")
+
+    proposal = tmp_path / "cleanup_stray_old.md"
+    _write_stray_proposal_file(
+        proposal, [(501, "Oskolkov-RG7", "hagenauer-rg7")], []
+    )
+    # Force mtime to 25h ago.
+    old = _time.time() - (25 * 3600)
+    os.utime(proposal, (old, old))
+
+    monkeypatch.setattr(
+        bms,
+        "get_conn",
+        lambda: pytest.fail("get_conn must not be called on stale file"),
+    )
+
+    rc = bms.main(["--cleanup-strays", "--apply", str(proposal)])
+    assert rc == 2
+
+
+def test_cleanup_strays_apply_uses_ratified_set_not_redrive(
+    monkeypatch, tmp_path
+):
+    """REQUEST_CHANGES H1 — apply must use the exact rows from the ratified
+    proposal file. If prod state has drifted since the dry-run (new strays
+    appeared / existing ones cleared), the apply must NOT silently widen to
+    the freshly-derived set."""
+    import importlib
+
+    bms = importlib.import_module("backfill_matter_slug")
+
+    proposal = tmp_path / "cleanup_stray_ratified.md"
+    _write_stray_proposal_file(
+        proposal,
+        [(501, "Oskolkov-RG7", "hagenauer-rg7")],
+        [(502, "Financing Vienna & Baden-Baden", None)],
+    )
+
+    # If --apply re-derives (calls _query_stray_matter_slugs), this would
+    # widen scope to id=999. The H1 fix must keep apply set bound to
+    # the ratified file (501 + 502 only).
+    def _drifted_query():
+        return [
+            (501, "Oskolkov-RG7", "old row"),
+            (502, "Financing Vienna & Baden-Baden", "old row"),
+            (999, "NewlyAppearedStray", "drifted row"),  # MUST NOT be applied
+        ]
+
+    monkeypatch.setattr(bms, "_query_stray_matter_slugs", _drifted_query)
+
+    captured: dict = {}
+
+    def _fake_apply(fixable, null_out):
+        captured["fixable"] = list(fixable)
+        captured["null_out"] = list(null_out)
+        return {"affected": len(fixable) + len(null_out), "failed": []}
+
+    monkeypatch.setattr(bms, "_apply_stray_cleanup", _fake_apply)
+
+    rc = bms.main(["--cleanup-strays", "--apply", str(proposal)])
+    assert rc == 0
+    # The ratified set is exactly 501 (fixable) + 502 (null_out). 999 must NOT appear.
+    ids_applied = (
+        [r[0] for r in captured["fixable"]]
+        + [r[0] for r in captured["null_out"]]
+    )
+    assert 501 in ids_applied
+    assert 502 in ids_applied
+    assert 999 not in ids_applied, (
+        "H1 regression: --cleanup-strays --apply re-derived from prod and "
+        "applied a row that wasn't in the ratified proposal file"
+    )
+
+
+def test_cleanup_strays_apply_blocked_by_dry_run_only_env(
+    monkeypatch, tmp_path
+):
+    """Env-var kill switch must also block --cleanup-strays --apply."""
+    import importlib
+
+    bms = importlib.import_module("backfill_matter_slug")
+
+    proposal = tmp_path / "cleanup_stray_envblock.md"
+    _write_stray_proposal_file(
+        proposal, [(501, "Oskolkov-RG7", "hagenauer-rg7")], []
+    )
+
+    monkeypatch.setenv("BAKER_BACKFILL_DRY_RUN_ONLY", "1")
+    monkeypatch.setattr(
+        bms,
+        "get_conn",
+        lambda: pytest.fail("get_conn must not be called when env blocks apply"),
+    )
+
+    rc = bms.main(["--cleanup-strays", "--apply", str(proposal)])
+    assert rc == 2
+
+
+def test_parse_stray_proposal_rejects_empty_proposed_slug(tmp_path):
+    """Safety rail 3: Bucket F row with empty proposed_slug must raise."""
+    import importlib
+
+    bms = importlib.import_module("backfill_matter_slug")
+
+    bad = tmp_path / "stray_bad.md"
+    bad.write_text(
+        "## Bucket F — Fixable (UPDATE matter_slug = canonical)\n"
+        "\n"
+        "| id | current_slug | proposed_slug |\n"
+        "|----|--------------|---------------|\n"
+        "| 501 | `Oskolkov-RG7` | `` |\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="empty proposed_slug"):
+        bms._parse_stray_proposal(bad)

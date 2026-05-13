@@ -33,11 +33,18 @@ _NOISE_PATTERNS = [
     # Training / webcast / seminar / course registration
     r"\b(register\s+for|attend|participate\s+in)\s+(the\s+)?[\w\s]+\s+(webcast|seminar|course|event|webinar)\b",
     r"\b'?[\w\s]+'?\s+(webcast|webinar|seminar)\b",
-    # Generic billing
+    # Generic billing (credit-card / payment-processor noise ONLY — commercial
+    # invoices like Balgerstrasse/Cupial/Heidenauer must pass through, so the
+    # bare "invoice payment" pattern is intentionally NOT included).
     r"\bmake\s+payment\s+to\s+(american\s+express|visa|mastercard|paypal)",
-    r"\b(credit\s+card|invoice)\s+(payment|late\s+fee)",
-    # Domestic logistics / personal delivery
-    r"\bdelivery\s+of\s+\w+",
+    r"\bcredit\s+card\s+(payment|late\s+fee|statement|bill)\b",
+    # Consumer-logistics / personal delivery (must NOT match closing
+    # documents, title deeds, guarantee letters — those are deal-doc nouns
+    # commonly preceded by "delivery of"). Anchor on consumer-courier
+    # signatures + parcel/package nouns.
+    r"\b(amazon|ups|fedex|dhl|usps|royal\s+mail|deutsche\s+post)\b.*\bdelivery\b",
+    r"\bdelivery\s+of\s+(your\s+)?(package|parcel|order|shipment|item)s?\b",
+    r"\bpackage\s+(arriv|deliver|out\s+for\s+delivery)",
     r"\bmother's\s+day\s+gifts?",
     # Generic forecast/meeting noise
     r"\bdiscuss\s+\w+/ytd\s+and\s+forecast",
