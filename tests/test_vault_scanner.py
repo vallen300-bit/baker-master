@@ -530,3 +530,87 @@ def test_14_recovery_prefix_then_cleared(vault, fake_db, stub_slack):
     assert "Previous" in body and "send errors" in body
     # error file cleared
     assert not err_path.exists()
+
+
+# ===========================================================================
+# v1.5 — PR #197 2nd-pass nits (B1 MED1 / B2 MED2 / B3 LOW3)
+# ===========================================================================
+
+
+# Test 17 — B1 (MED1): startup_catchup uses hour-only check; works for naive + aware now
+def test_17_startup_catchup_hour_gate(vault, monkeypatch, no_db, stub_slack):
+    """startup_catchup returns False at 05:59 UTC, True at 06:00 UTC.
+    Hour-only check is refactor-safe: works for both aware and naive datetime inputs."""
+    import triggers.vault_scanner as vs
+
+    real_datetime = vs.datetime
+    fake_now: dict = {"val": None}
+
+    class FakeDateTime:
+        @classmethod
+        def now(cls, tz=None):  # noqa: ARG003
+            return fake_now["val"]
+
+    monkeypatch.setattr(vs, "datetime", FakeDateTime)
+
+    # Stub run_scan so the True path returns without exercising the full scan
+    monkeypatch.setattr(vs, "run_scan", lambda: {"desks_scanned": []})
+
+    # Case 1 — aware datetime at 05:59 UTC → False
+    fake_now["val"] = real_datetime(2026, 5, 13, 5, 59, 0, tzinfo=timezone.utc)
+    assert vs.startup_catchup() is False
+
+    # Case 2 — naive datetime at 05:59 → False (hour-only check is tz-agnostic)
+    fake_now["val"] = real_datetime(2026, 5, 13, 5, 59, 0)
+    assert vs.startup_catchup() is False
+
+    # Case 3 — aware datetime at 06:00 UTC → True (passes hour gate, no marker, run_scan stub)
+    fake_now["val"] = real_datetime(2026, 5, 13, 6, 0, 0, tzinfo=timezone.utc)
+    assert vs.startup_catchup() is True
+
+    # Case 4 — naive datetime at 06:00 → True (same; tz-agnostic)
+    fake_now["val"] = real_datetime(2026, 5, 13, 6, 0, 0)
+    # Pre-seed marker so this run does not write filesystem state from the stub
+    # (stub is a no-op, but the marker check happens before stub call — empty state ok)
+    assert vs.startup_catchup() is True
+
+
+# Test 18 — B2 (MED2): _empty_streak_count uses parameterized LIMIT = THRESHOLD + 1
+def test_18_empty_streak_limit_parameterized(fake_db, monkeypatch):
+    """Bump EMPTY_STREAK_THRESHOLD to 5; assert the streak query bind value is 6."""
+    import triggers.vault_scanner as vs
+
+    monkeypatch.setattr(vs, "EMPTY_STREAK_THRESHOLD", 5)
+    fake_db["add_result"]([])  # streak query returns no rows; we only care about the bind
+    vs._empty_streak_count()
+    streak_calls = [
+        c for c in fake_db["calls"]
+        if "FROM scanner_run_log" in c[0] and "SELECT tasks_found" in c[0]
+    ]
+    assert len(streak_calls) == 1
+    sql, params = streak_calls[0]
+    assert "LIMIT %s" in sql
+    assert params == (6,)  # THRESHOLD (5) + 1
+
+
+# Test 19 — B3 (LOW3): _send_dm_with_capture truncates dm_error_msg to 500 chars
+def test_19_dm_error_msg_truncated_to_500(monkeypatch):
+    """When the underlying Slack call raises with a huge body, the captured
+    error string is truncated to exactly 500 chars before return."""
+    from triggers.vault_scanner import _send_dm_with_capture
+    import outputs.slack_notifier as sn
+
+    huge_body = "x" * 1000
+
+    class HugeError(Exception):
+        pass
+
+    def fake_post(*_a, **_kw):
+        raise HugeError(huge_body)
+
+    monkeypatch.setattr(sn, "post_to_channel", fake_post)
+    ok, err = _send_dm_with_capture("test body")
+    assert ok is False
+    assert err is not None
+    assert len(err) == 500
+    assert err.startswith("HugeError: ")
